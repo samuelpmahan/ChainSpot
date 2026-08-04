@@ -18,7 +18,7 @@ function attachErrorListener(page: Page): string[] {
 }
 
 async function gotoApp(page: Page): Promise<void> {
-	await page.goto('/');
+	await page.goto('/spot-round');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 }
 
@@ -270,4 +270,77 @@ test('successful open returns focus to the Open project control', async ({ page 
 	await expect(page.getByTestId('activity-message')).toContainText('Opened project');
 	await expect(openButton).toBeFocused();
 	expect(errors).toEqual([]);
+});
+
+test('toolbar buttons display shortcut labels and aria-keyshortcuts attributes', async ({ page }) => {
+	await gotoApp(page);
+
+	await expect(page.getByTestId('add-correspondence')).toHaveAttribute('aria-keyshortcuts', 'A');
+	await expect(page.getByTestId('undo')).toHaveAttribute('aria-keyshortcuts', 'Control+Z Meta+Z');
+	await expect(page.getByTestId('redo')).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+Z Meta+Shift+Z Control+Y');
+	await expect(page.getByTestId('toggle-markers')).toHaveAttribute('aria-keyshortcuts', 'M');
+	await expect(page.getByTestId('save-project')).toHaveAttribute('aria-keyshortcuts', 'Control+S Meta+S');
+	await expect(page.getByTestId('open-project')).toHaveAttribute('aria-keyshortcuts', 'Control+O Meta+O');
+
+	await expect(page.getByTestId('add-correspondence')).toContainText('(A)');
+	await expect(page.getByTestId('save-project')).toContainText('(⌘/Ctrl+S)');
+	await expect(page.getByTestId('open-project')).toContainText('(⌘/Ctrl+O)');
+});
+
+test('A, M, and Escape perform expected actions when active and are ignored inside text input', async ({ page }) => {
+	await gotoApp(page);
+	await loadBoth(page);
+
+	// A activates correspondence mode when neutral and images loaded
+	await page.keyboard.press('a');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-source');
+	await expect(page.getByTestId('cancel-correspondence')).toHaveAttribute('aria-keyshortcuts', 'Escape');
+
+	// Escape cancels pending correspondence
+	await page.keyboard.press('Escape');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
+
+	// M toggles marker visibility
+	await expect(page.getByTestId('toggle-markers')).toHaveAttribute('aria-pressed', 'true');
+	await page.keyboard.press('m');
+	await expect(page.getByTestId('toggle-markers')).toHaveAttribute('aria-pressed', 'false');
+	await page.keyboard.press('m');
+	await expect(page.getByTestId('toggle-markers')).toHaveAttribute('aria-pressed', 'true');
+
+	// Shortcuts are ignored while typing inside project-name input
+	const nameInput = page.getByTestId('project-name');
+	await nameInput.focus();
+	await page.keyboard.press('a');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
+	await page.keyboard.press('m');
+	await expect(page.getByTestId('toggle-markers')).toHaveAttribute('aria-pressed', 'true');
+
+	// Escape inside text input does not cancel correspondence mode
+	await nameInput.blur();
+	await page.keyboard.press('a');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-source');
+	await nameInput.focus();
+	await page.keyboard.press('Escape');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-source');
+});
+
+test('Cmd/Ctrl+S and Cmd/Ctrl+O trigger save and open file chooser without browser defaults', async ({ page }) => {
+	await gotoApp(page);
+	await loadBoth(page);
+
+	// Ctrl/Cmd+S triggers project save download
+	const downloadPromise = page.waitForEvent('download');
+	await page.keyboard.press('ControlOrMeta+s');
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toContain('.chainspot.zip');
+
+	// Ctrl/Cmd+O triggers file input click
+	let inputClicked = false;
+	await page.evaluate(() => {
+		const input = document.querySelector<HTMLInputElement>('[data-testid="open-project-input"]');
+		if (input) input.addEventListener('click', () => { (window as unknown as Record<string, boolean>).__openClicked = true; });
+	});
+	await page.keyboard.press('ControlOrMeta+o');
+	inputClicked = await page.evaluate(() => (window as unknown as Record<string, boolean>).__openClicked === true);
+	expect(inputClicked).toBe(true);
 });

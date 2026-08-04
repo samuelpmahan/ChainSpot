@@ -47,7 +47,7 @@ function attachErrorListener(page: Page): string[] {
 }
 
 async function gotoApp(page: Page): Promise<void> {
-	await page.goto('/');
+	await page.goto('/spot-round');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 }
 

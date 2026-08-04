@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
-import Page from '../../src/routes/+page.svelte';
+import Page from '../../src/routes/spot-round/+page.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import {
 	createControlPointPair,

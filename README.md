@@ -77,6 +77,18 @@ History shortcuts (suppressed while editing a text field):
 | Delete selected point | `Delete` or `Backspace` |
 | Cancel a pending correspondence | `Escape` |
 
+## Stitch Map page
+
+`/stitch-map` combines four higher-zoom screenshots of one map into a single higher-detail image before the Spot Round correspondence workflow (`/spot-round`; `/` redirects there). The workflow is intentionally a controlled 2×2 screenshot compositor:
+
+- **Capture protocol**: four screenshots at one fixed zoom/orientation, captured upper-left → upper-right → lower-left → lower-right with roughly 20–30% overlap, all at the same device/screenshot size. The first valid tile establishes the required dimensions; every other tile must match, and the requirement resets only when all four slots are empty.
+- **Shared crop**: one non-destructive crop (top/right/bottom/left insets in original pixels) applied to all four tiles, adjustable visually on the upper-left preview or with exact numeric fields, with **Reset crop**. Crops that remove all width or height disable export and flag the offending fields.
+- **Alignment**: the upper-left tile is anchored at `(0, 0)`; the other three are moved by pointer drag, Arrow keys (1 px), Shift+Arrow (10 px), or exact integer `x`/`y` fields. Initial and reset arrangements use a rounded 25% overlap (integer-only placements). Visibility and opacity controls are preview-only and never change the exported PNG.
+- **Export**: a native-resolution PNG whose bounds are the union of the four cropped placements, drawn at full opacity in stable order (upper-left, upper-right, lower-left, lower-right) with no resampling, no network request, and no stitch-session persistence (reload clears the session). Export requires all four tiles, a valid crop, and every movable tile overlapping an expected neighbor.
+- **Spot Round handoff**: **Use as UDisc source** / **Use as clean target** render the PNG, hold it in an in-memory pending handoff, and navigate to `/spot-round`, where a banner offers **Import** (through the normal image-intake and replacement rules, including point-discard confirmation, undo/redo, and dirty state) or **Dismiss**. A pending handoff is never silently overwritten, and it survives round trips between the two pages until imported or dismissed.
+
+Phase 0.5 adds four new test cases (two unit, two browser) on top of P05-001's six, holding the combined Phase 0.5 total at the ten-case cap.
+
 ## Phase 0 acceptance workflow
 
 The integrated acceptance test is `tests/e2e/integratedAcceptance.spec.ts` and runs as part of `npm run test:e2e`. It loads the two map-like fixtures, creates five distributed source/target correspondences, navigates both panes, corrects two markers by drag, labels a pair, deletes and restores a pair through Undo, reorders a pair, toggles Enabled, nudges a selected point by one original pixel, resizes the browser, and saves the bundle. It then reloads the application, reopens the downloaded bundle through the visible Open project file control, and compares every saved source/target pixel coordinate with the reopened value within one original pixel.

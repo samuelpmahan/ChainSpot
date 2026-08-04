@@ -3,7 +3,7 @@ import { mount, tick, unmount } from 'svelte';
 import { createProjectState } from '../../src/lib/domain/project';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { intakeImageFile } from '../../src/lib/imageIntake';
-import Page from '../../src/routes/+page.svelte';
+import Page from '../../src/routes/spot-round/+page.svelte';
 import type { DecodeImageFile, DecodedImage } from '../../src/lib/imageIntake';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
