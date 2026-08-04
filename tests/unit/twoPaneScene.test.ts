@@ -279,29 +279,44 @@ describe('two-pane scene workspace', () => {
 		host.remove();
 	});
 
-	it('retains points without confirmation on a same-dimension replacement', async () => {
+	it('prompts before a same-dimension replacement discards affected points', async () => {
 		const editor = makeEditor();
 		await seedBothWithPair(editor);
 		const { component, host } = mountPage(editor, decodeOf(2, 3));
 		await flush();
-		const pairId = editor.state.controlPointPairs[0].id;
 		const oldSourceId = editor.state.images.find(
 			(image) => image.role === 'source-overview'
 		)?.id;
 
+		// Same dimensions no longer bypass the confirmation: the affected pair
+		// is invalidated by replacing either underlying image.
 		setFileInput(inputFor(host, 'source-overview'), fileOf('s-v2.png', 'image/png'));
 		await flush();
-
+		expect(host.querySelector('[data-testid="discard-confirmation"]')).toBeTruthy();
+		host.querySelector<HTMLButtonElement>('[data-testid="discard-confirm-cancel"]')?.click();
+		await flush();
 		expect(host.querySelector('[data-testid="discard-confirmation"]')).toBeNull();
+		expect(host.querySelector('[data-testid="pane-filename-source-overview"]')?.textContent).toBe(
+			's.png'
+		);
+		expect(editor.state.images.find((image) => image.role === 'source-overview')?.id).toBe(
+			oldSourceId
+		);
+		expect(editor.state.controlPointPairs).toHaveLength(1);
+
+		// Confirming replaces the image and discards the affected pair.
+		setFileInput(inputFor(host, 'source-overview'), fileOf('s-v2.png', 'image/png'));
+		await flush();
+		expect(host.querySelector('[data-testid="discard-confirmation"]')).toBeTruthy();
+		host.querySelector<HTMLButtonElement>('[data-testid="discard-confirm-accept"]')?.click();
+		await flush();
 		expect(host.querySelector('[data-testid="pane-filename-source-overview"]')?.textContent).toBe(
 			's-v2.png'
 		);
-		const source = editor.state.images.find((image) => image.role === 'source-overview');
-		expect(source?.id).not.toBe(oldSourceId);
-		expect(editor.state.controlPointPairs).toHaveLength(1);
-		expect(editor.state.controlPointPairs[0].id).toBe(pairId);
-		expect(editor.state.controlPointPairs[0].source.imageId).toBe(source?.id);
-		expect(editor.state.controlPointPairs[0].source.xPx).toBe(1);
+		expect(editor.state.images.find((image) => image.role === 'source-overview')?.id).not.toBe(
+			oldSourceId
+		);
+		expect(editor.state.controlPointPairs).toEqual([]);
 		unmount(component);
 		host.remove();
 	});

@@ -315,29 +315,31 @@ describe('image replacement', () => {
 		expect(editor.state.images.find((image) => image.id === sourceId)).toBeTruthy();
 	});
 
-	it('retains points on a same-dimension replacement', async () => {
-		const { editor, sourceId, pairId } = await editorWithSourceAndPair();
+	it('prompts for confirmation on a same-dimension replacement and discards points when confirmed', async () => {
+		const { editor, sourceId } = await editorWithSourceAndPair();
+		const confirmDiscard = vi.fn(async (count: number) => {
+			expect(count).toBe(1);
+			return true;
+		});
 		const result = await intakeImageFile({
 			editor,
 			role: 'source-overview',
 			file: fileOf('s-v2.png', 'image/png', 11),
 			decode: decodeOf(2, 3),
+			confirmDiscard,
 			createAssetId: nextId
 		});
+		// Same dimensions no longer imply that points remain meaningful: replacing
+		// either underlying image invalidates every pair involving it.
+		expect(confirmDiscard).toHaveBeenCalledTimes(1);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.status).toBe('replaced-retained');
-
-		const state = editor.state;
-		expect(state.images.find((image) => image.role === 'source-overview')?.id).toBe(
+		expect(result.status).toBe('replaced-discarded');
+		expect(editor.state.controlPointPairs).toEqual([]);
+		expect(editor.state.images.find((image) => image.role === 'source-overview')?.id).toBe(
 			result.asset.id
 		);
-		expect(state.controlPointPairs).toHaveLength(1);
-		const pair = state.controlPointPairs[0];
-		expect(pair.id).toBe(pairId);
-		expect(pair.source.imageId).toBe(result.asset.id);
-		expect(pair.source.xPx).toBe(1);
-		expect(pair.source.yPx).toBe(1);
+		expect(editor.state.images.find((image) => image.id === sourceId)).toBeUndefined();
 		expect(editor.getAssetResource(result.asset.id)?.decoded).toEqual({ simulated: true });
 	});
 

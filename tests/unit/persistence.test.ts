@@ -218,7 +218,10 @@ describe('intake hashing and bundle path (A)', () => {
 			file: fileOf('udisc-v2.png', 'image/png', replacement),
 			decode: decodeOf(2, 3),
 			createAssetId: nextId,
-			hash: sha256Hex
+			hash: sha256Hex,
+			// The replacement has an affected pair, so intake requires the explicit
+			// discard confirmation before applying it.
+			confirmDiscard: async () => true
 		});
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;

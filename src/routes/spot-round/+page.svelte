@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import ImagePane from '$lib/components/ImagePane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
 	import type { AssetResource } from '$lib/domain/editor';
@@ -34,6 +34,7 @@
 	import type { DownloadBlob, RepairCandidate, RepairResolutionResult } from '$lib/persistence';
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
+	import { retainEditor, takeRetainedEditor } from '$lib/spotRoundSession';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -43,11 +44,25 @@
 	}
 
 	let { editor: initialEditor, decode, hash, download }: Props = $props();
+	/**
+	 * Only production-created or session-retrieved editors participate in route
+	 * retention; explicitly injected editors (tests/harnesses) never touch the
+	 * module-level application session. Deliberately captured once at mount: the
+	 * injection decision never changes for a given page instance.
+	 */
+	// svelte-ignore state_referenced_locally
+	const participatesInSession = initialEditor === undefined;
 	let editor = $state.raw(resolveInitialEditor());
 
 	function resolveInitialEditor(): ProjectEditor {
-		return initialEditor ?? new ProjectEditor();
+		// An explicitly injected editor (tests) wins; otherwise reuse the retained
+		// in-memory session across SPA navigation, or start a fresh project.
+		return initialEditor ?? takeRetainedEditor() ?? new ProjectEditor();
 	}
+
+	onDestroy(() => {
+		if (participatesInSession) retainEditor(editor);
+	});
 
 	let refreshCount = $state(0);
 	let correspondence = $state(createCorrespondenceState());
@@ -1118,7 +1133,7 @@
 			>
 				<h2>Discard correspondence points?</h2>
 				<p>
-					Replacing the {pendingRoleLabel()} image with different dimensions will discard
+					Replacing the {pendingRoleLabel()} image will discard
 					{pendingDiscard.count} correspondence point{pendingDiscard.count === 1 ? '' : 's'}
 					on this image.
 				</p>
@@ -1278,8 +1293,8 @@
 			>
 				<h2>Discard correspondence points?</h2>
 				<p>
-					Replacing the {roleLabel(pendingRepairDiscard.role)} image with different
-					dimensions will discard {pendingRepairDiscard.count} correspondence point
+					Replacing the {roleLabel(pendingRepairDiscard.role)} image will discard
+					{pendingRepairDiscard.count} correspondence point
 					{pendingRepairDiscard.count === 1 ? '' : 's'} on this image.
 				</p>
 				<div class="dialog-actions">

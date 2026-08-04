@@ -146,13 +146,22 @@ export interface ReadinessReport {
 	readonly missing: readonly TileSlot[];
 	readonly dimensionMismatch: readonly TileSlot[];
 	readonly invalidCrop: boolean;
-	readonly noOverlap: readonly TileSlot[];
+	/**
+	 * Movable tiles that cannot reach the upper-left anchor through positive-area
+	 * overlaps along expected-neighbor edges. Two internally overlapping clusters
+	 * that are not connected to each other keep this non-empty.
+	 */
+	readonly disconnected: readonly TileSlot[];
 }
 
 /**
  * Export readiness: all four tiles present, all matching the session requirement,
- * a valid shared crop, and every movable tile with positive overlap against an
- * expected neighbor. Never claims visual alignment; that stays the user's call.
+ * a valid shared crop, and a connected arrangement — starting from the upper-left
+ * anchor, every loaded tile must be reachable through positive-area overlaps along
+ * expected-neighbor edges only. A pair of detached but internally overlapping
+ * clusters is therefore never ready. Visibility and opacity are preview concerns
+ * and never affect readiness. Readiness never claims visual alignment; that stays
+ * the user's judgment.
  */
 export function readiness(
 	tiles: Partial<Record<TileSlot, { readonly widthPx: number; readonly heightPx: number }>>,
@@ -176,25 +185,31 @@ export function readiness(
 	}
 	const validation = required ? cropSize(crop, required.widthPx, required.heightPx) : null;
 	const invalidCrop = !validation?.ok;
-	const noOverlap: TileSlot[] = [];
+	const disconnected: TileSlot[] = [];
 	if (validation?.ok) {
-		for (const slot of TILE_SLOTS) {
-			if (slot === 'upper-left') continue;
+		const visited = new Set<TileSlot>(['upper-left']);
+		const queue: TileSlot[] = tiles['upper-left'] ? ['upper-left'] : [];
+		while (queue.length > 0) {
+			const slot = queue.shift() as TileSlot;
 			const placement = placements[slot];
-			if (!placement || !tiles[slot]) continue;
+			if (!placement) continue;
 			const rect = tileRect(placement, validation.widthPx, validation.heightPx);
-			const overlaps = expectedNeighbors(slot).some((neighbor) => {
-				const neighborTile = tiles[neighbor];
-				const neighborPlacement = placements[neighbor];
-				if (!neighborTile || !neighborPlacement) return false;
-				return (
+			for (const neighbor of expectedNeighbors(slot)) {
+				if (visited.has(neighbor) || !tiles[neighbor] || !placements[neighbor]) continue;
+				if (
 					overlapArea(
 						rect,
-						tileRect(neighborPlacement, validation.widthPx, validation.heightPx)
+						tileRect(placements[neighbor], validation.widthPx, validation.heightPx)
 					) > 0
-				);
-			});
-			if (!overlaps) noOverlap.push(slot);
+				) {
+					visited.add(neighbor);
+					queue.push(neighbor);
+				}
+			}
+		}
+		for (const slot of TILE_SLOTS) {
+			if (slot === 'upper-left' || !tiles[slot]) continue;
+			if (!visited.has(slot)) disconnected.push(slot);
 		}
 	}
 	return {
@@ -202,11 +217,11 @@ export function readiness(
 			missing.length === 0 &&
 			dimensionMismatch.length === 0 &&
 			!invalidCrop &&
-			noOverlap.length === 0,
+			disconnected.length === 0,
 		missing,
 		dimensionMismatch,
 		invalidCrop,
-		noOverlap
+		disconnected
 	};
 }
 

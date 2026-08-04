@@ -176,6 +176,40 @@ function row(page: Page, ordinal: number): Locator {
 	return page.locator(`[data-testid="pair-row"][data-ordinal="${ordinal}"]`);
 }
 
+interface ViewTransform {
+	zoom: number;
+	panX: number;
+	panY: number;
+}
+
+async function viewOf(viewport: Locator): Promise<ViewTransform> {
+	return {
+		zoom: Number(await viewport.getAttribute('data-view-zoom')),
+		panX: Number(await viewport.getAttribute('data-view-pan-x')),
+		panY: Number(await viewport.getAttribute('data-view-pan-y'))
+	};
+}
+
+async function atImagePoint(
+	viewport: Locator,
+	box: { x: number; y: number },
+	view: ViewTransform,
+	xPx: number,
+	yPx: number
+): Promise<{ x: number; y: number }> {
+	return {
+		x: box.x + view.panX + xPx * view.zoom,
+		y: box.y + view.panY + yPx * view.zoom
+	};
+}
+
+async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+	await page.mouse.move(from.x, from.y);
+	await page.mouse.down();
+	await page.mouse.move(to.x, to.y, { steps: 8 });
+	await page.mouse.up();
+}
+
 test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, native PNG download', async ({
 	page
 }) => {
@@ -237,6 +271,46 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	await cropLeft.blur();
 	await expect(page.getByTestId('download-stitched')).toBeEnabled();
 
+	// Shared crop viewport: background drag pans without changing crop values.
+	const cropViewport = page.getByTestId('crop-viewport');
+	await cropViewport.scrollIntoViewIfNeeded();
+	const cropBox = await cropViewport.boundingBox();
+	if (!cropBox) throw new Error('crop viewport has no bounds');
+	const cropViewBefore = await viewOf(cropViewport);
+	await drag(page, { x: cropBox.x + 10, y: cropBox.y + 10 }, { x: cropBox.x + 60, y: cropBox.y + 10 });
+	const cropViewAfter = await viewOf(cropViewport);
+	expect(cropViewAfter.panX).not.toBe(cropViewBefore.panX);
+	await expect(page.getByTestId('crop-leftPx')).toHaveValue('4');
+
+	// Crop-handle drag changes only the crop edge and preserves the viewport.
+	// Bottom inset is 2, so the bottom edge sits at image y = 22; the handle
+	// center is at the crop-rect midpoint x = 13.
+	const handleView = await viewOf(cropViewport);
+	const bottomHandle = await atImagePoint(cropViewport, cropBox, handleView, 13, 22);
+	await drag(
+		page,
+		bottomHandle,
+		{ x: bottomHandle.x, y: bottomHandle.y - handleView.zoom * 3 }
+	);
+	await expect(page.getByTestId('crop-bottomPx')).toHaveValue('5');
+	const viewAfterHandle = await viewOf(cropViewport);
+	expect(viewAfterHandle.panX).toBe(handleView.panX);
+	expect(viewAfterHandle.panY).toBe(handleView.panY);
+	await page.getByTestId('crop-bottomPx').fill('2');
+	await page.getByTestId('crop-bottomPx').blur();
+
+	// Crop wheel zoom is pointer-centered; Fit restores the full upper-left image.
+	const cropZoomBefore = (await viewOf(cropViewport)).zoom;
+	await page.mouse.move(cropBox.x + cropBox.width / 2, cropBox.y + cropBox.height / 2);
+	await page.mouse.wheel(0, -200);
+	await expect
+		.poll(async () => (await viewOf(cropViewport)).zoom)
+		.toBeGreaterThan(cropZoomBefore);
+	await page.getByTestId('crop-fit').click();
+	await expect
+		.poll(async () => (await viewOf(cropViewport)).zoom)
+		.toBe(cropZoomBefore);
+
 	// Cropped size is 18 x 18, so initial 25% offsets are round(18 * 3 / 4) = 14.
 	await page.getByTestId('tile-select-upper-right').click();
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('14');
@@ -256,22 +330,105 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	await page.getByTestId('tile-position-x').blur();
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('6');
 
-	// Pointer drag translates by integer pixels (2 tile pixels to the right).
-	const workspace = page.getByTestId('alignment-workspace');
-	await workspace.scrollIntoViewIfNeeded();
-	const workspaceBox = await workspace.boundingBox();
-	if (!workspaceBox) throw new Error('alignment workspace has no bounds');
-	const scale = Number(await workspace.getAttribute('data-stitch-scale'));
-	const offsetX = Number(await workspace.getAttribute('data-stitch-offset-x'));
-	const offsetY = Number(await workspace.getAttribute('data-stitch-offset-y'));
-	const startX = workspaceBox.x + offsetX + 6 * scale + 9 * scale;
-	const startY = workspaceBox.y + offsetY + 9 * scale;
-	const drag = scale * 2;
-	await page.mouse.move(startX, startY);
-	await page.mouse.down();
-	await page.mouse.move(startX + drag, startY, { steps: 5 });
-	await page.mouse.up();
+	// Shared alignment viewport geometry.
+	const alignmentViewport = page.getByTestId('alignment-viewport');
+	await alignmentViewport.scrollIntoViewIfNeeded();
+	const alignmentBox = await alignmentViewport.boundingBox();
+	if (!alignmentBox) throw new Error('alignment viewport has no bounds');
+
+	// A point overlapped by the anchored upper-left tile and a movable tile is
+	// ambiguous too: the anchor participates in ambiguity even though it can
+	// never be selected. With lower-left selected, (8, 4) lies inside both the
+	// anchor and UR, so the selection stays on lower-left.
+	await page.getByTestId('tile-select-lower-left').click();
+	const anchorOverlapPoint = await atImagePoint(
+		alignmentViewport,
+		alignmentBox,
+		await viewOf(alignmentViewport),
+		8,
+		4
+	);
+	await page.mouse.click(anchorOverlapPoint.x, anchorOverlapPoint.y);
+	await expect(page.getByTestId('tile-select-lower-left')).toHaveAttribute('aria-pressed', 'true');
+
+	// Clicking an exposed, non-overlapped region of an unselected tile selects
+	// it without moving it. UR sits at (6,0); its exposed region is the part not
+	// covered by UL (x >= 18) or LR (y < 16), e.g. (20, 5).
+	const clickView = await viewOf(alignmentViewport);
+	const exposedPoint = await atImagePoint(alignmentViewport, alignmentBox, clickView, 20, 5);
+	await page.mouse.click(exposedPoint.x, exposedPoint.y);
+	await expect(page.getByTestId('tile-select-upper-right')).toHaveAttribute('aria-pressed', 'true');
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('6');
+	await expect(page.getByTestId('tile-position-y')).toHaveValue('0');
+
+	// A point overlapped by two movable tiles (UR and LR, e.g. (20, 17)) is
+	// ambiguous: the current selection is preserved.
+	const ambiguousPoint = await atImagePoint(
+		alignmentViewport,
+		alignmentBox,
+		await viewOf(alignmentViewport),
+		20,
+		17
+	);
+	await page.mouse.click(ambiguousPoint.x, ambiguousPoint.y);
+	await expect(page.getByTestId('tile-select-upper-right')).toHaveAttribute('aria-pressed', 'true');
+
+	// Dragging the ALREADY SELECTED tile from an overlapped point moves the tile
+	// (2 image pixels) and leaves the viewport pan untouched.
+	const panBeforeTileDrag = await viewOf(alignmentViewport);
+	const tileDragStart = await atImagePoint(alignmentViewport, alignmentBox, panBeforeTileDrag, 10, 5);
+	await drag(
+		page,
+		tileDragStart,
+		{ x: tileDragStart.x + panBeforeTileDrag.zoom * 2, y: tileDragStart.y }
+	);
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('8');
+	const panAfterTileDrag = await viewOf(alignmentViewport);
+	expect(panAfterTileDrag).toEqual(panBeforeTileDrag);
+
+	// Dragging an UNSELECTED tile pans the viewport instead of moving the tile.
+	await page.getByTestId('tile-select-lower-left').click();
+	const panBeforeUnselected = await viewOf(alignmentViewport);
+	const unselectedPoint = await atImagePoint(alignmentViewport, alignmentBox, panBeforeUnselected, 20, 9);
+	await drag(
+		page,
+		unselectedPoint,
+		{ x: unselectedPoint.x + panBeforeUnselected.zoom * 15, y: unselectedPoint.y }
+	);
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('0');
+	await expect(page.getByTestId('tile-position-y')).toHaveValue('14');
+	await page.getByTestId('tile-select-upper-right').click();
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('8');
+
+	// Background drag pans without changing any tile coordinate.
+	const panBeforeBackground = await viewOf(alignmentViewport);
+	await drag(
+		page,
+		{ x: alignmentBox.x + 5, y: alignmentBox.y + 5 },
+		{ x: alignmentBox.x + 45, y: alignmentBox.y + 5 }
+	);
+	const panAfterBackground = await viewOf(alignmentViewport);
+	expect(panAfterBackground.panX).not.toBe(panBeforeBackground.panX);
+	await page.getByTestId('tile-select-upper-right').click();
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('8');
+
+	// Wheel zoom is pointer-centered; Fit restores the full tile union. The tiles
+	// fill the fitted viewport, so the probe uses the background corner point.
+	const beforeZoom = await viewOf(alignmentViewport);
+	const wheelPoint = { x: alignmentBox.x + 5, y: alignmentBox.y + 5 };
+	await page.mouse.move(wheelPoint.x, wheelPoint.y);
+	await page.mouse.wheel(0, -200);
+	await expect
+		.poll(async () => (await viewOf(alignmentViewport)).zoom)
+		.toBeGreaterThan(beforeZoom.zoom);
+	const zoomed = await viewOf(alignmentViewport);
+	const imageXBefore = (wheelPoint.x - alignmentBox.x - beforeZoom.panX) / beforeZoom.zoom;
+	const imageXAfter = (wheelPoint.x - alignmentBox.x - zoomed.panX) / zoomed.zoom;
+	expect(Math.abs(imageXAfter - imageXBefore)).toBeLessThan(0.01);
+	await page.getByTestId('fit-preview').click();
+	await expect
+		.poll(async () => (await viewOf(alignmentViewport)).zoom)
+		.toBe(beforeZoom.zoom);
 
 	// Lower-right gets exact coordinates; preview-only controls never block export.
 	await page.getByTestId('tile-select-lower-right').click();
@@ -335,38 +492,62 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	expect(externalRequests).toEqual([]);
 });
 
-test('handoff: normal intake import, declined replacement, dismissal, blocked second handoff, target import', async ({
+test('handoff: retained Spot Round session, replacement semantics, blocked second handoff, target import', async ({
 	page
 }) => {
 	await gotoApp(page, '/spot-round');
 	await loadSpotImages(page);
+	await page.getByTestId('project-name').fill('Round 1');
+	await page.getByTestId('project-name').blur();
+	await expect(page.getByTestId('project-name')).toHaveValue('Round 1');
 	await createPair(page);
+	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
-	// Build a handoff to the source role and navigate to Spot Round.
+	// Navigate to Stitch Map and hand a stitched image back to the source role.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
 	await expect(page).toHaveURL(/\/spot-round$/);
+
+	// The retained session is the same active editor: images, project name,
+	// pair, dirty state, and undo/redo history all survive the round trip.
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('source.png');
+	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
+	await expect(page.getByTestId('project-name')).toHaveValue('Round 1');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
+	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
+	await page.keyboard.press('Control+z');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '0');
+	await page.keyboard.press('Control+Shift+z');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
+
 	const banner = page.getByTestId('pending-handoff');
 	await expect(banner).toBeVisible();
 	await expect(banner).toContainText('UDisc source');
 
-	// Load images and a pair into this Spot Round session while the banner is up.
-	await loadSpotImages(page);
-	await createPair(page);
-
-	// Different-dimension import triggers the discard confirmation; cancelling
-	// preserves both the project and the pending stitched image.
+	// Cancelling the discard confirmation preserves both the Spot Round project
+	// and the pending stitched image.
 	await page.getByTestId('handoff-import').click();
 	await expect(page.getByTestId('discard-confirmation')).toBeVisible();
 	await page.getByTestId('discard-confirm-cancel').click();
 	await expect(banner).toBeVisible();
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('source.png');
+	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
 
-	// Dismissal consumes only the pending stitched image, never the project.
-	await page.getByTestId('handoff-dismiss').click();
+	// Confirming replaces only the requested role through the normal intake
+	// path: the other image stays, affected pairs are discarded, history and
+	// dirty state update normally, and the handoff is consumed.
+	await page.getByTestId('handoff-import').click();
+	await expect(page.getByTestId('discard-confirmation')).toBeVisible();
+	await page.getByTestId('discard-confirm-accept').click();
 	await expect(banner).toBeHidden();
-	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
+		'upper-left-stitched.png'
+	);
+	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '0');
+	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
 	// A second handoff (target role) reaches Spot Round.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
@@ -385,8 +566,8 @@ test('handoff: normal intake import, declined replacement, dismissal, blocked se
 	await expect(page.getByTestId('stitch-status')).toContainText('already awaiting import');
 	await expect(page.getByTestId('download-stitched')).toBeEnabled();
 
-	// Back on Spot Round the pending handoff survives and imports into the
-	// clean target role through normal intake (empty role: no discard step).
+	// The pending handoff survives the round trip and imports into the clean
+	// target role through normal intake (no affected pairs, so no discard step).
 	await page.getByRole('link', { name: 'Spot Round' }).click();
 	await expect(banner).toBeVisible();
 	await page.getByTestId('handoff-import').click();
@@ -394,7 +575,7 @@ test('handoff: normal intake import, declined replacement, dismissal, blocked se
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText(
 		'upper-left-stitched.png'
 	);
-
-	// Existing rows are untouched by the handoff flow after remounts.
-	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '0');
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
+		'upper-left-stitched.png'
+	);
 });

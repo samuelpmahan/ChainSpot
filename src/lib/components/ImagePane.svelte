@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import ImageViewport from './ImageViewport.svelte';
+	import { ViewportController, CLICK_SLOP_PX } from '$lib/viewport.svelte';
+	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageAsset } from '$lib/domain/project';
 	import type { ControlPointPair } from '$lib/domain/project';
 	import type { ProjectEditor } from '$lib/domain/editor';
-	import { clampPointToImageBounds, identityViewTransform, imageToScreen, pointInBounds, screenToImage } from '$lib/coords';
-	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
+	import { clampPointToImageBounds, imageToScreen, pointInBounds, screenToImage } from '$lib/coords';
 	import type { PendingSourcePlacement } from '$lib/correspondenceState';
 	import {
 		MAGNIFIER_SIZE,
@@ -15,16 +17,6 @@
 		magnifierSampling
 	} from '$lib/magnifier';
 	import type { MagnifierSampling } from '$lib/magnifier';
-	import {
-		DEFAULT_VIEW_ZOOM_LIMITS,
-		defaultFitTransform,
-		panBy,
-		resizeViewTransform,
-		wheelZoomFactor,
-		zoomAtPointer,
-		zoomLimitsForFit
-	} from '$lib/navigation';
-	import type { ViewZoomLimits } from '$lib/navigation';
 	import {
 		IntakeError,
 		ORIENTATION_LABELS,
@@ -85,17 +77,13 @@
 		onPointMove
 	}: Props = $props();
 
+	let vp = new ViewportController();
+
 	let loading = $state(false);
 	let error = $state<IntakeError | null>(null);
-	let sceneContainer = $state<HTMLDivElement | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let scene: PaneScene | null = null;
 	let canvasSupport: boolean | null = null;
-
-	/** Authoritative transient view state for this pane (plain transform, not Konva). */
-	let view = $state<ViewTransformState>(identityViewTransform());
-	/** Latest ResizeObserver-reported pane content size; null until the first callback. */
-	let paneSize = $state<{ width: number; height: number } | null>(null);
 	/** Image asset whose decoded raster is currently rendered, so unrelated refreshes never reset navigation. */
 	let lastImageId: string | null = null;
 	/**
@@ -106,12 +94,19 @@
 	 * frame stale while a click is in flight.
 	 */
 	let lastMarkersJson: string | null = null;
-	/** Guards one-time listener/observer setup inside the refresh-reactive effect. */
+	/** Guards one-time hover-listener setup inside the refresh-reactive effect. */
 	let setupDone = false;
-	let resizeObserver: ResizeObserver | null = null;
 	let interactionError = $state<string | null>(null);
 	let dragPreview = $state<{ pairId: string; side: 'source' | 'target'; coordinates: { xPx: number; yPx: number } } | null>(null);
-	const CLICK_SLOP_PX = 4;
+
+	/** Marker-drag gesture only; background pan and clicks live in the viewport. */
+	let gesture: {
+		pointerId: number;
+		start: ScreenSpacePoint;
+		transform: ViewTransformState;
+		markerHit: MarkerHitResult;
+		draggingMarker: boolean;
+	} | null = null;
 
 	interface MagnifierAnchorState {
 		xPx: number;
@@ -126,14 +121,6 @@
 	/** Combined transient anchor: pointer in placement mode, otherwise selection/drag. */
 	let magnifier = $derived(hoverMagnifier ?? selectionMagnifier);
 	let magnifierCanvas = $state<HTMLCanvasElement | null>(null);
-	let gesture: {
-		pointerId: number;
-		start: ScreenSpacePoint;
-		transform: ViewTransformState;
-		markerHit: MarkerHitResult | null;
-		panning: boolean;
-		draggingMarker: boolean;
-	} | null = null;
 
 	function canvasAvailable(): boolean {
 		if (canvasSupport === null) canvasSupport = canvas2dAvailable();
@@ -179,30 +166,6 @@
 		return ORIENTATION_LABELS[deriveOrientation(image.widthPx, image.heightPx)];
 	}
 
-	/**
-	 * Current pane content size in CSS pixels: the ResizeObserver-reported size once
-	 * available, otherwise the container's client size (1×1 fallback).
-	 */
-	function paneSizeNow(): { width: number; height: number } {
-		if (paneSize) return paneSize;
-		if (!sceneContainer) return { width: 1, height: 1 };
-		return { width: sceneContainer.clientWidth || 1, height: sceneContainer.clientHeight || 1 };
-	}
-
-	/** Interactive zoom limits derived from the current default-fit zoom. */
-	function currentZoomLimits(): ViewZoomLimits {
-		const image = currentImage();
-		if (!image) return DEFAULT_VIEW_ZOOM_LIMITS;
-		const size = paneSizeNow();
-		const fitZoom = defaultFitTransform(image.widthPx, image.heightPx, size.width, size.height).zoom;
-		return zoomLimitsForFit(fitZoom);
-	}
-
-	function applyView(next: ViewTransformState): void {
-		view = next;
-		scene?.applyTransform(next);
-	}
-
 	function markerData(): MarkerSceneData[] {
 		void refresh;
 		void pairs;
@@ -246,106 +209,136 @@
 		return markers;
 	}
 
-	function resetToFit(): void {
-		const image = currentImage();
-		if (!image) return;
-		const size = paneSizeNow();
-		applyView(defaultFitTransform(image.widthPx, image.heightPx, size.width, size.height));
-	}
-
 	/**
-	 * Pointer position in pane/stage-local CSS pixels. `clientLeft`/`clientTop` remove
-	 * the scene border so pointer-centered zoom is not displaced from the canvas.
+	 * Claims a primary-pointer gesture for marker handling: selects a complete
+	 * marker immediately and tracks its drag. Background gestures are left to the
+	 * shared viewport (pan or click), and an empty pane claims everything so
+	 * nothing happens, exactly as before.
 	 */
-	function pointerInPane(event: { clientX: number; clientY: number }): ScreenSpacePoint {
-		const container = sceneContainer;
-		if (!container) return { x: event.clientX, y: event.clientY };
-		const rect = container.getBoundingClientRect();
-		return {
-			x: event.clientX - rect.left - container.clientLeft,
-			y: event.clientY - rect.top - container.clientTop
-		};
-	}
-
-	function onWheel(event: WheelEvent): void {
-		if (!currentImage()) return;
-		if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return;
-		// The page must not scroll while the user intentionally zooms over a pane.
-		event.preventDefault();
-		applyView(
-			zoomAtPointer(view, pointerInPane(event), wheelZoomFactor(event.deltaY), currentZoomLimits())
-		);
-	}
-
-	function onPointerDown(event: PointerEvent): void {
-		if (event.button !== 0 || gesture || !currentImage()) return;
-		const pointer = pointerInPane(event);
+	function claimPointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
+		if (!currentImage()) return true;
 		const markerHit = scene?.markerHitAt(pointer) ?? null;
 		if (markerHit?.kind === 'complete' && markerHit.pairId && correctionEnabled) {
 			onPointSelect?.({ pairId: markerHit.pairId, side: markerHit.side });
 		}
+		if (!markerHit) return false;
 		gesture = {
 			pointerId: event.pointerId,
 			start: pointer,
-			transform: { ...view },
+			transform: { ...vp.view },
 			markerHit,
-			panning: false,
 			draggingMarker: false
 		};
-		window.addEventListener('pointermove', onPointerMove);
-		window.addEventListener('pointerup', onPointerUp);
-		window.addEventListener('pointercancel', onPointerCancel);
+		window.addEventListener('pointermove', onMarkerMove);
+		window.addEventListener('pointerup', onMarkerUp);
+		window.addEventListener('pointercancel', onMarkerCancel);
+		return true;
 	}
 
-	function onPointerMove(event: PointerEvent): void {
+	function onMarkerMove(event: PointerEvent): void {
 		if (!gesture) return;
 		if (event.pointerId !== gesture.pointerId) {
-			endDrag();
+			endMarkerGesture();
 			clearDragPreview();
 			return;
 		}
-		const pointer = pointerInPane(event);
-		const dx = pointer.x - gesture.start.x;
-		const dy = pointer.y - gesture.start.y;
-		if (gesture.markerHit) {
-			if (
-				gesture.markerHit.kind !== 'complete' ||
-				!gesture.markerHit.pairId ||
-				!correctionEnabled
-			) {
-				return;
-			}
-			if (!gesture.draggingMarker && Math.hypot(dx, dy) > CLICK_SLOP_PX) {
-				gesture.draggingMarker = true;
-			}
-			if (!gesture.draggingMarker) return;
-			const image = currentImage();
-			if (!image) return;
-			dragPreview = {
-				pairId: gesture.markerHit.pairId,
-				side: gesture.markerHit.side,
-				coordinates: clampPointToImageBounds(
-					screenToImage(pointer, gesture.transform),
-					image.widthPx,
-					image.heightPx
-				)
-			};
+		if (
+			gesture.markerHit.kind !== 'complete' ||
+			!gesture.markerHit.pairId ||
+			!correctionEnabled
+		) {
 			return;
 		}
-		if (!gesture.panning && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.panning = true;
-		if (gesture.panning) applyView(panBy(gesture.transform, dx, dy));
+		const pointer = vp.pointerIn(event);
+		const dx = pointer.x - gesture.start.x;
+		const dy = pointer.y - gesture.start.y;
+		if (!gesture.draggingMarker && Math.hypot(dx, dy) > CLICK_SLOP_PX) {
+			gesture.draggingMarker = true;
+		}
+		if (!gesture.draggingMarker) return;
+		const image = currentImage();
+		if (!image) return;
+		dragPreview = {
+			pairId: gesture.markerHit.pairId,
+			side: gesture.markerHit.side,
+			coordinates: clampPointToImageBounds(
+				screenToImage(pointer, gesture.transform),
+				image.widthPx,
+				image.heightPx
+			)
+		};
 	}
 
-	function endDrag(): void {
+	function onMarkerUp(event: PointerEvent): void {
+		if (!gesture) return;
+		if (event.pointerId !== gesture.pointerId) {
+			endMarkerGesture();
+			clearDragPreview();
+			return;
+		}
+		const activeGesture = gesture;
+		const pointer = vp.pointerIn(event);
+		const preview = dragPreview;
+		const inside = vp.containsPoint(event);
+		const image = currentImage();
+		const releaseCoordinates =
+			image && activeGesture.markerHit.kind === 'complete'
+				? clampPointToImageBounds(
+						screenToImage(pointer, activeGesture.transform),
+						image.widthPx,
+						image.heightPx
+					)
+				: null;
+		endMarkerGesture();
+		clearDragPreview();
+		if (
+			!inside ||
+			!activeGesture.draggingMarker ||
+			activeGesture.markerHit.kind !== 'complete' ||
+			!activeGesture.markerHit.pairId ||
+			(!preview && !releaseCoordinates) ||
+			!correctionEnabled ||
+			!onPointMove
+		) {
+			return;
+		}
+		const result = onPointMove({
+			selection: { pairId: activeGesture.markerHit.pairId, side: activeGesture.markerHit.side },
+			coordinates: releaseCoordinates ?? preview!.coordinates
+		});
+		if (!result.ok) interactionError = result.message;
+		else interactionError = null;
+	}
+
+	function onMarkerCancel(): void {
+		endMarkerGesture();
+		clearDragPreview();
+	}
+
+	function endMarkerGesture(): void {
 		gesture = null;
 		if (typeof window === 'undefined') return;
-		window.removeEventListener('pointermove', onPointerMove);
-		window.removeEventListener('pointerup', onPointerUp);
-		window.removeEventListener('pointercancel', onPointerCancel);
+		window.removeEventListener('pointermove', onMarkerMove);
+		window.removeEventListener('pointerup', onMarkerUp);
+		window.removeEventListener('pointercancel', onMarkerCancel);
 	}
 
 	function clearDragPreview(): void {
 		dragPreview = null;
+	}
+
+	/** Placement clicks land here from the shared viewport's click handling. */
+	function onViewportClick(pointer: ScreenSpacePoint): void {
+		if (!placementEnabled || !onPlacement) return;
+		const image = currentImage();
+		if (!image) return;
+		const coordinates = screenToImage(pointer, vp.view);
+		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) {
+			interactionError = 'Click inside the original image bounds.';
+			return;
+		}
+		interactionError = null;
+		onPlacement({ role, coordinates });
 	}
 
 	/**
@@ -358,8 +351,8 @@
 			hoverMagnifier = null;
 			return;
 		}
-		const pointer = pointerInPane(event);
-		const coordinates = screenToImage(pointer, view);
+		const pointer = vp.pointerIn(event);
+		const coordinates = screenToImage(pointer, vp.view);
 		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) {
 			hoverMagnifier = null;
 			return;
@@ -405,7 +398,7 @@
 			selectionMagnifier = null;
 			return;
 		}
-		const screen = imageToScreen(anchor, view);
+		const screen = imageToScreen(anchor, vp.view);
 		selectionMagnifier = {
 			xPx: anchor.xPx,
 			yPx: anchor.yPx,
@@ -417,8 +410,8 @@
 	/** Renders the transient magnifier canvas from the decoded original pixels. */
 	$effect(() => {
 		void refresh;
-		void view;
-		void paneSize;
+		void vp.view;
+		void vp.size;
 		const anchor = magnifier;
 		const canvas = magnifierCanvas;
 		const image = currentImage();
@@ -431,9 +424,9 @@
 			image.widthPx,
 			image.heightPx,
 			MAGNIFIER_SIZE,
-			view.zoom
+			vp.view.zoom
 		);
-		const box = magnifierBoxPosition({ x: anchor.screenX, y: anchor.screenY }, paneSizeNow(), MAGNIFIER_SIZE);
+		const box = magnifierBoxPosition({ x: anchor.screenX, y: anchor.screenY }, vp.size, MAGNIFIER_SIZE);
 		canvas.style.display = 'block';
 		canvas.style.left = `${box.x}px`;
 		canvas.style.top = `${box.y}px`;
@@ -465,140 +458,33 @@
 		drawMagnifier(context, decoded, sampling, MAGNIFIER_SIZE);
 	}
 
-	function paneContains(event: { clientX: number; clientY: number }): boolean {
-		if (!sceneContainer) return false;
-		const rect = sceneContainer.getBoundingClientRect();
-		return (
-			event.clientX >= rect.left + sceneContainer.clientLeft &&
-			event.clientX < rect.left + sceneContainer.clientLeft + sceneContainer.clientWidth &&
-			event.clientY >= rect.top + sceneContainer.clientTop &&
-			event.clientY < rect.top + sceneContainer.clientTop + sceneContainer.clientHeight
-		);
-	}
-
-	function onPointerUp(event: PointerEvent): void {
-		if (!gesture) return;
-		if (event.pointerId !== gesture.pointerId) {
-			endDrag();
-			clearDragPreview();
-			return;
-		}
-		const activeGesture = gesture;
-		const pointer = pointerInPane(event);
-		if (activeGesture.markerHit) {
-			const preview = dragPreview;
-			const inside = paneContains(event);
-			const image = currentImage();
-			const releaseCoordinates =
-				image && activeGesture.markerHit.kind === 'complete'
-					? clampPointToImageBounds(
-							screenToImage(pointer, activeGesture.transform),
-							image.widthPx,
-							image.heightPx
-						)
-					: null;
-			endDrag();
-			clearDragPreview();
-			if (
-				!inside ||
-				!activeGesture.draggingMarker ||
-				activeGesture.markerHit.kind !== 'complete' ||
-				!activeGesture.markerHit.pairId ||
-				(!preview && !releaseCoordinates) ||
-				!correctionEnabled ||
-				!onPointMove
-			) {
-				return;
-			}
-			const result = onPointMove({
-				selection: { pairId: activeGesture.markerHit.pairId, side: activeGesture.markerHit.side },
-				coordinates: releaseCoordinates ?? preview!.coordinates
-			});
-			if (!result.ok) interactionError = result.message;
-			else interactionError = null;
-			return;
-		}
-		const isClick =
-			!activeGesture.panning &&
-			Math.hypot(pointer.x - activeGesture.start.x, pointer.y - activeGesture.start.y) <= CLICK_SLOP_PX &&
-			paneContains(event);
-		endDrag();
-		if (!isClick || !placementEnabled || !onPlacement) return;
-		const image = currentImage();
-		if (!image) return;
-		const coordinates = screenToImage(pointer, view);
-		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) {
-			interactionError = 'Click inside the original image bounds.';
-			return;
-		}
-		interactionError = null;
-		onPlacement({ role, coordinates });
-	}
-
-	function onPointerCancel(): void {
-		endDrag();
-		clearDragPreview();
-	}
-
-	function handlePaneResize(entries: ResizeObserverEntry[]): void {
-		const entry = entries[0];
-		if (!entry) return;
-		const next = {
-			width: entry.contentRect.width > 0 ? entry.contentRect.width : 1,
-			height: entry.contentRect.height > 0 ? entry.contentRect.height : 1
-		};
-		const previous = paneSize
-			? paneSize
-			: sceneContainer
-				? { width: sceneContainer.clientWidth || 1, height: sceneContainer.clientHeight || 1 }
-				: next;
-		paneSize = next;
-		scene?.setStageSize(next.width, next.height);
-		const image = currentImage();
-		if (!image) return;
-		applyView(
-			resizeViewTransform(
-				view,
-				image.widthPx,
-				image.heightPx,
-				previous.width,
-				previous.height,
-				next.width,
-				next.height
-			)
-		);
-	}
-
+	/** Creates the Konva scene and attaches the pane-local hover listeners once. */
 	$effect(() => {
-		const container = sceneContainer;
+		const container = vp.container;
 		if (!container) return;
-		// Capture the actual geometry used by initial fit before ResizeObserver's
-		// first asynchronous callback. Reading clientWidth inside that callback can
-		// already return the new size and lose the previous resize anchor.
-		if (!paneSize) {
-			paneSize = {
-				width: container.clientWidth || 1,
-				height: container.clientHeight || 1
-			};
-		}
 		if (canvasAvailable() && !scene) {
 			scene = createPaneScene(container);
-			const size = paneSizeNow();
-			scene.setStageSize(size.width, size.height);
+			scene.setStageSize(vp.size.width, vp.size.height);
 		}
 		if (!setupDone) {
 			setupDone = true;
-			container.addEventListener('wheel', onWheel, { passive: false });
-			container.addEventListener('pointerdown', onPointerDown);
 			container.addEventListener('pointermove', handleHoverMove);
 			container.addEventListener('pointerleave', handleHoverLeave);
-			if (typeof ResizeObserver !== 'undefined') {
-				resizeObserver = new ResizeObserver(handlePaneResize);
-				resizeObserver.observe(container);
-			}
 		}
-		const image = currentImage();
-		const decoded = currentDecoded();
+	});
+
+	/** Applies the authoritative viewport transform to the Konva scene. */
+	$effect(() => {
+		scene?.applyTransform(vp.view);
+	});
+
+	/** Keeps the Konva stage sized to the viewport content box. */
+	$effect(() => {
+		scene?.setStageSize(vp.size.width, vp.size.height);
+	});
+
+	/** Renders markers and the raster; establishes the fit only on asset changes. */
+	$effect(() => {
 		scene?.setMarkersVisible(markersVisible);
 		const markers = markerData();
 		const markersJson = JSON.stringify(markers);
@@ -606,35 +492,44 @@
 			lastMarkersJson = markersJson;
 			scene?.setMarkers(markers);
 		}
+		const image = currentImage();
+		const decoded = currentDecoded();
 		if (image && decoded) {
 			// Establish the default fit only when the rendered asset changes, so
 			// unrelated domain refreshes (rename, future undo/redo) keep the view.
 			if (lastImageId !== image.id) {
 				lastImageId = image.id;
 				lastMarkersJson = null;
-				const size = paneSizeNow();
 				scene?.setImage(decoded, image.widthPx, image.heightPx);
-				applyView(defaultFitTransform(image.widthPx, image.heightPx, size.width, size.height));
+				vp.setFitTarget({ xPx: 0, yPx: 0, widthPx: image.widthPx, heightPx: image.heightPx });
+				vp.fit();
 			}
 		} else if (!image) {
 			lastImageId = null;
 			lastMarkersJson = null;
 			scene?.clearImage();
+			vp.setFitTarget(null);
 		}
 	});
 
+	function resetToFit(): void {
+		vp.fit();
+	}
+
 	onDestroy(() => {
-		endDrag();
+		endMarkerGesture();
 		clearDragPreview();
-		resizeObserver?.disconnect();
-		resizeObserver = null;
-		sceneContainer?.removeEventListener('wheel', onWheel);
-		sceneContainer?.removeEventListener('pointerdown', onPointerDown);
-		sceneContainer?.removeEventListener('pointermove', handleHoverMove);
-		sceneContainer?.removeEventListener('pointerleave', handleHoverLeave);
+		sceneContainerRemoveHover();
 		scene?.destroy();
 		scene = null;
 	});
+
+	function sceneContainerRemoveHover(): void {
+		const container = vp.container;
+		if (!container) return;
+		container.removeEventListener('pointermove', handleHoverMove);
+		container.removeEventListener('pointerleave', handleHoverLeave);
+	}
 
 	async function handleFileChange(event: Event): Promise<void> {
 		const input = event.currentTarget as HTMLInputElement;
@@ -669,20 +564,20 @@
 		<span class="status" role="status" data-testid={`pane-status-${role}`}>{statusText()}</span>
 	</header>
 
-	<!-- The scene-host is the Konva stage container: Konva clears its contents on
+	<!-- The viewport is the Konva stage container: Konva clears its contents on
 	     mount, so the loading/empty placeholders live in the scene wrapper instead. -->
 	<div class="scene">
-		<div
-			class="scene-host"
-			data-testid={`pane-scene-${role}`}
+		<ImageViewport
+			controller={vp}
+			testid={`pane-scene-${role}`}
 			role="img"
-			aria-label={`${title} image workspace. Use the point list for keyboard selection and management.`}
-			aria-describedby={`pane-status-${role}`}
-			data-view-zoom={view.zoom}
-			data-view-pan-x={view.panX}
-			data-view-pan-y={view.panY}
-			bind:this={sceneContainer}
-		></div>
+			ariaLabel={`${title} image workspace. Use the point list for keyboard selection and management.`}
+			ariaDescribedby={`pane-status-${role}`}
+			claimPointer={claimPointer}
+			onViewportClick={onViewportClick}
+		>
+			{#snippet content()}{/snippet}
+		</ImageViewport>
 		<canvas
 			class="magnifier"
 			data-testid={`pane-magnifier-${role}`}
@@ -799,12 +694,6 @@
 		border-radius: 4px;
 		background: repeating-conic-gradient(#f2f2f2 0% 25%, #ffffff 0% 50%) 50% / 16px 16px;
 		overflow: hidden;
-	}
-
-	.scene-host {
-		position: absolute;
-		inset: 0;
-		touch-action: none;
 	}
 
 	.magnifier {

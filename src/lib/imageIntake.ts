@@ -12,11 +12,13 @@
  * 3. Non-zero intrinsic-dimension validation.
  * 4. Domain mutation through `ProjectEditor` only:
  *    - first image for a role: `assignImage`;
- *    - same-dimension replacement: `replaceImage` with `retainPoints: true` (existing
- *      points are re-targeted, never invalidated);
- *    - different-dimension replacement with affected pairs: explicit user confirmation
- *      before `replaceImage` with `retainPoints: false`; cancellation preserves the
- *      current image, points, history, and the other pane.
+ *    - any replacement with affected pairs (regardless of dimensions): explicit
+ *      user confirmation before `replaceImage` with `retainPoints: false`, because
+ *      replacing either underlying image invalidates every pair involving it;
+ *      cancellation preserves the current image, points, history, and the other
+ *      pane;
+ *    - replacement with no affected pairs: direct `replaceImage` (points retained
+ *      only when the dimensions match, which is then a no-op).
  * 5. The decoded image is registered as the asset's transient decoded resource
  *    (`setDecodedResource`) so undo/redo can render the restored original. The
  *    `ProjectEditor` registry releases it once no current, undo, or redo snapshot
@@ -304,12 +306,10 @@ export async function intakeImageFile(options: IntakeImageFileOptions): Promise<
 		(pair) => pair.source.imageId === current.id || pair.target.imageId === current.id
 	).length;
 
-	if (sameDimensions) {
-		editor.replaceImage({ role, asset, bytes, retainPoints: true });
-		editor.setDecodedResource(asset.id, decoded.image);
-		return { ok: true, status: 'replaced-retained', asset };
-	}
-
+	// Replacing either underlying image invalidates every pair involving it,
+	// regardless of whether the replacement has the same dimensions: the points'
+	// visual reference is gone. Any replacement with affected pairs therefore
+	// requires the explicit discard confirmation.
 	if (affectedCount > 0) {
 		const confirmed = await confirmDiscard(affectedCount);
 		if (!confirmed) {
@@ -317,7 +317,18 @@ export async function intakeImageFile(options: IntakeImageFileOptions): Promise<
 		}
 	}
 
-	editor.replaceImage({ role, asset, bytes });
+	editor.replaceImage({
+		role,
+		asset,
+		bytes,
+		// With no affected pairs, retainPoints only matters to satisfy the domain
+		// dimension guard; it is a no-op either way.
+		retainPoints: affectedCount === 0 && sameDimensions
+	});
 	editor.setDecodedResource(asset.id, decoded.image);
-	return { ok: true, status: 'replaced-discarded', asset };
+	return {
+		ok: true,
+		status: affectedCount > 0 || !sameDimensions ? 'replaced-discarded' : 'replaced-retained',
+		asset
+	};
 }

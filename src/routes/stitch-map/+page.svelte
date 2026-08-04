@@ -1,29 +1,30 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import Konva from 'konva';
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
+	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
+	import type { ViewportFitTarget } from '$lib/viewport.svelte';
 	import { decodeImageFile, isSupportedMimeType } from '$lib/imageIntake';
 	import { isEditableTarget } from '$lib/pointSelection';
-	import { wheelZoomFactor, zoomAtPointer } from '$lib/navigation';
 	import { canvas2dAvailable } from '$lib/scene';
 	import {
 		TILE_SLOTS,
 		ZERO_CROP,
 		cropSize,
-		expectedNeighbors,
 		initialPlacements,
-		overlapArea,
 		readiness,
 		sessionDimensions,
 		tileRect,
-		translatedOrigin,
 		unionBounds
 	} from '$lib/stitch/geometry';
 	import type { CropInsetField, CropInsets, TilePlacement, TileSlot } from '$lib/stitch/geometry';
+	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
 	import type { ImageRole } from '$lib/domain/project';
+	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
 	interface StitchTile {
 		fileName: string;
@@ -56,6 +57,8 @@
 	/** Session tiles: transient browser resources only, never durable project state. */
 	let tiles = $state<Partial<Record<TileSlot, StitchTile>>>({});
 	let tileErrors = $state<Partial<Record<TileSlot, string>>>({});
+	/** Per-slot decode generations: stale in-flight decodes never publish results. */
+	const decodeCoordinator = new TileDecodeCoordinator();
 
 	/** Authoritative committed crop; drafts may be invalid without touching it. */
 	let crop = $state<CropInsets>({ ...ZERO_CROP });
@@ -74,24 +77,35 @@
 	let xPositionInput = $state<HTMLInputElement | null>(null);
 	let yPositionInput = $state<HTMLInputElement | null>(null);
 	let previewOpacity = $state(0.6);
+	let alignmentWorkspace = $state<HTMLDivElement | null>(null);
 
-	let fitScale = $state(1);
-	let renderOffset = $state({ x: 0, y: 0 });
-	let alignmentScope = $state<HTMLDivElement | null>(null);
-	let cropScope = $state<HTMLDivElement | null>(null);
-	let alignmentStageSize = $state({ width: 1, height: 1 });
-	let cropStageSize = $state({ width: 1, height: 1 });
+	let alignmentVp = new ViewportController();
+	let cropVp = new ViewportController();
+
 	let alignmentStage = $state<Konva.Stage | null>(null);
 	let cropStage = $state<Konva.Stage | null>(null);
 	let alignmentLayer = $state<Konva.Layer | null>(null);
 	let cropLayer = $state<Konva.Layer | null>(null);
-	let resizeObserver: ResizeObserver | null = null;
-	/** User-adjustable crop-preview view (wheel zoom); fit is the default. */
-	let cropViewScale = $state(1);
-	let cropViewOffset = $state({ x: 0, y: 0 });
+	/** Live tile groups so a drag preview moves the image and its highlight together. */
+	let tileNodes = new Map<TileSlot, Konva.Group>();
 	/** Live nodes of the crop scene so drags can move them without rebuilding. */
 	let cropRectNode = $state<Konva.Rect | null>(null);
 	let cropHandles = $state<Partial<Record<CropInsetField, Konva.Rect>>>({});
+	/** True only between a crop-handle dragstart and dragend (Konva-native drag). */
+	let cropDragActive = false;
+	/**
+	 * Custom alignment tile drag claimed from the shared viewport. The node is
+	 * moved only after the shared click threshold is exceeded, and any gesture
+	 * that ends without a commit (click, pointercancel, pointer-ID mismatch)
+	 * reconciles the live node back to the authoritative placements.
+	 */
+	let tileDrag: {
+		slot: TileSlot;
+		pointerId: number;
+		startScreen: ScreenSpacePoint;
+		startPlacement: { xPx: number; yPx: number };
+		moved: boolean;
+	} | null = null;
 
 	let statusMessage = $state<string | null>(null);
 	let exportError = $state<string | null>(null);
@@ -107,41 +121,29 @@
 		report.ready && !rendering && invalidCropFields.length === 0
 	);
 
-	/** Centers the upper-left tile at the largest scale that fits the preview. */
-	function fitCropPreview(): void {
-		const tile = tiles['upper-left'];
-		if (!tile) return;
-		const pad = 12;
-		const availableWidth = Math.max(cropStageSize.width - pad * 2, 1);
-		const availableHeight = Math.max(cropStageSize.height - pad * 2, 1);
-		const scale = Math.max(
-			0.05,
-			Math.min(4, Math.min(availableWidth / tile.widthPx, availableHeight / tile.heightPx))
+	/** The union of all loaded cropped tile rectangles; the alignment fit target. */
+	function alignmentFitTarget(): ViewportFitTarget | null {
+		const validation = croppedValidation;
+		if (!validation?.ok) return null;
+		const rects = TILE_SLOTS.filter((slot) => tiles[slot]).map((slot) =>
+			tileRect(placements[slot], validation.widthPx, validation.heightPx)
 		);
-		cropViewScale = scale;
-		cropViewOffset = {
-			x: (cropStageSize.width - tile.widthPx * scale) / 2,
-			y: (cropStageSize.height - tile.heightPx * scale) / 2
-		};
+		const union = unionBounds(rects);
+		if (!union) return null;
+		return { xPx: union.xPx, yPx: union.yPx, widthPx: union.widthPx, heightPx: union.heightPx };
 	}
 
 	function cropGeometry():
-		| {
-				scale: number;
-				rectX: number;
-				rectY: number;
-				rectWidth: number;
-				rectHeight: number;
-		  }
+		| { rectX: number; rectY: number; rectWidth: number; rectHeight: number }
 		| null {
 		const tile = tiles['upper-left'];
 		if (!tile) return null;
-		const scale = cropViewScale;
-		const rectX = cropViewOffset.x + crop.leftPx * scale;
-		const rectY = cropViewOffset.y + crop.topPx * scale;
-		const rectWidth = Math.max(0, (tile.widthPx - crop.leftPx - crop.rightPx) * scale);
-		const rectHeight = Math.max(0, (tile.heightPx - crop.topPx - crop.bottomPx) * scale);
-		return { scale, rectX, rectY, rectWidth, rectHeight };
+		const view = cropVp.view;
+		const rectX = view.panX + crop.leftPx * view.zoom;
+		const rectY = view.panY + crop.topPx * view.zoom;
+		const rectWidth = Math.max(0, (tile.widthPx - crop.leftPx - crop.rightPx) * view.zoom);
+		const rectHeight = Math.max(0, (tile.heightPx - crop.topPx - crop.bottomPx) * view.zoom);
+		return { rectX, rectY, rectWidth, rectHeight };
 	}
 
 	function cropHandleAnchor(
@@ -257,22 +259,27 @@
 	}
 
 	async function handleSlotFile(slot: TileSlot, file: File): Promise<void> {
+		// Every selection invalidates earlier in-flight decodes for this slot —
+		// even a selection that turns out to be unsupported.
+		const generation = decodeCoordinator.begin(slot);
 		exportError = null;
 		if (!isSupportedMimeType(file.type)) {
-			tileErrors = {
-				...tileErrors,
-				[slot]: `Unsupported file type "${file.type || 'unknown'}": ChainSpot accepts PNG and JPEG images.`
-			};
+			if (decodeCoordinator.isCurrent(slot, generation)) {
+				tileErrors = {
+					...tileErrors,
+					[slot]: `Unsupported file type "${file.type || 'unknown'}": ChainSpot accepts PNG and JPEG images.`
+				};
+			}
 			return;
 		}
-		let decoded: { image: HTMLImageElement; widthPx: number; heightPx: number };
-		try {
-			decoded = await decodeImageFile(file);
-		} catch {
+		const result = await guardedDecode(decodeCoordinator, slot, generation, file, decodeImageFile);
+		if (!result.ok) {
+			// A stale success or failure must never publish over the newest tile.
+			if ('stale' in result) return;
 			tileErrors = { ...tileErrors, [slot]: `Could not decode "${file.name}".` };
 			return;
 		}
-		const { image, widthPx, heightPx } = decoded;
+		const { image, widthPx, heightPx } = result.decoded;
 		if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
 			tileErrors = {
 				...tileErrors,
@@ -299,11 +306,11 @@
 		delete cleared[slot];
 		tileErrors = cleared;
 		statusMessage = `${SLOT_LABELS[slot]} loaded (${widthPx} x ${heightPx}).`;
-		fitPreview();
-		fitCropPreview();
 	}
 
 	function handleRemove(slot: TileSlot): void {
+		// Any in-flight decode for this slot must never publish its result.
+		decodeCoordinator.invalidate(slot);
 		if (!tiles[slot]) return;
 		const next = { ...tiles };
 		delete next[slot];
@@ -317,11 +324,11 @@
 		}
 		if (!TILE_SLOTS.some((candidate) => tiles[candidate])) resetSession();
 		statusMessage = `${SLOT_LABELS[slot]} removed.`;
-		fitPreview();
-		fitCropPreview();
 	}
 
 	function resetSession(): void {
+		// No in-flight decode may publish into the cleared session.
+		decodeCoordinator.invalidateAll(TILE_SLOTS);
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
 		placements = initialPlacements(1, 1);
@@ -353,7 +360,6 @@
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
 		renderCropScene();
-		fitPreview();
 		statusMessage = 'Shared crop reset.';
 	}
 
@@ -377,7 +383,7 @@
 		if (slot !== null && (slot === 'upper-left' || !tiles[slot])) return;
 		selectedSlot = slot;
 		syncPositionDraft(true);
-		if (slot) alignmentScope?.focus();
+		if (slot) alignmentWorkspace?.focus();
 	}
 
 	function handlePositionInput(field: 'xPx' | 'yPx', event: Event): void {
@@ -441,34 +447,162 @@
 		};
 	}
 
-	function fitPreview(): void {
-		const validation = croppedValidation;
-		if (!validation?.ok) return;
-		const rects = TILE_SLOTS.filter((slot) => tiles[slot]).map((slot) =>
-			tileRect(placements[slot], validation.widthPx, validation.heightPx)
-		);
-		const union = unionBounds(rects);
-		if (!union) return;
-		const pad = 16;
-		const availableWidth = Math.max(alignmentStageSize.width - pad * 2, 1);
-		const availableHeight = Math.max(alignmentStageSize.height - pad * 2, 1);
-		const scale = Math.max(
-			0.01,
-			Math.min(8, Math.min(availableWidth / union.widthPx, availableHeight / union.heightPx))
-		);
-		fitScale = scale;
-		renderOffset = {
-			x: (alignmentStageSize.width - union.widthPx * scale) / 2 - union.xPx * scale,
-			y: (alignmentStageSize.height - union.heightPx * scale) / 2 - union.yPx * scale
-		};
-	}
-
 	function resetArrangement(): void {
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
 		placements = initialPlacements(validation.widthPx, validation.heightPx);
 		syncPositionDraft(true);
 		statusMessage = 'Arrangement reset to the 25% overlap layout.';
+	}
+
+	/**
+	 * Alignment gesture arbitration (shared viewport claim): a pointer that begins
+	 * inside the currently selected, visible, movable tile claims the gesture for
+	 * tile movement — even when other tiles cover the point. Everything else is
+	 * left to the viewport (background pan) or click selection.
+	 */
+	function claimAlignmentPointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
+		const slot = selectedSlot;
+		const validation = croppedValidation;
+		if (!slot || slot === 'upper-left' || !validation?.ok) return false;
+		const placement = placements[slot];
+		const tile = tiles[slot];
+		if (!placement?.visible || !tile) return false;
+		const rect = tileRect(placement, validation.widthPx, validation.heightPx);
+		const image = alignmentVp.toImage(pointer);
+		if (!pointInTileRect(image, rect)) return false;
+		tileDrag = {
+			slot,
+			pointerId: event.pointerId,
+			startScreen: pointer,
+			startPlacement: { xPx: placement.xPx, yPx: placement.yPx },
+			moved: false
+		};
+		window.addEventListener('pointermove', handleTileDragMove);
+		window.addEventListener('pointerup', handleTileDragEnd);
+		window.addEventListener('pointercancel', handleTileDragCancel);
+		return true;
+	}
+
+	function pointInTileRect(
+		point: ImageSpacePoint,
+		rect: { xPx: number; yPx: number; widthPx: number; heightPx: number }
+	): boolean {
+		return (
+			point.xPx >= rect.xPx &&
+			point.xPx < rect.xPx + rect.widthPx &&
+			point.yPx >= rect.yPx &&
+			point.yPx < rect.yPx + rect.heightPx
+		);
+	}
+
+	/**
+	 * Live tile drag preview: the node stays at its committed placement until the
+	 * shared click threshold is exceeded, then follows the drag delta applied to
+	 * the starting placement (never the grab point). Scene state never changes
+	 * mid-gesture, so no rebuild interrupts the drag.
+	 */
+	function handleTileDragMove(event: PointerEvent): void {
+		if (!tileDrag) return;
+		if (event.pointerId !== tileDrag.pointerId) {
+			endTileDrag();
+			reconcileTileDrag();
+			return;
+		}
+		const screen = alignmentVp.pointerIn(event);
+		if (
+			!tileDrag.moved &&
+			Math.hypot(screen.x - tileDrag.startScreen.x, screen.y - tileDrag.startScreen.y) >
+				CLICK_SLOP_PX
+		) {
+			tileDrag.moved = true;
+		}
+		if (!tileDrag.moved) return;
+		const dx = (screen.x - tileDrag.startScreen.x) / alignmentVp.view.zoom;
+		const dy = (screen.y - tileDrag.startScreen.y) / alignmentVp.view.zoom;
+		const node = tileNodes.get(tileDrag.slot);
+		if (!node) return;
+		const next = alignmentVp.toScreen({
+			xPx: tileDrag.startPlacement.xPx + dx,
+			yPx: tileDrag.startPlacement.yPx + dy
+		});
+		node.position({ x: next.x, y: next.y });
+	}
+
+	function handleTileDragEnd(event: PointerEvent): void {
+		if (!tileDrag) return;
+		const drag = tileDrag;
+		endTileDrag();
+		if (event.pointerId !== drag.pointerId) {
+			reconcileTileDrag();
+			return;
+		}
+		// A click on the selected tile (movement within the shared threshold)
+		// selects nothing new and must never move or commit the tile.
+		if (!drag.moved) {
+			reconcileTileDrag();
+			return;
+		}
+		const screen = alignmentVp.pointerIn(event);
+		const dx = (screen.x - drag.startScreen.x) / alignmentVp.view.zoom;
+		const dy = (screen.y - drag.startScreen.y) / alignmentVp.view.zoom;
+		// The drag delta applies to the tile's committed position; the grab point
+		// inside the tile is only the anchor for the preview.
+		const placement = placements[drag.slot];
+		if (!placement) return;
+		// Final placements are committed as integer cropped-image pixels.
+		updatePlacement(
+			drag.slot,
+			placement.xPx + Math.round(dx),
+			placement.yPx + Math.round(dy)
+		);
+	}
+
+	/** pointercancel must never commit; the live node returns to its placement. */
+	function handleTileDragCancel(): void {
+		if (!tileDrag) return;
+		endTileDrag();
+		reconcileTileDrag();
+	}
+
+	/** Restores the live node from the authoritative placements after a no-commit end. */
+	function reconcileTileDrag(): void {
+		renderAlignmentScene();
+	}
+
+	function endTileDrag(): void {
+		tileDrag = null;
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointermove', handleTileDragMove);
+		window.removeEventListener('pointerup', handleTileDragEnd);
+		window.removeEventListener('pointercancel', handleTileDragCancel);
+	}
+
+	/**
+	 * Click selection in the alignment view: selects a movable tile only when the
+	 * point lies inside exactly one visible tile — the anchored upper-left tile
+	 * participates in ambiguity even though it can never be selected. Hidden tiles
+	 * are never selectable.
+	 */
+	function onAlignmentClick(pointer: ScreenSpacePoint): void {
+		const validation = croppedValidation;
+		if (!validation?.ok) return;
+		const image = alignmentVp.toImage(pointer);
+		const hits = TILE_SLOTS.filter((slot) => {
+			const placement = placements[slot];
+			if (!placement?.visible || !tiles[slot]) return false;
+			return pointInTileRect(image, tileRect(placement, validation.widthPx, validation.heightPx));
+		});
+		if (hits.length === 1 && hits[0] !== 'upper-left') selectSlot(hits[0]);
+	}
+
+	/** Crop-handle claim: only Konva handle nodes claim; everything else pans. */
+	function claimCropPointer(pointer: ScreenSpacePoint): boolean {
+		const stage = cropStage;
+		if (!stage) return false;
+		const hit = stage.getIntersection(pointer);
+		if (!hit) return false;
+		return CROP_FIELDS.some((field) => cropHandles[field] === hit);
 	}
 
 	function handleDownload(): void {
@@ -565,68 +699,13 @@
 		}
 		if (report.dimensionMismatch.length > 0) reasons.push('Screenshots must share one size.');
 		if (report.invalidCrop) reasons.push('The shared crop is invalid.');
-		if (report.noOverlap.length > 0) {
-			reasons.push('Every movable tile must overlap a neighbor.');
+		if (report.disconnected.length > 0) {
+			reasons.push(
+				'Every movable tile must connect to the upper-left tile through overlapping neighbors.'
+			);
 		}
 		if (invalidCropFields.length > 0) reasons.push('The crop fields contain invalid values.');
 		return `Not ready to export: ${reasons.join('; ')}.`;
-	}
-
-	function measureStages(): void {
-		if (alignmentScope) {
-			alignmentStageSize = {
-				width: alignmentScope.clientWidth || 1,
-				height: alignmentScope.clientHeight || 1
-			};
-			alignmentStage?.size(alignmentStageSize);
-		}
-		if (cropScope) {
-			cropStageSize = {
-				width: cropScope.clientWidth || 1,
-				height: cropScope.clientHeight || 1
-			};
-			cropStage?.size(cropStageSize);
-		}
-		fitPreview();
-		fitCropPreview();
-	}
-
-	/**
-	 * ImagePane-style pointer-centered wheel zoom for the alignment preview. The
-	 * listener is attached non-passively so the page never scrolls while zooming.
-	 */
-	function handleAlignmentWheel(event: WheelEvent): void {
-		if (!TILE_SLOTS.some((slot) => tiles[slot])) return;
-		if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return;
-		event.preventDefault();
-		const rect = alignmentScope?.getBoundingClientRect();
-		if (!rect) return;
-		const next = zoomAtPointer(
-			{ zoom: fitScale, panX: renderOffset.x, panY: renderOffset.y },
-			{ x: event.clientX - rect.left, y: event.clientY - rect.top },
-			wheelZoomFactor(event.deltaY)
-		);
-		fitScale = next.zoom;
-		renderOffset = { x: next.panX, y: next.panY };
-	}
-
-	/** Pointer-centered wheel zoom for the crop preview. */
-	function handleCropWheel(event: WheelEvent): void {
-		const tile = tiles['upper-left'];
-		if (!tile) return;
-		if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return;
-		event.preventDefault();
-		const rect = cropScope?.getBoundingClientRect();
-		if (!rect) return;
-		const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-		const nextScale = Math.max(
-			0.05,
-			Math.min(16, cropViewScale * wheelZoomFactor(event.deltaY))
-		);
-		const px = (pointer.x - cropViewOffset.x) / cropViewScale;
-		const py = (pointer.y - cropViewOffset.y) / cropViewScale;
-		cropViewScale = nextScale;
-		cropViewOffset = { x: pointer.x - px * nextScale, y: pointer.y - py * nextScale };
 	}
 
 	function renderCropScene(): void {
@@ -641,15 +720,16 @@
 			layer.batchDraw();
 			return;
 		}
+		const view = cropVp.view;
 		const g = cropGeometry();
 		if (!g) return;
 		layer.add(
 			new Konva.Image({
 				image: tile.image,
-				x: cropViewOffset.x,
-				y: cropViewOffset.y,
-				width: tile.widthPx * g.scale,
-				height: tile.heightPx * g.scale,
+				x: view.panX,
+				y: view.panY,
+				width: tile.widthPx * view.zoom,
+				height: tile.heightPx * view.zoom,
 				listening: false
 			})
 		);
@@ -704,20 +784,24 @@
 			// the opposite edge, so the handle's rest position exactly matches
 			// the committed value and never jumps on the first drag move.
 			const pixels = (axis === 'x' ? handle.x() : handle.y()) + size / 2;
-			const offset = axis === 'x' ? cropViewOffset.x : cropViewOffset.y;
+			const offset = axis === 'x' ? cropVp.view.panX : cropVp.view.panY;
 			const dimension = axis === 'x' ? tile.widthPx : tile.heightPx;
-			const fromOrigin = (pixels - offset) / cropViewScale;
+			const fromOrigin = (pixels - offset) / cropVp.view.zoom;
 			const value =
 				field === 'topPx' || field === 'leftPx'
 					? Math.round(fromOrigin)
 					: dimension - Math.round(fromOrigin);
 			return Math.min(maxInset(field, tile), Math.max(0, value));
 		};
+		handle.on('dragstart', () => {
+			cropDragActive = true;
+		});
 		handle.on('dragmove', () => {
 			updateCropDrag(field, valueFromDrag());
 			updateCropSceneGeometry();
 		});
 		handle.on('dragend', () => {
+			cropDragActive = false;
 			updateCropDrag(field, valueFromDrag());
 			updateCropSceneGeometry();
 			endCropDrag();
@@ -730,131 +814,132 @@
 		const layer = alignmentLayer;
 		if (!stage || !layer) return;
 		layer.destroyChildren();
+		tileNodes.clear();
 		const validation = croppedValidation;
 		if (!validation?.ok) {
 			layer.batchDraw();
 			return;
 		}
-		const scale = fitScale;
-		const ox = renderOffset.x;
-		const oy = renderOffset.y;
+		const view = alignmentVp.view;
 		for (const slot of TILE_SLOTS) {
 			const tile = tiles[slot];
 			const placement = placements[slot];
 			if (!tile || !placement) continue;
-			const node = new Konva.Image({
-				image: tile.image,
-				x: placement.xPx * scale + ox,
-				y: placement.yPx * scale + oy,
-				width: validation.widthPx * scale,
-				height: validation.heightPx * scale,
-				crop: {
-					x: crop.leftPx,
-					y: crop.topPx,
-					width: validation.widthPx,
-					height: validation.heightPx
-				},
-				opacity: slot === selectedSlot ? previewOpacity : 1,
+			// One group per tile so the drag preview moves the image and its
+			// selected highlight together without rebuilding the scene.
+			const group = new Konva.Group({
+				x: placement.xPx * view.zoom + view.panX,
+				y: placement.yPx * view.zoom + view.panY,
 				visible: placement.visible,
-				draggable: slot !== 'upper-left',
-				listening: slot !== 'upper-left'
+				listening: false
 			});
-			if (slot !== 'upper-left') {
-				node.on('dragstart', () => {
-					if (selectedSlot !== slot) selectSlot(slot);
-					else alignmentScope?.focus();
-				});
-				node.on('dragend', () => {
-					const xPx = Math.round((node.x() - ox) / scale);
-					const yPx = Math.round((node.y() - oy) / scale);
-					updatePlacement(slot, xPx, yPx);
-				});
-			}
-			layer.add(node);
-		}
-		const selected = selectedSlot;
-		if (selected && selected !== 'upper-left' && tiles[selected] && placements[selected]) {
-			const placement = placements[selected];
-			layer.add(
-				new Konva.Rect({
-					x: placement.xPx * scale + ox,
-					y: placement.yPx * scale + oy,
-					width: validation.widthPx * scale,
-					height: validation.heightPx * scale,
-					stroke: '#facc15',
-					strokeWidth: 2,
+			group.add(
+				new Konva.Image({
+					image: tile.image,
+					width: validation.widthPx * view.zoom,
+					height: validation.heightPx * view.zoom,
+					crop: {
+						x: crop.leftPx,
+						y: crop.topPx,
+						width: validation.widthPx,
+						height: validation.heightPx
+					},
+					opacity: slot === selectedSlot ? previewOpacity : 1,
 					listening: false
 				})
 			);
+			if (slot === selectedSlot) {
+				group.add(
+					new Konva.Rect({
+						width: validation.widthPx * view.zoom,
+						height: validation.heightPx * view.zoom,
+						stroke: '#facc15',
+						strokeWidth: 2,
+						listening: false
+					})
+				);
+			}
+			tileNodes.set(slot, group);
+			layer.add(group);
 		}
 		layer.batchDraw();
 	}
 
 	$effect(() => {
-		if (!alignmentScope) return;
-		if (canvas2dAvailable() && !alignmentStage) {
-			alignmentStage = new Konva.Stage({
-				container: alignmentScope,
-				width: alignmentStageSize.width,
-				height: alignmentStageSize.height
-			});
-			alignmentLayer = new Konva.Layer();
-			alignmentStage.add(alignmentLayer);
-		}
+		const container = alignmentVp.container;
+		if (!container || !canvas2dAvailable() || alignmentStage) return;
+		alignmentStage = new Konva.Stage({
+			container,
+			width: alignmentVp.size.width,
+			height: alignmentVp.size.height
+		});
+		alignmentLayer = new Konva.Layer();
+		alignmentStage.add(alignmentLayer);
 	});
 
 	$effect(() => {
-		if (!cropScope) return;
-		if (canvas2dAvailable() && !cropStage) {
-			cropStage = new Konva.Stage({
-				container: cropScope,
-				width: cropStageSize.width,
-				height: cropStageSize.height
-			});
-			cropLayer = new Konva.Layer();
-			cropStage.add(cropLayer);
-		}
+		const container = cropVp.container;
+		if (!container || !canvas2dAvailable() || cropStage) return;
+		cropStage = new Konva.Stage({
+			container,
+			width: cropVp.size.width,
+			height: cropVp.size.height
+		});
+		cropLayer = new Konva.Layer();
+		cropStage.add(cropLayer);
 	});
 
-	// Rebuild the alignment scene whenever the session, crop, or view changes.
-	// Placement updates always land outside an in-flight Konva drag, so a rebuild
-	// here never destroys a node mid-drag.
+	$effect(() => {
+		alignmentStage?.size(alignmentVp.size);
+		cropStage?.size(cropVp.size);
+	});
+
+	// The alignment fit follows the union of loaded cropped tile rectangles.
+	$effect(() => {
+		void tiles;
+		void placements;
+		void crop;
+		untrack(() => alignmentVp.setFitTarget(alignmentFitTarget()));
+	});
+
+	// The crop view fits the complete original upper-left image.
+	$effect(() => {
+		void tiles;
+		untrack(() => {
+			const tile = tiles['upper-left'];
+			cropVp.setFitTarget(
+				tile ? { xPx: 0, yPx: 0, widthPx: tile.widthPx, heightPx: tile.heightPx } : null
+			);
+		});
+	});
+
+	// Rebuild the alignment scene when the session, crop, or view changes. Tile
+	// drags update only the live Konva node, and committed placements land after
+	// the gesture ends, so a rebuild never interrupts an active drag.
 	$effect(() => {
 		void tiles;
 		void crop;
 		void placements;
 		void selectedSlot;
 		void previewOpacity;
-		void fitScale;
-		void renderOffset;
-		void alignmentStageSize;
-		untrack(() => renderAlignmentScene());
+		void alignmentVp.view;
+		void alignmentVp.size;
+		untrack(() => {
+			if (!tileDrag) renderAlignmentScene();
+		});
 	});
 
-	// The crop preview rebuilds on tile, stage-size, or view-zoom changes. Crop
-	// values never trigger a rebuild here: numeric commits and handle-drag ends
-	// render explicitly so a dragged handle node is never destroyed mid-drag.
+	// The crop preview rebuilds on tile, crop, or view changes. Crop values never
+	// trigger a rebuild during a handle drag (cropDragActive), so the dragged
+	// handle node is never destroyed mid-drag; handle drags re-render explicitly.
 	$effect(() => {
 		void tiles;
-		void cropStageSize;
-		void cropViewScale;
-		void cropViewOffset;
-		untrack(() => renderCropScene());
-	});
-
-	// Re-fit the alignment view only when the tile set or stage size changes;
-	// crop edits and placement tweaks preserve the user's current zoom.
-	$effect(() => {
-		void tiles;
-		void alignmentStageSize;
-		untrack(() => fitPreview());
-	});
-
-	// Re-center the crop preview when the tile or stage size changes.
-	$effect(() => {
-		void tiles;
-		void cropStageSize;
-		untrack(() => fitCropPreview());
+		void crop;
+		void cropVp.view;
+		void cropVp.size;
+		untrack(() => {
+			if (!cropDragActive) renderCropScene();
+		});
 	});
 
 	$effect(() => {
@@ -864,29 +949,13 @@
 			placements = initialPlacements(validation.widthPx, validation.heightPx);
 			placementsInitialized = true;
 			syncPositionDraft(true);
-			fitPreview();
+			alignmentVp.fit();
 			statusMessage = 'All four screenshots loaded. Initial 25% overlap layout created.';
 		}
 	});
 
-	onMount(() => {
-		syncCropDraft(true);
-		if (typeof ResizeObserver !== 'undefined') {
-			resizeObserver = new ResizeObserver(() => measureStages());
-			if (alignmentScope) resizeObserver.observe(alignmentScope);
-			if (cropScope) resizeObserver.observe(cropScope);
-		}
-		// Non-passive wheel listeners so the page never scrolls while zooming.
-		alignmentScope?.addEventListener('wheel', handleAlignmentWheel, { passive: false });
-		cropScope?.addEventListener('wheel', handleCropWheel, { passive: false });
-		measureStages();
-	});
-
 	onDestroy(() => {
-		resizeObserver?.disconnect();
-		resizeObserver = null;
-		alignmentScope?.removeEventListener('wheel', handleAlignmentWheel);
-		cropScope?.removeEventListener('wheel', handleCropWheel);
+		endTileDrag();
 		alignmentStage?.destroy();
 		alignmentStage = null;
 		alignmentLayer = null;
@@ -943,18 +1012,14 @@
 		<h3 id="crop-heading">Shared crop</h3>
 		<p class="section-note">
 			One crop applies to all four screenshots. Adjust it on the upper-left preview or with
-			the numeric fields. Scroll over the preview to zoom in and out.
+			the numeric fields. Scroll over the preview to zoom; drag its background to pan.
 		</p>
 		<div class="crop-layout">
-			<div
-				class="crop-preview"
-				data-testid="crop-preview"
-				bind:this={cropScope}
-				aria-label="Crop preview on the upper-left screenshot"
-				data-crop-scale={cropViewScale}
-				data-crop-offset-x={cropViewOffset.x}
-				data-crop-offset-y={cropViewOffset.y}
-			></div>
+			<div class="crop-preview">
+				<ImageViewport controller={cropVp} testid="crop-viewport" claimPointer={claimCropPointer}>
+					{#snippet content()}{/snippet}
+				</ImageViewport>
+			</div>
 			<div class="crop-fields">
 				{#each CROP_FIELDS as field (field)}
 					<label class="crop-field">
@@ -975,6 +1040,9 @@
 				<button type="button" data-testid="crop-reset" onclick={resetCrop}>
 					Reset crop
 				</button>
+				<button type="button" data-testid="crop-fit" onclick={() => cropVp.fit()}>
+					Fit
+				</button>
 			</div>
 		</div>
 	</section>
@@ -983,7 +1051,8 @@
 		<h3 id="alignment-heading">Align tiles</h3>
 		<p id="alignment-help" class="alignment-help">
 			Select a movable tile, then use the arrow keys to adjust it. Hold Shift to move 10
-			pixels. Scroll over the preview to zoom in and out; Fit restores the full view.
+			pixels. Click an exposed tile region to select it; drag the selected tile to move it.
+			Drag the background to pan and scroll to zoom; Fit restores the full view.
 		</p>
 		<div class="alignment-controls">
 			{#each MOVABLE_SLOTS as slot (slot)}
@@ -1051,7 +1120,7 @@
 					disabled={!selectedSlot}
 				/>
 			</label>
-			<button type="button" data-testid="fit-preview" onclick={fitPreview}>
+			<button type="button" data-testid="fit-preview" onclick={() => alignmentVp.fit()}>
 				Fit preview
 			</button>
 			<button
@@ -1069,21 +1138,28 @@
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
-			class="alignment-scope"
+			class="alignment-workspace"
 			data-testid="alignment-workspace"
-			bind:this={alignmentScope}
+			bind:this={alignmentWorkspace}
 			tabindex="0"
 			role="group"
 			aria-label="Stitch alignment workspace"
 			aria-describedby="alignment-help"
 			data-stitch-nudge-scope
-			data-stitch-scale={fitScale}
-			data-stitch-offset-x={renderOffset.x}
-			data-stitch-offset-y={renderOffset.y}
 			onkeydown={handleAlignmentKeyDown}
-		></div>
+		>
+			<ImageViewport
+				controller={alignmentVp}
+				testid="alignment-viewport"
+				claimPointer={claimAlignmentPointer}
+				onViewportClick={onAlignmentClick}
+			>
+				{#snippet content()}{/snippet}
+			</ImageViewport>
+		</div>
 		<p class="preview-note">
-			Preview-only: hiding a tile or changing opacity never changes the exported PNG.
+			Preview-only: hiding a tile, changing opacity, zooming, or panning never changes the
+			exported PNG.
 		</p>
 		<p data-testid="stitch-readiness" role="status">{readinessText()}</p>
 	</section>
@@ -1178,6 +1254,7 @@
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
+		overflow: hidden;
 	}
 
 	.crop-fields {
@@ -1250,14 +1327,14 @@
 		color: #e4e4e7;
 	}
 
-	.alignment-scope {
+	.alignment-workspace {
 		height: 440px;
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
 	}
 
-	.alignment-scope:focus-visible {
+	.alignment-workspace:focus-visible {
 		outline: 3px solid #075985;
 		outline-offset: 2px;
 	}

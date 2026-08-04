@@ -1,0 +1,190 @@
+<script lang="ts">
+	import { onDestroy } from 'svelte';
+	import type { Snippet } from 'svelte';
+	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
+	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
+	import { panBy, wheelZoomFactor } from '$lib/navigation';
+
+	interface Props {
+		/** Shared controller; the consumer also reads/writes its view directly. */
+		controller: ViewportController;
+		testid?: string;
+		ariaLabel?: string;
+		ariaDescribedby?: string;
+		role?: string;
+		/**
+		 * Called on primary pointer-down inside the viewport. Returning true claims
+		 * the gesture for the editor: the viewport performs no panning and no click
+		 * for that gesture. The consumer then owns pointer handling (for example a
+		 * marker drag or a tile drag) through its own listeners.
+		 */
+		claimPointer?: (pointer: ScreenSpacePoint, event: PointerEvent) => boolean;
+		/**
+		 * Called for a normal click (no drag beyond the shared threshold) that the
+		 * editor did not claim.
+		 */
+		onViewportClick?: (pointer: ScreenSpacePoint) => void;
+		/** The editor-specific scene content; renders inside the viewport container. */
+		content: Snippet;
+	}
+
+	let {
+		controller,
+		testid,
+		ariaLabel,
+		ariaDescribedby,
+		role,
+		claimPointer,
+		onViewportClick,
+		content
+	}: Props = $props();
+
+	interface PanGesture {
+		pointerId: number;
+		start: ScreenSpacePoint;
+		transform: ViewTransformState;
+		panning: boolean;
+	}
+
+	let gesture: PanGesture | null = null;
+	let resizeObserver: ResizeObserver | null = null;
+
+	function onWheel(event: WheelEvent): void {
+		// Without fitted content there is nothing meaningful to zoom.
+		if (!controller.fitTarget) return;
+		if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+		// The page must not scroll while the user intentionally zooms over a viewport.
+		event.preventDefault();
+		controller.zoomAtPointer(controller.pointerIn(event), wheelZoomFactor(event.deltaY));
+	}
+
+	function onPointerDown(event: PointerEvent): void {
+		if (event.button !== 0 || gesture) return;
+		const pointer = controller.pointerIn(event);
+		// The editor may claim the gesture (marker drag, tile drag, crop handle)
+		// before viewport panning begins.
+		if (claimPointer?.(pointer, event)) return;
+		gesture = {
+			pointerId: event.pointerId,
+			start: pointer,
+			transform: { ...controller.view },
+			panning: false
+		};
+		window.addEventListener('pointermove', onPointerMove);
+		window.addEventListener('pointerup', onPointerUp);
+		window.addEventListener('pointercancel', onPointerCancel);
+	}
+
+	function onPointerMove(event: PointerEvent): void {
+		if (!gesture) return;
+		if (event.pointerId !== gesture.pointerId) {
+			endGesture();
+			return;
+		}
+		const pointer = controller.pointerIn(event);
+		const dx = pointer.x - gesture.start.x;
+		const dy = pointer.y - gesture.start.y;
+		if (!gesture.panning && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.panning = true;
+		if (gesture.panning) {
+			// Pan against the gesture-start transform so a click never drifts.
+			controller.view = panBy(gesture.transform, dx, dy);
+			controller.panning = true;
+		}
+	}
+
+	function onPointerUp(event: PointerEvent): void {
+		if (!gesture) return;
+		if (event.pointerId !== gesture.pointerId) {
+			endGesture();
+			return;
+		}
+		const active = gesture;
+		const pointer = controller.pointerIn(event);
+		const isClick =
+			!active.panning &&
+			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <= CLICK_SLOP_PX &&
+			controller.containsPoint(event);
+		endGesture();
+		if (isClick) onViewportClick?.(pointer);
+	}
+
+	function onPointerCancel(): void {
+		endGesture();
+	}
+
+	function endGesture(): void {
+		gesture = null;
+		controller.panning = false;
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointermove', onPointerMove);
+		window.removeEventListener('pointerup', onPointerUp);
+		window.removeEventListener('pointercancel', onPointerCancel);
+	}
+
+	function handleResize(entries: ResizeObserverEntry[]): void {
+		const entry = entries[0];
+		if (!entry) return;
+		controller.setSize({
+			width: entry.contentRect.width > 0 ? entry.contentRect.width : 1,
+			height: entry.contentRect.height > 0 ? entry.contentRect.height : 1
+		});
+	}
+
+	$effect(() => {
+		const container = controller.container;
+		if (!container) return;
+		// Capture the geometry used by the initial fit before ResizeObserver's first
+		// asynchronous callback, exactly as the Phase 0 panes did.
+		controller.setSize({
+			width: container.clientWidth || 1,
+			height: container.clientHeight || 1
+		});
+		if (typeof ResizeObserver !== 'undefined' && !resizeObserver) {
+			resizeObserver = new ResizeObserver(handleResize);
+			resizeObserver.observe(container);
+		}
+		// Non-passive wheel so the page never scrolls while zooming.
+		container.addEventListener('wheel', onWheel, { passive: false });
+		container.addEventListener('pointerdown', onPointerDown);
+		return () => {
+			container.removeEventListener('wheel', onWheel);
+			container.removeEventListener('pointerdown', onPointerDown);
+		};
+	});
+
+	onDestroy(() => {
+		endGesture();
+		resizeObserver?.disconnect();
+		resizeObserver = null;
+	});
+</script>
+
+<div
+	class="image-viewport"
+	class:panning={controller.panning}
+	data-testid={testid}
+	role={role}
+	aria-label={ariaLabel}
+	aria-describedby={ariaDescribedby}
+	data-view-zoom={controller.view.zoom}
+	data-view-pan-x={controller.view.panX}
+	data-view-pan-y={controller.view.panY}
+	bind:this={controller.container}
+>
+	{@render content()}
+</div>
+
+<style>
+	.image-viewport {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+		touch-action: none;
+		cursor: grab;
+	}
+
+	.image-viewport.panning {
+		cursor: grabbing;
+	}
+</style>
