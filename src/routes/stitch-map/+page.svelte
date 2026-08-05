@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import Konva from 'konva';
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
+	import { dialogKeyboard } from '$lib/focusManagement';
 	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
 	import type { ViewportFitTarget } from '$lib/viewport.svelte';
 	import { decodeImageFile, isSupportedMimeType } from '$lib/imageIntake';
@@ -21,6 +22,10 @@
 	} from '$lib/stitch/geometry';
 	import type { CropInsetField, CropInsets, TilePlacement, TileSlot } from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
+	import { smartImportFiles } from '$lib/stitch/smartImport';
+	import { diagnosticText, categoryLabel } from '$lib/stitch/diagnostics';
+	import type { LayoutDiagnostic } from '$lib/stitch/diagnostics';
+	import { requiresReplaceDecision } from '$lib/stitch/rerunGuard';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
 	import type { ImageRole } from '$lib/domain/project';
@@ -53,6 +58,9 @@
 	const MOVABLE_SLOTS: readonly TileSlot[] = ['upper-right', 'lower-left', 'lower-right'];
 
 	const CROP_HANDLE_SIZE = 10;
+
+	/** Reserved coordinator key guarding one whole smart-import batch (P1-001). */
+	const SMART_IMPORT_BATCH = '__smart-import__';
 
 	/** Session tiles: transient browser resources only, never durable project state. */
 	let tiles = $state<Partial<Record<TileSlot, StitchTile>>>({});
@@ -110,6 +118,29 @@
 	let statusMessage = $state<string | null>(null);
 	let exportError = $state<string | null>(null);
 	let rendering = $state(false);
+
+	/** P1-001 smart-import state: transient, never durable. */
+	let smartImportBusy = $state(false);
+	let smartImportError = $state<string | null>(null);
+	let smartImportSummary = $state<Partial<Record<TileSlot, string>> | null>(null);
+	let cropProposal = $state<CropInsets | null>(null);
+
+	/** P1-002 hardening state: transient diagnostic/confirmation state only. */
+	let smartImportDiagnostic = $state<LayoutDiagnostic | null>(null);
+	let cropProposalConfidence = $state<'high' | 'low' | 'absent' | null>(null);
+	/** The automatic result's committed placements; a re-run over manual edits must confirm. */
+	let lastAutoPlacements: Record<TileSlot, TilePlacement> | null = null;
+	let pendingReplaceConfirm = $state(false);
+	let pendingSmartImportFiles: File[] | null = null;
+	/** Replace-dialog focus management follows the established P0 pattern. */
+	let replaceCancelButton = $state<HTMLButtonElement | null>(null);
+	let replaceFocusRestore: HTMLElement | null = null;
+
+	const CROP_CONFIDENCE_LABELS: Record<'high' | 'low' | 'absent', string> = {
+		high: 'high — all four screenshots agree on the shared edge bands',
+		low: 'low — edge evidence is partial or conflicts; inspect before applying',
+		absent: 'none — no shared outer band could be confirmed'
+	};
 
 	const required = $derived(sessionDimensions(tiles));
 	const croppedValidation = $derived(
@@ -308,6 +339,156 @@
 		statusMessage = `${SLOT_LABELS[slot]} loaded (${widthPx} x ${heightPx}).`;
 	}
 
+	function handleSmartImportFiles(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		const files = Array.from(input.files ?? []);
+		input.value = '';
+		requestSmartImport(files);
+	}
+
+	/**
+	 * Requests a bulk import (P1-001), gated by P1-002's re-run protection: when
+	 * the current placements were manually refined away from the last automatic
+	 * result, the user must explicitly confirm replacing the arrangement before
+	 * anything is recomputed or overwritten.
+	 */
+	function requestSmartImport(files: File[]): void {
+		if (files.length !== 4) {
+			statusMessage = `Import four screenshots requires exactly four files; received ${files.length}. The current session is unchanged.`;
+			return;
+		}
+		if (requiresReplaceDecision(placements, lastAutoPlacements)) {
+			pendingSmartImportFiles = files;
+			replaceFocusRestore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			pendingReplaceConfirm = true;
+			return;
+		}
+		void runSmartImport(files);
+	}
+
+	function settleReplaceConfirm(accept: boolean): void {
+		const files = pendingSmartImportFiles;
+		pendingSmartImportFiles = null;
+		pendingReplaceConfirm = false;
+		const target = replaceFocusRestore?.isConnected ? replaceFocusRestore : null;
+		replaceFocusRestore = null;
+		if (target) void tick().then(() => target.focus());
+		if (!accept || !files) return;
+		void runSmartImport(files);
+	}
+
+	$effect(() => {
+		if (!pendingReplaceConfirm) return;
+		void tick().then(() => replaceCancelButton?.focus());
+	});
+
+	/**
+	 * One local-only bulk import (P1-001, hardened in P1-002). Decodes and
+	 * analyzes exactly four screenshots in any order, then commits tiles,
+	 * placements, confidence, and the summary as one coherent session
+	 * replacement so a failure never damages the current valid session. A newer
+	 * selection/reset/unmount invalidates the batch; a stale result publishes
+	 * nothing. An `uncertain` diagnostic still loads every decoded file into the
+	 * manual starting layout rather than discarding or blocking.
+	 */
+	async function runSmartImport(files: File[]): Promise<void> {
+		const generation = decodeCoordinator.begin(SMART_IMPORT_BATCH);
+		if (files.length !== 4) {
+			statusMessage = `Import four screenshots requires exactly four files; received ${files.length}. The current session is unchanged.`;
+			return;
+		}
+		smartImportError = null;
+		smartImportBusy = true;
+		statusMessage = `Analyzing ${files.length} screenshots…`;
+		try {
+			const result = await smartImportFiles(files, {
+				isCurrent: () => decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)
+			});
+			if (!result.ok) {
+				if ('stale' in result) return;
+				if (result.kind === 'wrong-count') {
+					statusMessage = `Import four screenshots requires exactly four files; received ${result.count}. The current session is unchanged.`;
+					return;
+				}
+				smartImportError = result.message;
+				statusMessage = `Smart import rejected "${result.fileName}"; the current session is unchanged.`;
+				return;
+			}
+			const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
+			const nextSummary: Partial<Record<TileSlot, string>> = {};
+			for (const slot of TILE_SLOTS) {
+				const fileIndex = result.assignment[slot];
+				const tile = result.tiles[fileIndex];
+				nextTiles[slot] = {
+					fileName: tile.fileName,
+					mimeType: tile.mimeType,
+					widthPx: tile.widthPx,
+					heightPx: tile.heightPx,
+					image: tile.image
+				};
+				nextSummary[slot] = tile.fileName;
+			}
+			const firstTile = result.tiles[0];
+			// A coherent best attempt loads with its inferred placements; an
+			// uncertain result loads every file into the neutral manual starting
+			// layout so the user corrects it instead of being blocked.
+			const nextPlacements =
+				result.diagnostic.category === 'uncertain'
+					? initialPlacements(firstTile.widthPx, firstTile.heightPx)
+					: result.placements;
+			// One coherent session replacement, not staggered slot mutations.
+			tiles = nextTiles;
+			tileErrors = {};
+			placements = nextPlacements;
+			placementsInitialized = true;
+			lastAutoPlacements = snapshotPlacements(nextPlacements);
+			selectedSlot = null;
+			positionDraft = { xPx: '', yPx: '' };
+			exportError = null;
+			smartImportSummary = nextSummary;
+			smartImportDiagnostic = result.diagnostic;
+			cropProposal = result.cropProposal;
+			cropProposalConfidence = result.crop.confidence;
+			alignmentVp.fit();
+			const order = TILE_SLOTS.map((slot) => `${SLOT_LABELS[slot]}: ${nextSummary[slot]}`).join(', ');
+			const { label, warnings } = diagnosticText(result.diagnostic);
+			if (result.diagnostic.category === 'uncertain') {
+				statusMessage = `Automatic arrangement was uncertain — manual correction required. All four screenshots were loaded into the manual starting layout.${
+					warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
+				}`;
+			} else {
+				statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
+					warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
+				} Manual correction remains available.`;
+			}
+		} finally {
+			smartImportBusy = false;
+		}
+	}
+
+	/** Copies a placement map so later manual edits can never alias the snapshot. */
+	function snapshotPlacements(
+		source: Record<TileSlot, TilePlacement>
+	): Record<TileSlot, TilePlacement> {
+		return Object.fromEntries(
+			TILE_SLOTS.map((slot) => [slot, { ...source[slot] }])
+		) as Record<TileSlot, TilePlacement>;
+	}
+
+	function applyCropProposal(): void {
+		if (!cropProposal) return;
+		crop = { ...cropProposal };
+		syncCropDraft(true);
+		renderCropScene();
+		cropProposal = null;
+		statusMessage = 'Suggested crop applied. Edit or reset it with the existing crop controls.';
+	}
+
+	function rejectCropProposal(): void {
+		cropProposal = null;
+		statusMessage = 'Suggested crop declined; the full images are kept.';
+	}
+
 	function handleRemove(slot: TileSlot): void {
 		// Any in-flight decode for this slot must never publish its result.
 		decodeCoordinator.invalidate(slot);
@@ -327,8 +508,9 @@
 	}
 
 	function resetSession(): void {
-		// No in-flight decode may publish into the cleared session.
+		// No in-flight decode or smart-import batch may publish into the cleared session.
 		decodeCoordinator.invalidateAll(TILE_SLOTS);
+		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
 		placements = initialPlacements(1, 1);
@@ -337,6 +519,16 @@
 		positionDraft = { xPx: '', yPx: '' };
 		previewOpacity = 0.6;
 		exportError = null;
+		smartImportBusy = false;
+		smartImportError = null;
+		smartImportSummary = null;
+		cropProposal = null;
+		smartImportDiagnostic = null;
+		cropProposalConfidence = null;
+		lastAutoPlacements = null;
+		pendingReplaceConfirm = false;
+		pendingSmartImportFiles = null;
+		replaceFocusRestore = null;
 		statusMessage = 'All screenshots cleared. The session and its crop and arrangement were reset.';
 	}
 
@@ -955,6 +1147,8 @@
 	});
 
 	onDestroy(() => {
+		// An in-flight smart-import batch must never publish after unmount.
+		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		endTileDrag();
 		alignmentStage?.destroy();
 		alignmentStage = null;
@@ -990,6 +1184,86 @@
 		this order: upper-left, upper-right, lower-left, lower-right, with about 20–30% overlap
 		between neighbors. This session lives only in this tab; reloading the page clears it.
 	</p>
+
+	<section class="smart-import-section" aria-labelledby="smart-import-heading">
+		<h3 id="smart-import-heading">Import four screenshots</h3>
+		<p class="section-note">
+			Select exactly four overlapping screenshots in any order. ChainSpot infers their
+			upper-left, upper-right, lower-left, and lower-right roles, places them, and may
+			suggest a shared crop. The existing controls remain available for correction.
+		</p>
+		<div class="smart-import-row">
+			<label class="file-label">
+				Import four screenshots
+				<input
+					class="file-input"
+					type="file"
+					accept="image/png,image/jpeg"
+					multiple
+					data-testid="smart-import-input"
+					disabled={smartImportBusy}
+					onchange={handleSmartImportFiles}
+				/>
+			</label>
+			{#if smartImportBusy}
+				<span class="status" role="status">Analyzing…</span>
+			{/if}
+		</div>
+		{#if smartImportError}
+			<p class="error" data-testid="smart-import-error" role="alert">{smartImportError}</p>
+		{/if}
+		{#if smartImportSummary}
+			<ul class="smart-assignment" data-testid="smart-import-assignment" aria-label="Inferred screenshot order">
+				{#each TILE_SLOTS as slot (slot)}
+					<li>
+						<span class="assignment-label">{SLOT_LABELS[slot]}:</span>
+						<span data-testid={`smart-import-slot-${slot}`}>{smartImportSummary[slot]}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if smartImportDiagnostic}
+			<p class="smart-confidence" data-testid="smart-import-confidence" role="status">
+				Automatic arrangement confidence: {categoryLabel(smartImportDiagnostic.category)}.
+			</p>
+			{#if smartImportDiagnostic.warnings.length > 0}
+				<ul
+					class="smart-warnings"
+					data-testid="smart-import-warnings"
+					aria-label="Automatic arrangement warnings"
+				>
+					{#each smartImportDiagnostic.warnings as warning (warning.kind)}
+						<li data-testid={`smart-import-warning-${warning.kind}`}>{warning.message}</li>
+					{/each}
+				</ul>
+			{/if}
+		{/if}
+		{#if cropProposal}
+			<div class="crop-proposal" data-testid="crop-proposal" role="status">
+				<p>
+					Suggested shared crop:
+					<span data-testid="crop-proposal-insets">
+						top {cropProposal.topPx}px, right {cropProposal.rightPx}px, bottom
+						{cropProposal.bottomPx}px, left {cropProposal.leftPx}px
+					</span>
+					. This is a proposal; it is not applied automatically.
+				</p>
+				{#if cropProposalConfidence}
+					<p class="crop-confidence" data-testid="crop-confidence">
+						Crop suggestion confidence: {CROP_CONFIDENCE_LABELS[cropProposalConfidence]}.
+					</p>
+				{/if}
+				<div class="proposal-actions">
+					<button type="button" data-testid="apply-suggested-crop" onclick={applyCropProposal}>
+						Apply suggested crop
+					</button>
+					<button type="button" data-testid="keep-full-images" onclick={rejectCropProposal}>
+						Keep full images
+					</button>
+				</div>
+			</div>
+		{/if}
+	</section>
 
 	<section class="tile-section" aria-labelledby="tiles-heading">
 		<h3 id="tiles-heading">Screenshots</h3>
@@ -1196,6 +1470,43 @@
 			{/if}
 		</div>
 	</section>
+
+	{#if pendingReplaceConfirm}
+		<div class="dialog-backdrop">
+			<div
+				class="dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Replace current arrangement?"
+				data-testid="replace-arrangement-confirmation"
+				use:dialogKeyboard={() => settleReplaceConfirm(false)}
+			>
+				<h2>Replace current arrangement?</h2>
+				<p>
+					The current tile placements differ from the last automatic result. Running automatic
+					arrangement again will replace them. Cancel keeps the current crop, placements,
+					selection, visibility, opacity, and export state.
+				</p>
+				<div class="dialog-actions">
+					<button
+						type="button"
+						data-testid="replace-confirm-cancel"
+						bind:this={replaceCancelButton}
+						onclick={() => settleReplaceConfirm(false)}
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						data-testid="replace-confirm-accept"
+						onclick={() => settleReplaceConfirm(true)}
+					>
+						Replace current arrangement
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </main>
 
 <style>
@@ -1232,6 +1543,144 @@
 		color: #a1a1aa;
 		line-height: 1.5;
 		max-width: 60rem;
+	}
+
+	.smart-import-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.smart-import-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.file-label {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	.file-label:has(input:focus-visible) {
+		outline: 3px solid #075985;
+		outline-offset: 2px;
+	}
+
+	.file-input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+	}
+
+	.file-label:has(input:disabled) {
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+
+	.smart-assignment {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.85rem;
+		color: #a1a1aa;
+	}
+
+	.smart-confidence {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #f4f4f5;
+	}
+
+	.smart-warnings {
+		margin: 0;
+		padding: 0 0 0 1rem;
+		font-size: 0.85rem;
+		color: #a1a1aa;
+	}
+
+	.crop-confidence {
+		margin: 0;
+		font-size: 0.8rem;
+		color: #a1a1aa;
+	}
+
+	.dialog-backdrop {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.6);
+		z-index: 50;
+	}
+
+	.dialog {
+		max-width: 28rem;
+		padding: 1rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #1e1e24;
+		color: #e4e4e7;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.dialog h2 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.dialog p {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #a1a1aa;
+		line-height: 1.5;
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+	}
+
+	.assignment-label {
+		color: #f4f4f5;
+	}
+
+	.crop-proposal {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.6rem 0.8rem;
+		border: 1px solid #3b82f6;
+		border-radius: 6px;
+		background-color: #16233b;
+	}
+
+	.crop-proposal p {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #dbeafe;
+	}
+
+	.proposal-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
 	}
 
 	.tile-grid {
