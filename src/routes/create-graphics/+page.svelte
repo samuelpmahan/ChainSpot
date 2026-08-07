@@ -42,6 +42,11 @@
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
 	import type { PixelRect } from '$lib/naipGrid';
 	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
+	import { estimateAffine } from '$lib/alignment/affine';
+	import { estimateSimilarity } from '$lib/alignment/similarity';
+	import { validateTransform } from '$lib/alignment/validation';
+	import { AlignmentFailureReason } from '$lib/alignment/types';
+	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
 	import {
 		consumePendingAnnotatedRound,
 		getActiveAnnotatedRound,
@@ -89,6 +94,47 @@
 			deriveDiagnostics(currentPairs(), editor.state.images, correspondence.pendingSource !== null)
 		)
 	);
+
+	/**
+	 * Phase 1 alignment: `src/lib/alignment` estimates a source-to-target
+	 * transform from the correspondence pairs above. Pure, derived, and
+	 * recomputed automatically as pairs are added/edited — nothing here mutates
+	 * domain state, matching diagnosticsView's own pattern.
+	 */
+	let alignmentModel = $state<AlignmentModel>('similarity');
+
+	function alignmentPairs(): AlignmentPairInput[] {
+		return currentPairs().map((pair) => ({
+			id: pair.id,
+			enabled: pair.enabled,
+			source: pair.source,
+			target: pair.target
+		}));
+	}
+
+	/** Null before any enabled, complete pair exists — nothing to estimate yet. */
+	let alignmentResult: EstimationResultOrFailure | null = $derived.by(() => {
+		const pairs = alignmentPairs();
+		if (!pairs.some((pair) => pair.enabled && pair.target !== null)) return null;
+		return alignmentModel === 'affine' ? estimateAffine({ pairs }) : estimateSimilarity({ pairs });
+	});
+
+	let alignmentWarnings = $derived.by(() => {
+		if (!alignmentResult || !('transform' in alignmentResult)) return [];
+		return validateTransform({ transform: alignmentResult.transform, pairs: alignmentPairs() });
+	});
+
+	const ALIGNMENT_FAILURE_MESSAGES: Record<AlignmentFailureReason, string> = {
+		[AlignmentFailureReason.INSUFFICIENT_PAIRS]: 'Not enough enabled, complete pairs yet.',
+		[AlignmentFailureReason.ZERO_SPREAD]: 'The enabled pairs are all at the same point — spread them out.',
+		[AlignmentFailureReason.COLLINEAR_GEOMETRY]:
+			'The enabled pairs are collinear — affine needs a non-collinear spread (try similarity, or add a pair off that line).',
+		[AlignmentFailureReason.NON_INVERTIBLE]: 'The estimated transform is not invertible.',
+		[AlignmentFailureReason.NON_FINITE_COORDINATES]: 'Some pair coordinates are not finite numbers.',
+		[AlignmentFailureReason.REFLECTION_REQUIRED]:
+			'This pair geometry requires a reflection, which similarity does not model — try affine.',
+		[AlignmentFailureReason.NUMERICAL_SOLVE_FAILURE]: 'The numerical solve failed. Try adjusting the pairs.'
+	};
 	let selection = $state<PointSelection | null>(null);
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
@@ -1797,6 +1843,62 @@
 		{/each}
 	</section>
 
+	<section class="alignment-panel" data-testid="alignment-panel" aria-labelledby="alignment-heading">
+		<h2 id="alignment-heading">Alignment</h2>
+		<fieldset class="alignment-model">
+			<legend>Transform model</legend>
+			<label>
+				<input
+					type="radio"
+					name="alignment-model"
+					value="similarity"
+					checked={alignmentModel === 'similarity'}
+					onchange={() => (alignmentModel = 'similarity')}
+					data-testid="alignment-model-similarity"
+				/>
+				Similarity (2+ pairs)
+			</label>
+			<label>
+				<input
+					type="radio"
+					name="alignment-model"
+					value="affine"
+					checked={alignmentModel === 'affine'}
+					onchange={() => (alignmentModel = 'affine')}
+					data-testid="alignment-model-affine"
+				/>
+				Affine (3+ non-collinear pairs)
+			</label>
+		</fieldset>
+
+		{#if !alignmentResult}
+			<p class="alignment-empty" data-testid="alignment-empty">
+				Add at least one enabled, completed pair to estimate an alignment.
+			</p>
+		{:else if 'transform' in alignmentResult}
+			<div class="alignment-result" data-testid="alignment-result">
+				<p data-testid="alignment-summary">
+					{alignmentResult.model} transform from {alignmentResult.usedPairIds.length} pair{alignmentResult
+						.usedPairIds.length === 1
+						? ''
+						: 's'}
+					&mdash; mean residual {alignmentResult.metrics.meanDistance.toFixed(2)}px, max {alignmentResult.metrics.maxDistance.toFixed(
+						2
+					)}px
+				</p>
+				{#each alignmentWarnings as warning (warning.type)}
+					<p class="alignment-warning" data-testid="alignment-warning" data-severity={warning.severity}>
+						{warning.message}
+					</p>
+				{/each}
+			</div>
+		{:else}
+			<p class="alignment-failure" data-testid="alignment-failure" role="alert">
+				{ALIGNMENT_FAILURE_MESSAGES[alignmentResult.reason]}
+			</p>
+		{/if}
+	</section>
+
 	{#if selection && correspondence.mode === 'neutral'}
 		<section class="point-inspector" data-testid="point-inspector" aria-label="Selected control point" aria-describedby={pointError ? 'point-error' : undefined}>
 			<h2>Pair {selectedPair()?.ordinal} · {selection.side === 'source' ? 'Source' : 'Target'} point</h2>
@@ -2261,6 +2363,71 @@
 
 	.diagnostic-warning {
 		color: #92400e;
+	}
+
+	.alignment-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.6rem 0.7rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		background: #f8fafc;
+		font-size: 0.85rem;
+	}
+
+	.alignment-panel h2 {
+		margin: 0;
+		font-size: 0.95rem;
+	}
+
+	.alignment-model {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		border: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	.alignment-model legend {
+		font-size: 0.75rem;
+		opacity: 0.8;
+		padding: 0;
+	}
+
+	.alignment-model label {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.alignment-empty {
+		margin: 0;
+		opacity: 0.75;
+	}
+
+	.alignment-result {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.alignment-result p {
+		margin: 0;
+	}
+
+	.alignment-warning {
+		color: #92400e;
+	}
+
+	.alignment-warning[data-severity='high'] {
+		color: #8a1f11;
+	}
+
+	.alignment-failure {
+		margin: 0;
+		color: #8a1f11;
 	}
 
 	.point-inspector {
