@@ -1640,7 +1640,7 @@
 			</button>
 		</div>
 
-		<details class="naip-manual-entry">
+		<details class="naip-manual-entry" data-testid="naip-manual-entry">
 			<summary>Enter coordinates manually instead</summary>
 			<div class="naip-inputs">
 				<label>
