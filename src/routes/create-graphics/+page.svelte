@@ -54,6 +54,8 @@
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
 	import type { AnnotatedRound } from '$lib/domain/annotatedRound';
+	import { planHoleGraphic, renderHoleGraphic } from '$lib/holeGraphics';
+	import type { HoleGraphicPlan } from '$lib/holeGraphics';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -83,6 +85,7 @@
 		if (participatesInSession) retainEditor('create-graphics', editor);
 		clearNaipPreview();
 		handleBoxHandleUp();
+		clearHoleGraphicPreviews();
 	});
 
 	let refreshCount = $state(0);
@@ -135,6 +138,61 @@
 			'This pair geometry requires a reflection, which similarity does not model — try affine.',
 		[AlignmentFailureReason.NUMERICAL_SOLVE_FAILURE]: 'The numerical solve failed. Try adjusting the pairs.'
 	};
+
+	/**
+	 * Clean hole construction: applies the estimated transform above to every
+	 * AnnotatedRound hole's source-space points, producing target-space plans
+	 * ready to render. Purely derived — no rendering happens until the user
+	 * explicitly clicks "Build hole graphics", matching the app's convention
+	 * that nothing heavier than pointer input runs without an explicit action.
+	 */
+	let holeGraphicPlans: HoleGraphicPlan[] = $derived.by(() => {
+		if (!annotatedRound || !alignmentResult || !('transform' in alignmentResult)) return [];
+		const target = targetImage();
+		if (!target) return [];
+		const transform = alignmentResult.transform;
+		const plans: HoleGraphicPlan[] = [];
+		for (const hole of annotatedRound.holes) {
+			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
+			if (plan) plans.push(plan);
+		}
+		return plans;
+	});
+
+	let holeGraphicPreviews = $state<Map<string, { blob: Blob; objectUrl: string }>>(new Map());
+	let holeGraphicsLoading = $state(false);
+	let holeGraphicsError = $state<string | null>(null);
+
+	function clearHoleGraphicPreviews(): void {
+		for (const preview of holeGraphicPreviews.values()) URL.revokeObjectURL(preview.objectUrl);
+		holeGraphicPreviews = new Map();
+	}
+
+	async function handleBuildHoleGraphics(): Promise<void> {
+		const plans = holeGraphicPlans;
+		const target = targetImage();
+		if (plans.length === 0 || !target || holeGraphicsLoading) return;
+		const decoded = editor.getAssetResource(target.id)?.decoded;
+		if (!(decoded instanceof HTMLImageElement)) {
+			holeGraphicsError = 'The clean target image is not available to render from.';
+			return;
+		}
+		holeGraphicsLoading = true;
+		holeGraphicsError = null;
+		try {
+			const next = new Map<string, { blob: Blob; objectUrl: string }>();
+			for (const plan of plans) {
+				const blob = await renderHoleGraphic(decoded, plan);
+				next.set(plan.holeId, { blob, objectUrl: URL.createObjectURL(blob) });
+			}
+			clearHoleGraphicPreviews();
+			holeGraphicPreviews = next;
+		} catch (error) {
+			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphics.';
+		} finally {
+			holeGraphicsLoading = false;
+		}
+	}
 	let selection = $state<PointSelection | null>(null);
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
@@ -1899,6 +1957,59 @@
 		{/if}
 	</section>
 
+	{#if annotatedRound && annotatedRound.holes.length > 0 && targetImage()}
+		<section class="hole-graphics" data-testid="hole-graphics" aria-labelledby="hole-graphics-heading">
+			<h2 id="hole-graphics-heading">Hole graphics</h2>
+			<p class="alignment-empty">
+				Applies the alignment above to every annotated hole's tee, basket, shot,
+				and corridor points, then crops and renders one clean graphic per hole.
+				Holes with no placed points yet are skipped.
+			</p>
+			<button
+				type="button"
+				data-testid="build-hole-graphics"
+				disabled={holeGraphicPlans.length === 0 || holeGraphicsLoading}
+				onclick={handleBuildHoleGraphics}
+			>
+				{holeGraphicsLoading
+					? 'Building…'
+					: `Build ${holeGraphicPlans.length} hole graphic${holeGraphicPlans.length === 1 ? '' : 's'}`}
+			</button>
+			{#if holeGraphicPlans.length === 0}
+				<p class="alignment-empty" data-testid="hole-graphics-empty">
+					No hole has both a placed point and a usable alignment yet.
+				</p>
+			{/if}
+			{#if holeGraphicsError}
+				<p class="error" data-testid="hole-graphics-error" role="alert">{holeGraphicsError}</p>
+			{/if}
+			{#if holeGraphicPreviews.size > 0}
+				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
+					{#each holeGraphicPlans as plan (plan.holeId)}
+						{@const preview = holeGraphicPreviews.get(plan.holeId)}
+						{#if preview}
+							<li class="hole-graphic-item">
+								<img
+									class="hole-graphic-image"
+									src={preview.objectUrl}
+									alt={`Clean graphic for hole ${plan.number}`}
+									data-testid="hole-graphic-image-{plan.number}"
+								/>
+								<a
+									href={preview.objectUrl}
+									download={`hole-${plan.number}.png`}
+									data-testid="hole-graphic-download-{plan.number}"
+								>
+									Download hole {plan.number}
+								</a>
+							</li>
+						{/if}
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
+
 	{#if selection && correspondence.mode === 'neutral'}
 		<section class="point-inspector" data-testid="point-inspector" aria-label="Selected control point" aria-describedby={pointError ? 'point-error' : undefined}>
 			<h2>Pair {selectedPair()?.ordinal} · {selection.side === 'source' ? 'Source' : 'Target'} point</h2>
@@ -2428,6 +2539,47 @@
 	.alignment-failure {
 		margin: 0;
 		color: #8a1f11;
+	}
+
+	.hole-graphics {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		max-width: 48rem;
+	}
+
+	.hole-graphics h2 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.hole-graphic-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.hole-graphic-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		align-items: flex-start;
+	}
+
+	.hole-graphic-image {
+		max-width: 14rem;
+		max-height: 10rem;
+		width: auto;
+		height: auto;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+	}
+
+	.hole-graphic-item a {
+		font-size: 0.8rem;
 	}
 
 	.point-inspector {
