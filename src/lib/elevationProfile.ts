@@ -264,6 +264,14 @@ interface EpqsPayload {
 	value?: unknown;
 }
 
+function invalidElevationValue(value: unknown): boolean {
+	if (typeof value !== 'number' && typeof value !== 'string') return true;
+	if (typeof value === 'string' && value.trim() === '') return true;
+	const numeric = Number(value);
+	// EPQS uses -1000000 when it cannot resolve an elevation at the requested point.
+	return !Number.isFinite(numeric) || numeric <= -999_999;
+}
+
 async function queryElevation(
 	point: GeoPoint,
 	units: ElevationUnits,
@@ -294,15 +302,14 @@ async function queryElevation(
 	} catch {
 		throw new ElevationProfileError('bad-payload', 'USGS elevation service returned invalid JSON.', sampleIndex);
 	}
-	const value = Number(payload.value);
-	if (!Number.isFinite(value)) {
+	if (invalidElevationValue(payload.value)) {
 		throw new ElevationProfileError(
 			'bad-payload',
 			`USGS elevation service returned no numeric elevation for sample ${sampleIndex + 1}.`,
 			sampleIndex
 		);
 	}
-	return value;
+	return Number(payload.value);
 }
 
 export interface ElevationSample extends ProfilePathSample {
