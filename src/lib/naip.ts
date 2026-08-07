@@ -12,6 +12,7 @@
  * `{ ok: true | false }` convention as `src/lib/stitch/smartImport.ts` so callers can
  * render a clear inline error instead of crashing.
  */
+import { recordSingleNaipReference } from './naipReferenceSession';
 
 /** WGS84 center point in decimal degrees. */
 export interface GeoPoint {
@@ -122,19 +123,34 @@ export type NaipFetchResult =
 
 export type FetchLike = typeof fetch;
 
+export interface FetchNaipImageOptions {
+	sizePx?: number;
+	fetch?: FetchLike;
+	/** Grid fetching suppresses per-tile records and stores one grid record after all tiles succeed. */
+	recordReference?: boolean;
+}
+
 /**
  * Fetches the NAIP `exportImage` PNG for a center point and radius. Reports failure
  * as a typed result (network error, non-200 status, or a response whose
  * `Content-Type` isn't an image — NAIP's `exportImage` returns a JSON error body with
  * a 200 status for some invalid requests, e.g. no coverage at the location) rather
  * than throwing, so the UI can render a clear inline message.
+ *
+ * A successful standalone request records its exact center/radius/size in the
+ * in-memory NAIP reference session. That is request provenance, not inferred image
+ * metadata, and later lets elevation sampling map pixels straight back to WGS84.
  */
 export async function fetchNaipImage(
 	center: GeoPoint,
 	radiusMeters: number,
-	options: { sizePx?: number; fetch?: FetchLike } = {}
+	options: FetchNaipImageOptions = {}
 ): Promise<NaipFetchResult> {
-	const { sizePx = NAIP_EXPORT_SIZE_PX, fetch: fetchImpl = globalThis.fetch } = options;
+	const {
+		sizePx = NAIP_EXPORT_SIZE_PX,
+		fetch: fetchImpl = globalThis.fetch,
+		recordReference = true
+	} = options;
 	const bbox = bboxFromCenter(center, radiusMeters);
 	const url = buildNaipExportUrl(bbox, sizePx);
 
@@ -173,5 +189,6 @@ export async function fetchNaipImage(
 	}
 
 	const blob = await response.blob();
+	if (recordReference) recordSingleNaipReference(center, radiusMeters, sizePx);
 	return { ok: true, blob, url };
 }
