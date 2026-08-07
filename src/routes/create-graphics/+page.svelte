@@ -905,10 +905,16 @@
 	}
 
 	/**
-	 * Looks up the course by name and city/state via OpenStreetMap Nominatim and lists
-	 * matches for the user to pick from — never fetches NAIP imagery itself. Picking a
-	 * match just fills the same lat/lon inputs `handleNaipFetch` already reads, so nothing
-	 * downstream needs to know the coordinate came from a search instead of manual entry.
+	 * Looks up the course by name (city/state optional, to help when the course sits in
+	 * some small town near a metro area the user can't name off-hand) via OpenStreetMap
+	 * Nominatim and lists matches for the user to pick from — never fetches NAIP imagery
+	 * itself. Nominatim matches literal named things in OSM, not "near this metro area";
+	 * a vague region name in the city/state field wouldn't narrow the search so much as
+	 * risk matching some other named entity entirely (an airport, a neighborhood). The
+	 * safety net either way is the same: nothing is used until the user recognizes and
+	 * picks a specific result by its full display name below. Picking a match just fills
+	 * the same lat/lon inputs `handleNaipFetch` already reads, so nothing downstream needs
+	 * to know the coordinate came from a search instead of manual entry.
 	 */
 	async function handleGeocodeSearch(): Promise<void> {
 		if (geocodeLoading) return;
@@ -917,13 +923,14 @@
 		geocodeSelectedIndex = null;
 		const parkName = geocodeParkNameInput.trim();
 		const cityState = geocodeCityStateInput.trim();
-		if (!parkName || !cityState) {
-			geocodeError = 'Enter both a course name and a city/state.';
+		if (!parkName) {
+			geocodeError = 'Enter a course name to search for.';
 			return;
 		}
 		geocodeLoading = true;
 		try {
-			const result = await searchPlace(`${parkName}, ${cityState}`);
+			const query = cityState ? `${parkName}, ${cityState}` : parkName;
+			const result = await searchPlace(query);
 			if (!result.ok) {
 				geocodeError = result.error.message;
 				return;
@@ -1554,7 +1561,9 @@
 			Alternative to uploading a target image above: search for the course by
 			name, pick the matching location, then fetch a clean aerial map from the
 			public USGS NAIP imagery service. US coverage only — manual upload above
-			still works for other courses.
+			still works for other courses. City/state is optional — leave it blank if
+			you're not sure which nearby town the course is actually in; check each
+			result's full location below before picking one.
 		</p>
 
 		<div class="geocode-search">
@@ -1564,16 +1573,16 @@
 					type="text"
 					data-testid="geocode-park-name"
 					bind:value={geocodeParkNameInput}
-					placeholder="e.g. Winthrop Gold"
+					placeholder="e.g. Dash's Track"
 				/>
 			</label>
 			<label>
-				<span>City, State</span>
+				<span>City, State (optional)</span>
 				<input
 					type="text"
 					data-testid="geocode-city-state"
 					bind:value={geocodeCityStateInput}
-					placeholder="e.g. Rock Hill, SC"
+					placeholder="e.g. Frisco, TX"
 				/>
 			</label>
 			<button
