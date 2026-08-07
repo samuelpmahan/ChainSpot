@@ -1,66 +1,21 @@
 # CV probes on the Phase 3 integration branch
 
-This directory carries the CV work into the branch based on Claude's Phase 3 implementation.
+This directory carries the clean-course CV work into the branch based on Claude's Phase 3 implementation.
 
-Read `../../docs/cv-clean-course-pipeline.md` first. Annotate Round needs **two UDisc images**:
+Read `../../docs/cv-clean-course-pipeline.md` first. Annotate Round ultimately needs two UDisc images: a clean course map for canonical static geometry and a played-round map for dynamic evidence.
 
-- clean course map for static course geometry and canonical coordinates;
-- played round map for dynamic shot/walking evidence.
+## Current clean-course parser
 
-The final `AnnotatedRound` still has one authoritative coordinate space: the clean UDisc map.
+Discrete detection remains in `static_course_parser.py`; centerline experiments build on top of it.
 
-## Current static parser
-
-`static_course_centerline.py` is now the preferred clean-course probe. It reuses the proven discrete detectors in `static_course_parser.py`, but changes the geometry target from a ribbon polygon to a **tee-to-basket centerline**.
-
-On the current clean Dash's Track fixture it produces:
+On the current clean Dash's Track fixture the parser reaches:
 
 - **18/18 hole numbers**
 - **18/18 baskets**
 - **18/18 teepads**
-- **18/18 centerline proposals**
+- **18/18 tee-to-basket centerline proposals**
 
-The important product decision is that UDisc's band width is presentation, not course truth. ChainSpot should extract routing geometry and let the creator's style preset choose band width, outline/hatch/solid treatment, palette, and chrome.
-
-### Pipeline
-
-1. broad `#1` template search derives UI raster scale;
-2. all number-template peaks are clustered, then `1..18` are assigned one-to-one with Hungarian matching;
-3. basket template matching + NMS finds 18 basket glyphs;
-4. basket semantic endpoint is the **bottom-center stem base**;
-5. teepads fuse two complementary detectors (gray-center rectangle + bright-rim quadrilateral), yielding 18/18 on the fixture;
-6. tee and basket candidates are assigned one-to-one to holes;
-7. outside the putting circles, bounded DP tracks `tee -> number -> C2 entry`;
-8. C1/C2 are detected as repeated basket-centered radial edge peaks across all 18 holes;
-9. pixels inside C2 are treated as foreground contamination, not fairway evidence;
-10. the final C2 segment is reconstructed geometrically from the detected C2 entry to the basket stem base.
-
-On the current fixture the repeated radial peaks recover approximately:
-
-- C1 radius: **25 px**
-- C2 radius: **50 px**
-
-That directly addresses the previous failure where basket / C1 / C2 artwork distorted the final ~60 ft of the inferred route.
-
-Run:
-
-```text
-python scripts/cv-probes/static_course_centerline.py clean-course.png \
-  --templates ./templates \
-  --out ./cv-out
-```
-
-Outputs:
-
-- `report.json` — counts, putting-circle radii, centerline point counts;
-- `proposals.json` — number badge, tee, basket base, centerline, and C2 entry for every hole;
-- `static-centerline-overlay.png` — full-course visual diagnostic with all static annotations.
-
-`static_course_parser.py` remains as the v1 polygon experiment and supplies the shared proven detector/assignment helpers. Do not delete it yet; it is useful comparison history.
-
-## Representation direction
-
-The parser should converge on something like:
+UDisc's translucent band width is now treated as presentation, not course truth. The intended product representation is:
 
 ```ts
 interface ParsedHole {
@@ -71,26 +26,47 @@ interface ParsedHole {
 }
 ```
 
-The final renderer can generate a constant-width band, outline, hatch, centerline-only treatment, contour overlay, or other visual styles from the same centerline. Boundary extraction is no longer a static-parser stopping requirement.
+The renderer owns band width, outline/hatch/solid treatment, palette, and other styling.
 
-This implies a later Phase 3 domain change: `AnnotatedHole.corridor` should be replaced or supplemented by authoritative centerline geometry, and `holeGraphics.ts` should construct presentation width after source-to-target transformation rather than preserving UDisc's source raster width.
+## Semantic centerline correction
 
-## Strong vs provisional
+`static_course_centerline_semantic.py` is the newest centerline probe.
 
-Strong on the current clean fixture:
+The motivating failure was Hole 5 in the dense 4–7 cluster. Hole 6's tee sits almost beside Hole 5's basket. A naive basket-backward tracer therefore sees Hole 6's fairway as excellent local evidence and follows Hole 6 toward its number before eventually reconnecting to Hole 5's tee.
 
-- `#1 -> UI scale`;
-- 18 unique number locations;
-- 18 basket detections;
-- 18 teepad detections;
-- basket stem-base endpoint;
-- repeated C1/C2 radius recovery.
+That is not merely an appearance problem; it is an **ownership/topology** problem.
 
-Still provisional / needs more fixtures:
+The corrected rules are:
 
-- tee-to-hole assignment in dense clusters;
-- basket-to-hole assignment in dense clusters;
-- centerline routing through the densest overlapping 4–7 area;
-- thresholds across Android and other UDisc raster/scaling variants.
+1. the current hole's number badge is strong routing/ownership evidence;
+2. the badge pixels themselves are foreground UI and therefore an occlusion, not fairway pixels;
+3. trace from the tee to the near edge of the own-number badge;
+4. trace backward from the basket/C2 side toward the far edge of the own-number badge;
+5. bridge through the badge geometrically instead of tracing around its black/white raster;
+6. when selecting a C2 departure direction, a ray that runs through another hole's tee very close to the current basket is explicitly penalized;
+7. inside C2, ignore appearance and reconstruct the terminal to the basket stem base.
 
-Do not put CV confidence/provenance on final `AnnotatedRound`. These are review-layer proposals; after correction and Done, geometry is authoritative.
+This preserves the useful 'look backward and tolerate obstruction' idea without demoting the number badge to a weak hint. For H5 specifically, the own `5` badge keeps the route on Hole 5 while the nearby H6 teepad becomes negative semantic evidence.
+
+The older `static_course_centerline.py` is retained as comparison history; it is the simpler v2 that first introduced centerlines and the C2 semantic-occlusion rule.
+
+## Static primitives currently working on the fixture
+
+- broad `#1` search -> UI scale;
+- joint 1..18 number assignment via clustered template peaks + Hungarian matching;
+- 18/18 basket template detections;
+- basket semantic endpoint = bottom-center stem base;
+- 18/18 teepads from gray-center + edge-loop detector fusion;
+- repeated radial edge aggregation recovers approximately **C1 = 25 px** and **C2 = 50 px**.
+
+## What remains provisional
+
+The clean fixture is now much more useful as a failure suite, but this is still probe code. The remaining work is mostly:
+
+- validate association and centerline routing on additional clean UDisc courses;
+- stress dense overlapping / opposite-direction fairways like H5/H6;
+- port proven pieces to the existing OpenCV.js/WASM runtime;
+- wire proposals into Annotate Round's manual review layer;
+- later add played-round dynamic extraction and played->clean registration.
+
+Do not put CV confidence/provenance on final `AnnotatedRound`. CV results are proposals before Done; reviewed geometry is authoritative afterward.
