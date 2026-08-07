@@ -24,12 +24,20 @@
 			Stitch Map
 		</a>
 		<a
-			href="/spot-round"
+			href="/annotate-round"
 			class="nav-link"
-			class:active={page.url.pathname === '/spot-round' || page.url.pathname === '/'}
-			aria-current={page.url.pathname === '/spot-round' || page.url.pathname === '/' ? 'page' : undefined}
+			class:active={page.url.pathname === '/annotate-round' || page.url.pathname === '/'}
+			aria-current={page.url.pathname === '/annotate-round' || page.url.pathname === '/' ? 'page' : undefined}
 		>
-			Spot Round
+			Annotate Round
+		</a>
+		<a
+			href="/create-graphics"
+			class="nav-link"
+			class:active={page.url.pathname === '/create-graphics'}
+			aria-current={page.url.pathname === '/create-graphics' ? 'page' : undefined}
+		>
+			Create Graphics
 		</a>
 	</nav>
 </header>

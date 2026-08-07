@@ -24,7 +24,7 @@ function attachErrorListener(page: Page): string[] {
 }
 
 async function gotoApp(page: Page): Promise<void> {
-	await page.goto('/spot-round');
+	await page.goto('/create-graphics');
 	// Wait for hydration: events dispatched before this are not delegated.
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 }

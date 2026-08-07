@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import { createImageAsset, createProjectState } from '../../src/lib/domain/project';
 import { ProjectEditor } from '../../src/lib/domain/editor';
-import Page from '../../src/routes/spot-round/+page.svelte';
+import Page from '../../src/routes/create-graphics/+page.svelte';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');

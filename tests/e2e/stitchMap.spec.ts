@@ -1,4 +1,5 @@
 import { deflateSync } from 'node:zlib';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
@@ -213,6 +214,12 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, native PNG download', async ({
 	page
 }) => {
+	// Extended from Playwright's 30s default: this test's Snap-assist step pays
+	// the one-time OpenCV WASM first-call tax (see the comment at that step
+	// below), which is comfortably inside 30s in isolation but can exceed it
+	// when several e2e spec files run concurrently in other workers, each
+	// paying that same tax on their own CPU-bound first WASM call at once.
+	test.setTimeout(90000);
 	const serverOrigin = await gotoApp(page, '/stitch-map');
 
 	// Assert no request leaves the Playwright test server's origin after this
@@ -312,6 +319,7 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 		.toBe(cropZoomBefore);
 
 	// Cropped size is 18 x 18, so initial 25% offsets are round(18 * 3 / 4) = 14.
+	await expect(page.getByTestId('snap-tile')).toBeDisabled();
 	await page.getByTestId('tile-select-upper-right').click();
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('14');
 	await expect(page.getByTestId('tile-position-y')).toHaveValue('0');
@@ -329,6 +337,33 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	await page.getByTestId('tile-position-x').fill('1.5');
 	await page.getByTestId('tile-position-x').blur();
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('6');
+
+	// Snap assist: enabled once a movable tile with neighbor data is selected.
+	// The solid-color workflow fixtures have no content to match, so every
+	// overlapping offset ties; Snap still deterministically commits its earliest
+	// tied candidate through the normal `updatePlacement` path (position-draft
+	// sync included), which is what this interaction verifies. The meaningful
+	// content-based lock-on is verified in the dedicated fixture case below.
+	await expect(page.getByTestId('snap-tile')).toBeEnabled();
+	await page.getByTestId('snap-tile').click();
+	// The eager `loadCv()` warm-up (see +page.svelte) only covers the WASM
+	// module's parse/instantiate cost; the very first real `cv.matchTemplate`
+	// call in a page's lifetime pays its own one-time JIT/lazy-compile tax on
+	// top of that (measured 9-13.5s locally, more under concurrent CPU
+	// contention from other e2e workers), separate from and in addition to the
+	// module load. Every Snap call after the first in the same page is back
+	// down to ~100-250ms, so this timeout only needs to cover that one
+	// first-call tax, not steady-state latency.
+	await expect(page.getByTestId('snap-tile')).toBeEnabled({ timeout: 60000 });
+	await expect(page.getByTestId('tile-position-x')).not.toHaveValue('6');
+	await expect(page.getByTestId('tile-position-y')).not.toHaveValue('0');
+	// Restore the hand-refined position for the rest of the workflow.
+	await page.getByTestId('tile-position-x').fill('6');
+	await page.getByTestId('tile-position-x').blur();
+	await page.getByTestId('tile-position-y').fill('0');
+	await page.getByTestId('tile-position-y').blur();
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('6');
+	await expect(page.getByTestId('tile-position-y')).toHaveValue('0');
 
 	// Shared alignment viewport geometry.
 	const alignmentViewport = page.getByTestId('alignment-viewport');
@@ -492,10 +527,12 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	expect(externalRequests).toEqual([]);
 });
 
-test('handoff: retained Spot Round session, replacement semantics, blocked second handoff, target import', async ({
+test('handoff: independent per-stage sessions, replacement semantics, blocked second handoff, target import', async ({
 	page
 }) => {
-	await gotoApp(page, '/spot-round');
+	// Set up a Create Graphics project: both images, a project name, one pair,
+	// dirty state.
+	await gotoApp(page, '/create-graphics');
 	await loadSpotImages(page);
 	await page.getByTestId('project-name').fill('Round 1');
 	await page.getByTestId('project-name').blur();
@@ -503,14 +540,44 @@ test('handoff: retained Spot Round session, replacement semantics, blocked secon
 	await createPair(page);
 	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
-	// Navigate to Stitch Map and hand a stitched image back to the source role.
+	// A source-role handoff now lands on Annotate Round — a session entirely
+	// independent of Create Graphics (see src/lib/editorSession.ts's two keyed
+	// slots).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
-	await expect(page).toHaveURL(/\/spot-round$/);
+	await expect(page).toHaveURL(/\/annotate-round$/);
 
-	// The retained session is the same active editor: images, project name,
-	// pair, dirty state, and undo/redo history all survive the round trip.
+	const sourceBanner = page.getByTestId('pending-handoff');
+	await expect(sourceBanner).toBeVisible();
+	await expect(sourceBanner).toContainText('UDisc source');
+	await expect(page.getByTestId('annotate-done')).toBeDisabled();
+
+	// Dismiss consumes the pending handoff without importing it (Annotate
+	// Round's own handleHandoffDismiss, same semantics as the original page's).
+	await page.getByTestId('handoff-dismiss').click();
+	await expect(sourceBanner).toBeHidden();
+	await expect(page.getByTestId('annotate-done')).toBeDisabled();
+
+	// A fresh handoff reaches the same banner. Importing it never shows a
+	// discard dialog — an Annotate Round project never has correspondence
+	// pairs to lose — and enables Done once the source pane is loaded.
+	await page.getByRole('link', { name: 'Stitch Map' }).click();
+	await uploadTiles(page, tileFiles());
+	await page.getByTestId('use-as-source').click();
+	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(sourceBanner).toBeVisible();
+	await page.getByTestId('handoff-import').click();
+	await expect(sourceBanner).toBeHidden();
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
+		'upper-left-stitched.png'
+	);
+	await expect(page.getByTestId('annotate-done')).toBeEnabled();
+
+	// Create Graphics' retained session is untouched by the Annotate Round
+	// handoff: its own images, project name, pair, dirty state, and undo/redo
+	// history all survive the round trip through its own keyed slot.
+	await page.getByRole('link', { name: 'Create Graphics' }).click();
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('source.png');
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
 	await expect(page.getByTestId('project-name')).toHaveValue('Round 1');
@@ -521,61 +588,172 @@ test('handoff: retained Spot Round session, replacement semantics, blocked secon
 	await page.keyboard.press('Control+Shift+z');
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
 
-	const banner = page.getByTestId('pending-handoff');
-	await expect(banner).toBeVisible();
-	await expect(banner).toContainText('UDisc source');
+	// A target-role handoff lands directly on Create Graphics.
+	await page.getByRole('link', { name: 'Stitch Map' }).click();
+	await uploadTiles(page, tileFiles());
+	await page.getByTestId('use-as-target').click();
+	await expect(page).toHaveURL(/\/create-graphics$/);
 
-	// Cancelling the discard confirmation preserves both the Spot Round project
-	// and the pending stitched image.
+	const targetBanner = page.getByTestId('pending-handoff');
+	await expect(targetBanner).toBeVisible();
+	await expect(targetBanner).toContainText('clean target');
+
+	// Cancelling the discard confirmation preserves both the Create Graphics
+	// project (its one pair references the target image) and the pending
+	// stitched image.
 	await page.getByTestId('handoff-import').click();
 	await expect(page.getByTestId('discard-confirmation')).toBeVisible();
 	await page.getByTestId('discard-confirm-cancel').click();
-	await expect(banner).toBeVisible();
+	await expect(targetBanner).toBeVisible();
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('source.png');
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
 
-	// Confirming replaces only the requested role through the normal intake
-	// path: the other image stays, affected pairs are discarded, history and
-	// dirty state update normally, and the handoff is consumed.
-	await page.getByTestId('handoff-import').click();
-	await expect(page.getByTestId('discard-confirmation')).toBeVisible();
-	await page.getByTestId('discard-confirm-accept').click();
-	await expect(banner).toBeHidden();
-	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
-		'upper-left-stitched.png'
-	);
-	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('target.png');
-	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '0');
-	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
-
-	// A second handoff (target role) reaches Spot Round.
-	await page.getByRole('link', { name: 'Stitch Map' }).click();
-	await uploadTiles(page, tileFiles());
-	await page.getByTestId('use-as-target').click();
-	await expect(page).toHaveURL(/\/spot-round$/);
-	await expect(banner).toBeVisible();
-	await expect(banner).toContainText('clean target');
-
-	// While a handoff is pending, another Use-as attempt aborts without
-	// navigating or overwriting; Download remains available.
+	// While this handoff is pending, another Use-as attempt aborts without
+	// navigating or overwriting; Download remains available. The status
+	// message names the actual pending destination (Create Graphics).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
 	await expect(page).toHaveURL(/\/stitch-map$/);
-	await expect(page.getByTestId('stitch-status')).toContainText('already awaiting import');
+	await expect(page.getByTestId('stitch-status')).toContainText(
+		'already awaiting import in Create Graphics'
+	);
 	await expect(page.getByTestId('download-stitched')).toBeEnabled();
 
-	// The pending handoff survives the round trip and imports into the clean
-	// target role through normal intake (no affected pairs, so no discard step).
-	await page.getByRole('link', { name: 'Spot Round' }).click();
-	await expect(banner).toBeVisible();
+	// The pending handoff survives the round trip. Confirming replaces only
+	// the target role through the normal intake path: the source stays, the
+	// one affected pair is discarded, and the handoff is consumed.
+	await page.getByRole('link', { name: 'Create Graphics' }).click();
+	await expect(targetBanner).toBeVisible();
 	await page.getByTestId('handoff-import').click();
-	await expect(banner).toBeHidden();
+	await expect(page.getByTestId('discard-confirmation')).toBeVisible();
+	await page.getByTestId('discard-confirm-accept').click();
+	await expect(targetBanner).toBeHidden();
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText(
 		'upper-left-stitched.png'
 	);
-	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
-		'upper-left-stitched.png'
-	);
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('source.png');
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '0');
+	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
+});
+
+// The one allowed budget exception for the Snap-assist work: the solid-color
+// workflow fixtures above have no matchable content, so a meaningful lock-on
+// needs purpose-built tiles with real imagery. Uses the committed strong
+// smart-import fixture (deterministic seeded scene, 200x200, 25% overlap),
+// whose ground-truth placements relative to the upper-left anchor are
+// UR (150, 0), LL (0, 150), LR (150, 150) — exactly the initial 25%-overlap
+// layout the manual slot path installs before any crop is applied.
+test('snap assist locks deliberately offset tiles onto their real neighbor match', async ({
+	page
+}) => {
+	// Extended from Playwright's 30s default: see the matching comment in the
+	// workflow test above for why the first Snap call needs this much room
+	// under concurrent e2e-worker CPU contention.
+	test.setTimeout(90000);
+	await gotoApp(page, '/stitch-map');
+
+	const fixtures = join(process.cwd(), 'tests', 'fixtures', 'smart-import');
+	const slotFiles: Record<string, string> = {
+		'upper-left': 'smart-ul.png',
+		'upper-right': 'smart-ur.png',
+		'lower-left': 'smart-ll.png',
+		'lower-right': 'smart-lr.png'
+	};
+	for (const [slot, name] of Object.entries(slotFiles)) {
+		await page.getByTestId(`tile-input-${slot}`).setInputFiles(join(fixtures, name));
+		await expect(page.getByTestId(`tile-file-${slot}`)).toHaveText(name);
+	}
+	await expect(page.getByTestId('stitch-readiness')).toContainText('ready');
+
+	// Snap matches what is actually visible: trim the fixture's shared chrome
+	// bands (top 4px, bottom 3px) through the normal crop inputs first.
+	await page.getByTestId('crop-topPx').fill('4');
+	await page.getByTestId('crop-topPx').blur();
+	await page.getByTestId('crop-bottomPx').fill('3');
+	await page.getByTestId('crop-bottomPx').blur();
+
+	await expect(page.getByTestId('snap-tile')).toBeDisabled();
+
+	// Upper-right, deliberately displaced 12px/9px from ground truth (well
+	// inside the bounded search radius): Snap locks it back onto the match
+	// against its expected neighbors.
+	await page.getByTestId('tile-select-upper-right').click();
+	await expect(page.getByTestId('tile-position-x')).toHaveValue('150');
+	await expect(page.getByTestId('tile-position-y')).toHaveValue('0');
+	await page.getByTestId('tile-position-x').fill('162');
+	await page.getByTestId('tile-position-x').blur();
+	await page.getByTestId('tile-position-y').fill('9');
+	await page.getByTestId('tile-position-y').blur();
+	await page.getByTestId('snap-tile').click();
+	// First Snap call in the page's lifetime: same one-time WASM first-call tax
+	// documented on the workflow test above (measured 9-13.5s locally, more
+	// under concurrent e2e-worker CPU contention), on top of whatever the
+	// eager `loadCv()` warm-up already covers. Every later Snap call below is
+	// back to double-digit-millisecond latency and needs no extended timeout.
+	await expect(page.getByTestId('snap-tile')).toBeEnabled({ timeout: 60000 });
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-x').inputValue()) - 150)
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-y').inputValue()))
+	).toBeLessThanOrEqual(2);
+
+	// Lower-right checks both expected neighbors at once: displaced in both
+	// axes, it snaps to the single offset that best satisfies upper-right and
+	// lower-left together (the combined-score path), recovering ground truth.
+	await page.getByTestId('tile-select-lower-right').click();
+	await page.getByTestId('tile-position-x').fill('138');
+	await page.getByTestId('tile-position-x').blur();
+	await page.getByTestId('tile-position-y').fill('161');
+	await page.getByTestId('tile-position-y').blur();
+	await page.getByTestId('snap-tile').click();
+	await expect(page.getByTestId('snap-tile')).toBeEnabled();
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-x').inputValue()) - 150)
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-y').inputValue()) - 150)
+	).toBeLessThanOrEqual(2);
+
+	// Negative-direction displacement (P1-002 1b regression insurance): the old
+	// hand-rolled matcher quantized offsets onto a 512px-capped raster and its
+	// strict `>` tie-break always kept whichever candidate a scan reached
+	// first, a directional bias. Structurally impossible with the
+	// cvMatch-backed matcher (full-resolution raster, `scale` ~= 1, no
+	// quantization), but this pins the invariant either way: upper-right
+	// displaced negative on both axes still recovers ground truth.
+	await page.getByTestId('tile-select-upper-right').click();
+	await page.getByTestId('tile-position-x').fill('138');
+	await page.getByTestId('tile-position-x').blur();
+	await page.getByTestId('tile-position-y').fill('-9');
+	await page.getByTestId('tile-position-y').blur();
+	await page.getByTestId('snap-tile').click();
+	await expect(page.getByTestId('snap-tile')).toBeEnabled();
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-x').inputValue()) - 150)
+	).toBeLessThanOrEqual(2);
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-y').inputValue()))
+	).toBeLessThanOrEqual(2);
+
+	// Snap from exact ground truth must never move the tile: the core "Snap
+	// must never make alignment worse" invariant. Lower-left's ground truth is
+	// (0, 150) — the initial 25%-overlap layout's own position, untouched by
+	// any earlier step in this test — so setting it there explicitly and
+	// snapping must leave it unchanged within a tight (1px) tolerance.
+	await page.getByTestId('tile-select-lower-left').click();
+	await page.getByTestId('tile-position-x').fill('0');
+	await page.getByTestId('tile-position-x').blur();
+	await page.getByTestId('tile-position-y').fill('150');
+	await page.getByTestId('tile-position-y').blur();
+	await page.getByTestId('snap-tile').click();
+	await expect(page.getByTestId('snap-tile')).toBeEnabled();
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-x').inputValue()))
+	).toBeLessThanOrEqual(1);
+	expect(
+		Math.abs(Number(await page.getByTestId('tile-position-y').inputValue()) - 150)
+	).toBeLessThanOrEqual(1);
 });

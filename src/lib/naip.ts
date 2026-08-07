@@ -1,0 +1,162 @@
+/**
+ * ChainSpot NAIP aerial fetch (Phase 3a).
+ *
+ * Wraps the public USGS NAIP `exportImage` REST endpoint
+ * (`imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer`) as an
+ * isolated, provider-specific module per the overarching plan's guidance to isolate
+ * imagery acquisition behind a provider interface. Free, public-domain, CORS-enabled,
+ * no API key.
+ *
+ * Two pure pieces (bbox math, URL construction) plus one network call. The fetch
+ * reports failure as a typed result, never a thrown exception, following the same
+ * `{ ok: true | false }` convention as `src/lib/stitch/smartImport.ts` so callers can
+ * render a clear inline error instead of crashing.
+ */
+
+/** WGS84 center point in decimal degrees. */
+export interface GeoPoint {
+	lat: number;
+	lon: number;
+}
+
+/** A WGS84 bounding box in decimal degrees. */
+export interface GeoBoundingBox {
+	minLon: number;
+	minLat: number;
+	maxLon: number;
+	maxLat: number;
+}
+
+/** Meters per degree of latitude; treated as constant (adequate at course scale). */
+const METERS_PER_DEGREE_LAT = 111_320;
+
+/** Output raster size (pixels, square) requested from `exportImage`. */
+export const NAIP_EXPORT_SIZE_PX = 2048;
+
+const NAIP_EXPORT_IMAGE_URL =
+	'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage';
+
+/**
+ * Computes a WGS84 bounding box centered on `center`, extending `radiusMeters` in
+ * every direction. Uses a simple equirectangular (flat-earth) approximation —
+ * longitude degrees are scaled by `cos(latitude)` — which is entirely adequate at
+ * disc-golf-course scale (a few hundred meters) and avoids pulling in a real geodesy
+ * library for a correction that would be sub-meter here.
+ */
+export function bboxFromCenter(center: GeoPoint, radiusMeters: number): GeoBoundingBox {
+	if (!Number.isFinite(center.lat) || center.lat < -90 || center.lat > 90) {
+		throw new Error(`bboxFromCenter: latitude must be a finite number in [-90, 90], got ${center.lat}`);
+	}
+	if (!Number.isFinite(center.lon) || center.lon < -180 || center.lon > 180) {
+		throw new Error(`bboxFromCenter: longitude must be a finite number in [-180, 180], got ${center.lon}`);
+	}
+	if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+		throw new Error(`bboxFromCenter: radiusMeters must be a positive finite number, got ${radiusMeters}`);
+	}
+
+	const latDegrees = radiusMeters / METERS_PER_DEGREE_LAT;
+	const metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos((center.lat * Math.PI) / 180);
+	// Guard the pole-adjacent degenerate case (cos ~ 0) rather than dividing toward
+	// infinity; disc-golf courses are never near a pole, but the guard keeps this a
+	// clean typed throw instead of a NaN bbox.
+	const lonDegrees =
+		metersPerDegreeLon > 1e-6 ? radiusMeters / metersPerDegreeLon : 180;
+
+	return {
+		minLon: center.lon - lonDegrees,
+		maxLon: center.lon + lonDegrees,
+		minLat: center.lat - latDegrees,
+		maxLat: center.lat + latDegrees
+	};
+}
+
+/**
+ * Builds the `exportImage` URL for a bounding box: WGS84 input (`bboxSR=4326`), a
+ * fixed square output raster, PNG, and `f=image` so the endpoint returns raw PNG
+ * bytes directly rather than a JSON wrapper.
+ */
+export function buildNaipExportUrl(
+	bbox: GeoBoundingBox,
+	sizePx: number = NAIP_EXPORT_SIZE_PX
+): string {
+	const params = new URLSearchParams({
+		bbox: `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`,
+		bboxSR: '4326',
+		size: `${sizePx},${sizePx}`,
+		format: 'png',
+		f: 'image'
+	});
+	return `${NAIP_EXPORT_IMAGE_URL}?${params.toString()}`;
+}
+
+export type NaipFetchErrorKind = 'network' | 'http-error' | 'bad-content-type';
+
+export class NaipFetchError extends Error {
+	readonly kind: NaipFetchErrorKind;
+
+	constructor(kind: NaipFetchErrorKind, message: string) {
+		super(message);
+		this.name = 'NaipFetchError';
+		this.kind = kind;
+	}
+}
+
+export type NaipFetchResult =
+	| { ok: true; blob: Blob; url: string }
+	| { ok: false; error: NaipFetchError };
+
+export type FetchLike = typeof fetch;
+
+/**
+ * Fetches the NAIP `exportImage` PNG for a center point and radius. Reports failure
+ * as a typed result (network error, non-200 status, or a response whose
+ * `Content-Type` isn't an image — NAIP's `exportImage` returns a JSON error body with
+ * a 200 status for some invalid requests, e.g. no coverage at the location) rather
+ * than throwing, so the UI can render a clear inline message.
+ */
+export async function fetchNaipImage(
+	center: GeoPoint,
+	radiusMeters: number,
+	options: { sizePx?: number; fetch?: FetchLike } = {}
+): Promise<NaipFetchResult> {
+	const { sizePx = NAIP_EXPORT_SIZE_PX, fetch: fetchImpl = globalThis.fetch } = options;
+	const bbox = bboxFromCenter(center, radiusMeters);
+	const url = buildNaipExportUrl(bbox, sizePx);
+
+	let response: Response;
+	try {
+		response = await fetchImpl(url, { mode: 'cors' });
+	} catch {
+		return {
+			ok: false,
+			error: new NaipFetchError(
+				'network',
+				'Could not reach the USGS NAIP imagery service. Check your connection and try again.'
+			)
+		};
+	}
+
+	if (!response.ok) {
+		return {
+			ok: false,
+			error: new NaipFetchError(
+				'http-error',
+				`USGS NAIP imagery service returned an error (HTTP ${response.status}).`
+			)
+		};
+	}
+
+	const contentType = response.headers.get('content-type') ?? '';
+	if (!contentType.toLowerCase().startsWith('image/')) {
+		return {
+			ok: false,
+			error: new NaipFetchError(
+				'bad-content-type',
+				'No aerial imagery is available at this location and radius. Try a nearby coordinate or a different radius.'
+			)
+		};
+	}
+
+	const blob = await response.blob();
+	return { ok: true, blob, url };
+}

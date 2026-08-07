@@ -65,11 +65,18 @@ describe('orientation derivation', () => {
 });
 
 describe('decodeImageFileWith', () => {
+	// Mimics real `<img>` behavior: assigning `src` asynchronously fires either
+	// `onload` (success) or `onerror` (failure) — decoding is driven by those
+	// events, not `HTMLImageElement.decode()` (see imageIntake.ts for why: that
+	// API's promise can hang indefinitely while the document is hidden).
 	class FakeImage {
-		src = '';
 		naturalWidth = 2;
 		naturalHeight = 3;
-		async decode(): Promise<void> {}
+		onload: (() => void) | null = null;
+		onerror: (() => void) | null = null;
+		set src(_value: string) {
+			queueMicrotask(() => this.onload?.());
+		}
 	}
 
 	it('revokes the object URL immediately after a successful decode', async () => {
@@ -86,8 +93,8 @@ describe('decodeImageFileWith', () => {
 
 	it('revokes the object URL after a failed decode and does not return an image', async () => {
 		class FailingImage extends FakeImage {
-			override async decode(): Promise<void> {
-				throw new Error('decode failed');
+			override set src(_value: string) {
+				queueMicrotask(() => this.onerror?.());
 			}
 		}
 		const revoked: string[] = [];
@@ -97,7 +104,7 @@ describe('decodeImageFileWith', () => {
 				revokeObjectUrl: (url) => revoked.push(url),
 				ImageConstructor: FailingImage as unknown as typeof Image
 			})
-		).rejects.toThrow('decode failed');
+		).rejects.toThrow(/Could not load image data/);
 		expect(revoked).toEqual(['blob:fake-b']);
 	});
 });

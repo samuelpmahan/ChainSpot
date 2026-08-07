@@ -7,7 +7,8 @@ import type { TileSlot } from '../../src/lib/stitch/geometry';
 const ALL_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
 
 describe('P1-001 shared outer-band crop proposal (case 3)', () => {
-	test('proposes bounded common outer insets for shared chrome bands', () => {
+	test('proposes bounded common outer insets, declines conflicting or unsupported evidence, and bounds insets', () => {
+		// Shared chrome bands on every tile produce one bounded common proposal.
 		const rasters = [
 			buildGrayRaster('upper-left'),
 			buildGrayRaster('upper-right'),
@@ -21,51 +22,34 @@ describe('P1-001 shared outer-band crop proposal (case 3)', () => {
 			expect(Number.isInteger(value)).toBe(true);
 			expect(value).toBeGreaterThanOrEqual(0);
 		}
-	});
 
-	test('declines a side whose evidence conflicts on a single tile', () => {
-		// Lower-left lacks the top chrome band: the top edge evidence conflicts,
-		// so the top inset must not be proposed for any tile.
-		const rasters = [
+		// A single conflicting tile declines the whole side.
+		const conflicting = [
 			buildGrayRaster('upper-left'),
 			buildGrayRaster('upper-right'),
 			buildGrayRaster('lower-left', { chromeTop: 0 }),
 			buildGrayRaster('lower-right')
 		];
-		const proposal = proposeCrop(rasters);
-		expect(proposal).toEqual({ topPx: 0, rightPx: 0, bottomPx: 3, leftPx: 0 });
-	});
+		expect(proposeCrop(conflicting)).toEqual({ topPx: 0, rightPx: 0, bottomPx: 3, leftPx: 0 });
 
-	test('returns no proposal at all when every side has conflicting evidence', () => {
-		const rasters = [
-			buildGrayRaster('upper-left', { chromeTop: 0, chromeBottom: 0 }),
-			buildGrayRaster('upper-right', { chromeTop: 0, chromeBottom: 0 }),
-			buildGrayRaster('lower-left', { chromeTop: 0, chromeBottom: 0 }),
-			buildGrayRaster('lower-right', { chromeTop: 0, chromeBottom: 0 })
-		];
-		expect(proposeCrop(rasters)).toBeNull();
-	});
+		// Every side conflicting means no proposal at all (no unjustified crop).
+		const allConflicting = ALL_SLOTS.map((slot) =>
+			buildGrayRaster(slot, { chromeTop: 0, chromeBottom: 0 })
+		);
+		expect(proposeCrop(allConflicting)).toBeNull();
 
-	test('bounds proposed insets so they cannot remove nearly all content', () => {
-		// A very deep uniform band must be capped by the bounded inset rule.
-		const rasters = [
-			buildGrayRaster('upper-left', { chromeTop: 40 }),
-			buildGrayRaster('upper-right', { chromeTop: 40 }),
-			buildGrayRaster('lower-left', { chromeTop: 40 }),
-			buildGrayRaster('lower-right', { chromeTop: 40 })
-		];
-		const proposal = proposeCrop(rasters);
-		expect(proposal).not.toBeNull();
-		if (!proposal) return;
+		// Very deep uniform bands are capped by the bounded-inset rule.
+		const deep = ALL_SLOTS.map((slot) => buildGrayRaster(slot, { chromeTop: 40 }));
+		const capped = proposeCrop(deep);
+		expect(capped).not.toBeNull();
+		if (!capped) return;
 		const maxInset = Math.floor(TILE_H * MAX_INSET_FRACTION);
-		expect(proposal.topPx).toBe(maxInset);
-		expect(proposal.topPx).toBeLessThan(TILE_H);
-	});
+		expect(capped.topPx).toBe(maxInset);
+		expect(capped.topPx).toBeLessThan(TILE_H);
 
-	test('never proposes internal uniform regions or bands below the minimum depth', () => {
-		// Interior uniform bands (rows 50-59) must be ignored: only outer edge
-		// lines are ever inspected, so an interior masking region never appears.
-		const rasters = ALL_SLOTS.map((slot) => {
+		// Interior uniform regions and bands below the minimum depth are never
+		// proposed as chrome: only outer edge lines are inspected.
+		const interior = ALL_SLOTS.map((slot) => {
 			const raster = buildGrayRaster(slot, { chromeTop: 0, chromeBottom: 0 });
 			const gray = raster.gray.slice();
 			for (let y = 50; y < 60; y += 1) {
@@ -75,9 +59,8 @@ describe('P1-001 shared outer-band crop proposal (case 3)', () => {
 			}
 			return { ...raster, gray };
 		});
-		expect(proposeCrop(rasters)).toBeNull();
+		expect(proposeCrop(interior)).toBeNull();
 
-		// A band narrower than the documented minimum is not proposed either.
 		const thin = ALL_SLOTS.map((slot) => {
 			const raster = buildGrayRaster(slot, { chromeTop: 1, chromeBottom: 0 });
 			const gray = raster.gray.slice();
@@ -88,9 +71,8 @@ describe('P1-001 shared outer-band crop proposal (case 3)', () => {
 		});
 		expect(MIN_ORIGINAL_BAND_PX).toBeGreaterThan(1);
 		expect(proposeCrop(thin)).toBeNull();
-	});
 
-	test('returns null for an empty set', () => {
+		// An empty set returns null rather than failing.
 		expect(proposeCrop([] as AnalysisRaster[])).toBeNull();
 	});
 });

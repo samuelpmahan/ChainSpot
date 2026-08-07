@@ -13,7 +13,7 @@ import type { TilePlacement, TileSlot } from './geometry';
 
 export type PlacementMap = Record<TileSlot, TilePlacement>;
 
-/** True when both maps exist and every movable placement matches exactly. */
+/** True when both maps exist and every placement matches on x/y and visibility. */
 export function placementsEqual(
 	a: PlacementMap | null | undefined,
 	b: PlacementMap | null | undefined
@@ -23,7 +23,7 @@ export function placementsEqual(
 		const pa = a[slot];
 		const pb = b[slot];
 		if (!pa || !pb) return false;
-		if (pa.xPx !== pb.xPx || pa.yPx !== pb.yPx) return false;
+		if (pa.xPx !== pb.xPx || pa.yPx !== pb.yPx || pa.visible !== pb.visible) return false;
 	}
 	return true;
 }

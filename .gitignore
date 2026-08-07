@@ -6,3 +6,5 @@ test-results/
 .DS_Store
 tickets/
 Phase1Tickets/
+resources/
+tests/fixtures/smart-import-large/

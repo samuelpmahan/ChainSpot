@@ -29,6 +29,9 @@ async function gotoApp(page: Page): Promise<string> {
 test('smart four-tile import: unordered select, inferred roles, crop decision, manual edit, native export, no network', async ({
 	page
 }) => {
+	// Extended from Playwright's 30s default: see the timing note below on the
+	// first smart-import assertion for why.
+	test.setTimeout(90000);
 	const serverOrigin = await gotoApp(page);
 
 	const externalRequests: string[] = [];
@@ -41,8 +44,14 @@ test('smart four-tile import: unordered select, inferred roles, crop decision, m
 	// must not determine the inferred roles.
 	await page.getByTestId('smart-import-input').setInputFiles(FILES);
 
-	// Analysis completes and the inferred assignment is reported as visible text.
-	await expect(page.getByTestId('smart-import-assignment')).toBeVisible();
+	// Analysis completes and the inferred assignment is reported as visible
+	// text. Extended from Playwright's 5s default: this is the worker's first
+	// real `cv.matchTemplate` call in its lifetime (via `assignFour`), which
+	// pays a one-time WASM JIT/lazy-compile tax on top of whatever the eager
+	// `loadCv()` warm-up in `smartStitch.worker.ts` already covers (measured
+	// 10-12s locally, more under concurrent e2e-worker CPU contention). See
+	// the equivalent Snap-assist timing note in stitchMap.spec.ts.
+	await expect(page.getByTestId('smart-import-assignment')).toBeVisible({ timeout: 60000 });
 	await expect(page.getByTestId('smart-import-slot-upper-left')).toHaveText('smart-ul.png');
 	await expect(page.getByTestId('smart-import-slot-upper-right')).toHaveText('smart-ur.png');
 	await expect(page.getByTestId('smart-import-slot-lower-left')).toHaveText('smart-ll.png');

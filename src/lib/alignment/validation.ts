@@ -19,7 +19,10 @@ export interface ValidationOptions {
 }
 
 export function validateTransform(options: ValidationOptions): ValidationWarning[] {
-	const { transform, pairs, minPairs = 3, maxScale = 10, maxShear = 2 } = options;
+	const { transform, pairs, maxScale = 10, maxShear = 2 } = options;
+	// A valid minimal fit needs two pairs for similarity and three for affine;
+	// callers may still override the default for later UI policy.
+	const minPairs = options.minPairs ?? (transform.model === 'similarity' ? 2 : 3);
 	const warnings: ValidationWarning[] = [];
 
 	const enabledPairs = pairs.filter((pair) => pair.enabled);

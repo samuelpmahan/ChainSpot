@@ -19,13 +19,15 @@
  */
 import { isSupportedMimeType, decodeImageFile } from '../imageIntake';
 import type { DecodedImage, DecodeImageFile } from '../imageIntake';
-import { toAnalysisRaster } from './analysis';
-import type { AnalysisRaster } from './analysis';
+import { toAnalysisRaster, toCropRaster } from './analysis';
+import type { AnalysisRaster, RasterRegion } from './analysis';
 import { assignFour } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
 import { proposeCropDetailed } from './autoCrop';
+import type { CropProposalDetail } from './autoCrop';
 import { classifyLayout } from './diagnostics';
 import type { LayoutDiagnostic } from './diagnostics';
+import { matcherRegionFromCrop } from './cropGate';
 import type { CropInsets } from './geometry';
 import type { TilePlacement, TileSlot } from './geometry';
 
@@ -78,11 +80,32 @@ export type SmartImportFailure =
 
 export type SmartImportResult = SmartImportSuccess | SmartImportFailure;
 
+/**
+ * The worker-backed analysis result: identical to `SmartImportSuccess` except
+ * the raw layout evidence (including gray rasters) never crosses the worker
+ * boundary. The route consumes only the fields both shapes share.
+ */
+export type SmartImportWorkerSuccess = Omit<SmartImportSuccess, 'layout'>;
+export type SmartImportWorkerResult = SmartImportWorkerSuccess | SmartImportFailure;
+
 export interface SmartImportOptions {
 	/** Injectable browser decoder; defaults to the object-URL `Image.decode()` path. */
 	decode?: DecodeImageFile;
-	/** Injectable downscaled-grayscale builder; defaults to the canvas path. */
-	buildRaster?: (image: HTMLImageElement) => AnalysisRaster;
+	/**
+	 * Injectable downscaled-grayscale matcher-raster builder; defaults to the
+	 * canvas path. The optional `region` argument, when supplied, is the
+	 * interior sub-rectangle a confidently defensible shared crop identified
+	 * (see `matcherRegionFromCrop`); implementations should draw from it
+	 * instead of the whole frame.
+	 */
+	buildRaster?: (image: HTMLImageElement, region?: RasterRegion) => AnalysisRaster;
+	/**
+	 * Injectable crop-analysis raster builder; defaults to a dedicated
+	 * 1024-long-edge representation separate from the low-resolution matcher
+	 * raster, so crop boundaries are not quantized to the matcher's 10-12
+	 * original pixels per analysis line.
+	 */
+	buildCropRaster?: (image: HTMLImageElement) => AnalysisRaster;
 	/** Returns false once a newer selection/reset invalidated this batch. */
 	isCurrent?: () => boolean;
 }
@@ -96,7 +119,15 @@ export async function smartImportFiles(
 	files: readonly File[],
 	options: SmartImportOptions = {}
 ): Promise<SmartImportResult> {
-	const { decode = decodeImageFile, buildRaster = toAnalysisRaster, isCurrent = () => true } = options;
+	const {
+		decode = decodeImageFile,
+		buildCropRaster = toCropRaster,
+		isCurrent = () => true
+	} = options;
+	// `toAnalysisRaster` takes a `maxDim` in the middle, so it is wrapped to
+	// match this narrower two-argument shape instead of being used directly.
+	const buildRaster: (image: HTMLImageElement, region?: RasterRegion) => AnalysisRaster =
+		options.buildRaster ?? ((image, region) => toAnalysisRaster(image, undefined, region));
 
 	if (files.length !== 4) {
 		return { ok: false, kind: 'wrong-count', count: files.length };
@@ -154,10 +185,26 @@ export async function smartImportFiles(
 		decoded.push(result);
 	}
 
+	// Crop evidence is computed first, from the full frame, because a
+	// confidently defensible shared crop is used to trim the matcher rasters
+	// below to their interior content before pairwise scoring — see
+	// `matcherRegionFromCrop`. The dedicated higher-resolution crop rasters feed
+	// crop analysis only; the matcher rasters stay at their bounded low
+	// resolution. A crop-analysis failure never fails the import: it yields an
+	// honest absent proposal and matcher rasters fall back to the whole frame.
+	let crop: CropProposalDetail | null = null;
+	try {
+		crop = proposeCropDetailed(decoded.map((result) => buildCropRaster(result.image)));
+	} catch {
+		crop = null;
+	}
+	if (!isCurrent()) return { ok: false, stale: true };
+
 	const rasters: AnalysisRaster[] = [];
 	for (let i = 0; i < decoded.length; i += 1) {
+		const region = matcherRegionFromCrop(crop, decoded[i].widthPx, decoded[i].heightPx);
 		try {
-			rasters.push(buildRaster(decoded[i].image));
+			rasters.push(buildRaster(decoded[i].image, region ?? undefined));
 		} catch {
 			if (!isCurrent()) return { ok: false, stale: true };
 			return {
@@ -171,10 +218,16 @@ export async function smartImportFiles(
 	}
 	if (!isCurrent()) return { ok: false, stale: true };
 
-	const layout = assignFour(rasters);
-	const crop = proposeCropDetailed(rasters);
-	const diagnostic = classifyLayout(layout, rasters);
+	const layout = await assignFour(rasters);
+	const diagnostic = classifyLayout(layout);
 	if (!isCurrent()) return { ok: false, stale: true };
+
+	// Crop confidence is independent of layout confidence (see cropGate.ts):
+	// whatever crop evidence exists is surfaced as-is.
+	const cropResult: SmartImportCrop = {
+		proposal: crop?.insets ?? null,
+		confidence: crop?.confidence ?? 'absent'
+	};
 
 	const tiles: SmartImportTile[] = decoded.map((result, i) => ({
 		fileName: files[i].name,
@@ -190,8 +243,212 @@ export async function smartImportFiles(
 		assignment: layout.assignment,
 		placements: layout.placements,
 		layout,
-		cropProposal: crop.insets,
-		crop: { proposal: crop.insets, confidence: crop.confidence },
+		cropProposal: cropResult.proposal,
+		crop: cropResult,
 		diagnostic
 	};
+}
+
+/**
+ * One focused smart-stitch worker shared by every import. It exists because the
+ * Chromium measurement observed multi-hundred-millisecond main-thread blocks;
+ * the worker owns rasterization (OffscreenCanvas) and all pure analysis.
+ * Terminate it with `disposeSmartStitchWorker` when the page no longer owns it.
+ */
+let smartStitchWorker: Worker | null = null;
+
+export function disposeSmartStitchWorker(): void {
+	if (smartStitchWorker) {
+		smartStitchWorker.terminate();
+		smartStitchWorker = null;
+	}
+}
+
+/**
+ * Eagerly constructs the singleton smart-stitch worker (P1-002 1b), so its
+ * module-scope `loadCv()` call (see `smartStitch.worker.ts`) kicks off the
+ * worker-side OpenCV WASM load on Stitch Map route mount instead of waiting
+ * for the first real smart-import call. A no-op once the worker already
+ * exists — the same singleton `analyzeInWorker` reuses. Deliberately not
+ * awaited by callers: this only warms the worker, it never runs analysis.
+ */
+export function warmSmartStitchWorker(): void {
+	if (smartStitchWorker) return;
+	smartStitchWorker = new Worker(new URL('./smartStitch.worker.ts', import.meta.url), {
+		type: 'module'
+	});
+}
+
+/**
+ * The P1-002 production intake path: identical validation, atomicity, stale
+ * protection, crop gating, and result semantics to `smartImportFiles`, but the
+ * decode-for-analysis uses off-main-thread ImageBitmap creation and the raster
+ * building plus all analysis run inside the single smart-stitch worker, so the
+ * main thread is never blocked for the measured multi-hundred-millisecond
+ * analysis spans. The decoded rendering images are still produced on the main
+ * thread through the normal decode path.
+ */
+export async function smartImportViaWorker(
+	files: readonly File[],
+	options: { isCurrent?: () => boolean } = {}
+): Promise<SmartImportWorkerResult> {
+	const { isCurrent = () => true } = options;
+
+	if (files.length !== 4) {
+		return { ok: false, kind: 'wrong-count', count: files.length };
+	}
+	if (!isCurrent()) return { ok: false, stale: true };
+
+	const decoded: DecodedImage[] = [];
+	const bitmaps: ImageBitmap[] = [];
+	let requirement: { widthPx: number; heightPx: number } | null = null;
+	for (let i = 0; i < files.length; i += 1) {
+		const file = files[i];
+		if (!isSupportedMimeType(file.type)) {
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: file.name,
+				reason: 'unsupported-type',
+				message: `Unsupported file type "${file.type || 'unknown'}": ChainSpot accepts PNG and JPEG images.`
+			};
+		}
+		let result: DecodedImage;
+		try {
+			result = await decodeImageFile(file);
+		} catch {
+			if (!isCurrent()) return { ok: false, stale: true };
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: file.name,
+				reason: 'decode-failure',
+				message: `Could not decode "${file.name}".`
+			};
+		}
+		if (!isCurrent()) return { ok: false, stale: true };
+		let bitmap: ImageBitmap;
+		try {
+			bitmap = await createImageBitmap(file);
+		} catch {
+			if (!isCurrent()) return { ok: false, stale: true };
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: file.name,
+				reason: 'decode-failure',
+				message: `Could not analyze "${file.name}".`
+			};
+		}
+		if (!isCurrent()) return { ok: false, stale: true };
+		const widthPx = bitmap.width;
+		const heightPx = bitmap.height;
+		if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
+			bitmap.close();
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: file.name,
+				reason: 'invalid-dimension',
+				message: `"${file.name}" decoded with invalid dimensions (${widthPx} x ${heightPx}); width and height must be greater than zero.`
+			};
+		}
+		if (!requirement) {
+			requirement = { widthPx, heightPx };
+		} else if (widthPx !== requirement.widthPx || heightPx !== requirement.heightPx) {
+			bitmap.close();
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: file.name,
+				reason: 'dimension-mismatch',
+				message: `"${file.name}" is ${widthPx} x ${heightPx} but the batch requires ${requirement.widthPx} x ${requirement.heightPx}. Recapture all four screenshots at the same device orientation and screenshot size.`
+			};
+		}
+		decoded.push(result);
+		bitmaps.push(bitmap);
+	}
+	if (!isCurrent()) return { ok: false, stale: true };
+
+	const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	let reply: WorkerReply;
+	try {
+		reply = await analyzeInWorker(token, bitmaps);
+	} catch (error) {
+		// A rejection here means the worker transport itself failed (construction,
+		// message-channel error) rather than an internal analysis error — internal
+		// errors are caught inside the worker and arrive as a typed `ok: false`
+		// reply instead. Treat it the same as any other file-analysis failure so
+		// this path is never the one silent exception in an otherwise fully typed
+		// function, and discard the worker in case it is left in a broken state.
+		disposeSmartStitchWorker();
+		if (!isCurrent()) return { ok: false, stale: true };
+		return {
+			ok: false,
+			kind: 'file',
+			fileName: files[0].name,
+			reason: 'decode-failure',
+			message: `Smart-import analysis failed: ${error instanceof Error ? error.message : String(error)}.`
+		};
+	}
+	if (!isCurrent() || reply.token !== token) return { ok: false, stale: true };
+	if (!reply.ok) {
+		return {
+			ok: false,
+			kind: 'file',
+			fileName: files[0].name,
+			reason: 'decode-failure',
+			message: `Smart-import analysis failed: ${reply.message ?? 'unknown error'}.`
+		};
+	}
+
+	const tiles: SmartImportTile[] = decoded.map((result, i) => ({
+		fileName: files[i].name,
+		mimeType: files[i].type,
+		widthPx: result.widthPx,
+		heightPx: result.heightPx,
+		image: result.image
+	}));
+
+	return {
+		ok: true,
+		tiles,
+		assignment: reply.assignment,
+		placements: reply.placements,
+		cropProposal: reply.cropProposal,
+		crop: reply.crop,
+		diagnostic: reply.diagnostic
+	};
+}
+
+type WorkerReply =
+	| {
+			readonly ok: true;
+			readonly token: string;
+			readonly assignment: SmartImportWorkerSuccess['assignment'];
+			readonly placements: SmartImportWorkerSuccess['placements'];
+			readonly cropProposal: SmartImportWorkerSuccess['cropProposal'];
+			readonly crop: SmartImportWorkerSuccess['crop'];
+			readonly diagnostic: SmartImportWorkerSuccess['diagnostic'];
+	  }
+	| { readonly ok: false; readonly token: string; readonly message: string };
+
+function analyzeInWorker(token: string, bitmaps: readonly ImageBitmap[]): Promise<WorkerReply> {
+	warmSmartStitchWorker();
+	const worker = smartStitchWorker as Worker;
+	return new Promise((resolve, reject) => {
+		const onMessage = (event: MessageEvent<WorkerReply>): void => {
+			if (event.data.token !== token) return;
+			worker.removeEventListener('message', onMessage);
+			worker.removeEventListener('error', onError);
+			resolve(event.data);
+		};
+		const onError = (): void => {
+			worker.removeEventListener('message', onMessage);
+			reject(new Error('smart-stitch worker failed'));
+		};
+		worker.addEventListener('message', onMessage);
+		worker.addEventListener('error', onError, { once: true });
+		worker.postMessage({ token, bitmaps }, bitmaps as unknown as Transferable[]);
+	});
 }

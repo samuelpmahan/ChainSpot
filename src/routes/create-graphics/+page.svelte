@@ -34,7 +34,16 @@
 	import type { DownloadBlob, RepairCandidate, RepairResolutionResult } from '$lib/persistence';
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
-	import { retainEditor, takeRetainedEditor } from '$lib/spotRoundSession';
+	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
+	import { fetchNaipImage } from '$lib/naip';
+	import type { GeoPoint } from '$lib/naip';
+	import {
+		consumePendingAnnotatedRound,
+		getActiveAnnotatedRound,
+		getPendingAnnotatedRound,
+		setActiveAnnotatedRound
+	} from '$lib/annotatedRoundSession';
+	import type { AnnotatedRound } from '$lib/domain/annotatedRound';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -57,11 +66,12 @@
 	function resolveInitialEditor(): ProjectEditor {
 		// An explicitly injected editor (tests) wins; otherwise reuse the retained
 		// in-memory session across SPA navigation, or start a fresh project.
-		return initialEditor ?? takeRetainedEditor() ?? new ProjectEditor();
+		return initialEditor ?? takeRetainedEditor('create-graphics') ?? new ProjectEditor();
 	}
 
 	onDestroy(() => {
-		if (participatesInSession) retainEditor(editor);
+		if (participatesInSession) retainEditor('create-graphics', editor);
+		clearNaipPreview();
 	});
 
 	let refreshCount = $state(0);
@@ -114,6 +124,35 @@
 	let pendingHandoff = $state<PendingHandoff | null>(null);
 	let importingHandoff = $state(false);
 	let handoffError = $state<string | null>(null);
+
+	/**
+	 * The AnnotatedRound artifact received from Annotate Round, once imported —
+	 * either auto-intaked on mount (no source image loaded yet) or through the
+	 * banner below (a source image is already loaded). Soft boundary: this page
+	 * still accepts a direct image upload with no AnnotatedRound present at all;
+	 * a hard gate is out of scope for this ticket.
+	 */
+	let annotatedRound = $state<AnnotatedRound | null>(null);
+	/** A pending AnnotatedRound awaiting explicit import because a source image is already loaded. */
+	let pendingAnnotatedRoundBanner = $state<AnnotatedRound | null>(null);
+	let importingAnnotatedRound = $state(false);
+	let annotatedRoundError = $state<string | null>(null);
+
+	/**
+	 * Default fetch radius for the USGS NAIP aerial pull: 300m frames one or two
+	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on
+	 * every side, without the course shrinking to a speck in a much larger frame.
+	 * Purely a starting point — the user adjusts and refetches as needed.
+	 */
+	const DEFAULT_NAIP_RADIUS_METERS = 300;
+	let naipLatInput = $state('');
+	let naipLonInput = $state('');
+	let naipRadiusInput = $state(String(DEFAULT_NAIP_RADIUS_METERS));
+	let naipLoading = $state(false);
+	let naipCommitting = $state(false);
+	let naipError = $state<string | null>(null);
+	/** Fetched-but-not-yet-committed aerial image awaiting explicit user confirmation. */
+	let naipPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
 
 	function sourceImage(): ImageAsset | null {
 		void refreshCount;
@@ -726,8 +765,181 @@
 		activityMessage = 'Pending stitched image dismissed.';
 	}
 
+	/**
+	 * Routes an AnnotatedRound's source image through the exact same
+	 * intake/replacement path as a pane file upload (`intakeImageFile`), so
+	 * point-discard confirmation, asset manifest creation, undo/redo, and dirty
+	 * state all apply. Used both for the silent auto-intake (no source image
+	 * loaded yet, on mount) and for the explicit banner import (a source image
+	 * is already loaded). The pending slot is consumed, and the active slot set,
+	 * only on a successful (non-cancelled) import.
+	 */
+	async function importAnnotatedRound(round: AnnotatedRound): Promise<void> {
+		if (importingAnnotatedRound) return;
+		importingAnnotatedRound = true;
+		annotatedRoundError = null;
+		try {
+			const file = new File([round.sourceImage.blob], round.sourceImage.fileName, {
+				type: round.sourceImage.mimeType
+			});
+			const result = await intakeImageFile({
+				editor,
+				role: 'source-overview',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('source-overview', count)
+			});
+			if (!result.ok) {
+				annotatedRoundError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The annotated round is still pending.';
+				return;
+			}
+			consumePendingAnnotatedRound();
+			setActiveAnnotatedRound(round);
+			annotatedRound = round;
+			pendingAnnotatedRoundBanner = null;
+			onDomainChanged('source-overview');
+			activityMessage = 'Annotated round imported as the UDisc source.';
+		} catch (error) {
+			annotatedRoundError =
+				error instanceof Error ? error.message : 'Could not import the annotated round.';
+		} finally {
+			importingAnnotatedRound = false;
+		}
+	}
+
+	function handleAnnotatedRoundImport(): void {
+		if (pendingAnnotatedRoundBanner) void importAnnotatedRound(pendingAnnotatedRoundBanner);
+	}
+
+	/** Dismiss only clears the banner; the pending slot survives for a later visit. */
+	function handleAnnotatedRoundDismiss(): void {
+		pendingAnnotatedRoundBanner = null;
+		annotatedRoundError = null;
+		activityMessage = 'Pending annotated round dismissed.';
+	}
+
+	function clearNaipPreview(): void {
+		if (naipPreview) URL.revokeObjectURL(naipPreview.objectUrl);
+		naipPreview = null;
+	}
+
+	function parseNaipCenter(): GeoPoint | null {
+		const lat = Number(naipLatInput);
+		const lon = Number(naipLonInput);
+		if (naipLatInput.trim() === '' || naipLonInput.trim() === '' || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+			naipError = 'Enter a valid latitude and longitude.';
+			return null;
+		}
+		if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+			naipError = 'Latitude must be between -90 and 90; longitude between -180 and 180.';
+			return null;
+		}
+		return { lat, lon };
+	}
+
+	function parseNaipRadius(): number | null {
+		const radius = Number(naipRadiusInput);
+		if (naipRadiusInput.trim() === '' || !Number.isFinite(radius) || radius <= 0) {
+			naipError = 'Enter a radius greater than 0 meters.';
+			return null;
+		}
+		return radius;
+	}
+
+	/**
+	 * Fetches a NAIP aerial preview only — never commits into the project. The user
+	 * reviews the preview and either confirms (`handleNaipConfirm`) or discards it to
+	 * adjust the radius and refetch.
+	 */
+	async function handleNaipFetch(): Promise<void> {
+		if (naipLoading) return;
+		naipError = null;
+		clearNaipPreview();
+		const center = parseNaipCenter();
+		if (!center) return;
+		const radius = parseNaipRadius();
+		if (radius === null) return;
+		naipLoading = true;
+		try {
+			const result = await fetchNaipImage(center, radius);
+			if (!result.ok) {
+				naipError = result.error.message;
+				return;
+			}
+			naipPreview = { blob: result.blob, objectUrl: URL.createObjectURL(result.blob) };
+		} finally {
+			naipLoading = false;
+		}
+	}
+
+	/**
+	 * Routes the confirmed NAIP preview through the exact same intake/replacement
+	 * path as a pane file upload (`intakeImageFile`), so point-discard confirmation,
+	 * asset manifest creation, undo/redo, and dirty state all apply identically to a
+	 * manual upload.
+	 */
+	async function handleNaipConfirm(): Promise<void> {
+		if (!naipPreview || naipCommitting) return;
+		naipCommitting = true;
+		naipError = null;
+		try {
+			const file = new File([naipPreview.blob], 'naip-aerial.png', { type: 'image/png' });
+			const result = await intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('target-basemap', count)
+			});
+			if (!result.ok) {
+				naipError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The fetched aerial image is still pending.';
+				return;
+			}
+			clearNaipPreview();
+			onDomainChanged('target-basemap');
+			activityMessage = 'Fetched NAIP aerial image imported as the clean target.';
+		} catch (error) {
+			naipError = error instanceof Error ? error.message : 'Could not import the fetched aerial image.';
+		} finally {
+			naipCommitting = false;
+		}
+	}
+
+	function handleNaipDiscardPreview(): void {
+		clearNaipPreview();
+	}
+
 	onMount(() => {
-		pendingHandoff = getPendingHandoff();
+		// Only the target-basemap handoff belongs here now; the source-role case
+		// is entirely Annotate Round's since P1 Ticket 1.
+		const handoff = getPendingHandoff();
+		pendingHandoff = handoff && handoff.targetRole === 'target-basemap' ? handoff : null;
+
+		// Every new session-module read here is gated on participatesInSession:
+		// only production-created or session-retrieved editors participate, so
+		// injected-editor unit tests never observe cross-test session leakage.
+		const pendingRound = participatesInSession ? getPendingAnnotatedRound() : null;
+		if (pendingRound) {
+			if (!sourceImage()) {
+				// No source loaded yet: auto-intake, no extra click required.
+				void importAnnotatedRound(pendingRound);
+			} else {
+				// A source image is already loaded: never silently replace it.
+				pendingAnnotatedRoundBanner = pendingRound;
+			}
+		} else {
+			const activeRound = participatesInSession ? getActiveAnnotatedRound() : null;
+			if (activeRound) annotatedRound = activeRound;
+		}
+
 		window.addEventListener('keydown', handleGlobalKeyDown);
 		return () => window.removeEventListener('keydown', handleGlobalKeyDown);
 	});
@@ -821,7 +1033,7 @@
 </script>
 
 <svelte:head>
-	<title>Spot Round | ChainSpot</title>
+	<title>Create Graphics | ChainSpot</title>
 </svelte:head>
 
 	<main
@@ -830,6 +1042,8 @@
 		data-complete-pair-count={currentPairs().length}
 		data-pending-pair-count={correspondence.pendingSource ? 1 : 0}
 		data-pending-source={correspondence.pendingSource ? 'true' : 'false'}
+		data-annotated-round={annotatedRound ? 'present' : 'absent'}
+		data-hole-count={annotatedRound?.holes.length ?? 0}
 	>
 	{#if pendingHandoff}
 		<section
@@ -861,6 +1075,39 @@
 			</div>
 			{#if handoffError}
 				<p class="error" data-testid="handoff-error" role="alert">{handoffError}</p>
+			{/if}
+		</section>
+	{/if}
+	{#if pendingAnnotatedRoundBanner}
+		<section
+			class="handoff-banner"
+			data-testid="annotated-round-banner"
+			aria-label="Pending annotated round"
+		>
+			<p>
+				An annotated round with source image “{pendingAnnotatedRoundBanner.sourceImage.fileName}”
+				is ready to import as the UDisc source.
+			</p>
+			<div class="handoff-actions">
+				<button
+					type="button"
+					data-testid="annotated-round-import"
+					disabled={importingAnnotatedRound}
+					onclick={handleAnnotatedRoundImport}
+				>
+					Import
+				</button>
+				<button
+					type="button"
+					data-testid="annotated-round-dismiss"
+					disabled={importingAnnotatedRound}
+					onclick={handleAnnotatedRoundDismiss}
+				>
+					Dismiss
+				</button>
+			</div>
+			{#if annotatedRoundError}
+				<p class="error" data-testid="annotated-round-error" role="alert">{annotatedRoundError}</p>
 			{/if}
 		</section>
 	{/if}
@@ -1043,6 +1290,80 @@
 			onPointSelect={handlePointSelect}
 			onPointMove={handlePointMove}
 		/>
+	</section>
+
+	<section
+		class="naip-fetch"
+		data-testid="naip-fetch"
+		aria-labelledby="naip-fetch-heading"
+	>
+		<h2 id="naip-fetch-heading">Fetch clean target from USGS NAIP</h2>
+		<p class="naip-hint">
+			Alternative to uploading a target image above: enter a center coordinate
+			(found externally, e.g. any map site) and a radius, then fetch a clean
+			aerial map from the public USGS NAIP imagery service. US coverage only —
+			manual upload above still works for other courses.
+		</p>
+		<div class="naip-inputs">
+			<label>
+				<span>Latitude</span>
+				<input
+					type="text"
+					inputmode="decimal"
+					data-testid="naip-lat"
+					bind:value={naipLatInput}
+					placeholder="e.g. 44.9778"
+				/>
+			</label>
+			<label>
+				<span>Longitude</span>
+				<input
+					type="text"
+					inputmode="decimal"
+					data-testid="naip-lon"
+					bind:value={naipLonInput}
+					placeholder="e.g. -93.2650"
+				/>
+			</label>
+			<label>
+				<span>Radius (meters)</span>
+				<input type="text" inputmode="decimal" data-testid="naip-radius" bind:value={naipRadiusInput} />
+			</label>
+			<button
+				type="button"
+				data-testid="naip-fetch-button"
+				disabled={naipLoading}
+				onclick={handleNaipFetch}
+			>
+				{naipLoading ? 'Fetching…' : 'Fetch aerial map'}
+			</button>
+		</div>
+		{#if naipError}
+			<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
+		{/if}
+		{#if naipPreview}
+			<div class="naip-preview" data-testid="naip-preview">
+				<img class="naip-preview-image" src={naipPreview.objectUrl} alt="Fetched NAIP aerial preview, not yet used" />
+				<div class="naip-preview-actions">
+					<button
+						type="button"
+						data-testid="naip-use"
+						disabled={naipCommitting}
+						onclick={handleNaipConfirm}
+					>
+						{naipCommitting ? 'Using…' : 'Use this image'}
+					</button>
+					<button
+						type="button"
+						data-testid="naip-discard"
+						disabled={naipCommitting}
+						onclick={handleNaipDiscardPreview}
+					>
+						Discard, adjust radius
+					</button>
+				</div>
+			</div>
+		{/if}
 	</section>
 
 	<!--
@@ -1569,6 +1890,65 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 1rem;
+	}
+
+	.naip-fetch {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.75rem 1rem;
+		border: 1px solid #ccc;
+		border-radius: 6px;
+	}
+
+	.naip-fetch h2 {
+		font-size: 1rem;
+		margin: 0;
+	}
+
+	.naip-hint {
+		margin: 0;
+		font-size: 0.85rem;
+		opacity: 0.8;
+	}
+
+	.naip-inputs {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 0.75rem;
+	}
+
+	.naip-inputs label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.85rem;
+	}
+
+	.naip-inputs input {
+		width: 10rem;
+	}
+
+	.naip-preview {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.naip-preview-image {
+		max-width: 20rem;
+		max-height: 15rem;
+		width: auto;
+		height: auto;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+	}
+
+	.naip-preview-actions {
+		display: flex;
+		gap: 0.5rem;
 	}
 
 	.dialog-backdrop {

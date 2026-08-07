@@ -285,6 +285,45 @@ describe('P1-003 Map Alignment Math', () => {
 			shear: 0
 		};
 		expect(invertTransform(singular)).toBeNull();
+
+		// validateTransform defaults the minimum pair count to the model's
+		// requirement (2 for similarity, 3 for affine), so a valid minimal
+		// similarity result does not receive a spurious insufficient-pairs
+		// warning while an explicit override still wins.
+		const twoPairs = [pair('p1', 10, 20, 20, 40), pair('p2', 100, 30, 110, 50)];
+		const threePairs = [...twoPairs, pair('p3', 80, 240, 90, 260)];
+		const simTransform: SerializableTransform = {
+			model: 'similarity',
+			coefficients: [1, 0, 0, 1, 0, 0],
+			isInvertible: true,
+			determinant: 1,
+			orientation: 1,
+			majorAxisScale: 1,
+			minorAxisScale: 1,
+			anisotropy: 1,
+			shear: 0
+		};
+		const affineTransform: SerializableTransform = { ...simTransform, model: 'affine' };
+		expect(
+			validateTransform({ transform: simTransform, pairs: twoPairs }).some(
+				(warning) => warning.type === 'INSUFFICIENT_PAIRS'
+			)
+		).toBe(false);
+		expect(
+			validateTransform({ transform: affineTransform, pairs: threePairs }).some(
+				(warning) => warning.type === 'INSUFFICIENT_PAIRS'
+			)
+		).toBe(false);
+		expect(
+			validateTransform({ transform: affineTransform, pairs: twoPairs }).some(
+				(warning) => warning.type === 'INSUFFICIENT_PAIRS'
+			)
+		).toBe(true);
+		expect(
+			validateTransform({ transform: simTransform, pairs: twoPairs, minPairs: 3 }).some(
+				(warning) => warning.type === 'INSUFFICIENT_PAIRS'
+			)
+		).toBe(true);
 	});
 
 	it('residuals report per-pair vectors, aggregate metrics, maximum-pair identity, and affine distortion values', () => {
@@ -338,6 +377,16 @@ describe('P1-003 Map Alignment Math', () => {
 			maxPairId: null
 		});
 		expect(empty.pairs).toHaveLength(0);
+
+		// A nonempty exact fit still reports its maximum pair identity: every
+		// residual is zero, so the first pair in input order is the maximum.
+		const exact = calculateResiduals({
+			pairs: [pair('e1', 10, 20, 30, 60), pair('e2', 40, 50, 90, 120)],
+			transform
+		});
+		expect(exact.metrics.count).toBe(2);
+		expect(exact.metrics.maxDistance).toBe(0);
+		expect(exact.metrics.maxPairId).toBe('e1');
 
 		// Affine distortion derivation on a known sheared map.
 		const distortion = estimateAffine({

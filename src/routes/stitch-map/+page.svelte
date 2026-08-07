@@ -14,6 +14,7 @@
 		TILE_SLOTS,
 		ZERO_CROP,
 		cropSize,
+		expectedNeighbors,
 		initialPlacements,
 		readiness,
 		sessionDimensions,
@@ -23,9 +24,18 @@
 	import type { CropInsetField, CropInsets, TilePlacement, TileSlot } from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
 	import { smartImportFiles } from '$lib/stitch/smartImport';
-	import { diagnosticText, categoryLabel } from '$lib/stitch/diagnostics';
+	import { categoryLabel } from '$lib/stitch/diagnostics';
 	import type { LayoutDiagnostic } from '$lib/stitch/diagnostics';
 	import { requiresReplaceDecision } from '$lib/stitch/rerunGuard';
+	import {
+		smartImportViaWorker,
+		disposeSmartStitchWorker,
+		warmSmartStitchWorker
+	} from '$lib/stitch/smartImport';
+	import { DEFAULT_MAX_ANALYSIS_DIM, toAnalysisRaster } from '$lib/stitch/analysis';
+	import type { AnalysisRaster } from '$lib/stitch/analysis';
+	import { loadCv, snapAlign, warmMatchTemplate } from '$lib/stitch/cvMatch';
+	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
 	import type { ImageRole } from '$lib/domain/project';
@@ -119,6 +129,9 @@
 	let exportError = $state<string | null>(null);
 	let rendering = $state(false);
 
+	/** P1-002 1b: Snap is now async (backed by `cvMatch`'s matcher); busy while a call is in flight. */
+	let snapBusy = $state(false);
+
 	/** P1-001 smart-import state: transient, never durable. */
 	let smartImportBusy = $state(false);
 	let smartImportError = $state<string | null>(null);
@@ -151,6 +164,18 @@
 	const canExport = $derived(
 		report.ready && !rendering && invalidCropFields.length === 0
 	);
+	/**
+	 * Snap assist availability: a selected, loaded movable tile with a valid
+	 * shared crop and at least one loaded expected neighbor to match against,
+	 * and no Snap call already in flight.
+	 */
+	const snapAvailable = $derived.by(() => {
+		const slot = selectedSlot;
+		if (snapBusy) return false;
+		if (!slot || !MOVABLE_SLOTS.includes(slot) || !tiles[slot] || !placements[slot]) return false;
+		if (!croppedValidation?.ok) return false;
+		return expectedNeighbors(slot).some((neighbor) => Boolean(tiles[neighbor]));
+	});
 
 	/** The union of all loaded cropped tile rectangles; the alignment fit target. */
 	function alignmentFitTarget(): ViewportFitTarget | null {
@@ -388,8 +413,10 @@
 	 * placements, confidence, and the summary as one coherent session
 	 * replacement so a failure never damages the current valid session. A newer
 	 * selection/reset/unmount invalidates the batch; a stale result publishes
-	 * nothing. An `uncertain` diagnostic still loads every decoded file into the
-	 * manual starting layout rather than discarding or blocking.
+	 * nothing. The computed placements always commit, even when the diagnostic
+	 * flags a `review` warning: the automatic arrangement is the best evidence
+	 * available and is never discarded in favor of a neutral manual layout, so
+	 * a warning is guidance for review, not a reason to withhold correct output.
 	 */
 	async function runSmartImport(files: File[]): Promise<void> {
 		const generation = decodeCoordinator.begin(SMART_IMPORT_BATCH);
@@ -401,7 +428,7 @@
 		smartImportBusy = true;
 		statusMessage = `Analyzing ${files.length} screenshots…`;
 		try {
-			const result = await smartImportFiles(files, {
+			const result = await smartImportViaWorker(files, {
 				isCurrent: () => decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)
 			});
 			if (!result.ok) {
@@ -428,14 +455,10 @@
 				};
 				nextSummary[slot] = tile.fileName;
 			}
-			const firstTile = result.tiles[0];
-			// A coherent best attempt loads with its inferred placements; an
-			// uncertain result loads every file into the neutral manual starting
-			// layout so the user corrects it instead of being blocked.
-			const nextPlacements =
-				result.diagnostic.category === 'uncertain'
-					? initialPlacements(firstTile.widthPx, firstTile.heightPx)
-					: result.placements;
+			// The computed placements always commit — the automatic arrangement is
+			// the best evidence available and is never discarded in favor of a
+			// neutral manual layout, even when the diagnostic flags a warning.
+			const nextPlacements = result.placements;
 			// One coherent session replacement, not staggered slot mutations.
 			tiles = nextTiles;
 			tileErrors = {};
@@ -451,16 +474,11 @@
 			cropProposalConfidence = result.crop.confidence;
 			alignmentVp.fit();
 			const order = TILE_SLOTS.map((slot) => `${SLOT_LABELS[slot]}: ${nextSummary[slot]}`).join(', ');
-			const { label, warnings } = diagnosticText(result.diagnostic);
-			if (result.diagnostic.category === 'uncertain') {
-				statusMessage = `Automatic arrangement was uncertain — manual correction required. All four screenshots were loaded into the manual starting layout.${
-					warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
-				}`;
-			} else {
-				statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
-					warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
-				} Manual correction remains available.`;
-			}
+			const label = categoryLabel(result.diagnostic.category);
+			const warnings = result.diagnostic.warnings;
+			statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
+				warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
+			} Manual correction remains available.`;
 		} finally {
 			smartImportBusy = false;
 		}
@@ -648,6 +666,82 @@
 	}
 
 	/**
+	 * Builds one Snap raster from a tile's current crop interior, at the
+	 * standard full-resolution matcher raster size (P1-002 1b): Snap's old
+	 * 512px-capped raster was the root of a real quantization/directional
+	 * tie-break bug (see `cvMatch.ts`'s module doc comment). The same shared
+	 * insets apply to every tile, so relative geometry is unchanged and Snap
+	 * matches what is actually visible, not hidden chrome; a ZERO_CROP session
+	 * uses the full frame automatically.
+	 */
+	function buildSnapRaster(
+		tile: StitchTile,
+		validation: { widthPx: number; heightPx: number }
+	): AnalysisRaster {
+		return toAnalysisRaster(tile.image, DEFAULT_MAX_ANALYSIS_DIM, {
+			x: crop.leftPx,
+			y: crop.topPx,
+			width: validation.widthPx,
+			height: validation.heightPx
+		});
+	}
+
+	/**
+	 * Manual-correction "Snap" assist (P1-002 1b): once the selected tile is
+	 * roughly in place (drag/nudge, or the automatic reconciled placement), a
+	 * bounded local search locks it to the best nearby offset against its
+	 * loaded expected neighbor(s) — a tile with two neighbors is snapped to the
+	 * single position that best satisfies both at once. Backed by `cvMatch.ts`'s
+	 * proven `matchTemplate` matcher (`snapAlign`/`matchTranslationNear`), the
+	 * same one that does the automatic four-tile assignment — no separate
+	 * scoring function. Async because the matcher is; `snapBusy` disables the
+	 * control for the duration so a click gets feedback instead of an apparent
+	 * no-op. Commits through `updatePlacement` — the one mutation point
+	 * drag/nudge/numeric input already use — so position-draft sync and the
+	 * re-run guard's replace-confirmation diff pick it up with no
+	 * special-casing.
+	 */
+	async function snapSelectedTile(): Promise<void> {
+		const slot = selectedSlot;
+		if (!slot || !MOVABLE_SLOTS.includes(slot)) return;
+		const tile = tiles[slot];
+		const placement = placements[slot];
+		const validation = croppedValidation;
+		if (!tile || !placement || !validation?.ok) return;
+		const neighbors: SnapNeighbor[] = [];
+		for (const neighborSlot of expectedNeighbors(slot)) {
+			const neighborTile = tiles[neighborSlot];
+			const neighborPlacement = placements[neighborSlot];
+			if (!neighborTile || !neighborPlacement) continue;
+			neighbors.push({
+				raster: buildSnapRaster(neighborTile, validation),
+				xPx: neighborPlacement.xPx,
+				yPx: neighborPlacement.yPx
+			});
+		}
+		if (neighbors.length === 0) return;
+		snapBusy = true;
+		statusMessage = `Snapping ${SLOT_LABELS[slot]}…`;
+		try {
+			const result = await snapAlign(
+				buildSnapRaster(tile, validation),
+				neighbors,
+				placement.xPx,
+				placement.yPx
+			);
+			// The selection or its tile may have changed while the match ran;
+			// never commit a stale result onto a different tile.
+			if (selectedSlot !== slot || !tiles[slot]) return;
+			updatePlacement(slot, result.xPx, result.yPx);
+			statusMessage = `${SLOT_LABELS[slot]} snapped to the best nearby match against ${
+				neighbors.length > 1 ? 'its neighbors' : 'its neighbor'
+			} (match strength ${Math.round(result.score * 100)}%).`;
+		} finally {
+			snapBusy = false;
+		}
+	}
+
+	/**
 	 * Alignment gesture arbitration (shared viewport claim): a pointer that begins
 	 * inside the currently selected, visible, movable tile claims the gesture for
 	 * tile movement — even when other tiles cover the point. Everything else is
@@ -824,11 +918,19 @@
 		}
 	}
 
+	function handoffDestination(role: ImageRole): string {
+		return role === 'source-overview' ? '/annotate-round' : '/create-graphics';
+	}
+
+	function handoffDestinationName(role: ImageRole): string {
+		return role === 'source-overview' ? 'Annotate Round' : 'Create Graphics';
+	}
+
 	function handleUseAs(role: ImageRole): void {
 		if (!canExport) return;
-		if (getPendingHandoff()) {
-			statusMessage =
-				'A stitched image is already awaiting import in Spot Round. Import or dismiss it before creating another handoff.';
+		const existing = getPendingHandoff();
+		if (existing) {
+			statusMessage = `A stitched image is already awaiting import in ${handoffDestinationName(existing.targetRole)}. Import or dismiss it before creating another handoff.`;
 			return;
 		}
 		void runHandoff(role);
@@ -840,8 +942,8 @@
 		try {
 			const blob = await renderStitchedPng(exportTiles(), crop);
 			setPendingHandoff({ blob, fileName: stitchedFileName(exportTiles()), targetRole: role });
-			statusMessage = 'Stitched image handed to Spot Round.';
-			await goto('/spot-round');
+			statusMessage = `Stitched image handed to ${handoffDestinationName(role)}.`;
+			await goto(handoffDestination(role));
 		} catch (error) {
 			exportError = error instanceof Error ? error.message : 'Could not render the stitched image.';
 		} finally {
@@ -1146,9 +1248,36 @@
 		}
 	});
 
+	/**
+	 * Eager OpenCV warm-up (P1-002 1b, extended 1c), deliberately simple: fire
+	 * off both loads on mount, non-blocking, and let each cache its own promise
+	 * for later real use (`loadCv()` on the main thread for Snap;
+	 * `warmSmartStitchWorker()` constructs the worker so its own module-scope
+	 * `loadCv()` call fires there too). Two independent ~15MB loads, one per
+	 * thread — not sharing one instance between realms is intentional (see
+	 * `cvMatch.ts`'s module doc comment and the roadmap's P1-002 1b notes), not
+	 * an oversight. Neither call is awaited: nothing here blocks rendering, and
+	 * a real Snap or smart-import call later simply awaits the by-then-likely-
+	 * already-resolved cached promise instead of paying the cold-load cost
+	 * itself.
+	 *
+	 * Once `loadCv()` resolves, `warmMatchTemplate` runs one throwaway
+	 * `matchTemplate` call so that if this thread's first real call carries any
+	 * one-time compile/lazy-init cost on top of the module load, it is paid
+	 * here, during this same idle warm-up window, instead of on the user's
+	 * first real Snap click (see `cvMatch.ts`'s `warmMatchTemplate` doc comment
+	 * for what this session's own re-measurement did and did not confirm).
+	 */
+	$effect(() => {
+		void loadCv().then((cv) => warmMatchTemplate(cv));
+		warmSmartStitchWorker();
+	});
+
 	onDestroy(() => {
-		// An in-flight smart-import batch must never publish after unmount.
+		// An in-flight smart-import batch must never publish after unmount, and
+		// the page no longer owns the smart-stitch worker once it is gone.
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
+		disposeSmartStitchWorker();
 		endTileDrag();
 		alignmentStage?.destroy();
 		alignmentStage = null;
@@ -1232,8 +1361,8 @@
 					data-testid="smart-import-warnings"
 					aria-label="Automatic arrangement warnings"
 				>
-					{#each smartImportDiagnostic.warnings as warning (warning.kind)}
-						<li data-testid={`smart-import-warning-${warning.kind}`}>{warning.message}</li>
+					{#each smartImportDiagnostic.warnings as warning, index (warning)}
+						<li data-testid={`smart-import-warning-${index}`}>{warning}</li>
 					{/each}
 				</ul>
 			{/if}
@@ -1326,7 +1455,9 @@
 		<p id="alignment-help" class="alignment-help">
 			Select a movable tile, then use the arrow keys to adjust it. Hold Shift to move 10
 			pixels. Click an exposed tile region to select it; drag the selected tile to move it.
-			Drag the background to pan and scroll to zoom; Fit restores the full view.
+			Once a tile is roughly in place, Snap selected tile locks it to the best nearby match
+			against its expected neighbor tiles. Drag the background to pan and scroll to zoom; Fit
+			restores the full view.
 		</p>
 		<div class="alignment-controls">
 			{#each MOVABLE_SLOTS as slot (slot)}
@@ -1405,6 +1536,17 @@
 			>
 				Reset arrangement
 			</button>
+			<button
+				type="button"
+				data-testid="snap-tile"
+				disabled={!snapAvailable}
+				onclick={() => void snapSelectedTile()}
+			>
+				Snap selected tile
+			</button>
+			{#if snapBusy}
+				<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
+			{/if}
 		</div>
 		<!-- The alignment workspace is a deliberate keyboard-operable region (P05-002):
 			role="group", a real focus target for the scoped Arrow-key nudge handler,

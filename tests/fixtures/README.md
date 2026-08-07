@@ -33,14 +33,20 @@ per shared edge), below ChainSpot's intended 20-30%. Every pairwise match is
 still credible, so the best attempt loads, but classification reports a
 **weak horizontal/vertical overlap** review warning instead of strong.
 
-### `smart-import/incompatible/` (P1-002)
+### `smart-import/incompatible/` (P1-002, redefined in the fifth round)
 
-An internally contradictory capture: every pairwise match is credible, but the
-lower-right tile is displaced 10px vertically, so the two redundant lower-right
-paths disagree (~20px) and the vertical step is inconsistent. Classification is
-**uncertain** with **contradictory lower-right position** and **mixed zoom**
-warnings, and the four files load into the manual starting layout without
-claiming success.
+A weak-corner capture: the top and left edges keep the documented 25%
+overlap (so the correct 2x2 assignment still wins clearly), but the
+lower-right corner overlaps only 15% with both its neighbors, below
+ChainSpot's intended 20-30% band. Every pairwise match is still credible
+content, so classification reports **weak horizontal/vertical overlap** plus
+**ambiguous or repeated imagery** (the reduced separation from the weaker
+corner) and lands **uncertain**; the four files load into the manual starting
+layout without claiming success. (This set previously used a deliberately
+irregular, non-rectangular grid on the premise that inconsistent per-pair
+overlap was itself a defect — removed because a real hand-held capture never
+overlaps identically on every edge, which was the bug being fixed, not a case
+worth a fixture.)
 
 ### `smart-import-large/` (P1-002, generated on demand)
 

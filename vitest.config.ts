@@ -7,7 +7,8 @@ export default defineConfig({
 	resolve: {
 		conditions: ['browser'],
 		alias: {
-			$lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+			'$app/navigation': fileURLToPath(new URL('./tests/mocks/appNavigation.ts', import.meta.url))
 		}
 	},
 	test: {

@@ -5,7 +5,7 @@ import { ProjectEditor } from '../../src/lib/domain/editor';
 import { defaultFitTransform, resizeViewTransform } from '../../src/lib/navigation';
 import { screenToImage } from '../../src/lib/coords';
 import { intakeImageFile } from '../../src/lib/imageIntake';
-import Page from '../../src/routes/spot-round/+page.svelte';
+import Page from '../../src/routes/create-graphics/+page.svelte';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
 import type { ViewTransformState } from '../../src/lib/coords';
 

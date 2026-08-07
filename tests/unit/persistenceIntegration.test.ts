@@ -6,7 +6,7 @@ import { createProjectState } from '../../src/lib/domain/project';
 import { intakeImageFile, sha256Hex } from '../../src/lib/imageIntake';
 import type { DecodeImageFile, HashBytes } from '../../src/lib/imageIntake';
 import { createProjectBundle } from '../../src/lib/persistence';
-import Page from '../../src/routes/spot-round/+page.svelte';
+import Page from '../../src/routes/create-graphics/+page.svelte';
 import type { DownloadBlob } from '../../src/lib/persistence';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');

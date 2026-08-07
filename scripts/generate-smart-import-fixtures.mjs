@@ -93,14 +93,21 @@ const WEAK_ORIGINS = {
 };
 writeTiles(join(fixturesDir, 'weak'), (slot) => buildGrayRaster(slot, { origin: WEAK_ORIGINS[slot] }), 'weak');
 
-// Incompatible set (P1-002): every pairwise match is credible, but the
-// lower-right tile is displaced so the redundant lower-right paths disagree and
-// the vertical step is inconsistent -> contradictory lower-right + mixed zoom.
+// Incompatible set (P1-002, redefined in the fifth round): the top and left
+// edges keep the documented 25% overlap (so the correct 2x2 assignment still
+// wins clearly), but the lower-right corner overlaps only 15% with both its
+// neighbors, well below ChainSpot's intended 20-30% band. Every pairwise
+// match is still credible content, so classification reports weak overlap
+// plus ambiguity from the reduced separation and lands uncertain. This used
+// to be a deliberately irregular (non-rectangular) grid instead, on the
+// premise that inconsistent per-pair overlap was itself a defect — but a real
+// hand-held capture never overlaps identically on every edge, so that was the
+// bug being fixed, not a case worth a fixture.
 const INCOMPATIBLE_ORIGINS = {
 	'upper-left': { x: 0, y: 0 },
 	'upper-right': { x: SLOT_ORIGINS['upper-right'].x, y: 0 },
 	'lower-left': { x: 0, y: SLOT_ORIGINS['lower-left'].y },
-	'lower-right': { x: SLOT_ORIGINS['lower-right'].x, y: SLOT_ORIGINS['lower-right'].y - 10 }
+	'lower-right': { x: 170, y: 170 }
 };
 writeTiles(join(fixturesDir, 'incompatible'), (slot) =>
 	buildGrayRaster(slot, { origin: INCOMPATIBLE_ORIGINS[slot] })

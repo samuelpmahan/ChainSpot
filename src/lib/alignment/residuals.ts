@@ -77,10 +77,12 @@ function computeMetrics(residuals: readonly ResidualPair[]): ResidualMetrics {
 
 	// Deterministic "first maximum wins" identity lookup: the maximum
 	// distance itself comes from the sorted list; the pair ID is the first
-	// pair in input order achieving it.
-	let maxDistance = 0;
-	let maxPairId: string | null = null;
-	for (const residual of residuals) {
+	// pair in input order achieving it. Initialized from the first residual so
+	// a nonempty exact fit (every distance 0) still reports its max pair.
+	let maxDistance = residuals[0].distance;
+	let maxPairId = residuals[0].pairId;
+	for (let i = 1; i < residuals.length; i += 1) {
+		const residual = residuals[i];
 		if (residual.distance > maxDistance) {
 			maxDistance = residual.distance;
 			maxPairId = residual.pairId;

@@ -1,7 +1,7 @@
 import Konva from 'konva';
 import { mount, unmount } from 'svelte';
 import { describe, expect, it } from 'vitest';
-import Page from '../../src/routes/spot-round/+page.svelte';
+import Page from '../../src/routes/create-graphics/+page.svelte';
 
 describe('application foundation smoke', () => {
 	it('imports Konva without a browser context', () => {

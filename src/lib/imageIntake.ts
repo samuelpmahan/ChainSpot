@@ -6,9 +6,9 @@
  *
  * Pipeline:
  * 1. MIME validation (PNG/JPEG only) before any decoding.
- * 2. Browser-native decode of the candidate (object URL + `Image.decode()`). The
- *    object URL is revoked immediately after successful or failed decoding, once the
- *    decoded image no longer depends on it.
+ * 2. Browser-native decode of the candidate (object URL + the image `load`/`error`
+ *    events). The object URL is revoked immediately after successful or failed
+ *    decoding, once the decoded image no longer depends on it.
  * 3. Non-zero intrinsic-dimension validation.
  * 4. Domain mutation through `ProjectEditor` only:
  *    - first image for a role: `assignImage`;
@@ -134,9 +134,17 @@ export interface DecodeEnvironment {
 }
 
 /**
- * Browser-native decoding via an object URL and `Image.decode()`. The object URL is
- * revoked in `finally`, immediately after the decode settles, because the decoded
- * image no longer depends on the URL afterwards.
+ * Browser-native decoding via an object URL and the image's `load`/`error` events.
+ * The object URL is revoked in `finally`, immediately after loading settles, because
+ * the decoded image no longer depends on the URL afterwards.
+ *
+ * Deliberately does not use `HTMLImageElement.decode()`: that API's promise is tied
+ * to the rendering pipeline and can stay pending indefinitely while the document is
+ * not visible (backgrounded/hidden tab) — confirmed to hang forever, even for a
+ * trivial sub-1KB PNG, in that condition. The `load` event has no such dependency:
+ * it fires as soon as the image data is fetched and its intrinsic dimensions are
+ * known, which is all this function needs, and has been the standard way to await
+ * image readiness for decades.
  */
 export async function decodeImageFile(file: File): Promise<DecodedImage> {
 	return decodeImageFileWith(file, {
@@ -154,8 +162,11 @@ export async function decodeImageFileWith(
 	const url = env.createObjectUrl(file);
 	const image = new env.ImageConstructor();
 	try {
-		image.src = url;
-		await image.decode();
+		await new Promise<void>((resolve, reject) => {
+			image.onload = () => resolve();
+			image.onerror = () => reject(new Error(`Could not load image data for "${file.name}".`));
+			image.src = url;
+		});
 		return { image, widthPx: image.naturalWidth, heightPx: image.naturalHeight };
 	} finally {
 		env.revokeObjectUrl(url);

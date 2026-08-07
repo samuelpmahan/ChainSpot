@@ -8,15 +8,71 @@
  * lower-right); the strongest globally consistent assignment wins. Ties resolve
  * to the earliest permutation in lexicographic order (a documented stable rule).
  *
- * The upper-left tile anchors at (0, 0) and the other three receive integer
- * translation-only placements. The lower-right placement is reconciled from the
- * two redundant paths (down the right column and across the bottom row) rather
- * than trusting a single edge.
+ * The upper-left tile anchors at (0, 0). Upper-right and lower-left each take
+ * their own directly measured pairwise offset as-is: a real hand-held capture
+ * has no reason to overlap identically on every edge, so one edge's
+ * measurement is never adjusted to make another edge's measurement "fit" a
+ * rectangle. Lower-right has no direct measurement against the anchor, so its
+ * placement genuinely does combine two independent measurements of the same
+ * point (`reconcilePlacements`) — via upper-right, and via lower-left — which
+ * is ordinary two-measurement averaging, not a grid-consistency assumption.
+ *
+ * Pairwise translation estimates come from `cvMatch.matchTranslation`
+ * (OpenCV `matchTemplate`), asynchronously, in two qualities:
+ *
+ * 1. `'coarse'` for every ordered pair's both orientation hypotheses (12
+ *    ordered pairs x 2 orientations = 24 evaluations) — cheap enough to score
+ *    all 24 permutations of the 2x2 assignment.
+ * 2. `'refine'` for just the four edges the winning assignment actually
+ *    commits as placements — exact pixels, paid for only where it matters.
+ *
+ * This is the same coarse-then-fine split `cvMatch.ts` documents for a single
+ * pair, applied one level up: coarse to choose *which* four edges win, refine
+ * to place them precisely.
  */
-import { estimatePair } from './analysis';
-import type { AnalysisRaster, PairEstimate } from './analysis';
+import { matchTranslation } from './cvMatch';
+import type { MatchMode } from './cvMatch';
+import type { AnalysisRaster, PairEstimate, PairEstimates, PairOrientation } from './analysis';
 import { TILE_SLOTS } from './geometry';
 import type { TilePlacement, TileSlot } from './geometry';
+
+/**
+ * Runs both orientation hypotheses of one ordered pair through `cvMatch` at
+ * the given mode and assembles them into the `PairEstimates` shape the
+ * assignment/diagnostics code shares with the old matcher. `overlapFraction`
+ * is renamed to `overlapFractionPx` here only because that is the field name
+ * `PairEstimate` already committed to; both are the same fraction-of-tile
+ * quantity.
+ */
+async function estimatePairBothCv(
+	a: AnalysisRaster,
+	b: AnalysisRaster,
+	mode: MatchMode
+): Promise<PairEstimates> {
+	const horizontalMatch = await matchTranslation(a, b, 'left-right', { mode });
+	const verticalMatch = await matchTranslation(a, b, 'top-bottom', { mode });
+	const horizontal = toPairEstimate('left-right', horizontalMatch);
+	const vertical = toPairEstimate('top-bottom', verticalMatch);
+	return {
+		'left-right': horizontal,
+		'top-bottom': vertical,
+		orientation: horizontal.score >= vertical.score ? 'left-right' : 'top-bottom'
+	};
+}
+
+function toPairEstimate(
+	orientation: PairOrientation,
+	match: Awaited<ReturnType<typeof matchTranslation>>
+): PairEstimate {
+	return {
+		orientation,
+		dxPx: match.dxPx,
+		dyPx: match.dyPx,
+		score: match.score,
+		overlapFractionPx: match.overlapFraction,
+		runnerUpScore: match.runnerUpScore
+	};
+}
 
 export interface AutoLayout {
 	/** slot -> file index (into the caller's raster/file ordering). */
@@ -24,32 +80,15 @@ export interface AutoLayout {
 	readonly placements: Record<TileSlot, TilePlacement>;
 	/** Sum of the four expected-neighbor scores of the winning assignment. */
 	readonly score: number;
-	/** Second-best assignment score; separation feeds P1-002 confidence. */
-	readonly runnerUpScore: number;
-	readonly separation: number;
-	/** Per-edge scores of the winning assignment, keyed `from>to` slots. */
-	readonly edgeScores: Readonly<Record<string, number>>;
 	/**
-	 * Every directed pair estimate keyed `fileIndex>fileIndex` in the original
-	 * raster ordering. Raw evidence P1-002 diagnostics consume; never persisted.
+	 * Every directed pair's two orientation-specific estimates keyed
+	 * `fileIndex>fileIndex` in the original raster ordering. Raw evidence P1-002
+	 * diagnostics consume; never persisted. An expected edge is always scored
+	 * with the hypothesis matching its required orientation, so a winning
+	 * hypothesis that points the other way is visible as a mismatch rather than
+	 * being silently committed.
 	 */
-	readonly estimates: Readonly<Record<string, PairEstimate>>;
-	/**
-	 * The lower-right placement as implied by each redundant path and how far
-	 * those paths disagree (P1-002 consistency evidence).
-	 */
-	readonly lowerRightPaths: {
-		readonly viaRight: { readonly xPx: number; readonly yPx: number };
-		readonly viaBottom: { readonly xPx: number; readonly yPx: number };
-		readonly deltaPx: number;
-	};
-	/**
-	 * Translation-consistency evidence across the grid: how much the top-row and
-	 * bottom-row horizontal steps disagree (`rowDeltaPx`) and how much the
-	 * left-column and right-column vertical steps disagree (`columnDeltaPx`).
-	 * Large deltas indicate mixed zoom or a capture that is not one coherent 2×2.
-	 */
-	readonly steps: { readonly rowDeltaPx: number; readonly columnDeltaPx: number };
+	readonly estimates: Readonly<Record<string, PairEstimates>>;
 }
 
 interface ExpectedEdge {
@@ -65,11 +104,52 @@ const EXPECTED_EDGES: readonly ExpectedEdge[] = [
 	{ from: 'lower-left', to: 'lower-right', orientation: 'left-right' }
 ];
 
-/** An edge whose estimate orientation disagrees with the expected geometry. */
-const ORIENTATION_MISMATCH_PENALTY = 0.5;
-
 function pairKey(from: number, to: number): string {
 	return `${from}>${to}`;
+}
+
+export interface ReconciledPlacements {
+	readonly upperRight: { readonly xPx: number; readonly yPx: number };
+	readonly lowerLeft: { readonly xPx: number; readonly yPx: number };
+	readonly lowerRight: { readonly xPx: number; readonly yPx: number };
+}
+
+/**
+ * Places the three non-anchor tiles independently, each from its own directly
+ * measured evidence. Upper-right and lower-left take their single
+ * expected-neighbor measurement (`ulur`, `ulll`) exactly as measured: a real
+ * hand-held capture has no reason to overlap identically on every edge, so one
+ * edge's measurement must never be adjusted just to make a different edge's
+ * measurement agree with it (a previous version of this function did exactly
+ * that, blending all four edges together under a rigid-rectangle assumption —
+ * removed because real captures routinely and legitimately disagree).
+ *
+ * Lower-right has no direct measurement against the upper-left anchor, so it
+ * is the one point that genuinely requires combining two independent
+ * measurements of the same location: the position implied via upper-right
+ * (`urlr`) and via lower-left (`llr`). Averaging those two paths is ordinary
+ * two-measurement fusion for an otherwise-unmeasured point, not a
+ * grid-consistency assumption — it says nothing about whether the top and
+ * bottom rows agree.
+ */
+export function reconcilePlacements(
+	ulur: PairEstimate,
+	ulll: PairEstimate,
+	urlr: PairEstimate,
+	llr: PairEstimate
+): ReconciledPlacements {
+	const upperRight = { xPx: ulur.dxPx, yPx: ulur.dyPx };
+	const lowerLeft = { xPx: ulll.dxPx, yPx: ulll.dyPx };
+	const viaRight = { xPx: upperRight.xPx + urlr.dxPx, yPx: upperRight.yPx + urlr.dyPx };
+	const viaBottom = { xPx: lowerLeft.xPx + llr.dxPx, yPx: lowerLeft.yPx + llr.dyPx };
+	return {
+		upperRight,
+		lowerLeft,
+		lowerRight: {
+			xPx: Math.round((viaRight.xPx + viaBottom.xPx) / 2),
+			yPx: Math.round((viaRight.yPx + viaBottom.yPx) / 2)
+		}
+	};
 }
 
 /** All 24 permutations of the four file indices in lexicographic order. */
@@ -94,66 +174,60 @@ function permutations(): readonly (readonly [number, number, number, number])[] 
 
 /**
  * Scores one assignment: the sum of its four expected-neighbor directed pair
- * scores, applying the mismatch penalty when an edge's estimate is not in the
- * expected orientation.
+ * scores, each read from the hypothesis matching the edge's required
+ * orientation. A winner pointing the other way is never rewarded; it simply
+ * contributes its (typically poor) required-orientation score and is surfaced
+ * by P1-002's direction-mismatch diagnostic.
  */
 function scoreAssignment(
 	ordered: readonly [number, number, number, number],
-	estimates: ReadonlyMap<string, PairEstimate>
-): { score: number; edgeScores: Record<string, number> } {
+	estimates: ReadonlyMap<string, PairEstimates>
+): number {
 	const slotOf: Record<TileSlot, number> = {
 		'upper-left': ordered[0],
 		'upper-right': ordered[1],
 		'lower-left': ordered[2],
 		'lower-right': ordered[3]
 	};
-	const edgeScores: Record<string, number> = {};
 	let score = 0;
 	for (const edge of EXPECTED_EDGES) {
 		const from = slotOf[edge.from];
 		const to = slotOf[edge.to];
-		const estimate = estimates.get(pairKey(from, to));
-		const base = estimate ? estimate.score : 0;
-		const edgeScore = estimate && estimate.orientation === edge.orientation ? base : base * ORIENTATION_MISMATCH_PENALTY;
-		edgeScores[`${edge.from}>${edge.to}`] = edgeScore;
-		score += edgeScore;
+		const estimate = estimates.get(pairKey(from, to))?.[edge.orientation];
+		score += estimate ? estimate.score : 0;
 	}
-	return { score, edgeScores };
+	return score;
 }
 
 /**
  * Assigns the four rasters to 2×2 slots and produces integer translation-only
  * placements, anchoring the inferred upper-left tile at (0, 0).
+ *
+ * Two-quality strategy (see the module doc comment): every ordered pair's both
+ * orientations are matched at `'coarse'` first, cheaply enough to score all 24
+ * permutations; only the four edges the winner actually commits are then
+ * re-matched at `'refine'` for exact pixels.
  */
-export function assignFour(
-	rasters: readonly AnalysisRaster[],
-	options?: Parameters<typeof estimatePair>[2]
-): AutoLayout {
+export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
 	if (rasters.length !== 4) {
 		throw new Error(`assignFour: expected exactly four rasters, got ${rasters.length}`);
 	}
 
-	const estimates = new Map<string, PairEstimate>();
+	const estimates = new Map<string, PairEstimates>();
 	for (let i = 0; i < rasters.length; i += 1) {
 		for (let j = 0; j < rasters.length; j += 1) {
 			if (i === j) continue;
-			estimates.set(pairKey(i, j), estimatePair(rasters[i], rasters[j], options));
+			estimates.set(pairKey(i, j), await estimatePairBothCv(rasters[i], rasters[j], 'coarse'));
 		}
 	}
 
 	let best: readonly [number, number, number, number] | null = null;
 	let bestScore = -Infinity;
-	let runnerUpScore = -Infinity;
-	let bestEdgeScores: Record<string, number> = {};
 	for (const ordered of permutations()) {
-		const { score, edgeScores } = scoreAssignment(ordered, estimates);
+		const score = scoreAssignment(ordered, estimates);
 		if (score > bestScore) {
-			runnerUpScore = bestScore;
 			bestScore = score;
 			best = ordered;
-			bestEdgeScores = edgeScores;
-		} else if (score > runnerUpScore) {
-			runnerUpScore = score;
 		}
 	}
 	if (!best) {
@@ -166,54 +240,72 @@ export function assignFour(
 		'lower-left': best[2],
 		'lower-right': best[3]
 	};
-	const ulur = estimates.get(pairKey(slotOf['upper-left'], slotOf['upper-right']));
-	const ulll = estimates.get(pairKey(slotOf['upper-left'], slotOf['lower-left']));
-	const urlr = estimates.get(pairKey(slotOf['upper-right'], slotOf['lower-right']));
-	const llr = estimates.get(pairKey(slotOf['lower-left'], slotOf['lower-right']));
+
+	// Refine only the four edges the winning assignment actually commits: the
+	// 24-permutation scoring above only ever needed to know *which* assignment
+	// wins, not exact pixels, so it ran entirely at 'coarse'. Now that the
+	// winner is fixed, its four edges are re-matched at 'refine' for the exact
+	// placement pixels. The pair's *other* orientation (not required by this
+	// edge) is left at its already-computed coarse value — recomputing it at
+	// full cost would only ever feed the direction-mismatch check below, and a
+	// coarse estimate is already sufficient signal for "does the other
+	// direction score competitively" without paying for a second refine pass
+	// per edge.
+	for (const edge of EXPECTED_EDGES) {
+		const from = slotOf[edge.from];
+		const to = slotOf[edge.to];
+		const key = pairKey(from, to);
+		const coarse = estimates.get(key);
+		if (!coarse) continue;
+		const refinedMatch = await matchTranslation(rasters[from], rasters[to], edge.orientation, {
+			mode: 'refine'
+		});
+		const refined = toPairEstimate(edge.orientation, refinedMatch);
+		const otherOrientation: PairOrientation =
+			edge.orientation === 'left-right' ? 'top-bottom' : 'left-right';
+		const other = coarse[otherOrientation];
+		estimates.set(key, {
+			'left-right': edge.orientation === 'left-right' ? refined : other,
+			'top-bottom': edge.orientation === 'top-bottom' ? refined : other,
+			orientation: refined.score >= other.score ? edge.orientation : otherOrientation
+		});
+	}
+
+	// The permutation-scoring loop above only ever compared assignments at
+	// 'coarse' quality. Re-derive the winner's own score from the now-refined
+	// estimates so `layout.score` (which diagnostics thresholds against)
+	// reflects the same exact-pixel evidence the placements themselves use, not
+	// the coarse approximation that merely picked the winner.
+	bestScore = scoreAssignment(best, estimates);
+
+	// Each expected edge is placed from the hypothesis matching its required
+	// orientation, so a winning hypothesis that points the other way can never
+	// become the actual placement of the edge.
+	const ulur = estimates.get(pairKey(slotOf['upper-left'], slotOf['upper-right']))?.['left-right'];
+	const ulll = estimates.get(pairKey(slotOf['upper-left'], slotOf['lower-left']))?.['top-bottom'];
+	const urlr = estimates.get(pairKey(slotOf['upper-right'], slotOf['lower-right']))?.['top-bottom'];
+	const llr = estimates.get(pairKey(slotOf['lower-left'], slotOf['lower-right']))?.['left-right'];
 	if (!ulur || !ulll || !urlr || !llr) {
 		throw new Error('assignFour: missing directed edge estimate');
 	}
 
-	const upperRight = { xPx: ulur.dxPx, yPx: ulur.dyPx };
-	const lowerLeft = { xPx: ulll.dxPx, yPx: ulll.dyPx };
-	// Two redundant paths to the lower-right: down the right column from
-	// upper-right, and across the bottom row from lower-left. Reconcile by
-	// averaging the two coordinates (rounded to integers), and expose how far the
-	// two paths disagreed so P1-002 can detect a contradictory lower-right.
-	const viaRight = { xPx: upperRight.xPx + urlr.dxPx, yPx: upperRight.yPx + urlr.dyPx };
-	const viaBottom = { xPx: lowerLeft.xPx + llr.dxPx, yPx: lowerLeft.yPx + llr.dyPx };
-	const lowerRight = {
-		xPx: Math.round((viaRight.xPx + viaBottom.xPx) / 2),
-		yPx: Math.round((viaRight.yPx + viaBottom.yPx) / 2)
-	};
-	const lowerRightPaths = {
-		viaRight,
-		viaBottom,
-		deltaPx: Math.max(
-			Math.abs(viaRight.xPx - viaBottom.xPx),
-			Math.abs(viaRight.yPx - viaBottom.yPx)
-		)
-	};
-	// Horizontal step along the top row must match the bottom row, and the
-	// vertical step down the left column must match the right column, for the
-	// capture to be one coherent same-zoom 2×2 grid.
-	const steps = {
-		rowDeltaPx: Math.abs(ulur.dxPx - llr.dxPx),
-		columnDeltaPx: Math.abs(ulll.dyPx - urlr.dyPx)
-	};
+	// Each non-anchor tile is placed independently from its own evidence; see
+	// `reconcilePlacements` for why lower-right is the sole exception that
+	// combines two measurements.
+	const reconciled = reconcilePlacements(ulur, ulll, urlr, llr);
 
 	const placements: Record<TileSlot, TilePlacement> = {
 		'upper-left': { xPx: 0, yPx: 0, visible: true },
-		'upper-right': { xPx: upperRight.xPx, yPx: upperRight.yPx, visible: true },
-		'lower-left': { xPx: lowerLeft.xPx, yPx: lowerLeft.yPx, visible: true },
-		'lower-right': { xPx: lowerRight.xPx, yPx: lowerRight.yPx, visible: true }
+		'upper-right': { ...reconciled.upperRight, visible: true },
+		'lower-left': { ...reconciled.lowerLeft, visible: true },
+		'lower-right': { ...reconciled.lowerRight, visible: true }
 	};
 
 	const assignment = Object.fromEntries(
 		TILE_SLOTS.map((slot) => [slot, slotOf[slot]])
 	) as Record<TileSlot, number>;
 
-	const estimatesRecord: Record<string, PairEstimate> = {};
+	const estimatesRecord: Record<string, PairEstimates> = {};
 	for (const [key, value] of estimates) {
 		estimatesRecord[key] = value;
 	}
@@ -222,11 +314,6 @@ export function assignFour(
 		assignment,
 		placements,
 		score: bestScore,
-		runnerUpScore,
-		separation: bestScore - runnerUpScore,
-		edgeScores: bestEdgeScores,
-		estimates: estimatesRecord,
-		lowerRightPaths,
-		steps
+		estimates: estimatesRecord
 	};
 }
