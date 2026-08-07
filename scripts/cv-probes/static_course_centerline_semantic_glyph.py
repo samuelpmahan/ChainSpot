@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Current clean-course semantic centerline probe with glyph-only badge labels.
 
-This wraps static_course_centerline_semantic.py without duplicating its tracing
-logic. The only pipeline change is that after the 18 physical number badges are
-located, their interiors are reclassified from the numeral glyphs alone before
-tee/basket association and centerline routing.
+After the 18 physical number badges are located, their interiors are
+reclassified from the numeral glyphs alone before tee/basket association.
+Centerline routing then treats the exact center of each recognized hole-number
+badge as a hard centerline anchor; the badge pixels are occlusion, but the path
+may not swerve around the badge.
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ if not hasattr(v1, '_track_segment'):
 
 import number_badge_classifier as number_classifier
 import static_course_centerline as v2
-import static_course_centerline_semantic as semantic
+import static_course_centerline_semantic_exact_anchor as semantic
 
 
 def main() -> None:
@@ -119,8 +120,9 @@ def main() -> None:
         },
         'puttingCircles': {'c1RadiusPx': c1_radius, 'c2RadiusPx': c2_radius},
         'rules': [
-            'own number is a semantic waypoint but its pixels are occlusion',
-            'basket side is traced backward toward the own-number waypoint',
+            'exact own-number badge center is a hard centerline anchor',
+            'number badge pixels are occlusion and are bridged geometrically through that center',
+            'basket side is traced backward toward the own-number anchor',
             'nearby foreign tees repel C2 departure directions',
             'C2 terminal is reconstructed to basket stem base',
         ],
