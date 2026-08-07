@@ -39,6 +39,14 @@
 		>
 			Create Graphics
 		</a>
+		<a
+			href="/elevation-profile"
+			class="nav-link"
+			class:active={page.url.pathname === '/elevation-profile'}
+			aria-current={page.url.pathname === '/elevation-profile' ? 'page' : undefined}
+		>
+			Elevation
+		</a>
 	</nav>
 </header>
 
