@@ -52,11 +52,10 @@ export interface OrderedShot {
 	readonly landing: SourcePoint;
 }
 
-/**
- * Minimum vertex count for a `corridor` polygon — below this it isn't a shape.
- * `undefined` (not annotated) is always valid; this only bounds a present array.
- */
+/** Minimum vertex count for a closed `corridor` polygon. */
 export const MIN_CORRIDOR_POINTS = 3;
+/** Minimum point count for an open tee-to-basket route. */
+export const MIN_CENTERLINE_POINTS = 2;
 
 export interface AnnotatedHole {
 	readonly id: string;
@@ -65,13 +64,16 @@ export interface AnnotatedHole {
 	readonly basket?: SourcePoint;
 	readonly shots: readonly OrderedShot[];
 	/**
-	 * Fairway/corridor outline as a closed polygon (first and last vertex are
-	 * both implicit ends of the same closed loop — the last point is never
-	 * repeated) in source-image pixels. Absent until annotated. This is the
-	 * vector counterpart of UDisc's bottom-layer hole-shape raster: whether the
-	 * vertices come from manual placement or a future CV-assisted detector, the
-	 * authoritative artifact only ever holds the resulting polygon, never the
-	 * raster or how it was produced (see the provenance rule above).
+	 * The authoritative tee-to-basket routing path as an open polyline in source
+	 * image pixels. This is the compact geometry the static-course CV probe now
+	 * extracts. Band width/treatment are rendering choices, not source geometry.
+	 */
+	readonly centerline?: readonly SourcePoint[];
+	/**
+	 * Legacy/optional fairway outline as a closed polygon (first and last vertex
+	 * are implicit ends of the same closed loop — the last point is never
+	 * repeated) in source-image pixels. Kept for manually traced projects and
+	 * compatibility; new automatic extraction does not need to recover it.
 	 */
 	readonly corridor?: readonly SourcePoint[];
 }
@@ -123,12 +125,9 @@ function assertPointInBounds(
 
 /**
  * The only sanctioned way to build an artifact. Validates the source image
- * has positive finite dimensions and that every supplied feature point
- * (tee/basket/shot landings/corridor vertices/walkingPath points) is finite
- * and inside the source image bounds, via the existing pointInBounds from
- * src/lib/coords.ts, and that a present `corridor` has at least
- * `MIN_CORRIDOR_POINTS` vertices. Throws on violation — a malformed artifact
- * must never reach Create Graphics.
+ * has positive finite dimensions and every supplied feature point is finite
+ * and inside source bounds. Present centerlines need at least two points and
+ * present corridor polygons need at least three.
  */
 export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): AnnotatedRound {
 	const { sourceImage, holes = [], walkingPath } = options;
@@ -155,6 +154,21 @@ export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): Anno
 				`createAnnotatedRound: hole ${hole.number} shot ${index + 1} landing`
 			);
 		});
+		if (hole.centerline) {
+			if (hole.centerline.length < MIN_CENTERLINE_POINTS) {
+				throw new Error(
+					`createAnnotatedRound: hole ${hole.number} centerline must have at least ${MIN_CENTERLINE_POINTS} points, got ${hole.centerline.length}`
+				);
+			}
+			hole.centerline.forEach((point, index) => {
+				assertPointInBounds(
+					point,
+					widthPx,
+					heightPx,
+					`createAnnotatedRound: hole ${hole.number} centerline point ${index + 1}`
+				);
+			});
+		}
 		if (hole.corridor) {
 			if (hole.corridor.length < MIN_CORRIDOR_POINTS) {
 				throw new Error(
