@@ -1,174 +1,157 @@
 # Annotate Round: clean-course CV integration
 
-This branch starts from Claude's Phase 3 implementation and records the semantic integration point for the CV work developed on `agent/cv-annotation-core-probes`.
+This branch starts from Claude's Phase 3 implementation and records the semantic integration point for the CV work.
 
-## Key correction: Annotate Round needs two UDisc rasters
+## Two UDisc rasters, one canonical coordinate space
 
-The Phase 3 implementation currently treats one UDisc `source-overview` as the place where tee, basket, shot, and corridor geometry are all annotated. The CV experiments showed that this is the wrong production boundary.
+Annotate Round needs two logically different UDisc inputs:
 
-We need two logically different UDisc inputs:
+1. **Clean course map** — static course geometry: numbers, tees, baskets, routing.
+2. **Played round map** — dynamic evidence: shot landings, pale-blue shot connections, purple walking path.
 
-1. **Clean course map** — no played-round overlays. Best source for static course geometry:
-   - hole number badges
-   - teepads
-   - baskets
-   - UDisc hole/corridor raster
-2. **Played round map** — round-specific overlays:
-   - shot landing markers
-   - pale-blue shot connections
-   - purple walking path
-
-The clean course map should be the **canonical annotation coordinate space**.
-
-## Pipeline
+The clean course map is the canonical annotation coordinate space. Dynamic played-round detections are registered into clean-UDisc pixels before review. `Done` emits one authoritative `AnnotatedRound` in clean-UDisc coordinates; Create Graphics then keeps the existing clean-UDisc -> satellite alignment.
 
 ```text
-                    CLEAN UDISC COURSE MAP
-                            |
-                            | static CV
-                            v
-               numbers / tees / baskets / corridors
-                            |
-                            | canonical coordinate space
-                            |
-PLAYED UDISC ROUND MAP      |
-          |                 |
-          | dynamic CV      |
-          v                 |
- shots / connections / walk |
-          |                 |
-          +-- register -----+
-              played -> clean
-                    |
-                    v
-             provisional holes
-                    |
-                    v
-            Annotate Round review
-                    |
-                   Done
-                    |
-                    v
-      AnnotatedRound (all geometry in clean-UDisc px)
-                    |
-                    | existing Phase 3 alignment
-                    v
-          CLEAN SATELLITE / NAIP TARGET
-                    |
-                    v
-              Create Graphics
+CLEAN UDISC COURSE MAP
+        | static CV
+        v
+numbers / tees / baskets / centerlines
+        |
+        | canonical clean-UDisc pixels
+        |
+PLAYED UDISC ROUND MAP
+        | dynamic CV
+        v
+shots / walk
+        | played -> clean registration
+        +-----------------------> provisional holes
+                                      |
+                                Annotate Round review
+                                      |
+                                     Done
+                                      |
+                                AnnotatedRound
+                                      |
+                              source -> satellite
+                                      v
+                                Create Graphics
 ```
 
-Static features are easiest to detect on the clean UDisc map, so do not detect them there and then force the authoritative artifact back into an occluded played-round coordinate system. Detect static geometry on clean UDisc, transform dynamic played-round evidence into that same coordinate system, review once, then let Create Graphics keep its existing clean-UDisc -> satellite alignment.
+## Static parser stopping bar
 
-## Current static parser milestone
-
-`scripts/cv-probes/static_course_parser.py` is the current best probe. On the clean Dash's Track development fixture it now reaches the explicit static-icon stopping bar:
+The current clean Dash's Track fixture reaches:
 
 - **18/18 hole numbers**
 - **18/18 baskets**
 - **18/18 teepads**
+- **18/18 tee-to-basket centerline proposals**
 
-That is materially better than the earlier state where teepads were the weak detector.
+The preferred probe is now `scripts/cv-probes/static_course_centerline.py`. It reuses the proven detector/assignment layer from `static_course_parser.py`.
 
-### Number layer
+## Representation breakthrough: extract routing, not UDisc width
 
-1. Search canonical `#1` over a broad scale range.
-2. Derive UI raster scale from the matched badge dimensions.
-3. Search all `1..18` templates only in a narrow scale window.
-4. Cluster physical badge locations before classification.
-5. Solve one-to-one number assignment with Hungarian matching so multiple templates cannot claim the same badge.
+UDisc's translucent hole band is presentation, not reliable fairway truth. ChainSpot does not need to reproduce its width or boundary precisely. The static parser should recover:
 
-### Basket layer
+```ts
+interface ParsedHole {
+  number: number;
+  tee: SourcePoint;
+  basket: SourcePoint;
+  centerline: SourcePoint[];
+}
+```
 
-- Multiscale template matching + NMS reaches 18 detections on the clean fixture.
-- The semantic hole endpoint is the **bottom-center base of the basket stem**, not the center of the basket glyph or green circle.
-- This endpoint rule came from the earlier tracer experiment where stem-base stopping improved terminal hits from 13/18 to 16/18.
+Rendering owns the rest: band width, solid/outline/hatch/centerline-only treatment, palette, contour treatment, information blocks, and framing. A creator preset can therefore style an entire season consistently from the same geometry.
 
-### Teepad layer
+This also makes elevation straightforward later: transform/sample centerline points to lat/lon, query elevation along that 1D path, and draw a profile. No contour-line CV is required.
 
-One detector was not enough, but two simple detectors have complementary failures:
+## Proven discrete layers
 
-- **gray-center detector** — repeated low-saturation gray interior rectangle;
-- **edge-loop detector** — quadrilateral edge loop with bright rim and gray-ish interior.
+### Numbers
 
-On the fixture each finds 16 pads and misses a different two. Fusing their centers yields exactly 18 physical teepads. This is preferable to reviving the old generic `gray rectangle` detector, which produced dozens of false positives.
+1. Search canonical `#1` broadly to derive UI raster scale.
+2. Search all `1..18` templates only near that scale.
+3. Cluster physical badge locations.
+4. Solve one-to-one number assignment with Hungarian matching.
+
+The current fixture produces 18 unique badge locations.
+
+### Baskets
+
+- Multiscale template matching + NMS produces 18 basket detections.
+- The semantic endpoint is the **bottom-center basket stem base**, not the glyph/circle center.
+
+### Teepads
+
+Fuse two complementary detectors:
+
+- low-saturation gray-center rectangle;
+- quadrilateral edge loop with bright rim / gray-ish interior.
+
+Each finds 16 on the current fixture and misses a different two; fusion yields all 18.
 
 ### Static association
 
-The parser currently proposes one tee and basket per number:
+- tees: one-to-one proximity assignment to number badges;
+- baskets: one-to-one assignment with tee/number polarity so the far-side basket is preferred over a nearby basket beside the tee.
 
-- tees: one-to-one proximity matching against number badges;
-- baskets: one-to-one matching with a tee/number polarity term, preferring a basket on the opposite side of the number from its tee.
+Dense clusters remain provisional until more clean fixtures are available.
 
-That polarity rule fixes the obvious nearest-basket failure on Hole 1. Dense upper-course associations remain provisional until validated on more fixtures.
+## Centerline extraction
 
-## Hole shape: current best direction
+Outside the basket decoration, the tracker remains deliberately bounded:
 
-The earlier free grower had a fundamental failure mode: once its local score preferred a road or neighboring hole, beam search merely found a longer, more confident wrong answer.
+1. track `tee -> number` with DP over lateral offsets from the anchored baseline;
+2. independently locate where the route enters C2;
+3. track `number -> C2 entry` with the same bounded DP;
+4. reconstruct the final C2 segment geometrically to the basket stem base;
+5. lightly smooth while snapping tee, number, and basket anchors back exactly.
 
-The current parser therefore changes the shape problem structurally:
+This keeps roads and neighboring holes from becoming unlimited escape routes while avoiding unnecessary boundary segmentation.
 
-1. tee, number, and basket base are discrete anchors first;
-2. track `tee -> number` and `number -> basket` separately;
-3. each segment uses smooth dynamic programming over bounded **lateral offsets** from its endpoint-anchored baseline;
-4. no state can wander arbitrarily far from the intended hole;
-5. estimate left/right ribbon boundaries from cross-sectional feature gradients;
-6. simplify those boundaries into an `AnnotatedHole.corridor` proposal polygon.
+## C1/C2 are foreground occlusion, not fairway evidence
 
-This keeps the useful local ribbon score while removing the most embarrassing free-growth failure mode. It also naturally makes Hole 16's road a local scoring nuisance rather than an unlimited escape route.
+The previous parser consistently damaged the final ~60 ft because UDisc adds basket / C1 / C2 artwork over the underlying route.
 
-Corridors are still the researchy part. The generated polygon is a **proposal for the existing manual review UI**, not something to bless directly into final `AnnotatedRound` without inspection.
+The new parser detects the repeated putting-circle radii directly by aggregating basket-centered radial edge strength across all 18 holes. On the current fixture the common peaks are approximately:
 
-## Registration between clean and played UDisc
+- **C1: 25 px**
+- **C2: 50 px**
 
-This should be easier than generic image registration because both captures contain the same UDisc UI grammar.
+The C2 entry search works **backward from the basket** but scores pixels only outside C2. Inside C2, appearance is ignored entirely; a smooth terminal segment connects the detected entry to the known basket stem base.
 
-Preferred automatic correspondences:
-
-1. hole-number badge centers;
-2. basket stem-base points;
-3. teepad centers.
-
-Estimate similarity first; affine is a reasonable fallback for stitched/cropped capture differences. Manual correction can reuse the existing correspondence-editor concepts if automatic registration is not good enough.
+That is an explicit semantic rule, not an attempt to make the local CV score explain foreground putting-circle graphics.
 
 ## Relationship to Claude's Phase 3 code
 
 Keep:
 
-- `AnnotatedHole.corridor` as reviewed vector geometry;
-- `holeAnnotation.ts` pure edit operations as the manual correction layer;
-- `createAnnotatedRound` validation and the authoritative/no-provenance Done boundary;
-- `holeGraphics.ts` source->target transform/render path;
-- Create Graphics NAIP/geocode/mosaic work;
-- current alignment machinery.
+- `holeAnnotation.ts` as the manual review/correction layer;
+- `createAnnotatedRound` validation and authoritative/no-provenance Done boundary;
+- Create Graphics alignment, NAIP/geocode/mosaic work, and rendering structure.
 
-Change before CV is wired into production:
+Change later when the parser is wired into production:
 
-- Annotate Round must accept both clean-course UDisc and played-round UDisc inputs;
-- image-role/session plumbing needs to distinguish those two inputs;
-- static CV proposals run on the clean map;
-- dynamic CV proposals run on the played map;
-- played->clean registration happens before provisional holes are presented for final review;
-- `Done` uses the clean course map as `AnnotatedRound.sourceImage`.
+- add `round-overview` for the played UDisc evidence image;
+- keep `source-overview` as the canonical clean UDisc map;
+- replace or supplement `AnnotatedHole.corridor` with authoritative `centerline` geometry;
+- have `holeGraphics.ts` generate presentation-width bands from transformed centerlines instead of preserving a source-raster polygon;
+- static CV proposals run on clean UDisc;
+- dynamic CV proposals run on played UDisc and are registered into clean coordinates before review.
 
-## Suggested role semantics
+Suggested roles:
 
-Minimize downstream changes:
+- `source-overview` = clean UDisc canonical map;
+- `round-overview` = played UDisc evidence map;
+- `target-basemap` = clean satellite/NAIP image.
 
-- existing `source-overview` = **clean UDisc canonical map**;
-- new `round-overview` = **played UDisc evidence image**;
-- existing `target-basemap` = **clean satellite/NAIP image**.
+## Immediate order
 
-Stitch Map should eventually hand a stitched image to either UDisc role. Do not block static-detector work on that UX.
+1. Validate the centerline parser against more clean UDisc captures, especially Android/different zooms.
+2. Fix any dense-cluster tee/basket association errors without weakening 18/18 icon detection.
+3. Port the stable static parser primitives to the existing OpenCV.js/WASM stack.
+4. Change the review/domain representation from corridor-first to centerline-first.
+5. Add the played-round input and played -> clean registration.
+6. Add dynamic shot/walking extraction.
 
-## Immediate implementation order
-
-1. Validate `static_course_parser.py` against additional clean UDisc captures, especially Android / different raster scales.
-2. Correct any remaining static association failures while preserving the now-achieved 18/18 icon counts.
-3. Iterate corridor proposals with the endpoint-constrained tracker; manual review remains mandatory.
-4. Add `round-overview` and make clean UDisc the Annotate Round canonical source.
-5. Port stable static primitives from Python to the existing OpenCV.js/WASM stack.
-6. Add played-round dynamic extraction and played->clean registration.
-
-Keep provisional CV confidence inside Annotate Round review state only. Final `AnnotatedRound` geometry remains authoritative after Done and must not gain CV provenance/confidence fields.
+CV confidence/provenance stays inside Annotate Round review state only. After Done, geometry is authoritative.
