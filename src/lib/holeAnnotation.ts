@@ -1,0 +1,105 @@
+/**
+ * Pure hole-annotation editing operations for Annotate Round.
+ *
+ * Operates on draft `AnnotatedHole[]` arrays in source-image pixel space — the
+ * same authoritative coordinate convention `createAnnotatedRound` validates
+ * against at the Done boundary. Every function returns a new array; none
+ * mutate their input, matching the rest of the domain layer's pure-reducer
+ * style (`correspondenceState.ts`, `pointCorrection.ts`).
+ *
+ * Bounds checking is deliberately NOT duplicated here — the caller (the
+ * viewport click handler, mirroring `ImagePane`'s own `onViewportClick`)
+ * already rejects an out-of-bounds click before it reaches these functions,
+ * and `createAnnotatedRound` performs the final authoritative validation.
+ */
+import type { AnnotatedHole, OrderedShot, SourcePoint } from './domain/annotatedRound';
+
+export type HolePlacementMode = 'tee' | 'basket' | 'shot' | 'corridor';
+
+export type CreateId = () => string;
+
+const defaultCreateId: CreateId = () => globalThis.crypto.randomUUID();
+
+/** Next sequential hole number — mirrors `nextPairOrdinal`'s max-plus-one convention. */
+export function nextHoleNumber(holes: readonly AnnotatedHole[]): number {
+	return holes.reduce((max, hole) => Math.max(max, hole.number), 0) + 1;
+}
+
+/** Appends a new, entirely empty hole with the next sequential number. */
+export function addHole(holes: readonly AnnotatedHole[], createId: CreateId = defaultCreateId): AnnotatedHole[] {
+	const hole: AnnotatedHole = { id: createId(), number: nextHoleNumber(holes), shots: [] };
+	return [...holes, hole];
+}
+
+export function removeHole(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return holes.filter((hole) => hole.id !== holeId);
+}
+
+function updateHole(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	update: (hole: AnnotatedHole) => AnnotatedHole
+): AnnotatedHole[] {
+	return holes.map((hole) => (hole.id === holeId ? update(hole) : hole));
+}
+
+export function setTee(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, tee: point }));
+}
+
+export function setBasket(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, basket: point }));
+}
+
+export function addShot(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	point: SourcePoint,
+	createId: CreateId = defaultCreateId
+): AnnotatedHole[] {
+	const shot: OrderedShot = { id: createId(), landing: point };
+	return updateHole(holes, holeId, (hole) => ({ ...hole, shots: [...hole.shots, shot] }));
+}
+
+export function removeLastShot(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, shots: hole.shots.slice(0, -1) }));
+}
+
+export function addCorridorPoint(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridor: [...(hole.corridor ?? []), point] }));
+}
+
+/** Pops the last vertex; a corridor left with zero vertices reverts to unannotated (`undefined`). */
+export function removeLastCorridorPoint(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		const remaining = (hole.corridor ?? []).slice(0, -1);
+		return { ...hole, corridor: remaining.length > 0 ? remaining : undefined };
+	});
+}
+
+export function clearCorridor(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridor: undefined }));
+}
+
+/**
+ * Places `point` on `holeId` according to `mode` — the one entry point the UI
+ * click handler needs, so it doesn't have to branch on mode itself.
+ */
+export function placeByMode(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	mode: HolePlacementMode,
+	point: SourcePoint,
+	createId: CreateId = defaultCreateId
+): AnnotatedHole[] {
+	switch (mode) {
+		case 'tee':
+			return setTee(holes, holeId, point);
+		case 'basket':
+			return setBasket(holes, holeId, point);
+		case 'shot':
+			return addShot(holes, holeId, point, createId);
+		case 'corridor':
+			return addCorridorPoint(holes, holeId, point);
+	}
+}

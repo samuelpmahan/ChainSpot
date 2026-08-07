@@ -52,12 +52,28 @@ export interface OrderedShot {
 	readonly landing: SourcePoint;
 }
 
+/**
+ * Minimum vertex count for a `corridor` polygon — below this it isn't a shape.
+ * `undefined` (not annotated) is always valid; this only bounds a present array.
+ */
+export const MIN_CORRIDOR_POINTS = 3;
+
 export interface AnnotatedHole {
 	readonly id: string;
 	readonly number: number;
 	readonly tee?: SourcePoint;
 	readonly basket?: SourcePoint;
 	readonly shots: readonly OrderedShot[];
+	/**
+	 * Fairway/corridor outline as a closed polygon (first and last vertex are
+	 * both implicit ends of the same closed loop — the last point is never
+	 * repeated) in source-image pixels. Absent until annotated. This is the
+	 * vector counterpart of UDisc's bottom-layer hole-shape raster: whether the
+	 * vertices come from manual placement or a future CV-assisted detector, the
+	 * authoritative artifact only ever holds the resulting polygon, never the
+	 * raster or how it was produced (see the provenance rule above).
+	 */
+	readonly corridor?: readonly SourcePoint[];
 }
 
 export interface AnnotatedRound {
@@ -108,9 +124,11 @@ function assertPointInBounds(
 /**
  * The only sanctioned way to build an artifact. Validates the source image
  * has positive finite dimensions and that every supplied feature point
- * (tee/basket/shot landings/walkingPath points) is finite and inside the
- * source image bounds, via the existing pointInBounds from src/lib/coords.ts.
- * Throws on violation — a malformed artifact must never reach Create Graphics.
+ * (tee/basket/shot landings/corridor vertices/walkingPath points) is finite
+ * and inside the source image bounds, via the existing pointInBounds from
+ * src/lib/coords.ts, and that a present `corridor` has at least
+ * `MIN_CORRIDOR_POINTS` vertices. Throws on violation — a malformed artifact
+ * must never reach Create Graphics.
  */
 export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): AnnotatedRound {
 	const { sourceImage, holes = [], walkingPath } = options;
@@ -119,23 +137,38 @@ export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): Anno
 
 	for (const hole of holes) {
 		if (hole.tee) {
-			assertPointInBounds(hole.tee, widthPx, heightPx, `createAnnotatedRound: hole ${hole.id} tee`);
+			assertPointInBounds(hole.tee, widthPx, heightPx, `createAnnotatedRound: hole ${hole.number} tee`);
 		}
 		if (hole.basket) {
 			assertPointInBounds(
 				hole.basket,
 				widthPx,
 				heightPx,
-				`createAnnotatedRound: hole ${hole.id} basket`
+				`createAnnotatedRound: hole ${hole.number} basket`
 			);
 		}
-		for (const shot of hole.shots) {
+		hole.shots.forEach((shot, index) => {
 			assertPointInBounds(
 				shot.landing,
 				widthPx,
 				heightPx,
-				`createAnnotatedRound: hole ${hole.id} shot ${shot.id} landing`
+				`createAnnotatedRound: hole ${hole.number} shot ${index + 1} landing`
 			);
+		});
+		if (hole.corridor) {
+			if (hole.corridor.length < MIN_CORRIDOR_POINTS) {
+				throw new Error(
+					`createAnnotatedRound: hole ${hole.number} corridor must have at least ${MIN_CORRIDOR_POINTS} vertices, got ${hole.corridor.length}`
+				);
+			}
+			hole.corridor.forEach((point, index) => {
+				assertPointInBounds(
+					point,
+					widthPx,
+					heightPx,
+					`createAnnotatedRound: hole ${hole.number} corridor point ${index + 1}`
+				);
+			});
 		}
 	}
 
