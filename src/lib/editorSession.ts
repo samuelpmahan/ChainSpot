@@ -42,3 +42,13 @@ export function takeRetainedEditor(key: EditorSessionKey): ProjectEditor | null 
 	retained.delete(key);
 	return editor;
 }
+
+/**
+ * Reads a retained stage without consuming it. Auxiliary pages use this after
+ * the owning page has unmounted so the owner can still `take` the same editor
+ * when the user navigates back. This deliberately does not create a third
+ * editor-session key or transfer ownership.
+ */
+export function peekRetainedEditor(key: EditorSessionKey): ProjectEditor | null {
+	return retained.get(key) ?? null;
+}
