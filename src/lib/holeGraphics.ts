@@ -2,13 +2,11 @@
  * ChainSpot clean hole graphic construction.
  *
  * Applies an estimated source-to-target transform (`src/lib/alignment`) to a
- * hole's manually-annotated tee/basket/shot/corridor points (source-image
- * pixels), producing their positions in the clean target image's pixel
- * space, then frames and renders a crop around them. No feature detection or
- * image analysis happens here — every point was already placed by the user
- * (or, in a future iteration, a reviewed CV proposal); this module only ever
- * does arithmetic and drawing, the same "structured geometry, not edited
- * screenshots" boundary the rest of the domain layer keeps.
+ * hole's authoritative geometry (source-image pixels), producing positions in
+ * the clean target image's pixel space, then frames and renders a crop around
+ * them. No feature detection or image analysis happens here — this module only
+ * ever does arithmetic and drawing, preserving the "structured geometry, not
+ * edited screenshots" boundary the rest of the domain layer keeps.
  */
 import { applyTransform } from './alignment/transform';
 import type { SerializableTransform } from './alignment/types';
@@ -32,7 +30,9 @@ export interface HoleGraphicPlan {
 	readonly tee: TargetPoint | null;
 	readonly basket: TargetPoint | null;
 	readonly shots: readonly TargetPoint[];
-	/** Present only when the source hole had at least one corridor vertex — never a synthesized shape. */
+	/** Tee-to-basket routing polyline, ready for styling and elevation sampling. */
+	readonly centerline: readonly TargetPoint[] | null;
+	/** Legacy/manual polygon when one exists; never synthesized from the centerline. */
 	readonly corridor: readonly TargetPoint[] | null;
 	/** Crop rectangle in target-image pixels, already clamped to the target image bounds. */
 	readonly crop: CropRect;
@@ -62,12 +62,16 @@ export function planHoleGraphic(
 	const tee = hole.tee ? applyTransform(hole.tee, transform) : null;
 	const basket = hole.basket ? applyTransform(hole.basket, transform) : null;
 	const shots = hole.shots.map((shot) => applyTransform(shot.landing, transform));
+	const centerline = hole.centerline
+		? hole.centerline.map((point) => applyTransform(point, transform))
+		: null;
 	const corridor = hole.corridor ? hole.corridor.map((point) => applyTransform(point, transform)) : null;
 
 	const points: TargetPoint[] = [
 		...(tee ? [tee] : []),
 		...(basket ? [basket] : []),
 		...shots,
+		...(centerline ?? []),
 		...(corridor ?? [])
 	];
 	if (points.length === 0) return null;
@@ -95,6 +99,7 @@ export function planHoleGraphic(
 		tee,
 		basket,
 		shots,
+		centerline,
 		corridor,
 		crop: {
 			xPx: cropX,
@@ -128,7 +133,8 @@ export const defaultHoleGraphicRenderEnv: HoleGraphicRenderEnv = {
  * Renders one hole's clean graphic: the cropped clean-image region, the
  * corridor polygon (if any), straight tee-through-shots displacement guides
  * (never a curved flight path — an explicit non-goal), tee/basket/shot
- * markers, and a hole-number label.
+ * markers, and a hole-number label. The centerline is intentionally not given
+ * a hard-coded treatment here: band width/outline/hatch are style choices.
  */
 export async function renderHoleGraphic(
 	targetImage: HTMLImageElement,
