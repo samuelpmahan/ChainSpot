@@ -9,7 +9,6 @@
 import { fetchNaipImage, NAIP_EXPORT_SIZE_PX } from './naip';
 import type { FetchLike, GeoPoint } from './naip';
 import type { TileGridPlan } from './naipGrid';
-import { recordGridNaipReference } from './naipReferenceSession';
 
 /** Tiles are fetched a few at a time, out of courtesy to a shared public federal
  * service that enforces no request quota of its own — nothing stops a naive
@@ -48,12 +47,7 @@ async function fetchTileWithRetry(
 ): Promise<{ ok: true; blob: Blob } | { ok: false; error: MosaicFetchError }> {
 	let lastError: MosaicFetchError | null = null;
 	for (let attempt = 0; attempt <= TILE_FETCH_RETRIES; attempt++) {
-		// A grid records one piecewise georeference after the whole fetch succeeds;
-		// individual tile requests must not masquerade as standalone target images.
-		const result = await fetchNaipImage(center, radiusMeters, {
-			fetch: fetchImpl,
-			recordReference: false
-		});
+		const result = await fetchNaipImage(center, radiusMeters, { fetch: fetchImpl });
 		if (result.ok) return { ok: true, blob: result.blob };
 		lastError = new MosaicFetchError(result.error.kind, index, result.error.message);
 		// A "no coverage here" response is a real answer, not a transient failure —
@@ -67,8 +61,7 @@ async function fetchTileWithRetry(
 /**
  * Fetches every tile in `plan.centers`, `TILE_FETCH_CONCURRENCY` at a time. Any tile
  * that still fails after retrying fails the whole grid — a mosaic with a silently
- * blank patch would be worse than asking the user to retry the fetch. A successful
- * grid records the exact row-major request geometry for later pixel -> WGS84 lookup.
+ * blank patch would be worse than asking the user to retry the fetch.
  */
 export async function fetchTileGrid(
 	plan: TileGridPlan,
@@ -97,7 +90,6 @@ export async function fetchTileGrid(
 	await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
 	if (firstError) return { ok: false, error: firstError };
-	recordGridNaipReference(plan, NAIP_EXPORT_SIZE_PX);
 	return { ok: true, tiles: tiles as Blob[] };
 }
 
