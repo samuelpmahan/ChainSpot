@@ -6,7 +6,7 @@
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
-	import { intakeImageFile } from '$lib/imageIntake';
+	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
 	import { pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
@@ -35,10 +35,13 @@
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
-	import { fetchNaipImage } from '$lib/naip';
-	import type { GeoPoint } from '$lib/naip';
+	import { bboxFromCenter, fetchNaipImage, NAIP_EXPORT_SIZE_PX } from '$lib/naip';
+	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
 	import { searchPlace } from '$lib/geocode';
 	import type { GeoSearchMatch } from '$lib/geocode';
+	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
+	import type { PixelRect } from '$lib/naipGrid';
+	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
 	import {
 		consumePendingAnnotatedRound,
 		getActiveAnnotatedRound,
@@ -74,6 +77,7 @@
 	onDestroy(() => {
 		if (participatesInSession) retainEditor('create-graphics', editor);
 		clearNaipPreview();
+		handleBoxHandleUp();
 	});
 
 	let refreshCount = $state(0);
@@ -141,20 +145,36 @@
 	let annotatedRoundError = $state<string | null>(null);
 
 	/**
-	 * Default fetch radius for the USGS NAIP aerial pull: 300m frames one or two
-	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on
-	 * every side, without the course shrinking to a speck in a much larger frame.
-	 * Purely a starting point — the user adjusts and refetches as needed.
+	 * Default *preview/reference* radius for the USGS NAIP aerial pull: 900m — three
+	 * times the fixed per-tile radius below — gives enough framing margin around a
+	 * course for the coverage-box picker to be drawn and resized inside it. This is
+	 * deliberately wider than a single hole; it is a reference frame, not itself the
+	 * final clean target (though "Use this preview as-is" still commits it directly
+	 * for a course small enough not to need tiling).
 	 */
-	const DEFAULT_NAIP_RADIUS_METERS = 300;
+	const DEFAULT_NAIP_RADIUS_METERS = 900;
+	/**
+	 * Fixed radius for every tile in the full-resolution grid: 300m frames one or two
+	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on every
+	 * side, so each tile stays sharp instead of stretching thin over a huge area.
+	 */
+	const TILE_RADIUS_METERS = 300;
+	/** Default coverage box: most of the preview frame, leaving a visible margin to grow into. */
+	const DEFAULT_BOX_FRACTION = 0.9;
+	const MIN_BOX_SIZE_PX = 128;
+	const BOX_HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
+
 	let naipLatInput = $state('');
 	let naipLonInput = $state('');
 	let naipRadiusInput = $state(String(DEFAULT_NAIP_RADIUS_METERS));
 	let naipLoading = $state(false);
 	let naipCommitting = $state(false);
 	let naipError = $state<string | null>(null);
-	/** Fetched-but-not-yet-committed aerial image awaiting explicit user confirmation. */
+	/** Fetched-but-not-yet-committed aerial preview, awaiting explicit user confirmation. */
 	let naipPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
+	/** Center/radius actually used for the current `naipPreview`, kept to derive its bbox. */
+	let naipPreviewCenter = $state<GeoPoint | null>(null);
+	let naipPreviewRadiusUsed = $state<number | null>(null);
 
 	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
 	let geocodeParkNameInput = $state('');
@@ -163,6 +183,19 @@
 	let geocodeError = $state<string | null>(null);
 	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
 	let geocodeSelectedIndex = $state<number | null>(null);
+
+	/** CSS-displayed-pixels-per-natural-pixel for the rendered preview `<img>`, set once it loads. */
+	let displayScale = $state(1);
+	/** User-adjustable coverage box drawn over the preview, in the preview's own pixel space. */
+	let boxRect = $state<PixelRect | null>(null);
+	let boxDragHandle = $state<'nw' | 'ne' | 'sw' | 'se' | null>(null);
+	let boxDragStart = $state<{ clientX: number; clientY: number; rect: PixelRect } | null>(null);
+
+	/** The assembled full-resolution tile grid, fetched for the area inside `boxRect`. */
+	let gridLoading = $state(false);
+	let gridError = $state<string | null>(null);
+	let gridCommitting = $state(false);
+	let gridPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
 
 	function sourceImage(): ImageAsset | null {
 		void refreshCount;
@@ -835,6 +868,17 @@
 	function clearNaipPreview(): void {
 		if (naipPreview) URL.revokeObjectURL(naipPreview.objectUrl);
 		naipPreview = null;
+		naipPreviewCenter = null;
+		naipPreviewRadiusUsed = null;
+		boxRect = null;
+		displayScale = 1;
+		clearGridPreview();
+	}
+
+	function clearGridPreview(): void {
+		if (gridPreview) URL.revokeObjectURL(gridPreview.objectUrl);
+		gridPreview = null;
+		gridError = null;
 	}
 
 	function parseNaipCenter(): GeoPoint | null {
@@ -920,6 +964,10 @@
 				return;
 			}
 			naipPreview = { blob: result.blob, objectUrl: URL.createObjectURL(result.blob) };
+			naipPreviewCenter = center;
+			naipPreviewRadiusUsed = radius;
+			// The coverage box itself is initialized once the preview `<img>` fires
+			// `onload` (see the template), since that's when its display size is known.
 		} finally {
 			naipLoading = false;
 		}
@@ -964,6 +1012,161 @@
 
 	function handleNaipDiscardPreview(): void {
 		clearNaipPreview();
+	}
+
+	function clamp(value: number, min: number, max: number): number {
+		return Math.min(Math.max(value, min), Math.max(min, max));
+	}
+
+	/**
+	 * Centers a default coverage box inside the freshly-fetched preview and records its
+	 * display scale from the `load` event's own element — reading a separately-`bind:this`-
+	 * bound element here would race a same-tick (e.g. cached-blob) `load` event.
+	 */
+	function initBoxRect(imgEl: HTMLImageElement): void {
+		const size = NAIP_EXPORT_SIZE_PX;
+		const boxSize = Math.round(size * DEFAULT_BOX_FRACTION);
+		const offset = Math.round((size - boxSize) / 2);
+		boxRect = { x: offset, y: offset, width: boxSize, height: boxSize };
+		displayScale = imgEl.naturalWidth > 0 ? imgEl.clientWidth / imgEl.naturalWidth : 1;
+	}
+
+	/**
+	 * Bbox of the current preview, derived from the center/radius actually used to
+	 * fetch it (not the possibly-since-edited lat/lon/radius inputs).
+	 */
+	let naipPreviewBbox: GeoBoundingBox | null = $derived(
+		naipPreviewCenter && naipPreviewRadiusUsed !== null
+			? bboxFromCenter(naipPreviewCenter, naipPreviewRadiusUsed)
+			: null
+	);
+
+	/**
+	 * Live plan for the area inside `boxRect`, recomputed as the user drags a handle —
+	 * pure geometry, no network call, so this can safely run on every drag frame.
+	 */
+	let gridPlanPreview = $derived.by(() => {
+		if (!naipPreviewBbox || !boxRect) return null;
+		const geoBox = pixelRectToGeoBox(naipPreviewBbox, NAIP_EXPORT_SIZE_PX, boxRect);
+		const { center, widthMeters, heightMeters } = geoBoxCenterAndSize(geoBox);
+		const plan = planTileGrid(center, widthMeters, heightMeters, TILE_RADIUS_METERS);
+		return { widthMeters, heightMeters, plan };
+	});
+
+	function handleBoxHandleDown(handle: 'nw' | 'ne' | 'sw' | 'se', event: PointerEvent): void {
+		if (!boxRect) return;
+		event.preventDefault();
+		boxDragHandle = handle;
+		boxDragStart = { clientX: event.clientX, clientY: event.clientY, rect: { ...boxRect } };
+		window.addEventListener('pointermove', handleBoxHandleMove);
+		window.addEventListener('pointerup', handleBoxHandleUp);
+		window.addEventListener('pointercancel', handleBoxHandleUp);
+	}
+
+	function handleBoxHandleMove(event: PointerEvent): void {
+		if (!boxDragHandle || !boxDragStart) return;
+		const scale = displayScale;
+		if (scale <= 0) return;
+		const dxNatural = (event.clientX - boxDragStart.clientX) / scale;
+		const dyNatural = (event.clientY - boxDragStart.clientY) / scale;
+		const { rect } = boxDragStart;
+		const size = NAIP_EXPORT_SIZE_PX;
+
+		let { x, y, width, height } = rect;
+		if (boxDragHandle === 'nw' || boxDragHandle === 'sw') {
+			const newX = clamp(rect.x + dxNatural, 0, rect.x + rect.width - MIN_BOX_SIZE_PX);
+			width = rect.x + rect.width - newX;
+			x = newX;
+		} else {
+			width = clamp(rect.width + dxNatural, MIN_BOX_SIZE_PX, size - rect.x);
+		}
+		if (boxDragHandle === 'nw' || boxDragHandle === 'ne') {
+			const newY = clamp(rect.y + dyNatural, 0, rect.y + rect.height - MIN_BOX_SIZE_PX);
+			height = rect.y + rect.height - newY;
+			y = newY;
+		} else {
+			height = clamp(rect.height + dyNatural, MIN_BOX_SIZE_PX, size - rect.y);
+		}
+		boxRect = { x, y, width, height };
+	}
+
+	function handleBoxHandleUp(): void {
+		boxDragHandle = null;
+		boxDragStart = null;
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointermove', handleBoxHandleMove);
+		window.removeEventListener('pointerup', handleBoxHandleUp);
+		window.removeEventListener('pointercancel', handleBoxHandleUp);
+	}
+
+	/**
+	 * Fetches every tile the current box requires and composes them into one mosaic
+	 * preview — never commits into the project. Deterministic placement (see
+	 * `naipGrid.ts`/`naipMosaic.ts`): each tile's geographic extent was chosen before
+	 * any request was made, so composing them is arithmetic, not image matching.
+	 */
+	async function handleGridFetch(): Promise<void> {
+		const planned = gridPlanPreview;
+		if (!planned || gridLoading) return;
+		clearGridPreview();
+		gridLoading = true;
+		try {
+			const fetchResult = await fetchTileGrid(planned.plan);
+			if (!fetchResult.ok) {
+				gridError = `Tile ${fetchResult.error.tileIndex + 1} of ${planned.plan.rows * planned.plan.cols}: ${fetchResult.error.message}`;
+				return;
+			}
+			const decodeFn = decode ?? decodeImageFile;
+			const images = await Promise.all(
+				fetchResult.tiles.map(async (blob, index) => {
+					const file = new File([blob], `naip-tile-${index}.png`, { type: 'image/png' });
+					const decoded = await decodeFn(file);
+					return decoded.image;
+				})
+			);
+			const mosaicBlob = await composeMosaic(images, planned.plan.rows, planned.plan.cols);
+			gridPreview = { blob: mosaicBlob, objectUrl: URL.createObjectURL(mosaicBlob) };
+		} catch (error) {
+			gridError = error instanceof Error ? error.message : 'Could not assemble the tile grid.';
+		} finally {
+			gridLoading = false;
+		}
+	}
+
+	/** Same intake path as `handleNaipConfirm` — the mosaic is just another PNG file. */
+	async function handleGridConfirm(): Promise<void> {
+		if (!gridPreview || gridCommitting) return;
+		gridCommitting = true;
+		gridError = null;
+		try {
+			const file = new File([gridPreview.blob], 'naip-tile-grid.png', { type: 'image/png' });
+			const result = await intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('target-basemap', count)
+			});
+			if (!result.ok) {
+				gridError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The assembled tile grid is still pending.';
+				return;
+			}
+			clearNaipPreview();
+			onDomainChanged('target-basemap');
+			activityMessage = 'Assembled NAIP tile grid imported as the clean target.';
+		} catch (error) {
+			gridError = error instanceof Error ? error.message : 'Could not import the assembled tile grid.';
+		} finally {
+			gridCommitting = false;
+		}
+	}
+
+	function handleGridDiscardPreview(): void {
+		clearGridPreview();
 	}
 
 	onMount(() => {
@@ -1459,7 +1662,38 @@
 		{/if}
 		{#if naipPreview}
 			<div class="naip-preview" data-testid="naip-preview">
-				<img class="naip-preview-image" src={naipPreview.objectUrl} alt="Fetched NAIP aerial preview, not yet used" />
+				<p class="naip-hint">
+					Drag a corner to size the area you want at full resolution, then fetch the
+					tile grid for it below. "Use this preview as-is" skips tiling entirely and
+					commits this single reference image instead.
+				</p>
+				<div class="naip-overview-frame" data-testid="naip-overview-frame">
+					<img
+						class="naip-overview-image"
+						src={naipPreview.objectUrl}
+						alt="Fetched NAIP aerial preview, not yet used"
+						onload={(event) => initBoxRect(event.currentTarget as HTMLImageElement)}
+					/>
+					{#if boxRect}
+						<div
+							class="naip-box"
+							data-testid="naip-box"
+							style="left:{boxRect.x * displayScale}px; top:{boxRect.y *
+								displayScale}px; width:{boxRect.width * displayScale}px; height:{boxRect.height *
+								displayScale}px;"
+						>
+							{#each BOX_HANDLES as handle (handle)}
+								<button
+									type="button"
+									class="naip-box-handle naip-box-handle-{handle}"
+									data-testid="naip-box-handle-{handle}"
+									aria-label="Resize selected area ({handle})"
+									onpointerdown={(event) => handleBoxHandleDown(handle, event)}
+								></button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 				<div class="naip-preview-actions">
 					<button
 						type="button"
@@ -1467,7 +1701,7 @@
 						disabled={naipCommitting}
 						onclick={handleNaipConfirm}
 					>
-						{naipCommitting ? 'Using…' : 'Use this image'}
+						{naipCommitting ? 'Using…' : 'Use this preview as-is'}
 					</button>
 					<button
 						type="button"
@@ -1479,6 +1713,57 @@
 					</button>
 				</div>
 			</div>
+
+			{#if gridPlanPreview}
+				<div class="naip-grid-plan" data-testid="naip-grid-plan">
+					<p>
+						Selected area: {Math.round(gridPlanPreview.widthMeters)}m x {Math.round(
+							gridPlanPreview.heightMeters
+						)}m &rarr; {gridPlanPreview.plan.rows} x {gridPlanPreview.plan.cols} tiles at {TILE_RADIUS_METERS}m
+						radius each ({gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} images).
+					</p>
+					<button
+						type="button"
+						data-testid="naip-grid-fetch-button"
+						disabled={gridLoading}
+						onclick={handleGridFetch}
+					>
+						{gridLoading
+							? 'Fetching tiles…'
+							: `Fetch ${gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} full-resolution tiles`}
+					</button>
+				</div>
+			{/if}
+			{#if gridError}
+				<p class="error" data-testid="naip-grid-error" role="alert">{gridError}</p>
+			{/if}
+			{#if gridPreview}
+				<div class="naip-preview" data-testid="naip-grid-preview">
+					<img
+						class="naip-preview-image"
+						src={gridPreview.objectUrl}
+						alt="Assembled full-resolution NAIP tile grid, not yet used"
+					/>
+					<div class="naip-preview-actions">
+						<button
+							type="button"
+							data-testid="naip-grid-use"
+							disabled={gridCommitting}
+							onclick={handleGridConfirm}
+						>
+							{gridCommitting ? 'Using…' : 'Use this image'}
+						</button>
+						<button
+							type="button"
+							data-testid="naip-grid-discard"
+							disabled={gridCommitting}
+							onclick={handleGridDiscardPreview}
+						>
+							Discard
+						</button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</section>
 
@@ -2065,6 +2350,81 @@
 	.naip-preview-actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+
+	.naip-overview-frame {
+		position: relative;
+		display: inline-block;
+	}
+
+	.naip-overview-image {
+		display: block;
+		max-width: 28rem;
+		max-height: 28rem;
+		width: auto;
+		height: auto;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+		user-select: none;
+	}
+
+	.naip-box {
+		position: absolute;
+		border: 2px solid #2a6df4;
+		background: rgb(42 109 244 / 10%);
+		box-sizing: border-box;
+	}
+
+	.naip-box-handle {
+		position: absolute;
+		width: 0.9rem;
+		height: 0.9rem;
+		margin: -0.45rem;
+		padding: 0;
+		border: 1px solid #fff;
+		border-radius: 50%;
+		background: #2a6df4;
+		touch-action: none;
+	}
+
+	.naip-box-handle-nw {
+		top: 0;
+		left: 0;
+		cursor: nwse-resize;
+	}
+
+	.naip-box-handle-ne {
+		top: 0;
+		right: 0;
+		margin-right: -0.45rem;
+		cursor: nesw-resize;
+	}
+
+	.naip-box-handle-sw {
+		bottom: 0;
+		left: 0;
+		margin-bottom: -0.45rem;
+		cursor: nesw-resize;
+	}
+
+	.naip-box-handle-se {
+		bottom: 0;
+		right: 0;
+		margin-bottom: -0.45rem;
+		margin-right: -0.45rem;
+		cursor: nwse-resize;
+	}
+
+	.naip-grid-plan {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.naip-grid-plan p {
+		margin: 0;
+		font-size: 0.85rem;
 	}
 
 	.geocode-search {

@@ -28,7 +28,7 @@ export interface GeoBoundingBox {
 }
 
 /** Meters per degree of latitude; treated as constant (adequate at course scale). */
-const METERS_PER_DEGREE_LAT = 111_320;
+export const METERS_PER_DEGREE_LAT = 111_320;
 
 /** Output raster size (pixels, square) requested from `exportImage`. */
 export const NAIP_EXPORT_SIZE_PX = 2048;
@@ -87,6 +87,21 @@ export function buildNaipExportUrl(
 		f: 'image'
 	});
 	return `${NAIP_EXPORT_IMAGE_URL}?${params.toString()}`;
+}
+
+/**
+ * Offsets `center` by a flat-earth displacement in meters (east-positive `dxMeters`,
+ * north-positive `dyMeters`), using the same equirectangular approximation as
+ * `bboxFromCenter` — adequate at course scale, and kept consistent with it so a grid
+ * of tiles built from repeated offsets lines up with any single tile's own bbox math.
+ */
+export function offsetPoint(center: GeoPoint, dxMeters: number, dyMeters: number): GeoPoint {
+	const metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos((center.lat * Math.PI) / 180);
+	const lonPerMeter = metersPerDegreeLon > 1e-6 ? 1 / metersPerDegreeLon : 0;
+	return {
+		lat: center.lat + dyMeters / METERS_PER_DEGREE_LAT,
+		lon: center.lon + dxMeters * lonPerMeter
+	};
 }
 
 export type NaipFetchErrorKind = 'network' | 'http-error' | 'bad-content-type';
