@@ -14,10 +14,22 @@ from pathlib import Path
 
 import cv2
 
+import static_course_parser as v1
+
+# The exploratory centerline modules were written against underscored helper
+# names while static_course_parser.py later exposed the same helpers publicly.
+# Patch the shared module object before importing those probes so this wrapper
+# remains runnable on the current integration branch.
+if not hasattr(v1, '_overlay_feature'):
+    v1._overlay_feature = v1.overlay_feature
+if not hasattr(v1, '_band_contrast'):
+    v1._band_contrast = v1.band_contrast
+if not hasattr(v1, '_track_segment'):
+    v1._track_segment = v1.track_segment
+
 import number_badge_classifier as number_classifier
 import static_course_centerline as v2
 import static_course_centerline_semantic as semantic
-import static_course_parser as v1
 
 
 def main() -> None:
