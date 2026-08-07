@@ -37,6 +37,8 @@
 	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
 	import { fetchNaipImage } from '$lib/naip';
 	import type { GeoPoint } from '$lib/naip';
+	import { searchPlace } from '$lib/geocode';
+	import type { GeoSearchMatch } from '$lib/geocode';
 	import {
 		consumePendingAnnotatedRound,
 		getActiveAnnotatedRound,
@@ -153,6 +155,14 @@
 	let naipError = $state<string | null>(null);
 	/** Fetched-but-not-yet-committed aerial image awaiting explicit user confirmation. */
 	let naipPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
+
+	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
+	let geocodeParkNameInput = $state('');
+	let geocodeCityStateInput = $state('');
+	let geocodeLoading = $state(false);
+	let geocodeError = $state<string | null>(null);
+	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
+	let geocodeSelectedIndex = $state<number | null>(null);
 
 	function sourceImage(): ImageAsset | null {
 		void refreshCount;
@@ -851,6 +861,45 @@
 	}
 
 	/**
+	 * Looks up the course by name and city/state via OpenStreetMap Nominatim and lists
+	 * matches for the user to pick from — never fetches NAIP imagery itself. Picking a
+	 * match just fills the same lat/lon inputs `handleNaipFetch` already reads, so nothing
+	 * downstream needs to know the coordinate came from a search instead of manual entry.
+	 */
+	async function handleGeocodeSearch(): Promise<void> {
+		if (geocodeLoading) return;
+		geocodeError = null;
+		geocodeMatches = null;
+		geocodeSelectedIndex = null;
+		const parkName = geocodeParkNameInput.trim();
+		const cityState = geocodeCityStateInput.trim();
+		if (!parkName || !cityState) {
+			geocodeError = 'Enter both a course name and a city/state.';
+			return;
+		}
+		geocodeLoading = true;
+		try {
+			const result = await searchPlace(`${parkName}, ${cityState}`);
+			if (!result.ok) {
+				geocodeError = result.error.message;
+				return;
+			}
+			geocodeMatches = result.matches;
+		} finally {
+			geocodeLoading = false;
+		}
+	}
+
+	function handleGeocodeSelect(index: number): void {
+		const match = geocodeMatches?.[index];
+		if (!match) return;
+		geocodeSelectedIndex = index;
+		naipLatInput = String(match.lat);
+		naipLonInput = String(match.lon);
+		naipError = null;
+	}
+
+	/**
 	 * Fetches a NAIP aerial preview only — never commits into the project. The user
 	 * reviews the preview and either confirms (`handleNaipConfirm`) or discards it to
 	 * adjust the radius and refetch.
@@ -1299,32 +1348,72 @@
 	>
 		<h2 id="naip-fetch-heading">Fetch clean target from USGS NAIP</h2>
 		<p class="naip-hint">
-			Alternative to uploading a target image above: enter a center coordinate
-			(found externally, e.g. any map site) and a radius, then fetch a clean
-			aerial map from the public USGS NAIP imagery service. US coverage only —
-			manual upload above still works for other courses.
+			Alternative to uploading a target image above: search for the course by
+			name, pick the matching location, then fetch a clean aerial map from the
+			public USGS NAIP imagery service. US coverage only — manual upload above
+			still works for other courses.
 		</p>
+
+		<div class="geocode-search">
+			<label>
+				<span>Course name</span>
+				<input
+					type="text"
+					data-testid="geocode-park-name"
+					bind:value={geocodeParkNameInput}
+					placeholder="e.g. Winthrop Gold"
+				/>
+			</label>
+			<label>
+				<span>City, State</span>
+				<input
+					type="text"
+					data-testid="geocode-city-state"
+					bind:value={geocodeCityStateInput}
+					placeholder="e.g. Rock Hill, SC"
+				/>
+			</label>
+			<button
+				type="button"
+				data-testid="geocode-search-button"
+				disabled={geocodeLoading}
+				onclick={handleGeocodeSearch}
+			>
+				{geocodeLoading ? 'Searching…' : 'Search'}
+			</button>
+		</div>
+		{#if geocodeError}
+			<p class="error" data-testid="geocode-error" role="alert">{geocodeError}</p>
+		{/if}
+		{#if geocodeMatches && geocodeMatches.length > 0}
+			<ul class="geocode-results" data-testid="geocode-results">
+				{#each geocodeMatches as match, index (match.displayName + index)}
+					<li>
+						<button
+							type="button"
+							class="geocode-result"
+							class:selected={geocodeSelectedIndex === index}
+							data-testid="geocode-result-{index}"
+							onclick={() => handleGeocodeSelect(index)}
+						>
+							{match.displayName}
+						</button>
+					</li>
+				{/each}
+			</ul>
+			<p class="geocode-attribution">
+				Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+					>OpenStreetMap</a
+				> contributors
+			</p>
+		{/if}
+		{#if geocodeSelectedIndex !== null}
+			<p class="naip-selected-coords" data-testid="naip-selected-coords">
+				Selected: {naipLatInput}, {naipLonInput}
+			</p>
+		{/if}
+
 		<div class="naip-inputs">
-			<label>
-				<span>Latitude</span>
-				<input
-					type="text"
-					inputmode="decimal"
-					data-testid="naip-lat"
-					bind:value={naipLatInput}
-					placeholder="e.g. 44.9778"
-				/>
-			</label>
-			<label>
-				<span>Longitude</span>
-				<input
-					type="text"
-					inputmode="decimal"
-					data-testid="naip-lon"
-					bind:value={naipLonInput}
-					placeholder="e.g. -93.2650"
-				/>
-			</label>
 			<label>
 				<span>Radius (meters)</span>
 				<input type="text" inputmode="decimal" data-testid="naip-radius" bind:value={naipRadiusInput} />
@@ -1338,6 +1427,33 @@
 				{naipLoading ? 'Fetching…' : 'Fetch aerial map'}
 			</button>
 		</div>
+
+		<details class="naip-manual-entry">
+			<summary>Enter coordinates manually instead</summary>
+			<div class="naip-inputs">
+				<label>
+					<span>Latitude</span>
+					<input
+						type="text"
+						inputmode="decimal"
+						data-testid="naip-lat"
+						bind:value={naipLatInput}
+						placeholder="e.g. 44.9778"
+					/>
+				</label>
+				<label>
+					<span>Longitude</span>
+					<input
+						type="text"
+						inputmode="decimal"
+						data-testid="naip-lon"
+						bind:value={naipLonInput}
+						placeholder="e.g. -93.2650"
+					/>
+				</label>
+			</div>
+		</details>
+
 		{#if naipError}
 			<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
 		{/if}
@@ -1949,6 +2065,68 @@
 	.naip-preview-actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+
+	.geocode-search {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 0.75rem;
+	}
+
+	.geocode-search label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.85rem;
+	}
+
+	.geocode-search input {
+		width: 12rem;
+	}
+
+	.geocode-results {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.geocode-result {
+		text-align: left;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+		background: none;
+		cursor: pointer;
+		width: 100%;
+	}
+
+	.geocode-result.selected {
+		border-color: #2a6df4;
+		background: rgb(42 109 244 / 10%);
+	}
+
+	.geocode-attribution {
+		margin: 0;
+		font-size: 0.75rem;
+		opacity: 0.7;
+	}
+
+	.naip-selected-coords {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.naip-manual-entry summary {
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+
+	.naip-manual-entry .naip-inputs {
+		margin-top: 0.5rem;
 	}
 
 	.dialog-backdrop {
