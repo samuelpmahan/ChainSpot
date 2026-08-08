@@ -2,16 +2,21 @@ import { loadCv } from '../stitch/cvMatch';
 import { associateCourseGrammar } from './courseGrammar';
 import { detectHoleNumberBadges } from './holeNumberDetection';
 import type { HoleNumberTemplate } from './holeNumberDetection';
+import { detectBasketTemplateCandidates } from './basketTemplateDetection';
+import type { BasketCandidate, BasketCv, BasketTemplateRaster } from './basketTemplateDetection';
 import { detectTeePadCandidates, detectTeePadVariants } from './teePadDetection';
 import type { TeePadCv, TeePadVariant, TeePadVariantResult } from './teePadDetection';
 
 const MAX_ANALYSIS_DIM = 2200;
 const MIN_SCORE = 0.42;
 const MAX_CANDIDATES = 18;
-const SEARCH_SCALES = [0.65, 0.8, 0.95, 1.1, 1.3] as const;
-const BASE_TEMPLATE_WIDTH = 82;
-const BASE_TEMPLATE_HEIGHT = 105;
-const BASKET_BASE_Y_FRACTION = 0.80;
+/**
+ * Bounded canonical basket-template scales in source-image pixels. Both basket
+ * browser entry points retain this compatibility ladder; number-derived scale
+ * selection remains part of the existing tee path only.
+ */
+const BROWSER_BASKET_SCALES = [0.65, 0.8, 0.95, 1.1, 1.3] as const;
+const BASKET_TEMPLATE_URL = '/resources/chainspot_cv_templates/basket.png';
 
 interface BasketDetectionRequest {
 	readonly kind: 'detect' | 'detect-course';
@@ -39,15 +44,6 @@ interface TeeDetectionRequest {
 }
 
 type BasketRequest = BasketDetectionRequest | BasketPrewarmRequest | TeeDetectionRequest;
-
-interface BasketCandidate {
-	readonly xPx: number;
-	readonly yPx: number;
-	readonly score: number;
-	readonly widthPx: number;
-	readonly heightPx: number;
-	readonly scale: number;
-}
 
 type CvMat = {
 	readonly rows: number;
@@ -100,43 +96,37 @@ function fullResolutionRaster(bitmap: ImageBitmap): {
 
 type AnalysisRaster = ReturnType<typeof grayscaleRaster>;
 
-let templateBitmapPromise: Promise<ImageBitmap> | null = null;
 let detectorRuntimePromise: Promise<CvModule> | null = null;
-const templateRasterCache = new Map<string, Uint8Array>();
+let basketTemplatePromise: Promise<BasketTemplateRaster> | null = null;
 
-function loadTemplateBitmap(): Promise<ImageBitmap> {
-	if (!templateBitmapPromise) {
-		templateBitmapPromise = fetch(new URL('./basket-template.png', import.meta.url))
+function loadBasketTemplate(): Promise<BasketTemplateRaster> {
+	if (!basketTemplatePromise) {
+		basketTemplatePromise = fetch(BASKET_TEMPLATE_URL)
 			.then((response) => {
 				if (!response.ok) throw new Error(`Could not load basket template (${response.status}).`);
 				return response.blob();
 			})
-			.then((blob) => createImageBitmap(blob));
-		templateBitmapPromise.catch(() => {
+			.then((blob) => createImageBitmap(blob))
+			.then((bitmap) => {
+				const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+				const context = canvas.getContext('2d', { willReadFrequently: true });
+				if (!context) throw new Error('Basket detection could not create a template context.');
+				context.drawImage(bitmap, 0, 0);
+				const rgba = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+				const gray = new Uint8Array(bitmap.width * bitmap.height);
+				for (let i = 0, j = 0; i < rgba.length; i += 4, j += 1) {
+					gray[j] = (rgba[i] * 0.299 + rgba[i + 1] * 0.587 + rgba[i + 2] * 0.114 + 0.5) | 0;
+				}
+				bitmap.close();
+				return { gray, widthPx: canvas.width, heightPx: canvas.height };
+			});
+		basketTemplatePromise.catch(() => {
 			// A failed fetch/decode should not permanently poison a worker which
 			// otherwise remains healthy (for example, after a transient asset load).
-			templateBitmapPromise = null;
+			basketTemplatePromise = null;
 		});
 	}
-	return templateBitmapPromise;
-}
-
-async function basketTemplate(width: number, height: number): Promise<Uint8Array> {
-	const cacheKey = `${width}x${height}`;
-	const cached = templateRasterCache.get(cacheKey);
-	if (cached) return cached;
-	const bitmap = await loadTemplateBitmap();
-	const canvas = new OffscreenCanvas(width, height);
-	const context = canvas.getContext('2d', { willReadFrequently: true });
-	if (!context) throw new Error('Basket detection could not create a template context.');
-	context.drawImage(bitmap, 0, 0, width, height);
-	const rgba = context.getImageData(0, 0, width, height).data;
-	const gray = new Uint8Array(width * height);
-	for (let i = 0, j = 0; i < rgba.length; i += 4, j += 1) {
-		gray[j] = (rgba[i] * 0.299 + rgba[i + 1] * 0.587 + rgba[i + 2] * 0.114 + 0.5) | 0;
-	}
-	templateRasterCache.set(cacheKey, gray);
-	return gray;
+	return basketTemplatePromise;
 }
 
 /**
@@ -147,7 +137,7 @@ async function basketTemplate(width: number, height: number): Promise<Uint8Array
  */
 function loadDetectorRuntime(): Promise<CvModule> {
 	if (!detectorRuntimePromise) {
-		detectorRuntimePromise = Promise.all([loadCv(), loadTemplateBitmap()])
+		detectorRuntimePromise = Promise.all([loadCv(), loadBasketTemplate()])
 			.then(([cv]) => {
 				const runtime = cv as unknown as CvModule;
 				// Exercise the OpenCV code path while prewarming. This is deliberately
@@ -174,122 +164,34 @@ function loadDetectorRuntime(): Promise<CvModule> {
 	return detectorRuntimePromise;
 }
 
-function matFromBytes(cv: CvModule, bytes: Uint8Array, rows: number, cols: number): CvMat {
-	const mat = new cv.Mat(rows, cols, cv.CV_8UC1);
-	(mat.data as Uint8Array).set(bytes);
-	return mat;
-}
-
-function addScaleCandidates(
-	result: CvMat,
-	imageScale: number,
-	templateScale: number,
-	templateWidth: number,
-	templateHeight: number,
-	into: BasketCandidate[]
-): void {
-	// OpenCV.js exposes CV_32F results through data32F. Reading data instead
-	// interprets the float bytes as 8-bit pixels, producing bogus scores like
-	// 25500% in the UI.
-	const values = result.data32F ?? (result.data as Float32Array);
-	const top: Array<{ x: number; y: number; score: number }> = [];
-	for (let index = 0; index < values.length; index += 1) {
-		const score = values[index];
-		if (score < MIN_SCORE) continue;
-		const x = index % result.cols;
-		const y = Math.floor(index / result.cols);
-		// Keep response-map local maxima, matching the proven Python parser's
-		// dilation/NMS step. Without this, adjacent pixels from one strong basket
-		// can fill the bounded top set and crowd every other basket out.
-		let localMaximum = true;
-		for (let dy = -1; dy <= 1 && localMaximum; dy += 1) {
-			const neighborY = y + dy;
-			if (neighborY < 0 || neighborY >= result.rows) continue;
-			for (let dx = -1; dx <= 1; dx += 1) {
-				if (dx === 0 && dy === 0) continue;
-				const neighborX = x + dx;
-				if (neighborX < 0 || neighborX >= result.cols) continue;
-				if (values[neighborY * result.cols + neighborX] > score) {
-					localMaximum = false;
-					break;
-				}
-			}
-		}
-		if (!localMaximum) continue;
-		const candidate = {
-			x,
-			y,
-			score
-		};
-		// Keep a bounded high-score set per scale; this avoids sorting millions of
-		// response pixels while still retaining every plausible local maximum.
-		if (top.length < 128) {
-			top.push(candidate);
-			continue;
-		}
-		let lowestIndex = 0;
-		for (let i = 1; i < top.length; i += 1) {
-			if (top[i].score < top[lowestIndex].score) lowestIndex = i;
-		}
-		if (score > top[lowestIndex].score) top[lowestIndex] = candidate;
-	}
-	top.sort((a, b) => b.score - a.score);
-	for (const hit of top) {
-		const widthPx = templateWidth / imageScale;
-		const heightPx = templateHeight / imageScale;
-		const xPx = (hit.x + templateWidth * 0.5) / imageScale;
-		const yPx = (hit.y + templateHeight * BASKET_BASE_Y_FRACTION) / imageScale;
-		const radius = Math.max(18, Math.min(widthPx, heightPx) * 0.45);
-		if (into.some((existing) => Math.hypot(existing.xPx - xPx, existing.yPx - yPx) < radius)) {
-			continue;
-		}
-		into.push({ xPx, yPx, score: hit.score, widthPx, heightPx, scale: templateScale });
-		if (into.length >= MAX_CANDIDATES * 3) return;
-	}
-}
-
 async function detect(
 	request: BasketDetectionRequest,
 	existingRaster?: AnalysisRaster
 ): Promise<readonly BasketCandidate[]> {
 	const cv = await loadDetectorRuntime();
 	const raster = existingRaster ?? grayscaleRaster(request.bitmap);
-	const image = matFromBytes(cv, raster.gray, raster.height, raster.width);
-	const candidates: BasketCandidate[] = [];
-	try {
-		for (const templateScale of SEARCH_SCALES) {
-			const templateWidth = Math.max(10, Math.round(BASE_TEMPLATE_WIDTH * templateScale * raster.scale));
-			const templateHeight = Math.max(14, Math.round(BASE_TEMPLATE_HEIGHT * templateScale * raster.scale));
-			if (templateWidth >= raster.width || templateHeight >= raster.height) continue;
-			const template = matFromBytes(
-				cv,
-				await basketTemplate(templateWidth, templateHeight),
-				templateHeight,
-				templateWidth
-			);
-			const result = new cv.Mat();
-			try {
-				cv.matchTemplate(image, template, result, cv.TM_CCOEFF_NORMED);
-				addScaleCandidates(
-					result,
-					raster.scale,
-					templateScale,
-					templateWidth,
-					templateHeight,
-					candidates
-				);
-			} finally {
-				template.delete();
-				result.delete();
-			}
+	const template = await loadBasketTemplate();
+	const sourceScale = 1 / raster.scale;
+	const candidates = detectBasketTemplateCandidates(
+		cv as unknown as BasketCv,
+		{
+			gray: raster.gray,
+			widthPx: raster.width,
+			heightPx: raster.height,
+			sourceScale
+		},
+		template,
+		{
+			// The basket-only route has no number anchor. Keep its historical,
+			// bounded scale ladder rather than paying a blind sweep in the worker.
+			uiScalePx: sourceScale,
+			templateScales: BROWSER_BASKET_SCALES.map((scale) => scale * raster.scale),
+			maxCandidates: MAX_CANDIDATES,
+			minScore: MIN_SCORE
 		}
-	} finally {
-		image.delete();
-	}
+	);
 
 	return candidates
-		.sort((a, b) => b.score - a.score)
-		.slice(0, MAX_CANDIDATES)
 		.map((candidate) => ({
 			...candidate,
 			xPx: Math.max(0, Math.min(request.widthPx, candidate.xPx)),

@@ -4,9 +4,9 @@ Context: this plan targets the CV auto-annotation work originally on `agent/phas
 (hole-number detection, tee-pad detection, basket detection, `courseGrammar.ts`), merged into
 this branch to implement against.
 
-**Status: Phase 1, steps 1-3 implemented** (see "Progress" below). Step 4 (re-measure against a
-real fixture) and everything from Phase 0 onward is still blocked on getting a real clean-course
-screenshot checked into the repo — see Phase 0.
+**Status:** Phase 1 tee-pad work remains documented below. The approved Phase 2 basket detector
+transplant is implemented and truth-scored against `resources/GoldenBasketSet.chainspot.zip`; the
+browser worker uses the bounded production path and the broad scale sweep remains CLI-only.
 
 ## Current state
 
@@ -14,7 +14,7 @@ screenshot checked into the repo — see Phase 0.
 |---|---|---|
 | Hole numbers | 18/18 | production TS (`holeNumberDetection.ts`), commit `c8a8273` |
 | Tee pads | 14/18 | production TS (`teePadDetection.ts` fused path), commit `e328970` |
-| Baskets | unverified, assumed 18/18 | production TS (`basketDetection.worker.ts`) — never explicitly measured against a truth set |
+| Baskets | 18/18, 0 false positives | production TS (`basketDetection.worker.ts`) plus `npm run detect:baskets` against `GoldenBasketSet` |
 | Reference (Python probe) | 18/18 numbers, 18/18 baskets, 18/18 tees, 18/18 centerlines | `scripts/cv-probes/static_course_parser.py`, run against a real clean-course screenshot that is **not checked into the repo** |
 
 The Python probe already solves this problem on a real fixture. The gap is a **porting/wiring
@@ -159,16 +159,18 @@ real clean-course screenshot that lives only in a local/session path
    on genuinely missed pads only, not by loosening thresholds broadly, to avoid trading misses
    for new false positives.
 
-## Phase 2 — Verify (and if needed, close) the basket gap
+## Phase 2 — Basket detector transplant: complete
 
-1. Run the Phase 0 harness against baskets specifically and get a real number — do not assume
-   18/18 holds in production; it has never been measured against a truth set.
-2. If short of 18/18, port the `uiScale`-relative multiscale search
-   (`linspace(uiScale*0.90, uiScale*1.10, 9)`) and NMS radius (`22*scale`) from the Python
-   probe/tee-pad precedent, replacing the current fixed `SEARCH_SCALES` ladder and `MIN_SCORE = 0.42`.
-3. Confirm the basket's semantic endpoint (bottom-center stem base, `y + 0.96*height`, not
-   glyph/icon center) survives unchanged into `courseGrammar`'s basket-assignment cost, since
-   that's the anchor the tee/basket polarity penalty depends on.
+The production worker now uses the clean `basket.png` template through the shared pure detector,
+with the proven 11x11 local-max suppression window and 0.96 bottom-center stem-base anchor. The
+existing worker/API transport, course grammar, number detector, and tee detector are unchanged.
+Both browser basket entry points use the bounded five-scale compatibility ladder; number-derived
+scale selection remains solely in the existing tee path. The independent 0.4..4.0 basket-scale
+sweep is intentionally exposed only by `npm run detect:baskets` for diagnostics.
+
+Measured on `GoldenBasketSet.chainspot.zip` (default CLI discovery, 116.93s on this workstation):
+18 candidates, all truth numbers 1 through 18 matched, 0 false positives, with discovered scale
+1.85 and scores 0.727–0.919. The CLI writes both `baskets.json` and `baskets.png` overlays.
 
 ## Phase 3 — Course grammar: clarify what "bumps to 18/18" can mean
 
