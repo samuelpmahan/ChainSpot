@@ -202,10 +202,13 @@ in the new module:
 
 **Result on `GoldenTeeSet.chainspot.zip`** (no `--basket-scale` override — fully self-calibrated):
 **18/18** candidates, scores 0.85-0.92, every one visually confirmed landing on the correct basket
-icon. `GoldenTeeSet` has no basket ground truth in its `project.json` (`holes[].basket` is absent,
-unlike `holes[].tee`), so this is a strong visual confirmation, not yet a truth-scored number —
-worth adding basket truth to a fixture (or the mentioned separate "golden basket set") to make
-this a hard, CI-checkable assertion per Phase 4.
+icon. `GoldenTeeSet` has no basket ground truth (`holes[].basket` absent, unlike `holes[].tee`),
+so that run was a strong visual confirmation, not a truth-scored number.
+
+**Confirmed truth-scored on `resources/GoldenBasketSet.chainspot.zip`** (landed after the above,
+same source image, real `holes[].basket` ground truth for all 18 holes): **18/18 matched, 0 false
+positives**, `basketScale` self-calibrated to 1.85 (independently, not hand-tuned — close to the
+~2.0 found manually while diagnosing issue 4 above). Basket detection is done, not just plausible.
 
 **Known cost:** the blind sweep is slow (default range 0.4-4.0 at 0.05 steps, full-image
 `matchTemplate` per step) — this run took on the order of a few minutes end-to-end including
