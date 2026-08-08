@@ -141,13 +141,53 @@ export interface FindBasketAnchorScaleOptions {
 	/** Coarse blind sweep bounds, as a multiple of the template's own canonical size. Defaults to 0.4..4.0. */
 	readonly scaleRangeLow?: number;
 	readonly scaleRangeHigh?: number;
-	/** Sweep step size. Defaults to 0.05. */
+	/** Coarse sweep step size. Defaults to 0.15. A finer refinement pass always follows around the coarse winner. */
 	readonly scaleStep?: number;
+	/** Skip the refinement pass (used by tests exercising the coarse sweep alone). Defaults to true. */
+	readonly refine?: boolean;
 }
 
 const DEFAULT_ANCHOR_SCALE_RANGE_LOW = 0.4;
 const DEFAULT_ANCHOR_SCALE_RANGE_HIGH = 4.0;
-const DEFAULT_ANCHOR_SCALE_STEP = 0.05;
+/**
+ * A full 0.4..4.0 sweep at the previous 0.05 step was ~72 full-image
+ * matchTemplate passes -- fine for an offline CLI investigation, too slow to
+ * run on every load in a production worker. The coarse pass now uses a much
+ * bigger step, and a refinement pass (see `refineScale`) narrows around the
+ * coarse winner at fine precision, so overall accuracy is unchanged while
+ * total passes drop by roughly half.
+ */
+const DEFAULT_ANCHOR_SCALE_STEP = 0.15;
+const REFINE_STEP_DIVISOR = 15;
+
+function sweepScales(
+	cv: BasketCv,
+	image: CvMat,
+	template: BasketTemplateRaster,
+	raster: BasketRaster,
+	low: number,
+	high: number,
+	step: number
+): BasketAnchorScale | null {
+	let best: BasketAnchorScale | null = null;
+	for (let scale = low; scale <= high + 1e-9; scale += step) {
+		const resized = resizeTemplate(cv, template, scale);
+		try {
+			if (resized.cols >= raster.widthPx || resized.rows >= raster.heightPx) continue;
+			const result = new cv.Mat();
+			try {
+				cv.matchTemplate(image, resized, result, cv.TM_CCOEFF_NORMED);
+				const { maxVal } = cv.minMaxLoc(result);
+				if (!best || maxVal > best.score) best = { scale, score: maxVal };
+			} finally {
+				result.delete();
+			}
+		} finally {
+			resized.delete();
+		}
+	}
+	return best;
+}
 
 /**
  * Finds the single template scale (as a multiple of the canonical basket
@@ -165,6 +205,9 @@ const DEFAULT_ANCHOR_SCALE_STEP = 0.05;
  * of its own. Measured on one such real fixture, the basket icon's true
  * scale was roughly 2x what the number-badge-derived `uiScalePx` predicted —
  * enough to push every candidate below the match-score floor.
+ *
+ * Runs coarse-to-fine: a wide coarse sweep, then a narrow high-precision
+ * refinement pass around the coarse winner (see `DEFAULT_ANCHOR_SCALE_STEP`).
  */
 export function findBasketAnchorScale(
 	cv: BasketCv,
@@ -175,33 +218,23 @@ export function findBasketAnchorScale(
 	const scaleRangeLow = options.scaleRangeLow ?? DEFAULT_ANCHOR_SCALE_RANGE_LOW;
 	const scaleRangeHigh = options.scaleRangeHigh ?? DEFAULT_ANCHOR_SCALE_RANGE_HIGH;
 	const scaleStep = options.scaleStep ?? DEFAULT_ANCHOR_SCALE_STEP;
+	const refine = options.refine ?? true;
 	if (!(scaleRangeHigh > scaleRangeLow) || !(scaleStep > 0)) {
 		throw new Error('findBasketAnchorScale requires scaleRangeHigh > scaleRangeLow and a positive scaleStep.');
 	}
 
 	const image = matFromBytes(cv, raster.gray, raster.widthPx, raster.heightPx);
-	let best: BasketAnchorScale | null = null;
 	try {
-		for (let scale = scaleRangeLow; scale <= scaleRangeHigh + 1e-9; scale += scaleStep) {
-			const resized = resizeTemplate(cv, template, scale);
-			try {
-				if (resized.cols >= raster.widthPx || resized.rows >= raster.heightPx) continue;
-				const result = new cv.Mat();
-				try {
-					cv.matchTemplate(image, resized, result, cv.TM_CCOEFF_NORMED);
-					const { maxVal } = cv.minMaxLoc(result);
-					if (!best || maxVal > best.score) best = { scale, score: maxVal };
-				} finally {
-					result.delete();
-				}
-			} finally {
-				resized.delete();
-			}
-		}
+		const coarse = sweepScales(cv, image, template, raster, scaleRangeLow, scaleRangeHigh, scaleStep);
+		if (!coarse || !refine) return coarse;
+		const fineStep = scaleStep / REFINE_STEP_DIVISOR;
+		const fineLow = Math.max(scaleRangeLow, coarse.scale - scaleStep);
+		const fineHigh = Math.min(scaleRangeHigh, coarse.scale + scaleStep);
+		const fine = sweepScales(cv, image, template, raster, fineLow, fineHigh, fineStep);
+		return fine && fine.score >= coarse.score ? fine : coarse;
 	} finally {
 		image.delete();
 	}
-	return best;
 }
 
 function mapRows(

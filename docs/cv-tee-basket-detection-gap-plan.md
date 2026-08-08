@@ -210,20 +210,32 @@ same source image, real `holes[].basket` ground truth for all 18 holes): **18/18
 positives**, `basketScale` self-calibrated to 1.85 (independently, not hand-tuned — close to the
 ~2.0 found manually while diagnosing issue 4 above). Basket detection is done, not just plausible.
 
-**Known cost:** the blind sweep is slow (default range 0.4-4.0 at 0.05 steps, full-image
-`matchTemplate` per step) — this run took on the order of a few minutes end-to-end including
-number-badge map-bounds derivation. Fine for an offline CLI investigation; worth a coarse-to-fine
-two-pass sweep before this becomes a per-load production step (not done here).
+**Wired into production.** `basketDetection.worker.ts` now calls `basketTemplateDetection.ts`
+directly, for both `detectCourse` (full-course pipeline) and the standalone "Basket assist"
+`detect` path — the old `detect()`/`addScaleCandidates()`/`SEARCH_SCALES`/`BASE_TEMPLATE_WIDTH`
+etc. are deleted, not just superseded. `detectCourse`'s pipeline order changed: numbers now run
+*before* baskets (previously baskets ran first, with a `median(basket scales)` fallback for
+`uiScalePx` when number-badge anchoring failed — that fallback is gone, since basket scale no
+longer depends on anything numbers produce; map-bounds restriction still comes from number-badge
+*positions*, unaffected). `findBasketAnchorScale` also got a coarse-to-fine speedup (coarse sweep
+at a much wider 0.15 step, then a narrow high-precision refinement pass around the winner) cutting
+the earlier "known cost" roughly in half without any accuracy loss — confirmed by rerunning the
+CLI against `GoldenBasketSet` post-change: still 18/18, 0 false positives, `basketScale` 1.84
+(vs. 1.85 before), in ~66s instead of a few minutes.
 
-**Not yet done:** wiring the fixed `basketTemplateDetection.ts` into production
-(`basketDetection.worker.ts`'s `detectCourse` and the standalone "Basket assist" `detect()`
-path) — this phase deliberately stopped at CLI-verified-correct, mirroring how tee-pad fixes were
-measured via CLI before touching the worker. `courseGrammar`'s basket-assignment cost consuming
-the corrected `0.96` stem-base anchor is still open (item 3 below).
+**Verified in an actual browser worker, not just Node/CLI** — this is browser-only code
+(`OffscreenCanvas`, `ImageBitmap`) that unit tests can't exercise and could easily have broken on
+details the CLI's Node environment can't catch. Drove `/annotate-round`'s real "Detect full
+course" button in headless Chromium against `GoldenTeeSet`'s image end to end: **18 numbers, 18
+baskets, 15 tees**, 9 holes reaching "ready" status in `courseGrammar`, no console errors, 71s.
+Baskets matching the CLI-confirmed 18/18 in the actual production code path is the real
+confirmation this phase needed.
 
-3. Confirm the basket's semantic endpoint (bottom-center stem base, `y + 0.96*height`, not
-   glyph/icon center) survives unchanged into `courseGrammar`'s basket-assignment cost once the
-   fix is wired into production, since that's the anchor the tee/basket polarity penalty depends on.
+Item 3 below (basket's `0.96` stem-base anchor reaching `courseGrammar` correctly) is satisfied
+as a side effect of this wiring, since `detectBaskets` returns the same `BasketCandidate` shape
+`associateCourseGrammar` already consumed.
+
+3. ~~Confirm the basket's semantic endpoint reaches `courseGrammar` unchanged~~ — done, see above.
 
 ## Phase 3 — Course grammar: clarify what "bumps to 18/18" can mean
 
