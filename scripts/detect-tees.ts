@@ -6,6 +6,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
+	deriveTeePadUiScalePx,
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadVariants
 } from '../src/lib/autoAnnotation/teePadDetection';
@@ -312,8 +313,9 @@ async function deriveDetectionInputs(
 	args: TeeCliArgs
 ): Promise<{ uiScalePx: number; mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>; numberCount: number }> {
 	if (args.uiScalePx !== undefined) {
+		const uiScalePx = deriveTeePadUiScalePx(undefined, args.uiScalePx);
 		return {
-			uiScalePx: args.uiScalePx,
+			uiScalePx: uiScalePx as number,
 			mapBoundsPx:
 				args.mapTopPx !== undefined && args.mapBottomPx !== undefined
 					? { topPx: args.mapTopPx, bottomPx: args.mapBottomPx }
@@ -327,7 +329,7 @@ async function deriveDetectionInputs(
 		{ format: 'rgba', widthPx: raster.widthPx, heightPx: raster.heightPx, data: raster.rgba },
 		templates
 	);
-	const uiScalePx = args.uiScalePx ?? detection.anchor?.scale;
+	const uiScalePx = deriveTeePadUiScalePx(detection.anchor);
 	if (!uiScalePx || !Number.isFinite(uiScalePx) || uiScalePx <= 0) {
 		throw new Error(detection.note ?? 'Could not derive UI scale from hole-number templates; pass --ui-scale.');
 	}

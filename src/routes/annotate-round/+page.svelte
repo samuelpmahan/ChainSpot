@@ -48,6 +48,7 @@
 		DetectTeesResult,
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
+	import { deriveTeePadUiScalePx } from '$lib/autoAnnotation/teePadDetection';
 
 	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'bend'];
 	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
@@ -463,7 +464,7 @@
 		teeExperimentResult = null;
 		selectedTeeCandidateKey = null;
 		try {
-			const cachedScale = courseDetection?.numberDetection?.anchor?.scale;
+			const cachedScale = deriveTeePadUiScalePx(courseDetection?.numberDetection?.anchor);
 			const mapBoundsPx = deriveMapBoundsFromNumbers(
 				courseDetection?.numberDetection?.candidates,
 				image.heightPx

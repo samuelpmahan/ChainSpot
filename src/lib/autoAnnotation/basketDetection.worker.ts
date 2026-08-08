@@ -4,7 +4,11 @@ import { detectHoleNumberBadges } from './holeNumberDetection';
 import type { HoleNumberTemplate } from './holeNumberDetection';
 import { detectBasketTemplateCandidates } from './basketTemplateDetection';
 import type { BasketCandidate, BasketCv, BasketTemplateRaster } from './basketTemplateDetection';
-import { detectTeePadCandidates, detectTeePadVariants } from './teePadDetection';
+import {
+	deriveTeePadUiScalePx,
+	detectTeePadCandidates,
+	detectTeePadVariants
+} from './teePadDetection';
 import type { TeePadCv, TeePadVariant, TeePadVariantResult } from './teePadDetection';
 
 const MAX_ANALYSIS_DIM = 2200;
@@ -278,7 +282,17 @@ async function deriveUiScaleAndMapBounds(
 	}
 
 	const sourceScale = 1 / raster.scale;
-	const uiScalePx = detectedNumbers.anchor.scale * sourceScale;
+	const sourceNumberAnchor = detectedNumbers.anchor
+		? {
+				...detectedNumbers.anchor,
+				widthPx: detectedNumbers.anchor.widthPx * sourceScale,
+				heightPx: detectedNumbers.anchor.heightPx * sourceScale
+			}
+		: null;
+	const uiScalePx = deriveTeePadUiScalePx(sourceNumberAnchor);
+	if (uiScalePx === undefined) {
+		throw new Error(detectedNumbers.note ?? 'Could not derive UI scale from hole-number templates.');
+	}
 	const mapBoundsPx =
 		request.mapBoundsPx ??
 		deriveMapBoundsFromNumbers(
@@ -376,9 +390,10 @@ async function detectCourse(request: BasketDetectionRequest) {
 				}
 			: null
 	};
-	const uiScalePx = numberDetection.anchor
-		? numberDetection.anchor.scale
-		: median(baskets.map((candidate) => candidate.scale));
+	const uiScalePx = deriveTeePadUiScalePx(
+		numberDetection.anchor,
+		median(baskets.map((candidate) => candidate.scale)) ?? undefined
+	);
 	reportCourseProgress(
 		request,
 		'tees',

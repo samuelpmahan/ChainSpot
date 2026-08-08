@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { filterSizeConsistentCandidates } from '../../src/lib/autoAnnotation/teePadDetection';
+import {
+	deriveTeePadUiScalePx,
+	filterSizeConsistentCandidates
+} from '../../src/lib/autoAnnotation/teePadDetection';
 import type { TeePadCandidate } from '../../src/lib/autoAnnotation/teePadDetection';
 
 function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCandidate {
@@ -13,6 +18,48 @@ function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCa
 		support: ['edge-loop']
 	};
 }
+
+describe('deriveTeePadUiScalePx', () => {
+	it('converts a 53x41 number anchor to the canonical UDisc UI scale', () => {
+		const anchor = { widthPx: 53, heightPx: 41, scale: 1 };
+		expect(deriveTeePadUiScalePx(anchor)).toBeCloseTo(1.7746, 4);
+	});
+
+	it('ignores the number detector anchor scale', () => {
+		const atOneAnchor = { widthPx: 53, heightPx: 41, scale: 1 };
+		const atAnotherResizeAnchor = { widthPx: 53, heightPx: 41, scale: 9.5 };
+		const atOne = deriveTeePadUiScalePx(atOneAnchor);
+		const atAnotherResize = deriveTeePadUiScalePx(atAnotherResizeAnchor);
+		expect(atAnotherResize).toBe(atOne);
+	});
+
+	it('preserves the supplied fallback when no number anchor exists', () => {
+		expect(deriveTeePadUiScalePx(null, 1.85)).toBe(1.85);
+		expect(deriveTeePadUiScalePx(undefined)).toBeUndefined();
+	});
+
+	it('routes every tee scale entry path through the shared helper', () => {
+		const root = resolve(process.cwd());
+		const entryPaths = [
+			'src/lib/autoAnnotation/basketDetection.worker.ts',
+			'scripts/detect-tees.ts',
+			'src/routes/annotate-round/+page.svelte'
+		];
+		for (const entryPath of entryPaths) {
+			const source = readFileSync(resolve(root, entryPath), 'utf8');
+			expect(source, entryPath).toContain('deriveTeePadUiScalePx');
+		}
+		const workerSource = readFileSync(
+			resolve(root, 'src/lib/autoAnnotation/basketDetection.worker.ts'),
+			'utf8'
+		);
+		const cliSource = readFileSync(resolve(root, 'scripts/detect-tees.ts'), 'utf8');
+		expect(workerSource).toMatch(
+			/const uiScalePx = deriveTeePadUiScalePx\(\s*numberDetection\.anchor/
+		);
+		expect(cliSource).not.toContain('detection.anchor?.scale');
+	});
+});
 
 describe('filterSizeConsistentCandidates', () => {
 	it('drops candidates about half the width of the rest of the set (C2 dash artifacts)', () => {
