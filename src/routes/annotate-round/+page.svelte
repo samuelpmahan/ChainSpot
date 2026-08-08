@@ -15,13 +15,19 @@
 	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
 	import {
 		addHole,
-		clearCorridor,
+		clearBends,
 		placeByMode,
 		removeHole,
-		removeLastCorridorPoint,
-		removeLastShot
+		removeLastBend,
+		removeLastShot,
+		setCorridorWidth
 	} from '$lib/holeAnnotation';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
+	import {
+		deriveCorridorBand,
+		deriveCorridorCenterline,
+		DEFAULT_CORRIDOR_WIDTH_PX
+	} from '$lib/corridor';
 	import {
 		detectBasketCandidates,
 		detectCourseCandidates,
@@ -29,12 +35,12 @@
 	} from '$lib/autoAnnotation/basketDetection';
 	import type { BasketCandidate, CourseDetectionResult } from '$lib/autoAnnotation/basketDetection';
 
-	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'corridor'];
+	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'bend'];
 	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
 		tee: 'Tee',
 		basket: 'Basket',
 		shot: 'Shot landing',
-		corridor: 'Corridor point'
+		bend: 'Bend point'
 	};
 
 	interface Props {
@@ -64,6 +70,7 @@
 	}
 
 	onDestroy(() => {
+		stopCourseDetectionProgress();
 		if (participatesInSession) retainEditor('annotate-round', editor);
 	});
 
@@ -89,10 +96,34 @@
 	let basketDetectionError = $state<string | null>(null);
 	let courseDetection = $state<CourseDetectionResult | null>(null);
 	let courseDetectionRunning = $state(false);
+	let courseDetectionStatus = $state<string | null>(null);
+	let courseDetectionElapsedSeconds = $state(0);
+	let courseDetectionStartedAt = 0;
+	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let prewarmedSourceId: string | null = null;
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
+	}
+
+	function startCourseDetectionProgress(): void {
+		if (courseDetectionTimer !== null) clearInterval(courseDetectionTimer);
+		courseDetectionStartedAt = Date.now();
+		courseDetectionElapsedSeconds = 0;
+		courseDetectionStatus = 'Preparing image for the CV worker…';
+		courseDetectionTimer = setInterval(() => {
+			courseDetectionElapsedSeconds = Math.floor((Date.now() - courseDetectionStartedAt) / 1000);
+		}, 250);
+	}
+
+	function stopCourseDetectionProgress(): void {
+		if (courseDetectionStartedAt > 0) {
+			courseDetectionElapsedSeconds = Math.floor((Date.now() - courseDetectionStartedAt) / 1000);
+		}
+		if (courseDetectionTimer !== null) {
+			clearInterval(courseDetectionTimer);
+			courseDetectionTimer = null;
+		}
 	}
 
 	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
@@ -123,14 +154,22 @@
 		holes = removeLastShot(holes, activeHoleId);
 	}
 
-	function handleRemoveLastCorridorPoint(): void {
+	function handleRemoveLastBend(): void {
 		if (!activeHoleId) return;
-		holes = removeLastCorridorPoint(holes, activeHoleId);
+		holes = removeLastBend(holes, activeHoleId);
 	}
 
-	function handleClearCorridor(): void {
+	function handleClearBends(): void {
 		if (!activeHoleId) return;
-		holes = clearCorridor(holes, activeHoleId);
+		holes = clearBends(holes, activeHoleId);
+	}
+
+	function handleCorridorWidthChange(event: Event): void {
+		if (!activeHoleId) return;
+		const input = event.currentTarget as HTMLInputElement;
+		const corridorWidthPx = Number(input.value);
+		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
+		holes = setCorridorWidth(holes, activeHoleId, corridorWidthPx);
 	}
 
 	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
@@ -151,6 +190,9 @@
 		selectedBasketCandidate = null;
 		basketDetectionError = null;
 		courseDetection = null;
+		courseDetectionStatus = null;
+		courseDetectionElapsedSeconds = 0;
+		stopCourseDetectionProgress();
 	}
 
 	async function handleDetectCourse(): Promise<void> {
@@ -165,20 +207,30 @@
 		courseDetectionRunning = true;
 		basketDetectionError = null;
 		selectedBasketCandidate = null;
+		startCourseDetectionProgress();
 		try {
 			const result = await detectCourseCandidates(
 				resource.bytes,
 				image.mimeType,
 				image.widthPx,
-				image.heightPx
+				image.heightPx,
+				(progress) => {
+					courseDetectionStatus = progress.message;
+				}
 			);
 			courseDetection = result;
 			basketCandidates = result.baskets;
+			const assignedNumbers = result.numberDetection.candidates.filter(
+				(candidate) => candidate.label !== undefined
+			).length;
+			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
 		} catch (error) {
 			courseDetection = null;
+			courseDetectionStatus = 'Detection failed';
 			basketDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
 		} finally {
 			courseDetectionRunning = false;
+			stopCourseDetectionProgress();
 		}
 	}
 
@@ -193,7 +245,13 @@
 		for (const proposal of ready) {
 			const existing = existingByNumber.get(proposal.number);
 			const next: AnnotatedHole = {
-				...(existing ?? { id: crypto.randomUUID(), number: proposal.number, shots: [] }),
+				...(existing ?? {
+					id: crypto.randomUUID(),
+					number: proposal.number,
+					shots: [],
+					corridorBends: [],
+					corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
+				}),
 				tee: { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
 				basket: { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
 			};
@@ -339,8 +397,8 @@
 					holes
 				});
 			} catch (error) {
-				// Most likely an in-progress corridor with fewer than
-				// MIN_CORRIDOR_POINTS vertices — finish it or clear it first.
+				// Hole validation failure (for example a non-positive corridor
+				// width or an out-of-bounds point) — correct it and try again.
 				doneError = error instanceof Error ? error.message : 'The current annotations are invalid.';
 				return;
 			}
@@ -458,7 +516,7 @@
 									>
 										<strong>Hole {hole.number}</strong>
 										<span>
-											{hole.tee ? 'tee' : 'no tee'}{hole.basket ? ' · basket' : ''} · {hole.shots.length} shots{hole.corridor ? ` · corridor (${hole.corridor.length})` : ''}
+											{hole.tee ? 'tee' : 'no tee'}{hole.basket ? ' · basket' : ''} · {hole.shots.length} shots{hole.corridorBends.length > 0 ? ` · bends (${hole.corridorBends.length})` : ''}
 										</span>
 									</button>
 									<button
@@ -497,9 +555,20 @@
 						</div>
 						<div class="edit-actions">
 							<button type="button" data-testid="remove-last-shot" disabled={hole.shots.length === 0} onclick={handleRemoveLastShot}>Undo shot</button>
-							<button type="button" data-testid="remove-last-corridor-point" disabled={!hole.corridor?.length} onclick={handleRemoveLastCorridorPoint}>Undo corridor point</button>
-							<button type="button" data-testid="clear-corridor" disabled={!hole.corridor} onclick={handleClearCorridor}>Clear corridor</button>
+							<button type="button" data-testid="remove-last-bend" disabled={hole.corridorBends.length === 0} onclick={handleRemoveLastBend}>Undo bend</button>
+							<button type="button" data-testid="clear-bends" disabled={hole.corridorBends.length === 0} onclick={handleClearBends}>Clear bends</button>
 						</div>
+						<label class="width-control">
+							<span>Corridor width (px)</span>
+							<input
+								type="number"
+								min="1"
+								step="1"
+								value={hole.corridorWidthPx}
+								onchange={handleCorridorWidthChange}
+								data-testid="corridor-width"
+							/>
+						</label>
 					</div>
 				{/if}
 
@@ -518,6 +587,18 @@
 						>
 							{courseDetectionRunning ? 'Detecting the course…' : 'Detect full course'}
 						</button>
+						{#if courseDetectionStatus}
+							<p
+								class="detection-progress"
+								data-testid="course-detection-progress"
+								data-running={courseDetectionRunning ? 'true' : 'false'}
+								role="status"
+							>
+								<span class="progress-dot" class:running={courseDetectionRunning} aria-hidden="true"></span>
+								<span class="progress-copy">{courseDetectionStatus}</span>
+								<span class="progress-time">{courseDetectionElapsedSeconds}s</span>
+							</p>
+						{/if}
 						{#if courseDetection}
 							{@const assignedNumbers = courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length}
 							{@const readyHoles = courseDetection.grammar.holes.filter((proposal) => proposal.status === 'ready').length}
@@ -526,6 +607,29 @@
 							</p>
 							{#if courseDetection.numberDetection.note}
 								<p class="tool-note">{courseDetection.numberDetection.note}</p>
+							{/if}
+							{#if courseDetection.numberDetection.candidates.some((candidate) => candidate.topGlyphMatches?.length)}
+								<details class="number-diagnostics" open>
+									<summary>Number classifier diagnostics</summary>
+									<p class="diagnostic-help">Raw top 3 are independent glyph scores. Assigned is the forced one-to-one Hungarian result.</p>
+									<div class="diagnostic-list">
+										{#each courseDetection.numberDetection.candidates as candidate, index (index)}
+											{@const candidateId = candidate.diagnosticId ?? index + 1}
+											{@const rawMatches = candidate.topGlyphMatches ?? []}
+											{@const forcedAssignment = candidate.label !== undefined && rawMatches[0] !== undefined && rawMatches[0].label !== candidate.label}
+											<div class="diagnostic-row" class:forced={forcedAssignment}>
+												<strong>C{candidateId}</strong>
+												<span class="diagnostic-assigned">assigned {candidate.label !== undefined ? `H${candidate.label}` : '—'}</span>
+												<span class="diagnostic-raw">
+													raw
+													{#each rawMatches as match, matchIndex (match.label)}
+														{matchIndex > 0 ? ' · ' : ' '}H{match.label} {(match.score * 100).toFixed(0)}%
+													{/each}
+												</span>
+											</div>
+										{/each}
+									</div>
+								</details>
 							{/if}
 							<button
 								type="button"
@@ -579,9 +683,17 @@
 			{#snippet overlay({ image, zoom })}
 				<svg class="annotation-overlay" viewBox={`0 0 ${image.widthPx} ${image.heightPx}`} aria-hidden="true">
 					{#each holes as overlayHole (overlayHole.id)}
-						{#if overlayHole.corridor && overlayHole.corridor.length >= 3}
-							<polygon points={overlayHole.corridor.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor" class:active={overlayHole.id === activeHoleId} />
+						{@const band = deriveCorridorBand(overlayHole)}
+						{#if band}
+							<polygon points={band.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor" class:active={overlayHole.id === activeHoleId} data-testid="corridor-band-{overlayHole.number}" />
 						{/if}
+						{@const centerline = deriveCorridorCenterline(overlayHole)}
+						{#if centerline.length >= 2}
+							<polyline points={centerline.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor-centerline" data-testid="corridor-centerline-{overlayHole.number}" />
+						{/if}
+						{#each overlayHole.corridorBends as bend, index (index)}
+							<circle cx={bend.xPx} cy={bend.yPx} r={5 / zoom} class="bend-marker" data-testid="bend-marker-{overlayHole.number}-{index}" />
+						{/each}
 						{#if overlayHole.tee && overlayHole.basket}
 							<line x1={overlayHole.tee.xPx} y1={overlayHole.tee.yPx} x2={overlayHole.basket.xPx} y2={overlayHole.basket.yPx} class="guide" />
 						{/if}
@@ -595,6 +707,50 @@
 							<circle cx={shot.landing.xPx} cy={shot.landing.yPx} r={6 / zoom} class="shot-marker" data-testid="shot-marker-{overlayHole.number}-{index}" />
 						{/each}
 					{/each}
+					{#if courseDetection}
+						{#each courseDetection.numberDetection.candidates as candidate, index (index)}
+							{@const candidateId = candidate.diagnosticId ?? index + 1}
+							{@const rawTopMatch = candidate.topGlyphMatches?.[0]}
+							{@const forcedAssignment = candidate.label !== undefined && rawTopMatch !== undefined && rawTopMatch.label !== candidate.label}
+							<g
+								class="number-candidate-marker"
+								class:forced-assignment={forcedAssignment}
+								data-testid="number-candidate-{candidateId}"
+							>
+								<rect
+									x={candidate.xPx - candidate.widthPx / 2}
+									y={candidate.yPx - candidate.heightPx / 2}
+									width={candidate.widthPx}
+									height={candidate.heightPx}
+									rx={2 / zoom}
+								/>
+								<text
+									x={candidate.xPx}
+									y={candidate.yPx - candidate.heightPx / 2 - 5 / zoom}
+									text-anchor="middle"
+									class="number-candidate-label"
+									style={`font-size:${11 / zoom}px`}
+								>
+									{#if candidate.label !== undefined}
+										C{candidateId} → H{candidate.label}{rawTopMatch && rawTopMatch.label !== candidate.label ? ` · raw H${rawTopMatch.label} ${(rawTopMatch.score * 100).toFixed(0)}%` : ` · ${(candidate.score * 100).toFixed(0)}%`}
+									{:else}
+										C{candidateId} · {(candidate.score * 100).toFixed(0)}%
+									{/if}
+								</text>
+							</g>
+						{/each}
+						{#each courseDetection.tees as candidate, index (index)}
+							<rect
+								x={candidate.xPx - candidate.widthPx / 2}
+								y={candidate.yPx - candidate.heightPx / 2}
+								width={candidate.widthPx}
+								height={candidate.heightPx}
+								transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
+								class="tee-candidate-marker"
+								data-testid="tee-candidate-{index + 1}"
+							/>
+						{/each}
+					{/if}
 					{#each basketCandidates as candidate, index (index)}
 						<circle cx={candidate.xPx} cy={candidate.yPx} r={(selectedBasketCandidate === index ? 11 : 8) / zoom} class="basket-candidate-marker" class:selected={selectedBasketCandidate === index} data-testid="basket-candidate-{index + 1}" />
 					{/each}
@@ -714,6 +870,39 @@
 		stroke-width: 2;
 	}
 
+	.corridor-centerline {
+		fill: none;
+		stroke: rgb(255 255 255 / 85%);
+		stroke-width: 2;
+		stroke-dasharray: 5 4;
+	}
+
+	.bend-marker {
+		fill: #a78bfa;
+		stroke: #2e1065;
+		stroke-width: 1;
+	}
+
+	.width-control {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		font-size: 0.76rem;
+		color: #d4d4d8;
+	}
+
+	.width-control input {
+		width: 6rem;
+		padding: 0.3rem 0.45rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #18181b;
+		color: #f4f4f5;
+		font: inherit;
+		text-align: right;
+	}
+
 	.guide {
 		stroke: rgb(255 255 255 / 70%);
 		stroke-width: 1.5;
@@ -724,6 +913,39 @@
 		fill: #22c55e;
 		stroke: #063d1e;
 		stroke-width: 1;
+	}
+
+	.number-candidate-marker rect {
+		fill: rgb(244 63 94 / 16%);
+		stroke: #fb7185;
+		stroke-width: 2;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.number-candidate-marker.forced-assignment rect {
+		fill: rgb(245 158 11 / 16%);
+		stroke: #f59e0b;
+	}
+
+	.number-candidate-marker.forced-assignment .number-candidate-label {
+		fill: #fde68a;
+	}
+
+	.number-candidate-label {
+		fill: #fecdd3;
+		stroke: #18181b;
+		stroke-width: 3px;
+		paint-order: stroke fill;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-weight: 700;
+		pointer-events: none;
+	}
+
+	.tee-candidate-marker {
+		fill: rgb(56 189 248 / 20%);
+		stroke: #38bdf8;
+		stroke-width: 2;
+		vector-effect: non-scaling-stroke;
 	}
 
 	.basket-marker {
@@ -929,8 +1151,121 @@
 		color: #d4d4d8;
 	}
 
+	.detection-progress {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0.5rem 0.55rem;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		background: #18181b;
+		font-size: 0.72rem;
+		line-height: 1.25;
+		color: #d4d4d8;
+	}
+
+	.progress-dot {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 999px;
+		background: #22c55e;
+	}
+
+	.progress-dot.running {
+		background: #f59e0b;
+		animation: cv-pulse 0.9s ease-in-out infinite alternate;
+	}
+
+	.progress-copy {
+		min-width: 0;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+
+	.progress-time {
+		font-variant-numeric: tabular-nums;
+		color: #a1a1aa;
+	}
+
+	@keyframes cv-pulse {
+		from {
+			opacity: 0.35;
+			transform: scale(0.8);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1.2);
+		}
+	}
+
 	.tool-note {
 		color: #fcd34d;
+	}
+
+	.number-diagnostics {
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		background: #18181b;
+	}
+
+	.number-diagnostics summary {
+		padding: 0.5rem 0.55rem;
+		cursor: pointer;
+		font-size: 0.75rem;
+		font-weight: 650;
+		color: #e4e4e7;
+	}
+
+	.diagnostic-help {
+		margin: 0;
+		padding: 0 0.55rem 0.45rem;
+		font-size: 0.68rem;
+		line-height: 1.35;
+		color: #a1a1aa;
+	}
+
+	.diagnostic-list {
+		display: flex;
+		flex-direction: column;
+		max-height: 22rem;
+		overflow: auto;
+		border-top: 1px solid #3f3f46;
+	}
+
+	.diagnostic-row {
+		display: grid;
+		grid-template-columns: 2rem 5.6rem minmax(0, 1fr);
+		gap: 0.35rem;
+		align-items: baseline;
+		padding: 0.35rem 0.5rem;
+		border-bottom: 1px solid #2b2b30;
+		font-size: 0.68rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.diagnostic-row:last-child {
+		border-bottom: 0;
+	}
+
+	.diagnostic-row.forced {
+		background: rgb(245 158 11 / 10%);
+	}
+
+	.diagnostic-row.forced > strong,
+	.diagnostic-row.forced .diagnostic-assigned {
+		color: #fbbf24;
+	}
+
+	.diagnostic-assigned {
+		color: #fda4af;
+	}
+
+	.diagnostic-raw {
+		min-width: 0;
+		color: #d4d4d8;
+		white-space: normal;
 	}
 
 	.assist-divider {
@@ -944,7 +1279,21 @@
 		height: 100%;
 	}
 
+	/* Course Assist now carries live CV diagnostics, so the generic 18rem tool
+	 * rail is too narrow on this route. Keep the wider rail local to Annotate Round. */
+	:global(.editor-body.with-tools) {
+		grid-template-columns: 24rem minmax(0, 1fr) !important;
+	}
+
+	:global(.tools) {
+		min-width: 0;
+	}
+
 	@media (max-width: 900px) {
+		:global(.editor-body.with-tools) {
+			grid-template-columns: 1fr !important;
+		}
+
 		main {
 			padding: 0.75rem;
 		}

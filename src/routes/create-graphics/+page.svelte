@@ -278,8 +278,11 @@
 	const MIN_BOX_SIZE_PX = 128;
 	const BOX_HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
 
-	let naipLatInput = $state('');
-	let naipLonInput = $state('');
+	// MVP default: Dash's Track, Frisco TX. UDisc course-directory coordinate.
+	// These remain ordinary editable inputs; the default just lets the common
+	// development course skip geocoding entirely and go straight to NAIP.
+	let naipLatInput = $state('33.12551979622626');
+	let naipLonInput = $state('-96.86103869229555');
 	let naipRadiusInput = $state(String(DEFAULT_NAIP_RADIUS_METERS));
 	let naipLoading = $state(false);
 	let naipCommitting = $state(false);
@@ -1775,8 +1778,8 @@
 			</button>
 		</div>
 
-		<details class="naip-manual-entry" data-testid="naip-manual-entry">
-			<summary>Enter coordinates manually instead</summary>
+		<details class="naip-manual-entry" data-testid="naip-manual-entry" open>
+			<summary>Coordinates (editable)</summary>
 			<div class="naip-inputs">
 				<label>
 					<span>Latitude</span>

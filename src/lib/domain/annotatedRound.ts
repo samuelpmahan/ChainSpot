@@ -16,7 +16,6 @@
  */
 
 import { pointInBounds } from '../coords';
-import { MIN_CORRIDOR_POINTS } from './project';
 import type { AnnotatedHole, ImageAsset, OrderedShot, SourcePoint } from './project';
 
 /**
@@ -24,7 +23,6 @@ import type { AnnotatedHole, ImageAsset, OrderedShot, SourcePoint } from './proj
  * data) and re-exported here so this module stays the single import site for
  * anything working with an annotated round.
  */
-export { MIN_CORRIDOR_POINTS };
 export type { AnnotatedHole, OrderedShot, SourcePoint };
 
 /**
@@ -91,11 +89,12 @@ function assertPointInBounds(
 /**
  * The only sanctioned way to build an artifact. Validates the source image
  * has positive finite dimensions and that every supplied feature point
- * (tee/basket/shot landings/corridor vertices/walkingPath points) is finite
+ * (tee/basket/shot landings/corridor bends/walkingPath points) is finite
  * and inside the source image bounds, via the existing pointInBounds from
- * src/lib/coords.ts, and that a present `corridor` has at least
- * `MIN_CORRIDOR_POINTS` vertices. Throws on violation — a malformed artifact
- * must never reach Create Graphics.
+ * src/lib/coords.ts. Corridor bends are validated per-point (zero bends is a
+ * valid straight hole) and the constant corridor width must be finite and
+ * positive. Throws on violation — a malformed artifact must never reach
+ * Create Graphics.
  */
 export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): AnnotatedRound {
 	const { sourceImage, holes = [], walkingPath } = options;
@@ -122,20 +121,18 @@ export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): Anno
 				`createAnnotatedRound: hole ${hole.number} shot ${index + 1} landing`
 			);
 		});
-		if (hole.corridor) {
-			if (hole.corridor.length < MIN_CORRIDOR_POINTS) {
-				throw new Error(
-					`createAnnotatedRound: hole ${hole.number} corridor must have at least ${MIN_CORRIDOR_POINTS} vertices, got ${hole.corridor.length}`
-				);
-			}
-			hole.corridor.forEach((point, index) => {
-				assertPointInBounds(
-					point,
-					widthPx,
-					heightPx,
-					`createAnnotatedRound: hole ${hole.number} corridor point ${index + 1}`
-				);
-			});
+		hole.corridorBends.forEach((point, index) => {
+			assertPointInBounds(
+				point,
+				widthPx,
+				heightPx,
+				`createAnnotatedRound: hole ${hole.number} corridor bend ${index + 1}`
+			);
+		});
+		if (!Number.isFinite(hole.corridorWidthPx) || hole.corridorWidthPx <= 0) {
+			throw new Error(
+				`createAnnotatedRound: hole ${hole.number} corridorWidthPx must be a finite number greater than zero, got ${JSON.stringify(hole.corridorWidthPx)}`
+			);
 		}
 	}
 

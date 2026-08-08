@@ -104,9 +104,6 @@ export interface OrderedShot {
 	readonly landing: SourcePoint;
 }
 
-/** Minimum vertex count for a `corridor` polygon — below this it isn't a shape. */
-export const MIN_CORRIDOR_POINTS = 3;
-
 export interface AnnotatedHole {
 	readonly id: string;
 	readonly number: number;
@@ -114,10 +111,13 @@ export interface AnnotatedHole {
 	readonly basket?: SourcePoint;
 	readonly shots: readonly OrderedShot[];
 	/**
-	 * Fairway/corridor outline as a closed polygon (the last vertex is never a
-	 * repeat of the first) in source-image pixels. Absent until annotated.
+	 * Corridor bend points in source-image pixels. Together with `tee` and
+	 * `basket` they form the hole's centerline: [tee, ...corridorBends, basket].
+	 * Zero bends is a valid straight hole; tee/basket are never duplicated here.
 	 */
-	readonly corridor?: readonly SourcePoint[];
+	readonly corridorBends: readonly SourcePoint[];
+	/** Constant corridor width in source-image pixels; always persisted. */
+	readonly corridorWidthPx: number;
 }
 
 export interface ProjectState {

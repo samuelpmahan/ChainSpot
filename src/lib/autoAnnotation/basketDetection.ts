@@ -30,12 +30,32 @@ export interface CourseDetectionResult {
 	readonly grammar: CourseGrammarResult;
 }
 
+export type CourseDetectionProgressStage =
+	| 'opencv'
+	| 'baskets'
+	| 'templates'
+	| 'numbers'
+	| 'tees'
+	| 'grammar';
+
+export interface CourseDetectionProgress {
+	readonly stage: CourseDetectionProgressStage;
+	readonly message: string;
+}
+
 interface BasketWorkerSuccess {
 	ok: true;
 	token: string;
 	kind: 'detect' | 'detect-course' | 'prewarm';
 	candidates?: readonly BasketCandidate[];
 	course?: CourseDetectionResult;
+}
+
+interface BasketWorkerProgress {
+	ok: true;
+	token: string;
+	kind: 'progress';
+	progress: CourseDetectionProgress;
 }
 
 interface BasketWorkerFailure {
@@ -45,7 +65,7 @@ interface BasketWorkerFailure {
 	message: string;
 }
 
-type BasketWorkerReply = BasketWorkerSuccess | BasketWorkerFailure;
+type BasketWorkerReply = BasketWorkerSuccess | BasketWorkerProgress | BasketWorkerFailure;
 
 interface BasketDetectionRequest {
 	readonly kind: 'detect' | 'detect-course';
@@ -64,8 +84,9 @@ type BasketWorkerRequest = BasketDetectionRequest | BasketPrewarmRequest;
 
 interface PendingRequest {
 	readonly worker: Worker;
-	readonly resolve: (reply: BasketWorkerReply) => void;
+	readonly resolve: (reply: BasketWorkerSuccess | BasketWorkerFailure) => void;
 	readonly reject: (reason: Error) => void;
+	readonly onProgress?: (progress: CourseDetectionProgress) => void;
 }
 
 let activeWorker: Worker | null = null;
@@ -111,6 +132,12 @@ function handleWorkerMessage(worker: Worker, event: MessageEvent<BasketWorkerRep
 	if (!reply || typeof reply.token !== 'string') return;
 	const pending = pendingRequests.get(reply.token);
 	if (!pending || pending.worker !== worker) return;
+
+	if (reply.ok && reply.kind === 'progress') {
+		pending.onProgress?.(reply.progress);
+		return;
+	}
+
 	pendingRequests.delete(reply.token);
 	if (reply.ok) {
 		pending.resolve(reply);
@@ -143,11 +170,12 @@ function getWorker(): Worker {
 
 function postToWorker(
 	request: BasketWorkerRequest,
-	transfer: Transferable[] = []
-): Promise<BasketWorkerReply> {
+	transfer: Transferable[] = [],
+	onProgress?: (progress: CourseDetectionProgress) => void
+): Promise<BasketWorkerSuccess | BasketWorkerFailure> {
 	const worker = getWorker();
-	return new Promise<BasketWorkerReply>((resolve, reject) => {
-		pendingRequests.set(request.token, { worker, resolve, reject });
+	return new Promise<BasketWorkerSuccess | BasketWorkerFailure>((resolve, reject) => {
+		pendingRequests.set(request.token, { worker, resolve, reject, onProgress });
 		try {
 			worker.postMessage(request, transfer);
 		} catch (error) {
@@ -233,14 +261,15 @@ export async function detectBasketCandidates(
 
 /**
  * Runs the complete MVP detector in the same persistent OpenCV worker used by
- * basket assist. The returned grammar remains proposal-only until the user
- * explicitly applies ready holes in Annotate Round.
+ * basket assist. Progress is reported from the worker's actual pipeline stages,
+ * so the UI can distinguish expensive CV work from a stalled request.
  */
 export async function detectCourseCandidates(
 	bytes: Uint8Array,
 	mimeType: string,
 	widthPx: number,
-	heightPx: number
+	heightPx: number,
+	onProgress?: (progress: CourseDetectionProgress) => void
 ): Promise<CourseDetectionResult> {
 	assertWorkerSupport();
 	if (typeof createImageBitmap === 'undefined') {
@@ -255,7 +284,8 @@ export async function detectCourseCandidates(
 	try {
 		const reply = await postToWorker(
 			{ kind: 'detect-course', token, bitmap, widthPx, heightPx },
-			[bitmap as unknown as Transferable]
+			[bitmap as unknown as Transferable],
+			onProgress
 		);
 		if (!reply.ok) throw new Error(reply.message);
 		if (reply.kind !== 'detect-course' || !reply.course) {

@@ -8,7 +8,7 @@ import {
 	serializeProjectState
 } from '../../src/lib/projectSchema';
 import type {
-	ProjectDocumentV2,
+	ProjectDocumentV3,
 	ProjectParseResult,
 	ProjectSchemaError,
 	ProjectSchemaErrorCategory
@@ -84,7 +84,7 @@ function buildState(overrides: Partial<ProjectState> = {}): ProjectState {
 	};
 }
 
-function docFromState(state: ProjectState): ProjectDocumentV2 {
+function docFromState(state: ProjectState): ProjectDocumentV3 {
 	return serializeProjectState(state);
 }
 
@@ -160,7 +160,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(2);
+		expect(doc.schemaVersion).toBe(3);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -358,12 +358,12 @@ describe('schema version validation', () => {
 
 	it('classifies a newer unsupported version before any other validation', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 3;
+		doc.schemaVersion = 4;
 		doc.project = undefined;
 		doc.images = 'not-an-array';
 		const error = expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 		expect(error.message).toContain('newer');
-		expect(error.message).toContain('3');
+		expect(error.message).toContain('4');
 	});
 
 	it('rejects older or otherwise unknown numeric versions', () => {
@@ -377,7 +377,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(2);
+		expect(CURRENT_SCHEMA_VERSION).toBe(3);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });

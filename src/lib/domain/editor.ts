@@ -49,8 +49,7 @@ import {
 	createControlPointPair,
 	createProjectState,
 	findImageByRole,
-	isImageRole,
-	MIN_CORRIDOR_POINTS
+	isImageRole
 } from './project';
 import type {
 	AnnotatedHole,
@@ -283,14 +282,15 @@ export class ProjectEditor {
 			hole.shots.forEach((shot: OrderedShot, index: number) =>
 				checkPoint(shot.landing, `shot ${index + 1}`)
 			);
-			if (hole.corridor) {
-				if (hole.corridor.length < MIN_CORRIDOR_POINTS) {
-					throw new Error(
-						`setHoles: hole ${hole.number} corridor must have at least ${MIN_CORRIDOR_POINTS} vertices, got ${hole.corridor.length}`
-					);
-				}
-				hole.corridor.forEach((point: SourcePoint, index: number) =>
-					checkPoint(point, `corridor point ${index + 1}`)
+			if (!Array.isArray(hole.corridorBends)) {
+				throw new Error(`setHoles: hole ${hole.number} corridorBends must be an array`);
+			}
+			hole.corridorBends.forEach((point: SourcePoint, index: number) =>
+				checkPoint(point, `corridor bend ${index + 1}`)
+			);
+			if (!Number.isFinite(hole.corridorWidthPx) || hole.corridorWidthPx <= 0) {
+				throw new Error(
+					`setHoles: hole ${hole.number} corridorWidthPx must be a finite number greater than zero, got ${JSON.stringify(hole.corridorWidthPx)}`
 				);
 			}
 		}

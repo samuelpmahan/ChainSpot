@@ -83,6 +83,10 @@ export interface HoleNumberCandidate {
 	/** Present only after glyph-only one-to-one label assignment. */
 	readonly label?: number;
 	readonly glyphScore?: number;
+	/** Stable physical-candidate rank before the final labels are sorted. */
+	readonly diagnosticId?: number;
+	/** Independent raw glyph scores, sorted best-first, before one-to-one assignment. */
+	readonly topGlyphMatches?: readonly Readonly<{ label: number; score: number }>[];
 }
 
 export interface HoleNumberScaleAnchor {
@@ -519,6 +523,13 @@ function assignedCandidates(
 		const template = usableTemplates[templateIndex];
 		const badgeHit = cluster.hits[0];
 		const glyph = scores[index][templateIndex];
+		const topGlyphMatches = usableTemplates
+			.map((candidateTemplate, candidateTemplateIndex) => ({
+				label: candidateTemplate.label,
+				score: scores[index][candidateTemplateIndex]
+			}))
+			.sort((a, b) => b.score - a.score)
+			.slice(0, 3);
 		return {
 			xPx: cluster.xPx,
 			yPx: cluster.yPx,
@@ -528,13 +539,15 @@ function assignedCandidates(
 			score: glyph,
 			badgeScore: badgeHit.score,
 			label: template.label,
-			glyphScore: glyph
+			glyphScore: glyph,
+			diagnosticId: index + 1,
+			topGlyphMatches
 		};
 	});
 }
 
 function candidateOnly(clusters: readonly BadgeCluster[], anchorScale: number): HoleNumberCandidate[] {
-	return clusters.map((cluster) => {
+	return clusters.map((cluster, index) => {
 		const hit = cluster.hits[0];
 		return {
 			xPx: cluster.xPx,
@@ -543,7 +556,8 @@ function candidateOnly(clusters: readonly BadgeCluster[], anchorScale: number): 
 			heightPx: hit.heightPx,
 			scale: anchorScale,
 			score: hit.score,
-			badgeScore: hit.score
+			badgeScore: hit.score,
+			diagnosticId: index + 1
 		};
 	});
 }

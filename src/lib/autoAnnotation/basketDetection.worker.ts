@@ -273,29 +273,26 @@ async function detect(
 		}));
 }
 
-const templateUrls = import.meta.glob<string>('./hole-number-templates/hole-*.png', {
-	eager: true,
-	query: '?url',
-	import: 'default'
-});
+const HOLE_TEMPLATE_BASE_URL = '/resources/chainspot_cv_templates';
 let holeTemplatesPromise: Promise<readonly HoleNumberTemplate[]> | null = null;
 
 function loadHoleNumberTemplates(): Promise<readonly HoleNumberTemplate[]> {
 	if (holeTemplatesPromise) return holeTemplatesPromise;
 	holeTemplatesPromise = Promise.all(
-		Object.entries(templateUrls).map(async ([path, url]) => {
-			const match = /hole-(\d{2})\.png$/.exec(path);
-			if (!match) throw new Error(`Invalid hole-number template name: ${path}`);
+		Array.from({ length: 18 }, async (_, index) => {
+			const label = index + 1;
+			const fileName = `hole-${String(label).padStart(2, '0')}.png`;
+			const url = `${HOLE_TEMPLATE_BASE_URL}/${fileName}`;
 			const response = await fetch(url);
-			if (!response.ok) throw new Error(`Could not load ${path} (${response.status}).`);
+			if (!response.ok) throw new Error(`Could not load ${url} (${response.status}).`);
 			const bitmap = await createImageBitmap(await response.blob());
 			try {
 				const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
 				const context = canvas.getContext('2d', { willReadFrequently: true });
-				if (!context) throw new Error(`Could not rasterize ${path}.`);
+				if (!context) throw new Error(`Could not rasterize ${url}.`);
 				context.drawImage(bitmap, 0, 0);
 				return {
-					label: Number(match[1]),
+					label,
 					raster: {
 						format: 'rgba' as const,
 						widthPx: bitmap.width,
@@ -307,7 +304,7 @@ function loadHoleNumberTemplates(): Promise<readonly HoleNumberTemplate[]> {
 				bitmap.close();
 			}
 		})
-	).then((templates) => templates.sort((a, b) => a.label - b.label));
+	);
 	return holeTemplatesPromise;
 }
 
@@ -318,11 +315,31 @@ function median(values: readonly number[]): number | null {
 	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
+function reportCourseProgress(
+	request: BasketDetectionRequest,
+	stage: 'opencv' | 'baskets' | 'templates' | 'numbers' | 'tees' | 'grammar',
+	message: string
+): void {
+	(self as unknown as Worker).postMessage({
+		ok: true,
+		kind: 'progress',
+		token: request.token,
+		progress: { stage, message }
+	});
+}
+
 async function detectCourse(request: BasketDetectionRequest) {
+	reportCourseProgress(request, 'opencv', 'Loading OpenCV runtime…');
 	const cv = await loadDetectorRuntime();
 	const raster = grayscaleRaster(request.bitmap);
+
+	reportCourseProgress(request, 'baskets', 'OpenCV ready · detecting baskets…');
 	const baskets = await detect(request, raster);
+
+	reportCourseProgress(request, 'templates', `${baskets.length} baskets found · loading 18 number templates…`);
 	const templates = await loadHoleNumberTemplates();
+
+	reportCourseProgress(request, 'numbers', `${templates.length} templates loaded · matching hole numbers…`);
 	const detectedNumbers = detectHoleNumberBadges(
 		cv,
 		{ format: 'gray', widthPx: raster.width, heightPx: raster.height, data: raster.gray },
@@ -353,6 +370,11 @@ async function detectCourse(request: BasketDetectionRequest) {
 	const uiScalePx = numberDetection.anchor
 		? numberDetection.anchor.scale
 		: median(baskets.map((candidate) => candidate.scale));
+	reportCourseProgress(
+		request,
+		'tees',
+		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting tee pads…`
+	);
 	const tees = uiScalePx
 		? detectTeePadCandidates(
 				cv as unknown as TeePadCv,
@@ -372,6 +394,11 @@ async function detectCourse(request: BasketDetectionRequest) {
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
+	reportCourseProgress(
+		request,
+		'grammar',
+		`${tees.length} tees found · matching numbers, tees, and baskets…`
+	);
 	const grammar = associateCourseGrammar({ numberBadges, tees, baskets });
 	return { numberDetection, tees, baskets, grammar };
 }

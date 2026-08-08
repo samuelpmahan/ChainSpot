@@ -7,10 +7,11 @@ import type { Page } from '@playwright/test';
  * The regression this file exists for: hole annotations used to live only in an
  * in-memory session slot, so annotating a round, saving the project, and
  * reopening it silently lost every tee, basket, shot, and corridor point. Holes
- * are now durable `ProjectState` written into the schema-v2 document, and this
- * test drives the whole loop in a real browser — annotate, save, reload the
- * page (clearing every in-memory session), reopen the bundle, and confirm the
- * holes are still there and still buildable into graphics.
+ * are now durable `ProjectState` written into the schema-v3 document (centerline
+ * bends + one constant width), and this test drives the whole loop in a real
+ * browser — annotate, save, reload the page (clearing every in-memory session),
+ * reopen the bundle, and confirm the holes are still there and still buildable
+ * into graphics.
  */
 
 function crc32(bytes: Uint8Array): number {
@@ -115,7 +116,7 @@ async function createPair(
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
 }
 
-/** Annotates one hole with a tee, a basket, one shot, and a 3-vertex corridor. */
+/** Annotates one hole with a tee, a basket, one shot, one bend, and a custom width. */
 async function annotateOneHole(page: Page): Promise<void> {
 	await page.goto('/annotate-round');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
@@ -140,10 +141,10 @@ async function annotateOneHole(page: Page): Promise<void> {
 	await page.mouse.click(box.x + 400, box.y + 300);
 	await page.getByTestId('placement-mode-shot').check();
 	await page.mouse.click(box.x + 200, box.y + 150);
-	await page.getByTestId('placement-mode-corridor').check();
-	await page.mouse.click(box.x + 20, box.y + 20);
-	await page.mouse.click(box.x + 450, box.y + 20);
-	await page.mouse.click(box.x + 230, box.y + 320);
+	await page.getByTestId('placement-mode-bend').check();
+	await page.mouse.click(box.x + 230, box.y + 180);
+	await page.getByTestId('corridor-width').fill('90');
+	await page.getByTestId('corridor-width').blur();
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');
@@ -169,16 +170,17 @@ test('holes survive save, full page reload, and reopen — and are still buildab
 	for await (const chunk of stream) chunks.push(chunk);
 	const zipBuffer = Buffer.concat(chunks);
 
-	// The saved manifest is v2 and actually carries the hole geometry.
+	// The saved manifest is v3 and actually carries the hole geometry.
 	const entries = unzipSync(new Uint8Array(zipBuffer));
 	const manifest = JSON.parse(strFromU8(entries['project.json']));
-	expect(manifest.schemaVersion).toBe(2);
+	expect(manifest.schemaVersion).toBe(3);
 	expect(manifest.holes).toHaveLength(1);
 	expect(manifest.holes[0].number).toBe(1);
 	expect(manifest.holes[0].tee).toBeDefined();
 	expect(manifest.holes[0].basket).toBeDefined();
 	expect(manifest.holes[0].shots).toHaveLength(1);
-	expect(manifest.holes[0].corridor).toHaveLength(3);
+	expect(manifest.holes[0].corridorBends).toHaveLength(1);
+	expect(manifest.holes[0].corridorWidthPx).toBe(90);
 	const savedHole = manifest.holes[0];
 
 	// Full page load clears every in-memory session slot — the exact condition

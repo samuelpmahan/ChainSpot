@@ -12,9 +12,10 @@
  * already rejects an out-of-bounds click before it reaches these functions,
  * and `createAnnotatedRound` performs the final authoritative validation.
  */
+import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type { AnnotatedHole, OrderedShot, SourcePoint } from './domain/annotatedRound';
 
-export type HolePlacementMode = 'tee' | 'basket' | 'shot' | 'corridor';
+export type HolePlacementMode = 'tee' | 'basket' | 'shot' | 'bend';
 
 export type CreateId = () => string;
 
@@ -27,7 +28,13 @@ export function nextHoleNumber(holes: readonly AnnotatedHole[]): number {
 
 /** Appends a new, entirely empty hole with the next sequential number. */
 export function addHole(holes: readonly AnnotatedHole[], createId: CreateId = defaultCreateId): AnnotatedHole[] {
-	const hole: AnnotatedHole = { id: createId(), number: nextHoleNumber(holes), shots: [] };
+	const hole: AnnotatedHole = {
+		id: createId(),
+		number: nextHoleNumber(holes),
+		shots: [],
+		corridorBends: [],
+		corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
+	};
 	return [...holes, hole];
 }
 
@@ -65,20 +72,21 @@ export function removeLastShot(holes: readonly AnnotatedHole[], holeId: string):
 	return updateHole(holes, holeId, (hole) => ({ ...hole, shots: hole.shots.slice(0, -1) }));
 }
 
-export function addCorridorPoint(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
-	return updateHole(holes, holeId, (hole) => ({ ...hole, corridor: [...(hole.corridor ?? []), point] }));
+export function addCorridorBend(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: [...hole.corridorBends, point] }));
 }
 
-/** Pops the last vertex; a corridor left with zero vertices reverts to unannotated (`undefined`). */
-export function removeLastCorridorPoint(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
-	return updateHole(holes, holeId, (hole) => {
-		const remaining = (hole.corridor ?? []).slice(0, -1);
-		return { ...hole, corridor: remaining.length > 0 ? remaining : undefined };
-	});
+/** Pops the last bend; an empty bend list is a valid straight hole. */
+export function removeLastBend(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: hole.corridorBends.slice(0, -1) }));
 }
 
-export function clearCorridor(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
-	return updateHole(holes, holeId, (hole) => ({ ...hole, corridor: undefined }));
+export function clearBends(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: [] }));
+}
+
+export function setCorridorWidth(holes: readonly AnnotatedHole[], holeId: string, corridorWidthPx: number): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorWidthPx }));
 }
 
 /**
@@ -99,7 +107,7 @@ export function placeByMode(
 			return setBasket(holes, holeId, point);
 		case 'shot':
 			return addShot(holes, holeId, point, createId);
-		case 'corridor':
-			return addCorridorPoint(holes, holeId, point);
+		case 'bend':
+			return addCorridorBend(holes, holeId, point);
 	}
 }

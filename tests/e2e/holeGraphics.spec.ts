@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 
 /**
  * End-to-end coverage for the full "clean hole construction" flow: annotate a
- * hole in Annotate Round (tee, basket, a shot, and a corridor), hand off to
+ * hole in Annotate Round (tee, basket, a shot, a bend), hand off to
  * Create Graphics, load a clean target and create correspondence pairs so
  * alignment succeeds, then build and download the resulting clean hole
  * graphic. Each stage (hole annotation, alignment estimation, hole-graphic
@@ -123,7 +123,7 @@ async function createPair(
 test('clean hole construction: annotate a hole, align, build and download the resulting clean graphic', async ({
 	page
 }) => {
-	// 1. Annotate Round: place a fully-featured hole (tee, basket, one shot, a corridor).
+	// 1. Annotate Round: place a fully-featured hole (tee, basket, one shot, a bend).
 	await page.goto('/annotate-round');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
@@ -147,10 +147,8 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	await page.mouse.click(box.x + 400, box.y + 300);
 	await page.getByTestId('placement-mode-shot').check();
 	await page.mouse.click(box.x + 200, box.y + 150);
-	await page.getByTestId('placement-mode-corridor').check();
-	await page.mouse.click(box.x + 20, box.y + 20);
-	await page.mouse.click(box.x + 450, box.y + 20);
-	await page.mouse.click(box.x + 230, box.y + 320);
+	await page.getByTestId('placement-mode-bend').check();
+	await page.mouse.click(box.x + 230, box.y + 180); // one dogleg bend
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');

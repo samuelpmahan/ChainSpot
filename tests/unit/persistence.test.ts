@@ -312,7 +312,7 @@ describe('bundle writer (B)', () => {
 		const created = await createProjectBundle(editor);
 		expect(created.ok).toBe(true);
 		if (!created.ok) return;
-		expect(created.bundle.document.schemaVersion).toBe(2);
+		expect(created.bundle.document.schemaVersion).toBe(3);
 		const parsed = parseProjectJson(created.bundle.text);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
@@ -487,16 +487,22 @@ describe('full round trip (C)', () => {
 						{ id: 'shot-1', landing: { xPx: 300.25, yPx: 700.5 } },
 						{ id: 'shot-2', landing: { xPx: 560, yPx: 1300.75 } }
 					],
-					corridor: [
-						{ xPx: 100, yPx: 200 },
-						{ xPx: 900, yPx: 200 },
-						{ xPx: 900, yPx: 2000 },
-						{ xPx: 100, yPx: 2000 }
-					]
+					corridorBends: [
+						{ xPx: 400, yPx: 1000 },
+						{ xPx: 700, yPx: 1500 }
+					],
+					corridorWidthPx: 75
 				},
 				// A partially-annotated hole: proves optional fields stay absent rather
 				// than round-tripping as null.
-				{ id: 'hole-2', number: 2, tee: { xPx: 10.5, yPx: 20.5 }, shots: [] }
+				{
+					id: 'hole-2',
+					number: 2,
+					tee: { xPx: 10.5, yPx: 20.5 },
+					shots: [],
+					corridorBends: [],
+					corridorWidthPx: 60
+				}
 			],
 			viewState: {
 				source: { zoom: 1.4, panX: -92, panY: 17 },
@@ -608,7 +614,7 @@ describe('import failures (D)', () => {
 	});
 
 	it('classifies unsupported newer schema versions', async () => {
-		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 3 })) }, { level: 6 });
+		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 4 })) }, { level: 6 });
 		const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
 		expect(result.ok).toBe(false);
 		if (result.ok) return;

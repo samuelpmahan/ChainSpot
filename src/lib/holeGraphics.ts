@@ -2,16 +2,19 @@
  * ChainSpot clean hole graphic construction.
  *
  * Applies an estimated source-to-target transform (`src/lib/alignment`) to a
- * hole's manually-annotated tee/basket/shot/corridor points (source-image
- * pixels), producing their positions in the clean target image's pixel
- * space, then frames and renders a crop around them. No feature detection or
- * image analysis happens here — every point was already placed by the user
- * (or, in a future iteration, a reviewed CV proposal); this module only ever
- * does arithmetic and drawing, the same "structured geometry, not edited
- * screenshots" boundary the rest of the domain layer keeps.
+ * hole's manually-annotated tee/basket/shot points and its DERIVED constant-
+ * width corridor band (see `src/lib/corridor.ts` — tee + bends + basket +
+ * width become a closed polygon), producing their positions in the clean
+ * target image's pixel space, then frames and renders a crop around them. No
+ * feature detection or image analysis happens here — every point was already
+ * placed by the user (or, in a future iteration, a reviewed CV proposal);
+ * this module only ever does arithmetic and drawing, the same "structured
+ * geometry, not edited screenshots" boundary the rest of the domain layer
+ * keeps.
  */
 import { applyTransform } from './alignment/transform';
 import type { SerializableTransform } from './alignment/types';
+import { deriveCorridorBand } from './corridor';
 import type { AnnotatedHole } from './domain/annotatedRound';
 
 export interface TargetPoint {
@@ -32,8 +35,8 @@ export interface HoleGraphicPlan {
 	readonly tee: TargetPoint | null;
 	readonly basket: TargetPoint | null;
 	readonly shots: readonly TargetPoint[];
-	/** Present only when the source hole had at least one corridor vertex — never a synthesized shape. */
-	readonly corridor: readonly TargetPoint[] | null;
+	/** Present only when the source hole can derive a complete corridor band — never a synthesized shape. */
+	readonly corridorBand: readonly TargetPoint[] | null;
 	/** Crop rectangle in target-image pixels, already clamped to the target image bounds. */
 	readonly crop: CropRect;
 }
@@ -62,7 +65,7 @@ export function planHoleGraphic(
 	const tee = hole.tee ? applyTransform(hole.tee, transform) : null;
 	const basket = hole.basket ? applyTransform(hole.basket, transform) : null;
 	const shots = hole.shots.map((shot) => applyTransform(shot.landing, transform));
-	const corridor = hole.corridor ? hole.corridor.map((point) => applyTransform(point, transform)) : null;
+	const corridor = deriveCorridorBand(hole)?.map((point) => applyTransform(point, transform)) ?? null;
 
 	const points: TargetPoint[] = [
 		...(tee ? [tee] : []),
@@ -95,7 +98,7 @@ export function planHoleGraphic(
 		tee,
 		basket,
 		shots,
-		corridor,
+		corridorBand: corridor,
 		crop: {
 			xPx: cropX,
 			yPx: cropY,
@@ -126,9 +129,9 @@ export const defaultHoleGraphicRenderEnv: HoleGraphicRenderEnv = {
 
 /**
  * Renders one hole's clean graphic: the cropped clean-image region, the
- * corridor polygon (if any), straight tee-through-shots displacement guides
- * (never a curved flight path — an explicit non-goal), tee/basket/shot
- * markers, and a hole-number label.
+ * derived corridor band (if the hole can form a complete one), straight
+ * tee-through-shots displacement guides (never a curved flight path — an
+ * explicit non-goal), tee/basket/shot markers, and a hole-number label.
  */
 export async function renderHoleGraphic(
 	targetImage: HTMLImageElement,
@@ -158,9 +161,9 @@ export async function renderHoleGraphic(
 		y: point.yPx - plan.crop.yPx
 	});
 
-	if (plan.corridor && plan.corridor.length >= 3) {
+	if (plan.corridorBand && plan.corridorBand.length >= 3) {
 		context.beginPath();
-		plan.corridor.forEach((point, index) => {
+		plan.corridorBand.forEach((point, index) => {
 			const local = toLocal(point);
 			if (index === 0) context.moveTo(local.x, local.y);
 			else context.lineTo(local.x, local.y);

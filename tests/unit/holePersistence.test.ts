@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { AnnotatedHole, ImageAsset, ProjectState } from '../../src/lib/domain/project';
+import { DEFAULT_CORRIDOR_WIDTH_PX } from '../../src/lib/corridor';
 import {
 	CURRENT_SCHEMA_VERSION,
 	parseProjectDocument,
@@ -48,12 +49,11 @@ const RICH_HOLE: AnnotatedHole = {
 		{ id: 'shot-1', landing: { xPx: 300, yPx: 250.5 } },
 		{ id: 'shot-2', landing: { xPx: 600.25, yPx: 500 } }
 	],
-	corridor: [
-		{ xPx: 0, yPx: 0 },
-		{ xPx: 999, yPx: 0 },
-		{ xPx: 999, yPx: 799 },
-		{ xPx: 0, yPx: 799 }
-	]
+	corridorBends: [
+		{ xPx: 400, yPx: 300 },
+		{ xPx: 600, yPx: 600 }
+	],
+	corridorWidthPx: 90
 };
 
 function stateWithHoles(holes: AnnotatedHole[]): ProjectState {
@@ -83,11 +83,23 @@ describe('hole serialization round trip', () => {
 		expect(result.state.holes).toEqual([RICH_HOLE]);
 	});
 
-	it('omits absent optional fields rather than writing them as null, so a re-parse matches exactly', () => {
-		const sparse: AnnotatedHole = { id: 'hole-b', number: 2, shots: [] };
+	it('emits corridorBends and corridorWidthPx on every hole, omitting only genuinely optional fields', () => {
+		const sparse: AnnotatedHole = {
+			id: 'hole-b',
+			number: 2,
+			shots: [],
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
 		const doc = serializeProjectState(stateWithHoles([sparse]));
 
-		expect(Object.keys(doc.holes[0]).sort()).toEqual(['id', 'number', 'shots']);
+		expect(Object.keys(doc.holes[0]).sort()).toEqual([
+			'corridorBends',
+			'corridorWidthPx',
+			'id',
+			'number',
+			'shots'
+		]);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -105,10 +117,10 @@ describe('hole serialization round trip', () => {
 	});
 });
 
-describe('v1 -> v2 migration', () => {
+describe('v1/v2 migration', () => {
 	it('reads a v1 document (written before holes existed) as a project with no holes', () => {
-		const v2 = serializeProjectState(stateWithHoles([]));
-		const v1 = JSON.parse(JSON.stringify(v2)) as Record<string, unknown>;
+		const v3 = serializeProjectState(stateWithHoles([]));
+		const v1 = JSON.parse(JSON.stringify(v3)) as Record<string, unknown>;
 		v1.schemaVersion = 1;
 		delete v1.holes;
 
@@ -118,7 +130,7 @@ describe('v1 -> v2 migration', () => {
 		expect(result.state.holes).toEqual([]);
 	});
 
-	it('re-serializing a migrated v1 document writes it forward as v2', () => {
+	it('re-serializing a migrated v1 document writes it forward as v3', () => {
 		const v1 = JSON.parse(JSON.stringify(serializeProjectState(stateWithHoles([])))) as Record<
 			string,
 			unknown
@@ -129,7 +141,39 @@ describe('v1 -> v2 migration', () => {
 		const parsed = parseProjectDocument(v1);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
-		expect(serializeProjectState(parsed.state).schemaVersion).toBe(2);
+		expect(serializeProjectState(parsed.state).schemaVersion).toBe(3);
+	});
+
+	it('drops a v2 legacy corridor polygon, initializing empty bends and the default width', () => {
+		const v3 = serializeProjectState(stateWithHoles([]));
+		const v2 = JSON.parse(JSON.stringify(v3)) as Record<string, unknown>;
+		v2.schemaVersion = 2;
+		(v2.holes as unknown[]).push({
+			id: 'legacy-hole',
+			number: 1,
+			tee: { xPx: 10, yPx: 10 },
+			basket: { xPx: 900, yPx: 700 },
+			shots: [],
+			corridor: [
+				{ xPx: 0, yPx: 0 },
+				{ xPx: 999, yPx: 0 },
+				{ xPx: 999, yPx: 799 }
+			]
+		});
+
+		const result = parseProjectDocument(v2);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		const migrated = result.state.holes[0];
+		expect(migrated.corridorBends).toEqual([]);
+		expect(migrated.corridorWidthPx).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+		expect(migrated.tee).toEqual({ xPx: 10, yPx: 10 });
+		expect(migrated.basket).toEqual({ xPx: 900, yPx: 700 });
+		expect('corridor' in migrated).toBe(false);
+
+		const reSerialized = serializeProjectState(result.state);
+		expect(reSerialized.schemaVersion).toBe(3);
+		expect('corridor' in reSerialized.holes[0]).toBe(false);
 	});
 });
 
@@ -158,22 +202,43 @@ describe('hole validation on parse', () => {
 		expect(result.error.category).toBe('coordinate');
 	});
 
-	it('rejects a corridor with fewer than three vertices', () => {
+	it('rejects a corridor bend outside the source image bounds', () => {
 		const result = parseWithHoles([
 			{
 				id: 'h',
 				number: 1,
 				shots: [],
-				corridor: [
+				corridorBends: [
 					{ xPx: 1, yPx: 1 },
-					{ xPx: 2, yPx: 2 }
-				]
+					{ xPx: 5000, yPx: 2 }
+				],
+				corridorWidthPx: 60
 			}
 		]);
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
+		expect(result.error.category).toBe('coordinate');
+		expect(result.error.code).toBe('coordinate.out-of-bounds');
+	});
+
+	it('rejects a non-positive corridor width', () => {
+		const result = parseWithHoles([
+			{ id: 'h', number: 1, shots: [], corridorBends: [], corridorWidthPx: 0 }
+		]);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
 		expect(result.error.category).toBe('hole');
-		expect(result.error.code).toBe('hole.corridor.too-few');
+		expect(result.error.code).toBe('hole.width.invalid');
+	});
+
+	it('rejects a non-numeric corridor width', () => {
+		const result = parseWithHoles([
+			{ id: 'h', number: 1, shots: [], corridorBends: [], corridorWidthPx: 'wide' }
+		]);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.error.category).toBe('hole');
+		expect(result.error.code).toBe('hole.width.type');
 	});
 
 	it('rejects duplicate hole numbers', () => {
@@ -196,10 +261,18 @@ describe('hole validation on parse', () => {
 	});
 
 	it('drops unknown fields on a hole so they cannot survive a round trip', () => {
-		const result = parseWithHoles([{ id: 'h', number: 1, shots: [], sneaky: 'value' }]);
+		const result = parseWithHoles([
+			{ id: 'h', number: 1, shots: [], corridorBends: [], corridorWidthPx: 60, sneaky: 'value' }
+		]);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(Object.keys(result.state.holes[0]).sort()).toEqual(['id', 'number', 'shots']);
+		expect(Object.keys(result.state.holes[0]).sort()).toEqual([
+			'corridorBends',
+			'corridorWidthPx',
+			'id',
+			'number',
+			'shots'
+		]);
 	});
 });
 
@@ -231,21 +304,25 @@ describe('ProjectEditor.setHoles', () => {
 
 	it('isolates stored holes from the caller\'s array', () => {
 		const editor = loadedEditor();
-		const holes: AnnotatedHole[] = [{ id: 'h', number: 1, shots: [], tee: { xPx: 5, yPx: 5 } }];
+		const holes: AnnotatedHole[] = [
+			{ id: 'h', number: 1, shots: [], tee: { xPx: 5, yPx: 5 }, corridorBends: [], corridorWidthPx: 60 }
+		];
 		editor.setHoles(holes);
-		holes.push({ id: 'other', number: 2, shots: [] });
+		holes.push({ id: 'other', number: 2, shots: [], corridorBends: [], corridorWidthPx: 60 });
 		expect(editor.state.holes).toHaveLength(1);
 	});
 
 	it('rejects an out-of-bounds hole point before it can reach serialization', () => {
 		const editor = loadedEditor();
 		expect(() =>
-			editor.setHoles([{ id: 'h', number: 1, shots: [], tee: { xPx: 5000, yPx: 5 } }])
+			editor.setHoles([
+				{ id: 'h', number: 1, shots: [], tee: { xPx: 5000, yPx: 5 }, corridorBends: [], corridorWidthPx: 60 }
+			])
 		).toThrow(/outside the source image bounds/);
 		expect(editor.state.holes).toEqual([]);
 	});
 
-	it('rejects a too-short corridor and duplicate hole numbers', () => {
+	it('rejects an out-of-bounds bend and a non-positive width', () => {
 		const editor = loadedEditor();
 		expect(() =>
 			editor.setHoles([
@@ -253,19 +330,23 @@ describe('ProjectEditor.setHoles', () => {
 					id: 'h',
 					number: 1,
 					shots: [],
-					corridor: [
-						{ xPx: 1, yPx: 1 },
-						{ xPx: 2, yPx: 2 }
-					]
+					corridorBends: [{ xPx: 1, yPx: 1 }, { xPx: 5000, yPx: 2 }],
+					corridorWidthPx: 60
 				}
 			])
-		).toThrow(/at least 3 vertices/);
+		).toThrow(/outside the source image bounds/);
 		expect(() =>
 			editor.setHoles([
-				{ id: 'h1', number: 1, shots: [] },
-				{ id: 'h2', number: 1, shots: [] }
+				{ id: 'h', number: 1, shots: [], corridorBends: [], corridorWidthPx: 0 }
+			])
+		).toThrow(/corridorWidthPx must be a finite number greater than zero/);
+		expect(() =>
+			editor.setHoles([
+				{ id: 'h1', number: 1, shots: [], corridorBends: [], corridorWidthPx: 60 },
+				{ id: 'h2', number: 1, shots: [], corridorBends: [], corridorWidthPx: 60 }
 			])
 		).toThrow(/duplicate hole number/);
+		expect(editor.state.holes).toEqual([]);
 	});
 
 	it('setting an identical list is a no-op that does not grow history', () => {

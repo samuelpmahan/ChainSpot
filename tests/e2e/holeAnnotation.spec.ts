@@ -4,11 +4,11 @@ import type { Page } from '@playwright/test';
 
 /**
  * Browser coverage for Annotate Round's hole-annotation workflow: adding holes,
- * placing tee/basket/shot/corridor points by click, per-hole correction (remove
- * last shot/corridor point, clear corridor), switching the active hole without
- * cross-contaminating another hole's points, the Done-time corridor-length
- * validation surfacing as a page error instead of crashing, and the resulting
- * AnnotatedRound handing off to Create Graphics once corrected.
+ * placing tee/basket/shot/bend points by click, per-hole correction (remove
+ * last shot/bend, clear bends), switching the active hole without
+ * cross-contaminating another hole's points, immediate corridor-band rendering
+ * from tee + basket + bends + width, and the resulting AnnotatedRound handing
+ * off to Create Graphics once corrected.
  */
 
 function crc32(bytes: Uint8Array): number {
@@ -81,7 +81,7 @@ async function annotationFrameBox(page: Page) {
 	return { frame, box };
 }
 
-test('hole annotation: place tee/basket/shots/corridor by click, correct with remove-last controls, no cross-contamination between holes', async ({
+test('hole annotation: place tee/basket/shots/bends by click, correct with remove-last controls, no cross-contamination between holes', async ({
 	page
 }) => {
 	await loadSourceImage(page);
@@ -96,24 +96,42 @@ test('hole annotation: place tee/basket/shots/corridor by click, correct with re
 	await page.mouse.click(box.x + 300, box.y + 250);
 	await expect(page.getByTestId('basket-marker-1')).toBeVisible();
 
+	// As soon as tee + basket exist, the derived corridor band and centerline
+	// render — even with zero bends.
+	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
+	await expect(page.getByTestId('corridor-centerline-1')).toBeVisible();
+	await expect(page.getByTestId('hole-select-1')).toContainText('tee · basket');
+
 	await page.getByTestId('placement-mode-shot').check();
 	await page.mouse.click(box.x + 120, box.y + 100);
 	await page.mouse.click(box.x + 200, box.y + 160);
 	await expect(page.getByTestId('shot-marker-1-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('2 shots');
 
-	await page.getByTestId('placement-mode-corridor').check();
-	await page.mouse.click(box.x + 20, box.y + 20);
-	await page.mouse.click(box.x + 350, box.y + 20);
-	await page.mouse.click(box.x + 200, box.y + 280);
-	await expect(page.getByTestId('hole-select-1')).toContainText('corridor (3)');
+	// A bend click places a visible bend marker; more clicks add more bends.
+	await page.getByTestId('placement-mode-bend').check();
+	await page.mouse.click(box.x + 170, box.y + 170);
+	await expect(page.getByTestId('bend-marker-1-0')).toBeVisible();
+	await page.mouse.click(box.x + 230, box.y + 190);
+	await expect(page.getByTestId('bend-marker-1-1')).toBeVisible();
+	await expect(page.getByTestId('hole-select-1')).toContainText('bends (2)');
 
-	// Corrections: remove the last shot and the last corridor point.
+	// The corridor width is controllable and persists on the hole.
+	await page.getByTestId('corridor-width').fill('90');
+	await page.getByTestId('corridor-width').blur();
+	await expect(page.getByTestId('corridor-width')).toHaveValue('90');
+
+	// Corrections: remove the last shot and the last bend; clearing all bends
+	// still leaves a renderable straight-hole band.
 	await page.getByTestId('remove-last-shot').click();
-	await page.getByTestId('remove-last-corridor-point').click();
+	await page.getByTestId('remove-last-bend').click();
 	await expect(page.getByTestId('hole-select-1')).toContainText('1 shot');
-	await expect(page.getByTestId('hole-select-1')).toContainText('corridor (2)');
+	await expect(page.getByTestId('hole-select-1')).toContainText('bends (1)');
 	await expect(page.getByTestId('hole-select-1')).not.toContainText('2 shots');
+	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
+	await page.getByTestId('clear-bends').click();
+	await expect(page.getByTestId('hole-select-1')).not.toContainText('bends (1)');
+	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
 
 	// A second hole must not see hole 1's points, and placing on hole 2 must not
 	// touch hole 1's already-placed tee.
@@ -126,24 +144,21 @@ test('hole annotation: place tee/basket/shots/corridor by click, correct with re
 	await expect(page.getByTestId('basket-marker-2')).toHaveCount(0);
 });
 
-test('hole annotation: an incomplete corridor blocks Done with a specific error instead of crashing, and clearing it unblocks the handoff', async ({
+test('hole annotation: a straight hole with zero bends and its width control still hands off to Create Graphics', async ({
 	page
 }) => {
 	await loadSourceImage(page);
 	const { box } = await annotationFrameBox(page);
 
-	await page.getByTestId('placement-mode-corridor').check();
-	await page.mouse.click(box.x + 20, box.y + 20);
-	await page.mouse.click(box.x + 100, box.y + 20);
-	await expect(page.getByTestId('hole-select-1')).toContainText('corridor (2)');
+	await page.mouse.click(box.x + 50, box.y + 50); // tee (default mode)
+	await page.getByTestId('placement-mode-basket').check();
+	await page.mouse.click(box.x + 300, box.y + 250);
+	// Zero bends is a valid straight hole: the band renders and Done is unblocked.
+	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
+	await page.getByTestId('corridor-width').fill('70');
+	await page.getByTestId('corridor-width').blur();
+	await expect(page.getByTestId('corridor-width')).toHaveValue('70');
 
-	await page.getByTestId('annotate-done').click();
-	await expect(page.getByTestId('annotate-done-error')).toContainText('hole 1 corridor must have at least 3 vertices, got 2');
-
-	// Clearing the incomplete corridor unblocks Done, and the round hands off to
-	// Create Graphics as normal (source image intact, no crash from the earlier
-	// failed attempt).
-	await page.getByTestId('clear-corridor').click();
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
