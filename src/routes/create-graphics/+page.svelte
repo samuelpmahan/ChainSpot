@@ -94,7 +94,7 @@
 	/** Pure, derived, non-mutating pair counts, readiness, and diagnostics copy. */
 	let diagnosticsView = $derived(
 		diagnosticsCopy(
-			deriveDiagnostics(currentPairs(), editor.state.images, correspondence.pendingSource !== null)
+			deriveDiagnostics(currentPairs(), editor.state.images, correspondence.pendingPlacement !== null)
 		)
 	);
 
@@ -383,7 +383,8 @@
 			nextPairOrdinal(currentPairs())
 		);
 		correspondenceError = null;
-		activityMessage = 'Add correspondence started. Select a landmark in the source image.';
+		activityMessage =
+			'Add correspondence started. Select a landmark in either the UDisc source or clean target image.';
 	}
 
 	function cancelAddCorrespondence(): void {
@@ -393,9 +394,13 @@
 	}
 
 	function placementGuidance(): string {
-		if (correspondence.mode === 'add-source') return 'Click a landmark in the UDisc source image.';
-		if (correspondence.mode === 'add-target') {
-			return 'Click the same landmark in the clean target image.';
+		if (correspondence.mode === 'add-source') {
+			return 'Click a landmark in either the UDisc source or clean target image.';
+		}
+		if (correspondence.mode === 'add-target' && correspondence.pendingPlacement) {
+			return correspondence.pendingPlacement.role === 'source-overview'
+				? 'Click the same landmark in the clean target image.'
+				: 'Click the same landmark in the UDisc source image.';
 		}
 		return 'Select Add correspondence to create a source–target pair.';
 	}
@@ -639,12 +644,11 @@
 	}
 
 	function handlePlacement(placement: PanePlacement): void {
+		const imageId = findImageByRole(editor.state.images, placement.role)?.id ?? '';
 		const transition = placeCorrespondence(
 			correspondence,
 			placement,
-			placement.role === 'source-overview'
-				? findImageByRole(editor.state.images, 'source-overview')?.id ?? ''
-				: '',
+			imageId,
 			nextPairOrdinal(currentPairs())
 		);
 		if (!transition.accepted) return;
@@ -656,14 +660,18 @@
 
 		try {
 			const currentSourceImageId = findImageByRole(editor.state.images, 'source-overview')?.id ?? null;
-			if (currentSourceImageId !== transition.completion.source.imageId) {
+			const currentTargetImageId = findImageByRole(editor.state.images, 'target-basemap')?.id ?? null;
+			if (
+				currentSourceImageId !== transition.completion.source.imageId ||
+				currentTargetImageId !== transition.completion.target.imageId
+			) {
 				correspondence = cancelCorrespondence(transition.state);
-				correspondenceError = 'The source image changed. Restart correspondence creation.';
+				correspondenceError = 'An image changed. Restart correspondence creation.';
 				return;
 			}
 			editor.addPair({
 				sourceCoordinates: transition.completion.source.coordinates,
-				targetCoordinates: transition.completion.target
+				targetCoordinates: transition.completion.target.coordinates
 			});
 			correspondence = completeCorrespondence(transition.state);
 			refreshCount += 1;
@@ -679,7 +687,7 @@
 	}
 
 	function onDomainChanged(role: ImageRole): void {
-		// A successful assignment/replacement invalidates any pending source identity,
+		// A successful assignment/replacement invalidates any pending placement identity,
 		// including same-dimension replacements. Failed/cancelled intake never calls here.
 		if (correspondence.mode !== 'neutral') {
 			correspondence = cancelCorrespondence(correspondence);
@@ -1437,8 +1445,9 @@
 		data-testid="app-shell"
 		data-correspondence-mode={correspondence.mode}
 		data-complete-pair-count={currentPairs().length}
-		data-pending-pair-count={correspondence.pendingSource ? 1 : 0}
-		data-pending-source={correspondence.pendingSource ? 'true' : 'false'}
+		data-pending-pair-count={correspondence.pendingPlacement ? 1 : 0}
+		data-pending-source={correspondence.pendingPlacement?.role === 'source-overview' ? 'true' : 'false'}
+		data-pending-placement-role={correspondence.pendingPlacement?.role ?? ''}
 		data-annotated-round={annotatedRound ? 'present' : 'absent'}
 		data-hole-count={currentHoles().length}
 	>
@@ -1657,7 +1666,7 @@
 			{editor}
 			refresh={refreshCount}
 			pairs={currentPairs()}
-			pendingSource={correspondence.pendingSource}
+			pendingPlacement={correspondence.pendingPlacement}
 			placementEnabled={correspondence.mode !== 'neutral'}
 			correctionEnabled={correspondence.mode === 'neutral'}
 			{selection}
@@ -1675,7 +1684,7 @@
 			{editor}
 			refresh={refreshCount}
 			pairs={currentPairs()}
-			pendingSource={correspondence.pendingSource}
+			pendingPlacement={correspondence.pendingPlacement}
 			placementEnabled={correspondence.mode !== 'neutral'}
 			correctionEnabled={correspondence.mode === 'neutral'}
 			{selection}
@@ -1926,9 +1935,10 @@
 	<section class="pair-diagnostics" data-testid="pair-diagnostics" aria-live="polite" aria-atomic="true" aria-label="Pair diagnostics">
 		<p data-testid="pair-count-text">{diagnosticsView.count}</p>
 		<p data-testid="readiness-text">{diagnosticsView.readiness}</p>
-		{#if correspondence.mode === 'add-target' && correspondence.pendingSource}
+		{#if correspondence.mode === 'add-target' && correspondence.pendingPlacement}
 			<p class="pending-guidance" data-testid="pending-guidance">
-				This pair is not saved yet. Click the same landmark in the target image to
+				This pair is not saved yet. Click the same landmark in the
+				{correspondence.pendingPlacement.role === 'source-overview' ? 'target' : 'source'} image to
 				complete it, or press Escape / Cancel to discard it.
 			</p>
 		{/if}

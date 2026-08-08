@@ -50,9 +50,9 @@ export interface PairCounts {
 
 export function derivePairCounts(
 	pairs: ReadonlyArray<{ readonly ordinal: number }>,
-	hasPendingSource: boolean
+	hasPendingPlacement: boolean
 ): PairCounts {
-	return { complete: pairs.length, pending: hasPendingSource ? 1 : 0 };
+	return { complete: pairs.length, pending: hasPendingPlacement ? 1 : 0 };
 }
 
 export interface Readiness {
@@ -202,12 +202,12 @@ export interface DiagnosticsSummary {
 export function deriveDiagnostics(
 	pairs: readonly ControlPointPair[],
 	images: readonly ImageAsset[],
-	hasPendingSource: boolean
+	hasPendingPlacement: boolean
 ): DiagnosticsSummary {
 	const sourceImage = findImageByRole(images, 'source-overview');
 	const targetImage = findImageByRole(images, 'target-basemap');
 	return {
-		counts: derivePairCounts(pairs, hasPendingSource),
+		counts: derivePairCounts(pairs, hasPendingPlacement),
 		readiness: deriveReadiness(pairs.length),
 		source: sourceImage ? imageDiagnostics(pairs, sourceImage) : emptyImageDiagnostics(),
 		target: targetImage ? imageDiagnostics(pairs, targetImage) : emptyImageDiagnostics()
