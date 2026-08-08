@@ -718,6 +718,8 @@
 		position: absolute;
 		margin: 1rem;
 		color: #666;
+		z-index: 1;
+		pointer-events: none;
 	}
 
 	.error {

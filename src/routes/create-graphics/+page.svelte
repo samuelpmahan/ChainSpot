@@ -1047,8 +1047,15 @@
 		}
 		geocodeLoading = true;
 		try {
-			const query = cityState ? `${parkName}, ${cityState}` : parkName;
-			const result = await searchPlace(query);
+			const combinedQuery = cityState ? `${parkName}, ${cityState}` : null;
+			const initialResult = await searchPlace(combinedQuery ?? parkName);
+			// A course may be named in OSM but not indexed under the user's metro
+			// spelling/state abbreviation. Retry the stable course name before
+			// reporting failure; do not retry transport or HTTP errors.
+			const result =
+				!initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
+					? await searchPlace(parkName)
+					: initialResult;
 			if (!result.ok) {
 				geocodeError = result.error.message;
 				return;
@@ -1137,6 +1144,16 @@
 
 	function handleNaipDiscardPreview(): void {
 		clearNaipPreview();
+	}
+
+	function handleNaipPreviewError(): void {
+		clearNaipPreview();
+		naipError = 'The aerial preview could not be displayed. Try another US location or radius.';
+	}
+
+	function handleGridPreviewError(): void {
+		clearGridPreview();
+		gridError = 'The assembled aerial preview could not be displayed.';
 	}
 
 	function clamp(value: number, min: number, max: number): number {
@@ -1800,6 +1817,7 @@
 						src={naipPreview.objectUrl}
 						alt="Fetched NAIP aerial preview, not yet used"
 						onload={(event) => initBoxRect(event.currentTarget as HTMLImageElement)}
+						onerror={handleNaipPreviewError}
 					/>
 					{#if boxRect}
 						<div
@@ -1870,6 +1888,7 @@
 						class="naip-preview-image"
 						src={gridPreview.objectUrl}
 						alt="Assembled full-resolution NAIP tile grid, not yet used"
+						onerror={handleGridPreviewError}
 					/>
 					<div class="naip-preview-actions">
 						<button
@@ -2479,6 +2498,7 @@
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 		font-size: 0.85rem;
 	}
 
@@ -2498,6 +2518,7 @@
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 		font-size: 0.85rem;
 	}
 
@@ -2604,6 +2625,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 	}
 
 	.point-inspector h2 {
@@ -2707,6 +2729,7 @@
 		height: auto;
 		border: 1px solid #ccc;
 		border-radius: 4px;
+		background: #e5e7eb;
 		user-select: none;
 	}
 
@@ -2801,14 +2824,16 @@
 		padding: 0.4rem 0.6rem;
 		border: 1px solid #ccc;
 		border-radius: 4px;
-		background: none;
+		background: #27272a;
+		color: #f4f4f5;
 		cursor: pointer;
 		width: 100%;
 	}
 
 	.geocode-result.selected {
 		border-color: #2a6df4;
-		background: rgb(42 109 244 / 10%);
+		background: #172554;
+		color: #eff6ff;
 	}
 
 	.geocode-attribution {

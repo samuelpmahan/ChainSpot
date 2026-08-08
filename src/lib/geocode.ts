@@ -59,7 +59,11 @@ export function buildNominatimSearchUrl(query: string, limit: number = GEOCODE_R
 		q: query,
 		format: 'jsonv2',
 		limit: String(limit),
-		addressdetails: '0'
+		addressdetails: '0',
+		// The next step is USGS NAIP, which only covers the United States. Without
+		// this constraint, a weak course-name match can select an unrelated place
+		// overseas and produce a blank-looking aerial preview.
+		countrycodes: 'us'
 	});
 	return `${NOMINATIM_SEARCH_URL}?${params.toString()}`;
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import ImagePane from '$lib/components/ImagePane.svelte';
+	import ImageEditorPane from '$lib/components/ImageEditorPane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset } from '$lib/domain/project';
@@ -11,7 +11,7 @@
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
-	import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
 	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
 	import {
 		addHole,
@@ -22,7 +22,12 @@
 		removeLastShot
 	} from '$lib/holeAnnotation';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
-	import { pointInBounds } from '$lib/coords';
+	import {
+		detectBasketCandidates,
+		detectCourseCandidates,
+		prewarmBasketDetection
+	} from '$lib/autoAnnotation/basketDetection';
+	import type { BasketCandidate, CourseDetectionResult } from '$lib/autoAnnotation/basketDetection';
 
 	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'corridor'];
 	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
@@ -70,45 +75,37 @@
 	}
 
 	/**
-	 * Hole annotation draft — manual placement only for now (no CV proposals, no
-	 * undo/redo, no pan/zoom precision). Cleared whenever the source image is
-	 * replaced, since existing points are coordinates into a specific raster and
-	 * make no sense against a different one.
+	 * Hole annotation draft. Manual placement and basket CV proposals are both
+	 * transient until the user applies them and clicks Done. Cleared whenever the
+	 * source image is replaced, since existing points are coordinates into a
+	 * specific raster and make no sense against a different one.
 	 */
 	let holes = $state<AnnotatedHole[]>([]);
 	let activeHoleId = $state<string | null>(null);
 	let placementMode = $state<HolePlacementMode>('tee');
-	/** Set once the annotation `<img>` loads, from its own natural/rendered size. */
-	let annotationDisplayScale = $state(1);
-	let annotationDisplayWidth = $state(0);
-	let annotationDisplayHeight = $state(0);
+	let basketCandidates = $state<readonly BasketCandidate[]>([]);
+	let selectedBasketCandidate = $state<number | null>(null);
+	let basketDetectionRunning = $state(false);
+	let basketDetectionError = $state<string | null>(null);
+	let courseDetection = $state<CourseDetectionResult | null>(null);
+	let courseDetectionRunning = $state(false);
+	let prewarmedSourceId: string | null = null;
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
 	}
 
-	/**
-	 * A dedicated object URL for the annotation `<img>`, built from the asset's
-	 * raw bytes — NOT `editor.getAssetResource(id)?.decoded.src`. That element's
-	 * own object URL is deliberately revoked by `decodeImageFileWith` right
-	 * after its original decode settles (see that function's own comment); a
-	 * second `<img>` pointed at the same, by-then-revoked URL string loads
-	 * nothing (`complete: true, naturalWidth: 0`, no error event). Revoked
-	 * whenever the source image changes or the page unmounts.
-	 */
-	let annotationObjectUrl = $state<string | null>(null);
-
+	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
+	// as a source image exists so Detect baskets does not pay the cold-load cost.
 	$effect(() => {
 		void refreshCount;
 		const image = sourceImage();
-		const resource = image ? editor.getAssetResource(image.id) : null;
-		if (!image || !resource) {
-			annotationObjectUrl = null;
-			return;
-		}
-		const url = URL.createObjectURL(new Blob([resource.bytes as BufferSource], { type: image.mimeType }));
-		annotationObjectUrl = url;
-		return () => URL.revokeObjectURL(url);
+		if (!image || image.id === prewarmedSourceId || typeof Worker === 'undefined') return;
+		prewarmedSourceId = image.id;
+		void prewarmBasketDetection().catch(() => {
+			// Detection still reports a useful error if the user explicitly runs it.
+			// A speculative warm-up failure should not alarm or block manual annotation.
+		});
 	});
 
 	function handleAddHole(): void {
@@ -136,40 +133,10 @@
 		holes = clearCorridor(holes, activeHoleId);
 	}
 
-	function handleAnnotationImageLoad(imgEl: HTMLImageElement): void {
-		annotationDisplayScale = imgEl.naturalWidth > 0 ? imgEl.clientWidth / imgEl.naturalWidth : 1;
-		annotationDisplayWidth = imgEl.clientWidth;
-		annotationDisplayHeight = imgEl.clientHeight;
+	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
+		if (!activeHoleId) return;
+		holes = placeByMode(holes, activeHoleId, placementMode, coordinates);
 	}
-
-	/**
-	 * Wired imperatively via `addEventListener` in the effect below, not a
-	 * template `onclick` — the same convention `ImageViewport` uses for its own
-	 * pointer-only interactions, since a template `onclick` on a non-interactive
-	 * element trips the a11y linter for a keyboard equivalent that (per the
-	 * comment on the annotation frame markup) doesn't meaningfully exist yet.
-	 */
-	function handleAnnotationClick(event: MouseEvent, container: HTMLElement): void {
-		const image = sourceImage();
-		if (!image || !activeHoleId || annotationDisplayScale <= 0) return;
-		const rect = container.getBoundingClientRect();
-		const point: SourcePoint = {
-			xPx: (event.clientX - rect.left) / annotationDisplayScale,
-			yPx: (event.clientY - rect.top) / annotationDisplayScale
-		};
-		if (!pointInBounds(point, image.widthPx, image.heightPx)) return;
-		holes = placeByMode(holes, activeHoleId, placementMode, point);
-	}
-
-	let annotationFrameEl = $state<HTMLDivElement | null>(null);
-
-	$effect(() => {
-		const container = annotationFrameEl;
-		if (!container) return;
-		const listener = (event: MouseEvent) => handleAnnotationClick(event, container);
-		container.addEventListener('click', listener);
-		return () => container.removeEventListener('click', listener);
-	});
 
 	/**
 	 * A replaced source image invalidates every existing hole's coordinates —
@@ -180,6 +147,118 @@
 		refresh();
 		holes = [];
 		activeHoleId = null;
+		basketCandidates = [];
+		selectedBasketCandidate = null;
+		basketDetectionError = null;
+		courseDetection = null;
+	}
+
+	async function handleDetectCourse(): Promise<void> {
+		const image = sourceImage();
+		if (!image || courseDetectionRunning || basketDetectionRunning) return;
+		const resource = editor.getAssetResource(image.id);
+		if (!resource) {
+			basketDetectionError = 'The source image bytes are no longer available.';
+			return;
+		}
+
+		courseDetectionRunning = true;
+		basketDetectionError = null;
+		selectedBasketCandidate = null;
+		try {
+			const result = await detectCourseCandidates(
+				resource.bytes,
+				image.mimeType,
+				image.widthPx,
+				image.heightPx
+			);
+			courseDetection = result;
+			basketCandidates = result.baskets;
+		} catch (error) {
+			courseDetection = null;
+			basketDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
+		} finally {
+			courseDetectionRunning = false;
+		}
+	}
+
+	function applyReadyCourseHoles(): void {
+		if (!courseDetection) return;
+		const ready = courseDetection.grammar.holes.filter(
+			(proposal) => proposal.status === 'ready' && proposal.tee && proposal.basket
+		);
+		if (ready.length === 0) return;
+
+		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
+		for (const proposal of ready) {
+			const existing = existingByNumber.get(proposal.number);
+			const next: AnnotatedHole = {
+				...(existing ?? { id: crypto.randomUUID(), number: proposal.number, shots: [] }),
+				tee: { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
+				basket: { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
+			};
+			existingByNumber.set(proposal.number, next);
+		}
+		holes = [...existingByNumber.values()].sort((a, b) => a.number - b.number);
+		activeHoleId = holes[0]?.id ?? null;
+	}
+
+	async function handleDetectBaskets(): Promise<void> {
+		const image = sourceImage();
+		if (!image || basketDetectionRunning) return;
+		const resource = editor.getAssetResource(image.id);
+		if (!resource) {
+			basketDetectionError = 'The source image bytes are no longer available.';
+			return;
+		}
+
+		basketDetectionRunning = true;
+		basketDetectionError = null;
+		selectedBasketCandidate = null;
+		try {
+			basketCandidates = await detectBasketCandidates(
+				resource.bytes,
+				image.mimeType,
+				image.widthPx,
+				image.heightPx
+			);
+			if (basketCandidates.length === 0) {
+				basketDetectionError =
+					'No basket candidates found. Try a full UDisc map screenshot with the basket icons visible.';
+			}
+		} catch (error) {
+			basketCandidates = [];
+			basketDetectionError =
+				error instanceof Error ? error.message : 'Basket detection failed.';
+		} finally {
+			basketDetectionRunning = false;
+		}
+	}
+
+	function applySelectedBasket(): void {
+		if (selectedBasketCandidate === null || !activeHoleId) return;
+		const candidate = basketCandidates[selectedBasketCandidate];
+		if (!candidate) return;
+		holes = holes.map((hole) =>
+			hole.id === activeHoleId ? { ...hole, basket: { xPx: candidate.xPx, yPx: candidate.yPx } } : hole
+		);
+		selectedBasketCandidate = null;
+	}
+
+	function selectBasketCandidate(index: number): void {
+		selectedBasketCandidate = index;
+		if (activeHoleId) return;
+
+		// Candidate review needs an active hole to show the preview and enable
+		// Apply. Create the first draft hole on demand so the detector is usable
+		// immediately after the user clicks a candidate.
+		if (holes.length > 0) {
+			activeHoleId = holes[holes.length - 1].id;
+			return;
+		}
+		const nextHoles = addHole(holes);
+		holes = nextHoles;
+		activeHoleId = nextHoles[nextHoles.length - 1].id;
 	}
 
 	/** A stitched PNG awaiting explicit import from the Stitch Map page. */
@@ -331,7 +410,10 @@
 	{/if}
 
 	<header class="toolbar">
-		<h1>ChainSpot</h1>
+		<div>
+			<h1>Annotate Round</h1>
+			<p>Review the course map, mark each hole, then continue to graphics.</p>
+		</div>
 		<button
 			type="button"
 			data-testid="annotate-done"
@@ -347,206 +429,179 @@
 		<p class="error" data-testid="annotate-done-error" role="alert">{doneError}</p>
 	{/if}
 
-	<section class="panes">
-		<ImagePane
+	<div data-testid="hole-annotation">
+		<ImageEditorPane
 			title="UDisc source"
 			role="source-overview"
 			{editor}
 			refresh={refreshCount}
-			pairs={[]}
-			pendingSource={null}
-			placementEnabled={false}
-			correctionEnabled={false}
-			markersVisible={false}
 			{decode}
 			confirmDiscard={() => true}
 			onDomainChanged={handleSourceDomainChanged}
-		/>
-	</section>
-
-	{#if sourceImage()}
-		<section class="hole-annotation" data-testid="hole-annotation" aria-labelledby="hole-annotation-heading">
-			<h2 id="hole-annotation-heading">Hole annotation</h2>
-			<p class="future-note">
-				Manual placement for now: click the image below to place tee, basket,
-				ordered shot landings, or corridor vertices for the selected hole. Zoom
-				for precision and CV-assisted point proposals are planned but not built
-				yet — every point placed here is authoritative once you click Done.
-			</p>
-
-			<div class="hole-list-row">
-				<ul class="hole-list" data-testid="hole-list">
-					{#each holes as hole (hole.id)}
-						<li class="hole-item">
-							<button
-								type="button"
-								class="hole-chip"
-								class:active={hole.id === activeHoleId}
-								data-testid="hole-select-{hole.number}"
-								onclick={() => (activeHoleId = hole.id)}
-							>
-								Hole {hole.number}
-								{#if hole.tee}· tee{/if}
-								{#if hole.basket}· basket{/if}
-								{#if hole.shots.length > 0}· {hole.shots.length} shot{hole.shots.length === 1 ? '' : 's'}{/if}
-								{#if hole.corridor}· corridor ({hole.corridor.length}){/if}
-							</button>
-							<button
-								type="button"
-								class="hole-remove"
-								data-testid="hole-remove-{hole.number}"
-								aria-label={`Remove hole ${hole.number}`}
-								onclick={() => handleRemoveHole(hole.id)}
-							>
-								✕
-							</button>
-						</li>
-					{/each}
-				</ul>
-				<button type="button" data-testid="hole-add" onclick={handleAddHole}>Add hole</button>
-			</div>
-
-			{#if activeHole()}
-				{@const hole = activeHole()!}
-				<div class="placement-controls">
-					<fieldset>
-						<legend>Placement mode</legend>
-						{#each PLACEMENT_MODES as mode (mode)}
-							<label>
-								<input
-									type="radio"
-									name="placement-mode"
-									value={mode}
-									checked={placementMode === mode}
-									onchange={() => (placementMode = mode)}
-									data-testid="placement-mode-{mode}"
-								/>
-								{PLACEMENT_MODE_LABELS[mode]}
-							</label>
-						{/each}
-					</fieldset>
-					<div class="correction-buttons">
-						<button
-							type="button"
-							data-testid="remove-last-shot"
-							disabled={hole.shots.length === 0}
-							onclick={handleRemoveLastShot}
-						>
-							Remove last shot
-						</button>
-						<button
-							type="button"
-							data-testid="remove-last-corridor-point"
-							disabled={!hole.corridor || hole.corridor.length === 0}
-							onclick={handleRemoveLastCorridorPoint}
-						>
-							Remove last corridor point
-						</button>
-						<button
-							type="button"
-							data-testid="clear-corridor"
-							disabled={!hole.corridor}
-							onclick={handleClearCorridor}
-						>
-							Clear corridor
-						</button>
+			onPlacement={activeHoleId ? handleAnnotationPlacement : undefined}
+		>
+			{#snippet tools()}
+				<div class="tool-section">
+					<div class="section-heading">
+						<h2>Holes</h2>
+						<button type="button" data-testid="hole-add" onclick={handleAddHole}>+ Add</button>
 					</div>
+					{#if holes.length > 0}
+						<ul class="hole-list" data-testid="hole-list">
+							{#each holes as hole (hole.id)}
+								<li class:active={hole.id === activeHoleId}>
+									<button
+										type="button"
+										class="hole-select"
+										data-testid="hole-select-{hole.number}"
+										onclick={() => (activeHoleId = hole.id)}
+									>
+										<strong>Hole {hole.number}</strong>
+										<span>
+											{hole.tee ? 'tee' : 'no tee'}{hole.basket ? ' · basket' : ''} · {hole.shots.length} shots{hole.corridor ? ` · corridor (${hole.corridor.length})` : ''}
+										</span>
+									</button>
+									<button
+										type="button"
+										class="icon-button"
+										data-testid="hole-remove-{hole.number}"
+										aria-label={`Remove hole ${hole.number}`}
+										onclick={() => handleRemoveHole(hole.id)}
+									>×</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p class="empty-copy">Add the first hole, then click directly on the map.</p>
+					{/if}
 				</div>
 
-				<!--
-					Semantics live on this wrapping div, not the <img>: pointer placement
-					has no meaningful keyboard equivalent yet (there's nowhere for
-					"Enter" to place a point without a cursor position), the same reason
-					ImagePane's own workspace is a role="img" region with keyboard
-					operability delegated to a separate control set. No such alternate
-					control set exists for hole annotation yet — this interim workflow
-					is pointer-only, and that's a real gap to close, not a false claim.
-				-->
-				<div
-					class="annotation-frame"
-					data-testid="annotation-frame"
-					role="img"
-					aria-label="UDisc source — click to place points for the selected hole. Pointer-only for now; no keyboard equivalent exists yet."
-					bind:this={annotationFrameEl}
-				>
-					<img
-						class="annotation-image"
-						src={annotationObjectUrl}
-						alt=""
-						onload={(event) => handleAnnotationImageLoad(event.currentTarget as HTMLImageElement)}
-					/>
-					<svg
-						class="annotation-overlay"
-						width={annotationDisplayWidth}
-						height={annotationDisplayHeight}
-						aria-hidden="true"
-					>
-						{#each holes as overlayHole (overlayHole.id)}
-							{#if overlayHole.corridor && overlayHole.corridor.length >= 3}
-								<polygon
-									points={overlayHole.corridor
-										.map((point) => `${point.xPx * annotationDisplayScale},${point.yPx * annotationDisplayScale}`)
-										.join(' ')}
-									class="corridor"
-									class:active={overlayHole.id === activeHoleId}
-								/>
-							{/if}
-							{#if overlayHole.tee && overlayHole.basket}
-								<line
-									x1={overlayHole.tee.xPx * annotationDisplayScale}
-									y1={overlayHole.tee.yPx * annotationDisplayScale}
-									x2={overlayHole.basket.xPx * annotationDisplayScale}
-									y2={overlayHole.basket.yPx * annotationDisplayScale}
-									class="guide"
-								/>
-							{/if}
-							{#each overlayHole.shots as shot, index (shot.id)}
-								{@const from = index === 0 ? overlayHole.tee : overlayHole.shots[index - 1].landing}
-								{#if from}
-									<line
-										x1={from.xPx * annotationDisplayScale}
-										y1={from.yPx * annotationDisplayScale}
-										x2={shot.landing.xPx * annotationDisplayScale}
-										y2={shot.landing.yPx * annotationDisplayScale}
-										class="guide"
+				{#if activeHole()}
+					{@const hole = activeHole()!}
+					<div class="tool-section">
+						<h2>Place</h2>
+						<div class="mode-grid">
+							{#each PLACEMENT_MODES as mode (mode)}
+								<label class:active={placementMode === mode}>
+									<input
+										type="radio"
+										name="placement-mode"
+										value={mode}
+										checked={placementMode === mode}
+										onchange={() => (placementMode = mode)}
+										data-testid="placement-mode-{mode}"
 									/>
-								{/if}
+									{PLACEMENT_MODE_LABELS[mode]}
+								</label>
 							{/each}
-							{#if overlayHole.tee}
-								<circle
-									cx={overlayHole.tee.xPx * annotationDisplayScale}
-									cy={overlayHole.tee.yPx * annotationDisplayScale}
-									r="5"
-									class="tee-marker"
-									data-testid="tee-marker-{overlayHole.number}"
-								/>
+						</div>
+						<div class="edit-actions">
+							<button type="button" data-testid="remove-last-shot" disabled={hole.shots.length === 0} onclick={handleRemoveLastShot}>Undo shot</button>
+							<button type="button" data-testid="remove-last-corridor-point" disabled={!hole.corridor?.length} onclick={handleRemoveLastCorridorPoint}>Undo corridor point</button>
+							<button type="button" data-testid="clear-corridor" disabled={!hole.corridor} onclick={handleClearCorridor}>Clear corridor</button>
+						</div>
+					</div>
+				{/if}
+
+				{#if sourceImage()}
+					<div class="tool-section detection">
+						<div class="section-heading">
+							<h2>Course assist</h2>
+							{#if basketCandidates.length > 0}<span>{basketCandidates.length} found</span>{/if}
+						</div>
+						<button
+							type="button"
+							class="detect-button"
+							data-testid="detect-course"
+							disabled={courseDetectionRunning || basketDetectionRunning}
+							onclick={() => void handleDetectCourse()}
+						>
+							{courseDetectionRunning ? 'Detecting the course…' : 'Detect full course'}
+						</button>
+						{#if courseDetection}
+							{@const assignedNumbers = courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length}
+							{@const readyHoles = courseDetection.grammar.holes.filter((proposal) => proposal.status === 'ready').length}
+							<p class="detection-summary" data-testid="course-detection-summary">
+								{assignedNumbers} numbers · {courseDetection.tees.length} tees · {courseDetection.baskets.length} baskets · {readyHoles} ready
+							</p>
+							{#if courseDetection.numberDetection.note}
+								<p class="tool-note">{courseDetection.numberDetection.note}</p>
 							{/if}
-							{#if overlayHole.basket}
-								<circle
-									cx={overlayHole.basket.xPx * annotationDisplayScale}
-									cy={overlayHole.basket.yPx * annotationDisplayScale}
-									r="5"
-									class="basket-marker"
-									data-testid="basket-marker-{overlayHole.number}"
-								/>
-							{/if}
-							{#each overlayHole.shots as shot, index (shot.id)}
-								<circle
-									cx={shot.landing.xPx * annotationDisplayScale}
-									cy={shot.landing.yPx * annotationDisplayScale}
-									r="4"
-									class="shot-marker"
-									data-testid="shot-marker-{overlayHole.number}-{index}"
-								/>
-							{/each}
+							<button
+								type="button"
+								class="apply-button"
+								data-testid="apply-ready-course-holes"
+								disabled={readyHoles === 0}
+								onclick={applyReadyCourseHoles}
+							>
+								Apply {readyHoles} ready holes
+							</button>
+						{/if}
+						<p class="assist-divider">Basket-only fallback</p>
+						<button
+							type="button"
+							class="detect-button"
+							data-testid="detect-baskets"
+							disabled={basketDetectionRunning || courseDetectionRunning}
+							onclick={() => void handleDetectBaskets()}
+						>
+							{basketDetectionRunning ? 'Loading OpenCV and detecting…' : 'Detect baskets'}
+						</button>
+						{#if basketDetectionError}
+							<p class="tool-error" data-testid="basket-detection-error" role="alert">{basketDetectionError}</p>
+						{/if}
+						{#if basketCandidates.length > 0}
+							<div class="candidate-list" aria-label="Detected basket candidates">
+								{#each basketCandidates as candidate, index (index)}
+									<button
+										type="button"
+										class:selected={selectedBasketCandidate === index}
+										onclick={() => selectBasketCandidate(index)}
+									>
+										#{index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
+									</button>
+								{/each}
+							</div>
+							<button
+								type="button"
+								class="apply-button"
+								data-testid="apply-basket-candidate"
+								disabled={selectedBasketCandidate === null || !activeHoleId}
+								onclick={applySelectedBasket}
+							>
+								Apply to Hole {activeHole()?.number ?? ''}
+							</button>
+						{/if}
+					</div>
+				{/if}
+			{/snippet}
+
+			{#snippet overlay({ image, zoom })}
+				<svg class="annotation-overlay" viewBox={`0 0 ${image.widthPx} ${image.heightPx}`} aria-hidden="true">
+					{#each holes as overlayHole (overlayHole.id)}
+						{#if overlayHole.corridor && overlayHole.corridor.length >= 3}
+							<polygon points={overlayHole.corridor.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor" class:active={overlayHole.id === activeHoleId} />
+						{/if}
+						{#if overlayHole.tee && overlayHole.basket}
+							<line x1={overlayHole.tee.xPx} y1={overlayHole.tee.yPx} x2={overlayHole.basket.xPx} y2={overlayHole.basket.yPx} class="guide" />
+						{/if}
+						{#each overlayHole.shots as shot, index (shot.id)}
+							{@const from = index === 0 ? overlayHole.tee : overlayHole.shots[index - 1].landing}
+							{#if from}<line x1={from.xPx} y1={from.yPx} x2={shot.landing.xPx} y2={shot.landing.yPx} class="guide" />{/if}
 						{/each}
-					</svg>
-				</div>
-			{:else}
-				<p class="future-note">Add a hole to start placing points.</p>
-			{/if}
-		</section>
-	{/if}
+						{#if overlayHole.tee}<circle cx={overlayHole.tee.xPx} cy={overlayHole.tee.yPx} r={7 / zoom} class="tee-marker" data-testid="tee-marker-{overlayHole.number}" />{/if}
+						{#if overlayHole.basket}<circle cx={overlayHole.basket.xPx} cy={overlayHole.basket.yPx} r={7 / zoom} class="basket-marker" data-testid="basket-marker-{overlayHole.number}" />{/if}
+						{#each overlayHole.shots as shot, index (shot.id)}
+							<circle cx={shot.landing.xPx} cy={shot.landing.yPx} r={6 / zoom} class="shot-marker" data-testid="shot-marker-{overlayHole.number}-{index}" />
+						{/each}
+					{/each}
+					{#each basketCandidates as candidate, index (index)}
+						<circle cx={candidate.xPx} cy={candidate.yPx} r={(selectedBasketCandidate === index ? 11 : 8) / zoom} class="basket-candidate-marker" class:selected={selectedBasketCandidate === index} data-testid="basket-candidate-{index + 1}" />
+					{/each}
+				</svg>
+			{/snippet}
+		</ImageEditorPane>
+	</div>
 </main>
 
 <style>
@@ -570,13 +625,28 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: 1rem;
-		flex-wrap: wrap;
 	}
 
 	h1 {
 		font-size: 1.5rem;
 		margin: 0;
+	}
+
+	.toolbar p {
+		margin: 0.15rem 0 0;
+		color: #a1a1aa;
+		font-size: 0.85rem;
+	}
+
+	.toolbar > button {
+		padding: 0.5rem 1.1rem;
+		border: 1px solid #2563eb;
+		border-radius: 6px;
+		background: #2563eb;
+		color: #fff;
+		font-weight: 650;
 	}
 
 	.handoff-banner {
@@ -616,39 +686,6 @@
 		font-size: 0.85rem;
 	}
 
-	.panes {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: 1rem;
-		max-width: 32rem;
-	}
-
-	.future-note {
-		margin: 0;
-		font-size: 0.85rem;
-		opacity: 0.75;
-		max-width: 40rem;
-	}
-
-	.hole-annotation {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		max-width: 48rem;
-	}
-
-	.hole-annotation h2 {
-		font-size: 1.1rem;
-		margin: 0;
-	}
-
-	.hole-list-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
 	.hole-list {
 		display: flex;
 		flex-wrap: wrap;
@@ -656,92 +693,6 @@
 		margin: 0;
 		padding: 0;
 		list-style: none;
-	}
-
-	.hole-item {
-		display: flex;
-		align-items: stretch;
-	}
-
-	.hole-chip {
-		font-size: 0.8rem;
-		padding: 0.3rem 0.6rem;
-		border: 1px solid #ccc;
-		border-radius: 4px 0 0 4px;
-		background: none;
-		cursor: pointer;
-	}
-
-	.hole-chip.active {
-		border-color: #2a6df4;
-		background: rgb(42 109 244 / 10%);
-	}
-
-	.hole-remove {
-		font-size: 0.75rem;
-		padding: 0.3rem 0.4rem;
-		border: 1px solid #ccc;
-		border-left: none;
-		border-radius: 0 4px 4px 0;
-		background: none;
-		cursor: pointer;
-	}
-
-	.placement-controls {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 1rem;
-	}
-
-	.placement-controls fieldset {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.6rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		padding: 0.4rem 0.6rem;
-		margin: 0;
-	}
-
-	.placement-controls legend {
-		font-size: 0.75rem;
-		opacity: 0.8;
-		padding: 0 0.3rem;
-	}
-
-	.placement-controls label {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		font-size: 0.85rem;
-	}
-
-	.correction-buttons {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	.correction-buttons button {
-		font-size: 0.8rem;
-	}
-
-	.annotation-frame {
-		position: relative;
-		display: inline-block;
-	}
-
-	.annotation-image {
-		display: block;
-		max-width: 48rem;
-		max-height: 32rem;
-		width: auto;
-		height: auto;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		cursor: crosshair;
 	}
 
 	.annotation-overlay {
@@ -785,6 +736,212 @@
 		fill: #f59e0b;
 		stroke: #451a03;
 		stroke-width: 1;
+	}
+
+	.basket-candidate-marker {
+		fill: #facc15;
+		stroke: #713f12;
+		stroke-width: 2;
+		stroke-dasharray: 3 2;
+	}
+
+	.basket-candidate-marker.selected {
+		fill: #fb923c;
+		stroke: #7c2d12;
+		stroke-width: 3;
+	}
+
+	.tool-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.55rem;
+		padding-bottom: 0.85rem;
+		margin-bottom: 0.85rem;
+		border-bottom: 1px solid #3f3f46;
+	}
+
+	.tool-section:last-child {
+		margin-bottom: 0;
+		border-bottom: 0;
+	}
+
+	.tool-section h2 {
+		margin: 0;
+		font-size: 0.82rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #d4d4d8;
+	}
+
+	.section-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.section-heading > span,
+	.empty-copy {
+		margin: 0;
+		color: #a1a1aa;
+		font-size: 0.75rem;
+	}
+
+	.tool-section button {
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #27272a;
+		color: #f4f4f5;
+		padding: 0.4rem 0.55rem;
+		cursor: pointer;
+	}
+
+	.tool-section button:disabled {
+		opacity: 0.4;
+	}
+
+	.hole-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.hole-list li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.hole-list li.active {
+		border-color: #3b82f6;
+		box-shadow: inset 3px 0 #3b82f6;
+	}
+
+	.hole-select {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.1rem;
+		border: 0 !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+		text-align: left;
+	}
+
+	.hole-select span {
+		color: #a1a1aa;
+		font-size: 0.7rem;
+	}
+
+	.icon-button {
+		border: 0 !important;
+		border-left: 1px solid #3f3f46 !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+		font-size: 1rem;
+	}
+
+	.mode-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.35rem;
+	}
+
+	.mode-grid label {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.45rem;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		font-size: 0.76rem;
+		cursor: pointer;
+	}
+
+	.mode-grid label.active {
+		border-color: #3b82f6;
+		background: rgb(59 130 246 / 15%);
+	}
+
+	.mode-grid input {
+		margin: 0;
+	}
+
+	.edit-actions {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.detect-button,
+	.apply-button {
+		width: 100%;
+	}
+
+	.detect-button {
+		border-color: #a16207 !important;
+		background: #422006 !important;
+		color: #fde68a !important;
+	}
+
+	.apply-button {
+		border-color: #2563eb !important;
+		background: #1d4ed8 !important;
+	}
+
+	.candidate-list {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.3rem;
+	}
+
+	.candidate-list button {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.72rem;
+	}
+
+	.candidate-list button.selected {
+		border-color: #f59e0b;
+		background: #451a03;
+	}
+
+	.candidate-list span {
+		color: #fbbf24;
+	}
+
+	.tool-error {
+		margin: 0;
+		color: #fca5a5;
+		font-size: 0.75rem;
+	}
+
+	.detection-summary,
+	.tool-note,
+	.assist-divider {
+		margin: 0;
+		font-size: 0.75rem;
+		line-height: 1.35;
+	}
+
+	.detection-summary {
+		color: #d4d4d8;
+	}
+
+	.tool-note {
+		color: #fcd34d;
+	}
+
+	.assist-divider {
+		padding-top: 0.35rem;
+		border-top: 1px solid #3f3f46;
+		color: #a1a1aa;
+	}
+
+	.annotation-overlay {
+		width: 100%;
+		height: 100%;
 	}
 
 	@media (max-width: 900px) {
