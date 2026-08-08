@@ -4,6 +4,10 @@ import {
 	addHole,
 	addShot,
 	clearBends,
+	moveBasket,
+	moveCorridorBend,
+	moveShot,
+	moveTee,
 	nextHoleNumber,
 	placeByMode,
 	removeHole,
@@ -74,6 +78,22 @@ describe('setTee / setBasket', () => {
 	});
 });
 
+describe('moveTee / moveBasket', () => {
+	it('moves only the existing endpoint on the matching hole', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 1, yPx: 2 }, basket: { xPx: 3, yPx: 4 } }),
+			emptyHole('b', 2, { tee: { xPx: 5, yPx: 6 } })
+		];
+
+		const movedTee = moveTee(holes, 'a', { xPx: 11, yPx: 12 });
+		const movedBasket = moveBasket(movedTee, 'a', { xPx: 13, yPx: 14 });
+
+		expect(movedBasket[0].tee).toEqual({ xPx: 11, yPx: 12 });
+		expect(movedBasket[0].basket).toEqual({ xPx: 13, yPx: 14 });
+		expect(movedBasket[1]).toEqual(holes[1]);
+	});
+});
+
 describe('addShot / removeLastShot', () => {
 	it('appends ordered shots and pops only the last one', () => {
 		const createId = idSequence('shot');
@@ -93,6 +113,26 @@ describe('addShot / removeLastShot', () => {
 	it('removing the last shot from an empty list is a no-op, not an error', () => {
 		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
 		expect(removeLastShot(holes, 'a')[0].shots).toEqual([]);
+	});
+});
+
+describe('moveShot', () => {
+	it('changes only the selected landing and preserves shot ids and order', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				shots: [
+					{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
+					{ id: 'shot-2', landing: { xPx: 3, yPx: 4 } }
+				]
+			})
+		];
+
+		const result = moveShot(holes, 'a', 'shot-2', { xPx: 30, yPx: 40 });
+
+		expect(result[0].shots).toEqual([
+			{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
+			{ id: 'shot-2', landing: { xPx: 30, yPx: 40 } }
+		]);
 	});
 });
 
@@ -124,6 +164,28 @@ describe('addCorridorBend / removeLastBend / clearBends', () => {
 		holes = addCorridorBend(holes, 'a', { xPx: 2, yPx: 2 });
 		holes = clearBends(holes, 'a');
 		expect(holes[0].corridorBends).toEqual([]);
+	});
+});
+
+describe('moveCorridorBend', () => {
+	it('changes only the selected index and preserves bend order', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				corridorBends: [
+					{ xPx: 1, yPx: 2 },
+					{ xPx: 3, yPx: 4 },
+					{ xPx: 5, yPx: 6 }
+				]
+			})
+		];
+
+		const result = moveCorridorBend(holes, 'a', 1, { xPx: 30, yPx: 40 });
+
+		expect(result[0].corridorBends).toEqual([
+			{ xPx: 1, yPx: 2 },
+			{ xPx: 30, yPx: 40 },
+			{ xPx: 5, yPx: 6 }
+		]);
 	});
 });
 

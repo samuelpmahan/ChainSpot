@@ -81,6 +81,33 @@ async function annotationFrameBox(page: Page) {
 	return { frame, box };
 }
 
+async function dragMarker(
+	page: Page,
+	testid: string,
+	deltaX: number,
+	deltaY: number,
+	release = true
+): Promise<void> {
+	const marker = page.getByTestId(testid);
+	const box = await marker.boundingBox();
+	if (!box) throw new Error(`${testid} has no bounding box`);
+	const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	await page.mouse.move(start.x, start.y);
+	await page.mouse.down();
+	await page.mouse.move(start.x + deltaX, start.y + deltaY, { steps: 4 });
+	if (release) await page.mouse.up();
+}
+
+async function expectSourcePointInBounds(page: Page, testid: string): Promise<void> {
+	const marker = page.getByTestId(testid);
+	const x = Number(await marker.getAttribute('cx'));
+	const y = Number(await marker.getAttribute('cy'));
+	expect(x).toBeGreaterThanOrEqual(0);
+	expect(x).toBeLessThan(800);
+	expect(y).toBeGreaterThanOrEqual(0);
+	expect(y).toBeLessThan(600);
+}
+
 test('hole annotation: place tee/basket/shots/bends by click, correct with remove-last controls, no cross-contamination between holes', async ({
 	page
 }) => {
@@ -142,6 +169,64 @@ test('hole annotation: place tee/basket/shots/bends by click, correct with remov
 	await expect(page.getByTestId('tee-marker-2')).toBeVisible();
 	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
 	await expect(page.getByTestId('basket-marker-2')).toHaveCount(0);
+});
+
+test('hole annotation: existing tee, basket, shot, and bend markers drag without placement duplication', async ({
+	page
+}) => {
+	await loadSourceImage(page);
+	const { box } = await annotationFrameBox(page);
+
+	await page.mouse.click(box.x + 80, box.y + 80);
+	await page.getByTestId('placement-mode-basket').check();
+	await page.mouse.click(box.x + 520, box.y + 420);
+	await page.getByTestId('placement-mode-shot').check();
+	await page.mouse.click(box.x + 180, box.y + 180);
+	await page.mouse.click(box.x + 260, box.y + 240);
+	await page.getByTestId('placement-mode-bend').check();
+	await page.mouse.click(box.x + 350, box.y + 320);
+
+	const centerlineBefore = await page.getByTestId('corridor-centerline-1').getAttribute('points');
+	const bendCountBefore = await page.locator('[data-testid^="bend-marker-1-"]').count();
+
+	// Bend placement is active, but a marker claim must win over background placement.
+	const teeBefore = await page.getByTestId('tee-marker-1').getAttribute('cx');
+	await dragMarker(page, 'tee-marker-1', 45, 25, false);
+	await expect(page.getByTestId('tee-marker-1')).not.toHaveAttribute('cx', teeBefore ?? '');
+	await expect(page.getByTestId('hole-select-1')).toContainText('tee · basket · 2 shots · bends (1)');
+	await page.mouse.up();
+	await expect(page.locator('[data-testid^="bend-marker-1-"]')).toHaveCount(bendCountBefore);
+	const centerlineAfterTee = await page.getByTestId('corridor-centerline-1').getAttribute('points');
+		expect(centerlineAfterTee).not.toBe(centerlineBefore);
+	await expectSourcePointInBounds(page, 'tee-marker-1');
+
+	const bandBeforeBasket = await page.getByTestId('corridor-band-1').getAttribute('points');
+	await dragMarker(page, 'basket-marker-1', -35, -20);
+	await expect(page.getByTestId('corridor-band-1')).toHaveAttribute('points', /.+/);
+	const bandAfterBasket = await page.getByTestId('corridor-band-1').getAttribute('points');
+		expect(bandAfterBasket).not.toBe(bandBeforeBasket);
+	await expectSourcePointInBounds(page, 'basket-marker-1');
+
+	const shotCountBefore = await page.locator('[data-testid^="shot-marker-1-"]').count();
+	await dragMarker(page, 'shot-marker-1-0', 30, 15);
+	await expect(page.locator('[data-testid^="shot-marker-1-"]')).toHaveCount(shotCountBefore);
+	await expectSourcePointInBounds(page, 'shot-marker-1-0');
+
+	const centerlineBeforeBend = await page.getByTestId('corridor-centerline-1').getAttribute('points');
+	await dragMarker(page, 'bend-marker-1-0', 25, -15);
+	const centerlineAfterBend = await page.getByTestId('corridor-centerline-1').getAttribute('points');
+		expect(centerlineAfterBend).not.toBe(centerlineBeforeBend);
+
+	// A click without movement on an existing marker is not a placement click.
+	const finalBendCount = await page.locator('[data-testid^="bend-marker-1-"]').count();
+	const teeBox = await page.getByTestId('tee-marker-1').boundingBox();
+	if (!teeBox) throw new Error('tee marker has no bounding box');
+	await page.mouse.click(teeBox.x + teeBox.width / 2, teeBox.y + teeBox.height / 2);
+	await expect(page.locator('[data-testid^="bend-marker-1-"]')).toHaveCount(finalBendCount);
+
+	// Dragging beyond the visible image is clamped into source-image bounds.
+	await dragMarker(page, 'bend-marker-1-0', -1000, -1000);
+	await expectSourcePointInBounds(page, 'bend-marker-1-0');
 });
 
 test('hole annotation: a straight hole with zero bends and its width control still hands off to Create Graphics', async ({

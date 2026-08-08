@@ -58,6 +58,16 @@ export function setBasket(holes: readonly AnnotatedHole[], holeId: string, point
 	return updateHole(holes, holeId, (hole) => ({ ...hole, basket: point }));
 }
 
+/** Moves the existing tee on a hole without changing any other annotation. */
+export function moveTee(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => (hole.tee ? { ...hole, tee: point } : hole));
+}
+
+/** Moves the existing basket on a hole without changing any other annotation. */
+export function moveBasket(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => (hole.basket ? { ...hole, basket: point } : hole));
+}
+
 export function addShot(
 	holes: readonly AnnotatedHole[],
 	holeId: string,
@@ -72,8 +82,39 @@ export function removeLastShot(holes: readonly AnnotatedHole[], holeId: string):
 	return updateHole(holes, holeId, (hole) => ({ ...hole, shots: hole.shots.slice(0, -1) }));
 }
 
+/** Moves one existing shot landing while preserving the shot id and order. */
+export function moveShot(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	shotId: string,
+	point: SourcePoint
+): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({
+		...hole,
+		shots: hole.shots.map((shot) => (shot.id === shotId ? { ...shot, landing: point } : shot))
+	}));
+}
+
 export function addCorridorBend(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: [...hole.corridorBends, point] }));
+}
+
+/** Moves one existing bend while preserving its position in the bend array. */
+export function moveCorridorBend(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	index: number,
+	point: SourcePoint
+): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		if (index < 0 || index >= hole.corridorBends.length) return hole;
+		return {
+			...hole,
+			corridorBends: hole.corridorBends.map((bend, bendIndex) =>
+				bendIndex === index ? point : bend
+			)
+		};
+	});
 }
 
 /** Pops the last bend; an empty bend list is a valid straight hole. */

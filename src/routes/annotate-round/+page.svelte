@@ -13,9 +13,16 @@
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
 	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
+	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
+	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
+	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
 	import {
 		addHole,
 		clearBends,
+		moveBasket,
+		moveCorridorBend,
+		moveShot,
+		moveTee,
 		placeByMode,
 		removeHole,
 		removeLastBend,
@@ -60,6 +67,23 @@
 		'edge-loop': 'EL',
 		fused: 'F'
 	};
+	const MARKER_HIT_RADIUS_PX = 12;
+
+	type AnnotationMarkerKind = 'tee' | 'basket' | 'shot' | 'bend';
+
+	interface AnnotationMarkerHit {
+		holeId: string;
+		kind: AnnotationMarkerKind;
+		index?: number;
+		shotId?: string;
+	}
+
+	interface AnnotationDragGesture {
+		marker: AnnotationMarkerHit;
+		start: ScreenSpacePoint;
+		transform: ViewTransformState;
+		dragging: boolean;
+	}
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -119,6 +143,9 @@
 	let courseDetectionStartedAt = 0;
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let prewarmedSourceId: string | null = null;
+	let annotationDrag = $state<AnnotationDragGesture | null>(null);
+	let previewHoles = $state<AnnotatedHole[] | null>(null);
+	let visibleHoles = $derived(previewHoles ?? holes);
 
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
@@ -199,6 +226,114 @@
 		const corridorWidthPx = Number(input.value);
 		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
 		holes = setCorridorWidth(holes, activeHoleId, corridorWidthPx);
+	}
+
+	function pointHitAt(pointer: ScreenSpacePoint, view: ViewTransformState): AnnotationMarkerHit | null {
+		let closestMarker: AnnotationMarkerHit | null = null;
+		let closestDistance = Number.POSITIVE_INFINITY;
+
+		function consider(
+			holeId: string,
+			kind: AnnotationMarkerKind,
+			point: { xPx: number; yPx: number },
+			index?: number,
+			shotId?: string
+		): void {
+			const screen = imageToScreen(point, view);
+			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
+			if (distance > MARKER_HIT_RADIUS_PX || distance >= closestDistance) return;
+			closestDistance = distance;
+			closestMarker = { holeId, kind, index, shotId };
+		}
+
+		for (const hole of holes) {
+			if (hole.tee) consider(hole.id, 'tee', hole.tee);
+			if (hole.basket) consider(hole.id, 'basket', hole.basket);
+			for (const [index, bend] of hole.corridorBends.entries()) {
+				consider(hole.id, 'bend', bend, index);
+			}
+			for (const [index, shot] of hole.shots.entries()) {
+				consider(hole.id, 'shot', shot.landing, index, shot.id);
+			}
+		}
+
+		return closestMarker;
+	}
+
+	function moveMarker(
+		currentHoles: readonly AnnotatedHole[],
+		marker: AnnotationMarkerHit,
+		point: { xPx: number; yPx: number }
+	): AnnotatedHole[] {
+		switch (marker.kind) {
+			case 'tee':
+				return moveTee(currentHoles, marker.holeId, point);
+			case 'basket':
+				return moveBasket(currentHoles, marker.holeId, point);
+			case 'shot':
+				return marker.shotId
+					? moveShot(currentHoles, marker.holeId, marker.shotId, point)
+					: currentHoles.slice();
+			case 'bend':
+				return marker.index === undefined
+					? currentHoles.slice()
+					: moveCorridorBend(currentHoles, marker.holeId, marker.index, point);
+		}
+	}
+
+	function claimAnnotationPointer(
+		pointer: ScreenSpacePoint,
+		event: PointerEvent,
+		view: ViewTransformState
+	): boolean {
+		if (!sourceImage()) return false;
+		const marker = pointHitAt(pointer, view);
+		if (!marker) return false;
+		annotationDrag = {
+			marker,
+			start: { ...pointer },
+			transform: { ...view },
+			dragging: false
+		};
+		void event;
+		return true;
+	}
+
+	function previewAnnotationMove(pointer: ScreenSpacePoint): void {
+		const drag = annotationDrag;
+		const image = sourceImage();
+		if (!drag || !image) return;
+		const distance = Math.hypot(pointer.x - drag.start.x, pointer.y - drag.start.y);
+		if (!drag.dragging && distance > CLICK_SLOP_PX) drag.dragging = true;
+		if (!drag.dragging) return;
+		const point = clampPointToImageBounds(
+			screenToImage(pointer, drag.transform),
+			image.widthPx,
+			image.heightPx
+		);
+		previewHoles = moveMarker(holes, drag.marker, point);
+	}
+
+	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
+		const drag = annotationDrag;
+		annotationDrag = null;
+		const image = sourceImage();
+		if (!drag || !drag.dragging || !image) {
+			previewHoles = null;
+			return;
+		}
+		const point = clampPointToImageBounds(
+			screenToImage(pointer, drag.transform),
+			image.widthPx,
+			image.heightPx
+		);
+		holes = moveMarker(holes, drag.marker, point);
+		previewHoles = null;
+	}
+
+	function cancelAnnotationPointer(): void {
+		annotationDrag = null;
+		previewHoles = null;
 	}
 
 	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
@@ -590,6 +725,10 @@
 			confirmDiscard={() => true}
 			onDomainChanged={handleSourceDomainChanged}
 			onPlacement={activeHoleId ? handleAnnotationPlacement : undefined}
+			claimPointer={claimAnnotationPointer}
+			onClaimedPointerMove={previewAnnotationMove}
+			onClaimedPointerUp={commitAnnotationPointerUp}
+			onClaimedPointerCancel={cancelAnnotationPointer}
 		>
 			{#snippet tools()}
 				<div class="tool-section">
@@ -865,7 +1004,7 @@
 
 			{#snippet overlay({ image, zoom })}
 				<svg class="annotation-overlay" viewBox={`0 0 ${image.widthPx} ${image.heightPx}`} aria-hidden="true">
-					{#each holes as overlayHole (overlayHole.id)}
+					{#each visibleHoles as overlayHole (overlayHole.id)}
 						{@const band = deriveCorridorBand(overlayHole)}
 						{#if band}
 							<polygon points={band.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor" class:active={overlayHole.id === activeHoleId} data-testid="corridor-band-{overlayHole.number}" />

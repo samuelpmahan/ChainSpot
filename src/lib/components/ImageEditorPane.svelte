@@ -3,6 +3,7 @@
 	import ImageViewport from './ImageViewport.svelte';
 	import { ViewportController } from '$lib/viewport.svelte';
 	import { pointInBounds, screenToImage } from '$lib/coords';
+	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset, ImageRole } from '$lib/domain/project';
 	import type { ProjectEditor } from '$lib/domain/editor';
@@ -27,6 +28,26 @@
 		confirmDiscard?: (affectedPairCount: number) => boolean | Promise<boolean>;
 		onDomainChanged?: (role: ImageRole) => void;
 		onPlacement?: (coordinates: { xPx: number; yPx: number }) => void;
+		claimPointer?: (
+			pointer: ScreenSpacePoint,
+			event: PointerEvent,
+			view: ViewTransformState
+		) => boolean;
+		onClaimedPointerMove?: (
+			pointer: ScreenSpacePoint,
+			event: PointerEvent,
+			view: ViewTransformState
+		) => void;
+		onClaimedPointerUp?: (
+			pointer: ScreenSpacePoint,
+			event: PointerEvent,
+			view: ViewTransformState
+		) => void;
+		onClaimedPointerCancel?: (
+			pointer: ScreenSpacePoint,
+			event: PointerEvent,
+			view: ViewTransformState
+		) => void;
 		tools?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 	}
@@ -40,6 +61,10 @@
 		confirmDiscard,
 		onDomainChanged,
 		onPlacement,
+		claimPointer,
+		onClaimedPointerMove,
+		onClaimedPointerUp,
+		onClaimedPointerCancel,
 		tools,
 		overlay
 	}: Props = $props();
@@ -153,6 +178,22 @@
 				testid={`pane-scene-${role}`}
 				role="img"
 				ariaLabel={`${title} editor. Drag to pan, use the wheel to zoom, and click the image to place the selected annotation.`}
+				claimPointer={claimPointer ? (pointer, event) => claimPointer(pointer, event, vp.view) : undefined}
+				onClaimedPointerMove={
+					onClaimedPointerMove
+						? (pointer, event) => onClaimedPointerMove(pointer, event, vp.view)
+						: undefined
+				}
+				onClaimedPointerUp={
+					onClaimedPointerUp
+						? (pointer, event) => onClaimedPointerUp(pointer, event, vp.view)
+						: undefined
+				}
+				onClaimedPointerCancel={
+					onClaimedPointerCancel
+						? (pointer, event) => onClaimedPointerCancel(pointer, event, vp.view)
+						: undefined
+				}
 				onViewportClick={handleViewportClick}
 			>
 				{#snippet content()}
