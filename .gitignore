@@ -7,3 +7,5 @@ test-results/
 tickets/
 Phase1Tickets/
 tests/fixtures/smart-import-large/
+__pycache__/
+*.pyc
