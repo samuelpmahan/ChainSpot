@@ -45,14 +45,23 @@
  */
 
 import { pointInBounds } from '../coords';
-import { createControlPointPair, createProjectState, findImageByRole, isImageRole } from './project';
+import {
+	createControlPointPair,
+	createProjectState,
+	findImageByRole,
+	isImageRole,
+	MIN_CORRIDOR_POINTS
+} from './project';
 import type {
+	AnnotatedHole,
 	ControlPointPair,
 	ImageAsset,
 	ImagePoint,
 	ImageRole,
+	OrderedShot,
 	PointCoordinates,
-	ProjectState
+	ProjectState,
+	SourcePoint
 } from './project';
 
 export type PointSide = 'source' | 'target';
@@ -223,6 +232,71 @@ export class ProjectEditor {
 			...before,
 			project: { ...before.project, name, updatedAt: this.#now().toISOString() }
 		};
+		this.commit(before, after);
+	}
+
+	/**
+	 * Replaces the whole hole-annotation list in one history step. Whole-list rather
+	 * than per-feature mutations because hole editing is authored elsewhere as pure
+	 * transformations over an immutable array (`src/lib/holeAnnotation.ts`); the caller
+	 * composes those and commits the result once, exactly like one drag becomes one
+	 * `movePoint`.
+	 *
+	 * Hole points are always source-image pixels, so every one is bounds-checked
+	 * against the loaded `source-overview` image — the same guarantee `addPair`
+	 * enforces, so an out-of-bounds hole can never reach serialization.
+	 */
+	setHoles(holes: readonly AnnotatedHole[]): void {
+		if (!Array.isArray(holes)) {
+			throw new Error('setHoles: holes must be an array');
+		}
+		const sourceImage = findImageByRole(this.#state.images, 'source-overview');
+		if (!sourceImage && holes.length > 0) {
+			throw new Error('setHoles: the source-overview image must be loaded before setting holes');
+		}
+		const numbers = new Set<number>();
+		for (const hole of holes) {
+			if (typeof hole.id !== 'string' || hole.id.length === 0) {
+				throw new Error('setHoles: every hole must have a non-empty id');
+			}
+			if (!Number.isInteger(hole.number) || hole.number <= 0) {
+				throw new Error(`setHoles: hole '${hole.id}' number must be a positive integer`);
+			}
+			if (numbers.has(hole.number)) {
+				throw new Error(`setHoles: duplicate hole number ${hole.number}`);
+			}
+			numbers.add(hole.number);
+			const image = sourceImage as ImageAsset;
+			const checkPoint = (point: { xPx: number; yPx: number }, label: string): void => {
+				assertFiniteCoordinates(point, `setHoles (hole ${hole.number} ${label})`);
+				if (!pointInBounds(point, image.widthPx, image.heightPx)) {
+					throw new Error(
+						`setHoles: hole ${hole.number} ${label} is outside the source image bounds`
+					);
+				}
+			};
+			if (hole.tee) checkPoint(hole.tee, 'tee');
+			if (hole.basket) checkPoint(hole.basket, 'basket');
+			if (!Array.isArray(hole.shots)) {
+				throw new Error(`setHoles: hole ${hole.number} shots must be an array`);
+			}
+			hole.shots.forEach((shot: OrderedShot, index: number) =>
+				checkPoint(shot.landing, `shot ${index + 1}`)
+			);
+			if (hole.corridor) {
+				if (hole.corridor.length < MIN_CORRIDOR_POINTS) {
+					throw new Error(
+						`setHoles: hole ${hole.number} corridor must have at least ${MIN_CORRIDOR_POINTS} vertices, got ${hole.corridor.length}`
+					);
+				}
+				hole.corridor.forEach((point: SourcePoint, index: number) =>
+					checkPoint(point, `corridor point ${index + 1}`)
+				);
+			}
+		}
+
+		const before = this.#state;
+		const after = { ...before, holes: cloneValue(holes as AnnotatedHole[]) };
 		this.commit(before, after);
 	}
 
@@ -454,10 +528,18 @@ export class ProjectEditor {
 			);
 		}
 
+		// Holes are source-image pixel coordinates with no imageId to remap, so they
+		// follow the same rule as points: retained when the replacement has identical
+		// dimensions (the coordinates still mean the same thing), discarded otherwise.
+		// Replacing the target image never affects them.
+		const holes =
+			current.role === 'source-overview' && !retainPoints ? [] : before.holes;
+
 		const after = {
 			...before,
 			images: before.images.map((candidate) => (candidate.id === current.id ? stored : candidate)),
-			controlPointPairs: pairs
+			controlPointPairs: pairs,
+			holes
 		};
 		this.#assets.set(stored.id, { bytes: Uint8Array.from(bytes), decoded: null });
 		this.commit(before, after);

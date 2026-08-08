@@ -16,12 +16,16 @@
  */
 
 import { pointInBounds } from '../coords';
-import type { ImageAsset } from './project';
+import { MIN_CORRIDOR_POINTS } from './project';
+import type { AnnotatedHole, ImageAsset, OrderedShot, SourcePoint } from './project';
 
-export interface SourcePoint {
-	readonly xPx: number;
-	readonly yPx: number;
-}
+/**
+ * The hole types are defined in `./project` (they are durable `ProjectState`
+ * data) and re-exported here so this module stays the single import site for
+ * anything working with an annotated round.
+ */
+export { MIN_CORRIDOR_POINTS };
+export type { AnnotatedHole, OrderedShot, SourcePoint };
 
 /**
  * The UDisc source map the round was annotated on, carried by value so the
@@ -37,43 +41,6 @@ export interface AnnotatedSourceImage {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly blob: Blob;
-}
-
-/**
- * One throw's resting position. Array order in AnnotatedHole.shots IS the
- * shot order — no `index` field, so a reorder can never desync from a stored
- * ordinal. `id` is stable identity for future edit tools (add/remove/
- * move/reorder/reassign) and for correlating a transferred feature back to
- * its source. Shot connections (UDisc's pale-blue lines) are implied by
- * tee -> shots -> basket order and are NOT stored as geometry.
- */
-export interface OrderedShot {
-	readonly id: string;
-	readonly landing: SourcePoint;
-}
-
-/**
- * Minimum vertex count for a `corridor` polygon — below this it isn't a shape.
- * `undefined` (not annotated) is always valid; this only bounds a present array.
- */
-export const MIN_CORRIDOR_POINTS = 3;
-
-export interface AnnotatedHole {
-	readonly id: string;
-	readonly number: number;
-	readonly tee?: SourcePoint;
-	readonly basket?: SourcePoint;
-	readonly shots: readonly OrderedShot[];
-	/**
-	 * Fairway/corridor outline as a closed polygon (first and last vertex are
-	 * both implicit ends of the same closed loop — the last point is never
-	 * repeated) in source-image pixels. Absent until annotated. This is the
-	 * vector counterpart of UDisc's bottom-layer hole-shape raster: whether the
-	 * vertices come from manual placement or a future CV-assisted detector, the
-	 * authoritative artifact only ever holds the resulting polygon, never the
-	 * raster or how it was produced (see the provenance rule above).
-	 */
-	readonly corridor?: readonly SourcePoint[];
 }
 
 export interface AnnotatedRound {

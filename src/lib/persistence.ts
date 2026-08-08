@@ -41,8 +41,8 @@ import { createImageAsset } from './domain/project';
 import type { ImageAsset, ImageRole, ProjectState } from './domain/project';
 import { ProjectEditor } from './domain/editor';
 import type { AssetResource } from './domain/editor';
-import { parseProjectJson, serializeProjectState } from './schemaV1';
-import type { ProjectDocumentV1, ProjectSchemaError } from './schemaV1';
+import { parseProjectJson, serializeProjectState } from './projectSchema';
+import type { ProjectDocumentV2, ProjectSchemaError } from './projectSchema';
 import {
 	bundlePathFor,
 	decodeImageFile,
@@ -155,7 +155,7 @@ export interface ExportImageFile {
 }
 
 export interface ExportBundle {
-	readonly document: ProjectDocumentV1;
+	readonly document: ProjectDocumentV2;
 	readonly text: string;
 	readonly images: ExportImageFile[];
 	readonly zipBytes: Uint8Array;
@@ -187,7 +187,7 @@ export async function createProjectBundle(
 ): Promise<CreateProjectBundleResult> {
 	const { hash = sha256Hex } = options;
 	const savedState = editor.state;
-	let document: ProjectDocumentV1;
+	let document: ProjectDocumentV2;
 	try {
 		document = serializeProjectState(savedState);
 	} catch (caught) {

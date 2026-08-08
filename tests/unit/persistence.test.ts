@@ -10,7 +10,7 @@ import {
 	sha256Hex
 } from '../../src/lib/imageIntake';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
-import { parseProjectJson, serializeProjectState } from '../../src/lib/schemaV1';
+import { parseProjectJson, serializeProjectState } from '../../src/lib/projectSchema';
 import {
 	createProjectBundle,
 	isSafeBundlePath,
@@ -307,12 +307,12 @@ describe('bundle writer (B)', () => {
 		expect(created.bundle.images[1].path).toBe('images/target-original.jpg');
 	});
 
-	it('writes a schema-v1 project.json that re-parses with matching hashes', async () => {
+	it('writes a schema-v2 project.json that re-parses with matching hashes', async () => {
 		const { editor } = await loadedEditor();
 		const created = await createProjectBundle(editor);
 		expect(created.ok).toBe(true);
 		if (!created.ok) return;
-		expect(created.bundle.document.schemaVersion).toBe(1);
+		expect(created.bundle.document.schemaVersion).toBe(2);
 		const parsed = parseProjectJson(created.bundle.text);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
@@ -477,6 +477,27 @@ describe('full round trip (C)', () => {
 					updatedAt: NOW().toISOString()
 				}
 			],
+			holes: [
+				{
+					id: 'hole-1',
+					number: 1,
+					tee: { xPx: 120.5, yPx: 240.25 },
+					basket: { xPx: 800.75, yPx: 1900.5 },
+					shots: [
+						{ id: 'shot-1', landing: { xPx: 300.25, yPx: 700.5 } },
+						{ id: 'shot-2', landing: { xPx: 560, yPx: 1300.75 } }
+					],
+					corridor: [
+						{ xPx: 100, yPx: 200 },
+						{ xPx: 900, yPx: 200 },
+						{ xPx: 900, yPx: 2000 },
+						{ xPx: 100, yPx: 2000 }
+					]
+				},
+				// A partially-annotated hole: proves optional fields stay absent rather
+				// than round-tripping as null.
+				{ id: 'hole-2', number: 2, tee: { xPx: 10.5, yPx: 20.5 }, shots: [] }
+			],
 			viewState: {
 				source: { zoom: 1.4, panX: -92, panY: 17 },
 				target: { zoom: 1.1, panX: 0, panY: -35 }
@@ -484,7 +505,7 @@ describe('full round trip (C)', () => {
 		};
 	}
 
-	it('round-trips metadata, fractional pixels, labels, disabled/reordered pairs, and view state without drift', async () => {
+	it('round-trips metadata, fractional pixels, labels, disabled/reordered pairs, holes, and view state without drift', async () => {
 		const srcSha = await sha256Hex(SRC);
 		const tgtSha = await sha256Hex(TGT);
 		const original = richState(srcSha, tgtSha);
@@ -587,7 +608,7 @@ describe('import failures (D)', () => {
 	});
 
 	it('classifies unsupported newer schema versions', async () => {
-		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 2 })) }, { level: 6 });
+		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 3 })) }, { level: 6 });
 		const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
 		expect(result.ok).toBe(false);
 		if (result.ok) return;

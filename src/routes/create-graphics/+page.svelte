@@ -53,7 +53,7 @@
 		getPendingAnnotatedRound,
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
-	import type { AnnotatedRound } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
 	import { planHoleGraphic, renderHoleGraphic } from '$lib/holeGraphics';
 	import type { HoleGraphicPlan } from '$lib/holeGraphics';
 
@@ -141,18 +141,28 @@
 
 	/**
 	 * Clean hole construction: applies the estimated transform above to every
-	 * AnnotatedRound hole's source-space points, producing target-space plans
-	 * ready to render. Purely derived — no rendering happens until the user
-	 * explicitly clicks "Build hole graphics", matching the app's convention
-	 * that nothing heavier than pointer input runs without an explicit action.
+	 * annotated hole's source-space points, producing target-space plans ready to
+	 * render. Purely derived — no rendering happens until the user explicitly
+	 * clicks "Build hole graphics", matching the app's convention that nothing
+	 * heavier than pointer input runs without an explicit action.
+	 *
+	 * Reads holes from durable project state, NOT from the `annotatedRound`
+	 * session artifact: a project reopened from a saved bundle has holes but no
+	 * session artifact at all, and reading the artifact would leave those holes
+	 * unbuildable.
 	 */
+	function currentHoles(): readonly AnnotatedHole[] {
+		void refreshCount;
+		return editor.state.holes;
+	}
+
 	let holeGraphicPlans: HoleGraphicPlan[] = $derived.by(() => {
-		if (!annotatedRound || !alignmentResult || !('transform' in alignmentResult)) return [];
+		if (!alignmentResult || !('transform' in alignmentResult)) return [];
 		const target = targetImage();
 		if (!target) return [];
 		const transform = alignmentResult.transform;
 		const plans: HoleGraphicPlan[] = [];
-		for (const hole of annotatedRound.holes) {
+		for (const hole of currentHoles()) {
 			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
 			if (plan) plans.push(plan);
 		}
@@ -944,6 +954,10 @@
 				activityMessage = 'Replacement cancelled. The annotated round is still pending.';
 				return;
 			}
+			// Holes cross into durable project state here, so they are saved with the
+			// project and restored on reopen. The session artifact is only the transport;
+			// `editor.state.holes` is the single source of truth from this point on.
+			editor.setHoles(round.holes);
 			consumePendingAnnotatedRound();
 			setActiveAnnotatedRound(round);
 			annotatedRound = round;
@@ -1406,7 +1420,7 @@
 		data-pending-pair-count={correspondence.pendingSource ? 1 : 0}
 		data-pending-source={correspondence.pendingSource ? 'true' : 'false'}
 		data-annotated-round={annotatedRound ? 'present' : 'absent'}
-		data-hole-count={annotatedRound?.holes.length ?? 0}
+		data-hole-count={currentHoles().length}
 	>
 	{#if pendingHandoff}
 		<section
@@ -1957,7 +1971,7 @@
 		{/if}
 	</section>
 
-	{#if annotatedRound && annotatedRound.holes.length > 0 && targetImage()}
+	{#if currentHoles().length > 0 && targetImage()}
 		<section class="hole-graphics" data-testid="hole-graphics" aria-labelledby="hole-graphics-heading">
 			<h2 id="hole-graphics-heading">Hole graphics</h2>
 			<p class="alignment-empty">

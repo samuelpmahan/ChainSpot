@@ -78,10 +78,54 @@ export interface ProjectViewState {
 	target: ViewTransformState;
 }
 
+/**
+ * Hole-annotation types live here, in the domain root, rather than in
+ * `annotatedRound.ts` (which re-exports them): `ProjectState` holds holes as
+ * durable data, and `annotatedRound.ts` already imports from this module, so
+ * defining them there and importing here would be a cycle.
+ *
+ * Coordinate space: every hole point is in ORIGINAL source-image pixels, the
+ * same authoritative convention as `ImagePoint.xPx/yPx`. Unlike `ImagePoint`
+ * these carry no `imageId` — a hole always belongs to the `source-overview`
+ * image, so the reference is structural rather than stored.
+ */
+export interface SourcePoint {
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+/**
+ * One throw's resting position. Array order in `AnnotatedHole.shots` IS the
+ * shot order — no `index` field, so a reorder can never desync from a stored
+ * ordinal.
+ */
+export interface OrderedShot {
+	readonly id: string;
+	readonly landing: SourcePoint;
+}
+
+/** Minimum vertex count for a `corridor` polygon — below this it isn't a shape. */
+export const MIN_CORRIDOR_POINTS = 3;
+
+export interface AnnotatedHole {
+	readonly id: string;
+	readonly number: number;
+	readonly tee?: SourcePoint;
+	readonly basket?: SourcePoint;
+	readonly shots: readonly OrderedShot[];
+	/**
+	 * Fairway/corridor outline as a closed polygon (the last vertex is never a
+	 * repeat of the first) in source-image pixels. Absent until annotated.
+	 */
+	readonly corridor?: readonly SourcePoint[];
+}
+
 export interface ProjectState {
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPair[];
+	/** Hole annotations against the `source-overview` image; empty until annotated. */
+	holes: AnnotatedHole[];
 	viewState: ProjectViewState | null;
 }
 
@@ -136,6 +180,7 @@ export function createProjectState(options: CreateProjectStateOptions = {}): Pro
 		project: { id: createId(), name, createdAt: timestamp, updatedAt: timestamp },
 		images: [],
 		controlPointPairs: [],
+		holes: [],
 		viewState: null
 	};
 }
