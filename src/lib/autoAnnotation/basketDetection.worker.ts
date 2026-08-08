@@ -2,8 +2,8 @@ import { loadCv } from '../stitch/cvMatch';
 import { associateCourseGrammar } from './courseGrammar';
 import { detectHoleNumberBadges } from './holeNumberDetection';
 import type { HoleNumberTemplate } from './holeNumberDetection';
-import { detectTeePadCandidates } from './teePadDetection';
-import type { TeePadCv } from './teePadDetection';
+import { detectTeePadCandidates, detectTeePadVariants } from './teePadDetection';
+import type { TeePadCv, TeePadVariant, TeePadVariantResult } from './teePadDetection';
 
 const MAX_ANALYSIS_DIM = 2200;
 const MIN_SCORE = 0.42;
@@ -26,7 +26,19 @@ interface BasketPrewarmRequest {
 	readonly token: string;
 }
 
-type BasketRequest = BasketDetectionRequest | BasketPrewarmRequest;
+interface TeeDetectionRequest {
+	readonly kind: 'detect-tees';
+	readonly token: string;
+	readonly bitmap: ImageBitmap;
+	readonly widthPx: number;
+	readonly heightPx: number;
+	readonly variants: readonly TeePadVariant[];
+	readonly uiScalePx?: number;
+	readonly mapBoundsPx?: { topPx: number; bottomPx: number };
+	readonly fullResolution?: boolean;
+}
+
+type BasketRequest = BasketDetectionRequest | BasketPrewarmRequest | TeeDetectionRequest;
 
 interface BasketCandidate {
 	readonly xPx: number;
@@ -72,6 +84,18 @@ function grayscaleRaster(bitmap: ImageBitmap): {
 		gray[j] = (rgba[i] * 0.299 + rgba[i + 1] * 0.587 + rgba[i + 2] * 0.114 + 0.5) | 0;
 	}
 	return { gray, rgba, width, height, scale };
+}
+
+function fullResolutionRaster(bitmap: ImageBitmap): {
+	rgba: Uint8ClampedArray;
+	width: number;
+	height: number;
+} {
+	const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+	const context = canvas.getContext('2d', { willReadFrequently: true });
+	if (!context) throw new Error('Tee detection could not create an OffscreenCanvas context.');
+	context.drawImage(bitmap, 0, 0);
+	return { rgba: context.getImageData(0, 0, bitmap.width, bitmap.height).data, width: bitmap.width, height: bitmap.height };
 }
 
 type AnalysisRaster = ReturnType<typeof grayscaleRaster>;
@@ -315,6 +339,89 @@ function median(values: readonly number[]): number | null {
 	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
+function deriveMapBoundsFromNumbers(
+	candidates: readonly { readonly label?: number; readonly yPx: number }[],
+	heightPx: number
+): { topPx: number; bottomPx: number } | undefined {
+	const labeled = candidates.filter((candidate) => candidate.label !== undefined);
+	if (labeled.length < 3) return undefined;
+	const ys = labeled.map((candidate) => candidate.yPx);
+	const minY = Math.min(...ys);
+	const maxY = Math.max(...ys);
+	const spread = maxY - minY;
+	const margin = Math.max(80, Math.min(300, spread * 0.3));
+	return {
+		topPx: Math.max(0, minY - margin),
+		bottomPx: Math.min(heightPx, maxY + margin)
+	};
+}
+
+async function deriveUiScaleAndMapBounds(
+	request: TeeDetectionRequest,
+	cv: CvModule,
+	raster: AnalysisRaster
+): Promise<{ uiScalePx: number; mapBoundsPx?: { topPx: number; bottomPx: number } }> {
+	if (Number.isFinite(request.uiScalePx) && (request.uiScalePx ?? 0) > 0) {
+		return { uiScalePx: request.uiScalePx as number, mapBoundsPx: request.mapBoundsPx };
+	}
+
+	const templates = await loadHoleNumberTemplates();
+	const detectedNumbers = detectHoleNumberBadges(
+		cv,
+		{ format: 'gray', widthPx: raster.width, heightPx: raster.height, data: raster.gray },
+		templates
+	);
+	if (!detectedNumbers.anchor) {
+		throw new Error(detectedNumbers.note ?? 'Could not derive UI scale from hole-number templates.');
+	}
+
+	const sourceScale = 1 / raster.scale;
+	const uiScalePx = detectedNumbers.anchor.scale * sourceScale;
+	const mapBoundsPx =
+		request.mapBoundsPx ??
+		deriveMapBoundsFromNumbers(
+			detectedNumbers.candidates.map((candidate) => ({
+				...candidate,
+				yPx: candidate.yPx * sourceScale
+			})),
+			request.heightPx
+		);
+	return { uiScalePx, mapBoundsPx };
+}
+
+async function detectTees(
+	request: TeeDetectionRequest
+): Promise<{ uiScalePx: number; results: readonly TeePadVariantResult[] }> {
+	const cv = await loadDetectorRuntime();
+	const analysisRaster = grayscaleRaster(request.bitmap);
+	const { uiScalePx, mapBoundsPx } = await deriveUiScaleAndMapBounds(request, cv, analysisRaster);
+
+	const teeRaster = request.fullResolution
+		? (() => {
+				const full = fullResolutionRaster(request.bitmap);
+				return {
+					rgba: full.rgba,
+					widthPx: full.width,
+					heightPx: full.height,
+					sourceScale: 1
+				};
+			})()
+		: {
+				rgba: analysisRaster.rgba,
+				widthPx: analysisRaster.width,
+				heightPx: analysisRaster.height,
+				sourceScale: 1 / analysisRaster.scale
+			};
+
+	const results = detectTeePadVariants(
+		cv as unknown as TeePadCv,
+		teeRaster,
+		{ uiScalePx, mapBoundsPx },
+		request.variants
+	);
+	return { uiScalePx, results };
+}
+
 function reportCourseProgress(
 	request: BasketDetectionRequest,
 	stage: 'opencv' | 'baskets' | 'templates' | 'numbers' | 'tees' | 'grammar',
@@ -418,6 +525,18 @@ async function processRequest(request: BasketRequest): Promise<void> {
 				kind: request.kind,
 				token: request.token,
 				course
+			});
+			return;
+		}
+
+		if (request.kind === 'detect-tees') {
+			const { uiScalePx, results } = await detectTees(request);
+			(self as unknown as Worker).postMessage({
+				ok: true,
+				kind: request.kind,
+				token: request.token,
+				uiScalePx,
+				results
 			});
 			return;
 		}

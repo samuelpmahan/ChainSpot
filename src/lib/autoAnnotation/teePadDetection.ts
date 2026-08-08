@@ -17,6 +17,8 @@
 
 export type TeePadSupport = 'gray-center' | 'edge-loop';
 
+export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
+
 export interface TeePadCandidate {
 	/** Source-image center, in pixels. */
 	readonly xPx: number;
@@ -32,6 +34,28 @@ export interface TeePadCandidate {
 	 */
 	readonly score: number;
 	readonly support: readonly TeePadSupport[];
+}
+
+/**
+ * Lightweight per-detector diagnostics showing how many candidates survive
+ * major filter stages. Exact fields vary by detector.
+ */
+export interface TeePadStageCounts {
+	readonly discovered: number;
+	readonly area?: number;
+	readonly size?: number;
+	readonly aspect?: number;
+	readonly rectangularity?: number;
+	readonly visual?: number;
+	readonly grayCenter?: number;
+	readonly edgeLoop?: number;
+	readonly final: number;
+}
+
+export interface TeePadVariantResult {
+	readonly variant: TeePadVariant;
+	readonly candidates: readonly TeePadCandidate[];
+	readonly stageCounts: TeePadStageCounts;
 }
 
 /**
@@ -132,8 +156,19 @@ interface VisualStats {
 	readonly innerSaturation: number;
 }
 
+interface AnalysisContext {
+	readonly cv: TeePadCv;
+	readonly raster: TeePadRaster;
+	readonly scale: number;
+	readonly rows: { first: number; last: number };
+	readonly gray: Uint8Array;
+	readonly saturation: Uint8Array;
+	readonly value: Uint8Array;
+}
+
 const DEFAULT_MAX_CANDIDATES = 18;
 const MAX_EDGE_CANDIDATES = 16;
+const EXPERIMENT_MAX_CANDIDATES = 30;
 
 function clamp(value: number, minimum: number, maximum: number): number {
 	return Math.max(minimum, Math.min(maximum, value));
@@ -314,45 +349,69 @@ function validateInputs(raster: TeePadRaster, options: TeePadDetectionOptions): 
 	}
 }
 
-/**
- * Detect tee-pad proposals from an RGBA raster inside the existing OpenCV
- * worker. The caller owns every Mat passed through `cv`; this function frees
- * all temporary Mats before it returns or throws.
- */
-export function detectTeePadCandidates(
+function buildContext(
 	cv: TeePadCv,
 	raster: TeePadRaster,
 	options: TeePadDetectionOptions
-): readonly TeePadCandidate[] {
-	validateInputs(raster, options);
+): AnalysisContext {
 	const rows = mapRows(raster, options.mapBoundsPx);
-	if (!rows) return [];
+	if (!rows) {
+		// Empty context: callers must short-circuit before using scale-dependent helpers.
+		return {
+			cv,
+			raster,
+			scale: options.uiScalePx / raster.sourceScale,
+			rows: { first: 0, last: -1 },
+			gray: new Uint8Array(0),
+			saturation: new Uint8Array(0),
+			value: new Uint8Array(0)
+		};
+	}
 	const scale = options.uiScalePx / raster.sourceScale;
 	const { gray, saturation, value } = readHsv(raster);
-	const centerMask = new Uint8Array(gray.length);
+	return { cv, raster, scale, rows, gray, saturation, value };
+}
+
+function detectGrayCenterCandidates(
+	ctx: AnalysisContext,
+	maxCandidates: number
+): { candidates: AnalysisCandidate[]; stageCounts: TeePadStageCounts } {
+	const { cv, raster, scale, rows, saturation, value } = ctx;
+	const centerMask = new Uint8Array(value.length);
 	for (let index = 0; index < centerMask.length; index += 1) {
 		centerMask[index] = saturation[index] < 18 && value[index] >= 148 && value[index] <= 168 ? 255 : 0;
 	}
 	insideRows(centerMask, raster.widthPx, rows);
 
-	const detectorA: AnalysisCandidate[] = [];
+	let discovered = 0;
+	let areaAccepted = 0;
+	let sizeAccepted = 0;
+	let aspectAccepted = 0;
+	let rectangularityAccepted = 0;
+	const candidates: AnalysisCandidate[] = [];
+
 	const centerMat = matFromBytes(cv, centerMask, raster.widthPx, raster.heightPx);
 	try {
 		const { contours, hierarchy } = findContours(cv, centerMat);
 		try {
+			discovered = contours.size();
 			for (let index = 0; index < contours.size(); index += 1) {
 				const contour = contours.get(index);
 				try {
 					const area = cv.contourArea(contour);
 					if (area < 15 * scale * scale || area > 150 * scale * scale) continue;
+					areaAccepted += 1;
 					const rect = cv.minAreaRect(contour);
 					const { major, minor } = rectDimensions(rect);
 					if (minor < 2) continue;
 					if (minor < 5 * scale || minor > 12 * scale || major < 8 * scale || major > 20 * scale) continue;
+					sizeAccepted += 1;
 					if (major / minor < 1.1 || major / minor > 3.0) continue;
+					aspectAccepted += 1;
 					const rectangularity = area / (major * minor);
 					if (rectangularity < 0.6) continue;
-					detectorA.push(candidateFromRect(rect, rectangularity, 'gray-center'));
+					rectangularityAccepted += 1;
+					candidates.push(candidateFromRect(rect, rectangularity, 'gray-center'));
 				} finally {
 					contour.delete();
 				}
@@ -365,7 +424,31 @@ export function detectTeePadCandidates(
 		centerMat.delete();
 	}
 
-	const detectorB: AnalysisCandidate[] = [];
+	candidates.sort((a, b) => b.score - a.score);
+	const finalCandidates = candidates.slice(0, maxCandidates);
+	return {
+		candidates: finalCandidates,
+		stageCounts: {
+			discovered,
+			area: areaAccepted,
+			size: sizeAccepted,
+			aspect: aspectAccepted,
+			rectangularity: rectangularityAccepted,
+			final: finalCandidates.length
+		}
+	};
+}
+
+function detectEdgeLoopCandidates(
+	ctx: AnalysisContext,
+	maxCandidates: number
+): { candidates: AnalysisCandidate[]; stageCounts: TeePadStageCounts } {
+	const { cv, raster, scale, rows, gray, saturation, value } = ctx;
+	let discovered = 0;
+	let sizeAccepted = 0;
+	let rectangularityAccepted = 0;
+	let visualAccepted = 0;
+
 	const grayMat = matFromBytes(cv, gray, raster.widthPx, raster.heightPx);
 	const blurred = new cv.Mat();
 	const edges = new cv.Mat();
@@ -376,6 +459,7 @@ export function detectTeePadCandidates(
 		insideRows(edges.data, raster.widthPx, rows);
 		const { contours, hierarchy } = findContours(cv, edges);
 		try {
+			discovered = contours.size();
 			const edgeCandidates: AnalysisCandidate[] = [];
 			for (let index = 0; index < contours.size(); index += 1) {
 				const contour = contours.get(index);
@@ -388,8 +472,10 @@ export function detectTeePadCandidates(
 					const { major, minor } = rectDimensions(rect);
 					if (minor < 1) continue;
 					if (minor < 5.5 * scale || minor > 18 * scale || major < 8 * scale || major > 26 * scale) continue;
+					sizeAccepted += 1;
 					const rectangularity = area / (major * minor);
 					if (approximation.rows > 6 || rectangularity < 0.45) continue;
+					rectangularityAccepted += 1;
 
 					const visual = rotatedRectVisualStats(
 						rect,
@@ -399,6 +485,7 @@ export function detectTeePadCandidates(
 						value
 					);
 					if (!visual || visual.borderValue < 145) continue;
+					visualAccepted += 1;
 					const contrast = visual.borderValue - visual.innerValue;
 					const score =
 						1.5 * rectangularity -
@@ -416,11 +503,16 @@ export function detectTeePadCandidates(
 				}
 			}
 			edgeCandidates.sort((a, b) => b.score - a.score);
+			const candidates: AnalysisCandidate[] = [];
 			for (const candidate of edgeCandidates) {
-				if (detectorB.some((kept) => tooClose(candidate, kept, 7 * scale))) continue;
-				detectorB.push(candidate);
-				if (detectorB.length === MAX_EDGE_CANDIDATES) break;
+				if (candidates.some((kept) => tooClose(candidate, kept, 7 * scale))) continue;
+				candidates.push(candidate);
+				if (candidates.length === maxCandidates) break;
 			}
+			return {
+				candidates,
+				stageCounts: { discovered, size: sizeAccepted, rectangularity: rectangularityAccepted, visual: visualAccepted, final: candidates.length }
+			};
 		} finally {
 			contours.delete();
 			hierarchy.delete();
@@ -430,11 +522,18 @@ export function detectTeePadCandidates(
 		blurred.delete();
 		edges.delete();
 	}
+}
 
+function fuseCandidates(
+	detectorA: readonly AnalysisCandidate[],
+	detectorB: readonly AnalysisCandidate[],
+	raster: TeePadRaster,
+	uiScalePx: number
+): TeePadCandidate[] {
 	const fused: TeePadCandidate[] = [];
 	for (const candidate of [...detectorA, ...detectorB]) {
 		const source = sourceCandidate(candidate, raster.sourceScale);
-		const existingIndex = fused.findIndex((kept) => Math.hypot(source.xPx - kept.xPx, source.yPx - kept.yPx) < 7 * options.uiScalePx);
+		const existingIndex = fused.findIndex((kept) => Math.hypot(source.xPx - kept.xPx, source.yPx - kept.yPx) < 7 * uiScalePx);
 		if (existingIndex < 0) {
 			fused.push(source);
 			continue;
@@ -445,12 +544,117 @@ export function detectTeePadCandidates(
 		// better score and both support signals when the detections coincide.
 		fused[existingIndex] = { ...existing, score: Math.max(existing.score, candidate.score), support };
 	}
+	return fused;
+}
+
+function sortAndSliceFused(
+	fused: TeePadCandidate[],
+	maxCandidates: number
+): readonly TeePadCandidate[] {
+	return fused
+		.sort((a, b) => b.support.length - a.support.length || b.score - a.score || a.yPx - b.yPx)
+		.slice(0, maxCandidates);
+}
+
+/**
+ * Detect tee-pad proposals from an RGBA raster inside the existing OpenCV
+ * worker. The caller owns every Mat passed through `cv`; this function frees
+ * all temporary Mats before it returns or throws.
+ *
+ * This is the original fused entry point used by full-course detection.
+ * Behavior is preserved from before the experiment-surface refactor.
+ */
+export function detectTeePadCandidates(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: TeePadDetectionOptions
+): readonly TeePadCandidate[] {
+	validateInputs(raster, options);
+	const rows = mapRows(raster, options.mapBoundsPx);
+	if (!rows) return [];
+	const scale = options.uiScalePx / raster.sourceScale;
+	const { gray, saturation, value } = readHsv(raster);
+	const ctx: AnalysisContext = { cv, raster, scale, rows, gray, saturation, value };
+	const { candidates: detectorA } = detectGrayCenterCandidates(ctx, Infinity);
+	const { candidates: detectorB } = detectEdgeLoopCandidates(ctx, MAX_EDGE_CANDIDATES);
+
+	const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
 
 	const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 	if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
 		throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 	}
-	return fused
-		.sort((a, b) => b.support.length - a.support.length || b.score - a.score || a.yPx - b.yPx)
-		.slice(0, maxCandidates);
+	return sortAndSliceFused(fused, maxCandidates);
+}
+
+/**
+ * Run one or more tee-pad detector variants against the same raster and return
+ * per-variant candidates plus lightweight stage counts. Used by the Detect tees
+ * experiment surface. The fused variant preserves the same fusion used by
+ * full-course detection.
+ */
+export function detectTeePadVariants(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: TeePadDetectionOptions,
+	variants: readonly TeePadVariant[]
+): readonly TeePadVariantResult[] {
+	validateInputs(raster, options);
+	const rows = mapRows(raster, options.mapBoundsPx);
+	if (!rows) {
+		return variants.map((variant) => ({
+			variant,
+			candidates: [],
+			stageCounts: { discovered: 0, final: 0 }
+		}));
+	}
+
+	const scale = options.uiScalePx / raster.sourceScale;
+	const { gray, saturation, value } = readHsv(raster);
+	const ctx: AnalysisContext = { cv, raster, scale, rows, gray, saturation, value };
+
+	const results: TeePadVariantResult[] = [];
+	for (const variant of variants) {
+		if (variant === 'gray-center') {
+			const { candidates, stageCounts } = detectGrayCenterCandidates(ctx, EXPERIMENT_MAX_CANDIDATES);
+			results.push({
+				variant,
+				candidates: candidates.map((candidate) => sourceCandidate(candidate, raster.sourceScale)),
+				stageCounts
+			});
+		} else if (variant === 'edge-loop') {
+			const { candidates, stageCounts } = detectEdgeLoopCandidates(ctx, EXPERIMENT_MAX_CANDIDATES);
+			results.push({
+				variant,
+				candidates: candidates.map((candidate) => sourceCandidate(candidate, raster.sourceScale)),
+				stageCounts
+			});
+		} else {
+			const { candidates: detectorA, stageCounts: countsA } = detectGrayCenterCandidates(
+				ctx,
+				Infinity
+			);
+			const { candidates: detectorB, stageCounts: countsB } = detectEdgeLoopCandidates(
+				ctx,
+				MAX_EDGE_CANDIDATES
+			);
+			const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
+			const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+			if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
+				throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
+			}
+			const candidates = sortAndSliceFused(fused, maxCandidates);
+			results.push({
+				variant: 'fused',
+				candidates,
+				stageCounts: {
+					discovered: countsA.final + countsB.final,
+					grayCenter: countsA.final,
+					edgeLoop: countsB.final,
+					final: candidates.length
+				}
+			});
+		}
+	}
+	return results;
 }

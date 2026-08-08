@@ -334,7 +334,12 @@ function endpointConfidence(detectorConfidence: number, localRank: number, chose
 	return clamp01(detectorConfidence * 0.35 + geometry * 0.65 - Math.max(0, localRank - 1) * 0.08);
 }
 
-function basketCost(badge: IndexedPoint, tee: IndexedPoint, basket: IndexedPoint, polarityPenaltyPx: number): {
+function basketCost(
+	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
+	tee: Pick<IndexedPoint, 'xPx' | 'yPx'>,
+	basket: Pick<IndexedPoint, 'xPx' | 'yPx'>,
+	polarityPenaltyPx: number
+): {
 	distancePx: number;
 	polarityCosine: number;
 	cost: number;
@@ -601,7 +606,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	const assignedBadgeIndexes = new Set([...badgeForHole.values()].map((assignment) => assignment.candidateIndex));
 	const assignedTeeIndexes = new Set([...teeForHole.values()].map(({ assignment }) => assignment.candidateIndex));
 	const assignedBasketIndexes = new Set([...basketForHole.values()].map(({ assignment }) => assignment.candidateIndex));
-	const holes = holeNumbers.map((number) => {
+	const holes: CourseHoleProposal[] = holeNumbers.map((number) => {
 		const badge = badgeForHole.get(number);
 		const tee = teeForHole.get(number)?.assignment;
 		const basket = basketForHole.get(number)?.assignment;

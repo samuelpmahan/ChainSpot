@@ -31,9 +31,15 @@
 	import {
 		detectBasketCandidates,
 		detectCourseCandidates,
+		detectTees,
 		prewarmBasketDetection
 	} from '$lib/autoAnnotation/basketDetection';
-	import type { BasketCandidate, CourseDetectionResult } from '$lib/autoAnnotation/basketDetection';
+	import type {
+		BasketCandidate,
+		CourseDetectionResult,
+		DetectTeesResult,
+		TeePadVariant
+	} from '$lib/autoAnnotation/basketDetection';
 
 	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'bend'];
 	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
@@ -41,6 +47,18 @@
 		basket: 'Basket',
 		shot: 'Shot landing',
 		bend: 'Bend point'
+	};
+
+	const TEE_VARIANTS: readonly TeePadVariant[] = ['gray-center', 'edge-loop', 'fused'];
+	const TEE_VARIANT_LABELS: Record<TeePadVariant, string> = {
+		'gray-center': 'Gray center',
+		'edge-loop': 'Edge loop',
+		fused: 'Fused'
+	};
+	const TEE_VARIANT_SHORT_LABELS: Record<TeePadVariant, string> = {
+		'gray-center': 'GC',
+		'edge-loop': 'EL',
+		fused: 'F'
 	};
 
 	interface Props {
@@ -101,6 +119,17 @@
 	let courseDetectionStartedAt = 0;
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let prewarmedSourceId: string | null = null;
+
+	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
+		'gray-center': true,
+		'edge-loop': true,
+		fused: true
+	});
+	let teeExperimentFullResolution = $state(false);
+	let teeExperimentRunning = $state(false);
+	let teeExperimentError = $state<string | null>(null);
+	let teeExperimentResult = $state<DetectTeesResult | null>(null);
+	let selectedTeeCandidateKey = $state<string | null>(null);
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
@@ -193,6 +222,70 @@
 		courseDetectionStatus = null;
 		courseDetectionElapsedSeconds = 0;
 		stopCourseDetectionProgress();
+		teeExperimentEnabled = { 'gray-center': true, 'edge-loop': true, fused: true };
+		teeExperimentFullResolution = false;
+		teeExperimentResult = null;
+		teeExperimentError = null;
+		selectedTeeCandidateKey = null;
+	}
+
+	function deriveMapBoundsFromNumbers(
+		candidates: readonly { readonly label?: number; readonly yPx: number }[] | undefined,
+		imageHeightPx: number
+	): { topPx: number; bottomPx: number } | undefined {
+		const labeled = candidates?.filter((candidate) => candidate.label !== undefined) ?? [];
+		if (labeled.length < 3) return undefined;
+		const ys = labeled.map((candidate) => candidate.yPx);
+		const minY = Math.min(...ys);
+		const maxY = Math.max(...ys);
+		const spread = maxY - minY;
+		const margin = Math.max(80, Math.min(300, spread * 0.3));
+		return {
+			topPx: Math.max(0, minY - margin),
+			bottomPx: Math.min(imageHeightPx, maxY + margin)
+		};
+	}
+
+	async function handleDetectTees(): Promise<void> {
+		const image = sourceImage();
+		if (!image || teeExperimentRunning) return;
+		const resource = editor.getAssetResource(image.id);
+		if (!resource) {
+			teeExperimentError = 'The source image bytes are no longer available.';
+			return;
+		}
+
+		const variants = TEE_VARIANTS.filter((variant) => teeExperimentEnabled[variant]);
+		if (variants.length === 0) return;
+
+		teeExperimentRunning = true;
+		teeExperimentError = null;
+		teeExperimentResult = null;
+		selectedTeeCandidateKey = null;
+		try {
+			const cachedScale = courseDetection?.numberDetection?.anchor?.scale;
+			const mapBoundsPx = deriveMapBoundsFromNumbers(
+				courseDetection?.numberDetection?.candidates,
+				image.heightPx
+			);
+			teeExperimentResult = await detectTees(
+				resource.bytes,
+				image.mimeType,
+				image.widthPx,
+				image.heightPx,
+				{
+					variants,
+					uiScalePx: cachedScale,
+					mapBoundsPx,
+					fullResolution: teeExperimentFullResolution
+				}
+			);
+		} catch (error) {
+			teeExperimentResult = null;
+			teeExperimentError = error instanceof Error ? error.message : 'Tee detection failed.';
+		} finally {
+			teeExperimentRunning = false;
+		}
 	}
 
 	async function handleDetectCourse(): Promise<void> {
@@ -641,6 +734,96 @@
 								Apply {readyHoles} ready holes
 							</button>
 						{/if}
+						<p class="assist-divider">Tee experiments</p>
+						<div class="tee-experiment-controls">
+							<div class="tee-variant-toggles">
+								{#each TEE_VARIANTS as variant (variant)}
+									<label class:active={teeExperimentEnabled[variant]}>
+										<input
+											type="checkbox"
+											checked={teeExperimentEnabled[variant]}
+											onchange={() =>
+												(teeExperimentEnabled = {
+													...teeExperimentEnabled,
+													[variant]: !teeExperimentEnabled[variant]
+												})}
+											data-testid="tee-variant-{variant}"
+										/>
+										{TEE_VARIANT_LABELS[variant]}
+									</label>
+								{/each}
+							</div>
+							<label class="tee-full-res-toggle" class:active={teeExperimentFullResolution}>
+								<input
+									type="checkbox"
+									checked={teeExperimentFullResolution}
+									onchange={() => (teeExperimentFullResolution = !teeExperimentFullResolution)}
+									data-testid="tee-full-resolution"
+								/>
+								Full resolution
+							</label>
+							<button
+								type="button"
+								class="detect-button"
+								data-testid="detect-tees"
+								disabled={teeExperimentRunning || courseDetectionRunning || basketDetectionRunning}
+								onclick={() => void handleDetectTees()}
+							>
+								{teeExperimentRunning ? 'Detecting tees…' : 'Detect tees'}
+							</button>
+							{#if teeExperimentError}
+								<p class="tool-error" data-testid="tee-detection-error" role="alert">
+									{teeExperimentError}
+								</p>
+							{/if}
+							{#if teeExperimentResult}
+								{@const total = teeExperimentResult.results.reduce(
+									(sum, result) => sum + result.candidates.length,
+									0
+								)}
+								<p class="detection-summary" data-testid="tee-detection-summary">
+									scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates
+								</p>
+								{#each teeExperimentResult.results as result (result.variant)}
+									<details class="tee-diagnostics" open>
+										<summary>
+											{TEE_VARIANT_LABELS[result.variant]} · {result.candidates.length} found
+										</summary>
+										<div class="tee-stage-counts">
+											{#each Object.entries(result.stageCounts) as [stage, count]}
+												<span>{stage}: {count}</span>
+											{/each}
+										</div>
+										<div class="tee-candidate-list">
+											{#each result.candidates as candidate, index (index)}
+												{@const key = `${result.variant}-${index}`}
+												<button
+													type="button"
+													class:selected={selectedTeeCandidateKey === key}
+													onclick={() => (selectedTeeCandidateKey = key)}
+												>
+													<span class="tee-candidate-tag">
+														{TEE_VARIANT_SHORT_LABELS[result.variant]}
+													</span>
+													<span class="tee-candidate-score">
+														{(candidate.score * 100).toFixed(0)}%
+													</span>
+													<span class="tee-candidate-dims">
+														{candidate.widthPx.toFixed(0)}×{candidate.heightPx.toFixed(0)}
+													</span>
+													<span class="tee-candidate-orient">
+														{candidate.orientationDeg.toFixed(0)}°
+													</span>
+													<span class="tee-candidate-support">
+														{candidate.support.join('+')}
+													</span>
+												</button>
+											{/each}
+										</div>
+									</details>
+								{/each}
+							{/if}
+						</div>
 						<p class="assist-divider">Basket-only fallback</p>
 						<button
 							type="button"
@@ -749,6 +932,35 @@
 								class="tee-candidate-marker"
 								data-testid="tee-candidate-{index + 1}"
 							/>
+						{/each}
+					{/if}
+					{#if teeExperimentResult}
+						{#each teeExperimentResult.results as result (result.variant)}
+							{@const colorClass = `tee-candidate-${result.variant}`}
+							{@const short = TEE_VARIANT_SHORT_LABELS[result.variant]}
+							{#each result.candidates as candidate, index (index)}
+								{@const key = `${result.variant}-${index}`}
+								<g class="tee-experiment-candidate">
+									<rect
+										x={candidate.xPx - candidate.widthPx / 2}
+										y={candidate.yPx - candidate.heightPx / 2}
+										width={candidate.widthPx}
+										height={candidate.heightPx}
+										transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
+										class="tee-candidate-marker {colorClass}"
+										class:selected={selectedTeeCandidateKey === key}
+									/>
+									<text
+										x={candidate.xPx}
+										y={candidate.yPx - candidate.heightPx / 2 - 5 / zoom}
+										text-anchor="middle"
+										class="tee-experiment-label"
+										style={`font-size:${10 / zoom}px`}
+									>
+										{short} {candidate.score.toFixed(2)}
+									</text>
+								</g>
+							{/each}
 						{/each}
 					{/if}
 					{#each basketCandidates as candidate, index (index)}
@@ -1287,6 +1499,148 @@
 
 	:global(.tools) {
 		min-width: 0;
+	}
+
+	.tee-experiment-controls {
+		display: flex;
+		flex-direction: column;
+		gap: 0.55rem;
+	}
+
+	.tee-variant-toggles {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.tee-variant-toggles label,
+	.tee-full-res-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.4rem 0.55rem;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		font-size: 0.76rem;
+		cursor: pointer;
+	}
+
+	.tee-variant-toggles label.active,
+	.tee-full-res-toggle.active {
+		border-color: #3b82f6;
+		background: rgb(59 130 246 / 15%);
+	}
+
+	.tee-variant-toggles input,
+	.tee-full-res-toggle input {
+		margin: 0;
+	}
+
+	.tee-experiment-candidate rect {
+		fill-opacity: 0.15;
+		stroke-width: 2;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.tee-experiment-candidate rect.selected {
+		stroke-width: 4;
+	}
+
+	.tee-experiment-candidate .tee-candidate-gray-center {
+		fill: #38bdf8;
+		stroke: #38bdf8;
+	}
+
+	.tee-experiment-candidate .tee-candidate-edge-loop {
+		fill: #c084fc;
+		stroke: #c084fc;
+		stroke-dasharray: 4 3;
+	}
+
+	.tee-experiment-candidate .tee-candidate-fused {
+		fill: #facc15;
+		stroke: #facc15;
+		stroke-dasharray: 2 2;
+	}
+
+	.tee-experiment-label {
+		fill: #fff;
+		stroke: #18181b;
+		stroke-width: 3px;
+		paint-order: stroke fill;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-weight: 700;
+		pointer-events: none;
+	}
+
+	.tee-diagnostics {
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		background: #18181b;
+	}
+
+	.tee-diagnostics summary {
+		padding: 0.5rem 0.55rem;
+		cursor: pointer;
+		font-size: 0.75rem;
+		font-weight: 650;
+		color: #e4e4e7;
+	}
+
+	.tee-stage-counts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		padding: 0 0.55rem 0.45rem;
+		font-size: 0.68rem;
+		color: #a1a1aa;
+	}
+
+	.tee-stage-counts span {
+		background: #27272a;
+		padding: 0.15rem 0.3rem;
+		border-radius: 4px;
+	}
+
+	.tee-candidate-list {
+		display: flex;
+		flex-direction: column;
+		max-height: 16rem;
+		overflow: auto;
+		border-top: 1px solid #3f3f46;
+	}
+
+	.tee-candidate-list button {
+		display: grid;
+		grid-template-columns: 2rem 3.5rem 5rem 3rem 1fr;
+		gap: 0.35rem;
+		align-items: baseline;
+		padding: 0.35rem 0.5rem;
+		border-bottom: 1px solid #2b2b30;
+		font-size: 0.68rem;
+		text-align: left;
+	}
+
+	.tee-candidate-list button:last-child {
+		border-bottom: 0;
+	}
+
+	.tee-candidate-list button.selected {
+		background: rgb(59 130 246 / 15%);
+	}
+
+	.tee-candidate-tag {
+		font-weight: 700;
+	}
+
+	.tee-candidate-score {
+		color: #fbbf24;
+	}
+
+	.tee-candidate-dims,
+	.tee-candidate-orient,
+	.tee-candidate-support {
+		color: #a1a1aa;
 	}
 
 	@media (max-width: 900px) {

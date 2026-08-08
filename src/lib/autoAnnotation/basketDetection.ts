@@ -21,13 +21,27 @@ export interface BasketCandidate {
 
 import type { CourseGrammarResult } from './courseGrammar';
 import type { HoleNumberDetection } from './holeNumberDetection';
-import type { TeePadCandidate } from './teePadDetection';
+import type { TeePadCandidate, TeePadStageCounts, TeePadVariant, TeePadVariantResult } from './teePadDetection';
 
 export interface CourseDetectionResult {
 	readonly numberDetection: HoleNumberDetection;
 	readonly tees: readonly TeePadCandidate[];
 	readonly baskets: readonly BasketCandidate[];
 	readonly grammar: CourseGrammarResult;
+}
+
+export type { TeePadVariant, TeePadStageCounts, TeePadVariantResult } from './teePadDetection';
+
+export interface DetectTeesOptions {
+	readonly variants?: readonly TeePadVariant[];
+	readonly uiScalePx?: number;
+	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
+	readonly fullResolution?: boolean;
+}
+
+export interface DetectTeesResult {
+	readonly uiScalePx: number;
+	readonly results: readonly TeePadVariantResult[];
 }
 
 export type CourseDetectionProgressStage =
@@ -46,9 +60,11 @@ export interface CourseDetectionProgress {
 interface BasketWorkerSuccess {
 	ok: true;
 	token: string;
-	kind: 'detect' | 'detect-course' | 'prewarm';
+	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees';
 	candidates?: readonly BasketCandidate[];
 	course?: CourseDetectionResult;
+	uiScalePx?: number;
+	results?: readonly TeePadVariantResult[];
 }
 
 interface BasketWorkerProgress {
@@ -80,7 +96,19 @@ interface BasketPrewarmRequest {
 	readonly token: string;
 }
 
-type BasketWorkerRequest = BasketDetectionRequest | BasketPrewarmRequest;
+interface TeeDetectionRequest {
+	readonly kind: 'detect-tees';
+	readonly token: string;
+	readonly bitmap: ImageBitmap;
+	readonly widthPx: number;
+	readonly heightPx: number;
+	readonly variants: readonly TeePadVariant[];
+	readonly uiScalePx?: number;
+	readonly mapBoundsPx?: { topPx: number; bottomPx: number };
+	readonly fullResolution?: boolean;
+}
+
+type BasketWorkerRequest = BasketDetectionRequest | BasketPrewarmRequest | TeeDetectionRequest;
 
 interface PendingRequest {
 	readonly worker: Worker;
@@ -292,6 +320,55 @@ export async function detectCourseCandidates(
 			throw new Error('Course detection worker returned an invalid detection reply.');
 		}
 		return reply.course;
+	} catch (error) {
+		bitmap.close();
+		throw error;
+	}
+}
+
+/**
+ * Runs tee-pad detector variants in the same OpenCV worker used by basket/course
+ * detection. This is an experiment/debugging surface: it does not assign tees
+ * to holes or run course grammar.
+ */
+export async function detectTees(
+	bytes: Uint8Array,
+	mimeType: string,
+	widthPx: number,
+	heightPx: number,
+	options: DetectTeesOptions = {}
+): Promise<DetectTeesResult> {
+	assertWorkerSupport();
+	if (typeof createImageBitmap === 'undefined') {
+		throw new Error('Tee detection requires a browser with ImageBitmap support.');
+	}
+	if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
+		throw new Error(`Tee detection received invalid image dimensions (${widthPx} × ${heightPx}).`);
+	}
+
+	const variants = options.variants ?? (['gray-center', 'edge-loop', 'fused'] as const);
+	const bitmap = await createImageBitmap(new Blob([bytes as BufferSource], { type: mimeType }));
+	const token = nextToken();
+	try {
+		const reply = await postToWorker(
+			{
+				kind: 'detect-tees',
+				token,
+				bitmap,
+				widthPx,
+				heightPx,
+				variants,
+				uiScalePx: options.uiScalePx,
+				mapBoundsPx: options.mapBoundsPx,
+				fullResolution: options.fullResolution
+			},
+			[bitmap as unknown as Transferable]
+		);
+		if (!reply.ok) throw new Error(reply.message);
+		if (reply.kind !== 'detect-tees' || !Number.isFinite(reply.uiScalePx) || !reply.results) {
+			throw new Error('Tee detection worker returned an invalid detection reply.');
+		}
+		return { uiScalePx: reply.uiScalePx as number, results: reply.results };
 	} catch (error) {
 		bitmap.close();
 		throw error;
