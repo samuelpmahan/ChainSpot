@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import ImageEditorPane from '$lib/components/ImageEditorPane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
@@ -16,6 +16,7 @@
 	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
+	import { isEditableTarget } from '$lib/pointSelection';
 	import {
 		addHole,
 		clearBends,
@@ -53,7 +54,19 @@
 		tee: 'Tee',
 		basket: 'Basket',
 		shot: 'Shot landing',
-		bend: 'Bend point'
+		bend: 'Corridor bend'
+	};
+	const PLACEMENT_MODE_SHORTCUTS: Record<HolePlacementMode, string> = {
+		tee: '1',
+		basket: '2',
+		shot: '3',
+		bend: '4'
+	};
+	const PLACEMENT_MODE_BY_SHORTCUT: Record<string, HolePlacementMode> = {
+		'1': 'tee',
+		'2': 'basket',
+		'3': 'shot',
+		'4': 'bend'
 	};
 
 	const TEE_VARIANTS: readonly TeePadVariant[] = ['gray-center', 'edge-loop', 'fused'];
@@ -201,8 +214,60 @@
 	}
 
 	function handleRemoveHole(holeId: string): void {
-		holes = removeHole(holes, holeId);
-		if (activeHoleId === holeId) activeHoleId = holes[0]?.id ?? null;
+		const removedIndex = holes.findIndex((hole) => hole.id === holeId);
+		const removedHole = holes[removedIndex];
+		if (!removedHole) return;
+		const removeButton = document.querySelector<HTMLButtonElement>(
+			`[data-testid="hole-remove-${removedHole.number}"]`
+		);
+		const shouldRestoreFocus = document.activeElement === removeButton;
+		const remainingHoles = removeHole(holes, holeId);
+		const nextActiveHoleId =
+			activeHoleId === holeId ? remainingHoles[0]?.id ?? null : activeHoleId;
+		holes = remainingHoles;
+		activeHoleId = nextActiveHoleId;
+
+		if (shouldRestoreFocus) {
+			const focusHole =
+				remainingHoles.find((hole) => hole.id === nextActiveHoleId) ??
+				remainingHoles[removedIndex] ??
+				remainingHoles[removedIndex - 1];
+			void tick().then(() => {
+				const selector = focusHole
+					? `[data-testid="hole-select-${focusHole.number}"]`
+					: '[data-testid="hole-add"]';
+				document.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
+			});
+		}
+	}
+
+	function isShortcutEditableTarget(target: EventTarget | null): boolean {
+		if (target instanceof HTMLInputElement && (target.type === 'radio' || target.type === 'checkbox')) {
+			return false;
+		}
+		return isEditableTarget(target);
+	}
+
+	function handleAnnotationKeyDown(event: KeyboardEvent): void {
+		if (isShortcutEditableTarget(event.target)) return;
+		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+
+		const key = event.key.toLowerCase();
+		if (key === 'n') {
+			event.preventDefault();
+			handleAddHole();
+			return;
+		}
+
+		const mode = PLACEMENT_MODE_BY_SHORTCUT[key];
+		if (!mode || !activeHoleId) return;
+		event.preventDefault();
+		placementMode = mode;
+		void tick().then(() => {
+			document
+				.querySelector<HTMLInputElement>(`[data-testid="placement-mode-${mode}"]`)
+				?.focus({ preventScroll: true });
+		});
 	}
 
 	function handleRemoveLastShot(): void {
@@ -642,6 +707,8 @@
 		// observe cross-test session leakage from the module-level handoff store.
 		const handoff = participatesInSession ? getPendingHandoff() : null;
 		pendingHandoff = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+		window.addEventListener('keydown', handleAnnotationKeyDown);
+		return () => window.removeEventListener('keydown', handleAnnotationKeyDown);
 	});
 
 	/** Test hook: forces a re-derive after external domain actions. */
@@ -678,7 +745,7 @@
 					disabled={importingHandoff}
 					onclick={handleHandoffImport}
 				>
-					Import
+					Import stitched image
 				</button>
 				<button
 					type="button"
@@ -686,7 +753,7 @@
 					disabled={importingHandoff}
 					onclick={handleHandoffDismiss}
 				>
-					Dismiss
+					Dismiss stitched image
 				</button>
 			</div>
 			{#if handoffError}
@@ -734,7 +801,14 @@
 				<div class="tool-section">
 					<div class="section-heading">
 						<h2>Holes</h2>
-						<button type="button" data-testid="hole-add" onclick={handleAddHole}>+ Add</button>
+						<button
+							type="button"
+							data-testid="hole-add"
+							aria-keyshortcuts="N"
+							onclick={handleAddHole}
+						>
+							Add hole <kbd>N</kbd>
+						</button>
 					</div>
 					{#if holes.length > 0}
 						<ul class="hole-list" data-testid="hole-list">
@@ -744,6 +818,7 @@
 										type="button"
 										class="hole-select"
 										data-testid="hole-select-{hole.number}"
+										aria-current={hole.id === activeHoleId ? 'true' : undefined}
 										onclick={() => (activeHoleId = hole.id)}
 									>
 										<strong>Hole {hole.number}</strong>
@@ -753,11 +828,11 @@
 									</button>
 									<button
 										type="button"
-										class="icon-button"
+										class="remove-hole-button"
 										data-testid="hole-remove-{hole.number}"
 										aria-label={`Remove hole ${hole.number}`}
 										onclick={() => handleRemoveHole(hole.id)}
-									>×</button>
+									>Remove hole {hole.number}</button>
 								</li>
 							{/each}
 						</ul>
@@ -777,11 +852,13 @@
 										type="radio"
 										name="placement-mode"
 										value={mode}
-										checked={placementMode === mode}
-										onchange={() => (placementMode = mode)}
-										data-testid="placement-mode-{mode}"
-									/>
-									{PLACEMENT_MODE_LABELS[mode]}
+									checked={placementMode === mode}
+									onchange={() => (placementMode = mode)}
+									data-testid="placement-mode-{mode}"
+									aria-keyshortcuts={PLACEMENT_MODE_SHORTCUTS[mode]}
+								/>
+								<span>{PLACEMENT_MODE_LABELS[mode]}</span>
+								<kbd>{PLACEMENT_MODE_SHORTCUTS[mode]}</kbd>
 								</label>
 							{/each}
 						</div>
@@ -939,10 +1016,11 @@
 												<button
 													type="button"
 													class:selected={selectedTeeCandidateKey === key}
+													aria-pressed={selectedTeeCandidateKey === key}
 													onclick={() => (selectedTeeCandidateKey = key)}
 												>
 													<span class="tee-candidate-tag">
-														{TEE_VARIANT_SHORT_LABELS[result.variant]}
+														{TEE_VARIANT_LABELS[result.variant]} tee
 													</span>
 													<span class="tee-candidate-score">
 														{(candidate.score * 100).toFixed(0)}%
@@ -982,9 +1060,10 @@
 									<button
 										type="button"
 										class:selected={selectedBasketCandidate === index}
+										aria-pressed={selectedBasketCandidate === index}
 										onclick={() => selectBasketCandidate(index)}
 									>
-										#{index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
+										Basket candidate {index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
 									</button>
 								{/each}
 							</div>
@@ -1120,7 +1199,8 @@
 		gap: 1rem;
 	}
 
-	:global(button:focus-visible) {
+	:global(button:focus-visible),
+	:global(input:focus-visible) {
 		outline: 3px solid #075985;
 		outline-offset: 2px;
 	}
@@ -1408,12 +1488,13 @@
 		font-size: 0.7rem;
 	}
 
-	.icon-button {
+	.remove-hole-button {
 		border: 0 !important;
 		border-left: 1px solid #3f3f46 !important;
 		border-radius: 0 !important;
 		background: transparent !important;
-		font-size: 1rem;
+		font-size: 0.72rem;
+		white-space: nowrap;
 	}
 
 	.mode-grid {
@@ -1440,6 +1521,18 @@
 
 	.mode-grid input {
 		margin: 0;
+	}
+
+	.mode-grid kbd,
+	.section-heading kbd {
+		padding: 0.05rem 0.25rem;
+		border: 1px solid #71717a;
+		border-radius: 3px;
+		background: #18181b;
+		color: #e4e4e7;
+		font: inherit;
+		font-size: 0.68rem;
+		line-height: 1.1;
 	}
 
 	.edit-actions {
@@ -1751,7 +1844,7 @@
 
 	.tee-candidate-list button {
 		display: grid;
-		grid-template-columns: 2rem 3.5rem 5rem 3rem 1fr;
+		grid-template-columns: minmax(7rem, 1.2fr) 3.5rem 5rem 3rem minmax(0, 1fr);
 		gap: 0.35rem;
 		align-items: baseline;
 		padding: 0.35rem 0.5rem;

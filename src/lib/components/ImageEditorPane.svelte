@@ -149,7 +149,7 @@
 			</span>
 		</div>
 		<div class="header-actions">
-			<button type="button" data-testid={`pane-fit-${role}`} disabled={!currentImage()} onclick={() => vp.fit()}>Fit</button>
+			<button type="button" data-testid={`pane-fit-${role}`} disabled={!currentImage()} onclick={() => vp.fit()}>Fit image</button>
 			<button
 				type="button"
 				data-testid={`pane-choose-${role}`}
