@@ -159,7 +159,7 @@ describe('Save project (F)', () => {
 		expect([...entries['images/source-original.png']]).toEqual([...SRC]);
 		expect([...entries['images/target-original.jpg']]).toEqual([...TGT]);
 		const manifest = JSON.parse(strFromU8(entries['project.json']));
-		expect(manifest.schemaVersion).toBe(1);
+		expect(manifest.schemaVersion).toBe(3);
 		expect(manifest.images[0].sha256).toBe(await sha256Hex(SRC));
 		expect(manifest.images[1].sha256).toBe(await sha256Hex(TGT));
 
@@ -494,14 +494,15 @@ describe('Open project (F)', () => {
 		const created = await createProjectBundle(source);
 		expect(created.ok).toBe(true);
 		if (!created.ok) return;
-		const { project, images, controlPointPairs, viewState } = created.bundle.document;
+		const { project, images, controlPointPairs, holes, viewState } = created.bundle.document;
 		const doc = {
-			schemaVersion: 1,
+			schemaVersion: 3,
 			project,
-			images: images.map((image) =>
+			images: images.map((image: (typeof images)[number]) =>
 				image.role === 'source-overview' ? { ...image, sha256: 'b'.repeat(64) } : image
 			),
 			controlPointPairs,
+			holes,
 			viewState
 		};
 		const bundle = new File(

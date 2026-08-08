@@ -23,7 +23,14 @@
 		 * Called for a normal click (no drag beyond the shared threshold) that the
 		 * editor did not claim.
 		 */
-		onViewportClick?: (pointer: ScreenSpacePoint) => void;
+		onViewportClick?: (pointer: ScreenSpacePoint, event: PointerEvent) => void;
+		/**
+		 * Optional move/up plumbing for a claimed pointer gesture. The viewport owns
+		 * the pointer lifecycle; consumers only receive viewport-local coordinates.
+		 */
+		onClaimedPointerMove?: (pointer: ScreenSpacePoint, event: PointerEvent) => void;
+		onClaimedPointerUp?: (pointer: ScreenSpacePoint, event: PointerEvent) => void;
+		onClaimedPointerCancel?: (pointer: ScreenSpacePoint, event: PointerEvent) => void;
 		/** The editor-specific scene content; renders inside the viewport container. */
 		content: Snippet;
 	}
@@ -36,6 +43,9 @@
 		role,
 		claimPointer,
 		onViewportClick,
+		onClaimedPointerMove,
+		onClaimedPointerUp,
+		onClaimedPointerCancel,
 		content
 	}: Props = $props();
 
@@ -47,6 +57,7 @@
 	}
 
 	let gesture: PanGesture | null = null;
+	let claimedGesture: { pointerId: number } | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 
 	function onWheel(event: WheelEvent): void {
@@ -59,11 +70,18 @@
 	}
 
 	function onPointerDown(event: PointerEvent): void {
-		if (event.button !== 0 || gesture) return;
+		if (event.button !== 0 || gesture || claimedGesture) return;
 		const pointer = controller.pointerIn(event);
 		// The editor may claim the gesture (marker drag, tile drag, crop handle)
 		// before viewport panning begins.
-		if (claimPointer?.(pointer, event)) return;
+		if (claimPointer?.(pointer, event)) {
+			event.preventDefault();
+			claimedGesture = { pointerId: event.pointerId };
+			window.addEventListener('pointermove', handleClaimedPointerMove);
+			window.addEventListener('pointerup', handleClaimedPointerUp);
+			window.addEventListener('pointercancel', handleClaimedPointerCancel);
+			return;
+		}
 		gesture = {
 			pointerId: event.pointerId,
 			start: pointer,
@@ -105,7 +123,34 @@
 			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <= CLICK_SLOP_PX &&
 			controller.containsPoint(event);
 		endGesture();
-		if (isClick) onViewportClick?.(pointer);
+		if (isClick) onViewportClick?.(pointer, event);
+	}
+
+	function handleClaimedPointerMove(event: PointerEvent): void {
+		if (!claimedGesture) return;
+		if (event.pointerId !== claimedGesture.pointerId) {
+			endClaimedGesture();
+			return;
+		}
+		onClaimedPointerMove?.(controller.pointerIn(event), event);
+	}
+
+	function handleClaimedPointerUp(event: PointerEvent): void {
+		if (!claimedGesture) return;
+		if (event.pointerId !== claimedGesture.pointerId) {
+			endClaimedGesture();
+			return;
+		}
+		onClaimedPointerUp?.(controller.pointerIn(event), event);
+		endClaimedGesture();
+	}
+
+	function handleClaimedPointerCancel(event: PointerEvent): void {
+		if (!claimedGesture) return;
+		if (event.pointerId === claimedGesture.pointerId) {
+			onClaimedPointerCancel?.(controller.pointerIn(event), event);
+		}
+		endClaimedGesture();
 	}
 
 	function onPointerCancel(): void {
@@ -119,6 +164,14 @@
 		window.removeEventListener('pointermove', onPointerMove);
 		window.removeEventListener('pointerup', onPointerUp);
 		window.removeEventListener('pointercancel', onPointerCancel);
+	}
+
+	function endClaimedGesture(): void {
+		claimedGesture = null;
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointermove', handleClaimedPointerMove);
+		window.removeEventListener('pointerup', handleClaimedPointerUp);
+		window.removeEventListener('pointercancel', handleClaimedPointerCancel);
 	}
 
 	function handleResize(entries: ResizeObserverEntry[]): void {
@@ -154,6 +207,7 @@
 
 	onDestroy(() => {
 		endGesture();
+		endClaimedGesture();
 		resizeObserver?.disconnect();
 		resizeObserver = null;
 	});

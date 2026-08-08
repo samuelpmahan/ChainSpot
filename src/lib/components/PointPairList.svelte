@@ -284,6 +284,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 	}
 
 	.pairs-header {

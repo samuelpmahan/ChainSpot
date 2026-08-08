@@ -6,13 +6,13 @@ import {
 	parseProjectDocument,
 	parseProjectJson,
 	serializeProjectState
-} from '../../src/lib/schemaV1';
+} from '../../src/lib/projectSchema';
 import type {
-	ProjectDocumentV1,
+	ProjectDocumentV3,
 	ProjectParseResult,
 	ProjectSchemaError,
 	ProjectSchemaErrorCategory
-} from '../../src/lib/schemaV1';
+} from '../../src/lib/projectSchema';
 
 const FIXED_TIMESTAMP = '2026-08-02T00:00:00.000Z';
 
@@ -75,6 +75,7 @@ function buildState(overrides: Partial<ProjectState> = {}): ProjectState {
 				updatedAt: FIXED_TIMESTAMP
 			}
 		],
+		holes: [],
 		viewState: {
 			source: { zoom: 1.4, panX: -92, panY: 17 },
 			target: { zoom: 1.1, panX: 0, panY: -35 }
@@ -83,7 +84,7 @@ function buildState(overrides: Partial<ProjectState> = {}): ProjectState {
 	};
 }
 
-function docFromState(state: ProjectState): ProjectDocumentV1 {
+function docFromState(state: ProjectState): ProjectDocumentV3 {
 	return serializeProjectState(state);
 }
 
@@ -155,11 +156,11 @@ function expectSerializeError(
 	return error;
 }
 
-describe('schema-v1 round trip', () => {
+describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(1);
+		expect(doc.schemaVersion).toBe(3);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -357,12 +358,12 @@ describe('schema version validation', () => {
 
 	it('classifies a newer unsupported version before any other validation', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 2;
+		doc.schemaVersion = 4;
 		doc.project = undefined;
 		doc.images = 'not-an-array';
 		const error = expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 		expect(error.message).toContain('newer');
-		expect(error.message).toContain('2');
+		expect(error.message).toContain('4');
 	});
 
 	it('rejects older or otherwise unknown numeric versions', () => {
@@ -376,7 +377,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(1);
+		expect(CURRENT_SCHEMA_VERSION).toBe(3);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -786,6 +787,7 @@ describe('serializer validation of domain state', () => {
 		const doc = docFromState(buildState());
 		expect(Object.keys(doc).sort()).toEqual([
 			'controlPointPairs',
+			'holes',
 			'images',
 			'project',
 			'schemaVersion',
@@ -854,7 +856,7 @@ describe('atomicity and editor isolation', () => {
 		expect(canUndo).toBe(false);
 
 		parseProjectJson('{definitely not json');
-		parseProjectJson(JSON.stringify({ schemaVersion: 2 }));
+		parseProjectJson(JSON.stringify({ schemaVersion: 3 }));
 		parseProjectJson('null');
 		parseProjectDocument({ schemaVersion: 1, project: {}, images: [], controlPointPairs: [], viewState: null });
 		parseProjectDocument([]);

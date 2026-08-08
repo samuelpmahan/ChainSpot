@@ -16,12 +16,14 @@
  */
 
 import { pointInBounds } from '../coords';
-import type { ImageAsset } from './project';
+import type { AnnotatedHole, ImageAsset, OrderedShot, SourcePoint } from './project';
 
-export interface SourcePoint {
-	readonly xPx: number;
-	readonly yPx: number;
-}
+/**
+ * The hole types are defined in `./project` (they are durable `ProjectState`
+ * data) and re-exported here so this module stays the single import site for
+ * anything working with an annotated round.
+ */
+export type { AnnotatedHole, OrderedShot, SourcePoint };
 
 /**
  * The UDisc source map the round was annotated on, carried by value so the
@@ -37,27 +39,6 @@ export interface AnnotatedSourceImage {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly blob: Blob;
-}
-
-/**
- * One throw's resting position. Array order in AnnotatedHole.shots IS the
- * shot order — no `index` field, so a reorder can never desync from a stored
- * ordinal. `id` is stable identity for future edit tools (add/remove/
- * move/reorder/reassign) and for correlating a transferred feature back to
- * its source. Shot connections (UDisc's pale-blue lines) are implied by
- * tee -> shots -> basket order and are NOT stored as geometry.
- */
-export interface OrderedShot {
-	readonly id: string;
-	readonly landing: SourcePoint;
-}
-
-export interface AnnotatedHole {
-	readonly id: string;
-	readonly number: number;
-	readonly tee?: SourcePoint;
-	readonly basket?: SourcePoint;
-	readonly shots: readonly OrderedShot[];
 }
 
 export interface AnnotatedRound {
@@ -108,9 +89,12 @@ function assertPointInBounds(
 /**
  * The only sanctioned way to build an artifact. Validates the source image
  * has positive finite dimensions and that every supplied feature point
- * (tee/basket/shot landings/walkingPath points) is finite and inside the
- * source image bounds, via the existing pointInBounds from src/lib/coords.ts.
- * Throws on violation — a malformed artifact must never reach Create Graphics.
+ * (tee/basket/shot landings/corridor bends/walkingPath points) is finite
+ * and inside the source image bounds, via the existing pointInBounds from
+ * src/lib/coords.ts. Corridor bends are validated per-point (zero bends is a
+ * valid straight hole) and the constant corridor width must be finite and
+ * positive. Throws on violation — a malformed artifact must never reach
+ * Create Graphics.
  */
 export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): AnnotatedRound {
 	const { sourceImage, holes = [], walkingPath } = options;
@@ -119,22 +103,35 @@ export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): Anno
 
 	for (const hole of holes) {
 		if (hole.tee) {
-			assertPointInBounds(hole.tee, widthPx, heightPx, `createAnnotatedRound: hole ${hole.id} tee`);
+			assertPointInBounds(hole.tee, widthPx, heightPx, `createAnnotatedRound: hole ${hole.number} tee`);
 		}
 		if (hole.basket) {
 			assertPointInBounds(
 				hole.basket,
 				widthPx,
 				heightPx,
-				`createAnnotatedRound: hole ${hole.id} basket`
+				`createAnnotatedRound: hole ${hole.number} basket`
 			);
 		}
-		for (const shot of hole.shots) {
+		hole.shots.forEach((shot, index) => {
 			assertPointInBounds(
 				shot.landing,
 				widthPx,
 				heightPx,
-				`createAnnotatedRound: hole ${hole.id} shot ${shot.id} landing`
+				`createAnnotatedRound: hole ${hole.number} shot ${index + 1} landing`
+			);
+		});
+		hole.corridorBends.forEach((point, index) => {
+			assertPointInBounds(
+				point,
+				widthPx,
+				heightPx,
+				`createAnnotatedRound: hole ${hole.number} corridor bend ${index + 1}`
+			);
+		});
+		if (!Number.isFinite(hole.corridorWidthPx) || hole.corridorWidthPx <= 0) {
+			throw new Error(
+				`createAnnotatedRound: hole ${hole.number} corridorWidthPx must be a finite number greater than zero, got ${JSON.stringify(hole.corridorWidthPx)}`
 			);
 		}
 	}

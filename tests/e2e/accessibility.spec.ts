@@ -280,10 +280,10 @@ test('status guidance and outcomes are announced through polite live regions', a
 	// Add-step guidance is announced politely when creation starts.
 	await page.getByTestId('add-correspondence').click();
 	await expect(page.getByTestId('correspondence-guidance')).toHaveText(
-		'Click a landmark in the UDisc source image.'
+		'Click a landmark in either the UDisc source or clean target image.'
 	);
 	await expect(page.getByTestId('activity-message')).toHaveText(
-		'Add correspondence started. Select a landmark in the source image.'
+		'Add correspondence started. Select a landmark in either the UDisc source or clean target image.'
 	);
 
 	// Escape cancels the pending creation and announces it.

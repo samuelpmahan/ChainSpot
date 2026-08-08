@@ -182,7 +182,7 @@ test('a keyboard user can create and cancel a correspondence using visible contr
 	await page.keyboard.press('Enter');
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-source');
 	await expect(page.getByTestId('correspondence-guidance')).toHaveText(
-		'Click a landmark in the UDisc source image.'
+		'Click a landmark in either the UDisc source or clean target image.'
 	);
 
 	// Escape cancels the pending half-pair without history.
