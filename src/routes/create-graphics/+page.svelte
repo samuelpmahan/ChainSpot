@@ -35,7 +35,12 @@
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
-	import { bboxFromCenter, fetchNaipImage, NAIP_EXPORT_SIZE_PX } from '$lib/naip';
+	import {
+		bboxFromCenter,
+		fetchNaipBoundingBoxImage,
+		fetchNaipImage,
+		NAIP_EXPORT_SIZE_PX
+	} from '$lib/naip';
 	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
 	import { searchPlace } from '$lib/geocode';
 	import type { GeoSearchMatch } from '$lib/geocode';
@@ -313,6 +318,11 @@
 	let gridError = $state<string | null>(null);
 	let gridCommitting = $state(false);
 	let gridPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
+	/** Exact geographic selection fetched at a fit-to-box raster size, awaiting import. */
+	let exactSelectionLoading = $state(false);
+	let exactSelectionError = $state<string | null>(null);
+	let exactSelectionCommitting = $state(false);
+	let exactSelectionPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
 
 	function sourceImage(): ImageAsset | null {
 		void refreshCount;
@@ -1002,12 +1012,19 @@
 		boxRect = null;
 		displayScale = 1;
 		clearGridPreview();
+		clearExactSelectionPreview();
 	}
 
 	function clearGridPreview(): void {
 		if (gridPreview) URL.revokeObjectURL(gridPreview.objectUrl);
 		gridPreview = null;
 		gridError = null;
+	}
+
+	function clearExactSelectionPreview(): void {
+		if (exactSelectionPreview) URL.revokeObjectURL(exactSelectionPreview.objectUrl);
+		exactSelectionPreview = null;
+		exactSelectionError = null;
 	}
 
 	function parseNaipCenter(): GeoPoint | null {
@@ -1167,6 +1184,11 @@
 		gridError = 'The assembled aerial preview could not be displayed.';
 	}
 
+	function handleExactSelectionPreviewError(): void {
+		clearExactSelectionPreview();
+		exactSelectionError = 'The exact selected-area preview could not be displayed.';
+	}
+
 	function clamp(value: number, min: number, max: number): number {
 		return Math.min(Math.max(value, min), Math.max(min, max));
 	}
@@ -1250,6 +1272,79 @@
 		window.removeEventListener('pointermove', handleBoxHandleMove);
 		window.removeEventListener('pointerup', handleBoxHandleUp);
 		window.removeEventListener('pointercancel', handleBoxHandleUp);
+	}
+
+	/**
+	 * Fetches exactly the geographic area inside the blue selection box. The output
+	 * uses the full 2048-pixel budget on its longer side and preserves the box's
+	 * aspect ratio, so a 201m x 319m selection is fetched as that rectangle rather
+	 * than padded to a 300m-radius square tile.
+	 */
+	async function handleExactSelectionFetch(): Promise<void> {
+		const bbox = naipPreviewBbox;
+		const rect = boxRect;
+		if (!bbox || !rect || exactSelectionLoading) return;
+		clearExactSelectionPreview();
+		exactSelectionLoading = true;
+		try {
+			const selectionBbox = pixelRectToGeoBox(bbox, NAIP_EXPORT_SIZE_PX, rect);
+			const { widthMeters, heightMeters } = geoBoxCenterAndSize(selectionBbox);
+			const longestSideMeters = Math.max(widthMeters, heightMeters);
+			const pixelsPerMeter = NAIP_EXPORT_SIZE_PX / longestSideMeters;
+			const result = await fetchNaipBoundingBoxImage(selectionBbox, {
+				widthPx: Math.max(1, Math.round(widthMeters * pixelsPerMeter)),
+				heightPx: Math.max(1, Math.round(heightMeters * pixelsPerMeter))
+			});
+			if (!result.ok) {
+				exactSelectionError = result.error.message;
+				return;
+			}
+			exactSelectionPreview = {
+				blob: result.blob,
+				objectUrl: URL.createObjectURL(result.blob)
+			};
+		} catch (error) {
+			exactSelectionError =
+				error instanceof Error ? error.message : 'Could not fetch the exact selected area.';
+		} finally {
+			exactSelectionLoading = false;
+		}
+	}
+
+	async function handleExactSelectionConfirm(): Promise<void> {
+		if (!exactSelectionPreview || exactSelectionCommitting) return;
+		exactSelectionCommitting = true;
+		exactSelectionError = null;
+		try {
+			const file = new File([exactSelectionPreview.blob], 'naip-selected-area.png', { type: 'image/png' });
+			const result = await intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('target-basemap', count)
+			});
+			if (!result.ok) {
+				exactSelectionError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The exact selected-area image is still pending.';
+				return;
+			}
+			clearNaipPreview();
+			onDomainChanged('target-basemap');
+			activityMessage = 'Exact selected area imported as the clean target.';
+		} catch (error) {
+			exactSelectionError =
+				error instanceof Error ? error.message : 'Could not import the exact selected area.';
+		} finally {
+			exactSelectionCommitting = false;
+		}
+	}
+
+	function handleExactSelectionDiscard(): void {
+		clearExactSelectionPreview();
 	}
 
 	/**
@@ -1820,8 +1915,8 @@
 			<div class="naip-preview" data-testid="naip-preview">
 				<p class="naip-hint">
 					Drag a corner to size the area you want at full resolution, then fetch the
-					tile grid for it below. "Use this preview as-is" skips tiling entirely and
-					commits this single reference image instead.
+					exact selected area or a larger tile grid for it below. "Use this preview
+					as-is" skips both options and commits this single reference image instead.
 				</p>
 				<div class="naip-overview-frame" data-testid="naip-overview-frame">
 					<img
@@ -1889,10 +1984,52 @@
 							? 'Fetching tiles…'
 							: `Fetch ${gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} full-resolution tiles`}
 					</button>
+					<button
+						type="button"
+						data-testid="naip-exact-fetch-button"
+						disabled={exactSelectionLoading}
+						onclick={handleExactSelectionFetch}
+					>
+						{exactSelectionLoading ? 'Fetching exact area…' : 'Fetch exact selected area'}
+					</button>
 				</div>
 			{/if}
 			{#if gridError}
 				<p class="error" data-testid="naip-grid-error" role="alert">{gridError}</p>
+			{/if}
+			{#if exactSelectionError}
+				<p class="error" data-testid="naip-exact-error" role="alert">{exactSelectionError}</p>
+			{/if}
+			{#if exactSelectionPreview}
+				<div class="naip-preview" data-testid="naip-exact-preview">
+					<div>
+						<p class="naip-hint">Exact blue-box area, fetched without the 300 m tile-radius padding.</p>
+						<img
+							class="naip-preview-image"
+							src={exactSelectionPreview.objectUrl}
+							alt="Exact selected NAIP area, not yet used"
+							onerror={handleExactSelectionPreviewError}
+						/>
+					</div>
+					<div class="naip-preview-actions">
+						<button
+							type="button"
+							data-testid="naip-exact-use"
+							disabled={exactSelectionCommitting}
+							onclick={handleExactSelectionConfirm}
+						>
+							{exactSelectionCommitting ? 'Using…' : 'Use exact area as clean target'}
+						</button>
+						<button
+							type="button"
+							data-testid="naip-exact-discard"
+							disabled={exactSelectionCommitting}
+							onclick={handleExactSelectionDiscard}
+						>
+							Discard
+						</button>
+					</div>
+				</div>
 			{/if}
 			{#if gridPreview}
 				<div class="naip-preview" data-testid="naip-grid-preview">

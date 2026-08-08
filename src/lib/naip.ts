@@ -30,7 +30,7 @@ export interface GeoBoundingBox {
 /** Meters per degree of latitude; treated as constant (adequate at course scale). */
 export const METERS_PER_DEGREE_LAT = 111_320;
 
-/** Output raster size (pixels, square) requested from `exportImage`. */
+/** Default raster size (pixels per side) requested from `exportImage`. */
 export const NAIP_EXPORT_SIZE_PX = 2048;
 
 const NAIP_EXPORT_IMAGE_URL =
@@ -71,18 +71,20 @@ export function bboxFromCenter(center: GeoPoint, radiusMeters: number): GeoBound
 }
 
 /**
- * Builds the `exportImage` URL for a bounding box: WGS84 input (`bboxSR=4326`), a
- * fixed square output raster, PNG, and `f=image` so the endpoint returns raw PNG
- * bytes directly rather than a JSON wrapper.
+ * Builds the `exportImage` URL for a bounding box: WGS84 input (`bboxSR=4326`),
+ * an explicit raster size, PNG, and `f=image` so the endpoint returns raw PNG bytes
+ * directly rather than a JSON wrapper. A numeric size remains the square-output
+ * shorthand used by the radius-based preview and tile workflows.
  */
 export function buildNaipExportUrl(
 	bbox: GeoBoundingBox,
-	sizePx: number = NAIP_EXPORT_SIZE_PX
+	sizePx: number | NaipRasterSize = NAIP_EXPORT_SIZE_PX
 ): string {
+	const size = rasterSize(sizePx);
 	const params = new URLSearchParams({
 		bbox: `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`,
 		bboxSR: '4326',
-		size: `${sizePx},${sizePx}`,
+		size: `${size.widthPx},${size.heightPx}`,
 		format: 'png',
 		f: 'image'
 	});
@@ -122,21 +124,42 @@ export type NaipFetchResult =
 
 export type FetchLike = typeof fetch;
 
+export interface NaipRasterSize {
+	widthPx: number;
+	heightPx: number;
+}
+
+function rasterSize(size: number | NaipRasterSize): NaipRasterSize {
+	const dimensions = typeof size === 'number' ? { widthPx: size, heightPx: size } : size;
+	if (
+		!Number.isInteger(dimensions.widthPx) ||
+		!Number.isInteger(dimensions.heightPx) ||
+		dimensions.widthPx <= 0 ||
+		dimensions.heightPx <= 0
+	) {
+		throw new Error(
+			`NAIP raster dimensions must be positive integers, got ${dimensions.widthPx} x ${dimensions.heightPx}.`
+		);
+	}
+	return dimensions;
+}
+
 /**
- * Fetches the NAIP `exportImage` PNG for a center point and radius. Reports failure
- * as a typed result (network error, non-200 status, or a response whose
- * `Content-Type` isn't an image — NAIP's `exportImage` returns a JSON error body with
- * a 200 status for some invalid requests, e.g. no coverage at the location) rather
- * than throwing, so the UI can render a clear inline message.
+ * Fetches an image for an exact geographic bounding box. Rectangular output is
+ * supported so a user-selected area can be fetched without padding it to a fixed
+ * tile radius or stretching it into a square.
  */
-export async function fetchNaipImage(
-	center: GeoPoint,
-	radiusMeters: number,
-	options: { sizePx?: number; fetch?: FetchLike } = {}
+export async function fetchNaipBoundingBoxImage(
+	bbox: GeoBoundingBox,
+	options: { widthPx?: number; heightPx?: number; fetch?: FetchLike } = {}
 ): Promise<NaipFetchResult> {
-	const { sizePx = NAIP_EXPORT_SIZE_PX, fetch: fetchImpl = globalThis.fetch } = options;
-	const bbox = bboxFromCenter(center, radiusMeters);
-	const url = buildNaipExportUrl(bbox, sizePx);
+	const {
+		widthPx = NAIP_EXPORT_SIZE_PX,
+		heightPx = NAIP_EXPORT_SIZE_PX,
+		fetch: fetchImpl = globalThis.fetch
+	} = options;
+	const size = rasterSize({ widthPx, heightPx });
+	const url = buildNaipExportUrl(bbox, size);
 
 	let response: Response;
 	try {
@@ -167,11 +190,30 @@ export async function fetchNaipImage(
 			ok: false,
 			error: new NaipFetchError(
 				'bad-content-type',
-				'No aerial imagery is available at this location and radius. Try a nearby coordinate or a different radius.'
+				'No aerial imagery is available at this location and area. Try a nearby coordinate or a larger selection.'
 			)
 		};
 	}
 
-	const blob = await response.blob();
-	return { ok: true, blob, url };
+	return { ok: true, blob: await response.blob(), url };
+}
+
+/**
+ * Fetches the NAIP `exportImage` PNG for a center point and radius. Reports failure
+ * as a typed result (network error, non-200 status, or a response whose
+ * `Content-Type` isn't an image — NAIP's `exportImage` returns a JSON error body with
+ * a 200 status for some invalid requests, e.g. no coverage at the location) rather
+ * than throwing, so the UI can render a clear inline message.
+ */
+export async function fetchNaipImage(
+	center: GeoPoint,
+	radiusMeters: number,
+	options: { sizePx?: number; fetch?: FetchLike } = {}
+): Promise<NaipFetchResult> {
+	const bbox = bboxFromCenter(center, radiusMeters);
+	return fetchNaipBoundingBoxImage(bbox, {
+		widthPx: options.sizePx,
+		heightPx: options.sizePx,
+		fetch: options.fetch
+	});
 }
