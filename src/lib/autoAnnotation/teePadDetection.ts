@@ -15,7 +15,7 @@
  * candidates within one pad radius are fused rather than choosing either one.
  */
 
-export type TeePadSupport = 'gray-center' | 'edge-loop';
+export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop';
 
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 
@@ -42,6 +42,11 @@ export interface TeePadCandidate {
  */
 export interface TeePadStageCounts {
 	readonly discovered: number;
+	readonly segments?: number;
+	readonly pairs?: number;
+	readonly parallel?: number;
+	readonly geometry?: number;
+	readonly masked?: number;
 	readonly area?: number;
 	readonly size?: number;
 	readonly aspect?: number;
@@ -54,6 +59,12 @@ export interface TeePadStageCounts {
 
 export interface TeePadVariantResult {
 	readonly variant: TeePadVariant;
+	readonly candidates: readonly TeePadCandidate[];
+	readonly stageCounts: TeePadStageCounts;
+}
+
+export interface OccludedEdgeLoopResult {
+	readonly variant: 'occluded-edge-loop';
 	readonly candidates: readonly TeePadCandidate[];
 	readonly stageCounts: TeePadStageCounts;
 }
@@ -80,12 +91,15 @@ export interface TeePadDetectionOptions {
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	/** Keep at most this many fused proposals. Defaults to the 18-hole MVP. */
 	readonly maxCandidates?: number;
+	/** Optional source-image circles whose Canny pixels should be ignored. */
+	readonly ignoreCirclesPx?: readonly Readonly<{ xPx: number; yPx: number; radiusPx: number }>[];
 }
 
 type CvMat = {
 	readonly rows: number;
 	readonly cols: number;
 	readonly data: Uint8Array;
+	readonly data32S?: Int32Array;
 	delete(): void;
 };
 
@@ -132,6 +146,15 @@ export interface TeePadCv {
 	arcLength(curve: CvMat, closed: boolean): number;
 	approxPolyDP(curve: CvMat, approximation: CvMat, epsilon: number, closed: boolean): void;
 	minAreaRect(points: CvMat): CvRotatedRect;
+	HoughLinesP(
+		edges: CvMat,
+		lines: CvMat,
+		rho: number,
+		theta: number,
+		threshold: number,
+		minLineLength: number,
+		maxLineGap: number
+	): void;
 }
 
 interface AnalysisCandidate {
@@ -164,6 +187,25 @@ interface AnalysisContext {
 	readonly gray: Uint8Array;
 	readonly saturation: Uint8Array;
 	readonly value: Uint8Array;
+}
+
+interface HoughSegment {
+	readonly x1: number;
+	readonly y1: number;
+	readonly x2: number;
+	readonly y2: number;
+}
+
+interface OccludedPair {
+	readonly centerX: number;
+	readonly centerY: number;
+	readonly major: number;
+	readonly minor: number;
+	readonly angleDeg: number;
+	readonly angleDeltaDeg: number;
+	readonly overlap: number;
+	readonly firstLength: number;
+	readonly secondLength: number;
 }
 
 const DEFAULT_MAX_CANDIDATES = 18;
@@ -521,6 +563,309 @@ function detectEdgeLoopCandidates(
 		grayMat.delete();
 		blurred.delete();
 		edges.delete();
+	}
+}
+
+function segmentLength(segment: HoughSegment): number {
+	return Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1);
+}
+
+function segmentAngle(segment: HoughSegment): number {
+	return normalizeOrientation((Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1) * 180) / Math.PI);
+}
+
+function houghSegments(lines: CvMat): HoughSegment[] {
+	const values = lines.data32S;
+	if (!values) return [];
+	const segments: HoughSegment[] = [];
+	for (let index = 0; index + 3 < values.length; index += 4) {
+		const segment = {
+			x1: values[index],
+			y1: values[index + 1],
+			x2: values[index + 2],
+			y2: values[index + 3]
+		};
+		if (segmentLength(segment) > 0) segments.push(segment);
+	}
+	return segments;
+}
+
+function maskIgnoredCircles(
+	edges: Uint8Array,
+	width: number,
+	height: number,
+	sourceScale: number,
+	circles: TeePadDetectionOptions['ignoreCirclesPx']
+): number {
+	if (!circles || circles.length === 0) return 0;
+	for (const circle of circles) {
+		const centerX = circle.xPx / sourceScale;
+		const centerY = circle.yPx / sourceScale;
+		const radius = circle.radiusPx / sourceScale;
+		if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(radius) || radius <= 0) continue;
+		const radiusSquared = radius * radius;
+		const firstX = clamp(Math.floor(centerX - radius), 0, width - 1);
+		const lastX = clamp(Math.ceil(centerX + radius), 0, width - 1);
+		const firstY = clamp(Math.floor(centerY - radius), 0, height - 1);
+		const lastY = clamp(Math.ceil(centerY + radius), 0, height - 1);
+		for (let y = firstY; y <= lastY; y += 1) {
+			for (let x = firstX; x <= lastX; x += 1) {
+				const dx = x - centerX;
+				const dy = y - centerY;
+				if (dx * dx + dy * dy <= radiusSquared) edges[y * width + x] = 0;
+			}
+		}
+	}
+	return circles.length;
+}
+
+function occludedPair(
+	first: HoughSegment,
+	second: HoughSegment,
+	sourceScale: number
+): OccludedPair | null {
+	const firstLength = segmentLength(first);
+	const secondLength = segmentLength(second);
+	const minimumSegmentLength = 5 / sourceScale;
+	if (firstLength < minimumSegmentLength || secondLength < minimumSegmentLength) return null;
+
+	const firstUx = (first.x2 - first.x1) / firstLength;
+	const firstUy = (first.y2 - first.y1) / firstLength;
+	let secondUx = (second.x2 - second.x1) / secondLength;
+	let secondUy = (second.y2 - second.y1) / secondLength;
+	const directionDot = firstUx * secondUx + firstUy * secondUy;
+	if (directionDot < 0) {
+		secondUx = -secondUx;
+		secondUy = -secondUy;
+	}
+	const alignedDot = clamp(firstUx * secondUx + firstUy * secondUy, -1, 1);
+	const angleDeltaDeg = (Math.acos(alignedDot) * 180) / Math.PI;
+	if (angleDeltaDeg > 10) return null;
+
+	const directionLength = Math.hypot(firstUx + secondUx, firstUy + secondUy);
+	if (directionLength <= 1e-6) return null;
+	const ux = (firstUx + secondUx) / directionLength;
+	const uy = (firstUy + secondUy) / directionLength;
+	const nx = -uy;
+	const ny = ux;
+
+	const firstStart = { x: first.x1, y: first.y1 };
+	const firstEnd = { x: first.x2, y: first.y2 };
+	const secondStart = { x: second.x1, y: second.y1 };
+	const secondEnd = { x: second.x2, y: second.y2 };
+	const projection = (point: { x: number; y: number }): number => point.x * ux + point.y * uy;
+	const firstRange = [projection(firstStart), projection(firstEnd)].sort((a, b) => a - b);
+	const secondRange = [projection(secondStart), projection(secondEnd)].sort((a, b) => a - b);
+	const overlap = Math.min(firstRange[1], secondRange[1]) - Math.max(firstRange[0], secondRange[0]);
+	if (overlap < 0.35 * Math.min(firstLength, secondLength)) return null;
+
+	const major = Math.max(firstRange[1], secondRange[1]) - Math.min(firstRange[0], secondRange[0]);
+	const majorMinimum = 16 / sourceScale;
+	const majorMaximum = 20 / sourceScale;
+	if (major < majorMinimum || major > majorMaximum) return null;
+
+	const firstMidpoint = { x: (first.x1 + first.x2) * 0.5, y: (first.y1 + first.y2) * 0.5 };
+	const secondMidpoint = { x: (second.x1 + second.x2) * 0.5, y: (second.y1 + second.y2) * 0.5 };
+	const separation = Math.abs(
+		(secondMidpoint.x - firstMidpoint.x) * nx + (secondMidpoint.y - firstMidpoint.y) * ny
+	);
+	const separationMinimum = 5 / sourceScale;
+	const separationMaximum = 8.5 / sourceScale;
+	if (separation < separationMinimum || separation > separationMaximum) return null;
+
+	const centerAlong = (Math.min(firstRange[0], secondRange[0]) + Math.max(firstRange[1], secondRange[1])) * 0.5;
+	const centerAcross =
+		((firstMidpoint.x + secondMidpoint.x) * 0.5) * nx + ((firstMidpoint.y + secondMidpoint.y) * 0.5) * ny;
+	return {
+		centerX: centerAlong * ux + centerAcross * nx,
+		centerY: centerAlong * uy + centerAcross * ny,
+		major,
+		minor: separation,
+		angleDeg: normalizeOrientation((Math.atan2(uy, ux) * 180) / Math.PI),
+		angleDeltaDeg,
+		overlap,
+		firstLength,
+		secondLength
+	};
+}
+
+function occludedPairScore(pair: OccludedPair, visual: VisualStats): number {
+	const lengthFit = clamp(1 - Math.abs(pair.major - 18) / 2, 0, 1);
+	const separationFit = clamp(1 - Math.abs(pair.minor - 6.75) / 1.75, 0, 1);
+	const parallelFit = clamp(1 - pair.angleDeltaDeg / 10, 0, 1);
+	const overlapFit = clamp(pair.overlap / Math.min(pair.firstLength, pair.secondLength), 0, 1);
+	const rimFit = clamp((visual.borderValue - 120) / 80, 0, 1);
+	return 0.28 * lengthFit + 0.24 * separationFit + 0.18 * parallelFit + 0.18 * overlapFit + 0.12 * rimFit;
+}
+
+/**
+ * Targeted recovery for tee pads whose outline is broken by Circle 2 or a
+ * basket icon. It deliberately requires two short, roughly parallel rails and
+ * never attempts to reconstruct a tee from one rail.
+ */
+export function detectOccludedEdgeLoopCandidates(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: TeePadDetectionOptions
+): OccludedEdgeLoopResult {
+	validateInputs(raster, options);
+	const rows = mapRows(raster, options.mapBoundsPx);
+	if (!rows) return { variant: 'occluded-edge-loop', candidates: [], stageCounts: { discovered: 0, final: 0 } };
+
+	const { gray, saturation, value } = readHsv(raster);
+	const grayMat = matFromBytes(cv, gray, raster.widthPx, raster.heightPx);
+	const blurred = new cv.Mat();
+	const edges = new cv.Mat();
+	const lines = new cv.Mat();
+	try {
+		const kernel = new cv.Size(3, 3);
+		cv.GaussianBlur(grayMat, blurred, kernel, 0, 0, cv.BORDER_DEFAULT);
+		cv.Canny(blurred, edges, 50, 150);
+		insideRows(edges.data, raster.widthPx, rows);
+		const masked = maskIgnoredCircles(
+			edges.data,
+			raster.widthPx,
+			raster.heightPx,
+			raster.sourceScale,
+			options.ignoreCirclesPx
+		);
+
+		const sourceScale = raster.sourceScale;
+		cv.HoughLinesP(
+			edges,
+			lines,
+			1,
+			Math.PI / 180,
+			8,
+			5 / sourceScale,
+			6 / sourceScale
+		);
+		const discoveredSegments = houghSegments(lines);
+		const minimumSegmentLength = 5 / sourceScale;
+		const maximumSegmentLength = 20 / sourceScale;
+		const segments = discoveredSegments.filter((segment) => {
+			const length = segmentLength(segment);
+			return length >= minimumSegmentLength && length <= maximumSegmentLength;
+		});
+		const maximumPairDistance = 24 / sourceScale;
+		const pairCellSize = maximumPairDistance;
+		const angleBinCount = 18;
+		const maximumSegmentsPerPairBucket = 12;
+		const segmentAngles = segments.map((segment) => segmentAngle(segment));
+		const pairBuckets = new Map<string, number[]>();
+		for (let index = 0; index < segments.length; index += 1) {
+			const segment = segments[index];
+			const cellX = Math.floor(((segment.x1 + segment.x2) * 0.5) / pairCellSize);
+			const cellY = Math.floor(((segment.y1 + segment.y2) * 0.5) / pairCellSize);
+			const angleBin = Math.floor(segmentAngles[index] / 10);
+			const key = `${cellX},${cellY},${angleBin}`;
+			const bucket = pairBuckets.get(key);
+			if (bucket) bucket.push(index);
+			else pairBuckets.set(key, [index]);
+		}
+		for (const [key, bucket] of pairBuckets) {
+			if (bucket.length <= maximumSegmentsPerPairBucket) continue;
+			bucket.sort(
+				(firstIndex, secondIndex) => segmentLength(segments[secondIndex]) - segmentLength(segments[firstIndex])
+			);
+			pairBuckets.set(key, bucket.slice(0, maximumSegmentsPerPairBucket));
+		}
+		let pairCount = 0;
+		let parallelCount = 0;
+		let geometryCount = 0;
+		let visualCount = 0;
+		const candidates: AnalysisCandidate[] = [];
+		for (let firstIndex = 0; firstIndex < segments.length; firstIndex += 1) {
+			const first = segments[firstIndex];
+			const firstMidpointX = (first.x1 + first.x2) * 0.5;
+			const firstMidpointY = (first.y1 + first.y2) * 0.5;
+			const firstCellX = Math.floor(firstMidpointX / pairCellSize);
+			const firstCellY = Math.floor(firstMidpointY / pairCellSize);
+			const firstAngleBin = Math.floor(segmentAngles[firstIndex] / 10);
+			for (let cellX = firstCellX - 1; cellX <= firstCellX + 1; cellX += 1) {
+				for (let cellY = firstCellY - 1; cellY <= firstCellY + 1; cellY += 1) {
+					for (let angleOffset = -1; angleOffset <= 1; angleOffset += 1) {
+						const angleBin = (firstAngleBin + angleOffset + angleBinCount) % angleBinCount;
+						const bucket = pairBuckets.get(`${cellX},${cellY},${angleBin}`);
+						if (!bucket) continue;
+						for (const secondIndex of bucket) {
+							if (secondIndex <= firstIndex) continue;
+							const second = segments[secondIndex];
+							const secondMidpointX = (second.x1 + second.x2) * 0.5;
+							const secondMidpointY = (second.y1 + second.y2) * 0.5;
+							if (
+								Math.hypot(secondMidpointX - firstMidpointX, secondMidpointY - firstMidpointY) >
+								maximumPairDistance
+							)
+								continue;
+							pairCount += 1;
+							const firstAngle = segmentAngles[firstIndex];
+							const secondAngle = segmentAngles[secondIndex];
+							const angleDifference = Math.abs(firstAngle - secondAngle);
+							const parallelDifference = Math.min(angleDifference, 180 - angleDifference);
+							if (parallelDifference > 10) continue;
+							parallelCount += 1;
+							const pair = occludedPair(first, second, sourceScale);
+							if (!pair) continue;
+							geometryCount += 1;
+							const visual = rotatedRectVisualStats(
+								{
+									center: { x: pair.centerX, y: pair.centerY },
+									size: { width: pair.major, height: pair.minor },
+									angle: pair.angleDeg
+								},
+								raster.widthPx,
+								raster.heightPx,
+								saturation,
+								value
+							);
+							if (!visual || visual.borderValue < 145) continue;
+							visualCount += 1;
+							candidates.push({
+								x: pair.centerX,
+								y: pair.centerY,
+								orientationDeg: pair.angleDeg,
+								width: pair.major,
+								height: pair.minor,
+								score: occludedPairScore(pair, visual),
+								support: 'occluded-edge-loop'
+							});
+						}
+					}
+				}
+			}
+		}
+
+		candidates.sort((a, b) => b.score - a.score);
+		const kept: AnalysisCandidate[] = [];
+		const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+		if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
+			throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
+		}
+		for (const candidate of candidates) {
+			if (kept.some((existing) => tooClose(candidate, existing, 7 * options.uiScalePx / sourceScale))) continue;
+			kept.push(candidate);
+			if (kept.length === maxCandidates) break;
+		}
+		return {
+			variant: 'occluded-edge-loop',
+			candidates: kept.map((candidate) => sourceCandidate(candidate, raster.sourceScale)),
+			stageCounts: {
+				discovered: discoveredSegments.length,
+				segments: segments.length,
+				pairs: pairCount,
+				parallel: parallelCount,
+				geometry: geometryCount,
+				visual: visualCount,
+				masked,
+				final: kept.length
+			}
+		};
+	} finally {
+		grayMat.delete();
+		blurred.delete();
+		edges.delete();
+		lines.delete();
 	}
 }
 
