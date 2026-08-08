@@ -67,26 +67,66 @@ error downstream.
 
 ## Progress
 
-Phase 1, steps 1-3 are implemented (`src/lib/autoAnnotation/teePadDetection.ts`,
-`src/lib/autoAnnotation/basketDetection.worker.ts`):
+**Phase 0 fixture landed:** `resources/GoldenTeeSet.chainspot.zip` (+ `resources/TeeTestBlank.jpg`)
+is a real course capture with ground-truth tee coordinates for all 18 holes
+(`project.json`'s `holes[].tee`), checked in via `agent/phase3-cv-integration` and merged into
+this branch. This unblocked actually measuring instead of guessing. Source image
+(`images/source-original.jpg`, 1290x2091) is a phone photo of a satellite/map view with hand
+overlays, not a UDisc in-app screenshot — a different visual domain than the Python probe's
+clean-course fixture, and that difference explains most of what follows.
 
-- `detectTeePadCandidates` (the production fused entry point) now also runs
-  `detectOccludedEdgeLoopCandidates` and merges its candidates into the fused set using the same
-  one-pad-radius merge rule as the existing gray-center/edge-loop fusion.
-- `detectCourse`'s tee-pad call now runs on the full-resolution raster (`fullResolutionRaster`)
-  instead of the `MAX_ANALYSIS_DIM`-downscaled one used for basket/number matching.
-- `detectCourse` now derives `mapBoundsPx` from the detected number badges
-  (`deriveMapBoundsFromNumbers`, the same heuristic already used by the CLI/experiment path) and
-  passes it into tee-pad detection, restricting the search to the course-map row band.
-- Added `tests/unit/teePadDetection.test.ts`, isolating the occluded-edge-loop detector (via a
-  fake `cv` where `findContours` always reports zero contours) to confirm its candidates now
-  reach `detectTeePadCandidates`'s output.
-- Full unit suite (486 tests) and `tsc --noEmit` pass.
+**Step 1 (full-resolution raster) and step 2 (map-bounds restriction) are implemented and kept**
+in `detectCourse` (`basketDetection.worker.ts`).
 
-**Not yet done: step 4, re-measuring against a real fixture.** No clean-course screenshot is
-checked into the repo or available in this environment, so the actual 14/18 → ?/18 delta from
-these changes is unverified. This is exactly why Phase 0 exists — treat this as implemented but
-unconfirmed until it runs against real data.
+**Step "wire in occluded-edge-loop" was implemented, measured, and reverted.** Against
+`GoldenTeeSet`, it made zero difference to recall (still 12/18 matched, same 6 misses) — its one
+contribution was to add a second support tag to an already-found gray-center candidate, which
+promoted a false positive over a different false positive in the final ranked slice. Net neutral
+here, but a real fragility (support-count ranking can promote a coincidentally-double-tagged wrong
+candidate over a correct single-support one) with no offsetting benefit on real data. Dropped from
+`detectTeePadCandidates` per direct instruction after seeing the measurement.
+
+**New finding, not in the original plan: C2 dash false positives, fixed via size-consistency
+filtering.** Every false positive in the `GoldenTeeSet` fused output turned out to be a Canny
+fragment of a C2 putting-circle dash — passes the gray-center/edge-loop rectangle filters, but its
+minor axis is roughly half a real pad's (~6-8px vs ~15.5px measured on this fixture). A first
+attempt filtered by `heightPx < 0.75 * median(heightPx)`, but the uncapped gray-center detector
+actually finds *more* dash fragments than real pads on this course (24 vs 14), so the population
+median itself sits inside the dash range and the filter did nothing. Replaced with
+`filterSizeConsistentCandidates` (`teePadDetection.ts`): find the largest *relative* gap in sorted
+minor-axis values and, if it looks like a genuine bimodal split (≥30% relative jump, and the upper
+cluster has ≥3 members), keep only the larger-size cluster — real pads are the larger physical
+object regardless of which population is more numerous in the raw candidate pool. Wired into both
+`detectTeePadCandidates` (production) and `detectTeePadVariants`'s `fused` branch (CLI/experiment
+surface), so `npm run detect:tees -- ... --mode fused` reflects the same behavior.
+
+**Measured result on `GoldenTeeSet.chainspot.zip`:** 18 candidates / 6 false positives →
+13 candidates / 1 false positive (a near-miss at hole 10, off by ~7.5px against a 7.15px
+tolerance — arguably a correct detection at a stricter-than-necessary tolerance). Matched/missed
+set unchanged (still 12/18 — holes 2, 3, 5, 7, 10, 12 miss because gray-center/edge-loop simply
+produce no candidate near truth there, not because of crowding), but false-positive rate dropped
+~83%, which matters a lot for `courseGrammar`'s Hungarian assignment once basket detection is
+verified too.
+
+Sam separately ran the in-browser production build (pre-dating the occluded-edge-loop
+revert/size-filter work) and reported misses at only 2, 3, 5, 12 (14/18) — a better number than
+this branch's CLI measurement of 12/18 on the same fixture. That gap is unexplained and worth
+resolving before trusting either number as "the" baseline (see Open questions).
+
+Added `tests/unit/teePadDetection.test.ts` covering `filterSizeConsistentCandidates` directly
+(clear bimodal split, too-small sample to judge, already-consistent set). Full unit suite (488
+tests) and `tsc --noEmit` pass.
+
+## Open questions
+
+- **Reconcile the 12/18 (this branch's CLI, full-res + map-bounds) vs. 14/18 (Sam's in-browser
+  production run, same fixture) discrepancy** before treating either as ground truth. Candidates:
+  different code paths/build than what's on this branch, a different tolerance, or an environment
+  difference in the OpenCV.js runtime vs. Node's `loadCv()`.
+- Holes 2, 3, 5, 7, 10, 12 (this branch) / 2, 3, 5, 12 (Sam's browser run) still produce no
+  candidate near truth at all — that's a genuine recall gap in gray-center/edge-loop on this
+  image domain, not a crowding/precision problem, and needs its own investigation (likely
+  per-hole crops + stage-count inspection, as Phase 1 step 4 originally proposed).
 
 ## Phase 0 — Shared fixture + reproducible measurement (blocking prerequisite)
 

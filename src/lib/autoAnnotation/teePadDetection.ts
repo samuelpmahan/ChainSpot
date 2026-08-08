@@ -901,30 +901,55 @@ function sortAndSliceFused(
 		.slice(0, maxCandidates);
 }
 
+const SIZE_CONSISTENCY_MIN_SAMPLE = 4;
+const SIZE_CONSISTENCY_MIN_RELATIVE_GAP = 0.3;
+const SIZE_CONSISTENCY_MIN_CLUSTER = 3;
+
 /**
- * Merges additional already-source-space candidates (for example the
- * occluded-edge-loop recovery detector) into an existing fused set, using the
- * same one-pad-radius merge rule as `fuseCandidates`.
+ * Finds the widest relative jump between consecutive sorted values and
+ * returns the index of the first value above it (i.e. the boundary of the
+ * upper cluster), or null when no jump looks like a real bimodal split.
  */
-function mergeSourceCandidates(
-	fused: readonly TeePadCandidate[],
-	additional: readonly TeePadCandidate[],
-	radiusPx: number
-): TeePadCandidate[] {
-	const merged = [...fused];
-	for (const candidate of additional) {
-		const existingIndex = merged.findIndex(
-			(kept) => Math.hypot(candidate.xPx - kept.xPx, candidate.yPx - kept.yPx) < radiusPx
-		);
-		if (existingIndex < 0) {
-			merged.push(candidate);
-			continue;
+function largestRelativeGapSplit(sortedValues: readonly number[]): number | null {
+	let bestIndex: number | null = null;
+	let bestRelativeGap = SIZE_CONSISTENCY_MIN_RELATIVE_GAP;
+	for (let index = 1; index < sortedValues.length; index += 1) {
+		const previous = sortedValues[index - 1];
+		const current = sortedValues[index];
+		const relativeGap = (current - previous) / ((previous + current) / 2);
+		if (relativeGap > bestRelativeGap) {
+			bestRelativeGap = relativeGap;
+			bestIndex = index;
 		}
-		const existing = merged[existingIndex];
-		const support = [...new Set([...existing.support, ...candidate.support])].sort() as TeePadSupport[];
-		merged[existingIndex] = { ...existing, score: Math.max(existing.score, candidate.score), support };
 	}
-	return merged;
+	return bestIndex;
+}
+
+/**
+ * On real (photographed/satellite) course captures, a course's C2 putting-circle
+ * dashes produce short arc segments that pass the edge-loop/gray-center
+ * rectangle filters but whose minor axis is roughly half a real tee pad's,
+ * because a dash segment is much narrower than the pad interior. Worse, the
+ * uncapped gray-center detector can find *more* dash artifacts than real
+ * pads on one course, so a population average (mean/median) gets dragged
+ * into the artifact range rather than describing the real pads. Instead,
+ * look for a genuine bimodal split in minor-axis size and keep only the
+ * larger-size cluster: real pads are the larger physical objects, dash
+ * segments are consistently smaller, regardless of which group is more
+ * numerous in the raw candidate pool.
+ */
+export function filterSizeConsistentCandidates(candidates: readonly TeePadCandidate[]): TeePadCandidate[] {
+	if (candidates.length < SIZE_CONSISTENCY_MIN_SAMPLE) return [...candidates];
+	const sortedHeights = candidates.map((candidate) => candidate.heightPx).sort((a, b) => a - b);
+	const splitIndex = largestRelativeGapSplit(sortedHeights);
+	if (splitIndex === null) return [...candidates];
+	const minimumMinorAxis = sortedHeights[splitIndex];
+	const upperCluster = candidates.filter((candidate) => candidate.heightPx >= minimumMinorAxis);
+	// An implausibly small upper cluster likely means the gap was noise inside
+	// one real cluster, not a genuine dash/pad split; keep everything rather
+	// than risk discarding most of the real pads.
+	if (upperCluster.length < SIZE_CONSISTENCY_MIN_CLUSTER) return [...candidates];
+	return upperCluster;
 }
 
 /**
@@ -932,13 +957,12 @@ function mergeSourceCandidates(
  * worker. The caller owns every Mat passed through `cv`; this function frees
  * all temporary Mats before it returns or throws.
  *
- * This is the fused entry point used by full-course detection. It fuses all
- * three detectors: the gray-center and edge-loop pair proven on the clean
- * fixture, plus occluded-edge-loop, which recovers pads whose outline is
- * broken by a C2 putting circle or basket icon and which the other two
- * detectors structurally cannot see. occluded-edge-loop previously only ran
- * on the CLI/experiment surface (`detectTeePadVariants`); production course
- * detection did not include it.
+ * This is the fused entry point used by full-course detection. It fuses the
+ * gray-center and edge-loop detectors, then drops fused candidates whose
+ * minor axis is well under the size established by the rest of the set
+ * (see `filterSizeConsistentCandidates`) before taking the top
+ * `maxCandidates`, so a C2 dash artifact cannot displace a real pad from the
+ * final slice.
  */
 export function detectTeePadCandidates(
 	cv: TeePadCv,
@@ -955,14 +979,13 @@ export function detectTeePadCandidates(
 	const { candidates: detectorB } = detectEdgeLoopCandidates(ctx, MAX_EDGE_CANDIDATES);
 
 	const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
-	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, options);
-	const withOccluded = mergeSourceCandidates(fused, occluded.candidates, 7 * options.uiScalePx);
+	const sizeConsistent = filterSizeConsistentCandidates(fused);
 
 	const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 	if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
 		throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 	}
-	return sortAndSliceFused(withOccluded, maxCandidates);
+	return sortAndSliceFused(sizeConsistent, maxCandidates);
 }
 
 /**
@@ -1017,11 +1040,12 @@ export function detectTeePadVariants(
 				MAX_EDGE_CANDIDATES
 			);
 			const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
+			const sizeConsistent = filterSizeConsistentCandidates(fused);
 			const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 			if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
 				throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 			}
-			const candidates = sortAndSliceFused(fused, maxCandidates);
+			const candidates = sortAndSliceFused(sizeConsistent, maxCandidates);
 			results.push({
 				variant: 'fused',
 				candidates,
