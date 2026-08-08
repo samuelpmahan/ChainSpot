@@ -902,12 +902,43 @@ function sortAndSliceFused(
 }
 
 /**
+ * Merges additional already-source-space candidates (for example the
+ * occluded-edge-loop recovery detector) into an existing fused set, using the
+ * same one-pad-radius merge rule as `fuseCandidates`.
+ */
+function mergeSourceCandidates(
+	fused: readonly TeePadCandidate[],
+	additional: readonly TeePadCandidate[],
+	radiusPx: number
+): TeePadCandidate[] {
+	const merged = [...fused];
+	for (const candidate of additional) {
+		const existingIndex = merged.findIndex(
+			(kept) => Math.hypot(candidate.xPx - kept.xPx, candidate.yPx - kept.yPx) < radiusPx
+		);
+		if (existingIndex < 0) {
+			merged.push(candidate);
+			continue;
+		}
+		const existing = merged[existingIndex];
+		const support = [...new Set([...existing.support, ...candidate.support])].sort() as TeePadSupport[];
+		merged[existingIndex] = { ...existing, score: Math.max(existing.score, candidate.score), support };
+	}
+	return merged;
+}
+
+/**
  * Detect tee-pad proposals from an RGBA raster inside the existing OpenCV
  * worker. The caller owns every Mat passed through `cv`; this function frees
  * all temporary Mats before it returns or throws.
  *
- * This is the original fused entry point used by full-course detection.
- * Behavior is preserved from before the experiment-surface refactor.
+ * This is the fused entry point used by full-course detection. It fuses all
+ * three detectors: the gray-center and edge-loop pair proven on the clean
+ * fixture, plus occluded-edge-loop, which recovers pads whose outline is
+ * broken by a C2 putting circle or basket icon and which the other two
+ * detectors structurally cannot see. occluded-edge-loop previously only ran
+ * on the CLI/experiment surface (`detectTeePadVariants`); production course
+ * detection did not include it.
  */
 export function detectTeePadCandidates(
 	cv: TeePadCv,
@@ -924,12 +955,14 @@ export function detectTeePadCandidates(
 	const { candidates: detectorB } = detectEdgeLoopCandidates(ctx, MAX_EDGE_CANDIDATES);
 
 	const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
+	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, options);
+	const withOccluded = mergeSourceCandidates(fused, occluded.candidates, 7 * options.uiScalePx);
 
 	const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 	if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
 		throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 	}
-	return sortAndSliceFused(fused, maxCandidates);
+	return sortAndSliceFused(withOccluded, maxCandidates);
 }
 
 /**

@@ -482,16 +482,23 @@ async function detectCourse(request: BasketDetectionRequest) {
 		'tees',
 		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting tee pads…`
 	);
+	// Tee-pad rectangles are tiny (roughly 13x8 UI px), and their size/aspect
+	// thresholds are tuned tight against full-resolution pixels, so detection
+	// runs on the full-resolution raster rather than the MAX_ANALYSIS_DIM
+	// raster used for basket/number matching. The search is also restricted to
+	// the course-map row band derived from the number badges so off-map UI
+	// chrome cannot crowd real pads out of the maxCandidates slice.
+	const mapBoundsPx = deriveMapBoundsFromNumbers(numberDetection.candidates, request.heightPx);
 	const tees = uiScalePx
 		? detectTeePadCandidates(
 				cv as unknown as TeePadCv,
 				{
-					rgba: raster.rgba,
-					widthPx: raster.width,
-					heightPx: raster.height,
-					sourceScale
+					rgba: fullResolutionRaster(request.bitmap).rgba,
+					widthPx: request.widthPx,
+					heightPx: request.heightPx,
+					sourceScale: 1
 				},
-				{ uiScalePx }
+				{ uiScalePx, mapBoundsPx }
 			)
 		: [];
 

@@ -1,9 +1,12 @@
 # Plan: close the tee-pad / basket detection gap to 18/18
 
-Context: this plan targets the CV auto-annotation work on `origin/agent/phase3-cv-integration`
-(hole-number detection, tee-pad detection, basket detection, `courseGrammar.ts`). That code
-does not exist on this branch yet — this document is the plan for closing the gap, to be
-executed against (or merged from) that branch.
+Context: this plan targets the CV auto-annotation work originally on `agent/phase3-cv-integration`
+(hole-number detection, tee-pad detection, basket detection, `courseGrammar.ts`), merged into
+this branch to implement against.
+
+**Status: Phase 1, steps 1-3 implemented** (see "Progress" below). Step 4 (re-measure against a
+real fixture) and everything from Phase 0 onward is still blocked on getting a real clean-course
+screenshot checked into the repo — see Phase 0.
 
 ## Current state
 
@@ -61,6 +64,29 @@ Basket detection also structurally diverges from the proven probe (fixed absolut
 same downscaled-raster issue as (2)) — flagged in Phase 2 below because its output feeds
 `courseGrammar`'s tee/basket polarity cost, so a basket error can look like a tee-assignment
 error downstream.
+
+## Progress
+
+Phase 1, steps 1-3 are implemented (`src/lib/autoAnnotation/teePadDetection.ts`,
+`src/lib/autoAnnotation/basketDetection.worker.ts`):
+
+- `detectTeePadCandidates` (the production fused entry point) now also runs
+  `detectOccludedEdgeLoopCandidates` and merges its candidates into the fused set using the same
+  one-pad-radius merge rule as the existing gray-center/edge-loop fusion.
+- `detectCourse`'s tee-pad call now runs on the full-resolution raster (`fullResolutionRaster`)
+  instead of the `MAX_ANALYSIS_DIM`-downscaled one used for basket/number matching.
+- `detectCourse` now derives `mapBoundsPx` from the detected number badges
+  (`deriveMapBoundsFromNumbers`, the same heuristic already used by the CLI/experiment path) and
+  passes it into tee-pad detection, restricting the search to the course-map row band.
+- Added `tests/unit/teePadDetection.test.ts`, isolating the occluded-edge-loop detector (via a
+  fake `cv` where `findContours` always reports zero contours) to confirm its candidates now
+  reach `detectTeePadCandidates`'s output.
+- Full unit suite (486 tests) and `tsc --noEmit` pass.
+
+**Not yet done: step 4, re-measuring against a real fixture.** No clean-course screenshot is
+checked into the repo or available in this environment, so the actual 14/18 → ?/18 delta from
+these changes is unverified. This is exactly why Phase 0 exists — treat this as implemented but
+unconfirmed until it runs against real data.
 
 ## Phase 0 — Shared fixture + reproducible measurement (blocking prerequisite)
 
