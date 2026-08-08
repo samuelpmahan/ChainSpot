@@ -4,9 +4,10 @@ Context: this plan targets the CV auto-annotation work originally on `agent/phas
 (hole-number detection, tee-pad detection, basket detection, `courseGrammar.ts`), merged into
 this branch to implement against.
 
-**Status: Phase 1, steps 1-3 implemented** (see "Progress" below). Step 4 (re-measure against a
-real fixture) and everything from Phase 0 onward is still blocked on getting a real clean-course
-screenshot checked into the repo — see Phase 0.
+**Status:** Phase 1 (tee pads) done against `resources/GoldenTeeSet.chainspot.zip` — see "Progress"
+below. Phase 2 (baskets) is now also done, with a new `scripts/detect-baskets.ts` CLI and a
+pure `basketTemplateDetection.ts` module — see "Phase 2 findings" below. Both were blocked on
+Phase 0 (a real fixture with ground truth) until `GoldenTeeSet.chainspot.zip` landed.
 
 ## Current state
 
@@ -159,16 +160,67 @@ real clean-course screenshot that lives only in a local/session path
    on genuinely missed pads only, not by loosening thresholds broadly, to avoid trading misses
    for new false positives.
 
-## Phase 2 — Verify (and if needed, close) the basket gap
+## Phase 2 — Basket detection: done, 18/18 on GoldenTeeSet
 
-1. Run the Phase 0 harness against baskets specifically and get a real number — do not assume
-   18/18 holds in production; it has never been measured against a truth set.
-2. If short of 18/18, port the `uiScale`-relative multiscale search
-   (`linspace(uiScale*0.90, uiScale*1.10, 9)`) and NMS radius (`22*scale`) from the Python
-   probe/tee-pad precedent, replacing the current fixed `SEARCH_SCALES` ladder and `MIN_SCORE = 0.42`.
+Built `scripts/detect-baskets.ts` (`npm run detect:baskets -- <image-or-.chainspot.zip> --out <dir>`)
+and a new pure, environment-agnostic module `src/lib/autoAnnotation/basketTemplateDetection.ts`
+(mirrors `teePadDetection.ts`'s split from its worker), covered by
+`tests/unit/basketTemplateDetection.test.ts`. Production basket detection
+(`basketDetection.worker.ts`) turned out to have four independent, compounding bugs, all fixed
+in the new module:
+
+1. **Wrong template asset.** Production matched against
+   `src/lib/autoAnnotation/basket-template.png` (82×105), which has a green circular halo baked
+   in behind the flag icon — an artifact of whatever UI state it was captured from. The canonical
+   `static/resources/chainspot_cv_templates/basket.png` (27×41, what the proven Python probe uses)
+   is a clean flag glyph with no halo, matching how baskets actually render on real captures.
+   Cross-correlation against ~40% "background that doesn't exist in the real image" suppressed
+   scores regardless of scale.
+2. **Local-maxima window was 3×3, not the documented 11×11.** The code comment claimed to match
+   the proven probe's `cv2.dilate(response, np.ones((11,11)))` NMS step; the loop only checked
+   the 8 immediate neighbors. Let far more near-duplicate noisy peaks through per scale than
+   intended — the same failure shape as the tee-pad C2-dash crowding bug.
+3. **Wrong semantic anchor fraction.** `BASKET_BASE_Y_FRACTION = 0.80` vs. the proven probe's
+   `0.96` (bottom-center stem base) — a systematic ~16%-of-template-height position bias on
+   every detection.
+4. **The real blocker: `uiScalePx` doesn't transfer from number badges to baskets on this fixture
+   class.** Even after fixing 1-3, using the number-badge-derived `uiScalePx` (~1.02) found only
+   3/18 candidates. Measuring the actual basket icon's pixel size directly (crop + eyeball) showed
+   it's roughly 2x what `uiScalePx` predicted. That ratio holds on the Python probe's fixture
+   because the same UI (UDisc's own screenshot) draws both the number badge and the basket icon at
+   a shared, consistent scale — it does **not** hold here, because `GoldenTeeSet`'s source image is
+   a photographed/exported map capture with custom pin-style markers from a different tool
+   entirely, where a basket pin can be drawn at a very different multiple of its canonical
+   template's size than a number badge is of its own.
+
+   Fixed by decoupling basket scale from `uiScalePx` entirely: `findBasketAnchorScale` runs its
+   own blind scale sweep (same strategy the proven probe's `ui_scale_from_hole_one` already uses
+   to derive the number-badge scale from scratch — coarse sweep, keep whichever scale gives the
+   single best match), independent of anything numbers derived. Map-bounds restriction still uses
+   number-badge *positions* (unaffected by this issue, still a reliable proxy for the course-map
+   row band) — only the *scale* linkage was cut.
+
+**Result on `GoldenTeeSet.chainspot.zip`** (no `--basket-scale` override — fully self-calibrated):
+**18/18** candidates, scores 0.85-0.92, every one visually confirmed landing on the correct basket
+icon. `GoldenTeeSet` has no basket ground truth in its `project.json` (`holes[].basket` is absent,
+unlike `holes[].tee`), so this is a strong visual confirmation, not yet a truth-scored number —
+worth adding basket truth to a fixture (or the mentioned separate "golden basket set") to make
+this a hard, CI-checkable assertion per Phase 4.
+
+**Known cost:** the blind sweep is slow (default range 0.4-4.0 at 0.05 steps, full-image
+`matchTemplate` per step) — this run took on the order of a few minutes end-to-end including
+number-badge map-bounds derivation. Fine for an offline CLI investigation; worth a coarse-to-fine
+two-pass sweep before this becomes a per-load production step (not done here).
+
+**Not yet done:** wiring the fixed `basketTemplateDetection.ts` into production
+(`basketDetection.worker.ts`'s `detectCourse` and the standalone "Basket assist" `detect()`
+path) — this phase deliberately stopped at CLI-verified-correct, mirroring how tee-pad fixes were
+measured via CLI before touching the worker. `courseGrammar`'s basket-assignment cost consuming
+the corrected `0.96` stem-base anchor is still open (item 3 below).
+
 3. Confirm the basket's semantic endpoint (bottom-center stem base, `y + 0.96*height`, not
-   glyph/icon center) survives unchanged into `courseGrammar`'s basket-assignment cost, since
-   that's the anchor the tee/basket polarity penalty depends on.
+   glyph/icon center) survives unchanged into `courseGrammar`'s basket-assignment cost once the
+   fix is wired into production, since that's the anchor the tee/basket polarity penalty depends on.
 
 ## Phase 3 — Course grammar: clarify what "bumps to 18/18" can mean
 

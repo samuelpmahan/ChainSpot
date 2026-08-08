@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "detect:tees": "tsx scripts/detect-tees.ts",
+    "detect:baskets": "tsx scripts/detect-baskets.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
