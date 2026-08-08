@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'vitest';
-import { planHoleGraphic, renderHoleGraphic } from '../../src/lib/holeGraphics';
+import {
+	buildHoleGraphicMarkup,
+	planHoleGraphic,
+	renderHoleGraphicPng,
+	zipHoleGraphics
+} from '../../src/lib/holeGraphics';
 import type { HoleGraphicRenderEnv } from '../../src/lib/holeGraphics';
-import { deriveCorridorBand } from '../../src/lib/corridor';
+import { deriveCorridorBand, deriveCorridorCenterline } from '../../src/lib/corridor';
 import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 import type { SerializableTransform } from '../../src/lib/alignment/types';
 
@@ -29,14 +34,14 @@ describe('planHoleGraphic', () => {
 		expect(planHoleGraphic(hole, IDENTITY, 1000, 1000)).toBeNull();
 	});
 
-	test('transforms tee/basket/shots and the derived corridor band, and frames a padded, clamped crop', () => {
+	test('transforms tee/basket/shots/centerline/bends and the derived corridor band, and frames a padded, clamped crop', () => {
 		const hole: AnnotatedHole = {
 			id: 'h1',
 			number: 5,
 			tee: { xPx: 10, yPx: 10 },
 			basket: { xPx: 60, yPx: 40 },
 			shots: [{ id: 's1', landing: { xPx: 30, yPx: 20 } }],
-			corridorBends: [],
+			corridorBends: [{ xPx: 40, yPx: 30 }],
 			corridorWidthPx: 20
 		};
 
@@ -47,6 +52,8 @@ describe('planHoleGraphic', () => {
 		expect(plan!.tee).toEqual({ xPx: 120, yPx: 70 });
 		expect(plan!.basket).toEqual({ xPx: 220, yPx: 130 });
 		expect(plan!.shots).toEqual([{ xPx: 160, yPx: 90 }]);
+		expect(plan!.targetWidthPx).toBe(1000);
+		expect(plan!.targetHeightPx).toBe(1000);
 		// The band is derived from the authoritative centerline + width, then transformed.
 		expect(plan!.corridorBand).toEqual(
 			deriveCorridorBand(hole)!.map((point) => ({
@@ -54,7 +61,13 @@ describe('planHoleGraphic', () => {
 				yPx: point.yPx * 2 + 50
 			}))
 		);
-		expect(plan!.corridorBand!.length).toBe(4);
+		expect(plan!.centerline).toEqual(
+			deriveCorridorCenterline(hole).map((point) => ({
+				xPx: point.xPx * 2 + 100,
+				yPx: point.yPx * 2 + 50
+			}))
+		);
+		expect(plan!.bends).toEqual([{ xPx: 180, yPx: 110 }]);
 
 		// Crop must frame the derived band as well as the placed points.
 		const bandX = plan!.corridorBand!.map((point) => point.xPx);
@@ -97,78 +110,84 @@ describe('planHoleGraphic', () => {
 	});
 });
 
-describe('renderHoleGraphic', () => {
-	function fakeEnv(): { env: HoleGraphicRenderEnv; canvas: { width: number; height: number }; calls: string[] } {
-		const calls: string[] = [];
-		const canvas = { width: 0, height: 0 };
-		const context = {
-			drawImage: (..._args: unknown[]) => calls.push('drawImage'),
-			beginPath: () => calls.push('beginPath'),
-			moveTo: () => calls.push('moveTo'),
-			lineTo: () => calls.push('lineTo'),
-			closePath: () => calls.push('closePath'),
-			fill: () => calls.push('fill'),
-			stroke: () => calls.push('stroke'),
-			arc: () => calls.push('arc'),
-			fillRect: () => calls.push('fillRect'),
-			fillText: () => calls.push('fillText'),
-			measureText: () => ({ width: 40 }),
-			setLineDash: () => calls.push('setLineDash'),
-			fillStyle: '',
-			strokeStyle: '',
-			lineWidth: 0,
-			font: ''
-		};
-		const env: HoleGraphicRenderEnv = {
-			createCanvas: () => ({ ...canvas, getContext: () => context }) as unknown as HTMLCanvasElement,
-			toBlob: async () => new Blob(['hole-graphic'])
-		};
-		return { env, canvas, calls };
+describe('buildHoleGraphicMarkup', () => {
+	function planFor(hole: AnnotatedHole): ReturnType<typeof planHoleGraphic> {
+		return planHoleGraphic(hole, IDENTITY, 1000, 1000);
 	}
 
-	test('sizes the canvas to the crop and draws the cropped region, corridor band, guides, markers, and label', async () => {
-		const { env, calls } = fakeEnv();
-		const plan = planHoleGraphic(
-			{
-				id: 'h1',
-				number: 3,
-				tee: { xPx: 10, yPx: 10 },
-				basket: { xPx: 60, yPx: 40 },
-				shots: [{ id: 's1', landing: { xPx: 30, yPx: 20 } }],
-				corridorBends: [],
-				corridorWidthPx: 20
-			},
-			IDENTITY,
-			1000,
-			1000
-		)!;
-		const image = {} as HTMLImageElement;
+	test('crops via viewBox and references the target image href directly (no pixel copy)', () => {
+		const plan = planFor({
+			id: 'h1',
+			number: 3,
+			tee: { xPx: 10, yPx: 10 },
+			basket: { xPx: 60, yPx: 40 },
+			shots: [{ id: 's1', landing: { xPx: 30, yPx: 20 } }],
+			corridorBends: [],
+			corridorWidthPx: 20
+		})!;
 
-		const blob = await renderHoleGraphic(image, plan, env);
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
 
-		expect(calls).toContain('drawImage');
-		// 1 corridor band fill + 3 marker fills (tee, basket, one shot).
-		expect(calls.filter((call) => call === 'fill')).toHaveLength(4);
-		expect(calls.filter((call) => call === 'arc')).toHaveLength(3); // one per marker
-		expect(calls).toContain('fillText'); // hole number label
-		expect(blob.size).toBeGreaterThan(0);
+		expect(markup).toContain(`viewBox="${plan.crop.xPx} ${plan.crop.yPx} ${plan.crop.widthPx} ${plan.crop.heightPx}"`);
+		expect(markup).toContain('href="blob:http://example/target"');
+		expect(markup).toContain('width="1000" height="1000"'); // full target dims, not the crop
+		expect(markup).toContain('<polygon'); // corridor band
+		expect(markup).toContain('<polyline'); // centerline and/or guide
+		expect(markup).toContain('Hole 3');
 	});
 
-	test('skips the corridor draw entirely when absent, without erroring', async () => {
+	test('escapes the href so a URL cannot break out of the attribute', () => {
+		const plan = planFor({ id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 })!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/"><script>alert(1)</script>');
+		expect(markup).not.toContain('<script>');
+		expect(markup).toContain('&quot;&gt;&lt;script&gt;');
+	});
+
+	test('skips the corridor and centerline entirely when absent, without erroring', () => {
+		const plan = planFor({ id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 })!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
+		expect(markup).not.toContain('<polygon');
+		expect(markup).not.toContain('<polyline');
+	});
+});
+
+describe('renderHoleGraphicPng', () => {
+	function fakeEnv(): { env: HoleGraphicRenderEnv; calls: string[] } {
+		const calls: string[] = [];
+		const canvas = {
+			width: 0,
+			height: 0,
+			getContext: () => ({
+				drawImage: (..._args: unknown[]) => calls.push('drawImage')
+			})
+		};
+		const env: HoleGraphicRenderEnv = {
+			createCanvas: () => canvas as unknown as HTMLCanvasElement,
+			toBlob: async () => {
+				calls.push('toBlob');
+				return new Blob(['hole-graphic']);
+			},
+			loadImage: async (url) => {
+				calls.push(`loadImage:${url.startsWith('data:image/svg+xml') ? 'svg' : url}`);
+				return { width: 10, height: 10 } as unknown as CanvasImageSource & { width: number; height: number };
+			}
+		};
+		return { env, calls };
+	}
+
+	test('rasterizes the built SVG markup onto a canvas sized to the crop', async () => {
 		const { env, calls } = fakeEnv();
 		const plan = planHoleGraphic(
-			{ id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 },
+			{ id: 'h1', number: 3, tee: { xPx: 10, yPx: 10 }, basket: { xPx: 60, yPx: 40 }, shots: [], corridorBends: [], corridorWidthPx: 20 },
 			IDENTITY,
 			1000,
 			1000
 		)!;
-		const image = {} as HTMLImageElement;
 
-		await renderHoleGraphic(image, plan, env);
+		const blob = await renderHoleGraphicPng('blob:http://example/target', plan, env);
 
-		// One marker (tee) draws exactly one arc+fill; no corridor, no guide line (needs >= 2 points).
-		expect(calls.filter((call) => call === 'arc')).toHaveLength(1);
-		expect(calls.filter((call) => call === 'moveTo')).toHaveLength(0);
+		expect(calls).toEqual(['loadImage:svg', 'drawImage', 'toBlob']);
+		expect(blob.size).toBeGreaterThan(0);
 	});
 
 	test('throws a typed error when canvas 2D context allocation fails', async () => {
@@ -180,8 +199,23 @@ describe('renderHoleGraphic', () => {
 		)!;
 		const env: HoleGraphicRenderEnv = {
 			createCanvas: () => ({ getContext: () => null }) as unknown as HTMLCanvasElement,
-			toBlob: async () => new Blob()
+			toBlob: async () => new Blob(),
+			loadImage: async () => ({ width: 10, height: 10 }) as unknown as CanvasImageSource & { width: number; height: number }
 		};
-		await expect(renderHoleGraphic({} as HTMLImageElement, plan, env)).rejects.toThrow(/allocate a canvas/);
+		await expect(renderHoleGraphicPng('blob:http://example/target', plan, env)).rejects.toThrow(/allocate a canvas/);
+	});
+});
+
+describe('zipHoleGraphics', () => {
+	test('names entries hole-01.png..hole-NN.png inside a single zip blob', async () => {
+		const zip = await zipHoleGraphics([
+			{ number: 1, blob: new Blob(['a']) },
+			{ number: 12, blob: new Blob(['b']) }
+		]);
+		expect(zip.type).toBe('application/zip');
+		const { unzipSync } = await import('fflate');
+		const bytes = new Uint8Array(await zip.arrayBuffer());
+		const files = unzipSync(bytes);
+		expect(Object.keys(files).sort()).toEqual(['hole-01.png', 'hole-12.png']);
 	});
 });

@@ -205,9 +205,7 @@ test('holes survive save, full page reload, and reopen — and are still buildab
 	await expect(page.getByTestId('alignment-summary')).toContainText('similarity transform from 2 pairs');
 
 	await page.getByTestId('hole-graphics').scrollIntoViewIfNeeded();
-	await expect(page.getByTestId('build-hole-graphics')).toHaveText('Build 1 hole graphic');
-	await page.getByTestId('build-hole-graphics').click();
-	await page.waitForSelector('[data-testid="hole-graphic-image-1"]');
+	await page.waitForSelector('[data-testid="hole-graphic-preview-1"]');
 
 	// Re-saving reproduces the same hole geometry: no drift across the round trip.
 	const resavePromise = page.waitForEvent('download');

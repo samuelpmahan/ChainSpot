@@ -59,7 +59,7 @@
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
-	import { planHoleGraphic, renderHoleGraphic } from '$lib/holeGraphics';
+	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
 	import type { HoleGraphicPlan } from '$lib/holeGraphics';
 
 	interface Props {
@@ -90,7 +90,6 @@
 		if (participatesInSession) retainEditor('create-graphics', editor);
 		clearNaipPreview();
 		handleBoxHandleUp();
-		clearHoleGraphicPreviews();
 	});
 
 	let refreshCount = $state(0);
@@ -147,9 +146,11 @@
 	/**
 	 * Clean hole construction: applies the estimated transform above to every
 	 * annotated hole's source-space points, producing target-space plans ready to
-	 * render. Purely derived — no rendering happens until the user explicitly
-	 * clicks "Build hole graphics", matching the app's convention that nothing
-	 * heavier than pointer input runs without an explicit action.
+	 * render. Purely derived, so the SVG preview below is always live — it
+	 * updates as annotations or the alignment change, with no separate "build"
+	 * step. Rendering to a downloadable PNG (or a batch zip) is the only thing
+	 * that stays an explicit action, since that's genuinely expensive work
+	 * (canvas rasterization per hole), not just pointer input.
 	 *
 	 * Reads holes from durable project state, NOT from the `annotatedRound`
 	 * session artifact: a project reopened from a saved bundle has holes but no
@@ -174,38 +175,62 @@
 		return plans;
 	});
 
-	let holeGraphicPreviews = $state<Map<string, { blob: Blob; objectUrl: string }>>(new Map());
-	let holeGraphicsLoading = $state(false);
-	let holeGraphicsError = $state<string | null>(null);
-
-	function clearHoleGraphicPreviews(): void {
-		for (const preview of holeGraphicPreviews.values()) URL.revokeObjectURL(preview.objectUrl);
-		holeGraphicPreviews = new Map();
+	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
+	function targetImageHref(): string | null {
+		const target = targetImage();
+		if (!target) return null;
+		const decoded = editor.getAssetResource(target.id)?.decoded;
+		return decoded instanceof HTMLImageElement ? decoded.src : null;
 	}
 
-	async function handleBuildHoleGraphics(): Promise<void> {
-		const plans = holeGraphicPlans;
-		const target = targetImage();
-		if (plans.length === 0 || !target || holeGraphicsLoading) return;
-		const decoded = editor.getAssetResource(target.id)?.decoded;
-		if (!(decoded instanceof HTMLImageElement)) {
-			holeGraphicsError = 'The clean target image is not available to render from.';
-			return;
-		}
-		holeGraphicsLoading = true;
+	let holeGraphicDownloading = $state<Set<string>>(new Set());
+	let holeGraphicsZipping = $state(false);
+	let holeGraphicsError = $state<string | null>(null);
+
+	function triggerBlobDownload(blob: Blob, fileName: string): void {
+		const objectUrl = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		anchor.href = objectUrl;
+		anchor.download = fileName;
+		anchor.click();
+		URL.revokeObjectURL(objectUrl);
+	}
+
+	async function handleDownloadHoleGraphic(plan: HoleGraphicPlan): Promise<void> {
+		const href = targetImageHref();
+		if (!href || holeGraphicDownloading.has(plan.holeId)) return;
+		holeGraphicDownloading = new Set(holeGraphicDownloading).add(plan.holeId);
 		holeGraphicsError = null;
 		try {
-			const next = new Map<string, { blob: Blob; objectUrl: string }>();
-			for (const plan of plans) {
-				const blob = await renderHoleGraphic(decoded, plan);
-				next.set(plan.holeId, { blob, objectUrl: URL.createObjectURL(blob) });
-			}
-			clearHoleGraphicPreviews();
-			holeGraphicPreviews = next;
+			const blob = await renderHoleGraphicPng(href, plan);
+			triggerBlobDownload(blob, `hole-${plan.number}.png`);
 		} catch (error) {
-			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphics.';
+			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphic.';
 		} finally {
-			holeGraphicsLoading = false;
+			const next = new Set(holeGraphicDownloading);
+			next.delete(plan.holeId);
+			holeGraphicDownloading = next;
+		}
+	}
+
+	async function handleDownloadAllHoleGraphics(): Promise<void> {
+		const plans = holeGraphicPlans;
+		const href = targetImageHref();
+		if (plans.length === 0 || !href || holeGraphicsZipping) return;
+		holeGraphicsZipping = true;
+		holeGraphicsError = null;
+		try {
+			const entries = [];
+			for (const plan of plans) {
+				const blob = await renderHoleGraphicPng(href, plan);
+				entries.push({ number: plan.number, blob });
+			}
+			const zip = await zipHoleGraphics(entries);
+			triggerBlobDownload(zip, 'hole-graphics.zip');
+		} catch (error) {
+			holeGraphicsError = error instanceof Error ? error.message : 'Could not build the hole graphics zip.';
+		} finally {
+			holeGraphicsZipping = false;
 		}
 	}
 	let selection = $state<PointSelection | null>(null);
@@ -2145,48 +2170,45 @@
 			<h2 id="hole-graphics-heading">Hole graphics</h2>
 			<p class="alignment-empty">
 				Applies the alignment above to every annotated hole's tee, basket, shot,
-				and corridor points, then crops and renders one clean graphic per hole.
-				Holes with no placed points yet are skipped.
+				bend, and corridor points, live — previews below update as annotations or
+				the alignment change. Holes with no placed points yet are skipped.
 			</p>
-			<button
-				type="button"
-				data-testid="build-hole-graphics"
-				disabled={holeGraphicPlans.length === 0 || holeGraphicsLoading}
-				onclick={handleBuildHoleGraphics}
-			>
-				{holeGraphicsLoading
-					? 'Building…'
-					: `Build ${holeGraphicPlans.length} hole graphic${holeGraphicPlans.length === 1 ? '' : 's'}`}
-			</button>
 			{#if holeGraphicPlans.length === 0}
 				<p class="alignment-empty" data-testid="hole-graphics-empty">
 					No hole has both a placed point and a usable alignment yet.
 				</p>
+			{:else}
+				<button
+					type="button"
+					data-testid="download-all-hole-graphics"
+					disabled={holeGraphicsZipping}
+					onclick={handleDownloadAllHoleGraphics}
+				>
+					{holeGraphicsZipping ? 'Zipping…' : `Download all ${holeGraphicPlans.length} as .zip`}
+				</button>
 			{/if}
 			{#if holeGraphicsError}
 				<p class="error" data-testid="hole-graphics-error" role="alert">{holeGraphicsError}</p>
 			{/if}
-			{#if holeGraphicPreviews.size > 0}
+			{#if holeGraphicPlans.length > 0}
+				{@const href = targetImageHref()}
 				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
 					{#each holeGraphicPlans as plan (plan.holeId)}
-						{@const preview = holeGraphicPreviews.get(plan.holeId)}
-						{#if preview}
-							<li class="hole-graphic-item">
-								<img
-									class="hole-graphic-image"
-									src={preview.objectUrl}
-									alt={`Clean graphic for hole ${plan.number}`}
-									data-testid="hole-graphic-image-{plan.number}"
-								/>
-								<a
-									href={preview.objectUrl}
-									download={`hole-${plan.number}.png`}
-									data-testid="hole-graphic-download-{plan.number}"
-								>
-									Download hole {plan.number}
-								</a>
-							</li>
-						{/if}
+						<li class="hole-graphic-item">
+							{#if href}
+								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
+									{@html buildHoleGraphicMarkup(plan, href)}
+								</div>
+							{/if}
+							<button
+								type="button"
+								data-testid="hole-graphic-download-{plan.number}"
+								disabled={!href || holeGraphicDownloading.has(plan.holeId)}
+								onclick={() => handleDownloadHoleGraphic(plan)}
+							>
+								{holeGraphicDownloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
+							</button>
+						</li>
 					{/each}
 				</ul>
 			{/if}
@@ -2754,16 +2776,21 @@
 		align-items: flex-start;
 	}
 
-	.hole-graphic-image {
+	.hole-graphic-preview {
 		max-width: 14rem;
 		max-height: 10rem;
-		width: auto;
-		height: auto;
+		overflow: hidden;
 		border: 1px solid #ccc;
 		border-radius: 4px;
 	}
 
-	.hole-graphic-item a {
+	.hole-graphic-preview :global(svg) {
+		display: block;
+		max-width: 100%;
+		max-height: 100%;
+	}
+
+	.hole-graphic-item button {
 		font-size: 0.8rem;
 	}
 

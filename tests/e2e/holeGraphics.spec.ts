@@ -164,27 +164,38 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	await createPair(page, { xPx: 700, yPx: 500 }, { xPx: 900, yPx: 700 });
 	await expect(page.getByTestId('alignment-summary')).toContainText('similarity transform from 2 pairs');
 
-	// 3. Exactly one buildable plan (the fully-annotated hole), build it, and confirm
-	// the result is a real, differently-sized PNG framed around the transformed points.
+	// 3. Exactly one buildable plan (the fully-annotated hole). Its preview
+	// renders live, with no explicit "build" step, framed to the hole's own
+	// bounding box (with padding), not the full 1000x800 target.
 	await page.getByTestId('hole-graphics').scrollIntoViewIfNeeded();
-	await expect(page.getByTestId('build-hole-graphics')).toHaveText('Build 1 hole graphic');
-	await page.getByTestId('build-hole-graphics').click();
-	await page.waitForSelector('[data-testid="hole-graphic-image-1"]');
+	await page.waitForSelector('[data-testid="hole-graphic-preview-1"]');
 
-	const imgInfo = await page.evaluate(() => {
-		const img = document.querySelector('[data-testid="hole-graphic-image-1"]');
-		return img instanceof HTMLImageElement
-			? { complete: img.complete, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight }
-			: null;
+	const viewBox = await page.evaluate(() => {
+		const svg = document.querySelector('[data-testid="hole-graphic-preview-1"] svg');
+		return svg?.getAttribute('viewBox') ?? null;
 	});
-	expect(imgInfo?.complete).toBe(true);
-	expect(imgInfo?.naturalWidth).toBeGreaterThan(0);
-	expect(imgInfo?.naturalHeight).toBeGreaterThan(0);
-	// Cropped to the hole's own bounding box (with padding), not the full 1000x800 target.
-	expect(imgInfo?.naturalWidth).toBeLessThan(1000);
-	expect(imgInfo?.naturalHeight).toBeLessThan(800);
+	expect(viewBox).not.toBeNull();
+	const [, , cropWidth, cropHeight] = (viewBox as string).split(' ').map(Number);
+	expect(cropWidth).toBeGreaterThan(0);
+	expect(cropHeight).toBeGreaterThan(0);
+	expect(cropWidth).toBeLessThan(1000);
+	expect(cropHeight).toBeLessThan(800);
 
-	await expect(page.getByTestId('hole-graphic-download-1')).toHaveAttribute('download', 'hole-1.png');
-	const href = await page.getByTestId('hole-graphic-download-1').getAttribute('href');
-	expect(href).toMatch(/^blob:/);
+	// 4. Downloading renders the same geometry to a real PNG on demand.
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByTestId('hole-graphic-download-1').click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toBe('hole-1.png');
+	const stream = await download.createReadStream();
+	const chunks: Buffer[] = [];
+	for await (const chunk of stream) chunks.push(chunk);
+	const bytes = Buffer.concat(chunks);
+	expect(bytes.length).toBeGreaterThan(0);
+	expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); // PNG signature
+
+	// 5. The batch zip download bundles the same hole under hole-01.png.
+	const zipDownloadPromise = page.waitForEvent('download');
+	await page.getByTestId('download-all-hole-graphics').click();
+	const zipDownload = await zipDownloadPromise;
+	expect(zipDownload.suggestedFilename()).toBe('hole-graphics.zip');
 });

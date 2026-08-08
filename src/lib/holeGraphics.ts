@@ -2,19 +2,25 @@
  * ChainSpot clean hole graphic construction.
  *
  * Applies an estimated source-to-target transform (`src/lib/alignment`) to a
- * hole's manually-annotated tee/basket/shot points and its DERIVED constant-
- * width corridor band (see `src/lib/corridor.ts` — tee + bends + basket +
- * width become a closed polygon), producing their positions in the clean
- * target image's pixel space, then frames and renders a crop around them. No
- * feature detection or image analysis happens here — every point was already
- * placed by the user (or, in a future iteration, a reviewed CV proposal);
- * this module only ever does arithmetic and drawing, the same "structured
- * geometry, not edited screenshots" boundary the rest of the domain layer
- * keeps.
+ * hole's manually-annotated tee/basket/shot/bend points and its DERIVED
+ * constant-width corridor band and centerline (see `src/lib/corridor.ts` —
+ * tee + bends + basket + width become a closed polygon and a centerline
+ * polyline), producing their positions in the clean target image's pixel
+ * space, then frames a crop around them. No feature detection or image
+ * analysis happens here — every point was already placed by the user (or, in
+ * a future iteration, a reviewed CV proposal); this module only ever does
+ * arithmetic and markup generation, the same "structured geometry, not
+ * edited screenshots" boundary the rest of the domain layer keeps.
+ *
+ * Rendering is SVG-first: `buildHoleGraphicMarkup` produces self-contained
+ * markup that crops via `viewBox` (no separate pixel-copy step) and is used
+ * identically for a live, resolution-independent DOM preview and for
+ * offscreen PNG rasterization at download time — one source of truth for
+ * both, instead of a second hand-written canvas drawing implementation.
  */
 import { applyTransform } from './alignment/transform';
 import type { SerializableTransform } from './alignment/types';
-import { deriveCorridorBand } from './corridor';
+import { deriveCorridorBand, deriveCorridorCenterline } from './corridor';
 import type { AnnotatedHole } from './domain/annotatedRound';
 
 export interface TargetPoint {
@@ -37,8 +43,15 @@ export interface HoleGraphicPlan {
 	readonly shots: readonly TargetPoint[];
 	/** Present only when the source hole can derive a complete corridor band — never a synthesized shape. */
 	readonly corridorBand: readonly TargetPoint[] | null;
+	/** [tee, ...bends, basket] with absent endpoints filtered out; may be empty. */
+	readonly centerline: readonly TargetPoint[];
+	/** Corridor bend points alone, for their own marker — a subset of `centerline`. */
+	readonly bends: readonly TargetPoint[];
 	/** Crop rectangle in target-image pixels, already clamped to the target image bounds. */
 	readonly crop: CropRect;
+	/** The full (uncropped) target image's own pixel dimensions. */
+	readonly targetWidthPx: number;
+	readonly targetHeightPx: number;
 }
 
 /** Padding around a hole's transformed points, as a fraction of its own bounding box. */
@@ -54,7 +67,11 @@ function clamp(value: number, min: number, max: number): number {
  * Plans one hole's clean graphic: transforms every present feature point into
  * target-image pixels and derives a padded crop rectangle, clamped to the
  * target image's own bounds. Returns null for a hole with no placed features
- * at all — there's nothing to frame.
+ * at all — there's nothing to frame. The crop frame itself is intentionally
+ * driven only by tee/basket/shots/corridorBand (unchanged from before
+ * centerline/bends were added as renderable fields): the corridor band, when
+ * present, already encloses every bend on its centerline, so a bends-only
+ * hole with no tee or basket still correctly plans to null.
  */
 export function planHoleGraphic(
 	hole: AnnotatedHole,
@@ -66,6 +83,8 @@ export function planHoleGraphic(
 	const basket = hole.basket ? applyTransform(hole.basket, transform) : null;
 	const shots = hole.shots.map((shot) => applyTransform(shot.landing, transform));
 	const corridor = deriveCorridorBand(hole)?.map((point) => applyTransform(point, transform)) ?? null;
+	const centerline = deriveCorridorCenterline(hole).map((point) => applyTransform(point, transform));
+	const bends = hole.corridorBends.map((point) => applyTransform(point, transform));
 
 	const points: TargetPoint[] = [
 		...(tee ? [tee] : []),
@@ -99,18 +118,107 @@ export function planHoleGraphic(
 		basket,
 		shots,
 		corridorBand: corridor,
+		centerline,
+		bends,
 		crop: {
 			xPx: cropX,
 			yPx: cropY,
 			widthPx: Math.max(cropRight - cropX, 1),
 			heightPx: Math.max(cropBottom - cropY, 1)
-		}
+		},
+		targetWidthPx,
+		targetHeightPx
 	};
+}
+
+function pointsAttr(points: readonly TargetPoint[]): string {
+	return points.map((point) => `${point.xPx},${point.yPx}`).join(' ');
+}
+
+function escapeAttr(value: string): string {
+	return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Builds one hole's clean graphic as self-contained SVG markup: the target
+ * image cropped via `viewBox` (the full image is placed at its own pixel
+ * size; the viewport does the cropping, so no pixel-copy step is needed),
+ * the derived corridor band, centerline, bend markers, straight
+ * tee-through-shots displacement guides (never a curved flight path — an
+ * explicit non-goal), tee/basket/shot markers, and a hole-number label.
+ *
+ * Styling is inlined (not CSS classes) so the markup rasterizes correctly
+ * standalone — e.g. via a `data:image/svg+xml` URI — without depending on an
+ * external stylesheet being available in that context.
+ */
+export function buildHoleGraphicMarkup(plan: HoleGraphicPlan, targetImageHref: string): string {
+	const { crop } = plan;
+	const parts: string[] = [];
+	parts.push(
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${crop.xPx} ${crop.yPx} ${crop.widthPx} ${crop.heightPx}" width="${crop.widthPx}" height="${crop.heightPx}">`
+	);
+	parts.push(
+		`<image href="${escapeAttr(targetImageHref)}" x="0" y="0" width="${plan.targetWidthPx}" height="${plan.targetHeightPx}" preserveAspectRatio="xMidYMid meet" />`
+	);
+
+	if (plan.corridorBand && plan.corridorBand.length >= 3) {
+		parts.push(
+			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="rgba(42, 109, 244, 0.25)" stroke="rgba(42, 109, 244, 0.9)" stroke-width="2" />`
+		);
+	}
+
+	if (plan.centerline.length >= 2) {
+		parts.push(
+			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="rgba(255, 255, 255, 0.85)" stroke-width="1.5" stroke-dasharray="6 4" />`
+		);
+	}
+
+	for (const bend of plan.bends) {
+		parts.push(`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="#a78bfa" stroke="#fff" stroke-width="1.5" />`);
+	}
+
+	const guidePoints = [...(plan.tee ? [plan.tee] : []), ...plan.shots];
+	if (guidePoints.length >= 2) {
+		parts.push(
+			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="rgba(255, 255, 255, 0.85)" stroke-width="2" stroke-dasharray="6 4" />`
+		);
+	}
+
+	for (const shot of plan.shots) {
+		parts.push(`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="8" fill="#f59e0b" stroke="#000" stroke-width="1.5" />`);
+	}
+	if (plan.tee) {
+		parts.push(`<circle cx="${plan.tee.xPx}" cy="${plan.tee.yPx}" r="8" fill="#22c55e" stroke="#000" stroke-width="1.5" />`);
+	}
+	if (plan.basket) {
+		parts.push(
+			`<circle cx="${plan.basket.xPx}" cy="${plan.basket.yPx}" r="8" fill="#ef4444" stroke="#000" stroke-width="1.5" />`
+		);
+	}
+
+	const label = `Hole ${plan.number}`;
+	const labelWidth = 12 + label.length * 11;
+	const labelX = crop.xPx + 6;
+	const labelY = crop.yPx + 6;
+	parts.push(
+		`<rect x="${labelX}" y="${labelY}" width="${labelWidth}" height="28" fill="rgba(0, 0, 0, 0.6)" />` +
+			`<text x="${labelX + 6}" y="${labelY + 20}" font-family="system-ui, sans-serif" font-weight="bold" font-size="20" fill="#fff">${escapeAttr(label)}</text>`
+	);
+
+	parts.push('</svg>');
+	return parts.join('');
+}
+
+export interface LoadedImageSize {
+	readonly width: number;
+	readonly height: number;
 }
 
 export interface HoleGraphicRenderEnv {
 	createCanvas(): HTMLCanvasElement;
 	toBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob | null>;
+	/** Decodes an image URL (including a `data:image/svg+xml` URI) into something `drawImage` accepts. */
+	loadImage(url: string): Promise<CanvasImageSource & LoadedImageSize>;
 }
 
 export const defaultHoleGraphicRenderEnv: HoleGraphicRenderEnv = {
@@ -124,97 +232,60 @@ export const defaultHoleGraphicRenderEnv: HoleGraphicRenderEnv = {
 				else reject(new Error('Hole graphic PNG encoding failed. Try again.'));
 			}, type);
 		});
+	},
+	loadImage(url) {
+		return new Promise((resolve, reject) => {
+			const image = new Image();
+			image.onload = () => resolve(image);
+			image.onerror = () => reject(new Error('Could not rasterize the hole graphic for PNG export.'));
+			image.src = url;
+		});
 	}
 };
 
 /**
- * Renders one hole's clean graphic: the cropped clean-image region, the
- * derived corridor band (if the hole can form a complete one), straight
- * tee-through-shots displacement guides (never a curved flight path — an
- * explicit non-goal), tee/basket/shot markers, and a hole-number label.
+ * Renders one hole's clean graphic to a PNG blob by rasterizing the exact
+ * markup `buildHoleGraphicMarkup` produces — the same markup a live DOM
+ * preview would show — through an offscreen image decode and canvas draw.
  */
-export async function renderHoleGraphic(
-	targetImage: HTMLImageElement,
+export async function renderHoleGraphicPng(
+	targetImageHref: string,
 	plan: HoleGraphicPlan,
 	env: HoleGraphicRenderEnv = defaultHoleGraphicRenderEnv
 ): Promise<Blob> {
+	const markup = buildHoleGraphicMarkup(plan, targetImageHref);
+	const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+	const image = await env.loadImage(svgUrl);
+
 	const canvas = env.createCanvas();
-	const context = canvas.getContext('2d');
-	if (!context) throw new Error('Could not allocate a canvas for the hole graphic.');
 	canvas.width = plan.crop.widthPx;
 	canvas.height = plan.crop.heightPx;
-
-	context.drawImage(
-		targetImage,
-		plan.crop.xPx,
-		plan.crop.yPx,
-		plan.crop.widthPx,
-		plan.crop.heightPx,
-		0,
-		0,
-		plan.crop.widthPx,
-		plan.crop.heightPx
-	);
-
-	const toLocal = (point: TargetPoint): { x: number; y: number } => ({
-		x: point.xPx - plan.crop.xPx,
-		y: point.yPx - plan.crop.yPx
-	});
-
-	if (plan.corridorBand && plan.corridorBand.length >= 3) {
-		context.beginPath();
-		plan.corridorBand.forEach((point, index) => {
-			const local = toLocal(point);
-			if (index === 0) context.moveTo(local.x, local.y);
-			else context.lineTo(local.x, local.y);
-		});
-		context.closePath();
-		context.fillStyle = 'rgba(42, 109, 244, 0.25)';
-		context.fill();
-		context.strokeStyle = 'rgba(42, 109, 244, 0.9)';
-		context.lineWidth = 2;
-		context.stroke();
-	}
-
-	const guidePoints = [...(plan.tee ? [plan.tee] : []), ...plan.shots];
-	if (guidePoints.length >= 2) {
-		context.beginPath();
-		guidePoints.forEach((point, index) => {
-			const local = toLocal(point);
-			if (index === 0) context.moveTo(local.x, local.y);
-			else context.lineTo(local.x, local.y);
-		});
-		context.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-		context.lineWidth = 2;
-		context.setLineDash([6, 4]);
-		context.stroke();
-		context.setLineDash([]);
-	}
-
-	const drawMarker = (point: TargetPoint | null, fill: string): void => {
-		if (!point) return;
-		const local = toLocal(point);
-		context.beginPath();
-		context.arc(local.x, local.y, 8, 0, Math.PI * 2);
-		context.fillStyle = fill;
-		context.fill();
-		context.strokeStyle = '#000';
-		context.lineWidth = 1.5;
-		context.stroke();
-	};
-	drawMarker(plan.tee, '#22c55e');
-	drawMarker(plan.basket, '#ef4444');
-	plan.shots.forEach((point) => drawMarker(point, '#f59e0b'));
-
-	const label = `Hole ${plan.number}`;
-	context.font = 'bold 20px system-ui, sans-serif';
-	const labelWidth = context.measureText(label).width;
-	context.fillStyle = 'rgba(0, 0, 0, 0.6)';
-	context.fillRect(6, 6, labelWidth + 12, 28);
-	context.fillStyle = '#fff';
-	context.fillText(label, 12, 26);
+	const context = canvas.getContext('2d');
+	if (!context) throw new Error('Could not allocate a canvas for the hole graphic.');
+	context.drawImage(image, 0, 0, plan.crop.widthPx, plan.crop.heightPx);
 
 	const blob = await env.toBlob(canvas, 'image/png');
 	if (!blob) throw new Error('Hole graphic PNG encoding failed. Try again.');
 	return blob;
+}
+
+export interface HoleGraphicPngEntry {
+	readonly number: number;
+	readonly blob: Blob;
+}
+
+/**
+ * Zips a batch of already-rendered hole PNGs into one archive, named
+ * `hole-01.png`, `hole-02.png`, etc. Pure packaging — callers render each
+ * blob (e.g. via `renderHoleGraphicPng`) themselves first.
+ */
+export async function zipHoleGraphics(entries: readonly HoleGraphicPngEntry[]): Promise<Blob> {
+	const { zipSync } = await import('fflate');
+	const files: Record<string, Uint8Array> = {};
+	for (const entry of entries) {
+		const fileName = `hole-${String(entry.number).padStart(2, '0')}.png`;
+		files[fileName] = new Uint8Array(await entry.blob.arrayBuffer());
+	}
+	const zipBytes = zipSync(files, { level: 6 });
+	return new Blob([zipBytes as BlobPart], { type: 'application/zip' });
 }
