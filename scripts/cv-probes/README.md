@@ -93,17 +93,54 @@ session as dead weight.
   original dev fixture — see the real-data validation note above for why these numbers are
   fixture-specific, not universal, and need re-deriving per capture rather than hard-coding.
 
+## Centerline/hole-shape auto-detection: deprioritized (this session)
+
+`src/lib/autoAnnotation/centerlineDetection.ts` is a complete, working TypeScript port of this
+probe's tracker (tee -> number-badge occlusion -> C2/C1 ribbon-midpoint bridges -> basket), with
+the C1/C2 radius bug fixed for real — `detectPuttingCircleRadii` now searches for the radius pair
+`(r, 2r)` that's simultaneously strong (disc golf's fixed 1:2 ratio as the discriminator), not a
+single-radius argmax, which was previously locking onto the wrong ring entirely. It has audit
+tooling (`npm run detect:centerlines`: contact-sheet rendering matching this probe's
+`render_one`/`contact_sheet`, plus `contact-sheet-audit.png`/`ribbon-audit.json` exposing the raw
+ribbon-search evidence behind every circle-crossing pick) and a golden-shape/straightness
+regression check against real hand-annotated ground truth
+(`resources/centerline-golden.json`, `static/resources/hole-spike/one-hole.chainspot.zip`). **It
+was never wired into production** — worker, UI, nothing downstream depends on it.
+
+Separately, this session tried to detect the actual rendered UDisc corridor-band overlay itself
+(the straight-segmented, sharp-cornered, constant-width band the app already knows is the real
+ground truth shape) directly from the photo, as a path toward a fundamentally simpler
+mask-and-simplify approach instead of appearance-tracking. Three techniques were tried and all
+failed for the same underlying reason (prototypes: `scripts/_prototype-band-fragments.ts`,
+`scripts/_prototype-band-hough.ts`, `scripts/_prototype-canny-check.ts`):
+
+1. absolute color/brightness+saturation threshold — global, then re-tried scoped to a per-hole
+   capsule region — both let unrelated pale terrain (roads, dead grass, parking lots) dominate;
+2. local-relative brightness (pixel vs. its own neighborhood mean) — cleanly separated band from
+   grass on hand-picked sample points, but at full resolution picked up too much dead-grass
+   texture noise as small spurious blobs;
+3. Canny edges + Hough line-pairing, adapting `detectOccludedEdgeLoopCandidates`'s proven
+   tee-pad technique (pair two roughly-parallel segments a known distance apart) from tee-pad rail
+   spacing (~7px) to corridor width (25-90px) — checked the actual prerequisite directly
+   (`_prototype-canny-check.ts`: raw Canny output at several thresholds) and confirmed the band has
+   **no real edge at any threshold** on this photo, while every other UDisc graphic (tee icons,
+   badge boxes, C1/C2 circles) is crisp and clean. That's the root cause, not a tuning problem:
+   unlike tee pads/badges/circles (near-solid-color, hard-edged, hence why the borrowed technique
+   works great for them), the band is a genuinely low-contrast, soft/blended translucent overlay.
+
+**Decision: paused, not pursued further.** Course setup is a once-per-course action, not a hot
+path, and the app already has working hand-annotation tooling for hole shape (`corridorBends`, the
+ribbon/bend editor — see `src/lib/corridor.ts`). The cost/benefit of continuing to chase automated
+shape detection against a signal that may just not be reliably present in real photographed
+captures isn't worth it relative to other work (throw collection). If this is revisited: default
+auto-generated centerlines to a straight tee->basket line and treat bend detection as a low-
+confidence assist at most, rather than the backbone of the route.
+
 ## What remains provisional
 
-- validate association and centerline routing on additional real, non-UDisc-screenshot courses
-  (only one has been tried, per the note above);
-- port the C1/C2 search-range fix into `semantic_exact_anchor.py` itself;
-- port proven pieces to the existing OpenCV.js/WASM runtime — nothing in this directory has a TS
-  equivalent yet, unlike numbers/tees/baskets (all ported and fixed);
 - `TODO(shared-endpoints)` in `semantic_exact_anchor.py`: tee/basket assignment is strictly
   one-to-one Hungarian matching — multi-tee or multi-basket holes (alternate pin positions) aren't
   modeled;
-- wire proposals into Annotate Round's manual review layer;
 - later add played-round dynamic extraction and played->clean registration.
 
 Do not put CV confidence/provenance on final `AnnotatedRound`. CV results are proposals before Done; reviewed geometry is authoritative afterward.
