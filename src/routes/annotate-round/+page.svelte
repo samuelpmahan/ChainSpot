@@ -24,6 +24,7 @@
 		moveCorridorBend,
 		moveShot,
 		moveTee,
+		nextHoleNumber,
 		placeByMode,
 		removeHole,
 		removeLastBend,
@@ -210,8 +211,10 @@
 	});
 
 	function handleAddHole(): void {
-		holes = addHole(holes);
-		activeHoleId = holes[holes.length - 1].id;
+		const nextHoles = addHole(holes);
+		if (nextHoles.length === holes.length) return;
+		holes = nextHoles;
+		activeHoleId = nextHoles[nextHoles.length - 1].id;
 	}
 
 	function handleRemoveHole(holeId: string): void {
@@ -254,7 +257,8 @@
 		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
 
 		const key = event.key.toLowerCase();
-		if (key === 'n') {
+		if (key === 'a' || key === 'n') {
+			if (nextHoleNumber(holes) === null) return;
 			event.preventDefault();
 			handleAddHole();
 			return;
@@ -805,10 +809,11 @@
 						<button
 							type="button"
 							data-testid="hole-add"
-							aria-keyshortcuts="N"
+							aria-keyshortcuts="A N"
+							disabled={nextHoleNumber(holes) === null}
 							onclick={handleAddHole}
 						>
-							Add hole <kbd>N</kbd>
+							Add hole <kbd>A</kbd> / <kbd>N</kbd>
 						</button>
 					</div>
 					{#if holes.length > 0}

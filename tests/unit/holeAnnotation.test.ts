@@ -30,15 +30,16 @@ function emptyHole(id: string, number: number, overrides: Partial<AnnotatedHole>
 }
 
 describe('nextHoleNumber', () => {
-	it('is 1 for an empty list and max-plus-one otherwise', () => {
+	it('is the lowest missing number from 1 through 18', () => {
 		expect(nextHoleNumber([])).toBe(1);
 		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 3)];
-		expect(nextHoleNumber(holes)).toBe(4);
+		expect(nextHoleNumber(holes)).toBe(2);
+		expect(nextHoleNumber(Array.from({ length: 18 }, (_, index) => emptyHole(`${index}`, index + 1)))).toBeNull();
 	});
 });
 
 describe('addHole / removeHole', () => {
-	it('appends an empty hole with the next number, empty bends, and the default width, without mutating the input array', () => {
+	it('appends an empty hole with the lowest missing number, empty bends, and the default width, without mutating the input array', () => {
 		const original: AnnotatedHole[] = [emptyHole('a', 1)];
 		const result = addHole(original, idSequence('hole'));
 
@@ -51,6 +52,22 @@ describe('addHole / removeHole', () => {
 			corridorBends: [],
 			corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
 		});
+	});
+
+	it('fills missing hole numbers in ascending order and stops after hole 18', () => {
+		let holes: AnnotatedHole[] = [2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17].map((number) =>
+			emptyHole(`hole-${number}`, number)
+		);
+		const createId = idSequence('added');
+
+		const addedNumbers: number[] = [];
+		for (let index = 0; index < 5; index += 1) {
+			holes = addHole(holes, createId);
+			addedNumbers.push(holes[holes.length - 1].number);
+		}
+
+		expect(addedNumbers).toEqual([1, 5, 13, 16, 18]);
+		expect(addHole(holes, createId)).toHaveLength(18);
 	});
 
 	it('removes exactly the hole with the matching id', () => {

@@ -114,21 +114,29 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		const addButton = host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]');
 		if (!addButton) throw new Error('missing hole-add button');
 		expect(addButton.textContent).toContain('Add hole');
+		expect(addButton.textContent).toContain('A');
 		expect(addButton.textContent).toContain('N');
-		expect(addButton.getAttribute('aria-keyshortcuts')).toBe('N');
+		expect(addButton.getAttribute('aria-keyshortcuts')).toBe('A N');
 		for (const button of host.querySelectorAll('button')) {
 			expect(button.textContent?.trim()).not.toBe('');
 		}
 
-		const addEvent = new KeyboardEvent('keydown', {
-			key: 'n',
-			bubbles: true,
-			cancelable: true
-		});
-		window.dispatchEvent(addEvent);
-		await flush();
-		expect(addEvent.defaultPrevented).toBe(true);
-		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('1');
+		for (const [key, expectedCount] of [
+			['a', '1'],
+			['A', '2'],
+			['n', '3'],
+			['N', '4']
+		] as const) {
+			const addEvent = new KeyboardEvent('keydown', {
+				key,
+				bubbles: true,
+				cancelable: true
+			});
+			window.dispatchEvent(addEvent);
+			await flush();
+			expect(addEvent.defaultPrevented).toBe(true);
+			expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe(expectedCount);
+		}
 
 		for (const [key, mode] of [
 			['1', 'tee'],
@@ -159,7 +167,7 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		});
 		window.dispatchEvent(repeated);
 		await flush();
-		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('1');
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('4');
 
 		const widthInput = inputEl(host, 'corridor-width');
 		widthInput.focus();
@@ -171,7 +179,7 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		widthInput.dispatchEvent(inputEvent);
 		await flush();
 		expect(inputEvent.defaultPrevented).toBe(false);
-		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('1');
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('4');
 
 		unmount(component);
 		host.remove();

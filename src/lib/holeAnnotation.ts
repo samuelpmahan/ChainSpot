@@ -21,16 +21,23 @@ export type CreateId = () => string;
 
 const defaultCreateId: CreateId = () => globalThis.crypto.randomUUID();
 
-/** Next sequential hole number — mirrors `nextPairOrdinal`'s max-plus-one convention. */
-export function nextHoleNumber(holes: readonly AnnotatedHole[]): number {
-	return holes.reduce((max, hole) => Math.max(max, hole.number), 0) + 1;
+/** Lowest missing hole number in the supported 1–18 range, or null when full. */
+export function nextHoleNumber(holes: readonly AnnotatedHole[]): number | null {
+	const presentNumbers = new Set(holes.map((hole) => hole.number));
+	for (let number = 1; number <= 18; number += 1) {
+		if (!presentNumbers.has(number)) return number;
+	}
+	return null;
 }
 
-/** Appends a new, entirely empty hole with the next sequential number. */
+/** Appends a new, entirely empty hole with the lowest missing number. */
 export function addHole(holes: readonly AnnotatedHole[], createId: CreateId = defaultCreateId): AnnotatedHole[] {
+	const number = nextHoleNumber(holes);
+	if (number === null) return [...holes];
+
 	const hole: AnnotatedHole = {
 		id: createId(),
-		number: nextHoleNumber(holes),
+		number,
 		shots: [],
 		corridorBends: [],
 		corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
