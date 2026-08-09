@@ -16,6 +16,7 @@ import type {
 import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedHoleNumberBadges,
+	detectCalibratedTeeGapFallbackCandidates,
 	detectCalibratedTeePadCandidates,
 	detectCalibratedTeePadVariants,
 	findCalibratedBasketAnchorScale
@@ -501,7 +502,30 @@ async function detectCourse(request: BasketDetectionRequest) {
 		elapsedMs()
 	);
 	const grammarStartedAt = performance.now();
-	const grammar = associateCourseGrammar({ numberBadges, tees, baskets });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees, baskets });
+
+	// A hole whose tee ownership survives with low confidence typically means
+	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
+	// badge -- e.g. a bright dashed putting-circle stroke crossing the pad.
+	// Recover those specific badges with a tightly-scoped `occluded-edge-loop`
+	// fallback and re-associate once more; every other hole is untouched.
+	const gappedBadges = primaryGrammar.holes
+		.filter((hole) => hole.tee && hole.tee.confidence < 0.5 && hole.numberBadge)
+		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
+	const gapFallbackStartedAt = performance.now();
+	const gapFallbackCandidates = gappedBadges.length
+		? detectCalibratedTeeGapFallbackCandidates(
+				cv,
+				{ rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 },
+				{ uiScalePx: calibration.uiScalePx, mapBoundsPx },
+				gappedBadges
+			)
+		: [];
+	const gapFallbackMs = performance.now() - gapFallbackStartedAt;
+	const finalTees = gapFallbackCandidates.length ? [...tees, ...gapFallbackCandidates] : tees;
+	const grammar = gapFallbackCandidates.length
+		? associateCourseGrammar({ numberBadges, tees: finalTees, baskets })
+		: primaryGrammar;
 	const grammarMs = performance.now() - grammarStartedAt;
 
 	const performanceReport = {
@@ -528,6 +552,7 @@ async function detectCourse(request: BasketDetectionRequest) {
 			teesMs,
 			teeRasterMs,
 			teeDetectionMs,
+			gapFallbackMs,
 			grammarMs
 		},
 		counts: {
@@ -535,8 +560,10 @@ async function detectCourse(request: BasketDetectionRequest) {
 			numberCandidates: numberDetection.candidates.length,
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			baskets: baskets.length,
-			tees: tees.length,
-			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations
+			tees: finalTees.length,
+			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
+			gappedBadges: gappedBadges.length,
+			gapFallbackCandidates: gapFallbackCandidates.length
 		},
 		calibration: {
 			numberTemplateScale: numberDetection.anchor.scale,
@@ -546,7 +573,7 @@ async function detectCourse(request: BasketDetectionRequest) {
 		}
 	};
 
-	return { numberDetection, tees, baskets, grammar, performance: performanceReport };
+	return { numberDetection, tees: finalTees, baskets, grammar, performance: performanceReport };
 }
 
 async function processRequest(request: BasketRequest): Promise<void> {

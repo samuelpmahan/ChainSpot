@@ -8,6 +8,7 @@ import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedHoleNumberBadges,
+	detectCalibratedTeeGapFallbackCandidates,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import type { CalibratedBasketCandidate } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
@@ -94,6 +95,7 @@ export interface CourseCliResult {
 		readonly reviewHoles: number;
 		readonly incompleteHoles: number;
 	};
+	readonly gapFallback: { readonly gappedBadgeCount: number; readonly addedCandidateCount: number };
 	readonly grammar: CourseGrammarResult;
 	readonly teeTruthEvaluation?: {
 		readonly tolerancePx: number;
@@ -513,7 +515,22 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
-	const grammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
+
+	// A hole whose tee ownership survives with low confidence typically means
+	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
+	// badge -- the pipeline was forced to give it someone else's leftover
+	// candidate. Recover those specific badges with a tightly-scoped
+	// `occluded-edge-loop` fallback and re-associate once more; every other
+	// hole's candidates and assignment are untouched.
+	const gappedBadges = primaryGrammar.holes
+		.filter((hole) => hole.tee && hole.tee.confidence < 0.5 && hole.numberBadge)
+		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
+	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
+	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;
+	const grammar = gapFallbackCandidates.length
+		? associateCourseGrammar({ numberBadges, tees: finalTeeCandidates, baskets: basketCandidates })
+		: primaryGrammar;
 
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
@@ -533,18 +550,19 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			numberCandidates: numberDetection.candidates.length,
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			basketCandidates: basketCandidates.length,
-			teeCandidates: teeCandidates.length,
+			teeCandidates: finalTeeCandidates.length,
 			readyHoles,
 			reviewHoles,
 			incompleteHoles
 		},
+		gapFallback: { gappedBadgeCount: gappedBadges.length, addedCandidateCount: gapFallbackCandidates.length },
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		overlayPath,
 		elapsedMs: performance.now() - startedAt
 	};
 
-	writeFileSync(overlayPath, renderOverlay(input, grammar, teeCandidates, basketCandidates));
+	writeFileSync(overlayPath, renderOverlay(input, grammar, finalTeeCandidates, basketCandidates));
 	writeFileSync(jsonPath, `${JSON.stringify(output, null, 2)}\n`);
 	console.log(JSON.stringify({ ...output, jsonPath }, null, 2));
 	return output;
