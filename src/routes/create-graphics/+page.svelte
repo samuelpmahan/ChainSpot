@@ -39,9 +39,11 @@
 		bboxFromCenter,
 		fetchNaipBoundingBoxImage,
 		fetchNaipImage,
+		naipMetersPerPixel,
 		NAIP_EXPORT_SIZE_PX
 	} from '$lib/naip';
 	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
+	import { metersToFeet } from '$lib/units';
 	import { searchPlace } from '$lib/geocode';
 	import type { GeoSearchMatch } from '$lib/geocode';
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
@@ -61,6 +63,7 @@
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
 	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
 	import type { HoleGraphicPlan } from '$lib/holeGraphics';
+	import { DEFAULT_GRAPHIC_STYLE, GRAPHIC_STYLE_PRESETS, findGraphicStyle } from '$lib/graphics/style';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -196,13 +199,26 @@
 		URL.revokeObjectURL(objectUrl);
 	}
 
+	/** Feet-per-pixel for the current target image, only when it has a known (never estimated) ground scale. */
+	function holeGraphicFeetPerPixel(): number | undefined {
+		return targetGroundScaleMetersPerPixel === null
+			? undefined
+			: metersToFeet(targetGroundScaleMetersPerPixel);
+	}
+
 	async function handleDownloadHoleGraphic(plan: HoleGraphicPlan): Promise<void> {
 		const href = targetImageHref();
 		if (!href || holeGraphicDownloading.has(plan.holeId)) return;
 		holeGraphicDownloading = new Set(holeGraphicDownloading).add(plan.holeId);
 		holeGraphicsError = null;
 		try {
-			const blob = await renderHoleGraphicPng(href, plan);
+			const blob = await renderHoleGraphicPng(
+				href,
+				plan,
+				undefined,
+				findGraphicStyle(holeGraphicStyleId),
+				holeGraphicFeetPerPixel()
+			);
 			triggerBlobDownload(blob, `hole-${plan.number}.png`);
 		} catch (error) {
 			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphic.';
@@ -220,9 +236,11 @@
 		holeGraphicsZipping = true;
 		holeGraphicsError = null;
 		try {
+			const style = findGraphicStyle(holeGraphicStyleId);
+			const feetPerPixel = holeGraphicFeetPerPixel();
 			const entries = [];
 			for (const plan of plans) {
-				const blob = await renderHoleGraphicPng(href, plan);
+				const blob = await renderHoleGraphicPng(href, plan, undefined, style, feetPerPixel);
 				entries.push({ number: plan.number, blob });
 			}
 			const zip = await zipHoleGraphics(entries);
@@ -322,6 +340,17 @@
 	/** Center/radius actually used for the current `naipPreview`, kept to derive its bbox. */
 	let naipPreviewCenter = $state<GeoPoint | null>(null);
 	let naipPreviewRadiusUsed = $state<number | null>(null);
+
+	/**
+	 * Exact ground resolution of the committed target-basemap image, when it came
+	 * from the radius-based NAIP center fetch (see `naipMetersPerPixel`'s own
+	 * docstring for why only that fetch shape has a known, non-estimated scale).
+	 * Never guessed or defaulted -- null whenever the current target image did not
+	 * come from that exact path, so hole-graphic distance display simply omits
+	 * distances rather than showing a wrong number.
+	 */
+	let targetGroundScaleMetersPerPixel = $state<number | null>(null);
+	let holeGraphicStyleId = $state(DEFAULT_GRAPHIC_STYLE.id);
 
 	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
 	let geocodeParkNameInput = $state('');
@@ -728,7 +757,9 @@
 			correspondence = cancelCorrespondence(correspondence);
 			correspondenceError = null;
 		}
-		void role;
+		// A replaced target-basemap invalidates any known ground scale -- only the
+		// radius-based NAIP confirm path (handleNaipConfirm) sets it back.
+		if (role === 'target-basemap') targetGroundScaleMetersPerPixel = null;
 		refresh();
 	}
 
@@ -1185,8 +1216,12 @@
 				activityMessage = 'Replacement cancelled. The fetched aerial image is still pending.';
 				return;
 			}
+			const radiusUsed = naipPreviewRadiusUsed;
 			clearNaipPreview();
 			onDomainChanged('target-basemap');
+			if (radiusUsed !== null) {
+				targetGroundScaleMetersPerPixel = naipMetersPerPixel(radiusUsed, NAIP_EXPORT_SIZE_PX);
+			}
 			activityMessage = 'Fetched NAIP aerial image imported as the clean target.';
 		} catch (error) {
 			naipError = error instanceof Error ? error.message : 'Could not import the fetched aerial image.';
@@ -2178,6 +2213,19 @@
 					No hole has both a placed point and a usable alignment yet.
 				</p>
 			{:else}
+				<label class="hole-graphic-style">
+					Color theme
+					<select data-testid="hole-graphic-style" bind:value={holeGraphicStyleId}>
+						{#each GRAPHIC_STYLE_PRESETS as preset (preset.id)}
+							<option value={preset.id}>{preset.name}</option>
+						{/each}
+					</select>
+				</label>
+				{#if targetGroundScaleMetersPerPixel !== null}
+					<p class="alignment-empty" data-testid="hole-graphics-ground-scale">
+						Real hole distances shown (ground scale from the NAIP fetch).
+					</p>
+				{/if}
 				<button
 					type="button"
 					data-testid="download-all-hole-graphics"
@@ -2197,7 +2245,12 @@
 						<li class="hole-graphic-item">
 							{#if href}
 								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
-									{@html buildHoleGraphicMarkup(plan, href)}
+									{@html buildHoleGraphicMarkup(
+										plan,
+										href,
+										findGraphicStyle(holeGraphicStyleId),
+										holeGraphicFeetPerPixel()
+									)}
 								</div>
 							{/if}
 							<button
@@ -2792,6 +2845,12 @@
 
 	.hole-graphic-item button {
 		font-size: 0.8rem;
+	}
+
+	.hole-graphic-style {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 	}
 
 	.point-inspector {

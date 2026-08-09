@@ -107,6 +107,8 @@ export interface OrderedShot {
 export interface AnnotatedHole {
 	readonly id: string;
 	readonly number: number;
+	/** Scorecard par, when known. Absent, never a placeholder like 0 or -1. */
+	readonly par?: number;
 	readonly tee?: SourcePoint;
 	readonly basket?: SourcePoint;
 	readonly shots: readonly OrderedShot[];

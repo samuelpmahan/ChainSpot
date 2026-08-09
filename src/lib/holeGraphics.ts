@@ -22,6 +22,9 @@ import { applyTransform } from './alignment/transform';
 import type { SerializableTransform } from './alignment/types';
 import { deriveCorridorBand, deriveCorridorCenterline } from './corridor';
 import type { AnnotatedHole } from './domain/annotatedRound';
+import { computeHoleDistances } from './graphics/distances';
+import { DEFAULT_GRAPHIC_STYLE } from './graphics/style';
+import type { GraphicStyle } from './graphics/style';
 
 export interface TargetPoint {
 	readonly xPx: number;
@@ -38,6 +41,8 @@ export interface CropRect {
 export interface HoleGraphicPlan {
 	readonly holeId: string;
 	readonly number: number;
+	/** Scorecard par, when known; shown on the info card. */
+	readonly par?: number;
 	readonly tee: TargetPoint | null;
 	readonly basket: TargetPoint | null;
 	readonly shots: readonly TargetPoint[];
@@ -114,6 +119,7 @@ export function planHoleGraphic(
 	return {
 		holeId: hole.id,
 		number: hole.number,
+		par: hole.par,
 		tee,
 		basket,
 		shots,
@@ -140,18 +146,64 @@ function escapeAttr(value: string): string {
 }
 
 /**
+ * Renders the info card in the crop's top-left corner: "HOLE n" always, then
+ * "PAR p" and, when a real-world ground scale (`feetPerPixel`) is supplied,
+ * the hole's straight-line length and remaining distance to the pin.
+ */
+function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel: number | undefined): string {
+	const lines = [`Hole ${plan.number}`];
+	if (plan.par !== undefined) lines.push(`Par ${plan.par}`);
+	if (feetPerPixel !== undefined) {
+		const { lengthFt, distanceToPinFt } = computeHoleDistances(plan, feetPerPixel);
+		if (lengthFt !== null) lines.push(`${Math.round(lengthFt)} ft`);
+		if (distanceToPinFt !== null) lines.push(`${Math.round(distanceToPinFt)} ft to pin`);
+	}
+
+	const { crop } = plan;
+	const fontSize = 20;
+	const lineHeight = fontSize + 6;
+	const paddingX = 10;
+	const paddingY = 6;
+	const cardWidth = Math.max(...lines.map((line) => 12 + line.length * 11)) + paddingX;
+	const cardHeight = lines.length * lineHeight + paddingY;
+	const cardX = crop.xPx + 6;
+	const cardY = crop.yPx + 6;
+
+	const parts = [
+		`<rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${escapeAttr(style.cardBackground)}" stroke="${escapeAttr(style.cardBorder)}" stroke-width="2" />`
+	];
+	lines.forEach((line, index) => {
+		const textY = cardY + paddingY + index * lineHeight + fontSize;
+		parts.push(
+			`<text x="${cardX + paddingX / 2}" y="${textY}" font-family="system-ui, sans-serif" font-weight="bold" font-size="${fontSize}" fill="${escapeAttr(style.cardText)}">${escapeAttr(line)}</text>`
+		);
+	});
+	return parts.join('');
+}
+
+/**
  * Builds one hole's clean graphic as self-contained SVG markup: the target
  * image cropped via `viewBox` (the full image is placed at its own pixel
  * size; the viewport does the cropping, so no pixel-copy step is needed),
  * the derived corridor band, centerline, bend markers, straight
  * tee-through-shots displacement guides (never a curved flight path — an
- * explicit non-goal), tee/basket/shot markers, and a hole-number label.
+ * explicit non-goal), tee/basket/shot markers, and an info card. Every
+ * themeable color comes from `style` (a `GraphicStyle` preset, see
+ * `graphics/style.ts`), defaulting to `DEFAULT_GRAPHIC_STYLE`. `feetPerPixel`
+ * (see `naipMetersPerPixel`/`metersToFeet`) adds real-world hole length and
+ * distance-to-pin to the info card when the caller has a known ground scale;
+ * omit it to leave those lines off.
  *
  * Styling is inlined (not CSS classes) so the markup rasterizes correctly
  * standalone — e.g. via a `data:image/svg+xml` URI — without depending on an
  * external stylesheet being available in that context.
  */
-export function buildHoleGraphicMarkup(plan: HoleGraphicPlan, targetImageHref: string): string {
+export function buildHoleGraphicMarkup(
+	plan: HoleGraphicPlan,
+	targetImageHref: string,
+	style: GraphicStyle = DEFAULT_GRAPHIC_STYLE,
+	feetPerPixel?: number
+): string {
 	const { crop } = plan;
 	const parts: string[] = [];
 	parts.push(
@@ -163,47 +215,46 @@ export function buildHoleGraphicMarkup(plan: HoleGraphicPlan, targetImageHref: s
 
 	if (plan.corridorBand && plan.corridorBand.length >= 3) {
 		parts.push(
-			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="rgba(42, 109, 244, 0.25)" stroke="rgba(42, 109, 244, 0.9)" stroke-width="2" />`
+			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="${escapeAttr(style.pathColor)}" fill-opacity="0.25" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" />`
 		);
 	}
 
 	if (plan.centerline.length >= 2) {
 		parts.push(
-			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="rgba(255, 255, 255, 0.85)" stroke-width="1.5" stroke-dasharray="6 4" />`
+			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="${escapeAttr(style.pathHaloColor)}" stroke-width="1.5" stroke-dasharray="6 4" />`
 		);
 	}
 
 	for (const bend of plan.bends) {
-		parts.push(`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="#a78bfa" stroke="#fff" stroke-width="1.5" />`);
+		parts.push(
+			`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="${escapeAttr(style.pathColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+		);
 	}
 
 	const guidePoints = [...(plan.tee ? [plan.tee] : []), ...plan.shots];
 	if (guidePoints.length >= 2) {
 		parts.push(
-			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="rgba(255, 255, 255, 0.85)" stroke-width="2" stroke-dasharray="6 4" />`
+			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" stroke-dasharray="6 4" />`
 		);
 	}
 
 	for (const shot of plan.shots) {
-		parts.push(`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="8" fill="#f59e0b" stroke="#000" stroke-width="1.5" />`);
+		parts.push(
+			`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="8" fill="${escapeAttr(style.shotColor)}" stroke="${escapeAttr(style.shotStrokeColor)}" stroke-width="1.5" />`
+		);
 	}
 	if (plan.tee) {
-		parts.push(`<circle cx="${plan.tee.xPx}" cy="${plan.tee.yPx}" r="8" fill="#22c55e" stroke="#000" stroke-width="1.5" />`);
+		parts.push(
+			`<circle cx="${plan.tee.xPx}" cy="${plan.tee.yPx}" r="8" fill="${escapeAttr(style.teeColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+		);
 	}
 	if (plan.basket) {
 		parts.push(
-			`<circle cx="${plan.basket.xPx}" cy="${plan.basket.yPx}" r="8" fill="#ef4444" stroke="#000" stroke-width="1.5" />`
+			`<circle cx="${plan.basket.xPx}" cy="${plan.basket.yPx}" r="8" fill="${escapeAttr(style.basketColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
 		);
 	}
 
-	const label = `Hole ${plan.number}`;
-	const labelWidth = 12 + label.length * 11;
-	const labelX = crop.xPx + 6;
-	const labelY = crop.yPx + 6;
-	parts.push(
-		`<rect x="${labelX}" y="${labelY}" width="${labelWidth}" height="28" fill="rgba(0, 0, 0, 0.6)" />` +
-			`<text x="${labelX + 6}" y="${labelY + 20}" font-family="system-ui, sans-serif" font-weight="bold" font-size="20" fill="#fff">${escapeAttr(label)}</text>`
-	);
+	parts.push(buildInfoCard(plan, style, feetPerPixel));
 
 	parts.push('</svg>');
 	return parts.join('');
@@ -251,9 +302,11 @@ export const defaultHoleGraphicRenderEnv: HoleGraphicRenderEnv = {
 export async function renderHoleGraphicPng(
 	targetImageHref: string,
 	plan: HoleGraphicPlan,
-	env: HoleGraphicRenderEnv = defaultHoleGraphicRenderEnv
+	env: HoleGraphicRenderEnv = defaultHoleGraphicRenderEnv,
+	style: GraphicStyle = DEFAULT_GRAPHIC_STYLE,
+	feetPerPixel?: number
 ): Promise<Blob> {
-	const markup = buildHoleGraphicMarkup(plan, targetImageHref);
+	const markup = buildHoleGraphicMarkup(plan, targetImageHref, style, feetPerPixel);
 	const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 	const image = await env.loadImage(svgUrl);
 

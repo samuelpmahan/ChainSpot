@@ -115,6 +115,21 @@ describe('hole serialization round trip', () => {
 		if (!parsed.ok) return;
 		expect(parsed.state.holes[0].shots.map((shot) => shot.id)).toEqual(['shot-1', 'shot-2']);
 	});
+
+	it('round-trips a present par and omits it when absent', () => {
+		const withPar: AnnotatedHole = { ...RICH_HOLE, par: 4 };
+		const parsedWithPar = parseProjectDocument(
+			JSON.parse(JSON.stringify(serializeProjectState(stateWithHoles([withPar]))))
+		);
+		expect(parsedWithPar.ok).toBe(true);
+		if (parsedWithPar.ok) expect(parsedWithPar.state.holes[0].par).toBe(4);
+
+		const doc = serializeProjectState(stateWithHoles([RICH_HOLE]));
+		expect(Object.keys(doc.holes[0])).not.toContain('par');
+		const parsedWithoutPar = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
+		expect(parsedWithoutPar.ok).toBe(true);
+		if (parsedWithoutPar.ok) expect(parsedWithoutPar.state.holes[0].par).toBeUndefined();
+	});
 });
 
 describe('v1/v2 migration', () => {
@@ -239,6 +254,24 @@ describe('hole validation on parse', () => {
 		if (result.ok) return;
 		expect(result.error.category).toBe('hole');
 		expect(result.error.code).toBe('hole.width.type');
+	});
+
+	it('rejects a non-positive or non-integer par', () => {
+		for (const par of [0, -3, 3.5]) {
+			const result = parseWithHoles([{ id: 'h', number: 1, shots: [], par }]);
+			expect(result.ok).toBe(false);
+			if (result.ok) continue;
+			expect(result.error.category).toBe('hole');
+			expect(result.error.code).toBe('hole.par.invalid');
+		}
+	});
+
+	it('rejects a non-numeric par', () => {
+		const result = parseWithHoles([{ id: 'h', number: 1, shots: [], par: 'four' }]);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.error.category).toBe('hole');
+		expect(result.error.code).toBe('hole.par.type');
 	});
 
 	it('rejects duplicate hole numbers', () => {

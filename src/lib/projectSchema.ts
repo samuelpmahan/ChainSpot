@@ -571,6 +571,22 @@ function readCorridorWidthPx(input: unknown, path: string): number {
 	return input;
 }
 
+function readPar(input: unknown, path: string): number | undefined {
+	if (input === undefined || input === null) return undefined;
+	if (typeof input !== 'number') {
+		throw failure('hole', 'hole.par.type', path, `${path} must be a number, got ${describeValue(input)}`);
+	}
+	if (!Number.isInteger(input) || input <= 0) {
+		throw failure(
+			'hole',
+			'hole.par.invalid',
+			path,
+			`${path} must be a positive integer, got ${String(input)}`
+		);
+	}
+	return input;
+}
+
 /**
  * Reads the `holes` array. Absent/null is an empty list, which is exactly how a migrated
  * v1 document (written before hole annotation existed) arrives here.
@@ -630,12 +646,15 @@ function readHoles(input: unknown, images: ImageAsset[]): AnnotatedHole[] {
 		}
 		const corridorWidthPx = readCorridorWidthPx(object.corridorWidthPx, `${path}.corridorWidthPx`);
 
+		const par = readPar(object.par, `${path}.par`);
+
 		const hole: AnnotatedHole = {
 			id,
 			number,
 			shots,
 			corridorBends,
 			corridorWidthPx,
+			...(par !== undefined ? { par } : {}),
 			...(object.tee !== undefined && object.tee !== null
 				? { tee: readHolePoint(object.tee, `${path}.tee`, sourceImage) }
 				: {}),
@@ -905,6 +924,7 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV3 {
 			})),
 			corridorBends: hole.corridorBends.map((point) => ({ xPx: point.xPx, yPx: point.yPx })),
 			corridorWidthPx: hole.corridorWidthPx,
+			...(hole.par !== undefined ? { par: hole.par } : {}),
 			...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
 			...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
 		})),
