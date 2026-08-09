@@ -351,10 +351,10 @@ async function detectCourse(request: BasketDetectionRequest) {
 	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
 	const analysis = grayscaleRaster(request.bitmap);
 
-	reportCourseProgress(request, 'baskets', 'OpenCV ready · detecting baskets…');
-	const baskets = await detectBaskets(request.bitmap, request.widthPx, request.heightPx);
-
-	reportCourseProgress(request, 'templates', `${baskets.length} baskets found · loading number templates…`);
+	// Preserve the proven production ordering: numbers first establish the map
+	// band; basket detection then uses that bound. The only semantic change here
+	// is that number TemplateScale is never reused as canonical UiScalePx.
+	reportCourseProgress(request, 'templates', 'OpenCV ready · loading number templates…');
 	reportCourseProgress(request, 'numbers', `${pack.holeNumbers.length} templates loaded · matching hole numbers…`);
 	const analysisNumbers = detectCalibratedHoleNumberBadges(
 		cv,
@@ -381,9 +381,17 @@ async function detectCourse(request: BasketDetectionRequest) {
 
 	reportCourseProgress(
 		request,
-		'tees',
-		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting tee pads…`
+		'baskets',
+		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting baskets…`
 	);
+	const baskets = await detectBaskets(
+		request.bitmap,
+		request.widthPx,
+		request.heightPx,
+		mapBoundsPx
+	);
+
+	reportCourseProgress(request, 'tees', `${baskets.length} baskets found · detecting tee pads…`);
 	const full = fullResolutionRaster(request.bitmap);
 	const tees = detectCalibratedTeePadCandidates(
 		cv,
