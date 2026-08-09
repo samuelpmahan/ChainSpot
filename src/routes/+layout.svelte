@@ -41,10 +41,10 @@
 			Create Graphics
 		</a>
 		<a
-			href="/ribbon-editor"
+			href="{base}/ribbon-editor"
 			class="nav-link"
-			class:active={page.url.pathname === '/ribbon-editor'}
-			aria-current={page.url.pathname === '/ribbon-editor' ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/ribbon-editor`}
+			aria-current={page.url.pathname === `${base}/ribbon-editor` ? 'page' : undefined}
 		>
 			Ribbon Goldens
 		</a>
