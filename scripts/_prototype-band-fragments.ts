@@ -15,7 +15,7 @@ import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
-import { buildOcclusionMask, computeOverlayFeature, detectPuttingCircleRadii } from '../src/lib/autoAnnotation/centerlineDetection';
+import { buildOcclusionMask, detectPuttingCircleRadii } from '../src/lib/autoAnnotation/centerlineDetection';
 import type { CenterlineRaster } from '../src/lib/autoAnnotation/centerlineDetection';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,58 +95,63 @@ async function main(): Promise<void> {
 	const { c1RadiusPx, c2RadiusPx } = detectPuttingCircleRadii(raster, basketPoints);
 	console.error(`c1=${c1RadiusPx} c2=${c2RadiusPx}`);
 	const occlusionMask = buildOcclusionMask(raster.widthPx, raster.heightPx, numberBadges, basketPoints, teePoints, c2RadiusPx);
-	const feature = computeOverlayFeature(raster);
-
-	// Threshold calibration: sample feature value at a handful of confirmed
-	// on-band points (near each badge, which sits on the centerline) vs a
-	// grass point, then pick a cutoff between the two populations.
-	const onBandSamples = numberBadges.map((b) => feature[Math.round(b.yPx) * raster.widthPx + Math.round(b.xPx - b.widthPx)]);
-	const threshold = -70; // -(0.8*sat + 0.35*|v-160|); calibrated by inspection below
-	console.error('on-band feature samples near badges:', onBandSamples.map((v) => v.toFixed(1)));
-
 	const { widthPx, heightPx } = raster;
-	const onBand = new Uint8Array(widthPx * heightPx);
-	for (let i = 0; i < onBand.length; i += 1) {
-		onBand[i] = feature[i] >= threshold && occlusionMask[i] === 0 ? 1 : 0;
-	}
 
-	// 4-connected component labeling.
-	const labels = new Int32Array(widthPx * heightPx).fill(-1);
-	let labelCount = 0;
-	const components: { xs: number[]; ys: number[] }[] = [];
-	const stack: number[] = [];
-	for (let start = 0; start < onBand.length; start += 1) {
-		if (onBand[start] === 0 || labels[start] !== -1) continue;
-		const label = labelCount;
-		labelCount += 1;
-		const component = { xs: [] as number[], ys: [] as number[] };
-		components.push(component);
-		stack.push(start);
-		labels[start] = label;
-		while (stack.length > 0) {
-			const index = stack.pop()!;
-			const x = index % widthPx;
-			const y = (index / widthPx) | 0;
-			component.xs.push(x);
-			component.ys.push(y);
-			const neighbors = [index - 1, index + 1, index - widthPx, index + widthPx];
-			for (const neighbor of neighbors) {
-				if (neighbor < 0 || neighbor >= onBand.length) continue;
-				if (Math.abs((neighbor % widthPx) - x) > 1) continue; // wraparound guard for left/right
-				if (onBand[neighbor] === 1 && labels[neighbor] === -1) {
-					labels[neighbor] = label;
-					stack.push(neighbor);
-				}
-			}
+	// Local-relative brightness: the band is a translucent overlay that lifts
+	// brightness relative to whatever terrain it's over, not any fixed
+	// absolute brightness/saturation -- confirmed on real samples (band:
+	// consistently +20..+48 over its local neighborhood; grass: -9..-28).
+	// Computed via a summed-area table for O(1) local-mean lookups.
+	const value = new Float32Array(widthPx * heightPx);
+	for (let pixel = 0, offset = 0; pixel < value.length; pixel += 1, offset += 4) {
+		value[pixel] = Math.max(raster.rgba[offset], raster.rgba[offset + 1], raster.rgba[offset + 2]);
+	}
+	const integral = new Float64Array((widthPx + 1) * (heightPx + 1));
+	for (let y = 0; y < heightPx; y += 1) {
+		let rowSum = 0;
+		for (let x = 0; x < widthPx; x += 1) {
+			rowSum += value[y * widthPx + x];
+			integral[(y + 1) * (widthPx + 1) + (x + 1)] = integral[y * (widthPx + 1) + (x + 1)] + rowSum;
+		}
+	}
+	function localMean(x: number, y: number, radius: number): number {
+		const x0 = Math.max(0, x - radius);
+		const y0 = Math.max(0, y - radius);
+		const x1 = Math.min(widthPx, x + radius + 1);
+		const y1 = Math.min(heightPx, y + radius + 1);
+		const sum =
+			integral[y1 * (widthPx + 1) + x1] -
+			integral[y0 * (widthPx + 1) + x1] -
+			integral[y1 * (widthPx + 1) + x0] +
+			integral[y0 * (widthPx + 1) + x0];
+		return sum / ((x1 - x0) * (y1 - y0));
+	}
+	const LOCAL_RADIUS_PX = 60;
+	const feature = new Float32Array(widthPx * heightPx);
+	for (let y = 0; y < heightPx; y += 1) {
+		for (let x = 0; x < widthPx; x += 1) {
+			const index = y * widthPx + x;
+			feature[index] = value[index] - localMean(x, y, LOCAL_RADIUS_PX);
 		}
 	}
 
-	const MIN_COMPONENT_SIZE = 40;
-	const bigComponents = components.filter((c) => c.xs.length >= MIN_COMPONENT_SIZE);
-	console.error(`${components.length} components total, ${bigComponents.length} with >= ${MIN_COMPONENT_SIZE}px`);
+	const threshold = 15; // pixel value minus its local-neighborhood mean brightness
 
-	// PCA line fit per component: principal axis + the two extreme
-	// projections along it (the fragment's endpoints).
+	// Restrict the mask/component search per hole to a capsule around its own
+	// straight tee-basket line (generous radius so a real bend still fits),
+	// instead of the whole image -- that's what let unrelated pale terrain
+	// (roads, parking, dead grass) leak into far-away components last time.
+	const CAPSULE_RADIUS_PX = 140;
+	function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+		const dx = bx - ax;
+		const dy = by - ay;
+		const lengthSquared = dx * dx + dy * dy;
+		const t = lengthSquared > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)) : 0;
+		const cx = ax + t * dx;
+		const cy = ay + t * dy;
+		return Math.hypot(px - cx, py - cy);
+	}
+
 	function fitLine(xs: readonly number[], ys: readonly number[]): { a: [number, number]; b: [number, number] } {
 		const n = xs.length;
 		const meanX = xs.reduce((s, v) => s + v, 0) / n;
@@ -182,14 +187,85 @@ async function main(): Promise<void> {
 		return { a: minPoint, b: maxPoint };
 	}
 
-	const fragments = bigComponents.map((c) => ({ ...fitLine(c.xs, c.ys), size: c.xs.length }));
+	const MIN_COMPONENT_SIZE = 40;
+	const fragmentsByHole = new Map<number, { a: [number, number]; b: [number, number]; size: number }[]>();
+	const combinedOnBand = new Uint8Array(widthPx * heightPx);
 
-	// Render: source image, on-band mask tinted faint white, each big
-	// fragment in a distinct color with its fitted line drawn on top.
+	for (const hole of teeBundle.truth) {
+		const tee = teeByNumber.get(hole.number);
+		const basket = basketByNumber.get(hole.number);
+		if (!tee || !basket) continue;
+
+		const x0 = Math.max(0, Math.floor(Math.min(tee.xPx, basket.xPx) - CAPSULE_RADIUS_PX));
+		const x1 = Math.min(widthPx, Math.ceil(Math.max(tee.xPx, basket.xPx) + CAPSULE_RADIUS_PX));
+		const y0 = Math.max(0, Math.floor(Math.min(tee.yPx, basket.yPx) - CAPSULE_RADIUS_PX));
+		const y1 = Math.min(heightPx, Math.ceil(Math.max(tee.yPx, basket.yPx) + CAPSULE_RADIUS_PX));
+
+		const onBand = new Uint8Array(widthPx * heightPx);
+		for (let y = y0; y < y1; y += 1) {
+			for (let x = x0; x < x1; x += 1) {
+				const index = y * widthPx + x;
+				if (feature[index] < threshold || occlusionMask[index] !== 0) continue;
+				if (distanceToSegment(x, y, tee.xPx, tee.yPx, basket.xPx, basket.yPx) > CAPSULE_RADIUS_PX) continue;
+				onBand[index] = 1;
+				combinedOnBand[index] = 1;
+			}
+		}
+
+		const labels = new Int32Array(widthPx * heightPx).fill(-1);
+		const components: { xs: number[]; ys: number[] }[] = [];
+		const stack: number[] = [];
+		for (let y = y0; y < y1; y += 1) {
+			for (let x = x0; x < x1; x += 1) {
+				const start = y * widthPx + x;
+				if (onBand[start] === 0 || labels[start] !== -1) continue;
+				const component = { xs: [] as number[], ys: [] as number[] };
+				components.push(component);
+				stack.push(start);
+				labels[start] = components.length - 1;
+				while (stack.length > 0) {
+					const index = stack.pop()!;
+					const cx = index % widthPx;
+					const cy = (index / widthPx) | 0;
+					component.xs.push(cx);
+					component.ys.push(cy);
+					const neighbors: [number, number][] = [
+						[index - 1, cx - 1],
+						[index + 1, cx + 1],
+						[index - widthPx, cx],
+						[index + widthPx, cx]
+					];
+					for (const [neighbor, neighborX] of neighbors) {
+						if (neighbor < 0 || neighbor >= onBand.length) continue;
+						if (Math.abs(neighborX - cx) > 1) continue;
+						if (onBand[neighbor] === 1 && labels[neighbor] === -1) {
+							labels[neighbor] = components.length - 1;
+							stack.push(neighbor);
+						}
+					}
+				}
+			}
+		}
+
+		const bigComponents = components.filter((c) => c.xs.length >= MIN_COMPONENT_SIZE);
+		fragmentsByHole.set(
+			hole.number,
+			bigComponents.map((c) => ({ ...fitLine(c.xs, c.ys), size: c.xs.length }))
+		);
+	}
+
+	const totalFragments = [...fragmentsByHole.values()].reduce((sum, f) => sum + f.length, 0);
+	console.error(`${totalFragments} fragments across ${fragmentsByHole.size} holes (capsule radius ${CAPSULE_RADIUS_PX}px)`);
+	for (const [number, fragments] of fragmentsByHole) {
+		console.error(`  hole ${number}: ${fragments.length} fragments, sizes [${fragments.map((f) => f.size).join(', ')}]`);
+	}
+
+	// Render: source image, on-band mask tinted faint white, each hole's
+	// fragments in a distinct color with the fitted line drawn on top.
 	const png = new PNG({ width: widthPx, height: heightPx });
 	png.data.set(teeBundle.raster.rgba);
-	for (let i = 0; i < onBand.length; i += 1) {
-		if (onBand[i] === 1) {
+	for (let i = 0; i < combinedOnBand.length; i += 1) {
+		if (combinedOnBand[i] === 1) {
 			const o = i * 4;
 			png.data[o] = Math.min(255, png.data[o] + 40);
 			png.data[o + 1] = Math.min(255, png.data[o + 1] + 40);
@@ -238,13 +314,15 @@ async function main(): Promise<void> {
 		[255, 120, 0, 255],
 		[160, 0, 255, 255]
 	];
-	fragments.forEach((fragment, index) => {
-		const color = PALETTE[index % PALETTE.length];
-		line(fragment.a[0], fragment.a[1], fragment.b[0], fragment.b[1], color);
-	});
+	let holeIndex = 0;
+	for (const fragments of fragmentsByHole.values()) {
+		const color = PALETTE[holeIndex % PALETTE.length];
+		for (const fragment of fragments) line(fragment.a[0], fragment.a[1], fragment.b[0], fragment.b[1], color);
+		holeIndex += 1;
+	}
 
 	writeFileSync(join(outDir, 'fragments-full.png'), PNG.sync.write(png));
-	console.error(`wrote ${join(outDir, 'fragments-full.png')}, ${fragments.length} fragments drawn`);
+	console.error(`wrote ${join(outDir, 'fragments-full.png')}, ${totalFragments} fragments drawn`);
 
 	// Focused crop on hole 7's number badge (the validation case: obscured on
 	// one side by hole 8's tee pad, the other by hole 6's dashed C2 circle).
