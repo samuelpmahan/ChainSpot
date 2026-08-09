@@ -167,7 +167,7 @@ test('saves a portable bundle, reloads, and reopens it with exact restoration an
 	expect(Buffer.from(entries['images/source-original.png']).equals(fixtureBuffer('tiny.png'))).toBe(true);
 	expect(Buffer.from(entries['images/target-original.jpg']).equals(fixtureBuffer('tiny.jpg'))).toBe(true);
 	const manifest = JSON.parse(strFromU8(entries['project.json']));
-	expect(manifest.schemaVersion).toBe(1);
+	expect(manifest.schemaVersion).toBe(2);
 	expect(manifest.images[0].sha256).toBe(sha256(Buffer.from(entries['images/source-original.png'])));
 	expect(manifest.images[1].sha256).toBe(sha256(Buffer.from(entries['images/target-original.jpg'])));
 	expect(manifest.project.name).toBe('Sample Round');

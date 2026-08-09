@@ -49,6 +49,7 @@ describe('project state construction', () => {
 			},
 			images: [],
 			controlPointPairs: [],
+			holes: [],
 			viewState: null
 		});
 	});
@@ -303,6 +304,7 @@ describe('durable state serialization', () => {
 
 		expect(Object.keys(parsed).sort()).toEqual([
 			'controlPointPairs',
+			'holes',
 			'images',
 			'project',
 			'viewState'

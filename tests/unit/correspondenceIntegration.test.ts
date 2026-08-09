@@ -142,7 +142,7 @@ function mode(host: HTMLElement): string | undefined {
 }
 
 describe('P0-007 correspondence integration', () => {
-	it('shows exact guidance, creates a pending source, and completes one pair', async () => {
+	it('shows guidance, creates a pending placement, and completes one pair', async () => {
 		const editor = makeEditorWithBothImages();
 		editor.markSaved();
 		const { component, host } = mountPage(editor, decodeOf(100, 80));
@@ -153,7 +153,7 @@ describe('P0-007 correspondence integration', () => {
 		host.querySelector<HTMLButtonElement>('[data-testid="add-correspondence"]')?.click();
 		await flush();
 		expect(host.querySelector('[data-testid="correspondence-guidance"]')?.textContent).toContain(
-			'Click a landmark in the UDisc source image.'
+			'Click a landmark in either the UDisc source or clean target image.'
 		);
 		dispatchClick(host, 'source-overview');
 		await flush();
@@ -183,6 +183,42 @@ describe('P0-007 correspondence integration', () => {
 		expect(editor.state.controlPointPairs[0].target.imageId).toBe('target-1');
 		expect(mode(host)).toBe('neutral');
 		expect(host.querySelector<HTMLElement>('[data-testid="app-shell"]')?.dataset.completePairCount).toBe('1');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('creates a pair when the target is clicked before the source', async () => {
+		const editor = makeEditorWithBothImages();
+		editor.markSaved();
+		const { component, host } = mountPage(editor, decodeOf(100, 80));
+		setGeometry(host, 'source-overview');
+		setGeometry(host, 'target-basemap');
+		await flush();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="add-correspondence"]')?.click();
+		await flush();
+		dispatchClick(host, 'target-basemap', 0.25, 0.5);
+		await flush();
+
+		expect(mode(host)).toBe('add-target');
+		expect(host.querySelector('[data-testid="app-shell"]')?.getAttribute('data-pending-placement-role')).toBe(
+			'target-basemap'
+		);
+		expect(host.querySelector('[data-testid="correspondence-guidance"]')?.textContent).toContain(
+			'Click the same landmark in the UDisc source image.'
+		);
+
+		dispatchClick(host, 'source-overview', 0.75, 0.25);
+		await flush();
+
+		expect(editor.state.controlPointPairs).toHaveLength(1);
+		expect(editor.state.controlPointPairs[0].source.imageId).toBe('source-1');
+		expect(editor.state.controlPointPairs[0].target.imageId).toBe('target-1');
+		expect(editor.state.controlPointPairs[0].source.xPx).not.toBe(
+			editor.state.controlPointPairs[0].target.xPx
+		);
+		expect(mode(host)).toBe('neutral');
 
 		unmount(component);
 		host.remove();

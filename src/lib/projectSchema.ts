@@ -1,16 +1,29 @@
 /**
- * ChainSpot versioned project document — schema version 1 serialization and validation.
+ * ChainSpot versioned project document — serialization, validation, and migration.
  *
- * The saved document (`ProjectDocumentV1`) is the durable, portable boundary of a
+ * The saved document (`ProjectDocumentV3`) is the durable, portable boundary of a
  * ChainSpot project. It wraps the plain authoritative domain state (`ProjectState` from
  * P0-002) with an explicit `schemaVersion` and stores derived normalized coordinates
  * alongside the authoritative pixel coordinates:
  *
- *   { "schemaVersion": 1,
+ *   { "schemaVersion": 3,
  *     "project": { "id", "name", "createdAt", "updatedAt" },
  *     "images": [ <source-overview manifest>, <target-basemap manifest> ],
  *     "controlPointPairs": [ <complete pair with source/target pixel + normalized points> ],
+ *     "holes": [ <hole with tee/basket/ordered shots/corridorBends/corridorWidthPx in source-image pixels> ],
  *     "viewState": null | { "source": {"zoom","panX","panY"}, "target": {...} } }
+ *
+ * Versions: v1 documents (written before hole annotation existed) are still readable and
+ * are migrated forward by treating `holes` as empty — the only difference between the two
+ * versions. The version was bumped rather than adding `holes` as an optional v1 field on
+ * purpose: unknown fields are dropped on re-serialization, so a v1-only build opening a
+ * document with holes would silently discard them on the next save. A version bump makes
+ * that case fail loudly with `schema.version.unsupported` instead of losing user work.
+ *
+ * v2 -> v3: v2 holes carried a hand-traced `corridor` polygon; v3 replaces it with a
+ * centerline representation (`corridorBends` + one `corridorWidthPx`). Old polygon data
+ * is dev-era and is DROPPED on read: a v2 hole is migrated to empty bends and the current
+ * default width. No legacy polygon compatibility subsystem is kept.
  *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
@@ -20,11 +33,11 @@
  * An invalid-type or non-finite normalized value is a structured failure (no coercion).
  *
  * Validation order: the root must be a plain object and `schemaVersion` is read and
- * checked before anything else, so an unsupported version (any value other than 1, with
- * newer versions clearly classified) fails before any other validation and never leads to
- * partial state replacement. Unknown fields at every level of a supported version are
- * ignored during parsing and are never emitted by the serializer, so they cannot survive
- * a re-serialization.
+ * checked before anything else, so an unsupported version (any value other than 1, 2, or
+ * 3, with newer versions clearly classified) fails before any other validation and never
+ * leads to partial state replacement. Unknown fields at every level of a supported
+ * version are ignored during parsing and are never emitted by the serializer, so they
+ * cannot survive a re-serialization.
  *
  * Error contract: every failure is one `ProjectSchemaError` with a stable `category` and
  * `code`, a document `path` and optional `context`, and a human-readable `message`. The
@@ -36,28 +49,36 @@
  * touch a `ProjectEditor`, Svelte store, Konva node, decoded image, file object, or UI
  * state, so a failed parse cannot mutate an existing in-memory project.
  *
- * Out of scope: ZIP bundle I/O, image-byte hashing, downloads/uploads, migrations beyond
- * version 1, autosave, and UI repair flows belong to P0-011 and later tickets. No generic
- * validation library, reflection, decorators, placeholder migration registry, or generic
- * validator framework is used; validation is explicit and close to the versioned document
- * definition.
+ * Out of scope: ZIP bundle I/O, image-byte hashing, downloads/uploads, autosave, and UI
+ * repair flows belong to P0-011 and later tickets. No generic validation library,
+ * reflection, decorators, placeholder migration registry, or generic validator framework
+ * is used; validation and the explicit forward migrations (v1 predating holes, v2's
+ * polygon corridor dropped for v3's centerline) are explicit and close to the versioned
+ * document definition.
  */
 
 import { pointInBounds, toNormalizedCoordinates } from './coords';
+import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type {
+	AnnotatedHole,
 	ControlPointPair,
 	ImageAsset,
 	ImagePoint,
 	ImageRole,
+	OrderedShot,
 	ProjectMetadata,
 	ProjectState,
 	ProjectViewState,
+	SourcePoint,
 	ViewTransformState
 } from './domain/project';
 import { IMAGE_ROLES } from './domain/project';
 
-/** The only supported schema version for saved ChainSpot project documents. */
-export const CURRENT_SCHEMA_VERSION = 1 as const;
+/** The schema version written by this build. */
+export const CURRENT_SCHEMA_VERSION = 3 as const;
+
+/** Every version this build can read; older ones are migrated forward on parse. */
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -78,11 +99,12 @@ export interface ControlPointPairV1 {
 	updatedAt: string;
 }
 
-export interface ProjectDocumentV1 {
-	schemaVersion: 1;
+export interface ProjectDocumentV3 {
+	schemaVersion: 3;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
+	holes: AnnotatedHole[];
 	viewState: ProjectViewState | null;
 }
 
@@ -97,6 +119,7 @@ export type ProjectSchemaErrorCategory =
 	| 'reference'
 	| 'coordinate'
 	| 'normalized'
+	| 'hole'
 	| 'view';
 
 export interface ProjectSchemaError {
@@ -491,6 +514,140 @@ function readPairs(input: unknown, images: ImageAsset[]): ControlPointPair[] {
 	return pairs;
 }
 
+/**
+ * Reads one hole feature point. Holes carry no `imageId` (a hole always belongs to the
+ * `source-overview` image), so the bound image is passed in rather than resolved from
+ * the document; bounds are enforced exactly as they are for control points.
+ */
+function readHolePoint(input: unknown, path: string, sourceImage: ImageAsset): SourcePoint {
+	const object = readObject(input, path, 'hole point');
+	const xPx = readFiniteCoordinate(object.xPx, `${path}.xPx`);
+	const yPx = readFiniteCoordinate(object.yPx, `${path}.yPx`);
+	if (!pointInBounds({ xPx, yPx }, sourceImage.widthPx, sourceImage.heightPx)) {
+		throw failure(
+			'coordinate',
+			'coordinate.out-of-bounds',
+			path,
+			`hole point (${xPx}, ${yPx}) is outside [0, ${sourceImage.widthPx}) x [0, ${sourceImage.heightPx}) of the source image '${sourceImage.id}'`
+		);
+	}
+	return { xPx, yPx };
+}
+
+function readHoleNumber(input: unknown, path: string): number {
+	if (typeof input !== 'number' || !Number.isInteger(input) || input <= 0) {
+		throw failure(
+			'hole',
+			'hole.number.invalid',
+			path,
+			`${path} must be a positive integer, got ${describeValue(input)}`
+		);
+	}
+	return input;
+}
+
+/**
+ * Reads the hole's constant corridor width. Required in v3; an absent value
+ * (v1/v2 data predating the field) migrates to the current default width.
+ */
+function readCorridorWidthPx(input: unknown, path: string): number {
+	if (input === undefined || input === null) return DEFAULT_CORRIDOR_WIDTH_PX;
+	if (typeof input !== 'number') {
+		throw failure(
+			'hole',
+			'hole.width.type',
+			path,
+			`${path} must be a number, got ${describeValue(input)}`
+		);
+	}
+	if (!Number.isFinite(input) || input <= 0) {
+		throw failure(
+			'hole',
+			'hole.width.invalid',
+			path,
+			`${path} must be a finite number greater than zero, got ${String(input)}`
+		);
+	}
+	return input;
+}
+
+/**
+ * Reads the `holes` array. Absent/null is an empty list, which is exactly how a migrated
+ * v1 document (written before hole annotation existed) arrives here.
+ */
+function readHoles(input: unknown, images: ImageAsset[]): AnnotatedHole[] {
+	if (input === undefined || input === null) return [];
+	if (!Array.isArray(input)) {
+		throw failure('required-type', 'required.missing', 'holes', 'holes must be an array');
+	}
+	const sourceImage = images.find((image) => image.role === 'source-overview') as ImageAsset;
+	const holes: AnnotatedHole[] = [];
+	const numbers = new Map<number, string>();
+	for (let index = 0; index < input.length; index++) {
+		const path = `holes[${index}]`;
+		const object = readObject(input[index], path, 'hole');
+		const id = readNonEmptyString(object.id, `${path}.id`);
+		const number = readHoleNumber(object.number, `${path}.number`);
+		const prior = numbers.get(number);
+		if (prior !== undefined) {
+			throw failure(
+				'hole',
+				'hole.number-duplicate',
+				`${path}.number`,
+				`hole number ${number} is used by both ${prior} and ${path}.id`
+			);
+		}
+		numbers.set(number, `${path}.id`);
+
+		if (!Array.isArray(object.shots)) {
+			throw failure('hole', 'hole.shots.type', `${path}.shots`, `${path}.shots must be an array`);
+		}
+		const shots: OrderedShot[] = object.shots.map((shot, shotIndex) => {
+			const shotPath = `${path}.shots[${shotIndex}]`;
+			const shotObject = readObject(shot, shotPath, 'shot');
+			return {
+				id: readNonEmptyString(shotObject.id, `${shotPath}.id`),
+				landing: readHolePoint(shotObject.landing, `${shotPath}.landing`, sourceImage)
+			};
+		});
+
+		// Centerline bend points. Required (possibly empty) in v3; absent on
+		// v1/v2 holes means no bends, and any legacy `corridor` polygon field on
+		// v2 holes is deliberately ignored (dev-era data, dropped on read).
+		let corridorBends: SourcePoint[] = [];
+		if (object.corridorBends !== undefined && object.corridorBends !== null) {
+			if (!Array.isArray(object.corridorBends)) {
+				throw failure(
+					'hole',
+					'hole.corridorBends.type',
+					`${path}.corridorBends`,
+					`${path}.corridorBends must be an array`
+				);
+			}
+			corridorBends = object.corridorBends.map((point, pointIndex) =>
+				readHolePoint(point, `${path}.corridorBends[${pointIndex}]`, sourceImage)
+			);
+		}
+		const corridorWidthPx = readCorridorWidthPx(object.corridorWidthPx, `${path}.corridorWidthPx`);
+
+		const hole: AnnotatedHole = {
+			id,
+			number,
+			shots,
+			corridorBends,
+			corridorWidthPx,
+			...(object.tee !== undefined && object.tee !== null
+				? { tee: readHolePoint(object.tee, `${path}.tee`, sourceImage) }
+				: {}),
+			...(object.basket !== undefined && object.basket !== null
+				? { basket: readHolePoint(object.basket, `${path}.basket`, sourceImage) }
+				: {})
+		};
+		holes.push(hole);
+	}
+	return holes;
+}
+
 function assertUniqueIds(project: ProjectMetadata, images: ImageAsset[], pairs: ControlPointPair[]): void {
 	const seen = new Map<string, string>([['project.id', project.id]]);
 	for (let index = 0; index < images.length; index++) {
@@ -574,7 +731,7 @@ function readDocument(value: unknown): ProjectState {
 			`schemaVersion must be a number, got ${describeValue(schemaVersion)}`
 		);
 	}
-	if (schemaVersion !== CURRENT_SCHEMA_VERSION) {
+	if (!SUPPORTED_SCHEMA_VERSIONS.includes(schemaVersion)) {
 		const newer = schemaVersion > CURRENT_SCHEMA_VERSION;
 		throw failure(
 			'unsupported-version',
@@ -582,7 +739,7 @@ function readDocument(value: unknown): ProjectState {
 			'schemaVersion',
 			newer
 				? `unsupported schema version ${schemaVersion}; this build supports version ${CURRENT_SCHEMA_VERSION} and cannot open newer documents`
-				: `unsupported schema version ${schemaVersion}; this build supports version ${CURRENT_SCHEMA_VERSION}`
+				: `unsupported schema version ${schemaVersion}; this build supports versions ${SUPPORTED_SCHEMA_VERSIONS.join(', ')}`
 		);
 	}
 
@@ -590,9 +747,14 @@ function readDocument(value: unknown): ProjectState {
 	const images = readImages(root.images);
 	const pairs = readPairs(root.controlPointPairs, images);
 	assertUniqueIds(project, images, pairs);
+	// Migration from pre-hole documents: v1 simply has no `holes`, which
+	// `readHoles` already reads as an empty list. Reading it unconditionally
+	// keeps the migration a single well-defined default rather than a separate
+	// transform pass.
+	const holes = readHoles(root.holes, images);
 	const viewState = readViewState(root.viewState);
 
-	return { project, images, controlPointPairs: pairs, viewState };
+	return { project, images, controlPointPairs: pairs, holes, viewState };
 }
 
 /**
@@ -668,6 +830,7 @@ function validateState(state: ProjectState): void {
 	const images = readImages(state.images);
 	const pairs = readPairs(state.controlPointPairs, images);
 	assertUniqueIds(project, images, pairs);
+	readHoles(state.holes, images);
 	readViewState(state.viewState);
 }
 
@@ -678,7 +841,7 @@ function validateState(state: ProjectState): void {
  * returned document never stores normalized state back into the domain. Throws a
  * structured `ProjectSchemaError` when the domain state is invalid.
  */
-export function serializeProjectState(state: ProjectState): ProjectDocumentV1 {
+export function serializeProjectState(state: ProjectState): ProjectDocumentV3 {
 	try {
 		validateState(state);
 	} catch (error) {
@@ -728,6 +891,22 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV1 {
 			target: buildPoint(pair.target, sourceImage, targetImage),
 			createdAt: pair.createdAt,
 			updatedAt: pair.updatedAt
+		})),
+		// Emitted field-by-field (never spread) so unknown properties on a hole object
+		// cannot survive a round trip, matching how pairs and images are serialized.
+		// Optional fields are omitted rather than written as null, so a re-parse
+		// reproduces exactly the same shape.
+		holes: state.holes.map((hole) => ({
+			id: hole.id,
+			number: hole.number,
+			shots: hole.shots.map((shot) => ({
+				id: shot.id,
+				landing: { xPx: shot.landing.xPx, yPx: shot.landing.yPx }
+			})),
+			corridorBends: hole.corridorBends.map((point) => ({ xPx: point.xPx, yPx: point.yPx })),
+			corridorWidthPx: hole.corridorWidthPx,
+			...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
+			...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
 		})),
 		viewState
 	};

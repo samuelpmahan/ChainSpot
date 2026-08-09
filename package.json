@@ -10,6 +10,10 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "detect:tees": "tsx scripts/detect-tees.ts",
+    "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
+    "detect:course": "tsx scripts/detect-course.ts",
+    "verify:cv": "tsx scripts/verify-cv-guardrails.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
@@ -27,11 +31,12 @@
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/node": "^26.1.2",
     "@types/pngjs": "^6.0.5",
+    "jpeg-js": "^0.4.4",
     "jsdom": "^30.0.1",
     "pngjs": "^7.0.0",
     "svelte": "^5.56.8",
-    "svelte-check": "^4.7.4",
     "typescript": "^6.0.3",
+    "tsx": "^4.20.3",
     "vitest": "^4.1.10"
   }
 }

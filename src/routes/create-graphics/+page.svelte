@@ -6,7 +6,7 @@
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
-	import { intakeImageFile } from '$lib/imageIntake';
+	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
 	import { pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
@@ -35,15 +35,32 @@
 	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
-	import { fetchNaipImage } from '$lib/naip';
-	import type { GeoPoint } from '$lib/naip';
+	import {
+		bboxFromCenter,
+		fetchNaipBoundingBoxImage,
+		fetchNaipImage,
+		NAIP_EXPORT_SIZE_PX
+	} from '$lib/naip';
+	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
+	import { searchPlace } from '$lib/geocode';
+	import type { GeoSearchMatch } from '$lib/geocode';
+	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
+	import type { PixelRect } from '$lib/naipGrid';
+	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
+	import { estimateAffine } from '$lib/alignment/affine';
+	import { estimateSimilarity } from '$lib/alignment/similarity';
+	import { validateTransform } from '$lib/alignment/validation';
+	import { AlignmentFailureReason } from '$lib/alignment/types';
+	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
 	import {
 		consumePendingAnnotatedRound,
 		getActiveAnnotatedRound,
 		getPendingAnnotatedRound,
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
-	import type { AnnotatedRound } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
+	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
+	import type { HoleGraphicPlan } from '$lib/holeGraphics';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -72,6 +89,7 @@
 	onDestroy(() => {
 		if (participatesInSession) retainEditor('create-graphics', editor);
 		clearNaipPreview();
+		handleBoxHandleUp();
 	});
 
 	let refreshCount = $state(0);
@@ -80,9 +98,141 @@
 	/** Pure, derived, non-mutating pair counts, readiness, and diagnostics copy. */
 	let diagnosticsView = $derived(
 		diagnosticsCopy(
-			deriveDiagnostics(currentPairs(), editor.state.images, correspondence.pendingSource !== null)
+			deriveDiagnostics(currentPairs(), editor.state.images, correspondence.pendingPlacement !== null)
 		)
 	);
+
+	/**
+	 * Phase 1 alignment: `src/lib/alignment` estimates a source-to-target
+	 * transform from the correspondence pairs above. Pure, derived, and
+	 * recomputed automatically as pairs are added/edited — nothing here mutates
+	 * domain state, matching diagnosticsView's own pattern.
+	 */
+	let alignmentModel = $state<AlignmentModel>('similarity');
+
+	function alignmentPairs(): AlignmentPairInput[] {
+		return currentPairs().map((pair) => ({
+			id: pair.id,
+			enabled: pair.enabled,
+			source: pair.source,
+			target: pair.target
+		}));
+	}
+
+	/** Null before any enabled, complete pair exists — nothing to estimate yet. */
+	let alignmentResult: EstimationResultOrFailure | null = $derived.by(() => {
+		const pairs = alignmentPairs();
+		if (!pairs.some((pair) => pair.enabled && pair.target !== null)) return null;
+		return alignmentModel === 'affine' ? estimateAffine({ pairs }) : estimateSimilarity({ pairs });
+	});
+
+	let alignmentWarnings = $derived.by(() => {
+		if (!alignmentResult || !('transform' in alignmentResult)) return [];
+		return validateTransform({ transform: alignmentResult.transform, pairs: alignmentPairs() });
+	});
+
+	const ALIGNMENT_FAILURE_MESSAGES: Record<AlignmentFailureReason, string> = {
+		[AlignmentFailureReason.INSUFFICIENT_PAIRS]: 'Not enough enabled, complete pairs yet.',
+		[AlignmentFailureReason.ZERO_SPREAD]: 'The enabled pairs are all at the same point — spread them out.',
+		[AlignmentFailureReason.COLLINEAR_GEOMETRY]:
+			'The enabled pairs are collinear — affine needs a non-collinear spread (try similarity, or add a pair off that line).',
+		[AlignmentFailureReason.NON_INVERTIBLE]: 'The estimated transform is not invertible.',
+		[AlignmentFailureReason.NON_FINITE_COORDINATES]: 'Some pair coordinates are not finite numbers.',
+		[AlignmentFailureReason.REFLECTION_REQUIRED]:
+			'This pair geometry requires a reflection, which similarity does not model — try affine.',
+		[AlignmentFailureReason.NUMERICAL_SOLVE_FAILURE]: 'The numerical solve failed. Try adjusting the pairs.'
+	};
+
+	/**
+	 * Clean hole construction: applies the estimated transform above to every
+	 * annotated hole's source-space points, producing target-space plans ready to
+	 * render. Purely derived, so the SVG preview below is always live — it
+	 * updates as annotations or the alignment change, with no separate "build"
+	 * step. Rendering to a downloadable PNG (or a batch zip) is the only thing
+	 * that stays an explicit action, since that's genuinely expensive work
+	 * (canvas rasterization per hole), not just pointer input.
+	 *
+	 * Reads holes from durable project state, NOT from the `annotatedRound`
+	 * session artifact: a project reopened from a saved bundle has holes but no
+	 * session artifact at all, and reading the artifact would leave those holes
+	 * unbuildable.
+	 */
+	function currentHoles(): readonly AnnotatedHole[] {
+		void refreshCount;
+		return editor.state.holes;
+	}
+
+	let holeGraphicPlans: HoleGraphicPlan[] = $derived.by(() => {
+		if (!alignmentResult || !('transform' in alignmentResult)) return [];
+		const target = targetImage();
+		if (!target) return [];
+		const transform = alignmentResult.transform;
+		const plans: HoleGraphicPlan[] = [];
+		for (const hole of currentHoles()) {
+			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
+			if (plan) plans.push(plan);
+		}
+		return plans;
+	});
+
+	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
+	function targetImageHref(): string | null {
+		const target = targetImage();
+		if (!target) return null;
+		const decoded = editor.getAssetResource(target.id)?.decoded;
+		return decoded instanceof HTMLImageElement ? decoded.src : null;
+	}
+
+	let holeGraphicDownloading = $state<Set<string>>(new Set());
+	let holeGraphicsZipping = $state(false);
+	let holeGraphicsError = $state<string | null>(null);
+
+	function triggerBlobDownload(blob: Blob, fileName: string): void {
+		const objectUrl = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		anchor.href = objectUrl;
+		anchor.download = fileName;
+		anchor.click();
+		URL.revokeObjectURL(objectUrl);
+	}
+
+	async function handleDownloadHoleGraphic(plan: HoleGraphicPlan): Promise<void> {
+		const href = targetImageHref();
+		if (!href || holeGraphicDownloading.has(plan.holeId)) return;
+		holeGraphicDownloading = new Set(holeGraphicDownloading).add(plan.holeId);
+		holeGraphicsError = null;
+		try {
+			const blob = await renderHoleGraphicPng(href, plan);
+			triggerBlobDownload(blob, `hole-${plan.number}.png`);
+		} catch (error) {
+			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphic.';
+		} finally {
+			const next = new Set(holeGraphicDownloading);
+			next.delete(plan.holeId);
+			holeGraphicDownloading = next;
+		}
+	}
+
+	async function handleDownloadAllHoleGraphics(): Promise<void> {
+		const plans = holeGraphicPlans;
+		const href = targetImageHref();
+		if (plans.length === 0 || !href || holeGraphicsZipping) return;
+		holeGraphicsZipping = true;
+		holeGraphicsError = null;
+		try {
+			const entries = [];
+			for (const plan of plans) {
+				const blob = await renderHoleGraphicPng(href, plan);
+				entries.push({ number: plan.number, blob });
+			}
+			const zip = await zipHoleGraphics(entries);
+			triggerBlobDownload(zip, 'hole-graphics.zip');
+		} catch (error) {
+			holeGraphicsError = error instanceof Error ? error.message : 'Could not build the hole graphics zip.';
+		} finally {
+			holeGraphicsZipping = false;
+		}
+	}
 	let selection = $state<PointSelection | null>(null);
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
@@ -139,20 +289,65 @@
 	let annotatedRoundError = $state<string | null>(null);
 
 	/**
-	 * Default fetch radius for the USGS NAIP aerial pull: 300m frames one or two
-	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on
-	 * every side, without the course shrinking to a speck in a much larger frame.
-	 * Purely a starting point — the user adjusts and refetches as needed.
+	 * Default *preview/reference* radius for the USGS NAIP aerial pull: 900m — three
+	 * times the fixed per-tile radius below — gives enough framing margin around a
+	 * course for the coverage-box picker to be drawn and resized inside it. This is
+	 * deliberately wider than a single hole; it is a reference frame, not itself the
+	 * final clean target (though "Use this preview as-is" still commits it directly
+	 * for a course small enough not to need tiling).
 	 */
-	const DEFAULT_NAIP_RADIUS_METERS = 300;
-	let naipLatInput = $state('');
-	let naipLonInput = $state('');
+	const DEFAULT_NAIP_RADIUS_METERS = 900;
+	/**
+	 * Fixed radius for every tile in the full-resolution grid: 300m frames one or two
+	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on every
+	 * side, so each tile stays sharp instead of stretching thin over a huge area.
+	 */
+	const TILE_RADIUS_METERS = 300;
+	/** Default coverage box: most of the preview frame, leaving a visible margin to grow into. */
+	const DEFAULT_BOX_FRACTION = 0.9;
+	const MIN_BOX_SIZE_PX = 128;
+	const BOX_HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
+
+	// MVP default: Dash's Track, Frisco TX. UDisc course-directory coordinate.
+	// These remain ordinary editable inputs; the default just lets the common
+	// development course skip geocoding entirely and go straight to NAIP.
+	let naipLatInput = $state('33.12551979622626');
+	let naipLonInput = $state('-96.86103869229555');
 	let naipRadiusInput = $state(String(DEFAULT_NAIP_RADIUS_METERS));
 	let naipLoading = $state(false);
 	let naipCommitting = $state(false);
 	let naipError = $state<string | null>(null);
-	/** Fetched-but-not-yet-committed aerial image awaiting explicit user confirmation. */
+	/** Fetched-but-not-yet-committed aerial preview, awaiting explicit user confirmation. */
 	let naipPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
+	/** Center/radius actually used for the current `naipPreview`, kept to derive its bbox. */
+	let naipPreviewCenter = $state<GeoPoint | null>(null);
+	let naipPreviewRadiusUsed = $state<number | null>(null);
+
+	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
+	let geocodeParkNameInput = $state('');
+	let geocodeCityStateInput = $state('');
+	let geocodeLoading = $state(false);
+	let geocodeError = $state<string | null>(null);
+	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
+	let geocodeSelectedIndex = $state<number | null>(null);
+
+	/** CSS-displayed-pixels-per-natural-pixel for the rendered preview `<img>`, set once it loads. */
+	let displayScale = $state(1);
+	/** User-adjustable coverage box drawn over the preview, in the preview's own pixel space. */
+	let boxRect = $state<PixelRect | null>(null);
+	let boxDragHandle = $state<'nw' | 'ne' | 'sw' | 'se' | null>(null);
+	let boxDragStart = $state<{ clientX: number; clientY: number; rect: PixelRect } | null>(null);
+
+	/** The assembled full-resolution tile grid, fetched for the area inside `boxRect`. */
+	let gridLoading = $state(false);
+	let gridError = $state<string | null>(null);
+	let gridCommitting = $state(false);
+	let gridPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
+	/** Exact geographic selection fetched at a fit-to-box raster size, awaiting import. */
+	let exactSelectionLoading = $state(false);
+	let exactSelectionError = $state<string | null>(null);
+	let exactSelectionCommitting = $state(false);
+	let exactSelectionPreview = $state<{ blob: Blob; objectUrl: string } | null>(null);
 
 	function sourceImage(): ImageAsset | null {
 		void refreshCount;
@@ -223,7 +418,8 @@
 			nextPairOrdinal(currentPairs())
 		);
 		correspondenceError = null;
-		activityMessage = 'Add correspondence started. Select a landmark in the source image.';
+		activityMessage =
+			'Add correspondence started. Select a landmark in either the UDisc source or clean target image.';
 	}
 
 	function cancelAddCorrespondence(): void {
@@ -233,9 +429,13 @@
 	}
 
 	function placementGuidance(): string {
-		if (correspondence.mode === 'add-source') return 'Click a landmark in the UDisc source image.';
-		if (correspondence.mode === 'add-target') {
-			return 'Click the same landmark in the clean target image.';
+		if (correspondence.mode === 'add-source') {
+			return 'Click a landmark in either the UDisc source or clean target image.';
+		}
+		if (correspondence.mode === 'add-target' && correspondence.pendingPlacement) {
+			return correspondence.pendingPlacement.role === 'source-overview'
+				? 'Click the same landmark in the clean target image.'
+				: 'Click the same landmark in the UDisc source image.';
 		}
 		return 'Select Add correspondence to create a source–target pair.';
 	}
@@ -479,12 +679,11 @@
 	}
 
 	function handlePlacement(placement: PanePlacement): void {
+		const imageId = findImageByRole(editor.state.images, placement.role)?.id ?? '';
 		const transition = placeCorrespondence(
 			correspondence,
 			placement,
-			placement.role === 'source-overview'
-				? findImageByRole(editor.state.images, 'source-overview')?.id ?? ''
-				: '',
+			imageId,
 			nextPairOrdinal(currentPairs())
 		);
 		if (!transition.accepted) return;
@@ -496,14 +695,18 @@
 
 		try {
 			const currentSourceImageId = findImageByRole(editor.state.images, 'source-overview')?.id ?? null;
-			if (currentSourceImageId !== transition.completion.source.imageId) {
+			const currentTargetImageId = findImageByRole(editor.state.images, 'target-basemap')?.id ?? null;
+			if (
+				currentSourceImageId !== transition.completion.source.imageId ||
+				currentTargetImageId !== transition.completion.target.imageId
+			) {
 				correspondence = cancelCorrespondence(transition.state);
-				correspondenceError = 'The source image changed. Restart correspondence creation.';
+				correspondenceError = 'An image changed. Restart correspondence creation.';
 				return;
 			}
 			editor.addPair({
 				sourceCoordinates: transition.completion.source.coordinates,
-				targetCoordinates: transition.completion.target
+				targetCoordinates: transition.completion.target.coordinates
 			});
 			correspondence = completeCorrespondence(transition.state);
 			refreshCount += 1;
@@ -519,7 +722,7 @@
 	}
 
 	function onDomainChanged(role: ImageRole): void {
-		// A successful assignment/replacement invalidates any pending source identity,
+		// A successful assignment/replacement invalidates any pending placement identity,
 		// including same-dimension replacements. Failed/cancelled intake never calls here.
 		if (correspondence.mode !== 'neutral') {
 			correspondence = cancelCorrespondence(correspondence);
@@ -797,6 +1000,10 @@
 				activityMessage = 'Replacement cancelled. The annotated round is still pending.';
 				return;
 			}
+			// Holes cross into durable project state here, so they are saved with the
+			// project and restored on reopen. The session artifact is only the transport;
+			// `editor.state.holes` is the single source of truth from this point on.
+			editor.setHoles(round.holes);
 			consumePendingAnnotatedRound();
 			setActiveAnnotatedRound(round);
 			annotatedRound = round;
@@ -825,6 +1032,24 @@
 	function clearNaipPreview(): void {
 		if (naipPreview) URL.revokeObjectURL(naipPreview.objectUrl);
 		naipPreview = null;
+		naipPreviewCenter = null;
+		naipPreviewRadiusUsed = null;
+		boxRect = null;
+		displayScale = 1;
+		clearGridPreview();
+		clearExactSelectionPreview();
+	}
+
+	function clearGridPreview(): void {
+		if (gridPreview) URL.revokeObjectURL(gridPreview.objectUrl);
+		gridPreview = null;
+		gridError = null;
+	}
+
+	function clearExactSelectionPreview(): void {
+		if (exactSelectionPreview) URL.revokeObjectURL(exactSelectionPreview.objectUrl);
+		exactSelectionPreview = null;
+		exactSelectionError = null;
 	}
 
 	function parseNaipCenter(): GeoPoint | null {
@@ -851,6 +1076,59 @@
 	}
 
 	/**
+	 * Looks up the course by name (city/state optional, to help when the course sits in
+	 * some small town near a metro area the user can't name off-hand) via OpenStreetMap
+	 * Nominatim and lists matches for the user to pick from — never fetches NAIP imagery
+	 * itself. Nominatim matches literal named things in OSM, not "near this metro area";
+	 * a vague region name in the city/state field wouldn't narrow the search so much as
+	 * risk matching some other named entity entirely (an airport, a neighborhood). The
+	 * safety net either way is the same: nothing is used until the user recognizes and
+	 * picks a specific result by its full display name below. Picking a match just fills
+	 * the same lat/lon inputs `handleNaipFetch` already reads, so nothing downstream needs
+	 * to know the coordinate came from a search instead of manual entry.
+	 */
+	async function handleGeocodeSearch(): Promise<void> {
+		if (geocodeLoading) return;
+		geocodeError = null;
+		geocodeMatches = null;
+		geocodeSelectedIndex = null;
+		const parkName = geocodeParkNameInput.trim();
+		const cityState = geocodeCityStateInput.trim();
+		if (!parkName) {
+			geocodeError = 'Enter a course name to search for.';
+			return;
+		}
+		geocodeLoading = true;
+		try {
+			const combinedQuery = cityState ? `${parkName}, ${cityState}` : null;
+			const initialResult = await searchPlace(combinedQuery ?? parkName);
+			// A course may be named in OSM but not indexed under the user's metro
+			// spelling/state abbreviation. Retry the stable course name before
+			// reporting failure; do not retry transport or HTTP errors.
+			const result =
+				!initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
+					? await searchPlace(parkName)
+					: initialResult;
+			if (!result.ok) {
+				geocodeError = result.error.message;
+				return;
+			}
+			geocodeMatches = result.matches;
+		} finally {
+			geocodeLoading = false;
+		}
+	}
+
+	function handleGeocodeSelect(index: number): void {
+		const match = geocodeMatches?.[index];
+		if (!match) return;
+		geocodeSelectedIndex = index;
+		naipLatInput = String(match.lat);
+		naipLonInput = String(match.lon);
+		naipError = null;
+	}
+
+	/**
 	 * Fetches a NAIP aerial preview only — never commits into the project. The user
 	 * reviews the preview and either confirms (`handleNaipConfirm`) or discards it to
 	 * adjust the radius and refetch.
@@ -871,6 +1149,10 @@
 				return;
 			}
 			naipPreview = { blob: result.blob, objectUrl: URL.createObjectURL(result.blob) };
+			naipPreviewCenter = center;
+			naipPreviewRadiusUsed = radius;
+			// The coverage box itself is initialized once the preview `<img>` fires
+			// `onload` (see the template), since that's when its display size is known.
 		} finally {
 			naipLoading = false;
 		}
@@ -915,6 +1197,249 @@
 
 	function handleNaipDiscardPreview(): void {
 		clearNaipPreview();
+	}
+
+	function handleNaipPreviewError(): void {
+		clearNaipPreview();
+		naipError = 'The aerial preview could not be displayed. Try another US location or radius.';
+	}
+
+	function handleGridPreviewError(): void {
+		clearGridPreview();
+		gridError = 'The assembled aerial preview could not be displayed.';
+	}
+
+	function handleExactSelectionPreviewError(): void {
+		clearExactSelectionPreview();
+		exactSelectionError = 'The exact selected-area preview could not be displayed.';
+	}
+
+	function clamp(value: number, min: number, max: number): number {
+		return Math.min(Math.max(value, min), Math.max(min, max));
+	}
+
+	/**
+	 * Centers a default coverage box inside the freshly-fetched preview and records its
+	 * display scale from the `load` event's own element — reading a separately-`bind:this`-
+	 * bound element here would race a same-tick (e.g. cached-blob) `load` event.
+	 */
+	function initBoxRect(imgEl: HTMLImageElement): void {
+		const size = NAIP_EXPORT_SIZE_PX;
+		const boxSize = Math.round(size * DEFAULT_BOX_FRACTION);
+		const offset = Math.round((size - boxSize) / 2);
+		boxRect = { x: offset, y: offset, width: boxSize, height: boxSize };
+		displayScale = imgEl.naturalWidth > 0 ? imgEl.clientWidth / imgEl.naturalWidth : 1;
+	}
+
+	/**
+	 * Bbox of the current preview, derived from the center/radius actually used to
+	 * fetch it (not the possibly-since-edited lat/lon/radius inputs).
+	 */
+	let naipPreviewBbox: GeoBoundingBox | null = $derived(
+		naipPreviewCenter && naipPreviewRadiusUsed !== null
+			? bboxFromCenter(naipPreviewCenter, naipPreviewRadiusUsed)
+			: null
+	);
+
+	/**
+	 * Live plan for the area inside `boxRect`, recomputed as the user drags a handle —
+	 * pure geometry, no network call, so this can safely run on every drag frame.
+	 */
+	let gridPlanPreview = $derived.by(() => {
+		if (!naipPreviewBbox || !boxRect) return null;
+		const geoBox = pixelRectToGeoBox(naipPreviewBbox, NAIP_EXPORT_SIZE_PX, boxRect);
+		const { center, widthMeters, heightMeters } = geoBoxCenterAndSize(geoBox);
+		const plan = planTileGrid(center, widthMeters, heightMeters, TILE_RADIUS_METERS);
+		return { widthMeters, heightMeters, plan };
+	});
+
+	function handleBoxHandleDown(handle: 'nw' | 'ne' | 'sw' | 'se', event: PointerEvent): void {
+		if (!boxRect) return;
+		event.preventDefault();
+		boxDragHandle = handle;
+		boxDragStart = { clientX: event.clientX, clientY: event.clientY, rect: { ...boxRect } };
+		window.addEventListener('pointermove', handleBoxHandleMove);
+		window.addEventListener('pointerup', handleBoxHandleUp);
+		window.addEventListener('pointercancel', handleBoxHandleUp);
+	}
+
+	function handleBoxHandleMove(event: PointerEvent): void {
+		if (!boxDragHandle || !boxDragStart) return;
+		const scale = displayScale;
+		if (scale <= 0) return;
+		const dxNatural = (event.clientX - boxDragStart.clientX) / scale;
+		const dyNatural = (event.clientY - boxDragStart.clientY) / scale;
+		const { rect } = boxDragStart;
+		const size = NAIP_EXPORT_SIZE_PX;
+
+		let { x, y, width, height } = rect;
+		if (boxDragHandle === 'nw' || boxDragHandle === 'sw') {
+			const newX = clamp(rect.x + dxNatural, 0, rect.x + rect.width - MIN_BOX_SIZE_PX);
+			width = rect.x + rect.width - newX;
+			x = newX;
+		} else {
+			width = clamp(rect.width + dxNatural, MIN_BOX_SIZE_PX, size - rect.x);
+		}
+		if (boxDragHandle === 'nw' || boxDragHandle === 'ne') {
+			const newY = clamp(rect.y + dyNatural, 0, rect.y + rect.height - MIN_BOX_SIZE_PX);
+			height = rect.y + rect.height - newY;
+			y = newY;
+		} else {
+			height = clamp(rect.height + dyNatural, MIN_BOX_SIZE_PX, size - rect.y);
+		}
+		boxRect = { x, y, width, height };
+	}
+
+	function handleBoxHandleUp(): void {
+		boxDragHandle = null;
+		boxDragStart = null;
+		if (typeof window === 'undefined') return;
+		window.removeEventListener('pointermove', handleBoxHandleMove);
+		window.removeEventListener('pointerup', handleBoxHandleUp);
+		window.removeEventListener('pointercancel', handleBoxHandleUp);
+	}
+
+	/**
+	 * Fetches exactly the geographic area inside the blue selection box. The output
+	 * uses the full 2048-pixel budget on its longer side and preserves the box's
+	 * aspect ratio, so a 201m x 319m selection is fetched as that rectangle rather
+	 * than padded to a 300m-radius square tile.
+	 */
+	async function handleExactSelectionFetch(): Promise<void> {
+		const bbox = naipPreviewBbox;
+		const rect = boxRect;
+		if (!bbox || !rect || exactSelectionLoading) return;
+		clearExactSelectionPreview();
+		exactSelectionLoading = true;
+		try {
+			const selectionBbox = pixelRectToGeoBox(bbox, NAIP_EXPORT_SIZE_PX, rect);
+			const { widthMeters, heightMeters } = geoBoxCenterAndSize(selectionBbox);
+			const longestSideMeters = Math.max(widthMeters, heightMeters);
+			const pixelsPerMeter = NAIP_EXPORT_SIZE_PX / longestSideMeters;
+			const result = await fetchNaipBoundingBoxImage(selectionBbox, {
+				widthPx: Math.max(1, Math.round(widthMeters * pixelsPerMeter)),
+				heightPx: Math.max(1, Math.round(heightMeters * pixelsPerMeter))
+			});
+			if (!result.ok) {
+				exactSelectionError = result.error.message;
+				return;
+			}
+			exactSelectionPreview = {
+				blob: result.blob,
+				objectUrl: URL.createObjectURL(result.blob)
+			};
+		} catch (error) {
+			exactSelectionError =
+				error instanceof Error ? error.message : 'Could not fetch the exact selected area.';
+		} finally {
+			exactSelectionLoading = false;
+		}
+	}
+
+	async function handleExactSelectionConfirm(): Promise<void> {
+		if (!exactSelectionPreview || exactSelectionCommitting) return;
+		exactSelectionCommitting = true;
+		exactSelectionError = null;
+		try {
+			const file = new File([exactSelectionPreview.blob], 'naip-selected-area.png', { type: 'image/png' });
+			const result = await intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('target-basemap', count)
+			});
+			if (!result.ok) {
+				exactSelectionError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The exact selected-area image is still pending.';
+				return;
+			}
+			clearNaipPreview();
+			onDomainChanged('target-basemap');
+			activityMessage = 'Exact selected area imported as the clean target.';
+		} catch (error) {
+			exactSelectionError =
+				error instanceof Error ? error.message : 'Could not import the exact selected area.';
+		} finally {
+			exactSelectionCommitting = false;
+		}
+	}
+
+	function handleExactSelectionDiscard(): void {
+		clearExactSelectionPreview();
+	}
+
+	/**
+	 * Fetches every tile the current box requires and composes them into one mosaic
+	 * preview — never commits into the project. Deterministic placement (see
+	 * `naipGrid.ts`/`naipMosaic.ts`): each tile's geographic extent was chosen before
+	 * any request was made, so composing them is arithmetic, not image matching.
+	 */
+	async function handleGridFetch(): Promise<void> {
+		const planned = gridPlanPreview;
+		if (!planned || gridLoading) return;
+		clearGridPreview();
+		gridLoading = true;
+		try {
+			const fetchResult = await fetchTileGrid(planned.plan);
+			if (!fetchResult.ok) {
+				gridError = `Tile ${fetchResult.error.tileIndex + 1} of ${planned.plan.rows * planned.plan.cols}: ${fetchResult.error.message}`;
+				return;
+			}
+			const decodeFn = decode ?? decodeImageFile;
+			const images = await Promise.all(
+				fetchResult.tiles.map(async (blob, index) => {
+					const file = new File([blob], `naip-tile-${index}.png`, { type: 'image/png' });
+					const decoded = await decodeFn(file);
+					return decoded.image;
+				})
+			);
+			const mosaicBlob = await composeMosaic(images, planned.plan.rows, planned.plan.cols);
+			gridPreview = { blob: mosaicBlob, objectUrl: URL.createObjectURL(mosaicBlob) };
+		} catch (error) {
+			gridError = error instanceof Error ? error.message : 'Could not assemble the tile grid.';
+		} finally {
+			gridLoading = false;
+		}
+	}
+
+	/** Same intake path as `handleNaipConfirm` — the mosaic is just another PNG file. */
+	async function handleGridConfirm(): Promise<void> {
+		if (!gridPreview || gridCommitting) return;
+		gridCommitting = true;
+		gridError = null;
+		try {
+			const file = new File([gridPreview.blob], 'naip-tile-grid.png', { type: 'image/png' });
+			const result = await intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file,
+				decode,
+				confirmDiscard: (count) => requestDiscardConfirmation('target-basemap', count)
+			});
+			if (!result.ok) {
+				gridError = result.error.message;
+				return;
+			}
+			if (result.status === 'cancelled') {
+				activityMessage = 'Replacement cancelled. The assembled tile grid is still pending.';
+				return;
+			}
+			clearNaipPreview();
+			onDomainChanged('target-basemap');
+			activityMessage = 'Assembled NAIP tile grid imported as the clean target.';
+		} catch (error) {
+			gridError = error instanceof Error ? error.message : 'Could not import the assembled tile grid.';
+		} finally {
+			gridCommitting = false;
+		}
+	}
+
+	function handleGridDiscardPreview(): void {
+		clearGridPreview();
 	}
 
 	onMount(() => {
@@ -1040,10 +1565,11 @@
 		data-testid="app-shell"
 		data-correspondence-mode={correspondence.mode}
 		data-complete-pair-count={currentPairs().length}
-		data-pending-pair-count={correspondence.pendingSource ? 1 : 0}
-		data-pending-source={correspondence.pendingSource ? 'true' : 'false'}
+		data-pending-pair-count={correspondence.pendingPlacement ? 1 : 0}
+		data-pending-source={correspondence.pendingPlacement?.role === 'source-overview' ? 'true' : 'false'}
+		data-pending-placement-role={correspondence.pendingPlacement?.role ?? ''}
 		data-annotated-round={annotatedRound ? 'present' : 'absent'}
-		data-hole-count={annotatedRound?.holes.length ?? 0}
+		data-hole-count={currentHoles().length}
 	>
 	{#if pendingHandoff}
 		<section
@@ -1260,7 +1786,7 @@
 			{editor}
 			refresh={refreshCount}
 			pairs={currentPairs()}
-			pendingSource={correspondence.pendingSource}
+			pendingPlacement={correspondence.pendingPlacement}
 			placementEnabled={correspondence.mode !== 'neutral'}
 			correctionEnabled={correspondence.mode === 'neutral'}
 			{selection}
@@ -1278,7 +1804,7 @@
 			{editor}
 			refresh={refreshCount}
 			pairs={currentPairs()}
-			pendingSource={correspondence.pendingSource}
+			pendingPlacement={correspondence.pendingPlacement}
 			placementEnabled={correspondence.mode !== 'neutral'}
 			correctionEnabled={correspondence.mode === 'neutral'}
 			{selection}
@@ -1299,32 +1825,74 @@
 	>
 		<h2 id="naip-fetch-heading">Fetch clean target from USGS NAIP</h2>
 		<p class="naip-hint">
-			Alternative to uploading a target image above: enter a center coordinate
-			(found externally, e.g. any map site) and a radius, then fetch a clean
-			aerial map from the public USGS NAIP imagery service. US coverage only —
-			manual upload above still works for other courses.
+			Alternative to uploading a target image above: search for the course by
+			name, pick the matching location, then fetch a clean aerial map from the
+			public USGS NAIP imagery service. US coverage only — manual upload above
+			still works for other courses. City/state is optional — leave it blank if
+			you're not sure which nearby town the course is actually in; check each
+			result's full location below before picking one.
 		</p>
+
+		<div class="geocode-search">
+			<label>
+				<span>Course name</span>
+				<input
+					type="text"
+					data-testid="geocode-park-name"
+					bind:value={geocodeParkNameInput}
+					placeholder="e.g. Dash's Track"
+				/>
+			</label>
+			<label>
+				<span>City, State (optional)</span>
+				<input
+					type="text"
+					data-testid="geocode-city-state"
+					bind:value={geocodeCityStateInput}
+					placeholder="e.g. Frisco, TX"
+				/>
+			</label>
+			<button
+				type="button"
+				data-testid="geocode-search-button"
+				disabled={geocodeLoading}
+				onclick={handleGeocodeSearch}
+			>
+				{geocodeLoading ? 'Searching…' : 'Search'}
+			</button>
+		</div>
+		{#if geocodeError}
+			<p class="error" data-testid="geocode-error" role="alert">{geocodeError}</p>
+		{/if}
+		{#if geocodeMatches && geocodeMatches.length > 0}
+			<ul class="geocode-results" data-testid="geocode-results">
+				{#each geocodeMatches as match, index (match.displayName + index)}
+					<li>
+						<button
+							type="button"
+							class="geocode-result"
+							class:selected={geocodeSelectedIndex === index}
+							data-testid="geocode-result-{index}"
+							onclick={() => handleGeocodeSelect(index)}
+						>
+							{match.displayName}
+						</button>
+					</li>
+				{/each}
+			</ul>
+			<p class="geocode-attribution">
+				Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+					>OpenStreetMap</a
+				> contributors
+			</p>
+		{/if}
+		{#if geocodeSelectedIndex !== null}
+			<p class="naip-selected-coords" data-testid="naip-selected-coords">
+				Selected: {naipLatInput}, {naipLonInput}
+			</p>
+		{/if}
+
 		<div class="naip-inputs">
-			<label>
-				<span>Latitude</span>
-				<input
-					type="text"
-					inputmode="decimal"
-					data-testid="naip-lat"
-					bind:value={naipLatInput}
-					placeholder="e.g. 44.9778"
-				/>
-			</label>
-			<label>
-				<span>Longitude</span>
-				<input
-					type="text"
-					inputmode="decimal"
-					data-testid="naip-lon"
-					bind:value={naipLonInput}
-					placeholder="e.g. -93.2650"
-				/>
-			</label>
 			<label>
 				<span>Radius (meters)</span>
 				<input type="text" inputmode="decimal" data-testid="naip-radius" bind:value={naipRadiusInput} />
@@ -1338,12 +1906,71 @@
 				{naipLoading ? 'Fetching…' : 'Fetch aerial map'}
 			</button>
 		</div>
+
+		<details class="naip-manual-entry" data-testid="naip-manual-entry" open>
+			<summary>Coordinates (editable)</summary>
+			<div class="naip-inputs">
+				<label>
+					<span>Latitude</span>
+					<input
+						type="text"
+						inputmode="decimal"
+						data-testid="naip-lat"
+						bind:value={naipLatInput}
+						placeholder="e.g. 44.9778"
+					/>
+				</label>
+				<label>
+					<span>Longitude</span>
+					<input
+						type="text"
+						inputmode="decimal"
+						data-testid="naip-lon"
+						bind:value={naipLonInput}
+						placeholder="e.g. -93.2650"
+					/>
+				</label>
+			</div>
+		</details>
+
 		{#if naipError}
 			<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
 		{/if}
 		{#if naipPreview}
 			<div class="naip-preview" data-testid="naip-preview">
-				<img class="naip-preview-image" src={naipPreview.objectUrl} alt="Fetched NAIP aerial preview, not yet used" />
+				<p class="naip-hint">
+					Drag a corner to size the area you want at full resolution, then fetch the
+					exact selected area or a larger tile grid for it below. "Use this preview
+					as-is" skips both options and commits this single reference image instead.
+				</p>
+				<div class="naip-overview-frame" data-testid="naip-overview-frame">
+					<img
+						class="naip-overview-image"
+						src={naipPreview.objectUrl}
+						alt="Fetched NAIP aerial preview, not yet used"
+						onload={(event) => initBoxRect(event.currentTarget as HTMLImageElement)}
+						onerror={handleNaipPreviewError}
+					/>
+					{#if boxRect}
+						<div
+							class="naip-box"
+							data-testid="naip-box"
+							style="left:{boxRect.x * displayScale}px; top:{boxRect.y *
+								displayScale}px; width:{boxRect.width * displayScale}px; height:{boxRect.height *
+								displayScale}px;"
+						>
+							{#each BOX_HANDLES as handle (handle)}
+								<button
+									type="button"
+									class="naip-box-handle naip-box-handle-{handle}"
+									data-testid="naip-box-handle-{handle}"
+									aria-label="Resize selected area ({handle})"
+									onpointerdown={(event) => handleBoxHandleDown(handle, event)}
+								></button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 				<div class="naip-preview-actions">
 					<button
 						type="button"
@@ -1351,7 +1978,7 @@
 						disabled={naipCommitting}
 						onclick={handleNaipConfirm}
 					>
-						{naipCommitting ? 'Using…' : 'Use this image'}
+						{naipCommitting ? 'Using…' : 'Use this preview as-is'}
 					</button>
 					<button
 						type="button"
@@ -1363,6 +1990,100 @@
 					</button>
 				</div>
 			</div>
+
+			{#if gridPlanPreview}
+				<div class="naip-grid-plan" data-testid="naip-grid-plan">
+					<p>
+						Selected area: {Math.round(gridPlanPreview.widthMeters)}m x {Math.round(
+							gridPlanPreview.heightMeters
+						)}m &rarr; {gridPlanPreview.plan.rows} x {gridPlanPreview.plan.cols} tiles at {TILE_RADIUS_METERS}m
+						radius each ({gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} images).
+					</p>
+					<button
+						type="button"
+						data-testid="naip-grid-fetch-button"
+						disabled={gridLoading}
+						onclick={handleGridFetch}
+					>
+						{gridLoading
+							? 'Fetching tiles…'
+							: `Fetch ${gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} full-resolution tiles`}
+					</button>
+					<button
+						type="button"
+						data-testid="naip-exact-fetch-button"
+						disabled={exactSelectionLoading}
+						onclick={handleExactSelectionFetch}
+					>
+						{exactSelectionLoading ? 'Fetching exact area…' : 'Fetch exact selected area'}
+					</button>
+				</div>
+			{/if}
+			{#if gridError}
+				<p class="error" data-testid="naip-grid-error" role="alert">{gridError}</p>
+			{/if}
+			{#if exactSelectionError}
+				<p class="error" data-testid="naip-exact-error" role="alert">{exactSelectionError}</p>
+			{/if}
+			{#if exactSelectionPreview}
+				<div class="naip-preview" data-testid="naip-exact-preview">
+					<div>
+						<p class="naip-hint">Exact blue-box area, fetched without the 300 m tile-radius padding.</p>
+						<img
+							class="naip-preview-image"
+							src={exactSelectionPreview.objectUrl}
+							alt="Exact selected NAIP area, not yet used"
+							onerror={handleExactSelectionPreviewError}
+						/>
+					</div>
+					<div class="naip-preview-actions">
+						<button
+							type="button"
+							data-testid="naip-exact-use"
+							disabled={exactSelectionCommitting}
+							onclick={handleExactSelectionConfirm}
+						>
+							{exactSelectionCommitting ? 'Using…' : 'Use exact area as clean target'}
+						</button>
+						<button
+							type="button"
+							data-testid="naip-exact-discard"
+							disabled={exactSelectionCommitting}
+							onclick={handleExactSelectionDiscard}
+						>
+							Discard
+						</button>
+					</div>
+				</div>
+			{/if}
+			{#if gridPreview}
+				<div class="naip-preview" data-testid="naip-grid-preview">
+					<img
+						class="naip-preview-image"
+						src={gridPreview.objectUrl}
+						alt="Assembled full-resolution NAIP tile grid, not yet used"
+						onerror={handleGridPreviewError}
+					/>
+					<div class="naip-preview-actions">
+						<button
+							type="button"
+							data-testid="naip-grid-use"
+							disabled={gridCommitting}
+							onclick={handleGridConfirm}
+						>
+							{gridCommitting ? 'Using…' : 'Use this image'}
+						</button>
+						<button
+							type="button"
+							data-testid="naip-grid-discard"
+							disabled={gridCommitting}
+							onclick={handleGridDiscardPreview}
+						>
+							Discard
+						</button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</section>
 
@@ -1376,9 +2097,10 @@
 	<section class="pair-diagnostics" data-testid="pair-diagnostics" aria-live="polite" aria-atomic="true" aria-label="Pair diagnostics">
 		<p data-testid="pair-count-text">{diagnosticsView.count}</p>
 		<p data-testid="readiness-text">{diagnosticsView.readiness}</p>
-		{#if correspondence.mode === 'add-target' && correspondence.pendingSource}
+		{#if correspondence.mode === 'add-target' && correspondence.pendingPlacement}
 			<p class="pending-guidance" data-testid="pending-guidance">
-				This pair is not saved yet. Click the same landmark in the target image to
+				This pair is not saved yet. Click the same landmark in the
+				{correspondence.pendingPlacement.role === 'source-overview' ? 'target' : 'source'} image to
 				complete it, or press Escape / Cancel to discard it.
 			</p>
 		{/if}
@@ -1386,6 +2108,112 @@
 			<p class="diagnostic-warning" data-testid="diagnostic-warning">{warning}</p>
 		{/each}
 	</section>
+
+	<section class="alignment-panel" data-testid="alignment-panel" aria-labelledby="alignment-heading">
+		<h2 id="alignment-heading">Alignment</h2>
+		<fieldset class="alignment-model">
+			<legend>Transform model</legend>
+			<label>
+				<input
+					type="radio"
+					name="alignment-model"
+					value="similarity"
+					checked={alignmentModel === 'similarity'}
+					onchange={() => (alignmentModel = 'similarity')}
+					data-testid="alignment-model-similarity"
+				/>
+				Similarity (2+ pairs)
+			</label>
+			<label>
+				<input
+					type="radio"
+					name="alignment-model"
+					value="affine"
+					checked={alignmentModel === 'affine'}
+					onchange={() => (alignmentModel = 'affine')}
+					data-testid="alignment-model-affine"
+				/>
+				Affine (3+ non-collinear pairs)
+			</label>
+		</fieldset>
+
+		{#if !alignmentResult}
+			<p class="alignment-empty" data-testid="alignment-empty">
+				Add at least one enabled, completed pair to estimate an alignment.
+			</p>
+		{:else if 'transform' in alignmentResult}
+			<div class="alignment-result" data-testid="alignment-result">
+				<p data-testid="alignment-summary">
+					{alignmentResult.model} transform from {alignmentResult.usedPairIds.length} pair{alignmentResult
+						.usedPairIds.length === 1
+						? ''
+						: 's'}
+					&mdash; mean residual {alignmentResult.metrics.meanDistance.toFixed(2)}px, max {alignmentResult.metrics.maxDistance.toFixed(
+						2
+					)}px
+				</p>
+				{#each alignmentWarnings as warning (warning.type)}
+					<p class="alignment-warning" data-testid="alignment-warning" data-severity={warning.severity}>
+						{warning.message}
+					</p>
+				{/each}
+			</div>
+		{:else}
+			<p class="alignment-failure" data-testid="alignment-failure" role="alert">
+				{ALIGNMENT_FAILURE_MESSAGES[alignmentResult.reason]}
+			</p>
+		{/if}
+	</section>
+
+	{#if currentHoles().length > 0 && targetImage()}
+		<section class="hole-graphics" data-testid="hole-graphics" aria-labelledby="hole-graphics-heading">
+			<h2 id="hole-graphics-heading">Hole graphics</h2>
+			<p class="alignment-empty">
+				Applies the alignment above to every annotated hole's tee, basket, shot,
+				bend, and corridor points, live — previews below update as annotations or
+				the alignment change. Holes with no placed points yet are skipped.
+			</p>
+			{#if holeGraphicPlans.length === 0}
+				<p class="alignment-empty" data-testid="hole-graphics-empty">
+					No hole has both a placed point and a usable alignment yet.
+				</p>
+			{:else}
+				<button
+					type="button"
+					data-testid="download-all-hole-graphics"
+					disabled={holeGraphicsZipping}
+					onclick={handleDownloadAllHoleGraphics}
+				>
+					{holeGraphicsZipping ? 'Zipping…' : `Download all ${holeGraphicPlans.length} as .zip`}
+				</button>
+			{/if}
+			{#if holeGraphicsError}
+				<p class="error" data-testid="hole-graphics-error" role="alert">{holeGraphicsError}</p>
+			{/if}
+			{#if holeGraphicPlans.length > 0}
+				{@const href = targetImageHref()}
+				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
+					{#each holeGraphicPlans as plan (plan.holeId)}
+						<li class="hole-graphic-item">
+							{#if href}
+								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
+									{@html buildHoleGraphicMarkup(plan, href)}
+								</div>
+							{/if}
+							<button
+								type="button"
+								data-testid="hole-graphic-download-{plan.number}"
+								disabled={!href || holeGraphicDownloading.has(plan.holeId)}
+								onclick={() => handleDownloadHoleGraphic(plan)}
+							>
+								{holeGraphicDownloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
 
 	{#if selection && correspondence.mode === 'neutral'}
 		<section class="point-inspector" data-testid="point-inspector" aria-label="Selected control point" aria-describedby={pointError ? 'point-error' : undefined}>
@@ -1842,6 +2670,7 @@
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 		font-size: 0.85rem;
 	}
 
@@ -1853,6 +2682,118 @@
 		color: #92400e;
 	}
 
+	.alignment-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.6rem 0.7rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 6px;
+		background: #f8fafc;
+		color: #1f2937;
+		font-size: 0.85rem;
+	}
+
+	.alignment-panel h2 {
+		margin: 0;
+		font-size: 0.95rem;
+	}
+
+	.alignment-model {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		border: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	.alignment-model legend {
+		font-size: 0.75rem;
+		opacity: 0.8;
+		padding: 0;
+	}
+
+	.alignment-model label {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.alignment-empty {
+		margin: 0;
+		opacity: 0.75;
+	}
+
+	.alignment-result {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.alignment-result p {
+		margin: 0;
+	}
+
+	.alignment-warning {
+		color: #92400e;
+	}
+
+	.alignment-warning[data-severity='high'] {
+		color: #8a1f11;
+	}
+
+	.alignment-failure {
+		margin: 0;
+		color: #8a1f11;
+	}
+
+	.hole-graphics {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		max-width: 48rem;
+	}
+
+	.hole-graphics h2 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.hole-graphic-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.hole-graphic-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		align-items: flex-start;
+	}
+
+	.hole-graphic-preview {
+		max-width: 14rem;
+		max-height: 10rem;
+		overflow: hidden;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+	}
+
+	.hole-graphic-preview :global(svg) {
+		display: block;
+		max-width: 100%;
+		max-height: 100%;
+	}
+
+	.hole-graphic-item button {
+		font-size: 0.8rem;
+	}
+
 	.point-inspector {
 		display: flex;
 		flex-direction: column;
@@ -1861,6 +2802,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 	}
 
 	.point-inspector h2 {
@@ -1949,6 +2891,146 @@
 	.naip-preview-actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+
+	.naip-overview-frame {
+		position: relative;
+		display: inline-block;
+	}
+
+	.naip-overview-image {
+		display: block;
+		max-width: 28rem;
+		max-height: 28rem;
+		width: auto;
+		height: auto;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+		background: #e5e7eb;
+		user-select: none;
+	}
+
+	.naip-box {
+		position: absolute;
+		border: 2px solid #2a6df4;
+		background: rgb(42 109 244 / 10%);
+		box-sizing: border-box;
+	}
+
+	.naip-box-handle {
+		position: absolute;
+		width: 0.9rem;
+		height: 0.9rem;
+		margin: -0.45rem;
+		padding: 0;
+		border: 1px solid #fff;
+		border-radius: 50%;
+		background: #2a6df4;
+		touch-action: none;
+	}
+
+	.naip-box-handle-nw {
+		top: 0;
+		left: 0;
+		cursor: nwse-resize;
+	}
+
+	.naip-box-handle-ne {
+		top: 0;
+		right: 0;
+		margin-right: -0.45rem;
+		cursor: nesw-resize;
+	}
+
+	.naip-box-handle-sw {
+		bottom: 0;
+		left: 0;
+		margin-bottom: -0.45rem;
+		cursor: nesw-resize;
+	}
+
+	.naip-box-handle-se {
+		bottom: 0;
+		right: 0;
+		margin-bottom: -0.45rem;
+		margin-right: -0.45rem;
+		cursor: nwse-resize;
+	}
+
+	.naip-grid-plan {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.naip-grid-plan p {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.geocode-search {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 0.75rem;
+	}
+
+	.geocode-search label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.85rem;
+	}
+
+	.geocode-search input {
+		width: 12rem;
+	}
+
+	.geocode-results {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.geocode-result {
+		text-align: left;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #ccc;
+		border-radius: 4px;
+		background: #27272a;
+		color: #f4f4f5;
+		cursor: pointer;
+		width: 100%;
+	}
+
+	.geocode-result.selected {
+		border-color: #2a6df4;
+		background: #172554;
+		color: #eff6ff;
+	}
+
+	.geocode-attribution {
+		margin: 0;
+		font-size: 0.75rem;
+		opacity: 0.7;
+	}
+
+	.naip-selected-coords {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.naip-manual-entry summary {
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+
+	.naip-manual-entry .naip-inputs {
+		margin-top: 0.5rem;
 	}
 
 	.dialog-backdrop {

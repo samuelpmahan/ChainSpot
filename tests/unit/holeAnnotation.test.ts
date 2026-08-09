@@ -1,0 +1,251 @@
+import { describe, expect, it } from 'vitest';
+import {
+	addCorridorBend,
+	addHole,
+	addHoleBeyondStandardCourse,
+	addShot,
+	clearBends,
+	moveBasket,
+	moveCorridorBend,
+	moveShot,
+	moveTee,
+	nextHoleNumber,
+	placeByMode,
+	removeHole,
+	removeLastBend,
+	removeLastShot,
+	setBasket,
+	setCorridorWidth,
+	setTee
+} from '../../src/lib/holeAnnotation';
+import { DEFAULT_CORRIDOR_WIDTH_PX } from '../../src/lib/corridor';
+import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
+
+function idSequence(prefix: string): () => string {
+	let count = 0;
+	return () => `${prefix}-${++count}`;
+}
+
+function emptyHole(id: string, number: number, overrides: Partial<AnnotatedHole> = {}): AnnotatedHole {
+	return { id, number, shots: [], corridorBends: [], corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX, ...overrides };
+}
+
+describe('nextHoleNumber', () => {
+	it('is the lowest missing number from 1 through 18', () => {
+		expect(nextHoleNumber([])).toBe(1);
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 3)];
+		expect(nextHoleNumber(holes)).toBe(2);
+		expect(nextHoleNumber(Array.from({ length: 18 }, (_, index) => emptyHole(`${index}`, index + 1)))).toBeNull();
+	});
+});
+
+describe('addHole / removeHole', () => {
+	it('inserts the lowest missing hole in numeric order without mutating or changing existing records', () => {
+		const original: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 10, yPx: 20 } }),
+			emptyHole('c', 3, { shots: [{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } }] })
+		];
+		const result = addHole(original, idSequence('hole'));
+
+		expect(original.map((hole) => hole.number)).toEqual([1, 3]);
+		expect(result.map((hole) => hole.number)).toEqual([1, 2, 3]);
+		expect(result[0]).toBe(original[0]);
+		expect(result[2]).toBe(original[1]);
+		expect(result[1]).toEqual({
+			id: 'hole-1',
+			number: 2,
+			shots: [],
+			corridorBends: [],
+			corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
+		});
+	});
+
+	it('fills missing hole numbers in ascending order and stops after hole 18', () => {
+		let holes: AnnotatedHole[] = [2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17].map((number) =>
+			emptyHole(`hole-${number}`, number)
+		);
+		const createId = idSequence('added');
+
+		const addedNumbers: number[] = [];
+		for (let index = 0; index < 5; index += 1) {
+			const expectedNumber = nextHoleNumber(holes);
+			holes = addHole(holes, createId);
+			addedNumbers.push(expectedNumber!);
+		}
+
+		expect(addedNumbers).toEqual([1, 5, 13, 16, 18]);
+		expect(addHole(holes, createId)).toHaveLength(18);
+	});
+
+	it('adds post-18 holes after the current maximum in numeric order', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 19), emptyHole('c', 21)];
+		const result = addHoleBeyondStandardCourse(holes, idSequence('extra'));
+
+		expect(result.map((hole) => hole.number)).toEqual([1, 19, 21, 22]);
+		expect(result[0]).toBe(holes[0]);
+		expect(result[1]).toBe(holes[1]);
+	});
+
+	it('removes exactly the hole with the matching id', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 2)];
+		expect(removeHole(holes, 'a')).toEqual([emptyHole('b', 2)]);
+	});
+});
+
+describe('setTee / setBasket', () => {
+	it('sets the point on the matching hole only, leaving others untouched', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 2)];
+		const withTee = setTee(holes, 'a', { xPx: 10, yPx: 20 });
+		expect(withTee[0].tee).toEqual({ xPx: 10, yPx: 20 });
+		expect(withTee[1].tee).toBeUndefined();
+
+		const withBasket = setBasket(withTee, 'a', { xPx: 30, yPx: 40 });
+		expect(withBasket[0].basket).toEqual({ xPx: 30, yPx: 40 });
+		expect(withBasket[0].tee).toEqual({ xPx: 10, yPx: 20 });
+	});
+
+	it('replaces an existing point rather than accumulating', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1, { tee: { xPx: 1, yPx: 1 } })];
+		const result = setTee(holes, 'a', { xPx: 99, yPx: 99 });
+		expect(result[0].tee).toEqual({ xPx: 99, yPx: 99 });
+	});
+});
+
+describe('moveTee / moveBasket', () => {
+	it('moves only the existing endpoint on the matching hole', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 1, yPx: 2 }, basket: { xPx: 3, yPx: 4 } }),
+			emptyHole('b', 2, { tee: { xPx: 5, yPx: 6 } })
+		];
+
+		const movedTee = moveTee(holes, 'a', { xPx: 11, yPx: 12 });
+		const movedBasket = moveBasket(movedTee, 'a', { xPx: 13, yPx: 14 });
+
+		expect(movedBasket[0].tee).toEqual({ xPx: 11, yPx: 12 });
+		expect(movedBasket[0].basket).toEqual({ xPx: 13, yPx: 14 });
+		expect(movedBasket[1]).toEqual(holes[1]);
+	});
+});
+
+describe('addShot / removeLastShot', () => {
+	it('appends ordered shots and pops only the last one', () => {
+		const createId = idSequence('shot');
+		let holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		holes = addShot(holes, 'a', { xPx: 1, yPx: 1 }, createId);
+		holes = addShot(holes, 'a', { xPx: 2, yPx: 2 }, createId);
+		expect(holes[0].shots.map((shot) => shot.landing)).toEqual([
+			{ xPx: 1, yPx: 1 },
+			{ xPx: 2, yPx: 2 }
+		]);
+		expect(holes[0].shots.map((shot) => shot.id)).toEqual(['shot-1', 'shot-2']);
+
+		holes = removeLastShot(holes, 'a');
+		expect(holes[0].shots.map((shot) => shot.landing)).toEqual([{ xPx: 1, yPx: 1 }]);
+	});
+
+	it('removing the last shot from an empty list is a no-op, not an error', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		expect(removeLastShot(holes, 'a')[0].shots).toEqual([]);
+	});
+});
+
+describe('moveShot', () => {
+	it('changes only the selected landing and preserves shot ids and order', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				shots: [
+					{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
+					{ id: 'shot-2', landing: { xPx: 3, yPx: 4 } }
+				]
+			})
+		];
+
+		const result = moveShot(holes, 'a', 'shot-2', { xPx: 30, yPx: 40 });
+
+		expect(result[0].shots).toEqual([
+			{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
+			{ id: 'shot-2', landing: { xPx: 30, yPx: 40 } }
+		]);
+	});
+});
+
+describe('addCorridorBend / removeLastBend / clearBends', () => {
+	it('builds up bends from an empty list and pops only the last one', () => {
+		let holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		holes = addCorridorBend(holes, 'a', { xPx: 1, yPx: 1 });
+		holes = addCorridorBend(holes, 'a', { xPx: 2, yPx: 2 });
+		expect(holes[0].corridorBends).toEqual([
+			{ xPx: 1, yPx: 1 },
+			{ xPx: 2, yPx: 2 }
+		]);
+
+		holes = removeLastBend(holes, 'a');
+		expect(holes[0].corridorBends).toEqual([{ xPx: 1, yPx: 1 }]);
+
+		holes = removeLastBend(holes, 'a');
+		expect(holes[0].corridorBends).toEqual([]);
+	});
+
+	it('removing the last bend from an empty list keeps an empty straight hole', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		expect(removeLastBend(holes, 'a')[0].corridorBends).toEqual([]);
+	});
+
+	it('clearBends removes all bends in one step', () => {
+		let holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		holes = addCorridorBend(holes, 'a', { xPx: 1, yPx: 1 });
+		holes = addCorridorBend(holes, 'a', { xPx: 2, yPx: 2 });
+		holes = clearBends(holes, 'a');
+		expect(holes[0].corridorBends).toEqual([]);
+	});
+});
+
+describe('moveCorridorBend', () => {
+	it('changes only the selected index and preserves bend order', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				corridorBends: [
+					{ xPx: 1, yPx: 2 },
+					{ xPx: 3, yPx: 4 },
+					{ xPx: 5, yPx: 6 }
+				]
+			})
+		];
+
+		const result = moveCorridorBend(holes, 'a', 1, { xPx: 30, yPx: 40 });
+
+		expect(result[0].corridorBends).toEqual([
+			{ xPx: 1, yPx: 2 },
+			{ xPx: 30, yPx: 40 },
+			{ xPx: 5, yPx: 6 }
+		]);
+	});
+});
+
+describe('setCorridorWidth', () => {
+	it('stores the width on the matching hole only', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 2)];
+		const result = setCorridorWidth(holes, 'a', 90);
+		expect(result[0].corridorWidthPx).toBe(90);
+		expect(result[1].corridorWidthPx).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+	});
+});
+
+describe('placeByMode', () => {
+	it('dispatches to the matching operation for each mode', () => {
+		const createId = idSequence('shot');
+		let holes: AnnotatedHole[] = [emptyHole('a', 1)];
+
+		holes = placeByMode(holes, 'a', 'tee', { xPx: 1, yPx: 1 }, createId);
+		expect(holes[0].tee).toEqual({ xPx: 1, yPx: 1 });
+
+		holes = placeByMode(holes, 'a', 'basket', { xPx: 2, yPx: 2 }, createId);
+		expect(holes[0].basket).toEqual({ xPx: 2, yPx: 2 });
+
+		holes = placeByMode(holes, 'a', 'shot', { xPx: 3, yPx: 3 }, createId);
+		expect(holes[0].shots.map((shot) => shot.landing)).toEqual([{ xPx: 3, yPx: 3 }]);
+
+		holes = placeByMode(holes, 'a', 'bend', { xPx: 4, yPx: 4 }, createId);
+		expect(holes[0].corridorBends).toEqual([{ xPx: 4, yPx: 4 }]);
+	});
+});

@@ -104,3 +104,133 @@ describe('Annotate Round Done gate and handoff', () => {
 		host.remove();
 	});
 });
+
+describe('Annotate Round keyboard controls and visible labels', () => {
+	it('keeps all standard hole tabs visible and adds post-18 holes with the plus control', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		expect(host.querySelectorAll('[data-testid^="hole-select-"]')).toHaveLength(18);
+		const plus = host.querySelector<HTMLButtonElement>('[data-testid="hole-add-beyond"]');
+		if (!plus) throw new Error('missing post-18 hole control');
+		expect(plus.getAttribute('aria-label')).toContain('beyond');
+		plus.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('1');
+		expect(host.querySelector('[data-testid="hole-bar"]')?.textContent).toContain('Hole 19');
+		expect(host.querySelector<HTMLButtonElement>('[data-testid="hole-select-19"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('uses visible labels and keyboard shortcuts for hole creation and placement modes', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		const addButton = host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]');
+		if (!addButton) throw new Error('missing hole-add button');
+		expect(addButton.textContent).toContain('Add hole');
+		expect(addButton.textContent).toContain('A');
+		expect(addButton.textContent).toContain('N');
+		expect(addButton.getAttribute('aria-keyshortcuts')).toBe('A N');
+		for (const button of host.querySelectorAll('button')) {
+			expect(button.textContent?.trim()).not.toBe('');
+		}
+
+		for (const [key, expectedCount] of [
+			['a', '1'],
+			['A', '2'],
+			['n', '3'],
+			['N', '4']
+		] as const) {
+			const addEvent = new KeyboardEvent('keydown', {
+				key,
+				bubbles: true,
+				cancelable: true
+			});
+			window.dispatchEvent(addEvent);
+			await flush();
+			expect(addEvent.defaultPrevented).toBe(true);
+			expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe(expectedCount);
+		}
+
+		for (const [key, mode] of [
+			['1', 'tee'],
+			['2', 'basket'],
+			['3', 'shot'],
+			['4', 'bend']
+		] as const) {
+			const event = new KeyboardEvent('keydown', {
+				key,
+				bubbles: true,
+				cancelable: true
+			});
+			const eventTarget = document.activeElement instanceof HTMLElement ? document.activeElement : window;
+			eventTarget.dispatchEvent(event);
+			await flush();
+			const input = host.querySelector<HTMLInputElement>(`[data-testid="placement-mode-${mode}"]`);
+			if (!input) throw new Error(`missing placement-mode-${mode} input`);
+			expect(event.defaultPrevented).toBe(true);
+			expect(input.checked).toBe(true);
+			expect(document.activeElement).toBe(input);
+		}
+
+		const repeated = new KeyboardEvent('keydown', {
+			key: 'n',
+			repeat: true,
+			bubbles: true,
+			cancelable: true
+		});
+		window.dispatchEvent(repeated);
+		await flush();
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('4');
+
+		const widthInput = inputEl(host, 'corridor-width');
+		widthInput.focus();
+		const inputEvent = new KeyboardEvent('keydown', {
+			key: 'n',
+			bubbles: true,
+			cancelable: true
+		});
+		widthInput.dispatchEvent(inputEvent);
+		await flush();
+		expect(inputEvent.defaultPrevented).toBe(false);
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('4');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('restores focus to a surviving hole or Add hole after removing a focused hole', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		await flush();
+
+		const removeSecond = host.querySelector<HTMLButtonElement>('[data-testid="hole-remove-2"]');
+		if (!removeSecond) throw new Error('missing hole-remove-2 button');
+		removeSecond.focus();
+		removeSecond.click();
+		await flush();
+		expect(document.activeElement).toBe(
+			host.querySelector('[data-testid="hole-select-1"]')
+		);
+
+		const removeFirst = host.querySelector<HTMLButtonElement>('[data-testid="hole-remove-1"]');
+		if (!removeFirst) throw new Error('missing hole-remove-1 button');
+		removeFirst.focus();
+		removeFirst.click();
+		await flush();
+		expect(document.activeElement).toBe(host.querySelector('[data-testid="hole-add"]'));
+
+		unmount(component);
+		host.remove();
+	});
+});

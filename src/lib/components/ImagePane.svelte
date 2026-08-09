@@ -9,7 +9,7 @@
 	import type { ControlPointPair } from '$lib/domain/project';
 	import type { ProjectEditor } from '$lib/domain/editor';
 	import { clampPointToImageBounds, imageToScreen, pointInBounds, screenToImage } from '$lib/coords';
-	import type { PendingSourcePlacement } from '$lib/correspondenceState';
+	import type { PendingPlacement } from '$lib/correspondenceState';
 	import {
 		MAGNIFIER_SIZE,
 		drawMagnifier,
@@ -44,7 +44,7 @@
 		/** Bumped by the parent whenever domain state may have changed. */
 		refresh: number;
 		pairs: readonly ControlPointPair[];
-		pendingSource?: PendingSourcePlacement | null;
+		pendingPlacement?: PendingPlacement | null;
 		placementEnabled?: boolean;
 		correctionEnabled?: boolean;
 		selection?: PointSelection | null;
@@ -64,7 +64,7 @@
 		editor,
 		refresh,
 		pairs,
-		pendingSource = null,
+		pendingPlacement = null,
 		placementEnabled = false,
 		correctionEnabled = false,
 		selection = null,
@@ -169,7 +169,7 @@
 	function markerData(): MarkerSceneData[] {
 		void refresh;
 		void pairs;
-		void pendingSource;
+		void pendingPlacement;
 		void selection;
 		void dragPreview;
 		void markersVisible;
@@ -193,14 +193,15 @@
 				enabled: pair.enabled
 			});
 		}
-		if (role === 'source-overview' && pendingSource) {
+		if (pendingPlacement?.role === role) {
+			const side = role === 'source-overview' ? 'source' : 'target';
 			markers.push({
-				id: 'pending-source-marker',
+				id: `pending-${side}-marker`,
 				pairId: null,
-				side: 'source',
-				ordinal: pendingSource.ordinal,
-				xPx: pendingSource.coordinates.xPx,
-				yPx: pendingSource.coordinates.yPx,
+				side,
+				ordinal: pendingPlacement.ordinal,
+				xPx: pendingPlacement.coordinates.xPx,
+				yPx: pendingPlacement.coordinates.yPx,
 				kind: 'pending',
 				selected: false,
 				enabled: true
@@ -718,6 +719,8 @@
 		position: absolute;
 		margin: 1rem;
 		color: #666;
+		z-index: 1;
+		pointer-events: none;
 	}
 
 	.error {

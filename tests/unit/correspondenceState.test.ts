@@ -17,11 +17,11 @@ describe('correspondence state machine', () => {
 		expect(activateCorrespondence(initial, false, 1)).toBe(initial);
 		expect(activateCorrespondence(initial, true, 1)).toEqual({
 			mode: 'add-source',
-			pendingSource: null
+			pendingPlacement: null
 		});
 	});
 
-	it('accepts a source placement and retains its image identity and ordinal', () => {
+	it('accepts either image as the first placement and retains its identity and ordinal', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
 		const transition = placeCorrespondence(addingSource, sourcePlacement, 'source-1', 1);
 
@@ -29,7 +29,8 @@ describe('correspondence state machine', () => {
 		expect(transition.completion).toBeNull();
 		expect(transition.state).toEqual({
 			mode: 'add-target',
-			pendingSource: {
+			pendingPlacement: {
+				role: 'source-overview',
 				imageId: 'source-1',
 				coordinates: sourcePlacement.coordinates,
 				ordinal: 1
@@ -37,14 +38,26 @@ describe('correspondence state machine', () => {
 		});
 	});
 
-	it('ignores a target placement while adding the source', () => {
+	it('accepts a target placement as the first endpoint', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
-		const transition = placeCorrespondence(addingSource, targetPlacement, '', 1);
+		const transition = placeCorrespondence(addingSource, targetPlacement, 'target-1', 1);
 
-		expect(transition).toEqual({ state: addingSource, accepted: false, completion: null });
+		expect(transition).toEqual({
+			state: {
+				mode: 'add-target',
+				pendingPlacement: {
+					role: 'target-basemap',
+					imageId: 'target-1',
+					coordinates: targetPlacement.coordinates,
+					ordinal: 1
+				}
+			},
+			accepted: true,
+			completion: null
+		});
 	});
 
-	it('does not replace the pending source when another source placement arrives', () => {
+	it('does not replace the pending placement when another click uses the same image', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
 		const awaitingTarget = placeCorrespondence(addingSource, sourcePlacement, 'source-1', 1).state;
 		const secondSource = placeCorrespondence(
@@ -64,28 +77,50 @@ describe('correspondence state machine', () => {
 	it('creates a completion intent without leaving add-target', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
 		const awaitingTarget = placeCorrespondence(addingSource, sourcePlacement, 'source-1', 1).state;
-		const completion = placeCorrespondence(awaitingTarget, targetPlacement, '', 1);
+		const completion = placeCorrespondence(awaitingTarget, targetPlacement, 'target-1', 1);
 
 		expect(completion.accepted).toBe(true);
 		expect(completion.state).toBe(awaitingTarget);
 		expect(completion.completion).toEqual({
-			source: awaitingTarget.pendingSource,
-			target: targetPlacement.coordinates
+			source: awaitingTarget.pendingPlacement,
+			target: {
+				role: 'target-basemap',
+				imageId: 'target-1',
+				coordinates: targetPlacement.coordinates,
+				ordinal: 1
+			}
+		});
+	});
+
+	it('maps a target-first completion into source and target endpoints', () => {
+		const addingFirst = activateCorrespondence(createCorrespondenceState(), true, 1);
+		const awaitingSource = placeCorrespondence(addingFirst, targetPlacement, 'target-1', 1).state;
+		const completion = placeCorrespondence(awaitingSource, sourcePlacement, 'source-1', 1);
+
+		expect(completion.accepted).toBe(true);
+		expect(completion.completion).toEqual({
+			source: {
+				role: 'source-overview',
+				imageId: 'source-1',
+				coordinates: sourcePlacement.coordinates,
+				ordinal: 1
+			},
+			target: awaitingSource.pendingPlacement
 		});
 	});
 
 	it('returns to neutral only after a separate successful completion event', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
 		const awaitingTarget = placeCorrespondence(addingSource, sourcePlacement, 'source-1', 1).state;
-		const completionIntent = placeCorrespondence(awaitingTarget, targetPlacement, '', 1);
+		const completionIntent = placeCorrespondence(awaitingTarget, targetPlacement, 'target-1', 1);
 
 		expect(completeCorrespondence(completionIntent.state)).toEqual({
 			mode: 'neutral',
-			pendingSource: null
+			pendingPlacement: null
 		});
 	});
 
-	it('ignores a source placement while adding the target', () => {
+	it('ignores a second placement on the same side', () => {
 		const addingSource = activateCorrespondence(createCorrespondenceState(), true, 1);
 		const awaitingTarget = placeCorrespondence(addingSource, sourcePlacement, 'source-1', 1).state;
 

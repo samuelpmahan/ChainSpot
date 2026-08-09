@@ -224,7 +224,7 @@ test('creates one source-then-target pair and keeps pan and marker gestures sepa
 	const targetGeometry = await paneGeometry(page, TARGET_ROLE);
 	await page.getByTestId('add-correspondence').click();
 	await expect(page.getByTestId('correspondence-guidance')).toHaveText(
-		'Click a landmark in the UDisc source image.'
+		'Click a landmark in either the UDisc source or clean target image.'
 	);
 
 	// A drag over empty canvas is a pan, never a correspondence click.
@@ -296,6 +296,35 @@ test('keeps marker anchors and visible size stable through zoom, fit, reset, and
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
 	await page.getByTestId('pane-reset-source-overview').click();
 	await page.setViewportSize({ width: 1000, height: 700 });
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
+
+	expect(errors).toEqual([]);
+});
+
+test('creates a pair when the clean target is clicked first', async ({ page }) => {
+	const errors = attachErrorListener(page);
+	await gotoApp(page);
+	await loadBoth(page);
+
+	const sourceGeometry = await paneGeometry(page, SOURCE_ROLE);
+	const targetGeometry = await paneGeometry(page, TARGET_ROLE);
+	const sourceView = await viewState(page, SOURCE_ROLE);
+	const targetView = await viewState(page, TARGET_ROLE);
+	const sourceLocal = imagePoint(sourceView, 1, 1);
+	const targetLocal = imagePoint(targetView, 2, 2);
+
+	await page.getByTestId('add-correspondence').click();
+	await expect(page.getByTestId('correspondence-guidance')).toHaveText(
+		'Click a landmark in either the UDisc source or clean target image.'
+	);
+	await page.mouse.click(...Object.values(panePoint(targetGeometry, targetLocal.x, targetLocal.y)) as [number, number]);
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-pending-placement-role', TARGET_ROLE);
+	await expect(page.getByTestId('correspondence-guidance')).toHaveText(
+		'Click the same landmark in the UDisc source image.'
+	);
+
+	await page.mouse.click(...Object.values(panePoint(sourceGeometry, sourceLocal.x, sourceLocal.y)) as [number, number]);
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
 
 	expect(errors).toEqual([]);

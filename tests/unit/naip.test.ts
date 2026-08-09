@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
 	bboxFromCenter,
 	buildNaipExportUrl,
+	fetchNaipBoundingBoxImage,
 	fetchNaipImage,
 	NAIP_EXPORT_SIZE_PX
 } from '../../src/lib/naip';
@@ -55,10 +56,20 @@ describe('fetchNaipImage', () => {
 		if (!noCoverageResult.ok) expect(noCoverageResult.error.kind).toBe('bad-content-type');
 
 		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-		const okFetch: FetchLike = async () =>
-			new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png' } });
+		let requestedUrl = '';
+		const okFetch: FetchLike = async (input) => {
+			requestedUrl = String(input);
+			return new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png' } });
+		};
 		const okResult = await fetchNaipImage({ lat: 45, lon: -93 }, 200, { fetch: okFetch });
 		expect(okResult.ok).toBe(true);
 		if (okResult.ok) expect(okResult.blob.size).toBe(pngBytes.byteLength);
+
+		const exactResult = await fetchNaipBoundingBoxImage(
+			{ minLon: -93.01, minLat: 44.99, maxLon: -92.99, maxLat: 45.01 },
+			{ widthPx: 1292, heightPx: 2048, fetch: okFetch }
+		);
+		expect(exactResult.ok).toBe(true);
+		expect(new URL(requestedUrl).searchParams.get('size')).toBe('1292,2048');
 	});
 });
