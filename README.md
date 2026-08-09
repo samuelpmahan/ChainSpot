@@ -42,6 +42,19 @@ is not already installed for the locked Playwright version, run
 - **Integrated acceptance fixtures** are synthetic, repository-controlled map-like PNGs with five documented landmarks; regenerate them with `node scripts/generate-acceptance-fixtures.mjs`.
 - **`fflate`** is the single runtime persistence dependency (P0-011). Browsers provide File, download, and SHA-256 (Web Crypto) primitives but no portable ZIP API; a small focused ZIP library avoids error-prone custom archive binary code. No validation, state, hashing, or utility packages are used.
 
+## GitHub Pages
+
+Pushes to `main` build the static site (`npm run build`) and publish it to GitHub Pages via `.github/workflows/deploy-pages.yml`. In the repository's **Settings → Pages**, set the source to **GitHub Actions** once to enable it.
+
+The workflow builds with `BASE_PATH` set to `/<repo-name>` so routes and assets resolve correctly under the project-pages subpath (e.g. `https://<owner>.github.io/ChainSpot/`). For a local build under the same subpath:
+
+```sh
+BASE_PATH=/ChainSpot npm run build
+npm run preview
+```
+
+Local development and a plain `npm run build` (no `BASE_PATH`) are unaffected and continue to serve from the domain root.
+
 ## Phase 0 browser baseline
 
 Current Chromium-based desktop browsers (Chrome, Edge, Brave) at recent versions. The application is browser-only: `npm run build` emits a static site, and no backend or deployment infrastructure is used.

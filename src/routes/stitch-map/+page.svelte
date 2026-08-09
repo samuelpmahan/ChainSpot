@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import Konva from 'konva';
 	import { onDestroy, tick, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
@@ -919,7 +920,7 @@
 	}
 
 	function handoffDestination(role: ImageRole): string {
-		return role === 'source-overview' ? '/annotate-round' : '/create-graphics';
+		return role === 'source-overview' ? `${base}/annotate-round` : `${base}/create-graphics`;
 	}
 
 	function handoffDestinationName(role: ImageRole): string {
