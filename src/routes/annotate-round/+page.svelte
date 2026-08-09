@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import ImagePane from '$lib/components/ImagePane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
 	import { findImageByRole } from '$lib/domain/project';
@@ -124,7 +125,7 @@
 				sourceImage: annotatedSourceImageFromAsset(asset, resource.bytes)
 			});
 			setPendingAnnotatedRound(round);
-			await goto('/create-graphics');
+			await goto(`${base}/create-graphics`);
 		} finally {
 			doneRunning = false;
 		}
