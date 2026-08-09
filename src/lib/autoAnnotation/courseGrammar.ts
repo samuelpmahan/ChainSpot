@@ -9,11 +9,18 @@
  *
  *   tee  ->  own number badge  ->  basket
  *
- * Number badges own hole labels, tees are matched one-to-one to their nearest
- * owned badge, and baskets are matched one-to-one by distance plus a penalty
- * when the tee and basket lie on the same side of that badge.  The latter is
- * important on maps where a basket is physically closer to a tee from another
- * hole than to its own tee.
+ * Number badges own hole labels.  Baskets are the more reliable detector, so
+ * a preliminary badge-to-basket distance pass runs first to learn each
+ * badge's basket direction.  Tees are then matched one-to-one to their owned
+ * badge by distance plus a penalty when the tee lies on the *same* side of
+ * the badge as its (preliminary) basket — i.e. walking backward from the
+ * basket, through the badge, to find the tee on the far side.  This resolves
+ * dense clusters where a neighboring hole's badge sits nominally closer to
+ * this hole's tee than its own badge does.  Baskets are then matched
+ * one-to-one, final pass, by distance plus a penalty when the tee and basket
+ * lie on the same side of that badge.  The latter is important on maps where
+ * a basket is physically closer to a tee from another hole than to its own
+ * tee.
  */
 
 export const DEFAULT_COURSE_HOLE_NUMBERS: readonly number[] = Array.from(
@@ -57,8 +64,10 @@ export interface CourseGrammarInput {
 	/** Defaults to the standard 1..18 course. */
 	readonly holeNumbers?: readonly number[];
 	/**
-	 * Matches the proven static parser's 80 px opposite-direction penalty.  It
-	 * is intentionally an option for unusually small or large source rasters.
+	 * Matches the proven static parser's 80 px opposite-direction penalty,
+	 * applied both when walking backward from a preliminary basket to find a
+	 * tee and when finally placing a basket against its tee.  It is
+	 * intentionally an option for unusually small or large source rasters.
 	 */
 	readonly basketPolarityPenaltyPx?: number;
 }
@@ -334,6 +343,27 @@ function endpointConfidence(detectorConfidence: number, localRank: number, chose
 	return clamp01(detectorConfidence * 0.35 + geometry * 0.65 - Math.max(0, localRank - 1) * 0.08);
 }
 
+/**
+ * Cosine of the angle at `badge` between rays toward `a` and `b`.  -1 means
+ * opposite rays (ideal tee/basket topology), +1 means the same ray (strongly
+ * suspicious — the two endpoints are on the same side of the badge).
+ */
+function raysPolarityCosine(
+	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
+	a: Pick<IndexedPoint, 'xPx' | 'yPx'>,
+	b: Pick<IndexedPoint, 'xPx' | 'yPx'>
+): number {
+	const aX = a.xPx - badge.xPx;
+	const aY = a.yPx - badge.yPx;
+	const bX = b.xPx - badge.xPx;
+	const bY = b.yPx - badge.yPx;
+	const aLength = Math.hypot(aX, aY);
+	const bLength = Math.hypot(bX, bY);
+	return aLength > 1e-6 && bLength > 1e-6
+		? Math.max(-1, Math.min(1, (aX * bX + aY * bY) / (aLength * bLength)))
+		: 1;
+}
+
 function basketCost(
 	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
 	tee: Pick<IndexedPoint, 'xPx' | 'yPx'>,
@@ -344,16 +374,8 @@ function basketCost(
 	polarityCosine: number;
 	cost: number;
 } {
-	const teeX = tee.xPx - badge.xPx;
-	const teeY = tee.yPx - badge.yPx;
-	const basketX = basket.xPx - badge.xPx;
-	const basketY = basket.yPx - badge.yPx;
-	const teeLength = Math.hypot(teeX, teeY);
-	const basketLength = Math.hypot(basketX, basketY);
-	const polarityCosine =
-		teeLength > 1e-6 && basketLength > 1e-6
-			? Math.max(-1, Math.min(1, (teeX * basketX + teeY * basketY) / (teeLength * basketLength)))
-			: 1;
+	const basketLength = pointDistance(badge, basket);
+	const polarityCosine = raysPolarityCosine(badge, tee, basket);
 	return {
 		distancePx: basketLength,
 		polarityCosine,
@@ -436,12 +458,44 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		}
 	});
 
-	// Stage 2: tee ownership.  The static parser used raw badge-to-tee distance
-	// inside a one-to-one Hungarian assignment; preserve that exact grammar.
+	// Stage 2: a preliminary, tee-independent basket pass.  Baskets are the more
+	// reliable detector, so their rough direction from each badge is known
+	// before any tee is chosen.  This is used only to orient Stage 3 below; the
+	// authoritative basket assignment is recomputed in Stage 4 once a tee (and
+	// therefore precise polarity) exists.
+	const preliminaryBasketHoleNumbers = holeNumbers.filter((holeNumber) => badgeForHole.has(holeNumber));
+	const preliminaryBasketCosts = preliminaryBasketHoleNumbers.map((holeNumber) => {
+		const badge = badgeForHole.get(holeNumber)!;
+		return baskets.map((basket) => pointDistance(badge, basket));
+	});
+	const preliminaryBasketAssignments = hungarian(withDummyColumns(preliminaryBasketCosts, baskets.length));
+	const preliminaryBasketForHole = new Map<number, IndexedPoint>();
+	preliminaryBasketHoleNumbers.forEach((holeNumber, row) => {
+		const basketIndex = preliminaryBasketAssignments[row];
+		if (basketIndex >= 0 && basketIndex < baskets.length) {
+			preliminaryBasketForHole.set(holeNumber, baskets[basketIndex]);
+		}
+	});
+
+	// Stage 3: tee ownership.  The static parser used raw badge-to-tee distance
+	// inside a one-to-one Hungarian assignment.  That grammar alone is locally
+	// misleading in dense clusters where a neighboring hole's badge sits closer
+	// to this hole's tee than its own badge does (the H5/H6 case: hole 6's
+	// badge can be nearer to hole 5's physical tee than hole 5's own badge is).
+	// Walking backward from the reliable preliminary basket resolves it: a tee
+	// on the opposite side of the badge from its known basket is preferred,
+	// using the same opposite-ray polarity concept Stage 4 already applies to
+	// baskets.
 	const teeHoleNumbers = holeNumbers.filter((holeNumber) => badgeForHole.has(holeNumber));
 	const teeCosts = teeHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
-		return tees.map((tee) => pointDistance(badge, tee));
+		const preliminaryBasket = preliminaryBasketForHole.get(holeNumber);
+		return tees.map((tee) => {
+			const distance = pointDistance(badge, tee);
+			if (!preliminaryBasket) return distance;
+			const polarityCosine = raysPolarityCosine(badge, tee, preliminaryBasket);
+			return distance + polarityPenaltyPx * (polarityCosine + 1);
+		});
 	});
 	const teeAssignments = hungarian(withDummyColumns(teeCosts, tees.length));
 	const teeForHole = new Map<number, TeeDetails>();
@@ -497,8 +551,10 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		}
 	});
 
-	// Stage 3: baskets.  A badge normally sits between its tee and basket, so
-	// same-direction endpoints pay the proven 80px (by default) penalty.
+	// Stage 4: baskets, final pass.  A badge normally sits between its tee and
+	// basket, so same-direction endpoints pay the proven 80px (by default)
+	// penalty.  This recomputes basket ownership with the real (Stage 3) tee
+	// now known, rather than trusting the Stage 2 preliminary pass verbatim.
 	const basketHoleNumbers = teeHoleNumbers.filter((holeNumber) => teeForHole.has(holeNumber));
 	const basketCosts = basketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
