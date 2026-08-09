@@ -249,10 +249,14 @@ async function main(): Promise<void> {
 	mkdirSync(resolve(outputDir), { recursive: true });
 	const png = new PNG({ width: teeBundle.widthPx, height: teeBundle.heightPx });
 	png.data.set(teeBundle.rgba);
+	const basketByHoleNumber = new Map(holes.map((hole) => [hole.number, hole.basket]));
 	for (const hole of result.holes) {
 		const color = CENTERLINE_COLORS[(hole.number - 1) % CENTERLINE_COLORS.length];
-		circle(png, hole.c1Entry.xPx, hole.c1Entry.yPx, result.c1RadiusPx, CIRCLE_COLOR);
-		circle(png, hole.c2Entry.xPx, hole.c2Entry.yPx, result.c2RadiusPx, CIRCLE_COLOR);
+		const basket = basketByHoleNumber.get(hole.number)!;
+		// c1Entry/c2Entry are where the traced path crosses each circle's
+		// boundary, not the circle's center — the center is always the basket.
+		circle(png, basket.xPx, basket.yPx, result.c1RadiusPx, CIRCLE_COLOR);
+		circle(png, basket.xPx, basket.yPx, result.c2RadiusPx, CIRCLE_COLOR);
 		for (let index = 0; index < hole.centerline.length - 1; index += 1) {
 			const a = hole.centerline[index];
 			const b = hole.centerline[index + 1];
