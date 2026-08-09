@@ -3,12 +3,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
+	asBasketTemplateScale,
+	asNumberTemplateScale,
 	asTemplateScale,
 	asUiScalePx,
+	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
 	validateCvTemplateManifest
 } from '../../src/lib/autoAnnotation/cvCalibration';
-import type { TemplateScale, UiScalePx } from '../../src/lib/autoAnnotation/cvCalibration';
+import type {
+	BasketTemplateScale,
+	TemplateScale,
+	UiScalePx
+} from '../../src/lib/autoAnnotation/cvCalibration';
 import type { CalibratedTeePadDetectionOptions } from '../../src/lib/autoAnnotation/cvCalibratedDetectors';
 import type {
 	CourseDetectionResult,
@@ -21,7 +28,10 @@ const holeNumbers = Array.from({ length: 18 }, (_, index) => `hole-${String(inde
 function manifest(overrides: Record<string, unknown> = {}) {
 	return {
 		schemaVersion: 1,
-		calibration: { canonicalNumberBadge: { widthPx: 30, heightPx: 23 } },
+		calibration: {
+			canonicalNumberBadge: { widthPx: 30, heightPx: 23 },
+			basketTemplateScalePerNumberTemplateScale: 1.7952550415183868
+		},
 		templates: { holeNumbers, basket: 'basket.png' },
 		...overrides
 	};
@@ -30,12 +40,12 @@ function manifest(overrides: Record<string, unknown> = {}) {
 describe('CV calibration semantics', () => {
 	it('derives canonical UDisc UI scale from matched badge dimensions, not template scale', () => {
 		const first = deriveUDiscCalibration({
-			scale: asTemplateScale(1),
+			scale: asNumberTemplateScale(1),
 			widthPx: 53,
 			heightPx: 41
 		});
 		const second = deriveUDiscCalibration({
-			scale: asTemplateScale(4.25),
+			scale: asNumberTemplateScale(4.25),
 			widthPx: 53,
 			heightPx: 41
 		});
@@ -69,6 +79,20 @@ describe('CV calibration semantics', () => {
 		void invalidPublicInput;
 	});
 
+	it('requires an explicit typed conversion between number and basket template scales', () => {
+		const numberScale = asNumberTemplateScale(1.0249240121580545);
+		const basketScale = asBasketTemplateScale(1.84);
+		const acceptsBasketScale = (_value: BasketTemplateScale): void => {};
+		acceptsBasketScale(basketScale);
+
+		// @ts-expect-error NumberTemplateScale is not BasketTemplateScale.
+		acceptsBasketScale(numberScale);
+
+		const calibration = validateCvTemplateManifest(manifest()).calibration;
+		const converted: BasketTemplateScale = deriveBasketTemplateScale(numberScale, calibration);
+		expect(converted).toBeCloseTo(1.84, 8);
+	});
+
 	it('brands the public number-detection anchor as TemplateScale', () => {
 		const compileOnly = (course: CourseDetectionResult): void => {
 			const anchor = course.numberDetection.anchor;
@@ -93,6 +117,7 @@ describe('CV calibration semantics', () => {
 			}
 		});
 		expect(parsed.calibration.canonicalNumberBadge).toEqual({ widthPx: 30, heightPx: 23 });
+		expect(parsed.calibration.basketTemplateScalePerNumberTemplateScale).toBeCloseTo(1.7952550415183868, 12);
 		expect(parsed.templates.holeNumbers).toHaveLength(18);
 	});
 
@@ -106,7 +131,7 @@ describe('CV calibration semantics', () => {
 		expect(() => validateCvTemplateManifest({ schemaVersion: 1, templates: manifest().templates })).toThrow(/calibration/);
 		expect(() =>
 			deriveUDiscCalibration(
-				{ scale: asTemplateScale(1), widthPx: 53, heightPx: 41 },
+				{ scale: asNumberTemplateScale(1), widthPx: 53, heightPx: 41 },
 				{ widthPx: 31, heightPx: 23 }
 			)
 		).toThrow(/does not match the compiled canonical badge geometry/);

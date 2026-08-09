@@ -14,7 +14,10 @@ Included:
 The PNGs retain their native crop dimensions and **must not** define canonical UI geometry.
 `manifest.json` independently defines the canonical number-badge geometry used to convert a
 matched badge's physical dimensions into `UiScalePx` (currently 30×23). A template's resize
-multiplier is `TemplateScale`; it is not interchangeable with `UiScalePx`.
+multiplier is `TemplateScale`; it is not interchangeable with `UiScalePx`. The manifest also
+records the measured `basketTemplateScalePerNumberTemplateScale` relationship between the
+independently branded number and basket template families. The conversion is applied through
+the typed calibration helper, rather than being embedded in a detector.
 
 This separation is intentional: replacing or recropping a template may change its native raster
 size and `TemplateScale` without silently changing tee-pad, mask, circle, or other UI-relative

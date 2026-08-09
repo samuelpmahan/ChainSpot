@@ -1,4 +1,6 @@
 export type TemplateScale = number & { readonly __brand: 'TemplateScale' };
+export type NumberTemplateScale = TemplateScale & { readonly __templateFamily: 'hole-number' };
+export type BasketTemplateScale = TemplateScale & { readonly __templateFamily: 'basket' };
 export type UiScalePx = number & { readonly __brand: 'UiScalePx' };
 
 type AssertFalse<Value extends false> = Value;
@@ -7,6 +9,12 @@ type _TemplateScaleMustNotBeUiScalePx = AssertFalse<
 >;
 type _UiScalePxMustNotBeTemplateScale = AssertFalse<
 	UiScalePx extends TemplateScale ? true : false
+>;
+type _NumberTemplateScaleMustNotBeBasketTemplateScale = AssertFalse<
+	NumberTemplateScale extends BasketTemplateScale ? true : false
+>;
+type _BasketTemplateScaleMustNotBeNumberTemplateScale = AssertFalse<
+	BasketTemplateScale extends NumberTemplateScale ? true : false
 >;
 
 /** One semantic calibration value, re-exported at the scale boundary. */
@@ -18,11 +26,15 @@ export interface CanonicalNumberBadgeCalibration {
 	readonly heightPx: number;
 }
 
+export interface CvTemplateCalibration {
+	readonly canonicalNumberBadge: CanonicalNumberBadgeCalibration;
+	/** Basket-template scale produced per detected hole-number template scale. */
+	readonly basketTemplateScalePerNumberTemplateScale: number;
+}
+
 export interface CvTemplateManifest {
 	readonly schemaVersion: 1;
-	readonly calibration: {
-		readonly canonicalNumberBadge: CanonicalNumberBadgeCalibration;
-	};
+	readonly calibration: CvTemplateCalibration;
 	readonly templates: {
 		readonly holeNumbers: readonly string[];
 		readonly basket: string;
@@ -30,7 +42,7 @@ export interface CvTemplateManifest {
 }
 
 export interface UDiscCalibrationAnchor {
-	readonly templateScale: TemplateScale;
+	readonly templateScale: NumberTemplateScale;
 	readonly matchedWidthPx: number;
 	readonly matchedHeightPx: number;
 }
@@ -41,7 +53,7 @@ export interface UDiscCalibration {
 }
 
 export interface NumberBadgeAnchorObservation {
-	readonly scale: TemplateScale;
+	readonly scale: NumberTemplateScale;
 	readonly widthPx: number;
 	readonly heightPx: number;
 }
@@ -75,6 +87,36 @@ function assertCanonicalCalibration(calibration: CanonicalNumberBadgeCalibration
 
 export function asTemplateScale(value: number, name = 'Template scale'): TemplateScale {
 	return positiveFinite(value, name) as TemplateScale;
+}
+
+export function asNumberTemplateScale(
+	value: number,
+	name = 'Hole-number template scale'
+): NumberTemplateScale {
+	return positiveFinite(value, name) as NumberTemplateScale;
+}
+
+export function asBasketTemplateScale(
+	value: number,
+	name = 'Basket template scale'
+): BasketTemplateScale {
+	return positiveFinite(value, name) as BasketTemplateScale;
+}
+
+/**
+ * Converts the detected hole-number template scale into the basket-template
+ * family using the template pack's measured semantic calibration.
+ */
+export function deriveBasketTemplateScale(
+	numberTemplateScale: NumberTemplateScale,
+	calibration: CvTemplateCalibration
+): BasketTemplateScale {
+	const numberScale = positiveFinite(numberTemplateScale, 'Number template scale');
+	const ratio = positiveFinite(
+		calibration.basketTemplateScalePerNumberTemplateScale,
+		'Basket template scale per number template scale'
+	);
+	return asBasketTemplateScale(numberScale * ratio, 'Derived basket template scale');
 }
 
 export function asUiScalePx(value: number, name = 'UDisc UI scale'): UiScalePx {
@@ -114,7 +156,7 @@ export function deriveUDiscCalibration(
 	assertCanonicalCalibration(canonical);
 	const matchedWidthPx = positiveFinite(anchor.widthPx, 'Matched number-badge width');
 	const matchedHeightPx = positiveFinite(anchor.heightPx, 'Matched number-badge height');
-	const templateScale = asTemplateScale(anchor.scale, 'Number-badge template scale');
+	const templateScale = asNumberTemplateScale(anchor.scale, 'Number-badge template scale');
 	const derived = deriveCanonicalUiScalePx(matchedWidthPx, matchedHeightPx, canonical);
 	const uiScalePx = asUiScalePx(derived, 'Derived UDisc UI scale');
 	return { uiScalePx, anchor: { templateScale, matchedWidthPx, matchedHeightPx } };
@@ -143,6 +185,10 @@ export function validateCvTemplateManifest(value: unknown): CvTemplateManifest {
 		heightPx: positiveFinite(canonical.heightPx, 'Canonical number-badge height')
 	};
 	assertCanonicalCalibration(canonicalNumberBadge);
+	const basketTemplateScalePerNumberTemplateScale = positiveFinite(
+		calibration.basketTemplateScalePerNumberTemplateScale,
+		'Basket template scale per number template scale'
+	);
 
 	const templates = record(root.templates, 'CV template manifest templates');
 	if (!Array.isArray(templates.holeNumbers) || templates.holeNumbers.length !== 18) {
@@ -157,5 +203,9 @@ export function validateCvTemplateManifest(value: unknown): CvTemplateManifest {
 		}
 	}
 	const basket = templateAsset(templates.basket, 'Basket template');
-	return { schemaVersion: 1, calibration: { canonicalNumberBadge }, templates: { holeNumbers, basket } };
+	return {
+		schemaVersion: 1,
+		calibration: { canonicalNumberBadge, basketTemplateScalePerNumberTemplateScale },
+		templates: { holeNumbers, basket }
+	};
 }

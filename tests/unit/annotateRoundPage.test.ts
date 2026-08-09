@@ -106,6 +106,26 @@ describe('Annotate Round Done gate and handoff', () => {
 });
 
 describe('Annotate Round keyboard controls and visible labels', () => {
+	it('keeps all standard hole tabs visible and adds post-18 holes with the plus control', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		expect(host.querySelectorAll('[data-testid^="hole-select-"]')).toHaveLength(18);
+		const plus = host.querySelector<HTMLButtonElement>('[data-testid="hole-add-beyond"]');
+		if (!plus) throw new Error('missing post-18 hole control');
+		expect(plus.getAttribute('aria-label')).toContain('beyond');
+		plus.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('1');
+		expect(host.querySelector('[data-testid="hole-bar"]')?.textContent).toContain('Hole 19');
+		expect(host.querySelector<HTMLButtonElement>('[data-testid="hole-select-19"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('uses visible labels and keyboard shortcuts for hole creation and placement modes', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(640, 480));

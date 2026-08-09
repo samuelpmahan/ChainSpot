@@ -5,7 +5,7 @@ import {
 	deriveTeePadUiScalePx,
 	filterSizeConsistentCandidates
 } from '../../src/lib/autoAnnotation/teePadDetection';
-import { asTemplateScale, deriveUDiscCalibration } from '../../src/lib/autoAnnotation/cvCalibration';
+import { asNumberTemplateScale, deriveUDiscCalibration } from '../../src/lib/autoAnnotation/cvCalibration';
 import type { TeePadCandidate } from '../../src/lib/autoAnnotation/teePadDetection';
 
 function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCandidate {
@@ -22,7 +22,7 @@ function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCa
 
 describe('deriveUDiscCalibration', () => {
 	it('converts a 53x41 number anchor to the canonical UDisc UI scale', () => {
-		const anchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(1) };
+		const anchor = { widthPx: 53, heightPx: 41, scale: asNumberTemplateScale(1) };
 		expect(deriveUDiscCalibration(anchor).uiScalePx).toBeCloseTo(1.7746, 4);
 	});
 
@@ -32,8 +32,8 @@ describe('deriveUDiscCalibration', () => {
 	});
 
 	it('ignores the number detector anchor scale', () => {
-		const atOneAnchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(1) };
-		const atAnotherResizeAnchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(9.5) };
+		const atOneAnchor = { widthPx: 53, heightPx: 41, scale: asNumberTemplateScale(1) };
+		const atAnotherResizeAnchor = { widthPx: 53, heightPx: 41, scale: asNumberTemplateScale(9.5) };
 		const atOne = deriveUDiscCalibration(atOneAnchor).uiScalePx;
 		const atAnotherResize = deriveUDiscCalibration(atAnotherResizeAnchor).uiScalePx;
 		expect(atAnotherResize).toBe(atOne);

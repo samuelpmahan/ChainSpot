@@ -6,13 +6,16 @@
  * ownership of decoding, scaling, and worker messaging. All returned points
  * are in the supplied source raster's pixel coordinate system.
  *
- * The implementation is the browser port of the successful Python probes:
+ * The implementation keeps the successful glyph-only classifier from the
+ * Python probes, but avoids expensive full-image template matching for physical
+ * badge localization and cheaply prunes implausible glyph labels before NCC:
  *
- * 1. match the canonical #1 badge over a broad scale range;
- * 2. search every available badge near that measured UI scale;
- * 3. cluster the overlapping physical-badge peaks;
- * 4. when every physical badge and every label is available, match only the
- *    inner glyphs and solve a one-to-one maximum-score assignment.
+ * 1. threshold the image once and find connected dark components;
+ * 2. identify the dominant repeated badge-body size cluster;
+ * 3. derive template scale from observed badge-body dimensions;
+ * 4. use NonBlackWidthRatio to retain only plausible glyph labels;
+ * 5. NCC-score only retained tiny glyph ROIs and solve a one-to-one
+ *    maximum-score assignment.
  *
  * Full 1..18 labeling therefore needs 18 canonical UDisc badge captures
  * (`hole-01.png` ... `hole-18.png`) from one unscaled UI style. The current
@@ -162,6 +165,254 @@ const DEFAULTS = {
 	maxCandidates: 18,
 	maxPeaksPerSearch: 96
 } as const;
+
+
+/**
+ * UDisc's badge body is nearly black while the map underneath it is not.
+ * These values are intentionally aligned with the offline clean-course probe.
+ */
+const BADGE_DARK_THRESHOLD = 50;
+const BADGE_MIN_WIDTH_PX = 12;
+const BADGE_MIN_HEIGHT_PX = 9;
+const BADGE_MAX_WIDTH_PX = 120;
+const BADGE_MAX_HEIGHT_PX = 90;
+const BADGE_MIN_ASPECT = 1.12;
+const BADGE_MAX_ASPECT = 1.75;
+const BADGE_MIN_FILL_RATIO = 0.55;
+const BADGE_SIZE_LOG_TOLERANCE = Math.log(1.2);
+
+/**
+ * Grid-searched on the current clean-course fixture.
+ *
+ * The safety floor deliberately uses 3 rather than the absolute grid optimum
+ * of 1: it costs only six extra NCC comparisons on the fixture (89 vs 83) while
+ * ensuring every physical badge keeps at least three plausible labels.
+ */
+const GLYPH_FOREGROUND_THRESHOLD = 150;
+const GLYPH_MIN_COLUMN_PIXELS = 5;
+const GLYPH_WIDTH_RATIO_TOLERANCE = 0.04;
+const GLYPH_MIN_KEEP = 3;
+/** Lower than any valid TM_CCOEFF_NORMED score; Hungarian treats pruned pairs as impossible. */
+const GLYPH_PRUNED_SCORE = -2;
+
+interface DarkComponent {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly widthPx: number;
+	readonly heightPx: number;
+	readonly areaPx: number;
+	readonly fillRatio: number;
+}
+
+function darkComponents(source: GrayRaster): DarkComponent[] {
+	const { widthPx, heightPx, data } = source;
+	const pixelCount = widthPx * heightPx;
+	const visited = new Uint8Array(pixelCount);
+	const queue = new Int32Array(pixelCount);
+	const components: DarkComponent[] = [];
+
+	for (let seed = 0; seed < pixelCount; seed += 1) {
+		if (visited[seed]) continue;
+		visited[seed] = 1;
+		if (data[seed] > BADGE_DARK_THRESHOLD) continue;
+
+		let head = 0;
+		let tail = 0;
+		queue[tail++] = seed;
+		let minX = widthPx;
+		let minY = heightPx;
+		let maxX = -1;
+		let maxY = -1;
+		let areaPx = 0;
+
+		while (head < tail) {
+			const index = queue[head++];
+			const y = Math.floor(index / widthPx);
+			const x = index - y * widthPx;
+			areaPx += 1;
+			minX = Math.min(minX, x);
+			maxX = Math.max(maxX, x);
+			minY = Math.min(minY, y);
+			maxY = Math.max(maxY, y);
+
+			const firstY = Math.max(0, y - 1);
+			const lastY = Math.min(heightPx - 1, y + 1);
+			const firstX = Math.max(0, x - 1);
+			const lastX = Math.min(widthPx - 1, x + 1);
+			for (let neighborY = firstY; neighborY <= lastY; neighborY += 1) {
+				const row = neighborY * widthPx;
+				for (let neighborX = firstX; neighborX <= lastX; neighborX += 1) {
+					const neighbor = row + neighborX;
+					if (visited[neighbor]) continue;
+					visited[neighbor] = 1;
+					if (data[neighbor] <= BADGE_DARK_THRESHOLD) queue[tail++] = neighbor;
+				}
+			}
+		}
+
+		const componentWidth = maxX - minX + 1;
+		const componentHeight = maxY - minY + 1;
+		components.push({
+			xPx: minX,
+			yPx: minY,
+			widthPx: componentWidth,
+			heightPx: componentHeight,
+			areaPx,
+			fillRatio: areaPx / (componentWidth * componentHeight)
+		});
+	}
+
+	return components;
+}
+
+function plausibleBadgeBody(component: DarkComponent): boolean {
+	const aspect = component.widthPx / component.heightPx;
+	return (
+		component.widthPx >= BADGE_MIN_WIDTH_PX &&
+		component.heightPx >= BADGE_MIN_HEIGHT_PX &&
+		component.widthPx <= BADGE_MAX_WIDTH_PX &&
+		component.heightPx <= BADGE_MAX_HEIGHT_PX &&
+		aspect >= BADGE_MIN_ASPECT &&
+		aspect <= BADGE_MAX_ASPECT &&
+		component.fillRatio >= BADGE_MIN_FILL_RATIO
+	);
+}
+
+function sizeDistance(a: DarkComponent, b: DarkComponent): number {
+	return Math.max(
+		Math.abs(Math.log(a.widthPx / b.widthPx)),
+		Math.abs(Math.log(a.heightPx / b.heightPx))
+	);
+}
+
+function median(values: readonly number[]): number {
+	const sorted = [...values].sort((a, b) => a - b);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0
+		? (sorted[middle - 1] + sorted[middle]) / 2
+		: sorted[middle];
+}
+
+function selectBadgeBodies(
+	components: readonly DarkComponent[],
+	maxCandidates: number
+): DarkComponent[] {
+	const plausible = components.filter(plausibleBadgeBody);
+	if (plausible.length === 0) return [];
+
+	let bestCluster: DarkComponent[] = [];
+	let bestFill = -1;
+	for (const seed of plausible) {
+		const cluster = plausible.filter(
+			(candidate) => sizeDistance(seed, candidate) <= BADGE_SIZE_LOG_TOLERANCE
+		);
+		const fill = cluster.reduce((sum, candidate) => sum + candidate.fillRatio, 0);
+		if (
+			cluster.length > bestCluster.length ||
+			(cluster.length === bestCluster.length && fill > bestFill)
+		) {
+			bestCluster = cluster;
+			bestFill = fill;
+		}
+	}
+
+	const medianWidth = median(bestCluster.map((candidate) => candidate.widthPx));
+	const medianHeight = median(bestCluster.map((candidate) => candidate.heightPx));
+	return [...bestCluster]
+		.sort((a, b) => {
+			const aSizeError =
+				Math.abs(Math.log(a.widthPx / medianWidth)) +
+				Math.abs(Math.log(a.heightPx / medianHeight));
+			const bSizeError =
+				Math.abs(Math.log(b.widthPx / medianWidth)) +
+				Math.abs(Math.log(b.heightPx / medianHeight));
+			return aSizeError - bSizeError || b.fillRatio - a.fillRatio || a.yPx - b.yPx;
+		})
+		.slice(0, maxCandidates)
+		.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx);
+}
+
+function templateBadgeBody(template: GrayRaster): DarkComponent | null {
+	return (
+		darkComponents(template)
+			.filter(plausibleBadgeBody)
+			.sort((a, b) => b.areaPx - a.areaPx)[0] ?? null
+	);
+}
+
+function componentAnchorScale(
+	bodies: readonly DarkComponent[],
+	canonicalBody: DarkComponent
+): number {
+	const observedWidth = median(bodies.map((candidate) => candidate.widthPx));
+	const observedHeight = median(bodies.map((candidate) => candidate.heightPx));
+	return (
+		observedWidth / canonicalBody.widthPx +
+		observedHeight / canonicalBody.heightPx
+	) / 2;
+}
+
+function clustersFromBadgeBodies(
+	bodies: readonly DarkComponent[],
+	anchorTemplate: HoleNumberTemplate,
+	anchorScale: number
+): BadgeCluster[] {
+	const widthPx = Math.max(5, Math.round(anchorTemplate.raster.widthPx * anchorScale));
+	const heightPx = Math.max(5, Math.round(anchorTemplate.raster.heightPx * anchorScale));
+	return bodies.map((body) => {
+		const centerX = body.xPx + body.widthPx / 2;
+		const centerY = body.yPx + body.heightPx / 2;
+		const localizationScore = Math.max(0, Math.min(1, body.fillRatio));
+		return {
+			xPx: centerX,
+			yPx: centerY,
+			hits: [
+				{
+					label: anchorTemplate.label,
+					score: localizationScore,
+					xPx: centerX - widthPx / 2,
+					yPx: centerY - heightPx / 2,
+					widthPx,
+					heightPx,
+					scale: anchorScale
+				}
+			]
+		};
+	});
+}
+
+function localizationAnchor(
+	anchorTemplate: HoleNumberTemplate,
+	anchorScale: number,
+	clusters: readonly BadgeCluster[],
+	assigned: readonly HoleNumberCandidate[] | null
+): HoleNumberScaleAnchor | null {
+	const labeled = assigned?.find((candidate) => candidate.label === anchorTemplate.label);
+	if (labeled) {
+		return {
+			label: anchorTemplate.label,
+			score: labeled.badgeScore,
+			scale: anchorScale,
+			xPx: labeled.xPx - labeled.widthPx / 2,
+			yPx: labeled.yPx - labeled.heightPx / 2,
+			widthPx: labeled.widthPx,
+			heightPx: labeled.heightPx
+		};
+	}
+
+	const hit = clusters[0]?.hits[0];
+	return hit
+		? {
+				label: anchorTemplate.label,
+				score: hit.score,
+				scale: anchorScale,
+				xPx: hit.xPx,
+				yPx: hit.yPx,
+				widthPx: hit.widthPx,
+				heightPx: hit.heightPx
+			}
+		: null;
+}
 
 function assertRaster(raster: HoleNumberRaster, name: string): void {
 	if (!Number.isInteger(raster.widthPx) || !Number.isInteger(raster.heightPx)) {
@@ -410,6 +661,78 @@ function crop(source: GrayRaster, xPx: number, yPx: number, widthPx: number, hei
 	return { widthPx, heightPx, data };
 }
 
+
+function centeredCrop(
+	source: GrayRaster,
+	centerX: number,
+	centerY: number,
+	widthPx: number,
+	heightPx: number
+): GrayRaster | null {
+	const xPx = Math.round(centerX - widthPx / 2);
+	const yPx = Math.round(centerY - heightPx / 2);
+	if (
+		xPx < 0 ||
+		yPx < 0 ||
+		xPx + widthPx > source.widthPx ||
+		yPx + heightPx > source.heightPx
+	) {
+		return null;
+	}
+	return crop(source, xPx, yPx, widthPx, heightPx);
+}
+
+/**
+ * Horizontal span occupied by sufficiently bright foreground-bearing columns,
+ * normalized by the glyph-interior width.
+ *
+ * This matches scripts/cv-probes/number_prefilter_grid.py.
+ */
+function nonBlackWidthRatio(glyph: GrayRaster): number {
+	let firstActive = -1;
+	let lastActive = -1;
+
+	for (let x = 0; x < glyph.widthPx; x += 1) {
+		let foregroundPixels = 0;
+		for (let y = 0; y < glyph.heightPx; y += 1) {
+			if (glyph.data[y * glyph.widthPx + x] >= GLYPH_FOREGROUND_THRESHOLD) {
+				foregroundPixels += 1;
+			}
+		}
+		if (foregroundPixels >= GLYPH_MIN_COLUMN_PIXELS) {
+			if (firstActive < 0) firstActive = x;
+			lastActive = x;
+		}
+	}
+
+	return firstActive < 0 ? 0 : (lastActive - firstActive + 1) / glyph.widthPx;
+}
+
+function retainedGlyphTemplateIndexes(
+	candidateRatio: number,
+	templateRatios: readonly number[]
+): Set<number> {
+	const ranked = templateRatios
+		.map((ratio, index) => ({
+			index,
+			distance: Math.abs(ratio - candidateRatio)
+		}))
+		.sort((a, b) => a.distance - b.distance || a.index - b.index);
+
+	const retained = new Set(
+		ranked
+			.filter((entry) => entry.distance <= GLYPH_WIDTH_RATIO_TOLERANCE)
+			.map((entry) => entry.index)
+	);
+
+	for (const entry of ranked) {
+		if (retained.size >= GLYPH_MIN_KEEP) break;
+		retained.add(entry.index);
+	}
+
+	return retained;
+}
+
 function glyphScore(
 	cv: HoleNumberCvModule,
 	image: GrayRaster,
@@ -514,9 +837,31 @@ function assignedCandidates(
 		outer: ResizedTemplate;
 		glyph: GrayRaster;
 	}>;
-	const scores = clusters.map((cluster) =>
-		usableTemplates.map((template) => glyphScore(cv, image, cluster.xPx, cluster.yPx, template.glyph))
-	);
+	const templateRatios = usableTemplates.map((template) => nonBlackWidthRatio(template.glyph));
+	const medianOuterWidth = Math.round(median(usableTemplates.map((template) => template.outer.widthPx)));
+	const medianOuterHeight = Math.round(median(usableTemplates.map((template) => template.outer.heightPx)));
+
+	const scores = clusters.map((cluster) => {
+		const outerCandidate = centeredCrop(
+			image,
+			cluster.xPx,
+			cluster.yPx,
+			medianOuterWidth,
+			medianOuterHeight
+		);
+		const candidateGlyph = outerCandidate ? interior(outerCandidate) : null;
+		if (!candidateGlyph) {
+			return usableTemplates.map(() => GLYPH_PRUNED_SCORE);
+		}
+
+		const candidateRatio = nonBlackWidthRatio(candidateGlyph);
+		const retained = retainedGlyphTemplateIndexes(candidateRatio, templateRatios);
+		return usableTemplates.map((template, templateIndex) =>
+			retained.has(templateIndex)
+				? glyphScore(cv, image, cluster.xPx, cluster.yPx, template.glyph)
+				: GLYPH_PRUNED_SCORE
+		);
+	});
 	const assignments = maximumScoreAssignment(scores);
 	return clusters.map((cluster, index) => {
 		const templateIndex = assignments[index];
@@ -619,42 +964,48 @@ export function detectHoleNumberBadges(
 
 	const anchorTemplate = availableTemplates.find((template) => template.label === 1) ?? availableTemplates[0];
 	const canonicalAnchor = grayscale(anchorTemplate.raster, `Hole ${anchorTemplate.label} template`);
-	const imageMat = matFromBytes(cv, image);
-	try {
-		const anchor = findScaleAnchor(cv, imageMat, canonicalAnchor, anchorTemplate.label, options);
-		if (!anchor) {
-			return {
-				candidates: [],
-				anchor: null,
-				labeling: 'candidate-only',
-				note: 'Every supplied number template is larger than the source image at the requested scale range.'
-			};
-		}
-
-		const clusters = clusterBadgeHits(
-			collectTemplateHits(cv, imageMat, availableTemplates, anchor.scale, options),
-			anchor.scale,
-			options.maxCandidates
-		);
-		const assigned = assignedCandidates(cv, image, clusters, availableTemplates, anchor.scale);
-		if (assigned) {
-			return {
-				candidates: assigned.sort((a, b) => (a.label ?? 0) - (b.label ?? 0)),
-				anchor,
-				labeling: 'assigned'
-			};
-		}
-
-		const fullTemplatePack = availableTemplates.length === 18 && availableTemplates.every((template, index) => template.label === index + 1);
+	const canonicalBody = templateBadgeBody(canonicalAnchor);
+	if (!canonicalBody) {
 		return {
-			candidates: candidateOnly(clusters, anchor.scale),
-			anchor,
+			candidates: [],
+			anchor: null,
 			labeling: 'candidate-only',
-			note: fullTemplatePack
-				? `Located ${clusters.length} badge candidates; glyph labels require one physical candidate for each of the 18 templates.`
-				: 'Candidate-only mode: supply the complete canonical hole-01.png through hole-18.png template pack for one-to-one glyph labels.'
+			note: `Hole ${anchorTemplate.label} template does not contain a plausible dark badge body.`
 		};
-	} finally {
-		imageMat.delete();
 	}
+
+	const badgeBodies = selectBadgeBodies(darkComponents(image), options.maxCandidates);
+	if (badgeBodies.length === 0) {
+		return {
+			candidates: [],
+			anchor: null,
+			labeling: 'candidate-only',
+			note: 'No repeated dark UDisc badge-body population was found.'
+		};
+	}
+
+	const anchorScale = componentAnchorScale(badgeBodies, canonicalBody);
+	const clusters = clustersFromBadgeBodies(badgeBodies, anchorTemplate, anchorScale);
+	const assigned = assignedCandidates(cv, image, clusters, availableTemplates, anchorScale);
+	const anchor = localizationAnchor(anchorTemplate, anchorScale, clusters, assigned);
+
+	if (assigned) {
+		return {
+			candidates: assigned.sort((a, b) => (a.label ?? 0) - (b.label ?? 0)),
+			anchor,
+			labeling: 'assigned'
+		};
+	}
+
+	const fullTemplatePack =
+		availableTemplates.length === 18 &&
+		availableTemplates.every((template, index) => template.label === index + 1);
+	return {
+		candidates: candidateOnly(clusters, anchorScale),
+		anchor,
+		labeling: 'candidate-only',
+		note: fullTemplatePack
+			? `Located ${clusters.length} badge candidates from dark components; glyph labels require one physical candidate for each of the 18 templates.`
+			: 'Candidate-only mode: supply the complete canonical hole-01.png through hole-18.png template pack for one-to-one glyph labels.'
+	};
 }

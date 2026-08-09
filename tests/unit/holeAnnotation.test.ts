@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	addCorridorBend,
 	addHole,
+	addHoleBeyondStandardCourse,
 	addShot,
 	clearBends,
 	moveBasket,
@@ -39,12 +40,17 @@ describe('nextHoleNumber', () => {
 });
 
 describe('addHole / removeHole', () => {
-	it('appends an empty hole with the lowest missing number, empty bends, and the default width, without mutating the input array', () => {
-		const original: AnnotatedHole[] = [emptyHole('a', 1)];
+	it('inserts the lowest missing hole in numeric order without mutating or changing existing records', () => {
+		const original: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 10, yPx: 20 } }),
+			emptyHole('c', 3, { shots: [{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } }] })
+		];
 		const result = addHole(original, idSequence('hole'));
 
-		expect(original).toHaveLength(1);
-		expect(result).toHaveLength(2);
+		expect(original.map((hole) => hole.number)).toEqual([1, 3]);
+		expect(result.map((hole) => hole.number)).toEqual([1, 2, 3]);
+		expect(result[0]).toBe(original[0]);
+		expect(result[2]).toBe(original[1]);
 		expect(result[1]).toEqual({
 			id: 'hole-1',
 			number: 2,
@@ -62,12 +68,22 @@ describe('addHole / removeHole', () => {
 
 		const addedNumbers: number[] = [];
 		for (let index = 0; index < 5; index += 1) {
+			const expectedNumber = nextHoleNumber(holes);
 			holes = addHole(holes, createId);
-			addedNumbers.push(holes[holes.length - 1].number);
+			addedNumbers.push(expectedNumber!);
 		}
 
 		expect(addedNumbers).toEqual([1, 5, 13, 16, 18]);
 		expect(addHole(holes, createId)).toHaveLength(18);
+	});
+
+	it('adds post-18 holes after the current maximum in numeric order', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 19), emptyHole('c', 21)];
+		const result = addHoleBeyondStandardCourse(holes, idSequence('extra'));
+
+		expect(result.map((hole) => hole.number)).toEqual([1, 19, 21, 22]);
+		expect(result[0]).toBe(holes[0]);
+		expect(result[1]).toBe(holes[1]);
 	});
 
 	it('removes exactly the hole with the matching id', () => {

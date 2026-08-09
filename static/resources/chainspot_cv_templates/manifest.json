@@ -4,7 +4,8 @@
     "canonicalNumberBadge": {
       "widthPx": 30,
       "heightPx": 23
-    }
+    },
+    "basketTemplateScalePerNumberTemplateScale": 1.7952550415183868
   },
   "templates": {
     "holeNumbers": [

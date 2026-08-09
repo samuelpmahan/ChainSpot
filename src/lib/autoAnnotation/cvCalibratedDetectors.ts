@@ -34,15 +34,22 @@ import type {
 	TeePadVariant,
 	TeePadVariantResult
 } from './teePadDetection';
-import { asTemplateScale } from './cvCalibration';
-import type { TemplateScale, UiScalePx } from './cvCalibration';
+import {
+	asBasketTemplateScale,
+	asNumberTemplateScale
+} from './cvCalibration';
+import type {
+	BasketTemplateScale,
+	NumberTemplateScale,
+	UiScalePx
+} from './cvCalibration';
 
 export type CalibratedHoleNumberScaleAnchor = Omit<HoleNumberScaleAnchor, 'scale'> & {
-	readonly scale: TemplateScale;
+	readonly scale: NumberTemplateScale;
 };
 
 export type CalibratedHoleNumberCandidate = Omit<HoleNumberCandidate, 'scale'> & {
-	readonly scale: TemplateScale;
+	readonly scale: NumberTemplateScale;
 };
 
 export type CalibratedHoleNumberDetection = Omit<HoleNumberDetection, 'anchor' | 'candidates'> & {
@@ -64,11 +71,14 @@ export function detectCalibratedHoleNumberBadges(
 	return {
 		...detection,
 		anchor: detection.anchor
-			? { ...detection.anchor, scale: asTemplateScale(detection.anchor.scale, 'Hole-number template scale') }
+			? {
+					...detection.anchor,
+					scale: asNumberTemplateScale(detection.anchor.scale, 'Hole-number template scale')
+				}
 			: null,
 		candidates: detection.candidates.map((candidate) => ({
 			...candidate,
-			scale: asTemplateScale(candidate.scale, 'Hole-number candidate template scale')
+			scale: asNumberTemplateScale(candidate.scale, 'Hole-number candidate template scale')
 		}))
 	};
 }
@@ -104,14 +114,14 @@ export function detectCalibratedOccludedEdgeLoopCandidates(
 }
 
 export type CalibratedBasketCandidate = Omit<RawBasketCandidate, 'scale'> & {
-	/** Basket-template multiplier, never canonical UDisc UiScalePx. */
-	readonly scale: TemplateScale;
+	/** Basket-template multiplier, never a hole-number multiplier or canonical UDisc UiScalePx. */
+	readonly scale: BasketTemplateScale;
 };
 
 export interface BasketTemplateScaleDetectionOptions
 	extends Omit<RawBasketDetectionOptions, 'uiScalePx' | 'templateScales'> {
-	readonly templateScale: TemplateScale;
-	readonly templateScales?: readonly TemplateScale[];
+	readonly templateScale: BasketTemplateScale;
+	readonly templateScales?: readonly BasketTemplateScale[];
 }
 
 /**
@@ -133,12 +143,12 @@ export function detectBasketCandidatesAtTemplateScale(
 	};
 	return detectBasketTemplateCandidates(cv, raster, template, rawOptions).map((candidate) => ({
 		...candidate,
-		scale: asTemplateScale(candidate.scale, 'Basket candidate template scale')
+		scale: asBasketTemplateScale(candidate.scale, 'Basket candidate template scale')
 	}));
 }
 
 export interface CalibratedBasketAnchorScale {
-	readonly scale: TemplateScale;
+	readonly scale: BasketTemplateScale;
 	readonly score: number;
 }
 
@@ -150,6 +160,6 @@ export function findCalibratedBasketAnchorScale(
 ): CalibratedBasketAnchorScale | null {
 	const anchor = findBasketAnchorScale(cv, raster, template, options);
 	return anchor
-		? { ...anchor, scale: asTemplateScale(anchor.scale, 'Basket anchor template scale') }
+		? { ...anchor, scale: asBasketTemplateScale(anchor.scale, 'Basket anchor template scale') }
 		: null;
 }

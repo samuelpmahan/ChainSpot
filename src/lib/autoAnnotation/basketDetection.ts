@@ -4,7 +4,12 @@ import type {
 	CalibratedHoleNumberDetection
 } from './cvCalibratedDetectors';
 import { asUiScalePx } from './cvCalibration';
-import type { TemplateScale, UiScalePx } from './cvCalibration';
+import type {
+	BasketTemplateScale,
+	NumberTemplateScale,
+	TemplateScale,
+	UiScalePx
+} from './cvCalibration';
 import type {
 	TeePadCandidate,
 	TeePadStageCounts,
@@ -14,15 +19,63 @@ import type {
 
 export type BasketCandidate = CalibratedBasketCandidate;
 
+export interface CourseDetectionPerformance {
+	readonly totalMs: number;
+	readonly cachedAtStart: {
+		readonly runtime: boolean;
+		readonly templatePack: boolean;
+	};
+	readonly input: {
+		readonly sourceWidthPx: number;
+		readonly sourceHeightPx: number;
+		readonly analysisWidthPx: number;
+		readonly analysisHeightPx: number;
+		readonly analysisScale: number;
+	};
+	readonly stages: {
+		readonly bootstrapMs: number;
+		readonly analysisRasterMs: number;
+		readonly numbersMs: number;
+		readonly basketsMs: number;
+		readonly basketRasterMs: number;
+		readonly basketAnchorMs: number;
+		readonly basketCandidatesMs: number;
+		readonly teesMs: number;
+		readonly teeRasterMs: number;
+		readonly teeDetectionMs: number;
+		readonly grammarMs: number;
+	};
+	readonly counts: {
+		readonly numberTemplates: number;
+		readonly numberCandidates: number;
+		readonly labeledNumbers: number;
+		readonly baskets: number;
+		readonly tees: number;
+		readonly basketAnchorScaleEvaluations: number;
+	};
+	readonly calibration: {
+		readonly numberTemplateScale: NumberTemplateScale;
+		readonly basketTemplateScale: BasketTemplateScale;
+		readonly basketTemplateScalePerNumberTemplateScale: number;
+	};
+}
+
 export interface CourseDetectionResult {
 	readonly numberDetection: CalibratedHoleNumberDetection;
 	readonly tees: readonly TeePadCandidate[];
 	readonly baskets: readonly BasketCandidate[];
 	readonly grammar: CourseGrammarResult;
+	/** Present on production worker results; optional so existing test fixtures/mocks remain source-compatible. */
+	readonly performance?: CourseDetectionPerformance;
 }
 
 export type { TeePadVariant, TeePadStageCounts, TeePadVariantResult } from './teePadDetection';
-export type { TemplateScale, UiScalePx } from './cvCalibration';
+export type {
+	BasketTemplateScale,
+	NumberTemplateScale,
+	TemplateScale,
+	UiScalePx
+} from './cvCalibration';
 
 /**
  * Transitional public input for a user-supplied UI calibration. Plain numeric
@@ -55,6 +108,8 @@ export type CourseDetectionProgressStage =
 export interface CourseDetectionProgress {
 	readonly stage: CourseDetectionProgressStage;
 	readonly message: string;
+	/** Milliseconds elapsed since the detect-course request began. */
+	readonly elapsedMs?: number;
 }
 
 interface BasketWorkerSuccess {
@@ -285,6 +340,10 @@ export async function detectCourseCandidates(
 		if (!reply.ok) throw new Error(reply.message);
 		if (reply.kind !== 'detect-course' || !reply.course) {
 			throw new Error('Course detection worker returned an invalid detection reply.');
+		}
+		if (reply.course.performance) {
+			console.info('[ChainSpot CV benchmark]', reply.course.performance);
+			console.table(reply.course.performance.stages);
 		}
 		return reply.course;
 	} catch (error) {

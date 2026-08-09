@@ -49,6 +49,7 @@
 			view: ViewTransformState
 		) => void;
 		tools?: Snippet;
+		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 	}
 
@@ -66,6 +67,7 @@
 		onClaimedPointerUp,
 		onClaimedPointerCancel,
 		tools,
+		diagnostics,
 		overlay
 	}: Props = $props();
 
@@ -227,6 +229,11 @@
 				{/snippet}
 			</ImageViewport>
 		</div>
+		{#if diagnostics}
+			<aside class="diagnostics" aria-label={`${title} diagnostics`}>
+				{@render diagnostics()}
+			</aside>
+		{/if}
 	</div>
 
 	<input
@@ -302,12 +309,20 @@
 	}
 
 	.editor-body.with-tools {
-		grid-template-columns: 18rem minmax(0, 1fr);
+		grid-template-columns: 18rem minmax(0, 1fr) 20rem;
 	}
 
 	.tools {
 		padding: 0.8rem;
 		border-right: 1px solid #34343a;
+		background: #202024;
+		overflow: auto;
+	}
+
+	.diagnostics {
+		min-width: 0;
+		padding: 0.8rem;
+		border-left: 1px solid #34343a;
 		background: #202024;
 		overflow: auto;
 	}
@@ -380,6 +395,12 @@
 		.tools {
 			border-right: 0;
 			border-bottom: 1px solid #34343a;
+		}
+
+		.diagnostics {
+			border-left: 0;
+			border-top: 1px solid #34343a;
+			max-height: 45vh;
 		}
 
 		.editor-body,

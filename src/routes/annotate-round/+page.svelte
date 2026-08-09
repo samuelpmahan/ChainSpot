@@ -19,6 +19,7 @@
 	import { isEditableTarget } from '$lib/pointSelection';
 	import {
 		addHole,
+		addHoleBeyondStandardCourse,
 		clearBends,
 		moveBasket,
 		moveCorridorBend,
@@ -31,6 +32,7 @@
 		removeLastShot,
 		setCorridorWidth
 	} from '$lib/holeAnnotation';
+	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
 	import {
 		deriveCorridorBand,
@@ -213,8 +215,17 @@
 	function handleAddHole(): void {
 		const nextHoles = addHole(holes);
 		if (nextHoles.length === holes.length) return;
+		const addedHole = nextHoles.find((hole) => !holes.some((existing) => existing.id === hole.id));
 		holes = nextHoles;
-		activeHoleId = nextHoles[nextHoles.length - 1].id;
+		activeHoleId = addedHole?.id ?? activeHoleId;
+	}
+
+	function handleAddHoleBeyondStandardCourse(): void {
+		const nextHoles = addHoleBeyondStandardCourse(holes);
+		const addedHole = nextHoles.find((hole) => !holes.some((existing) => existing.id === hole.id));
+		if (!addedHole) return;
+		holes = nextHoles;
+		activeHoleId = addedHole.id;
 	}
 
 	function handleRemoveHole(holeId: string): void {
@@ -794,6 +805,75 @@
 		<p class="error" data-testid="annotate-done-error" role="alert">{doneError}</p>
 	{/if}
 
+	<nav class="hole-bar" aria-label="Course holes" data-testid="hole-bar">
+		<div class="hole-bar-grid">
+			{#each Array.from({ length: 18 }, (_, index) => index + 1) as holeNumber}
+				{@const hole = holes.find((candidate) => candidate.number === holeNumber)}
+				<button
+					type="button"
+					class="hole-tab"
+					class:populated={Boolean(hole)}
+					class:selected={hole?.id === activeHoleId}
+					data-testid="hole-select-{holeNumber}"
+					disabled={!hole}
+					aria-current={hole?.id === activeHoleId ? 'true' : undefined}
+					aria-label={hole ? getHoleBarLabel(hole, hole.id === activeHoleId) : `Hole ${holeNumber}: empty`}
+					onclick={() => hole && (activeHoleId = hole.id)}
+				>
+					<strong>{holeNumber}</strong>
+					{#if hole}
+						{@const indicators = getHoleBarIndicators(hole)}
+						<span class="hole-indicators" aria-hidden="true">
+							<span class:present={indicators.number}>N</span>
+							<span class:present={indicators.tee}>T</span>
+							<span class:present={indicators.basket}>B</span>
+							<span class:present={indicators.bends > 0}>↯{indicators.bends || ''}</span>
+							<span class:present={indicators.throws > 0}>↗{indicators.throws || ''}</span>
+						</span>
+						<span class="sr-only">{hole.tee ? 'tee' : 'no tee'}{hole.basket ? ' · basket' : ''} · {hole.shots.length} shots{hole.corridorBends.length > 0 ? ` · bends (${hole.corridorBends.length})` : ''}</span>
+					{/if}
+				</button>
+			{/each}
+		</div>
+		<div class="hole-bar-actions">
+			<button
+				type="button"
+				data-testid="hole-add"
+				aria-keyshortcuts="A N"
+				disabled={nextHoleNumber(holes) === null}
+				onclick={handleAddHole}
+			>
+				Add hole <kbd>A</kbd> / <kbd>N</kbd>
+			</button>
+			<button
+				type="button"
+				class="hole-add-beyond"
+				data-testid="hole-add-beyond"
+				aria-label="Add hole beyond 18"
+				onclick={handleAddHoleBeyondStandardCourse}
+			>
+				+ <span class="sr-only">Add hole beyond 18</span>
+			</button>
+		</div>
+		{#if holes.some((hole) => hole.number > 18)}
+			<div class="extra-hole-tabs" aria-label="Additional holes">
+				{#each holes.filter((hole) => hole.number > 18) as hole (hole.id)}
+					<button
+						type="button"
+						class="hole-tab extra"
+						class:selected={hole.id === activeHoleId}
+						data-testid="hole-select-{hole.number}"
+						aria-current={hole.id === activeHoleId ? 'true' : undefined}
+						aria-label={getHoleBarLabel(hole, hole.id === activeHoleId)}
+						onclick={() => (activeHoleId = hole.id)}
+					>
+						Hole {hole.number}
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</nav>
+
 	<div data-testid="hole-annotation">
 		<ImageEditorPane
 			title="UDisc source"
@@ -810,35 +890,16 @@
 			onClaimedPointerCancel={cancelAnnotationPointer}
 		>
 			{#snippet tools()}
-				<div class="tool-section">
+				<div class="tool-section hole-management">
 					<div class="section-heading">
-						<h2>Holes</h2>
-						<button
-							type="button"
-							data-testid="hole-add"
-							aria-keyshortcuts="A N"
-							disabled={nextHoleNumber(holes) === null}
-							onclick={handleAddHole}
-						>
-							Add hole <kbd>A</kbd> / <kbd>N</kbd>
-						</button>
+						<h2>Hole controls</h2>
+						<span>{holes.length} active</span>
 					</div>
 					{#if holes.length > 0}
-						<ul class="hole-list" data-testid="hole-list">
+						<ul class="hole-remove-list" data-testid="hole-list">
 							{#each holes as hole (hole.id)}
 								<li class:active={hole.id === activeHoleId}>
-									<button
-										type="button"
-										class="hole-select"
-										data-testid="hole-select-{hole.number}"
-										aria-current={hole.id === activeHoleId ? 'true' : undefined}
-										onclick={() => (activeHoleId = hole.id)}
-									>
-										<strong>Hole {hole.number}</strong>
-										<span>
-											{hole.tee ? 'tee' : 'no tee'}{hole.basket ? ' · basket' : ''} · {hole.shots.length} shots{hole.corridorBends.length > 0 ? ` · bends (${hole.corridorBends.length})` : ''}
-										</span>
-									</button>
+									<span>Hole {hole.number}</span>
 									<button
 										type="button"
 										class="remove-hole-button"
@@ -850,7 +911,7 @@
 							{/each}
 						</ul>
 					{:else}
-						<p class="empty-copy">Add the first hole, then click directly on the map.</p>
+						<p class="empty-copy">Add a hole from the bar, then click directly on the map.</p>
 					{/if}
 				</div>
 
@@ -912,7 +973,7 @@
 						{#if courseDetectionStatus}
 							<p
 								class="detection-progress"
-								data-testid="course-detection-progress"
+								data-testid="course-detection-controls-progress"
 								data-running={courseDetectionRunning ? 'true' : 'false'}
 								role="status"
 							>
@@ -924,7 +985,7 @@
 						{#if courseDetection}
 							{@const assignedNumbers = courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length}
 							{@const readyHoles = courseDetection.grammar.holes.filter((proposal) => proposal.status === 'ready').length}
-							<p class="detection-summary" data-testid="course-detection-summary">
+							<p class="detection-summary" data-testid="course-detection-controls-summary">
 								{assignedNumbers} numbers · {courseDetection.tees.length} tees · {courseDetection.baskets.length} baskets · {readyHoles} ready
 							</p>
 							{#if courseDetection.numberDetection.note}
@@ -1010,7 +1071,7 @@
 									(sum, result) => sum + result.candidates.length,
 									0
 								)}
-								<p class="detection-summary" data-testid="tee-detection-summary">
+								<p class="detection-summary" data-testid="tee-detection-controls-summary">
 									scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates
 								</p>
 								{#each teeExperimentResult.results as result (result.variant)}
@@ -1083,7 +1144,7 @@
 							<button
 								type="button"
 								class="apply-button"
-								data-testid="apply-basket-candidate"
+								data-testid="apply-basket-candidate-controls"
 								disabled={selectedBasketCandidate === null || !activeHoleId}
 								onclick={applySelectedBasket}
 							>
@@ -1092,6 +1153,81 @@
 						{/if}
 					</div>
 				{/if}
+			{/snippet}
+
+			{#snippet diagnostics()}
+				<div class="diagnostics-panel" data-testid="annotation-diagnostics">
+					<h2>Diagnostics</h2>
+					{#if courseDetectionStatus}
+						<p class="detection-progress" data-testid="course-detection-progress" role="status">
+							<span class="progress-dot" class:running={courseDetectionRunning} aria-hidden="true"></span>
+							<span class="progress-copy">{courseDetectionStatus}</span>
+							<span class="progress-time">{courseDetectionElapsedSeconds}s</span>
+						</p>
+					{/if}
+					{#if courseDetection}
+						{@const assignedNumbers = courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length}
+						{@const readyHoles = courseDetection.grammar.holes.filter((proposal) => proposal.status === 'ready').length}
+						<p class="detection-summary" data-testid="course-detection-summary">
+							{assignedNumbers} numbers · {courseDetection.tees.length} tees · {courseDetection.baskets.length} baskets · {readyHoles} ready
+						</p>
+						{#if courseDetection.numberDetection.note}
+							<p class="tool-note">{courseDetection.numberDetection.note}</p>
+						{/if}
+						{#if courseDetection.numberDetection.candidates.some((candidate) => candidate.topGlyphMatches?.length)}
+							<details class="number-diagnostics" open>
+								<summary>Number classifier diagnostics</summary>
+								<p class="diagnostic-help">Raw top 3 are independent glyph scores. Assigned is the forced one-to-one Hungarian result.</p>
+								<div class="diagnostic-list">
+									{#each courseDetection.numberDetection.candidates as candidate, index (index)}
+										{@const candidateId = candidate.diagnosticId ?? index + 1}
+										{@const rawMatches = candidate.topGlyphMatches ?? []}
+										{@const forcedAssignment = candidate.label !== undefined && rawMatches[0] !== undefined && rawMatches[0].label !== candidate.label}
+										<div class="diagnostic-row" class:forced={forcedAssignment}>
+											<strong>C{candidateId}</strong>
+											<span class="diagnostic-assigned">assigned {candidate.label !== undefined ? `H${candidate.label}` : '—'}</span>
+											<span class="diagnostic-raw">raw {#each rawMatches as match, matchIndex (match.label)}{matchIndex > 0 ? ' · ' : ' '}H{match.label} {(match.score * 100).toFixed(0)}%{/each}</span>
+										</div>
+									{/each}
+								</div>
+							</details>
+						{/if}
+					{/if}
+					{#if teeExperimentResult}
+						{@const total = teeExperimentResult.results.reduce((sum, result) => sum + result.candidates.length, 0)}
+						<p class="detection-summary" data-testid="tee-detection-summary">scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates</p>
+						{#each teeExperimentResult.results as result (result.variant)}
+							<details class="tee-diagnostics" open>
+								<summary>{TEE_VARIANT_LABELS[result.variant]} · {result.candidates.length} found</summary>
+								<div class="tee-stage-counts">
+									{#each Object.entries(result.stageCounts) as [stage, count]}<span>{stage}: {count}</span>{/each}
+								</div>
+								<div class="tee-candidate-list">
+									{#each result.candidates as candidate, index (index)}
+										{@const key = `${result.variant}-${index}`}
+										<button type="button" class:selected={selectedTeeCandidateKey === key} aria-pressed={selectedTeeCandidateKey === key} onclick={() => (selectedTeeCandidateKey = key)}>
+											<span class="tee-candidate-tag">{TEE_VARIANT_LABELS[result.variant]} tee</span>
+											<span class="tee-candidate-score">{(candidate.score * 100).toFixed(0)}%</span>
+											<span class="tee-candidate-dims">{candidate.widthPx.toFixed(0)}×{candidate.heightPx.toFixed(0)}</span>
+										</button>
+									{/each}
+								</div>
+							</details>
+						{/each}
+					{/if}
+					{#if basketCandidates.length > 0}
+						<div class="candidate-list" aria-label="Detected basket candidates">
+							{#each basketCandidates as candidate, index (index)}
+								<button type="button" class:selected={selectedBasketCandidate === index} aria-pressed={selectedBasketCandidate === index} onclick={() => selectBasketCandidate(index)}>
+									Basket candidate {index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
+								</button>
+							{/each}
+						</div>
+						<button type="button" class="apply-button" data-testid="apply-basket-candidate" disabled={selectedBasketCandidate === null || !activeHoleId} onclick={applySelectedBasket}>
+							Apply to Hole {activeHole()?.number ?? ''}
+						</button>
+					{/if}
+				</div>
 			{/snippet}
 
 			{#snippet overlay({ image, zoom })}
@@ -1210,6 +1346,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
+		min-height: 100vh;
 	}
 
 	:global(button:focus-visible),
@@ -1466,39 +1603,26 @@
 		opacity: 0.4;
 	}
 
-	.hole-list {
+	.hole-remove-list {
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
 	}
 
-	.hole-list li {
+	.hole-remove-list li {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.35rem;
+		padding-left: 0.45rem;
 		border: 1px solid #3f3f46;
 		border-radius: 6px;
 		overflow: hidden;
 	}
 
-	.hole-list li.active {
+	.hole-remove-list li.active {
 		border-color: #3b82f6;
 		box-shadow: inset 3px 0 #3b82f6;
-	}
-
-	.hole-select {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 0.1rem;
-		border: 0 !important;
-		border-radius: 0 !important;
-		background: transparent !important;
-		text-align: left;
-	}
-
-	.hole-select span {
-		color: #a1a1aa;
-		font-size: 0.7rem;
 	}
 
 	.remove-hole-button {
@@ -1536,8 +1660,7 @@
 		margin: 0;
 	}
 
-	.mode-grid kbd,
-	.section-heading kbd {
+	.mode-grid kbd {
 		padding: 0.05rem 0.25rem;
 		border: 1px solid #71717a;
 		border-radius: 3px;
@@ -1657,6 +1780,99 @@
 		}
 	}
 
+		.hole-bar {
+			display: flex;
+			align-items: stretch;
+			flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0.5rem;
+		border: 1px solid #34343a;
+		border-radius: 8px;
+		background: #18181b;
+	}
+
+	.hole-bar-grid {
+		flex: 1 1 auto;
+		display: grid;
+		grid-template-columns: repeat(9, minmax(3.2rem, 1fr));
+		gap: 0.3rem;
+		min-width: 0;
+	}
+
+	.hole-tab {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.2rem;
+		min-height: 2.4rem;
+		padding: 0.25rem 0.3rem;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		background: #27272a;
+		color: #a1a1aa;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.hole-tab:disabled {
+		opacity: 0.5;
+	}
+
+	.hole-tab.populated {
+		border-color: #52525b;
+		color: #f4f4f5;
+	}
+
+	.hole-tab.selected {
+		border-color: #60a5fa;
+		background: rgb(37 99 235 / 25%);
+		box-shadow: inset 0 0 0 1px #2563eb;
+	}
+
+	.hole-indicators {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.12rem;
+		font-size: 0.58rem;
+		font-weight: 700;
+	}
+
+	.hole-indicators span {
+		color: #71717a;
+	}
+
+	.hole-indicators span.present {
+		color: #4ade80;
+	}
+
+	.hole-bar-actions,
+	.extra-hole-tabs {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.hole-bar-actions {
+		flex: 0 0 auto;
+	}
+
+	.hole-add-beyond {
+		min-width: 2.4rem;
+		font-size: 1.25rem;
+		font-weight: 700;
+	}
+
+	.extra-hole-tabs {
+		flex-basis: 100%;
+		justify-content: flex-start;
+		padding-top: 0.35rem;
+		border-top: 1px solid #34343a;
+	}
+
+	.extra-hole-tabs .hole-tab {
+		min-width: 4.5rem;
+	}
+
 	.tool-note {
 		color: #fcd34d;
 	}
@@ -1736,14 +1952,38 @@
 		height: 100%;
 	}
 
-	/* Course Assist now carries live CV diagnostics, so the generic 18rem tool
-	 * rail is too narrow on this route. Keep the wider rail local to Annotate Round. */
+	/* Keep side regions bounded so diagnostic/control content cannot resize the image region. */
 	:global(.editor-body.with-tools) {
-		grid-template-columns: 24rem minmax(0, 1fr) !important;
+		grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr) minmax(18rem, 20rem) !important;
+		min-height: min(78vh, 900px);
 	}
 
 	:global(.tools) {
 		min-width: 0;
+	}
+
+	:global(.tools .number-diagnostics),
+		:global(.tools .tee-diagnostics),
+	:global(.tools [data-testid='course-detection-controls-summary']),
+	:global(.tools [data-testid='course-detection-controls-progress']),
+	:global(.tools [data-testid='tee-detection-controls-summary']),
+		:global(.tools .tool-note),
+	:global(.tools .tee-candidate-list),
+	:global(.tools .candidate-list),
+	:global(.tools [data-testid='apply-basket-candidate-controls']) {
+		display: none;
+	}
+
+	.diagnostics-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+
+	.diagnostics-panel h2 {
+		margin: 0;
+		font-size: 1rem;
 	}
 
 	.tee-experiment-controls {
@@ -1891,6 +2131,20 @@
 	@media (max-width: 900px) {
 		:global(.editor-body.with-tools) {
 			grid-template-columns: 1fr !important;
+		}
+
+		.hole-bar {
+			flex-wrap: wrap;
+		}
+
+		.hole-bar-grid {
+			flex-basis: 100%;
+			grid-template-columns: repeat(9, minmax(2.3rem, 1fr));
+			order: 1;
+		}
+
+		.hole-bar-actions {
+			order: 2;
 		}
 
 		main {

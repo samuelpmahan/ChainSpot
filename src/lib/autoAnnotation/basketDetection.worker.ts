@@ -23,10 +23,12 @@ import {
 import type { CalibratedBasketCandidate } from './cvCalibratedDetectors';
 import {
 	asUiScalePx,
+	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
 	validateCvTemplateManifest
 } from './cvCalibration';
 import type {
+	BasketTemplateScale,
 	CvTemplateManifest,
 	UiScalePx
 } from './cvCalibration';
@@ -68,6 +70,17 @@ interface LoadedTemplatePack {
 	readonly manifest: CvTemplateManifest;
 	readonly holeNumbers: readonly HoleNumberTemplate[];
 	readonly basket: BasketTemplateRaster;
+}
+
+interface BasketDetectionTiming {
+	rasterMs: number;
+	anchorMs: number;
+	candidatesMs: number;
+	anchorScaleEvaluations: number;
+}
+
+function emptyBasketDetectionTiming(): BasketDetectionTiming {
+	return { rasterMs: 0, anchorMs: 0, candidatesMs: 0, anchorScaleEvaluations: 0 };
 }
 
 let runtimePromise: Promise<RuntimeCv> | null = null;
@@ -220,9 +233,13 @@ async function detectBaskets(
 	bitmap: ImageBitmap,
 	widthPx: number,
 	heightPx: number,
-	mapBoundsPx?: { topPx: number; bottomPx: number }
+	mapBoundsPx?: { topPx: number; bottomPx: number },
+	basketTemplateScale?: BasketTemplateScale,
+	timing?: BasketDetectionTiming
 ): Promise<readonly CalibratedBasketCandidate[]> {
 	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
+
+	const rasterStartedAt = performance.now();
 	const full = fullResolutionRaster(bitmap);
 	const raster = {
 		gray: grayscaleRgba(full.rgba, full.width * full.height),
@@ -230,16 +247,39 @@ async function detectBaskets(
 		heightPx: full.height,
 		sourceScale: 1
 	};
-	const anchor = findCalibratedBasketAnchorScale(cv, raster, pack.basket);
-	if (!anchor) return [];
-	return detectBasketCandidatesAtTemplateScale(cv, raster, pack.basket, {
-		templateScale: anchor.scale,
+	if (timing) timing.rasterMs = performance.now() - rasterStartedAt;
+
+	let resolvedBasketTemplateScale = basketTemplateScale;
+	if (!resolvedBasketTemplateScale) {
+		const anchorStartedAt = performance.now();
+		const anchor = findCalibratedBasketAnchorScale(
+			cv,
+			raster,
+			pack.basket,
+			timing
+				? {
+						onProgress: () => {
+							timing.anchorScaleEvaluations += 1;
+						}
+					}
+				: {}
+		);
+		if (timing) timing.anchorMs = performance.now() - anchorStartedAt;
+		resolvedBasketTemplateScale = anchor?.scale;
+	}
+	if (!resolvedBasketTemplateScale) return [];
+
+	const candidatesStartedAt = performance.now();
+	const candidates = detectBasketCandidatesAtTemplateScale(cv, raster, pack.basket, {
+		templateScale: resolvedBasketTemplateScale,
 		mapBoundsPx
 	}).map((candidate) => ({
 		...candidate,
 		xPx: Math.max(0, Math.min(widthPx, candidate.xPx)),
 		yPx: Math.max(0, Math.min(heightPx, candidate.yPx))
 	}));
+	if (timing) timing.candidatesMs = performance.now() - candidatesStartedAt;
+	return candidates;
 }
 
 function sourceNumberDetection(
@@ -336,31 +376,58 @@ async function detectTees(
 function reportCourseProgress(
 	request: BasketDetectionRequest,
 	stage: 'opencv' | 'baskets' | 'templates' | 'numbers' | 'tees' | 'grammar',
-	message: string
+	message: string,
+	elapsedMs?: number
 ): void {
 	(self as unknown as Worker).postMessage({
 		ok: true,
 		kind: 'progress',
 		token: request.token,
-		progress: { stage, message }
+		progress: { stage, message, elapsedMs }
 	});
 }
 
 async function detectCourse(request: BasketDetectionRequest) {
-	reportCourseProgress(request, 'opencv', 'Loading OpenCV runtime and CV calibration manifest…');
-	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
-	const analysis = grayscaleRaster(request.bitmap);
+	const startedAt = performance.now();
+	const runtimeCachedAtStart = runtimePromise !== null;
+	const templatePackCachedAtStart = templatePackPromise !== null;
+	const elapsedMs = () => performance.now() - startedAt;
 
-	// Preserve the proven production ordering: numbers first establish the map
-	// band; basket detection then uses that bound. The only semantic change here
-	// is that number TemplateScale is never reused as canonical UiScalePx.
-	reportCourseProgress(request, 'templates', 'OpenCV ready · loading number templates…');
-	reportCourseProgress(request, 'numbers', `${pack.holeNumbers.length} templates loaded · matching hole numbers…`);
+	reportCourseProgress(
+		request,
+		'opencv',
+		'Loading OpenCV runtime and CV calibration manifest…',
+		elapsedMs()
+	);
+	const bootstrapStartedAt = performance.now();
+	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
+	const bootstrapMs = performance.now() - bootstrapStartedAt;
+
+	const analysisStartedAt = performance.now();
+	const analysis = grayscaleRaster(request.bitmap);
+	const analysisRasterMs = performance.now() - analysisStartedAt;
+
+	// Preserve the proven production ordering and detector behavior. This pass
+	// only measures where wall-clock time is being spent.
+	reportCourseProgress(
+		request,
+		'templates',
+		'OpenCV ready · loading number templates…',
+		elapsedMs()
+	);
+	reportCourseProgress(
+		request,
+		'numbers',
+		`${pack.holeNumbers.length} templates loaded · matching hole numbers…`,
+		elapsedMs()
+	);
+	const numbersStartedAt = performance.now();
 	const analysisNumbers = detectCalibratedHoleNumberBadges(
 		cv,
 		{ format: 'gray', widthPx: analysis.width, heightPx: analysis.height, data: analysis.gray },
 		pack.holeNumbers
 	);
+	const numbersMs = performance.now() - numbersStartedAt;
 	const sourceScale = 1 / analysis.scale;
 	const numberDetection = sourceNumberDetection(analysisNumbers, sourceScale);
 	if (!numberDetection.anchor) {
@@ -369,6 +436,7 @@ async function detectCourse(request: BasketDetectionRequest) {
 				'Course tee detection requires a number-badge anchor; basket TemplateScale is not a UiScalePx fallback.'
 		);
 	}
+
 	const calibration = deriveUDiscCalibration(
 		{
 			scale: numberDetection.anchor.scale,
@@ -377,27 +445,48 @@ async function detectCourse(request: BasketDetectionRequest) {
 		},
 		pack.manifest.calibration.canonicalNumberBadge
 	);
+	const basketTemplateScale = deriveBasketTemplateScale(
+		numberDetection.anchor.scale,
+		pack.manifest.calibration
+	);
 	const mapBoundsPx = deriveMapBoundsFromNumbers(numberDetection.candidates, request.heightPx);
 
 	reportCourseProgress(
 		request,
 		'baskets',
-		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting baskets…`
+		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting baskets…`,
+		elapsedMs()
 	);
+	const basketTiming = emptyBasketDetectionTiming();
+	const basketsStartedAt = performance.now();
 	const baskets = await detectBaskets(
 		request.bitmap,
 		request.widthPx,
 		request.heightPx,
-		mapBoundsPx
+		mapBoundsPx,
+		basketTemplateScale,
+		basketTiming
 	);
+	const basketsMs = performance.now() - basketsStartedAt;
 
-	reportCourseProgress(request, 'tees', `${baskets.length} baskets found · detecting tee pads…`);
+	reportCourseProgress(
+		request,
+		'tees',
+		`${baskets.length} baskets found · detecting tee pads…`,
+		elapsedMs()
+	);
+	const teesStartedAt = performance.now();
+	const teeRasterStartedAt = performance.now();
 	const full = fullResolutionRaster(request.bitmap);
+	const teeRasterMs = performance.now() - teeRasterStartedAt;
+	const teeDetectionStartedAt = performance.now();
 	const tees = detectCalibratedTeePadCandidates(
 		cv,
 		{ rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 },
 		{ uiScalePx: calibration.uiScalePx, mapBoundsPx }
 	);
+	const teeDetectionMs = performance.now() - teeDetectionStartedAt;
+	const teesMs = performance.now() - teesStartedAt;
 
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
@@ -405,9 +494,59 @@ async function detectCourse(request: BasketDetectionRequest) {
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
-	reportCourseProgress(request, 'grammar', `${tees.length} tees found · matching course grammar…`);
+	reportCourseProgress(
+		request,
+		'grammar',
+		`${tees.length} tees found · matching course grammar…`,
+		elapsedMs()
+	);
+	const grammarStartedAt = performance.now();
 	const grammar = associateCourseGrammar({ numberBadges, tees, baskets });
-	return { numberDetection, tees, baskets, grammar };
+	const grammarMs = performance.now() - grammarStartedAt;
+
+	const performanceReport = {
+		totalMs: elapsedMs(),
+		cachedAtStart: {
+			runtime: runtimeCachedAtStart,
+			templatePack: templatePackCachedAtStart
+		},
+		input: {
+			sourceWidthPx: request.widthPx,
+			sourceHeightPx: request.heightPx,
+			analysisWidthPx: analysis.width,
+			analysisHeightPx: analysis.height,
+			analysisScale: analysis.scale
+		},
+		stages: {
+			bootstrapMs,
+			analysisRasterMs,
+			numbersMs,
+			basketsMs,
+			basketRasterMs: basketTiming.rasterMs,
+			basketAnchorMs: basketTiming.anchorMs,
+			basketCandidatesMs: basketTiming.candidatesMs,
+			teesMs,
+			teeRasterMs,
+			teeDetectionMs,
+			grammarMs
+		},
+		counts: {
+			numberTemplates: pack.holeNumbers.length,
+			numberCandidates: numberDetection.candidates.length,
+			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
+			baskets: baskets.length,
+			tees: tees.length,
+			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations
+		},
+		calibration: {
+			numberTemplateScale: numberDetection.anchor.scale,
+			basketTemplateScale,
+			basketTemplateScalePerNumberTemplateScale:
+				basketTemplateScale / numberDetection.anchor.scale
+		}
+	};
+
+	return { numberDetection, tees, baskets, grammar, performance: performanceReport };
 }
 
 async function processRequest(request: BasketRequest): Promise<void> {

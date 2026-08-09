@@ -30,19 +30,36 @@ export function nextHoleNumber(holes: readonly AnnotatedHole[]): number | null {
 	return null;
 }
 
-/** Appends a new, entirely empty hole with the lowest missing number. */
-export function addHole(holes: readonly AnnotatedHole[], createId: CreateId = defaultCreateId): AnnotatedHole[] {
-	const number = nextHoleNumber(holes);
-	if (number === null) return [...holes];
-
-	const hole: AnnotatedHole = {
+function emptyHole(number: number, createId: CreateId): AnnotatedHole {
+	return {
 		id: createId(),
 		number,
 		shots: [],
 		corridorBends: [],
 		corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
 	};
-	return [...holes, hole];
+}
+
+function insertHoleInNumberOrder(holes: readonly AnnotatedHole[], hole: AnnotatedHole): AnnotatedHole[] {
+	const next = [...holes, hole];
+	next.sort((left, right) => left.number - right.number);
+	return next;
+}
+
+/** Adds an empty hole in numeric order, using the lowest missing 1–18 number. */
+export function addHole(holes: readonly AnnotatedHole[], createId: CreateId = defaultCreateId): AnnotatedHole[] {
+	const number = nextHoleNumber(holes);
+	if (number === null) return [...holes];
+	return insertHoleInNumberOrder(holes, emptyHole(number, createId));
+}
+
+/** Adds the next hole after the current maximum, for courses longer than 18 holes. */
+export function addHoleBeyondStandardCourse(
+	holes: readonly AnnotatedHole[],
+	createId: CreateId = defaultCreateId
+): AnnotatedHole[] {
+	const number = Math.max(18, ...holes.map((hole) => hole.number)) + 1;
+	return insertHoleInNumberOrder(holes, emptyHole(number, createId));
 }
 
 export function removeHole(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
