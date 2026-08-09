@@ -67,9 +67,18 @@ async function loadSourceImage(page: Page): Promise<void> {
 	await page.waitForSelector('[data-testid="hole-annotation"]');
 }
 
+/** The Hole controls/Place panel floats over the map, closed by default; open it once so its controls (placement mode, corridor width, undo, remove) are interactable for the rest of the test. */
+async function openAnnotatePanel(page: Page): Promise<void> {
+	const toggle = page.getByTestId('mobile-annotate-toggle');
+	if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
+		await toggle.click();
+	}
+}
+
 /** The annotation frame renders below the fold on a short viewport; scroll it into view first, matching how a real user would interact with it, before reading its box or clicking inside it. */
 async function annotationFrameBox(page: Page) {
 	await page.getByTestId('hole-add').click();
+	await openAnnotatePanel(page);
 	const frame = page.getByTestId('annotation-frame');
 	await frame.scrollIntoViewIfNeeded();
 	await page.waitForFunction(() => {

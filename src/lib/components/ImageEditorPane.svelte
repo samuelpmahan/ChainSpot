@@ -49,6 +49,13 @@
 			view: ViewTransformState
 		) => void;
 		tools?: Snippet;
+		/**
+		 * When true, `tools` renders directly in `.editor-body` instead of inside
+		 * the `.tools` aside column — for callers whose tools content positions
+		 * itself (e.g. a fixed-position floating panel) rather than sitting in a
+		 * reserved sidebar. The canvas/diagnostics grid track collapses to match.
+		 */
+		toolsFloating?: boolean;
 		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 	}
@@ -67,6 +74,7 @@
 		onClaimedPointerUp,
 		onClaimedPointerCancel,
 		tools,
+		toolsFloating = false,
 		diagnostics,
 		overlay
 	}: Props = $props();
@@ -167,11 +175,15 @@
 		<p class="error" role="alert">{error.message}</p>
 	{/if}
 
-	<div class="editor-body" class:with-tools={Boolean(tools)}>
+	<div class="editor-body" class:with-tools={Boolean(tools)} class:floating-tools={toolsFloating}>
 		{#if tools}
-			<aside class="tools" aria-label={`${title} tools`}>
+			{#if toolsFloating}
 				{@render tools()}
-			</aside>
+			{:else}
+				<aside class="tools" aria-label={`${title} tools`}>
+					{@render tools()}
+				</aside>
+			{/if}
 		{/if}
 
 		<div class="canvas-shell" class:placing={Boolean(onPlacement)}>
@@ -289,12 +301,14 @@
 	}
 
 	button {
+		min-height: 2.5rem;
 		border: 1px solid #52525b;
 		border-radius: 5px;
 		background: #27272a;
 		color: #f4f4f5;
 		padding: 0.4rem 0.65rem;
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	button:disabled {
@@ -310,6 +324,10 @@
 
 	.editor-body.with-tools {
 		grid-template-columns: 18rem minmax(0, 1fr) 20rem;
+	}
+
+	.editor-body.with-tools.floating-tools {
+		grid-template-columns: minmax(0, 1fr) 20rem;
 	}
 
 	.tools {
@@ -387,7 +405,7 @@
 		border: 0;
 	}
 
-	@media (max-width: 850px) {
+	@media (max-width: 900px) {
 		.editor-body.with-tools {
 			grid-template-columns: 1fr;
 		}
@@ -406,6 +424,26 @@
 		.editor-body,
 		.canvas-shell {
 			min-height: 55vh;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.editor-header {
+			flex-wrap: wrap;
+		}
+
+		.header-actions {
+			flex-wrap: wrap;
+			width: 100%;
+		}
+
+		.header-actions button {
+			flex: 1 1 auto;
+		}
+
+		.editor-body,
+		.canvas-shell {
+			min-height: 45vh;
 		}
 	}
 </style>

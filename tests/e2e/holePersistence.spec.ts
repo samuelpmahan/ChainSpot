@@ -127,6 +127,8 @@ async function annotateOneHole(page: Page): Promise<void> {
 	});
 	await page.waitForSelector('[data-testid="hole-annotation"]');
 	await page.getByTestId('hole-add').click();
+	// The Hole controls/Place panel floats over the map, closed by default.
+	await page.getByTestId('mobile-annotate-toggle').click();
 	const frame = page.getByTestId('annotation-frame');
 	await frame.scrollIntoViewIfNeeded();
 	await page.waitForFunction(() => {
