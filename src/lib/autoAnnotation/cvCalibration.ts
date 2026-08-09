@@ -1,10 +1,15 @@
-import { deriveTeePadUiScalePx } from './teePadDetection';
+import {
+	CANONICAL_NUMBER_BADGE_HEIGHT_PX as TEE_CANONICAL_NUMBER_BADGE_HEIGHT_PX,
+	CANONICAL_NUMBER_BADGE_WIDTH_PX as TEE_CANONICAL_NUMBER_BADGE_WIDTH_PX,
+	deriveTeePadUiScalePx
+} from './teePadDetection';
 
 export type TemplateScale = number & { readonly __brand: 'TemplateScale' };
 export type UiScalePx = number & { readonly __brand: 'UiScalePx' };
 
-export const CANONICAL_BADGE_WIDTH_PX = 30;
-export const CANONICAL_BADGE_HEIGHT_PX = 23;
+/** One semantic calibration value, re-exported at the scale boundary. */
+export const CANONICAL_BADGE_WIDTH_PX = TEE_CANONICAL_NUMBER_BADGE_WIDTH_PX;
+export const CANONICAL_BADGE_HEIGHT_PX = TEE_CANONICAL_NUMBER_BADGE_HEIGHT_PX;
 
 export interface CanonicalNumberBadgeCalibration {
 	readonly widthPx: number;
@@ -63,7 +68,7 @@ export function asUiScalePx(value: number, name = 'UDisc UI scale'): UiScalePx {
  * The semantic boundary between raster-template scale and canonical UDisc UI
  * scale. Native template crop dimensions are deliberately absent. The numeric
  * 30×23 conversion itself lives in the already-proven tee calibration helper,
- * so the formula has exactly one implementation in the codebase.
+ * so the formula and its canonical geometry have exactly one implementation.
  */
 export function deriveUDiscCalibration(
 	anchor: NumberBadgeAnchorObservation,
