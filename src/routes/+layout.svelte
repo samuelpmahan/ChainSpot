@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { base } from '$app/paths';
 
 	/**
 	 * Client-only marker set after hydration and event delegation are in place.
@@ -16,26 +17,26 @@
 <header class="app-header">
 	<nav class="app-nav" aria-label="Main Navigation">
 		<a
-			href="/stitch-map"
+			href="{base}/stitch-map"
 			class="nav-link"
-			class:active={page.url.pathname === '/stitch-map'}
-			aria-current={page.url.pathname === '/stitch-map' ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/stitch-map`}
+			aria-current={page.url.pathname === `${base}/stitch-map` ? 'page' : undefined}
 		>
 			Stitch Map
 		</a>
 		<a
-			href="/annotate-round"
+			href="{base}/annotate-round"
 			class="nav-link"
-			class:active={page.url.pathname === '/annotate-round' || page.url.pathname === '/'}
-			aria-current={page.url.pathname === '/annotate-round' || page.url.pathname === '/' ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/annotate-round` || page.url.pathname === `${base}/`}
+			aria-current={page.url.pathname === `${base}/annotate-round` || page.url.pathname === `${base}/` ? 'page' : undefined}
 		>
 			Annotate Round
 		</a>
 		<a
-			href="/create-graphics"
+			href="{base}/create-graphics"
 			class="nav-link"
-			class:active={page.url.pathname === '/create-graphics'}
-			aria-current={page.url.pathname === '/create-graphics' ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/create-graphics`}
+			aria-current={page.url.pathname === `${base}/create-graphics` ? 'page' : undefined}
 		>
 			Create Graphics
 		</a>
