@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jpeg from 'jpeg-js';
@@ -9,6 +9,8 @@ import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDete
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 import { buildCenterlines } from '../src/lib/autoAnnotation/centerlineDetection';
 import type { CenterlineHoleInput, CenterlineRaster } from '../src/lib/autoAnnotation/centerlineDetection';
+import { checkStraightness, compareToGoldenShape } from '../src/lib/autoAnnotation/centerlineGolden';
+import type { GoldenPoint } from '../src/lib/autoAnnotation/centerlineGolden';
 
 interface DecodedRaster {
 	readonly rgba: Uint8Array;
@@ -35,8 +37,64 @@ function usage(): string {
 		'',
 		'Options:',
 		'  --templates <directory>   Canonical templates directory (default: static/resources/chainspot_cv_templates)',
+		'  --golden <path>           Golden-shape/straightness reference (default: resources/centerline-golden.json, if present)',
+		'  --no-golden               Skip the golden check even if a default reference file exists',
 		'  --help'
 	].join('\n');
+}
+
+/**
+ * A locked-in shape reference for one hole (regression guard against future
+ * routing drift) plus a coarse straightness sanity check for holes known,
+ * from the real course, to be plain tee-to-basket sightlines.
+ */
+interface GoldenReference {
+	readonly shapeHoles?: readonly Readonly<{
+		number: number;
+		centerline: readonly GoldenPoint[];
+		tolerancePx: number;
+	}>[];
+	readonly straightHoles?: Readonly<{ numbers: readonly number[]; maxDeviationFraction: number }>;
+}
+
+function loadGoldenReference(path: string): GoldenReference {
+	return JSON.parse(readFileSync(resolve(path), 'utf8')) as GoldenReference;
+}
+
+/** Prints a pass/fail report against the golden reference; returns false if anything failed. */
+function checkGolden(golden: GoldenReference, holesByNumber: Map<number, readonly GoldenPoint[]>): boolean {
+	let allPassed = true;
+	for (const shapeHole of golden.shapeHoles ?? []) {
+		const traced = holesByNumber.get(shapeHole.number);
+		if (!traced) {
+			console.error(`GOLDEN SHAPE hole ${shapeHole.number}: FAIL (hole not traced)`);
+			allPassed = false;
+			continue;
+		}
+		const comparison = compareToGoldenShape(traced, shapeHole.centerline, shapeHole.tolerancePx);
+		const status = comparison.withinTolerance ? 'PASS' : 'FAIL';
+		console.error(
+			`GOLDEN SHAPE hole ${shapeHole.number}: ${status} (max ${comparison.maxDistancePx.toFixed(1)}px vs ${shapeHole.tolerancePx}px tolerance)`
+		);
+		if (!comparison.withinTolerance) allPassed = false;
+	}
+	if (golden.straightHoles) {
+		for (const number of golden.straightHoles.numbers) {
+			const traced = holesByNumber.get(number);
+			if (!traced) {
+				console.error(`STRAIGHTNESS hole ${number}: FAIL (hole not traced)`);
+				allPassed = false;
+				continue;
+			}
+			const result = checkStraightness(traced, golden.straightHoles.maxDeviationFraction);
+			const status = result.withinTolerance ? 'PASS' : 'FAIL';
+			console.error(
+				`STRAIGHTNESS hole ${number}: ${status} (deviation ${(result.deviationFraction * 100).toFixed(1)}% vs ${(golden.straightHoles.maxDeviationFraction * 100).toFixed(1)}% max)`
+			);
+			if (!result.withinTolerance) allPassed = false;
+		}
+	}
+	return allPassed;
 }
 
 function decodeRaster(bytes: Uint8Array, fileName: string): DecodedRaster {
@@ -184,6 +242,8 @@ async function main(): Promise<void> {
 	}
 	let templateDir = defaultTemplateDir;
 	let outputDir: string | undefined;
+	let goldenPath: string | undefined;
+	let skipGolden = false;
 	const positionals: string[] = [];
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
@@ -193,12 +253,19 @@ async function main(): Promise<void> {
 		} else if (argument === '--out') {
 			outputDir = argv[index + 1];
 			index += 1;
+		} else if (argument === '--golden') {
+			goldenPath = argv[index + 1];
+			index += 1;
+		} else if (argument === '--no-golden') {
+			skipGolden = true;
 		} else if (!argument.startsWith('--')) {
 			positionals.push(argument);
 		}
 	}
 	const [teeBundlePath, basketBundlePath] = positionals;
 	if (!teeBundlePath || !basketBundlePath || !outputDir) throw new Error(`Missing arguments.\n\n${usage()}`);
+	const defaultGoldenPath = join(projectRoot, 'resources', 'centerline-golden.json');
+	const resolvedGoldenPath = skipGolden ? undefined : (goldenPath ?? (existsSync(defaultGoldenPath) ? defaultGoldenPath : undefined));
 
 	const teeBundle = loadBundle(teeBundlePath);
 	const basketBundle = loadBundle(basketBundlePath);
@@ -270,6 +337,13 @@ async function main(): Promise<void> {
 	writeFileSync(jsonPath, `${JSON.stringify({ c1RadiusPx: result.c1RadiusPx, c2RadiusPx: result.c2RadiusPx, holes: result.holes }, null, 2)}\n`);
 	console.log(`Wrote ${overlayPath}`);
 	console.log(`Wrote ${jsonPath}`);
+
+	if (resolvedGoldenPath) {
+		const golden = loadGoldenReference(resolvedGoldenPath);
+		const holesByNumber = new Map(result.holes.map((hole) => [hole.number, hole.centerline]));
+		const passed = checkGolden(golden, holesByNumber);
+		if (!passed) process.exitCode = 1;
+	}
 }
 
 main().catch((error: unknown) => {
