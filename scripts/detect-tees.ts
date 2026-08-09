@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jpeg from 'jpeg-js';
@@ -6,10 +6,23 @@ import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
-	deriveTeePadUiScalePx,
-	detectOccludedEdgeLoopCandidates,
-	detectTeePadVariants
-} from '../src/lib/autoAnnotation/teePadDetection';
+	detectCalibratedHoleNumberBadges,
+	detectCalibratedOccludedEdgeLoopCandidates,
+	detectCalibratedTeePadVariants
+} from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import type {
+	CalibratedHoleNumberDetection,
+	CalibratedTeePadDetectionOptions
+} from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import {
+	asUiScalePx,
+	deriveUDiscCalibration,
+	validateCvTemplateManifest
+} from '../src/lib/autoAnnotation/cvCalibration';
+import type {
+	CvTemplateManifest,
+	UiScalePx
+} from '../src/lib/autoAnnotation/cvCalibration';
 import type {
 	OccludedEdgeLoopResult,
 	TeePadCandidate,
@@ -19,8 +32,10 @@ import type {
 	TeePadVariant,
 	TeePadVariantResult
 } from '../src/lib/autoAnnotation/teePadDetection';
-import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDetection';
-import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
+import type {
+	HoleNumberCvModule,
+	HoleNumberTemplate
+} from '../src/lib/autoAnnotation/holeNumberDetection';
 
 export type TeeCliMode = 'edge-loop' | 'fused' | 'occluded-edge-loop';
 
@@ -29,6 +44,7 @@ export interface TeeCliArgs {
 	readonly mode: TeeCliMode;
 	readonly outputDir: string;
 	readonly templateDir: string;
+	/** Raw user input; converted to UiScalePx at the CLI boundary. */
 	readonly uiScalePx?: number;
 	readonly mapTopPx?: number;
 	readonly mapBottomPx?: number;
@@ -67,7 +83,7 @@ interface TeeProjectDocument {
 	}>[];
 }
 
-interface TeeCliResult {
+export interface TeeCliResult {
 	readonly mode: TeeCliMode;
 	readonly input: {
 		readonly path: string;
@@ -78,6 +94,16 @@ interface TeeCliResult {
 	};
 	readonly uiScalePx: number;
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
+	readonly numberDetection?: {
+		readonly labeling: CalibratedHoleNumberDetection['labeling'];
+		readonly candidateCount: number;
+		readonly labeledCount: number;
+		readonly candidates: readonly Readonly<{
+			label?: number;
+			xPx: number;
+			yPx: number;
+		}>[];
+	};
 	readonly stageCounts: TeePadStageCounts;
 	readonly candidateCount: number;
 	readonly candidates: readonly Readonly<{
@@ -110,8 +136,8 @@ function usage(): string {
 		'Usage: npm run detect:tees -- <image-or-chainspot-zip> --mode <edge-loop|fused|occluded-edge-loop> --out <directory>',
 		'',
 		'Options:',
-		'  --templates <directory>       Canonical hole-number templates (default: static/resources/chainspot_cv_templates)',
-		'  --ui-scale <source-pixels>   Override template-derived UI scale',
+		'  --templates <directory>       CV template pack (default: static/resources/chainspot_cv_templates)',
+		'  --ui-scale <source-pixels>   Override calibrated UDisc UI scale',
 		'  --map-top <source-pixels>    Restrict detection to this source row',
 		'  --map-bottom <source-pixels> Restrict detection to this source row',
 		'  --max-candidates <count>     Candidate limit (default: 18)',
@@ -144,7 +170,6 @@ export function parseArgs(argv: readonly string[]): TeeCliArgs {
 	if (argv.includes('--help')) throw new Error(usage());
 	const positional = argv.find((value) => !value.startsWith('--'));
 	if (!positional) throw new Error(`An image or .chainspot.zip input is required.\n\n${usage()}`);
-
 	let mode: TeeCliMode | undefined;
 	let outputDir: string | undefined;
 	let templateDir = defaultTemplateDir;
@@ -190,9 +215,7 @@ export function parseArgs(argv: readonly string[]): TeeCliArgs {
 			case '--max-candidates':
 				maxCandidates = finiteNumber(requireValue(argv, index, argument), argument);
 				index += 1;
-				if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
-					throw new Error('--max-candidates must be a positive integer.');
-				}
+				if (!Number.isInteger(maxCandidates) || maxCandidates < 1) throw new Error('--max-candidates must be a positive integer.');
 				break;
 			case '--ignore-circle':
 				ignoreCirclesPx.push(parseCircle(requireValue(argv, index, argument)));
@@ -202,29 +225,12 @@ export function parseArgs(argv: readonly string[]): TeeCliArgs {
 				throw new Error(`Unknown option '${argument}'.\n\n${usage()}`);
 		}
 	}
-
 	if (!mode) throw new Error(`--mode is required.\n\n${usage()}`);
 	if (!outputDir) throw new Error(`--out is required.\n\n${usage()}`);
-	if (mapTopPx !== undefined && mapBottomPx !== undefined && mapTopPx > mapBottomPx) {
-		throw new Error('--map-top cannot be greater than --map-bottom.');
-	}
-	if ((mapTopPx === undefined) !== (mapBottomPx === undefined)) {
-		throw new Error('--map-top and --map-bottom must be provided together.');
-	}
-	if (ignoreCirclesPx.length > 0 && mode !== 'occluded-edge-loop') {
-		throw new Error('--ignore-circle is only valid with --mode occluded-edge-loop.');
-	}
-	return {
-		inputPath: positional,
-		mode,
-		outputDir,
-		templateDir,
-		uiScalePx,
-		mapTopPx,
-		mapBottomPx,
-		maxCandidates,
-		ignoreCirclesPx
-	};
+	if (mapTopPx !== undefined && mapBottomPx !== undefined && mapTopPx > mapBottomPx) throw new Error('--map-top cannot be greater than --map-bottom.');
+	if ((mapTopPx === undefined) !== (mapBottomPx === undefined)) throw new Error('--map-top and --map-bottom must be provided together.');
+	if (ignoreCirclesPx.length > 0 && mode !== 'occluded-edge-loop') throw new Error('--ignore-circle is only valid with --mode occluded-edge-loop.');
+	return { inputPath: positional, mode, outputDir, templateDir, uiScalePx, mapTopPx, mapBottomPx, maxCandidates, ignoreCirclesPx };
 }
 
 function decodeRaster(bytes: Uint8Array, fileName: string): DecodedRaster {
@@ -254,19 +260,14 @@ function truthFromDocument(document: TeeProjectDocument): readonly TeeTruth[] {
 function loadInput(inputPath: string): LoadedInput {
 	const resolvedInput = resolve(inputPath);
 	const bytes = new Uint8Array(readFileSync(resolvedInput));
-	if (!resolvedInput.toLowerCase().endsWith('.chainspot.zip')) {
-		return { ...decodeRaster(bytes, resolvedInput), sourcePath: resolvedInput };
-	}
-
+	if (!resolvedInput.toLowerCase().endsWith('.chainspot.zip')) return { ...decodeRaster(bytes, resolvedInput), sourcePath: resolvedInput };
 	const entries = unzipSync(bytes);
 	const jsonBytes = entries['project.json'];
 	if (!jsonBytes) throw new Error(`Bundle '${resolvedInput}' does not contain project.json.`);
 	const document = JSON.parse(strFromU8(jsonBytes)) as TeeProjectDocument;
 	const sourceManifest = (document.images ?? []).find((image) => image.role === 'source-overview');
 	const sourceEntry = sourceManifest?.bundlePath;
-	if (typeof sourceEntry !== 'string' || !sourceEntry.startsWith('images/')) {
-		throw new Error(`Bundle '${resolvedInput}' does not contain a safe source-overview image path.`);
-	}
+	if (typeof sourceEntry !== 'string' || !sourceEntry.startsWith('images/')) throw new Error(`Bundle '${resolvedInput}' does not contain a safe source-overview image path.`);
 	const sourceBytes = entries[sourceEntry];
 	if (!sourceBytes) throw new Error(`Bundle '${resolvedInput}' is missing ${sourceEntry}.`);
 	return {
@@ -277,67 +278,65 @@ function loadInput(inputPath: string): LoadedInput {
 	};
 }
 
-function loadNumberTemplates(templateDir: string): readonly HoleNumberTemplate[] {
-	return Array.from({ length: 18 }, (_, index) => {
+export function loadValidatedTemplateManifest(templateDir: string): CvTemplateManifest {
+	const root = resolve(templateDir);
+	const manifestPath = join(root, 'manifest.json');
+	if (!existsSync(manifestPath)) throw new Error(`CV template manifest is missing: ${manifestPath}`);
+	const manifest = validateCvTemplateManifest(JSON.parse(readFileSync(manifestPath, 'utf8')));
+	for (const fileName of [...manifest.templates.holeNumbers, manifest.templates.basket]) {
+		const assetPath = join(root, fileName);
+		if (!existsSync(assetPath)) throw new Error(`CV template manifest asset is missing: ${assetPath}`);
+	}
+	return manifest;
+}
+
+function loadNumberTemplates(templateDir: string, manifest: CvTemplateManifest): readonly HoleNumberTemplate[] {
+	return manifest.templates.holeNumbers.map((fileName, index) => {
 		const label = index + 1;
-		const fileName = `hole-${String(label).padStart(2, '0')}.png`;
 		const path = join(resolve(templateDir), fileName);
 		const decoded = decodeRaster(new Uint8Array(readFileSync(path)), path);
 		return {
 			label,
-			raster: {
-				format: 'rgba' as const,
-				widthPx: decoded.widthPx,
-				heightPx: decoded.heightPx,
-				data: decoded.rgba
-			}
+			raster: { format: 'rgba', widthPx: decoded.widthPx, heightPx: decoded.heightPx, data: decoded.rgba }
 		};
 	});
 }
 
-function deriveMapBounds(
-	truthCandidates: readonly { readonly yPx: number }[],
-	heightPx: number
-): Readonly<{ topPx: number; bottomPx: number }> | undefined {
-	if (truthCandidates.length < 3) return undefined;
-	const ys = truthCandidates.map((candidate) => candidate.yPx);
+function deriveMapBounds(candidates: readonly { readonly yPx: number }[], heightPx: number): Readonly<{ topPx: number; bottomPx: number }> | undefined {
+	if (candidates.length < 3) return undefined;
+	const ys = candidates.map((candidate) => candidate.yPx);
 	const minY = Math.min(...ys);
 	const maxY = Math.max(...ys);
 	const margin = Math.max(80, Math.min(300, (maxY - minY) * 0.3));
 	return { topPx: Math.max(0, minY - margin), bottomPx: Math.min(heightPx, maxY + margin) };
 }
 
-async function deriveDetectionInputs(
-	cv: TeePadCv,
-	raster: DecodedRaster,
-	args: TeeCliArgs
-): Promise<{ uiScalePx: number; mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>; numberCount: number }> {
+interface DetectionInputs {
+	readonly uiScalePx: UiScalePx;
+	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
+	readonly numberDetection?: CalibratedHoleNumberDetection;
+}
+
+async function deriveDetectionInputs(cv: TeePadCv, raster: DecodedRaster, args: TeeCliArgs): Promise<DetectionInputs> {
+	const manifest = loadValidatedTemplateManifest(args.templateDir);
+	const explicitBounds = args.mapTopPx !== undefined && args.mapBottomPx !== undefined
+		? { topPx: args.mapTopPx, bottomPx: args.mapBottomPx }
+		: undefined;
 	if (args.uiScalePx !== undefined) {
-		const uiScalePx = deriveTeePadUiScalePx(undefined, args.uiScalePx);
-		return {
-			uiScalePx: uiScalePx as number,
-			mapBoundsPx:
-				args.mapTopPx !== undefined && args.mapBottomPx !== undefined
-					? { topPx: args.mapTopPx, bottomPx: args.mapBottomPx }
-					: undefined,
-			numberCount: 0
-		};
+		return { uiScalePx: asUiScalePx(args.uiScalePx, 'CLI --ui-scale'), mapBoundsPx: explicitBounds };
 	}
-	const templates = loadNumberTemplates(args.templateDir);
-	const detection = detectHoleNumberBadges(
+	const detection = detectCalibratedHoleNumberBadges(
 		cv as unknown as HoleNumberCvModule,
 		{ format: 'rgba', widthPx: raster.widthPx, heightPx: raster.heightPx, data: raster.rgba },
-		templates
+		loadNumberTemplates(args.templateDir, manifest)
 	);
-	const uiScalePx = deriveTeePadUiScalePx(detection.anchor);
-	if (!uiScalePx || !Number.isFinite(uiScalePx) || uiScalePx <= 0) {
-		throw new Error(detection.note ?? 'Could not derive UI scale from hole-number templates; pass --ui-scale.');
-	}
-	const mapBoundsPx =
-		args.mapTopPx !== undefined && args.mapBottomPx !== undefined
-			? { topPx: args.mapTopPx, bottomPx: args.mapBottomPx }
-			: deriveMapBounds(detection.candidates, raster.heightPx);
-	return { uiScalePx, mapBoundsPx, numberCount: detection.candidates.length };
+	if (!detection.anchor) throw new Error(detection.note ?? 'Could not derive UI scale from hole-number templates; pass --ui-scale.');
+	const calibration = deriveUDiscCalibration(detection.anchor, manifest.calibration.canonicalNumberBadge);
+	return {
+		uiScalePx: calibration.uiScalePx,
+		mapBoundsPx: explicitBounds ?? deriveMapBounds(detection.candidates, raster.heightPx),
+		numberDetection: detection
+	};
 }
 
 function candidateOutput(candidate: TeePadCandidate, index: number): TeeCliResult['candidates'][number] {
@@ -353,11 +352,7 @@ function candidateOutput(candidate: TeePadCandidate, index: number): TeeCliResul
 	};
 }
 
-function evaluateTruth(
-	truth: readonly TeeTruth[],
-	candidates: readonly TeePadCandidate[],
-	tolerancePx: number
-): NonNullable<TeeCliResult['truthEvaluation']> {
+function evaluateTruth(truth: readonly TeeTruth[], candidates: readonly TeePadCandidate[], tolerancePx: number): NonNullable<TeeCliResult['truthEvaluation']> {
 	const used = new Set<number>();
 	const matchedNumbers: number[] = [];
 	for (const expected of truth) {
@@ -367,82 +362,47 @@ function evaluateTruth(
 			if (used.has(index)) continue;
 			const candidate = candidates[index];
 			const distance = Math.hypot(candidate.xPx - expected.xPx, candidate.yPx - expected.yPx);
-			if (distance < bestDistance) {
-				bestDistance = distance;
-				bestIndex = index;
-			}
+			if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
 		}
-		if (bestIndex >= 0 && bestDistance <= tolerancePx) {
-			used.add(bestIndex);
-			matchedNumbers.push(expected.number);
-		}
+		if (bestIndex >= 0 && bestDistance <= tolerancePx) { used.add(bestIndex); matchedNumbers.push(expected.number); }
 	}
 	const missedNumbers = truth.map((expected) => expected.number).filter((number) => !matchedNumbers.includes(number));
 	const falsePositives = candidates
 		.map((candidate, index) => ({ candidate, index }))
 		.filter(({ index }) => !used.has(index))
 		.map(({ candidate }) => ({ xPx: candidate.xPx, yPx: candidate.yPx, score: candidate.score }));
-	return {
-		tolerancePx,
-		truthCount: truth.length,
-		matchedNumbers,
-		missedNumbers,
-		falsePositiveCount: falsePositives.length,
-		falsePositives
-	};
+	return { tolerancePx, truthCount: truth.length, matchedNumbers, missedNumbers, falsePositiveCount: falsePositives.length, falsePositives };
 }
 
 function setPixel(png: PNG, x: number, y: number, color: readonly [number, number, number, number]): void {
 	if (x < 0 || y < 0 || x >= png.width || y >= png.height) return;
 	const offset = (y * png.width + x) * 4;
-	png.data[offset] = color[0];
-	png.data[offset + 1] = color[1];
-	png.data[offset + 2] = color[2];
-	png.data[offset + 3] = color[3];
+	png.data[offset] = color[0]; png.data[offset + 1] = color[1]; png.data[offset + 2] = color[2]; png.data[offset + 3] = color[3];
 }
 
 function line(png: PNG, x0: number, y0: number, x1: number, y1: number, color: readonly [number, number, number, number]): void {
-	let x = Math.round(x0);
-	let y = Math.round(y0);
-	const targetX = Math.round(x1);
-	const targetY = Math.round(y1);
-	const dx = Math.abs(targetX - x);
-	const dy = Math.abs(targetY - y);
-	const stepX = x < targetX ? 1 : -1;
-	const stepY = y < targetY ? 1 : -1;
+	let x = Math.round(x0); let y = Math.round(y0);
+	const targetX = Math.round(x1); const targetY = Math.round(y1);
+	const dx = Math.abs(targetX - x); const dy = Math.abs(targetY - y);
+	const stepX = x < targetX ? 1 : -1; const stepY = y < targetY ? 1 : -1;
 	let error = dx - dy;
 	while (true) {
 		setPixel(png, x, y, color);
 		if (x === targetX && y === targetY) break;
 		const doubled = 2 * error;
-		if (doubled > -dy) {
-			error -= dy;
-			x += stepX;
-		}
-		if (doubled < dx) {
-			error += dx;
-			y += stepY;
-		}
+		if (doubled > -dy) { error -= dy; x += stepX; }
+		if (doubled < dx) { error += dx; y += stepY; }
 	}
 }
 
-function overlay(
-	raster: DecodedRaster,
-	candidates: readonly TeePadCandidate[],
-	mode: TeeCliMode
-): Buffer {
+function overlay(raster: DecodedRaster, candidates: readonly TeePadCandidate[], mode: TeeCliMode): Buffer {
 	const png = new PNG({ width: raster.widthPx, height: raster.heightPx });
 	png.data.set(raster.rgba);
-	const color: readonly [number, number, number, number] =
-		mode === 'edge-loop' ? [255, 64, 64, 255] : mode === 'fused' ? [64, 128, 255, 255] : [255, 32, 220, 255];
+	const color: readonly [number, number, number, number] = mode === 'edge-loop' ? [255, 64, 64, 255] : mode === 'fused' ? [64, 128, 255, 255] : [255, 32, 220, 255];
 	for (const candidate of candidates) {
 		const angle = (candidate.orientationDeg * Math.PI) / 180;
-		const ux = Math.cos(angle);
-		const uy = Math.sin(angle);
-		const nx = -uy;
-		const ny = ux;
-		const halfWidth = candidate.widthPx * 0.5;
-		const halfHeight = candidate.heightPx * 0.5;
+		const ux = Math.cos(angle); const uy = Math.sin(angle); const nx = -uy; const ny = ux;
+		const halfWidth = candidate.widthPx * 0.5; const halfHeight = candidate.heightPx * 0.5;
 		const corners = [
 			[candidate.xPx + ux * halfWidth + nx * halfHeight, candidate.yPx + uy * halfWidth + ny * halfHeight],
 			[candidate.xPx - ux * halfWidth + nx * halfHeight, candidate.yPx - uy * halfWidth + ny * halfHeight],
@@ -450,8 +410,7 @@ function overlay(
 			[candidate.xPx + ux * halfWidth - nx * halfHeight, candidate.yPx + uy * halfWidth - ny * halfHeight]
 		] as const;
 		for (let index = 0; index < corners.length; index += 1) {
-			const first = corners[index];
-			const second = corners[(index + 1) % corners.length];
+			const first = corners[index]; const second = corners[(index + 1) % corners.length];
 			line(png, first[0], first[1], second[0], second[1], color);
 		}
 		setPixel(png, Math.round(candidate.xPx), Math.round(candidate.yPx), color);
@@ -463,48 +422,38 @@ export async function runDetection(args: TeeCliArgs): Promise<TeeCliResult> {
 	const input = loadInput(args.inputPath);
 	const cv = (await loadCv()) as unknown as TeePadCv;
 	const detectionInputs = await deriveDetectionInputs(cv, input, args);
-	const raster: TeePadRaster = {
-		rgba: input.rgba,
-		widthPx: input.widthPx,
-		heightPx: input.heightPx,
-		sourceScale: 1
-	};
-	const options = {
+	const raster: TeePadRaster = { rgba: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
+	const options: CalibratedTeePadDetectionOptions = {
 		uiScalePx: detectionInputs.uiScalePx,
 		mapBoundsPx: detectionInputs.mapBoundsPx,
 		maxCandidates: args.maxCandidates,
 		ignoreCirclesPx: args.ignoreCirclesPx
 	};
 	let result: TeePadVariantResult | OccludedEdgeLoopResult;
-	if (args.mode === 'occluded-edge-loop') {
-		result = detectOccludedEdgeLoopCandidates(cv, raster, options);
-	} else {
-		result = detectTeePadVariants(cv, raster, options, [args.mode as TeePadVariant])[0];
-	}
+	if (args.mode === 'occluded-edge-loop') result = detectCalibratedOccludedEdgeLoopCandidates(cv, raster, options);
+	else result = detectCalibratedTeePadVariants(cv, raster, options, [args.mode as TeePadVariant])[0];
 	if (!result) throw new Error(`Detector returned no result for mode '${args.mode}'.`);
-
 	const candidates = result.candidates;
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
 	const overlayPath = join(outputDir, `${args.mode}.png`);
 	const jsonPath = join(outputDir, `${args.mode}.json`);
+	const numberDetection = detectionInputs.numberDetection;
 	const output: TeeCliResult = {
 		mode: args.mode,
-		input: {
-			path: input.sourcePath,
-			sourceEntry: input.sourceEntry,
-			widthPx: input.widthPx,
-			heightPx: input.heightPx,
-			sourceScale: 1
-		},
+		input: { path: input.sourcePath, sourceEntry: input.sourceEntry, widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 },
 		uiScalePx: detectionInputs.uiScalePx,
 		mapBoundsPx: detectionInputs.mapBoundsPx,
+		numberDetection: numberDetection ? {
+			labeling: numberDetection.labeling,
+			candidateCount: numberDetection.candidates.length,
+			labeledCount: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
+			candidates: numberDetection.candidates.map((candidate) => ({ label: candidate.label, xPx: candidate.xPx, yPx: candidate.yPx }))
+		} : undefined,
 		stageCounts: result.stageCounts,
 		candidateCount: candidates.length,
 		candidates: candidates.map(candidateOutput),
-		truthEvaluation: input.truth
-			? evaluateTruth(input.truth, candidates, 7 * detectionInputs.uiScalePx)
-			: undefined,
+		truthEvaluation: input.truth ? evaluateTruth(input.truth, candidates, 7 * detectionInputs.uiScalePx) : undefined,
 		overlayPath
 	};
 	writeFileSync(overlayPath, overlay(input, candidates, args.mode));
@@ -514,8 +463,7 @@ export async function runDetection(args: TeeCliArgs): Promise<TeeCliResult> {
 }
 
 async function main(): Promise<void> {
-	const args = parseArgs(process.argv.slice(2));
-	await runDetection(args);
+	await runDetection(parseArgs(process.argv.slice(2)));
 }
 
 if (resolve(process.argv[1] ?? '') === resolve(scriptPath)) {
