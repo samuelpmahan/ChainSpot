@@ -48,12 +48,27 @@ const DEFAULT_CANONICAL_NUMBER_BADGE: CanonicalNumberBadgeCalibration = {
 	widthPx: CANONICAL_BADGE_WIDTH_PX,
 	heightPx: CANONICAL_BADGE_HEIGHT_PX
 };
+const EXPECTED_HOLE_NUMBER_ASSETS = Array.from(
+	{ length: 18 },
+	(_, index) => `hole-${String(index + 1).padStart(2, '0')}.png`
+);
 
 function positiveFinite(value: unknown, name: string): number {
 	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
 		throw new Error(`${name} must be a positive finite number.`);
 	}
 	return value;
+}
+
+function assertCanonicalCalibration(calibration: CanonicalNumberBadgeCalibration): void {
+	if (
+		calibration.widthPx !== CANONICAL_BADGE_WIDTH_PX ||
+		calibration.heightPx !== CANONICAL_BADGE_HEIGHT_PX
+	) {
+		throw new Error(
+			`CV template manifest calibration ${calibration.widthPx}×${calibration.heightPx} does not match the compiled canonical badge geometry ${CANONICAL_BADGE_WIDTH_PX}×${CANONICAL_BADGE_HEIGHT_PX}.`
+		);
+	}
 }
 
 export function asTemplateScale(value: number, name = 'Template scale'): TemplateScale {
@@ -74,16 +89,11 @@ export function deriveUDiscCalibration(
 	anchor: NumberBadgeAnchorObservation,
 	canonicalNumberBadge: CanonicalNumberBadgeCalibration = DEFAULT_CANONICAL_NUMBER_BADGE
 ): UDiscCalibration {
-	const canonicalWidthPx = positiveFinite(canonicalNumberBadge.widthPx, 'Canonical number-badge width');
-	const canonicalHeightPx = positiveFinite(canonicalNumberBadge.heightPx, 'Canonical number-badge height');
-	if (
-		canonicalWidthPx !== CANONICAL_BADGE_WIDTH_PX ||
-		canonicalHeightPx !== CANONICAL_BADGE_HEIGHT_PX
-	) {
-		throw new Error(
-			`CV template manifest calibration ${canonicalWidthPx}×${canonicalHeightPx} does not match the compiled canonical badge geometry ${CANONICAL_BADGE_WIDTH_PX}×${CANONICAL_BADGE_HEIGHT_PX}.`
-		);
-	}
+	const canonical = {
+		widthPx: positiveFinite(canonicalNumberBadge.widthPx, 'Canonical number-badge width'),
+		heightPx: positiveFinite(canonicalNumberBadge.heightPx, 'Canonical number-badge height')
+	};
+	assertCanonicalCalibration(canonical);
 	const matchedWidthPx = positiveFinite(anchor.widthPx, 'Matched number-badge width');
 	const matchedHeightPx = positiveFinite(anchor.heightPx, 'Matched number-badge height');
 	const templateScale = asTemplateScale(anchor.scale, 'Number-badge template scale');
@@ -115,12 +125,20 @@ export function validateCvTemplateManifest(value: unknown): CvTemplateManifest {
 		widthPx: positiveFinite(canonical.widthPx, 'Canonical number-badge width'),
 		heightPx: positiveFinite(canonical.heightPx, 'Canonical number-badge height')
 	};
+	assertCanonicalCalibration(canonicalNumberBadge);
+
 	const templates = record(root.templates, 'CV template manifest templates');
 	if (!Array.isArray(templates.holeNumbers) || templates.holeNumbers.length !== 18) {
 		throw new Error('CV template manifest must list exactly 18 hole-number templates.');
 	}
 	const holeNumbers = templates.holeNumbers.map((asset, index) => templateAsset(asset, `Hole-number template ${index + 1}`));
-	if (new Set(holeNumbers).size !== holeNumbers.length) throw new Error('CV template manifest hole-number template filenames must be unique.');
+	for (let index = 0; index < EXPECTED_HOLE_NUMBER_ASSETS.length; index += 1) {
+		if (holeNumbers[index] !== EXPECTED_HOLE_NUMBER_ASSETS[index]) {
+			throw new Error(
+				`CV template manifest hole-number asset ${index + 1} must be ${EXPECTED_HOLE_NUMBER_ASSETS[index]}; received ${holeNumbers[index]}.`
+			);
+		}
+	}
 	const basket = templateAsset(templates.basket, 'Basket template');
 	return { schemaVersion: 1, calibration: { canonicalNumberBadge }, templates: { holeNumbers, basket } };
 }
