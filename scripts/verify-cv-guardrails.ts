@@ -5,6 +5,9 @@ import { runDetection as runTeeDetection } from './detect-tees';
 import { runDetection as runBasketDetection } from './detect-baskets';
 import { loadValidatedCvTemplateManifest } from './cv-template-manifest';
 
+const EXPECTED_TEE_UI_SCALE = 1.7746;
+const TEE_UI_SCALE_TOLERANCE = 0.03;
+
 function invariant(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(`CV guardrail regression failed: ${message}`);
 }
@@ -28,6 +31,10 @@ async function main(): Promise<void> {
 		});
 
 		invariant(Number.isFinite(tee.uiScalePx) && tee.uiScalePx > 0, 'derived UiScalePx is not positive and finite');
+		invariant(
+			Math.abs(tee.uiScalePx - EXPECTED_TEE_UI_SCALE) <= TEE_UI_SCALE_TOLERANCE,
+			`derived UiScalePx is ${tee.uiScalePx.toFixed(4)}, expected ${EXPECTED_TEE_UI_SCALE.toFixed(4)} ± ${TEE_UI_SCALE_TOLERANCE}`
+		);
 		invariant(tee.numberDetection, 'tee fixture did not run raw number detection');
 		invariant(tee.numberDetection.labeling === 'assigned', `number labeling is ${tee.numberDetection.labeling}, expected assigned`);
 		invariant(tee.numberDetection.candidateCount === 18, `number candidate count is ${tee.numberDetection.candidateCount}, expected 18`);
@@ -46,6 +53,10 @@ async function main(): Promise<void> {
 			tee.truthEvaluation.missedNumbers.every((number) => number === 5),
 			`unexpected tee misses: ${tee.truthEvaluation.missedNumbers.join(',')}`
 		);
+		invariant(
+			tee.truthEvaluation.falsePositiveCount <= 1,
+			`tee false positives are ${tee.truthEvaluation.falsePositiveCount}, expected at most 1`
+		);
 
 		loadValidatedCvTemplateManifest(templateDir);
 		const baskets = await runBasketDetection({
@@ -55,6 +66,7 @@ async function main(): Promise<void> {
 			maxCandidates: 18
 		});
 		invariant(baskets.truthEvaluation, 'GoldenBasketSet does not contain basket truth');
+		invariant(baskets.candidateCount === 18, `basket candidate count is ${baskets.candidateCount}, expected 18`);
 		invariant(baskets.truthEvaluation.matchedNumbers.length === 18, `basket raw recall is ${baskets.truthEvaluation.matchedNumbers.length}/18, expected 18/18`);
 		invariant(baskets.truthEvaluation.falsePositiveCount === 0, `basket false positives are ${baskets.truthEvaluation.falsePositiveCount}, expected 0`);
 
