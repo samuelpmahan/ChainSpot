@@ -40,12 +40,6 @@ export interface TeePadCandidate {
 	readonly support: readonly TeePadSupport[];
 }
 
-/** Canonical UDisc number-badge dimensions used by tee-pad scale calibration. */
-/** @deprecated Use the named calibration boundary in cvCalibration. */
-export const CANONICAL_NUMBER_BADGE_WIDTH_PX = 30;
-/** @deprecated Use the named calibration boundary in cvCalibration. */
-export const CANONICAL_NUMBER_BADGE_HEIGHT_PX = 23;
-
 export type TeePadNumberAnchor = Pick<HoleNumberScaleAnchor, 'widthPx' | 'heightPx'>;
 
 /**
@@ -414,29 +408,6 @@ function validateInputs(raster: TeePadRaster, options: TeePadDetectionOptions): 
 	) {
 		throw new Error('Tee-pad detection map bounds must be finite source-image pixels.');
 	}
-}
-
-function buildContext(
-	cv: TeePadCv,
-	raster: TeePadRaster,
-	options: TeePadDetectionOptions
-): AnalysisContext {
-	const rows = mapRows(raster, options.mapBoundsPx);
-	if (!rows) {
-		// Empty context: callers must short-circuit before using scale-dependent helpers.
-		return {
-			cv,
-			raster,
-			scale: options.uiScalePx / raster.sourceScale,
-			rows: { first: 0, last: -1 },
-			gray: new Uint8Array(0),
-			saturation: new Uint8Array(0),
-			value: new Uint8Array(0)
-		};
-	}
-	const scale = options.uiScalePx / raster.sourceScale;
-	const { gray, saturation, value } = readHsv(raster);
-	return { cv, raster, scale, rows, gray, saturation, value };
 }
 
 const GRAY_CENTER_DEFAULT_VALUE_MIN = 148;
