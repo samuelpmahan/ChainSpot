@@ -1,39 +1,46 @@
-/**
- * Browser-side basket candidate detection.
- *
- * This is deliberately a proposal-only vertical slice. It searches the loaded
- * UDisc/source image and returns ranked source-image points; it does not assign
- * a candidate to a hole or mutate ProjectState until the user accepts one.
- *
- * The OpenCV runtime is large enough that a detector worker is kept alive for
- * the life of this module. That lets a prewarm fetch/initialize it off the main
- * thread, and makes subsequent detections reuse both WASM and the template.
- */
-
 import type { CourseGrammarResult } from './courseGrammar';
-import type { HoleNumberDetection } from './holeNumberDetection';
-import type { TeePadCandidate, TeePadStageCounts, TeePadVariant, TeePadVariantResult } from './teePadDetection';
-import type { BasketCandidate } from './basketTemplateDetection';
-export type { BasketCandidate } from './basketTemplateDetection';
+import type {
+	CalibratedBasketCandidate,
+	CalibratedHoleNumberDetection
+} from './cvCalibratedDetectors';
+import { asUiScalePx } from './cvCalibration';
+import type { TemplateScale, UiScalePx } from './cvCalibration';
+import type {
+	TeePadCandidate,
+	TeePadStageCounts,
+	TeePadVariant,
+	TeePadVariantResult
+} from './teePadDetection';
+
+export type BasketCandidate = CalibratedBasketCandidate;
 
 export interface CourseDetectionResult {
-	readonly numberDetection: HoleNumberDetection;
+	readonly numberDetection: CalibratedHoleNumberDetection;
 	readonly tees: readonly TeePadCandidate[];
 	readonly baskets: readonly BasketCandidate[];
 	readonly grammar: CourseGrammarResult;
 }
 
 export type { TeePadVariant, TeePadStageCounts, TeePadVariantResult } from './teePadDetection';
+export type { TemplateScale, UiScalePx } from './cvCalibration';
+
+/**
+ * Transitional public input for a user-supplied UI calibration. Plain numeric
+ * CLI/UI values are accepted and immediately branded at the worker boundary,
+ * but a TemplateScale is structurally rejected by TypeScript.
+ */
+type UnbrandedScaleNumber = number & { readonly __brand?: never };
+export type UiScaleInput = UiScalePx | UnbrandedScaleNumber;
 
 export interface DetectTeesOptions {
 	readonly variants?: readonly TeePadVariant[];
-	readonly uiScalePx?: number;
+	readonly uiScalePx?: UiScaleInput;
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	readonly fullResolution?: boolean;
 }
 
 export interface DetectTeesResult {
-	readonly uiScalePx: number;
+	readonly uiScalePx: UiScalePx;
 	readonly results: readonly TeePadVariantResult[];
 }
 
@@ -70,7 +77,7 @@ interface BasketWorkerProgress {
 interface BasketWorkerFailure {
 	ok: false;
 	token: string;
-	kind: 'detect' | 'detect-course' | 'prewarm';
+	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees';
 	message: string;
 }
 
@@ -96,7 +103,7 @@ interface TeeDetectionRequest {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly variants: readonly TeePadVariant[];
-	readonly uiScalePx?: number;
+	readonly uiScalePx?: UiScalePx;
 	readonly mapBoundsPx?: { topPx: number; bottomPx: number };
 	readonly fullResolution?: boolean;
 }
@@ -125,8 +132,7 @@ function nextToken(): string {
 
 function workerErrorMessage(event: ErrorEvent | MessageEvent): string {
 	const message = (event as { message?: unknown }).message;
-	if (typeof message === 'string' && message) return message;
-	return 'Basket detection worker failed.';
+	return typeof message === 'string' && message ? message : 'Basket detection worker failed.';
 }
 
 function rejectWorkerRequests(worker: Worker, message: string): void {
@@ -153,19 +159,13 @@ function handleWorkerMessage(worker: Worker, event: MessageEvent<BasketWorkerRep
 	if (!reply || typeof reply.token !== 'string') return;
 	const pending = pendingRequests.get(reply.token);
 	if (!pending || pending.worker !== worker) return;
-
 	if (reply.ok && reply.kind === 'progress') {
 		pending.onProgress?.(reply.progress);
 		return;
 	}
-
 	pendingRequests.delete(reply.token);
-	if (reply.ok) {
-		pending.resolve(reply);
-	} else {
-		// A request-level failure can leave a rejected OpenCV initialization
-		// promise inside the worker. Retire only on this exceptional path so the
-		// next request gets a clean runtime instead of repeating that failure.
+	if (reply.ok) pending.resolve(reply);
+	else {
 		retireWorker(worker, reply.message);
 		pending.reject(new Error(reply.message));
 	}
@@ -173,18 +173,10 @@ function handleWorkerMessage(worker: Worker, event: MessageEvent<BasketWorkerRep
 
 function getWorker(): Worker {
 	if (activeWorker) return activeWorker;
-	const worker = new Worker(new URL('./basketDetection.worker.ts', import.meta.url), {
-		type: 'module'
-	});
-	worker.addEventListener('message', (event: MessageEvent<BasketWorkerReply>) => {
-		handleWorkerMessage(worker, event);
-	});
-	worker.addEventListener('error', (event) => {
-		retireWorker(worker, workerErrorMessage(event));
-	});
-	worker.addEventListener('messageerror', (event) => {
-		retireWorker(worker, workerErrorMessage(event));
-	});
+	const worker = new Worker(new URL('./basketDetection.worker.ts', import.meta.url), { type: 'module' });
+	worker.addEventListener('message', (event: MessageEvent<BasketWorkerReply>) => handleWorkerMessage(worker, event));
+	worker.addEventListener('error', (event) => retireWorker(worker, workerErrorMessage(event)));
+	worker.addEventListener('messageerror', (event) => retireWorker(worker, workerErrorMessage(event)));
 	activeWorker = worker;
 	return worker;
 }
@@ -195,7 +187,7 @@ function postToWorker(
 	onProgress?: (progress: CourseDetectionProgress) => void
 ): Promise<BasketWorkerSuccess | BasketWorkerFailure> {
 	const worker = getWorker();
-	return new Promise<BasketWorkerSuccess | BasketWorkerFailure>((resolve, reject) => {
+	return new Promise((resolve, reject) => {
 		pendingRequests.set(request.token, { worker, resolve, reject, onProgress });
 		try {
 			worker.postMessage(request, transfer);
@@ -210,20 +202,14 @@ function postToWorker(
 
 function assertWorkerSupport(): void {
 	if (typeof Worker === 'undefined') {
-		throw new Error('Basket detection requires a browser with Web Worker support.');
+		throw new Error('CV detection requires a browser with Web Worker support.');
 	}
 }
 
-/**
- * Starts the reusable worker and loads OpenCV plus the basket template without
- * blocking the UI. Call this after a source image is selected (or on an idle
- * route) so the Detect button does not pay the cold WASM cost.
- */
 export function prewarmBasketDetection(): Promise<void> {
 	assertWorkerSupport();
 	const worker = getWorker();
 	if (prewarmWorker === worker && prewarmPromise) return prewarmPromise;
-
 	const token = nextToken();
 	prewarmWorker = worker;
 	const warming = postToWorker({ kind: 'prewarm', token }).then((reply) => {
@@ -240,11 +226,19 @@ export function prewarmBasketDetection(): Promise<void> {
 	return prewarmPromise;
 }
 
-/**
- * Runs the detector off the main thread. The original bytes are used instead
- * of the transient HTMLImageElement so the worker receives an independently
- * decodable bitmap and the source-image coordinate contract stays explicit.
- */
+function validDimensions(widthPx: number, heightPx: number): void {
+	if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
+		throw new Error(`CV detection received invalid image dimensions (${widthPx} × ${heightPx}).`);
+	}
+}
+
+async function sourceBitmap(bytes: Uint8Array, mimeType: string): Promise<ImageBitmap> {
+	if (typeof createImageBitmap === 'undefined') {
+		throw new Error('CV detection requires a browser with ImageBitmap support.');
+	}
+	return createImageBitmap(new Blob([bytes as BufferSource], { type: mimeType }));
+}
+
 export async function detectBasketCandidates(
 	bytes: Uint8Array,
 	mimeType: string,
@@ -252,14 +246,8 @@ export async function detectBasketCandidates(
 	heightPx: number
 ): Promise<readonly BasketCandidate[]> {
 	assertWorkerSupport();
-	if (typeof createImageBitmap === 'undefined') {
-		throw new Error('Basket detection requires a browser with ImageBitmap support.');
-	}
-	if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
-		throw new Error(`Basket detection received invalid image dimensions (${widthPx} × ${heightPx}).`);
-	}
-
-	const bitmap = await createImageBitmap(new Blob([bytes as BufferSource], { type: mimeType }));
+	validDimensions(widthPx, heightPx);
+	const bitmap = await sourceBitmap(bytes, mimeType);
 	const token = nextToken();
 	try {
 		const reply = await postToWorker(
@@ -272,19 +260,11 @@ export async function detectBasketCandidates(
 		}
 		return reply.candidates;
 	} catch (error) {
-		// A bitmap whose transfer failed remains owned by this thread. Closing it
-		// is harmless after a successful transfer, and prevents a decode resource
-		// leak on the synchronous postMessage failure path.
 		bitmap.close();
 		throw error;
 	}
 }
 
-/**
- * Runs the complete MVP detector in the same persistent OpenCV worker used by
- * basket assist. Progress is reported from the worker's actual pipeline stages,
- * so the UI can distinguish expensive CV work from a stalled request.
- */
 export async function detectCourseCandidates(
 	bytes: Uint8Array,
 	mimeType: string,
@@ -293,14 +273,8 @@ export async function detectCourseCandidates(
 	onProgress?: (progress: CourseDetectionProgress) => void
 ): Promise<CourseDetectionResult> {
 	assertWorkerSupport();
-	if (typeof createImageBitmap === 'undefined') {
-		throw new Error('Course detection requires a browser with ImageBitmap support.');
-	}
-	if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
-		throw new Error(`Course detection received invalid image dimensions (${widthPx} × ${heightPx}).`);
-	}
-
-	const bitmap = await createImageBitmap(new Blob([bytes as BufferSource], { type: mimeType }));
+	validDimensions(widthPx, heightPx);
+	const bitmap = await sourceBitmap(bytes, mimeType);
 	const token = nextToken();
 	try {
 		const reply = await postToWorker(
@@ -319,11 +293,6 @@ export async function detectCourseCandidates(
 	}
 }
 
-/**
- * Runs tee-pad detector variants in the same OpenCV worker used by basket/course
- * detection. This is an experiment/debugging surface: it does not assign tees
- * to holes or run course grammar.
- */
 export async function detectTees(
 	bytes: Uint8Array,
 	mimeType: string,
@@ -332,16 +301,13 @@ export async function detectTees(
 	options: DetectTeesOptions = {}
 ): Promise<DetectTeesResult> {
 	assertWorkerSupport();
-	if (typeof createImageBitmap === 'undefined') {
-		throw new Error('Tee detection requires a browser with ImageBitmap support.');
-	}
-	if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
-		throw new Error(`Tee detection received invalid image dimensions (${widthPx} × ${heightPx}).`);
-	}
-
-	const variants = options.variants ?? (['gray-center', 'edge-loop', 'fused'] as const);
-	const bitmap = await createImageBitmap(new Blob([bytes as BufferSource], { type: mimeType }));
+	validDimensions(widthPx, heightPx);
+	const bitmap = await sourceBitmap(bytes, mimeType);
 	const token = nextToken();
+	const explicitUiScale =
+		options.uiScalePx === undefined
+			? undefined
+			: asUiScalePx(options.uiScalePx, 'Explicit browser tee UI scale');
 	try {
 		const reply = await postToWorker(
 			{
@@ -350,8 +316,8 @@ export async function detectTees(
 				bitmap,
 				widthPx,
 				heightPx,
-				variants,
-				uiScalePx: options.uiScalePx,
+				variants: options.variants ?? (['gray-center', 'edge-loop', 'fused'] as const),
+				uiScalePx: explicitUiScale,
 				mapBoundsPx: options.mapBoundsPx,
 				fullResolution: options.fullResolution
 			},
@@ -361,7 +327,10 @@ export async function detectTees(
 		if (reply.kind !== 'detect-tees' || !Number.isFinite(reply.uiScalePx) || !reply.results) {
 			throw new Error('Tee detection worker returned an invalid detection reply.');
 		}
-		return { uiScalePx: reply.uiScalePx as number, results: reply.results };
+		return {
+			uiScalePx: asUiScalePx(reply.uiScalePx as number, 'Worker tee UI scale'),
+			results: reply.results
+		};
 	} catch (error) {
 		bitmap.close();
 		throw error;
