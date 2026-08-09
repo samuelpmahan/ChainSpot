@@ -125,10 +125,11 @@ export function detectBasketCandidatesAtTemplateScale(
 	template: BasketTemplateRaster,
 	options: BasketTemplateScaleDetectionOptions
 ): readonly CalibratedBasketCandidate[] {
+	const { templateScale, templateScales, ...rest } = options;
 	const rawOptions: RawBasketDetectionOptions = {
-		...options,
-		uiScalePx: options.templateScale,
-		templateScales: options.templateScales
+		...rest,
+		uiScalePx: templateScale,
+		templateScales
 	};
 	return detectBasketTemplateCandidates(cv, raster, template, rawOptions).map((candidate) => ({
 		...candidate,
