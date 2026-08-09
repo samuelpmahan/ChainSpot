@@ -10,7 +10,10 @@ import {
 } from '../../src/lib/autoAnnotation/cvCalibration';
 import type { TemplateScale, UiScalePx } from '../../src/lib/autoAnnotation/cvCalibration';
 import type { CalibratedTeePadDetectionOptions } from '../../src/lib/autoAnnotation/cvCalibratedDetectors';
-import type { UiScaleInput } from '../../src/lib/autoAnnotation/basketDetection';
+import type {
+	CourseDetectionResult,
+	UiScaleInput
+} from '../../src/lib/autoAnnotation/basketDetection';
 import { loadValidatedCvTemplateManifest } from '../../scripts/cv-template-manifest';
 
 const holeNumbers = Array.from({ length: 18 }, (_, index) => `hole-${String(index + 1).padStart(2, '0')}.png`);
@@ -64,6 +67,19 @@ describe('CV calibration semantics', () => {
 		// @ts-expect-error The browser tee boundary rejects branded TemplateScale too.
 		const invalidPublicInput: UiScaleInput = templateScale;
 		void invalidPublicInput;
+	});
+
+	it('brands the public number-detection anchor as TemplateScale', () => {
+		const compileOnly = (course: CourseDetectionResult): void => {
+			const anchor = course.numberDetection.anchor;
+			if (!anchor) return;
+			const templateScale: TemplateScale = anchor.scale;
+			void templateScale;
+			// @ts-expect-error Public number anchor scale must not be usable as UiScalePx.
+			const uiScalePx: UiScalePx = anchor.scale;
+			void uiScalePx;
+		};
+		expect(typeof compileOnly).toBe('function');
 	});
 
 	it('keeps semantic metadata independent from arbitrary native PNG crop dimensions', () => {
@@ -122,12 +138,9 @@ describe('tee calibration handoff audit', () => {
 		expect(worker).toContain('deriveUDiscCalibration(');
 		expect(worker).not.toContain('median(baskets.map((candidate) => candidate.scale))');
 		expect(cli).toContain('deriveUDiscCalibration(');
-		// The browser experiment uses the same proven 30×23 primitive; the public
-		// detectTees boundary then brands/validates the numeric value before worker transport.
+		// Browser experiment calls the same sole 30×23 formula primitive; the
+		// public detectTees boundary immediately brands/validates that number.
 		expect(browser).toContain('deriveTeePadUiScalePx(');
 		expect(browser).not.toContain('uiScalePx: courseDetection?.numberDetection?.anchor?.scale');
 	});
 });
-
-// Keep explicit compile-only values alive so TS validates both brands in this file.
-void (0 as unknown as TemplateScale);
