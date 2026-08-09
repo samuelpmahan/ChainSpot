@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "calibration": {
+    "canonicalNumberBadge": {
+      "widthPx": 30,
+      "heightPx": 23
+    }
+  },
+  "templates": {
+    "holeNumbers": [
+      "hole-01.png",
+      "hole-02.png",
+      "hole-03.png",
+      "hole-04.png",
+      "hole-05.png",
+      "hole-06.png",
+      "hole-07.png",
+      "hole-08.png",
+      "hole-09.png",
+      "hole-10.png",
+      "hole-11.png",
+      "hole-12.png",
+      "hole-13.png",
+      "hole-14.png",
+      "hole-15.png",
+      "hole-16.png",
+      "hole-17.png",
+      "hole-18.png"
+    ],
+    "basket": "basket.png"
+  }
+}
