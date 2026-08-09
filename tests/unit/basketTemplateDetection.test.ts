@@ -77,6 +77,16 @@ describe('detectBasketTemplateCandidates', () => {
 		expect(candidates[0].xPx).toBeCloseTo(10 + candidates[0].widthPx / 2, 5);
 	});
 
+	it('uses the 11x11 local-max window to dedupe two adjacent peaks within one scale pass', () => {
+		const cv = fakeCv([
+			{ x: 10, y: 10, score: 0.9 },
+			{ x: 15, y: 10, score: 0.8 }
+		]);
+		const candidates = detectBasketTemplateCandidates(cv, RASTER, TEMPLATE, { uiScalePx: 1 });
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0].score).toBeCloseTo(0.9, 5);
+	});
+
 	it('keeps two peaks far enough apart as separate candidates', () => {
 		const cv = fakeCv([
 			{ x: 10, y: 10, score: 0.9 },
@@ -115,6 +125,36 @@ describe('detectBasketTemplateCandidates', () => {
 		expect(candidates[0].score).toBeCloseTo(0.9, 5);
 		expect(candidates[1].score).toBeCloseTo(0.8, 5);
 	});
+
+	it('honors score, map-band, and candidate-count bounds together', () => {
+		const cv = fakeCv([
+			{ x: 10, y: 10, score: 0.9 },
+			{ x: 200, y: 10, score: 0.8 },
+			{ x: 10, y: 200, score: 0.3 }
+		]);
+		const candidates = detectBasketTemplateCandidates(cv, RASTER, TEMPLATE, {
+			uiScalePx: 1,
+			mapBoundsPx: { topPx: 0, bottomPx: 100 },
+			maxCandidates: 1
+		});
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0].score).toBeCloseTo(0.9, 5);
+	});
+
+	it('accepts an explicit bounded scale list, overriding the uiScalePx-derived samples', () => {
+		let matchCount = 0;
+		const cv = fakeCv([]);
+		const original = cv.matchTemplate;
+		cv.matchTemplate = ((...args: Parameters<typeof original>) => {
+			matchCount += 1;
+			original(...args);
+		}) as typeof cv.matchTemplate;
+		detectBasketTemplateCandidates(cv, RASTER, TEMPLATE, {
+			uiScalePx: 1,
+			templateScales: [0.65, 0.8, 0.95, 1.1, 1.3]
+		});
+		expect(matchCount).toBe(5);
+	});
 });
 
 describe('findBasketAnchorScale', () => {
@@ -127,8 +167,8 @@ describe('findBasketAnchorScale', () => {
 	 */
 	function fakeCvWithScorePeakAt(targetScale: number, templateWidthPx: number): BasketCv {
 		class FakeMat {
-			rows: number;
-			cols: number;
+			rows = 0;
+			cols = 0;
 			data: Uint8Array;
 			data32F?: Float32Array;
 			constructor(rows = 0, cols = 0) {

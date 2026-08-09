@@ -1,11 +1,14 @@
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jpeg from 'jpeg-js';
 import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
-import { detectBasketTemplateCandidates, findBasketAnchorScale } from '../src/lib/autoAnnotation/basketTemplateDetection';
+import {
+	detectBasketTemplateCandidates,
+	findBasketAnchorScale
+} from '../src/lib/autoAnnotation/basketTemplateDetection';
 import type {
 	BasketCandidate,
 	BasketCv,
@@ -19,13 +22,7 @@ export interface BasketCliArgs {
 	readonly inputPath: string;
 	readonly outputDir: string;
 	readonly templateDir: string;
-	/**
-	 * Explicit override for the basket template's own scale factor. Baskets
-	 * are NOT assumed to render at the number-badge-derived `uiScalePx`: that
-	 * ratio only holds when both are drawn by the same UI (see
-	 * `findBasketAnchorScale`'s doc comment). By default this is discovered
-	 * with its own blind scale sweep, independent of number-badge matching.
-	 */
+	/** Basket-template scale in source pixels; omitted means CLI-only discovery. */
 	readonly basketScale?: number;
 	readonly mapTopPx?: number;
 	readonly mapBottomPx?: number;
@@ -39,7 +36,7 @@ interface DecodedRaster {
 	readonly heightPx: number;
 }
 
-interface BasketTruth {
+export interface BasketTruth {
 	readonly number: number;
 	readonly xPx: number;
 	readonly yPx: number;
@@ -64,7 +61,7 @@ interface BasketProjectDocument {
 	}>[];
 }
 
-interface BasketCliResult {
+export interface BasketCliResult {
 	readonly input: {
 		readonly path: string;
 		readonly sourceEntry?: string;
@@ -81,15 +78,17 @@ interface BasketCliResult {
 		heightPx: number;
 		score: number;
 	}>[];
-	readonly truthEvaluation?: {
-		readonly tolerancePx: number;
-		readonly truthCount: number;
-		readonly matchedNumbers: readonly number[];
-		readonly missedNumbers: readonly number[];
-		readonly falsePositiveCount: number;
-		readonly falsePositives: readonly Readonly<{ xPx: number; yPx: number; score: number }>[];
-	};
+	readonly truthEvaluation?: BasketTruthEvaluation;
 	readonly overlayPath: string;
+}
+
+export interface BasketTruthEvaluation {
+	readonly tolerancePx: number;
+	readonly truthCount: number;
+	readonly matchedNumbers: readonly number[];
+	readonly missedNumbers: readonly number[];
+	readonly falsePositiveCount: number;
+	readonly falsePositives: readonly Readonly<{ xPx: number; yPx: number; score: number }>[];
 }
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -101,9 +100,8 @@ function usage(): string {
 		'Usage: npm run detect:baskets -- <image-or-chainspot-zip> --out <directory>',
 		'',
 		'Options:',
-		'  --templates <directory>       Canonical templates directory, must contain basket.png and hole-01..18.png',
-		'                                 (default: static/resources/chainspot_cv_templates)',
-		'  --basket-scale <multiple>     Override the basket template scale factor (default: found via a blind sweep, NOT the number-badge uiScale)',
+		'  --templates <directory>       Canonical templates directory (default: static/resources/chainspot_cv_templates)',
+		'  --basket-scale <multiple>     Override scale; default is a CLI-only 0.4..4.0 blind sweep',
 		'  --map-top <source-pixels>    Restrict detection to this source row',
 		'  --map-bottom <source-pixels> Restrict detection to this source row',
 		'  --max-candidates <count>     Candidate limit (default: 18)',
@@ -126,9 +124,8 @@ function finiteNumber(value: string, option: string): number {
 
 export function parseArgs(argv: readonly string[]): BasketCliArgs {
 	if (argv.includes('--help')) throw new Error(usage());
-	const positional = argv.find((value) => !value.startsWith('--'));
-	if (!positional) throw new Error(`An image or .chainspot.zip input is required.\n\n${usage()}`);
 
+	let positional: string | undefined;
 	let outputDir: string | undefined;
 	let templateDir = defaultTemplateDir;
 	let basketScale: number | undefined;
@@ -139,7 +136,11 @@ export function parseArgs(argv: readonly string[]): BasketCliArgs {
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
-		if (!argument.startsWith('--')) continue;
+		if (!argument.startsWith('--')) {
+			if (positional) throw new Error(`Only one input path is supported; received '${argument}'.`);
+			positional = argument;
+			continue;
+		}
 		switch (argument) {
 			case '--out':
 				outputDir = requireValue(argv, index, argument);
@@ -177,7 +178,10 @@ export function parseArgs(argv: readonly string[]): BasketCliArgs {
 		}
 	}
 
+	if (!positional) throw new Error(`An image or .chainspot.zip input is required.\n\n${usage()}`);
 	if (!outputDir) throw new Error(`--out is required.\n\n${usage()}`);
+	if (basketScale !== undefined && basketScale <= 0) throw new Error('--basket-scale must be positive.');
+	if (minScore !== undefined && (minScore < -1 || minScore > 1)) throw new Error('--min-score must be between -1 and 1.');
 	if (mapTopPx !== undefined && mapBottomPx !== undefined && mapTopPx > mapBottomPx) {
 		throw new Error('--map-top cannot be greater than --map-bottom.');
 	}
@@ -237,36 +241,34 @@ function loadInput(inputPath: string): LoadedInput {
 	};
 }
 
-function loadNumberTemplates(templateDir: string): readonly HoleNumberTemplate[] {
-	return Array.from({ length: 18 }, (_, index) => {
-		const label = index + 1;
-		const fileName = `hole-${String(label).padStart(2, '0')}.png`;
-		const path = join(resolve(templateDir), fileName);
-		const decoded = decodeRaster(new Uint8Array(readFileSync(path)), path);
-		return {
-			label,
-			raster: { format: 'rgba' as const, widthPx: decoded.widthPx, heightPx: decoded.heightPx, data: decoded.rgba }
-		};
-	});
-}
-
-function loadBasketTemplate(templateDir: string): BasketTemplateRaster {
-	const path = join(resolve(templateDir), 'basket.png');
-	const decoded = decodeRaster(new Uint8Array(readFileSync(path)), path);
-	const gray = new Uint8Array(decoded.widthPx * decoded.heightPx);
-	for (let pixel = 0, offset = 0; pixel < gray.length; pixel += 1, offset += 4) {
-		gray[pixel] =
-			(decoded.rgba[offset] * 0.299 + decoded.rgba[offset + 1] * 0.587 + decoded.rgba[offset + 2] * 0.114 + 0.5) | 0;
-	}
-	return { gray, widthPx: decoded.widthPx, heightPx: decoded.heightPx };
-}
-
 function toGray(raster: DecodedRaster): Uint8Array {
 	const gray = new Uint8Array(raster.widthPx * raster.heightPx);
 	for (let pixel = 0, offset = 0; pixel < gray.length; pixel += 1, offset += 4) {
 		gray[pixel] = (raster.rgba[offset] * 0.299 + raster.rgba[offset + 1] * 0.587 + raster.rgba[offset + 2] * 0.114 + 0.5) | 0;
 	}
 	return gray;
+}
+
+function loadTemplateRaster(templateDir: string, fileName: string): DecodedRaster {
+	const path = join(resolve(templateDir), fileName);
+	return decodeRaster(new Uint8Array(readFileSync(path)), path);
+}
+
+function loadBasketTemplate(templateDir: string): BasketTemplateRaster {
+	const decoded = loadTemplateRaster(templateDir, 'basket.png');
+	return { gray: toGray(decoded), widthPx: decoded.widthPx, heightPx: decoded.heightPx };
+}
+
+function loadNumberTemplates(templateDir: string): readonly HoleNumberTemplate[] {
+	return Array.from({ length: 18 }, (_, index) => {
+		const label = index + 1;
+		const fileName = `hole-${String(label).padStart(2, '0')}.png`;
+		const decoded = loadTemplateRaster(templateDir, fileName);
+		return {
+			label,
+			raster: { format: 'rgba' as const, widthPx: decoded.widthPx, heightPx: decoded.heightPx, data: decoded.rgba }
+		};
+	});
 }
 
 function deriveMapBounds(
@@ -281,53 +283,31 @@ function deriveMapBounds(
 	return { topPx: Math.max(0, minY - margin), bottomPx: Math.min(heightPx, maxY + margin) };
 }
 
-/**
- * Map bounds still come from the number badges (their positions are a
- * reliable proxy for the course-map row band regardless of rendering style).
- * Best-effort only: a badge-detection failure here just means no automatic
- * map-bounds restriction, not a hard failure, since basket detection no
- * longer depends on the number-badge scale for anything else.
- */
 function deriveMapBoundsPx(
 	cv: HoleNumberCvModule,
-	raster: DecodedRaster,
+	input: LoadedInput,
 	args: BasketCliArgs
 ): Readonly<{ topPx: number; bottomPx: number }> | undefined {
 	if (args.mapTopPx !== undefined && args.mapBottomPx !== undefined) {
 		return { topPx: args.mapTopPx, bottomPx: args.mapBottomPx };
 	}
 	try {
-		const templates = loadNumberTemplates(args.templateDir);
 		const detection = detectHoleNumberBadges(
 			cv,
-			{ format: 'rgba', widthPx: raster.widthPx, heightPx: raster.heightPx, data: raster.rgba },
-			templates
+			{ format: 'rgba', widthPx: input.widthPx, heightPx: input.heightPx, data: input.rgba },
+			loadNumberTemplates(args.templateDir)
 		);
-		return deriveMapBounds(detection.candidates, raster.heightPx);
+		return deriveMapBounds(detection.candidates, input.heightPx);
 	} catch {
 		return undefined;
 	}
 }
 
-/**
- * The basket icon's own scale factor, found independently of the
- * number-badge UI scale (see `findBasketAnchorScale`'s doc comment for why
- * that ratio can't be assumed to transfer).
- */
-function deriveBasketScale(cv: BasketCv, basketRaster: BasketRaster, template: BasketTemplateRaster, args: BasketCliArgs): number {
-	if (args.basketScale !== undefined) return args.basketScale;
-	const anchor = findBasketAnchorScale(cv, basketRaster, template);
-	if (!anchor) {
-		throw new Error('Could not find a basket template scale via blind sweep; pass --basket-scale.');
-	}
-	return anchor.scale;
-}
-
-function evaluateTruth(
+export function evaluateTruth(
 	truth: readonly BasketTruth[],
 	candidates: readonly BasketCandidate[],
 	tolerancePx: number
-): NonNullable<BasketCliResult['truthEvaluation']> {
+): BasketTruthEvaluation {
 	const used = new Set<number>();
 	const matchedNumbers: number[] = [];
 	for (const expected of truth) {
@@ -438,9 +418,13 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 		heightPx: input.heightPx,
 		sourceScale: 1
 	};
-
 	const mapBoundsPx = deriveMapBoundsPx(cv, input, args);
-	const basketScale = deriveBasketScale(cv, raster, basketTemplate, args);
+	const basketScale = args.basketScale ?? findBasketAnchorScale(cv, raster, basketTemplate, {
+		onProgress: ({ scale, score }) => {
+			process.stderr.write(`basket scale ${scale.toFixed(2)} · max score ${score.toFixed(3)}\n`);
+		}
+	})?.scale;
+	if (!basketScale) throw new Error('Could not find a basket template scale via blind sweep; pass --basket-scale.');
 
 	const candidates = detectBasketTemplateCandidates(cv, raster, basketTemplate, {
 		uiScalePx: basketScale,
@@ -448,7 +432,6 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 		maxCandidates: args.maxCandidates,
 		minScore: args.minScore
 	});
-
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
 	const overlayPath = join(outputDir, 'baskets.png');
@@ -474,8 +457,7 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 }
 
 async function main(): Promise<void> {
-	const args = parseArgs(process.argv.slice(2));
-	await runDetection(args);
+	await runDetection(parseArgs(process.argv.slice(2)));
 }
 
 if (resolve(process.argv[1] ?? '') === resolve(scriptPath)) {

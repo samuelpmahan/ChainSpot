@@ -10,18 +10,11 @@
  * thread, and makes subsequent detections reuse both WASM and the template.
  */
 
-export interface BasketCandidate {
-	readonly xPx: number;
-	readonly yPx: number;
-	readonly score: number;
-	readonly widthPx: number;
-	readonly heightPx: number;
-	readonly scale: number;
-}
-
 import type { CourseGrammarResult } from './courseGrammar';
 import type { HoleNumberDetection } from './holeNumberDetection';
 import type { TeePadCandidate, TeePadStageCounts, TeePadVariant, TeePadVariantResult } from './teePadDetection';
+import type { BasketCandidate } from './basketTemplateDetection';
+export type { BasketCandidate } from './basketTemplateDetection';
 
 export interface CourseDetectionResult {
 	readonly numberDetection: HoleNumberDetection;

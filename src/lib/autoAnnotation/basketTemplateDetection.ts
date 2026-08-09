@@ -39,7 +39,7 @@ export interface BasketCandidate {
 	readonly score: number;
 	readonly widthPx: number;
 	readonly heightPx: number;
-	/** The uiScalePx-relative template scale this candidate matched at. */
+	/** The uiScalePx-relative template scale this candidate matched at, in source-image pixels. */
 	readonly scale: number;
 }
 
@@ -52,6 +52,13 @@ export interface BasketDetectionOptions {
 	readonly maxCandidates?: number;
 	/** Minimum normalized cross-correlation score. Defaults to the proven probe's 0.50. */
 	readonly minScore?: number;
+	/**
+	 * Exact canonical-template scales to try, in the supplied raster's own
+	 * pixels, overriding the nine samples normally derived from `uiScalePx`.
+	 * Escape hatch for a caller that already knows (or wants to bound) the
+	 * candidate scales rather than trusting `uiScalePx`.
+	 */
+	readonly templateScales?: readonly number[];
 }
 
 type CvMat = {
@@ -145,17 +152,18 @@ export interface FindBasketAnchorScaleOptions {
 	readonly scaleStep?: number;
 	/** Skip the refinement pass (used by tests exercising the coarse sweep alone). Defaults to true. */
 	readonly refine?: boolean;
+	/** Optional diagnostic callback, invoked once per evaluated scale (both coarse and refinement passes). */
+	readonly onProgress?: (result: Readonly<{ scale: number; score: number }>) => void;
 }
 
 const DEFAULT_ANCHOR_SCALE_RANGE_LOW = 0.4;
 const DEFAULT_ANCHOR_SCALE_RANGE_HIGH = 4.0;
 /**
- * A full 0.4..4.0 sweep at the previous 0.05 step was ~72 full-image
- * matchTemplate passes -- fine for an offline CLI investigation, too slow to
- * run on every load in a production worker. The coarse pass now uses a much
- * bigger step, and a refinement pass (see `refineScale`) narrows around the
- * coarse winner at fine precision, so overall accuracy is unchanged while
- * total passes drop by roughly half.
+ * A full 0.4..4.0 sweep at a flat 0.05 step was ~72 full-image matchTemplate
+ * passes -- fine for an offline CLI investigation, too slow to run on every
+ * load in a production worker. The coarse pass now uses a much bigger step,
+ * and a refinement pass narrows around the coarse winner at fine precision,
+ * so overall accuracy is unchanged while total passes drop by roughly half.
  */
 const DEFAULT_ANCHOR_SCALE_STEP = 0.15;
 const REFINE_STEP_DIVISOR = 15;
@@ -167,7 +175,8 @@ function sweepScales(
 	raster: BasketRaster,
 	low: number,
 	high: number,
-	step: number
+	step: number,
+	onProgress?: FindBasketAnchorScaleOptions['onProgress']
 ): BasketAnchorScale | null {
 	let best: BasketAnchorScale | null = null;
 	for (let scale = low; scale <= high + 1e-9; scale += step) {
@@ -178,7 +187,9 @@ function sweepScales(
 			try {
 				cv.matchTemplate(image, resized, result, cv.TM_CCOEFF_NORMED);
 				const { maxVal } = cv.minMaxLoc(result);
-				if (!best || maxVal > best.score) best = { scale, score: maxVal };
+				const sourceScale = scale * raster.sourceScale;
+				onProgress?.({ scale: sourceScale, score: maxVal });
+				if (!best || maxVal > best.score) best = { scale: sourceScale, score: maxVal };
 			} finally {
 				result.delete();
 			}
@@ -191,9 +202,10 @@ function sweepScales(
 
 /**
  * Finds the single template scale (as a multiple of the canonical basket
- * template's own pixel size) whose best match anywhere in the raster scores
- * highest, via a broad blind sweep — the same strategy the proven probe uses
- * to derive its number-badge UI scale from scratch (`ui_scale_from_hole_one`).
+ * template's own pixel size, expressed in source-image pixels) whose best
+ * match anywhere in the raster scores highest, via a broad blind sweep — the
+ * same strategy the proven probe uses to derive its number-badge UI scale
+ * from scratch (`ui_scale_from_hole_one`).
  *
  * This deliberately does NOT assume a basket icon is rendered at the same
  * scale as the number badge relative to their own canonical templates: that
@@ -225,12 +237,15 @@ export function findBasketAnchorScale(
 
 	const image = matFromBytes(cv, raster.gray, raster.widthPx, raster.heightPx);
 	try {
-		const coarse = sweepScales(cv, image, template, raster, scaleRangeLow, scaleRangeHigh, scaleStep);
+		const coarse = sweepScales(cv, image, template, raster, scaleRangeLow, scaleRangeHigh, scaleStep, options.onProgress);
 		if (!coarse || !refine) return coarse;
+		// coarse.scale is in source-image pixels; convert back to raster-native
+		// multiples of the canonical template before narrowing the fine window.
+		const coarseRasterScale = coarse.scale / raster.sourceScale;
 		const fineStep = scaleStep / REFINE_STEP_DIVISOR;
-		const fineLow = Math.max(scaleRangeLow, coarse.scale - scaleStep);
-		const fineHigh = Math.min(scaleRangeHigh, coarse.scale + scaleStep);
-		const fine = sweepScales(cv, image, template, raster, fineLow, fineHigh, fineStep);
+		const fineLow = Math.max(scaleRangeLow, coarseRasterScale - scaleStep);
+		const fineHigh = Math.min(scaleRangeHigh, coarseRasterScale + scaleStep);
+		const fine = sweepScales(cv, image, template, raster, fineLow, fineHigh, fineStep, options.onProgress);
 		return fine && fine.score >= coarse.score ? fine : coarse;
 	} finally {
 		image.delete();
@@ -309,8 +324,17 @@ function validateInputs(raster: BasketRaster, template: BasketTemplateRaster, op
 	if (!Number.isInteger(template.widthPx) || !Number.isInteger(template.heightPx) || template.widthPx <= 0 || template.heightPx <= 0) {
 		throw new Error('Basket detection received an invalid template raster.');
 	}
+	if (template.gray.length < template.widthPx * template.heightPx) {
+		throw new Error('Basket detection template does not contain grayscale pixels for its dimensions.');
+	}
 	if (!Number.isFinite(options.uiScalePx) || options.uiScalePx <= 0) {
 		throw new Error('Basket detection requires a positive uiScalePx.');
+	}
+	if (
+		options.templateScales?.some((scale) => !Number.isFinite(scale) || scale <= 0) ||
+		(options.templateScales !== undefined && options.templateScales.length === 0)
+	) {
+		throw new Error('Basket detection templateScales must contain positive finite values.');
 	}
 }
 
@@ -335,10 +359,11 @@ export function detectBasketTemplateCandidates(
 	}
 
 	const scale = options.uiScalePx / raster.sourceScale;
+	const templateScales = options.templateScales ?? scaleSamples(scale);
 	const image = matFromBytes(cv, raster.gray, raster.widthPx, raster.heightPx);
 	const hits: RawHit[] = [];
 	try {
-		for (const templateScale of scaleSamples(scale)) {
+		for (const templateScale of templateScales) {
 			const resized = resizeTemplate(cv, template, templateScale);
 			try {
 				if (resized.cols >= raster.widthPx || resized.rows >= raster.heightPx) continue;

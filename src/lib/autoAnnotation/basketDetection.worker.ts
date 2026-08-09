@@ -2,7 +2,7 @@ import { loadCv } from '../stitch/cvMatch';
 import { associateCourseGrammar } from './courseGrammar';
 import { detectHoleNumberBadges } from './holeNumberDetection';
 import type { HoleNumberTemplate } from './holeNumberDetection';
-import { detectTeePadCandidates, detectTeePadVariants } from './teePadDetection';
+import { deriveTeePadUiScalePx, detectTeePadCandidates, detectTeePadVariants } from './teePadDetection';
 import type { TeePadCv, TeePadVariant, TeePadVariantResult } from './teePadDetection';
 import { detectBasketTemplateCandidates, findBasketAnchorScale } from './basketTemplateDetection';
 import type { BasketCv, BasketTemplateRaster } from './basketTemplateDetection';
@@ -250,6 +250,13 @@ function loadHoleNumberTemplates(): Promise<readonly HoleNumberTemplate[]> {
 	return holeTemplatesPromise;
 }
 
+function median(values: readonly number[]): number | null {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
 function deriveMapBoundsFromNumbers(
 	candidates: readonly { readonly label?: number; readonly yPx: number }[],
 	heightPx: number
@@ -287,7 +294,15 @@ async function deriveUiScaleAndMapBounds(
 	}
 
 	const sourceScale = 1 / raster.scale;
-	const uiScalePx = detectedNumbers.anchor.scale * sourceScale;
+	const sourceNumberAnchor = {
+		...detectedNumbers.anchor,
+		widthPx: detectedNumbers.anchor.widthPx * sourceScale,
+		heightPx: detectedNumbers.anchor.heightPx * sourceScale
+	};
+	const uiScalePx = deriveTeePadUiScalePx(sourceNumberAnchor);
+	if (uiScalePx === undefined) {
+		throw new Error(detectedNumbers.note ?? 'Could not derive UI scale from hole-number templates.');
+	}
 	const mapBoundsPx =
 		request.mapBoundsPx ??
 		deriveMapBoundsFromNumbers(
@@ -387,7 +402,6 @@ async function detectCourse(request: BasketDetectionRequest) {
 				}
 			: null
 	};
-	const uiScalePx = numberDetection.anchor ? numberDetection.anchor.scale : undefined;
 	const mapBoundsPx = deriveMapBoundsFromNumbers(numberDetection.candidates, request.heightPx);
 
 	reportCourseProgress(
@@ -396,6 +410,11 @@ async function detectCourse(request: BasketDetectionRequest) {
 		`${numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length} numbers assigned · detecting baskets…`
 	);
 	const baskets = await detectBaskets(request.bitmap, request.widthPx, request.heightPx, mapBoundsPx);
+
+	// Tee scale prefers the measured number badge (converted to the canonical
+	// UDisc badge's own dimensions via deriveTeePadUiScalePx), falling back to
+	// the self-calibrated basket scale only when no number anchor was found.
+	const uiScalePx = deriveTeePadUiScalePx(numberDetection.anchor, median(baskets.map((candidate) => candidate.scale)) ?? undefined);
 
 	reportCourseProgress(request, 'tees', `${baskets.length} baskets found · detecting tee pads…`);
 	// Tee-pad rectangles are tiny (roughly 13x8 UI px), and their size/aspect

@@ -1,3 +1,5 @@
+import type { HoleNumberScaleAnchor } from './holeNumberDetection';
+
 /**
  * Tee-pad proposal detection for the clean UDisc-style course map fixture.
  *
@@ -34,6 +36,28 @@ export interface TeePadCandidate {
 	 */
 	readonly score: number;
 	readonly support: readonly TeePadSupport[];
+}
+
+/** Canonical UDisc number-badge dimensions used by tee-pad scale calibration. */
+export const CANONICAL_NUMBER_BADGE_WIDTH_PX = 30;
+export const CANONICAL_NUMBER_BADGE_HEIGHT_PX = 23;
+
+export type TeePadNumberAnchor = Pick<HoleNumberScaleAnchor, 'widthPx' | 'heightPx'>;
+
+/**
+ * Convert a measured number badge into source-image pixels per canonical UDisc
+ * UI scale. The hole-number detector's `scale` is intentionally not part of
+ * this conversion: it is only the resize multiplier for the supplied template.
+ */
+export function deriveTeePadUiScalePx(
+	numberAnchor: TeePadNumberAnchor | null | undefined,
+	fallbackUiScalePx?: number
+): number | undefined {
+	if (!numberAnchor) return fallbackUiScalePx;
+	return (
+		numberAnchor.widthPx / CANONICAL_NUMBER_BADGE_WIDTH_PX +
+		numberAnchor.heightPx / CANONICAL_NUMBER_BADGE_HEIGHT_PX
+	) / 2;
 }
 
 /**

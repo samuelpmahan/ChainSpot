@@ -15,7 +15,7 @@ Phase 0 (a real fixture with ground truth) until `GoldenTeeSet.chainspot.zip` la
 |---|---|---|
 | Hole numbers | 18/18 | production TS (`holeNumberDetection.ts`), commit `c8a8273` |
 | Tee pads | 14/18 | production TS (`teePadDetection.ts` fused path), commit `e328970` |
-| Baskets | unverified, assumed 18/18 | production TS (`basketDetection.worker.ts`) — never explicitly measured against a truth set |
+| Baskets | 18/18, 0 false positives (see Phase 2) | production TS (`basketDetection.worker.ts`) plus `npm run detect:baskets` against `GoldenBasketSet` |
 | Reference (Python probe) | 18/18 numbers, 18/18 baskets, 18/18 tees, 18/18 centerlines | `scripts/cv-probes/static_course_parser.py`, run against a real clean-course screenshot that is **not checked into the repo** |
 
 The Python probe already solves this problem on a real fixture. The gap is a **porting/wiring
@@ -236,6 +236,23 @@ as a side effect of this wiring, since `detectBaskets` returns the same `BasketC
 `associateCourseGrammar` already consumed.
 
 3. ~~Confirm the basket's semantic endpoint reaches `courseGrammar` unchanged~~ — done, see above.
+
+**Reconciled with a parallel independent fix (same session, different branch head).** A separate
+Claude Code session on `agent/phase3-cv-integration` reached items 1-3 above independently and
+committed its own `basketTemplateDetection.ts`/CLI, plus a genuinely new, unrelated improvement:
+`teePadDetection.ts`'s `deriveTeePadUiScalePx`, converting a *measured* number badge into a scale
+via canonical UDisc badge dimensions (30×23px) rather than reusing the anchor's raw resize
+multiplier — adopted here for both `detectCourse` and the tee-experiment endpoint. Its basket
+fix deliberately kept item 4 open for production: both browser basket entry points there use a
+bounded five-scale compatibility ladder (`[0.65, 0.8, 0.95, 1.1, 1.3]`), with the full blind sweep
+exposed only via the CLI, to avoid paying a multi-scale sweep cost on every load. That ladder
+reproduces item 4's exact bug on this fixture class — it's the same numeric range the original
+broken code used, and this session already measured that `GoldenTeeSet`'s real basket scale
+(~1.85-2.0) isn't in it. Kept this branch's self-calibrated production wiring instead (verified
+18/18 in a real headless-Chromium run, ~71-117s total including the sweep) since correctness on
+the only real fixtures available so far outweighs a one-time, user-triggered action's latency —
+worth revisiting if that cost proves unacceptable on slower hardware, e.g. via a coarse-resolution
+pre-pass before the full-resolution sweep.
 
 ## Phase 3 — Course grammar: clarify what "bumps to 18/18" can mean
 
