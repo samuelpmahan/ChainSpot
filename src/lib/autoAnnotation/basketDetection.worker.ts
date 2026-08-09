@@ -35,11 +35,16 @@ import type {
 } from './cvCalibration';
 
 const MAX_ANALYSIS_DIM = 2200;
-const TEMPLATE_BASE_URL = '/resources/chainspot_cv_templates';
+// `$app/paths`'s `base` does not resolve inside this worker's separate
+// Vite bundle context (it silently resolves to `''` at runtime despite
+// compiling cleanly), so the GitHub Pages base path (e.g. `/ChainSpot`)
+// must be sent from the main thread with every request instead.
+let templateBaseUrl = '/resources/chainspot_cv_templates';
 
 interface BasketDetectionRequest {
 	readonly kind: 'detect' | 'detect-course';
 	readonly token: string;
+	readonly basePath: string;
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -48,11 +53,13 @@ interface BasketDetectionRequest {
 interface BasketPrewarmRequest {
 	readonly kind: 'prewarm';
 	readonly token: string;
+	readonly basePath: string;
 }
 
 interface TeeDetectionRequest {
 	readonly kind: 'detect-tees';
 	readonly token: string;
+	readonly basePath: string;
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -134,7 +141,7 @@ function grayscaleRgba(rgba: Uint8ClampedArray, pixelCount: number): Uint8Array 
 }
 
 async function fetchAsset(fileName: string): Promise<Blob> {
-	const url = `${TEMPLATE_BASE_URL}/${fileName}`;
+	const url = `${templateBaseUrl}/${fileName}`;
 	const response = await fetch(url);
 	if (!response.ok) throw new Error(`CV template manifest asset ${fileName} could not be loaded (${response.status}).`);
 	return response.blob();
@@ -181,7 +188,7 @@ async function rasterizeBasketTemplate(fileName: string): Promise<BasketTemplate
 
 function loadTemplatePack(): Promise<LoadedTemplatePack> {
 	if (templatePackPromise) return templatePackPromise;
-	templatePackPromise = fetch(`${TEMPLATE_BASE_URL}/manifest.json`)
+	templatePackPromise = fetch(`${templateBaseUrl}/manifest.json`)
 		.then(async (response) => {
 			if (!response.ok) throw new Error(`CV template manifest could not be loaded (${response.status}).`);
 			const manifest = validateCvTemplateManifest(await response.json());
@@ -577,6 +584,7 @@ async function detectCourse(request: BasketDetectionRequest) {
 }
 
 async function processRequest(request: BasketRequest): Promise<void> {
+	templateBaseUrl = `${request.basePath}/resources/chainspot_cv_templates`;
 	try {
 		if (request.kind === 'prewarm') {
 			await Promise.all([loadRuntime(), loadTemplatePack()]);

@@ -9,37 +9,54 @@
  * it does `import cvReady from '@techstark/opencv-js'; await cvReady`.
  *
  * That shape is fine under plain Node ESM (Node's CJS interop binds the
- * default export straight to `module.exports`) but breaks under Vite's SSR
- * module runner, which is what executes this file under vitest. The runner
- * wraps a required CJS module's exports in a `Proxy` so the namespace supports
- * live bindings. Wrapping a `Proxy` around a `Promise` is normally harmless,
- * but here the *value being awaited* (either `import('@techstark/opencv-js')`
- * or the namespace produced for this very module, once it re-exported the
- * promise-shaped value) resolves to that `Proxy`. V8's native
- * `Promise.prototype.then` checks an internal `[[PromiseState]]` slot on
- * `this`, and a `Proxy` around a `Promise` does not carry that slot — so
- * awaiting it throws `TypeError: Method Promise.prototype.then called on
- * incompatible receiver [object Module]`. This reproduces with nothing but
- * `await import('@techstark/opencv-js')` in a vitest test, i.e. it has nothing
- * to do with how `cvMatch.ts` calls into this module.
+ * default export straight to `module.exports`) but breaks under two other
+ * module runners, for related but distinct reasons:
  *
- * The fix is to never let Vite's SSR runner touch the require of this package
- * on Node at all. `createRequire` goes straight to Node's own CJS loader,
- * bypassing Vite's transform/proxy layer entirely, so the returned value is
- * the raw `Promise` — identical to what the working probe script gets.
+ * 1. Vite's SSR module runner (what executes this file under vitest) wraps a
+ *    required CJS module's exports in a `Proxy` so the namespace supports
+ *    live bindings. Wrapping a `Proxy` around a `Promise` is normally
+ *    harmless, but the *value being awaited* resolves to that `Proxy`, and
+ *    V8's native `Promise.prototype.then` checks an internal `[[PromiseState]]`
+ *    slot on `this` that a `Proxy` around a `Promise` does not carry — so
+ *    awaiting it throws `TypeError: Method Promise.prototype.then called on
+ *    incompatible receiver`. This is triggered by evaluating *any* import of
+ *    the package under the SSR runner, static or dynamic — confirmed by
+ *    trying a static top-level import here, which broke vitest even though
+ *    the Node branch below never executes it.
  *
- * In a browser or worker build there is no `createRequire`/`process`, and no
- * SSR runner either: Vite's client-side pipeline rewrites this CJS dependency
- * into real ESM at (pre-)bundle time (esbuild during dev's `optimizeDeps`,
- * Rollup's commonjs plugin in production) rather than proxying a live CJS
- * export, so a plain dynamic `import()` there never hits the Proxy/Promise
- * interaction above.
+ * 2. The production Web Worker bundle (built by esbuild, not Rollup, unlike
+ *    the main SvelteKit app/SSR bundles) hits a different but same-shaped
+ *    bug when *dynamically* importing this package. esbuild's CJS-interop
+ *    helper synthesizes the ESM namespace object via
+ *    `Object.create(Object.getPrototypeOf(mod))` so the namespace preserves
+ *    `instanceof`/inherited-method behaviour for exotic CJS exports. Because
+ *    `module.exports` here *is* a `Promise` instance, its prototype is
+ *    `Promise.prototype` — so the synthesized namespace object also inherits
+ *    `Promise.prototype`, making it look "thenable" (it has a `.then` via the
+ *    prototype chain) without being a real `Promise` (no `[[PromiseState]]`
+ *    slot). The dynamic `import()`'s own promise-resolution machinery sees
+ *    that namespace object, treats it as a thenable, and calls `.then()` on
+ *    it internally to adopt its state — which throws the exact same
+ *    "incompatible receiver" error, this time from inside the bundler's own
+ *    interop code rather than anything `getCv()` does. Confirmed empirically
+ *    by inspecting the built worker bundle: the throw happens before
+ *    `getCv()`'s own code ever runs. A *static* import of the package does
+ *    not go through this dynamic-import interop path and sidesteps the bug
+ *    (confirmed against the actual built worker bundle in a real browser).
  *
- * Lazy loading is preserved either way because nothing imports *this* module
- * statically — the only reference is a dynamic `import('./cvRuntime')` inside
- * `cvMatch.ts` — and this file only touches the OpenCV package inside
- * `getCv()`, not at module scope, so the WASM payload is fetched on first use
- * rather than at startup.
+ * Since a static import breaks (1) and a dynamic import breaks (2), and both
+ * runners execute *this* file, the static import is isolated in
+ * `cvRuntimeBrowser.ts` and reached only via a dynamic `import()` of that
+ * (real-ESM, not CJS) module from the browser branch below. The Node branch
+ * returns before that dynamic import happens, so vitest's SSR runner never
+ * loads `cvRuntimeBrowser.ts` and never hits bug (1); dynamically importing
+ * our own already-real-ESM module never hits bug (2), because it isn't a CJS
+ * package needing bundler interop synthesis.
+ *
+ * Lazy loading is preserved throughout because nothing imports *this* module
+ * statically either — the only reference is a dynamic `import('./cvRuntime')`
+ * inside `cvMatch.ts` — so the WASM payload is only fetched once `getCv()`
+ * actually runs, not at app/worker startup.
  */
 
 /** Resolves once the WASM runtime is initialized and the API is usable. */
@@ -51,9 +68,6 @@ export async function getCv(): Promise<unknown> {
 		// that `@techstark/opencv-js`'s factory() produced, unproxied.
 		return await require('@techstark/opencv-js');
 	}
-	// Browser/worker: already real ESM by the time this runs, so the default
-	// export is the same in-flight Promise, reached without ever going through
-	// Vite's SSR CJS interop.
-	const mod = (await import('@techstark/opencv-js')) as { default: unknown };
-	return await mod.default;
+	const { default: cvReady } = await import('./cvRuntimeBrowser');
+	return await cvReady;
 }
