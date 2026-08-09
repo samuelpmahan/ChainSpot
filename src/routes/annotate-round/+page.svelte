@@ -641,7 +641,7 @@
 				(candidate) => candidate.label !== undefined
 			).length;
 			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
-			if (options.autoApply) applyReadyCourseHoles();
+			if (options.autoApply) applyReadyCourseHoles({ skipExisting: true });
 		} catch (error) {
 			courseDetection = null;
 			courseDetectionStatus = 'Detection failed';
@@ -652,7 +652,14 @@
 		}
 	}
 
-	function applyReadyCourseHoles(): void {
+	/**
+	 * `skipExisting` protects manually-placed or already-applied tee/basket
+	 * pairs from being silently clobbered by a re-run of detection — used by
+	 * the auto-detect effect, which can fire against a hole the user has
+	 * already corrected. The explicit "Apply N ready holes" button leaves it
+	 * off: a user pressing that button is deliberately asking to reapply.
+	 */
+	function applyReadyCourseHoles(options: { skipExisting?: boolean } = {}): void {
 		if (!courseDetection) return;
 		const ready = courseDetection.grammar.holes.filter(
 			(proposal) => proposal.status === 'ready' && proposal.tee && proposal.basket
@@ -662,6 +669,7 @@
 		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
 		for (const proposal of ready) {
 			const existing = existingByNumber.get(proposal.number);
+			if (options.skipExisting && existing?.tee && existing?.basket) continue;
 			const next: AnnotatedHole = {
 				...(existing ?? {
 					id: crypto.randomUUID(),
@@ -676,7 +684,7 @@
 			existingByNumber.set(proposal.number, next);
 		}
 		holes = [...existingByNumber.values()].sort((a, b) => a.number - b.number);
-		activeHoleId = holes[0]?.id ?? null;
+		activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
 	}
 
 	async function handleDetectBaskets(): Promise<void> {
