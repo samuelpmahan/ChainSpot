@@ -5,6 +5,7 @@ import {
 	deriveTeePadUiScalePx,
 	filterSizeConsistentCandidates
 } from '../../src/lib/autoAnnotation/teePadDetection';
+import { asTemplateScale, deriveUDiscCalibration } from '../../src/lib/autoAnnotation/cvCalibration';
 import type { TeePadCandidate } from '../../src/lib/autoAnnotation/teePadDetection';
 
 function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCandidate {
@@ -19,23 +20,23 @@ function pad(xPx: number, yPx: number, heightPx: number, widthPx = 24): TeePadCa
 	};
 }
 
-describe('deriveTeePadUiScalePx', () => {
+describe('deriveUDiscCalibration', () => {
 	it('converts a 53x41 number anchor to the canonical UDisc UI scale', () => {
-		const anchor = { widthPx: 53, heightPx: 41, scale: 1 };
-		expect(deriveTeePadUiScalePx(anchor)).toBeCloseTo(1.7746, 4);
+		const anchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(1) };
+		expect(deriveUDiscCalibration(anchor).uiScalePx).toBeCloseTo(1.7746, 4);
+	});
+
+	it('preserves the low-level fallback when no number anchor exists', () => {
+		expect(deriveTeePadUiScalePx(null, 1.85)).toBe(1.85);
+		expect(deriveTeePadUiScalePx(undefined)).toBeUndefined();
 	});
 
 	it('ignores the number detector anchor scale', () => {
-		const atOneAnchor = { widthPx: 53, heightPx: 41, scale: 1 };
-		const atAnotherResizeAnchor = { widthPx: 53, heightPx: 41, scale: 9.5 };
-		const atOne = deriveTeePadUiScalePx(atOneAnchor);
-		const atAnotherResize = deriveTeePadUiScalePx(atAnotherResizeAnchor);
+		const atOneAnchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(1) };
+		const atAnotherResizeAnchor = { widthPx: 53, heightPx: 41, scale: asTemplateScale(9.5) };
+		const atOne = deriveUDiscCalibration(atOneAnchor).uiScalePx;
+		const atAnotherResize = deriveUDiscCalibration(atAnotherResizeAnchor).uiScalePx;
 		expect(atAnotherResize).toBe(atOne);
-	});
-
-	it('preserves the supplied fallback when no number anchor exists', () => {
-		expect(deriveTeePadUiScalePx(null, 1.85)).toBe(1.85);
-		expect(deriveTeePadUiScalePx(undefined)).toBeUndefined();
 	});
 
 	it('routes every tee scale entry path through the shared helper', () => {
@@ -47,7 +48,7 @@ describe('deriveTeePadUiScalePx', () => {
 		];
 		for (const entryPath of entryPaths) {
 			const source = readFileSync(resolve(root, entryPath), 'utf8');
-			expect(source, entryPath).toContain('deriveTeePadUiScalePx');
+			expect(source, entryPath).toContain('deriveUDiscCalibration');
 		}
 		const workerSource = readFileSync(
 			resolve(root, 'src/lib/autoAnnotation/basketDetection.worker.ts'),
@@ -55,7 +56,7 @@ describe('deriveTeePadUiScalePx', () => {
 		);
 		const cliSource = readFileSync(resolve(root, 'scripts/detect-tees.ts'), 'utf8');
 		expect(workerSource).toMatch(
-			/const uiScalePx = deriveTeePadUiScalePx\(\s*numberDetection\.anchor/
+			/const calibration = deriveUDiscCalibration\(\s*\{/
 		);
 		expect(cliSource).not.toContain('detection.anchor?.scale');
 	});

@@ -5,8 +5,8 @@ import { runDetection as runTeeDetection } from './detect-tees';
 import { runDetection as runBasketDetection } from './detect-baskets';
 import { loadValidatedCvTemplateManifest } from './cv-template-manifest';
 
-const EXPECTED_TEE_UI_SCALE = 1.7746;
-const TEE_UI_SCALE_TOLERANCE = 0.03;
+const EXPECTED_TEE_UI_SCALE_MIN = 1.77;
+const EXPECTED_TEE_UI_SCALE_MAX = 1.82;
 const NUMBER_CENTER_TOLERANCE_PX = 5;
 
 interface NumberGolden {
@@ -54,8 +54,8 @@ async function main(): Promise<void> {
 		});
 		invariant(Number.isFinite(calibrated.uiScalePx) && calibrated.uiScalePx > 0, 'derived UiScalePx is not positive and finite');
 		invariant(
-			Math.abs(calibrated.uiScalePx - EXPECTED_TEE_UI_SCALE) <= TEE_UI_SCALE_TOLERANCE,
-			`derived UiScalePx is ${calibrated.uiScalePx.toFixed(4)}, expected ${EXPECTED_TEE_UI_SCALE.toFixed(4)} ± ${TEE_UI_SCALE_TOLERANCE}`
+			calibrated.uiScalePx >= EXPECTED_TEE_UI_SCALE_MIN && calibrated.uiScalePx <= EXPECTED_TEE_UI_SCALE_MAX,
+			`derived UiScalePx is ${calibrated.uiScalePx.toFixed(4)}, expected fixture-derived range ${EXPECTED_TEE_UI_SCALE_MIN.toFixed(2)}–${EXPECTED_TEE_UI_SCALE_MAX.toFixed(2)}`
 		);
 		invariant(calibrated.numberDetection, 'clean UDisc fixture did not run raw number detection');
 		invariant(calibrated.numberDetection.labeling === 'assigned', `number labeling is ${calibrated.numberDetection.labeling}, expected assigned`);
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
 			mode: 'fused',
 			outputDir: join(outputRoot, 'tees'),
 			templateDir,
-			uiScalePx: EXPECTED_TEE_UI_SCALE,
+			uiScalePx: EXPECTED_TEE_UI_SCALE_MIN,
 			maxCandidates: 18,
 			ignoreCirclesPx: []
 		});

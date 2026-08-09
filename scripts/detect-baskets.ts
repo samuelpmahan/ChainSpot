@@ -6,15 +6,17 @@ import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
-	detectBasketTemplateCandidates,
-	findBasketAnchorScale
-} from '../src/lib/autoAnnotation/basketTemplateDetection';
+	detectBasketCandidatesAtTemplateScale,
+	findCalibratedBasketAnchorScale
+} from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import { asTemplateScale } from '../src/lib/autoAnnotation/cvCalibration';
 import type {
 	BasketCandidate,
 	BasketCv,
 	BasketRaster,
 	BasketTemplateRaster
 } from '../src/lib/autoAnnotation/basketTemplateDetection';
+import type { TemplateScale } from '../src/lib/autoAnnotation/cvCalibration';
 import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 
@@ -419,15 +421,17 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 		sourceScale: 1
 	};
 	const mapBoundsPx = deriveMapBoundsPx(cv, input, args);
-	const basketScale = args.basketScale ?? findBasketAnchorScale(cv, raster, basketTemplate, {
-		onProgress: ({ scale, score }) => {
-			process.stderr.write(`basket scale ${scale.toFixed(2)} · max score ${score.toFixed(3)}\n`);
-		}
-	})?.scale;
+	const basketScale: TemplateScale | undefined = args.basketScale !== undefined
+		? asTemplateScale(args.basketScale, 'CLI basket template scale')
+		: findCalibratedBasketAnchorScale(cv, raster, basketTemplate, {
+			onProgress: ({ scale, score }) => {
+				process.stderr.write(`basket scale ${scale.toFixed(2)} · max score ${score.toFixed(3)}\n`);
+			}
+		})?.scale;
 	if (!basketScale) throw new Error('Could not find a basket template scale via blind sweep; pass --basket-scale.');
 
-	const candidates = detectBasketTemplateCandidates(cv, raster, basketTemplate, {
-		uiScalePx: basketScale,
+	const candidates = detectBasketCandidatesAtTemplateScale(cv, raster, basketTemplate, {
+		templateScale: basketScale,
 		mapBoundsPx,
 		maxCandidates: args.maxCandidates,
 		minScore: args.minScore

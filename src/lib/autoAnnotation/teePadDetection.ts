@@ -1,4 +1,6 @@
 import type { HoleNumberScaleAnchor } from './holeNumberDetection';
+import { deriveCanonicalUiScalePx } from './cvCalibration';
+import type { UiScalePx } from './cvCalibration';
 
 /**
  * Tee-pad proposal detection for the clean UDisc-style course map fixture.
@@ -39,7 +41,9 @@ export interface TeePadCandidate {
 }
 
 /** Canonical UDisc number-badge dimensions used by tee-pad scale calibration. */
+/** @deprecated Use the named calibration boundary in cvCalibration. */
 export const CANONICAL_NUMBER_BADGE_WIDTH_PX = 30;
+/** @deprecated Use the named calibration boundary in cvCalibration. */
 export const CANONICAL_NUMBER_BADGE_HEIGHT_PX = 23;
 
 export type TeePadNumberAnchor = Pick<HoleNumberScaleAnchor, 'widthPx' | 'heightPx'>;
@@ -54,10 +58,7 @@ export function deriveTeePadUiScalePx(
 	fallbackUiScalePx?: number
 ): number | undefined {
 	if (!numberAnchor) return fallbackUiScalePx;
-	return (
-		numberAnchor.widthPx / CANONICAL_NUMBER_BADGE_WIDTH_PX +
-		numberAnchor.heightPx / CANONICAL_NUMBER_BADGE_HEIGHT_PX
-	) / 2;
+	return deriveCanonicalUiScalePx(numberAnchor.widthPx, numberAnchor.heightPx);
 }
 
 /**
@@ -110,7 +111,7 @@ export interface TeePadDetectionOptions {
 	 * Source-image pixels per UI icon scale. The number-badge detector already
 	 * derives this in the static parser; pass that value here unchanged.
 	 */
-	readonly uiScalePx: number;
+	readonly uiScalePx: UiScalePx;
 	/** Optional source-image vertical map extent. Everything outside is ignored. */
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	/** Keep at most this many fused proposals. Defaults to the 18-hole MVP. */

@@ -3,6 +3,7 @@ import { parseArgs } from '../../scripts/detect-tees';
 import {
 	detectOccludedEdgeLoopCandidates
 } from '../../src/lib/autoAnnotation/teePadDetection';
+import { asUiScalePx } from '../../src/lib/autoAnnotation/cvCalibration';
 import type { TeePadCv } from '../../src/lib/autoAnnotation/teePadDetection';
 
 describe('tee detection CLI arguments', () => {
@@ -83,7 +84,7 @@ describe('occluded edge loop detector', () => {
 			heightPx: 80,
 			sourceScale: 1
 		};
-		const result = detectOccludedEdgeLoopCandidates(cv, raster, { uiScalePx: 1 });
+		const result = detectOccludedEdgeLoopCandidates(cv, raster, { uiScalePx: asUiScalePx(1) });
 
 		expect(result.variant).toBe('occluded-edge-loop');
 		expect(result.candidates).toHaveLength(1);

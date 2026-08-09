@@ -49,7 +49,7 @@
 		DetectTeesResult,
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
-	import { deriveTeePadUiScalePx } from '$lib/autoAnnotation/teePadDetection';
+	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 
 	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'bend'];
 	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
@@ -468,7 +468,14 @@
 		teeExperimentResult = null;
 		selectedTeeCandidateKey = null;
 		try {
-			const cachedScale = deriveTeePadUiScalePx(courseDetection?.numberDetection?.anchor);
+			const numberAnchor = courseDetection?.numberDetection?.anchor;
+			const cachedScale = numberAnchor
+				? deriveUDiscCalibration({
+						scale: numberAnchor.scale,
+						widthPx: numberAnchor.widthPx,
+						heightPx: numberAnchor.heightPx
+				  }).uiScalePx
+				: undefined;
 			const mapBoundsPx = deriveMapBoundsFromNumbers(
 				courseDetection?.numberDetection?.candidates,
 				image.heightPx

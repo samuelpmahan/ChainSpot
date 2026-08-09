@@ -1,9 +1,3 @@
-import {
-	CANONICAL_NUMBER_BADGE_HEIGHT_PX as TEE_CANONICAL_NUMBER_BADGE_HEIGHT_PX,
-	CANONICAL_NUMBER_BADGE_WIDTH_PX as TEE_CANONICAL_NUMBER_BADGE_WIDTH_PX,
-	deriveTeePadUiScalePx
-} from './teePadDetection';
-
 export type TemplateScale = number & { readonly __brand: 'TemplateScale' };
 export type UiScalePx = number & { readonly __brand: 'UiScalePx' };
 
@@ -16,8 +10,8 @@ type _UiScalePxMustNotBeTemplateScale = AssertFalse<
 >;
 
 /** One semantic calibration value, re-exported at the scale boundary. */
-export const CANONICAL_BADGE_WIDTH_PX = TEE_CANONICAL_NUMBER_BADGE_WIDTH_PX;
-export const CANONICAL_BADGE_HEIGHT_PX = TEE_CANONICAL_NUMBER_BADGE_HEIGHT_PX;
+export const CANONICAL_BADGE_WIDTH_PX = 30;
+export const CANONICAL_BADGE_HEIGHT_PX = 23;
 
 export interface CanonicalNumberBadgeCalibration {
 	readonly widthPx: number;
@@ -87,6 +81,22 @@ export function asUiScalePx(value: number, name = 'UDisc UI scale'): UiScalePx {
 	return positiveFinite(value, name) as UiScalePx;
 }
 
+/** The sole canonical 30×23 badge-to-UI-scale conversion. */
+export function deriveCanonicalUiScalePx(
+	matchedWidthPx: number,
+	matchedHeightPx: number,
+	canonicalNumberBadge: CanonicalNumberBadgeCalibration = DEFAULT_CANONICAL_NUMBER_BADGE
+): number {
+	const canonical = {
+		widthPx: positiveFinite(canonicalNumberBadge.widthPx, 'Canonical number-badge width'),
+		heightPx: positiveFinite(canonicalNumberBadge.heightPx, 'Canonical number-badge height')
+	};
+	assertCanonicalCalibration(canonical);
+	const widthPx = positiveFinite(matchedWidthPx, 'Matched number-badge width');
+	const heightPx = positiveFinite(matchedHeightPx, 'Matched number-badge height');
+	return (widthPx / canonical.widthPx + heightPx / canonical.heightPx) / 2;
+}
+
 /**
  * The semantic boundary between raster-template scale and canonical UDisc UI
  * scale. Native template crop dimensions are deliberately absent. The numeric
@@ -105,8 +115,7 @@ export function deriveUDiscCalibration(
 	const matchedWidthPx = positiveFinite(anchor.widthPx, 'Matched number-badge width');
 	const matchedHeightPx = positiveFinite(anchor.heightPx, 'Matched number-badge height');
 	const templateScale = asTemplateScale(anchor.scale, 'Number-badge template scale');
-	const derived = deriveTeePadUiScalePx({ widthPx: matchedWidthPx, heightPx: matchedHeightPx });
-	if (derived === undefined) throw new Error('Could not derive UDisc UI scale from the number-badge anchor.');
+	const derived = deriveCanonicalUiScalePx(matchedWidthPx, matchedHeightPx, canonical);
 	const uiScalePx = asUiScalePx(derived, 'Derived UDisc UI scale');
 	return { uiScalePx, anchor: { templateScale, matchedWidthPx, matchedHeightPx } };
 }

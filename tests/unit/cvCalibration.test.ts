@@ -134,13 +134,15 @@ describe('tee calibration handoff audit', () => {
 		const { readFileSync } = await import('node:fs');
 		const worker = readFileSync('src/lib/autoAnnotation/basketDetection.worker.ts', 'utf8');
 		const cli = readFileSync('scripts/detect-tees.ts', 'utf8');
+		const basketCli = readFileSync('scripts/detect-baskets.ts', 'utf8');
 		const browser = readFileSync('src/routes/annotate-round/+page.svelte', 'utf8');
 		expect(worker).toContain('deriveUDiscCalibration(');
 		expect(worker).not.toContain('median(baskets.map((candidate) => candidate.scale))');
 		expect(cli).toContain('deriveUDiscCalibration(');
-		// Browser experiment calls the same sole 30×23 formula primitive; the
-		// public detectTees boundary immediately brands/validates that number.
-		expect(browser).toContain('deriveTeePadUiScalePx(');
+		expect(basketCli).toContain('detectBasketCandidatesAtTemplateScale(');
+		expect(basketCli).not.toContain('uiScalePx: basketScale');
+		expect(browser).toContain('deriveUDiscCalibration(');
+		expect(browser).not.toContain('deriveTeePadUiScalePx(');
 		expect(browser).not.toContain('uiScalePx: courseDetection?.numberDetection?.anchor?.scale');
 	});
 });
