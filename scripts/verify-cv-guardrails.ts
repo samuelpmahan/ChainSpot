@@ -15,16 +15,18 @@ function invariant(condition: unknown, message: string): asserts condition {
 async function main(): Promise<void> {
 	const projectRoot = resolve(import.meta.dirname, '..');
 	const templateDir = join(projectRoot, 'static', 'resources', 'chainspot_cv_templates');
+	const numberFixture = join(projectRoot, 'resources', 'ribbon-reference', 'IMG_5641.jpg');
 	const teeFixture = join(projectRoot, 'resources', 'GoldenTeeSet.chainspot.zip');
 	const basketFixture = join(projectRoot, 'resources', 'GoldenBasketSet.chainspot.zip');
 	const outputRoot = mkdtempSync(join(tmpdir(), 'chainspot-cv-guardrail-'));
 	loadValidatedCvTemplateManifest(templateDir);
 
 	try {
-		// First run the real number/template calibration path. This independently
-		// guards classification, locations, and the semantic UiScalePx conversion.
+		// Run calibration on the clean UDisc fixture that actually contains the
+		// repeated number badges. GoldenTeeSet is a separate raw-tee truth fixture
+		// and must not be overloaded as number-classification truth.
 		const calibrated = await runTeeDetection({
-			inputPath: teeFixture,
+			inputPath: numberFixture,
 			mode: 'fused',
 			outputDir: join(outputRoot, 'calibrated'),
 			templateDir,
@@ -36,7 +38,7 @@ async function main(): Promise<void> {
 			Math.abs(calibrated.uiScalePx - EXPECTED_TEE_UI_SCALE) <= TEE_UI_SCALE_TOLERANCE,
 			`derived UiScalePx is ${calibrated.uiScalePx.toFixed(4)}, expected ${EXPECTED_TEE_UI_SCALE.toFixed(4)} ± ${TEE_UI_SCALE_TOLERANCE}`
 		);
-		invariant(calibrated.numberDetection, 'tee fixture did not run raw number detection');
+		invariant(calibrated.numberDetection, 'clean UDisc fixture did not run raw number detection');
 		invariant(calibrated.numberDetection.labeling === 'assigned', `number labeling is ${calibrated.numberDetection.labeling}, expected assigned`);
 		invariant(calibrated.numberDetection.candidateCount === 18, `number candidate count is ${calibrated.numberDetection.candidateCount}, expected 18`);
 		invariant(calibrated.numberDetection.labeledCount === 18, `number labeled count is ${calibrated.numberDetection.labeledCount}, expected 18`);
@@ -48,8 +50,8 @@ async function main(): Promise<void> {
 			invariant(candidate.yPx >= 0 && candidate.yPx <= calibrated.input.heightPx, `number ${candidate.label ?? '?'} y is out of bounds`);
 		}
 
-		// Then run the exact established raw-tee baseline, so calibration-map-bound
-		// behavior cannot accidentally hide a detector regression.
+		// Run the exact established raw-tee baseline independently. An explicit
+		// UiScalePx keeps number/map-bound behavior from hiding a detector change.
 		const tee = await runTeeDetection({
 			inputPath: teeFixture,
 			mode: 'fused',
@@ -87,18 +89,21 @@ async function main(): Promise<void> {
 			JSON.stringify(
 				{
 					numbers: {
+						fixture: 'resources/ribbon-reference/IMG_5641.jpg',
 						labeling: calibrated.numberDetection.labeling,
 						candidates: calibrated.numberDetection.candidateCount,
 						labeled: calibrated.numberDetection.labeledCount
 					},
 					uiScalePx: calibrated.uiScalePx,
 					tees: {
+						fixture: 'resources/GoldenTeeSet.chainspot.zip',
 						candidates: tee.candidateCount,
 						matched: tee.truthEvaluation.matchedNumbers.length,
 						missed: tee.truthEvaluation.missedNumbers,
 						falsePositives: tee.truthEvaluation.falsePositiveCount
 					},
 					baskets: {
+						fixture: 'resources/GoldenBasketSet.chainspot.zip',
 						candidates: baskets.candidateCount,
 						matched: baskets.truthEvaluation.matchedNumbers.length,
 						missed: baskets.truthEvaluation.missedNumbers,
