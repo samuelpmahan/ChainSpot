@@ -306,6 +306,55 @@ function renderOne(png: PNG, hole: RenderHole, offsetX: number, offsetY: number)
 	dot(png, c1EntryX, c1EntryY, 4, COLOR_C1_RING);
 }
 
+const COLOR_CHOSEN_MARK: readonly [number, number, number, number] = [255, 255, 255, 255];
+
+/** Blue (lowest sampled value) through yellow to red (highest). */
+function heatColor(t: number): [number, number, number, number] {
+	const clamped = Math.max(0, Math.min(1, t));
+	if (clamped < 0.5) {
+		const local = clamped / 0.5;
+		return [Math.round(local * 255), Math.round(local * 255), Math.round(255 * (1 - local)), 255];
+	}
+	const local = (clamped - 0.5) / 0.5;
+	return [255, Math.round(255 * (1 - local)), 0, 255];
+}
+
+/**
+ * Draws every offset `ribbonSidePointsAndMidpoint` sampled along the search
+ * normal, colored by the raw appearance-feature value it read there, with
+ * the two offsets it actually chose ringed in white. Makes it possible to
+ * see the exact evidence a bad left/right/midpoint pick was based on,
+ * instead of only the pick itself.
+ */
+function drawRibbonSearch(png: PNG, debug: { crossingPx: GoldenPoint; normal: GoldenPoint; offsetsPx: readonly number[]; values: readonly number[]; chosenLeftOffsetPx: number | null; chosenRightOffsetPx: number | null }, offsetX: number, offsetY: number): void {
+	const finiteValues = debug.values.filter((v) => v > -1e8);
+	if (finiteValues.length === 0) return;
+	const min = Math.min(...finiteValues);
+	const max = Math.max(...finiteValues);
+	const range = max - min || 1;
+	const at = (offset: number): [number, number] => [
+		debug.crossingPx.xPx + debug.normal.xPx * offset - offsetX,
+		debug.crossingPx.yPx + debug.normal.yPx * offset - offsetY
+	];
+	debug.offsetsPx.forEach((offset, index) => {
+		const value = debug.values[index];
+		if (value <= -1e8) return;
+		const [x, y] = at(offset);
+		dot(png, x, y, 1, heatColor((value - min) / range));
+	});
+	for (const offset of [debug.chosenLeftOffsetPx, debug.chosenRightOffsetPx]) {
+		if (offset === null) continue;
+		const [x, y] = at(offset);
+		circle(png, x, y, 3, COLOR_CHOSEN_MARK);
+	}
+}
+
+function renderOneWithAudit(png: PNG, hole: RenderHole, offsetX: number, offsetY: number): void {
+	renderOne(png, hole, offsetX, offsetY);
+	drawRibbonSearch(png, hole.route.c2RibbonSearch, offsetX, offsetY);
+	drawRibbonSearch(png, hole.route.c1RibbonSearch, offsetX, offsetY);
+}
+
 function cropPng(source: PNG, x0: number, y0: number, x1: number, y1: number): PNG {
 	const width = Math.max(1, x1 - x0);
 	const height = Math.max(1, y1 - y0);
@@ -358,7 +407,11 @@ const CONTACT_SHEET_COLUMNS = 3;
  * annotations) tiled into a grid, matching the reference probe's
  * `contact_sheet` for a direct side-by-side visual comparison.
  */
-function contactSheet(sourceRaster: PNG, holes: readonly RenderHole[]): PNG {
+function contactSheet(
+	sourceRaster: PNG,
+	holes: readonly RenderHole[],
+	render: (png: PNG, hole: RenderHole, offsetX: number, offsetY: number) => void = renderOne
+): PNG {
 	const tiles = holes.map((hole) => {
 		const xs = [...hole.route.centerline.map((p) => p.xPx), hole.badge.xPx, hole.tee.xPx, hole.basket.xPx];
 		const ys = [...hole.route.centerline.map((p) => p.yPx), hole.badge.yPx, hole.tee.yPx, hole.basket.yPx];
@@ -368,7 +421,7 @@ function contactSheet(sourceRaster: PNG, holes: readonly RenderHole[]): PNG {
 		const y1 = Math.min(sourceRaster.height, Math.ceil(Math.max(...ys) + TILE_PAD_PX));
 
 		const crop = cropPng(sourceRaster, x0, y0, x1, y1);
-		renderOne(crop, hole, x0, y0);
+		render(crop, hole, x0, y0);
 
 		const fitScale = Math.min(TILE_WIDTH / crop.width, TILE_HEIGHT / crop.height);
 		const resized = resizeBilinear(crop, Math.max(1, Math.round(crop.width * fitScale)), Math.max(1, Math.round(crop.height * fitScale)));
@@ -484,10 +537,28 @@ async function main(): Promise<void> {
 	const sheetPath = join(resolve(outputDir), 'contact-sheet.png');
 	writeFileSync(sheetPath, PNG.sync.write(contactSheet(rawSource, renderHoles)));
 
+	// Same tiles, plus the raw ribbon-search evidence (every offset sampled,
+	// colored by feature value, chosen offsets ringed white) so a bad
+	// left/right/midpoint pick can be traced back to what it was based on.
+	const auditSheetPath = join(resolve(outputDir), 'contact-sheet-audit.png');
+	writeFileSync(auditSheetPath, PNG.sync.write(contactSheet(rawSource, renderHoles, renderOneWithAudit)));
+
+	const ribbonAuditPath = join(resolve(outputDir), 'ribbon-audit.json');
+	writeFileSync(
+		ribbonAuditPath,
+		`${JSON.stringify(
+			result.holes.map((hole) => ({ number: hole.number, c2RibbonSearch: hole.c2RibbonSearch, c1RibbonSearch: hole.c1RibbonSearch })),
+			null,
+			2
+		)}\n`
+	);
+
 	const jsonPath = join(resolve(outputDir), 'centerlines.json');
 	writeFileSync(jsonPath, `${JSON.stringify({ c1RadiusPx: result.c1RadiusPx, c2RadiusPx: result.c2RadiusPx, holes: result.holes }, null, 2)}\n`);
 	console.log(`Wrote ${overlayPath}`);
 	console.log(`Wrote ${sheetPath}`);
+	console.log(`Wrote ${auditSheetPath}`);
+	console.log(`Wrote ${ribbonAuditPath}`);
 	console.log(`Wrote ${jsonPath}`);
 
 	if (resolvedGoldenPath) {

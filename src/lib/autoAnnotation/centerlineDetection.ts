@@ -62,6 +62,23 @@ export interface CenterlineRaster {
 	readonly heightPx: number;
 }
 
+/**
+ * The raw evidence `ribbonSidePointsAndMidpoint` chose between at one
+ * putting-circle crossing: every offset it sampled along the local path
+ * normal, the appearance-feature value it read there, and which two offsets
+ * (if any) it picked as the ribbon's edges. Exists purely for audit — so a
+ * bad `left`/`right`/`midpoint` can be traced back to the actual scan that
+ * produced it instead of being taken on faith.
+ */
+export interface RibbonSearchDebug {
+	readonly crossingPx: CenterlinePoint;
+	readonly normal: CenterlinePoint;
+	readonly offsetsPx: readonly number[];
+	readonly values: readonly number[];
+	readonly chosenLeftOffsetPx: number | null;
+	readonly chosenRightOffsetPx: number | null;
+}
+
 export interface CenterlineHoleResult {
 	readonly number: number;
 	/** [tee, ...traced points..., basket], in the raster's pixel space. */
@@ -74,6 +91,8 @@ export interface CenterlineHoleResult {
 	readonly c1Entry: CenterlinePoint;
 	readonly c1Left: CenterlinePoint;
 	readonly c1Right: CenterlinePoint;
+	readonly c2RibbonSearch: RibbonSearchDebug;
+	readonly c1RibbonSearch: RibbonSearchDebug;
 }
 
 export interface PuttingCircleRadii {
@@ -654,7 +673,7 @@ function ribbonSidePointsAndMidpoint(
 	tangentIn: Vec,
 	basketPoint: Vec,
 	radiusPx: number
-): { left: Vec; right: Vec; midpoint: Vec } {
+): { left: Vec; right: Vec; midpoint: Vec; debug: RibbonSearchDebug } {
 	const tangent = normalize(tangentIn);
 	const normal = vec(-tangent.y, tangent.x);
 
@@ -736,7 +755,15 @@ function ribbonSidePointsAndMidpoint(
 	const projectedRight = projectToCircle(right);
 	const midpointDirection = normalize(sub(scale(add(projectedLeft, projectedRight), 0.5), basketPoint));
 	const midpoint = add(basketPoint, scale(midpointDirection, radiusPx));
-	return { left: projectedLeft, right: projectedRight, midpoint };
+	const debug: RibbonSearchDebug = {
+		crossingPx: toPoint(crossing),
+		normal: toPoint(normal),
+		offsetsPx: offsets,
+		values,
+		chosenLeftOffsetPx: bestLeftIndex === -1 ? null : offsets[bestLeftIndex],
+		chosenRightOffsetPx: bestRightIndex === -1 ? null : offsets[bestRightIndex]
+	};
+	return { left: projectedLeft, right: projectedRight, midpoint, debug };
 }
 
 interface ForcedCircleAnchor {
@@ -744,6 +771,7 @@ interface ForcedCircleAnchor {
 	readonly left: Vec;
 	readonly right: Vec;
 	readonly midpoint: Vec;
+	readonly debug: RibbonSearchDebug;
 }
 
 /**
@@ -763,7 +791,7 @@ function forceCircleSideMidpointAnchor(
 	if (!crossingInfo) {
 		const crossing = points[points.length - 1];
 		const tangent = sub(points[points.length - 1], points[points.length - 2]);
-		const { left, right, midpoint } = ribbonSidePointsAndMidpoint(
+		const { left, right, midpoint, debug } = ribbonSidePointsAndMidpoint(
 			feature,
 			widthPx,
 			heightPx,
@@ -772,12 +800,12 @@ function forceCircleSideMidpointAnchor(
 			basketPoint,
 			radiusPx
 		);
-		return { points: [...points], left, right, midpoint };
+		return { points: [...points], left, right, midpoint, debug };
 	}
 
 	const { index, crossing } = crossingInfo;
 	const tangent = sub(points[index], points[index - 1]);
-	const { left, right, midpoint } = ribbonSidePointsAndMidpoint(
+	const { left, right, midpoint, debug } = ribbonSidePointsAndMidpoint(
 		feature,
 		widthPx,
 		heightPx,
@@ -786,7 +814,7 @@ function forceCircleSideMidpointAnchor(
 		basketPoint,
 		radiusPx
 	);
-	return { points: [...points.slice(0, index), midpoint], left, right, midpoint };
+	return { points: [...points.slice(0, index), midpoint], left, right, midpoint, debug };
 }
 
 /** A cubic Bezier from `entry` to `basket`, tangent-continuous with the incoming route direction. Matches `cubic_terminal_segment`. */
@@ -880,7 +908,9 @@ export function buildHoleCenterline(
 		c2Right: toPoint(c2Anchor.right),
 		c1Entry: toPoint(c1Anchor.midpoint),
 		c1Left: toPoint(c1Anchor.left),
-		c1Right: toPoint(c1Anchor.right)
+		c1Right: toPoint(c1Anchor.right),
+		c2RibbonSearch: c2Anchor.debug,
+		c1RibbonSearch: c1Anchor.debug
 	};
 }
 
