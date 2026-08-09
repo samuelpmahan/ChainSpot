@@ -62,6 +62,20 @@ export function addHoleBeyondStandardCourse(
 	return insertHoleInNumberOrder(holes, emptyHole(number, createId));
 }
 
+/**
+ * Adds a hole with a caller-supplied number, e.g. one read off a course map
+ * via number detection. No-op if that number is invalid or already present.
+ */
+export function addHoleWithNumber(
+	holes: readonly AnnotatedHole[],
+	number: number,
+	createId: CreateId = defaultCreateId
+): AnnotatedHole[] {
+	if (!Number.isInteger(number) || number < 1) return [...holes];
+	if (holes.some((hole) => hole.number === number)) return [...holes];
+	return insertHoleInNumberOrder(holes, emptyHole(number, createId));
+}
+
 export function removeHole(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
 	return holes.filter((hole) => hole.id !== holeId);
 }

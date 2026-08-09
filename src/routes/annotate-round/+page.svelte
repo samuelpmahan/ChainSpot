@@ -21,6 +21,7 @@
 	import {
 		addHole,
 		addHoleBeyondStandardCourse,
+		addHoleWithNumber,
 		clearBends,
 		moveBasket,
 		moveCorridorBend,
@@ -161,9 +162,13 @@
 	let courseDetectionStartedAt = 0;
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let prewarmedSourceId: string | null = null;
+	let autoDetectedSourceId: string | null = null;
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
+	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
+	let mobileHoleBarExpanded = $state(false);
+	let mobileAnnotatePanelOpen = $state(false);
 
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
@@ -211,6 +216,21 @@
 			// Detection still reports a useful error if the user explicitly runs it.
 			// A speculative warm-up failure should not alarm or block manual annotation.
 		});
+	});
+
+	/**
+	 * Early-dev default: every source image gets run through full-course
+	 * detection automatically, so tap-to-select-by-number and ready-hole tee/
+	 * basket placement both work without a manual "Detect full course" click.
+	 * Re-running the button manually still skips auto-apply so a user's own
+	 * corrections are never silently overwritten.
+	 */
+	$effect(() => {
+		void refreshCount;
+		const image = sourceImage();
+		if (!image || image.id === autoDetectedSourceId || typeof Worker === 'undefined') return;
+		autoDetectedSourceId = image.id;
+		void handleDetectCourse({ autoApply: true });
 	});
 
 	function handleAddHole(): void {
@@ -310,6 +330,21 @@
 		holes = setCorridorWidth(holes, activeHoleId, corridorWidthPx);
 	}
 
+	/** Moves `activeHoleId` to the previous/next existing hole, wrapping around. */
+	function cycleHole(direction: 1 | -1): void {
+		if (holes.length === 0) return;
+		const sorted = [...holes].sort((left, right) => left.number - right.number);
+		const currentIndex = sorted.findIndex((hole) => hole.id === activeHoleId);
+		const nextIndex =
+			currentIndex === -1
+				? direction === 1
+					? 0
+					: sorted.length - 1
+				: (currentIndex + direction + sorted.length) % sorted.length;
+		activeHoleId = sorted[nextIndex].id;
+		vibrate(6);
+	}
+
 	function pointHitAt(pointer: ScreenSpacePoint, view: ViewTransformState): AnnotationMarkerHit | null {
 		let closestMarker: AnnotationMarkerHit | null = null;
 		let closestDistance = Number.POSITIVE_INFINITY;
@@ -342,6 +377,51 @@
 		return closestMarker;
 	}
 
+	/** Nearest detected, confidently-labeled hole-number badge under the pointer, if any. */
+	function numberCandidateHitAt(pointer: ScreenSpacePoint, view: ViewTransformState): number | null {
+		const candidates = courseDetection?.numberDetection.candidates ?? [];
+		let closestLabel: number | null = null;
+		let closestDistance = Number.POSITIVE_INFINITY;
+		for (const candidate of candidates) {
+			if (candidate.label === undefined) continue;
+			const screen = imageToScreen({ xPx: candidate.xPx, yPx: candidate.yPx }, view);
+			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
+			const radius = Math.max(
+				MARKER_HIT_RADIUS_PX,
+				(Math.max(candidate.widthPx, candidate.heightPx) / 2) * view.zoom + 10
+			);
+			if (distance > radius || distance >= closestDistance) continue;
+			closestDistance = distance;
+			closestLabel = candidate.label;
+		}
+		return closestLabel;
+	}
+
+	/** Selects the hole matching a tapped map number, creating it first if it doesn't exist yet. */
+	function selectOrCreateHoleByNumber(number: number): void {
+		const existing = holes.find((hole) => hole.number === number);
+		if (existing) {
+			activeHoleId = existing.id;
+			vibrate(8);
+			return;
+		}
+		const nextHoles = addHoleWithNumber(holes, number);
+		const added = nextHoles.find((hole) => !holes.some((existingHole) => existingHole.id === hole.id));
+		if (!added) return;
+		holes = nextHoles;
+		activeHoleId = added.id;
+		vibrate(8);
+	}
+
+	function vibrate(durationMs: number): void {
+		if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return;
+		try {
+			navigator.vibrate(durationMs);
+		} catch {
+			// Haptics are a nicety; never let an unsupported/blocked call surface.
+		}
+	}
+
 	function moveMarker(
 		currentHoles: readonly AnnotatedHole[],
 		marker: AnnotationMarkerHit,
@@ -370,18 +450,31 @@
 	): boolean {
 		if (!sourceImage()) return false;
 		const marker = pointHitAt(pointer, view);
-		if (!marker) return false;
-		annotationDrag = {
-			marker,
-			start: { ...pointer },
-			transform: { ...view },
-			dragging: false
-		};
-		void event;
-		return true;
+		if (marker) {
+			annotationDrag = {
+				marker,
+				start: { ...pointer },
+				transform: { ...view },
+				dragging: false
+			};
+			void event;
+			return true;
+		}
+		const numberLabel = numberCandidateHitAt(pointer, view);
+		if (numberLabel !== null) {
+			numberSelectDrag = { label: numberLabel, start: { ...pointer }, dragging: false };
+			void event;
+			return true;
+		}
+		return false;
 	}
 
 	function previewAnnotationMove(pointer: ScreenSpacePoint): void {
+		if (numberSelectDrag) {
+			const distance = Math.hypot(pointer.x - numberSelectDrag.start.x, pointer.y - numberSelectDrag.start.y);
+			if (distance > CLICK_SLOP_PX) numberSelectDrag.dragging = true;
+			return;
+		}
 		const drag = annotationDrag;
 		const image = sourceImage();
 		if (!drag || !image) return;
@@ -397,6 +490,12 @@
 	}
 
 	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
+		if (numberSelectDrag) {
+			const { label, dragging } = numberSelectDrag;
+			numberSelectDrag = null;
+			if (!dragging) selectOrCreateHoleByNumber(label);
+			return;
+		}
 		const drag = annotationDrag;
 		annotationDrag = null;
 		const image = sourceImage();
@@ -415,6 +514,7 @@
 
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
+		numberSelectDrag = null;
 		previewHoles = null;
 	}
 
@@ -512,7 +612,7 @@
 		}
 	}
 
-	async function handleDetectCourse(): Promise<void> {
+	async function handleDetectCourse(options: { autoApply?: boolean } = {}): Promise<void> {
 		const image = sourceImage();
 		if (!image || courseDetectionRunning || basketDetectionRunning) return;
 		const resource = editor.getAssetResource(image.id);
@@ -541,6 +641,7 @@
 				(candidate) => candidate.label !== undefined
 			).length;
 			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
+			if (options.autoApply) applyReadyCourseHoles();
 		} catch (error) {
 			courseDetection = null;
 			courseDetectionStatus = 'Detection failed';
@@ -807,7 +908,34 @@
 	{/if}
 
 	<nav class="hole-bar" aria-label="Course holes" data-testid="hole-bar">
-		<div class="hole-bar-grid">
+		<div class="hole-bar-compact">
+			<button
+				type="button"
+				class="hole-bar-compact-nav"
+				aria-label="Previous hole"
+				disabled={holes.length === 0}
+				onclick={() => cycleHole(-1)}
+			>‹</button>
+			<button
+				type="button"
+				class="hole-bar-compact-label"
+				aria-expanded={mobileHoleBarExpanded}
+				aria-label={mobileHoleBarExpanded ? 'Collapse hole list' : 'Expand hole list'}
+				data-testid="hole-bar-compact-toggle"
+				onclick={() => (mobileHoleBarExpanded = !mobileHoleBarExpanded)}
+			>
+				{activeHole() ? `Hole ${activeHole()!.number}` : 'No hole selected'}
+				<span aria-hidden="true" class="hole-bar-compact-chevron" class:open={mobileHoleBarExpanded}>⌄</span>
+			</button>
+			<button
+				type="button"
+				class="hole-bar-compact-nav"
+				aria-label="Next hole"
+				disabled={holes.length === 0}
+				onclick={() => cycleHole(1)}
+			>›</button>
+		</div>
+		<div class="hole-bar-grid" class:mobile-collapsed={!mobileHoleBarExpanded}>
 			{#each Array.from({ length: 18 }, (_, index) => index + 1) as holeNumber}
 				{@const hole = holes.find((candidate) => candidate.number === holeNumber)}
 				<button
@@ -879,6 +1007,7 @@
 		<ImageEditorPane
 			title="UDisc source"
 			role="source-overview"
+			toolsFloating
 			{editor}
 			refresh={refreshCount}
 			{decode}
@@ -891,6 +1020,20 @@
 			onClaimedPointerCancel={cancelAnnotationPointer}
 		>
 			{#snippet tools()}
+				<button
+					type="button"
+					class="mobile-annotate-toggle"
+					class:open={mobileAnnotatePanelOpen}
+					aria-expanded={mobileAnnotatePanelOpen}
+					aria-label={mobileAnnotatePanelOpen ? 'Close annotate panel' : 'Open annotate panel'}
+					data-testid="mobile-annotate-toggle"
+					onclick={() => (mobileAnnotatePanelOpen = !mobileAnnotatePanelOpen)}
+				>
+					<span aria-hidden="true" class="mobile-annotate-toggle-icon">
+						{mobileAnnotatePanelOpen ? '✕' : '⋮⋮'}
+					</span>
+				</button>
+				<div class="tool-sections mobile-panel" class:open={mobileAnnotatePanelOpen}>
 				<div class="tool-section hole-management">
 					<div class="section-heading">
 						<h2>Hole controls</h2>
@@ -1154,6 +1297,7 @@
 						{/if}
 					</div>
 				{/if}
+				</div>
 			{/snippet}
 
 			{#snippet diagnostics()}
@@ -1266,6 +1410,8 @@
 							<g
 								class="number-candidate-marker"
 								class:forced-assignment={forcedAssignment}
+								class:selected-hole={candidate.label !== undefined && candidate.label === activeHole()?.number}
+								class:tappable={candidate.label !== undefined}
 								data-testid="number-candidate-{candidateId}"
 							>
 								<rect
@@ -1536,6 +1682,16 @@
 		fill: #fde68a;
 	}
 
+	.number-candidate-marker.tappable rect {
+		cursor: pointer;
+	}
+
+	.number-candidate-marker.selected-hole rect {
+		fill: rgb(59 130 246 / 22%);
+		stroke: #60a5fa;
+		stroke-width: 3;
+	}
+
 	.number-candidate-label {
 		fill: #fecdd3;
 		stroke: #18181b;
@@ -1663,18 +1819,18 @@
 	.mode-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.4rem;
+		gap: 0.5rem;
 	}
 
 	.mode-grid label {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
-		min-height: 2.5rem;
+		min-height: 2.9rem;
 		padding: 0.5rem 0.6rem;
 		border: 1px solid #3f3f46;
 		border-radius: 5px;
-		font-size: 0.8rem;
+		font-size: 0.85rem;
 		cursor: pointer;
 		touch-action: manipulation;
 	}
@@ -1688,15 +1844,9 @@
 		margin: 0;
 	}
 
+	/* Keyboard-shortcut hints are dead weight now that this is a touch-first layout. */
 	.mode-grid kbd {
-		padding: 0.05rem 0.25rem;
-		border: 1px solid #71717a;
-		border-radius: 3px;
-		background: #18181b;
-		color: #e4e4e7;
-		font: inherit;
-		font-size: 0.68rem;
-		line-height: 1.1;
+		display: none;
 	}
 
 	.edit-actions {
@@ -1819,12 +1969,67 @@
 		background: #18181b;
 	}
 
-	.hole-bar-grid {
+	.hole-bar-compact {
+		display: flex;
+		align-items: stretch;
+		gap: 0.4rem;
 		flex: 1 1 auto;
+	}
+
+	.hole-bar-compact-nav,
+	.hole-bar-compact-label {
+		min-height: 2.75rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #27272a;
+		color: #f4f4f5;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.hole-bar-compact-nav {
+		min-width: 2.75rem;
+		font-size: 1.15rem;
+		font-weight: 700;
+		color: #a1a1aa;
+	}
+
+	.hole-bar-compact-nav:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.hole-bar-compact-label {
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.4rem;
+		font-size: 0.95rem;
+		font-weight: 650;
+	}
+
+	.hole-bar-compact-chevron {
+		display: inline-block;
+		color: #71717a;
+		transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.hole-bar-compact-chevron.open {
+		transform: rotate(180deg);
+	}
+
+	.hole-bar-grid {
+		flex-basis: 100%;
 		display: grid;
-		grid-template-columns: repeat(9, minmax(3.2rem, 1fr));
+		grid-template-columns: repeat(6, minmax(2.75rem, 1fr));
 		gap: 0.35rem;
 		min-width: 0;
+		margin-top: 0.5rem;
+	}
+
+	.hole-bar-grid.mobile-collapsed {
+		display: none;
 	}
 
 	.hole-tab {
@@ -1863,7 +2068,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.12rem;
-		font-size: 0.58rem;
+		font-size: 0.62rem;
 		font-weight: 700;
 	}
 
@@ -1998,6 +2203,11 @@
 	:global(.editor-body.with-tools) {
 		grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr) minmax(18rem, 20rem) !important;
 		min-height: min(78vh, 900px);
+	}
+
+	/* Tools float over the map instead of reserving a column — drop that track. */
+	:global(.editor-body.with-tools.floating-tools) {
+		grid-template-columns: minmax(0, 1fr) minmax(18rem, 20rem) !important;
 	}
 
 	:global(.tools) {
@@ -2170,22 +2380,86 @@
 		color: #a1a1aa;
 	}
 
+	/*
+	 * The tools snippet floats over the map (ImageEditorPane's `toolsFloating`)
+	 * instead of sitting in a reserved sidebar column, so the canvas stays the
+	 * dominant element at every viewport width — see `.editor-body.floating-tools`
+	 * in ImageEditorPane.svelte. Opened via a small round toggle button; closed
+	 * by its own X, the scrim, or picking a placement mode.
+	 */
+	.mobile-annotate-toggle {
+		position: fixed;
+		top: max(4.25rem, calc(env(safe-area-inset-top) + 3.5rem));
+		right: max(1rem, env(safe-area-inset-right));
+		z-index: 70;
+		width: 3rem;
+		height: 3rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid #1d4ed8;
+		border-radius: 999px;
+		background: #2563eb;
+		color: #fff;
+		box-shadow: 0 6px 18px rgb(0 0 0 / 45%);
+		font-size: 1rem;
+		letter-spacing: 0.05em;
+		touch-action: manipulation;
+		transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1), background 150ms ease;
+	}
+
+	.mobile-annotate-toggle:active {
+		transform: scale(0.9);
+	}
+
+	.mobile-annotate-toggle.open {
+		background: #3f3f46;
+		border-color: #52525b;
+	}
+
+	.mobile-annotate-toggle-icon {
+		line-height: 1;
+	}
+
+	.tool-sections.mobile-panel {
+		position: fixed;
+		top: calc(max(4.25rem, calc(env(safe-area-inset-top) + 3.5rem)) + 3.5rem);
+		right: max(1rem, env(safe-area-inset-right));
+		z-index: 68;
+		width: min(22rem, calc(100vw - 2rem));
+		max-height: min(72vh, calc(100vh - 8rem));
+		overflow: auto;
+		padding: 1rem;
+		border: 1px solid #34343a;
+		border-radius: 16px;
+		background: #18181b;
+		box-shadow: 0 24px 60px rgb(0 0 0 / 55%);
+		transform-origin: top right;
+		transform: scale(0.85) translateY(-8px);
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+		transition:
+			transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+			opacity 180ms ease,
+			visibility 0s linear 260ms;
+	}
+
+	.tool-sections.mobile-panel.open {
+		transform: scale(1) translateY(0);
+		opacity: 1;
+		visibility: visible;
+		pointer-events: auto;
+		transition:
+			transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+			opacity 180ms ease,
+			visibility 0s linear 0s;
+	}
+
 	@media (max-width: 900px) {
-		:global(.editor-body.with-tools) {
+		:global(.editor-body.with-tools),
+		:global(.editor-body.with-tools.floating-tools) {
 			grid-template-columns: 1fr !important;
-		}
-
-		.hole-bar {
-			flex-wrap: wrap;
-		}
-
-		.hole-bar-grid {
-			flex-basis: 100%;
-			order: 1;
-		}
-
-		.hole-bar-actions {
-			order: 2;
 		}
 
 		main {
@@ -2194,41 +2468,6 @@
 			padding-left: max(0.75rem, env(safe-area-inset-left));
 			padding-right: max(0.75rem, env(safe-area-inset-right));
 			gap: 0.75rem;
-		}
-	}
-
-	@media (max-width: 640px) {
-		.toolbar {
-			gap: 0.5rem;
-		}
-
-		.toolbar > button {
-			width: 100%;
-		}
-
-		.hole-bar-grid {
-			grid-template-columns: repeat(6, minmax(2.75rem, 1fr));
-		}
-
-		.hole-tab {
-			min-height: 3rem;
-		}
-
-		.hole-indicators {
-			font-size: 0.62rem;
-		}
-
-		.mode-grid kbd {
-			display: none;
-		}
-
-		.mode-grid {
-			gap: 0.5rem;
-		}
-
-		.mode-grid label {
-			min-height: 2.9rem;
-			font-size: 0.85rem;
 		}
 	}
 </style>
