@@ -32,49 +32,58 @@ function grayCircleRaster(
 }
 
 describe('detectPuttingCircleRadii', () => {
-	// Real-fixture regression coverage for the argmax-vs-icon-edge bug this
-	// function was fixed for lives in `npm run detect:centerlines` against
-	// `resources/GoldenTeeSet.chainspot.zip` / `GoldenBasketSet.chainspot.zip`
-	// (verified to recover c1RadiusPx=92, matching the validated Python probe);
-	// reproducing that photographic edge behavior deterministically from a
-	// synthetic raster proved too fragile to be a useful unit test.
+	// Real-fixture regression coverage lives in `npm run detect:centerlines`
+	// against `resources/GoldenTeeSet.chainspot.zip` / `GoldenBasketSet.chainspot.zip`
+	// (verified to recover c1RadiusPx=46/c2RadiusPx=92, matching the inner
+	// solid / outer dashed rings visible on the source image itself).
 
-	it('finds a clean single ring and derives C2 as exactly double C1', () => {
-		const widthPx = 200;
-		const heightPx = 200;
-		const basket = { xPx: 100, yPx: 100 };
-		const raster = grayCircleRaster(widthPx, heightPx, [{ cx: basket.xPx, cy: basket.yPx, radiusPx: 60, thicknessPx: 4 }]);
+	it('picks the ring pair at the true 1:2 ratio over a stronger single unpaired ring', () => {
+		// The unpaired ring at radius 30 is a stronger single edge than either
+		// ring in the true 30(no partner)-vs-46/92 pair, so a plain argmax over
+		// the raw score curve would wrongly lock onto 30. Requiring a matching
+		// edge at 2x the candidate radius is what selects the real C1/C2 pair.
+		const widthPx = 250;
+		const heightPx = 250;
+		const basket = { xPx: 125, yPx: 125 };
+		const raster = grayCircleRaster(widthPx, heightPx, [
+			{ cx: basket.xPx, cy: basket.yPx, radiusPx: 30, thicknessPx: 4 },
+			{ cx: basket.xPx, cy: basket.yPx, radiusPx: 46, thicknessPx: 3 },
+			{ cx: basket.xPx, cy: basket.yPx, radiusPx: 92, thicknessPx: 3 }
+		]);
 
-		const { c1RadiusPx, c2RadiusPx } = detectPuttingCircleRadii(raster, [basket], { c1RangeLowPx: 20, c1RangeHighPx: 90 });
+		const { c1RadiusPx, c2RadiusPx } = detectPuttingCircleRadii(raster, [basket], { c1RangeLowPx: 20, c1RangeHighPx: 110 });
 
-		expect(c1RadiusPx).toBeGreaterThanOrEqual(58);
-		expect(c1RadiusPx).toBeLessThanOrEqual(62);
+		expect(c1RadiusPx).toBeGreaterThanOrEqual(45);
+		expect(c1RadiusPx).toBeLessThanOrEqual(47);
 		expect(c2RadiusPx).toBe(c1RadiusPx * 2);
 	});
 
-	it('uses the median across baskets so one basket with no nearby ring does not skew the result', () => {
+	it('uses the median across baskets so one basket with no nearby rings does not skew the result', () => {
 		const widthPx = 400;
-		const heightPx = 200;
-		const ringRadiusPx = 60;
+		const heightPx = 250;
 		const agreeingBaskets = [
-			{ xPx: 100, yPx: 100 },
-			{ xPx: 200, yPx: 100 },
-			{ xPx: 300, yPx: 100 }
+			{ xPx: 100, yPx: 125 },
+			{ xPx: 200, yPx: 125 },
+			{ xPx: 300, yPx: 125 }
 		];
-		const outlierBasket = { xPx: 380, yPx: 20 }; // near the raster edge; no ring around it
+		const outlierBasket = { xPx: 390, yPx: 10 }; // near the raster edge; no rings around it
 		const raster = grayCircleRaster(
 			widthPx,
 			heightPx,
-			agreeingBaskets.map((basket) => ({ cx: basket.xPx, cy: basket.yPx, radiusPx: ringRadiusPx, thicknessPx: 4 }))
+			agreeingBaskets.flatMap((basket) => [
+				{ cx: basket.xPx, cy: basket.yPx, radiusPx: 46, thicknessPx: 3 },
+				{ cx: basket.xPx, cy: basket.yPx, radiusPx: 92, thicknessPx: 3 }
+			])
 		);
 
-		const { c1RadiusPx } = detectPuttingCircleRadii(raster, [...agreeingBaskets, outlierBasket], {
+		const { c1RadiusPx, c2RadiusPx } = detectPuttingCircleRadii(raster, [...agreeingBaskets, outlierBasket], {
 			c1RangeLowPx: 20,
-			c1RangeHighPx: 90
+			c1RangeHighPx: 110
 		});
 
-		expect(c1RadiusPx).toBeGreaterThanOrEqual(58);
-		expect(c1RadiusPx).toBeLessThanOrEqual(62);
+		expect(c1RadiusPx).toBeGreaterThanOrEqual(45);
+		expect(c1RadiusPx).toBeLessThanOrEqual(47);
+		expect(c2RadiusPx).toBe(c1RadiusPx * 2);
 	});
 
 	it('rejects an invalid search range', () => {
@@ -82,6 +91,13 @@ describe('detectPuttingCircleRadii', () => {
 		expect(() => detectPuttingCircleRadii(raster, [{ xPx: 25, yPx: 25 }], { c1RangeLowPx: 40, c1RangeHighPx: 20 })).toThrow(
 			/c1RangeHighPx/
 		);
+	});
+
+	it('rejects a range too narrow to fit any C1/C2 pair', () => {
+		const raster = grayCircleRaster(50, 50, []);
+		expect(() =>
+			detectPuttingCircleRadii(raster, [{ xPx: 25, yPx: 25 }], { c1RangeLowPx: 20, c1RangeHighPx: 30 })
+		).toThrow(/2 \* c1RangeLowPx/);
 	});
 
 	it('requires at least one basket point', () => {

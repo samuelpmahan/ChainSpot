@@ -279,15 +279,19 @@ const DEFAULT_C1_RANGE_HIGH_PX = 140;
  * basket-centered radial edge strength (median across all baskets, so one
  * occluded/noisy basket can't dominate).
  *
- * Unlike the original probe (which independently searched C1 in 15-35px and
- * C2 in 36-80px — tuned to one UDisc-screenshot fixture's pixel scale, and
- * measured to be picking up basket-icon edges rather than real circle edges
- * on a real photographed capture), this searches a much wider C1 range and
- * derives **C2 = 2 x C1** from disc golf's fixed ratio (10m/20m) rather than
- * an independent search: C2's dashed rendering dilutes a simple radial-mean
- * edge score too much to find reliably on its own. Measured on one real
- * fixture: a clean, sharp median-score peak at C1 ~92px, nothing close to it
- * in the original 15-35px range.
+ * The basket icon's own graphic (and, separately, the solid C1 ring itself)
+ * both produce real, strong single-radius edge peaks below the true C2 ring,
+ * so a plain argmax — even smoothed — over the radial-edge-score curve can't
+ * reliably tell "icon edge" apart from "real C1 edge" apart from "real C2
+ * edge" by strength or width alone. Instead this searches for the radius `r`
+ * whose score AND whose score at `2r` are *both* strong at once, using disc
+ * golf's fixed C1:C2 = 1:2 ratio (10m/20m) as the discriminator: only a real
+ * C1/C2 pair lights up together at that exact ratio, whereas a basket icon's
+ * incidental edge doesn't have a matching edge at double its radius. Verified
+ * against a real fixture with the on-image circles visible for comparison:
+ * recovers C1=46px/C2=92px, matching the rendered inner solid / outer dashed
+ * rings exactly (previous single-radius approaches variously locked onto the
+ * icon's own edge or onto the outer ring alone, mislabeling it as C1).
  */
 export function detectPuttingCircleRadii(
 	raster: CenterlineRaster,
@@ -298,6 +302,8 @@ export function detectPuttingCircleRadii(
 	const high = options.c1RangeHighPx ?? DEFAULT_C1_RANGE_HIGH_PX;
 	if (!(high > low)) throw new Error('detectPuttingCircleRadii requires c1RangeHighPx > c1RangeLowPx.');
 	if (basketPoints.length === 0) throw new Error('detectPuttingCircleRadii requires at least one basket point.');
+	const c1High = Math.floor(high / 2);
+	if (!(c1High >= low)) throw new Error('detectPuttingCircleRadii requires c1RangeHighPx >= 2 * c1RangeLowPx.');
 
 	const gradient = sobelGradientMagnitude(raster.gray, raster.widthPx, raster.heightPx);
 	const scoreByRadius = new Map<number, number>();
@@ -306,32 +312,18 @@ export function detectPuttingCircleRadii(
 		scoreByRadius.set(radius, median(scores));
 	}
 
-	// A single-radius argmax on the raw curve is fooled by the basket icon's
-	// own graphic edges, which produce a narrow spurious spike near the icon's
-	// footprint (well below the real, wider C1 ring peak). Averaging each
-	// radius with its immediate neighbors before comparing suppresses that
-	// one-radius-wide spike while barely denting the real ring's multi-radius
-	// plateau, without needing to guess the icon's pixel size.
-	const smoothingRadius = 1;
-	let bestRadius = low;
-	let bestScore = -Infinity;
-	for (let radius = low; radius <= high; radius += 1) {
-		let sum = 0;
-		let count = 0;
-		for (let offset = -smoothingRadius; offset <= smoothingRadius; offset += 1) {
-			const neighborScore = scoreByRadius.get(radius + offset);
-			if (neighborScore !== undefined) {
-				sum += neighborScore;
-				count += 1;
-			}
-		}
-		const smoothedScore = sum / count;
-		if (smoothedScore > bestScore) {
-			bestScore = smoothedScore;
-			bestRadius = radius;
+	let bestC1Radius = low;
+	let bestPairScore = -Infinity;
+	for (let radius = low; radius <= c1High; radius += 1) {
+		const c1Score = scoreByRadius.get(radius)!;
+		const c2Score = scoreByRadius.get(radius * 2)!;
+		const pairScore = Math.min(c1Score, c2Score);
+		if (pairScore > bestPairScore) {
+			bestPairScore = pairScore;
+			bestC1Radius = radius;
 		}
 	}
-	return { c1RadiusPx: bestRadius, c2RadiusPx: bestRadius * 2 };
+	return { c1RadiusPx: bestC1Radius, c2RadiusPx: bestC1Radius * 2 };
 }
 
 // ---- occlusion mask ---------------------------------------------------------
