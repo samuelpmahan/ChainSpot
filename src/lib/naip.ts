@@ -106,6 +106,23 @@ export function offsetPoint(center: GeoPoint, dxMeters: number, dyMeters: number
 	};
 }
 
+/**
+ * Ground resolution of a fetched `exportImage` raster: the request bbox spans exactly
+ * `2 * radiusMeters` on each side (by construction of `bboxFromCenter`, square at
+ * course scale) and `exportImage` returns exactly `sizePx x sizePx` pixels for a
+ * square bbox and a square requested size — no letterboxing, no resampling to a
+ * different aspect. The scale is therefore exact, not estimated.
+ */
+export function naipMetersPerPixel(radiusMeters: number, sizePx: number = NAIP_EXPORT_SIZE_PX): number {
+	if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+		throw new Error(`naipMetersPerPixel: radiusMeters must be a positive finite number, got ${radiusMeters}`);
+	}
+	if (!Number.isFinite(sizePx) || sizePx <= 0) {
+		throw new Error(`naipMetersPerPixel: sizePx must be a positive finite number, got ${sizePx}`);
+	}
+	return (2 * radiusMeters) / sizePx;
+}
+
 export type NaipFetchErrorKind = 'network' | 'http-error' | 'bad-content-type';
 
 export class NaipFetchError extends Error {
