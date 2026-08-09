@@ -621,6 +621,7 @@
 			return;
 		}
 
+		const detectedImageId = image.id;
 		courseDetectionRunning = true;
 		basketDetectionError = null;
 		selectedBasketCandidate = null;
@@ -635,6 +636,9 @@
 					courseDetectionStatus = progress.message;
 				}
 			);
+			// The source image may have been replaced while this awaited: a result
+			// keyed to the old raster must never be written onto the new one's state.
+			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
 			basketCandidates = result.baskets;
 			const assignedNumbers = result.numberDetection.candidates.filter(
@@ -643,6 +647,7 @@
 			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
 			if (options.autoApply) applyReadyCourseHoles({ skipExisting: true });
 		} catch (error) {
+			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = null;
 			courseDetectionStatus = 'Detection failed';
 			basketDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
@@ -653,11 +658,13 @@
 	}
 
 	/**
-	 * `skipExisting` protects manually-placed or already-applied tee/basket
-	 * pairs from being silently clobbered by a re-run of detection — used by
-	 * the auto-detect effect, which can fire against a hole the user has
-	 * already corrected. The explicit "Apply N ready holes" button leaves it
-	 * off: a user pressing that button is deliberately asking to reapply.
+	 * `skipExisting` protects a manually-placed tee or basket from being
+	 * silently clobbered by a re-run of detection — used by the auto-detect
+	 * effect, which can fire against a hole the user is already correcting
+	 * (checked per field: a hole with a manual tee but no basket yet still
+	 * gets the detector's basket, without touching the tee). The explicit
+	 * "Apply N ready holes" button leaves it off: a user pressing that button
+	 * is deliberately asking to reapply both.
 	 */
 	function applyReadyCourseHoles(options: { skipExisting?: boolean } = {}): void {
 		if (!courseDetection) return;
@@ -669,7 +676,9 @@
 		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
 		for (const proposal of ready) {
 			const existing = existingByNumber.get(proposal.number);
-			if (options.skipExisting && existing?.tee && existing?.basket) continue;
+			const keepTee = options.skipExisting && existing?.tee;
+			const keepBasket = options.skipExisting && existing?.basket;
+			if (keepTee && keepBasket) continue;
 			const next: AnnotatedHole = {
 				...(existing ?? {
 					id: crypto.randomUUID(),
@@ -678,8 +687,8 @@
 					corridorBends: [],
 					corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
 				}),
-				tee: { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
-				basket: { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
+				tee: keepTee ? existing!.tee! : { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
+				basket: keepBasket ? existing!.basket! : { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
 			};
 			existingByNumber.set(proposal.number, next);
 		}
@@ -2392,8 +2401,10 @@
 	 * The tools snippet floats over the map (ImageEditorPane's `toolsFloating`)
 	 * instead of sitting in a reserved sidebar column, so the canvas stays the
 	 * dominant element at every viewport width — see `.editor-body.floating-tools`
-	 * in ImageEditorPane.svelte. Opened via a small round toggle button; closed
-	 * by its own X, the scrim, or picking a placement mode.
+	 * in ImageEditorPane.svelte. Opened and closed via its own round toggle
+	 * button; deliberately has no scrim and stays open across mode changes, so
+	 * placing several points in a row doesn't require reopening it each time.
+	 * Areas of the map outside its footprint stay tappable while it's open.
 	 */
 	.mobile-annotate-toggle {
 		position: fixed;
