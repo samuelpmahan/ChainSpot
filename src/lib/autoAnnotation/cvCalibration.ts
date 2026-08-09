@@ -32,7 +32,7 @@ export interface UDiscCalibration {
 }
 
 export interface NumberBadgeAnchorObservation {
-	readonly scale: number;
+	readonly scale: TemplateScale;
 	readonly widthPx: number;
 	readonly heightPx: number;
 }
@@ -59,8 +59,8 @@ export function asUiScalePx(value: number, name = 'UDisc UI scale'): UiScalePx {
 
 /**
  * The one conversion boundary between raster-template scale and semantic UDisc
- * UI scale. Template crop dimensions are deliberately absent from the formula:
- * only the matched physical badge dimensions and the independent canonical UI
+ * UI scale. Native template crop dimensions are deliberately absent from the
+ * formula: only the matched physical badge dimensions and independent semantic
  * calibration are allowed to define UiScalePx.
  */
 export function deriveUDiscCalibration(
