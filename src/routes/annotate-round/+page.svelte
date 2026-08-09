@@ -1344,6 +1344,9 @@
 	main {
 		font-family: system-ui, sans-serif;
 		padding: 1rem;
+		padding-bottom: max(1rem, env(safe-area-inset-bottom));
+		padding-left: max(1rem, env(safe-area-inset-left));
+		padding-right: max(1rem, env(safe-area-inset-right));
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
@@ -1356,15 +1359,32 @@
 		outline-offset: 2px;
 	}
 
+	:global(button) {
+		touch-action: manipulation;
+	}
+
 	:global(button:disabled) {
 		cursor: not-allowed;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.toolbar {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: 0.75rem;
 	}
 
 	h1 {
@@ -1379,6 +1399,7 @@
 	}
 
 	.toolbar > button {
+		min-height: 2.75rem;
 		padding: 0.5rem 1.1rem;
 		border: 1px solid #2563eb;
 		border-radius: 6px;
@@ -1476,12 +1497,14 @@
 
 	.width-control input {
 		width: 6rem;
+		min-height: 2.5rem;
 		padding: 0.3rem 0.45rem;
 		border: 1px solid #52525b;
 		border-radius: 5px;
 		background: #18181b;
 		color: #f4f4f5;
 		font: inherit;
+		font-size: 1rem;
 		text-align: right;
 	}
 
@@ -1592,6 +1615,7 @@
 	}
 
 	.tool-section button {
+		min-height: 2.5rem;
 		border: 1px solid #52525b;
 		border-radius: 5px;
 		background: #27272a;
@@ -1631,25 +1655,28 @@
 		border-left: 1px solid #3f3f46 !important;
 		border-radius: 0 !important;
 		background: transparent !important;
-		font-size: 0.72rem;
+		padding: 0.4rem 0.7rem;
+		font-size: 0.78rem;
 		white-space: nowrap;
 	}
 
 	.mode-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.35rem;
+		gap: 0.4rem;
 	}
 
 	.mode-grid label {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
-		padding: 0.45rem;
+		min-height: 2.5rem;
+		padding: 0.5rem 0.6rem;
 		border: 1px solid #3f3f46;
 		border-radius: 5px;
-		font-size: 0.76rem;
+		font-size: 0.8rem;
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	.mode-grid label.active {
@@ -1796,23 +1823,25 @@
 		flex: 1 1 auto;
 		display: grid;
 		grid-template-columns: repeat(9, minmax(3.2rem, 1fr));
-		gap: 0.3rem;
+		gap: 0.35rem;
 		min-width: 0;
 	}
 
 	.hole-tab {
 		position: relative;
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		gap: 0.2rem;
-		min-height: 2.4rem;
-		padding: 0.25rem 0.3rem;
+		min-height: 2.75rem;
+		padding: 0.3rem 0.3rem;
 		border: 1px solid #3f3f46;
 		border-radius: 5px;
 		background: #27272a;
 		color: #a1a1aa;
 		font-variant-numeric: tabular-nums;
+		touch-action: manipulation;
 	}
 
 	.hole-tab:disabled {
@@ -1857,8 +1886,20 @@
 		flex: 0 0 auto;
 	}
 
+	.hole-bar-actions button {
+		min-height: 2.75rem;
+		padding: 0.4rem 0.65rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #27272a;
+		color: #f4f4f5;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
 	.hole-add-beyond {
-		min-width: 2.4rem;
+		min-width: 2.75rem;
+		min-height: 2.75rem;
 		font-size: 1.25rem;
 		font-weight: 700;
 	}
@@ -2140,7 +2181,6 @@
 
 		.hole-bar-grid {
 			flex-basis: 100%;
-			grid-template-columns: repeat(9, minmax(2.3rem, 1fr));
 			order: 1;
 		}
 
@@ -2150,6 +2190,45 @@
 
 		main {
 			padding: 0.75rem;
+			padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+			padding-left: max(0.75rem, env(safe-area-inset-left));
+			padding-right: max(0.75rem, env(safe-area-inset-right));
+			gap: 0.75rem;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.toolbar {
+			gap: 0.5rem;
+		}
+
+		.toolbar > button {
+			width: 100%;
+		}
+
+		.hole-bar-grid {
+			grid-template-columns: repeat(6, minmax(2.75rem, 1fr));
+		}
+
+		.hole-tab {
+			min-height: 3rem;
+		}
+
+		.hole-indicators {
+			font-size: 0.62rem;
+		}
+
+		.mode-grid kbd {
+			display: none;
+		}
+
+		.mode-grid {
+			gap: 0.5rem;
+		}
+
+		.mode-grid label {
+			min-height: 2.9rem;
+			font-size: 0.85rem;
 		}
 	}
 </style>

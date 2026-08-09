@@ -289,12 +289,14 @@
 	}
 
 	button {
+		min-height: 2.5rem;
 		border: 1px solid #52525b;
 		border-radius: 5px;
 		background: #27272a;
 		color: #f4f4f5;
 		padding: 0.4rem 0.65rem;
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	button:disabled {
@@ -387,7 +389,7 @@
 		border: 0;
 	}
 
-	@media (max-width: 850px) {
+	@media (max-width: 900px) {
 		.editor-body.with-tools {
 			grid-template-columns: 1fr;
 		}
@@ -406,6 +408,26 @@
 		.editor-body,
 		.canvas-shell {
 			min-height: 55vh;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.editor-header {
+			flex-wrap: wrap;
+		}
+
+		.header-actions {
+			flex-wrap: wrap;
+			width: 100%;
+		}
+
+		.header-actions button {
+			flex: 1 1 auto;
+		}
+
+		.editor-body,
+		.canvas-shell {
+			min-height: 45vh;
 		}
 	}
 </style>

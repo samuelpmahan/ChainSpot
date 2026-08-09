@@ -68,6 +68,9 @@
 		background-color: #18181b;
 		border-bottom: 1px solid #27272a;
 		padding: 0.5rem 1rem;
+		padding-top: max(0.5rem, env(safe-area-inset-top));
+		padding-left: max(1rem, env(safe-area-inset-left));
+		padding-right: max(1rem, env(safe-area-inset-right));
 		height: 32px;
 		box-sizing: content-box;
 	}
@@ -76,16 +79,29 @@
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
+		width: 100%;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+	}
+
+	.app-nav::-webkit-scrollbar {
+		display: none;
 	}
 
 	.nav-link {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
 		color: #a1a1aa;
 		text-decoration: none;
+		white-space: nowrap;
 		font-size: 0.875rem;
 		font-weight: 500;
 		padding: 0.35rem 0.75rem;
 		border-radius: 4px;
 		transition: background-color 0.15s ease, color 0.15s ease;
+		touch-action: manipulation;
 	}
 
 	.nav-link:hover {
@@ -102,5 +118,18 @@
 		color: #ffffff;
 		background-color: #27272a;
 		font-weight: 600;
+	}
+
+	@media (max-width: 640px) {
+		.app-header {
+			height: auto;
+			padding-top: max(0.6rem, env(safe-area-inset-top));
+			padding-bottom: 0.6rem;
+		}
+
+		.nav-link {
+			min-height: 2.75rem;
+			padding: 0.5rem 0.85rem;
+		}
 	}
 </style>
