@@ -439,14 +439,102 @@ function buildContext(
 	return { cv, raster, scale, rows, gray, saturation, value };
 }
 
+const GRAY_CENTER_DEFAULT_VALUE_MIN = 148;
+const GRAY_CENTER_DEFAULT_VALUE_MAX = 168;
+const GRAY_CENTER_DEFAULT_SATURATION_MAX = 18;
+
+interface GrayCenterWindow {
+	readonly valueMin: number;
+	readonly valueMax: number;
+	readonly saturationMax: number;
+}
+
+const GRAY_CENTER_DEFAULT_WINDOW: GrayCenterWindow = {
+	valueMin: GRAY_CENTER_DEFAULT_VALUE_MIN,
+	valueMax: GRAY_CENTER_DEFAULT_VALUE_MAX,
+	saturationMax: GRAY_CENTER_DEFAULT_SATURATION_MAX
+};
+
+const ADAPTIVE_GRAY_CENTER_MIN_SAMPLES = 8;
+const ADAPTIVE_GRAY_CENTER_VALUE_MARGIN = 6;
+const ADAPTIVE_GRAY_CENTER_SATURATION_MARGIN = 3;
+
+function sampleInteriorMedian(
+	value: Uint8Array,
+	saturation: Uint8Array,
+	widthPx: number,
+	heightPx: number,
+	centerX: number,
+	centerY: number,
+	halfPatchPx: number
+): { medianValue: number; medianSaturation: number } | undefined {
+	const values: number[] = [];
+	const saturations: number[] = [];
+	const half = Math.max(1, Math.round(halfPatchPx));
+	for (let dy = -half; dy <= half; dy += 1) {
+		for (let dx = -half; dx <= half; dx += 1) {
+			const x = Math.round(centerX) + dx;
+			const y = Math.round(centerY) + dy;
+			if (x < 0 || x >= widthPx || y < 0 || y >= heightPx) continue;
+			const index = y * widthPx + x;
+			values.push(value[index]);
+			saturations.push(saturation[index]);
+		}
+	}
+	if (values.length === 0) return undefined;
+	values.sort((a, b) => a - b);
+	saturations.sort((a, b) => a - b);
+	return { medianValue: values[Math.floor(values.length / 2)], medianSaturation: saturations[Math.floor(saturations.length / 2)] };
+}
+
+/**
+ * Derives a per-course gray-center brightness/saturation window from tee
+ * pads the detector already found confidently (both detectors' baseline
+ * candidates), instead of trusting the fixed [148,168] band alone -- tuned
+ * against a rendered dev fixture, not a photographed capture. A real
+ * photo's lighting varies by capture, and even hole to hole when a pad
+ * sits in partial shade, so a pad whose true interior color is a
+ * legitimate few units outside the fixed band is otherwise invisible to
+ * gray-center regardless of contour quality. Requires at least
+ * `ADAPTIVE_GRAY_CENTER_MIN_SAMPLES` baseline candidates to trust a
+ * course-wide estimate; returns `undefined` otherwise.
+ */
+function deriveAdaptiveGrayCenterWindow(
+	value: Uint8Array,
+	saturation: Uint8Array,
+	widthPx: number,
+	heightPx: number,
+	scale: number,
+	baselineCandidates: readonly AnalysisCandidate[]
+): GrayCenterWindow | undefined {
+	if (baselineCandidates.length < ADAPTIVE_GRAY_CENTER_MIN_SAMPLES) return undefined;
+	const halfPatchPx = Math.max(1, scale * 1.5);
+	const values: number[] = [];
+	const saturations: number[] = [];
+	for (const candidate of baselineCandidates) {
+		const sample = sampleInteriorMedian(value, saturation, widthPx, heightPx, candidate.x, candidate.y, halfPatchPx);
+		if (sample) {
+			values.push(sample.medianValue);
+			saturations.push(sample.medianSaturation);
+		}
+	}
+	if (values.length < ADAPTIVE_GRAY_CENTER_MIN_SAMPLES) return undefined;
+	return {
+		valueMin: Math.max(0, Math.min(...values) - ADAPTIVE_GRAY_CENTER_VALUE_MARGIN),
+		valueMax: Math.min(255, Math.max(...values) + ADAPTIVE_GRAY_CENTER_VALUE_MARGIN),
+		saturationMax: Math.min(255, Math.max(...saturations) + ADAPTIVE_GRAY_CENTER_SATURATION_MARGIN)
+	};
+}
+
 function detectGrayCenterCandidates(
 	ctx: AnalysisContext,
-	maxCandidates: number
+	maxCandidates: number,
+	window: GrayCenterWindow = GRAY_CENTER_DEFAULT_WINDOW
 ): { candidates: AnalysisCandidate[]; stageCounts: TeePadStageCounts } {
 	const { cv, raster, scale, rows, saturation, value } = ctx;
 	const centerMask = new Uint8Array(value.length);
 	for (let index = 0; index < centerMask.length; index += 1) {
-		centerMask[index] = saturation[index] < 18 && value[index] >= 148 && value[index] <= 168 ? 255 : 0;
+		centerMask[index] = saturation[index] < window.saturationMax && value[index] >= window.valueMin && value[index] <= window.valueMax ? 255 : 0;
 	}
 	insideRows(centerMask, raster.widthPx, rows);
 
@@ -1003,7 +1091,21 @@ export function detectTeePadCandidates(
 	const { candidates: detectorA } = detectGrayCenterCandidates(ctx, Infinity);
 	const { candidates: detectorB } = detectEdgeLoopCandidates(ctx, MAX_EDGE_CANDIDATES);
 
-	const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
+	// A pad whose true interior brightness is a legitimate few units outside
+	// the fixed [148,168] band (real-photo lighting/shade, not present on the
+	// rendered dev fixture the band was tuned against) is otherwise invisible
+	// to gray-center no matter its contour quality. Re-run with a window
+	// derived from pads already found confidently, keeping only candidates
+	// with no existing nearby detection -- a gap filler, never a competitor.
+	const baseline = [...detectorA, ...detectorB];
+	const adaptiveWindow = deriveAdaptiveGrayCenterWindow(value, saturation, raster.widthPx, raster.heightPx, scale, baseline);
+	const detectorAGapFillers = adaptiveWindow
+		? detectGrayCenterCandidates(ctx, Infinity, adaptiveWindow).candidates.filter(
+				(candidate) => !baseline.some((existing) => tooClose(candidate, existing, 7 * scale))
+			)
+		: [];
+
+	const fused = fuseCandidates([...detectorA, ...detectorAGapFillers, ...detectorB], [], raster, options.uiScalePx);
 	const sizeConsistent = filterSizeConsistentCandidates(fused);
 
 	const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
@@ -1064,7 +1166,14 @@ export function detectTeePadVariants(
 				ctx,
 				MAX_EDGE_CANDIDATES
 			);
-			const fused = fuseCandidates(detectorA, detectorB, raster, options.uiScalePx);
+			const baseline = [...detectorA, ...detectorB];
+			const adaptiveWindow = deriveAdaptiveGrayCenterWindow(value, saturation, raster.widthPx, raster.heightPx, scale, baseline);
+			const detectorAGapFillers = adaptiveWindow
+				? detectGrayCenterCandidates(ctx, Infinity, adaptiveWindow).candidates.filter(
+						(candidate) => !baseline.some((existing) => tooClose(candidate, existing, 7 * scale))
+					)
+				: [];
+			const fused = fuseCandidates([...detectorA, ...detectorAGapFillers, ...detectorB], [], raster, options.uiScalePx);
 			const sizeConsistent = filterSizeConsistentCandidates(fused);
 			const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 			if (!Number.isInteger(maxCandidates) || maxCandidates < 1) {
