@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runDetection as runTeeDetection } from './detect-tees';
@@ -7,6 +7,21 @@ import { loadValidatedCvTemplateManifest } from './cv-template-manifest';
 
 const EXPECTED_TEE_UI_SCALE = 1.7746;
 const TEE_UI_SCALE_TOLERANCE = 0.03;
+const NUMBER_CENTER_TOLERANCE_PX = 5;
+
+interface NumberGolden {
+	readonly schemaVersion: 1;
+	readonly source: {
+		readonly fileName: string;
+		readonly widthPx: number;
+		readonly heightPx: number;
+	};
+	readonly badges: readonly Readonly<{
+		label: number;
+		xPx: number;
+		yPx: number;
+	}>[];
+}
 
 function invariant(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(`CV guardrail regression failed: ${message}`);
@@ -16,10 +31,14 @@ async function main(): Promise<void> {
 	const projectRoot = resolve(import.meta.dirname, '..');
 	const templateDir = join(projectRoot, 'static', 'resources', 'chainspot_cv_templates');
 	const numberFixture = join(projectRoot, 'resources', 'ribbon-reference', 'IMG_5641.jpg');
+	const numberGoldenPath = join(projectRoot, 'resources', 'ribbon-reference', 'IMG_5641-number-golden.json');
 	const teeFixture = join(projectRoot, 'resources', 'GoldenTeeSet.chainspot.zip');
 	const basketFixture = join(projectRoot, 'resources', 'GoldenBasketSet.chainspot.zip');
 	const outputRoot = mkdtempSync(join(tmpdir(), 'chainspot-cv-guardrail-'));
 	loadValidatedCvTemplateManifest(templateDir);
+	const numberGolden = JSON.parse(readFileSync(numberGoldenPath, 'utf8')) as NumberGolden;
+	invariant(numberGolden.schemaVersion === 1, 'number golden schemaVersion must be 1');
+	invariant(numberGolden.badges.length === 18, `number golden contains ${numberGolden.badges.length} badges, expected 18`);
 
 	try {
 		// Run calibration on the clean UDisc fixture that actually contains the
@@ -48,6 +67,15 @@ async function main(): Promise<void> {
 			invariant(Number.isFinite(candidate.xPx) && Number.isFinite(candidate.yPx), `number ${candidate.label ?? '?'} has non-finite coordinates`);
 			invariant(candidate.xPx >= 0 && candidate.xPx <= calibrated.input.widthPx, `number ${candidate.label ?? '?'} x is out of bounds`);
 			invariant(candidate.yPx >= 0 && candidate.yPx <= calibrated.input.heightPx, `number ${candidate.label ?? '?'} y is out of bounds`);
+		}
+		for (const expected of numberGolden.badges) {
+			const candidate = calibrated.numberDetection.candidates.find((item) => item.label === expected.label);
+			invariant(candidate, `number ${expected.label} is not classified`);
+			const distance = Math.hypot(candidate.xPx - expected.xPx, candidate.yPx - expected.yPx);
+			invariant(
+				distance <= NUMBER_CENTER_TOLERANCE_PX,
+				`number ${expected.label} is ${distance.toFixed(2)}px from its golden center, expected ≤ ${NUMBER_CENTER_TOLERANCE_PX}px`
+			);
 		}
 
 		// Run the exact established raw-tee baseline independently. An explicit
@@ -92,7 +120,8 @@ async function main(): Promise<void> {
 						fixture: 'resources/ribbon-reference/IMG_5641.jpg',
 						labeling: calibrated.numberDetection.labeling,
 						candidates: calibrated.numberDetection.candidateCount,
-						labeled: calibrated.numberDetection.labeledCount
+						labeled: calibrated.numberDetection.labeledCount,
+						goldenCentersMatched: numberGolden.badges.length
 					},
 					uiScalePx: calibrated.uiScalePx,
 					tees: {
