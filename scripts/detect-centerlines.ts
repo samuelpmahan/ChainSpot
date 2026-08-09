@@ -8,7 +8,7 @@ import { loadCv } from '../src/lib/stitch/cvMatch';
 import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 import { buildCenterlines } from '../src/lib/autoAnnotation/centerlineDetection';
-import type { CenterlineHoleInput, CenterlineRaster } from '../src/lib/autoAnnotation/centerlineDetection';
+import type { CenterlineHoleInput, CenterlineHoleResult, CenterlineRaster } from '../src/lib/autoAnnotation/centerlineDetection';
 import { checkStraightness, compareToGoldenShape } from '../src/lib/autoAnnotation/centerlineGolden';
 import type { GoldenPoint } from '../src/lib/autoAnnotation/centerlineGolden';
 
@@ -224,15 +224,168 @@ function circle(png: PNG, cx: number, cy: number, radius: number, color: readonl
 	}
 }
 
-const CENTERLINE_COLORS: readonly (readonly [number, number, number, number])[] = [
-	[255, 64, 64, 255],
-	[64, 160, 255, 255],
-	[64, 220, 128, 255],
-	[255, 200, 64, 255],
-	[220, 64, 255, 255],
-	[64, 220, 220, 255]
-];
-const CIRCLE_COLOR: readonly [number, number, number, number] = [255, 255, 255, 160];
+function rectOutline(
+	png: PNG,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	color: readonly [number, number, number, number]
+): void {
+	line(png, x0, y0, x1, y0, color);
+	line(png, x1, y0, x1, y1, color);
+	line(png, x1, y1, x0, y1, color);
+	line(png, x0, y1, x0, y0, color);
+}
+
+/**
+ * Per-hole overlay style matched to the proven `semantic_exact_anchor.py`
+ * probe's `render_one`/`contact_sheet` (BGR translated to RGB): the
+ * appearance-tracked outward trace and the geometry-only C2/C1/basket
+ * terminal are drawn in different colors so the two very different kinds of
+ * evidence a route is built from aren't visually conflated into one
+ * undifferentiated wiggly line.
+ */
+const COLOR_BADGE: readonly [number, number, number, number] = [255, 255, 0, 255];
+const COLOR_TEE: readonly [number, number, number, number] = [255, 0, 255, 255];
+const COLOR_BASKET_BOX: readonly [number, number, number, number] = [0, 255, 255, 255];
+const COLOR_BASKET_DOT: readonly [number, number, number, number] = [255, 0, 0, 255];
+const COLOR_C1_RING: readonly [number, number, number, number] = [255, 170, 0, 255];
+const COLOR_C2_RING: readonly [number, number, number, number] = [0, 220, 0, 255];
+const COLOR_APPEARANCE_SEGMENT: readonly [number, number, number, number] = [0, 80, 255, 255];
+const COLOR_TERMINAL_SEGMENT: readonly [number, number, number, number] = [255, 0, 0, 255];
+const COLOR_C2_SIDE: readonly [number, number, number, number] = [255, 255, 0, 255];
+const COLOR_C1_SIDE: readonly [number, number, number, number] = [0, 255, 255, 255];
+
+interface RenderHole {
+	readonly badge: { readonly xPx: number; readonly yPx: number; readonly leftPx: number; readonly topPx: number; readonly widthPx: number; readonly heightPx: number };
+	readonly tee: GoldenPoint;
+	readonly basket: GoldenPoint;
+	readonly route: CenterlineHoleResult;
+	readonly c1RadiusPx: number;
+	readonly c2RadiusPx: number;
+}
+
+/** Draws one hole's full route + endpoint markers onto `png`, offsetting every coordinate by `(-offsetX, -offsetY)`. */
+function renderOne(png: PNG, hole: RenderHole, offsetX: number, offsetY: number): void {
+	const at = (point: GoldenPoint): [number, number] => [point.xPx - offsetX, point.yPx - offsetY];
+	const [badgeX, badgeY] = at({ xPx: hole.badge.leftPx, yPx: hole.badge.topPx });
+	rectOutline(png, badgeX, badgeY, badgeX + hole.badge.widthPx, badgeY + hole.badge.heightPx, COLOR_BADGE);
+
+	const [teeX, teeY] = at(hole.tee);
+	circle(png, teeX, teeY, 6, COLOR_TEE);
+	dot(png, teeX, teeY, 2, COLOR_TEE);
+
+	const [basketX, basketY] = at(hole.basket);
+	rectOutline(png, basketX - hole.c1RadiusPx * 0.1 - 5, basketY - 5, basketX + 5, basketY + 5, COLOR_BASKET_BOX);
+	dot(png, basketX, basketY, 4, COLOR_BASKET_DOT);
+	circle(png, basketX, basketY, hole.c1RadiusPx, COLOR_C1_RING);
+	circle(png, basketX, basketY, hole.c2RadiusPx, COLOR_C2_RING);
+
+	const points = hole.route.centerline.map(at);
+	const terminalStart = hole.route.terminalStartIndex;
+	for (let index = 0; index < terminalStart && index < points.length - 1; index += 1) {
+		line(png, points[index][0], points[index][1], points[index + 1][0], points[index + 1][1], COLOR_APPEARANCE_SEGMENT);
+	}
+	for (let index = Math.max(terminalStart, 0); index < points.length - 1; index += 1) {
+		line(png, points[index][0], points[index][1], points[index + 1][0], points[index + 1][1], COLOR_TERMINAL_SEGMENT);
+	}
+
+	for (const side of [hole.route.c2Left, hole.route.c2Right]) {
+		const [x, y] = at(side);
+		dot(png, x, y, 3, COLOR_C2_SIDE);
+	}
+	const [c2EntryX, c2EntryY] = at(hole.route.c2Entry);
+	dot(png, c2EntryX, c2EntryY, 4, COLOR_C2_RING);
+
+	for (const side of [hole.route.c1Left, hole.route.c1Right]) {
+		const [x, y] = at(side);
+		dot(png, x, y, 3, COLOR_C1_SIDE);
+	}
+	const [c1EntryX, c1EntryY] = at(hole.route.c1Entry);
+	dot(png, c1EntryX, c1EntryY, 4, COLOR_C1_RING);
+}
+
+function cropPng(source: PNG, x0: number, y0: number, x1: number, y1: number): PNG {
+	const width = Math.max(1, x1 - x0);
+	const height = Math.max(1, y1 - y0);
+	const crop = new PNG({ width, height });
+	PNG.bitblt(source, crop, x0, y0, width, height, 0, 0);
+	return crop;
+}
+
+/** Bilinear resize into a new PNG; used to fit each hole's crop into a fixed tile size. */
+function resizeBilinear(source: PNG, targetWidth: number, targetHeight: number): PNG {
+	const output = new PNG({ width: targetWidth, height: targetHeight });
+	const scaleX = source.width / targetWidth;
+	const scaleY = source.height / targetHeight;
+	for (let y = 0; y < targetHeight; y += 1) {
+		const sy = Math.min(source.height - 1.0001, y * scaleY);
+		const y0 = Math.floor(sy);
+		const y1 = Math.min(source.height - 1, y0 + 1);
+		const fy = sy - y0;
+		for (let x = 0; x < targetWidth; x += 1) {
+			const sx = Math.min(source.width - 1.0001, x * scaleX);
+			const x0 = Math.floor(sx);
+			const x1 = Math.min(source.width - 1, x0 + 1);
+			const fx = sx - x0;
+			const outOffset = (y * targetWidth + x) * 4;
+			for (let channel = 0; channel < 4; channel += 1) {
+				const p00 = source.data[(y0 * source.width + x0) * 4 + channel];
+				const p10 = source.data[(y0 * source.width + x1) * 4 + channel];
+				const p01 = source.data[(y1 * source.width + x0) * 4 + channel];
+				const p11 = source.data[(y1 * source.width + x1) * 4 + channel];
+				const top = p00 + (p10 - p00) * fx;
+				const bottom = p01 + (p11 - p01) * fx;
+				output.data[outOffset + channel] = Math.round(top + (bottom - top) * fy);
+			}
+		}
+	}
+	return output;
+}
+
+function blit(destination: PNG, source: PNG, x: number, y: number): void {
+	PNG.bitblt(source, destination, 0, 0, source.width, source.height, x, y);
+}
+
+const TILE_WIDTH = 300;
+const TILE_HEIGHT = 250;
+const TILE_PAD_PX = 60;
+const CONTACT_SHEET_COLUMNS = 3;
+
+/**
+ * Per-hole cropped tiles (route + endpoints only, no neighboring holes'
+ * annotations) tiled into a grid, matching the reference probe's
+ * `contact_sheet` for a direct side-by-side visual comparison.
+ */
+function contactSheet(sourceRaster: PNG, holes: readonly RenderHole[]): PNG {
+	const tiles = holes.map((hole) => {
+		const xs = [...hole.route.centerline.map((p) => p.xPx), hole.badge.xPx, hole.tee.xPx, hole.basket.xPx];
+		const ys = [...hole.route.centerline.map((p) => p.yPx), hole.badge.yPx, hole.tee.yPx, hole.basket.yPx];
+		const x0 = Math.max(0, Math.floor(Math.min(...xs) - TILE_PAD_PX));
+		const x1 = Math.min(sourceRaster.width, Math.ceil(Math.max(...xs) + TILE_PAD_PX));
+		const y0 = Math.max(0, Math.floor(Math.min(...ys) - TILE_PAD_PX));
+		const y1 = Math.min(sourceRaster.height, Math.ceil(Math.max(...ys) + TILE_PAD_PX));
+
+		const crop = cropPng(sourceRaster, x0, y0, x1, y1);
+		renderOne(crop, hole, x0, y0);
+
+		const fitScale = Math.min(TILE_WIDTH / crop.width, TILE_HEIGHT / crop.height);
+		const resized = resizeBilinear(crop, Math.max(1, Math.round(crop.width * fitScale)), Math.max(1, Math.round(crop.height * fitScale)));
+		const tile = new PNG({ width: TILE_WIDTH, height: TILE_HEIGHT });
+		blit(tile, resized, Math.floor((TILE_WIDTH - resized.width) / 2), Math.floor((TILE_HEIGHT - resized.height) / 2));
+		return tile;
+	});
+
+	const rows = Math.ceil(tiles.length / CONTACT_SHEET_COLUMNS);
+	const sheet = new PNG({ width: TILE_WIDTH * CONTACT_SHEET_COLUMNS, height: TILE_HEIGHT * rows });
+	tiles.forEach((tile, index) => {
+		const row = Math.floor(index / CONTACT_SHEET_COLUMNS);
+		const column = index % CONTACT_SHEET_COLUMNS;
+		blit(sheet, tile, column * TILE_WIDTH, row * TILE_HEIGHT);
+	});
+	return sheet;
+}
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
@@ -314,28 +467,27 @@ async function main(): Promise<void> {
 	console.error(`c1RadiusPx=${result.c1RadiusPx.toFixed(1)} c2RadiusPx=${result.c2RadiusPx.toFixed(1)}`);
 
 	mkdirSync(resolve(outputDir), { recursive: true });
-	const png = new PNG({ width: teeBundle.widthPx, height: teeBundle.heightPx });
-	png.data.set(teeBundle.rgba);
-	const basketByHoleNumber = new Map(holes.map((hole) => [hole.number, hole.basket]));
-	for (const hole of result.holes) {
-		const color = CENTERLINE_COLORS[(hole.number - 1) % CENTERLINE_COLORS.length];
-		const basket = basketByHoleNumber.get(hole.number)!;
-		// c1Entry/c2Entry are where the traced path crosses each circle's
-		// boundary, not the circle's center — the center is always the basket.
-		circle(png, basket.xPx, basket.yPx, result.c1RadiusPx, CIRCLE_COLOR);
-		circle(png, basket.xPx, basket.yPx, result.c2RadiusPx, CIRCLE_COLOR);
-		for (let index = 0; index < hole.centerline.length - 1; index += 1) {
-			const a = hole.centerline[index];
-			const b = hole.centerline[index + 1];
-			line(png, a.xPx, a.yPx, b.xPx, b.yPx, color);
-		}
-		dot(png, hole.centerline[0].xPx, hole.centerline[0].yPx, 4, color);
-	}
+	const holeByNumber = new Map(holes.map((hole) => [hole.number, hole]));
+	const renderHoles: RenderHole[] = result.holes.map((route) => {
+		const hole = holeByNumber.get(route.number)!;
+		return { badge: hole.numberBadge, tee: hole.tee, basket: hole.basket, route, c1RadiusPx: result.c1RadiusPx, c2RadiusPx: result.c2RadiusPx };
+	});
+
+	const fullOverlay = new PNG({ width: teeBundle.widthPx, height: teeBundle.heightPx });
+	fullOverlay.data.set(teeBundle.rgba);
+	for (const hole of renderHoles) renderOne(fullOverlay, hole, 0, 0);
 	const overlayPath = join(resolve(outputDir), 'centerlines.png');
-	writeFileSync(overlayPath, PNG.sync.write(png));
+	writeFileSync(overlayPath, PNG.sync.write(fullOverlay));
+
+	const rawSource = new PNG({ width: teeBundle.widthPx, height: teeBundle.heightPx });
+	rawSource.data.set(teeBundle.rgba);
+	const sheetPath = join(resolve(outputDir), 'contact-sheet.png');
+	writeFileSync(sheetPath, PNG.sync.write(contactSheet(rawSource, renderHoles)));
+
 	const jsonPath = join(resolve(outputDir), 'centerlines.json');
 	writeFileSync(jsonPath, `${JSON.stringify({ c1RadiusPx: result.c1RadiusPx, c2RadiusPx: result.c2RadiusPx, holes: result.holes }, null, 2)}\n`);
 	console.log(`Wrote ${overlayPath}`);
+	console.log(`Wrote ${sheetPath}`);
 	console.log(`Wrote ${jsonPath}`);
 
 	if (resolvedGoldenPath) {
