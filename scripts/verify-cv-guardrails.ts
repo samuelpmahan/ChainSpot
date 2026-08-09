@@ -21,31 +21,44 @@ async function main(): Promise<void> {
 	loadValidatedCvTemplateManifest(templateDir);
 
 	try {
+		// First run the real number/template calibration path. This independently
+		// guards classification, locations, and the semantic UiScalePx conversion.
+		const calibrated = await runTeeDetection({
+			inputPath: teeFixture,
+			mode: 'fused',
+			outputDir: join(outputRoot, 'calibrated'),
+			templateDir,
+			maxCandidates: 18,
+			ignoreCirclesPx: []
+		});
+		invariant(Number.isFinite(calibrated.uiScalePx) && calibrated.uiScalePx > 0, 'derived UiScalePx is not positive and finite');
+		invariant(
+			Math.abs(calibrated.uiScalePx - EXPECTED_TEE_UI_SCALE) <= TEE_UI_SCALE_TOLERANCE,
+			`derived UiScalePx is ${calibrated.uiScalePx.toFixed(4)}, expected ${EXPECTED_TEE_UI_SCALE.toFixed(4)} ± ${TEE_UI_SCALE_TOLERANCE}`
+		);
+		invariant(calibrated.numberDetection, 'tee fixture did not run raw number detection');
+		invariant(calibrated.numberDetection.labeling === 'assigned', `number labeling is ${calibrated.numberDetection.labeling}, expected assigned`);
+		invariant(calibrated.numberDetection.candidateCount === 18, `number candidate count is ${calibrated.numberDetection.candidateCount}, expected 18`);
+		invariant(calibrated.numberDetection.labeledCount === 18, `number labeled count is ${calibrated.numberDetection.labeledCount}, expected 18`);
+		const labels = calibrated.numberDetection.candidates.map((candidate) => candidate.label).sort((a, b) => (a ?? 0) - (b ?? 0));
+		invariant(labels.every((label, index) => label === index + 1), `number labels are not exactly 1..18: ${labels.join(',')}`);
+		for (const candidate of calibrated.numberDetection.candidates) {
+			invariant(Number.isFinite(candidate.xPx) && Number.isFinite(candidate.yPx), `number ${candidate.label ?? '?'} has non-finite coordinates`);
+			invariant(candidate.xPx >= 0 && candidate.xPx <= calibrated.input.widthPx, `number ${candidate.label ?? '?'} x is out of bounds`);
+			invariant(candidate.yPx >= 0 && candidate.yPx <= calibrated.input.heightPx, `number ${candidate.label ?? '?'} y is out of bounds`);
+		}
+
+		// Then run the exact established raw-tee baseline, so calibration-map-bound
+		// behavior cannot accidentally hide a detector regression.
 		const tee = await runTeeDetection({
 			inputPath: teeFixture,
 			mode: 'fused',
 			outputDir: join(outputRoot, 'tees'),
 			templateDir,
+			uiScalePx: EXPECTED_TEE_UI_SCALE,
 			maxCandidates: 18,
 			ignoreCirclesPx: []
 		});
-
-		invariant(Number.isFinite(tee.uiScalePx) && tee.uiScalePx > 0, 'derived UiScalePx is not positive and finite');
-		invariant(
-			Math.abs(tee.uiScalePx - EXPECTED_TEE_UI_SCALE) <= TEE_UI_SCALE_TOLERANCE,
-			`derived UiScalePx is ${tee.uiScalePx.toFixed(4)}, expected ${EXPECTED_TEE_UI_SCALE.toFixed(4)} ± ${TEE_UI_SCALE_TOLERANCE}`
-		);
-		invariant(tee.numberDetection, 'tee fixture did not run raw number detection');
-		invariant(tee.numberDetection.labeling === 'assigned', `number labeling is ${tee.numberDetection.labeling}, expected assigned`);
-		invariant(tee.numberDetection.candidateCount === 18, `number candidate count is ${tee.numberDetection.candidateCount}, expected 18`);
-		invariant(tee.numberDetection.labeledCount === 18, `number labeled count is ${tee.numberDetection.labeledCount}, expected 18`);
-		const labels = tee.numberDetection.candidates.map((candidate) => candidate.label).sort((a, b) => (a ?? 0) - (b ?? 0));
-		invariant(labels.every((label, index) => label === index + 1), `number labels are not exactly 1..18: ${labels.join(',')}`);
-		for (const candidate of tee.numberDetection.candidates) {
-			invariant(Number.isFinite(candidate.xPx) && Number.isFinite(candidate.yPx), `number ${candidate.label ?? '?'} has non-finite coordinates`);
-			invariant(candidate.xPx >= 0 && candidate.xPx <= tee.input.widthPx, `number ${candidate.label ?? '?'} x is out of bounds`);
-			invariant(candidate.yPx >= 0 && candidate.yPx <= tee.input.heightPx, `number ${candidate.label ?? '?'} y is out of bounds`);
-		}
 		invariant(tee.truthEvaluation, 'GoldenTeeSet does not contain tee truth');
 		invariant(tee.candidateCount === 18, `fused tee candidate count is ${tee.candidateCount}, expected 18`);
 		invariant(tee.truthEvaluation.matchedNumbers.length >= 17, `tee raw recall is ${tee.truthEvaluation.matchedNumbers.length}/18, expected at least 17/18`);
@@ -74,11 +87,11 @@ async function main(): Promise<void> {
 			JSON.stringify(
 				{
 					numbers: {
-						labeling: tee.numberDetection.labeling,
-						candidates: tee.numberDetection.candidateCount,
-						labeled: tee.numberDetection.labeledCount
+						labeling: calibrated.numberDetection.labeling,
+						candidates: calibrated.numberDetection.candidateCount,
+						labeled: calibrated.numberDetection.labeledCount
 					},
-					uiScalePx: tee.uiScalePx,
+					uiScalePx: calibrated.uiScalePx,
 					tees: {
 						candidates: tee.candidateCount,
 						matched: tee.truthEvaluation.matchedNumbers.length,
