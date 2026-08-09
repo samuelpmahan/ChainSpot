@@ -1,3 +1,4 @@
+import { base } from '$app/paths';
 import type { CourseGrammarResult } from './courseGrammar';
 import type {
 	CalibratedBasketCandidate,
@@ -141,6 +142,7 @@ type BasketWorkerReply = BasketWorkerSuccess | BasketWorkerProgress | BasketWork
 interface BasketDetectionRequest {
 	readonly kind: 'detect' | 'detect-course';
 	readonly token: string;
+	readonly basePath: string;
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -149,11 +151,13 @@ interface BasketDetectionRequest {
 interface BasketPrewarmRequest {
 	readonly kind: 'prewarm';
 	readonly token: string;
+	readonly basePath: string;
 }
 
 interface TeeDetectionRequest {
 	readonly kind: 'detect-tees';
 	readonly token: string;
+	readonly basePath: string;
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -267,7 +271,7 @@ export function prewarmBasketDetection(): Promise<void> {
 	if (prewarmWorker === worker && prewarmPromise) return prewarmPromise;
 	const token = nextToken();
 	prewarmWorker = worker;
-	const warming = postToWorker({ kind: 'prewarm', token }).then((reply) => {
+	const warming = postToWorker({ kind: 'prewarm', token, basePath: base }).then((reply) => {
 		if (!reply.ok) throw new Error(reply.message);
 		if (reply.kind !== 'prewarm') throw new Error('Basket detection worker returned an invalid prewarm reply.');
 	});
@@ -306,7 +310,7 @@ export async function detectBasketCandidates(
 	const token = nextToken();
 	try {
 		const reply = await postToWorker(
-			{ kind: 'detect', token, bitmap, widthPx, heightPx },
+			{ kind: 'detect', token, basePath: base, bitmap, widthPx, heightPx },
 			[bitmap as unknown as Transferable]
 		);
 		if (!reply.ok) throw new Error(reply.message);
@@ -333,7 +337,7 @@ export async function detectCourseCandidates(
 	const token = nextToken();
 	try {
 		const reply = await postToWorker(
-			{ kind: 'detect-course', token, bitmap, widthPx, heightPx },
+			{ kind: 'detect-course', token, basePath: base, bitmap, widthPx, heightPx },
 			[bitmap as unknown as Transferable],
 			onProgress
 		);
@@ -372,6 +376,7 @@ export async function detectTees(
 			{
 				kind: 'detect-tees',
 				token,
+				basePath: base,
 				bitmap,
 				widthPx,
 				heightPx,
