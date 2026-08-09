@@ -7,6 +7,14 @@ import {
 export type TemplateScale = number & { readonly __brand: 'TemplateScale' };
 export type UiScalePx = number & { readonly __brand: 'UiScalePx' };
 
+type AssertFalse<Value extends false> = Value;
+type _TemplateScaleMustNotBeUiScalePx = AssertFalse<
+	TemplateScale extends UiScalePx ? true : false
+>;
+type _UiScalePxMustNotBeTemplateScale = AssertFalse<
+	UiScalePx extends TemplateScale ? true : false
+>;
+
 /** One semantic calibration value, re-exported at the scale boundary. */
 export const CANONICAL_BADGE_WIDTH_PX = TEE_CANONICAL_NUMBER_BADGE_WIDTH_PX;
 export const CANONICAL_BADGE_HEIGHT_PX = TEE_CANONICAL_NUMBER_BADGE_HEIGHT_PX;
