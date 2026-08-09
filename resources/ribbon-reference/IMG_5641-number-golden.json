@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "coordinateSpace": "source-image-px",
+  "source": {
+    "fileName": "IMG_5641.jpg",
+    "widthPx": 1290,
+    "heightPx": 2091
+  },
+  "badges": [
+    { "label": 1, "xPx": 739.5, "yPx": 439.5 },
+    { "label": 2, "xPx": 566.0, "yPx": 570.0 },
+    { "label": 3, "xPx": 594.5, "yPx": 656.5 },
+    { "label": 4, "xPx": 435.0, "yPx": 728.5 },
+    { "label": 5, "xPx": 539.5, "yPx": 796.5 },
+    { "label": 6, "xPx": 539.5, "yPx": 866.5 },
+    { "label": 7, "xPx": 435.0, "yPx": 962.5 },
+    { "label": 8, "xPx": 451.5, "yPx": 1046.0 },
+    { "label": 9, "xPx": 331.0, "yPx": 1277.5 },
+    { "label": 10, "xPx": 191.5, "yPx": 1523.0 },
+    { "label": 11, "xPx": 236.0, "yPx": 1780.5 },
+    { "label": 12, "xPx": 367.5, "yPx": 1610.5 },
+    { "label": 13, "xPx": 560.5, "yPx": 1503.5 },
+    { "label": 14, "xPx": 689.5, "yPx": 1396.5 },
+    { "label": 15, "xPx": 887.5, "yPx": 1250.5 },
+    { "label": 16, "xPx": 1117.0, "yPx": 946.5 },
+    { "label": 17, "xPx": 945.5, "yPx": 903.0 },
+    { "label": 18, "xPx": 845.0, "yPx": 762.0 }
+  ]
+}
