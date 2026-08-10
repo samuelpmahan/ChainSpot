@@ -16,13 +16,9 @@
  * like its sibling.
  */
 import type { HoleNumberBadgeAnchor } from './domain/project';
+import type { LabeledPoint } from './courseSignature';
 
-/** A basket position resolved to its hole number, pre-Done. Not stored on `AnnotatedHole` until import. */
-export interface LabeledPoint {
-	readonly holeNumber: number;
-	readonly xPx: number;
-	readonly yPx: number;
-}
+export type { LabeledPoint };
 
 export interface PendingCourseBadges {
 	readonly numberBadges: readonly HoleNumberBadgeAnchor[];
