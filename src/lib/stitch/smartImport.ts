@@ -25,6 +25,8 @@ import { assignFour } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
 import { proposeCropDetailed } from './autoCrop';
 import type { CropProposalDetail } from './autoCrop';
+import { duplicateImageMessage, findDuplicateRasters } from './duplicates';
+import type { DuplicateRasterPair } from './duplicates';
 import { classifyLayout } from './diagnostics';
 import type { LayoutDiagnostic } from './diagnostics';
 import { matcherRegionFromCrop } from './cropGate';
@@ -65,7 +67,8 @@ export type SmartImportFileFailureKind =
 	| 'unsupported-type'
 	| 'decode-failure'
 	| 'invalid-dimension'
-	| 'dimension-mismatch';
+	| 'dimension-mismatch'
+	| 'duplicate-image';
 
 export type SmartImportFailure =
 	| { readonly ok: false; stale: true }
@@ -217,6 +220,25 @@ export async function smartImportFiles(
 		}
 	}
 	if (!isCurrent()) return { ok: false, stale: true };
+
+	// Rejected before scoring, not warned about after: with the same screenshot
+	// twice there is no 2×2 to find, so any arrangement the matcher returned
+	// would stack two tiles and silently export a map missing a quarter of the
+	// course. Heavy overlap between genuinely different captures is fine and is
+	// never rejected here — only pixel-identical images are (see duplicates.ts).
+	const duplicate = findDuplicateRasters(rasters);
+	if (duplicate) {
+		return {
+			ok: false,
+			kind: 'file',
+			fileName: files[duplicate.duplicateIndex].name,
+			reason: 'duplicate-image',
+			message: duplicateImageMessage(
+				files[duplicate.firstIndex].name,
+				files[duplicate.duplicateIndex].name
+			)
+		};
+	}
 
 	const layout = await assignFour(rasters);
 	const diagnostic = classifyLayout(layout);
@@ -393,6 +415,20 @@ export async function smartImportViaWorker(
 	}
 	if (!isCurrent() || reply.token !== token) return { ok: false, stale: true };
 	if (!reply.ok) {
+		// The worker holds the rasters, so it is the side that can see two
+		// supplied images are the same picture; only this side knows their file
+		// names. Mapping happens here so the message the user reads is identical
+		// to the one the in-process path produces.
+		if (reply.duplicate) {
+			const { firstIndex, duplicateIndex } = reply.duplicate;
+			return {
+				ok: false,
+				kind: 'file',
+				fileName: files[duplicateIndex].name,
+				reason: 'duplicate-image',
+				message: duplicateImageMessage(files[firstIndex].name, files[duplicateIndex].name)
+			};
+		}
 		return {
 			ok: false,
 			kind: 'file',
@@ -431,7 +467,12 @@ type WorkerReply =
 			readonly crop: SmartImportWorkerSuccess['crop'];
 			readonly diagnostic: SmartImportWorkerSuccess['diagnostic'];
 	  }
-	| { readonly ok: false; readonly token: string; readonly message: string };
+	| {
+			readonly ok: false;
+			readonly token: string;
+			readonly message?: string;
+			readonly duplicate?: DuplicateRasterPair;
+	  };
 
 function analyzeInWorker(token: string, bitmaps: readonly ImageBitmap[]): Promise<WorkerReply> {
 	warmSmartStitchWorker();

@@ -1,9 +1,10 @@
 /**
  * ChainSpot cross-route in-memory session state (Ticket 2 consolidation of
  * P1 Ticket 1's `editorSession.ts` / `annotatedRoundSession.ts` /
- * `stitch/handoff.ts`, plus Course Memory's `courseBadgeSession.ts`).
+ * `stitch/handoff.ts`, plus Course Memory's `courseBadgeSession.ts` and the
+ * guided demo's `demo/stageInbox.ts`).
  *
- * One module, four independent mechanisms, all carrying state across
+ * One module, five independent mechanisms, all carrying state across
  * client-side SPA route changes so it survives navigation but never a full
  * page reload (nothing here is persisted to storage, IndexedDB, or the
  * server):
@@ -97,8 +98,34 @@ export interface PendingHandoff {
 
 let pendingHandoff: PendingHandoff | null = null;
 
+/**
+ * Listeners notified when a handoff is published.
+ *
+ * Stitch Map's own "Use as UDisc source" always navigates immediately after
+ * publishing, so for years the destination's `onMount` read was sufficient.
+ * The guided demo can publish while the destination is *already mounted*
+ * (`/demo`'s rail arms a step the visitor is standing on), and a mounted page
+ * has no reason to re-read a plain module variable — so the banner never
+ * appeared and the arming reported a success the visitor could not see.
+ * Publishing now announces itself, and destinations subscribe in addition to
+ * their mount-time read.
+ */
+type PendingHandoffListener = () => void;
+const handoffListeners = new Set<PendingHandoffListener>();
+
 export function setPendingHandoff(handoff: PendingHandoff): void {
 	pendingHandoff = handoff;
+	for (const listener of [...handoffListeners]) listener();
+}
+
+/**
+ * Subscribes to handoff publications. Returns an unsubscribe function for the
+ * caller's teardown; a destination that forgets to call it would keep a
+ * destroyed component's closure alive.
+ */
+export function subscribePendingHandoff(listener: PendingHandoffListener): () => void {
+	handoffListeners.add(listener);
+	return () => handoffListeners.delete(listener);
 }
 
 export function getPendingHandoff(): PendingHandoff | null {
@@ -107,6 +134,65 @@ export function getPendingHandoff(): PendingHandoff | null {
 
 export function consumePendingHandoff(): void {
 	pendingHandoff = null;
+}
+
+// ---------------------------------------------------------------------------
+// Pending stitch captures (demo inbox)
+// ---------------------------------------------------------------------------
+
+/**
+ * One-shot slot carrying demo-loaded files across the client-side navigation
+ * from `/demo` (or the guide rail) to `/stitch-map`, with the same vocabulary
+ * and lifetime as the pending-handoff slot above. Survives SPA route changes;
+ * a full page reload clears it.
+ *
+ * Only Stitch Map needs an inbox. The two downstream stages already accept an
+ * externally supplied image through the pending-handoff slot, so the demo
+ * reuses that rather than inventing a parallel path — the fewer seams the
+ * demo owns, the less of the demo can drift away from the real product.
+ *
+ * The slot carries plain `File`s, which Stitch Map hands to the same Smart
+ * Import entry point its own file input uses. It deliberately does not carry
+ * decoded images, placements, crops, or any precomputed result: the
+ * arrangement a visitor sees must be one the product just computed in front
+ * of them.
+ */
+let pendingStitchCaptures: File[] | null = null;
+
+/**
+ * Listeners notified when captures are deposited, mirroring the handoff
+ * subscription above for the same reason: the rail can arm a step the visitor
+ * is already standing on, and a mounted Stitch Map has no reason to re-read a
+ * plain module variable. Without this the visitor clicks "Load the real
+ * inputs", is told it worked, and watches nothing happen.
+ */
+type StitchCaptureListener = () => void;
+const stitchCaptureListeners = new Set<StitchCaptureListener>();
+
+export function setPendingStitchCaptures(files: readonly File[]): void {
+	pendingStitchCaptures = [...files];
+	for (const listener of [...stitchCaptureListeners]) listener();
+}
+
+/** Subscribes to deposits. Returns an unsubscribe function for teardown. */
+export function subscribePendingStitchCaptures(listener: StitchCaptureListener): () => void {
+	stitchCaptureListeners.add(listener);
+	return () => stitchCaptureListeners.delete(listener);
+}
+
+export function getPendingStitchCaptures(): File[] | null {
+	return pendingStitchCaptures ? [...pendingStitchCaptures] : null;
+}
+
+/** Claims the pending captures, leaving the slot empty. */
+export function takePendingStitchCaptures(): File[] | null {
+	const files = pendingStitchCaptures;
+	pendingStitchCaptures = null;
+	return files;
+}
+
+export function clearPendingStitchCaptures(): void {
+	pendingStitchCaptures = null;
 }
 
 // ---------------------------------------------------------------------------

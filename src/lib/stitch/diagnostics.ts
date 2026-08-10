@@ -8,6 +8,15 @@
  * warning taxonomy: correlation score has physical meaning (`TM_CCOEFF_NORMED`
  * true matches ~0.99, unrelated content ~0.03), so it is the one threshold
  * that survives matcher changes without re-tuning.
+ *
+ * A warning here costs a user their confidence in an arrangement that may be
+ * perfectly correct, so every warning must correspond to something they could
+ * actually act on. In particular, generous neighbor overlap is a supported
+ * capture style and never warned about on its own: the more content two tiles
+ * share, the better they match, and a user who panned in careful small steps
+ * must not be told their captures look wrong. What genuinely cannot work — the
+ * same screenshot supplied twice — is rejected outright before scoring rather
+ * than warned about here (see `duplicates.ts`).
  */
 import type { AutoLayout } from './autoLayout';
 import type { TileSlot } from './geometry';
@@ -47,8 +56,15 @@ interface EdgeEvidence {
 	readonly score: number;
 	/**
 	 * True when the winning orientation hypothesis of this directed pair differs
-	 * from the orientation the 2×2 layout requires for this edge. A wrong
-	 * direction must never be placed or trusted.
+	 * from the orientation the 2×2 layout requires for this edge.
+	 *
+	 * On its own this is not evidence of anything. Generous neighbor overlap is
+	 * a legitimate and well-supported capture style, and the more content two
+	 * tiles share, the more readily that shared region also explains itself
+	 * under the other orientation hypothesis — so the losing hypothesis can edge
+	 * ahead on a pair that genuinely sits exactly where the layout says it does.
+	 * See `classifyLayout` for why this is only ever reported alongside a weak
+	 * required-orientation match.
 	 */
 	readonly directionMismatch: boolean;
 }
@@ -77,11 +93,21 @@ export function classifyLayout(layout: AutoLayout): LayoutDiagnostic {
 	const weakEdges = edges.filter((edge) => edge.score < WEAK_EDGE_MAX_SCORE);
 	if (weakEdges.length > 0) {
 		warnings.push(
-			`Weak neighbor match (${edgePairText(weakEdges)}): these screenshots may not share enough overlapping map content, or one may be from a different capture. Recapture with roughly 20–30% neighbor overlap, or check for a mismatched screenshot.`
+			`Weak neighbor match (${edgePairText(weakEdges)}): these screenshots may not share enough overlapping map content, or one may be from a different capture. Recapture with more neighbor overlap — roughly 20% is enough, and more is always fine — or check for a mismatched screenshot.`
 		);
 	}
 
-	const mismatchedEdges = edges.filter((edge) => edge.directionMismatch);
+	// Gated on the edge also being weak. An edge that matches strongly in the
+	// orientation the layout requires is a real, well-supported neighbor pair,
+	// and the committed placement uses that strong measurement — so the other
+	// hypothesis happening to score higher says nothing a user could act on.
+	// Reporting it anyway punished exactly the users who captured most
+	// carefully, since generous overlap is what makes both hypotheses plausible
+	// in the first place. Where the required orientation is genuinely weak, the
+	// mismatch is real evidence about why, and it is still reported.
+	const mismatchedEdges = edges.filter(
+		(edge) => edge.directionMismatch && edge.score < WEAK_EDGE_MAX_SCORE
+	);
 	if (mismatchedEdges.length > 0) {
 		warnings.push(
 			`Direction mismatch (${edgePairText(mismatchedEdges)}): the strongest match for these expected neighbors points the other way than the 2×2 layout requires. The screenshots were likely captured at a changed orientation or zoom.`

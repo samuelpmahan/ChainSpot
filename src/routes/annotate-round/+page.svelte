@@ -12,6 +12,7 @@
 		takeRetainedEditor,
 		consumePendingHandoff,
 		getPendingHandoff,
+		subscribePendingHandoff,
 		setPendingAnnotatedRound,
 		setPendingCourseBadges
 	} from '$lib/session';
@@ -1130,13 +1131,28 @@
 		}
 	}
 
-	onMount(() => {
-		// Gated on participatesInSession so injected-editor unit tests never
-		// observe cross-test session leakage from the module-level handoff store.
+	/**
+	 * Gated on participatesInSession so injected-editor unit tests never observe
+	 * cross-test session leakage from the module-level handoff store.
+	 */
+	function readPendingHandoff(): void {
 		const handoff = participatesInSession ? getPendingHandoff() : null;
 		pendingHandoff = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+	}
+
+	onMount(() => {
+		readPendingHandoff();
+		// A handoff published while this page is already mounted — the guided
+		// demo arming a step the visitor is standing on — would otherwise never
+		// be seen, since the mount-time read above has already happened.
+		const unsubscribe = participatesInSession
+			? subscribePendingHandoff(readPendingHandoff)
+			: () => {};
 		window.addEventListener('keydown', handleAnnotationKeyDown);
-		return () => window.removeEventListener('keydown', handleAnnotationKeyDown);
+		return () => {
+			unsubscribe();
+			window.removeEventListener('keydown', handleAnnotationKeyDown);
+		};
 	});
 
 	/** Test hook: forces a re-derive after external domain actions. */

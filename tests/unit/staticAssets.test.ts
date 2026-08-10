@@ -32,6 +32,11 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
 		path: 'resources/chainspot_cv_templates/',
 		reason:
 			'CV template set + manifest.json, fetched at runtime by the basket/course-detection worker'
+	},
+	{
+		path: 'resources/demo/bill-allen/',
+		reason:
+			'guided-demo course captures + README, lazily fetched by /demo arming (see src/lib/demo/assets.ts)'
 	}
 ];
 

@@ -39,8 +39,13 @@ function rastersFor(
 	);
 }
 
-/** A minimal coherent layout whose only flaw is one edge's wrong winning direction. */
-function layoutWithOneDirectionMismatch(): AutoLayout {
+/**
+ * A minimal coherent layout whose only distinguishing feature is one edge's
+ * wrong winning direction. `requiredEdgeScore` is how well that edge matches in
+ * the orientation the 2×2 layout actually requires, which is what decides
+ * whether the mismatch is worth telling anyone about.
+ */
+function layoutWithOneDirectionMismatch(requiredEdgeScore: number): AutoLayout {
 	const directional = (
 		orientation: 'left-right' | 'top-bottom',
 		score: number
@@ -56,7 +61,7 @@ function layoutWithOneDirectionMismatch(): AutoLayout {
 	// hypothesis wins for that pair with a near-perfect score.
 	const estimates = {
 		'0>1': {
-			'left-right': directional('left-right', 0.98),
+			'left-right': directional('left-right', requiredEdgeScore),
 			'top-bottom': directional('top-bottom', 0.99),
 			orientation: 'top-bottom' as const
 		},
@@ -180,16 +185,27 @@ describe('P1-002 confidence/consistency classification (case 1)', () => {
 		const second = rastersFor(null);
 		expect(classifyLayout(await assignFour(first))).toEqual(classifyLayout(await assignFour(second)));
 
-		// A near-perfect layout whose only flaw is one expected edge's winning
-		// direction must be explicitly flagged and never ok: the assignment score
-		// (3.95) is far above any score threshold, yet the wrong-direction edge
-		// must not be trusted as a plausible placement.
-		const mismatchedLayout = layoutWithOneDirectionMismatch();
-		const mismatchedDiagnostic = classifyLayout(mismatchedLayout);
+		// A wrong winning direction on an edge that nevertheless matches strongly
+		// in the orientation the layout requires is not reported. Generous
+		// neighbor overlap is a supported capture style, and the more content two
+		// tiles share, the more readily the losing hypothesis also explains that
+		// shared region — so the careful user who overlapped most gets the tie,
+		// and warning them would cost their confidence in a placement committed
+		// from a near-perfect direct measurement they could not improve on.
+		const overlappedDiagnostic = classifyLayout(layoutWithOneDirectionMismatch(0.98));
+		expect(overlappedDiagnostic.category).toBe('ok');
+		expect(overlappedDiagnostic.warnings).toEqual([]);
+
+		// The same mismatch on an edge that is genuinely weak in the required
+		// orientation is real, actionable evidence about why that edge is weak,
+		// and is still reported alongside the weak-neighbor warning.
+		const mismatchedDiagnostic = classifyLayout(layoutWithOneDirectionMismatch(0.2));
 		expect(mismatchedDiagnostic.category).toBe('review');
-		expect(mismatchedDiagnostic.warnings.some((warning) => warning.includes('upper-left'))).toBe(
-			true
-		);
+		expect(
+			mismatchedDiagnostic.warnings.some(
+				(warning) => warning.startsWith('Direction mismatch') && warning.includes('upper-left')
+			)
+		).toBe(true);
 
 		// The same "every edge ties/repeats" imagery (x-periodic stripes, constant
 		// along y) that used to trip the dedicated ambiguity signal now also
@@ -219,10 +235,12 @@ describe('P1-002 confidence/consistency classification (case 1)', () => {
 		// Crop evidence is independent of layout confidence (the coupling was
 		// cut along with the `uncertain` category it gated on): whatever crop
 		// evidence `autoCrop.ts` finds is surfaced as-is regardless of the
-		// layout diagnostic. Very weak overlap (4%, well below the intended
-		// 20-30% band) still produces a review-category layout here (a direction
-		// mismatch on the thin bottom edge), demonstrating the crop proposal is
-		// computed and gated purely on its own evidence.
+		// layout diagnostic. These rasters overlap by only 4%, yet every expected
+		// edge still matches strongly in its required orientation, so the layout
+		// classifies ok — consistent with overlap fraction having been cut as its
+		// own signal (see the 17.5% case above). What this case demonstrates is
+		// that the crop proposal is computed and gated purely on its own
+		// evidence: identical rasters, opposite crop outcomes, same layout.
 		const uncertainOrigins = {
 			'upper-left': { x: 0, y: 0 },
 			'upper-right': { x: 192, y: 0 },
@@ -249,7 +267,7 @@ describe('P1-002 confidence/consistency classification (case 1)', () => {
 			)
 		);
 		if (!weakCrop.ok) throw new Error('expected a successful import');
-		expect(weakCrop.diagnostic.category).toBe('review');
+		expect(weakCrop.diagnostic.category).toBe('ok');
 		expect(weakCrop.cropProposal).toBeNull();
 		expect(weakCrop.crop.confidence).toBe('absent');
 
@@ -259,7 +277,7 @@ describe('P1-002 confidence/consistency classification (case 1)', () => {
 			ALL_SLOTS.map((slot) => buildGrayRaster(slot, { origin: uncertainOrigins[slot] }))
 		);
 		if (!strongCrop.ok) throw new Error('expected a successful import');
-		expect(strongCrop.diagnostic.category).toBe('review');
+		expect(strongCrop.diagnostic.category).toBe('ok');
 		expect(strongCrop.cropProposal).toEqual({ topPx: 4, rightPx: 0, bottomPx: 3, leftPx: 0 });
 		expect(strongCrop.crop.confidence).toBe('high');
 		},
