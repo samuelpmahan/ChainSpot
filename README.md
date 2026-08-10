@@ -90,6 +90,12 @@ History shortcuts (suppressed while editing a text field):
 | Delete selected point | `Delete` or `Backspace` |
 | Cancel a pending correspondence | `Escape` |
 
+## Guided walkthrough (`/demo`)
+
+`/demo` is a shareable guided tour for someone seeing ChainSpot for the first time. It is a narration layer over the real product, never a second implementation of it: each step loads real UDisc captures of a real course, hands them to the same intake paths the app's own file pickers use, and navigates to the real `/stitch-map`, `/annotate-round`, and `/create-graphics` routes. A guide rail mounted in the app layout carries the narration across those navigations and renders nothing when no tour is running.
+
+The clean basemap is deliberately not shipped as a fixture — step 3 fetches it live from the same OpenStreetMap Nominatim and USGS NAIP endpoints the product already uses. Exiting the tour leaves the loaded project fully usable, so a visitor can carry straight on with their own course. Design notes and the rules the demo holds itself to are in `docs/demo-walkthrough.md`; the dataset's provenance is in `static/resources/demo/bill-allen/README.md`.
+
 ## Stitch Map page
 
 `/stitch-map` combines four higher-zoom screenshots of one map into a single higher-detail image before either downstream stage: `/annotate-round` (UDisc source capture; `/` redirects there) or `/create-graphics` (the correspondence workflow). The workflow is intentionally a controlled 2×2 screenshot compositor:

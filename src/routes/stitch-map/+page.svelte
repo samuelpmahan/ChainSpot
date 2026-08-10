@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import Konva from 'konva';
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
 	import { dialogKeyboard } from '$lib/focusManagement';
@@ -39,6 +39,7 @@
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
+	import { takePendingStitchCaptures } from '$lib/demo/stageInbox';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
@@ -1272,6 +1273,17 @@
 	$effect(() => {
 		void loadCv().then((cv) => warmMatchTemplate(cv));
 		warmSmartStitchWorker();
+	});
+
+	onMount(() => {
+		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
+		// and navigates here. They enter through requestSmartImport — the exact
+		// entry point the "Import four screenshots" file input uses — so the
+		// arrangement a visitor watches appear is computed by the product now,
+		// never supplied by the demo. Re-run protection still applies: a session
+		// already refined by hand asks before it is replaced.
+		const captures = takePendingStitchCaptures();
+		if (captures) requestSmartImport(captures);
 	});
 
 	onDestroy(() => {
