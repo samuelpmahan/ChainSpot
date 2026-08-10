@@ -570,7 +570,7 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	await page.getByTestId('handoff-import').click();
 	await expect(sourceBanner).toBeHidden();
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
-		'upper-left-stitched.png'
+		'upper-left-stitched.png · 42 × 42'
 	);
 	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
