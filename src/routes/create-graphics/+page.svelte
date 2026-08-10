@@ -82,6 +82,8 @@
 	import { buildHoleGraphicMarkup } from '$lib/holeGraphics';
 	import { GRAPHIC_STYLE_PRESETS } from '$lib/graphics/style';
 	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
+	import { naipImageGeoReference } from '$lib/elevationProfile';
+	import type { GeoRasterReference } from '$lib/elevationProfile';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -216,6 +218,16 @@
 	}
 
 	/**
+	 * WGS84 georeference for the current target image, built fresh from the retained
+	 * center/radius -- null under the same condition `holeGraphicFeetPerPixel` returns
+	 * `undefined`, since both derive from the same NAIP-fetch-only retained geometry.
+	 */
+	function targetGeoReference(): GeoRasterReference | null {
+		if (targetGeoCenter === null || targetGeoRadiusMeters === null) return null;
+		return naipImageGeoReference(targetGeoCenter, targetGeoRadiusMeters);
+	}
+
+	/**
 	 * The graphics/export mode (style selection, per-hole plans, PNG/zip
 	 * export state) lives behind this module boundary — see
 	 * `graphicsMode.svelte.ts` for why. It reads alignment/annotation/NAIP
@@ -228,7 +240,8 @@
 		targetSize: () => targetImage(),
 		targetImageHref,
 		feetPerPixel: holeGraphicFeetPerPixel,
-		walkingPath: () => currentWalkingPath()
+		walkingPath: () => currentWalkingPath(),
+		geoReference: () => targetGeoReference()
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -330,6 +343,16 @@
 	 * distances rather than showing a wrong number.
 	 */
 	let targetGroundScaleMetersPerPixel = $state<number | null>(null);
+	/**
+	 * Center/radius of the committed target-basemap image, retained under the exact
+	 * same rule as `targetGroundScaleMetersPerPixel` above (only the radius-based NAIP
+	 * center fetch keeps its own geometry) -- powers the elevation-profile action's
+	 * WGS84 georeference. Null for an uploaded image, the exact-selection fetch, or the
+	 * tile-grid mosaic; the elevation-profile button simply doesn't render for those,
+	 * the same degrade real-distance display already uses.
+	 */
+	let targetGeoCenter = $state<GeoPoint | null>(null);
+	let targetGeoRadiusMeters = $state<number | null>(null);
 
 	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
 	let geocodeParkNameInput = $state('');
@@ -748,9 +771,13 @@
 			correspondence = cancelCorrespondence(correspondence);
 			correspondenceError = null;
 		}
-		// A replaced target-basemap invalidates any known ground scale -- only the
-		// radius-based NAIP confirm path (handleNaipConfirm) sets it back.
-		if (role === 'target-basemap') targetGroundScaleMetersPerPixel = null;
+		// A replaced target-basemap invalidates any known ground scale and geo-reference
+		// -- only the radius-based NAIP confirm path (handleNaipConfirm) sets them back.
+		if (role === 'target-basemap') {
+			targetGroundScaleMetersPerPixel = null;
+			targetGeoCenter = null;
+			targetGeoRadiusMeters = null;
+		}
 		refresh();
 	}
 
@@ -1356,6 +1383,10 @@
 			onDomainChanged('target-basemap');
 			if (radiusUsed !== null) {
 				targetGroundScaleMetersPerPixel = naipMetersPerPixel(radiusUsed, NAIP_EXPORT_SIZE_PX);
+				if (centerUsed) {
+					targetGeoCenter = centerUsed;
+					targetGeoRadiusMeters = radiusUsed;
+				}
 			}
 			// Course Library location cache write: only when this fetch's center is
 			// known and the current project actually carries Course Memory signature
@@ -2413,6 +2444,9 @@
 			{#if graphicsMode.error}
 				<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
 			{/if}
+			{#if graphicsMode.elevationError}
+				<p class="error" data-testid="elevation-profile-error" role="alert">{graphicsMode.elevationError}</p>
+			{/if}
 			{#if graphicsMode.plans.length > 0}
 				{@const href = targetImageHref()}
 				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
@@ -2431,6 +2465,24 @@
 							>
 								{graphicsMode.downloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
 							</button>
+							{#if graphicsMode.elevationEligible(plan)}
+								<button
+									type="button"
+									data-testid="elevation-profile-{plan.number}"
+									disabled={graphicsMode.elevationBuilding.has(plan.holeId)}
+									onclick={() => graphicsMode.buildAndDownloadElevation(plan)}
+								>
+									{graphicsMode.elevationBuilding.has(plan.holeId)
+										? 'Building elevation profile…'
+										: 'Elevation profile'}
+								</button>
+								{@const stats = graphicsMode.elevationStats.get(plan.holeId)}
+								{#if stats}
+									<span class="elevation-stats" data-testid="elevation-profile-stats-{plan.number}">
+										&uarr;{Math.round(stats.totalClimb)} ft &darr;{Math.round(stats.totalDescent)} ft
+									</span>
+								{/if}
+							{/if}
 						</li>
 					{/each}
 				</ul>
@@ -3037,6 +3089,11 @@
 
 	.hole-graphic-item button {
 		font-size: 0.8rem;
+	}
+
+	.elevation-stats {
+		font-size: 0.75rem;
+		opacity: 0.75;
 	}
 
 	.hole-graphic-style {
