@@ -19,7 +19,7 @@
 	import type { PendingHandoff, LabeledPoint } from '$lib/session';
 	import { importHandoffImage } from '$lib/handoffImport';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
-	import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
 	import type { HoleNumberBadgeAnchor } from '$lib/domain/project';
 	import {
 		applyLibraryEntry,
