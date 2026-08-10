@@ -58,7 +58,8 @@
 	} from '$lib/holeAnnotation';
 	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
-	import { radialWedges } from '$lib/radialMenu';
+	import RadialMenu from '$lib/components/RadialMenu.svelte';
+	import type { RadialMenuAction } from '$lib/components/RadialMenu.svelte';
 	import {
 		deriveCorridorBand,
 		deriveCorridorCenterline,
@@ -79,7 +80,7 @@
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 	import { acceptCandidate } from '$lib/cv/types';
 
-	/** Shared label text for a point kind, reused by both radial-menu wedges and the hole bar. */
+	/** Shared label text for a point kind, reused by both the radial menu's buttons and the hole bar. */
 	const POINT_KIND_LABELS: Record<HolePlacementMode, string> = {
 		tee: 'Tee',
 		basket: 'Basket',
@@ -93,11 +94,8 @@
 		bend: '↯'
 	};
 
-	/** A radial-menu wedge either places a point kind or deletes the marker that opened the menu. */
+	/** A radial-menu action either places a point kind or deletes the marker that opened the menu. */
 	type RadialAction = HolePlacementMode | 'delete';
-
-	const RADIAL_HUB_RADIUS_PX = 20;
-	const RADIAL_OUTER_RADIUS_PX = 62;
 
 	const TEE_VARIANTS: readonly TeePadVariant[] = ['gray-center', 'edge-loop', 'fused'];
 	const TEE_VARIANT_LABELS: Record<TeePadVariant, string> = {
@@ -138,13 +136,6 @@
 		at: { xPx: number; yPx: number };
 		holeId: string;
 		hitMarker: AnnotationMarkerHit | null;
-	}
-
-	/** Gesture tracking for a click on an already-open radial menu, mirroring `numberSelectDrag`. */
-	interface RadialSelectGesture {
-		action: RadialAction | null;
-		start: ScreenSpacePoint;
-		dragging: boolean;
 	}
 
 	interface Props {
@@ -235,18 +226,17 @@
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
-	let radialSelectDrag = $state<RadialSelectGesture | null>(null);
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
 
 	/**
 	 * An empty-space placement menu is tied to whichever hole was active when
 	 * it opened (`handleAnnotationPlacement` stamps `holeId: activeHoleId`) —
-	 * if the user switches holes without dismissing it first, choosing a wedge
-	 * would otherwise silently place the point on the stale hole instead of
-	 * the one now showing as active. A marker's delete menu has no such tie
-	 * (you can click any hole's marker regardless of which hole is active),
-	 * so it's deliberately left alone here.
+	 * if the user switches holes without dismissing it first, choosing an
+	 * action would otherwise silently place the point on the stale hole
+	 * instead of the one now showing as active. A marker's delete menu has no
+	 * such tie (you can click any hole's marker regardless of which hole is
+	 * active), so it's deliberately left alone here.
 	 */
 	$effect(() => {
 		if (radialMenu && radialMenu.hitMarker === null && radialMenu.holeId !== activeHoleId) {
@@ -383,9 +373,14 @@
 	}
 
 	function handleAnnotationKeyDown(event: KeyboardEvent): void {
+		// Backstop only: RadialMenu.svelte owns Escape while focus is inside it
+		// (closing itself and returning focus to the viewport). Focus is always
+		// moved into the menu on open, so this branch is normally never reached
+		// — it exists for the case that DOM focus wandered out from under the
+		// open menu by some path this file doesn't control.
 		if (event.key === 'Escape' && radialMenu) {
 			event.preventDefault();
-			radialMenu = null;
+			closeRadialMenu(radialMenu, 'escape');
 			return;
 		}
 		if (isShortcutEditableTarget(event.target)) return;
@@ -597,29 +592,17 @@
 		return actions;
 	}
 
-	/**
-	 * Which wedge (or the center hub) a click at `imagePoint` lands on, given
-	 * `menu`'s current wedge layout. `undefined` means the click fell entirely
-	 * outside the menu — the caller should treat it as an ordinary map click
-	 * instead. `null` means the hub (cancel). Mirrors `radialWedges()`'s own
-	 * angle convention so hit-testing always matches what's drawn.
-	 */
-	function radialHitTest(
-		menu: RadialMenuState,
-		imagePoint: { xPx: number; yPx: number },
-		zoom: number
-	): RadialAction | null | undefined {
-		const dx = imagePoint.xPx - menu.at.xPx;
-		const dy = imagePoint.yPx - menu.at.yPx;
-		const distancePx = Math.hypot(dx, dy) * zoom;
-		if (distancePx > RADIAL_OUTER_RADIUS_PX) return undefined;
-		if (distancePx <= RADIAL_HUB_RADIUS_PX) return null;
-		const actions = radialMenuActions(menu);
-		if (actions.length === 0) return null;
-		let angle = Math.atan2(dx, -dy);
-		if (angle < 0) angle += Math.PI * 2;
-		const index = Math.min(actions.length - 1, Math.floor((angle / (Math.PI * 2)) * actions.length));
-		return actions[index];
+	/** `radialMenuActions()`, projected into the generic button shape `RadialMenu.svelte` renders. */
+	function radialMenuButtons(menu: RadialMenuState): RadialMenuAction[] {
+		return radialMenuActions(menu).map((action) => ({
+			id: action,
+			label:
+				action === 'delete'
+					? `Delete ${menu.hitMarker ? POINT_KIND_LABELS[menu.hitMarker.kind] : ''}`
+					: POINT_KIND_LABELS[action],
+			icon: action === 'delete' ? '✕' : POINT_KIND_ICONS[action],
+			danger: action === 'delete'
+		}));
 	}
 
 	/** Whether the given map marker is the one an open delete radial menu targets, for the overlay's highlight ring. */
@@ -635,16 +618,49 @@
 		return true;
 	}
 
-	/** Applies the chosen wedge (place a point kind, or delete the marker that opened the menu) and closes the menu. */
-	function chooseRadialAction(action: RadialAction | null): void {
-		const menu = radialMenu;
+	/**
+	 * Applies the chosen action (place a point kind, or delete the marker that
+	 * opened the menu) and closes the menu, then returns focus to the viewport
+	 * so a keyboard user stays in the flow instead of losing focus to the page
+	 * body when the menu's buttons unmount. `menu` is the specific menu
+	 * instance the button belonged to — if `radialMenu` has already moved on to
+	 * a different one (e.g. a stray outside-click callback arriving after a
+	 * new menu opened), this is a no-op rather than acting on stale state.
+	 */
+	function chooseRadialAction(menu: RadialMenuState, action: RadialAction): void {
+		if (radialMenu !== menu) return;
 		radialMenu = null;
-		if (!menu || action === null) return;
 		if (action === 'delete') {
 			if (menu.hitMarker) holes = deleteMarker(holes, menu.hitMarker);
-			return;
+		} else {
+			holes = placeByMode(holes, menu.holeId, action, menu.at);
 		}
-		holes = placeByMode(holes, menu.holeId, action, menu.at);
+		focusViewport();
+	}
+
+	/** Closes `menu` if it's still the current one (see `chooseRadialAction`'s note on staleness), returning focus to the viewport on Escape. */
+	function closeRadialMenu(menu: RadialMenuState, reason: 'escape' | 'outside'): void {
+		if (radialMenu !== menu) return;
+		radialMenu = null;
+		if (reason === 'escape') focusViewport();
+	}
+
+	/**
+	 * Programmatically focuses the source-overview viewport (`tabindex="-1"`,
+	 * never in the tab order) so an accessible popover it renders above can
+	 * hand focus back on close. `preventScroll: true` matters here beyond the
+	 * usual "don't jar the user" reason: the pane is already fully in view by
+	 * construction (the click that opened the menu landed inside it), so an
+	 * unguarded `.focus()` call's default scroll-into-view would only ever
+	 * move the page, invalidating every screen coordinate a caller (or an e2e
+	 * test) computed before the menu closed.
+	 */
+	function focusViewport(): void {
+		void tick().then(() => {
+			document
+				.querySelector<HTMLElement>('[data-testid="pane-scene-source-overview"]')
+				?.focus({ preventScroll: true });
+		});
 	}
 
 	function claimAnnotationPointer(
@@ -653,15 +669,6 @@
 		view: ViewTransformState
 	): boolean {
 		if (!sourceImage()) return false;
-		if (radialMenu) {
-			const imagePoint = screenToImage(pointer, view);
-			const hit = radialHitTest(radialMenu, imagePoint, view.zoom);
-			if (hit !== undefined) {
-				radialSelectDrag = { action: hit, start: { ...pointer }, dragging: false };
-				void event;
-				return true;
-			}
-		}
 		const marker = pointHitAt(pointer, view);
 		if (marker) {
 			annotationDrag = {
@@ -688,11 +695,6 @@
 			if (distance > CLICK_SLOP_PX) numberSelectDrag.dragging = true;
 			return;
 		}
-		if (radialSelectDrag) {
-			const distance = Math.hypot(pointer.x - radialSelectDrag.start.x, pointer.y - radialSelectDrag.start.y);
-			if (distance > CLICK_SLOP_PX) radialSelectDrag.dragging = true;
-			return;
-		}
 		const drag = annotationDrag;
 		const image = sourceImage();
 		if (!drag || !image) return;
@@ -712,13 +714,6 @@
 			const { label, dragging } = numberSelectDrag;
 			numberSelectDrag = null;
 			if (!dragging) selectOrCreateHoleByNumber(label);
-			return;
-		}
-		if (radialSelectDrag) {
-			const { action, dragging } = radialSelectDrag;
-			radialSelectDrag = null;
-			if (!dragging) chooseRadialAction(action);
-			else radialMenu = null;
 			return;
 		}
 		const drag = annotationDrag;
@@ -746,7 +741,6 @@
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
 		numberSelectDrag = null;
-		radialSelectDrag = null;
 		previewHoles = null;
 	}
 
@@ -1865,39 +1859,23 @@
 					{#each basketCandidates as candidate, index (index)}
 						<circle cx={candidate.xPx} cy={candidate.yPx} r={(selectedBasketCandidate === index ? 11 : 8) / zoom} class="basket-candidate-marker" class:selected={selectedBasketCandidate === index} data-testid="basket-candidate-{index + 1}" />
 					{/each}
-					{#if radialMenu}
-						{@const menuActions = radialMenuActions(radialMenu)}
-						{@const layout = radialWedges(menuActions.length, { hubRadius: RADIAL_HUB_RADIUS_PX, outerRadius: RADIAL_OUTER_RADIUS_PX })}
-						<g
-							class="radial-menu"
-							data-testid="radial-menu"
-							transform={`translate(${radialMenu.at.xPx} ${radialMenu.at.yPx}) scale(${1 / zoom})`}
-						>
-							{#each menuActions as action, index (action)}
-								{@const wedge = layout.wedges[index]}
-								{@const label =
-									action === 'delete'
-										? `Delete ${radialMenu.hitMarker ? POINT_KIND_LABELS[radialMenu.hitMarker.kind] : ''}`
-										: POINT_KIND_LABELS[action]}
-								<path
-									d={wedge.path}
-									class="radial-wedge"
-									class:danger={action === 'delete'}
-									data-testid={`radial-wedge-${action}`}
-								>
-									<title>{label}</title>
-								</path>
-								<text x={wedge.labelX} y={wedge.labelY} text-anchor="middle" dominant-baseline="middle" class="radial-wedge-label">
-									{action === 'delete' ? '✕' : POINT_KIND_ICONS[action]}
-								</text>
-							{/each}
-							<circle r={layout.hubRadius} class="radial-hub" data-testid="radial-cancel">
-								<title>Cancel</title>
-							</circle>
-							<text text-anchor="middle" dominant-baseline="middle" class="radial-hub-label">✕</text>
-						</g>
-					{/if}
 				</svg>
+			{/snippet}
+
+			{#snippet popover({ view, paneSize })}
+				{#if radialMenu}
+					{@const menu = radialMenu}
+					{@const anchor = imageToScreen(menu.at, view)}
+					{#key `${menu.holeId}|${menu.hitMarker?.kind ?? ''}|${menu.hitMarker?.index ?? ''}|${menu.hitMarker?.shotId ?? ''}|${menu.at.xPx}|${menu.at.yPx}`}
+						<RadialMenu
+							{anchor}
+							bounds={paneSize}
+							actions={radialMenuButtons(menu)}
+							onSelect={(id) => chooseRadialAction(menu, id as RadialAction)}
+							onClose={(reason) => closeRadialMenu(menu, reason)}
+						/>
+					{/key}
+				{/if}
 			{/snippet}
 		</ImageEditorPane>
 	</div>
@@ -2761,43 +2739,6 @@
 	.bend-marker.radial-target {
 		stroke: #f87171;
 		stroke-width: 3;
-	}
-
-	.radial-menu {
-		filter: drop-shadow(0 8px 20px rgb(0 0 0 / 55%));
-	}
-
-	.radial-wedge {
-		fill: #27272a;
-		stroke: #18181b;
-		stroke-width: 2;
-		vector-effect: non-scaling-stroke;
-	}
-
-	.radial-wedge.danger {
-		fill: #7f1d1d;
-	}
-
-	.radial-wedge-label {
-		fill: #f4f4f5;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-		font-size: 1.15rem;
-		font-weight: 700;
-		pointer-events: none;
-	}
-
-	.radial-hub {
-		fill: #18181b;
-		stroke: #52525b;
-		stroke-width: 2;
-		vector-effect: non-scaling-stroke;
-	}
-
-	.radial-hub-label {
-		fill: #a1a1aa;
-		font-size: 0.85rem;
-		font-weight: 700;
-		pointer-events: none;
 	}
 
 	@media (max-width: 1180px) {

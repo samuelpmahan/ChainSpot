@@ -4,12 +4,6 @@ import Page from '../../src/routes/annotate-round/+page.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
-import { radialWedges } from '../../src/lib/radialMenu';
-
-// Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
-// +page.svelte — there is no shared export, since they're page-local tuning.
-const HUB_RADIUS_PX = 20;
-const OUTER_RADIUS_PX = 62;
 
 const NOW = () => new Date('2026-08-10T00:00:00.000Z');
 
@@ -77,11 +71,11 @@ function screenPointFor(host: HTMLElement, imageX: number, imageY: number): { x:
 	return { x: imageX * zoom + panX, y: imageY * zoom + panY };
 }
 
-/** Screen offset of a given wedge, relative to the menu's anchor point — independent of zoom by design. */
-function wedgeOffset(actionCount: number, index: number): { dx: number; dy: number } {
-	const layout = radialWedges(actionCount, { hubRadius: HUB_RADIUS_PX, outerRadius: OUTER_RADIUS_PX });
-	const wedge = layout.wedges[index];
-	return { dx: wedge.labelX, dy: wedge.labelY };
+/** Clicks the given action's button in the currently-open radial menu. */
+function clickAction(host: HTMLElement, action: string): void {
+	const button = host.querySelector<HTMLButtonElement>(`[data-testid="radial-action-${action}"]`);
+	if (!button) throw new Error(`missing radial-action-${action}`);
+	button.click();
 }
 
 async function flush(): Promise<void> {
@@ -108,7 +102,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 }
 
 describe('Annotate Round radial menu', () => {
-	it('opens on an empty-space click with a wedge per point kind not yet on the hole, and places a tee', async () => {
+	it('opens on an empty-space click with a button per point kind not yet on the hole, and places a tee', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -120,14 +114,13 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-basket"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-bend"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-tee"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-basket"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-bend"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
 
-		const teeOffset = wedgeOffset(4, 0);
-		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
+		clickAction(host, 'tee');
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
@@ -145,8 +138,7 @@ describe('Annotate Round radial menu', () => {
 		const clickAt = screenPointFor(host, 60, 60);
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
-		const teeOffset = wedgeOffset(4, 0);
-		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
+		clickAction(host, 'tee');
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
 
@@ -155,11 +147,10 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-delete"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-tee"]')).toBeNull();
 
-		const deleteOffset = wedgeOffset(1, 0);
-		dispatchClick(host, clickAt.x + deleteOffset.dx, clickAt.y + deleteOffset.dy);
+		clickAction(host, 'delete');
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
@@ -169,7 +160,7 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
-	it('dismisses without acting when the hub (cancel) is clicked', async () => {
+	it('a pointerdown outside the menu closes it without acting', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -179,7 +170,9 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 
-		dispatchClick(host, clickAt.x, clickAt.y);
+		// Outside the popover and outside the canvas entirely — a click that
+		// cannot land on any marker or the placement callback either.
+		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
@@ -211,12 +204,11 @@ describe('Annotate Round radial menu', () => {
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
 
-		// A fresh click now correctly opens a menu for hole 1, and choosing a
-		// wedge places on hole 1, not hole 2 (the stale menu's original target).
+		// A fresh click now correctly opens a menu for hole 1, and choosing an
+		// action places on hole 1, not hole 2 (the stale menu's original target).
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
-		const teeOffset = wedgeOffset(4, 0);
-		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
+		clickAction(host, 'tee');
 		await flush();
 
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
@@ -226,7 +218,7 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
-	it('Escape dismisses an open menu without acting', async () => {
+	it('Escape dismisses an open menu without acting and returns focus to the viewport', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -236,10 +228,40 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+		const menu = host.querySelector<HTMLElement>('[data-testid="radial-menu"]');
+		menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		expect(document.activeElement).toBe(scene(host));
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('the menu is a real HTML popover of accessible buttons, not an SVG group', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		const menu = host.querySelector<HTMLElement>('[data-testid="radial-menu"]');
+		expect(menu).not.toBeNull();
+		expect(menu?.tagName).toBe('DIV');
+		expect(menu?.getAttribute('role')).toBe('menu');
+
+		const teeButton = host.querySelector<HTMLButtonElement>('[data-testid="radial-action-tee"]');
+		expect(teeButton?.tagName).toBe('BUTTON');
+		expect(teeButton?.getAttribute('role')).toBe('menuitem');
+		expect(teeButton?.getAttribute('aria-label')).toBe('Tee');
+		// Roving tabindex: exactly one item is a tab stop, and focus already
+		// moved into the menu on open.
+		expect(teeButton?.getAttribute('tabindex')).toBe('0');
+		expect(document.activeElement).toBe(teeButton);
 
 		unmount(component);
 		host.remove();

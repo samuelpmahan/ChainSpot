@@ -548,7 +548,9 @@
 
 <!-- The dynamic `role` (default `application`, see the comment above `effectiveRole`)
      makes this a deliberately keyboard-operable non-native widget, matching
-     stitch-map's `alignment-workspace` wrapper (`role="group"`, same two ignores). -->
+     stitch-map's `alignment-workspace` wrapper (`role="group"`, same two ignores).
+     tabindex="0" also serves consumers that restore focus here programmatically
+     (e.g. annotate-round's radial menu returning focus on Escape). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div

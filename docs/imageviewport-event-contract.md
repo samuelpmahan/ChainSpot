@@ -234,6 +234,26 @@ own `window` listeners there and each correctly removes them in their own `onDes
 Note that stitch-map and create-graphics each mount **two `ImageViewport` instances on one page**,
 each with its own independent set of `window` listeners. This matters for **H3**.
 
+**Addendum — `ImageEditorPane`'s `popover` snippet (annotate-round's radial menu).** A second
+content slot, `popover`, renders as a *sibling* of `<ImageViewport>` inside `.canvas-shell`, not
+inside `.image-viewport` the way `content`/`overlay` do (`src/lib/components/ImageEditorPane.svelte`).
+Two consequences, both deliberate:
+
+- Its elements are never DOM descendants of `.image-viewport`, so a `pointerdown` on them never
+  reaches step **[B]** (the `isInteractiveControl` guard) at all — not because the guard's selector
+  matches real `<button>`s (it does), but because bubbling never gets that far. The guard stays
+  correct as a backstop for anything a future `content`/`overlay` consumer adds, but this popover
+  doesn't depend on it.
+- It is therefore also immune to `.image-viewport`'s `overflow: hidden`: `.canvas-shell` itself sets
+  no `overflow`, so a popover positioned in the same CSS-pixel coordinate space as `ScreenSpacePoint`
+  (`.image-viewport` fills `.canvas-shell` with no offset) can extend past the pane's edges — never
+  desired, which is why `RadialMenu.svelte` clamps itself to the pane's own size instead of relying on
+  clipping to hide overflow.
+
+The popover also relies on `.image-viewport` being programmatically focusable so it can call
+`.focus({ preventScroll: true })` on close (e.g. Escape). The container's `tabindex="0"` (from the
+keyboard contract in Part 1.7 below) satisfies this; no separate `tabindex="-1"` is needed.
+
 ### 1.7 Keyboard pan/zoom/fit, and on-canvas zoom controls
 
 **Formerly a deliberate absence (see git history for the original text of this section); closed in
@@ -338,7 +358,6 @@ button is still, in principle, visible to Konva's own `pointerdown` handler. In 
 inert — the button cluster occupies a small, fixed screen-corner region that the app's Konva scenes
 don't place interactive shapes over — but it is the same undocumented-and-unenforced order-independence
 H7 already names, now with one more instance of it, not a new hazard class.
-
 ---
 
 ## Part 2 — Hazard analysis

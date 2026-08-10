@@ -1,32 +1,13 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { radialWedges } from '../../src/lib/radialMenu';
-
-// Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
-// +page.svelte — there is no shared export, since they're page-local tuning.
-const RADIAL_HUB_RADIUS_PX = 20;
-const RADIAL_OUTER_RADIUS_PX = 62;
 
 type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
 
-/** The wedges a fresh radial menu offers for empty space, given what's already on the hole — mirrors +page.svelte's radialMenuActions(). */
-function availableKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
-	const kinds: PointKind[] = [];
-	if (!hasTee) kinds.push('tee');
-	if (!hasBasket) kinds.push('basket');
-	kinds.push('shot', 'bend');
-	return kinds;
-}
-
-/** Clicks (x, y) to open the radial menu, then clicks the wedge for `kind` among `kinds`. */
-async function placePoint(page: Page, x: number, y: number, kind: PointKind, kinds: PointKind[]): Promise<void> {
+/** Clicks (x, y) to open the radial menu, then clicks the real button for `kind`. */
+async function placePoint(page: Page, x: number, y: number, kind: PointKind): Promise<void> {
 	await page.mouse.click(x, y);
-	const layout = radialWedges(kinds.length, { hubRadius: RADIAL_HUB_RADIUS_PX, outerRadius: RADIAL_OUTER_RADIUS_PX });
-	const index = kinds.indexOf(kind);
-	if (index === -1) throw new Error(`${kind} is not offered among ${kinds.join(', ')}`);
-	const wedge = layout.wedges[index];
-	await page.mouse.click(x + wedge.labelX, y + wedge.labelY);
+	await page.getByTestId(`radial-action-${kind}`).click();
 }
 
 /**
@@ -169,10 +150,10 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	const box = await frame.boundingBox();
 	if (!box) throw new Error('annotation frame has no bounding box');
 
-	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 400, box.y + 300, 'basket', availableKinds(true, false));
-	await placePoint(page, box.x + 200, box.y + 150, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 230, box.y + 180, 'bend', availableKinds(true, true)); // one dogleg bend
+	await placePoint(page, box.x + 50, box.y + 50, 'tee');
+	await placePoint(page, box.x + 400, box.y + 300, 'basket');
+	await placePoint(page, box.x + 200, box.y + 150, 'shot');
+	await placePoint(page, box.x + 230, box.y + 180, 'bend'); // one dogleg bend
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');
