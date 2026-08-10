@@ -2519,12 +2519,32 @@
 	:global(button:focus-visible),
 	:global(input:focus-visible),
 	:global([role='button']:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
 	:global(button:disabled) {
 		cursor: not-allowed;
+	}
+
+	/* Shared sizing for the route's plain action buttons (add correspondence,
+	   undo/redo, save/open, marker toggle, geocode search) — these previously
+	   rendered as unstyled ~21px browser-default buttons, well below the
+	   ~40-44px targets used elsewhere in the app. */
+	.add-correspondence,
+	.cancel-correspondence,
+	.history-button,
+	.persistence-button,
+	.marker-toggle,
+	[data-testid='geocode-search-button'] {
+		min-height: 2.25rem;
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
 	}
 
 	.toolbar {
@@ -2636,6 +2656,7 @@
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 		margin-top: 0.5rem;
 	}
 
@@ -2676,6 +2697,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 4px;
 		background: #fff;
+		color: #1f2937;
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
@@ -3085,6 +3107,7 @@
 		align-items: center;
 		justify-content: center;
 		background: rgb(0 0 0 / 40%);
+		z-index: 50;
 	}
 
 	.dialog {
@@ -3092,6 +3115,7 @@
 		border-radius: 8px;
 		padding: 1rem 1.25rem;
 		max-width: 26rem;
+		color: #1f2937;
 	}
 
 	.dialog h2 {

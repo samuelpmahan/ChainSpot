@@ -1713,7 +1713,7 @@
 	}
 
 	.file-label:has(input:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -1927,7 +1927,7 @@
 	}
 
 	.alignment-workspace:focus-visible {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -1951,7 +1951,7 @@
 	button:focus-visible,
 	input:focus-visible,
 	input[type='range']:focus-visible {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
