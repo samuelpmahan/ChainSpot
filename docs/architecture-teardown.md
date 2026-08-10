@@ -86,10 +86,10 @@ Plus two non-pipeline routes: `/ribbon-editor` ("Ribbon Goldens" — a CV ground
 | Duplicated handoff-import banner logic (both routes) | **MERGE** | Self-documented copy-paste (`annotate-round` comment admits it) | shared helper | Low |
 | Per-detector raster + candidate types | **MERGE** | Four detectors independently converged on `{xPx,yPx,widthPx?,heightPx?,score}`; `courseGrammar`'s `CoursePointCandidate` already papers over the mismatch | one `Candidate` + `AnalysisRaster`-style input | Low — shapes already match structurally |
 | 4× `{xPx,yPx}` types, 2× `GeoPoint` | **MERGE** | Same shape, no shared base; space tracked only by naming discipline | one canonical point type (+ keep `TargetPoint` as the space-tagged exception) | Low — structural typing means no runtime change |
-| `annotatedRoundSession.active` slot | **DELETE** | Write-only; built for a future round-trip that was never built | — | None |
+| `annotatedRoundSession.active` slot | ~~DELETE~~ **KEEP** *(corrected)* | Was write-only when audited; PR #11 (Course Memory) now reads it in create-graphics to restore an in-session round | lives on in `session.ts` | — |
 | `/hole-spike` route + fixture zip + 2 dedicated specs | **DELETE** | Unlinked, zero-input spike; its SVG-overlay rendering superseded by `holeGraphics.ts` | — | None — tests exist only to keep the spike green |
 | `centerlineDetection.ts` + `centerlineGolden.ts` + `detect:centerlines` | **DELETE** (from `src/lib`) | Officially paused ("never wired into production — worker, UI, nothing"); production uses manual `corridorBends` | park remnants under `scripts/cv-probes/` if a record is wanted | Low — re-add from git if the experiment resumes |
-| `teePadDetection.ts::detectOccludedEdgeLoopCandidates` | **DELETE** | Docs call it "orphaned"; production worker never calls it | — | Low — CLI-only reachability |
+| `teePadDetection.ts::detectOccludedEdgeLoopCandidates` | ~~DELETE~~ **KEEP** *(corrected)* | The audit's "orphaned" claim was wrong: `cvCalibratedDetectors.detectCalibratedTeeGapFallbackCandidates` calls it from the production worker as the low-confidence tee gap fallback (commit `c5b5d63`) | — | Deleting it would regress live detection |
 | `smartImport.ts::smartImportFiles` (main-thread path) | **DELETE** | Route uses only the worker path; this is a parallel orchestration kept as a test convenience | tests exercise the shared pure stages (`autoCrop`/`autoLayout`) directly | Medium-low — requires test rewiring first |
 | `scripts/_prototype-*.ts` (3 files) | **DELETE** | Self-labeled failed experiments; conclusions recorded in `cv-probes/README.md` | — | None |
 | Python probes v2/v3 (`static_course_centerline*.py`) | **DELETE** (after verification) | Superseded by v4; retained only because `ribbon_centerline_experiments.py` imports them | — | Low — unpin the import first |
@@ -97,7 +97,7 @@ Plus two non-pipeline routes: `/ribbon-editor` ("Ribbon Goldens" — a CV ground
 | Root `+page.svelte` stub | **DELETE** | Unreachable (load always redirects) | — | None |
 | Ribbon editor + `ribbonGolden.ts` | **DEFER** (relocate) | Legitimate CV ground-truth authoring tool, but presented in product nav as a peer of real workflows | move out of main nav (dev/tools entry) | Low — keep the functionality; CV work still uses it |
 | `ImageEditorPane` vs `ImagePane` shell duplication | **DEFER** | Partial overlap (intake, claim wiring, discard) but real divergence; extraction is churn with little product payoff | — | Refactoring risk exceeds benefit today |
-| Per-hole presentation/style persistence (schema v4) | **DEFER** | This is Workstudio's one new concept; don't build it early | — | — |
+| Per-hole presentation/style persistence (schema v5) | **DEFER** | This is Workstudio's one new concept; don't build it early | — | — |
 | Double OpenCV WASM load (2 workers) | **DEFER** | Real, documented cost; optimizing is orthogonal to architecture | — | — |
 
 ---
@@ -157,7 +157,7 @@ flowchart TD
 | Tee / basket / corridor (bends+width) / throws / par | `AnnotatedHole` inside `ProjectState.holes` — mutated only via `ProjectEditor` + `holeAnnotation.ts` reducers | Corridor band and centerline polyline are always **derived** (`corridor.ts`); never stored |
 | CV proposals | Detector `Candidate` types, worker-side only | Never persisted; enter the domain solely through explicit `{xPx, yPx}` extraction at user-driven accept. Recommendation: formalize as `acceptCandidate(c): SourcePoint` adapters so a careless `{...candidate}` spread can never carry `score` onto a hole |
 | Image / source metadata | `ImageAsset` (id, role, dims, sha256, bundlePath) in `ProjectState`; `AnnotatedSourceImage` as the deliberately narrowed handoff copy | The narrowing is documented and one-directional — keep both |
-| Visual style | `graphics/style.ts` presets (today); a persisted per-hole/course `PresentationStyle` block in schema v4 (when Workstudio lands) | The only planned new authoritative object in the system |
+| Visual style | `graphics/style.ts` presets (today); a persisted per-hole/course `PresentationStyle` block in schema v5 (when Workstudio lands; v4 was claimed by Course Memory's badge anchors, #11) | The only planned new authoritative object in the system |
 | Transient editor state | Route-local Svelte `$state` + `correspondenceState.ts` (pending half-pair) + `ViewportController` | Correctly barred from `ProjectState` (documented and tested); keep it that way |
 | Cross-route transit | One `lib/session.ts`: pending stitched blob, pending `AnnotatedRound`, retained editors | In-memory only, cleared on reload — acceptable for a local-first SPA |
 | Persisted | `.chainspot.zip` = schema v3 JSON + original image bytes | Pixels win over normalized values on load |
@@ -233,10 +233,10 @@ What must *not* happen: a second geometry system, a second renderer, or style st
 
 **Likely removable after verification:**
 - `smartImport.ts::smartImportFiles` (rewire its two unit-test consumers to the shared pure stages first)
-- `teePadDetection.ts::detectOccludedEdgeLoopCandidates` (confirm no planned revival; it's CLI-reachable only)
+- ~~`teePadDetection.ts::detectOccludedEdgeLoopCandidates`~~ *(correction: production code — the worker's gap-recovery fallback calls it via `cvCalibratedDetectors`; keep)*
 - `scripts/cv-probes/static_course_centerline.py`, `static_course_centerline_semantic.py` (unpin `ribbon_centerline_experiments.py`'s imports first)
 - Ad-hoc scripts `gate-real-crop.mjs`, `perf-smart-import.mjs`, `probe-cv-match.mjs`, `real-capture-ground-truth.mjs`, `inspect-auto-layout-scoring.mjs` (self-labeled throwaway; keep any the team still runs)
-- `resources/centerline-golden.json`, `resources/ribbon-reference/*` (only consumers are the paused centerline tooling)
+- `resources/centerline-golden.json` *(deleted)*; `resources/ribbon-reference/*` *(correction: kept — `verify-cv-guardrails.ts` reads two of its files for the numbers guardrail)*
 
 **Still necessary (don't touch despite appearances):**
 - `cvScaleCompileGuards.ts` (compile-time-only by design), `cvRuntime.ts`/`cvRuntimeBrowser.ts` (interop shims for real bundler bugs), `static/resources/chainspot_cv_templates/` unzipped dir (fetched at runtime by the worker), `resources/GoldenTeeSet` / `GoldenBasketSet` zips and `resources/real-capture/` (regression fixtures for wired CV), the fixture-generator scripts (`generate-*.mjs`), ribbon-editor + `ribbonGolden.ts` (relocate, don't delete).
@@ -253,7 +253,7 @@ Five bounded tickets; the app is fully usable after each.
 4. **Canonicalize point types.** One `{xPx,yPx}` type (keep `TargetPoint` as the space-tagged name for post-transform space; rename `alignment`'s `PointCoordinates`); merge the two `GeoPoint`s. Mechanical, driven by `npm run check`.
 5. **Name the Graphics seam.** Inside create-graphics, isolate the graphics-mode state (plan inputs, style selection, export) behind a module boundary, and promote framing/crop to an explicit input of `planHoleGraphic` with today's behavior as default. No visual change, no new route. This is the only forward-looking step, and it is the entire Workstudio prerequisite.
 
-Then build Workstudio (new product functionality, schema v4 `PresentationStyle`) — outside this sequence.
+Then build Workstudio (new product functionality, schema v5 `PresentationStyle`; v4 was claimed by Course Memory, #11) — outside this sequence.
 
 ---
 
@@ -274,7 +274,7 @@ Then build Workstudio (new product functionality, schema v4 `PresentationStyle`)
 
 *If we implemented this simplification and wanted to build Workstudio next week, what new architectural concept would it require?*
 
-**One: a persisted `PresentationStyle` object** (style preset + per-element appearance overrides + framing) added as schema v4, edited by Workstudio, consumed by the existing `buildHoleGraphicMarkup`. Everything else Workstudio needs already exists after the migration: the geometry it reads is `AnnotatedHole` + transform (untouched), the renderer it drives is the existing markup pipeline (live preview = same SVG in the DOM), the export is the existing rasterizer, and the route slot is create-graphics' named Graphics mode. No new geometry system, no new renderer, no new session machinery.
+**One: a persisted `PresentationStyle` object** (style preset + per-element appearance overrides + framing) added as schema v5 (v4 = Course Memory badge anchors, #11), edited by Workstudio, consumed by the existing `buildHoleGraphicMarkup`. Everything else Workstudio needs already exists after the migration: the geometry it reads is `AnnotatedHole` + transform (untouched), the renderer it drives is the existing markup pipeline (live preview = same SVG in the DOM), the export is the existing rasterizer, and the route slot is create-graphics' named Graphics mode. No new geometry system, no new renderer, no new session machinery.
 
 That is as close to "almost none" as a real codebase gets.
 
@@ -283,3 +283,17 @@ That is as close to "almost none" as a real codebase gets.
 ## Appendix: preserved-principles check
 
 Every invariant the brief asked to preserve was verified present in code, none needs weakening: source-image pixels are authoritative ("pixels win" on load, tested); the CV/authoritative split is real and currently leak-free (harden per §7); manual correction is the primary path (CV is assist-only); local-first/static deployment holds (the only network calls are NAIP/USGS and Nominatim basemap acquisition — by design, not a violation); single-hole and full-course both work (`beyond 18` included); style-vs-geometry reuse already exists via presets; exports are native-resolution with no resampling; geometry (`corridor.ts`, `alignment/*`, `holeGraphics` planning) is pure and tested independently of UI.
+
+---
+
+## Post-implementation addendum (2026-08-10)
+
+The five-ticket migration was implemented on this branch (commits `b8323db`, `2bf6569`, `2f1ffcd`, `1f8f522`, `cb14eeb`), after PR #11 "Course Memory" merged (schema v3→v4, IndexedDB course library, a fourth session module — all reconciled into the tickets). Full suites green throughout: `npm run check`, unit, e2e, and both build configurations.
+
+Corrections to this document discovered during implementation (marked *(corrected)* inline above):
+
+1. **`detectOccludedEdgeLoopCandidates` is production code, not orphaned.** The gap-recovery fallback in `cvCalibratedDetectors.ts` calls it from the basket-detection worker (wired by `c5b5d63`, an ancestor of this audit's baseline). Kept.
+2. **`annotatedRoundSession.active` is no longer write-only.** Course Memory's recognition flow reads it in create-graphics. Kept (now in `session.ts`).
+3. **`resources/ribbon-reference/` is not centerline-only.** `verify-cv-guardrails.ts` reads two of its files for the numbers guardrail. Kept.
+4. **`smartImportFiles` deletion deferred by its own precondition.** Its atomicity tests depend on injectable decode hooks the worker path doesn't expose; rewiring them would have meant duplicating orchestration logic in tests, the exact outcome the ticket forbade. Kept.
+5. **Schema numbering shifted:** v4 = Course Memory badge anchors; the future Workstudio `PresentationStyle` becomes v5 (updated inline).
