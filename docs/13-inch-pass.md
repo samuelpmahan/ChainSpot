@@ -401,61 +401,105 @@ npm run test:e2e` green, and must flip the corresponding `test.fixme()` assertio
    and/or update the fixme comment with the new measured value. No geometry/behavior
    changes — CSS only; existing e2e canvas coordinate tests must stay green.
 
-### Ticket B — Annotate Round: rail default, toggle bug, Map/Round trap, target sizes
+### Ticket B — Annotate Round: canvas-first hole selection
 
-*Re-scoped 2026-08-10 against the Map/Round split; line anchors verified at `ca268e7`.*
+*Rewritten 2026-08-10 on owner design intent. This supersedes the re-scoped version,
+which solved the wrong problem. Line anchors verified at `ca268e7`.*
 
 **Files:** `src/routes/annotate-round/+page.svelte` only.
 
-1. **F3 first:** the collapsed rail (`:3840-3851`, `@media (min-width: 1181px)`) must
-   keep its toggle on-screen — hide the `h2` when collapsed or absolutely position the
-   toggle inside the 2.75rem column. Verify by hit-test, not by clicking:
-   `elementFromPoint` at the toggle centre must return the button (it currently returns
-   `null`, because at x 1339.5–1369.8 the toggle is off a 1280px viewport entirely).
-   While there, the toggle itself is **30.4×30.4** (`.diagnostics-rail-toggle`,
-   `:3819` — `min-width/min-height: 1.9rem`); take it to ≥36px.
-2. **Collapsed by default at ≤1280:** `readStoredDiagnosticsRailExpanded()` (`:370-378`)
-   — when no stored preference exists, default to collapsed if
+#### The correction
+
+The previous version of this ticket tried to rescue the out-of-frame hole bar — make
+`.hole-bar-compact` sticky, duplicate Done into it, enlarge the 18 tabs. The owner's
+stated intent is the opposite:
+
+> "I didnt want hole selectors outside the frame, they were supposed to be small
+> completion indicators for a quick check. You select a hole much more ergonomically
+> by clicking the hole number."
+
+So the hole bar is **not** the selector and should not be engineered into one. The
+selector is the hole number **on the image** — already implemented via
+`numberCandidateHitAt` (`:736`) and `numberSelectDrag` (`:1107`), claimed through
+`claimAnnotationPointer` before placement, exactly like the tee/basket candidates.
+`.hole-indicators` (`:3314`) is **status, not a target**: it answers "which holes are
+done" at a glance and is never the thing you aim at.
+
+Getting this right dissolves the scroll trap instead of working around it. If you do
+not need the hole bar mid-annotation, it does not matter that it scrolls away.
+
+#### Blocking dependency — read before starting
+
+`numberCandidateHitAt:741` is `if (candidate.label === undefined) continue;` — **only
+*labeled* badges are clickable.** On the shipped demo dataset 0 of 18 badges are
+labeled, so on that data canvas hole selection does not work at all and the hole bar is
+the only way to change holes. **This ticket cannot be finished, or honestly demoed,
+until badge labeling produces labels on the demo dataset** (see the 0-ready CV
+investigation). Do the parts below that stand alone; do not fake a selector that has no
+labels behind it, and do not delete the hole bar until the canvas path actually works.
+
+#### The work
+
+1. **Collapsed rail toggle is off-screen (do this first, it is a plain bug).** The
+   collapsed rail (`:3840-3851`, `@media (min-width: 1181px)`) puts its toggle at
+   x 1339.5–1369.8 — past the right edge of a 1280px viewport. `elementFromPoint` at the
+   toggle centre returns `null`: collapse the rail and you cannot re-open it. Hide the
+   `h2` when collapsed, or absolutely position the toggle inside the 2.75rem column.
+   Verify by hit-test, not by clicking (Playwright auto-scrolls and will hide this). The
+   toggle is also **30.4×30.4** (`.diagnostics-rail-toggle`, `:3819`); take it to ≥36px.
+2. **Then default the rail collapsed at ≤1280.** `readStoredDiagnosticsRailExpanded()`
+   (`:370-378`): with no stored preference, default collapsed when
    `window.innerWidth <= 1280`; a stored preference always wins. Auto-expand (without
-   writing the preference) when a course-detection result lands.
-3. **F2, now a three-row trap:** the mode toggle (`.mode-toggle`, `:2748`) sits between
-   the header and the hole bar, so with the canvas in view (scrollY 457) the hole bar
-   ends at −82, the compact row at −203, **the Map/Round toggle at −274** and Done at
-   −346.8. Make `.hole-bar-compact` (`:3233`) sticky (`top: 0`, above the pane) so
-   ‹/current/› is always available; the full 18-tab grid may scroll away. The sticky row
-   must also carry **Done and the Map/Round toggle** (or compact equivalents): switching
-   activity mid-round is now as common as switching hole, and both are currently a
-   ~330–460px scroll round trip. At 1152 the same round trip is ~1000px.
-4. **Targets and text (F4, M7, M12, M13).** All of these are one pass over the same
-   file, and the *pointer* geometry matters more than the DOM geometry:
-   - Ordinary markers (tee/basket/bend/shot/walk) are hit-tested at
-     `MARKER_HIT_RADIUS_PX = 12` screen px (`:125`, used by `pointHitAt` `:708`) — a
-     24×24 effective target in **both** modes. Take it to ≥18 (36px effective).
+   writing the preference) when a course-detection result lands. Gated behind item 1 —
+   shipping this first would strand users in a rail they cannot reopen. Worth it: the
+   canvas goes from 49.8% to 71.4% of the viewport width.
+3. **Make the on-image hole number a first-class selector.** The mechanism exists; what
+   is missing is that it does not *look* selectable and gives no feedback.
+   - Labeled badges need a visible affordance — hover/focus state, and a clear
+     indication of which badge is the active hole.
+   - Keyboard parity: a labeled badge must be reachable and activatable without a
+     pointer, since the hole bar stops being the primary path.
+   - The badge hit radius (`:744-747`,
+     `max(MARKER_HIT_RADIUS_PX, (max(w,h)/2) * zoom + 10)`) is already generous; leave
+     it alone unless measurement says otherwise.
+4. **Demote the hole bar to what the owner intended.** Keep the 18-tab grid as
+   completion status and a fallback selector — it must remain usable and accessible, and
+   it is the only path when badges are unlabeled (see the dependency above). Do not make
+   it sticky and do not duplicate ‹/current/› into a sticky row. `.hole-indicators` stays
+   small: it is status. It is currently **9.9px**, which is too small to *read* — raise
+   it to a legible size without turning it into a 36px target. Do not confuse
+   "legible" with "tappable" here.
+5. **Done and the Map/Round toggle still need to be reachable.** These are not hole
+   selection and the redesign does not address them. With the canvas in view (scrollY
+   457) the Map/Round toggle sits at −274 and Done at −346.8; at 1152 the round trip is
+   ~1000px. Switching activity mid-round is now as common as switching hole. Keep these
+   two — and only these two — persistently reachable, on-canvas or in a slim persistent
+   affordance. This is the one piece of the old sticky-row idea worth keeping.
+6. **Pointer targets on the canvas matter more now, not less.**
+   - Ordinary markers (tee/basket/bend/shot/walk) hit-test at `MARKER_HIT_RADIUS_PX = 12`
+     screen px (`:125`, used by `pointHitAt` `:708`) — 24×24 effective in both modes.
+     Take it to ≥18 (36px effective).
    - CV candidates: `courseCandidateHitAt` (`:775`) uses
-     `Math.max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom)`, so on the real stitched map
-     (fit zoom 0.17) tee and basket candidates are also 24px effective, while their DOM
-     markers draw at **2.2–9.3px** (tee) and 16×16 (basket). Raising the shared constant
-     fixes the hit area; give the markers an invisible screen-space hit circle too, so
-     what the eye aims at and what the pointer hits are the same thing.
-   - Confirm-chip cancel ≥36px; strip/chip/button text ≥13px (0.8125rem) — measured
-     12.5px on the strip, 12px on the chip buttons.
-   - New chrome from the split: `.mode-toggle-hint` (`:2783`) is **11.5px** and
-     `.hole-indicators` (`:3314`) **9.9px**; both are user-facing text under the 13px
-     budget (the indicators have an `sr-only` equivalent, but sighted users read the
-     glyphs).
-   - The handoff banner's Import button is still **143.4×21px** (`.handoff-actions`,
-     `:2852`); give it `min-height: 36px`.
-   - Add an ✕ dismiss to the summary chip that nulls only the chip visibility, not
+     `max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom)`, so at fit zoom (0.17) tee and
+     basket candidates are also 24px effective while drawing at **2.2–9.3px** (tee) and
+     16×16 (basket). Raising the shared constant fixes the hit area; give the markers an
+     invisible screen-space hit circle too, so what the eye aims at and what the pointer
+     hits are the same thing.
+   - Confirm-chip cancel ≥36px; strip/chip/button text ≥13px (measured 12.5px on the
+     strip, 12px on the chip buttons). `.mode-toggle-hint` (`:2783`) is **11.5px**.
+   - The handoff banner's Import button is **143.4×21px** (`.handoff-actions`, `:2852`);
+     give it `min-height: 36px`.
+   - Add an ✕ dismiss to the summary chip that nulls only chip visibility, not
      `courseDetection`.
-5. Flip the corresponding fixmes in `viewportBudget.spec.ts`: the two
-   `hole navigation and the mode toggle stay reachable` cases (one per mode), the
-   collapsed-rail toggle case, `an existing marker is a ≥36px pointer target`, and the
-   expanded-width case if the rail default change makes the default state pass.
-   Existing specs pinning `aria-expanded` defaults
-   (`tests/e2e/annotateRound.spec.ts:123-143`) run at 1280×720 — coordinate: that test
-   asserts default-expanded; it will need its expectation updated to the new
-   width-aware default (do it in the same PR, it is testing the exact behavior this
-   ticket changes).
+7. **Specs.** Flip the fixmes in `viewportBudget.spec.ts` that this work actually fixes:
+   the collapsed-rail toggle case, `an existing marker is a ≥36px pointer target`, and
+   the expanded-width case if the rail default makes the default state pass. The two
+   `hole navigation and the mode toggle stay reachable` cases now measure the wrong
+   thing — the hole bar is *allowed* to scroll away. Rewrite them against item 5: Done
+   and the Map/Round toggle stay reachable with the canvas in view, and a labeled badge
+   is clickable at the fit zoom. `tests/e2e/annotateRound.spec.ts:123-143` pins
+   `aria-expanded` defaults at 1280×720 and asserts default-expanded; update it in the
+   same change, since it tests exactly the behavior item 2 alters.
 
 ### Ticket C — ImageEditorPane grid: canvas width share and height cap
 
