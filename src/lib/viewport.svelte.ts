@@ -121,6 +121,16 @@ export class ViewportController {
 		this.view = zoomAtPointer(this.view, pointer, zoomFactor, this.zoomLimits());
 	}
 
+	/** The viewport's own center, in container-local CSS pixels — the anchor for keyboard zoom and the on-canvas zoom buttons (neither has a pointer position to anchor on). */
+	centerPoint(): ScreenSpacePoint {
+		return { x: this.size.width / 2, y: this.size.height / 2 };
+	}
+
+	/** Zoom about the viewport center (limits from `zoomLimits`, same clamp as `zoomAtPointer`). */
+	zoomAtCenter(zoomFactor: number): void {
+		this.zoomAtPointer(this.centerPoint(), zoomFactor);
+	}
+
 	/** Background drag-pan in CSS-pixel screen space, retaining zoom. */
 	panBy(deltaX: number, deltaY: number): void {
 		this.view = panBy(this.view, deltaX, deltaY);

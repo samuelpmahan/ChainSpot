@@ -165,7 +165,11 @@ highest-priority gesture in the component.
 | **Wheel / trackpad two-finger scroll** | container `wheel` | n/a | **Yes**, whenever a fit target exists and the normalized delta is nonzero | n/a | Pans (`-dx, -dy`) | none | **Explicitly `{ passive: false }`** |
 | **ctrl+wheel / meta+wheel (trackpad pinch, Cmd+scroll)** | container `wheel` | n/a | Same as above | n/a | Zooms at the pointer, gained by `PINCH_GAIN` | none | `{ passive: false }` |
 | **Wheel with no `controller.fitTarget`** | container `wheel` | n/a | **No — event escapes entirely** | n/a | No | none | — (see **H5**) |
-| **Keyboard** | **nothing** | — | — | — | — | — | — |
+| **Keyboard, viewport focused, no modifier** | container `keydown` | n/a | **Yes**, for Arrow/`+`/`=`/`-`/`_`/`0`; no-op for anything else | n/a | Arrow keys pan; `0` fits | none | n/a |
+| **Keyboard, viewport focused, `Cmd`/`Ctrl` held** | container `keydown` | n/a | **Yes**, same as above — this is what blocks the browser's native page-zoom while focused | n/a | `+`/`-`/`0` zoom/fit same as unmodified | none | n/a |
+| **Keyboard, event target is a focusable descendant (not the container itself)** | container `keydown` (bubbled) | n/a | **No — handler bails via `event.target !== event.currentTarget`** | n/a | No | none | n/a |
+| **Keyboard, viewport not focused** | **nothing reaches this component** | — | — | — | — | — | — |
+| **Click/tap on an on-canvas zoom/fit button** | container `pointerdown`, same as any `content` control | **No** | **No** | **No** | No | none | — (same row as the `button, a[href], input, select, textarea, label` case above — these are that case) |
 
 ### 1.4 The `claimPointer` protocol — what it promises and what it does not
 
@@ -230,15 +234,110 @@ own `window` listeners there and each correctly removes them in their own `onDes
 Note that stitch-map and create-graphics each mount **two `ImageViewport` instances on one page**,
 each with its own independent set of `window` listeners. This matters for **H3**.
 
-### 1.7 Keyboard: a deliberate absence
+### 1.7 Keyboard pan/zoom/fit, and on-canvas zoom controls
 
-The container has no `tabindex`, no key handlers, and (in `ImagePane`/`ImageEditorPane`)
-`role="img"` — it is not focusable and cannot be operated from a keyboard at all. Pan and zoom are
-pointer-only. Consumers supply their own keyboard affordances where they exist: stitch-map wraps the
-alignment viewport in a focusable `role="group"` whose Arrow keys nudge the *selected tile* (not the
-view), ribbon-editor offers zoom buttons, both panes offer Fit/Reset buttons. **There is no keyboard
-path to pan or zoom anywhere in the app.** This is a WCAG 2.1.1 gap, not a bug in the arbitration
-logic, and it is recorded here so it stops being rediscovered.
+**Formerly a deliberate absence (see git history for the original text of this section); closed in
+this commit.** The container is now unconditionally `tabindex="0"` and carries an `onkeydown` handler
+(`ImageViewport.svelte`'s `onKeyDown`), so every consumer gets a keyboard path to pan, zoom, and fit
+with zero changes on its part — the whole point of putting this in the shared component rather than
+in five separate consumers. A small on-canvas button cluster (zoom-in/zoom-out/fit) is rendered inside
+the same container, also with no consumer-side changes required.
+
+**Keys, while the viewport itself has focus** (see the target/currentTarget scoping below):
+
+| Key | Action | Notes |
+|---|---|---|
+| `ArrowLeft` / `ArrowRight` / `ArrowUp` / `ArrowDown` | Pan by `KEYBOARD_PAN_STEP_PX` (40px) | Same sign convention as the wheel pan (`onWheel`'s `panBy(-dx, -dy)`): Down/Right behave like scrolling down/right — content shifts up/left, revealing what's below/to the right. |
+| `Shift+Arrow*` | Pan by `KEYBOARD_PAN_STEP_PX * KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER` (200px) | Larger step, same direction. |
+| `+` / `=` | Zoom in about the **viewport center** by `KEYBOARD_ZOOM_STEP_FACTOR` (1.25×) | Center, not pointer — keyboard input has no pointer position to anchor on. Clamped by `zoomLimits()` (`zoomLimitsForFit`), identical to wheel/pinch zoom. |
+| `-` / `_` | Zoom out about the viewport center by `1 / KEYBOARD_ZOOM_STEP_FACTOR` (0.8×) | Reciprocal of zoom-in, so a `+` then a `-` returns to the exact original zoom. |
+| `0` | `controller.fit()` | No-op without a `fitTarget`. |
+| `Cmd/Ctrl` held with any of the above | Same action, **and** `preventDefault()` still fires | See the focus-scoping rule below — this is what stops the browser's own page-zoom. |
+
+All constants (`KEYBOARD_PAN_STEP_PX`, `KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER`, `KEYBOARD_ZOOM_STEP_FACTOR`)
+live in `src/lib/navigation.ts` alongside the wheel/pinch constants they parallel.
+
+**Focus and `preventDefault()` scoping (Figma/Google Maps convention).** `onKeyDown` calls
+`event.preventDefault()` for every key it recognizes — unconditionally, including when `Cmd`/`Ctrl` is
+held and including when `controller.fitTarget` is `null` (only the actual pan/zoom/fit *action* is
+skipped without a target; the prevention still happens). This is what stops `Cmd/Ctrl+Plus`,
+`Cmd/Ctrl+Minus`, and `Cmd/Ctrl+0` from triggering the browser's native page-zoom while a viewport is
+focused. The scoping mechanism is exactly focus: `onKeyDown` is bound directly on this container
+(`onkeydown` in the template, not a delegated/global listener), so it only ever runs for a keydown
+whose target is this element or a descendant — and when the target is a *focusable descendant*
+(the one case in this codebase: the empty-state "Choose image" `<button>` some consumers render inside
+`content`), the handler bails via `event.target !== event.currentTarget` and does nothing, native
+button behavior included. **Consequence: browser zoom behaves normally everywhere else on the
+page — every other viewport that doesn't have focus, and the page outside any viewport.** This
+mirrors — deliberately, down to the exact guard expression — stitch-map's pre-existing
+`handleAlignmentKeyDown`, which already uses `event.target !== event.currentTarget` to scope its
+Arrow-key tile-nudge to its own `role="group"` wrapper. Because the two nest (the alignment viewport's
+`ImageViewport` is a DOM descendant of that wrapper) and both use the identical guard, they compose
+without any change to stitch-map: focus the outer wrapper and Arrow keys nudge the selected tile; Tab
+once more into the inner viewport and Arrow keys pan the view instead — never both from one keypress.
+
+**Role: `application` by default, not `img`.** A `role="img"` element is documented to assistive
+technology as static, non-interactive content — the opposite of what this component now is, and with
+no guarantee a screen reader's browse mode even forwards Arrow keys to the page instead of consuming
+them for its own virtual-cursor navigation. `role="application"` is the standard technique for exactly
+this case (Google Maps' and Figma's canvases both use it): it tells the browser/AT to stop intercepting
+keys for browse-mode navigation and deliver them to the page, which is a precondition for the Arrow-key
+pan above to reach a screen reader user at all. This was chosen over the alternative the task allowed
+(`aria-roledescription` alone, keeping `role="img"`) because `aria-roledescription` only changes the
+*announced name* of a role, not the AT's navigation-mode behavior — it would leave real screen-reader
+users unable to reach the keyboard handler, defeating the point.
+
+The component computes `role ?? 'application'` — an explicit `role` prop still wins. **Three existing
+callers pass `role="img"` explicitly and are out of this change's reach** (owned by other in-flight
+work at the time of this commit): `ImagePane.svelte`, `ImageEditorPane.svelte`, and
+`routes/ribbon-editor/+page.svelte`. Their viewports keep `role="img"` — and, not incidentally, that is
+exactly what two of them are pinned to by `tests/e2e/accessibility.spec.ts` (`toHaveAttribute('role',
+'img')` at two call sites), which is the other reason the component honors an explicit override rather
+than forcing its own default. Sighted keyboard users get full pan/zoom regardless of which role is
+active, since `tabindex`/`onkeydown` function identically under any role value — only the screen-reader
+navigation-mode behavior differs. `stitch-map/+page.svelte`'s two viewports pass no `role` at all today
+and so pick up the new `application` default automatically. As a second, role-independent layer that
+helps even the three `img`-pinned consumers, the component also sets `aria-roledescription="zoomable
+image viewport"` unconditionally, regardless of which `role` is in effect — this only changes the
+announced role name, so it composes safely with any of the above. Migrating the three fixed-role
+consumers to drop their `role` override (or set it to `application` themselves) is a follow-up for
+whichever agent next owns those files; nothing in this component blocks it.
+
+**`aria-label` always names the keys, regardless of what a consumer passes.** The rendered
+`aria-label` is `${ariaLabel} ${KEYBOARD_HINT}` when a consumer supplies one, or
+`Image viewport. ${KEYBOARD_HINT}` when it doesn't — `KEYBOARD_HINT` is a fixed string ("Arrow keys
+pan, hold Shift to pan further. Plus or minus zoom. 0 fits the image.") appended unconditionally inside
+`ImageViewport` itself. Like the `aria-roledescription` above, this is a second mechanism chosen
+specifically so the keyboard contract is announced even for the three consumers whose own `ariaLabel`
+text (written before this change) doesn't mention it and that this change cannot edit.
+
+**On-canvas zoom controls.** A `<div class="viewport-controls">` renders inside the same container,
+after `{@render content()}`, containing three real `<button type="button">` elements —
+`data-testid="viewport-zoom-in"`, `"viewport-zoom-out"`, `"viewport-zoom-fit"` — positioned
+`position: absolute; right: 8px; bottom: 8px` with `min-width`/`min-height: 2.25rem` (WCAG 2.5.5-sized
+targets), dark-panel styling matching the rest of the app (`background: #27272a`, `border: 1px solid
+#52525b`, matching e.g. `ImageEditorPane`'s own `button { }` rule), and `#38bdf8` focus rings via
+`:focus-visible` matching every other focus ring in the app. `zoom-in`/`zoom-out` call the exact same
+`zoomAboutCenter` helper `+`/`-` use (same `KEYBOARD_ZOOM_STEP_FACTOR`, same center anchor, same
+`zoomLimits()` clamp); `fit` calls `controller.fit()` directly. **The whole cluster is wrapped in
+`{#if controller.fitTarget}`** so it disappears exactly when there is no image to operate on — no
+`showControls` prop was needed; hiding falls out of state that already exists.
+
+Because these are real `<button>` elements, `isInteractiveControl`'s existing selector
+(`target.closest('button, a[href], input, select, textarea, label')`, the f38b13c guard — see §1.2
+step **[B]**) already exempts them from pointer-gesture handling with zero changes: a pointerdown that
+starts on one of these buttons is never added to `activePointers`, never captured, never
+`preventDefault`ed, and native `click` reaches the button's own `onclick` exactly as it does for the
+pre-existing empty-state "Choose image" button inside `content`. This was verified by reading the guard
+rather than assumed — the selector matches on the `button` tag alone, independent of where in the DOM
+subtree the button sits, so it applies equally to a button rendered by `content` and one rendered by
+`ImageViewport` itself, as here. One acknowledged, pre-existing latent interaction (same category as
+H7): for `ImagePane` and stitch-map, Konva's `Stage` is bound to this *same* container element and does
+its own coordinate-based hit-testing independent of the DOM click target, so a click that lands on the
+button is still, in principle, visible to Konva's own `pointerdown` handler. In practice this is
+inert — the button cluster occupies a small, fixed screen-corner region that the app's Konva scenes
+don't place interactive shapes over — but it is the same undocumented-and-unenforced order-independence
+H7 already names, now with one more instance of it, not a new hazard class.
 
 ---
 
@@ -670,13 +769,17 @@ One per shipped-bug class, one per new hazard closed. All are unit tests in the 
 
 | Thing | Location |
 |---|---|
-| `onPointerDown` decision tree | `src/lib/components/ImageViewport.svelte:170-226` |
-| `cc7924e` mouse/touch `preventDefault` comment | `src/lib/components/ImageViewport.svelte:196-208` |
-| `f38b13c` interactive-control guard | `src/lib/components/ImageViewport.svelte:156-172` |
-| `fb51c7a` wheel model | `src/lib/components/ImageViewport.svelte:130-154` |
-| Pinch anchor / re-anchor | `src/lib/components/ImageViewport.svelte:228-274` |
-| Teardown | `src/lib/components/ImageViewport.svelte:345-411` |
-| Container listener registration | `src/lib/components/ImageViewport.svelte:377-397` |
+| `onPointerDown` decision tree | `src/lib/components/ImageViewport.svelte:288-348` |
+| `cc7924e` mouse/touch `preventDefault` comment | `src/lib/components/ImageViewport.svelte:317-330` |
+| `f38b13c` interactive-control guard | `src/lib/components/ImageViewport.svelte:274-286` |
+| `fb51c7a` wheel model | `src/lib/components/ImageViewport.svelte:162-186` |
+| `onKeyDown` (keyboard pan/zoom/fit; role/aria-label computation is above it, `:84-98`) | `src/lib/components/ImageViewport.svelte:205-272` |
+| On-canvas zoom controls (`zoomAboutCenter`/`handleZoomInClick`/`handleZoomOutClick`/`handleFitClick`, markup) | `src/lib/components/ImageViewport.svelte:188-203, 565-608` |
+| Keyboard pan/zoom step constants | `src/lib/navigation.ts` (`KEYBOARD_PAN_STEP_PX`, `KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER`, `KEYBOARD_ZOOM_STEP_FACTOR`) |
+| `ViewportController.centerPoint`/`zoomAtCenter` | `src/lib/viewport.svelte.ts` |
+| Pinch anchor / re-anchor | `src/lib/components/ImageViewport.svelte:350-396` |
+| Teardown | `src/lib/components/ImageViewport.svelte:486-546` |
+| Container listener registration | `src/lib/components/ImageViewport.svelte:512-532` |
 | `CLICK_SLOP_PX` | `src/lib/viewport.svelte.ts:30` |
 | `ImagePane` marker claim (own window listeners) | `src/lib/components/ImagePane.svelte:219-237` |
 | stitch-map tile claim (own window listeners) | `src/routes/stitch-map/+page.svelte:756-777` |
@@ -684,7 +787,11 @@ One per shipped-bug class, one per new hazard closed. All are unit tests in the 
 | Konva crop-handle drag callbacks / `cropDragActive` | `src/routes/stitch-map/+page.svelte:1096-1109` |
 | ribbon-editor claim (viewport plumbing) | `src/routes/ribbon-editor/+page.svelte:147-205` |
 | annotate-round claim (viewport plumbing) | `src/routes/annotate-round/+page.svelte:624-725` |
+| stitch-map's pre-existing `event.target !== event.currentTarget` scoping (the pattern `onKeyDown` mirrors) | `src/routes/stitch-map/+page.svelte:630-656` (`handleAlignmentKeyDown`) |
 | Pinch tests | `tests/unit/imageViewportPinchZoom.test.ts` |
+| Keyboard pan/zoom/fit + on-canvas control tests | `tests/unit/imageViewportKeyboard.test.ts` |
 | Wheel + lifecycle tests | `tests/unit/paneNavigation.test.ts:461-570` |
 | Crop-handle drag e2e (bug #1) | `tests/e2e/stitchMap.spec.ts:292-305` |
 | Inline choose-button e2e (bug #3) | `tests/e2e/annotateRound.spec.ts:83-84` |
+| On-canvas zoom controls + keyboard pan/zoom/fit e2e | `tests/e2e/ribbonEditor.spec.ts` (viewport keyboard/controls tests) |
+| `role="img"` pin for the two consumers this change cannot edit | `tests/e2e/accessibility.spec.ts:124, 156-157` |
