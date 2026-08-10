@@ -21,6 +21,13 @@ traps; 4) targets ≥36px, text ≥13px, dialogs contained; 5) demo rail must no
 critical controls at 1280; 6) CV status strip and review chip visible with the
 candidates they describe.
 
+> **Re-audit note.** Annotate Round has since been split into **Map mode** and **Round
+> mode**, and `/demo` is now the two-act "Dash's Track" walkthrough. Rows 1–10 and
+> 21–22 of the scorecard below, and Tickets B and C, were **re-measured at commit
+> `ca268e7` on 2026-08-10** — see [Re-audit](#re-audit--mapround-split-and-the-two-act-demo-2026-08-10-commit-ca268e7).
+> Rows 11–20 (stitch-map, create-graphics) and Tickets A and D were **not** re-measured;
+> their numbers below stand as first measured.
+
 ---
 
 ## Headline verdict
@@ -94,6 +101,118 @@ Mostly the same shape, two differences worth knowing:
   bar and the canvas, so with the canvas in view the hole bar is at −654px and Detect
   at −297px. Only the on-canvas zoom/fit cluster remains reachable. Acceptable as
   "graceful degradation" only because of those on-canvas controls.
+
+---
+
+## Re-audit — Map/Round split and the two-act demo (2026-08-10, commit `ca268e7`)
+
+*Scope: `/annotate-round` (both modes) and `/demo` only. Stitch Map and Create
+Graphics were not re-measured; their rows above stand. Method is unchanged from the
+original pass — the real app on a dev server, driven by Playwright/Chromium at the
+same three viewports, every number a `getBoundingClientRect` from a live session.
+Three commits landed since the original pass: the native-resolution crop boundary fix
+(`4a33dad`), map/round radial menu action coverage (`66b911b`), and simplified
+assigned hole labels (`ca268e7`).*
+
+**What was driven.** (a) `/annotate-round` with a source loaded, in Map and Round mode,
+rail expanded and collapsed, empty and with a hole selected; (b) the demo's own act-1
+path end to end — four real Dash's Track captures → Smart Import ("Export is ready")
+→ "Use as UDisc source" → Annotate Round → a real **"Detect full course"** run (37s
+wall clock at 1280, no mocking) for the CV surfaces and candidate targets; (c) the
+demo rail on every route it rides, at all three viewports, expanded and collapsed.
+
+**What was not measured, and why.** The NAIP/Nominatim basemap steps (live network,
+out of scope for a viewport pass and unchanged from row 17); the `kind: 'reload'` step
+(a real `window.location.assign`, deliberately not driven here); and the Round-mode
+auto-switch the step-5 narration promises — it is gated on the "Recognized course →
+Import saved holes" path, which needs a Course Memory entry written by step 2's Done,
+and this run entered step 5 directly. With the played-round capture imported at step
+5, the toggle measured `aria-pressed="false"` (Map mode). That is expected for a
+direct entry, **not** evidence the narration is wrong; a full 1→6 sequential run was
+not performed. Round-mode *geometry* was measured directly on the route instead.
+
+### Annotate Round at 1280×715 — Map mode
+
+| # | Item | Grade | Key numbers (baseline → now) |
+|---|---|---|---|
+| M1 | Canvas, rail **expanded** (default) | **FAILING** | 638px = **49.8%** (unchanged) |
+| M2 | Canvas, rail **collapsed** | PASS | 914px = **71.4%**; 640px tall empty, **793.6px** with a hole selected |
+| M3 | Hole bar / Done / mode toggle mid-task | **FAILING, worse** | canvas in view now needs scrollY **457** (was 310): hole bar bottom **−82** (was −7), compact ‹/›/label row **−203**, **mode toggle −274**, Done **−346.8** (was −200) |
+| M4 | On-canvas zoom cluster with a hole selected | **FAILING (new)** | canvas cell 793.6px > 715px viewport ⇒ all three buttons at y 744.6–780.6, **entirely below the fold**. With no hole selected they sit at 666–702 and pass |
+| M5 | Collapsed-rail re-expand toggle | **FAILING** | x **1339.5–1369.8** on a 1280 viewport; `elementFromPoint` at its centre returns **null** (off-viewport); rail `scrollWidth` 150 vs `clientWidth` 57; toggle itself **30.4×30.4** (budget ≥36) |
+| M6 | Radial menu (Map) | PASS | exactly `tee`/`basket`/`bend`, each **44×44**, fully inside the viewport at all three sizes |
+| M7 | Existing-marker pointer target | **FAILING (new)** | `MARKER_HIT_RADIUS_PX = 12` in *screen* space — probed empirically: 12px away re-opens the marker menu, 13px away opens the placement menu ⇒ **24×24 effective target**; drawn marker 14×14 |
+| M8 | CV candidate targets (real detection) | **FAILING** | 18 tee candidates **2.2×2.8 … 9.3×9.2**, 15 basket candidates **16×16**, 16 number badges **53.4×22.3**. Effective *pointer* radius is 12px for tee/basket ⇒ **24px**, not 9px — the DOM marker is smaller than the hit area, and both are under 36px |
+| M9 | CV status strip | PASS* | **239.4×33** at (317, 233), on-canvas with the map; *12.5px text (budget ≥13px) |
+| M10 | CV review chip | PASS* | **352×135.9**; buttons 96.6×36 and 133.3×36; *12px button text, *still no dismiss control |
+| M11 | Hole bar targets | PASS | tab **63×44**, Add hole 106.3×44, "+" beyond-18 44×44, compact ‹/› **44×46** |
+| M12 | Map/Round toggle (new chrome) | PASS* | buttons **117.5×44**, group 265.2×55.6; *hint text **11.5px**, hole-tab indicator glyphs **9.9px** |
+| M13 | Handoff Import button | **FAILING (target)** | **143.4×21px** — unchanged from row 10 |
+
+### Annotate Round at 1280×715 — Round mode
+
+Round mode is the same route and the same pane, and every geometry number above is
+**identical** in it (canvas 638/914, scrollY 457, hole bar −82, toggle x 1339.5, page
+1268px tall). The measured differences are the ones the mode is *for*:
+
+| # | Item | Grade | Key numbers |
+|---|---|---|---|
+| R1 | Radial menu with a hole active | PASS | exactly `shot`/`walk`, **44×44**, contained at all three viewports |
+| R2 | Radial menu with **no** hole selected | PASS | exactly `walk`, 44×44, contained — the walk path deliberately needs no hole, so it stays reachable in the one state where nothing else is |
+| R3 | Marker hit-testing is mode-scoped | (contract) | Map mode hit-tests tee/basket/bend only, Round mode shot/walk only; both share the same 12px screen radius as M7 |
+| R4 | Canvas / hole bar / rail | same as M1–M5 | measured separately in Round mode, no divergence |
+
+### 1440×815 and 1152×650
+
+- **1440×815:** canvas 798px = **55.4%** expanded, 1074px = 74.6% collapsed (both
+  unchanged). The M4 failure does **not** occur here — the 793.6px canvas cell fits
+  the taller viewport, so the zoom cluster stays at y 765.6–801.6, inside. The trap is
+  the same shape but shallower: at scrollY 436 the hole bar ends at −61, mode toggle
+  −253, Done −325.8. Collapsed-rail toggle equally unreachable (x 1499.5).
+- **1152×650:** still no horizontal overflow, still the ≤1180px single-column layout —
+  canvas 1126px = 97.7% wide, 640px = 98.5% tall, and the collapsed-rail toggle
+  becomes reachable (`elementFromPoint` returns the button). The trap is much worse
+  than at the original pass because the page is now taller: **1922px** with a hole
+  selected (was ~1596 empty). With the canvas in view (scrollY 1167) the hole bar ends
+  at **−804**, the mode toggle at −992 and Done at **−1060.8**. Only the on-canvas
+  zoom cluster remains reachable — and see D3 below for what the demo rail does to it.
+
+### `/demo` — the two-act rail
+
+The rail's geometry is step-independent: a fixed **386×514** panel at (878, 185) at
+1280×715, **386×49.2** at (878, 649.8) when collapsed, on every route it rides. Zero
+horizontal overflow with a tour running on every route, at every viewport.
+
+| # | Item | Grade | Key numbers at 1280×715 |
+|---|---|---|---|
+| D1 | Rail containment / overflow | PASS | rail fully inside the viewport; overflow 0 on stitch-map, annotate-round (both modes), create-graphics, and the cover |
+| D2 | Rail's own controls | **FAILING (new)** | Collapse **67.4×24**, Exit **77×24**, Back 58.4×**30.8**, Next 57×**30.8**, "Load the real inputs"/"Reload the page" 360×**30.8**, Finish 64.2×**30.8** — every one under the 36px budget; Collapse/Exit text **12px**. The `@media (max-width: 640px)` rule already gives them `min-height: 2.5rem`; a 13″ laptop gets nothing |
+| D3 | On-canvas zoom cluster (annotate, both modes) | **FAILING** | Fit **fully covered** (36×33 of a 36×36 button), zoom-out 12×33, zoom-in clear — as first measured. New: **collapsing the rail does not clear them** (the 49.2px collapsed header spans the same corner and covers exactly the same two buttons), so "start collapsed" alone would not close Ticket D. At **1152×650 all three** buttons are fully covered (36×36 each), expanded *and* collapsed |
+| D4 | Hole bar controls (annotate) | **FAILING (new)** | On the 18-hole course the demo itself produces, hole tabs **15–18** (63×44 each) are fully covered and `elementFromPoint` at their centres returns `demo-guide`; the compact **"Next hole"** button (44×46) is fully covered too. Add hole, Done and the Map/Round toggle are clear (0 overlap). Same at 1152; at 1440 tabs 15–18 are 72×29 covered (top 15px still clickable) and Next hole is clear |
+| D5 | Create Graphics panes | **FAILING (new)** | The rail covers **385×420px** of the target-basemap pane — 62.7% of its width, its full height — on the route the two-act script visits **twice** and where the visitor must click landmarks in both panes. Source pane, Add correspondence and the guidance line are clear. Collapsing *does* clear this one. 1440: 385×372; 1152: 385×397 plus the guidance line (386×16) |
+| D6 | Cover page with a tour running | **FAILING (new)** | "Finish" is a link back to `/demo` that leaves the tour running. There, the rail covers the last step card's own **"Start here"** (94.2×35.8) at **every scroll position the page allows** — the card's x-range 833–927 is inside the rail's 878–1264, and its y never leaves the rail's 185–699 band — so `elementFromPoint` returns `demo-guide`. Same at 1152 (fully covered); clear at 1440. Separately, every cover step button is **94.2×35.8**, 0.2px under the target budget |
+| D7 | CV surfaces vs the rail | PASS | measured during the real detection run with the rail active: status strip and review chip have **zero** overlap with it |
+| D8 | Stitch Map (step 1) | PASS (empty state) | rail clears `alignment-workspace`, `stitch-readiness` and `use-as-source` at scrollY 0. The *loaded*-state occlusion recorded in row 21 was not re-measured — out of scope |
+
+**Verdict for the re-audited surfaces.** The Map/Round split did not cost anything on
+the width budget and added one genuinely good thing (mode-scoped radial menus that
+pass every target check, including the no-hole walk case). It did make the mid-task
+trap worse — there is now a third control row above the canvas — and the demo rail is
+in worse shape than the original pass recorded, because the pass measured it against a
+one-act script that never reached Create Graphics twice and never had 18 hole tabs on
+screen.
+
+**Two non-viewport observations, recorded rather than fixed:**
+
+1. The real detection run on the shipped Dash's Track stitch reports **"0 numbers · 18
+   tees · 15 baskets · 0 ready"** → chip **"Found 18 holes — 0 ready, 18 need review"**
+   with "Accept 0 ready holes" disabled. The step-2 narration's one-click *"accept the
+   ready holes"* moment therefore cannot fire on the dataset the demo ships — the same
+   observation the original pass recorded for the Bill Allen dataset, now confirmed for
+   Dash's Track. Owned by whoever owns the CV pipeline, not by this pass.
+2. Hole-bar tab labels now read `Hole 1, selected: tee missing, basket missing, number
+   present, 0 bends, 0 throws` (the simplified-labels commit). Nothing viewport-related;
+   noted only because the label text is what a re-audited selector reads.
 
 ---
 
@@ -213,29 +332,47 @@ dialogs; the stitch alignment step at 1440.
 
 ## What the budget suite enforces vs. documents
 
-`tests/e2e/viewportBudget.spec.ts` runs at exactly 1280×715 and **enforces now**:
+`tests/e2e/viewportBudget.spec.ts` runs at exactly 1280×715. After the re-audit it is
+**19 active + 13 `test.fixme`**, and **enforces now**:
 
 - `documentElement.scrollWidth === clientWidth` on all five routes, including with
-  images loaded and pairs placed (budget 1, all states audited).
-- Annotate canvas ≥55% width with the rail collapsed; ≥89% canvas height (size).
+  images loaded and pairs placed (budget 1, all states audited) — and with a demo tour
+  running on annotate-round and create-graphics.
+- Annotate canvas ≥55% width / ≥65% height with the rail collapsed, **in both Map and
+  Round mode**, measured with a hole selected (the state a user annotates in).
 - Create-graphics combined pane area ≥55% width.
 - On-canvas zoom cluster: present, ≥36px targets, inside the viewport when the canvas
-  is scrolled into view (the mid-task controls that *do* work).
-- Radial menu: opens on canvas click, all actions ≥36px, fully inside the viewport.
+  is scrolled into view **with no hole selected** — the state that passes. The
+  hole-selected state is fixme'd separately (M4) rather than folded in here.
+- Radial menu: the action set is asserted *exactly* per mode — `tee/basket/bend` in Map,
+  `shot/walk` in Round, `walk` alone in Round with no hole — all ≥36px and fully inside
+  the viewport, so a wedge leaking across the mode split fails here.
 - Discard dialog fully contained.
 - Handoff/working state reachable end-to-end without horizontal overflow.
+- Demo rail: fully inside the viewport, and zero overlap with Annotate Round's
+  page-level controls (Done, Map/Round toggle, Add hole).
 
-**Documented as `test.fixme()`** (target state; would be red today — each cites this
-file): annotate canvas ≥55% width with the rail *expanded*; rail-collapsed toggle
-inside the viewport (F3); hole bar visible while the canvas is in view (F2);
-create-graphics pane height ≥65%; stitch crop preview ≥65% height.
+**Documented as `test.fixme()`** (target state; each verified genuinely red by running
+the suite with the fixmes stripped, and each citing this file): annotate canvas ≥55%
+width with the rail *expanded* (F1); the canvas cell fitting one screen and the zoom
+cluster staying in view with a hole selected (M4 → Ticket C); hole bar **and mode
+toggle** visible while the canvas is in view, in both modes (F2 → Ticket B); the
+rail-collapsed toggle inside the viewport and ≥36px (F3 → Ticket B); an existing marker
+as a ≥36px pointer target (M7 → Ticket B); create-graphics pane height ≥65% and stitch
+crop preview ≥65% (Ticket A, untouched by this re-audit); and five demo cases — rail
+control sizes (D2), the zoom cluster (D3 → Ticket D), the hole bar's own controls (D4),
+the Create Graphics target pane (D5), and the cover page's controls with a tour running
+(D6) — the last three under Ticket E.
 
-CV-showcase visibility (budget 6) is measured PASS in this audit but not asserted in
-the suite: driving real detection costs 60–120s of WASM+CV per run, and
+CV-showcase visibility (budget 6) is measured PASS in this audit and in the re-audit
+(M9/M10/D7, on a real detection run) but still not asserted in the suite: driving real
+detection costs a full stitch plus a WASM+CV pass per run, and
 `tests/unit/annotateRoundCvUx.test.ts` already pins the strip/chip *logic* with
 mocked detection. The geometry that makes it pass — strip and chip render inside the
 pane's popover layer, anchored to the canvas — is pinned indirectly by the
-canvas-visibility assertions.
+canvas-visibility assertions. The candidate-target failure (M8) is likewise not
+asserted in the suite; M7 pins the same 12px screen radius on an ordinary marker, which
+is the same constant and needs no CV.
 
 ---
 
@@ -264,49 +401,93 @@ npm run test:e2e` green, and must flip the corresponding `test.fixme()` assertio
    and/or update the fixme comment with the new measured value. No geometry/behavior
    changes — CSS only; existing e2e canvas coordinate tests must stay green.
 
-### Ticket B — Annotate Round: rail default, toggle bug, hole-bar trap, CV target sizes
+### Ticket B — Annotate Round: rail default, toggle bug, Map/Round trap, target sizes
+
+*Re-scoped 2026-08-10 against the Map/Round split; line anchors verified at `ca268e7`.*
 
 **Files:** `src/routes/annotate-round/+page.svelte` only.
 
-1. **F3 first:** collapsed rail (`:3429-3438`) must keep its toggle on-screen — hide
-   the `h2` when collapsed or absolutely position the toggle inside the 2.75rem
-   column. Verify by pointer click (not Playwright auto-scroll): `elementFromPoint`
-   at the toggle center must return the button.
-2. **Collapsed by default at ≤1280:** `readStoredDiagnosticsRailExpanded()` (`:325-336`)
+1. **F3 first:** the collapsed rail (`:3840-3851`, `@media (min-width: 1181px)`) must
+   keep its toggle on-screen — hide the `h2` when collapsed or absolutely position the
+   toggle inside the 2.75rem column. Verify by hit-test, not by clicking:
+   `elementFromPoint` at the toggle centre must return the button (it currently returns
+   `null`, because at x 1339.5–1369.8 the toggle is off a 1280px viewport entirely).
+   While there, the toggle itself is **30.4×30.4** (`.diagnostics-rail-toggle`,
+   `:3819` — `min-width/min-height: 1.9rem`); take it to ≥36px.
+2. **Collapsed by default at ≤1280:** `readStoredDiagnosticsRailExpanded()` (`:370-378`)
    — when no stored preference exists, default to collapsed if
    `window.innerWidth <= 1280`; a stored preference always wins. Auto-expand (without
    writing the preference) when a course-detection result lands.
-3. **F2:** make `.hole-bar-compact` sticky (`top: 0`, above the pane) so ‹/current/›
-   is always available; the full 18-tab grid may scroll away. Done button: include it
-   in (or duplicate it into) the sticky row.
-4. **F4:** candidate markers (`tee-candidate-*`, `basket-candidate-*`,
-   `number-candidate-*`) get invisible hit areas with an effective screen size ≥36px
-   (e.g. transparent circle `r = max(current, 18/zoom)` image units). Confirm-chip
-   cancel ≥36px; strip/chip/button text ≥13px (0.8125rem). Add an ✕ dismiss to the
-   summary chip that nulls only the chip visibility, not `courseDetection`.
-5. Flip the corresponding fixmes in `viewportBudget.spec.ts` (rail toggle, hole bar,
-   expanded-width if the default change makes "default state" pass). Existing specs
-   pinning `aria-expanded` defaults (`tests/e2e/annotateRound.spec.ts:123-143`) run at
-   1280×720 — coordinate: that test asserts default-expanded; it will need its
-   expectation updated to the new width-aware default (do it in the same PR, it is
-   testing the exact behavior this ticket changes).
+3. **F2, now a three-row trap:** the mode toggle (`.mode-toggle`, `:2748`) sits between
+   the header and the hole bar, so with the canvas in view (scrollY 457) the hole bar
+   ends at −82, the compact row at −203, **the Map/Round toggle at −274** and Done at
+   −346.8. Make `.hole-bar-compact` (`:3233`) sticky (`top: 0`, above the pane) so
+   ‹/current/› is always available; the full 18-tab grid may scroll away. The sticky row
+   must also carry **Done and the Map/Round toggle** (or compact equivalents): switching
+   activity mid-round is now as common as switching hole, and both are currently a
+   ~330–460px scroll round trip. At 1152 the same round trip is ~1000px.
+4. **Targets and text (F4, M7, M12, M13).** All of these are one pass over the same
+   file, and the *pointer* geometry matters more than the DOM geometry:
+   - Ordinary markers (tee/basket/bend/shot/walk) are hit-tested at
+     `MARKER_HIT_RADIUS_PX = 12` screen px (`:125`, used by `pointHitAt` `:708`) — a
+     24×24 effective target in **both** modes. Take it to ≥18 (36px effective).
+   - CV candidates: `courseCandidateHitAt` (`:775`) uses
+     `Math.max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom)`, so on the real stitched map
+     (fit zoom 0.17) tee and basket candidates are also 24px effective, while their DOM
+     markers draw at **2.2–9.3px** (tee) and 16×16 (basket). Raising the shared constant
+     fixes the hit area; give the markers an invisible screen-space hit circle too, so
+     what the eye aims at and what the pointer hits are the same thing.
+   - Confirm-chip cancel ≥36px; strip/chip/button text ≥13px (0.8125rem) — measured
+     12.5px on the strip, 12px on the chip buttons.
+   - New chrome from the split: `.mode-toggle-hint` (`:2783`) is **11.5px** and
+     `.hole-indicators` (`:3314`) **9.9px**; both are user-facing text under the 13px
+     budget (the indicators have an `sr-only` equivalent, but sighted users read the
+     glyphs).
+   - The handoff banner's Import button is still **143.4×21px** (`.handoff-actions`,
+     `:2852`); give it `min-height: 36px`.
+   - Add an ✕ dismiss to the summary chip that nulls only the chip visibility, not
+     `courseDetection`.
+5. Flip the corresponding fixmes in `viewportBudget.spec.ts`: the two
+   `hole navigation and the mode toggle stay reachable` cases (one per mode), the
+   collapsed-rail toggle case, `an existing marker is a ≥36px pointer target`, and the
+   expanded-width case if the rail default change makes the default state pass.
+   Existing specs pinning `aria-expanded` defaults
+   (`tests/e2e/annotateRound.spec.ts:123-143`) run at 1280×720 — coordinate: that test
+   asserts default-expanded; it will need its expectation updated to the new
+   width-aware default (do it in the same PR, it is testing the exact behavior this
+   ticket changes).
 
 ### Ticket C — ImageEditorPane grid: canvas width share and height cap
+
+*Re-scoped 2026-08-10. The file is unchanged since the original pass (both line
+anchors still hold), but item 2 now has a measured user-visible consequence, and it is
+the more urgent of the two.*
 
 **Files:** `src/lib/components/ImageEditorPane.svelte` only.
 
 1. At ≤1366px, narrow the chrome: `.editor-body.with-tools` (`:345-347`)
    `18rem / 20rem` → `minmax(13rem, 16rem) / 17rem` (or similar) so the canvas cell
-   is ≥55% of a 1280 viewport even with the rail expanded.
-2. Cap the canvas cell height: the `.canvas-shell` `min-height: 640px` (`:367`) plus
-   grid stretch lets a tall tools column push the canvas to 842px (> viewport).
-   Give `.tools` `overflow-y: auto` with `max-height` tied to the canvas cell, or cap
-   `.canvas-shell` at `max-height: calc(100vh - 4rem)` so the canvas never exceeds
-   one screen.
+   is ≥55% of a 1280 viewport even with the rail expanded (re-measured 638px = 49.8%,
+   identical in Map and Round mode — the chrome is mode-independent).
+2. **Cap the canvas cell height — this now costs the user a control, not just space.**
+   `.canvas-shell`'s `min-height: 640px` (`:367`) plus grid stretch lets the tools
+   column drive the cell to **793.6px** as soon as a hole is selected, i.e. taller than
+   a 715px viewport. Scrolling the canvas into view then puts the bottom-anchored
+   on-canvas zoom cluster at y 744.6–780.6 — **all three buttons below the fold** — and
+   those are precisely the controls the F2 hole-bar trap leaves as the last reachable
+   ones. Give `.tools` `overflow-y: auto` with `max-height` tied to the canvas cell, or
+   cap `.canvas-shell` at `max-height: calc(100vh - 4rem)`, so the cell never exceeds
+   one screen. At 1440×815 the same 793.6px cell fits and the cluster stays in view, so
+   this is a ≤~800px-tall-viewport failure specifically.
 3. Do not change the `popover`/`overlay` contract (see
    `docs/imageviewport-event-contract.md` §1.6 addendum) — the radial menu clamps
-   itself to `paneSize` and must keep working.
-4. Coordinate with Ticket B only through the shared budget spec; no shared files.
+   itself to `paneSize` and must keep working. The re-audit re-measured every wedge at
+   44×44 and fully contained in both modes; that must survive the cap.
+4. Acceptance: flip `annotate-round: on-canvas zoom controls stay in view with a hole
+   selected` in `viewportBudget.spec.ts` (it asserts both the ≤viewport cell height and
+   the three buttons' containment), and keep the two collapsed-rail canvas-share cases
+   green in both modes.
+5. Coordinate with Ticket B only through the shared budget spec; no shared files.
 
 ### Ticket D — Demo rail vs. on-canvas controls at 1280
 
@@ -320,6 +501,58 @@ npm run test:e2e` green, and must flip the corresponding `test.fixme()` assertio
    `apply-suggested-crop`, `use-as-source`, `course-summary-chip`.
 3. `tests/e2e/demo.spec.ts` must stay green; add the non-occlusion check to
    `viewportBudget.spec.ts` if stable without CV.
+
+> **Re-audit note on D (2026-08-10, ticket text left as written).** The zoom-cluster
+> occlusion is unchanged and confirmed (Fit 36×33 covered, zoom-out 12×33, zoom-in
+> clear). Two measurements bear on the remedies offered above: **"start it collapsed"
+> does not work on its own** — the collapsed rail is a 386×49.2 header in the same
+> corner and covers exactly the same two buttons — and at **1152×650 all three** zoom
+> buttons are fully covered, expanded or collapsed, so the fix needs to apply below
+> 1280 too. Raising `bottom` or docking bottom-left both still work. The non-occlusion
+> check asked for in item 3 now exists in `viewportBudget.spec.ts` as a `test.fixme`
+> (`demo: the guide rail does not cover the on-canvas zoom cluster`); it is stable
+> without CV and flips when this ticket lands. `course-summary-chip` from item 2 was
+> measured on a real detection run and has **zero** overlap with the rail.
+
+### Ticket E — Demo rail: control sizes and the occlusions Ticket D does not cover
+
+*New from the 2026-08-10 re-audit. Disjoint from A–D in files; overlaps D only in that
+both edit `DemoGuide.svelte`, so **run them as one ticket or serialize them** — this is
+the one pair in this document that shares a file.*
+
+**Files:** `src/lib/components/DemoGuide.svelte` only.
+
+1. **Rail control targets (D2).** Every control the rail owns is under 36px: Collapse
+   67.4×24, Exit 77×24, Back/Next 57–58.4×30.8, "Load the real inputs" / "Reload the
+   page" 360×30.8, Finish 64.2×30.8; Collapse/Exit text is 12px. The
+   `@media (max-width: 640px)` block (`:427-439`) already applies `min-height: 2.5rem`
+   to `button, .finish-link` — the base rule (`:371-383`) and `button.ghost` (`:414`)
+   need the same floor at every width, and ghost text ≥13px.
+2. **Hole bar occlusion (D4).** On the 18-hole course the walkthrough itself produces,
+   the rail fully covers hole tabs 15–18 and the compact "Next hole" button at 1280 and
+   1152 (`elementFromPoint` at their centres returns `demo-guide`), which is exactly
+   how step 2's script says to reach the hole flagged for review. Whatever fix Ticket D
+   takes for the zoom cluster should be chosen to clear the hole bar's right-hand end
+   too — docking bottom-left clears both; raising `bottom` clears the hole bar only if
+   the bar is scrolled below the rail's top edge, so verify, do not assume.
+3. **Create Graphics pane occlusion (D5).** The rail covers 385×420px of the
+   target-basemap pane — 62.7% of its width — on the route the two-act script visits
+   twice and where the visitor clicks landmarks in *both* panes. Collapsing clears it,
+   so an acceptable minimum is auto-collapsing on that route; docking bottom-left does
+   not help here (the source pane is on the left).
+4. **Cover page with a tour running (D6).** "Finish" links back to `/demo` without
+   exiting the tour, and there the rail covers the last step card's "Start here" at
+   *every* scroll position the page allows, at 1280 and 1152 — a pointer lockout of the
+   same class as F3, on the demo's own page. Either exit the tour on Finish, or hide
+   the rail on `/demo` (it narrates a step the visitor is not on), or dock it clear.
+   Also: the cover's step buttons are 94.2×35.8, 0.2px under the target budget — a
+   one-line fix in `src/routes/demo/+page.svelte` if that file is opened for the same
+   pass; otherwise leave it, it is not this ticket's file.
+5. Acceptance: flip `demo: the guide rail's own controls are ≥36px`, `demo: the guide
+   rail does not cover the hole bar's own controls`, `demo: the guide rail does not
+   cover the Create Graphics target pane`, and `demo: the cover page's own controls
+   stay reachable while a tour is running` in `viewportBudget.spec.ts`. Keep
+   `tests/e2e/demo.spec.ts` and the two active demo cases green.
 
 ---
 
@@ -336,3 +569,12 @@ audit's scope, recorded for honesty: on the demo dataset the detection currently
 reports **“Found 18 holes — 0 ready, 18 need review”** (0 of 18 number badges
 labeled), so the one-click "Accept ready holes" showcase moment never fires on the
 dataset the demo ships. Worth a look by whoever owns the CV pipeline.
+
+**Re-audit artifacts (2026-08-10, commit `ca268e7`).** Four throwaway Playwright
+drivers — the annotate journey (both modes × three viewports), the demo-rail journey
+(every step route × three viewports), a target/text probe including the empirical
+marker hit-radius bisection, and the real act-1 CV run — plus their raw measurement
+JSON. Session artifacts, deliberately not committed: everything they establish is
+either a number in the re-audit section above or an assertion in
+`tests/e2e/viewportBudget.spec.ts`, which is where a measurement belongs if it is
+meant to keep holding.
