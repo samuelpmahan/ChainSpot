@@ -13,6 +13,7 @@
     "detect:tees": "tsx scripts/detect-tees.ts",
     "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
     "detect:course": "tsx scripts/detect-course.ts",
+    "detect:landing-droplets": "tsx scripts/detect-landing-droplets.ts",
     "verify:cv": "tsx scripts/verify-cv-guardrails.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "vitest run",

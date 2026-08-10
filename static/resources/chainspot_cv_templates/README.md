@@ -8,6 +8,12 @@ Included:
 - `basket.png` — UDisc basket glyph template.
 - `landing-pin-a.png`, `landing-pin-b.png` — experimental played-round landing-marker templates.
 - `landing-pin-mask.png` — mask used with the landing-pin templates.
+- `round-landing-glyph-c1.png`, `round-landing-glyph-c2.png`, `round-landing-glyph-off-fairway.png`
+  — canonical interior-glyph templates for the production round-marker classifier
+  (`src/lib/autoAnnotation/landingDropletDetection.ts`). Each is a 28x28 binary mask (white =
+  glyph, black = background) generated from a real, hand-labeled UDisc round screenshot by
+  `scripts/generate-landing-droplet-templates.ts` — not learned at runtime, and unrelated to
+  the `landing-pin-*` files above (which are an earlier, different experiment).
 
 ## Calibration invariant
 
