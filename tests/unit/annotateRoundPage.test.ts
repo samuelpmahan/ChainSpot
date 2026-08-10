@@ -126,7 +126,7 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		host.remove();
 	});
 
-	it('uses visible labels and keyboard shortcuts for hole creation and placement modes', async () => {
+	it('uses visible labels and keyboard shortcuts for hole creation', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(640, 480));
 		await flush();
@@ -156,27 +156,6 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 			await flush();
 			expect(addEvent.defaultPrevented).toBe(true);
 			expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe(expectedCount);
-		}
-
-		for (const [key, mode] of [
-			['1', 'tee'],
-			['2', 'basket'],
-			['3', 'shot'],
-			['4', 'bend']
-		] as const) {
-			const event = new KeyboardEvent('keydown', {
-				key,
-				bubbles: true,
-				cancelable: true
-			});
-			const eventTarget = document.activeElement instanceof HTMLElement ? document.activeElement : window;
-			eventTarget.dispatchEvent(event);
-			await flush();
-			const input = host.querySelector<HTMLInputElement>(`[data-testid="placement-mode-${mode}"]`);
-			if (!input) throw new Error(`missing placement-mode-${mode} input`);
-			expect(event.defaultPrevented).toBe(true);
-			expect(input.checked).toBe(true);
-			expect(document.activeElement).toBe(input);
 		}
 
 		const repeated = new KeyboardEvent('keydown', {

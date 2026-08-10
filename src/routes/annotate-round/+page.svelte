@@ -29,13 +29,18 @@
 		moveTee,
 		nextHoleNumber,
 		placeByMode,
+		removeBasket,
+		removeCorridorBend,
 		removeHole,
 		removeLastBend,
 		removeLastShot,
+		removeShot,
+		removeTee,
 		setCorridorWidth
 	} from '$lib/holeAnnotation';
 	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
+	import { radialWedges } from '$lib/radialMenu';
 	import {
 		deriveCorridorBand,
 		deriveCorridorCenterline,
@@ -55,25 +60,25 @@
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 
-	const PLACEMENT_MODES: readonly HolePlacementMode[] = ['tee', 'basket', 'shot', 'bend'];
-	const PLACEMENT_MODE_LABELS: Record<HolePlacementMode, string> = {
+	/** Shared label text for a point kind, reused by both radial-menu wedges and the hole bar. */
+	const POINT_KIND_LABELS: Record<HolePlacementMode, string> = {
 		tee: 'Tee',
 		basket: 'Basket',
 		shot: 'Shot landing',
 		bend: 'Corridor bend'
 	};
-	const PLACEMENT_MODE_SHORTCUTS: Record<HolePlacementMode, string> = {
-		tee: '1',
-		basket: '2',
-		shot: '3',
-		bend: '4'
+	const POINT_KIND_ICONS: Record<HolePlacementMode, string> = {
+		tee: 'T',
+		basket: 'B',
+		shot: '+',
+		bend: '↯'
 	};
-	const PLACEMENT_MODE_BY_SHORTCUT: Record<string, HolePlacementMode> = {
-		'1': 'tee',
-		'2': 'basket',
-		'3': 'shot',
-		'4': 'bend'
-	};
+
+	/** A radial-menu wedge either places a point kind or deletes the marker that opened the menu. */
+	type RadialAction = HolePlacementMode | 'delete';
+
+	const RADIAL_HUB_RADIUS_PX = 20;
+	const RADIAL_OUTER_RADIUS_PX = 62;
 
 	const TEE_VARIANTS: readonly TeePadVariant[] = ['gray-center', 'edge-loop', 'fused'];
 	const TEE_VARIANT_LABELS: Record<TeePadVariant, string> = {
@@ -101,6 +106,25 @@
 		marker: AnnotationMarkerHit;
 		start: ScreenSpacePoint;
 		transform: ViewTransformState;
+		dragging: boolean;
+	}
+
+	/**
+	 * An open radial menu, anchored at an image-space point. `hitMarker` set
+	 * means the menu was opened on an existing point (offers Delete only);
+	 * unset means it was opened on empty space (offers the point kinds not yet
+	 * placed on `holeId`).
+	 */
+	interface RadialMenuState {
+		at: { xPx: number; yPx: number };
+		holeId: string;
+		hitMarker: AnnotationMarkerHit | null;
+	}
+
+	/** Gesture tracking for a click on an already-open radial menu, mirroring `numberSelectDrag`. */
+	interface RadialSelectGesture {
+		action: RadialAction | null;
+		start: ScreenSpacePoint;
 		dragging: boolean;
 	}
 
@@ -150,7 +174,6 @@
 	 */
 	let holes = $state<AnnotatedHole[]>([]);
 	let activeHoleId = $state<string | null>(null);
-	let placementMode = $state<HolePlacementMode>('tee');
 	let basketCandidates = $state<readonly BasketCandidate[]>([]);
 	let selectedBasketCandidate = $state<number | null>(null);
 	let basketDetectionRunning = $state(false);
@@ -165,10 +188,25 @@
 	let autoDetectedSourceId: string | null = null;
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
+	let radialMenu = $state<RadialMenuState | null>(null);
+	let radialSelectDrag = $state<RadialSelectGesture | null>(null);
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
-	let mobileHoleBarExpanded = $state(false);
-	let mobileAnnotatePanelOpen = $state(false);
+
+	/**
+	 * An empty-space placement menu is tied to whichever hole was active when
+	 * it opened (`handleAnnotationPlacement` stamps `holeId: activeHoleId`) —
+	 * if the user switches holes without dismissing it first, choosing a wedge
+	 * would otherwise silently place the point on the stale hole instead of
+	 * the one now showing as active. A marker's delete menu has no such tie
+	 * (you can click any hole's marker regardless of which hole is active),
+	 * so it's deliberately left alone here.
+	 */
+	$effect(() => {
+		if (radialMenu && radialMenu.hitMarker === null && radialMenu.holeId !== activeHoleId) {
+			radialMenu = null;
+		}
+	});
 
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
@@ -260,6 +298,7 @@
 		const remainingHoles = removeHole(holes, holeId);
 		const nextActiveHoleId =
 			activeHoleId === holeId ? remainingHoles[0]?.id ?? null : activeHoleId;
+		if (radialMenu?.holeId === holeId) radialMenu = null;
 		holes = remainingHoles;
 		activeHoleId = nextActiveHoleId;
 
@@ -285,6 +324,11 @@
 	}
 
 	function handleAnnotationKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Escape' && radialMenu) {
+			event.preventDefault();
+			radialMenu = null;
+			return;
+		}
 		if (isShortcutEditableTarget(event.target)) return;
 		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
 
@@ -295,16 +339,6 @@
 			handleAddHole();
 			return;
 		}
-
-		const mode = PLACEMENT_MODE_BY_SHORTCUT[key];
-		if (!mode || !activeHoleId) return;
-		event.preventDefault();
-		placementMode = mode;
-		void tick().then(() => {
-			document
-				.querySelector<HTMLInputElement>(`[data-testid="placement-mode-${mode}"]`)
-				?.focus({ preventScroll: true });
-		});
 	}
 
 	function handleRemoveLastShot(): void {
@@ -443,12 +477,120 @@
 		}
 	}
 
+	function deleteMarker(
+		currentHoles: readonly AnnotatedHole[],
+		marker: AnnotationMarkerHit
+	): AnnotatedHole[] {
+		switch (marker.kind) {
+			case 'tee':
+				return removeTee(currentHoles, marker.holeId);
+			case 'basket':
+				return removeBasket(currentHoles, marker.holeId);
+			case 'shot':
+				return marker.shotId
+					? removeShot(currentHoles, marker.holeId, marker.shotId)
+					: currentHoles.slice();
+			case 'bend':
+				return marker.index === undefined
+					? currentHoles.slice()
+					: removeCorridorBend(currentHoles, marker.holeId, marker.index);
+		}
+	}
+
+	/** The point in image space that a currently-hit marker occupies right now. */
+	function markerPoint(marker: AnnotationMarkerHit): { xPx: number; yPx: number } | null {
+		const hole = holes.find((candidate) => candidate.id === marker.holeId);
+		if (!hole) return null;
+		switch (marker.kind) {
+			case 'tee':
+				return hole.tee ?? null;
+			case 'basket':
+				return hole.basket ?? null;
+			case 'shot':
+				return hole.shots.find((shot) => shot.id === marker.shotId)?.landing ?? null;
+			case 'bend':
+				return marker.index !== undefined ? hole.corridorBends[marker.index] ?? null : null;
+		}
+	}
+
+	/** Wedge actions offered by an open radial menu: Delete alone for a hit marker, otherwise one wedge per point kind not yet placed on the hole. */
+	function radialMenuActions(menu: RadialMenuState): RadialAction[] {
+		if (menu.hitMarker) return ['delete'];
+		const hole = holes.find((candidate) => candidate.id === menu.holeId);
+		if (!hole) return [];
+		const actions: HolePlacementMode[] = [];
+		if (!hole.tee) actions.push('tee');
+		if (!hole.basket) actions.push('basket');
+		actions.push('shot');
+		actions.push('bend');
+		return actions;
+	}
+
+	/**
+	 * Which wedge (or the center hub) a click at `imagePoint` lands on, given
+	 * `menu`'s current wedge layout. `undefined` means the click fell entirely
+	 * outside the menu — the caller should treat it as an ordinary map click
+	 * instead. `null` means the hub (cancel). Mirrors `radialWedges()`'s own
+	 * angle convention so hit-testing always matches what's drawn.
+	 */
+	function radialHitTest(
+		menu: RadialMenuState,
+		imagePoint: { xPx: number; yPx: number },
+		zoom: number
+	): RadialAction | null | undefined {
+		const dx = imagePoint.xPx - menu.at.xPx;
+		const dy = imagePoint.yPx - menu.at.yPx;
+		const distancePx = Math.hypot(dx, dy) * zoom;
+		if (distancePx > RADIAL_OUTER_RADIUS_PX) return undefined;
+		if (distancePx <= RADIAL_HUB_RADIUS_PX) return null;
+		const actions = radialMenuActions(menu);
+		if (actions.length === 0) return null;
+		let angle = Math.atan2(dx, -dy);
+		if (angle < 0) angle += Math.PI * 2;
+		const index = Math.min(actions.length - 1, Math.floor((angle / (Math.PI * 2)) * actions.length));
+		return actions[index];
+	}
+
+	/** Whether the given map marker is the one an open delete radial menu targets, for the overlay's highlight ring. */
+	function isRadialTarget(
+		holeId: string,
+		kind: AnnotationMarkerKind,
+		options: { index?: number; shotId?: string } = {}
+	): boolean {
+		const marker = radialMenu?.hitMarker;
+		if (!marker || marker.holeId !== holeId || marker.kind !== kind) return false;
+		if (kind === 'shot') return marker.shotId === options.shotId;
+		if (kind === 'bend') return marker.index === options.index;
+		return true;
+	}
+
+	/** Applies the chosen wedge (place a point kind, or delete the marker that opened the menu) and closes the menu. */
+	function chooseRadialAction(action: RadialAction | null): void {
+		const menu = radialMenu;
+		radialMenu = null;
+		if (!menu || action === null) return;
+		if (action === 'delete') {
+			if (menu.hitMarker) holes = deleteMarker(holes, menu.hitMarker);
+			return;
+		}
+		holes = placeByMode(holes, menu.holeId, action, menu.at);
+	}
+
 	function claimAnnotationPointer(
 		pointer: ScreenSpacePoint,
 		event: PointerEvent,
 		view: ViewTransformState
 	): boolean {
 		if (!sourceImage()) return false;
+		if (radialMenu) {
+			const imagePoint = screenToImage(pointer, view);
+			const hit = radialHitTest(radialMenu, imagePoint, view.zoom);
+			if (hit !== undefined) {
+				radialSelectDrag = { action: hit, start: { ...pointer }, dragging: false };
+				void event;
+				return true;
+			}
+		}
 		const marker = pointHitAt(pointer, view);
 		if (marker) {
 			annotationDrag = {
@@ -475,6 +617,11 @@
 			if (distance > CLICK_SLOP_PX) numberSelectDrag.dragging = true;
 			return;
 		}
+		if (radialSelectDrag) {
+			const distance = Math.hypot(pointer.x - radialSelectDrag.start.x, pointer.y - radialSelectDrag.start.y);
+			if (distance > CLICK_SLOP_PX) radialSelectDrag.dragging = true;
+			return;
+		}
 		const drag = annotationDrag;
 		const image = sourceImage();
 		if (!drag || !image) return;
@@ -496,11 +643,24 @@
 			if (!dragging) selectOrCreateHoleByNumber(label);
 			return;
 		}
+		if (radialSelectDrag) {
+			const { action, dragging } = radialSelectDrag;
+			radialSelectDrag = null;
+			if (!dragging) chooseRadialAction(action);
+			else radialMenu = null;
+			return;
+		}
 		const drag = annotationDrag;
 		annotationDrag = null;
 		const image = sourceImage();
-		if (!drag || !drag.dragging || !image) {
+		if (!drag || !image) {
 			previewHoles = null;
+			return;
+		}
+		if (!drag.dragging) {
+			previewHoles = null;
+			const point = markerPoint(drag.marker);
+			if (point) radialMenu = { at: point, holeId: drag.marker.holeId, hitMarker: drag.marker };
 			return;
 		}
 		const point = clampPointToImageBounds(
@@ -515,12 +675,13 @@
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
 		numberSelectDrag = null;
+		radialSelectDrag = null;
 		previewHoles = null;
 	}
 
 	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
 		if (!activeHoleId) return;
-		holes = placeByMode(holes, activeHoleId, placementMode, coordinates);
+		radialMenu = { at: coordinates, holeId: activeHoleId, hitMarker: null };
 	}
 
 	/**
@@ -532,6 +693,7 @@
 		refresh();
 		holes = [];
 		activeHoleId = null;
+		radialMenu = null;
 		basketCandidates = [];
 		selectedBasketCandidate = null;
 		basketDetectionError = null;
@@ -933,17 +1095,9 @@
 				disabled={holes.length === 0}
 				onclick={() => cycleHole(-1)}
 			>‹</button>
-			<button
-				type="button"
-				class="hole-bar-compact-label"
-				aria-expanded={mobileHoleBarExpanded}
-				aria-label={mobileHoleBarExpanded ? 'Collapse hole list' : 'Expand hole list'}
-				data-testid="hole-bar-compact-toggle"
-				onclick={() => (mobileHoleBarExpanded = !mobileHoleBarExpanded)}
-			>
+			<span class="hole-bar-compact-label" data-testid="hole-bar-current-label">
 				{activeHole() ? `Hole ${activeHole()!.number}` : 'No hole selected'}
-				<span aria-hidden="true" class="hole-bar-compact-chevron" class:open={mobileHoleBarExpanded}>⌄</span>
-			</button>
+			</span>
 			<button
 				type="button"
 				class="hole-bar-compact-nav"
@@ -952,7 +1106,7 @@
 				onclick={() => cycleHole(1)}
 			>›</button>
 		</div>
-		<div class="hole-bar-grid" class:mobile-collapsed={!mobileHoleBarExpanded}>
+		<div class="hole-bar-grid">
 			{#each Array.from({ length: 18 }, (_, index) => index + 1) as holeNumber}
 				{@const hole = holes.find((candidate) => candidate.number === holeNumber)}
 				<button
@@ -1024,7 +1178,6 @@
 		<ImageEditorPane
 			title="UDisc source"
 			role="source-overview"
-			toolsFloating
 			{editor}
 			refresh={refreshCount}
 			{decode}
@@ -1037,20 +1190,6 @@
 			onClaimedPointerCancel={cancelAnnotationPointer}
 		>
 			{#snippet tools()}
-				<button
-					type="button"
-					class="mobile-annotate-toggle"
-					class:open={mobileAnnotatePanelOpen}
-					aria-expanded={mobileAnnotatePanelOpen}
-					aria-label={mobileAnnotatePanelOpen ? 'Close annotate panel' : 'Open annotate panel'}
-					data-testid="mobile-annotate-toggle"
-					onclick={() => (mobileAnnotatePanelOpen = !mobileAnnotatePanelOpen)}
-				>
-					<span aria-hidden="true" class="mobile-annotate-toggle-icon">
-						{mobileAnnotatePanelOpen ? '✕' : '⋮⋮'}
-					</span>
-				</button>
-				<div class="tool-sections mobile-panel" class:open={mobileAnnotatePanelOpen}>
 				<div class="tool-section hole-management">
 					<div class="section-heading">
 						<h2>Hole controls</h2>
@@ -1079,24 +1218,8 @@
 				{#if activeHole()}
 					{@const hole = activeHole()!}
 					<div class="tool-section">
-						<h2>Place</h2>
-						<div class="mode-grid">
-							{#each PLACEMENT_MODES as mode (mode)}
-								<label class:active={placementMode === mode}>
-									<input
-										type="radio"
-										name="placement-mode"
-										value={mode}
-									checked={placementMode === mode}
-									onchange={() => (placementMode = mode)}
-									data-testid="placement-mode-{mode}"
-									aria-keyshortcuts={PLACEMENT_MODE_SHORTCUTS[mode]}
-								/>
-								<span>{PLACEMENT_MODE_LABELS[mode]}</span>
-								<kbd>{PLACEMENT_MODE_SHORTCUTS[mode]}</kbd>
-								</label>
-							{/each}
-						</div>
+						<h2>Edit hole {hole.number}</h2>
+						<p class="empty-copy">Click the map to open the point menu — place a tee, basket, shot, or bend, or delete an existing one.</p>
 						<div class="edit-actions">
 							<button type="button" data-testid="remove-last-shot" disabled={hole.shots.length === 0} onclick={handleRemoveLastShot}>Undo shot</button>
 							<button type="button" data-testid="remove-last-bend" disabled={hole.corridorBends.length === 0} onclick={handleRemoveLastBend}>Undo bend</button>
@@ -1314,7 +1437,6 @@
 						{/if}
 					</div>
 				{/if}
-				</div>
 			{/snippet}
 
 			{#snippet diagnostics()}
@@ -1337,7 +1459,7 @@
 							<p class="tool-note">{courseDetection.numberDetection.note}</p>
 						{/if}
 						{#if courseDetection.numberDetection.candidates.some((candidate) => candidate.topGlyphMatches?.length)}
-							<details class="number-diagnostics" open>
+							<details class="number-diagnostics">
 								<summary>Number classifier diagnostics</summary>
 								<p class="diagnostic-help">Raw top 3 are independent glyph scores. Assigned is the forced one-to-one Hungarian result.</p>
 								<div class="diagnostic-list">
@@ -1359,7 +1481,7 @@
 						{@const total = teeExperimentResult.results.reduce((sum, result) => sum + result.candidates.length, 0)}
 						<p class="detection-summary" data-testid="tee-detection-summary">scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates</p>
 						{#each teeExperimentResult.results as result (result.variant)}
-							<details class="tee-diagnostics" open>
+							<details class="tee-diagnostics">
 								<summary>{TEE_VARIANT_LABELS[result.variant]} · {result.candidates.length} found</summary>
 								<div class="tee-stage-counts">
 									{#each Object.entries(result.stageCounts) as [stage, count]}<span>{stage}: {count}</span>{/each}
@@ -1404,7 +1526,14 @@
 							<polyline points={centerline.map((point) => `${point.xPx},${point.yPx}`).join(' ')} class="corridor-centerline" data-testid="corridor-centerline-{overlayHole.number}" />
 						{/if}
 						{#each overlayHole.corridorBends as bend, index (index)}
-							<circle cx={bend.xPx} cy={bend.yPx} r={5 / zoom} class="bend-marker" data-testid="bend-marker-{overlayHole.number}-{index}" />
+							<circle
+								cx={bend.xPx}
+								cy={bend.yPx}
+								r={5 / zoom}
+								class="bend-marker"
+								class:radial-target={isRadialTarget(overlayHole.id, 'bend', { index })}
+								data-testid="bend-marker-{overlayHole.number}-{index}"
+							/>
 						{/each}
 						{#if overlayHole.tee && overlayHole.basket}
 							<line x1={overlayHole.tee.xPx} y1={overlayHole.tee.yPx} x2={overlayHole.basket.xPx} y2={overlayHole.basket.yPx} class="guide" />
@@ -1413,10 +1542,49 @@
 							{@const from = index === 0 ? overlayHole.tee : overlayHole.shots[index - 1].landing}
 							{#if from}<line x1={from.xPx} y1={from.yPx} x2={shot.landing.xPx} y2={shot.landing.yPx} class="guide" />{/if}
 						{/each}
-						{#if overlayHole.tee}<circle cx={overlayHole.tee.xPx} cy={overlayHole.tee.yPx} r={7 / zoom} class="tee-marker" data-testid="tee-marker-{overlayHole.number}" />{/if}
-						{#if overlayHole.basket}<circle cx={overlayHole.basket.xPx} cy={overlayHole.basket.yPx} r={7 / zoom} class="basket-marker" data-testid="basket-marker-{overlayHole.number}" />{/if}
+						{#if overlayHole.tee}
+							<circle
+								cx={overlayHole.tee.xPx}
+								cy={overlayHole.tee.yPx}
+								r={7 / zoom}
+								class="tee-marker"
+								class:radial-target={isRadialTarget(overlayHole.id, 'tee')}
+								data-testid="tee-marker-{overlayHole.number}"
+							/>
+							<text
+								x={overlayHole.tee.xPx}
+								y={overlayHole.tee.yPx - 12 / zoom}
+								text-anchor="middle"
+								class="point-hole-label"
+								style={`font-size:${10 / zoom}px`}
+							>{overlayHole.number}</text>
+						{/if}
+						{#if overlayHole.basket}
+							<circle
+								cx={overlayHole.basket.xPx}
+								cy={overlayHole.basket.yPx}
+								r={7 / zoom}
+								class="basket-marker"
+								class:radial-target={isRadialTarget(overlayHole.id, 'basket')}
+								data-testid="basket-marker-{overlayHole.number}"
+							/>
+							<text
+								x={overlayHole.basket.xPx}
+								y={overlayHole.basket.yPx - 12 / zoom}
+								text-anchor="middle"
+								class="point-hole-label"
+								style={`font-size:${10 / zoom}px`}
+							>{overlayHole.number}</text>
+						{/if}
 						{#each overlayHole.shots as shot, index (shot.id)}
-							<circle cx={shot.landing.xPx} cy={shot.landing.yPx} r={6 / zoom} class="shot-marker" data-testid="shot-marker-{overlayHole.number}-{index}" />
+							<circle
+								cx={shot.landing.xPx}
+								cy={shot.landing.yPx}
+								r={6 / zoom}
+								class="shot-marker"
+								class:radial-target={isRadialTarget(overlayHole.id, 'shot', { shotId: shot.id })}
+								data-testid="shot-marker-{overlayHole.number}-{index}"
+							/>
 						{/each}
 					{/each}
 					{#if courseDetection}
@@ -1497,6 +1665,38 @@
 					{#each basketCandidates as candidate, index (index)}
 						<circle cx={candidate.xPx} cy={candidate.yPx} r={(selectedBasketCandidate === index ? 11 : 8) / zoom} class="basket-candidate-marker" class:selected={selectedBasketCandidate === index} data-testid="basket-candidate-{index + 1}" />
 					{/each}
+					{#if radialMenu}
+						{@const menuActions = radialMenuActions(radialMenu)}
+						{@const layout = radialWedges(menuActions.length, { hubRadius: RADIAL_HUB_RADIUS_PX, outerRadius: RADIAL_OUTER_RADIUS_PX })}
+						<g
+							class="radial-menu"
+							data-testid="radial-menu"
+							transform={`translate(${radialMenu.at.xPx} ${radialMenu.at.yPx}) scale(${1 / zoom})`}
+						>
+							{#each menuActions as action, index (action)}
+								{@const wedge = layout.wedges[index]}
+								{@const label =
+									action === 'delete'
+										? `Delete ${radialMenu.hitMarker ? POINT_KIND_LABELS[radialMenu.hitMarker.kind] : ''}`
+										: POINT_KIND_LABELS[action]}
+								<path
+									d={wedge.path}
+									class="radial-wedge"
+									class:danger={action === 'delete'}
+									data-testid={`radial-wedge-${action}`}
+								>
+									<title>{label}</title>
+								</path>
+								<text x={wedge.labelX} y={wedge.labelY} text-anchor="middle" dominant-baseline="middle" class="radial-wedge-label">
+									{action === 'delete' ? '✕' : POINT_KIND_ICONS[action]}
+								</text>
+							{/each}
+							<circle r={layout.hubRadius} class="radial-hub" data-testid="radial-cancel">
+								<title>Cancel</title>
+							</circle>
+							<text text-anchor="middle" dominant-baseline="middle" class="radial-hub-label">✕</text>
+						</g>
+					{/if}
 				</svg>
 			{/snippet}
 		</ImageEditorPane>
@@ -1833,39 +2033,6 @@
 		white-space: nowrap;
 	}
 
-	.mode-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
-	}
-
-	.mode-grid label {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		min-height: 2.9rem;
-		padding: 0.5rem 0.6rem;
-		border: 1px solid #3f3f46;
-		border-radius: 5px;
-		font-size: 0.85rem;
-		cursor: pointer;
-		touch-action: manipulation;
-	}
-
-	.mode-grid label.active {
-		border-color: #3b82f6;
-		background: rgb(59 130 246 / 15%);
-	}
-
-	.mode-grid input {
-		margin: 0;
-	}
-
-	/* Keyboard-shortcut hints are dead weight now that this is a touch-first layout. */
-	.mode-grid kbd {
-		display: none;
-	}
-
 	.edit-actions {
 		display: grid;
 		gap: 0.35rem;
@@ -2000,7 +2167,6 @@
 		border-radius: 6px;
 		background: #27272a;
 		color: #f4f4f5;
-		cursor: pointer;
 		touch-action: manipulation;
 	}
 
@@ -2009,6 +2175,7 @@
 		font-size: 1.15rem;
 		font-weight: 700;
 		color: #a1a1aa;
+		cursor: pointer;
 	}
 
 	.hole-bar-compact-nav:disabled {
@@ -2026,27 +2193,13 @@
 		font-weight: 650;
 	}
 
-	.hole-bar-compact-chevron {
-		display: inline-block;
-		color: #71717a;
-		transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
-	}
-
-	.hole-bar-compact-chevron.open {
-		transform: rotate(180deg);
-	}
-
 	.hole-bar-grid {
 		flex-basis: 100%;
 		display: grid;
-		grid-template-columns: repeat(6, minmax(2.75rem, 1fr));
+		grid-template-columns: repeat(9, minmax(2.5rem, 1fr));
 		gap: 0.35rem;
 		min-width: 0;
 		margin-top: 0.5rem;
-	}
-
-	.hole-bar-grid.mobile-collapsed {
-		display: none;
 	}
 
 	.hole-tab {
@@ -2222,11 +2375,6 @@
 		min-height: min(78vh, 900px);
 	}
 
-	/* Tools float over the map instead of reserving a column — drop that track. */
-	:global(.editor-body.with-tools.floating-tools) {
-		grid-template-columns: minmax(0, 1fr) minmax(18rem, 20rem) !important;
-	}
-
 	:global(.tools) {
 		min-width: 0;
 	}
@@ -2397,87 +2545,63 @@
 		color: #a1a1aa;
 	}
 
-	/*
-	 * The tools snippet floats over the map (ImageEditorPane's `toolsFloating`)
-	 * instead of sitting in a reserved sidebar column, so the canvas stays the
-	 * dominant element at every viewport width — see `.editor-body.floating-tools`
-	 * in ImageEditorPane.svelte. Opened and closed via its own round toggle
-	 * button; deliberately has no scrim and stays open across mode changes, so
-	 * placing several points in a row doesn't require reopening it each time.
-	 * Areas of the map outside its footprint stay tappable while it's open.
-	 */
-	.mobile-annotate-toggle {
-		position: fixed;
-		top: max(4.25rem, calc(env(safe-area-inset-top) + 3.5rem));
-		right: max(1rem, env(safe-area-inset-right));
-		z-index: 70;
-		width: 3rem;
-		height: 3rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px solid #1d4ed8;
-		border-radius: 999px;
-		background: #2563eb;
-		color: #fff;
-		box-shadow: 0 6px 18px rgb(0 0 0 / 45%);
-		font-size: 1rem;
-		letter-spacing: 0.05em;
-		touch-action: manipulation;
-		transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1), background 150ms ease;
-	}
-
-	.mobile-annotate-toggle:active {
-		transform: scale(0.9);
-	}
-
-	.mobile-annotate-toggle.open {
-		background: #3f3f46;
-		border-color: #52525b;
-	}
-
-	.mobile-annotate-toggle-icon {
-		line-height: 1;
-	}
-
-	.tool-sections.mobile-panel {
-		position: fixed;
-		top: calc(max(4.25rem, calc(env(safe-area-inset-top) + 3.5rem)) + 3.5rem);
-		right: max(1rem, env(safe-area-inset-right));
-		z-index: 68;
-		width: min(22rem, calc(100vw - 2rem));
-		max-height: min(72vh, calc(100vh - 8rem));
-		overflow: auto;
-		padding: 1rem;
-		border: 1px solid #34343a;
-		border-radius: 16px;
-		background: #18181b;
-		box-shadow: 0 24px 60px rgb(0 0 0 / 55%);
-		transform-origin: top right;
-		transform: scale(0.85) translateY(-8px);
-		opacity: 0;
-		visibility: hidden;
+	.point-hole-label {
+		fill: #fff;
+		stroke: #18181b;
+		stroke-width: 3px;
+		paint-order: stroke fill;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-weight: 700;
 		pointer-events: none;
-		transition:
-			transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-			opacity 180ms ease,
-			visibility 0s linear 260ms;
 	}
 
-	.tool-sections.mobile-panel.open {
-		transform: scale(1) translateY(0);
-		opacity: 1;
-		visibility: visible;
-		pointer-events: auto;
-		transition:
-			transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-			opacity 180ms ease,
-			visibility 0s linear 0s;
+	.tee-marker.radial-target,
+	.basket-marker.radial-target,
+	.shot-marker.radial-target,
+	.bend-marker.radial-target {
+		stroke: #f87171;
+		stroke-width: 3;
+	}
+
+	.radial-menu {
+		filter: drop-shadow(0 8px 20px rgb(0 0 0 / 55%));
+	}
+
+	.radial-wedge {
+		fill: #27272a;
+		stroke: #18181b;
+		stroke-width: 2;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.radial-wedge.danger {
+		fill: #7f1d1d;
+	}
+
+	.radial-wedge-label {
+		fill: #f4f4f5;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 1.15rem;
+		font-weight: 700;
+		pointer-events: none;
+	}
+
+	.radial-hub {
+		fill: #18181b;
+		stroke: #52525b;
+		stroke-width: 2;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.radial-hub-label {
+		fill: #a1a1aa;
+		font-size: 0.85rem;
+		font-weight: 700;
+		pointer-events: none;
 	}
 
 	@media (max-width: 900px) {
-		:global(.editor-body.with-tools),
-		:global(.editor-body.with-tools.floating-tools) {
+		:global(.editor-body.with-tools) {
 			grid-template-columns: 1fr !important;
 		}
 

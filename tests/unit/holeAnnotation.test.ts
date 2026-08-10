@@ -11,9 +11,13 @@ import {
 	moveTee,
 	nextHoleNumber,
 	placeByMode,
+	removeBasket,
+	removeCorridorBend,
 	removeHole,
 	removeLastBend,
 	removeLastShot,
+	removeShot,
+	removeTee,
 	setBasket,
 	setCorridorWidth,
 	setTee
@@ -127,6 +131,29 @@ describe('moveTee / moveBasket', () => {
 	});
 });
 
+describe('removeTee / removeBasket', () => {
+	it('clears only the targeted point on the matching hole', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 1, yPx: 2 }, basket: { xPx: 3, yPx: 4 } }),
+			emptyHole('b', 2, { tee: { xPx: 5, yPx: 6 }, basket: { xPx: 7, yPx: 8 } })
+		];
+
+		const teeCleared = removeTee(holes, 'a');
+		expect(teeCleared[0].tee).toBeUndefined();
+		expect(teeCleared[0].basket).toEqual({ xPx: 3, yPx: 4 });
+		expect(teeCleared[1]).toEqual(holes[1]);
+
+		const basketCleared = removeBasket(teeCleared, 'a');
+		expect(basketCleared[0].basket).toBeUndefined();
+	});
+
+	it('clearing an already-absent point is a no-op, not an error', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		expect(removeTee(holes, 'a')[0].tee).toBeUndefined();
+		expect(removeBasket(holes, 'a')[0].basket).toBeUndefined();
+	});
+});
+
 describe('addShot / removeLastShot', () => {
 	it('appends ordered shots and pops only the last one', () => {
 		const createId = idSequence('shot');
@@ -146,6 +173,31 @@ describe('addShot / removeLastShot', () => {
 	it('removing the last shot from an empty list is a no-op, not an error', () => {
 		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
 		expect(removeLastShot(holes, 'a')[0].shots).toEqual([]);
+	});
+});
+
+describe('removeShot', () => {
+	it('removes exactly the shot with the matching id, regardless of position', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				shots: [
+					{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
+					{ id: 'shot-2', landing: { xPx: 3, yPx: 4 } },
+					{ id: 'shot-3', landing: { xPx: 5, yPx: 6 } }
+				]
+			})
+		];
+
+		const result = removeShot(holes, 'a', 'shot-2');
+
+		expect(result[0].shots.map((shot) => shot.id)).toEqual(['shot-1', 'shot-3']);
+	});
+
+	it('removing an unknown shot id is a no-op, not an error', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { shots: [{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } }] })
+		];
+		expect(removeShot(holes, 'a', 'missing')[0].shots).toEqual(holes[0].shots);
 	});
 });
 
@@ -197,6 +249,33 @@ describe('addCorridorBend / removeLastBend / clearBends', () => {
 		holes = addCorridorBend(holes, 'a', { xPx: 2, yPx: 2 });
 		holes = clearBends(holes, 'a');
 		expect(holes[0].corridorBends).toEqual([]);
+	});
+});
+
+describe('removeCorridorBend', () => {
+	it('removes exactly the bend at the given index, preserving order', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				corridorBends: [
+					{ xPx: 1, yPx: 2 },
+					{ xPx: 3, yPx: 4 },
+					{ xPx: 5, yPx: 6 }
+				]
+			})
+		];
+
+		const result = removeCorridorBend(holes, 'a', 1);
+
+		expect(result[0].corridorBends).toEqual([
+			{ xPx: 1, yPx: 2 },
+			{ xPx: 5, yPx: 6 }
+		]);
+	});
+
+	it('an out-of-range index is a no-op, not an error', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1, { corridorBends: [{ xPx: 1, yPx: 2 }] })];
+		expect(removeCorridorBend(holes, 'a', 5)[0].corridorBends).toEqual(holes[0].corridorBends);
+		expect(removeCorridorBend(holes, 'a', -1)[0].corridorBends).toEqual(holes[0].corridorBends);
 	});
 });
 

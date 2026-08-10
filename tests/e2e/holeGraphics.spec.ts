@@ -1,6 +1,33 @@
 import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { radialWedges } from '../../src/lib/radialMenu';
+
+// Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
+// +page.svelte — there is no shared export, since they're page-local tuning.
+const RADIAL_HUB_RADIUS_PX = 20;
+const RADIAL_OUTER_RADIUS_PX = 62;
+
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
+
+/** The wedges a fresh radial menu offers for empty space, given what's already on the hole — mirrors +page.svelte's radialMenuActions(). */
+function availableKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
+	const kinds: PointKind[] = [];
+	if (!hasTee) kinds.push('tee');
+	if (!hasBasket) kinds.push('basket');
+	kinds.push('shot', 'bend');
+	return kinds;
+}
+
+/** Clicks (x, y) to open the radial menu, then clicks the wedge for `kind` among `kinds`. */
+async function placePoint(page: Page, x: number, y: number, kind: PointKind, kinds: PointKind[]): Promise<void> {
+	await page.mouse.click(x, y);
+	const layout = radialWedges(kinds.length, { hubRadius: RADIAL_HUB_RADIUS_PX, outerRadius: RADIAL_OUTER_RADIUS_PX });
+	const index = kinds.indexOf(kind);
+	if (index === -1) throw new Error(`${kind} is not offered among ${kinds.join(', ')}`);
+	const wedge = layout.wedges[index];
+	await page.mouse.click(x + wedge.labelX, y + wedge.labelY);
+}
 
 /**
  * End-to-end coverage for the full "clean hole construction" flow: annotate a
@@ -133,8 +160,6 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	});
 	await page.waitForSelector('[data-testid="hole-annotation"]');
 	await page.getByTestId('hole-add').click();
-	// The Hole controls/Place panel floats over the map, closed by default.
-	await page.getByTestId('mobile-annotate-toggle').click();
 	const frame = page.getByTestId('annotation-frame');
 	await frame.scrollIntoViewIfNeeded();
 	await page.waitForFunction(() => {
@@ -144,13 +169,10 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	const box = await frame.boundingBox();
 	if (!box) throw new Error('annotation frame has no bounding box');
 
-	await page.mouse.click(box.x + 50, box.y + 50); // tee (default mode)
-	await page.getByTestId('placement-mode-basket').check();
-	await page.mouse.click(box.x + 400, box.y + 300);
-	await page.getByTestId('placement-mode-shot').check();
-	await page.mouse.click(box.x + 200, box.y + 150);
-	await page.getByTestId('placement-mode-bend').check();
-	await page.mouse.click(box.x + 230, box.y + 180); // one dogleg bend
+	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
+	await placePoint(page, box.x + 400, box.y + 300, 'basket', availableKinds(true, false));
+	await placePoint(page, box.x + 200, box.y + 150, 'shot', availableKinds(true, true));
+	await placePoint(page, box.x + 230, box.y + 180, 'bend', availableKinds(true, true)); // one dogleg bend
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');

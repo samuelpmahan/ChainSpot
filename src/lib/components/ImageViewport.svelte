@@ -56,9 +56,50 @@
 		panning: boolean;
 	}
 
+	interface PinchGesture {
+		pointerIds: [number, number];
+		lastDistance: number;
+		lastMidpoint: ScreenSpacePoint;
+	}
+
 	let gesture: PanGesture | null = null;
 	let claimedGesture: { pointerId: number } | null = null;
 	let resizeObserver: ResizeObserver | null = null;
+	/** Every pointer currently down inside the viewport, tracked regardless of which gesture (if any) owns it — the only way to detect a second touch arriving mid-gesture. */
+	let activePointers = new Map<number, ScreenSpacePoint>();
+	let pinch: PinchGesture | null = null;
+
+	function distanceBetween(a: ScreenSpacePoint, b: ScreenSpacePoint): number {
+		return Math.hypot(a.x - b.x, a.y - b.y);
+	}
+
+	function midpointOf(a: ScreenSpacePoint, b: ScreenSpacePoint): ScreenSpacePoint {
+		return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+	}
+
+	/**
+	 * Explicit capture so every subsequent event for this pointer keeps
+	 * targeting the viewport no matter where the finger physically wanders —
+	 * relying on implicit touch capture alone is inconsistent enough across
+	 * mobile browsers that a second finger's move/up events can otherwise go
+	 * missing mid-pinch. Capture can throw for a pointer the browser already
+	 * released (e.g. a fast double-tap); never let that abort the gesture.
+	 */
+	function capturePointer(event: PointerEvent): void {
+		try {
+			controller.container?.setPointerCapture(event.pointerId);
+		} catch {
+			// Best-effort; move/up still work uncaptured on browsers that reject it.
+		}
+	}
+
+	function releasePointerCapture(pointerId: number): void {
+		try {
+			controller.container?.releasePointerCapture(pointerId);
+		} catch {
+			// Already released (pointer up/cancel typically releases implicitly).
+		}
+	}
 
 	function onWheel(event: WheelEvent): void {
 		// Without fitted content there is nothing meaningful to zoom.
@@ -70,8 +111,30 @@
 	}
 
 	function onPointerDown(event: PointerEvent): void {
-		if (event.button !== 0 || gesture || claimedGesture) return;
+		if (event.button !== 0) return;
 		const pointer = controller.pointerIn(event);
+		activePointers.set(event.pointerId, pointer);
+		capturePointer(event);
+
+		// A second touch landing — whether or not a single-pointer gesture is
+		// already in flight — starts (or re-anchors) a pinch. Any single-pointer
+		// pan or claimed gesture is abandoned so the two systems never fight
+		// over the same view transform.
+		if (activePointers.size >= 2) {
+			event.preventDefault();
+			if (gesture) endGesture();
+			if (claimedGesture) {
+				onClaimedPointerCancel?.(pointer, event);
+				endClaimedGesture();
+			}
+			startPinch();
+			window.addEventListener('pointermove', onAnyPointerMove);
+			window.addEventListener('pointerup', onAnyPointerUp);
+			window.addEventListener('pointercancel', onAnyPointerUp);
+			return;
+		}
+
+		if (gesture || claimedGesture) return;
 		// The editor may claim the gesture (marker drag, tile drag, crop handle)
 		// before viewport panning begins.
 		if (claimPointer?.(pointer, event)) {
@@ -82,6 +145,7 @@
 			window.addEventListener('pointercancel', handleClaimedPointerCancel);
 			return;
 		}
+		event.preventDefault();
 		gesture = {
 			pointerId: event.pointerId,
 			start: pointer,
@@ -93,6 +157,47 @@
 		window.addEventListener('pointercancel', onPointerCancel);
 	}
 
+	/** (Re)anchors the pinch on the first two currently-down pointers. */
+	function startPinch(): void {
+		const points = [...activePointers.entries()].slice(0, 2);
+		if (points.length < 2) {
+			pinch = null;
+			return;
+		}
+		const [[idA, a], [idB, b]] = points;
+		pinch = { pointerIds: [idA, idB], lastDistance: distanceBetween(a, b), lastMidpoint: midpointOf(a, b) };
+	}
+
+	/** Pinch-zoom (about the two-finger midpoint) plus pan-with-midpoint, mirroring native touch editors. */
+	function onAnyPointerMove(event: PointerEvent): void {
+		if (!activePointers.has(event.pointerId)) return;
+		activePointers.set(event.pointerId, controller.pointerIn(event));
+		if (!pinch) return;
+		const a = activePointers.get(pinch.pointerIds[0]);
+		const b = activePointers.get(pinch.pointerIds[1]);
+		if (!a || !b) return;
+		event.preventDefault();
+		const distance = distanceBetween(a, b);
+		const midpoint = midpointOf(a, b);
+		if (pinch.lastDistance > 0 && distance > 0) {
+			controller.zoomAtPointer(midpoint, distance / pinch.lastDistance);
+		}
+		controller.panBy(midpoint.x - pinch.lastMidpoint.x, midpoint.y - pinch.lastMidpoint.y);
+		pinch.lastDistance = distance;
+		pinch.lastMidpoint = midpoint;
+	}
+
+	function onAnyPointerUp(event: PointerEvent): void {
+		activePointers.delete(event.pointerId);
+		releasePointerCapture(event.pointerId);
+		if (activePointers.size < 2) {
+			pinch = null;
+			window.removeEventListener('pointermove', onAnyPointerMove);
+			window.removeEventListener('pointerup', onAnyPointerUp);
+			window.removeEventListener('pointercancel', onAnyPointerUp);
+		}
+	}
+
 	function onPointerMove(event: PointerEvent): void {
 		if (!gesture) return;
 		if (event.pointerId !== gesture.pointerId) {
@@ -100,6 +205,7 @@
 			return;
 		}
 		const pointer = controller.pointerIn(event);
+		activePointers.set(event.pointerId, pointer);
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
 		if (!gesture.panning && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.panning = true;
@@ -122,6 +228,8 @@
 			!active.panning &&
 			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <= CLICK_SLOP_PX &&
 			controller.containsPoint(event);
+		activePointers.delete(event.pointerId);
+		releasePointerCapture(event.pointerId);
 		endGesture();
 		if (isClick) onViewportClick?.(pointer, event);
 	}
@@ -132,7 +240,9 @@
 			endClaimedGesture();
 			return;
 		}
-		onClaimedPointerMove?.(controller.pointerIn(event), event);
+		const pointer = controller.pointerIn(event);
+		activePointers.set(event.pointerId, pointer);
+		onClaimedPointerMove?.(pointer, event);
 	}
 
 	function handleClaimedPointerUp(event: PointerEvent): void {
@@ -142,6 +252,8 @@
 			return;
 		}
 		onClaimedPointerUp?.(controller.pointerIn(event), event);
+		activePointers.delete(event.pointerId);
+		releasePointerCapture(event.pointerId);
 		endClaimedGesture();
 	}
 
@@ -150,10 +262,14 @@
 		if (event.pointerId === claimedGesture.pointerId) {
 			onClaimedPointerCancel?.(controller.pointerIn(event), event);
 		}
+		activePointers.delete(event.pointerId);
+		releasePointerCapture(event.pointerId);
 		endClaimedGesture();
 	}
 
-	function onPointerCancel(): void {
+	function onPointerCancel(event: PointerEvent): void {
+		activePointers.delete(event.pointerId);
+		releasePointerCapture(event.pointerId);
 		endGesture();
 	}
 
@@ -208,6 +324,13 @@
 	onDestroy(() => {
 		endGesture();
 		endClaimedGesture();
+		activePointers.clear();
+		pinch = null;
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('pointermove', onAnyPointerMove);
+			window.removeEventListener('pointerup', onAnyPointerUp);
+			window.removeEventListener('pointercancel', onAnyPointerUp);
+		}
 		resizeObserver?.disconnect();
 		resizeObserver = null;
 	});

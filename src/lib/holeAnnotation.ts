@@ -106,6 +106,16 @@ export function moveBasket(holes: readonly AnnotatedHole[], holeId: string, poin
 	return updateHole(holes, holeId, (hole) => (hole.basket ? { ...hole, basket: point } : hole));
 }
 
+/** Removes the tee from a hole, leaving every other annotation untouched. */
+export function removeTee(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, tee: undefined }));
+}
+
+/** Removes the basket from a hole, leaving every other annotation untouched. */
+export function removeBasket(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({ ...hole, basket: undefined }));
+}
+
 export function addShot(
 	holes: readonly AnnotatedHole[],
 	holeId: string,
@@ -118,6 +128,14 @@ export function addShot(
 
 export function removeLastShot(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => ({ ...hole, shots: hole.shots.slice(0, -1) }));
+}
+
+/** Removes one specific shot by id, wherever it falls in the ordered list. */
+export function removeShot(holes: readonly AnnotatedHole[], holeId: string, shotId: string): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => ({
+		...hole,
+		shots: hole.shots.filter((shot) => shot.id !== shotId)
+	}));
 }
 
 /** Moves one existing shot landing while preserving the shot id and order. */
@@ -158,6 +176,17 @@ export function moveCorridorBend(
 /** Pops the last bend; an empty bend list is a valid straight hole. */
 export function removeLastBend(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: hole.corridorBends.slice(0, -1) }));
+}
+
+/** Removes one specific bend by its position in the ordered list. */
+export function removeCorridorBend(holes: readonly AnnotatedHole[], holeId: string, index: number): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		if (index < 0 || index >= hole.corridorBends.length) return hole;
+		return {
+			...hole,
+			corridorBends: hole.corridorBends.filter((_, bendIndex) => bendIndex !== index)
+		};
+	});
 }
 
 export function clearBends(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
