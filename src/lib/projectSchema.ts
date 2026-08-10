@@ -1,16 +1,17 @@
 /**
  * ChainSpot versioned project document — serialization, validation, and migration.
  *
- * The saved document (`ProjectDocumentV3`) is the durable, portable boundary of a
+ * The saved document (`ProjectDocumentV4`) is the durable, portable boundary of a
  * ChainSpot project. It wraps the plain authoritative domain state (`ProjectState` from
  * P0-002) with an explicit `schemaVersion` and stores derived normalized coordinates
  * alongside the authoritative pixel coordinates:
  *
- *   { "schemaVersion": 3,
+ *   { "schemaVersion": 4,
  *     "project": { "id", "name", "createdAt", "updatedAt" },
  *     "images": [ <source-overview manifest>, <target-basemap manifest> ],
  *     "controlPointPairs": [ <complete pair with source/target pixel + normalized points> ],
  *     "holes": [ <hole with tee/basket/ordered shots/corridorBends/corridorWidthPx in source-image pixels> ],
+ *     "numberBadges": [ <hole-number badge anchor: number/xPx/yPx/confidence> ],
  *     "viewState": null | { "source": {"zoom","panX","panY"}, "target": {...} } }
  *
  * Versions: v1 documents (written before hole annotation existed) are still readable and
@@ -25,6 +26,14 @@
  * is dev-era and is DROPPED on read: a v2 hole is migrated to empty bends and the current
  * default width. No legacy polygon compatibility subsystem is kept.
  *
+ * v3 -> v4: adds `numberBadges`, hole-number-badge anchor points captured alongside
+ * `holes` (course-shape signature input for smart course recognition; see
+ * `courseSignature.ts`). Absent on v1-v3 documents, which migrate to an empty array —
+ * one migration rule covering all three older versions at once, the same trick already
+ * used for `holes` migrating from v1. Badge anchors carry a `confidence` field but are
+ * never authoritative like tee/basket: they exist purely to fingerprint a course's shape,
+ * not to annotate a round.
+ *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
  * are only checked (never trusted) on load. A present finite normalized value that does
@@ -33,9 +42,9 @@
  * An invalid-type or non-finite normalized value is a structured failure (no coercion).
  *
  * Validation order: the root must be a plain object and `schemaVersion` is read and
- * checked before anything else, so an unsupported version (any value other than 1, 2, or
- * 3, with newer versions clearly classified) fails before any other validation and never
- * leads to partial state replacement. Unknown fields at every level of a supported
+ * checked before anything else, so an unsupported version (any value other than 1, 2, 3,
+ * or 4, with newer versions clearly classified) fails before any other validation and
+ * never leads to partial state replacement. Unknown fields at every level of a supported
  * version are ignored during parsing and are never emitted by the serializer, so they
  * cannot survive a re-serialization.
  *
@@ -62,6 +71,7 @@ import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type {
 	AnnotatedHole,
 	ControlPointPair,
+	HoleNumberBadgeAnchor,
 	ImageAsset,
 	ImagePoint,
 	ImageRole,
@@ -75,10 +85,10 @@ import type {
 import { IMAGE_ROLES } from './domain/project';
 
 /** The schema version written by this build. */
-export const CURRENT_SCHEMA_VERSION = 3 as const;
+export const CURRENT_SCHEMA_VERSION = 4 as const;
 
 /** Every version this build can read; older ones are migrated forward on parse. */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -99,12 +109,20 @@ export interface ControlPointPairV1 {
 	updatedAt: string;
 }
 
-export interface ProjectDocumentV3 {
-	schemaVersion: 3;
+export interface NumberBadgeAnchorDoc {
+	number: number;
+	xPx: number;
+	yPx: number;
+	confidence: number;
+}
+
+export interface ProjectDocumentV4 {
+	schemaVersion: 4;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
 	holes: AnnotatedHole[];
+	numberBadges: NumberBadgeAnchorDoc[];
 	viewState: ProjectViewState | null;
 }
 
@@ -120,6 +138,7 @@ export type ProjectSchemaErrorCategory =
 	| 'coordinate'
 	| 'normalized'
 	| 'hole'
+	| 'badge'
 	| 'view';
 
 export interface ProjectSchemaError {
@@ -667,6 +686,55 @@ function readHoles(input: unknown, images: ImageAsset[]): AnnotatedHole[] {
 	return holes;
 }
 
+function readConfidence01(input: unknown, path: string): number {
+	if (typeof input !== 'number') {
+		throw failure('badge', 'badge.confidence.type', path, `${path} must be a number, got ${describeValue(input)}`);
+	}
+	if (!Number.isFinite(input) || input < 0 || input > 1) {
+		throw failure(
+			'badge',
+			'badge.confidence.invalid',
+			path,
+			`${path} must be a finite number in [0, 1], got ${String(input)}`
+		);
+	}
+	return input;
+}
+
+/**
+ * Reads the `numberBadges` array. Absent/null is an empty list — the single migration
+ * rule covering v1, v2, and v3 documents (none of which had this field) uniformly, the
+ * same trick `readHoles` already uses for its own v1 migration.
+ */
+function readNumberBadges(input: unknown, images: ImageAsset[]): HoleNumberBadgeAnchor[] {
+	if (input === undefined || input === null) return [];
+	if (!Array.isArray(input)) {
+		throw failure('required-type', 'required.missing', 'numberBadges', 'numberBadges must be an array');
+	}
+	const sourceImage = images.find((image) => image.role === 'source-overview') as ImageAsset;
+	const badges: HoleNumberBadgeAnchor[] = [];
+	const numbers = new Map<number, string>();
+	for (let index = 0; index < input.length; index++) {
+		const path = `numberBadges[${index}]`;
+		const object = readObject(input[index], path, 'number badge anchor');
+		const number = readHoleNumber(object.number, `${path}.number`);
+		const prior = numbers.get(number);
+		if (prior !== undefined) {
+			throw failure(
+				'badge',
+				'badge.number-duplicate',
+				`${path}.number`,
+				`badge number ${number} is used by both ${prior} and ${path}`
+			);
+		}
+		numbers.set(number, path);
+		const point = readHolePoint(object, path, sourceImage);
+		const confidence = readConfidence01(object.confidence, `${path}.confidence`);
+		badges.push({ number, xPx: point.xPx, yPx: point.yPx, confidence });
+	}
+	return badges;
+}
+
 function assertUniqueIds(project: ProjectMetadata, images: ImageAsset[], pairs: ControlPointPair[]): void {
 	const seen = new Map<string, string>([['project.id', project.id]]);
 	for (let index = 0; index < images.length; index++) {
@@ -771,9 +839,12 @@ function readDocument(value: unknown): ProjectState {
 	// keeps the migration a single well-defined default rather than a separate
 	// transform pass.
 	const holes = readHoles(root.holes, images);
+	// Same one-migration-rule shape as holes above: numberBadges is absent on
+	// every version prior to v4 and reads as an empty array regardless.
+	const numberBadges = readNumberBadges(root.numberBadges, images);
 	const viewState = readViewState(root.viewState);
 
-	return { project, images, controlPointPairs: pairs, holes, viewState };
+	return { project, images, controlPointPairs: pairs, holes, numberBadges, viewState };
 }
 
 /**
@@ -850,6 +921,7 @@ function validateState(state: ProjectState): void {
 	const pairs = readPairs(state.controlPointPairs, images);
 	assertUniqueIds(project, images, pairs);
 	readHoles(state.holes, images);
+	readNumberBadges(state.numberBadges, images);
 	readViewState(state.viewState);
 }
 
@@ -860,7 +932,7 @@ function validateState(state: ProjectState): void {
  * returned document never stores normalized state back into the domain. Throws a
  * structured `ProjectSchemaError` when the domain state is invalid.
  */
-export function serializeProjectState(state: ProjectState): ProjectDocumentV3 {
+export function serializeProjectState(state: ProjectState): ProjectDocumentV4 {
 	try {
 		validateState(state);
 	} catch (error) {
@@ -927,6 +999,12 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV3 {
 			...(hole.par !== undefined ? { par: hole.par } : {}),
 			...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
 			...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
+		})),
+		numberBadges: state.numberBadges.map((badge) => ({
+			number: badge.number,
+			xPx: badge.xPx,
+			yPx: badge.yPx,
+			confidence: badge.confidence
 		})),
 		viewState
 	};

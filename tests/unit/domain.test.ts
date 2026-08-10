@@ -50,6 +50,7 @@ describe('project state construction', () => {
 			images: [],
 			controlPointPairs: [],
 			holes: [],
+			numberBadges: [],
 			viewState: null
 		});
 	});
@@ -306,6 +307,7 @@ describe('durable state serialization', () => {
 			'controlPointPairs',
 			'holes',
 			'images',
+			'numberBadges',
 			'project',
 			'viewState'
 		]);

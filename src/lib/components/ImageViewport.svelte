@@ -205,6 +205,13 @@
 			window.removeEventListener('pointermove', onAnyPointerMove);
 			window.removeEventListener('pointerup', onAnyPointerUp);
 			window.removeEventListener('pointercancel', onAnyPointerUp);
+		} else if (pinch && pinch.pointerIds.includes(event.pointerId)) {
+			// One of the two pointers the pinch was anchored on just lifted, but a
+			// third (e.g. a palm touch) is still down, keeping the count at 2+.
+			// Re-anchor onto whichever two pointers remain instead of leaving
+			// `pinch` referencing a now-missing finger, which would silently
+			// freeze the gesture (onAnyPointerMove no-ops once `a`/`b` is undefined).
+			startPinch();
 		}
 	}
 

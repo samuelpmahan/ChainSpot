@@ -67,6 +67,7 @@ function stateWithHoles(holes: AnnotatedHole[]): ProjectState {
 		images: [sourceAsset(), targetAsset()],
 		controlPointPairs: [],
 		holes,
+		numberBadges: [],
 		viewState: null
 	};
 }
@@ -145,7 +146,7 @@ describe('v1/v2 migration', () => {
 		expect(result.state.holes).toEqual([]);
 	});
 
-	it('re-serializing a migrated v1 document writes it forward as v3', () => {
+	it('re-serializing a migrated v1 document writes it forward as v4', () => {
 		const v1 = JSON.parse(JSON.stringify(serializeProjectState(stateWithHoles([])))) as Record<
 			string,
 			unknown
@@ -156,7 +157,7 @@ describe('v1/v2 migration', () => {
 		const parsed = parseProjectDocument(v1);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
-		expect(serializeProjectState(parsed.state).schemaVersion).toBe(3);
+		expect(serializeProjectState(parsed.state).schemaVersion).toBe(4);
 	});
 
 	it('drops a v2 legacy corridor polygon, initializing empty bends and the default width', () => {
@@ -187,7 +188,7 @@ describe('v1/v2 migration', () => {
 		expect('corridor' in migrated).toBe(false);
 
 		const reSerialized = serializeProjectState(result.state);
-		expect(reSerialized.schemaVersion).toBe(3);
+		expect(reSerialized.schemaVersion).toBe(4);
 		expect('corridor' in reSerialized.holes[0]).toBe(false);
 	});
 });
@@ -392,6 +393,81 @@ describe('ProjectEditor.setHoles', () => {
 		// returns all the way to the empty list.
 		expect(undoDepthProbe).toBe(true);
 		expect(editor.state.holes).toEqual([]);
+	});
+});
+
+describe('ProjectEditor.setNumberBadges', () => {
+	function loadedEditor(): ProjectEditor {
+		return new ProjectEditor({
+			state: {
+				...createProjectState({ createId: () => 'project-1', now: NOW }),
+				images: [sourceAsset(), targetAsset()]
+			},
+			now: NOW
+		});
+	}
+
+	const RICH_BADGE = { number: 1, xPx: 118.25, yPx: 200.5, confidence: 0.92 };
+
+	it('enters history as one step and is undoable/redoable', () => {
+		const editor = loadedEditor();
+		expect(editor.state.numberBadges).toEqual([]);
+
+		editor.setNumberBadges([RICH_BADGE]);
+		expect(editor.state.numberBadges).toEqual([RICH_BADGE]);
+		expect(editor.canUndo).toBe(true);
+
+		editor.undo();
+		expect(editor.state.numberBadges).toEqual([]);
+		editor.redo();
+		expect(editor.state.numberBadges).toEqual([RICH_BADGE]);
+	});
+
+	it("isolates stored badges from the caller's array", () => {
+		const editor = loadedEditor();
+		const badges = [RICH_BADGE];
+		editor.setNumberBadges(badges);
+		badges.push({ number: 2, xPx: 10, yPx: 10, confidence: 0.5 });
+		expect(editor.state.numberBadges).toHaveLength(1);
+	});
+
+	it('rejects an out-of-bounds badge point before it can reach serialization', () => {
+		const editor = loadedEditor();
+		expect(() => editor.setNumberBadges([{ number: 1, xPx: 5000, yPx: 5, confidence: 0.9 }])).toThrow(
+			/outside the source image bounds/
+		);
+		expect(editor.state.numberBadges).toEqual([]);
+	});
+
+	it('rejects a duplicate badge number and a confidence outside [0, 1]', () => {
+		const editor = loadedEditor();
+		expect(() =>
+			editor.setNumberBadges([
+				{ number: 1, xPx: 10, yPx: 10, confidence: 0.9 },
+				{ number: 1, xPx: 20, yPx: 20, confidence: 0.8 }
+			])
+		).toThrow(/duplicate badge number/);
+		expect(() => editor.setNumberBadges([{ number: 1, xPx: 10, yPx: 10, confidence: 1.5 }])).toThrow(
+			/confidence must be a finite number in \[0, 1\]/
+		);
+		expect(editor.state.numberBadges).toEqual([]);
+	});
+
+	it('rejects setting badges before a source image is loaded', () => {
+		const editor = new ProjectEditor({ state: createProjectState({ createId: () => 'project-1', now: NOW }) });
+		expect(() => editor.setNumberBadges([RICH_BADGE])).toThrow(
+			/the source-overview image must be loaded/
+		);
+	});
+
+	it('setting an identical list is a no-op that does not grow history', () => {
+		const editor = loadedEditor();
+		editor.setNumberBadges([RICH_BADGE]);
+		const undoDepthProbe = editor.canUndo;
+		editor.setNumberBadges([RICH_BADGE]);
+		editor.undo();
+		expect(undoDepthProbe).toBe(true);
+		expect(editor.state.numberBadges).toEqual([]);
 	});
 });
 

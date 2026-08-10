@@ -312,7 +312,7 @@ describe('bundle writer (B)', () => {
 		const created = await createProjectBundle(editor);
 		expect(created.ok).toBe(true);
 		if (!created.ok) return;
-		expect(created.bundle.document.schemaVersion).toBe(3);
+		expect(created.bundle.document.schemaVersion).toBe(4);
 		const parsed = parseProjectJson(created.bundle.text);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
@@ -504,6 +504,10 @@ describe('full round trip (C)', () => {
 					corridorWidthPx: 60
 				}
 			],
+			numberBadges: [
+				{ number: 1, xPx: 118.25, yPx: 200.5, confidence: 0.92 },
+				{ number: 2, xPx: 12.75, yPx: 18.25, confidence: 0.81 }
+			],
 			viewState: {
 				source: { zoom: 1.4, panX: -92, panY: 17 },
 				target: { zoom: 1.1, panX: 0, panY: -35 }
@@ -614,7 +618,7 @@ describe('import failures (D)', () => {
 	});
 
 	it('classifies unsupported newer schema versions', async () => {
-		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 4 })) }, { level: 6 });
+		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 5 })) }, { level: 6 });
 		const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
