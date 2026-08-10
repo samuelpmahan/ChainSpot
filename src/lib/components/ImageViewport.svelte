@@ -114,13 +114,13 @@
 		if (event.button !== 0) return;
 		const pointer = controller.pointerIn(event);
 		activePointers.set(event.pointerId, pointer);
-		capturePointer(event);
 
 		// A second touch landing — whether or not a single-pointer gesture is
 		// already in flight — starts (or re-anchors) a pinch. Any single-pointer
 		// pan or claimed gesture is abandoned so the two systems never fight
 		// over the same view transform.
 		if (activePointers.size >= 2) {
+			capturePointer(event);
 			event.preventDefault();
 			if (gesture) endGesture();
 			if (claimedGesture) {
@@ -136,15 +136,25 @@
 
 		if (gesture || claimedGesture) return;
 		// The editor may claim the gesture (marker drag, tile drag, crop handle)
-		// before viewport panning begins.
+		// before viewport panning begins. A claimed gesture must not capture the
+		// pointer on this container: some claimants (Konva's own draggable
+		// shapes, used by the crop handles) drive their drag entirely through
+		// the browser's native mouse events dispatched on their own element,
+		// not through this viewport's pointer plumbing. Calling
+		// preventDefault() on a mouse-origin pointerdown suppresses every
+		// compatibility mouse event (mousemove, mouseup) for the rest of that
+		// pointer's gesture, which would silently kill that native drag before
+		// it starts; touch input has no such compatibility-event dependency
+		// here, so it still gets preventDefault to block scroll/selection.
 		if (claimPointer?.(pointer, event)) {
-			event.preventDefault();
+			if (event.pointerType !== 'mouse') event.preventDefault();
 			claimedGesture = { pointerId: event.pointerId };
 			window.addEventListener('pointermove', handleClaimedPointerMove);
 			window.addEventListener('pointerup', handleClaimedPointerUp);
 			window.addEventListener('pointercancel', handleClaimedPointerCancel);
 			return;
 		}
+		capturePointer(event);
 		event.preventDefault();
 		gesture = {
 			pointerId: event.pointerId,
