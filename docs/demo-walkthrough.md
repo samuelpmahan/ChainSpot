@@ -6,10 +6,13 @@ to end, using real inputs, driving the real routes.
 ## The problem it solves
 
 ChainSpot's value is a pipeline, not a screen: four phone screenshots become one
-high-detail map, the map becomes an annotated round, the round lands on a clean
-aerial basemap, and the result is per-hole graphics that survive to air. Any one
-screen looks unremarkable in isolation. A prospect who opens `/stitch-map` cold
-sees an empty grid and four file pickers, and has nothing to put in them.
+high-detail map, the map becomes an annotated course, the course lands on a
+clean aerial basemap, and the result is per-hole graphics that survive to air.
+And the map pays off more than once — a course built today is a course
+Course Memory remembers for every round played on it afterward, with no
+re-annotation of the geometry. Any one screen looks unremarkable in isolation.
+A prospect who opens `/stitch-map` cold sees an empty grid and four file
+pickers, and has nothing to put in them.
 
 So the demo has to supply the inputs. The design question is what kind of demo
 that makes it, and there is a bad answer that is very easy to reach for: a
@@ -28,11 +31,18 @@ implementation of it.
   │  "Start the walkthrough"
   │    1. fetch real assets  →  2. hand to a real intake path  →  3. goto(real route)
   ▼
-/stitch-map ──▶ /annotate-round ──▶ /create-graphics
-      ▲                 ▲                    ▲
-      └─────────  DemoGuide rail (mounted once in +layout.svelte)  ──────┘
-                  narration · step navigation · "Load the real inputs"
+/stitch-map ──▶ /annotate-round ──▶ /create-graphics ──▶ (real reload) ──▶ /annotate-round ──▶ /create-graphics
+      ▲                 ▲                    ▲                                    ▲                    ▲
+      └───────────────────────────  DemoGuide rail (mounted once in +layout.svelte)  ─────────────────────┘
+                              narration · step navigation · "Load the real inputs"
 ```
+
+Build the map once (stitch, annotate in Map mode), put one course on air
+(basemap + export), then prove the map is worth having built: a real browser
+reload — the guide's own affordance, never a proxy for a product control —
+clears every in-memory session the app keeps, and the walkthrough finishes by
+annotating a *played round* of the same course (Round mode: throws and walking
+path) purely from what Course Memory remembered across that reload.
 
 Every step is performed on a production route by production code. The demo owns
 exactly three things: which real assets to hand over, what the visitor is told,
@@ -59,22 +69,37 @@ screenshot of the app pretending to be the app. `tests/e2e/demo.spec.ts` asserts
 that starting the walkthrough lands on `/stitch-map` and that the real stitch
 workspace is what renders.
 
-**2. No synthetic inputs.** The dataset is four real UDisc screenshots of a real
-18-hole course (Bill Allen Memorial Park, Frisco TX), catalogued in
-`src/lib/demo/catalog.ts` and served from `static/resources/demo/bill-allen/`.
-`fetchDemoFile` turns each one into an ordinary `File` — same name, same MIME
-type, same bytes — so a demo run exercises the identical validation, decode, and
-error paths a customer's own screenshots would.
+**2. No synthetic inputs.** The map-creation dataset is four real UDisc
+screenshots of a real 18-hole course (Dash's Track, McKinney/Frisco TX area),
+catalogued in `src/lib/demo/catalog.ts` and served from
+`static/resources/demo/dashs-track/`. `fetchDemoFile` turns each one into an
+ordinary `File` — same name, same MIME type, same bytes — so a demo run
+exercises the identical validation, decode, and error paths a customer's own
+screenshots would.
 
 The capture files carry no grid position in their names and are not in the order
 they were taken. Smart Import infers placement from pixel content, so a shuffled,
 position-free set makes the inference demonstrable rather than staged.
 
+The round-annotation dataset is a second, independent real capture of the
+*same* course, already played: UDisc's own blue landing droplets and purple
+walking path are pixels in that screenshot, and the visitor annotates over
+them. It carries full phone chrome — status bar, course title bar, hole/par
+banner, bottom nav — and, unlike the four map-creation tiles, nothing crops
+it before Annotate Round sees it; the narration says so rather than
+pretending otherwise. It is a deliberate interim stand-in the user has said
+will be replaced with a cleaner capture (see
+`static/resources/demo/dashs-track/README.md`) — swapping it for a better
+capture is scoped to be a one-field catalog change plus a file under
+`static/`, never a new branch in a route.
+
 **3. No mocked services.** The clean basemap is deliberately *not* shipped as a
-fixture. Step 3 sends the visitor through the live OpenStreetMap Nominatim
-search and the live USGS NAIP `exportImage` endpoint the product already uses,
-with a real course name as the query. A prospect who suspects the aerial is
-canned can type their own course instead and watch it work.
+fixture. The basemap/export steps — before *and* after the reload — send the
+visitor through the live OpenStreetMap Nominatim search and the live USGS NAIP
+`exportImage` endpoint the product already uses, refetched from scratch the
+second time because nothing about a fresh page load is special-cased for the
+demo. A prospect who suspects the aerial is canned can type their own course
+instead and watch it work.
 
 **4. No precomputed results.** Arming puts files where a real intake path finds
 them and stops. It never writes an editor, never supplies placements, crops, or
@@ -87,15 +112,18 @@ Two of the three stages needed no new seam at all.
 
 | Stage | Path in | New code |
 | --- | --- | --- |
-| Annotate Round | `setPendingHandoff({ targetRole: 'source-overview' })` — the store Stitch Map's "Use as UDisc source" already writes | none |
-| Create Graphics | same store, `targetRole: 'target-basemap'` (unused: step 3 fetches its own basemap live) | none |
-| Stitch Map | `src/lib/demo/stageInbox.ts`, a one-shot slot claimed on mount and passed straight to `requestSmartImport` | 2 lines in the route |
+| Annotate Round (Map mode, step 2) | `setPendingHandoff({ targetRole: 'source-overview' })` — the store Stitch Map's "Use as UDisc source" already writes. No demo-side arming: the product's own handoff carries the visitor's own stitched export forward. | none |
+| Annotate Round (Round mode, step 5) | Same store, demo-armed this time (`DemoArming` kind `annotate-source`) with the played-round capture, since there is no upstream product step to hand this one off. | none — reuses the same store |
+| Create Graphics | Same store, `targetRole: 'target-basemap'` (unused: the basemap steps fetch their own aerial live) | none |
+| Stitch Map | The pending-stitch-captures slot in `src/lib/session.ts` (originally its own `demo/stageInbox.ts`, folded into the session-state consolidation), claimed on mount and passed straight to `requestSmartImport` | 2 lines in the route |
 
 Reusing the product's own handoff store is the load-bearing choice. Annotate
 Round shows its ordinary import banner, applies its ordinary replacement and
 point-discard rules, and reports its ordinary errors — a demo visitor sees the
 real intake contract, and the demo has nothing of its own that can drift away
-from it.
+from it. This is why the Round-mode step's arming still routes through that
+store instead of inventing a second one, even though nothing upstream produced
+its input.
 
 The Stitch Map inbox exists because Stitch Map has no equivalent store, and it
 is modelled directly on `src/lib/stitch/handoff.ts`: module-level, one-shot,
@@ -104,10 +132,13 @@ cleared by a full page reload, carrying plain `File`s and nothing precomputed.
 ### The one thing arming must never do
 
 `armDemoStep` refuses to overwrite a pending handoff that is already waiting,
-because that handoff is usually the visitor's own stitched export from step 1.
-Replacing their work with a sample would be the single most damaging thing this
-code could do, so it is a guard in `src/lib/demo/arming.ts` and a unit test in
-`tests/unit/demoWalkthrough.test.ts`.
+because a waiting handoff is usually the visitor's own work in transit — their
+stitched export on the way to Annotate Round in step 2, or (less likely, but
+the guard does not special-case which role) a basemap export on its way to
+Create Graphics. Replacing it with a sample would be the single most damaging
+thing this code could do, so it is a guard in `src/lib/demo/arming.ts` and a
+unit test in `tests/unit/demoWalkthrough.test.ts` covering both roles the
+shared slot can carry.
 
 Related: a failed asset load leaves the Stitch Map inbox *empty* rather than
 half-filled. Three of four files would reach Smart Import as a wrong-file-count
@@ -132,25 +163,41 @@ mount, so a storage-disabled browser still runs the demo.
 
 ## Step navigation and route changes
 
-Advancing only navigates when the next step lives on a different route. Steps 3
-through 5 all happen on Create Graphics, and re-navigating would throw away the
-basemap and correspondences the visitor just created.
+Advancing only navigates when the next step lives on a different route. The
+basemap/export step and the reload step both happen on Create Graphics, and
+re-navigating between them would throw away the basemap and correspondences
+the visitor just created. Annotate Round is visited twice — once in Map mode
+(step 2), once in Round mode (step 5) — and each of those *is* preceded by a
+route change, so the ordinary `goto` path applies there same as anywhere else.
+
+### The reload step
+
+One step (`kind: 'reload'` in `src/lib/demo/catalog.ts`) is not a narration-only
+stop: its Next action, `DemoGuide`'s `reloadAndAdvance`, performs a real
+`window.location.assign`, not an SPA `goto`. This is deliberate, not an
+oversight — the step's narrated claim is that in-session product state does not
+survive a reload, and an SPA navigation would leave `src/lib/session.ts`'s
+retained editors sitting there untouched, making the claim false. Advancing the
+tour cursor (which persists to `sessionStorage`) happens *before* the
+navigation fires, so `DemoTour.restore()` on the reloaded page resumes on the
+reload step's successor rather than replaying the reload step itself.
 
 ## What building the demo found
 
-Step 1 was the load-bearing one, and running it on this dataset surfaced a real
-defect worth fixing rather than narrating around: the product reported "usable;
-review recommended" with a direction-mismatch warning on captures that were
-placed perfectly correctly. The cause was that these captures overlap
-generously, and the more content two tiles share, the more readily that shared
-region also explains itself under the *other* orientation hypothesis. The
-warning therefore fired hardest at users who captured most carefully.
+Step 1 was the load-bearing one for the walkthrough's first dataset (Bill Allen
+Memorial Park), and running it surfaced a real defect worth fixing rather than
+narrating around: the product reported "usable; review recommended" with a
+direction-mismatch warning on captures that were placed perfectly correctly.
+The cause was that those captures overlap generously, and the more content two
+tiles share, the more readily that shared region also explains itself under the
+*other* orientation hypothesis. The warning therefore fired hardest at users who
+captured most carefully.
 
 The diagnostic now reports a direction mismatch only on an edge that is also
 weak in the orientation the layout requires, where it is genuine evidence about
 why that edge is weak. On a strongly matching edge, the committed placement came
 from a near-perfect direct measurement and there is nothing a user could act on.
-The demo dataset now reports "strong" with no warnings.
+That dataset now reports "strong" with no warnings.
 
 The same pass added the case that generous overlap was being confused with:
 the same screenshot supplied twice, where no 2×2 exists and any arrangement
@@ -169,25 +216,35 @@ which corner each file lands in. Pinning corner labelling there would make it a
 Smart Import regression test wearing a demo's clothes, and it would fail for
 reasons that have nothing to do with the demo.
 
+**Not yet re-verified against the current dataset.** The walkthrough moved to
+Dash's Track's four captures without a browser run of Smart Import against
+them — nothing in `tests/unit/demoWalkthrough.test.ts` or `tests/e2e/demo.spec.ts`
+asserts a particular auto-layout outcome for this dataset precisely because
+that outcome is unconfirmed. If the same overlap-driven direction-mismatch
+false positive (or something new) shows up on this dataset, fix it the way the
+paragraphs above describe — narrating around it is not an option under rule 4.
+
 ## Files
 
 | File | Role |
 | --- | --- |
-| `src/routes/demo/+page.svelte` | Cover page: pitch, dataset, five steps, start controls |
+| `src/routes/demo/+page.svelte` | Cover page: pitch, dataset, six steps, start controls |
 | `src/lib/components/DemoGuide.svelte` | The guide rail, mounted in the layout |
 | `src/lib/demo/catalog.ts` | Dataset manifest and step script — the only place to edit copy |
 | `src/lib/demo/assets.ts` | Catalogued asset → ordinary `File`, with typed failures |
 | `src/lib/demo/arming.ts` | The one place the demo touches product state |
-| `src/lib/demo/stageInbox.ts` | One-shot Stitch Map inbox |
+| `src/lib/session.ts` | Cross-route session state, including the one-shot Stitch Map inbox the demo shares with the product (originally a dedicated `demo/stageInbox.ts`, folded in by the session-state consolidation) |
 | `src/lib/demo/tour.svelte.ts` | Reactive narration cursor |
-| `static/resources/demo/bill-allen/` | The real captures, with provenance in its README |
+| `static/resources/demo/dashs-track/` | The real captures, with provenance in its README |
 
 Adding a course is a data change in `catalog.ts` plus files in `static/`. It must
 never require a new branch in a route.
 
 ## Cost
 
-The four captures total roughly 15 MB, because that is what four full-resolution
-phone screenshots weigh — the demo pays the same intake cost a customer does.
-They are fetched only when a visitor starts the walkthrough, never on the cover
-page, which loads one 0.6 MB overview image.
+The four map-creation captures total roughly 17 MB and the round-annotation
+capture roughly 4 MB more, because that is what full-resolution phone
+screenshots weigh — the demo pays the same intake cost a customer does. Assets
+are fetched only when a visitor starts the walkthrough at the step that needs
+them, never speculatively and never on the cover page, which no longer loads a
+standalone overview image.

@@ -35,7 +35,7 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
 			'also includes the round-landing-glyph-*.png templates, which are CLI-read only (scripts/detect-landing-droplets.ts)'
 	},
 	{
-		path: 'resources/demo/bill-allen/',
+		path: 'resources/demo/dashs-track/',
 		reason:
 			'guided-demo course captures + README, lazily fetched by /demo arming (see src/lib/demo/assets.ts)'
 	}

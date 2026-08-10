@@ -1,11 +1,15 @@
 /**
  * Guided-demo unit coverage.
  *
- * The demo's value is entirely in its honesty, so these tests guard the two
+ * The demo's value is entirely in its honesty, so these tests guard the
  * claims that would be embarrassing to break in front of a prospective
  * customer: that every armed input is a real supported image handed to a real
- * intake path, and that arming never silently discards work the visitor already
- * produced.
+ * intake path, that arming never silently discards work the visitor already
+ * produced, and that the one step whose whole point is "your in-session work
+ * is gone, but the course isn't" actually resumes on the right step across
+ * what stands in for a reload here (real navigation is outside jsdom's reach
+ * — see the reload-specific tests below for exactly what is and isn't
+ * covered).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { armDemoStep, stepHasArming } from '../../src/lib/demo/arming';
@@ -58,7 +62,7 @@ afterEach(() => {
 
 describe('demo catalog', () => {
 	it('declares only supported image types and base-path-relative asset URLs', () => {
-		const assets = [...DEMO_DATASET.captures, DEMO_DATASET.overview];
+		const assets = [...DEMO_DATASET.captures, DEMO_DATASET.roundOverview];
 		expect(assets.length).toBe(5);
 		for (const asset of assets) {
 			expect(SUPPORTED_MIME_TYPES).toContain(asset.mimeType);
@@ -82,6 +86,54 @@ describe('demo catalog', () => {
 			expect(['stitch-map', 'annotate-round', 'create-graphics']).toContain(step.route);
 			expect(demoStepUrl(step)).toBe(`/${step.route}`);
 			expect(step.actions.length).toBeGreaterThan(0);
+		}
+	});
+
+	it('tells the whole build-once, reuse-for-a-round story in six steps', () => {
+		expect(DEMO_STEP_COUNT).toBe(6);
+		expect(DEMO_STEPS.map((step) => step.id)).toEqual([
+			'stitch',
+			'annotate-map',
+			'basemap-and-export',
+			'reload',
+			'annotate-round',
+			'export-round'
+		]);
+	});
+
+	it('visits Annotate Round twice — once for course geometry, once for a played round — each armed appropriately', () => {
+		const annotateSteps = DEMO_STEPS.filter((step) => step.route === 'annotate-round');
+		expect(annotateSteps).toHaveLength(2);
+
+		const mapStep = stepById('annotate-map');
+		expect(mapStep.arming).toEqual({ kind: 'none' });
+
+		const roundStep = stepById('annotate-round');
+		expect(roundStep.arming).toEqual({ kind: 'annotate-source' });
+	});
+
+	it('visits Create Graphics twice — once before the reload, once after', () => {
+		const createGraphicsSteps = DEMO_STEPS.filter((step) => step.route === 'create-graphics');
+		expect(createGraphicsSteps.map((step) => step.id)).toEqual([
+			'basemap-and-export',
+			'reload',
+			'export-round'
+		]);
+	});
+
+	it('marks exactly one step as a reload step, positioned between the two halves of the script', () => {
+		const reloadSteps = DEMO_STEPS.filter((step) => step.kind === 'reload');
+		expect(reloadSteps).toHaveLength(1);
+		const reloadIndex = DEMO_STEPS.findIndex((step) => step.kind === 'reload');
+		expect(reloadIndex).toBeGreaterThan(0);
+		expect(reloadIndex).toBeLessThan(DEMO_STEP_COUNT - 1);
+		// Its successor is the step that actually needs a fresh session to prove
+		// anything — the played-round annotation.
+		expect(DEMO_STEPS[reloadIndex + 1].id).toBe('annotate-round');
+		// Every other step defaults to ordinary (undefined/'default') navigation.
+		for (const step of DEMO_STEPS) {
+			if (step.kind === 'reload') continue;
+			expect(step.kind === undefined || step.kind === 'default').toBe(true);
 		}
 	});
 });
@@ -141,13 +193,25 @@ describe('armDemoStep', () => {
 		expect(getPendingStitchCaptures()).toBeNull();
 	});
 
-	it('publishes the sample source through the product handoff store', async () => {
-		const result = await armDemoStep(stepById('annotate'), okFetch());
+	it('is a no-op for the Map-mode annotate step: it relies on the product\'s own "Use as UDisc source" handoff, not demo arming', async () => {
+		const spy = vi.fn();
+		const step = stepById('annotate-map');
+
+		expect(stepHasArming(step)).toBe(false);
+		const result = await armDemoStep(step, spy as unknown as typeof fetch);
+
+		expect(result.ok).toBe(true);
+		expect(spy).not.toHaveBeenCalled();
+		expect(getPendingHandoff()).toBeNull();
+	});
+
+	it('publishes the played-round capture through the product handoff store for the Round-mode annotate step', async () => {
+		const result = await armDemoStep(stepById('annotate-round'), okFetch());
 
 		expect(result.ok).toBe(true);
 		const handoff = getPendingHandoff();
 		expect(handoff?.targetRole).toBe('source-overview');
-		expect(handoff?.fileName).toBe(DEMO_DATASET.overview.fileName);
+		expect(handoff?.fileName).toBe(DEMO_DATASET.roundOverview.fileName);
 	});
 
 	// Both roles, because the handoff store is a single shared slot: a waiting
@@ -156,7 +220,7 @@ describe('armDemoStep', () => {
 	// this step happens to use left the visitor's "Use as clean basemap" stitch
 	// silently discarded.
 	it.each(['source-overview', 'target-basemap'] as const)(
-		"never overwrites a pending %s handoff the visitor's own stitch placed",
+		"never overwrites a pending %s handoff the visitor's own work placed",
 		async (targetRole) => {
 			setPendingHandoff({
 				blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
@@ -165,7 +229,7 @@ describe('armDemoStep', () => {
 			});
 			const spy = vi.fn();
 
-			const result = await armDemoStep(stepById('annotate'), spy as unknown as typeof fetch);
+			const result = await armDemoStep(stepById('annotate-round'), spy as unknown as typeof fetch);
 
 			expect(result.ok).toBe(true);
 			expect(spy).not.toHaveBeenCalled();
@@ -180,7 +244,7 @@ describe('armDemoStep', () => {
 			seen.push(getPendingHandoff()?.fileName ?? '');
 		});
 
-		await armDemoStep(stepById('annotate'), okFetch());
+		await armDemoStep(stepById('annotate-round'), okFetch());
 		unsubscribe();
 		const afterUnsubscribe = seen.length;
 		setPendingHandoff({
@@ -189,7 +253,7 @@ describe('armDemoStep', () => {
 			targetRole: 'source-overview'
 		});
 
-		expect(seen).toEqual([DEMO_DATASET.overview.fileName]);
+		expect(seen).toEqual([DEMO_DATASET.roundOverview.fileName]);
 		expect(seen.length).toBe(afterUnsubscribe);
 	});
 
@@ -209,7 +273,7 @@ describe('armDemoStep', () => {
 
 	it('is a no-op for steps that run on the visitor’s own input', async () => {
 		const spy = vi.fn();
-		const step = stepById('basemap');
+		const step = stepById('basemap-and-export');
 
 		expect(stepHasArming(step)).toBe(false);
 		const result = await armDemoStep(step, spy as unknown as typeof fetch);
@@ -218,6 +282,17 @@ describe('armDemoStep', () => {
 		expect(spy).not.toHaveBeenCalled();
 		expect(getPendingStitchCaptures()).toBeNull();
 		expect(getPendingHandoff()).toBeNull();
+	});
+
+	it('is a no-op for the reload step — it has nothing to preload, only a navigation to perform', async () => {
+		const spy = vi.fn();
+		const step = stepById('reload');
+
+		expect(stepHasArming(step)).toBe(false);
+		const result = await armDemoStep(step, spy as unknown as typeof fetch);
+
+		expect(result.ok).toBe(true);
+		expect(spy).not.toHaveBeenCalled();
 	});
 });
 
@@ -256,5 +331,36 @@ describe('DemoTour', () => {
 		afterCorruption.restore();
 		expect(afterCorruption.active).toBe(false);
 		expect(afterCorruption.stepIndex).toBe(0);
+	});
+
+	/**
+	 * `DemoTour` owns no navigation of its own — `DemoGuide`'s `reloadAndAdvance`
+	 * is what actually calls `window.location.assign`, which is real browser
+	 * navigation this suite cannot exercise in jsdom. What *is* testable here,
+	 * and is exactly the mechanism the reload step depends on, is that advancing
+	 * the cursor past the reload step persists to `sessionStorage` before any
+	 * navigation would fire, so a brand new `DemoTour` instance — standing in for
+	 * the page that comes back after a real reload — restores onto the reload
+	 * step's successor rather than snapping back to the reload step itself.
+	 */
+	it('resumes on the reload step\'s successor, simulating what a real reload leaves behind', () => {
+		const reloadIndex = DEMO_STEPS.findIndex((step) => step.kind === 'reload');
+		expect(reloadIndex).toBeGreaterThanOrEqual(0);
+
+		const tour = new DemoTour();
+		tour.start(reloadIndex);
+		expect(tour.step.kind).toBe('reload');
+
+		// Mirrors DemoGuide.reloadAndAdvance: advance the cursor (persisting the
+		// *next* step to sessionStorage), then — in the real component — reload.
+		const next = tour.goTo(reloadIndex + 1);
+		expect(next.id).toBe('annotate-round');
+		expect(next.route).toBe('annotate-round');
+
+		const afterReload = new DemoTour();
+		afterReload.restore();
+		expect(afterReload.active).toBe(true);
+		expect(afterReload.stepIndex).toBe(reloadIndex + 1);
+		expect(afterReload.step.id).toBe('annotate-round');
 	});
 });

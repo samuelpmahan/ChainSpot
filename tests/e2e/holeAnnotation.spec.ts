@@ -42,9 +42,14 @@ function roundKinds(hasActiveHole: boolean): PointKind[] {
 	return kinds;
 }
 
-/** Clicks the Map/Round segmented toggle in the toolbar. */
+/**
+ * Clicks the Map/Round segmented toggle in the toolbar. The toggle sits above
+ * the fold, so clicking it scrolls the annotation frame away — scroll it back
+ * so frame coordinates measured earlier stay valid for subsequent clicks.
+ */
 async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
 	await page.getByTestId(`annotation-mode-${mode}`).click();
+	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
 }
 
 function crc32(bytes: Uint8Array): number {
