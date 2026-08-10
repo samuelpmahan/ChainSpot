@@ -26,6 +26,8 @@
  * in a browser worker or a Node CLI.
  */
 
+import type { Candidate, CvRaster } from '../cv/types';
+
 export type LandingMarkerKind = 'c1' | 'c2' | 'off-fairway';
 
 /**
@@ -33,7 +35,7 @@ export type LandingMarkerKind = 'c1' | 'c2' | 'off-fairway';
  * raster pixel: use `1` for full resolution and `1 / analysisScale` after a
  * downsample. The bytes are standard RGBA row-major pixels.
  */
-export interface LandingDropletRaster {
+export interface LandingDropletRaster extends CvRaster {
 	readonly rgba: Uint8Array | Uint8ClampedArray;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -47,10 +49,14 @@ export interface LandingDropletBounds {
 	readonly heightPx: number;
 }
 
-/** Localizer output: "there is a landing droplet here; semantic location = tip." */
-export interface LandingDropletLocalization {
-	/** Semantic endpoint: the bottom of the droplet, never the blob/glyph center. */
-	readonly tip: Readonly<{ xPx: number; yPx: number }>;
+/**
+ * Localizer output: "there is a landing droplet here; semantic location = tip."
+ * xPx/yPx (from `Candidate`) are the tip -- the bottom of the droplet, never
+ * the blob/glyph center. `boundsPx` carries the full bounding box (the tip is
+ * off-center within it, unlike a basket/tee candidate's roughly-centered
+ * box), which the glyph classifier and diagnostic overlay both need exactly.
+ */
+export interface LandingDropletLocalization extends Candidate {
 	readonly boundsPx: LandingDropletBounds;
 	readonly areaPx: number;
 }
@@ -78,9 +84,11 @@ export interface LandingDropletGlyphClassification {
 	readonly glyphConfidence: number;
 }
 
-/** Combined localizer + classifier candidate, matching the round-marker primitive's public shape. */
-export interface LandingMarkerCandidate {
-	readonly tip: Readonly<{ xPx: number; yPx: number }>;
+/**
+ * Combined localizer + classifier candidate, matching the round-marker
+ * primitive's public shape. xPx/yPx (from `Candidate`) are the tip.
+ */
+export interface LandingMarkerCandidate extends Candidate {
 	readonly boundsPx: LandingDropletBounds;
 	readonly kind: LandingMarkerKind;
 	readonly glyphConfidence: number;
@@ -143,17 +151,35 @@ const BLUE_VALUE_LOW = 100;
 const MIN_COMPONENT_AREA_PX = 30;
 
 /**
- * A standalone droplet is a vertically elongated pin. These bounds are
- * intentionally generous (not tuned to one fixed screenshot resolution) --
- * the real discriminators are the aspect ratio and the relative-area check
- * below, which both scale with the image itself. GPS-location dots are
- * roughly circular (aspect ~1); MAP/SAT chrome is very wide (aspect < 1).
+ * A standalone droplet is a vertically elongated pin. The real discriminators
+ * are the aspect ratio and the relative-area/dimension checks below, which
+ * both scale with the image itself; these are only a coarse upper sanity
+ * bound (reject something absurdly large, e.g. a mis-thresholded background
+ * region) and a noise floor. The upper bound is expressed as a fraction of
+ * the raster's own shorter side, floored at the fixed pixel values below, so
+ * a higher-resolution screenshot doesn't have its (proportionally larger)
+ * droplets silently filtered out -- a marker rendered at, say, 45px wide in
+ * a ~2400px-wide image should still pass at 90px wide in a ~4800px-wide one.
+ * GPS-location dots are roughly circular (aspect ~1); MAP/SAT chrome is very
+ * wide (aspect < 1) -- both rejected by `PIN_ASPECT_MIN`, not by the size caps.
  */
 const PIN_ASPECT_MIN = 1.15;
 const PIN_WIDTH_MIN_PX = 6;
-const PIN_WIDTH_MAX_PX = 160;
 const PIN_HEIGHT_MIN_PX = 10;
-const PIN_HEIGHT_MAX_PX = 220;
+/** Floors for the resolution-relative upper bounds below, sized for a ~2400px-wide screenshot. */
+const PIN_WIDTH_MAX_FLOOR_PX = 160;
+const PIN_HEIGHT_MAX_FLOOR_PX = 220;
+/** A droplet pin is a small UI glyph; it should never approach a meaningful fraction of the screenshot itself. */
+const PIN_WIDTH_MAX_FRACTION = 0.08;
+const PIN_HEIGHT_MAX_FRACTION = 0.12;
+
+function pinSizeBounds(raster: LandingDropletRaster): { widthMaxPx: number; heightMaxPx: number } {
+	const shorterSidePx = Math.min(raster.widthPx, raster.heightPx);
+	return {
+		widthMaxPx: Math.max(PIN_WIDTH_MAX_FLOOR_PX, shorterSidePx * PIN_WIDTH_MAX_FRACTION),
+		heightMaxPx: Math.max(PIN_HEIGHT_MAX_FLOOR_PX, shorterSidePx * PIN_HEIGHT_MAX_FRACTION)
+	};
+}
 
 /** Once a normal droplet area is known for this image, reject outliers relative to it. */
 const RELATIVE_AREA_LOW = 0.55;
@@ -367,12 +393,13 @@ export function findLandingDroplets(
 
 		const substantial = components.filter((component) => component.area >= MIN_COMPONENT_AREA_PX);
 
+		const { widthMaxPx: pinWidthMaxPx, heightMaxPx: pinHeightMaxPx } = pinSizeBounds(raster);
 		const pinLike = substantial.filter(
 			(component) =>
 				component.width >= PIN_WIDTH_MIN_PX &&
-				component.width <= PIN_WIDTH_MAX_PX &&
+				component.width <= pinWidthMaxPx &&
 				component.height >= PIN_HEIGHT_MIN_PX &&
-				component.height <= PIN_HEIGHT_MAX_PX &&
+				component.height <= pinHeightMaxPx &&
 				component.height / component.width >= PIN_ASPECT_MIN
 		);
 
@@ -391,7 +418,8 @@ export function findLandingDroplets(
 			const tip = componentTip(labelData, raster.widthPx, component.label, component.x, component.y, component.width, component.height);
 			if (!withinRows(tip.yPx, rows)) continue;
 			droplets.push({
-				tip: { xPx: tip.xPx * raster.sourceScale, yPx: tip.yPx * raster.sourceScale },
+				xPx: tip.xPx * raster.sourceScale,
+				yPx: tip.yPx * raster.sourceScale,
 				boundsPx: {
 					xPx: component.x * raster.sourceScale,
 					yPx: component.y * raster.sourceScale,
@@ -428,7 +456,7 @@ export function findLandingDroplets(
 			}
 		}
 
-		droplets.sort((a, b) => a.tip.yPx - b.tip.yPx || a.tip.xPx - b.tip.xPx);
+		droplets.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx);
 		deferredOverlaps.sort((a, b) => a.boundsPx.yPx - b.boundsPx.yPx || a.boundsPx.xPx - b.boundsPx.xPx);
 		return { droplets, deferredOverlaps };
 	} finally {
@@ -602,7 +630,8 @@ export function classifyLandingDropletGlyphs(
 	return droplets.map((droplet) => {
 		const classification = classifyLandingDropletGlyph(raster, droplet, templates);
 		return {
-			tip: droplet.tip,
+			xPx: droplet.xPx,
+			yPx: droplet.yPx,
 			boundsPx: droplet.boundsPx,
 			kind: classification.kind,
 			glyphConfidence: classification.glyphConfidence

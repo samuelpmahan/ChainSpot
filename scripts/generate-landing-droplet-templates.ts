@@ -66,7 +66,7 @@ async function main(): Promise<void> {
 
 	const samples = new Map<LandingMarkerKind, Float32Array[]>();
 	for (const droplet of droplets) {
-		const key = `${Math.round(droplet.tip.xPx)},${Math.round(droplet.tip.yPx)}`;
+		const key = `${Math.round(droplet.xPx)},${Math.round(droplet.yPx)}`;
 		const label = KNOWN_REFERENCE_LABELS.get(key);
 		if (!label) {
 			console.warn(`No known reference label for detected tip (${key}); skipping.`);

@@ -24,13 +24,22 @@ putts, or reconstruct a round — that is out of scope here.
 Validated against `resources/real-capture/ReferenceStitch.png` (the only real fixture image
 currently checked into the repo): 4/4 standalone droplets detected, correct tip coordinates,
 and all four correctly classified (`c1`, `c2`, `off-fairway`, `c1`), with zero false positives
-from the stitched map's UI chrome (MAP/SAT controls). The close-scale and medium-scale
-screenshots referenced in the original handoff (`IMG_5612.png`, `IMG_5613.png`) were not
-available to check into this repo; the detector's thresholds are deliberately expressed as
-relative/adaptive quantities (aspect ratio, and area/dimensions relative to the dominant
-same-image droplet cluster) rather than fixed absolute pixel sizes, specifically so they are
-not overfit to one screenshot resolution, but this has only been verified end-to-end against
-the one real fixture above.
+from the stitched map's UI chrome (MAP/SAT controls). This claim is pinned by
+`tests/unit/landingDropletDetectionFixture.test.ts`, which runs the real localizer +
+classifier against this fixture and the bundled templates, so a regression here fails CI
+instead of silently drifting from this doc. The close-scale and medium-scale screenshots
+referenced in the original handoff (`IMG_5612.png`, `IMG_5613.png`) were not available to
+check into this repo.
+
+The detector's thresholds are deliberately expressed as relative/adaptive quantities (aspect
+ratio; area relative to the dominant same-image droplet cluster) rather than fixed absolute
+pixel sizes, specifically so they are not overfit to one screenshot resolution. The one
+absolute-pixel component -- the upper size sanity bound that guards against a mis-thresholded
+region being treated as a giant droplet -- is itself expressed as a fraction of the raster's
+own shorter side (floored at a fixed pixel value sized for the real fixture above), so it
+scales with the image instead of silently rejecting every droplet on a much
+higher-resolution screenshot; see `pinSizeBounds()` and the
+"resolution-relative size bounds" test in `tests/unit/landingDropletDetection.test.ts`.
 
 ## Deferred: overlapping/merged droplets
 

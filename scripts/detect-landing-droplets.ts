@@ -39,6 +39,7 @@ export interface LandingDropletCliResult {
 	readonly candidateCount: number;
 	readonly candidates: readonly Readonly<{
 		index: number;
+		/** Semantic endpoint: the droplet tip, not the box center. */
 		tip: { xPx: number; yPx: number };
 		boundsPx: { xPx: number; yPx: number; widthPx: number; heightPx: number };
 		kind: LandingMarkerKind;
@@ -196,7 +197,7 @@ function overlay(
 	for (const candidate of candidates) {
 		const color = KIND_COLOR[candidate.kind];
 		rectangle(png, candidate.boundsPx, color);
-		crosshair(png, candidate.tip.xPx, candidate.tip.yPx, TIP_COLOR);
+		crosshair(png, candidate.xPx, candidate.yPx, TIP_COLOR);
 	}
 	for (const region of deferredOverlaps) {
 		rectangle(png, region.boundsPx, DEFERRED_COLOR);
@@ -224,7 +225,7 @@ export async function runDetection(args: LandingDropletCliArgs): Promise<Landing
 		candidateCount: candidates.length,
 		candidates: candidates.map((candidate, index) => ({
 			index,
-			tip: candidate.tip,
+			tip: { xPx: candidate.xPx, yPx: candidate.yPx },
 			boundsPx: candidate.boundsPx,
 			kind: candidate.kind,
 			glyphConfidence: candidate.glyphConfidence

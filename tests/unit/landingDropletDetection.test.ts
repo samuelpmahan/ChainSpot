@@ -82,9 +82,9 @@ describe('findLandingDroplets: tip semantics', () => {
 		// Bounding box center-x would be 10 + 20/2 = 20; the tail's bottom two
 		// rows span x=[15,19], averaging to x=17 -- distinct from bbox center.
 		expect(droplet.boundsPx).toEqual({ xPx: 10, yPx: 10, widthPx: PIN_WIDTH, heightPx: PIN_HEIGHT });
-		expect(droplet.tip.xPx).toBe(17);
-		expect(droplet.tip.yPx).toBe(10 + PIN_HEIGHT - 1);
-		expect(droplet.tip.xPx).not.toBe(10 + PIN_WIDTH / 2);
+		expect(droplet.xPx).toBe(17);
+		expect(droplet.yPx).toBe(10 + PIN_HEIGHT - 1);
+		expect(droplet.xPx).not.toBe(10 + PIN_WIDTH / 2);
 		expect(droplet.areaPx).toBe(PIN_AREA);
 	});
 
@@ -93,7 +93,7 @@ describe('findLandingDroplets: tip semantics', () => {
 		drawPin(rgba, 80, 10, 10);
 		const { droplets } = findLandingDroplets(cv, raster);
 		// The centroid of a droplet-shaped blob sits well above its bottom edge.
-		expect(droplets[0].tip.yPx).toBeGreaterThan(10 + PIN_HEIGHT * 0.7);
+		expect(droplets[0].yPx).toBeGreaterThan(10 + PIN_HEIGHT * 0.7);
 	});
 });
 
@@ -118,6 +118,23 @@ describe('findLandingDroplets: GPS/UI rejection', () => {
 		fillRect(rgba, 80, 60, 60, 3, 3, MARKER_BLUE); // 9px, far under the noise floor
 		const { droplets } = findLandingDroplets(cv, raster);
 		expect(droplets).toHaveLength(1);
+	});
+});
+
+describe('findLandingDroplets: resolution-relative size bounds', () => {
+	it('detects a proportionally larger droplet on a much higher-resolution screenshot', () => {
+		// A droplet this large (200x300px) would exceed the old fixed absolute
+		// caps (160x220px) that this module used before switching to bounds
+		// expressed as a fraction of the raster's own shorter side -- on a
+		// ~4000px-wide screenshot it is still a small UI glyph, proportionally
+		// smaller than the 45x61px droplet in the real fixture (~2359px wide).
+		const { raster, rgba } = makeRaster(4000, 4500);
+		fillRect(rgba, 4000, 100, 100, 200, 250, MARKER_BLUE); // body
+		fillRect(rgba, 4000, 150, 350, 100, 50, MARKER_BLUE); // tail, 300px total height
+
+		const { droplets } = findLandingDroplets(cv, raster);
+		expect(droplets).toHaveLength(1);
+		expect(droplets[0].boundsPx).toEqual({ xPx: 100, yPx: 100, widthPx: 200, heightPx: 300 });
 	});
 });
 
@@ -160,8 +177,8 @@ describe('findLandingDroplets: scale variation', () => {
 		const atFullRes = findLandingDroplets(cv, full.raster).droplets[0];
 		const atDownsampledRes = findLandingDroplets(cv, downsampled.raster).droplets[0];
 
-		expect(atDownsampledRes.tip.xPx).toBeCloseTo(atFullRes.tip.xPx * 2.5, 5);
-		expect(atDownsampledRes.tip.yPx).toBeCloseTo(atFullRes.tip.yPx * 2.5, 5);
+		expect(atDownsampledRes.xPx).toBeCloseTo(atFullRes.xPx * 2.5, 5);
+		expect(atDownsampledRes.yPx).toBeCloseTo(atFullRes.yPx * 2.5, 5);
 		expect(atDownsampledRes.boundsPx.widthPx).toBeCloseTo(atFullRes.boundsPx.widthPx * 2.5, 5);
 		expect(atDownsampledRes.areaPx).toBeCloseTo(atFullRes.areaPx * 2.5 * 2.5, 5);
 	});
@@ -254,7 +271,7 @@ describe('landingDropletGlyphTemplateFromMask and classification', () => {
 			}
 		}
 
-		const localization = { tip: { xPx: 0, yPx: 7 }, boundsPx: { xPx: 0, yPx: 0, widthPx: size, heightPx: 8 }, areaPx: 48 };
+		const localization = { xPx: 0, yPx: 7, boundsPx: { xPx: 0, yPx: 0, widthPx: size, heightPx: 8 }, areaPx: 48 };
 		const classification = classifyLandingDropletGlyph(raster, localization, templates);
 		expect(classification.kind).toBe('c2');
 		expect(classification.glyphConfidence).toBeCloseTo(1, 5);
@@ -294,17 +311,18 @@ describe('landingDropletGlyphTemplateFromMask and classification', () => {
 			}
 		}
 
-		const classification = classifyLandingDropletGlyph(raster, { tip: { xPx: 0, yPx: 19 }, boundsPx: dropletBounds, areaPx: 400 }, templates);
+		const classification = classifyLandingDropletGlyph(raster, { xPx: 0, yPx: 19, boundsPx: dropletBounds, areaPx: 400 }, templates);
 		expect(classification.kind).toBe('c2');
 		expect(classification.glyphConfidence).toBeGreaterThan(0);
 
 		const combined = classifyLandingDropletGlyphs(
 			raster,
-			[{ tip: { xPx: 0, yPx: 19 }, boundsPx: dropletBounds, areaPx: 400 }],
+			[{ xPx: 0, yPx: 19, boundsPx: dropletBounds, areaPx: 400 }],
 			templates
 		);
 		expect(combined).toHaveLength(1);
 		expect(combined[0].kind).toBe('c2');
-		expect(combined[0].tip).toEqual({ xPx: 0, yPx: 19 });
+		expect(combined[0].xPx).toBe(0);
+		expect(combined[0].yPx).toBe(19);
 	});
 });
