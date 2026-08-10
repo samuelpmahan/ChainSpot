@@ -12,6 +12,13 @@ import type { Page } from '@playwright/test';
  * drives CV detection or smart import — the CV-showcase visibility budget is
  * measured in the audit doc and its logic is pinned by
  * `tests/unit/annotateRoundCvUx.test.ts`.
+ *
+ * The annotate-round and `/demo` cases were re-measured against the Map/Round
+ * mode split and the two-act "Dash's Track" walkthrough (see the re-audit
+ * section of `docs/13-inch-pass.md`); every number quoted in a comment below is
+ * from that run, not from the original pass. Two rules for editing this file:
+ * a threshold only ever comes from the budget in that doc, and a case only
+ * loses its `test.fixme` when the product actually meets the threshold.
  */
 
 // 13″ MacBook logical resolution minus typical browser chrome.
@@ -59,6 +66,44 @@ async function boxOf(page: Page, selector: string): Promise<ElementBox> {
 	}, selector);
 }
 
+/**
+ * Annotate Round's two activities are one route and one pane: `Map` places
+ * course geometry (tee/basket/bend), `Round` places a played round's shots and
+ * walk path. The canvas budget applies to both, so the sizing cases run in
+ * both — the mode toggle is a route-level control, not a per-pane one.
+ */
+type AnnotationMode = 'map' | 'round';
+
+async function selectAnnotationMode(page: Page, mode: AnnotationMode): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
+	await expect(page.getByTestId(`annotation-mode-${mode}`)).toHaveAttribute('aria-pressed', 'true');
+}
+
+async function loadAnnotateSource(page: Page): Promise<void> {
+	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+}
+
+/**
+ * The state a user actually annotates in: a hole exists and is selected, so
+ * the tools column carries its "Edit hole" section. It matters for geometry —
+ * the canvas cell stretches to the tools column, which is what pushes the pane
+ * past one screen height (see the re-audit's C-series measurements).
+ */
+async function selectFirstHole(page: Page): Promise<void> {
+	await page.getByTestId('hole-add').click();
+	await expect(page.getByTestId('hole-select-1')).toHaveAttribute('aria-current', 'true');
+}
+
+/** The action ids a radial menu is currently offering, in DOM order. */
+async function radialActionIds(page: Page): Promise<string[]> {
+	return page.evaluate(() =>
+		Array.from(document.querySelectorAll('[data-testid^="radial-action-"]')).map(
+			(element) => element.getAttribute('data-testid')?.replace('radial-action-', '') ?? ''
+		)
+	);
+}
+
 async function openRadialMenuAtVisibleScene(page: Page): Promise<void> {
 	const scene = page.getByTestId('pane-scene-source-overview');
 	await scene.scrollIntoViewIfNeeded();
@@ -68,6 +113,29 @@ async function openRadialMenuAtVisibleScene(page: Page): Promise<void> {
 	await page.mouse.click(
 		sceneBox.x + sceneBox.width / 2,
 		visibleTop + (visibleBottom - visibleTop) / 2
+	);
+}
+
+/** Intersection area of two boxes, in px² — 0 when they do not overlap at all. */
+function overlapArea(a: ElementBox, b: ElementBox): number {
+	const width = Math.min(a.right, b.right) - Math.max(a.x, b.x);
+	const height = Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y);
+	if (width <= 0 || height <= 0) return 0;
+	return Math.round(width * height);
+}
+
+/**
+ * What a real mouse hits at a point. Playwright's own `click` auto-scrolls and
+ * would happily report success on a control a human cannot reach, so occlusion
+ * and clipping cases hit-test the geometry instead of clicking it.
+ */
+async function testIdAtPoint(page: Page, x: number, y: number): Promise<string | null> {
+	return page.evaluate(
+		({ px, py }) => {
+			const element = document.elementFromPoint(px, py);
+			return element?.closest('[data-testid]')?.getAttribute('data-testid') ?? null;
+		},
+		{ px: x, py: y }
 	);
 }
 
@@ -132,42 +200,54 @@ test('no horizontal overflow on create-graphics with both images and a complete 
 // Enforced where the current UI passes; fixme'd where it does not.
 // ---------------------------------------------------------------------------
 
-test('annotate-round: canvas is ≥55% of viewport width with the diagnostics rail collapsed', async ({
-	page
-}) => {
-	// The stored preference is the supported way to open in the collapsed state
-	// (see tests/e2e/annotateRound.spec.ts for the toggle/persistence contract).
-	await page.addInitScript(() =>
-		localStorage.setItem('chainspot.diagnosticsRail', 'collapsed')
-	);
-	await gotoApp(page, '/annotate-round');
-	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+// The canvas is the same grid cell in both activities: re-measured 914 × 640
+// with the rail collapsed and no hole selected, and 914 × 793.6 once a hole is
+// selected (the "Edit hole" tools section stretches the row — the mode makes no
+// difference to either number). Both clear the 55%/65% bars. This runs in both
+// modes so the mode split cannot silently regress one of them.
+for (const mode of ['map', 'round'] as const) {
+	test(`annotate-round (${mode} mode): canvas is ≥55% of viewport width with the diagnostics rail collapsed`, async ({
+		page
+	}) => {
+		// The stored preference is the supported way to open in the collapsed state
+		// (see tests/e2e/annotateRound.spec.ts for the toggle/persistence contract).
+		await page.addInitScript(() =>
+			localStorage.setItem('chainspot.diagnosticsRail', 'collapsed')
+		);
+		await gotoApp(page, '/annotate-round');
+		await loadAnnotateSource(page);
+		await selectAnnotationMode(page, mode);
+		// Measure the state a user annotates in, not the empty one.
+		await selectFirstHole(page);
 
-	const canvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
-	// Measured 914px (71.4%) at audit time — docs/13-inch-pass.md row 2.
-	expect(canvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
-	// The canvas element itself also meets the height budget (640px = 89.5%).
-	expect(canvas.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
-});
+		const canvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+		// Re-measured 914px (71.4%) — docs/13-inch-pass.md re-audit rows M2/R2.
+		expect(canvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
+		// The canvas element itself also clears the height budget (793.6px = 111%;
+		// that it *exceeds* one screen is the separate C-series finding below).
+		expect(canvas.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
+	});
+}
 
-// FAILING today: 638px = 49.8% with the rail expanded (the current default).
+// FAILING today, identically in both modes: re-measured 638px = 49.8% with the
+// rail expanded (still the default). The chrome is mode-independent — 288px
+// tools + 320px rail — so this is one case, not two.
 // Root cause and minimal fix: docs/13-inch-pass.md F1 (ImageEditorPane.svelte:346).
 test.fixme(
 	'annotate-round: canvas is ≥55% of viewport width with the diagnostics rail expanded',
 	async ({ page }) => {
 		await gotoApp(page, '/annotate-round');
-		await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-		await expect(page.getByTestId('annotate-round')).toHaveAttribute(
-			'data-source-loaded',
-			'true'
-		);
+		await loadAnnotateSource(page);
 		await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute(
 			'aria-expanded',
 			'true'
 		);
-		const canvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
-		expect(canvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
+		const mapCanvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+		expect(mapCanvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
+
+		await selectAnnotationMode(page, 'round');
+		const roundCanvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+		expect(roundCanvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
 	}
 );
 
@@ -213,12 +293,15 @@ test.fixme(
 // Budget 3 — no mid-task scroll traps: the controls the current step needs.
 // ---------------------------------------------------------------------------
 
+// Passes in the state this measures: no hole selected, so the canvas cell is
+// 640px tall and scrolling it into view leaves the bottom-right zoom cluster at
+// y = 666–702, inside the 715px fold. The working state (a hole selected)
+// does not — that is the fixme immediately below, not a weakening of this one.
 test('annotate-round: on-canvas zoom controls are ≥36px and visible while the canvas is in view', async ({
 	page
 }) => {
 	await gotoApp(page, '/annotate-round');
-	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+	await loadAnnotateSource(page);
 	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
 
 	for (const control of ['viewport-zoom-in', 'viewport-zoom-out', 'viewport-zoom-fit']) {
@@ -229,30 +312,65 @@ test('annotate-round: on-canvas zoom controls are ≥36px and visible while the 
 	}
 });
 
-// FAILING today: with the canvas scrolled into view (scrollY ≈ 310) the hole bar
-// ends at y = −7 and Done at y = −200; every hole switch is a 300–520px scroll
-// round trip. Root cause and minimal fix: docs/13-inch-pass.md F2 (sticky
-// compact hole-bar row, annotate-round/+page.svelte:1627/2811).
+// FAILING today, and new in this re-audit: once a hole is selected the tools
+// column stretches the canvas cell to 793.6px — taller than the 715px viewport
+// — so scrolling the canvas into view puts the whole on-canvas zoom cluster at
+// y = 744.6–780.6, entirely below the fold. These are the only mid-task
+// controls that survive the hole-bar trap below, so losing them in the working
+// state is the trap closing completely. Root cause and minimal fix:
+// docs/13-inch-pass.md Ticket C item 2 (cap the canvas cell height).
 test.fixme(
-	'annotate-round: hole navigation stays reachable while the canvas is in view',
+	'annotate-round: on-canvas zoom controls stay in view with a hole selected',
 	async ({ page }) => {
 		await gotoApp(page, '/annotate-round');
-		await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-		await expect(page.getByTestId('annotate-round')).toHaveAttribute(
-			'data-source-loaded',
-			'true'
-		);
+		await loadAnnotateSource(page);
+		await selectFirstHole(page);
 		await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
-		const compactBar = await boxOf(page, '[data-testid="hole-bar-current-label"]');
-		expect(compactBar.insideViewport).toBe(true);
+
+		const canvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+		expect(canvas.height, 'canvas cell fits one screen').toBeLessThanOrEqual(VIEWPORT.height);
+		for (const control of ['viewport-zoom-in', 'viewport-zoom-out', 'viewport-zoom-fit']) {
+			const box = await boxOf(page, `[data-testid="${control}"]`);
+			expect(box.insideViewport, `${control} inside viewport`).toBe(true);
+		}
 	}
 );
 
-// FAILING today: in the collapsed state the re-expand toggle measures x = 1339
-// on a 1280px viewport — clipped by the rail's `overflow: hidden` and
-// unreachable by pointer (keyboard focus still scrolls it into reach, which is
-// why a bare locator click in a test would deceptively pass — this asserts
-// geometry instead). Root cause and minimal fix: docs/13-inch-pass.md F3
+// FAILING today, and worse than at the original pass: the Map/Round toggle and
+// the taller canvas cell pushed the pane further down the page, so with the
+// canvas scrolled into view (scrollY 457) the hole bar now ends at y = −82, the
+// compact ‹/current/› row at y = −203, the mode toggle at y = −274 and Done at
+// y = −346.8. Switching hole *or* activity is a ~330–460px scroll round trip,
+// in both modes. The mode toggle is included here because the split made it a
+// mid-task control: Map and Round are two halves of one annotation session.
+// Root cause and minimal fix: docs/13-inch-pass.md F2 (sticky compact hole-bar
+// row, annotate-round/+page.svelte:1870/2811).
+for (const mode of ['map', 'round'] as const) {
+	test.fixme(
+		`annotate-round (${mode} mode): hole navigation and the mode toggle stay reachable while the canvas is in view`,
+		async ({ page }) => {
+			await gotoApp(page, '/annotate-round');
+			await loadAnnotateSource(page);
+			await selectAnnotationMode(page, mode);
+			await selectFirstHole(page);
+			await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
+
+			const compactBar = await boxOf(page, '[data-testid="hole-bar-current-label"]');
+			expect(compactBar.insideViewport, 'compact hole row').toBe(true);
+			const modeToggle = await boxOf(page, '[data-testid="annotation-mode-toggle"]');
+			expect(modeToggle.insideViewport, 'Map/Round toggle').toBe(true);
+		}
+	);
+}
+
+// FAILING today, unchanged by the mode split: in the collapsed state the
+// re-expand toggle measures x = 1339.5–1369.8 on a 1280px viewport — clipped by
+// the rail's `overflow: hidden` (rail scrollWidth 150 vs clientWidth 57) and
+// off the viewport entirely, so `elementFromPoint` at its centre returns
+// nothing at all. Keyboard focus still scrolls it into reach, which is why a
+// bare locator click in a test would deceptively pass — this asserts geometry
+// instead. Its 30.4 × 30.4 box is also under the 36px target budget.
+// Root cause and minimal fix: docs/13-inch-pass.md F3
 // (annotate-round/+page.svelte:3433).
 test.fixme(
 	'annotate-round: the collapsed diagnostics rail keeps its re-expand toggle inside the viewport',
@@ -261,13 +379,15 @@ test.fixme(
 			localStorage.setItem('chainspot.diagnosticsRail', 'collapsed')
 		);
 		await gotoApp(page, '/annotate-round');
-		await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-		await expect(page.getByTestId('annotate-round')).toHaveAttribute(
-			'data-source-loaded',
-			'true'
-		);
+		await loadAnnotateSource(page);
 		const toggle = await boxOf(page, '[data-testid="diagnostics-rail-toggle"]');
 		expect(toggle.right).toBeLessThanOrEqual(VIEWPORT.width);
+		expect(toggle.width, 'toggle width').toBeGreaterThanOrEqual(36);
+		expect(toggle.height, 'toggle height').toBeGreaterThanOrEqual(36);
+		expect(
+			await testIdAtPoint(page, toggle.x + toggle.width / 2, toggle.y + toggle.height / 2),
+			'toggle is what a mouse hits at its own centre'
+		).toBe('diagnostics-rail-toggle');
 	}
 );
 
@@ -294,35 +414,80 @@ test('create-graphics: correspondence placement controls and both panes share on
 // Budget 4 — target sizes and dialog containment.
 // ---------------------------------------------------------------------------
 
+// Map mode offers exactly tee/basket/bend on an empty hole; the action set is
+// asserted as a whole so a wedge appearing in the wrong mode is a failure here
+// rather than a silently unmeasured target. All wedges re-measured 44 × 44.
 test('annotate-round: the map radial menu keeps geometry actions fully on-screen', async ({
 	page
 }) => {
 	await gotoApp(page, '/annotate-round');
-	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
-	await page.getByTestId('hole-add').click();
+	await loadAnnotateSource(page);
+	await selectFirstHole(page);
 
 	await openRadialMenuAtVisibleScene(page);
 
 	await expect(page.getByTestId('radial-action-tee')).toBeVisible();
+	expect(await radialActionIds(page)).toEqual(['tee', 'basket', 'bend']);
 	await expectRadialActionsInsideViewport(page, ['tee', 'basket', 'bend']);
 	await page.keyboard.press('Escape');
 });
 
+// Round mode offers shot (needs an active hole) and walk (never does).
 test('annotate-round: the round radial menu keeps throw actions fully on-screen', async ({
 	page
 }) => {
 	await gotoApp(page, '/annotate-round');
-	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
-	await page.getByTestId('hole-add').click();
-	await page.getByTestId('annotation-mode-round').click();
-	await expect(page.getByTestId('annotation-mode-round')).toHaveAttribute('aria-pressed', 'true');
+	await loadAnnotateSource(page);
+	await selectFirstHole(page);
+	await selectAnnotationMode(page, 'round');
 
 	await openRadialMenuAtVisibleScene(page);
 
 	await expect(page.getByTestId('radial-action-shot')).toBeVisible();
+	expect(await radialActionIds(page)).toEqual(['shot', 'walk']);
 	await expectRadialActionsInsideViewport(page, ['shot', 'walk']);
+	await page.keyboard.press('Escape');
+});
+
+// The walk path deliberately needs no hole selected, so it is reachable in the
+// one Round-mode state where nothing else is: re-measured 44 × 44, on-screen.
+test('annotate-round: the round radial menu offers the walk path with no hole selected', async ({
+	page
+}) => {
+	await gotoApp(page, '/annotate-round');
+	await loadAnnotateSource(page);
+	await selectAnnotationMode(page, 'round');
+
+	await openRadialMenuAtVisibleScene(page);
+
+	await expect(page.getByTestId('radial-action-walk')).toBeVisible();
+	expect(await radialActionIds(page)).toEqual(['walk']);
+	await expectRadialActionsInsideViewport(page, ['walk']);
+	await page.keyboard.press('Escape');
+});
+
+// FAILING today, in both modes, and new in this re-audit: an existing marker is
+// re-opened (to delete or replace it) by hitting `MARKER_HIT_RADIUS_PX = 12` in
+// *screen* space — probed empirically at 12px away (marker menu) versus 13px
+// away (placement menu), i.e. an effective 24 × 24px target for every tee,
+// basket, bend, shot and walk vertex, against a 36px budget. The drawn marker
+// is 14 × 14. Root cause and minimal fix: docs/13-inch-pass.md F4
+// (annotate-round/+page.svelte:125).
+test.fixme('annotate-round: an existing marker is a ≥36px pointer target', async ({ page }) => {
+	await gotoApp(page, '/annotate-round');
+	await loadAnnotateSource(page);
+	await selectFirstHole(page);
+	await openRadialMenuAtVisibleScene(page);
+	await page.getByTestId('radial-action-tee').click();
+	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
+
+	// The marker's own centre, then one budget-radius (18px) away: both must
+	// re-open the marker's menu for the target to measure 36px across.
+	const scene = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+	const centreX = scene.x + scene.width / 2;
+	const centreY = Math.max(scene.y, 0) + (Math.min(scene.bottom, VIEWPORT.height) - Math.max(scene.y, 0)) / 2;
+	await page.mouse.click(centreX + 17, centreY);
+	expect(await radialActionIds(page)).toEqual(['delete']);
 	await page.keyboard.press('Escape');
 });
 
@@ -340,6 +505,146 @@ test('create-graphics: the discard-confirmation dialog is fully contained on-scr
 	expect(dialog.insideViewport).toBe(true);
 	await page.keyboard.press('Escape');
 	await expect(page.getByTestId('discard-confirmation')).toBeHidden();
+});
+
+// ---------------------------------------------------------------------------
+// Budget 5 — the two-act `/demo` rail must not occlude critical controls.
+//
+// The rail is a fixed 386 × 514 panel docked bottom-right (49.2px tall when
+// collapsed, docked in the same corner). These cases start the tour at a step
+// whose arming is `none`, so they cost no asset fetch and no CV: the rail's
+// geometry is identical on every step, which is the whole point of the finding.
+// ---------------------------------------------------------------------------
+
+const DEMO_RAIL_CONTROLS = ['demo-collapse', 'demo-exit', 'demo-previous', 'demo-next'] as const;
+
+async function startDemoAt(page: Page, stepId: string, route: RegExp): Promise<void> {
+	await gotoApp(page, '/demo');
+	await page.getByTestId(`demo-start-step-${stepId}`).click();
+	await page.waitForURL(route);
+	await expect(page.getByTestId('demo-guide')).toBeVisible();
+}
+
+test('demo: the guide rail is fully inside the viewport and leaves no horizontal overflow', async ({
+	page
+}) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	const rail = await boxOf(page, '[data-testid="demo-guide"]');
+	// Re-measured 386 × 514 at (878, 185) — docs/13-inch-pass.md re-audit D1.
+	expect(rail.insideViewport, 'rail on annotate-round').toBe(true);
+	expect(await horizontalOverflowPx(page)).toBe(0);
+
+	await page.getByTestId('demo-next').click();
+	await page.waitForURL(/\/create-graphics$/);
+	const graphicsRail = await boxOf(page, '[data-testid="demo-guide"]');
+	expect(graphicsRail.insideViewport, 'rail on create-graphics').toBe(true);
+	expect(await horizontalOverflowPx(page)).toBe(0);
+});
+
+// What is genuinely good and worth protecting: the rail is docked clear of
+// Annotate Round's page-level controls, in both modes (all re-measured at zero
+// overlap). The controls it *does* cover are the fixme'd cases below.
+test('demo: the guide rail clears Annotate Round’s page-level controls', async ({ page }) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await loadAnnotateSource(page);
+	const rail = await boxOf(page, '[data-testid="demo-guide"]');
+	for (const control of ['annotate-done', 'annotation-mode-toggle', 'hole-add']) {
+		const box = await boxOf(page, `[data-testid="${control}"]`);
+		expect(overlapArea(rail, box), `rail overlaps ${control}`).toBe(0);
+	}
+});
+
+// FAILING today, new in this re-audit: every control the rail owns is under the
+// 36px target budget — collapse 67.4 × 24, exit 77 × 24, back/next 57–58.4 ×
+// 30.8, "Load the real inputs"/"Reload the page" 360 × 30.8, Finish 64.2 ×
+// 30.8. The ≤640px media query already gives them `min-height: 2.5rem`; a 13″
+// laptop gets nothing. Root cause and minimal fix: docs/13-inch-pass.md
+// Ticket E item 1 (DemoGuide.svelte:371-425).
+test.fixme('demo: the guide rail’s own controls are ≥36px', async ({ page }) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	for (const control of DEMO_RAIL_CONTROLS) {
+		const box = await boxOf(page, `[data-testid="${control}"]`);
+		expect(box.width, `${control} width`).toBeGreaterThanOrEqual(36);
+		expect(box.height, `${control} height`).toBeGreaterThanOrEqual(36);
+	}
+});
+
+// FAILING today, unchanged since the original pass: with the canvas scrolled
+// into view the rail covers Fit entirely (36 × 33 of a 36 × 36 button) and
+// zoom-out partially (12 × 33); zoom-in stays clear. Collapsing the rail does
+// *not* clear them — the collapsed 49.2px header still spans the same corner,
+// covering exactly the same two buttons — so "start collapsed" alone would not
+// close this. Keyboard `0`/`+`/`-` still work. Root cause and minimal fix:
+// docs/13-inch-pass.md Ticket D (DemoGuide.svelte:244-259).
+test.fixme('demo: the guide rail does not cover the on-canvas zoom cluster', async ({ page }) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await loadAnnotateSource(page);
+	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
+	const rail = await boxOf(page, '[data-testid="demo-guide"]');
+	for (const control of ['viewport-zoom-in', 'viewport-zoom-out', 'viewport-zoom-fit']) {
+		const box = await boxOf(page, `[data-testid="${control}"]`);
+		expect(overlapArea(rail, box), `rail overlaps ${control}`).toBe(0);
+	}
+});
+
+// FAILING today, new in this re-audit: on the 18-hole course the demo itself
+// produces in step 2, the rail sits on top of hole tabs 15–18 (63 × 44 each,
+// fully covered at 1280 — `elementFromPoint` at their centres returns the rail)
+// and on the compact row's "Next hole" cycle button (44 × 46, fully covered).
+// Those are the controls the step-2 script tells a visitor to use to reach the
+// hole flagged for review. Root cause and minimal fix: docs/13-inch-pass.md
+// Ticket E item 2.
+test.fixme('demo: the guide rail does not cover the hole bar’s own controls', async ({ page }) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await loadAnnotateSource(page);
+	for (let index = 0; index < 18; index += 1) await page.getByTestId('hole-add').click();
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '18');
+
+	const rail = await boxOf(page, '[data-testid="demo-guide"]');
+	for (const number of [15, 16, 17, 18]) {
+		const tab = await boxOf(page, `[data-testid="hole-select-${number}"]`);
+		expect(overlapArea(rail, tab), `rail overlaps hole ${number}`).toBe(0);
+	}
+	const nextHole = await boxOf(page, '.hole-bar-compact-nav:last-of-type');
+	expect(overlapArea(rail, nextHole), 'rail overlaps the next-hole control').toBe(0);
+});
+
+// FAILING today, new in this re-audit: on Create Graphics — the route the
+// two-act script visits twice, and the one where the visitor must click
+// landmarks in *both* panes — the rail covers 385 × 420px of the target
+// basemap pane, 62.7% of its width. Collapsing the rail does clear this one.
+// Root cause and minimal fix: docs/13-inch-pass.md Ticket E item 3.
+test.fixme('demo: the guide rail does not cover the Create Graphics target pane', async ({
+	page
+}) => {
+	await startDemoAt(page, 'basemap-and-export', /\/create-graphics$/);
+	const rail = await boxOf(page, '[data-testid="demo-guide"]');
+	for (const role of ['source-overview', 'target-basemap']) {
+		const pane = await boxOf(page, `[data-testid="pane-scene-${role}"]`);
+		expect(overlapArea(rail, pane), `rail overlaps ${role}`).toBe(0);
+	}
+});
+
+// FAILING today, new in this re-audit: the last step's "Finish" is a link back
+// to `/demo` that leaves the tour running, and on that page the rail covers the
+// final step card's own "Start here" button at every scroll position the page
+// allows (the card's x-range 833–927 sits inside the rail's 878–1264, and its
+// y never leaves the rail's 185–699 band) — `elementFromPoint` returns the
+// rail. Same at 1152; at 1440 the card clears the rail. Root cause and minimal
+// fix: docs/13-inch-pass.md Ticket E item 4.
+test.fixme('demo: the cover page’s own controls stay reachable while a tour is running', async ({
+	page
+}) => {
+	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await gotoApp(page, '/demo');
+	await expect(page.getByTestId('demo-guide')).toBeVisible();
+	const card = page.getByTestId('demo-start-step-export-round');
+	await card.scrollIntoViewIfNeeded();
+	const box = await boxOf(page, '[data-testid="demo-start-step-export-round"]');
+	expect(
+		await testIdAtPoint(page, box.x + box.width / 2, box.y + box.height / 2),
+		'the last step card is what a mouse hits at its own centre'
+	).toBe('demo-start-step-export-round');
 });
 
 // ---------------------------------------------------------------------------

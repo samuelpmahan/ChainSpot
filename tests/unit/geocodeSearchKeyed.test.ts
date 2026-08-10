@@ -121,6 +121,49 @@ describe('create-graphics geocode search — keyed', () => {
 		host.remove();
 	});
 
+	// Must run before any test below that actually mounts `MapConfirm` (see this
+	// file's header comment): the script tag it injects persists in
+	// `document.head` for the rest of this file's module lifetime, which would
+	// make this test's "no script tag" assertion a false negative if it ran later.
+	it('a Places HTTP error (e.g. a key rejected by Google — bad restriction, revoked, disabled API) fails soft: inline error, loading resets, no silent Nominatim fallback, no crash', async () => {
+		setGoogleMapsApiKeyForTesting(TEST_KEY);
+		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+			expect(String(url)).toContain('places.googleapis.com');
+			// A syntactically valid but rejected key (referrer/API restriction
+			// mismatch, revoked, or billing disabled) surfaces from Places as a
+			// non-200, same as any other HTTP error — there is no distinct
+			// "bad key" response shape to special-case.
+			return new Response('', { status: 403 });
+		});
+		vi.stubGlobal('fetch', fetchSpy);
+
+		const { host, component } = mountPage();
+		await search(host, "Dash's Track");
+
+		// Unlike a `no-results` response, an HTTP-error response never falls back
+		// to Nominatim — exactly one request was made.
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+		const error = host.querySelector('[data-testid="geocode-error"]');
+		expect(error?.textContent).toContain('403');
+		expect(host.querySelector('[data-testid="geocode-results"]')).toBeNull();
+		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
+		expect(googleScriptTag()).toBeNull();
+
+		// The loading state must resolve either way (`finally`) — no stuck spinner.
+		const searchButton = host.querySelector<HTMLButtonElement>('[data-testid="geocode-search-button"]');
+		expect(searchButton?.disabled).toBe(false);
+		expect(searchButton?.textContent?.trim()).toBe('Search');
+
+		// The rest of the page is still usable: manual lat/lon entry never depended
+		// on the search succeeding.
+		expect(host.querySelector('[data-testid="naip-lat"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="naip-fetch-button"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('Search calls Places (not Nominatim), shows the Google attribution, and picking a result mounts MapConfirm + injects the script tag', async () => {
 		setGoogleMapsApiKeyForTesting(TEST_KEY);
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
@@ -199,6 +242,51 @@ describe('create-graphics geocode search — keyed', () => {
 		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
 		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lat"]')?.value).toBe('33.1255');
 		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lon"]')?.value).toBe('-96.861');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('"Use this location" on the map confirm step fetches the aerial preview immediately, with no separate "Fetch aerial map" press', async () => {
+		setGoogleMapsApiKeyForTesting(TEST_KEY);
+		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+			const href = String(url);
+			if (href.includes('places.googleapis.com')) return placesResponse();
+			if (href.includes('imagery.nationalmap.gov')) {
+				return new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png' } });
+			}
+			throw new Error(`unexpected fetch: ${href}`);
+		});
+		vi.stubGlobal('fetch', fetchSpy);
+
+		const { host, component } = mountPage();
+		await search(host, "Dash's Track");
+		host.querySelector<HTMLButtonElement>('[data-testid="geocode-result-0"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="map-confirm"]')).not.toBeNull();
+
+		// jsdom never actually loads the Google Maps script; simulate the load
+		// failure (same technique as the "use the coordinate anyway" test above)
+		// so "Use this location" becomes enabled with the picked coordinate. Take
+		// the *last* matching tag, not the first: earlier tests in this file leave
+		// their own (already-dead) script tags in `document.head`, which afterEach
+		// never clears since it only resets `document.body`.
+		const scriptTags = document.querySelectorAll<HTMLScriptElement>('script[src*="maps.googleapis.com"]');
+		const script = scriptTags[scriptTags.length - 1] ?? null;
+		script?.dispatchEvent(new Event('error'));
+		await flush();
+
+		// The map confirm step should already be gone and the aerial preview
+		// already fetched — no press of the separate "Fetch aerial map" button.
+		host.querySelector<HTMLButtonElement>('[data-testid="map-confirm-use"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
+		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lat"]')?.value).toBe('33.1255');
+		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lon"]')?.value).toBe('-96.861');
+		expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes('imagery.nationalmap.gov'))).toBe(true);
+		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();

@@ -531,6 +531,23 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	expect(externalRequests).toEqual([]);
 });
 
+test('handoff: a safe arrival (no existing source image or holes) auto-imports the stitched image with no confirmation click', async ({
+	page
+}) => {
+	await gotoApp(page, '/stitch-map');
+	await uploadTiles(page, tileFiles());
+	await page.getByTestId('use-as-source').click();
+	await expect(page).toHaveURL(/\/annotate-round$/);
+
+	// A fresh Annotate Round session has no source image and no holes yet, so
+	// the handoff is safe to complete on its own — no banner, no click.
+	await expect(page.getByTestId('pending-handoff')).toBeHidden();
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
+		'upper-left-stitched.png · 42 × 42'
+	);
+	await expect(page.getByTestId('annotate-done')).toBeEnabled();
+});
+
 test('handoff: independent per-stage sessions, replacement semantics, blocked second handoff, target import', async ({
 	page
 }) => {
@@ -546,26 +563,41 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 
 	// A source-role handoff now lands on Annotate Round — a session entirely
 	// independent of Create Graphics (see src/lib/session.ts's two keyed
-	// editor-retention slots).
+	// editor-retention slots). This is a fresh Annotate Round session (no
+	// source image, no holes yet), so the handoff is safe to complete on its
+	// own: no banner, no click (see the dedicated "safe arrival" test above).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
 	await expect(page).toHaveURL(/\/annotate-round$/);
 
 	const sourceBanner = page.getByTestId('pending-handoff');
+	await expect(sourceBanner).toBeHidden();
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
+		'upper-left-stitched.png · 42 × 42'
+	);
+	await expect(page.getByTestId('annotate-done')).toBeEnabled();
+
+	// A source image is now loaded, so a *second* handoff is no longer safe to
+	// auto-import (it would silently replace the current source out from under
+	// it) — the banner returns, with copy that says plainly importing replaces
+	// the current source, and Dismiss consumes the pending handoff without
+	// importing it (Annotate Round's own handleHandoffDismiss).
+	await page.getByRole('link', { name: 'Stitch Map' }).click();
+	await uploadTiles(page, tileFiles());
+	await page.getByTestId('use-as-source').click();
+	await expect(page).toHaveURL(/\/annotate-round$/);
 	await expect(sourceBanner).toBeVisible();
 	await expect(sourceBanner).toContainText('UDisc source');
-	await expect(page.getByTestId('annotate-done')).toBeDisabled();
-
-	// Dismiss consumes the pending handoff without importing it (Annotate
-	// Round's own handleHandoffDismiss, same semantics as the original page's).
+	await expect(sourceBanner).toContainText('replace the current source');
 	await page.getByTestId('handoff-dismiss').click();
 	await expect(sourceBanner).toBeHidden();
-	await expect(page.getByTestId('annotate-done')).toBeDisabled();
+	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
-	// A fresh handoff reaches the same banner. Importing it never shows a
-	// discard dialog — an Annotate Round project never has correspondence
-	// pairs to lose — and enables Done once the source pane is loaded.
+	// A third handoff reaches the same (still-unsafe) banner. Importing it
+	// never shows a discard dialog — an Annotate Round project never has
+	// correspondence pairs to lose — and Done stays enabled once the replaced
+	// source pane has loaded.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();

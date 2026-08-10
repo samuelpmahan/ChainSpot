@@ -24,6 +24,19 @@ async function gotoDemo(page: Page): Promise<void> {
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 }
 
+/**
+ * The rail now opens collapsed by default at this suite's (narrow, <=1280px)
+ * viewport — see `DemoGuide.svelte` — so cases that drive the step body or
+ * footer (`demo-next`, `demo-load-inputs`, …) must expand it first. A no-op
+ * when it's already expanded.
+ */
+async function expandRail(page: Page): Promise<void> {
+	const collapseToggle = page.getByTestId('demo-collapse');
+	if ((await collapseToggle.getAttribute('aria-expanded')) === 'false') {
+		await collapseToggle.click();
+	}
+}
+
 test('walkthrough drives the real Stitch Map with the real course captures', async ({ page }) => {
 	// The demo loads four full-size phone screenshots and then pays the
 	// smart-import worker's one-time OpenCV WASM compile, exactly as a first-time
@@ -59,7 +72,7 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	await expect(page.getByTestId('stitch-readiness')).toContainText('Export is ready');
 });
 
-test('the round-annotation step arrives through the ordinary import banner and can be exited without resetting the app', async ({
+test('the round-annotation step imports its sample source automatically and can be exited without resetting the app', async ({
 	page
 }) => {
 	// Generous despite not running stitch analysis: this file runs alongside the
@@ -69,7 +82,7 @@ test('the round-annotation step arrives through the ordinary import banner and c
 	await gotoDemo(page);
 
 	// Start at the Round-mode annotate step (script position 5) so this case
-	// exercises narration and the handoff banner without paying for the
+	// exercises narration and the handoff import without paying for the
 	// four-screenshot stitch analysis, the Map-mode annotate pass, or a real
 	// page reload. This is the step demo arming still supplies a fallback
 	// asset for — the Map-mode step relies entirely on the product's own "Use
@@ -79,11 +92,16 @@ test('the round-annotation step arrives through the ordinary import banner and c
 	await expect(page).toHaveURL(/\/annotate-round$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
-	// The sample source arrives through the product's ordinary import banner,
-	// awaiting an explicit decision rather than being applied behind the visitor.
-	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
-	await expect(page.getByTestId('handoff-import')).toBeVisible();
+	// This is a fresh visit — no source image, no annotations yet — so the
+	// sample source is safe to complete on its own: it imports itself through
+	// the product's ordinary handoff path (same as a real visitor's stitched
+	// export would) with no banner and no click required.
+	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true', {
+		timeout: 30000
+	});
 
+	await expandRail(page);
 	await page.getByTestId('demo-next').click();
 	await expect(page).toHaveURL(/\/create-graphics$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 6 of 6');
@@ -115,14 +133,20 @@ test('the rail stays usable when the visitor is already on the step route, and f
 	await expect(page).toHaveURL(/\/annotate-round$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
-	// Dismissing leaves the visitor on the step's route with nothing loaded —
-	// the state a visitor also reaches by using the rail's Next from an earlier
-	// step without loading real inputs.
-	await page.getByTestId('handoff-dismiss').click();
+	// This is a fresh visit, so the step's sample source imports itself
+	// automatically — no banner, nothing to dismiss.
 	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true', {
+		timeout: 30000
+	});
 
-	// Arming from here must reach the already-mounted page, not report a
-	// success the visitor cannot see.
+	// Arming again from here must reach the already-mounted page, not report a
+	// success the visitor cannot see — and with a source image now loaded,
+	// completing this second handoff without a decision would silently replace
+	// it, so the banner returns (this route's normal unsafe-replacement guard).
+	// The rail defaults collapsed at this viewport, so open it to reach the arm
+	// control.
+	await expandRail(page);
 	await page.getByTestId('demo-load-inputs').click();
 	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
 

@@ -18,9 +18,12 @@ export/broadcast through the Maps APIs at any tier.
 
 ## Why the key is allowed to be public
 
-The key ships in the built JS bundle — that is unavoidable in a static
-site, and it is the model Google designed browser keys for. Secrecy is not
-the control; **restrictions are**:
+The key ships in the built client output — concretely, `$env/dynamic/public`
+is resolved once at build time and baked into a small `_app/env.js` chunk
+that every page fetches on load (verified: building with a key set produces
+`export const env={PUBLIC_GOOGLE_MAPS_API_KEY:"…"}` there, in plain text).
+That is unavoidable in a static site, and it is the model Google designed
+browser keys for. Secrecy is not the control; **restrictions are**:
 
 - an HTTP-referrer restriction pins it to this site's origin,
 - an API restriction limits it to the two APIs used,
@@ -61,6 +64,21 @@ is the one genuinely dangerous configuration.
 
 No key configured (either place) = the app builds and runs exactly as
 before, keyless, with zero requests to Google.
+
+**This is verified, not just asserted.** `npm run build` succeeds both with
+the key absent and with one set, producing `_app/env.js` = `export const
+env={}` in the former case and shipping no Google request of any kind; a
+grep of the tracked tree and the full commit history turns up no committed
+key. The create-graphics search UI fails soft across every no-working-key
+shape that can plausibly reach production — env var missing entirely, set to
+`""` (what an absent GitHub Actions secret actually produces, per the
+workflow below), and set to a key Google itself rejects (HTTP error from
+Places) — with no crash, no white screen, and no stuck spinner in any of
+them, pinned by `tests/unit/googleMapsConfig.test.ts`,
+`tests/unit/geocodeSearchKeyless.test.ts`, `tests/unit/geocodeSearchKeyed.test.ts`,
+and (browser-level, mocked network) `tests/e2e/naipCleanMap.spec.ts`, which
+also confirms the only two origins ever contacted keyless are
+`nominatim.openstreetmap.org` and `imagery.nationalmap.gov`.
 
 ## Cost model and the load-gating rule
 
