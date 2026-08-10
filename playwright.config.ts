@@ -12,5 +12,17 @@ export default defineConfig({
 		url: 'http://127.0.0.1:5173',
 		reuseExistingServer: !process.env.CI
 	},
-	projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]
+	projects: [
+		{
+			name: 'chromium',
+			use: {
+				...devices['Desktop Chrome'],
+				// Sandboxed/CI environments can provide their own Chromium build
+				// instead of the exact revision this Playwright version pins.
+				...(process.env.PW_CHROMIUM_PATH
+					? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } }
+					: {})
+			}
+		}
+	]
 });
