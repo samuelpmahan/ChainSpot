@@ -159,7 +159,7 @@ describe('Save project (F)', () => {
 		expect([...entries['images/source-original.png']]).toEqual([...SRC]);
 		expect([...entries['images/target-original.jpg']]).toEqual([...TGT]);
 		const manifest = JSON.parse(strFromU8(entries['project.json']));
-		expect(manifest.schemaVersion).toBe(3);
+		expect(manifest.schemaVersion).toBe(4);
 		expect(manifest.images[0].sha256).toBe(await sha256Hex(SRC));
 		expect(manifest.images[1].sha256).toBe(await sha256Hex(TGT));
 

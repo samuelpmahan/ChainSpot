@@ -140,4 +140,39 @@ describe('ImageViewport pinch-to-zoom', () => {
 		unmount(component);
 		host.remove();
 	});
+
+	it('re-anchors on the remaining two touches instead of stalling when a third pointer arrives and an original pinch finger lifts', async () => {
+		const { component, host, controller, scene } = mountViewport();
+		await flush();
+
+		pointerDown(scene, 1, 100, 100);
+		pointerDown(scene, 2, 200, 100);
+		await flush();
+
+		// A third touch lands mid-pinch (e.g. an accidental palm touch) while
+		// pointers 1 and 2 keep driving the gesture.
+		pointerDown(scene, 3, 300, 300);
+		await flush();
+
+		// One of the original two pinch fingers lifts; pointer 3 (still down)
+		// keeps the tracked count at 2, so the stale-pinch bug never clears via
+		// the `< 2` branch — it must re-anchor here instead.
+		pointerUp(1, 100, 100);
+		await flush();
+
+		// The gesture should now be anchored on pointers 2 and 3. Move them
+		// apart and confirm zoom still responds instead of silently no-oping.
+		pointerMove(2, 100, 100);
+		pointerMove(3, 500, 300);
+		await flush();
+
+		expect(controller.view.zoom).toBeGreaterThan(1);
+
+		pointerUp(2, 100, 100);
+		pointerUp(3, 500, 300);
+		await flush();
+
+		unmount(component);
+		host.remove();
+	});
 });

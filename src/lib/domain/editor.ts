@@ -54,6 +54,7 @@ import {
 import type {
 	AnnotatedHole,
 	ControlPointPair,
+	HoleNumberBadgeAnchor,
 	ImageAsset,
 	ImagePoint,
 	ImageRole,
@@ -297,6 +298,49 @@ export class ProjectEditor {
 
 		const before = this.#state;
 		const after = { ...before, holes: cloneValue(holes as AnnotatedHole[]) };
+		this.commit(before, after);
+	}
+
+	/**
+	 * Replaces the whole hole-number-badge-anchor list in one history step, the
+	 * same "one CV run = one commit" shape as `setHoles`. Badge points are
+	 * always source-image pixels and bounds-checked the same way; `confidence`
+	 * is signature-quality input only (see `HoleNumberBadgeAnchor`) and is
+	 * validated as a plain 0..1 number, never treated as authoritative.
+	 */
+	setNumberBadges(badges: readonly HoleNumberBadgeAnchor[]): void {
+		if (!Array.isArray(badges)) {
+			throw new Error('setNumberBadges: badges must be an array');
+		}
+		const sourceImage = findImageByRole(this.#state.images, 'source-overview');
+		if (!sourceImage && badges.length > 0) {
+			throw new Error(
+				'setNumberBadges: the source-overview image must be loaded before setting badges'
+			);
+		}
+		const numbers = new Set<number>();
+		for (const badge of badges) {
+			if (!Number.isInteger(badge.number) || badge.number <= 0) {
+				throw new Error(`setNumberBadges: badge number must be a positive integer, got ${JSON.stringify(badge.number)}`);
+			}
+			if (numbers.has(badge.number)) {
+				throw new Error(`setNumberBadges: duplicate badge number ${badge.number}`);
+			}
+			numbers.add(badge.number);
+			const image = sourceImage as ImageAsset;
+			assertFiniteCoordinates(badge, `setNumberBadges (badge ${badge.number})`);
+			if (!pointInBounds(badge, image.widthPx, image.heightPx)) {
+				throw new Error(`setNumberBadges: badge ${badge.number} is outside the source image bounds`);
+			}
+			if (!Number.isFinite(badge.confidence) || badge.confidence < 0 || badge.confidence > 1) {
+				throw new Error(
+					`setNumberBadges: badge ${badge.number} confidence must be a finite number in [0, 1], got ${JSON.stringify(badge.confidence)}`
+				);
+			}
+		}
+
+		const before = this.#state;
+		const after = { ...before, numberBadges: cloneValue(badges as HoleNumberBadgeAnchor[]) };
 		this.commit(before, after);
 	}
 

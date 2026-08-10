@@ -13,7 +13,20 @@
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
+	import type { HoleNumberBadgeAnchor } from '$lib/domain/project';
 	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
+	import { setPendingCourseBadges } from '$lib/courseBadgeSession';
+	import type { LabeledPoint } from '$lib/courseBadgeSession';
+	import {
+		applyLibraryEntry,
+		badgesToLabeledPoints,
+		findFuzzyMatches,
+		getDefaultCourseLibraryStore,
+		toLibraryHoles,
+		upsertCourse
+	} from '$lib/courseLibrary';
+	import type { CourseLibraryEntry, CourseLibraryStore } from '$lib/courseLibrary';
+	import type { SignatureMatchResult } from '$lib/courseSignature';
 	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
@@ -132,11 +145,18 @@
 		editor?: ProjectEditor;
 		decode?: DecodeImageFile;
 		hash?: HashBytes;
+		courseLibraryStore?: CourseLibraryStore;
 	}
 
-	let { editor: initialEditor, decode, hash }: Props = $props();
+	let { editor: initialEditor, decode, hash, courseLibraryStore: initialCourseLibraryStore }: Props = $props();
 	// svelte-ignore state_referenced_locally
 	void hash; // Test-seam parity with create-graphics; this page never saves/opens a bundle.
+
+	// An explicitly injected store (tests) wins; otherwise every page instance
+	// shares one real IndexedDB connection via the module-level singleton in
+	// courseLibrary.ts, matching how smartStitchWorker is shared elsewhere.
+	// svelte-ignore state_referenced_locally
+	const courseLibraryStore = initialCourseLibraryStore ?? getDefaultCourseLibraryStore();
 
 	/**
 	 * Only production-created or session-retrieved editors participate in route
@@ -173,6 +193,17 @@
 	 * specific raster and make no sense against a different one.
 	 */
 	let holes = $state<AnnotatedHole[]>([]);
+	/**
+	 * Hole-number badge and basket positions keyed by resolved hole number,
+	 * captured from `handleDetectCourse`'s grammar result for course-shape
+	 * signature use (Course Memory) — never authoritative like `holes`, and
+	 * cleared on the same source-image-replacement lifecycle. Captured
+	 * regardless of a proposal's `status`: badge assignment (courseGrammar's
+	 * Stage 1) succeeds independently of tee/basket, so an "incomplete" hole
+	 * can still contribute a good badge point to the signature.
+	 */
+	let numberBadges = $state<HoleNumberBadgeAnchor[]>([]);
+	let labeledBaskets = $state<LabeledPoint[]>([]);
 	let activeHoleId = $state<string | null>(null);
 	let basketCandidates = $state<readonly BasketCandidate[]>([]);
 	let selectedBasketCandidate = $state<number | null>(null);
@@ -186,6 +217,15 @@
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let prewarmedSourceId: string | null = null;
 	let autoDetectedSourceId: string | null = null;
+	/**
+	 * A course recognized in the local library (Course Memory), surfaced as a
+	 * confirm/dismiss banner — never auto-imported. Recognition is attempted
+	 * at most once per source image via `recognizedSourceId`, mirroring
+	 * `autoDetectedSourceId`'s once-per-image guard.
+	 */
+	let recognizedMatch = $state<{ entry: CourseLibraryEntry; match: SignatureMatchResult } | null>(null);
+	let recognizedSourceId: string | null = null;
+	let applyingRecognizedMatch = $state(false);
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
@@ -692,6 +732,10 @@
 	function handleSourceDomainChanged(): void {
 		refresh();
 		holes = [];
+		numberBadges = [];
+		labeledBaskets = [];
+		recognizedMatch = null;
+		recognizedSourceId = null;
 		activeHoleId = null;
 		radialMenu = null;
 		basketCandidates = [];
@@ -803,11 +847,31 @@
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
 			basketCandidates = result.baskets;
+			// Captured regardless of proposal.status: badge/basket ownership
+			// (courseGrammar's Stages 1 and 4) each succeed independently of the
+			// hole's overall tee/basket-complete status, so an "incomplete" or
+			// "review" hole can still contribute a good signature point.
+			numberBadges = result.grammar.holes
+				.filter((proposal) => proposal.numberBadge !== undefined)
+				.map((proposal) => ({
+					number: proposal.number,
+					xPx: proposal.numberBadge!.xPx,
+					yPx: proposal.numberBadge!.yPx,
+					confidence: proposal.numberBadge!.confidence
+				}));
+			labeledBaskets = result.grammar.holes
+				.filter((proposal) => proposal.basket !== undefined)
+				.map((proposal) => ({
+					holeNumber: proposal.number,
+					xPx: proposal.basket!.xPx,
+					yPx: proposal.basket!.yPx
+				}));
 			const assignedNumbers = result.numberDetection.candidates.filter(
 				(candidate) => candidate.label !== undefined
 			).length;
 			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
 			if (options.autoApply) applyReadyCourseHoles({ skipExisting: true });
+			await recognizeCourse(detectedImageId, numberBadges, labeledBaskets);
 		} catch (error) {
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = null;
@@ -817,6 +881,53 @@
 			courseDetectionRunning = false;
 			stopCourseDetectionProgress();
 		}
+	}
+
+	/**
+	 * Course Memory recognition: at most once per source image, scan the local
+	 * course library for a confident geometric match and surface it as a
+	 * confirm/dismiss banner. Never applies anything itself — `recognizedMatch`
+	 * only ever renders the banner; `handleCourseRecognizedImport` is the sole
+	 * path that calls `applyLibraryEntry`. A lookup failure is swallowed: a
+	 * broken or unavailable library must never block manual annotation.
+	 */
+	async function recognizeCourse(
+		sourceId: string,
+		badges: readonly HoleNumberBadgeAnchor[],
+		baskets: readonly LabeledPoint[]
+	): Promise<void> {
+		if (recognizedSourceId === sourceId) return;
+		recognizedSourceId = sourceId;
+		try {
+			const results = await findFuzzyMatches(courseLibraryStore, {
+				badges: badgesToLabeledPoints(badges),
+				baskets
+			});
+			// The source image may have been replaced while this awaited: a match
+			// keyed to the old raster must never surface against the new one.
+			if (sourceImage()?.id !== sourceId) return;
+			if (results.length > 0) {
+				recognizedMatch = { entry: results[0].entry, match: results[0] };
+			}
+		} catch {
+			// Best-effort recognition only; never surfaces as a blocking error.
+		}
+	}
+
+	function handleCourseRecognizedImport(): void {
+		if (!recognizedMatch || applyingRecognizedMatch) return;
+		applyingRecognizedMatch = true;
+		try {
+			holes = applyLibraryEntry(recognizedMatch.entry, recognizedMatch.match, holes, { skipExisting: false });
+			activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
+			recognizedMatch = null;
+		} finally {
+			applyingRecognizedMatch = false;
+		}
+	}
+
+	function handleCourseRecognizedDismiss(): void {
+		recognizedMatch = null;
 	}
 
 	/**
@@ -1000,6 +1111,18 @@
 				return;
 			}
 			setPendingAnnotatedRound(round);
+			setPendingCourseBadges({ numberBadges, baskets: labeledBaskets });
+			try {
+				// Best-effort: a course-library write failure must never block Done.
+				await upsertCourse(courseLibraryStore, {
+					projectName: editor.state.project.name,
+					numberBadges: badgesToLabeledPoints(numberBadges),
+					baskets: labeledBaskets,
+					holes: toLibraryHoles(holes)
+				});
+			} catch {
+				// Ignored — see comment above.
+			}
 			await goto(`${base}/create-graphics`);
 		} finally {
 			doneRunning = false;
@@ -1063,6 +1186,37 @@
 			{#if handoffError}
 				<p class="error" data-testid="handoff-error" role="alert">{handoffError}</p>
 			{/if}
+		</section>
+	{/if}
+
+	{#if recognizedMatch}
+		<section
+			class="handoff-banner"
+			data-testid="course-recognized"
+			aria-label="Recognized course"
+		>
+			<p>
+				Recognized course “{recognizedMatch.entry.name}” ({Math.round(recognizedMatch.match.confidence * 100)}%
+				match). Import its saved holes?
+			</p>
+			<div class="handoff-actions">
+				<button
+					type="button"
+					data-testid="course-recognized-import"
+					disabled={applyingRecognizedMatch}
+					onclick={handleCourseRecognizedImport}
+				>
+					Import saved holes
+				</button>
+				<button
+					type="button"
+					data-testid="course-recognized-dismiss"
+					disabled={applyingRecognizedMatch}
+					onclick={handleCourseRecognizedDismiss}
+				>
+					Dismiss
+				</button>
+			</div>
 		</section>
 	{/if}
 
