@@ -19,8 +19,34 @@ export interface PendingHandoff {
 
 let pending: PendingHandoff | null = null;
 
+/**
+ * Listeners notified when a handoff is published.
+ *
+ * Stitch Map's own "Use as UDisc source" always navigates immediately after
+ * publishing, so for years the destination's `onMount` read was sufficient.
+ * The guided demo can publish while the destination is *already mounted*
+ * (`/demo`'s rail arms a step the visitor is standing on), and a mounted page
+ * has no reason to re-read a plain module variable — so the banner never
+ * appeared and the arming reported a success the visitor could not see.
+ * Publishing now announces itself, and destinations subscribe in addition to
+ * their mount-time read.
+ */
+type PendingHandoffListener = () => void;
+const listeners = new Set<PendingHandoffListener>();
+
 export function setPendingHandoff(handoff: PendingHandoff): void {
 	pending = handoff;
+	for (const listener of [...listeners]) listener();
+}
+
+/**
+ * Subscribes to handoff publications. Returns an unsubscribe function for the
+ * caller's teardown; a destination that forgets to call it would keep a
+ * destroyed component's closure alive.
+ */
+export function subscribePendingHandoff(listener: PendingHandoffListener): () => void {
+	listeners.add(listener);
+	return () => listeners.delete(listener);
 }
 
 export function getPendingHandoff(): PendingHandoff | null {

@@ -39,7 +39,10 @@
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
-	import { takePendingStitchCaptures } from '$lib/demo/stageInbox';
+	import {
+		subscribePendingStitchCaptures,
+		takePendingStitchCaptures
+	} from '$lib/demo/stageInbox';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
@@ -1282,8 +1285,15 @@
 		// arrangement a visitor watches appear is computed by the product now,
 		// never supplied by the demo. Re-run protection still applies: a session
 		// already refined by hand asks before it is replaced.
-		const captures = takePendingStitchCaptures();
-		if (captures) requestSmartImport(captures);
+		const claimCaptures = (): void => {
+			const captures = takePendingStitchCaptures();
+			if (captures) requestSmartImport(captures);
+		};
+		claimCaptures();
+		// Captures deposited while this page is already mounted — the rail arming
+		// a step the visitor is standing on — would otherwise sit unclaimed until
+		// the next navigation, after the rail already reported success.
+		return subscribePendingStitchCaptures(claimCaptures);
 	});
 
 	onDestroy(() => {

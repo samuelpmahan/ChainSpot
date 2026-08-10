@@ -19,8 +19,25 @@
 
 let pendingStitchCaptures: File[] | null = null;
 
+/**
+ * Listeners notified when captures are deposited, mirroring
+ * `stitch/handoff.ts`'s subscription for the same reason: the rail can arm a
+ * step the visitor is already standing on, and a mounted Stitch Map has no
+ * reason to re-read a plain module variable. Without this the visitor clicks
+ * "Load the real inputs", is told it worked, and watches nothing happen.
+ */
+type StitchCaptureListener = () => void;
+const listeners = new Set<StitchCaptureListener>();
+
 export function setPendingStitchCaptures(files: readonly File[]): void {
 	pendingStitchCaptures = [...files];
+	for (const listener of [...listeners]) listener();
+}
+
+/** Subscribes to deposits. Returns an unsubscribe function for teardown. */
+export function subscribePendingStitchCaptures(listener: StitchCaptureListener): () => void {
+	listeners.add(listener);
+	return () => listeners.delete(listener);
 }
 
 export function getPendingStitchCaptures(): File[] | null {

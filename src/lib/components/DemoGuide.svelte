@@ -15,9 +15,10 @@
 	 */
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { armDemoStep, stepHasArming } from '$lib/demo/arming';
-	import { demoRouteLabel, demoStepUrl } from '$lib/demo/catalog';
+	import { DEMO_STEPS, demoRouteLabel, demoStepUrl } from '$lib/demo/catalog';
 	import { demoTour } from '$lib/demo/tour.svelte';
 
 	let armBusy = $state(false);
@@ -26,6 +27,30 @@
 
 	onMount(() => {
 		demoTour.restore();
+	});
+
+	/**
+	 * Keeps the narration on the route the visitor is actually looking at.
+	 *
+	 * The script deliberately tells visitors to advance using the product's own
+	 * controls — "Use as UDisc source" on Stitch Map, "Done" on Annotate Round —
+	 * and those call `goto` directly, knowing nothing about this rail. Without
+	 * this the cursor stays behind, showing the previous step's instructions and,
+	 * worse, a "Load the real inputs" button that would navigate the visitor
+	 * backward and re-trigger Smart Import's replace confirmation.
+	 *
+	 * Only a pathname that no longer matches the current step moves the cursor,
+	 * which is what preserves steps 3–5: they share Create Graphics, so a match
+	 * on the current step must always win over the first step for that route.
+	 */
+	$effect(() => {
+		if (!demoTour.active) return;
+		const pathname = page.url.pathname;
+		if (pathname === demoStepUrl(demoTour.step)) return;
+		const index = DEMO_STEPS.findIndex((step) => demoStepUrl(step) === pathname);
+		// A route outside the script (the visitor wandered off to Ribbon Goldens)
+		// leaves the cursor alone: the rail should wait, not guess.
+		if (index >= 0) demoTour.goTo(index);
 	});
 
 	/**

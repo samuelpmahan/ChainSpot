@@ -45,8 +45,14 @@ export async function armDemoStep(step: DemoStep, fetchImpl: FetchLike = fetch):
 				};
 			}
 			case 'annotate-source': {
+				// Any pending handoff blocks, not just one bound for this step's
+				// own route. The handoff store holds a single slot shared by both
+				// roles, so publishing a `source-overview` sample over a waiting
+				// `target-basemap` export would destroy a stitch the visitor made
+				// and is on their way to import — the precise thing this module
+				// exists to never do. Which role is waiting does not change that.
 				const existing = getPendingHandoff();
-				if (existing && existing.targetRole === 'source-overview') {
+				if (existing) {
 					return {
 						ok: true,
 						message: `Keeping the image already waiting to import ("${existing.fileName}") — the demo never overwrites your own stitched export.`

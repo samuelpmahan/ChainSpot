@@ -21,10 +21,16 @@ import type { DemoStep } from '../../src/lib/demo/catalog';
 import {
 	clearPendingStitchCaptures,
 	getPendingStitchCaptures,
+	subscribePendingStitchCaptures,
 	takePendingStitchCaptures
 } from '../../src/lib/demo/stageInbox';
 import { DemoTour } from '../../src/lib/demo/tour.svelte';
-import { consumePendingHandoff, getPendingHandoff, setPendingHandoff } from '../../src/lib/stitch/handoff';
+import {
+	consumePendingHandoff,
+	getPendingHandoff,
+	setPendingHandoff,
+	subscribePendingHandoff
+} from '../../src/lib/stitch/handoff';
 import { SUPPORTED_MIME_TYPES } from '../../src/lib/imageIntake';
 
 function stepById(id: string): DemoStep {
@@ -146,19 +152,61 @@ describe('armDemoStep', () => {
 		expect(handoff?.fileName).toBe(DEMO_DATASET.overview.fileName);
 	});
 
-	it("never overwrites a handoff the visitor's own stitch already placed", async () => {
+	// Both roles, because the handoff store is a single shared slot: a waiting
+	// `target-basemap` export is destroyed by publishing a `source-overview`
+	// sample just as surely as a same-role one would be. Guarding only the role
+	// this step happens to use left the visitor's "Use as clean basemap" stitch
+	// silently discarded.
+	it.each(['source-overview', 'target-basemap'] as const)(
+		"never overwrites a pending %s handoff the visitor's own stitch placed",
+		async (targetRole) => {
+			setPendingHandoff({
+				blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+				fileName: 'my-own-stitch.png',
+				targetRole
+			});
+			const spy = vi.fn();
+
+			const result = await armDemoStep(stepById('annotate'), spy as unknown as typeof fetch);
+
+			expect(result.ok).toBe(true);
+			expect(spy).not.toHaveBeenCalled();
+			expect(getPendingHandoff()?.fileName).toBe('my-own-stitch.png');
+			expect(getPendingHandoff()?.targetRole).toBe(targetRole);
+		}
+	);
+
+	it('notifies a mounted destination when a handoff is published', async () => {
+		const seen: string[] = [];
+		const unsubscribe = subscribePendingHandoff(() => {
+			seen.push(getPendingHandoff()?.fileName ?? '');
+		});
+
+		await armDemoStep(stepById('annotate'), okFetch());
+		unsubscribe();
+		const afterUnsubscribe = seen.length;
 		setPendingHandoff({
 			blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
-			fileName: 'my-own-stitch.png',
+			fileName: 'later.png',
 			targetRole: 'source-overview'
 		});
-		const spy = vi.fn();
 
-		const result = await armDemoStep(stepById('annotate'), spy as unknown as typeof fetch);
+		expect(seen).toEqual([DEMO_DATASET.overview.fileName]);
+		expect(seen.length).toBe(afterUnsubscribe);
+	});
 
-		expect(result.ok).toBe(true);
-		expect(spy).not.toHaveBeenCalled();
-		expect(getPendingHandoff()?.fileName).toBe('my-own-stitch.png');
+	it('notifies a mounted Stitch Map when captures are deposited', async () => {
+		let notified = 0;
+		const unsubscribe = subscribePendingStitchCaptures(() => {
+			notified += 1;
+		});
+
+		await armDemoStep(stepById('stitch'), okFetch());
+		expect(notified).toBe(1);
+
+		unsubscribe();
+		await armDemoStep(stepById('stitch'), okFetch());
+		expect(notified).toBe(1);
 	});
 
 	it('is a no-op for steps that run on the visitor’s own input', async () => {

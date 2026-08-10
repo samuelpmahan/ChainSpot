@@ -51,7 +51,10 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 test('walkthrough steps to Annotate Round and can be exited without resetting the app', async ({
 	page
 }) => {
-	test.setTimeout(60000);
+	// Generous despite not running stitch analysis: this file runs alongside the
+	// CV-heavy stitch specs, and under that parallel load the image fetch and
+	// route transitions here have been observed to outlast a 60s budget.
+	test.setTimeout(90000);
 	await gotoDemo(page);
 
 	// Start at step 2 so this case exercises narration and the handoff banner
@@ -74,4 +77,36 @@ test('walkthrough steps to Annotate Round and can be exited without resetting th
 	await page.getByTestId('demo-exit').click();
 	await expect(page.getByTestId('demo-guide')).toHaveCount(0);
 	await expect(page.getByTestId('app-shell')).toBeVisible();
+});
+
+/**
+ * The two ways the rail and the product can fall out of step with each other.
+ * Both were reachable on the walkthrough's own recommended path, and both are
+ * invisible in unit tests: one depends on SvelteKit treating `goto` to the
+ * current URL as a no-op, the other on the product's controls navigating
+ * without the rail's knowledge.
+ */
+test('the rail stays usable when the visitor is already on the step route, and follows product navigation', async ({
+	page
+}) => {
+	test.setTimeout(60000);
+	await gotoDemo(page);
+	await page.getByTestId('demo-start-step-annotate').click();
+	await expect(page).toHaveURL(/\/annotate-round$/);
+
+	// Dismissing leaves the visitor on the step's route with nothing loaded —
+	// the state a visitor also reaches by using the rail's Next from step 1.
+	await page.getByTestId('handoff-dismiss').click();
+	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
+
+	// Arming from here must reach the already-mounted page, not report a
+	// success the visitor cannot see.
+	await page.getByTestId('demo-load-inputs').click();
+	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
+
+	// Navigating the way the product does, without touching the rail, moves the
+	// narration with the visitor instead of stranding it a step behind.
+	await page.getByRole('link', { name: 'Create Graphics' }).click();
+	await expect(page).toHaveURL(/\/create-graphics$/);
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 3 of 5');
 });
