@@ -74,9 +74,9 @@
 	} from '$lib/courseLibrary';
 	import type { CourseLibraryStore } from '$lib/courseLibrary';
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
-	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
-	import type { HoleGraphicPlan } from '$lib/holeGraphics';
-	import { DEFAULT_GRAPHIC_STYLE, GRAPHIC_STYLE_PRESETS, findGraphicStyle } from '$lib/graphics/style';
+	import { buildHoleGraphicMarkup } from '$lib/holeGraphics';
+	import { GRAPHIC_STYLE_PRESETS } from '$lib/graphics/style';
+	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -185,38 +185,12 @@
 		return editor.state.holes;
 	}
 
-	let holeGraphicPlans: HoleGraphicPlan[] = $derived.by(() => {
-		if (!alignmentResult || !('transform' in alignmentResult)) return [];
-		const target = targetImage();
-		if (!target) return [];
-		const transform = alignmentResult.transform;
-		const plans: HoleGraphicPlan[] = [];
-		for (const hole of currentHoles()) {
-			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
-			if (plan) plans.push(plan);
-		}
-		return plans;
-	});
-
 	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
 	function targetImageHref(): string | null {
 		const target = targetImage();
 		if (!target) return null;
 		const decoded = editor.getAssetResource(target.id)?.decoded;
 		return decoded instanceof HTMLImageElement ? decoded.src : null;
-	}
-
-	let holeGraphicDownloading = $state<Set<string>>(new Set());
-	let holeGraphicsZipping = $state(false);
-	let holeGraphicsError = $state<string | null>(null);
-
-	function triggerBlobDownload(blob: Blob, fileName: string): void {
-		const objectUrl = URL.createObjectURL(blob);
-		const anchor = document.createElement('a');
-		anchor.href = objectUrl;
-		anchor.download = fileName;
-		anchor.click();
-		URL.revokeObjectURL(objectUrl);
 	}
 
 	/** Feet-per-pixel for the current target image, only when it has a known (never estimated) ground scale. */
@@ -226,51 +200,21 @@
 			: metersToFeet(targetGroundScaleMetersPerPixel);
 	}
 
-	async function handleDownloadHoleGraphic(plan: HoleGraphicPlan): Promise<void> {
-		const href = targetImageHref();
-		if (!href || holeGraphicDownloading.has(plan.holeId)) return;
-		holeGraphicDownloading = new Set(holeGraphicDownloading).add(plan.holeId);
-		holeGraphicsError = null;
-		try {
-			const blob = await renderHoleGraphicPng(
-				href,
-				plan,
-				undefined,
-				findGraphicStyle(holeGraphicStyleId),
-				holeGraphicFeetPerPixel()
-			);
-			triggerBlobDownload(blob, `hole-${plan.number}.png`);
-		} catch (error) {
-			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphic.';
-		} finally {
-			const next = new Set(holeGraphicDownloading);
-			next.delete(plan.holeId);
-			holeGraphicDownloading = next;
-		}
-	}
+	/**
+	 * The graphics/export mode (style selection, per-hole plans, PNG/zip
+	 * export state) lives behind this module boundary — see
+	 * `graphicsMode.svelte.ts` for why. It reads alignment/annotation/NAIP
+	 * state through these getters only; it never reaches into the route
+	 * directly.
+	 */
+	const graphicsMode = new GraphicsMode({
+		holes: () => currentHoles(),
+		transform: () => (alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null),
+		targetSize: () => targetImage(),
+		targetImageHref,
+		feetPerPixel: holeGraphicFeetPerPixel
+	});
 
-	async function handleDownloadAllHoleGraphics(): Promise<void> {
-		const plans = holeGraphicPlans;
-		const href = targetImageHref();
-		if (plans.length === 0 || !href || holeGraphicsZipping) return;
-		holeGraphicsZipping = true;
-		holeGraphicsError = null;
-		try {
-			const style = findGraphicStyle(holeGraphicStyleId);
-			const feetPerPixel = holeGraphicFeetPerPixel();
-			const entries = [];
-			for (const plan of plans) {
-				const blob = await renderHoleGraphicPng(href, plan, undefined, style, feetPerPixel);
-				entries.push({ number: plan.number, blob });
-			}
-			const zip = await zipHoleGraphics(entries);
-			triggerBlobDownload(zip, 'hole-graphics.zip');
-		} catch (error) {
-			holeGraphicsError = error instanceof Error ? error.message : 'Could not build the hole graphics zip.';
-		} finally {
-			holeGraphicsZipping = false;
-		}
-	}
 	let selection = $state<PointSelection | null>(null);
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
@@ -370,7 +314,6 @@
 	 * distances rather than showing a wrong number.
 	 */
 	let targetGroundScaleMetersPerPixel = $state<number | null>(null);
-	let holeGraphicStyleId = $state(DEFAULT_GRAPHIC_STYLE.id);
 
 	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
 	let geocodeParkNameInput = $state('');
@@ -2256,14 +2199,14 @@
 				bend, and corridor points, live — previews below update as annotations or
 				the alignment change. Holes with no placed points yet are skipped.
 			</p>
-			{#if holeGraphicPlans.length === 0}
+			{#if graphicsMode.plans.length === 0}
 				<p class="alignment-empty" data-testid="hole-graphics-empty">
 					No hole has both a placed point and a usable alignment yet.
 				</p>
 			{:else}
 				<label class="hole-graphic-style">
 					Color theme
-					<select data-testid="hole-graphic-style" bind:value={holeGraphicStyleId}>
+					<select data-testid="hole-graphic-style" bind:value={graphicsMode.styleId}>
 						{#each GRAPHIC_STYLE_PRESETS as preset (preset.id)}
 							<option value={preset.id}>{preset.name}</option>
 						{/each}
@@ -2277,37 +2220,32 @@
 				<button
 					type="button"
 					data-testid="download-all-hole-graphics"
-					disabled={holeGraphicsZipping}
-					onclick={handleDownloadAllHoleGraphics}
+					disabled={graphicsMode.zipping}
+					onclick={() => graphicsMode.downloadAll()}
 				>
-					{holeGraphicsZipping ? 'Zipping…' : `Download all ${holeGraphicPlans.length} as .zip`}
+					{graphicsMode.zipping ? 'Zipping…' : `Download all ${graphicsMode.plans.length} as .zip`}
 				</button>
 			{/if}
-			{#if holeGraphicsError}
-				<p class="error" data-testid="hole-graphics-error" role="alert">{holeGraphicsError}</p>
+			{#if graphicsMode.error}
+				<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
 			{/if}
-			{#if holeGraphicPlans.length > 0}
+			{#if graphicsMode.plans.length > 0}
 				{@const href = targetImageHref()}
 				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
-					{#each holeGraphicPlans as plan (plan.holeId)}
+					{#each graphicsMode.plans as plan (plan.holeId)}
 						<li class="hole-graphic-item">
 							{#if href}
 								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
-									{@html buildHoleGraphicMarkup(
-										plan,
-										href,
-										findGraphicStyle(holeGraphicStyleId),
-										holeGraphicFeetPerPixel()
-									)}
+									{@html buildHoleGraphicMarkup(plan, href, graphicsMode.style, holeGraphicFeetPerPixel())}
 								</div>
 							{/if}
 							<button
 								type="button"
 								data-testid="hole-graphic-download-{plan.number}"
-								disabled={!href || holeGraphicDownloading.has(plan.holeId)}
-								onclick={() => handleDownloadHoleGraphic(plan)}
+								disabled={!href || graphicsMode.downloading.has(plan.holeId)}
+								onclick={() => graphicsMode.downloadOne(plan)}
 							>
-								{holeGraphicDownloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
+								{graphicsMode.downloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
 							</button>
 						</li>
 					{/each}

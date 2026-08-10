@@ -64,6 +64,24 @@ const CROP_PADDING_FRACTION = 0.2;
 /** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
 const MIN_CROP_PADDING_PX = 40;
 
+/**
+ * Framing/crop parameters for `planHoleGraphic`, factored out as an explicit
+ * input — this is the Workstudio seam named in teardown §8/§10 step 5.
+ * Today's behavior is the default; a future `PresentationStyle` (schema v5)
+ * supplies these instead of the caller relying on the hardcoded constants.
+ */
+export interface HoleFramingOptions {
+	/** Padding around a hole's transformed points, as a fraction of its own bounding box. */
+	readonly paddingFraction: number;
+	/** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
+	readonly minPaddingPx: number;
+}
+
+export const DEFAULT_HOLE_FRAMING: HoleFramingOptions = {
+	paddingFraction: CROP_PADDING_FRACTION,
+	minPaddingPx: MIN_CROP_PADDING_PX
+};
+
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), Math.max(min, max));
 }
@@ -77,12 +95,17 @@ function clamp(value: number, min: number, max: number): number {
  * centerline/bends were added as renderable fields): the corridor band, when
  * present, already encloses every bend on its centerline, so a bends-only
  * hole with no tee or basket still correctly plans to null.
+ *
+ * `framing` controls the crop's padding and defaults to today's hardcoded
+ * behavior (`DEFAULT_HOLE_FRAMING`); pass it to change how tightly the crop
+ * frames a hole's points without touching any other caller.
  */
 export function planHoleGraphic(
 	hole: AnnotatedHole,
 	transform: SerializableTransform,
 	targetWidthPx: number,
-	targetHeightPx: number
+	targetHeightPx: number,
+	framing: HoleFramingOptions = DEFAULT_HOLE_FRAMING
 ): HoleGraphicPlan | null {
 	const tee = hole.tee ? applyTransform(hole.tee, transform) : null;
 	const basket = hole.basket ? applyTransform(hole.basket, transform) : null;
@@ -103,8 +126,8 @@ export function planHoleGraphic(
 	const maxX = Math.max(...points.map((point) => point.xPx));
 	const minY = Math.min(...points.map((point) => point.yPx));
 	const maxY = Math.max(...points.map((point) => point.yPx));
-	const paddingX = Math.max(MIN_CROP_PADDING_PX, (maxX - minX) * CROP_PADDING_FRACTION);
-	const paddingY = Math.max(MIN_CROP_PADDING_PX, (maxY - minY) * CROP_PADDING_FRACTION);
+	const paddingX = Math.max(framing.minPaddingPx, (maxX - minX) * framing.paddingFraction);
+	const paddingY = Math.max(framing.minPaddingPx, (maxY - minY) * framing.paddingFraction);
 
 	const rawX = minX - paddingX;
 	const rawY = minY - paddingY;
