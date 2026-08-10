@@ -59,6 +59,30 @@ async function boxOf(page: Page, selector: string): Promise<ElementBox> {
 	}, selector);
 }
 
+async function openRadialMenuAtVisibleScene(page: Page): Promise<void> {
+	const scene = page.getByTestId('pane-scene-source-overview');
+	await scene.scrollIntoViewIfNeeded();
+	const sceneBox = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+	const visibleTop = Math.max(sceneBox.y, 0);
+	const visibleBottom = Math.min(sceneBox.bottom, VIEWPORT.height);
+	await page.mouse.click(
+		sceneBox.x + sceneBox.width / 2,
+		visibleTop + (visibleBottom - visibleTop) / 2
+	);
+}
+
+async function expectRadialActionsInsideViewport(
+	page: Page,
+	actions: readonly string[]
+): Promise<void> {
+	for (const action of actions) {
+		const box = await boxOf(page, `[data-testid="radial-action-${action}"]`);
+		expect(box.width, `radial ${action} width`).toBeGreaterThanOrEqual(36);
+		expect(box.height, `radial ${action} height`).toBeGreaterThanOrEqual(36);
+		expect(box.insideViewport, `radial ${action} inside viewport`).toBe(true);
+	}
+}
+
 async function horizontalOverflowPx(page: Page): Promise<number> {
 	return page.evaluate(
 		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -270,7 +294,7 @@ test('create-graphics: correspondence placement controls and both panes share on
 // Budget 4 — target sizes and dialog containment.
 // ---------------------------------------------------------------------------
 
-test('annotate-round: the radial menu opens fully on-screen with ≥36px actions', async ({
+test('annotate-round: the map radial menu keeps geometry actions fully on-screen', async ({
 	page
 }) => {
 	await gotoApp(page, '/annotate-round');
@@ -278,23 +302,27 @@ test('annotate-round: the radial menu opens fully on-screen with ≥36px actions
 	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
 	await page.getByTestId('hole-add').click();
 
-	const scene = page.getByTestId('pane-scene-source-overview');
-	await scene.scrollIntoViewIfNeeded();
-	const sceneBox = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
-	const visibleTop = Math.max(sceneBox.y, 0);
-	const visibleBottom = Math.min(sceneBox.bottom, VIEWPORT.height);
-	await page.mouse.click(
-		sceneBox.x + sceneBox.width / 2,
-		visibleTop + (visibleBottom - visibleTop) / 2
-	);
+	await openRadialMenuAtVisibleScene(page);
 
 	await expect(page.getByTestId('radial-action-tee')).toBeVisible();
-	for (const action of ['tee', 'basket', 'shot', 'bend']) {
-		const box = await boxOf(page, `[data-testid="radial-action-${action}"]`);
-		expect(box.width, `radial ${action} width`).toBeGreaterThanOrEqual(36);
-		expect(box.height, `radial ${action} height`).toBeGreaterThanOrEqual(36);
-		expect(box.insideViewport, `radial ${action} inside viewport`).toBe(true);
-	}
+	await expectRadialActionsInsideViewport(page, ['tee', 'basket', 'bend']);
+	await page.keyboard.press('Escape');
+});
+
+test('annotate-round: the round radial menu keeps throw actions fully on-screen', async ({
+	page
+}) => {
+	await gotoApp(page, '/annotate-round');
+	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+	await page.getByTestId('hole-add').click();
+	await page.getByTestId('annotation-mode-round').click();
+	await expect(page.getByTestId('annotation-mode-round')).toHaveAttribute('aria-pressed', 'true');
+
+	await openRadialMenuAtVisibleScene(page);
+
+	await expect(page.getByTestId('radial-action-shot')).toBeVisible();
+	await expectRadialActionsInsideViewport(page, ['shot', 'walk']);
 	await page.keyboard.press('Escape');
 });
 
