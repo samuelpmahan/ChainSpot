@@ -85,13 +85,16 @@ export interface PairEstimates {
  */
 export const DEFAULT_MAX_ANALYSIS_DIM = 4096;
 /**
- * Long-edge limit of the dedicated crop-analysis raster. Crop boundaries must
- * be identified at practical UI granularity; kept distinct from the matcher
- * raster's cap because crop detection scans the full frame on every side
- * (not just a thin template), so its own resolution/cost tradeoff is chosen
- * independently.
+ * Long-edge limit of the dedicated crop-analysis raster.
+ *
+ * Validation change: ordinary phone screenshots now stay at native resolution.
+ * The entropy crop benchmark showed the old 1024px cap introduced a systematic
+ * ~3-4 source-pixel undercrop on 1290x2796 UDisc screenshots, while native
+ * analysis reduced that to exactly one pixel on all 18 labeled top/bottom
+ * boundaries. 4096 still bounds pathological uploads while leaving current
+ * phone captures untouched.
  */
-export const DEFAULT_CROP_ANALYSIS_MAX_DIM = 1024;
+export const DEFAULT_CROP_ANALYSIS_MAX_DIM = 4096;
 
 /**
  * An optional source sub-rectangle in original-image pixels, so a raster can be
