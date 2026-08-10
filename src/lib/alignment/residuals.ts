@@ -9,7 +9,7 @@
 import { applyTransform } from './transform';
 import type {
 	AlignmentPairInput,
-	PointCoordinates,
+	AlignmentPoint,
 	ResidualMetrics,
 	ResidualPair,
 	SerializableTransform
@@ -34,7 +34,7 @@ export function calculateResiduals(options: ResidualCalculationOptions): Residua
 		.filter((pair) => pair.enabled && pair.target !== null)
 		.map((pair) => {
 			const expected = applyTransform(pair.source, options.transform);
-			const target = pair.target as PointCoordinates;
+			const target = pair.target as AlignmentPoint;
 			const dx = expected.xPx - target.xPx;
 			const dy = expected.yPx - target.yPx;
 			return {
