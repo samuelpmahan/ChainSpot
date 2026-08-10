@@ -56,7 +56,10 @@
 	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
 	import { metersToFeet } from '$lib/units';
 	import { searchPlace } from '$lib/geocode';
-	import type { GeoSearchMatch } from '$lib/geocode';
+	import type { GeoSearchMatch, GeocodeSearchResult } from '$lib/geocode';
+	import { parseCoordinateInput, searchPlacesText } from '$lib/placesSearch';
+	import { googleMapsApiKey } from '$lib/googleMapsConfig';
+	import MapConfirm from '$lib/components/MapConfirm.svelte';
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
 	import type { PixelRect } from '$lib/naipGrid';
 	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
@@ -66,8 +69,10 @@
 	import { AlignmentFailureReason } from '$lib/alignment/types';
 	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
 	import {
+		attachCourseLocation,
 		badgesToLabeledPoints,
 		basketsFromHoles,
+		findMatchingLibraryEntry,
 		getDefaultCourseLibraryStore,
 		toLibraryHoles,
 		upsertCourse
@@ -333,6 +338,18 @@
 	let geocodeError = $state<string | null>(null);
 	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
 	let geocodeSelectedIndex = $state<number | null>(null);
+	/** Which provider produced `geocodeMatches`, so the correct attribution renders (ODbL for Nominatim, Google's for Places). */
+	let geocodeResultSource = $state<'nominatim' | 'places' | null>(null);
+	/**
+	 * Set only when a key is configured AND the user has picked a result (or
+	 * pasted a recognized coordinate) — this is the sole gate that mounts
+	 * `MapConfirm`, which is itself the sole thing that ever injects the Google
+	 * Dynamic Maps script tag. Carries the key alongside the match so the
+	 * template never needs to re-derive/narrow a possibly-null key.
+	 */
+	let mapConfirmState = $state<{ match: GeoSearchMatch; apiKey: string } | null>(null);
+	/** Saved-location prefill note (Course Library location cache read path), dismissible without affecting the prefilled inputs. */
+	let savedLocationNote = $state<string | null>(null);
 
 	/** CSS-displayed-pixels-per-natural-pixel for the rendered preview `<img>`, set once it loads. */
 	let displayScale = $state(1);
@@ -1041,6 +1058,30 @@
 				// (e.g. a second basket on the hole) or stray/leftover CV noise to
 				// discard.
 				consumePendingCourseBadges();
+				// Course Library location cache read path: best-effort, prefill only —
+				// never auto-fetches imagery. `round.holes` (not the discarded
+				// `pendingBadges.baskets` above) is the same basket source
+				// `basketsFromHoles` already uses at save time, so this lookup can only
+				// ever match what `attachCourseLocation` could have written.
+				if (pendingBadges.numberBadges.length > 0) {
+					try {
+						const matchedEntry = await findMatchingLibraryEntry(
+							courseLibraryStore,
+							badgesToLabeledPoints(pendingBadges.numberBadges),
+							basketsFromHoles(round.holes)
+						);
+						if (matchedEntry?.location) {
+							naipLatInput = String(matchedEntry.location.lat);
+							naipLonInput = String(matchedEntry.location.lon);
+							if (matchedEntry.location.radiusMeters !== undefined) {
+								naipRadiusInput = String(matchedEntry.location.radiusMeters);
+							}
+							savedLocationNote = `Using saved location for '${matchedEntry.name}'.`;
+						}
+					} catch {
+						// Ignored — best-effort prefill only, never blocks the import.
+					}
+				}
 			}
 			consumePendingAnnotatedRound();
 			setActiveAnnotatedRound(round);
@@ -1114,46 +1155,121 @@
 	}
 
 	/**
+	 * Nominatim-only lookup, run either as the entire keyless search path or as
+	 * the post-Places fallback (`handleGeocodeSearch`'s "OSM occasionally has
+	 * what Google lacks" case) — same narrower-retry behavior either way: a
+	 * course may be named in OSM but not indexed under the user's metro
+	 * spelling/state abbreviation, so a `no-results` combined query retries
+	 * with just the stable course name before reporting failure. Transport/HTTP
+	 * errors are never retried.
+	 */
+	async function searchNominatim(parkName: string, combinedQuery: string | null): Promise<GeocodeSearchResult> {
+		const initialResult = await searchPlace(combinedQuery ?? parkName);
+		return !initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
+			? await searchPlace(parkName)
+			: initialResult;
+	}
+
+	/**
 	 * Looks up the course by name (city/state optional, to help when the course sits in
-	 * some small town near a metro area the user can't name off-hand) via OpenStreetMap
-	 * Nominatim and lists matches for the user to pick from — never fetches NAIP imagery
-	 * itself. Nominatim matches literal named things in OSM, not "near this metro area";
-	 * a vague region name in the city/state field wouldn't narrow the search so much as
-	 * risk matching some other named entity entirely (an airport, a neighborhood). The
-	 * safety net either way is the same: nothing is used until the user recognizes and
-	 * picks a specific result by its full display name below. Picking a match just fills
-	 * the same lat/lon inputs `handleNaipFetch` already reads, so nothing downstream needs
-	 * to know the coordinate came from a search instead of manual entry.
+	 * some small town near a metro area the user can't name off-hand) and lists matches
+	 * for the user to pick from — never fetches NAIP imagery itself. A vague region name
+	 * in the city/state field wouldn't narrow the search so much as risk matching some
+	 * other named entity entirely (an airport, a neighborhood). The safety net either way
+	 * is the same: nothing is used until the user recognizes and picks a specific result
+	 * by its full display name below (`selectLocation`).
+	 *
+	 * One search flow, provider chosen by whether a Google Maps Platform key is
+	 * configured (`googleMapsApiKey`): keyed, this calls Google Places Text
+	 * Search (course POI data Nominatim/OSM mostly doesn't have — the reason
+	 * this provider exists); keyless, this is exactly today's Nominatim-only
+	 * behavior, with zero Google contact. A keyed `no-results` from Places
+	 * falls back to one Nominatim attempt (OSM occasionally has what Google
+	 * lacks) before reporting failure — deliberately not the reverse: a keyless
+	 * search never calls Google under any circumstance.
+	 *
+	 * Also detects a pasted coordinate (or Google Maps URL) in the course-name
+	 * field first (`parseCoordinateInput`) and, when found, skips geocoding
+	 * entirely — no Nominatim or Places request fires at all.
 	 */
 	async function handleGeocodeSearch(): Promise<void> {
 		if (geocodeLoading) return;
 		geocodeError = null;
 		geocodeMatches = null;
 		geocodeSelectedIndex = null;
+		geocodeResultSource = null;
+		// A fresh search abandons any pending confirm from a previous pick.
+		mapConfirmState = null;
 		const parkName = geocodeParkNameInput.trim();
 		const cityState = geocodeCityStateInput.trim();
 		if (!parkName) {
 			geocodeError = 'Enter a course name to search for.';
 			return;
 		}
+
+		const pastedCoordinate = parseCoordinateInput(parkName);
+		if (pastedCoordinate) {
+			selectLocation({
+				displayName: `${pastedCoordinate.lat}, ${pastedCoordinate.lon}`,
+				lat: pastedCoordinate.lat,
+				lon: pastedCoordinate.lon
+			});
+			return;
+		}
+
 		geocodeLoading = true;
 		try {
 			const combinedQuery = cityState ? `${parkName}, ${cityState}` : null;
-			const initialResult = await searchPlace(combinedQuery ?? parkName);
-			// A course may be named in OSM but not indexed under the user's metro
-			// spelling/state abbreviation. Retry the stable course name before
-			// reporting failure; do not retry transport or HTTP errors.
-			const result =
-				!initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
-					? await searchPlace(parkName)
-					: initialResult;
+			const apiKey = googleMapsApiKey();
+			if (apiKey) {
+				const placesResult = await searchPlacesText(combinedQuery ?? parkName, apiKey);
+				if (placesResult.ok) {
+					geocodeMatches = placesResult.matches;
+					geocodeResultSource = 'places';
+					return;
+				}
+				if (placesResult.error.kind !== 'no-results') {
+					geocodeError = placesResult.error.message;
+					return;
+				}
+				const fallback = await searchNominatim(parkName, combinedQuery);
+				if (!fallback.ok) {
+					geocodeError = fallback.error.message;
+					return;
+				}
+				geocodeMatches = fallback.matches;
+				geocodeResultSource = 'nominatim';
+				return;
+			}
+
+			const result = await searchNominatim(parkName, combinedQuery);
 			if (!result.ok) {
 				geocodeError = result.error.message;
 				return;
 			}
 			geocodeMatches = result.matches;
+			geocodeResultSource = 'nominatim';
 		} finally {
 			geocodeLoading = false;
+		}
+	}
+
+	/**
+	 * The one place a search result (or a parsed coordinate paste) becomes a
+	 * "selected location": keyless, it writes straight into the lat/lon inputs
+	 * exactly as before; keyed, it instead arms `mapConfirmState`, which is the
+	 * sole gate that mounts `MapConfirm` — the only place the Google Dynamic
+	 * Maps script tag is ever injected. An abandoned search therefore costs at
+	 * most one Places call and zero map loads.
+	 */
+	function selectLocation(match: GeoSearchMatch): void {
+		naipError = null;
+		const apiKey = googleMapsApiKey();
+		if (apiKey) {
+			mapConfirmState = { match, apiKey };
+		} else {
+			naipLatInput = String(match.lat);
+			naipLonInput = String(match.lon);
 		}
 	}
 
@@ -1161,9 +1277,20 @@
 		const match = geocodeMatches?.[index];
 		if (!match) return;
 		geocodeSelectedIndex = index;
-		naipLatInput = String(match.lat);
-		naipLonInput = String(match.lon);
+		selectLocation(match);
+	}
+
+	/** "Use this location" on the map confirm step: same lat/lon inputs a picked Nominatim result writes directly. */
+	function handleMapConfirmUse(point: GeoPoint): void {
+		naipLatInput = String(point.lat);
+		naipLonInput = String(point.lon);
 		naipError = null;
+		mapConfirmState = null;
+	}
+
+	/** Cancel closes the confirm step without touching the lat/lon inputs. */
+	function handleMapConfirmCancel(): void {
+		mapConfirmState = null;
 	}
 
 	/**
@@ -1224,10 +1351,30 @@
 				return;
 			}
 			const radiusUsed = naipPreviewRadiusUsed;
+			const centerUsed = naipPreviewCenter;
 			clearNaipPreview();
 			onDomainChanged('target-basemap');
 			if (radiusUsed !== null) {
 				targetGroundScaleMetersPerPixel = naipMetersPerPixel(radiusUsed, NAIP_EXPORT_SIZE_PX);
+			}
+			// Course Library location cache write: only when this fetch's center is
+			// known and the current project actually carries Course Memory signature
+			// input (badges) to match it against. Best-effort and silently ignored on
+			// failure -- see runSave's identical upsertCourse try/catch above; a
+			// convenience cache write must never affect a successful commit.
+			if (centerUsed && editor.state.numberBadges.length > 0) {
+				try {
+					await attachCourseLocation(
+						courseLibraryStore,
+						badgesToLabeledPoints(editor.state.numberBadges),
+						basketsFromHoles(editor.state.holes),
+						radiusUsed !== null
+							? { lat: centerUsed.lat, lon: centerUsed.lon, radiusMeters: radiusUsed }
+							: { lat: centerUsed.lat, lon: centerUsed.lon }
+					);
+				} catch {
+					// Ignored — see comment above.
+				}
 			}
 			activityMessage = 'Fetched NAIP aerial image imported as the clean target.';
 		} catch (error) {
@@ -1922,15 +2069,36 @@
 					</li>
 				{/each}
 			</ul>
-			<p class="geocode-attribution">
-				Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
-					>OpenStreetMap</a
-				> contributors
-			</p>
+			{#if geocodeResultSource === 'places'}
+				<p class="geocode-attribution" data-testid="geocode-attribution">Powered by Google</p>
+			{:else}
+				<p class="geocode-attribution" data-testid="geocode-attribution">
+					Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+						>OpenStreetMap</a
+					> contributors
+				</p>
+			{/if}
 		{/if}
-		{#if geocodeSelectedIndex !== null}
+		{#if mapConfirmState}
+			<MapConfirm
+				apiKey={mapConfirmState.apiKey}
+				center={{ lat: mapConfirmState.match.lat, lon: mapConfirmState.match.lon }}
+				label={mapConfirmState.match.displayName}
+				onUse={handleMapConfirmUse}
+				onCancel={handleMapConfirmCancel}
+			/>
+		{/if}
+		{#if geocodeSelectedIndex !== null && !mapConfirmState}
 			<p class="naip-selected-coords" data-testid="naip-selected-coords">
 				Selected: {naipLatInput}, {naipLonInput}
+			</p>
+		{/if}
+		{#if savedLocationNote}
+			<p class="saved-location-note" data-testid="saved-location-note">
+				{savedLocationNote}
+				<button type="button" data-testid="saved-location-dismiss" onclick={() => (savedLocationNote = null)}>
+					Dismiss
+				</button>
 			</p>
 		{/if}
 
@@ -3105,6 +3273,22 @@
 	.naip-selected-coords {
 		margin: 0;
 		font-size: 0.85rem;
+	}
+
+	.saved-location-note {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #2a6df4;
+		border-radius: 4px;
+		background: rgb(42 109 244 / 10%);
+		font-size: 0.85rem;
+	}
+
+	.saved-location-note button {
+		margin-left: auto;
 	}
 
 	.naip-manual-entry summary {

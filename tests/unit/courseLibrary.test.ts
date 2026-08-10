@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
 	applyLibraryEntry,
+	attachCourseLocation,
 	findExactMatches,
 	findFuzzyMatches,
+	findMatchingLibraryEntry,
 	IndexedDbCourseLibraryStore,
 	previewUpsertCourse,
 	upsertCourse
@@ -258,6 +260,108 @@ describe('findExactMatches / findFuzzyMatches', () => {
 			baskets: []
 		};
 		expect(await findFuzzyMatches(store, unrelated)).toHaveLength(0);
+	});
+});
+
+describe('attachCourseLocation / findMatchingLibraryEntry', () => {
+	it('attaches a location to the matching entry and preserves every other field', async () => {
+		const store = fakeStore();
+		const badges = syntheticBadges(10);
+		const baskets = syntheticBaskets(10);
+		const seeded = await upsertCourse(
+			store,
+			{ projectName: 'Dash’s Track', numberBadges: badges, baskets, holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		expect(seeded).not.toBeNull();
+
+		const updated = await attachCourseLocation(store, badges, baskets, { lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+		expect(updated).not.toBeNull();
+		expect(updated?.id).toBe('course-1');
+		expect(updated?.location).toEqual({ lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+		// Everything else is untouched.
+		expect(updated?.name).toBe(seeded?.name);
+		expect(updated?.badges).toEqual(seeded?.badges);
+		expect(updated?.baskets).toEqual(seeded?.baskets);
+		expect(updated?.createdAt).toBe(seeded?.createdAt);
+		expect(updated?.signatureHash).toBe(seeded?.signatureHash);
+
+		const stored = (await store.getAll())[0];
+		expect(stored.location).toEqual({ lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+	});
+
+	it('overwrites a previously attached location rather than merging/duplicating', async () => {
+		const store = fakeStore();
+		const badges = syntheticBadges(10);
+		const baskets = syntheticBaskets(10);
+		await upsertCourse(
+			store,
+			{ projectName: 'Round 1', numberBadges: badges, baskets, holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		await attachCourseLocation(store, badges, baskets, { lat: 1, lon: 2 });
+		const second = await attachCourseLocation(store, badges, baskets, { lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+		expect(second?.location).toEqual({ lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+		expect(await store.getAll()).toHaveLength(1);
+	});
+
+	it('is a no-op that returns null when nothing in the library matches', async () => {
+		const store = fakeStore();
+		await upsertCourse(
+			store,
+			{ projectName: 'Unrelated', numberBadges: syntheticBadges(10), baskets: syntheticBaskets(10), holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		const unrelatedBadges: LabeledPoint[] = Array.from({ length: 10 }, (_, i) => ({
+			holeNumber: i + 1,
+			xPx: 5 * i,
+			yPx: 900 - 3 * i
+		}));
+		const result = await attachCourseLocation(store, unrelatedBadges, [], { lat: 0, lon: 0 });
+		expect(result).toBeNull();
+		expect((await store.getAll())[0].location).toBeUndefined();
+	});
+
+	it('is a no-op that returns null when badges are below MIN_SIGNATURE_HOLES', async () => {
+		const store = fakeStore();
+		const result = await attachCourseLocation(store, syntheticBadges(3), [], { lat: 0, lon: 0 });
+		expect(result).toBeNull();
+	});
+
+	it('findMatchingLibraryEntry reads the attached location without writing anything', async () => {
+		const store = fakeStore();
+		const badges = syntheticBadges(10);
+		const baskets = syntheticBaskets(10);
+		await upsertCourse(
+			store,
+			{ projectName: 'Round 1', numberBadges: badges, baskets, holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		await attachCourseLocation(store, badges, baskets, { lat: 33.1255, lon: -96.861 });
+
+		// A differently cropped/zoomed screenshot of the same course still resolves via fuzzy matching.
+		const target = {
+			badges: transformed(badges, 1.3, 0.15, 50, -20),
+			baskets: transformed(baskets, 1.3, 0.15, 50, -20)
+		};
+		const found = await findMatchingLibraryEntry(store, target.badges, target.baskets);
+		expect(found?.id).toBe('course-1');
+		expect(found?.location).toEqual({ lat: 33.1255, lon: -96.861 });
+		expect(await store.getAll()).toHaveLength(1);
+	});
+
+	it('findMatchingLibraryEntry returns null for an entry with no location, without throwing', async () => {
+		const store = fakeStore();
+		const badges = syntheticBadges(10);
+		const baskets = syntheticBaskets(10);
+		await upsertCourse(
+			store,
+			{ projectName: 'Round 1', numberBadges: badges, baskets, holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		const found = await findMatchingLibraryEntry(store, badges, baskets);
+		expect(found).not.toBeNull();
+		expect(found?.location).toBeUndefined();
 	});
 });
 
