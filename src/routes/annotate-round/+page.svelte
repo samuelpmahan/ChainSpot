@@ -193,6 +193,21 @@
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
 
+	/**
+	 * An empty-space placement menu is tied to whichever hole was active when
+	 * it opened (`handleAnnotationPlacement` stamps `holeId: activeHoleId`) —
+	 * if the user switches holes without dismissing it first, choosing a wedge
+	 * would otherwise silently place the point on the stale hole instead of
+	 * the one now showing as active. A marker's delete menu has no such tie
+	 * (you can click any hole's marker regardless of which hole is active),
+	 * so it's deliberately left alone here.
+	 */
+	$effect(() => {
+		if (radialMenu && radialMenu.hitMarker === null && radialMenu.holeId !== activeHoleId) {
+			radialMenu = null;
+		}
+	});
+
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
 		'edge-loop': true,

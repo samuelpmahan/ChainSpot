@@ -190,6 +190,42 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
+	it('switching the active hole closes an open empty-space menu instead of leaving it targeting the old hole', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+
+		// Adding a second hole makes it the active one (handleAddHole), so the
+		// menu opened below targets hole 2 from the start.
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]')?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 30, 30);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
+
+		// Switching back to hole 1 without dismissing the menu must close it.
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-select-1"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+
+		// A fresh click now correctly opens a menu for hole 1, and choosing a
+		// wedge places on hole 1, not hole 2 (the stale menu's original target).
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		const teeOffset = wedgeOffset(4, 0);
+		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
+		await flush();
+
+		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('Escape dismisses an open menu without acting', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
