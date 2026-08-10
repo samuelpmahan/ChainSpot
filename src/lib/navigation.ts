@@ -13,7 +13,9 @@
  *
  * Zoom limits: interactive zoom is clamped to pane-specific limits derived from the
  * current fit zoom so the default fit is always reachable:
- * `min = min(0.01, fitZoom / 16)` and `max = max(64, fitZoom * 16)`.
+ * `min = fitZoom / 4` and `max = max(8, fitZoom * 32)`. This keeps the interactive
+ * range tight enough that a momentum-heavy trackpad pinch or flick cannot zoom the
+ * content down to invisibility while still comfortably covering the fit zoom.
  *
  * Fit is never clamped: `defaultFitTransform` is exactly `fitViewTransform`, so Fit
  * always shows the complete image regardless of image or pane size.
@@ -35,11 +37,25 @@ export const ABSOLUTE_MIN_VIEW_ZOOM = 0.01;
 /** Absolute ceiling for interactive zoom when the derived maximum would exceed it. */
 export const ABSOLUTE_MAX_VIEW_ZOOM = 64;
 
-/** Fit-zoom factor used to widen the absolute limits so fit is always allowed. */
-export const ZOOM_LIMIT_FIT_RATIO = 16;
+/** Divisor applied to the fit zoom to derive the interactive minimum zoom. */
+export const ZOOM_LIMIT_FIT_MIN_RATIO = 4;
+
+/** Multiplier applied to the fit zoom to derive the interactive maximum zoom. */
+export const ZOOM_LIMIT_FIT_MAX_RATIO = 32;
+
+/** Absolute floor for the derived interactive maximum zoom. */
+export const ZOOM_LIMIT_MAX_FLOOR = 8;
 
 /** Wheel deltaY units that halve/double the zoom (see `wheelZoomFactor`). */
 export const WHEEL_ZOOM_STEP_DELTA = 200;
+
+/**
+ * Gain applied to ctrl/meta+wheel deltaY before it drives `wheelZoomFactor`.
+ * Chromium reports trackpad pinch gestures as ctrl+wheel with deltaY values
+ * roughly a third the magnitude of an equivalent two-finger scroll, so pinch
+ * needs amplification to feel proportionate to a deliberate zoom gesture.
+ */
+export const PINCH_GAIN = 3;
 
 export interface ViewZoomLimits {
 	min: number;
@@ -91,13 +107,13 @@ export function wheelZoomFactor(deltaY: number): number {
 
 /**
  * Pane-specific interactive zoom limits that always include the current fit zoom:
- * `min = min(0.01, fitZoom / 16)`, `max = max(64, fitZoom * 16)`.
+ * `min = fitZoom / 4`, `max = max(8, fitZoom * 32)`.
  */
 export function zoomLimitsForFit(fitZoom: number): ViewZoomLimits {
 	assertPositiveFinite(fitZoom, 'zoomLimitsForFit', 'fitZoom');
 	return {
-		min: Math.min(ABSOLUTE_MIN_VIEW_ZOOM, fitZoom / ZOOM_LIMIT_FIT_RATIO),
-		max: Math.max(ABSOLUTE_MAX_VIEW_ZOOM, fitZoom * ZOOM_LIMIT_FIT_RATIO)
+		min: fitZoom / ZOOM_LIMIT_FIT_MIN_RATIO,
+		max: Math.max(ZOOM_LIMIT_MAX_FLOOR, fitZoom * ZOOM_LIMIT_FIT_MAX_RATIO)
 	};
 }
 
