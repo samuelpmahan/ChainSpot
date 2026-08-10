@@ -8,7 +8,7 @@ import {
 	serializeProjectState
 } from '../../src/lib/projectSchema';
 import type {
-	ProjectDocumentV3,
+	ProjectDocumentV4,
 	ProjectParseResult,
 	ProjectSchemaError,
 	ProjectSchemaErrorCategory
@@ -76,6 +76,7 @@ function buildState(overrides: Partial<ProjectState> = {}): ProjectState {
 			}
 		],
 		holes: [],
+		numberBadges: [],
 		viewState: {
 			source: { zoom: 1.4, panX: -92, panY: 17 },
 			target: { zoom: 1.1, panX: 0, panY: -35 }
@@ -84,7 +85,7 @@ function buildState(overrides: Partial<ProjectState> = {}): ProjectState {
 	};
 }
 
-function docFromState(state: ProjectState): ProjectDocumentV3 {
+function docFromState(state: ProjectState): ProjectDocumentV4 {
 	return serializeProjectState(state);
 }
 
@@ -160,7 +161,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(3);
+		expect(doc.schemaVersion).toBe(4);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -358,12 +359,12 @@ describe('schema version validation', () => {
 
 	it('classifies a newer unsupported version before any other validation', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 4;
+		doc.schemaVersion = 5;
 		doc.project = undefined;
 		doc.images = 'not-an-array';
 		const error = expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 		expect(error.message).toContain('newer');
-		expect(error.message).toContain('4');
+		expect(error.message).toContain('5');
 	});
 
 	it('rejects older or otherwise unknown numeric versions', () => {
@@ -377,7 +378,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(3);
+		expect(CURRENT_SCHEMA_VERSION).toBe(4);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -733,6 +734,58 @@ describe('view state validation', () => {
 	});
 });
 
+describe('numberBadges migration and validation (schema v3 -> v4)', () => {
+	it('migrates v1, v2, and v3 documents (none of which have numberBadges) to an empty array', () => {
+		for (const version of [1, 2, 3]) {
+			const doc = plainDoc(buildState());
+			doc.schemaVersion = version;
+			delete doc.numberBadges;
+			const parsed = expectDocumentOk(doc);
+			expect(parsed.numberBadges).toEqual([]);
+		}
+	});
+
+	it('round-trips numberBadges through parse and serialize without drift', () => {
+		const state = buildState({
+			numberBadges: [
+				{ number: 1, xPx: 118.25, yPx: 200.5, confidence: 0.92 },
+				{ number: 2, xPx: 12.75, yPx: 18.25, confidence: 0.5 }
+			]
+		});
+		const parsed = expectParsedState(state);
+		expect(parsed.numberBadges).toEqual(state.numberBadges);
+	});
+
+	it('rejects a duplicate badge number', () => {
+		const doc = plainDoc(buildState());
+		doc.numberBadges = [
+			{ number: 1, xPx: 10, yPx: 10, confidence: 0.9 },
+			{ number: 1, xPx: 20, yPx: 20, confidence: 0.8 }
+		];
+		expectError(doc, 'badge', 'badge.number-duplicate', 'numberBadges[1].number');
+	});
+
+	it('rejects an out-of-bounds badge coordinate', () => {
+		const doc = plainDoc(buildState());
+		doc.numberBadges = [{ number: 1, xPx: 999999, yPx: 10, confidence: 0.9 }];
+		expectError(doc, 'coordinate', 'coordinate.out-of-bounds', 'numberBadges[0]');
+	});
+
+	it('rejects a confidence value outside [0, 1]', () => {
+		for (const confidence of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			const doc = plainDoc(buildState());
+			doc.numberBadges = [{ number: 1, xPx: 10, yPx: 10, confidence }];
+			expectError(doc, 'badge', 'badge.confidence.invalid', 'numberBadges[0].confidence');
+		}
+	});
+
+	it('still rejects schemaVersion 5 as unsupported, even though numberBadges exists', () => {
+		const doc = plainDoc(buildState());
+		doc.schemaVersion = 5;
+		expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
+	});
+});
+
 describe('serializer validation of domain state', () => {
 	it('throws structured errors for non-finite and out-of-bounds coordinates', () => {
 		const nan = buildState();
@@ -789,6 +842,7 @@ describe('serializer validation of domain state', () => {
 			'controlPointPairs',
 			'holes',
 			'images',
+			'numberBadges',
 			'project',
 			'schemaVersion',
 			'viewState'

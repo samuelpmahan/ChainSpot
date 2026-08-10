@@ -122,12 +122,32 @@ export interface AnnotatedHole {
 	readonly corridorWidthPx: number;
 }
 
+/**
+ * One resolved hole-number badge position, captured from CV course detection
+ * (`CourseHoleProposal.numberBadge` in `autoAnnotation/courseGrammar.ts`)
+ * alongside `holes`. This lives as its own top-level `ProjectState` array,
+ * never inside `AnnotatedHole`/`AnnotatedRound`: badge geometry is course-shape
+ * signature input (see `courseSignature.ts`), not round annotation, and the
+ * "Done boundary" purity rule for `AnnotatedRound` forbids provisional/CV
+ * metadata (like `confidence`) on that artifact. Coordinates are in
+ * `source-overview` image pixels, the same convention as `SourcePoint`.
+ */
+export interface HoleNumberBadgeAnchor {
+	readonly number: number;
+	readonly xPx: number;
+	readonly yPx: number;
+	/** Detector/glyph-assignment confidence (0..1); signature-quality input only, never authoritative. */
+	readonly confidence: number;
+}
+
 export interface ProjectState {
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPair[];
 	/** Hole annotations against the `source-overview` image; empty until annotated. */
 	holes: AnnotatedHole[];
+	/** Hole-number badge anchors from CV detection; empty until detected. Course-signature input only — see `HoleNumberBadgeAnchor`. */
+	numberBadges: HoleNumberBadgeAnchor[];
 	viewState: ProjectViewState | null;
 }
 
@@ -183,6 +203,7 @@ export function createProjectState(options: CreateProjectStateOptions = {}): Pro
 		images: [],
 		controlPointPairs: [],
 		holes: [],
+		numberBadges: [],
 		viewState: null
 	};
 }
