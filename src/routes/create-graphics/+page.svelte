@@ -889,6 +889,13 @@
 		pendingRepairDiscard = null;
 		saveError = null;
 		openError = null;
+		// An opened project's target-basemap has no known fetch geometry -- ground
+		// scale and geo-reference belong to the session that fetched the imagery,
+		// and carrying them across projects would place elevation profiles (and
+		// distance labels) at the previous project's coordinates.
+		targetGroundScaleMetersPerPixel = null;
+		targetGeoCenter = null;
+		targetGeoRadiusMeters = null;
 		activityMessage = `Opened project ${state.project.name}.`;
 		refresh();
 		void tick().then(() => openProjectButton?.focus());
@@ -2444,9 +2451,6 @@
 			{#if graphicsMode.error}
 				<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
 			{/if}
-			{#if graphicsMode.elevationError}
-				<p class="error" data-testid="elevation-profile-error" role="alert">{graphicsMode.elevationError}</p>
-			{/if}
 			{#if graphicsMode.plans.length > 0}
 				{@const href = targetImageHref()}
 				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
@@ -2481,6 +2485,12 @@
 									<span class="elevation-stats" data-testid="elevation-profile-stats-{plan.number}">
 										&uarr;{Math.round(stats.totalClimb)} ft &darr;{Math.round(stats.totalDescent)} ft
 									</span>
+								{/if}
+								{@const elevationError = graphicsMode.elevationErrors.get(plan.holeId)}
+								{#if elevationError}
+									<p class="error" data-testid="elevation-profile-error-{plan.number}" role="alert">
+										{elevationError}
+									</p>
 								{/if}
 							{/if}
 						</li>
