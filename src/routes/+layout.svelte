@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 
@@ -12,6 +13,25 @@
 	});
 
 	let { children }: { children: import('svelte').Snippet } = $props();
+
+	/**
+	 * No route in this app has a real drop zone, so a file the user drags over
+	 * the page — even a mis-aimed drop — must never be allowed to reach the
+	 * browser's default handling, which navigates away and destroys the
+	 * in-memory editor session. Guard at the document level unconditionally.
+	 */
+	function preventDefaultDrag(event: DragEvent): void {
+		event.preventDefault();
+	}
+
+	onMount(() => {
+		document.addEventListener('dragover', preventDefaultDrag);
+		document.addEventListener('drop', preventDefaultDrag);
+		return () => {
+			document.removeEventListener('dragover', preventDefaultDrag);
+			document.removeEventListener('drop', preventDefaultDrag);
+		};
+	});
 </script>
 
 <header class="app-header">

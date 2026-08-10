@@ -1873,7 +1873,7 @@
 
 	:global(button:focus-visible),
 	:global(input:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -2351,7 +2351,7 @@
 	.hole-bar-grid {
 		flex-basis: 100%;
 		display: grid;
-		grid-template-columns: repeat(9, minmax(2.5rem, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
 		gap: 0.35rem;
 		min-width: 0;
 		margin-top: 0.5rem;
@@ -2755,7 +2755,7 @@
 		pointer-events: none;
 	}
 
-	@media (max-width: 900px) {
+	@media (max-width: 1180px) {
 		:global(.editor-body.with-tools) {
 			grid-template-columns: 1fr !important;
 		}

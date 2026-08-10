@@ -49,13 +49,6 @@
 			view: ViewTransformState
 		) => void;
 		tools?: Snippet;
-		/**
-		 * When true, `tools` renders directly in `.editor-body` instead of inside
-		 * the `.tools` aside column — for callers whose tools content positions
-		 * itself (e.g. a fixed-position floating panel) rather than sitting in a
-		 * reserved sidebar. The canvas/diagnostics grid track collapses to match.
-		 */
-		toolsFloating?: boolean;
 		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 	}
@@ -74,7 +67,6 @@
 		onClaimedPointerUp,
 		onClaimedPointerCancel,
 		tools,
-		toolsFloating = false,
 		diagnostics,
 		overlay
 	}: Props = $props();
@@ -175,15 +167,11 @@
 		<p class="error" role="alert">{error.message}</p>
 	{/if}
 
-	<div class="editor-body" class:with-tools={Boolean(tools)} class:floating-tools={toolsFloating}>
+	<div class="editor-body" class:with-tools={Boolean(tools)}>
 		{#if tools}
-			{#if toolsFloating}
+			<aside class="tools" aria-label={`${title} tools`}>
 				{@render tools()}
-			{:else}
-				<aside class="tools" aria-label={`${title} tools`}>
-					{@render tools()}
-				</aside>
-			{/if}
+			</aside>
 		{/if}
 
 		<div class="canvas-shell" class:placing={Boolean(onPlacement)}>
@@ -232,7 +220,7 @@
 						</div>
 					{:else}
 						<div class="empty-state">
-							<strong>{loading ? 'Loading image…' : 'Drop in the course map to begin'}</strong>
+							<strong>{loading ? 'Loading image…' : 'Choose a course map to begin'}</strong>
 							{#if !loading}
 								<button type="button" onclick={() => fileInput?.click()}>Choose image</button>
 							{/if}
@@ -324,10 +312,6 @@
 
 	.editor-body.with-tools {
 		grid-template-columns: 18rem minmax(0, 1fr) 20rem;
-	}
-
-	.editor-body.with-tools.floating-tools {
-		grid-template-columns: minmax(0, 1fr) 20rem;
 	}
 
 	.tools {
