@@ -1867,7 +1867,7 @@
 	.crop-preview {
 		flex: 1 1 320px;
 		min-width: 280px;
-		height: 280px;
+		height: clamp(280px, round(66vh, 1px), 560px);
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
@@ -1945,7 +1945,7 @@
 	}
 
 	.alignment-workspace {
-		height: 440px;
+		height: clamp(440px, round(66vh, 1px), 640px);
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
