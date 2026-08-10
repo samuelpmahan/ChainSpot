@@ -19,7 +19,7 @@
 	import type { PendingHandoff, LabeledPoint } from '$lib/session';
 	import { importHandoffImage } from '$lib/handoffImport';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
-	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
 	import type { HoleNumberBadgeAnchor } from '$lib/domain/project';
 	import {
 		applyLibraryEntry,
@@ -39,6 +39,7 @@
 		addHole,
 		addHoleBeyondStandardCourse,
 		addHoleWithNumber,
+		assignCandidateToHole,
 		clearBends,
 		moveBasket,
 		moveCorridorBend,
@@ -73,6 +74,7 @@
 	} from '$lib/autoAnnotation/basketDetection';
 	import type {
 		BasketCandidate,
+		CourseDetectionProgressStage,
 		CourseDetectionResult,
 		DetectTeesResult,
 		TeePadVariant
@@ -173,6 +175,7 @@
 
 	onDestroy(() => {
 		stopCourseDetectionProgress();
+		clearRevealTimers();
 		if (participatesInSession) retainEditor('annotate-round', editor);
 	});
 
@@ -203,6 +206,16 @@
 	let labeledBaskets = $state<LabeledPoint[]>([]);
 	let activeHoleId = $state<string | null>(null);
 	let basketCandidates = $state<readonly BasketCandidate[]>([]);
+	/**
+	 * Which flow last populated `basketCandidates` — the full course-detection
+	 * pipeline, or the standalone "Detect baskets" fallback below it. Needed
+	 * because `$state` deep-proxies arrays/objects: `basketCandidates` and
+	 * `courseDetection.baskets` are assigned from the exact same array at the
+	 * same statement, but each becomes its own reactive proxy, so `===`
+	 * between them is unreliable. This flag is what candidate reveal/
+	 * interactivity gates on instead.
+	 */
+	let basketCandidatesSource = $state<'course-detection' | 'standalone' | null>(null);
 	let selectedBasketCandidate = $state<number | null>(null);
 	let basketDetectionRunning = $state(false);
 	let basketDetectionError = $state<string | null>(null);
@@ -244,6 +257,24 @@
 		}
 	});
 
+	/**
+	 * A pointerdown anywhere outside the open candidate-assign confirmation
+	 * chip dismisses it without acting — the same click-outside contract
+	 * `RadialMenu.svelte` implements for itself, reproduced here because this
+	 * chip is a plain page-owned popover, not a component with its own
+	 * lifecycle.
+	 */
+	$effect(() => {
+		if (!candidateAssignConfirm) return;
+		function handlePointerDown(event: PointerEvent): void {
+			if (candidateConfirmEl && event.target instanceof Node && !candidateConfirmEl.contains(event.target)) {
+				candidateAssignConfirm = null;
+			}
+		}
+		window.addEventListener('pointerdown', handlePointerDown);
+		return () => window.removeEventListener('pointerdown', handlePointerDown);
+	});
+
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
 		'edge-loop': true,
@@ -254,6 +285,64 @@
 	let teeExperimentError = $state<string | null>(null);
 	let teeExperimentResult = $state<DetectTeesResult | null>(null);
 	let selectedTeeCandidateKey = $state<string | null>(null);
+
+	/** The compact status-strip's current stage, mirrored from the worker's real progress messages (never simulated). */
+	let courseDetectionStage = $state<CourseDetectionProgressStage | null>(null);
+
+	/**
+	 * Staged reveal of a completed course-detection result (PART B): once
+	 * `'done'`, every candidate overlay is fully visible — the initial value
+	 * and the reduced-motion outcome, both of which are "today's behavior",
+	 * everything at once. `startCandidateReveal` steps this through the
+	 * intermediate stages with a short stagger when motion is allowed.
+	 */
+	type RevealStage = 'numbers' | 'tees' | 'baskets' | 'grammar' | 'done';
+	const REVEAL_STAGE_ORDER: readonly RevealStage[] = ['numbers', 'tees', 'baskets', 'grammar'];
+	const REVEAL_STAGGER_MS = 250;
+	let revealStage = $state<RevealStage>('done');
+	let revealTimers: ReturnType<typeof setTimeout>[] = [];
+
+	/** A candidate assignment awaiting one-click confirmation (PART C), anchored at the clicked marker. */
+	interface CandidateAssignConfirm {
+		readonly kind: 'tee' | 'basket';
+		readonly point: SourcePoint;
+		readonly holeId: string;
+		readonly holeNumber: number;
+		readonly mode: 'replace' | 'move';
+	}
+	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
+	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
+
+	/** Pointer-claim state for a tee/basket candidate marker, mirroring `numberSelectDrag` below. */
+	interface CourseCandidateDrag {
+		readonly kind: 'tee' | 'basket';
+		readonly point: SourcePoint;
+		readonly start: ScreenSpacePoint;
+		dragging: boolean;
+	}
+	let courseCandidateDrag = $state<CourseCandidateDrag | null>(null);
+
+	const DIAGNOSTICS_RAIL_STORAGE_KEY = 'chainspot.diagnosticsRail';
+
+	function readStoredDiagnosticsRailExpanded(): boolean {
+		if (typeof localStorage === 'undefined') return true;
+		try {
+			const stored = localStorage.getItem(DIAGNOSTICS_RAIL_STORAGE_KEY);
+			return stored === null ? true : stored === 'expanded';
+		} catch {
+			return true;
+		}
+	}
+	let diagnosticsRailExpanded = $state(readStoredDiagnosticsRailExpanded());
+
+	function toggleDiagnosticsRail(): void {
+		diagnosticsRailExpanded = !diagnosticsRailExpanded;
+		try {
+			localStorage.setItem(DIAGNOSTICS_RAIL_STORAGE_KEY, diagnosticsRailExpanded ? 'expanded' : 'collapsed');
+		} catch {
+			// Best-effort persistence only; the toggle still works for this session.
+		}
+	}
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
@@ -277,6 +366,89 @@
 			clearInterval(courseDetectionTimer);
 			courseDetectionTimer = null;
 		}
+	}
+
+	/**
+	 * Compact copy for the status strip near the map (PART A) — a handful of
+	 * plain phrases keyed to the worker's real stage boundaries, reported by
+	 * `detectCourse` in `basketDetection.worker.ts` in its actual execution
+	 * order: numbers, then baskets, then tees, then grammar. `'opencv'` and
+	 * `'templates'` are real too (loading the WASM runtime and the template
+	 * pack before any detector runs) but have no dedicated phrase of their
+	 * own — bucketed under the first, since nothing user-facing distinguishes
+	 * "loading" from "about to read numbers" at this level of compactness.
+	 * The detailed per-stage message (`courseDetectionStatus`) keeps showing
+	 * the fuller text in the diagnostics rail, unchanged.
+	 */
+	function compactDetectionStageCopy(stage: CourseDetectionProgressStage | null): string {
+		switch (stage) {
+			case 'opencv':
+			case 'templates':
+			case 'numbers':
+				return 'Reading hole numbers…';
+			case 'baskets':
+				return 'Locating baskets…';
+			case 'tees':
+				return 'Finding tee pads…';
+			case 'grammar':
+				return 'Assembling course…';
+			default:
+				return 'Preparing image for detection…';
+		}
+	}
+
+	function prefersReducedMotion(): boolean {
+		if (typeof matchMedia !== 'function') return false;
+		try {
+			return matchMedia('(prefers-reduced-motion: reduce)').matches;
+		} catch {
+			// A test/harness environment without a real matchMedia implementation
+			// behaves like "no preference", i.e. full motion.
+			return false;
+		}
+	}
+
+	function clearRevealTimers(): void {
+		for (const timer of revealTimers) clearTimeout(timer);
+		revealTimers = [];
+	}
+
+	/**
+	 * Steps `revealStage` through `REVEAL_STAGE_ORDER` with a short stagger
+	 * (PART B) once a course-detection result exists — presentation only, the
+	 * single already-computed result is never re-run or re-ordered. Under
+	 * `prefers-reduced-motion: reduce`, every stage lands at once: today's
+	 * exact behavior, and also this function's starting state, so no timers
+	 * are ever created in that case.
+	 */
+	function startCandidateReveal(): void {
+		clearRevealTimers();
+		if (prefersReducedMotion()) {
+			revealStage = 'done';
+			return;
+		}
+		revealStage = REVEAL_STAGE_ORDER[0];
+		for (let index = 1; index < REVEAL_STAGE_ORDER.length; index += 1) {
+			const stage = REVEAL_STAGE_ORDER[index];
+			revealTimers.push(setTimeout(() => { revealStage = stage; }, REVEAL_STAGGER_MS * index));
+		}
+		revealTimers.push(
+			setTimeout(() => { revealStage = 'done'; }, REVEAL_STAGGER_MS * REVEAL_STAGE_ORDER.length)
+		);
+	}
+
+	/** Whether a candidate overlay stage has been revealed yet (or motion is reduced, in which case everything has). */
+	function revealedUpTo(stage: 'numbers' | 'tees' | 'baskets' | 'grammar'): boolean {
+		if (revealStage === 'done') return true;
+		return REVEAL_STAGE_ORDER.indexOf(revealStage) >= REVEAL_STAGE_ORDER.indexOf(stage);
+	}
+
+	/** Moves to (creating if necessary) the first hole-number proposal that still needs review, for the summary chip's jump action. */
+	function jumpToFirstNeedsReview(): void {
+		if (!courseDetection) return;
+		const target = courseDetection.grammar.holes.find((hole) => hole.status !== 'ready');
+		if (!target) return;
+		selectOrCreateHoleByNumber(target.number);
 	}
 
 	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
@@ -381,6 +553,11 @@
 		if (event.key === 'Escape' && radialMenu) {
 			event.preventDefault();
 			closeRadialMenu(radialMenu, 'escape');
+			return;
+		}
+		if (event.key === 'Escape' && candidateAssignConfirm) {
+			event.preventDefault();
+			candidateAssignConfirm = null;
 			return;
 		}
 		if (isShortcutEditableTarget(event.target)) return;
@@ -494,6 +671,112 @@
 			closestLabel = candidate.label;
 		}
 		return closestLabel;
+	}
+
+	/**
+	 * Nearest revealed tee/basket CV candidate under the pointer, if any — the
+	 * hit-test `claimAnnotationPointer` uses so a candidate-marker click is
+	 * claimed before it ever reaches `onPlacement`, exactly like
+	 * `numberCandidateHitAt` above (the same precedence mechanism keeps the
+	 * radial menu from opening on either kind of candidate click). Only
+	 * markers the staged reveal has actually shown are hit-testable, so a
+	 * candidate can't be clicked a moment before its overlay fades in.
+	 */
+	function courseCandidateHitAt(
+		pointer: ScreenSpacePoint,
+		view: ViewTransformState
+	): { kind: 'tee' | 'basket'; point: SourcePoint } | null {
+		if (!courseDetection) return null;
+		let closest: { kind: 'tee' | 'basket'; point: SourcePoint } | null = null;
+		let closestDistance = Number.POSITIVE_INFINITY;
+
+		function consider(kind: 'tee' | 'basket', point: SourcePoint, radiusPx: number): void {
+			const screen = imageToScreen(point, view);
+			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
+			const radius = Math.max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom);
+			if (distance > radius || distance >= closestDistance) return;
+			closestDistance = distance;
+			closest = { kind, point: { xPx: point.xPx, yPx: point.yPx } };
+		}
+
+		if (revealedUpTo('tees')) {
+			for (const candidate of courseDetection.tees) {
+				consider('tee', candidate, Math.max(candidate.widthPx, candidate.heightPx) / 2 + 6);
+			}
+		}
+		// `basketCandidates` is shared with the standalone "Detect baskets"
+		// fallback (`handleDetectBaskets`), which can overwrite it with an
+		// unrelated result after a full course detection already ran. Only hit
+		// -test baskets that are still the course-detection set the visible
+		// markers are actually drawn from.
+		if (revealedUpTo('baskets') && basketCandidatesSource === 'course-detection') {
+			for (const candidate of courseDetection.baskets) {
+				consider('basket', candidate, 12);
+			}
+		}
+		return closest;
+	}
+
+	/** The draft hole (if any) whose current tee/basket is exactly this candidate point — i.e. the point's current "home". */
+	function holeHoldingPoint(kind: 'tee' | 'basket', point: SourcePoint): AnnotatedHole | undefined {
+		return holes.find((hole) => {
+			const existing = kind === 'tee' ? hole.tee : hole.basket;
+			return existing !== undefined && existing.xPx === point.xPx && existing.yPx === point.yPx;
+		});
+	}
+
+	/** Accessible name for a candidate marker, describing exactly what a click on it right now would do. */
+	function candidateAriaLabel(kind: 'tee' | 'basket', point: SourcePoint): string {
+		const label = kind === 'tee' ? 'tee' : 'basket';
+		const active = activeHole();
+		if (!active) return `Detected ${label}`;
+		const sourceHole = holeHoldingPoint(kind, point);
+		if (sourceHole?.id === active.id) return `Detected ${label} — already hole ${active.number}'s ${label}`;
+		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
+		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace`;
+		if (sourceHole) return `Detected ${label} — move to hole ${active.number}`;
+		return `Detected ${label} — assign to hole ${active.number}`;
+	}
+
+	/**
+	 * The frictionless-correction interaction (PART C): clicking a detected
+	 * tee/basket candidate assigns its `{xPx, yPx}` — coordinates only, via
+	 * `assignCandidateToHole` — to the active hole instantly when nothing
+	 * would be overwritten or moved from elsewhere; otherwise it opens a
+	 * one-click confirmation chip anchored at the marker instead of acting
+	 * immediately.
+	 */
+	function handleCandidateMarkerClick(kind: 'tee' | 'basket', point: SourcePoint): void {
+		const active = activeHole();
+		if (!active) return;
+		const sourceHole = holeHoldingPoint(kind, point);
+		if (sourceHole?.id === active.id) return; // Already exactly this hole's point; nothing to do.
+		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
+		if (!activeHasFeature && !sourceHole) {
+			holes = assignCandidateToHole(holes, active.id, kind, point);
+			vibrate(8);
+			return;
+		}
+		candidateAssignConfirm = {
+			kind,
+			point,
+			holeId: active.id,
+			holeNumber: active.number,
+			mode: activeHasFeature ? 'replace' : 'move'
+		};
+	}
+
+	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath. */
+	function confirmCandidateAssign(): void {
+		if (!candidateAssignConfirm) return;
+		const { holeId, kind, point } = candidateAssignConfirm;
+		holes = assignCandidateToHole(holes, holeId, kind, point);
+		candidateAssignConfirm = null;
+		vibrate(8);
+	}
+
+	function dismissCandidateAssign(): void {
+		candidateAssignConfirm = null;
 	}
 
 	/** Selects the hole matching a tapped map number, creating it first if it doesn't exist yet. */
@@ -663,6 +946,32 @@
 		});
 	}
 
+	/**
+	 * A real tee/basket marker belonging to a hole OTHER than the active one
+	 * can exactly coincide with a revealed CV candidate — the ordinary case
+	 * right after accepting a ready hole, whose point is the candidate's
+	 * coordinates verbatim. In exactly that case the candidate interpretation
+	 * wins, so PART C's move-to-the-active-hole interaction stays reachable
+	 * instead of being permanently shadowed by the foreign hole's delete
+	 * menu. The active hole's OWN marker is untouched by this — clicking it
+	 * still opens its delete menu exactly as before, since a candidate that
+	 * exactly matches the active hole's own point is already a no-op in
+	 * `handleCandidateMarkerClick`.
+	 */
+	function shouldPreferCandidateOverMarker(marker: AnnotationMarkerHit): boolean {
+		if (marker.kind !== 'tee' && marker.kind !== 'basket') return false;
+		if (marker.holeId === activeHoleId) return false;
+		if (!courseDetection) return false;
+		const point = markerPoint(marker);
+		if (!point) return false;
+		if (marker.kind === 'tee') {
+			if (!revealedUpTo('tees')) return false;
+			return courseDetection.tees.some((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx);
+		}
+		if (!revealedUpTo('baskets') || basketCandidatesSource !== 'course-detection') return false;
+		return courseDetection.baskets.some((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx);
+	}
+
 	function claimAnnotationPointer(
 		pointer: ScreenSpacePoint,
 		event: PointerEvent,
@@ -670,7 +979,7 @@
 	): boolean {
 		if (!sourceImage()) return false;
 		const marker = pointHitAt(pointer, view);
-		if (marker) {
+		if (marker && !shouldPreferCandidateOverMarker(marker)) {
 			annotationDrag = {
 				marker,
 				start: { ...pointer },
@@ -686,10 +995,21 @@
 			void event;
 			return true;
 		}
+		const courseCandidate = courseCandidateHitAt(pointer, view);
+		if (courseCandidate) {
+			courseCandidateDrag = { ...courseCandidate, start: { ...pointer }, dragging: false };
+			void event;
+			return true;
+		}
 		return false;
 	}
 
 	function previewAnnotationMove(pointer: ScreenSpacePoint, event: PointerEvent): void {
+		if (courseCandidateDrag) {
+			const distance = Math.hypot(pointer.x - courseCandidateDrag.start.x, pointer.y - courseCandidateDrag.start.y);
+			if (distance > clickSlopPx(event.pointerType)) courseCandidateDrag.dragging = true;
+			return;
+		}
 		if (numberSelectDrag) {
 			const distance = Math.hypot(pointer.x - numberSelectDrag.start.x, pointer.y - numberSelectDrag.start.y);
 			if (distance > clickSlopPx(event.pointerType)) numberSelectDrag.dragging = true;
@@ -710,6 +1030,12 @@
 	}
 
 	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
+		if (courseCandidateDrag) {
+			const { kind, point, dragging } = courseCandidateDrag;
+			courseCandidateDrag = null;
+			if (!dragging) handleCandidateMarkerClick(kind, point);
+			return;
+		}
 		if (numberSelectDrag) {
 			const { label, dragging } = numberSelectDrag;
 			numberSelectDrag = null;
@@ -741,6 +1067,7 @@
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
 		numberSelectDrag = null;
+		courseCandidateDrag = null;
 		previewHoles = null;
 	}
 
@@ -764,12 +1091,18 @@
 		activeHoleId = null;
 		radialMenu = null;
 		basketCandidates = [];
+		basketCandidatesSource = null;
 		selectedBasketCandidate = null;
 		basketDetectionError = null;
 		courseDetection = null;
 		courseDetectionStatus = null;
+		courseDetectionStage = null;
 		courseDetectionElapsedSeconds = 0;
 		stopCourseDetectionProgress();
+		clearRevealTimers();
+		revealStage = 'done';
+		candidateAssignConfirm = null;
+		courseCandidateDrag = null;
 		teeExperimentEnabled = { 'gray-center': true, 'edge-loop': true, fused: true };
 		teeExperimentFullResolution = false;
 		teeExperimentResult = null;
@@ -856,6 +1189,9 @@
 		courseDetectionRunning = true;
 		basketDetectionError = null;
 		selectedBasketCandidate = null;
+		courseDetectionStage = null;
+		candidateAssignConfirm = null;
+		courseCandidateDrag = null;
 		startCourseDetectionProgress();
 		try {
 			const result = await detectCourseCandidates(
@@ -865,6 +1201,7 @@
 				image.heightPx,
 				(progress) => {
 					courseDetectionStatus = progress.message;
+					courseDetectionStage = progress.stage;
 				}
 			);
 			// The source image may have been replaced while this awaited: a result
@@ -872,6 +1209,8 @@
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
 			basketCandidates = result.baskets;
+			basketCandidatesSource = 'course-detection';
+			startCandidateReveal();
 			// Captured regardless of proposal.status: badge/basket ownership
 			// (courseGrammar's Stages 1 and 4) each succeed independently of the
 			// hole's overall tee/basket-complete status, so an "incomplete" or
@@ -901,6 +1240,8 @@
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = null;
 			courseDetectionStatus = 'Detection failed';
+			clearRevealTimers();
+			revealStage = 'done';
 			basketDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
 		} finally {
 			courseDetectionRunning = false;
@@ -1014,12 +1355,14 @@
 				image.widthPx,
 				image.heightPx
 			);
+			basketCandidatesSource = 'standalone';
 			if (basketCandidates.length === 0) {
 				basketDetectionError =
 					'No basket candidates found. Try a full UDisc map screenshot with the basket icons visible.';
 			}
 		} catch (error) {
 			basketCandidates = [];
+			basketCandidatesSource = null;
 			basketDetectionError =
 				error instanceof Error ? error.message : 'Basket detection failed.';
 		} finally {
@@ -1368,7 +1711,7 @@
 		{/if}
 	</nav>
 
-	<div data-testid="hole-annotation">
+	<div class="hole-annotation" class:diagnostics-collapsed={!diagnosticsRailExpanded} data-testid="hole-annotation">
 		<ImageEditorPane
 			title="UDisc source"
 			role="source-overview"
@@ -1635,7 +1978,22 @@
 
 			{#snippet diagnostics()}
 				<div class="diagnostics-panel" data-testid="annotation-diagnostics">
-					<h2>Diagnostics</h2>
+					<div class="diagnostics-panel-header">
+						<h2>Diagnostics</h2>
+						<button
+							type="button"
+							class="diagnostics-rail-toggle"
+							data-testid="diagnostics-rail-toggle"
+							aria-expanded={diagnosticsRailExpanded}
+							aria-controls="diagnostics-rail-body"
+							aria-label={diagnosticsRailExpanded ? 'Collapse diagnostics panel' : 'Expand diagnostics panel'}
+							onclick={toggleDiagnosticsRail}
+						>
+							<span aria-hidden="true">{diagnosticsRailExpanded ? '»' : '«'}</span>
+						</button>
+					</div>
+					{#if diagnosticsRailExpanded}
+					<div id="diagnostics-rail-body" class="diagnostics-panel-body">
 					{#if courseDetectionStatus}
 						<p class="detection-progress" data-testid="course-detection-progress" role="status">
 							<span class="progress-dot" class:running={courseDetectionRunning} aria-hidden="true"></span>
@@ -1704,6 +2062,8 @@
 						<button type="button" class="apply-button" data-testid="apply-basket-candidate" disabled={selectedBasketCandidate === null || !activeHoleId} onclick={applySelectedBasket}>
 							Apply to Hole {activeHole()?.number ?? ''}
 						</button>
+					{/if}
+					</div>
 					{/if}
 				</div>
 			{/snippet}
@@ -1782,6 +2142,30 @@
 						{/each}
 					{/each}
 					{#if courseDetection}
+						{#each courseDetection.grammar.holes as proposal (proposal.number)}
+							{#if proposal.numberBadge && proposal.tee}
+								<line
+									x1={proposal.numberBadge.xPx}
+									y1={proposal.numberBadge.yPx}
+									x2={proposal.tee.xPx}
+									y2={proposal.tee.yPx}
+									class="grammar-link-candidate"
+									class:revealed={revealedUpTo('grammar')}
+									data-testid="grammar-link-{proposal.number}-badge-tee"
+								/>
+							{/if}
+							{#if proposal.tee && proposal.basket}
+								<line
+									x1={proposal.tee.xPx}
+									y1={proposal.tee.yPx}
+									x2={proposal.basket.xPx}
+									y2={proposal.basket.yPx}
+									class="grammar-link-candidate"
+									class:revealed={revealedUpTo('grammar')}
+									data-testid="grammar-link-{proposal.number}-tee-basket"
+								/>
+							{/if}
+						{/each}
 						{#each courseDetection.numberDetection.candidates as candidate, index (index)}
 							{@const candidateId = candidate.diagnosticId ?? index + 1}
 							{@const rawTopMatch = candidate.topGlyphMatches?.[0]}
@@ -1791,6 +2175,7 @@
 								class:forced-assignment={forcedAssignment}
 								class:selected-hole={candidate.label !== undefined && candidate.label === activeHole()?.number}
 								class:tappable={candidate.label !== undefined}
+								class:revealed={revealedUpTo('numbers')}
 								data-testid="number-candidate-{candidateId}"
 							>
 								<rect
@@ -1816,15 +2201,26 @@
 							</g>
 						{/each}
 						{#each courseDetection.tees as candidate, index (index)}
-							<rect
-								x={candidate.xPx - candidate.widthPx / 2}
-								y={candidate.yPx - candidate.heightPx / 2}
-								width={candidate.widthPx}
-								height={candidate.heightPx}
-								transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
-								class="tee-candidate-marker"
+							{@const point = { xPx: candidate.xPx, yPx: candidate.yPx }}
+							{@const label = candidateAriaLabel('tee', point)}
+							<g
+								class="course-candidate-group"
+								class:revealed={revealedUpTo('tees')}
+								class:interactive={Boolean(activeHoleId)}
+								role="button"
+								aria-label={label}
 								data-testid="tee-candidate-{index + 1}"
-							/>
+							>
+								<title>{label}</title>
+								<rect
+									x={candidate.xPx - candidate.widthPx / 2}
+									y={candidate.yPx - candidate.heightPx / 2}
+									width={candidate.widthPx}
+									height={candidate.heightPx}
+									transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
+									class="tee-candidate-marker"
+								/>
+							</g>
 						{/each}
 					{/if}
 					{#if teeExperimentResult}
@@ -1857,12 +2253,104 @@
 						{/each}
 					{/if}
 					{#each basketCandidates as candidate, index (index)}
-						<circle cx={candidate.xPx} cy={candidate.yPx} r={(selectedBasketCandidate === index ? 11 : 8) / zoom} class="basket-candidate-marker" class:selected={selectedBasketCandidate === index} data-testid="basket-candidate-{index + 1}" />
+						{@const fromCourseDetection = basketCandidatesSource === 'course-detection'}
+						{@const point = { xPx: candidate.xPx, yPx: candidate.yPx }}
+						{@const label = fromCourseDetection ? candidateAriaLabel('basket', point) : undefined}
+						<g
+							class="course-candidate-group"
+							class:revealed={!fromCourseDetection || revealedUpTo('baskets')}
+							class:interactive={fromCourseDetection && Boolean(activeHoleId)}
+							role={fromCourseDetection ? 'button' : undefined}
+							aria-label={label}
+						>
+							{#if label}<title>{label}</title>{/if}
+							<circle
+								cx={candidate.xPx}
+								cy={candidate.yPx}
+								r={(selectedBasketCandidate === index ? 11 : 8) / zoom}
+								class="basket-candidate-marker"
+								class:selected={selectedBasketCandidate === index}
+								data-testid="basket-candidate-{index + 1}"
+							/>
+						</g>
 					{/each}
 				</svg>
 			{/snippet}
 
 			{#snippet popover({ view, paneSize })}
+				<div class="course-detection-overlay">
+					{#if courseDetectionRunning}
+						<p
+							class="course-detection-strip"
+							data-testid="course-detection-status-strip"
+							role="status"
+							aria-live="polite"
+						>
+							<span class="progress-dot running" aria-hidden="true"></span>
+							{compactDetectionStageCopy(courseDetectionStage)}
+						</p>
+					{:else if courseDetection && revealStage === 'done'}
+						{@const grammarHoles = courseDetection.grammar.holes}
+						{@const readyCount = grammarHoles.filter((hole) => hole.status === 'ready').length}
+						{@const reviewCount = grammarHoles.length - readyCount}
+						{@const firstNeedsReview = grammarHoles.find((hole) => hole.status !== 'ready')}
+						<div class="course-summary-chip" data-testid="course-summary-chip" role="status">
+							<p class="course-summary-line">
+								Found {grammarHoles.length} holes — {readyCount} ready, {reviewCount} need review
+							</p>
+							<p class="course-summary-honesty">
+								Detection is limited where holes overlap or crowd each other — an area of active research — which is why the review step exists.
+							</p>
+							<div class="course-summary-actions">
+								<button
+									type="button"
+									data-testid="course-summary-jump-review"
+									disabled={!firstNeedsReview}
+									onclick={jumpToFirstNeedsReview}
+								>
+									{firstNeedsReview ? `Review hole ${firstNeedsReview.number}` : 'All holes ready'}
+								</button>
+								<button
+									type="button"
+									data-testid="course-summary-apply-ready"
+									disabled={readyCount === 0}
+									onclick={() => applyReadyCourseHoles()}
+								>
+									Accept {readyCount} ready holes
+								</button>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				{#if candidateAssignConfirm}
+					{@const anchor = imageToScreen(candidateAssignConfirm.point, view)}
+					<div
+						bind:this={candidateConfirmEl}
+						class="candidate-assign-confirm"
+						data-testid="candidate-assign-confirm"
+						style={`left:${anchor.x}px; top:${anchor.y}px;`}
+					>
+						<button
+							type="button"
+							class="candidate-assign-confirm-accept"
+							data-testid="candidate-assign-confirm-accept"
+							onclick={confirmCandidateAssign}
+						>
+							{candidateAssignConfirm.mode === 'replace'
+								? `Replace ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
+								: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
+						</button>
+						<button
+							type="button"
+							class="candidate-assign-confirm-cancel"
+							data-testid="candidate-assign-confirm-cancel"
+							aria-label="Cancel"
+							onclick={dismissCandidateAssign}
+						>✕</button>
+					</div>
+				{/if}
+
 				{#if radialMenu}
 					{@const menu = radialMenu}
 					{@const anchor = imageToScreen(menu.at, view)}
@@ -2739,6 +3227,215 @@
 	.bend-marker.radial-target {
 		stroke: #f87171;
 		stroke-width: 3;
+	}
+
+	/* PART A — compact detection status strip and PART C's summary chip, both
+	   anchored near the map (top-left of the canvas), one replacing the other. */
+	.course-detection-overlay {
+		position: absolute;
+		top: 0.75rem;
+		left: 0.75rem;
+		z-index: 20;
+		max-width: min(22rem, calc(100% - 1.5rem));
+	}
+
+	.course-detection-strip {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0.5rem 0.7rem;
+		border: 1px solid #3f3f46;
+		border-radius: 999px;
+		background: #18181bf2;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
+		font-size: 0.78rem;
+		color: #f4f4f5;
+	}
+
+	.course-summary-chip {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		padding: 0.65rem 0.75rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #18181bf2;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
+	}
+
+	.course-summary-line {
+		margin: 0;
+		font-size: 0.85rem;
+		font-weight: 650;
+		color: #f4f4f5;
+	}
+
+	.course-summary-honesty {
+		margin: 0;
+		font-size: 0.72rem;
+		line-height: 1.4;
+		color: #a1a1aa;
+	}
+
+	.course-summary-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+
+	.course-summary-actions button {
+		min-height: 2.25rem;
+		padding: 0.35rem 0.6rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #27272a;
+		color: #f4f4f5;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.course-summary-actions button:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.course-summary-actions button:first-child {
+		border-color: #f59e0b;
+	}
+
+	/* PART C — inline one-click confirmation chip anchored at the clicked candidate marker. */
+	.candidate-assign-confirm {
+		position: absolute;
+		left: 0;
+		top: 0;
+		z-index: 25;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		transform: translate(-50%, calc(-100% - 0.6rem));
+		padding: 0.3rem 0.3rem 0.3rem 0.6rem;
+		border: 1px solid #38bdf8;
+		border-radius: 999px;
+		background: #18181b;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 55%);
+		white-space: nowrap;
+	}
+
+	.candidate-assign-confirm-accept {
+		min-height: 2rem;
+		padding: 0.3rem 0.6rem;
+		border: 0;
+		border-radius: 999px;
+		background: #0369a1;
+		color: #f0f9ff;
+		font-size: 0.75rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.candidate-assign-confirm-accept:hover {
+		background: #0284c7;
+	}
+
+	.candidate-assign-confirm-cancel {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.6rem;
+		height: 1.6rem;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: #a1a1aa;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.candidate-assign-confirm-cancel:hover {
+		color: #f4f4f5;
+	}
+
+	/* PART B — staged reveal: hidden until each stage's turn, fading in via CSS transition. */
+	.number-candidate-marker,
+	.course-candidate-group,
+	.grammar-link-candidate {
+		opacity: 0;
+		transition: opacity 220ms ease;
+	}
+
+	.number-candidate-marker.revealed,
+	.course-candidate-group.revealed,
+	.grammar-link-candidate.revealed {
+		opacity: 1;
+	}
+
+	.grammar-link-candidate {
+		stroke: #38bdf8;
+		stroke-width: 1.5;
+		stroke-dasharray: 2 3;
+		pointer-events: none;
+	}
+
+	/* PART C — candidate markers become clickable once revealed. */
+	.course-candidate-group.interactive {
+		cursor: pointer;
+	}
+
+	.course-candidate-group.interactive:hover .tee-candidate-marker,
+	.course-candidate-group.interactive:hover .basket-candidate-marker {
+		stroke-width: 3;
+		filter: brightness(1.25);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.number-candidate-marker,
+		.course-candidate-group,
+		.grammar-link-candidate {
+			transition: none;
+		}
+	}
+
+	/* Small, same-file diagnostics-rail collapse toggle. */
+	.diagnostics-panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.diagnostics-rail-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.9rem;
+		min-height: 1.9rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #27272a;
+		color: #f4f4f5;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		cursor: pointer;
+	}
+
+	.diagnostics-panel-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+
+	@media (min-width: 1181px) {
+		:global(.hole-annotation.diagnostics-collapsed .editor-body.with-tools) {
+			grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr) 2.75rem !important;
+		}
+
+		:global(.hole-annotation.diagnostics-collapsed .diagnostics) {
+			width: 2.75rem;
+			min-width: 2.75rem;
+			padding: 0.6rem 0.4rem;
+			overflow: hidden;
+		}
 	}
 
 	@media (max-width: 1180px) {

@@ -211,6 +211,34 @@ export function setAllCorridorWidths(holes: readonly AnnotatedHole[], corridorWi
 }
 
 /**
+ * Assigns a CV candidate's already-reduced `{xPx, yPx}` (see `acceptCandidate`
+ * in `cv/types.ts` — no score/confidence ever reaches this function) to
+ * `holeId`'s tee or basket, first clearing that exact point from any OTHER
+ * hole that currently holds it. That clear pass is what makes this the single
+ * primitive behind Annotate Round's click-to-assign interaction: a plain
+ * assign or an in-place replace (the point isn't currently placed elsewhere)
+ * degenerates to the clear pass being a no-op, and a move is just the clear
+ * pass finding a match. Callers never need to branch on which case they're
+ * in — every mutation still flows through the same `holes = fn(holes, ...)`
+ * reassignment as `setTee`/`setBasket`/`moveTee`/`moveBasket`, so it is
+ * covered by any future undo/redo work exactly as those already are.
+ */
+export function assignCandidateToHole(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	kind: 'tee' | 'basket',
+	point: SourcePoint
+): AnnotatedHole[] {
+	const cleared = holes.map((hole) => {
+		if (hole.id === holeId) return hole;
+		const existing = kind === 'tee' ? hole.tee : hole.basket;
+		if (!existing || existing.xPx !== point.xPx || existing.yPx !== point.yPx) return hole;
+		return kind === 'tee' ? { ...hole, tee: undefined } : { ...hole, basket: undefined };
+	});
+	return kind === 'tee' ? setTee(cleared, holeId, point) : setBasket(cleared, holeId, point);
+}
+
+/**
  * Places `point` on `holeId` according to `mode` — the one entry point the UI
  * click handler needs, so it doesn't have to branch on mode itself.
  */

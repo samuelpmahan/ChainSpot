@@ -150,17 +150,17 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 	},
 	{
 		id: 'annotate',
-		title: 'Mark the round on the map you just built',
+		title: 'Watch ChainSpot find the course, then fix the one hole it missed',
 		route: 'annotate-round',
-		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees. Skipped step 1? Loading the sample here hands over the whole-course capture instead.',
+		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees. Skipped step 1? Loading the sample here hands over the whole-course capture instead. What happens next is not a canned animation: watch ChainSpot actually go looking for the course.',
 		actions: [
-			'Import the incoming image, then let detection run: tee pads, baskets, hole numbers, and centerlines are proposed for you.',
-			'Walk the hole bar and accept, move, or replace what detection found. Every proposal is a suggestion you can overrule.',
-			'Add a shot or a corridor bend on a hole to see the playing corridor update live.',
+			'Watch the status strip narrate detection as it runs — reading hole numbers, finding tee pads, locating baskets, assembling the course — with each stage\'s proposals fading onto the map in that same order as it finishes.',
+			'When the summary chip lands, accept the ready holes in one click — the holes detection is confident about are placed immediately, with the count right there in the chip.',
+			'Jump to the hole still flagged for review and fix it yourself: click the detected tee or basket candidate underneath it and it snaps onto the active hole instantly — no dialog, one click.',
 			'Press Done to package the round and continue to Create Graphics.'
 		],
 		mechanism:
-			'Detection is calibrated OpenCV template and centerline matching running locally in your browser. The annotated round crosses to the next stage in memory; nothing is uploaded and nothing is written to disk unless you save a bundle yourself.',
+			'Detection is calibrated OpenCV template matching running locally in your browser, and the status strip and staged reveal report its real stage boundaries as they happen — nothing is simulated for effect. It is honestly imperfect where holes overlap or crowd each other on the map, which is an area of active research, and that is exactly why the review step and the one-click fix exist rather than a silent best guess. The annotated round crosses to the next stage in memory; nothing is uploaded and nothing is written to disk unless you save a bundle yourself.',
 		arming: { kind: 'annotate-source' }
 	},
 	{

@@ -4,6 +4,7 @@ import {
 	addHole,
 	addHoleBeyondStandardCourse,
 	addShot,
+	assignCandidateToHole,
 	clearBends,
 	moveBasket,
 	moveCorridorBend,
@@ -23,6 +24,7 @@ import {
 	setCorridorWidth,
 	setTee
 } from '../../src/lib/holeAnnotation';
+import { acceptCandidate } from '../../src/lib/cv/types';
 import { DEFAULT_CORRIDOR_WIDTH_PX } from '../../src/lib/corridor';
 import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 
@@ -361,5 +363,97 @@ describe('placeByMode', () => {
 
 		holes = placeByMode(holes, 'a', 'bend', { xPx: 4, yPx: 4 }, createId);
 		expect(holes[0].corridorBends).toEqual([{ xPx: 4, yPx: 4 }]);
+	});
+});
+
+/**
+ * Annotate Round's click-to-assign interaction (Detected CV UX, PART C): a
+ * single primitive behind instant-assign, replace, and move. Coordinates
+ * only ever cross from a CV candidate through `acceptCandidate` first,
+ * mirroring how the page itself always calls it before reaching this
+ * function — never a raw `{...candidate}` spread.
+ */
+describe('assignCandidateToHole', () => {
+	it('assigns onto a hole with no existing point of that kind (instant-assign case), leaving other holes untouched', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 2, { tee: { xPx: 9, yPx: 9 } })];
+		const result = assignCandidateToHole(holes, 'a', 'basket', { xPx: 40, yPx: 50 });
+
+		expect(result[0]).toEqual({ ...holes[0], basket: { xPx: 40, yPx: 50 } });
+		expect(result[1]).toBe(holes[1]);
+		expect(holes[0].basket).toBeUndefined(); // input never mutated
+	});
+
+	it('replaces an existing point on the target hole in place (replace case)', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1, { tee: { xPx: 1, yPx: 1 } })];
+		const result = assignCandidateToHole(holes, 'a', 'tee', { xPx: 99, yPx: 99 });
+
+		expect(result[0].tee).toEqual({ xPx: 99, yPx: 99 });
+		expect(holes[0].tee).toEqual({ xPx: 1, yPx: 1 }); // input never mutated
+	});
+
+	it('moves a point from whichever OTHER hole currently holds those exact coordinates onto the target (move case)', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1),
+			emptyHole('b', 2, { basket: { xPx: 5, yPx: 6 } })
+		];
+		const result = assignCandidateToHole(holes, 'a', 'basket', { xPx: 5, yPx: 6 });
+
+		expect(result.find((hole) => hole.id === 'a')?.basket).toEqual({ xPx: 5, yPx: 6 });
+		expect(result.find((hole) => hole.id === 'b')?.basket).toBeUndefined();
+		// The source hole's OTHER fields are untouched by the move.
+		expect(result.find((hole) => hole.id === 'b')?.number).toBe(2);
+	});
+
+	it('combines replace and move in one call: the target is overwritten AND the point is cleared from wherever else it lived', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 1, yPx: 1 } }),
+			emptyHole('b', 2, { tee: { xPx: 7, yPx: 8 } })
+		];
+		const result = assignCandidateToHole(holes, 'a', 'tee', { xPx: 7, yPx: 8 });
+
+		expect(result.find((hole) => hole.id === 'a')?.tee).toEqual({ xPx: 7, yPx: 8 });
+		expect(result.find((hole) => hole.id === 'b')?.tee).toBeUndefined();
+	});
+
+	it('only clears an OTHER hole holding the exact same coordinates — a different point of the same kind is left alone', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1),
+			emptyHole('b', 2, { basket: { xPx: 100, yPx: 200 } })
+		];
+		const result = assignCandidateToHole(holes, 'a', 'basket', { xPx: 5, yPx: 6 });
+
+		expect(result.find((hole) => hole.id === 'a')?.basket).toEqual({ xPx: 5, yPx: 6 });
+		expect(result.find((hole) => hole.id === 'b')?.basket).toEqual({ xPx: 100, yPx: 200 });
+	});
+
+	it('carries only {xPx, yPx} from a CV candidate onto the hole — acceptCandidate strips score before this ever runs', () => {
+		const candidate = { xPx: 12, yPx: 34, score: 0.91, widthPx: 5, heightPx: 5 };
+		const holes: AnnotatedHole[] = [emptyHole('a', 1)];
+		const result = assignCandidateToHole(holes, 'a', 'basket', acceptCandidate(candidate));
+
+		expect(result[0].basket).toEqual({ xPx: 12, yPx: 34 });
+		expect(Object.keys(result[0].basket!)).toEqual(['xPx', 'yPx']);
+	});
+
+	it('is undo-safe: applying then reversing the exact sequence of moves restores the original state exactly, through the same reassignment path every other holeAnnotation operation uses', () => {
+		// Annotate Round keeps no separate undo stack for `holes` today — this
+		// reducer is called the same way `moveTee`/`moveBasket`/`removeTee`/
+		// `removeBasket` already are (`holes = fn(holes, ...)`), so it is
+		// automatically covered by any future undo/redo work exactly as those
+		// are. Reversibility through the pure reducers themselves is the
+		// strongest property testable without that stack existing yet.
+		const original: AnnotatedHole[] = [
+			emptyHole('a', 1, { basket: { xPx: 5, yPx: 6 } }),
+			emptyHole('b', 2)
+		];
+
+		// "Move": basket goes from hole a to hole b.
+		const moved = assignCandidateToHole(original, 'b', 'basket', { xPx: 5, yPx: 6 });
+		expect(moved.find((hole) => hole.id === 'a')?.basket).toBeUndefined();
+		expect(moved.find((hole) => hole.id === 'b')?.basket).toEqual({ xPx: 5, yPx: 6 });
+
+		// Undo: move it back from hole b to hole a.
+		const restored = assignCandidateToHole(moved, 'a', 'basket', { xPx: 5, yPx: 6 });
+		expect(restored).toEqual(original);
 	});
 });
