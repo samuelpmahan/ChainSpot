@@ -262,7 +262,13 @@ function readComponents(cv: LandingDropletCv, mask: CvMat): { labels: CvMat; com
 	}
 }
 
-/** Bottom-most blue point of one labeled component; averages x across the bottom 2 rows for stability. */
+/**
+ * Bottom-most blue point of one labeled component; averages x across the
+ * bottom 2 rows for stability. Assumes the pin is upright and unoccluded, as
+ * UDisc always renders it -- if another UI element ever overlapped a
+ * droplet's bottom pixels, the reported tip would silently shift to
+ * wherever the remaining visible blue pixels end, not the droplet's true tip.
+ */
 function componentTip(
 	labelData: Int32Array,
 	cols: number,
@@ -592,7 +598,9 @@ function diceScore(signature: Float32Array, template: LandingDropletGlyphTemplat
 	const denominator = signatureSum + templateSum;
 	const dice = denominator > 0 ? (2 * intersection) / denominator : 0;
 	const countPenalty = Math.abs(signatureSum - templateSum) / Math.max(1, templateSum);
-	return dice - 0.15 * countPenalty;
+	// countPenalty is unbounded (a signature far larger than the template can push
+	// dice - 0.15 * countPenalty below 0), but glyphConfidence is documented as [0, 1].
+	return Math.max(0, dice - 0.15 * countPenalty);
 }
 
 /**

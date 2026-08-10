@@ -245,6 +245,28 @@ describe('landingDropletGlyphTemplateFromMask and classification', () => {
 		expect(() => landingDropletGlyphTemplateFromMask('c1', new Uint8Array(6), 3, 2)).toThrow();
 	});
 
+	it('clamps glyphConfidence to the documented [0, 1] range even on a severe pixel-count mismatch', () => {
+		const size = 6;
+		// A single on-pixel far from where the signature below paints, so
+		// intersection is exactly 0 and dice is 0 -- only the pixel-count
+		// mismatch penalty is exercised.
+		const template = checkerTemplate('c1', [28], size); // row 4, col 4
+		const { raster, rgba } = makeRaster(10, 10);
+		for (let row = 1; row < 3; row += 1) {
+			for (let col = 1; col < 3; col += 1) {
+				const offset = (row * 10 + col) * 4;
+				rgba[offset] = 255;
+				rgba[offset + 1] = 255;
+				rgba[offset + 2] = 255;
+				rgba[offset + 3] = 255;
+			}
+		}
+		const localization = { xPx: 0, yPx: 7, boundsPx: { xPx: 0, yPx: 0, widthPx: size, heightPx: 8 }, areaPx: 48 };
+		const classification = classifyLandingDropletGlyph(raster, localization, [template]);
+		expect(classification.glyphConfidence).toBeGreaterThanOrEqual(0);
+		expect(classification.glyphConfidence).toBe(0);
+	});
+
 	it('picks the exactly-matching template via the public classification API', () => {
 		const size = 6;
 		// Each template occupies a distinct interior 2x2 block, away from the

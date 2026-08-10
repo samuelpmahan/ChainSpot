@@ -31,7 +31,8 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
 	{
 		path: 'resources/chainspot_cv_templates/',
 		reason:
-			'CV template set + manifest.json, fetched at runtime by the basket/course-detection worker'
+			'CV template set + manifest.json, fetched at runtime by the basket/course-detection worker; ' +
+			'also includes the round-landing-glyph-*.png templates, which are CLI-read only (scripts/detect-landing-droplets.ts)'
 	},
 	{
 		path: 'resources/demo/bill-allen/',
