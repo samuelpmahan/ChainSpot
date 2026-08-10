@@ -72,7 +72,8 @@
 		detectBasketCandidates,
 		detectCourseCandidates,
 		detectTees,
-		prewarmBasketDetection
+		prewarmBasketDetection,
+		requestLocalSnap
 	} from '$lib/autoAnnotation/basketDetection';
 	import type {
 		BasketCandidate,
@@ -82,6 +83,7 @@
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
+	import type { LocalSnapKind } from '$lib/cv/localSnap';
 	import { acceptCandidate } from '$lib/cv/types';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
@@ -152,6 +154,15 @@
 		/** Null in round mode when opened with no hole active — only the `walk` wedge is offered then. */
 		holeId: string | null;
 		hitMarker: AnnotationMarkerHit | null;
+		/**
+		 * Whether Alt was held on the empty-space click that opened this menu
+		 * (irrelevant, always `false`, for a `hitMarker` delete menu — deleting
+		 * never places a point). Snap-to-detection's escape hatch: threaded
+		 * through to `chooseRadialAction`'s tee/basket placement so a user who
+		 * deliberately wants the raw click, not the nearest detected feature,
+		 * can suppress the snap.
+		 */
+		altKey: boolean;
 	}
 
 	interface Props {
@@ -280,6 +291,25 @@
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
+	/**
+	 * Snap-to-detection (design point 5, optimistic placement): keys of
+	 * `${kind}:${holeId}` markers whose most recent placement/release is still
+	 * waiting on a local-snap reply. Tracked so a reply that arrives after the
+	 * marker has moved on (deleted, moved again, hole gone) is recognized as
+	 * stale and dropped instead of clobbering newer state — see
+	 * `applyLocalSnap`/`settleLocalSnap`.
+	 */
+	let pendingLocalSnaps = new Map<string, number>();
+	let localSnapRequestSequence = 0;
+	/**
+	 * Markers currently mid-settle from a raw click to a snapped point (design
+	 * point 4): carries the `.settling` class, whose CSS transition is what
+	 * actually animates `cx`/`cy`. Never populated under
+	 * `prefers-reduced-motion: reduce` — the marker jumps straight to the
+	 * snapped point instead, `today's exact behavior` for that preference,
+	 * matching every other motion decision on this page.
+	 */
+	let settlingMarkerKeys = $state<ReadonlySet<string>>(new Set());
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
 	let previewWalkingPath = $state<SourcePoint[] | null>(null);
@@ -951,6 +981,85 @@
 		}
 	}
 
+	function localSnapKey(kind: LocalSnapKind, holeId: string): string {
+		return `${kind}:${holeId}`;
+	}
+
+	/** The number-badge anchor `requestLocalSnap`'s worker request re-derives `UiScalePx`/`BasketTemplateScale` from — the same one `handleDetectTees` already reads out of `courseDetection`, raw (unbranded) since only the worker needs to re-brand it. `null` before "Detect course" has ever run: there is no calibration to crop or size a snap window from yet. */
+	function currentNumberAnchor(): { scale: number; widthPx: number; heightPx: number } | null {
+		const anchor = courseDetection?.numberDetection?.anchor;
+		return anchor ? { scale: anchor.scale, widthPx: anchor.widthPx, heightPx: anchor.heightPx } : null;
+	}
+
+	/**
+	 * Snap-to-detection (design points 1/2/3/5): fires a short local
+	 * object-finding pass around a tee/basket point that has *already* been
+	 * placed at the raw click/release coordinates by the caller
+	 * (`chooseRadialAction`'s placement, `commitAnnotationPointerUp`'s
+	 * drag-release) — this never blocks that raw placement, it only settles
+	 * the marker onto a detected feature later if one is confidently found
+	 * nearby (optimistic placement: a course screenshot decode plus a cold
+	 * worker can plausibly exceed the ~100ms "feels instant" budget even
+	 * though the crop-sized detector pass itself is fast once warm — see
+	 * `src/lib/cv/localSnap.ts`'s doc comment for the measurements behind
+	 * that choice). No calibration yet (course detection hasn't run), no
+	 * source image, Alt held, or a failed/empty pass are all indistinguishable
+	 * outcomes to the user: the raw point already placed simply stands.
+	 */
+	function applyLocalSnap(kind: LocalSnapKind, holeId: string, rawPoint: SourcePoint, altKey: boolean): void {
+		if (altKey) return;
+		const anchor = currentNumberAnchor();
+		const image = sourceImage();
+		if (!anchor || !image) return;
+		const resource = editor.getAssetResource(image.id);
+		if (!resource) return;
+
+		localSnapRequestSequence += 1;
+		const requestId = localSnapRequestSequence;
+		const key = localSnapKey(kind, holeId);
+		pendingLocalSnaps.set(key, requestId);
+
+		requestLocalSnap(resource.bytes, image.mimeType, { kind, clickPx: rawPoint, numberAnchor: anchor })
+			.then((snapped) => {
+				if (!snapped) return;
+				// Superseded by a newer snap request on the same marker (another
+				// placement/release, or the marker was deleted and re-placed) —
+				// this reply is stale and must not clobber whatever's current now.
+				if (pendingLocalSnaps.get(key) !== requestId) return;
+				settleLocalSnap(kind, holeId, rawPoint, snapped);
+			})
+			.catch(() => {
+				// A failed pass must be indistinguishable from no feature: never
+				// surface an error for a background convenience snap.
+			});
+	}
+
+	/** ~100ms CSS ease (design point 4) plus a small buffer so `.settling` outlives the transition it drives rather than being pulled off mid-animation. */
+	const LOCAL_SNAP_SETTLE_CLASS_MS = 150;
+
+	/**
+	 * Applies a resolved snap result, but only if the marker is still exactly
+	 * where the optimistic raw placement left it — if the user has since
+	 * moved, deleted, or replaced it, this reply is stale and must not
+	 * clobber newer state.
+	 */
+	function settleLocalSnap(kind: LocalSnapKind, holeId: string, rawPoint: SourcePoint, snapped: SourcePoint): void {
+		const hole = holes.find((candidate) => candidate.id === holeId);
+		if (!hole) return;
+		const current = kind === 'tee' ? hole.tee : hole.basket;
+		if (!current || current.xPx !== rawPoint.xPx || current.yPx !== rawPoint.yPx) return;
+		if (snapped.xPx === rawPoint.xPx && snapped.yPx === rawPoint.yPx) return;
+
+		const key = localSnapKey(kind, holeId);
+		if (!prefersReducedMotion()) {
+			settlingMarkerKeys = new Set([...settlingMarkerKeys, key]);
+			setTimeout(() => {
+				settlingMarkerKeys = new Set([...settlingMarkerKeys].filter((existing) => existing !== key));
+			}, LOCAL_SNAP_SETTLE_CLASS_MS);
+		}
+		holes = kind === 'tee' ? moveTee(holes, holeId, snapped) : moveBasket(holes, holeId, snapped);
+	}
+
 	/**
 	 * Wedge actions offered by an open radial menu: Delete alone for a hit
 	 * marker, otherwise the wedges the current mode's activity allows. Map
@@ -1030,6 +1139,9 @@
 		} else if (menu.holeId) {
 			holes = placeByMode(holes, menu.holeId, action, menu.at);
 			if (isMapGeometryKind(action)) markMapGeometryEdited();
+			if (action === 'tee' || action === 'basket') {
+				applyLocalSnap(action, menu.holeId, menu.at, menu.altKey);
+			}
 		}
 		focusViewport();
 	}
@@ -1147,7 +1259,7 @@
 		}
 	}
 
-	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
+	function commitAnnotationPointerUp(pointer: ScreenSpacePoint, event?: PointerEvent): void {
 		if (courseCandidateDrag) {
 			const { kind, point, dragging } = courseCandidateDrag;
 			courseCandidateDrag = null;
@@ -1175,7 +1287,7 @@
 				drag.marker.kind === 'walk'
 					? (drag.marker.index !== undefined ? walkingPath[drag.marker.index] ?? null : null)
 					: markerPoint(drag.marker);
-			if (point) radialMenu = { at: point, holeId: drag.marker.holeId, hitMarker: drag.marker };
+			if (point) radialMenu = { at: point, holeId: drag.marker.holeId, hitMarker: drag.marker, altKey: false };
 			return;
 		}
 		const point = clampPointToImageBounds(
@@ -1189,6 +1301,12 @@
 		} else {
 			holes = moveMarker(holes, drag.marker, point);
 			if (isMapGeometryKind(drag.marker.kind)) markMapGeometryEdited();
+			// Snap-to-detection applies on a genuine drag-RELEASE only (never
+			// mid-drag — `previewAnnotationMove` above never calls this), and only
+			// for an existing tee/basket marker being repositioned.
+			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && drag.marker.holeId) {
+				applyLocalSnap(drag.marker.kind, drag.marker.holeId, point, event?.altKey ?? false);
+			}
 		}
 		previewHoles = null;
 		previewWalkingPath = null;
@@ -1206,11 +1324,16 @@
 	 * Opens the empty-space placement menu. In round mode this works even with
 	 * no hole active — the menu then offers only `walk`, since the walk path
 	 * is round-level rather than per-hole. In map mode a hole must be active,
-	 * matching the pre-mode-split behavior.
+	 * matching the pre-mode-split behavior. `altKey` carries snap-to-detection's
+	 * escape hatch (see `RadialMenuState.altKey`'s doc comment) from the click
+	 * that opened this menu through to the eventual placement.
 	 */
-	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
+	function handleAnnotationPlacement(
+		coordinates: { xPx: number; yPx: number },
+		options: { altKey?: boolean } = {}
+	): void {
 		if (annotationMode === 'map' && !activeHoleId) return;
-		radialMenu = { at: coordinates, holeId: activeHoleId, hitMarker: null };
+		radialMenu = { at: coordinates, holeId: activeHoleId, hitMarker: null, altKey: options.altKey ?? false };
 	}
 
 	/**
@@ -1825,6 +1948,10 @@
 		<div>
 			<h1>Annotate Round</h1>
 			<p>Mark up the course map in Map mode, then switch to Round mode for throws and the walk path.</p>
+			<p>
+				Placing or dragging a tee or basket snaps to the nearest detected feature — hold Alt to place it exactly
+				where you click.
+			</p>
 		</div>
 		<button
 			type="button"
@@ -2352,6 +2479,7 @@
 								class="tee-marker"
 								class:dimmed={annotationMode === 'round'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'tee')}
+								class:settling={settlingMarkerKeys.has(localSnapKey('tee', overlayHole.id))}
 								data-testid="tee-marker-{overlayHole.number}"
 							/>
 							<text
@@ -2370,6 +2498,7 @@
 								class="basket-marker"
 								class:dimmed={annotationMode === 'round'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'basket')}
+								class:settling={settlingMarkerKeys.has(localSnapKey('basket', overlayHole.id))}
 								data-testid="basket-marker-{overlayHole.number}"
 							/>
 							<text
@@ -2942,6 +3071,21 @@
 		fill: #22c55e;
 		stroke: #063d1e;
 		stroke-width: 1;
+	}
+
+	/*
+	 * Snap-to-detection (design point 4): while `.settling`, cx/cy transitions
+	 * smoothly from the raw click to the snapped point instead of jumping.
+	 * Scoped to the class (not the bare marker) so an ordinary drag-move never
+	 * animates — only this deliberate raw-to-snapped settle does. Reduced
+	 * motion never applies this class at all (see `settleLocalSnap`), so no
+	 * `@media (prefers-reduced-motion: reduce)` override is needed here.
+	 */
+	.tee-marker.settling,
+	.basket-marker.settling {
+		transition:
+			cx 100ms ease,
+			cy 100ms ease;
 	}
 
 	.number-candidate-marker rect {
