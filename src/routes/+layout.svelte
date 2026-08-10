@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
+	import DemoGuide from '$lib/components/DemoGuide.svelte';
 
 	/**
 	 * Client-only marker set after hydration and event delegation are in place.
@@ -48,10 +49,25 @@
 		>
 			Ribbon Goldens
 		</a>
+		<a
+			href="{base}/demo"
+			class="nav-link"
+			class:active={page.url.pathname === `${base}/demo`}
+			aria-current={page.url.pathname === `${base}/demo` ? 'page' : undefined}
+		>
+			Demo
+		</a>
 	</nav>
 </header>
 
 {@render children()}
+
+<!--
+	The walkthrough rail lives in the layout, not in any one route, so a tour
+	survives client-side navigation between the stages it walks through. It
+	renders nothing unless a tour is running.
+-->
+<DemoGuide />
 
 <style>
 	:global(body) {

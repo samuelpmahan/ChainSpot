@@ -9,7 +9,11 @@
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
 	import { intakeImageFile } from '$lib/imageIntake';
 	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
-	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
+	import {
+		consumePendingHandoff,
+		getPendingHandoff,
+		subscribePendingHandoff
+	} from '$lib/stitch/handoff';
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
@@ -1129,13 +1133,28 @@
 		}
 	}
 
-	onMount(() => {
-		// Gated on participatesInSession so injected-editor unit tests never
-		// observe cross-test session leakage from the module-level handoff store.
+	/**
+	 * Gated on participatesInSession so injected-editor unit tests never observe
+	 * cross-test session leakage from the module-level handoff store.
+	 */
+	function readPendingHandoff(): void {
 		const handoff = participatesInSession ? getPendingHandoff() : null;
 		pendingHandoff = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+	}
+
+	onMount(() => {
+		readPendingHandoff();
+		// A handoff published while this page is already mounted — the guided
+		// demo arming a step the visitor is standing on — would otherwise never
+		// be seen, since the mount-time read above has already happened.
+		const unsubscribe = participatesInSession
+			? subscribePendingHandoff(readPendingHandoff)
+			: () => {};
 		window.addEventListener('keydown', handleAnnotationKeyDown);
-		return () => window.removeEventListener('keydown', handleAnnotationKeyDown);
+		return () => {
+			unsubscribe();
+			window.removeEventListener('keydown', handleAnnotationKeyDown);
+		};
 	});
 
 	/** Test hook: forces a re-derive after external domain actions. */

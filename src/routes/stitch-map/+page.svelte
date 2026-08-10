@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import Konva from 'konva';
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
 	import { dialogKeyboard } from '$lib/focusManagement';
@@ -39,6 +39,10 @@
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
 	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
+	import {
+		subscribePendingStitchCaptures,
+		takePendingStitchCaptures
+	} from '$lib/demo/stageInbox';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
@@ -1274,6 +1278,24 @@
 		warmSmartStitchWorker();
 	});
 
+	onMount(() => {
+		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
+		// and navigates here. They enter through requestSmartImport — the exact
+		// entry point the "Import four screenshots" file input uses — so the
+		// arrangement a visitor watches appear is computed by the product now,
+		// never supplied by the demo. Re-run protection still applies: a session
+		// already refined by hand asks before it is replaced.
+		const claimCaptures = (): void => {
+			const captures = takePendingStitchCaptures();
+			if (captures) requestSmartImport(captures);
+		};
+		claimCaptures();
+		// Captures deposited while this page is already mounted — the rail arming
+		// a step the visitor is standing on — would otherwise sit unclaimed until
+		// the next navigation, after the rail already reported success.
+		return subscribePendingStitchCaptures(claimCaptures);
+	});
+
 	onDestroy(() => {
 		// An in-flight smart-import batch must never publish after unmount, and
 		// the page no longer owns the smart-stitch worker once it is gone.
@@ -1311,8 +1333,9 @@
 	<h2>Stitch Map</h2>
 	<p class="protocol">
 		Capture four screenshots of the same map at one zoom and orientation, then load them in
-		this order: upper-left, upper-right, lower-left, lower-right, with about 20–30% overlap
-		between neighbors. This session lives only in this tab; reloading the page clears it.
+		this order: upper-left, upper-right, lower-left, lower-right. Neighbors need at least
+		about 20% overlap, and more is always fine — just make sure all four are different
+		captures. This session lives only in this tab; reloading the page clears it.
 	</p>
 
 	<section class="smart-import-section" aria-labelledby="smart-import-heading">
