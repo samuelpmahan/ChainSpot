@@ -198,6 +198,19 @@ export function setCorridorWidth(holes: readonly AnnotatedHole[], holeId: string
 }
 
 /**
+ * Sets every hole's corridor width to the same value. UDisc renders a
+ * course's corridor ribbon at one width across the whole map, not per hole,
+ * so this — not the single-hole `setCorridorWidth` — is what the Annotate
+ * Round width control now drives by default. `setCorridorWidth` stays
+ * exported: the domain remains per-hole capable (imported Course Memory
+ * geometry, for instance, can still carry mixed widths), this is just the
+ * bulk operation layered on top of it.
+ */
+export function setAllCorridorWidths(holes: readonly AnnotatedHole[], corridorWidthPx: number): AnnotatedHole[] {
+	return holes.map((hole) => ({ ...hole, corridorWidthPx }));
+}
+
+/**
  * Places `point` on `holeId` according to `mode` — the one entry point the UI
  * click handler needs, so it doesn't have to branch on mode itself.
  */

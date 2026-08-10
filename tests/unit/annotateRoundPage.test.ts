@@ -213,3 +213,59 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		host.remove();
 	});
 });
+
+describe('Annotate Round corridor width — applies to all holes', () => {
+	it('changing the width control updates every hole, not just the active one', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		await flush();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		await flush();
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('2');
+
+		// Hole 2 is active (most recently added). Changing the width here must
+		// carry over to hole 1 as well, per UDisc-parity: one width, every hole.
+		const widthInput = inputEl(host, 'corridor-width');
+		widthInput.value = '120';
+		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-select-1"]')?.click();
+		await flush();
+		expect(inputEl(host, 'corridor-width').value).toBe('120');
+
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-select-2"]')?.click();
+		await flush();
+		expect(inputEl(host, 'corridor-width').value).toBe('120');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('a newly added hole inherits the width currently in use, not the bare default', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(640, 480));
+		await flush();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		await flush();
+
+		const widthInput = inputEl(host, 'corridor-width');
+		widthInput.value = '95';
+		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+
+		// Hole 2 is created after the width change, and must start life at 95
+		// (the width in use) rather than the DEFAULT_CORRIDOR_WIDTH_PX fallback.
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+		await flush();
+		expect(host.querySelector('[data-testid="annotate-round"]')?.getAttribute('data-hole-count')).toBe('2');
+		expect(inputEl(host, 'corridor-width').value).toBe('95');
+
+		unmount(component);
+		host.remove();
+	});
+});
