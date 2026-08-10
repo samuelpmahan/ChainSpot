@@ -251,6 +251,8 @@ Severity is about user-visible consequence, weighted for how much durable data i
 
 ### H1 — A pinch silently cancels a claimed gesture, and two of four claimants never hear about it. **HIGH**
 
+**CLOSED (this commit).** `ImagePane.svelte` and `stitch-map/+page.svelte`'s alignment viewport now pass `onClaimedPointerCancel`.
+
 **Mechanism.** Step **[C]** calls `onClaimedPointerCancel?.(...)` and then `endClaimedGesture()`.
 `ImagePane` and `stitch-map` (both viewports) pass **no** `onClaimedPointerCancel` prop. Worse, both
 `ImagePane` and stitch-map's alignment viewport register their **own** `window` `pointermove`/`up`
@@ -281,6 +283,8 @@ ribbon-editor or annotate-round — they wire the callback.
 
 ### H2 — The pinch branch `preventDefault()`s a mouse `pointerdown` unconditionally — this is bug #1, uncorrected. **HIGH**
 
+**CLOSED (this commit).** The pinch branch now guards `preventDefault()` with `event.pointerType !== 'mouse'`, mirroring `cc7924e`.
+
 **Mechanism.** `cc7924e` made `preventDefault()` conditional on `pointerType !== 'mouse'` in the
 **claimed** path (step **[E]**) for exactly the reason in Part 0 rule 2. Step **[C]** — the pinch
 branch — calls the same `event.preventDefault()` with **no pointer-type check**, and step **[C]** runs
@@ -303,6 +307,8 @@ and a stationary finger.
 ---
 
 ### H3 — Pointer-id mismatch bail-outs leak entries into `activePointers`, producing a permanent phantom-pinch state. **HIGH**
+
+**CLOSED (this commit).** All four mismatch bail-outs (`onPointerMove`, `onPointerUp`, `handleClaimedPointerMove`, `handleClaimedPointerUp`) now delete the owned pointer from `activePointers` before tearing down.
 
 **Mechanism.** Three handlers tear down on an id mismatch **without removing the owned pointer from
 `activePointers`**:

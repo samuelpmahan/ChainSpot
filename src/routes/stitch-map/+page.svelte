@@ -1594,6 +1594,7 @@
 				testid="alignment-viewport"
 				claimPointer={claimAlignmentPointer}
 				onViewportClick={onAlignmentClick}
+				onClaimedPointerCancel={handleTileDragCancel}
 			>
 				{#snippet content()}{/snippet}
 			</ImageViewport>

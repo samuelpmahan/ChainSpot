@@ -141,4 +141,95 @@ describe('P0-008 ImagePane correction interaction', () => {
 		});
 		unmount(component);
 	});
+
+	it('never commits a marker drag that a second touch interrupts into a pinch (H1: onClaimedPointerCancel now wired)', async () => {
+		// Distinct non-zero pointerIds and an explicit 'touch' pointerType are
+		// required to reach ImageViewport's pinch branch at all: jsdom defaults
+		// pointerType to '' and every other helper in this suite dispatches
+		// pointerId 0, so this path was never exercised before.
+		const editor = makeEditor();
+		const host = document.createElement('div');
+		document.body.appendChild(host);
+		const onPointMove = vi.fn(() => ({ ok: true as const }));
+		const component = mount(ImagePane, {
+			target: host,
+			props: {
+				title: 'Source',
+				role: 'source-overview',
+				editor,
+				refresh: 0,
+				pairs: editor.state.controlPointPairs,
+				correctionEnabled: true,
+				onPointMove
+			}
+		});
+
+		const scene = host.querySelector<HTMLElement>('[data-testid="pane-scene-source-overview"]');
+		if (!scene) throw new Error('missing source pane scene');
+		setPaneGeometry(scene);
+		await flush();
+		const baseline = JSON.stringify(editor.state);
+
+		// Start a marker drag with one finger.
+		scene.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				button: 0,
+				pointerId: 11,
+				pointerType: 'touch',
+				clientX: 20,
+				clientY: 30,
+				bubbles: true
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointermove', {
+				pointerId: 11,
+				pointerType: 'touch',
+				clientX: 27,
+				clientY: 36
+			})
+		);
+
+		// A second finger lands inside the viewport: ImageViewport's pinch
+		// branch takes over, cancelling the claimed marker drag via
+		// onClaimedPointerCancel -> onMarkerCancel.
+		scene.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				button: 0,
+				pointerId: 12,
+				pointerType: 'touch',
+				clientX: 90,
+				clientY: 10,
+				bubbles: true
+			})
+		);
+		await flush();
+
+		// The original finger keeps moving and lifts, as it would mid-pinch.
+		// Pre-fix, ImagePane's own (still-attached) window listeners would see
+		// this and commit a move computed against a transform the pinch had
+		// already changed underneath it.
+		window.dispatchEvent(
+			new PointerEvent('pointermove', {
+				pointerId: 11,
+				pointerType: 'touch',
+				clientX: 60,
+				clientY: 65
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointerup', { pointerId: 11, pointerType: 'touch', clientX: 60, clientY: 65 })
+		);
+		await flush();
+
+		expect(onPointMove).not.toHaveBeenCalled();
+		expect(JSON.stringify(editor.state)).toBe(baseline);
+		expect(editor.canUndo).toBe(false);
+
+		window.dispatchEvent(
+			new PointerEvent('pointerup', { pointerId: 12, pointerType: 'touch', clientX: 90, clientY: 10 })
+		);
+		await flush();
+		unmount(component);
+	});
 });

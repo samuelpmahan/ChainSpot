@@ -179,7 +179,11 @@
 		// over the same view transform.
 		if (activePointers.size >= 2) {
 			capturePointer(event);
-			event.preventDefault();
+			// Mirror cc7924e's mouse/touch asymmetry here too: preventDefault on a
+			// mouse-origin pointerdown suppresses compatibility mousemove/mouseup for
+			// the rest of that gesture, which would break a mouse-driven Konva drag
+			// arriving while a touch is already down.
+			if (event.pointerType !== 'mouse') event.preventDefault();
 			if (gesture) endGesture();
 			if (claimedGesture) {
 				onClaimedPointerCancel?.(pointer, event);
@@ -276,6 +280,10 @@
 	function onPointerMove(event: PointerEvent): void {
 		if (!gesture) return;
 		if (event.pointerId !== gesture.pointerId) {
+			// The owning pointer never gets another event once these listeners are
+			// torn down below; leaving it in activePointers would strand it there
+			// forever, letting a later single touch masquerade as a phantom pinch.
+			activePointers.delete(gesture.pointerId);
 			endGesture();
 			return;
 		}
@@ -294,6 +302,9 @@
 	function onPointerUp(event: PointerEvent): void {
 		if (!gesture) return;
 		if (event.pointerId !== gesture.pointerId) {
+			// See onPointerMove: without this the owning pointer is stranded in
+			// activePointers forever.
+			activePointers.delete(gesture.pointerId);
 			endGesture();
 			return;
 		}
@@ -312,6 +323,9 @@
 	function handleClaimedPointerMove(event: PointerEvent): void {
 		if (!claimedGesture) return;
 		if (event.pointerId !== claimedGesture.pointerId) {
+			// See onPointerMove: without this the owning pointer is stranded in
+			// activePointers forever.
+			activePointers.delete(claimedGesture.pointerId);
 			endClaimedGesture();
 			return;
 		}
@@ -323,6 +337,9 @@
 	function handleClaimedPointerUp(event: PointerEvent): void {
 		if (!claimedGesture) return;
 		if (event.pointerId !== claimedGesture.pointerId) {
+			// See onPointerMove: without this the owning pointer is stranded in
+			// activePointers forever.
+			activePointers.delete(claimedGesture.pointerId);
 			endClaimedGesture();
 			return;
 		}
