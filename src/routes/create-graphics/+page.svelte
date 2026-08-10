@@ -61,6 +61,14 @@
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
 	import { consumePendingCourseBadges, getPendingCourseBadges } from '$lib/courseBadgeSession';
+	import {
+		badgesToLabeledPoints,
+		basketsFromHoles,
+		getDefaultCourseLibraryStore,
+		toLibraryHoles,
+		upsertCourse
+	} from '$lib/courseLibrary';
+	import type { CourseLibraryStore } from '$lib/courseLibrary';
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
 	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
 	import type { HoleGraphicPlan } from '$lib/holeGraphics';
@@ -71,9 +79,16 @@
 		decode?: DecodeImageFile;
 		hash?: HashBytes;
 		download?: DownloadBlob;
+		courseLibraryStore?: CourseLibraryStore;
 	}
 
-	let { editor: initialEditor, decode, hash, download }: Props = $props();
+	let { editor: initialEditor, decode, hash, download, courseLibraryStore: initialCourseLibraryStore }: Props =
+		$props();
+	// An explicitly injected store (tests) wins; otherwise every page instance
+	// shares one real IndexedDB connection via the module-level singleton in
+	// courseLibrary.ts.
+	// svelte-ignore state_referenced_locally
+	const courseLibraryStore = initialCourseLibraryStore ?? getDefaultCourseLibraryStore();
 	/**
 	 * Only production-created or session-retrieved editors participate in route
 	 * retention; explicitly injected editors (tests/harnesses) never touch the
@@ -792,6 +807,19 @@
 						'The project changed while saving. The downloaded bundle contains the earlier state — save again to include your latest edits.';
 				}
 				if (!saveError) activityMessage = 'Project bundle saved.';
+				// Keeps the local course library in sync for a project reopened and
+				// resaved here, a path Annotate Round's Done hook never sees. Best
+				// effort: a library write failure must never affect a successful save.
+				try {
+					await upsertCourse(courseLibraryStore, {
+						projectName: result.savedState.project.name,
+						numberBadges: badgesToLabeledPoints(result.savedState.numberBadges),
+						baskets: basketsFromHoles(result.savedState.holes),
+						holes: toLibraryHoles(result.savedState.holes)
+					});
+				} catch {
+					// Ignored — see comment above.
+				}
 				refresh();
 			} else {
 				saveError = result.error.message;

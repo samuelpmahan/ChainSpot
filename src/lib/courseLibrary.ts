@@ -32,7 +32,7 @@ import type { HashBytes, Sha256Hex } from './imageIntake';
 import { applyTransform, transformPoints } from './alignment/transform';
 import { computeSignatureDescriptor, hashSignatureDescriptor, matchSignatures } from './courseSignature';
 import type { CourseSignatureInput, LabeledPoint, SignatureMatchResult } from './courseSignature';
-import type { AnnotatedHole, SourcePoint } from './domain/project';
+import type { AnnotatedHole, HoleNumberBadgeAnchor, SourcePoint } from './domain/project';
 
 export interface CourseLibraryHole {
 	readonly number: number;
@@ -40,6 +40,33 @@ export interface CourseLibraryHole {
 	readonly basket?: SourcePoint;
 	readonly corridorBends: readonly SourcePoint[];
 	readonly corridorWidthPx: number;
+}
+
+/** Adapts persisted badge anchors (`number`) to `courseSignature.ts`'s labeled-point shape (`holeNumber`). */
+export function badgesToLabeledPoints(badges: readonly HoleNumberBadgeAnchor[]): LabeledPoint[] {
+	return badges.map((badge) => ({ holeNumber: badge.number, xPx: badge.xPx, yPx: badge.yPx }));
+}
+
+/** Projects durable `AnnotatedHole` geometry into the minimal library shape: no `id`, no `shots`. */
+export function toLibraryHoles(holes: readonly AnnotatedHole[]): CourseLibraryHole[] {
+	return holes.map((hole) => ({
+		number: hole.number,
+		...(hole.tee ? { tee: hole.tee } : {}),
+		...(hole.basket ? { basket: hole.basket } : {}),
+		corridorBends: hole.corridorBends,
+		corridorWidthPx: hole.corridorWidthPx
+	}));
+}
+
+/**
+ * Derives labeled basket points from durable holes, for a save path that has
+ * no separate CV-detected basket list of its own (Create Graphics reopening
+ * and resaving a bundle, rather than Annotate Round's fresh detection run).
+ */
+export function basketsFromHoles(holes: readonly AnnotatedHole[]): LabeledPoint[] {
+	return holes
+		.filter((hole): hole is AnnotatedHole & { basket: SourcePoint } => hole.basket !== undefined)
+		.map((hole) => ({ holeNumber: hole.number, xPx: hole.basket.xPx, yPx: hole.basket.yPx }));
 }
 
 export interface CourseLibraryEntry {
@@ -133,6 +160,21 @@ export class IndexedDbCourseLibraryStore implements CourseLibraryStore {
 			db.close();
 		}
 	}
+}
+
+let defaultStore: CourseLibraryStore | null = null;
+
+/**
+ * One shared `IndexedDbCourseLibraryStore` for the whole app, constructed
+ * lazily on first use — mirroring `smartStitchWorker`'s singleton pattern in
+ * `stitch/smartImport.ts`. Safe to call during prerendering: the constructor
+ * only stores the `IDBFactory` reference, so it never touches IndexedDB
+ * itself; only `getAll`/`put`/`delete` do, and routes only call those from
+ * interactive, browser-only actions.
+ */
+export function getDefaultCourseLibraryStore(): CourseLibraryStore {
+	defaultStore ??= new IndexedDbCourseLibraryStore();
+	return defaultStore;
 }
 
 export interface UpsertCourseInput {
