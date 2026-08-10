@@ -88,10 +88,10 @@ let cvPromise: Promise<CvModule> | null = null;
  */
 export function loadCv(): Promise<CvModule> {
 	if (!cvPromise) {
-		// Indirected through `cvRuntime` so the awaited namespace is one this
+		// Indirected through `cv/runtime` so the awaited namespace is one this
 		// codebase controls; see that module for why importing the OpenCV package
 		// directly here would break.
-		cvPromise = import('./cvRuntime').then(({ getCv }) => getCv() as Promise<CvModule>);
+		cvPromise = import('../cv/runtime').then(({ getCv }) => getCv() as Promise<CvModule>);
 	}
 	return cvPromise;
 }

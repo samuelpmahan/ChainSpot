@@ -1,6 +1,7 @@
 import type { HoleNumberScaleAnchor } from './holeNumberDetection';
 import { deriveCanonicalUiScalePx } from './cvCalibration';
 import type { UiScalePx } from './cvCalibration';
+import type { Candidate, CvRaster } from '../cv/types';
 
 /**
  * Tee-pad proposal detection for the clean UDisc-style course map fixture.
@@ -23,10 +24,8 @@ export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop';
 
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 
-export interface TeePadCandidate {
-	/** Source-image center, in pixels. */
-	readonly xPx: number;
-	readonly yPx: number;
+/** xPx/yPx (from `Candidate`) are the fitted rectangle's source-image center. */
+export interface TeePadCandidate extends Candidate {
 	/** Major-axis direction, normalized to [0, 180). */
 	readonly orientationDeg: number;
 	/** Source-image dimensions of the fitted rotated rectangle. */
@@ -93,7 +92,7 @@ export interface OccludedEdgeLoopResult {
  * raster pixel: use `1` for full resolution and `1 / analysisScale` after a
  * downsample. The bytes are standard RGBA row-major pixels.
  */
-export interface TeePadRaster {
+export interface TeePadRaster extends CvRaster {
 	readonly rgba: Uint8Array | Uint8ClampedArray;
 	readonly widthPx: number;
 	readonly heightPx: number;

@@ -75,6 +75,7 @@
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
+	import { acceptCandidate } from '$lib/cv/types';
 
 	/** Shared label text for a point kind, reused by both radial-menu wedges and the hole bar. */
 	const POINT_KIND_LABELS: Record<HolePlacementMode, string> = {
@@ -963,8 +964,8 @@
 					corridorBends: [],
 					corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
 				}),
-				tee: keepTee ? existing!.tee! : { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
-				basket: keepBasket ? existing!.basket! : { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
+				tee: keepTee ? existing!.tee! : acceptCandidate(proposal.tee!),
+				basket: keepBasket ? existing!.basket! : acceptCandidate(proposal.basket!)
 			};
 			existingByNumber.set(proposal.number, next);
 		}
@@ -1009,7 +1010,7 @@
 		const candidate = basketCandidates[selectedBasketCandidate];
 		if (!candidate) return;
 		holes = holes.map((hole) =>
-			hole.id === activeHoleId ? { ...hole, basket: { xPx: candidate.xPx, yPx: candidate.yPx } } : hole
+			hole.id === activeHoleId ? { ...hole, basket: acceptCandidate(candidate) } : hole
 		);
 		selectedBasketCandidate = null;
 	}

@@ -23,18 +23,20 @@
  * tee.
  */
 
+import type { Candidate } from '../cv/types';
+
 export const DEFAULT_COURSE_HOLE_NUMBERS: readonly number[] = Array.from(
 	{ length: 18 }, (_, index) => index + 1
 );
 
-/** A source-image point emitted by an endpoint detector. */
-export interface CoursePointCandidate {
-	readonly xPx: number;
-	readonly yPx: number;
+/**
+ * A source-image point emitted by an endpoint detector. `score` (from
+ * `Candidate`) is the compatibility field for detectors that call confidence
+ * `score` rather than `confidence`.
+ */
+export interface CoursePointCandidate extends Candidate {
 	/** Normalized detector confidence when available (0..1). */
 	readonly confidence?: number;
-	/** Compatibility field for current detectors that call confidence `score`. */
-	readonly score?: number;
 }
 
 /** One possible digit interpretation for a located number-badge glyph. */

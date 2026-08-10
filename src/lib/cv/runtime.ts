@@ -46,15 +46,15 @@
  *
  * Since a static import breaks (1) and a dynamic import breaks (2), and both
  * runners execute *this* file, the static import is isolated in
- * `cvRuntimeBrowser.ts` and reached only via a dynamic `import()` of that
+ * `runtimeBrowser.ts` and reached only via a dynamic `import()` of that
  * (real-ESM, not CJS) module from the browser branch below. The Node branch
  * returns before that dynamic import happens, so vitest's SSR runner never
- * loads `cvRuntimeBrowser.ts` and never hits bug (1); dynamically importing
+ * loads `runtimeBrowser.ts` and never hits bug (1); dynamically importing
  * our own already-real-ESM module never hits bug (2), because it isn't a CJS
  * package needing bundler interop synthesis.
  *
  * Lazy loading is preserved throughout because nothing imports *this* module
- * statically either — the only reference is a dynamic `import('./cvRuntime')`
+ * statically either — the only reference is a dynamic `import('../cv/runtime')`
  * inside `cvMatch.ts` — so the WASM payload is only fetched once `getCv()`
  * actually runs, not at app/worker startup.
  */
@@ -68,6 +68,6 @@ export async function getCv(): Promise<unknown> {
 		// that `@techstark/opencv-js`'s factory() produced, unproxied.
 		return await require('@techstark/opencv-js');
 	}
-	const { default: cvReady } = await import('./cvRuntimeBrowser');
+	const { default: cvReady } = await import('./runtimeBrowser');
 	return await cvReady;
 }
