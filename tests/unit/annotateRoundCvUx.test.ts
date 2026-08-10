@@ -508,6 +508,68 @@ describe('PART C — click-to-assign', () => {
 		expect(host.querySelector('[data-testid="tee-marker-2"]')).not.toBeNull();
 	});
 
+	it('clicking the active hole\'s own tee opens a "Delete" confirmation chip; confirming clears the tee', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await detectReady(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="course-summary-jump-review"]')?.click();
+		await flush();
+
+		// Instant-assign hole 2's own tee candidate first, so hole 2 has a tee.
+		const ownTee = screenPointFor(host, 140, 80);
+		dispatchClick(host, ownTee.x, ownTee.y);
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')).not.toBeNull();
+
+		// Clicking the SAME candidate — already this hole's own tee — must offer to delete it.
+		// Offset just outside the real marker's fixed hit radius (12px) but still
+		// inside the candidate overlay's zoom-scaled hit radius, exactly like a
+		// real click landing on the wider "Detected tee" badge rather than dead
+		// center on the narrower placed-marker hit target.
+		dispatchClick(host, ownTee.x + 16, ownTee.y);
+		await flush();
+
+		const confirm = host.querySelector('[data-testid="candidate-assign-confirm"]');
+		expect(confirm).not.toBeNull();
+		expect(confirm?.textContent).toContain('Delete tee on hole 2');
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="candidate-assign-confirm-accept"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="candidate-assign-confirm"]')).toBeNull();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')).toBeNull();
+	});
+
+	it('cancelling the delete confirmation chip leaves the tee untouched', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await detectReady(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="course-summary-jump-review"]')?.click();
+		await flush();
+
+		const ownTee = screenPointFor(host, 140, 80);
+		dispatchClick(host, ownTee.x, ownTee.y);
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')).not.toBeNull();
+
+		dispatchClick(host, ownTee.x + 16, ownTee.y);
+		await flush();
+		expect(host.querySelector('[data-testid="candidate-assign-confirm"]')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="candidate-assign-confirm-cancel"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="candidate-assign-confirm"]')).toBeNull();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')).not.toBeNull();
+	});
+
 	it('a pointerdown outside the confirmation chip dismisses it without acting', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));

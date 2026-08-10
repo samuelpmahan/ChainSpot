@@ -351,7 +351,7 @@
 		readonly point: SourcePoint;
 		readonly holeId: string;
 		readonly holeNumber: number;
-		readonly mode: 'replace' | 'move';
+		readonly mode: 'replace' | 'move' | 'delete';
 	}
 	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
 	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
@@ -810,7 +810,7 @@
 		const active = activeHole();
 		if (!active) return `Detected ${label}`;
 		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return `Detected ${label} — already hole ${active.number}'s ${label}`;
+		if (sourceHole?.id === active.id) return `Detected ${label} — hole ${active.number}'s own ${label}, click to remove`;
 		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
 		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace`;
 		if (sourceHole) return `Detected ${label} — move to hole ${active.number}`;
@@ -829,7 +829,17 @@
 		const active = activeHole();
 		if (!active) return;
 		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return; // Already exactly this hole's point; nothing to do.
+		if (sourceHole?.id === active.id) {
+			// Already exactly this hole's point: clicking it again offers to remove it.
+			candidateAssignConfirm = {
+				kind,
+				point,
+				holeId: active.id,
+				holeNumber: active.number,
+				mode: 'delete'
+			};
+			return;
+		}
 		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
 		if (!activeHasFeature && !sourceHole) {
 			holes = assignCandidateToHole(holes, active.id, kind, point);
@@ -845,11 +855,15 @@
 		};
 	}
 
-	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath. */
+	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath; delete clears the hole's feature instead. */
 	function confirmCandidateAssign(): void {
 		if (!candidateAssignConfirm) return;
-		const { holeId, kind, point } = candidateAssignConfirm;
-		holes = assignCandidateToHole(holes, holeId, kind, point);
+		const { holeId, kind, point, mode } = candidateAssignConfirm;
+		if (mode === 'delete') {
+			holes = kind === 'tee' ? removeTee(holes, holeId) : removeBasket(holes, holeId);
+		} else {
+			holes = assignCandidateToHole(holes, holeId, kind, point);
+		}
 		candidateAssignConfirm = null;
 		vibrate(8);
 	}
@@ -2610,7 +2624,9 @@
 						>
 							{candidateAssignConfirm.mode === 'replace'
 								? `Replace ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
-								: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
+								: candidateAssignConfirm.mode === 'delete'
+									? `Delete ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
+									: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
 						</button>
 						<button
 							type="button"
