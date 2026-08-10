@@ -121,6 +121,49 @@ describe('create-graphics geocode search — keyed', () => {
 		host.remove();
 	});
 
+	// Must run before any test below that actually mounts `MapConfirm` (see this
+	// file's header comment): the script tag it injects persists in
+	// `document.head` for the rest of this file's module lifetime, which would
+	// make this test's "no script tag" assertion a false negative if it ran later.
+	it('a Places HTTP error (e.g. a key rejected by Google — bad restriction, revoked, disabled API) fails soft: inline error, loading resets, no silent Nominatim fallback, no crash', async () => {
+		setGoogleMapsApiKeyForTesting(TEST_KEY);
+		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+			expect(String(url)).toContain('places.googleapis.com');
+			// A syntactically valid but rejected key (referrer/API restriction
+			// mismatch, revoked, or billing disabled) surfaces from Places as a
+			// non-200, same as any other HTTP error — there is no distinct
+			// "bad key" response shape to special-case.
+			return new Response('', { status: 403 });
+		});
+		vi.stubGlobal('fetch', fetchSpy);
+
+		const { host, component } = mountPage();
+		await search(host, "Dash's Track");
+
+		// Unlike a `no-results` response, an HTTP-error response never falls back
+		// to Nominatim — exactly one request was made.
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+		const error = host.querySelector('[data-testid="geocode-error"]');
+		expect(error?.textContent).toContain('403');
+		expect(host.querySelector('[data-testid="geocode-results"]')).toBeNull();
+		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
+		expect(googleScriptTag()).toBeNull();
+
+		// The loading state must resolve either way (`finally`) — no stuck spinner.
+		const searchButton = host.querySelector<HTMLButtonElement>('[data-testid="geocode-search-button"]');
+		expect(searchButton?.disabled).toBe(false);
+		expect(searchButton?.textContent?.trim()).toBe('Search');
+
+		// The rest of the page is still usable: manual lat/lon entry never depended
+		// on the search succeeding.
+		expect(host.querySelector('[data-testid="naip-lat"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="naip-fetch-button"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('Search calls Places (not Nominatim), shows the Google attribution, and picking a result mounts MapConfirm + injects the script tag', async () => {
 		setGoogleMapsApiKeyForTesting(TEST_KEY);
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
