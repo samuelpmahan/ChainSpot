@@ -25,8 +25,84 @@
 	let armMessage = $state<string | null>(null);
 	let armFailed = $state(false);
 
+	// The rail's expanded form is comfortable on a wide monitor and crowded on a
+	// 13" laptop. Below this width it opens collapsed by default; above it, the
+	// original expanded-by-default behavior is unchanged.
+	const NARROW_VIEWPORT_MAX_WIDTH = 1280;
+	const COLLAPSE_PREF_KEY = 'chainspot.demo.railCollapsed';
+
+	/**
+	 * A visitor's own expand/collapse choice, remembered in `localStorage` (a
+	 * standing preference, unlike the per-run tour position in `sessionStorage`)
+	 * so it always wins over the viewport-based default below.
+	 */
+	function readCollapsePreference(): boolean | null {
+		try {
+			const raw = localStorage.getItem(COLLAPSE_PREF_KEY);
+			if (raw === 'true') return true;
+			if (raw === 'false') return false;
+		} catch {
+			// Storage can throw outright in some privacy modes; fall through to
+			// the viewport-based default.
+		}
+		return null;
+	}
+
+	function writeCollapsePreference(collapsed: boolean): void {
+		try {
+			localStorage.setItem(COLLAPSE_PREF_KEY, String(collapsed));
+		} catch {
+			// Non-fatal: the choice just won't be remembered for next time.
+		}
+	}
+
+	function toggleCollapsed(): void {
+		const next = !demoTour.collapsed;
+		demoTour.setCollapsed(next);
+		writeCollapsePreference(next);
+	}
+
+	/**
+	 * Applies the initial collapsed state for a tour that just started fresh in
+	 * this tab. A stored preference always wins; otherwise the rail opens
+	 * collapsed on narrow viewports and expanded on wide ones (today's default).
+	 */
+	function applyInitialCollapseDefault(): void {
+		const preference = readCollapsePreference();
+		if (preference !== null) {
+			if (preference !== demoTour.collapsed) demoTour.setCollapsed(preference);
+			return;
+		}
+		if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+		if (window.matchMedia(`(max-width: ${NARROW_VIEWPORT_MAX_WIDTH}px)`).matches) {
+			demoTour.setCollapsed(true);
+		}
+	}
+
+	// True only for the one mount where `restore()` resumes a tour that was
+	// already active (a full-page reload mid-tour) — that resumed `collapsed`
+	// value must be left alone, never re-defaulted.
+	let skipNextActivationDefault = false;
+
 	onMount(() => {
 		demoTour.restore();
+		skipNextActivationDefault = demoTour.active;
+	});
+
+	// Fires once when the tour transitions from inactive to active. On the
+	// initial mount that only happens via a resumed (reloaded) tour, which the
+	// flag above skips; every later transition is a fresh "Start demo" click,
+	// which gets the narrow-viewport default applied.
+	$effect(() => {
+		const active = demoTour.active;
+		untrack(() => {
+			if (!active) return;
+			if (skipNextActivationDefault) {
+				skipNextActivationDefault = false;
+				return;
+			}
+			applyInitialCollapseDefault();
+		});
 	});
 
 	/**
@@ -155,7 +231,7 @@
 					class="ghost"
 					data-testid="demo-collapse"
 					aria-expanded={!demoTour.collapsed}
-					onclick={() => demoTour.setCollapsed(!demoTour.collapsed)}
+					onclick={toggleCollapsed}
 				>
 					{demoTour.collapsed ? 'Expand' : 'Collapse'}
 				</button>
@@ -258,8 +334,24 @@
 		font-size: 0.875rem;
 	}
 
+	/*
+	 * Collapsed, the rail docks bottom-LEFT instead of bottom-right. Even
+	 * collapsed it's a pill sitting right on top of whatever corner UI the
+	 * current route keeps in the bottom-right — the capture cards' Replace/
+	 * Remove buttons on Stitch Map, the on-canvas zoom cluster
+	 * (`viewport-zoom-*`) on the annotate/create-graphics panes. The
+	 * bottom-right corner is otherwise reserved for the product's own controls;
+	 * bottom-left is clear on every route the tour visits.
+	 */
 	.demo-rail.collapsed {
 		max-height: none;
+		left: max(1rem, env(safe-area-inset-left));
+		right: auto;
+		/* A pill only needs to be as wide as "Demo · Step N of 6 · <route> ·
+		   Expand · Exit demo" — not the expanded panel's 24rem, which would
+		   needlessly reach further across whatever sits at the bottom of the
+		   page than the pill's own content does. */
+		width: fit-content;
 	}
 
 	.rail-header {

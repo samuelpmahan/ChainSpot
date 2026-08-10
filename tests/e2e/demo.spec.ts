@@ -24,6 +24,19 @@ async function gotoDemo(page: Page): Promise<void> {
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 }
 
+/**
+ * The rail now opens collapsed by default at this suite's (narrow, <=1280px)
+ * viewport — see `DemoGuide.svelte` — so cases that drive the step body or
+ * footer (`demo-next`, `demo-load-inputs`, …) must expand it first. A no-op
+ * when it's already expanded.
+ */
+async function expandRail(page: Page): Promise<void> {
+	const collapseToggle = page.getByTestId('demo-collapse');
+	if ((await collapseToggle.getAttribute('aria-expanded')) === 'false') {
+		await collapseToggle.click();
+	}
+}
+
 test('walkthrough drives the real Stitch Map with the real course captures', async ({ page }) => {
 	// The demo loads four full-size phone screenshots and then pays the
 	// smart-import worker's one-time OpenCV WASM compile, exactly as a first-time
@@ -84,6 +97,7 @@ test('the round-annotation step arrives through the ordinary import banner and c
 	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
 	await expect(page.getByTestId('handoff-import')).toBeVisible();
 
+	await expandRail(page);
 	await page.getByTestId('demo-next').click();
 	await expect(page).toHaveURL(/\/create-graphics$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 6 of 6');
@@ -123,6 +137,7 @@ test('the rail stays usable when the visitor is already on the step route, and f
 
 	// Arming from here must reach the already-mounted page, not report a
 	// success the visitor cannot see.
+	await expandRail(page);
 	await page.getByTestId('demo-load-inputs').click();
 	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
 
