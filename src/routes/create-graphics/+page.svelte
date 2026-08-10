@@ -60,6 +60,7 @@
 		getPendingAnnotatedRound,
 		setActiveAnnotatedRound
 	} from '$lib/annotatedRoundSession';
+	import { consumePendingCourseBadges, getPendingCourseBadges } from '$lib/courseBadgeSession';
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
 	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
 	import type { HoleGraphicPlan } from '$lib/holeGraphics';
@@ -1035,6 +1036,14 @@
 			// project and restored on reopen. The session artifact is only the transport;
 			// `editor.state.holes` is the single source of truth from this point on.
 			editor.setHoles(round.holes);
+			// Badge/basket anchors ride a separate session slot (courseBadgeSession.ts)
+			// since AnnotatedRound can never carry them (Done-boundary purity rule);
+			// this is the only place they cross into durable ProjectState.numberBadges.
+			const pendingBadges = getPendingCourseBadges();
+			if (pendingBadges) {
+				editor.setNumberBadges(pendingBadges.numberBadges);
+				consumePendingCourseBadges();
+			}
 			consumePendingAnnotatedRound();
 			setActiveAnnotatedRound(round);
 			annotatedRound = round;

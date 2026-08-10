@@ -11,7 +11,12 @@ import {
 	getPendingAnnotatedRound,
 	setPendingAnnotatedRound
 } from '../../src/lib/annotatedRoundSession';
-import { retainEditor } from '../../src/lib/editorSession';
+import {
+	consumePendingCourseBadges,
+	getPendingCourseBadges,
+	setPendingCourseBadges
+} from '../../src/lib/courseBadgeSession';
+import { retainEditor, takeRetainedEditor } from '../../src/lib/editorSession';
 import { createAnnotatedRound } from '../../src/lib/domain/annotatedRound';
 import type { AnnotatedRound } from '../../src/lib/domain/annotatedRound';
 
@@ -71,6 +76,7 @@ function textOf(host: HTMLElement, testId: string): string | null {
 afterEach(() => {
 	document.body.replaceChildren();
 	consumePendingAnnotatedRound();
+	consumePendingCourseBadges();
 });
 
 describe('Create Graphics receipt of a pending AnnotatedRound (soft boundary)', () => {
@@ -122,5 +128,51 @@ describe('Create Graphics receipt of a pending AnnotatedRound (soft boundary)', 
 
 		unmount(loaded.component);
 		loaded.host.remove();
+	});
+});
+
+describe('course badge/basket handoff (Course Memory)', () => {
+	it('carries pending numberBadges into durable ProjectState on auto-intake, and consumes the slot', async () => {
+		// A prior test in this file may leave an editor with a source image
+		// already loaded retained under the 'create-graphics' key, which would
+		// steer this mount onto the banner branch instead of auto-intake.
+		takeRetainedEditor('create-graphics');
+		const round = annotatedRoundOf('udisc-round.png', 300, 200);
+		setPendingAnnotatedRound(round);
+		setPendingCourseBadges({
+			numberBadges: [
+				{ number: 1, xPx: 10, yPx: 20, confidence: 0.91 },
+				{ number: 2, xPx: 210, yPx: 40, confidence: 0.77 }
+			],
+			baskets: [{ holeNumber: 1, xPx: 280, yPx: 180 }]
+		});
+
+		const mounted = mountPage(decodeOf(300, 200));
+		await flush();
+
+		expect(getPendingCourseBadges()).toBeNull();
+
+		unmount(mounted.component);
+		mounted.host.remove();
+
+		const retained = takeRetainedEditor('create-graphics');
+		expect(retained?.state.numberBadges).toEqual([
+			{ number: 1, xPx: 10, yPx: 20, confidence: 0.91 },
+			{ number: 2, xPx: 210, yPx: 40, confidence: 0.77 }
+		]);
+	});
+
+	it('leaves numberBadges empty when no course badges were pending', async () => {
+		takeRetainedEditor('create-graphics');
+		const round = annotatedRoundOf('udisc-round-2.png', 300, 200);
+		setPendingAnnotatedRound(round);
+
+		const mounted = mountPage(decodeOf(300, 200));
+		await flush();
+		unmount(mounted.component);
+		mounted.host.remove();
+
+		const retained = takeRetainedEditor('create-graphics');
+		expect(retained?.state.numberBadges).toEqual([]);
 	});
 });

@@ -13,7 +13,10 @@
 	import type { PendingHandoff } from '$lib/stitch/handoff';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
+	import type { HoleNumberBadgeAnchor } from '$lib/domain/project';
 	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
+	import { setPendingCourseBadges } from '$lib/courseBadgeSession';
+	import type { LabeledPoint } from '$lib/courseBadgeSession';
 	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
@@ -173,6 +176,17 @@
 	 * specific raster and make no sense against a different one.
 	 */
 	let holes = $state<AnnotatedHole[]>([]);
+	/**
+	 * Hole-number badge and basket positions keyed by resolved hole number,
+	 * captured from `handleDetectCourse`'s grammar result for course-shape
+	 * signature use (Course Memory) — never authoritative like `holes`, and
+	 * cleared on the same source-image-replacement lifecycle. Captured
+	 * regardless of a proposal's `status`: badge assignment (courseGrammar's
+	 * Stage 1) succeeds independently of tee/basket, so an "incomplete" hole
+	 * can still contribute a good badge point to the signature.
+	 */
+	let numberBadges = $state<HoleNumberBadgeAnchor[]>([]);
+	let labeledBaskets = $state<LabeledPoint[]>([]);
 	let activeHoleId = $state<string | null>(null);
 	let basketCandidates = $state<readonly BasketCandidate[]>([]);
 	let selectedBasketCandidate = $state<number | null>(null);
@@ -692,6 +706,8 @@
 	function handleSourceDomainChanged(): void {
 		refresh();
 		holes = [];
+		numberBadges = [];
+		labeledBaskets = [];
 		activeHoleId = null;
 		radialMenu = null;
 		basketCandidates = [];
@@ -803,6 +819,25 @@
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
 			basketCandidates = result.baskets;
+			// Captured regardless of proposal.status: badge/basket ownership
+			// (courseGrammar's Stages 1 and 4) each succeed independently of the
+			// hole's overall tee/basket-complete status, so an "incomplete" or
+			// "review" hole can still contribute a good signature point.
+			numberBadges = result.grammar.holes
+				.filter((proposal) => proposal.numberBadge !== undefined)
+				.map((proposal) => ({
+					number: proposal.number,
+					xPx: proposal.numberBadge!.xPx,
+					yPx: proposal.numberBadge!.yPx,
+					confidence: proposal.numberBadge!.confidence
+				}));
+			labeledBaskets = result.grammar.holes
+				.filter((proposal) => proposal.basket !== undefined)
+				.map((proposal) => ({
+					holeNumber: proposal.number,
+					xPx: proposal.basket!.xPx,
+					yPx: proposal.basket!.yPx
+				}));
 			const assignedNumbers = result.numberDetection.candidates.filter(
 				(candidate) => candidate.label !== undefined
 			).length;
@@ -1000,6 +1035,7 @@
 				return;
 			}
 			setPendingAnnotatedRound(round);
+			setPendingCourseBadges({ numberBadges, baskets: labeledBaskets });
 			await goto(`${base}/create-graphics`);
 		} finally {
 			doneRunning = false;
