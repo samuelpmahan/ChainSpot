@@ -1323,8 +1323,9 @@
 	<h2>Stitch Map</h2>
 	<p class="protocol">
 		Capture four screenshots of the same map at one zoom and orientation, then load them in
-		this order: upper-left, upper-right, lower-left, lower-right, with about 20–30% overlap
-		between neighbors. This session lives only in this tab; reloading the page clears it.
+		this order: upper-left, upper-right, lower-left, lower-right. Neighbors need at least
+		about 20% overlap, and more is always fine — just make sure all four are different
+		captures. This session lives only in this tab; reloading the page clears it.
 	</p>
 
 	<section class="smart-import-section" aria-labelledby="smart-import-heading">

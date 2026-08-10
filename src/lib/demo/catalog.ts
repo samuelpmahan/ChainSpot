@@ -141,7 +141,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		actions: [
 			'Read the status line: it names which capture landed in which corner and how confident the inference was.',
 			'Check the proposed crop — the phone status bar and UDisc chrome are trimmed from all four captures at once.',
-			'If the confidence line recommends review — these two left-hand captures overlap almost completely, so it will — nudge a tile with the arrow keys or press Snap. Every automatic decision is reported with its confidence and stays fully correctable.',
+			'Nudge a tile with the arrow keys, or press Snap, to see that every automatic decision is reported with its confidence and stays fully correctable.',
 			'When the arrangement reads as connected, choose "Use as UDisc source" to carry the stitched PNG forward.'
 		],
 		mechanism:

@@ -136,24 +136,38 @@ Advancing only navigates when the next step lives on a different route. Steps 3
 through 5 all happen on Create Graphics, and re-navigating would throw away the
 basemap and correspondences the visitor just created.
 
-## What the walkthrough claims, and where it is honest
+## What building the demo found
 
-Step 1 is the load-bearing one, and on this dataset the product reports
-"usable; review recommended" with a direction-mismatch warning: the two
-left-hand captures overlap almost completely in the vertical direction, so
-corner labelling is genuinely ambiguous. The computed placements are still
-correct and the exported composite is still the right map.
+Step 1 was the load-bearing one, and running it on this dataset surfaced a real
+defect worth fixing rather than narrating around: the product reported "usable;
+review recommended" with a direction-mismatch warning on captures that were
+placed perfectly correctly. The cause was that these captures overlap
+generously, and the more content two tiles share, the more readily that shared
+region also explains itself under the *other* orientation hypothesis. The
+warning therefore fired hardest at users who captured most carefully.
 
-The step's narration says so up front rather than hoping nobody reads the status
-line. A product that shows its confidence and stays correctable is a better
-thing to demonstrate than one that pretends to be certain, and a prospect who
-spots an unmentioned warning stops believing the rest of the tour.
+The diagnostic now reports a direction mismatch only on an edge that is also
+weak in the orientation the layout requires, where it is genuine evidence about
+why that edge is weak. On a strongly matching edge, the committed placement came
+from a near-perfect direct measurement and there is nothing a user could act on.
+The demo dataset now reports "strong" with no warnings.
 
-For the same reason, `tests/e2e/demo.spec.ts` asserts what matters to a visitor —
-four distinct captures placed, an arrangement the product itself calls
-exportable — and not which corner each file lands in. Pinning corner labelling
-there would make it a Smart Import regression test wearing a demo's clothes, and
-it would fail for reasons that have nothing to do with the demo.
+The same pass added the case that generous overlap was being confused with:
+the same screenshot supplied twice, where no 2×2 exists and any arrangement
+stacks two tiles and exports a map missing a quarter of the course. That is
+rejected before scoring, naming both files. See `src/lib/stitch/duplicates.ts`.
+
+Worth knowing for anything similar: the browser does **not** run
+`smartImportFiles`. `smartStitch.worker.ts` is a second implementation of the
+same pipeline, and a check added only to the in-process path passes its unit
+tests while doing nothing in the product. The duplicate check is in both, with
+one shared message builder.
+
+`tests/e2e/demo.spec.ts` asserts what matters to a visitor — four distinct
+captures placed, an arrangement the product itself calls exportable — and not
+which corner each file lands in. Pinning corner labelling there would make it a
+Smart Import regression test wearing a demo's clothes, and it would fail for
+reasons that have nothing to do with the demo.
 
 ## Files
 

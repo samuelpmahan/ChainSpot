@@ -25,6 +25,8 @@ import { assignFour } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
 import { proposeCropDetailed } from './autoCrop';
 import { classifyLayout } from './diagnostics';
+import { findDuplicateRasters } from './duplicates';
+import type { DuplicateRasterPair } from './duplicates';
 import { DEFAULT_CROP_ANALYSIS_MAX_DIM, DEFAULT_MAX_ANALYSIS_DIM } from './analysis';
 import type { AnalysisRaster, RasterRegion } from './analysis';
 import { matcherRegionFromCrop } from './cropGate';
@@ -56,6 +58,12 @@ interface WorkerReply {
 	readonly ok: boolean;
 	readonly token: string;
 	readonly message?: string;
+	/**
+	 * Set instead of `message` when analysis stopped because two supplied images
+	 * are pixel-identical. Indices are into the request's `bitmaps`, which the
+	 * caller maps back to file names for the user-facing sentence.
+	 */
+	readonly duplicate?: DuplicateRasterPair;
 	readonly assignment?: AutoLayout['assignment'];
 	readonly placements?: AutoLayout['placements'];
 	readonly cropProposal?: ReturnType<typeof proposeCropDetailed>['insets'];
@@ -104,6 +112,17 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			const region = matcherRegionFromCrop(crop, bitmap.width, bitmap.height);
 			return rasterFromBitmap(bitmap, DEFAULT_MAX_ANALYSIS_DIM, region ?? undefined);
 		});
+		// Rejected before scoring: with the same screenshot twice there is no 2×2
+		// to find, so any arrangement `assignFour` returned would stack two tiles
+		// and export a map silently missing a quarter of the course. Reported by
+		// raster index because only the caller knows the file names.
+		const duplicate = findDuplicateRasters(matcher);
+		if (duplicate) {
+			const reply: WorkerReply = { ok: false, token, duplicate };
+			(self as unknown as Worker).postMessage(reply);
+			return;
+		}
+
 		const layout = await assignFour(matcher);
 		const diagnostic = classifyLayout(layout);
 		// Crop confidence is independent of layout confidence (see cropGate.ts):

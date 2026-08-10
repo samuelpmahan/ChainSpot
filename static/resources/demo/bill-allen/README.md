@@ -16,14 +16,12 @@ placement from image content and never from the file name, so handing it a
 shuffled, position-free set is an honest demonstration rather than a staged one.
 Keep it that way if these files are ever replaced.
 
-The corner each capture is *labelled* with is the product's own judgement, and
-on this course it is worth understanding before showing it to anyone. The two
-left captures overlap almost completely in the vertical direction, so Smart
-Import reports "usable; review recommended" with a direction-mismatch warning
-and may label the two left captures' corners the other way up. The placements it
-computes are still correct and the exported composite is still the right map —
-which is exactly the point the walkthrough makes at this step: every automatic
-decision is shown with its confidence and stays correctable by hand.
+These captures overlap generously — the two left-hand ones share most of their
+content. That is a supported capture style, not a flaw in the dataset: more
+overlap means stronger neighbor matches. Smart Import may label the two
+left-hand captures' corners the other way up, because with that much shared
+content either vertical ordering explains the overlap. The placements it
+computes are correct either way and the exported composite is the right map.
 
 The clean basemap for Create Graphics is not stored here. The walkthrough
 fetches it live from USGS NAIP after locating the course through OpenStreetMap

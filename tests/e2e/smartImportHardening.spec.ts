@@ -114,3 +114,39 @@ test('a reduced-overlap import still commits automatically, preserves all files,
 
 	expect(externalRequests).toEqual([]);
 });
+
+/**
+ * The duplicate check runs inside the smart-stitch worker, which unit tests
+ * cannot reach — the in-process `smartImportFiles` path they exercise is a
+ * separate implementation of the same pipeline. This case is the only coverage
+ * of the path the browser actually takes, and it pins both halves of the rule:
+ * the same screenshot twice is refused by name, and four distinct captures that
+ * merely overlap heavily are not.
+ */
+test('the same screenshot supplied twice is rejected by name, leaving the session untouched', async ({
+	page
+}) => {
+	test.setTimeout(90000);
+	await gotoApp(page);
+
+	// A first valid import establishes a session that must survive the rejection.
+	await page.getByTestId('smart-import-input').setInputFiles(STRONG_FILES);
+	await expect(page.getByTestId('smart-import-assignment')).toBeVisible({ timeout: 60000 });
+	const committed = await page.getByTestId('smart-import-slot-upper-left').innerText();
+
+	const duplicated = [
+		STRONG_FILES[0],
+		STRONG_FILES[1],
+		STRONG_FILES[2],
+		{ ...STRONG_FILES[0], name: 'smart-ll-copy.png' }
+	];
+	await page.getByTestId('smart-import-input').setInputFiles(duplicated);
+
+	const error = page.getByTestId('smart-import-error');
+	await expect(error).toBeVisible({ timeout: 60000 });
+	// Both files are named, so the user can tell which selection to fix.
+	await expect(error).toContainText('smart-ll-copy.png');
+	await expect(error).toContainText('smart-ll.png');
+	await expect(page.getByTestId('stitch-status')).toContainText('the current session is unchanged');
+	await expect(page.getByTestId('smart-import-slot-upper-left')).toHaveText(committed);
+});
