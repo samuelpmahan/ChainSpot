@@ -139,7 +139,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 }
 
 describe('Annotate Round radial menu', () => {
-	it('opens on an empty-space click with a button per point kind not yet on the hole, and places a tee', async () => {
+	it('in the default Map mode, opens on an empty-space click with a button per course-geometry kind not yet on the hole (no shot), and places a tee', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -153,7 +153,7 @@ describe('Annotate Round radial menu', () => {
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-tee"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-basket"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-shot"]')).toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-bend"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
 
@@ -212,6 +212,33 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('in Round mode, opens on an empty-space click with a shot action (hole active) and a walk action, and places a shot', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+		host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]')?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-action-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-basket"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-bend"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-walk"]')).not.toBeNull();
+
+		clickAction(host, 'shot');
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="shot-marker-1-0"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();

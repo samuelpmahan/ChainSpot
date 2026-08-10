@@ -9,6 +9,15 @@ import type { Page } from '@playwright/test';
  * and the product — not the demo — computes what they then see. It also pins
  * the escape hatch, since a prospective customer who cannot leave the tour is
  * worse off than one who never started it.
+ *
+ * The script now tells the whole product story in six steps: build the map
+ * once (stitch, annotate in Map mode), put one course on air (basemap +
+ * export), reload the browser for real, then annotate a *played round* of the
+ * same course (Round mode: throws + walking path) purely from what Course
+ * Memory remembered, and export again. This file does not attempt to drive
+ * the reload step itself — a real `window.location.assign` mid-test is
+ * exactly the kind of thing worth a dedicated, deliberately isolated case
+ * rather than folding it into these broader flows.
  */
 async function gotoDemo(page: Page): Promise<void> {
 	await page.goto('/demo');
@@ -29,7 +38,7 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	await expect(page).toHaveURL(/\/stitch-map$/);
 	await expect(page.getByTestId('stitch-map')).toBeVisible();
 	await expect(page.getByTestId('demo-guide')).toBeVisible();
-	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 1 of 5');
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 1 of 6');
 
 	// The arrangement is produced by the product's own inference over the supplied
 	// pixels. The assertion is deliberately on the outcome that matters to a
@@ -37,7 +46,9 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	// product itself calls exportable — not on which corner each file lands in.
 	// Corner labelling is the product's judgement on real, heavily overlapping
 	// captures; pinning it here would make this a smart-import regression test
-	// wearing a demo's clothes.
+	// wearing a demo's clothes. (This dataset's placement has not previously been
+	// exercised through this pipeline in this repo's test suite — see
+	// docs/demo-walkthrough.md's "What building the demo found".)
 	await expect(page.getByTestId('smart-import-assignment')).toBeVisible({ timeout: 60000 });
 	const assigned = await Promise.all(
 		['upper-left', 'upper-right', 'lower-left', 'lower-right'].map((slot) =>
@@ -48,7 +59,7 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	await expect(page.getByTestId('stitch-readiness')).toContainText('Export is ready');
 });
 
-test('walkthrough steps to Annotate Round and can be exited without resetting the app', async ({
+test('the round-annotation step arrives through the ordinary import banner and can be exited without resetting the app', async ({
 	page
 }) => {
 	// Generous despite not running stitch analysis: this file runs alongside the
@@ -57,12 +68,16 @@ test('walkthrough steps to Annotate Round and can be exited without resetting th
 	test.setTimeout(90000);
 	await gotoDemo(page);
 
-	// Start at step 2 so this case exercises narration and the handoff banner
-	// without paying for the four-screenshot stitch analysis.
-	await page.getByTestId('demo-start-step-annotate').click();
+	// Start at the Round-mode annotate step (script position 5) so this case
+	// exercises narration and the handoff banner without paying for the
+	// four-screenshot stitch analysis, the Map-mode annotate pass, or a real
+	// page reload. This is the step demo arming still supplies a fallback
+	// asset for — the Map-mode step relies entirely on the product's own "Use
+	// as UDisc source" handoff from step 1 and has nothing to arm on its own.
+	await page.getByTestId('demo-start-step-annotate-round').click();
 
 	await expect(page).toHaveURL(/\/annotate-round$/);
-	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 2 of 5');
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
 	// The sample source arrives through the product's ordinary import banner,
 	// awaiting an explicit decision rather than being applied behind the visitor.
@@ -71,7 +86,7 @@ test('walkthrough steps to Annotate Round and can be exited without resetting th
 
 	await page.getByTestId('demo-next').click();
 	await expect(page).toHaveURL(/\/create-graphics$/);
-	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 3 of 5');
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 6 of 6');
 
 	// Exiting removes the rail and leaves the visitor in the working product.
 	await page.getByTestId('demo-exit').click();
@@ -84,18 +99,25 @@ test('walkthrough steps to Annotate Round and can be exited without resetting th
  * Both were reachable on the walkthrough's own recommended path, and both are
  * invisible in unit tests: one depends on SvelteKit treating `goto` to the
  * current URL as a no-op, the other on the product's controls navigating
- * without the rail's knowledge.
+ * without the rail's knowledge. Anchored on the Round-mode annotate step (the
+ * later of the two Annotate Round visits) specifically because Create
+ * Graphics is now visited both before and after the reload step: following
+ * product navigation here must land forward on the export-the-round step, not
+ * snap back to the earlier basemap step just because it happens to share a
+ * route and comes first in the script array.
  */
-test('the rail stays usable when the visitor is already on the step route, and follows product navigation', async ({
+test('the rail stays usable when the visitor is already on the step route, and follows product navigation to the correct occurrence of a repeated route', async ({
 	page
 }) => {
 	test.setTimeout(60000);
 	await gotoDemo(page);
-	await page.getByTestId('demo-start-step-annotate').click();
+	await page.getByTestId('demo-start-step-annotate-round').click();
 	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
 	// Dismissing leaves the visitor on the step's route with nothing loaded —
-	// the state a visitor also reaches by using the rail's Next from step 1.
+	// the state a visitor also reaches by using the rail's Next from an earlier
+	// step without loading real inputs.
 	await page.getByTestId('handoff-dismiss').click();
 	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
 
@@ -105,8 +127,10 @@ test('the rail stays usable when the visitor is already on the step route, and f
 	await expect(page.getByTestId('pending-handoff')).toBeVisible({ timeout: 30000 });
 
 	// Navigating the way the product does, without touching the rail, moves the
-	// narration with the visitor instead of stranding it a step behind.
+	// narration with the visitor instead of stranding it a step behind — and
+	// lands on the export-round step (6), the nearer forward occurrence of
+	// Create Graphics, not the basemap step (3) that comes first in the script.
 	await page.getByRole('link', { name: 'Create Graphics' }).click();
 	await expect(page).toHaveURL(/\/create-graphics$/);
-	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 3 of 5');
+	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 6 of 6');
 });

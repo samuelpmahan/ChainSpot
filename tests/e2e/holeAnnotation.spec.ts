@@ -12,7 +12,17 @@ import type { Page } from '@playwright/test';
  * corrected.
  */
 
-type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
+
+/**
+ * Clicks the Map/Round segmented toggle in the toolbar. The toggle sits above
+ * the fold, so clicking it scrolls the annotation frame away — scroll it back
+ * so frame coordinates measured earlier stay valid for subsequent clicks.
+ */
+async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
+	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
+}
 
 function crc32(bytes: Uint8Array): number {
 	let crc = 0xffffffff;
@@ -136,12 +146,15 @@ test('hole annotation: place tee/basket/shots/bends via the radial menu, correct
 	await expect(page.getByTestId('corridor-centerline-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('tee · basket');
 
+	// Shots are a Round-mode activity.
+	await switchMode(page, 'round');
 	await placePoint(page, box.x + 120, box.y + 100, 'shot');
 	await placePoint(page, box.x + 200, box.y + 160, 'shot');
 	await expect(page.getByTestId('shot-marker-1-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('2 shots');
 
-	// A bend click places a visible bend marker; more clicks add more bends.
+	// Bends are a Map-mode activity; switch back before placing more.
+	await switchMode(page, 'map');
 	await placePoint(page, box.x + 170, box.y + 170, 'bend');
 	await expect(page.getByTestId('bend-marker-1-0')).toBeVisible();
 	await placePoint(page, box.x + 230, box.y + 190, 'bend');
@@ -185,14 +198,17 @@ test('hole annotation: existing tee, basket, shot, and bend markers drag without
 
 	await placePoint(page, box.x + 80, box.y + 80, 'tee');
 	await placePoint(page, box.x + 520, box.y + 420, 'basket');
+	await switchMode(page, 'round');
 	await placePoint(page, box.x + 180, box.y + 180, 'shot');
 	await placePoint(page, box.x + 260, box.y + 240, 'shot');
+	await switchMode(page, 'map');
 	await placePoint(page, box.x + 350, box.y + 320, 'bend');
 
 	const centerlineBefore = await page.getByTestId('corridor-centerline-1').getAttribute('points');
 	const bendCountBefore = await page.locator('[data-testid^="bend-marker-1-"]').count();
 
 	// Bend placement is active, but a marker claim must win over background placement.
+	// Still in Map mode, so tee/basket/bend markers are the interactive ones.
 	const teeBefore = await page.getByTestId('tee-marker-1').getAttribute('cx');
 	await dragMarker(page, 'tee-marker-1', 45, 25, false);
 	await expect(page.getByTestId('tee-marker-1')).not.toHaveAttribute('cx', teeBefore ?? '');
@@ -210,10 +226,13 @@ test('hole annotation: existing tee, basket, shot, and bend markers drag without
 		expect(bandAfterBasket).not.toBe(bandBeforeBasket);
 	await expectSourcePointInBounds(page, 'basket-marker-1');
 
+	// Shot markers are only interactive in Round mode.
+	await switchMode(page, 'round');
 	const shotCountBefore = await page.locator('[data-testid^="shot-marker-1-"]').count();
 	await dragMarker(page, 'shot-marker-1-0', 30, 15);
 	await expect(page.locator('[data-testid^="shot-marker-1-"]')).toHaveCount(shotCountBefore);
 	await expectSourcePointInBounds(page, 'shot-marker-1-0');
+	await switchMode(page, 'map');
 
 	const centerlineBeforeBend = await page.getByTestId('corridor-centerline-1').getAttribute('points');
 	await dragMarker(page, 'bend-marker-1-0', 25, -15);
@@ -246,7 +265,10 @@ test('hole annotation: the radial menu deletes an individual point without touch
 
 	await placePoint(page, box.x + 80, box.y + 80, 'tee');
 	await placePoint(page, box.x + 520, box.y + 420, 'basket');
+	await switchMode(page, 'round');
 	await placePoint(page, box.x + 180, box.y + 180, 'shot');
+	// Basket markers are only interactive in Map mode.
+	await switchMode(page, 'map');
 
 	const basketBox = await page.getByTestId('basket-marker-1').boundingBox();
 	if (!basketBox) throw new Error('basket marker has no bounding box');

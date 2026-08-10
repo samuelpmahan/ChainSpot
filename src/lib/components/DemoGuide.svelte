@@ -16,7 +16,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { armDemoStep, stepHasArming } from '$lib/demo/arming';
 	import { DEMO_STEPS, demoRouteLabel, demoStepUrl } from '$lib/demo/catalog';
 	import { demoTour } from '$lib/demo/tour.svelte';
@@ -39,25 +39,50 @@
 	 * worse, a "Load the real inputs" button that would navigate the visitor
 	 * backward and re-trigger Smart Import's replace confirmation.
 	 *
-	 * Only a pathname that no longer matches the current step moves the cursor,
-	 * which is what preserves steps 3–5: they share Create Graphics, so a match
-	 * on the current step must always win over the first step for that route.
+	 * Only a pathname that no longer matches the current step moves the cursor.
+	 * Several steps share a route (Create Graphics runs the basemap/export step
+	 * both before and after the reload step; Annotate Round runs both the
+	 * Map-mode and Round-mode steps), so a match on the current step must always
+	 * win over the fallback lookup below — the fallback is only ever a guess for
+	 * when the current step's own URL stopped matching.
+	 *
+	 * That fallback prefers the *nearest step at or after the current position*
+	 * that matches the route, falling back further to the first occurrence in
+	 * the script only when none exists ahead. A plain first-match `findIndex`
+	 * would always resolve a repeated route to its earliest step — correct for
+	 * the old script, where every repeated route's steps ran contiguously, but
+	 * wrong here: navigating from the Round-mode annotate step (script position
+	 * 5) to Create Graphics via the product's own header link must land on the
+	 * export-the-round step (6), not snap back to the basemap step (3).
+	 *
+	 * The effect must depend on the pathname ONLY. `moveTo` advances the cursor
+	 * before its own `goto` resolves; if cursor reads were tracked here, that
+	 * window (old pathname, new step) would re-run the fallback against the
+	 * stale route and drag the cursor backward — with repeated routes it then
+	 * "corrects" to the wrong occurrence after the navigation lands.
 	 */
 	$effect(() => {
-		if (!demoTour.active) return;
 		const pathname = page.url.pathname;
-		if (pathname === demoStepUrl(demoTour.step)) return;
-		const index = DEMO_STEPS.findIndex((step) => demoStepUrl(step) === pathname);
-		// A route outside the script (the visitor wandered off to Ribbon Goldens)
-		// leaves the cursor alone: the rail should wait, not guess.
-		if (index >= 0) demoTour.goTo(index);
+		untrack(() => {
+			if (!demoTour.active) return;
+			if (pathname === demoStepUrl(demoTour.step)) return;
+			const currentIndex = demoTour.stepIndex;
+			let index = DEMO_STEPS.findIndex(
+				(step, candidateIndex) => candidateIndex > currentIndex && demoStepUrl(step) === pathname
+			);
+			if (index < 0) index = DEMO_STEPS.findIndex((step) => demoStepUrl(step) === pathname);
+			// A route outside the script (the visitor wandered off to Ribbon Goldens)
+			// leaves the cursor alone: the rail should wait, not guess.
+			if (index >= 0) demoTour.goTo(index);
+		});
 	});
 
 	/**
 	 * Moves the narration and, when the next step lives on another route, takes
-	 * the visitor there. Staying put when the route is unchanged matters: steps 3
-	 * to 5 all happen on Create Graphics, and re-navigating would throw away the
-	 * basemap and correspondences the visitor just created.
+	 * the visitor there. Staying put when the route is unchanged matters: the
+	 * basemap/export step and the reload step both run on Create Graphics, and
+	 * re-navigating between them would throw away the basemap and
+	 * correspondences the visitor just created.
 	 */
 	async function moveTo(index: number): Promise<void> {
 		const previousRoute = demoTour.step.route;
@@ -67,6 +92,22 @@
 		if (step.route !== previousRoute) {
 			await goto(demoStepUrl(step));
 		}
+	}
+
+	/**
+	 * Advances past a `kind: 'reload'` step with a real browser reload instead
+	 * of an SPA `goto`. `demoTour.goTo` persists the *next* step's position to
+	 * `sessionStorage` before the navigation fires, so the reload's `restore()`
+	 * (see `tour.svelte.ts`) resumes the tour already on the reload step's
+	 * successor rather than back on the reload step itself. This is the one
+	 * place the rail deliberately does not use `goto`: the step's whole point is
+	 * that in-memory product state does not survive a real reload, and an SPA
+	 * navigation would leave retained editor sessions intact and make that claim
+	 * false.
+	 */
+	function reloadAndAdvance(): void {
+		const next = demoTour.goTo(demoTour.stepIndex + 1);
+		window.location.assign(demoStepUrl(next));
 	}
 
 	async function loadStepInputs(): Promise<void> {
@@ -172,7 +213,17 @@
 				>
 					Back
 				</button>
-				{#if demoTour.isLast}
+				{#if demoTour.step.kind === 'reload'}
+					<button
+						type="button"
+						class="primary"
+						data-testid="demo-reload"
+						disabled={armBusy}
+						onclick={reloadAndAdvance}
+					>
+						Reload the page
+					</button>
+				{:else if demoTour.isLast}
 					<a class="finish-link" href="{base}/demo" data-testid="demo-finish">Finish</a>
 				{:else}
 					<button

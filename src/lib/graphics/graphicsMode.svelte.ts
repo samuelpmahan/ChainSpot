@@ -9,17 +9,18 @@
  *
  * This is also the seam a future Workstudio docks into (teardown §8): it
  * will be an editor over a new persisted `PresentationStyle` object (schema
- * v5 — PR #11's Course Memory work already spent v4 on
- * `HoleNumberBadgeAnchor`), whose output feeds `buildHoleGraphicMarkup`
- * unchanged and whose live preview is the same markup rendered in the DOM
- * instead of rasterized. Nothing here builds that yet; it just names the
- * boundary so the next engineer knows why it exists.
+ * v6 — PR #11's Course Memory work already spent v4 on
+ * `HoleNumberBadgeAnchor`, and v5 went to the annotated round's walking
+ * path), whose output feeds `buildHoleGraphicMarkup` unchanged and whose
+ * live preview is the same markup rendered in the DOM instead of
+ * rasterized. Nothing here builds that yet; it just names the boundary so
+ * the next engineer knows why it exists.
  */
-import { planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
+import { DEFAULT_HOLE_FRAMING, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
 import type { HoleGraphicPlan } from '$lib/holeGraphics';
 import { DEFAULT_GRAPHIC_STYLE, findGraphicStyle } from '$lib/graphics/style';
 import type { GraphicStyle } from '$lib/graphics/style';
-import type { AnnotatedHole } from '$lib/domain/annotatedRound';
+import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
 import type { SerializableTransform } from '$lib/alignment/types';
 
 export interface GraphicsModeTargetSize {
@@ -42,6 +43,8 @@ export interface GraphicsModeInputs {
 	targetImageHref(): string | null;
 	/** Feet-per-pixel for the current target image, only when it has a known ground scale. */
 	feetPerPixel(): number | undefined;
+	/** UDisc's walking route (round-level, not per-hole); undefined when not annotated. */
+	walkingPath(): readonly SourcePoint[] | undefined;
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string): void {
@@ -67,9 +70,17 @@ export class GraphicsMode {
 		const transform = this.#inputs.transform();
 		const target = this.#inputs.targetSize();
 		if (!transform || !target) return [];
+		const walkingPath = this.#inputs.walkingPath() ?? [];
 		const result: HoleGraphicPlan[] = [];
 		for (const hole of this.#inputs.holes()) {
-			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
+			const plan = planHoleGraphic(
+				hole,
+				transform,
+				target.widthPx,
+				target.heightPx,
+				DEFAULT_HOLE_FRAMING,
+				walkingPath
+			);
 			if (plan) result.push(plan);
 		}
 		return result;

@@ -58,7 +58,7 @@ export async function armDemoStep(step: DemoStep, fetchImpl: FetchLike = fetch):
 						message: `Keeping the image already waiting to import ("${existing.fileName}") — the demo never overwrites your own stitched export.`
 					};
 				}
-				const file = await fetchDemoFile(DEMO_DATASET.overview, fetchImpl);
+				const file = await fetchDemoFile(DEMO_DATASET.roundOverview, fetchImpl);
 				setPendingHandoff({
 					blob: file,
 					fileName: file.name,
@@ -66,7 +66,7 @@ export async function armDemoStep(step: DemoStep, fetchImpl: FetchLike = fetch):
 				});
 				return {
 					ok: true,
-					message: `Loaded the whole-course capture of ${DEMO_DATASET.courseName}. Import it from the banner to start annotating.`
+					message: `Loaded the played-round capture of ${DEMO_DATASET.courseName}. Import it from the banner, then accept "Import saved holes" to pull in the course geometry from step 2.`
 				};
 			}
 			case 'none':

@@ -1,17 +1,20 @@
 /**
  * ChainSpot versioned project document — serialization, validation, and migration.
  *
- * The saved document (`ProjectDocumentV4`) is the durable, portable boundary of a
- * ChainSpot project. It wraps the plain authoritative domain state (`ProjectState` from
- * P0-002) with an explicit `schemaVersion` and stores derived normalized coordinates
- * alongside the authoritative pixel coordinates:
+ * The saved document (`ProjectDocumentV4` — the exported type name predates v5 and is
+ * kept stable for callers outside this module; only its `schemaVersion` literal and
+ * shape changed) is the durable, portable boundary of a ChainSpot project. It wraps the
+ * plain authoritative domain state (`ProjectState` from P0-002) with an explicit
+ * `schemaVersion` and stores derived normalized coordinates alongside the authoritative
+ * pixel coordinates:
  *
- *   { "schemaVersion": 4,
+ *   { "schemaVersion": 5,
  *     "project": { "id", "name", "createdAt", "updatedAt" },
  *     "images": [ <source-overview manifest>, <target-basemap manifest> ],
  *     "controlPointPairs": [ <complete pair with source/target pixel + normalized points> ],
  *     "holes": [ <hole with tee/basket/ordered shots/corridorBends/corridorWidthPx in source-image pixels> ],
  *     "numberBadges": [ <hole-number badge anchor: number/xPx/yPx/confidence> ],
+ *     "walkingPath": [ <xPx/yPx point, source-image pixels> ] (optional, omitted when unset),
  *     "viewState": null | { "source": {"zoom","panX","panY"}, "target": {...} } }
  *
  * Versions: v1 documents (written before hole annotation existed) are still readable and
@@ -34,6 +37,14 @@
  * never authoritative like tee/basket: they exist purely to fingerprint a course's shape,
  * not to annotate a round.
  *
+ * v4 -> v5: adds optional `walkingPath`, UDisc's purple walking route as one open
+ * polyline of source-image-pixel points (`ProjectState.walkingPath`, mirroring
+ * `AnnotatedRound.walkingPath`). Absent on v1-v4 documents, which migrate to
+ * `undefined` — an "absent by default" field rather than an "empty array by default"
+ * one like `holes`/`numberBadges`, because "no walking path" and "not yet annotated"
+ * are the same state and must have exactly one representation. An empty array is
+ * likewise normalized to `undefined` on both read and write.
+ *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
  * are only checked (never trusted) on load. A present finite normalized value that does
@@ -43,7 +54,7 @@
  *
  * Validation order: the root must be a plain object and `schemaVersion` is read and
  * checked before anything else, so an unsupported version (any value other than 1, 2, 3,
- * or 4, with newer versions clearly classified) fails before any other validation and
+ * 4, or 5, with newer versions clearly classified) fails before any other validation and
  * never leads to partial state replacement. Unknown fields at every level of a supported
  * version are ignored during parsing and are never emitted by the serializer, so they
  * cannot survive a re-serialization.
@@ -85,10 +96,10 @@ import type {
 import { IMAGE_ROLES } from './domain/project';
 
 /** The schema version written by this build. */
-export const CURRENT_SCHEMA_VERSION = 4 as const;
+export const CURRENT_SCHEMA_VERSION = 5 as const;
 
 /** Every version this build can read; older ones are migrated forward on parse. */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -117,12 +128,14 @@ export interface NumberBadgeAnchorDoc {
 }
 
 export interface ProjectDocumentV4 {
-	schemaVersion: 4;
+	schemaVersion: 5;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
 	holes: AnnotatedHole[];
 	numberBadges: NumberBadgeAnchorDoc[];
+	/** UDisc's purple walking route as one open polyline; omitted when not annotated. */
+	walkingPath?: SourcePoint[];
 	viewState: ProjectViewState | null;
 }
 
@@ -735,6 +748,29 @@ function readNumberBadges(input: unknown, images: ImageAsset[]): HoleNumberBadge
 	return badges;
 }
 
+/**
+ * Reads the optional `walkingPath` (v5+). Absent/null is `undefined` on every
+ * version, including a v5 document that was never annotated — unlike
+ * `readHoles`/`readNumberBadges`, whose well-defined default is an empty array, this
+ * field's well-defined default is "absent", matching `ProjectState.walkingPath`'s own
+ * "absent when not annotated" convention. An empty array is likewise normalized to
+ * `undefined` so there is exactly one representation of "no path".
+ */
+function readWalkingPath(input: unknown, images: ImageAsset[]): SourcePoint[] | undefined {
+	if (input === undefined || input === null) return undefined;
+	if (!Array.isArray(input)) {
+		throw failure(
+			'required-type',
+			'required.missing',
+			'walkingPath',
+			'walkingPath must be an array'
+		);
+	}
+	if (input.length === 0) return undefined;
+	const sourceImage = images.find((image) => image.role === 'source-overview') as ImageAsset;
+	return input.map((point, index) => readHolePoint(point, `walkingPath[${index}]`, sourceImage));
+}
+
 function assertUniqueIds(project: ProjectMetadata, images: ImageAsset[], pairs: ControlPointPair[]): void {
 	const seen = new Map<string, string>([['project.id', project.id]]);
 	for (let index = 0; index < images.length; index++) {
@@ -842,9 +878,20 @@ function readDocument(value: unknown): ProjectState {
 	// Same one-migration-rule shape as holes above: numberBadges is absent on
 	// every version prior to v4 and reads as an empty array regardless.
 	const numberBadges = readNumberBadges(root.numberBadges, images);
+	// walkingPath is absent on every version prior to v5 and reads as undefined
+	// regardless — see readWalkingPath for why its default differs from holes/badges.
+	const walkingPath = readWalkingPath(root.walkingPath, images);
 	const viewState = readViewState(root.viewState);
 
-	return { project, images, controlPointPairs: pairs, holes, numberBadges, viewState };
+	return {
+		project,
+		images,
+		controlPointPairs: pairs,
+		holes,
+		numberBadges,
+		...(walkingPath ? { walkingPath } : {}),
+		viewState
+	};
 }
 
 /**
@@ -922,6 +969,7 @@ function validateState(state: ProjectState): void {
 	assertUniqueIds(project, images, pairs);
 	readHoles(state.holes, images);
 	readNumberBadges(state.numberBadges, images);
+	readWalkingPath(state.walkingPath, images);
 	readViewState(state.viewState);
 }
 
@@ -1006,6 +1054,11 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV4 {
 			yPx: badge.yPx,
 			confidence: badge.confidence
 		})),
+		// Omitted (never an empty array) when unset — see the v4->v5 migration note
+		// above for why "no path" has exactly one representation.
+		...(state.walkingPath && state.walkingPath.length > 0
+			? { walkingPath: state.walkingPath.map((point) => ({ xPx: point.xPx, yPx: point.yPx })) }
+			: {}),
 		viewState
 	};
 }

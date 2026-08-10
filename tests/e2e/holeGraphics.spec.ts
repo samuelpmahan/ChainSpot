@@ -2,7 +2,15 @@ import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
+
+/** Clicks the Map/Round segmented toggle in the toolbar. */
+// The toggle sits above the fold; clicking it scrolls the annotation frame
+// away, so scroll back to keep previously-measured frame coordinates valid.
+async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
+	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
+}
 
 /** Clicks (x, y) to open the radial menu, then clicks the real button for `kind`. */
 async function placePoint(page: Page, x: number, y: number, kind: PointKind): Promise<void> {
@@ -152,7 +160,9 @@ test('clean hole construction: annotate a hole, align, build and download the re
 
 	await placePoint(page, box.x + 50, box.y + 50, 'tee');
 	await placePoint(page, box.x + 400, box.y + 300, 'basket');
+	await switchMode(page, 'round');
 	await placePoint(page, box.x + 200, box.y + 150, 'shot');
+	await switchMode(page, 'map');
 	await placePoint(page, box.x + 230, box.y + 180, 'bend'); // one dogleg bend
 
 	await page.getByTestId('annotate-done').click();

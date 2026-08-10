@@ -161,7 +161,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(4);
+		expect(doc.schemaVersion).toBe(5);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -359,12 +359,12 @@ describe('schema version validation', () => {
 
 	it('classifies a newer unsupported version before any other validation', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 5;
+		doc.schemaVersion = 6;
 		doc.project = undefined;
 		doc.images = 'not-an-array';
 		const error = expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 		expect(error.message).toContain('newer');
-		expect(error.message).toContain('5');
+		expect(error.message).toContain('6');
 	});
 
 	it('rejects older or otherwise unknown numeric versions', () => {
@@ -378,7 +378,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(4);
+		expect(CURRENT_SCHEMA_VERSION).toBe(5);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -779,10 +779,82 @@ describe('numberBadges migration and validation (schema v3 -> v4)', () => {
 		}
 	});
 
-	it('still rejects schemaVersion 5 as unsupported, even though numberBadges exists', () => {
+	it('still rejects schemaVersion 6 as unsupported, even though numberBadges exists', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 5;
+		doc.schemaVersion = 6;
 		expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
+	});
+});
+
+describe('walkingPath migration and validation (schema v4 -> v5)', () => {
+	it('migrates v1-v4 documents (none of which have walkingPath) to undefined', () => {
+		for (const version of [1, 2, 3, 4]) {
+			const doc = plainDoc(buildState());
+			doc.schemaVersion = version;
+			delete doc.walkingPath;
+			const parsed = expectDocumentOk(doc);
+			expect(parsed.walkingPath).toBeUndefined();
+		}
+	});
+
+	it('round-trips a walking path through parse and serialize without drift', () => {
+		const state = buildState({
+			walkingPath: [
+				{ xPx: 12.5, yPx: 18.25 },
+				{ xPx: 400, yPx: 512.75 },
+				{ xPx: 900.125, yPx: 2000 }
+			]
+		});
+		const doc = docFromState(state);
+		expect(doc.walkingPath).toEqual(state.walkingPath);
+
+		const parsed = expectParsedState(state);
+		expect(parsed.walkingPath).toEqual(state.walkingPath);
+	});
+
+	it('omits walkingPath from the serialized document when undefined', () => {
+		const doc = docFromState(buildState());
+		expect('walkingPath' in doc).toBe(false);
+	});
+
+	it('normalizes an empty walkingPath array to undefined on both read and write', () => {
+		const state = buildState({ walkingPath: [] });
+		const doc = docFromState(state);
+		expect('walkingPath' in doc).toBe(false);
+
+		const withEmptyArray = plainDoc(buildState());
+		withEmptyArray.walkingPath = [];
+		const parsed = expectDocumentOk(withEmptyArray);
+		expect(parsed.walkingPath).toBeUndefined();
+	});
+
+	it('rejects a non-array walkingPath', () => {
+		const doc = plainDoc(buildState());
+		doc.walkingPath = 'nope';
+		expectError(doc, 'required-type', 'required.missing', 'walkingPath');
+	});
+
+	it('rejects a malformed walkingPath point', () => {
+		const doc = plainDoc(buildState());
+		doc.walkingPath = [{ xPx: 'nope', yPx: 1 }];
+		expectError(doc, 'coordinate', 'coordinate.type', 'walkingPath[0].xPx');
+	});
+
+	it('rejects a non-finite walkingPath point', () => {
+		const doc = plainDoc(buildState());
+		doc.walkingPath = [{ xPx: Number.NaN, yPx: 1 }];
+		expectError(doc, 'coordinate', 'coordinate.non-finite', 'walkingPath[0].xPx');
+	});
+
+	it('rejects an out-of-bounds walkingPath point', () => {
+		const doc = plainDoc(buildState());
+		doc.walkingPath = [{ xPx: 999999, yPx: 10 }];
+		expectError(doc, 'coordinate', 'coordinate.out-of-bounds', 'walkingPath[0]');
+	});
+
+	it('serializer throws a structured error for an invalid walkingPath point', () => {
+		const state = buildState({ walkingPath: [{ xPx: Number.NaN, yPx: 1 }] });
+		expectSerializeError(state, 'coordinate', 'coordinate.non-finite');
 	});
 });
 
