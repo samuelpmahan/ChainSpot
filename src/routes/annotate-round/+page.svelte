@@ -2464,7 +2464,7 @@
 									style={`font-size:${11 / zoom}px`}
 								>
 									{#if candidate.label !== undefined}
-										C{candidateId} → H{candidate.label}{rawTopMatch && rawTopMatch.label !== candidate.label ? ` · raw H${rawTopMatch.label} ${(rawTopMatch.score * 100).toFixed(0)}%` : ` · ${(candidate.score * 100).toFixed(0)}%`}
+										H{candidate.label}
 									{:else}
 										C{candidateId} · {(candidate.score * 100).toFixed(0)}%
 									{/if}
