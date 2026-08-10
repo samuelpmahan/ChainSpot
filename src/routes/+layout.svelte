@@ -40,9 +40,11 @@
 		>
 			Create Graphics
 		</a>
+	</nav>
+	<nav class="dev-nav" aria-label="Developer tools">
 		<a
 			href="{base}/ribbon-editor"
-			class="nav-link"
+			class="nav-link dev-link"
 			class:active={page.url.pathname === `${base}/ribbon-editor`}
 			aria-current={page.url.pathname === `${base}/ribbon-editor` ? 'page' : undefined}
 		>
@@ -79,7 +81,8 @@
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
-		width: 100%;
+		flex: 1 1 auto;
+		min-width: 0;
 		overflow-x: auto;
 		-webkit-overflow-scrolling: touch;
 		scrollbar-width: none;
@@ -87,6 +90,20 @@
 
 	.app-nav::-webkit-scrollbar {
 		display: none;
+	}
+
+	.dev-nav {
+		display: flex;
+		align-items: center;
+		flex: 0 0 auto;
+		margin-left: 0.75rem;
+		padding-left: 0.75rem;
+		border-left: 1px solid #27272a;
+	}
+
+	.dev-link {
+		font-size: 0.75rem;
+		color: #71717a;
 	}
 
 	.nav-link {

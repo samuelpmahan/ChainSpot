@@ -14,7 +14,6 @@
     "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
     "detect:course": "tsx scripts/detect-course.ts",
     "verify:cv": "tsx scripts/verify-cv-guardrails.ts",
-    "detect:centerlines": "tsx scripts/detect-centerlines.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
