@@ -9,14 +9,13 @@ import {
 	consumePendingAnnotatedRound,
 	getActiveAnnotatedRound,
 	getPendingAnnotatedRound,
-	setPendingAnnotatedRound
-} from '../../src/lib/annotatedRoundSession';
-import {
+	setPendingAnnotatedRound,
 	consumePendingCourseBadges,
 	getPendingCourseBadges,
-	setPendingCourseBadges
-} from '../../src/lib/courseBadgeSession';
-import { retainEditor, takeRetainedEditor } from '../../src/lib/editorSession';
+	setPendingCourseBadges,
+	retainEditor,
+	takeRetainedEditor
+} from '../../src/lib/session';
 import { createAnnotatedRound } from '../../src/lib/domain/annotatedRound';
 import type { AnnotatedRound } from '../../src/lib/domain/annotatedRound';
 

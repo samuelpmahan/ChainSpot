@@ -38,7 +38,7 @@
 	import { loadCv, snapAlign, warmMatchTemplate } from '$lib/stitch/cvMatch';
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
-	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
+	import { getPendingHandoff, setPendingHandoff } from '$lib/session';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 

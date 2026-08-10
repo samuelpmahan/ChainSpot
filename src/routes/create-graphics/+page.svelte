@@ -32,9 +32,20 @@
 		saveProject
 	} from '$lib/persistence';
 	import type { DownloadBlob, RepairCandidate, RepairResolutionResult } from '$lib/persistence';
-	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
-	import type { PendingHandoff } from '$lib/stitch/handoff';
-	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
+	import {
+		consumePendingHandoff,
+		getPendingHandoff,
+		retainEditor,
+		takeRetainedEditor,
+		consumePendingAnnotatedRound,
+		getActiveAnnotatedRound,
+		getPendingAnnotatedRound,
+		setActiveAnnotatedRound,
+		consumePendingCourseBadges,
+		getPendingCourseBadges
+	} from '$lib/session';
+	import type { PendingHandoff } from '$lib/session';
+	import { importHandoffImage } from '$lib/handoffImport';
 	import {
 		bboxFromCenter,
 		fetchNaipBoundingBoxImage,
@@ -54,13 +65,6 @@
 	import { validateTransform } from '$lib/alignment/validation';
 	import { AlignmentFailureReason } from '$lib/alignment/types';
 	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
-	import {
-		consumePendingAnnotatedRound,
-		getActiveAnnotatedRound,
-		getPendingAnnotatedRound,
-		setActiveAnnotatedRound
-	} from '$lib/annotatedRoundSession';
-	import { consumePendingCourseBadges, getPendingCourseBadges } from '$lib/courseBadgeSession';
 	import {
 		badgesToLabeledPoints,
 		basketsFromHoles,
@@ -980,10 +984,10 @@
 	}
 
 	/**
-	 * Routes the pending stitched PNG through the exact same intake/replacement
-	 * path as a pane file upload, so point-discard confirmation, asset manifest
-	 * creation, undo/redo, and dirty state all apply. The handoff is consumed only
-	 * on a successful import; a declined replacement keeps it available.
+	 * Uses the shared `importHandoffImage` flow (see `$lib/handoffImport.ts`)
+	 * with this route's own dialog-backed discard confirmation. The handoff is
+	 * consumed only on a successful import; a declined replacement keeps it
+	 * available.
 	 */
 	async function handleHandoffImport(): Promise<void> {
 		const handoff = pendingHandoff;
@@ -991,16 +995,15 @@
 		importingHandoff = true;
 		handoffError = null;
 		try {
-			const file = new File([handoff.blob], handoff.fileName, { type: 'image/png' });
-			const result = await intakeImageFile({
+			const result = await importHandoffImage({
 				editor,
+				handoff,
 				role: handoff.targetRole,
-				file,
 				decode,
 				confirmDiscard: (count) => requestDiscardConfirmation(handoff.targetRole, count)
 			});
-			if (!result.ok) {
-				handoffError = result.error.message;
+			if (result.status === 'error') {
+				handoffError = result.message;
 				return;
 			}
 			if (result.status === 'cancelled') {
@@ -1014,8 +1017,6 @@
 				handoff.targetRole === 'source-overview'
 					? 'Stitched image imported as the UDisc source.'
 					: 'Stitched image imported as the clean target.';
-		} catch (error) {
-			handoffError = error instanceof Error ? error.message : 'Could not import the stitched image.';
 		} finally {
 			importingHandoff = false;
 		}
@@ -1064,8 +1065,9 @@
 			// project and restored on reopen. The session artifact is only the transport;
 			// `editor.state.holes` is the single source of truth from this point on.
 			editor.setHoles(round.holes);
-			// Badge/basket anchors ride a separate session slot (courseBadgeSession.ts)
-			// since AnnotatedRound can never carry them (Done-boundary purity rule);
+			// Badge/basket anchors ride a separate session slot (session.ts's pending
+			// course badges) since AnnotatedRound can never carry them (Done-boundary
+			// purity rule);
 			// this is the only place they cross into durable ProjectState.numberBadges.
 			const pendingBadges = getPendingCourseBadges();
 			if (pendingBadges) {

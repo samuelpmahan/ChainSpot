@@ -541,8 +541,8 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
 	// A source-role handoff now lands on Annotate Round — a session entirely
-	// independent of Create Graphics (see src/lib/editorSession.ts's two keyed
-	// slots).
+	// independent of Create Graphics (see src/lib/session.ts's two keyed
+	// editor-retention slots).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();

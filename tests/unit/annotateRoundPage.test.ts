@@ -16,7 +16,7 @@ import type { DecodeImageFile } from '../../src/lib/imageIntake';
 import {
 	consumePendingAnnotatedRound,
 	getPendingAnnotatedRound
-} from '../../src/lib/annotatedRoundSession';
+} from '../../src/lib/session';
 
 const NOW = () => new Date('2026-08-06T00:00:00.000Z');
 
