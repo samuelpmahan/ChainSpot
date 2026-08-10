@@ -82,8 +82,13 @@ export class GraphicsMode {
 
 	/** Hole IDs with an elevation-profile build/render/download in flight. */
 	elevationBuilding = $state<Set<string>>(new Set());
-	/** Set only by a failed elevation-profile build; EPQS is a flaky public service, so this is expected to happen. */
-	elevationError = $state<string | null>(null);
+	/**
+	 * Per-hole failure messages from elevation-profile builds; EPQS is a flaky
+	 * public service, so failures are expected. Keyed by hole id like
+	 * `elevationBuilding`/`elevationStats` so a failure on one hole can never be
+	 * misattributed to another hole's concurrent build.
+	 */
+	elevationErrors = $state<Map<string, string>>(new Map());
 	/** Climb/descent summary per hole, kept after a successful build so it stays visible next to the button. */
 	elevationStats = $state<Map<string, ElevationProfileSummary>>(new Map());
 
@@ -146,7 +151,9 @@ export class GraphicsMode {
 		const reference = this.#inputs.geoReference();
 		if (!reference || !this.elevationEligible(plan) || this.elevationBuilding.has(plan.holeId)) return;
 		this.elevationBuilding = new Set(this.elevationBuilding).add(plan.holeId);
-		this.elevationError = null;
+		const cleared = new Map(this.elevationErrors);
+		cleared.delete(plan.holeId);
+		this.elevationErrors = cleared;
 		try {
 			const profile = await buildElevationProfile(plan.centerline, reference);
 			const blob = await renderElevationProfile(profile, { title: `Hole ${plan.number} — Elevation` });
@@ -156,7 +163,12 @@ export class GraphicsMode {
 			this.elevationStats = next;
 		} catch {
 			// EPQS network hiccups and no-coverage points are normal, not a bug to surface in detail.
-			this.elevationError = 'Elevation lookup failed. The USGS elevation service can be flaky — try again.';
+			const failed = new Map(this.elevationErrors);
+			failed.set(
+				plan.holeId,
+				'Elevation lookup failed. The USGS elevation service can be flaky — try again.'
+			);
+			this.elevationErrors = failed;
 		} finally {
 			const next = new Set(this.elevationBuilding);
 			next.delete(plan.holeId);

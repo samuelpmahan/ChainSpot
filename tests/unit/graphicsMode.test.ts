@@ -63,7 +63,7 @@ describe('GraphicsMode elevation-profile gating', () => {
 		const mode = new GraphicsMode(fakeInputs({ geoReference: () => null }));
 		await mode.buildAndDownloadElevation(fakePlan());
 		expect(mode.elevationBuilding.size).toBe(0);
-		expect(mode.elevationError).toBeNull();
+		expect(mode.elevationErrors.size).toBe(0);
 		expect(mode.elevationStats.size).toBe(0);
 	});
 
@@ -82,7 +82,7 @@ describe('GraphicsMode elevation-profile gating', () => {
 			globalThis.fetch = originalFetch;
 		}
 		expect(mode.elevationBuilding.size).toBe(0);
-		expect(mode.elevationError).toMatch(/elevation lookup failed/i);
+		expect(mode.elevationErrors.get(fakePlan().holeId)).toMatch(/elevation lookup failed/i);
 		expect(mode.elevationStats.size).toBe(0);
 	});
 });
