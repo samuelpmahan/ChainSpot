@@ -302,3 +302,40 @@ test('hole annotation: a straight hole with zero bends and its width control sti
 	await page.waitForURL('**/create-graphics');
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
 });
+
+test('hole annotation: corridor width applies to every hole (UDisc parity), and a new hole inherits the width in use', async ({
+	page
+}) => {
+	await loadSourceImage(page);
+	const { frame, box } = await annotationFrameBox(page);
+
+	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
+	await placePoint(page, box.x + 300, box.y + 250, 'basket', availableKinds(true, false));
+	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
+
+	await page.getByTestId('hole-add').click();
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '2');
+	// Adding a hole can grow the sidebar above the frame and shift it within
+	// the viewport, so the frame's box must be re-measured before it's used
+	// for further clicks — a stale box silently misses the image entirely.
+	await frame.scrollIntoViewIfNeeded();
+	const box2 = (await frame.boundingBox())!;
+	await placePoint(page, box2.x + 450, box2.y + 300, 'tee', availableKinds(false, false));
+	await placePoint(page, box2.x + 550, box2.y + 400, 'basket', availableKinds(true, false));
+	await expect(page.getByTestId('corridor-band-2')).toBeVisible();
+
+	// Changing the width while hole 2 is active must carry over to hole 1 too —
+	// UDisc renders a course's corridor ribbon at one width, not per hole.
+	await page.getByTestId('corridor-width').fill('110');
+	await page.getByTestId('corridor-width').blur();
+	await expect(page.getByTestId('corridor-width')).toHaveValue('110');
+
+	await page.getByTestId('hole-select-1').click();
+	await expect(page.getByTestId('corridor-width')).toHaveValue('110');
+
+	// A hole added afterward inherits that width immediately, rather than
+	// resetting to the bare default.
+	await page.getByTestId('hole-add').click();
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '3');
+	await expect(page.getByTestId('corridor-width')).toHaveValue('110');
+});

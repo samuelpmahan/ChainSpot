@@ -222,7 +222,13 @@
 						<div class="empty-state">
 							<strong>{loading ? 'Loading image…' : 'Choose a course map to begin'}</strong>
 							{#if !loading}
-								<button type="button" onclick={() => fileInput?.click()}>Choose image</button>
+								<button
+									type="button"
+									data-testid={`pane-choose-inline-${role}`}
+									onclick={() => fileInput?.click()}
+								>
+									Choose image
+								</button>
 							{/if}
 						</div>
 					{/if}

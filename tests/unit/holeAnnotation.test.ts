@@ -18,6 +18,7 @@ import {
 	removeLastShot,
 	removeShot,
 	removeTee,
+	setAllCorridorWidths,
 	setBasket,
 	setCorridorWidth,
 	setTee
@@ -307,6 +308,40 @@ describe('setCorridorWidth', () => {
 		const result = setCorridorWidth(holes, 'a', 90);
 		expect(result[0].corridorWidthPx).toBe(90);
 		expect(result[1].corridorWidthPx).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+	});
+});
+
+describe('setAllCorridorWidths', () => {
+	it('applies the same width to every hole, regardless of their prior widths', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { corridorWidthPx: 40 }),
+			emptyHole('b', 2, { corridorWidthPx: 90 }),
+			emptyHole('c', 3)
+		];
+		const result = setAllCorridorWidths(holes, 75);
+		expect(result.map((hole) => hole.corridorWidthPx)).toEqual([75, 75, 75]);
+	});
+
+	it('preserves every other field on every hole, and does not mutate the input', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				tee: { xPx: 10, yPx: 20 },
+				basket: { xPx: 30, yPx: 40 },
+				shots: [{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } }],
+				corridorBends: [{ xPx: 5, yPx: 6 }]
+			}),
+			emptyHole('b', 2)
+		];
+		const result = setAllCorridorWidths(holes, 100);
+
+		expect(result[0]).toEqual({ ...holes[0], corridorWidthPx: 100 });
+		expect(result[1]).toEqual({ ...holes[1], corridorWidthPx: 100 });
+		expect(holes[0].corridorWidthPx).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+		expect(holes[1].corridorWidthPx).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+	});
+
+	it('is a no-op-shaped map over an empty array', () => {
+		expect(setAllCorridorWidths([], 50)).toEqual([]);
 	});
 });
 

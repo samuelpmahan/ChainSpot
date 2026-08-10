@@ -576,6 +576,7 @@
 			ariaDescribedby={`pane-status-${role}`}
 			claimPointer={claimPointer}
 			onViewportClick={onViewportClick}
+			onClaimedPointerCancel={onMarkerCancel}
 		>
 			{#snippet content()}{/snippet}
 		</ImageViewport>

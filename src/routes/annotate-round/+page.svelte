@@ -53,6 +53,7 @@
 		removeLastShot,
 		removeShot,
 		removeTee,
+		setAllCorridorWidths,
 		setCorridorWidth
 	} from '$lib/holeAnnotation';
 	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
@@ -316,19 +317,32 @@
 		void handleDetectCourse({ autoApply: true });
 	});
 
+	/**
+	 * The width a newly created hole should inherit — the active hole's width,
+	 * so the new hole matches its siblings instead of always starting at the
+	 * bare default. Falls back to the default when there's no active hole yet
+	 * (the very first hole on a fresh round).
+	 */
+	function currentCorridorWidthPx(): number {
+		const active = holes.find((hole) => hole.id === activeHoleId);
+		return active?.corridorWidthPx ?? DEFAULT_CORRIDOR_WIDTH_PX;
+	}
+
 	function handleAddHole(): void {
+		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHole(holes);
 		if (nextHoles.length === holes.length) return;
 		const addedHole = nextHoles.find((hole) => !holes.some((existing) => existing.id === hole.id));
-		holes = nextHoles;
+		holes = addedHole ? setCorridorWidth(nextHoles, addedHole.id, inheritedWidthPx) : nextHoles;
 		activeHoleId = addedHole?.id ?? activeHoleId;
 	}
 
 	function handleAddHoleBeyondStandardCourse(): void {
+		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHoleBeyondStandardCourse(holes);
 		const addedHole = nextHoles.find((hole) => !holes.some((existing) => existing.id === hole.id));
 		if (!addedHole) return;
-		holes = nextHoles;
+		holes = setCorridorWidth(nextHoles, addedHole.id, inheritedWidthPx);
 		activeHoleId = addedHole.id;
 	}
 
@@ -401,12 +415,23 @@
 		holes = clearBends(holes, activeHoleId);
 	}
 
+	/**
+	 * Applies to every hole, not just the active one: UDisc renders a course's
+	 * corridor ribbon at one width across the whole map, so that's the default
+	 * here too — the domain stays per-hole capable (`setCorridorWidth` is still
+	 * exported), this control just drives the bulk operation now. The input
+	 * still displays the active hole's width, which is equivalent once every
+	 * hole shares one value; holes that arrive with mixed widths (an older
+	 * saved project, or an unadjusted Course Memory import) show the active
+	 * hole's value until the first adjustment here unifies them, which is the
+	 * intended behavior.
+	 */
 	function handleCorridorWidthChange(event: Event): void {
 		if (!activeHoleId) return;
 		const input = event.currentTarget as HTMLInputElement;
 		const corridorWidthPx = Number(input.value);
 		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
-		holes = setCorridorWidth(holes, activeHoleId, corridorWidthPx);
+		holes = setAllCorridorWidths(holes, corridorWidthPx);
 	}
 
 	/** Moves `activeHoleId` to the previous/next existing hole, wrapping around. */
@@ -484,10 +509,11 @@
 			vibrate(8);
 			return;
 		}
+		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHoleWithNumber(holes, number);
 		const added = nextHoles.find((hole) => !holes.some((existingHole) => existingHole.id === hole.id));
 		if (!added) return;
-		holes = nextHoles;
+		holes = setCorridorWidth(nextHoles, added.id, inheritedWidthPx);
 		activeHoleId = added.id;
 		vibrate(8);
 	}
@@ -951,6 +977,7 @@
 		);
 		if (ready.length === 0) return;
 
+		const inheritedWidthPx = currentCorridorWidthPx();
 		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
 		for (const proposal of ready) {
 			const existing = existingByNumber.get(proposal.number);
@@ -963,7 +990,7 @@
 					number: proposal.number,
 					shots: [],
 					corridorBends: [],
-					corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
+					corridorWidthPx: inheritedWidthPx
 				}),
 				tee: keepTee ? existing!.tee! : acceptCandidate(proposal.tee!),
 				basket: keepBasket ? existing!.basket! : acceptCandidate(proposal.basket!)
@@ -1027,9 +1054,11 @@
 			activeHoleId = holes[holes.length - 1].id;
 			return;
 		}
+		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHole(holes);
-		holes = nextHoles;
-		activeHoleId = nextHoles[nextHoles.length - 1].id;
+		const addedHole = nextHoles[nextHoles.length - 1];
+		holes = setCorridorWidth(nextHoles, addedHole.id, inheritedWidthPx);
+		activeHoleId = addedHole.id;
 	}
 
 	/** A stitched PNG awaiting explicit import from the Stitch Map page. */
@@ -1397,7 +1426,7 @@
 							<button type="button" data-testid="clear-bends" disabled={hole.corridorBends.length === 0} onclick={handleClearBends}>Clear bends</button>
 						</div>
 						<label class="width-control">
-							<span>Corridor width (px)</span>
+							<span>Corridor width — all holes (px)</span>
 							<input
 								type="number"
 								min="1"
