@@ -1,0 +1,32 @@
+{
+  "shapeHoles": [
+    {
+      "number": 1,
+      "centerline": [
+        {
+          "xPx": 881.6399667547162,
+          "yPx": 428.20063173656297
+        },
+        {
+          "xPx": 649.8173681100354,
+          "yPx": 484.37106611645197
+        },
+        {
+          "xPx": 515.3473859372166,
+          "yPx": 424.64612819450895
+        }
+      ],
+      "tolerancePx": 20,
+      "source": "Hand-annotated ground truth from static/resources/hole-spike/one-hole.chainspot.zip (tee -> corridorBends[0] -> basket), same source image as GoldenTeeSet/GoldenBasketSet."
+    }
+  ],
+  "straightHoles": {
+    "numbers": [
+      9,
+      10,
+      11,
+      12
+    ],
+    "maxDeviationFraction": 0.15
+  }
+}
