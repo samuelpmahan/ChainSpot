@@ -1070,6 +1070,15 @@
 			const pendingBadges = getPendingCourseBadges();
 			if (pendingBadges) {
 				editor.setNumberBadges(pendingBadges.numberBadges);
+				// TODO(course-memory): pendingBadges.baskets is discarded here — it can
+				// include CV-detected basket points for holes that were never fully
+				// confirmed in Annotate Round (see labeledBaskets capture at
+				// annotate-round/+page.svelte), so it isn't always redundant with
+				// basketsFromHoles(holes) at save time. Rather than silently apply or
+				// silently drop it, surface it as an export/import option dialog: let
+				// the user decide per basket whether it's a real extra marker to keep
+				// (e.g. a second basket on the hole) or stray/leftover CV noise to
+				// discard.
 				consumePendingCourseBadges();
 			}
 			consumePendingAnnotatedRound();

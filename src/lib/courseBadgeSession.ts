@@ -22,6 +22,12 @@ export type { LabeledPoint };
 
 export interface PendingCourseBadges {
 	readonly numberBadges: readonly HoleNumberBadgeAnchor[];
+	// TODO(course-memory): `baskets` is currently captured on Done but never
+	// consumed on import (see create-graphics/+page.svelte's
+	// importAnnotatedRound) — it isn't safe to just apply or just drop, since
+	// it can carry CV-detected points for holes the user never confirmed.
+	// Needs an export/import option dialog so the user can decide per point
+	// whether it's a real extra basket or leftover CV noise.
 	readonly baskets: readonly LabeledPoint[];
 }
 
