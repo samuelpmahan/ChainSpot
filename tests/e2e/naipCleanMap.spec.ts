@@ -159,7 +159,6 @@ test('NAIP clean-map pipeline: "Use this preview as-is" commits the single refer
 		await route.fulfill({ status: 200, contentType: 'image/png', body: pngPayload(2048, 2048) });
 	});
 
-	await page.getByTestId('naip-manual-entry').locator('summary').click();
 	await page.getByTestId('naip-lat').fill('33.1255198');
 	await page.getByTestId('naip-lon').fill('-96.8610387');
 	await page.getByTestId('naip-fetch-button').click();

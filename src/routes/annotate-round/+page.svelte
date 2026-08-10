@@ -1303,7 +1303,7 @@
 								class="apply-button"
 								data-testid="apply-ready-course-holes"
 								disabled={readyHoles === 0}
-								onclick={applyReadyCourseHoles}
+								onclick={() => applyReadyCourseHoles()}
 							>
 								Apply {readyHoles} ready holes
 							</button>

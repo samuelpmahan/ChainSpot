@@ -80,7 +80,7 @@ test('Annotate Round hands its source image to Create Graphics, where the corres
 	// Done is gated on a loaded source image.
 	await expect(page.getByTestId('annotate-done')).toBeDisabled();
 	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('tiny.png');
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('tiny.png · 2 × 3');
 	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
 	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
