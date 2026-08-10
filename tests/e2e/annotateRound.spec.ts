@@ -72,6 +72,20 @@ async function canvasClick(page: Page, role: string, local: { x: number; y: numb
 	await page.mouse.click(point.x, point.y);
 }
 
+test('empty-state "Choose image" button opens the native file picker', async ({ page }) => {
+	await gotoApp(page, '/annotate-round');
+
+	// Regression test: a pointerdown on a control rendered inside the pannable
+	// ImageViewport must not be swallowed by the viewport's own pan-gesture
+	// setup (which used to call setPointerCapture on the viewport container
+	// and retarget the resulting click away from the button, so the click
+	// handler that opens the file input never ran).
+	const chooserPromise = page.waitForEvent('filechooser');
+	await page.getByTestId('pane-choose-inline-source-overview').click();
+	const chooser = await chooserPromise;
+	expect(chooser.isMultiple()).toBe(false);
+});
+
 test('Annotate Round hands its source image to Create Graphics, where the correspondence workflow still works', async ({
 	page
 }) => {

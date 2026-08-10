@@ -153,8 +153,23 @@
 		controller.panBy(-dx, -dy);
 	}
 
+	/**
+	 * Interactive controls a consumer renders inside `content` (for example the
+	 * empty-state "Choose image" button) must keep their native click behavior.
+	 * Below, an unclaimed pointerdown calls `setPointerCapture` on this
+	 * container to drive panning; that capture retargets the browser's
+	 * synthesized click event to the container itself instead of the element
+	 * the user actually pressed, so the control's own click handler would never
+	 * run. Bail out before any of that when the pointerdown started on (or
+	 * inside) a real form control or link.
+	 */
+	function isInteractiveControl(target: EventTarget | null): boolean {
+		return target instanceof Element && target.closest('button, a[href], input, select, textarea, label') !== null;
+	}
+
 	function onPointerDown(event: PointerEvent): void {
 		if (event.button !== 0) return;
+		if (isInteractiveControl(event.target)) return;
 		const pointer = controller.pointerIn(event);
 		activePointers.set(event.pointerId, pointer);
 
