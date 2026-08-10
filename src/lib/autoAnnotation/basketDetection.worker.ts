@@ -23,6 +23,7 @@ import {
 } from './cvCalibratedDetectors';
 import type { CalibratedBasketCandidate } from './cvCalibratedDetectors';
 import {
+	asNumberTemplateScale,
 	asUiScalePx,
 	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
@@ -33,6 +34,8 @@ import type {
 	CvTemplateManifest,
 	UiScalePx
 } from './cvCalibration';
+import { localFeatureSnap } from '../cv/localSnap';
+import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
 
 const MAX_ANALYSIS_DIM = 2200;
 // `$app/paths`'s `base` does not resolve inside this worker's separate
@@ -69,7 +72,29 @@ interface TeeDetectionRequest {
 	readonly fullResolution?: boolean;
 }
 
-type BasketRequest = BasketDetectionRequest | BasketPrewarmRequest | TeeDetectionRequest;
+/**
+ * "Snap-to-detection" (see `localSnap.ts`'s doc comment for why this reuses
+ * the worker rather than a second main-thread OpenCV instance). The caller
+ * forwards its already-known number-badge anchor (the same one
+ * `detectCourse`/`detectTees` derive `UiScalePx`/`BasketTemplateScale` from)
+ * as raw numbers rather than a branded type -- branding only matters once
+ * this worker re-derives calibration from it, structured-clone doesn't care.
+ */
+interface LocalSnapRequest {
+	readonly kind: 'local-snap';
+	readonly token: string;
+	readonly basePath: string;
+	readonly bitmap: ImageBitmap;
+	readonly snapKind: LocalSnapKind;
+	readonly clickPx: LocalSnapPoint;
+	readonly numberAnchor: { scale: number; widthPx: number; heightPx: number };
+}
+
+type BasketRequest =
+	| BasketDetectionRequest
+	| BasketPrewarmRequest
+	| TeeDetectionRequest
+	| LocalSnapRequest;
 type RuntimeCv = BasketCv & TeePadCv & HoleNumberCvModule;
 
 type AnalysisRaster = ReturnType<typeof grayscaleRaster>;
@@ -381,6 +406,50 @@ async function detectTees(
 	};
 }
 
+/**
+ * "Snap-to-detection" (design point 1/2). Re-derives `UiScalePx` (and, for a
+ * basket snap, `BasketTemplateScale`) from the caller's own number-badge
+ * anchor exactly the way `detectCourse` does, then hands the *whole*
+ * full-resolution raster to `localFeatureSnap`, which does its own
+ * cropping down to a small window around the click before running any
+ * detector -- see that module's doc comment for why decoding the whole
+ * image here (rather than a canvas-level partial draw) was an acceptable
+ * trade-off given this request is always wrapped in the caller's optimistic
+ * placement.
+ */
+async function detectLocalSnap(request: LocalSnapRequest): Promise<LocalSnapPoint | null> {
+	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
+	const numberTemplateScale = asNumberTemplateScale(request.numberAnchor.scale, 'Local snap number anchor scale');
+	const calibration = deriveUDiscCalibration(
+		{ scale: numberTemplateScale, widthPx: request.numberAnchor.widthPx, heightPx: request.numberAnchor.heightPx },
+		pack.manifest.calibration.canonicalNumberBadge
+	);
+
+	const full = fullResolutionRaster(request.bitmap);
+	const raster: LocalSnapRaster =
+		request.snapKind === 'tee'
+			? { rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 }
+			: {
+					gray: grayscaleRgba(full.rgba, full.width * full.height),
+					widthPx: full.width,
+					heightPx: full.height,
+					sourceScale: 1
+				};
+
+	const localSnapCalibration: LocalSnapCalibration =
+		request.snapKind === 'basket'
+			? {
+					uiScalePx: calibration.uiScalePx,
+					basket: {
+						template: pack.basket,
+						templateScale: deriveBasketTemplateScale(numberTemplateScale, pack.manifest.calibration)
+					}
+				}
+			: { uiScalePx: calibration.uiScalePx };
+
+	return localFeatureSnap(request.snapKind, cv, raster, request.clickPx, localSnapCalibration);
+}
+
 function reportCourseProgress(
 	request: BasketDetectionRequest,
 	stage: 'opencv' | 'baskets' | 'templates' | 'numbers' | 'tees' | 'grammar',
@@ -605,6 +674,11 @@ async function processRequest(request: BasketRequest): Promise<void> {
 				uiScalePx,
 				results
 			});
+			return;
+		}
+		if (request.kind === 'local-snap') {
+			const snapped = await detectLocalSnap(request);
+			(self as unknown as Worker).postMessage({ ok: true, kind: request.kind, token: request.token, snapped });
 			return;
 		}
 		const candidates = await detectBaskets(request.bitmap, request.widthPx, request.heightPx);

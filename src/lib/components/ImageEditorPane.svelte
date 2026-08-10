@@ -38,7 +38,10 @@
 		decode?: DecodeImageFile;
 		confirmDiscard?: (affectedPairCount: number) => boolean | Promise<boolean>;
 		onDomainChanged?: (role: ImageRole) => void;
-		onPlacement?: (coordinates: { xPx: number; yPx: number }) => void;
+		onPlacement?: (
+			coordinates: { xPx: number; yPx: number },
+			options?: { altKey?: boolean }
+		) => void;
 		claimPointer?: (
 			pointer: ScreenSpacePoint,
 			event: PointerEvent,
@@ -128,12 +131,12 @@
 		return () => URL.revokeObjectURL(url);
 	});
 
-	function handleViewportClick(pointer: { x: number; y: number }): void {
+	function handleViewportClick(pointer: { x: number; y: number }, event: PointerEvent): void {
 		const image = currentImage();
 		if (!image || !onPlacement) return;
 		const coordinates = screenToImage(pointer, vp.view);
 		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) return;
-		onPlacement(coordinates);
+		onPlacement(coordinates, { altKey: event.altKey });
 	}
 
 	async function handleFileChange(event: Event): Promise<void> {

@@ -17,6 +17,7 @@ import type {
 	TeePadVariant,
 	TeePadVariantResult
 } from './teePadDetection';
+import type { LocalSnapKind, LocalSnapPoint } from '../cv/localSnap';
 
 export type BasketCandidate = CalibratedBasketCandidate;
 
@@ -116,11 +117,12 @@ export interface CourseDetectionProgress {
 interface BasketWorkerSuccess {
 	ok: true;
 	token: string;
-	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees';
+	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees' | 'local-snap';
 	candidates?: readonly BasketCandidate[];
 	course?: CourseDetectionResult;
 	uiScalePx?: number;
 	results?: readonly TeePadVariantResult[];
+	snapped?: LocalSnapPoint | null;
 }
 
 interface BasketWorkerProgress {
@@ -133,7 +135,7 @@ interface BasketWorkerProgress {
 interface BasketWorkerFailure {
 	ok: false;
 	token: string;
-	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees';
+	kind: 'detect' | 'detect-course' | 'prewarm' | 'detect-tees' | 'local-snap';
 	message: string;
 }
 
@@ -167,7 +169,21 @@ interface TeeDetectionRequest {
 	readonly fullResolution?: boolean;
 }
 
-type BasketWorkerRequest = BasketDetectionRequest | BasketPrewarmRequest | TeeDetectionRequest;
+interface LocalSnapWorkerRequest {
+	readonly kind: 'local-snap';
+	readonly token: string;
+	readonly basePath: string;
+	readonly bitmap: ImageBitmap;
+	readonly snapKind: LocalSnapKind;
+	readonly clickPx: LocalSnapPoint;
+	readonly numberAnchor: { scale: number; widthPx: number; heightPx: number };
+}
+
+type BasketWorkerRequest =
+	| BasketDetectionRequest
+	| BasketPrewarmRequest
+	| TeeDetectionRequest
+	| LocalSnapWorkerRequest;
 
 interface PendingRequest {
 	readonly worker: Worker;
@@ -395,6 +411,56 @@ export async function detectTees(
 			uiScalePx: asUiScalePx(reply.uiScalePx as number, 'Worker tee UI scale'),
 			results: reply.results
 		};
+	} catch (error) {
+		bitmap.close();
+		throw error;
+	}
+}
+
+export interface LocalSnapRequestOptions {
+	readonly kind: LocalSnapKind;
+	readonly clickPx: LocalSnapPoint;
+	/** The same number-badge anchor `detectCourse`'s result already carries (`courseDetection.numberDetection.anchor`); the worker re-derives `UiScalePx`/`BasketTemplateScale` from it itself. */
+	readonly numberAnchor: { scale: number; widthPx: number; heightPx: number };
+}
+
+/**
+ * "Snap-to-detection" (see `src/lib/cv/localSnap.ts`'s doc comment for the
+ * main-thread-vs-worker choice this makes). Routes through the same
+ * `basketDetection.worker.ts` instance every other detection call uses --
+ * typically already warm after "Detect course"/"Detect tees" -- rather than
+ * loading a second OpenCV WASM runtime on the main thread. Never throws for
+ * "nothing found": resolves to `null` exactly like a failed local pass
+ * should. Callers on a latency budget (this feature's own wiring included)
+ * should not await this before placing the raw click -- see
+ * `annotate-round/+page.svelte`'s optimistic-placement call site.
+ */
+export async function requestLocalSnap(
+	bytes: Uint8Array,
+	mimeType: string,
+	options: LocalSnapRequestOptions
+): Promise<LocalSnapPoint | null> {
+	assertWorkerSupport();
+	const bitmap = await sourceBitmap(bytes, mimeType);
+	const token = nextToken();
+	try {
+		const reply = await postToWorker(
+			{
+				kind: 'local-snap',
+				token,
+				basePath: base,
+				bitmap,
+				snapKind: options.kind,
+				clickPx: options.clickPx,
+				numberAnchor: options.numberAnchor
+			},
+			[bitmap as unknown as Transferable]
+		);
+		if (!reply.ok) throw new Error(reply.message);
+		if (reply.kind !== 'local-snap') {
+			throw new Error('Local snap worker returned an invalid reply.');
+		}
+		return reply.snapped ?? null;
 	} catch (error) {
 		bitmap.close();
 		throw error;
