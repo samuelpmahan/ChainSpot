@@ -108,7 +108,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 }
 
 describe('Annotate Round radial menu', () => {
-	it('opens on an empty-space click with a wedge per point kind not yet on the hole, and places a tee', async () => {
+	it('in the default Map mode, opens on an empty-space click with a wedge per course-geometry kind not yet on the hole (no shot), and places a tee', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -122,16 +122,44 @@ describe('Annotate Round radial menu', () => {
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-wedge-basket"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).toBeNull();
 		expect(host.querySelector('[data-testid="radial-wedge-bend"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
 
-		const teeOffset = wedgeOffset(4, 0);
+		const teeOffset = wedgeOffset(3, 0);
 		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('in Round mode, opens on an empty-space click with a shot wedge (hole active) and a walk wedge, and places a shot', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+		host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]')?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-basket"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-bend"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-walk"]')).not.toBeNull();
+
+		const shotOffset = wedgeOffset(2, 0);
+		dispatchClick(host, clickAt.x + shotOffset.dx, clickAt.y + shotOffset.dy);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="shot-marker-1-0"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -145,7 +173,7 @@ describe('Annotate Round radial menu', () => {
 		const clickAt = screenPointFor(host, 60, 60);
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
-		const teeOffset = wedgeOffset(4, 0);
+		const teeOffset = wedgeOffset(3, 0);
 		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
@@ -215,7 +243,7 @@ describe('Annotate Round radial menu', () => {
 		// wedge places on hole 1, not hole 2 (the stale menu's original target).
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
-		const teeOffset = wedgeOffset(4, 0);
+		const teeOffset = wedgeOffset(3, 0);
 		dispatchClick(host, clickAt.x + teeOffset.dx, clickAt.y + teeOffset.dy);
 		await flush();
 

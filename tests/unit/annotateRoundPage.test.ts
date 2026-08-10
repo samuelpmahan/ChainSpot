@@ -17,6 +17,7 @@ import {
 	consumePendingAnnotatedRound,
 	getPendingAnnotatedRound
 } from '../../src/lib/session';
+import { radialWedges } from '../../src/lib/radialMenu';
 
 const NOW = () => new Date('2026-08-06T00:00:00.000Z');
 
@@ -208,6 +209,171 @@ describe('Annotate Round keyboard controls and visible labels', () => {
 		removeFirst.click();
 		await flush();
 		expect(document.activeElement).toBe(host.querySelector('[data-testid="hole-add"]'));
+
+		unmount(component);
+		host.remove();
+	});
+});
+
+// Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
+// +page.svelte — there is no shared export, since they're page-local tuning.
+const HUB_RADIUS_PX = 20;
+const OUTER_RADIUS_PX = 62;
+
+function scene(host: HTMLElement): HTMLElement {
+	const element = host.querySelector<HTMLElement>('[data-testid="pane-scene-source-overview"]');
+	if (!element) throw new Error('missing source-overview scene');
+	return element;
+}
+
+/** Places the scene's origin at (0,0) in viewport coordinates, one-to-one with clientX/Y. */
+function setGeometry(host: HTMLElement): void {
+	const element = scene(host);
+	Object.defineProperties(element, {
+		clientWidth: { configurable: true, value: 400 },
+		clientHeight: { configurable: true, value: 400 },
+		clientLeft: { configurable: true, value: 0 },
+		clientTop: { configurable: true, value: 0 }
+	});
+	element.getBoundingClientRect = () =>
+		({ left: 0, top: 0, width: 400, height: 400, right: 400, bottom: 400 }) as DOMRect;
+}
+
+function dispatchClick(host: HTMLElement, x: number, y: number): void {
+	const element = scene(host);
+	const pointerId = 41;
+	element.dispatchEvent(
+		new PointerEvent('pointerdown', { button: 0, pointerId, clientX: x, clientY: y, bubbles: true })
+	);
+	window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: x, clientY: y }));
+}
+
+function view(host: HTMLElement): { zoom: number; panX: number; panY: number } {
+	const dataset = scene(host).dataset;
+	return {
+		zoom: Number(dataset.viewZoom),
+		panX: Number(dataset.viewPanX),
+		panY: Number(dataset.viewPanY)
+	};
+}
+
+function screenPointFor(host: HTMLElement, imageX: number, imageY: number): { x: number; y: number } {
+	const { zoom, panX, panY } = view(host);
+	return { x: imageX * zoom + panX, y: imageY * zoom + panY };
+}
+
+/** Screen offset of a given wedge, relative to the menu's anchor point — independent of zoom by design. */
+function wedgeOffset(actionCount: number, index: number): { dx: number; dy: number } {
+	const layout = radialWedges(actionCount, { hubRadius: HUB_RADIUS_PX, outerRadius: OUTER_RADIUS_PX });
+	const wedge = layout.wedges[index];
+	return { dx: wedge.labelX, dy: wedge.labelY };
+}
+
+async function loadImage(host: HTMLElement): Promise<void> {
+	const input = inputEl(host, 'pane-input-source-overview');
+	setFileInput(input, new File([new Uint8Array([1, 2, 3, 4])], 'course.png', { type: 'image/png' }));
+	await flush();
+	setGeometry(host);
+}
+
+describe('Annotate Round mode toggle', () => {
+	it('defaults to Map mode; switching to Round mode changes the wedges an empty-space click offers', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await loadImage(host);
+
+		const mapButton = host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-map"]');
+		const roundButton = host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]');
+		if (!mapButton || !roundButton) throw new Error('missing mode toggle buttons');
+		expect(mapButton.getAttribute('aria-pressed')).toBe('true');
+		expect(roundButton.getAttribute('aria-pressed')).toBe('false');
+
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]')?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-basket"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-bend"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-walk"]')).toBeNull();
+		// Dismiss via the hub before switching modes.
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+
+		roundButton.click();
+		await flush();
+		expect(roundButton.getAttribute('aria-pressed')).toBe('true');
+		expect(mapButton.getAttribute('aria-pressed')).toBe('false');
+
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="radial-wedge-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-basket"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-bend"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-walk"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+});
+
+describe('Annotate Round walking path', () => {
+	it('in Round mode with no hole selected, an empty-space click offers only the walk wedge and places a walk vertex', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await loadImage(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="hole-bar-current-label"]')?.textContent).toContain(
+			'No hole selected'
+		);
+
+		const clickAt = screenPointFor(host, 40, 40);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-wedge-shot"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-wedge-walk"]')).not.toBeNull();
+
+		const walkOffset = wedgeOffset(1, 0);
+		dispatchClick(host, clickAt.x + walkOffset.dx, clickAt.y + walkOffset.dy);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="walk-vertex-0"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('Done includes walkingPath once at least one vertex was captured', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await loadImage(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]')?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 60, 60);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		const walkOffset = wedgeOffset(1, 0);
+		dispatchClick(host, clickAt.x + walkOffset.dx, clickAt.y + walkOffset.dy);
+		await flush();
+		expect(host.querySelector('[data-testid="walk-vertex-0"]')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]')?.click();
+		await flush();
+
+		const pending = getPendingAnnotatedRound();
+		expect(pending?.walkingPath).toBeDefined();
+		expect(pending?.walkingPath).toHaveLength(1);
 
 		unmount(component);
 		host.remove();

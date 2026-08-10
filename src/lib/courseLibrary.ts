@@ -201,6 +201,81 @@ async function findMatchingEntry(
 	return fuzzy.length > 0 ? fuzzy[0].entry : null;
 }
 
+function sourcePointsEqual(a: SourcePoint | undefined, b: SourcePoint | undefined): boolean {
+	if (!a || !b) return a === b;
+	return a.xPx === b.xPx && a.yPx === b.yPx;
+}
+
+function sourcePointArraysEqual(a: readonly SourcePoint[], b: readonly SourcePoint[]): boolean {
+	return a.length === b.length && a.every((point, index) => sourcePointsEqual(point, b[index]));
+}
+
+function labeledPointsEqual(a: readonly LabeledPoint[], b: readonly LabeledPoint[]): boolean {
+	return (
+		a.length === b.length &&
+		a.every(
+			(point, index) =>
+				point.holeNumber === b[index].holeNumber && point.xPx === b[index].xPx && point.yPx === b[index].yPx
+		)
+	);
+}
+
+/** Hole-number-keyed comparison so reordering never counts as a change. */
+function libraryHolesEqual(a: readonly CourseLibraryHole[], b: readonly CourseLibraryHole[]): boolean {
+	if (a.length !== b.length) return false;
+	const byNumber = new Map(b.map((hole) => [hole.number, hole]));
+	return a.every((hole) => {
+		const other = byNumber.get(hole.number);
+		return (
+			other !== undefined &&
+			sourcePointsEqual(hole.tee, other.tee) &&
+			sourcePointsEqual(hole.basket, other.basket) &&
+			sourcePointArraysEqual(hole.corridorBends, other.corridorBends) &&
+			hole.corridorWidthPx === other.corridorWidthPx
+		);
+	});
+}
+
+/** Whether `input` would leave `entry`'s stored geometry (badges/baskets/hole tee-basket-bends-width) byte-for-byte the same. */
+function isGeometryUnchanged(entry: CourseLibraryEntry, input: UpsertCourseInput): boolean {
+	return (
+		labeledPointsEqual(entry.badges, input.numberBadges) &&
+		labeledPointsEqual(entry.baskets, input.baskets) &&
+		libraryHolesEqual(entry.holes, input.holes)
+	);
+}
+
+export type UpsertCoursePreview =
+	| { readonly kind: 'new' }
+	| { readonly kind: 'identical'; readonly entry: CourseLibraryEntry }
+	| { readonly kind: 'update'; readonly entry: CourseLibraryEntry };
+
+/**
+ * Read-only counterpart to `upsertCourse`: reports what an upsert of `input`
+ * WOULD do — insert a fresh entry, no-op against an already-matching entry,
+ * or overwrite a matched entry's stored geometry — without writing anything.
+ * Shares `findMatchingEntry`'s exact-hash-then-fuzzy matching so the two
+ * functions can never disagree on which entry an upsert would touch. A
+ * `descriptor` failure (too few badges) mirrors `upsertCourse`'s own no-op:
+ * reported as `'new'` since the caller's subsequent upsert attempt will
+ * itself write nothing.
+ */
+export async function previewUpsertCourse(
+	store: CourseLibraryStore,
+	input: UpsertCourseInput,
+	options: Pick<UpsertCourseOptions, 'hash'> = {}
+): Promise<UpsertCoursePreview> {
+	const { hash = sha256Hex } = options;
+	const target: CourseSignatureInput = { badges: input.numberBadges, baskets: input.baskets };
+	const descriptor = computeSignatureDescriptor(target);
+	if (!descriptor.ok) return { kind: 'new' };
+	const signatureHash = await hashSignatureDescriptor(descriptor, hash);
+
+	const existing = await findMatchingEntry(store, target, signatureHash);
+	if (!existing) return { kind: 'new' };
+	return isGeometryUnchanged(existing, input) ? { kind: 'identical', entry: existing } : { kind: 'update', entry: existing };
+}
+
 /**
  * Computes the new signature, then updates the closest existing entry in
  * place (dedup: same physical course re-saved after further annotation)

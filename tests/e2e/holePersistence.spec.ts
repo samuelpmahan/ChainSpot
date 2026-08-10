@@ -10,15 +10,33 @@ import { CURRENT_SCHEMA_VERSION } from '../../src/lib/projectSchema';
 const RADIAL_HUB_RADIUS_PX = 20;
 const RADIAL_OUTER_RADIUS_PX = 62;
 
-type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-/** The wedges a fresh radial menu offers for empty space, given what's already on the hole — mirrors +page.svelte's radialMenuActions(). */
-function availableKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
+/**
+ * The wedges a fresh radial menu offers for empty space, given the active
+ * mode and what's already on the hole — mirrors +page.svelte's
+ * radialMenuActions(). Map mode offers course geometry (tee/basket if
+ * absent, bend always); Round mode offers round-specific points (shot only
+ * with a hole active, walk always).
+ */
+function mapKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
 	const kinds: PointKind[] = [];
 	if (!hasTee) kinds.push('tee');
 	if (!hasBasket) kinds.push('basket');
-	kinds.push('shot', 'bend');
+	kinds.push('bend');
 	return kinds;
+}
+
+function roundKinds(hasActiveHole: boolean): PointKind[] {
+	const kinds: PointKind[] = [];
+	if (hasActiveHole) kinds.push('shot');
+	kinds.push('walk');
+	return kinds;
+}
+
+/** Clicks the Map/Round segmented toggle in the toolbar. */
+async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
 }
 
 /** Clicks (x, y) to open the radial menu, then clicks the wedge for `kind` among `kinds`. */
@@ -164,10 +182,12 @@ async function annotateOneHole(page: Page): Promise<void> {
 	const box = await frame.boundingBox();
 	if (!box) throw new Error('annotation frame has no bounding box');
 
-	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 400, box.y + 300, 'basket', availableKinds(true, false));
-	await placePoint(page, box.x + 200, box.y + 150, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 230, box.y + 180, 'bend', availableKinds(true, true));
+	await placePoint(page, box.x + 50, box.y + 50, 'tee', mapKinds(false, false));
+	await placePoint(page, box.x + 400, box.y + 300, 'basket', mapKinds(true, false));
+	await switchMode(page, 'round');
+	await placePoint(page, box.x + 200, box.y + 150, 'shot', roundKinds(true));
+	await switchMode(page, 'map');
+	await placePoint(page, box.x + 230, box.y + 180, 'bend', mapKinds(true, true));
 	await page.getByTestId('corridor-width').fill('90');
 	await page.getByTestId('corridor-width').blur();
 

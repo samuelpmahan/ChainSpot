@@ -18,15 +18,33 @@ import { radialWedges } from '../../src/lib/radialMenu';
 const RADIAL_HUB_RADIUS_PX = 20;
 const RADIAL_OUTER_RADIUS_PX = 62;
 
-type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-/** The wedges a fresh radial menu offers for empty space, given what's already on the hole — mirrors +page.svelte's radialMenuActions(). */
-function availableKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
+/**
+ * The wedges a fresh radial menu offers for empty space, given the active
+ * mode and what's already on the hole — mirrors +page.svelte's
+ * radialMenuActions(). Map mode offers course geometry (tee/basket if
+ * absent, bend always); Round mode offers round-specific points (shot only
+ * with a hole active, walk always).
+ */
+function mapKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
 	const kinds: PointKind[] = [];
 	if (!hasTee) kinds.push('tee');
 	if (!hasBasket) kinds.push('basket');
-	kinds.push('shot', 'bend');
+	kinds.push('bend');
 	return kinds;
+}
+
+function roundKinds(hasActiveHole: boolean): PointKind[] {
+	const kinds: PointKind[] = [];
+	if (hasActiveHole) kinds.push('shot');
+	kinds.push('walk');
+	return kinds;
+}
+
+/** Clicks the Map/Round segmented toggle in the toolbar. */
+async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
 }
 
 function crc32(bytes: Uint8Array): number {
@@ -142,11 +160,11 @@ test('hole annotation: place tee/basket/shots/bends via the radial menu, correct
 	await loadSourceImage(page);
 	const { box } = await annotationFrameBox(page);
 
-	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
+	await placePoint(page, box.x + 50, box.y + 50, 'tee', mapKinds(false, false));
 	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('tee');
 
-	await placePoint(page, box.x + 300, box.y + 250, 'basket', availableKinds(true, false));
+	await placePoint(page, box.x + 300, box.y + 250, 'basket', mapKinds(true, false));
 	await expect(page.getByTestId('basket-marker-1')).toBeVisible();
 
 	// As soon as tee + basket exist, the derived corridor band and centerline
@@ -155,15 +173,18 @@ test('hole annotation: place tee/basket/shots/bends via the radial menu, correct
 	await expect(page.getByTestId('corridor-centerline-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('tee · basket');
 
-	await placePoint(page, box.x + 120, box.y + 100, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 200, box.y + 160, 'shot', availableKinds(true, true));
+	// Shots are a Round-mode activity.
+	await switchMode(page, 'round');
+	await placePoint(page, box.x + 120, box.y + 100, 'shot', roundKinds(true));
+	await placePoint(page, box.x + 200, box.y + 160, 'shot', roundKinds(true));
 	await expect(page.getByTestId('shot-marker-1-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('2 shots');
 
-	// A bend click places a visible bend marker; more clicks add more bends.
-	await placePoint(page, box.x + 170, box.y + 170, 'bend', availableKinds(true, true));
+	// Bends are a Map-mode activity; switch back before placing more.
+	await switchMode(page, 'map');
+	await placePoint(page, box.x + 170, box.y + 170, 'bend', mapKinds(true, true));
 	await expect(page.getByTestId('bend-marker-1-0')).toBeVisible();
-	await placePoint(page, box.x + 230, box.y + 190, 'bend', availableKinds(true, true));
+	await placePoint(page, box.x + 230, box.y + 190, 'bend', mapKinds(true, true));
 	await expect(page.getByTestId('bend-marker-1-1')).toBeVisible();
 	await expect(page.getByTestId('hole-select-1')).toContainText('bends (2)');
 
@@ -190,7 +211,7 @@ test('hole annotation: place tee/basket/shots/bends via the radial menu, correct
 	// delete menu.
 	await page.getByTestId('hole-add').click();
 	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '2');
-	await placePoint(page, box.x + 600, box.y + 440, 'tee', availableKinds(false, false));
+	await placePoint(page, box.x + 600, box.y + 440, 'tee', mapKinds(false, false));
 	await expect(page.getByTestId('tee-marker-2')).toBeVisible();
 	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
 	await expect(page.getByTestId('basket-marker-2')).toHaveCount(0);
@@ -202,16 +223,19 @@ test('hole annotation: existing tee, basket, shot, and bend markers drag without
 	await loadSourceImage(page);
 	const { box } = await annotationFrameBox(page);
 
-	await placePoint(page, box.x + 80, box.y + 80, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 520, box.y + 420, 'basket', availableKinds(true, false));
-	await placePoint(page, box.x + 180, box.y + 180, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 260, box.y + 240, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 350, box.y + 320, 'bend', availableKinds(true, true));
+	await placePoint(page, box.x + 80, box.y + 80, 'tee', mapKinds(false, false));
+	await placePoint(page, box.x + 520, box.y + 420, 'basket', mapKinds(true, false));
+	await switchMode(page, 'round');
+	await placePoint(page, box.x + 180, box.y + 180, 'shot', roundKinds(true));
+	await placePoint(page, box.x + 260, box.y + 240, 'shot', roundKinds(true));
+	await switchMode(page, 'map');
+	await placePoint(page, box.x + 350, box.y + 320, 'bend', mapKinds(true, true));
 
 	const centerlineBefore = await page.getByTestId('corridor-centerline-1').getAttribute('points');
 	const bendCountBefore = await page.locator('[data-testid^="bend-marker-1-"]').count();
 
 	// Bend placement is active, but a marker claim must win over background placement.
+	// Still in Map mode, so tee/basket/bend markers are the interactive ones.
 	const teeBefore = await page.getByTestId('tee-marker-1').getAttribute('cx');
 	await dragMarker(page, 'tee-marker-1', 45, 25, false);
 	await expect(page.getByTestId('tee-marker-1')).not.toHaveAttribute('cx', teeBefore ?? '');
@@ -229,10 +253,13 @@ test('hole annotation: existing tee, basket, shot, and bend markers drag without
 		expect(bandAfterBasket).not.toBe(bandBeforeBasket);
 	await expectSourcePointInBounds(page, 'basket-marker-1');
 
+	// Shot markers are only interactive in Round mode.
+	await switchMode(page, 'round');
 	const shotCountBefore = await page.locator('[data-testid^="shot-marker-1-"]').count();
 	await dragMarker(page, 'shot-marker-1-0', 30, 15);
 	await expect(page.locator('[data-testid^="shot-marker-1-"]')).toHaveCount(shotCountBefore);
 	await expectSourcePointInBounds(page, 'shot-marker-1-0');
+	await switchMode(page, 'map');
 
 	const centerlineBeforeBend = await page.getByTestId('corridor-centerline-1').getAttribute('points');
 	await dragMarker(page, 'bend-marker-1-0', 25, -15);
@@ -263,9 +290,12 @@ test('hole annotation: the radial menu deletes an individual point without touch
 	await loadSourceImage(page);
 	const { box } = await annotationFrameBox(page);
 
-	await placePoint(page, box.x + 80, box.y + 80, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 520, box.y + 420, 'basket', availableKinds(true, false));
-	await placePoint(page, box.x + 180, box.y + 180, 'shot', availableKinds(true, true));
+	await placePoint(page, box.x + 80, box.y + 80, 'tee', mapKinds(false, false));
+	await placePoint(page, box.x + 520, box.y + 420, 'basket', mapKinds(true, false));
+	await switchMode(page, 'round');
+	await placePoint(page, box.x + 180, box.y + 180, 'shot', roundKinds(true));
+	// Basket markers are only interactive in Map mode.
+	await switchMode(page, 'map');
 
 	const basketBox = await page.getByTestId('basket-marker-1').boundingBox();
 	if (!basketBox) throw new Error('basket marker has no bounding box');
@@ -290,8 +320,8 @@ test('hole annotation: a straight hole with zero bends and its width control sti
 	await loadSourceImage(page);
 	const { box } = await annotationFrameBox(page);
 
-	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 300, box.y + 250, 'basket', availableKinds(true, false));
+	await placePoint(page, box.x + 50, box.y + 50, 'tee', mapKinds(false, false));
+	await placePoint(page, box.x + 300, box.y + 250, 'basket', mapKinds(true, false));
 	// Zero bends is a valid straight hole: the band renders and Done is unblocked.
 	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
 	await page.getByTestId('corridor-width').fill('70');

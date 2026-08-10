@@ -26,6 +26,7 @@
 		badgesToLabeledPoints,
 		findFuzzyMatches,
 		getDefaultCourseLibraryStore,
+		previewUpsertCourse,
 		toLibraryHoles,
 		upsertCourse
 	} from '$lib/courseLibrary';
@@ -35,6 +36,7 @@
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
 	import { isEditableTarget } from '$lib/pointSelection';
+	import { dialogKeyboard, isModalOpen } from '$lib/focusManagement';
 	import {
 		addHole,
 		addHoleBeyondStandardCourse,
@@ -77,23 +79,33 @@
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 	import { acceptCandidate } from '$lib/cv/types';
+	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
+	import type { SourcePoint } from '$lib/domain/project';
+
+	/** The two annotation activities this route now separates: course geometry (once per course/layout) vs. round-specific throws and walk path (once per round). */
+	type AnnotationMode = 'map' | 'round';
+
+	/** A point kind offered by the radial menu, either a hole-scoped placement mode or the round-level walk path. */
+	type PointKind = HolePlacementMode | 'walk';
 
 	/** Shared label text for a point kind, reused by both radial-menu wedges and the hole bar. */
-	const POINT_KIND_LABELS: Record<HolePlacementMode, string> = {
+	const POINT_KIND_LABELS: Record<PointKind, string> = {
 		tee: 'Tee',
 		basket: 'Basket',
 		shot: 'Shot landing',
-		bend: 'Corridor bend'
+		bend: 'Corridor bend',
+		walk: 'Walk path'
 	};
-	const POINT_KIND_ICONS: Record<HolePlacementMode, string> = {
+	const POINT_KIND_ICONS: Record<PointKind, string> = {
 		tee: 'T',
 		basket: 'B',
 		shot: '+',
-		bend: '↯'
+		bend: '↯',
+		walk: 'W'
 	};
 
 	/** A radial-menu wedge either places a point kind or deletes the marker that opened the menu. */
-	type RadialAction = HolePlacementMode | 'delete';
+	type RadialAction = PointKind | 'delete';
 
 	const RADIAL_HUB_RADIUS_PX = 20;
 	const RADIAL_OUTER_RADIUS_PX = 62;
@@ -111,10 +123,11 @@
 	};
 	const MARKER_HIT_RADIUS_PX = 12;
 
-	type AnnotationMarkerKind = 'tee' | 'basket' | 'shot' | 'bend';
+	type AnnotationMarkerKind = PointKind;
 
 	interface AnnotationMarkerHit {
-		holeId: string;
+		/** Null for a `walk` marker — the walking path is round-level, not scoped to any hole. */
+		holeId: string | null;
 		kind: AnnotationMarkerKind;
 		index?: number;
 		shotId?: string;
@@ -135,7 +148,8 @@
 	 */
 	interface RadialMenuState {
 		at: { xPx: number; yPx: number };
-		holeId: string;
+		/** Null in round mode when opened with no hole active — only the `walk` wedge is offered then. */
+		holeId: string | null;
 		hitMarker: AnnotationMarkerHit | null;
 	}
 
@@ -199,6 +213,33 @@
 	 */
 	let holes = $state<AnnotatedHole[]>([]);
 	/**
+	 * Which of the two annotation activities the toolbar and radial menu are
+	 * scoped to right now — 'map' (course geometry: tee/basket/bend, once per
+	 * course) or 'round' (throws and walk path, once per round). Defaults to
+	 * 'map' since a fresh source image needs its geometry established first.
+	 */
+	let annotationMode = $state<AnnotationMode>('map');
+	/**
+	 * UDisc's purple walking route as one open polyline spanning the whole
+	 * round — round-level, not scoped to any hole. Cleared on the same
+	 * source-image-replacement lifecycle as `holes`.
+	 */
+	let walkingPath = $state<SourcePoint[]>([]);
+	/**
+	 * Whether "Import saved holes" (Course Memory) has been applied this
+	 * session. Together with `mapGeometryEdited` this tells Done whether the
+	 * current map geometry is still exactly what the library already knows
+	 * (skip the write) or has since been hand-edited (worth previewing/saving).
+	 */
+	let importedLibraryEntryThisSession = $state(false);
+	/**
+	 * Set false whenever a library entry is imported, true by any subsequent
+	 * Map-mode geometry mutation (tee/basket/bend place-move-delete, corridor
+	 * width). Round-mode actions (shots, walk path) never touch this — they
+	 * don't change the course geometry Course Memory stores.
+	 */
+	let mapGeometryEdited = $state(false);
+	/**
 	 * Hole-number badge and basket positions keyed by resolved hole number,
 	 * captured from `handleDetectCourse`'s grammar result for course-shape
 	 * signature use (Course Memory) — never authoritative like `holes`, and
@@ -237,6 +278,8 @@
 	let radialSelectDrag = $state<RadialSelectGesture | null>(null);
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
+	let previewWalkingPath = $state<SourcePoint[] | null>(null);
+	let visibleWalkingPath = $derived(previewWalkingPath ?? walkingPath);
 
 	/**
 	 * An empty-space placement menu is tied to whichever hole was active when
@@ -266,6 +309,23 @@
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
+	}
+
+	/** Switches the annotation activity; closes any open radial menu since its wedge set is mode-scoped. */
+	function setAnnotationMode(mode: AnnotationMode): void {
+		if (annotationMode === mode) return;
+		annotationMode = mode;
+		radialMenu = null;
+	}
+
+	/** Marks the map (course-geometry) side of the draft as diverged from whatever library entry was last imported. */
+	function markMapGeometryEdited(): void {
+		mapGeometryEdited = true;
+	}
+
+	/** tee/basket/bend are course geometry (Map mode); shot/walk are round-specific and never mark the draft as geometry-edited. */
+	function isMapGeometryKind(kind: PointKind): boolean {
+		return kind === 'tee' || kind === 'basket' || kind === 'bend';
 	}
 
 	function startCourseDetectionProgress(): void {
@@ -374,6 +434,7 @@
 			radialMenu = null;
 			return;
 		}
+		if (isModalOpen()) return;
 		if (isShortcutEditableTarget(event.target)) return;
 		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
 
@@ -394,11 +455,13 @@
 	function handleRemoveLastBend(): void {
 		if (!activeHoleId) return;
 		holes = removeLastBend(holes, activeHoleId);
+		markMapGeometryEdited();
 	}
 
 	function handleClearBends(): void {
 		if (!activeHoleId) return;
 		holes = clearBends(holes, activeHoleId);
+		markMapGeometryEdited();
 	}
 
 	function handleCorridorWidthChange(event: Event): void {
@@ -407,6 +470,7 @@
 		const corridorWidthPx = Number(input.value);
 		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
 		holes = setCorridorWidth(holes, activeHoleId, corridorWidthPx);
+		markMapGeometryEdited();
 	}
 
 	/** Moves `activeHoleId` to the previous/next existing hole, wrapping around. */
@@ -424,12 +488,19 @@
 		vibrate(6);
 	}
 
+	/**
+	 * Only markers interactive in the current mode are hit-tested: map mode
+	 * scopes to tee/basket/bend, round mode to shot/walk — matching which
+	 * wedges `radialMenuActions` offers. Every marker still renders in both
+	 * modes for context; this is what keeps the *other* mode's markers
+	 * unclickable so mode switches don't leak drag/delete across activities.
+	 */
 	function pointHitAt(pointer: ScreenSpacePoint, view: ViewTransformState): AnnotationMarkerHit | null {
 		let closestMarker: AnnotationMarkerHit | null = null;
 		let closestDistance = Number.POSITIVE_INFINITY;
 
 		function consider(
-			holeId: string,
+			holeId: string | null,
 			kind: AnnotationMarkerKind,
 			point: { xPx: number; yPx: number },
 			index?: number,
@@ -442,14 +513,22 @@
 			closestMarker = { holeId, kind, index, shotId };
 		}
 
-		for (const hole of holes) {
-			if (hole.tee) consider(hole.id, 'tee', hole.tee);
-			if (hole.basket) consider(hole.id, 'basket', hole.basket);
-			for (const [index, bend] of hole.corridorBends.entries()) {
-				consider(hole.id, 'bend', bend, index);
+		if (annotationMode === 'map') {
+			for (const hole of holes) {
+				if (hole.tee) consider(hole.id, 'tee', hole.tee);
+				if (hole.basket) consider(hole.id, 'basket', hole.basket);
+				for (const [index, bend] of hole.corridorBends.entries()) {
+					consider(hole.id, 'bend', bend, index);
+				}
 			}
-			for (const [index, shot] of hole.shots.entries()) {
-				consider(hole.id, 'shot', shot.landing, index, shot.id);
+		} else {
+			for (const hole of holes) {
+				for (const [index, shot] of hole.shots.entries()) {
+					consider(hole.id, 'shot', shot.landing, index, shot.id);
+				}
+			}
+			for (const [index, point] of walkingPath.entries()) {
+				consider(null, 'walk', point, index);
 			}
 		}
 
@@ -501,11 +580,13 @@
 		}
 	}
 
+	/** Hole-scoped markers only — a `walk` marker never reaches here, its own kind is handled by the caller before this is invoked. */
 	function moveMarker(
 		currentHoles: readonly AnnotatedHole[],
 		marker: AnnotationMarkerHit,
-		point: { xPx: number; yPx: number }
+		point: SourcePoint
 	): AnnotatedHole[] {
+		if (marker.holeId === null) return currentHoles.slice();
 		switch (marker.kind) {
 			case 'tee':
 				return moveTee(currentHoles, marker.holeId, point);
@@ -519,13 +600,17 @@
 				return marker.index === undefined
 					? currentHoles.slice()
 					: moveCorridorBend(currentHoles, marker.holeId, marker.index, point);
+			case 'walk':
+				return currentHoles.slice();
 		}
 	}
 
+	/** Hole-scoped markers only — a `walk` marker never reaches here, its own kind is handled by the caller before this is invoked. */
 	function deleteMarker(
 		currentHoles: readonly AnnotatedHole[],
 		marker: AnnotationMarkerHit
 	): AnnotatedHole[] {
+		if (marker.holeId === null) return currentHoles.slice();
 		switch (marker.kind) {
 			case 'tee':
 				return removeTee(currentHoles, marker.holeId);
@@ -539,11 +624,13 @@
 				return marker.index === undefined
 					? currentHoles.slice()
 					: removeCorridorBend(currentHoles, marker.holeId, marker.index);
+			case 'walk':
+				return currentHoles.slice();
 		}
 	}
 
-	/** The point in image space that a currently-hit marker occupies right now. */
-	function markerPoint(marker: AnnotationMarkerHit): { xPx: number; yPx: number } | null {
+	/** The point in image space that a currently-hit hole marker occupies right now; walk markers are read straight from `walkingPath` by the caller instead. */
+	function markerPoint(marker: AnnotationMarkerHit): SourcePoint | null {
 		const hole = holes.find((candidate) => candidate.id === marker.holeId);
 		if (!hole) return null;
 		switch (marker.kind) {
@@ -555,18 +642,31 @@
 				return hole.shots.find((shot) => shot.id === marker.shotId)?.landing ?? null;
 			case 'bend':
 				return marker.index !== undefined ? hole.corridorBends[marker.index] ?? null : null;
+			case 'walk':
+				return null;
 		}
 	}
 
-	/** Wedge actions offered by an open radial menu: Delete alone for a hit marker, otherwise one wedge per point kind not yet placed on the hole. */
+	/**
+	 * Wedge actions offered by an open radial menu: Delete alone for a hit
+	 * marker, otherwise the wedges the current mode's activity allows. Map
+	 * mode places course geometry (tee/basket if absent, bend always); round
+	 * mode places round-specific points (shot only with a hole active, walk
+	 * always — the walk path needs no hole).
+	 */
 	function radialMenuActions(menu: RadialMenuState): RadialAction[] {
 		if (menu.hitMarker) return ['delete'];
+		if (annotationMode === 'round') {
+			const actions: RadialAction[] = [];
+			if (menu.holeId) actions.push('shot');
+			actions.push('walk');
+			return actions;
+		}
 		const hole = holes.find((candidate) => candidate.id === menu.holeId);
 		if (!hole) return [];
-		const actions: HolePlacementMode[] = [];
+		const actions: RadialAction[] = [];
 		if (!hole.tee) actions.push('tee');
 		if (!hole.basket) actions.push('basket');
-		actions.push('shot');
 		actions.push('bend');
 		return actions;
 	}
@@ -596,14 +696,16 @@
 		return actions[index];
 	}
 
-	/** Whether the given map marker is the one an open delete radial menu targets, for the overlay's highlight ring. */
+	/** Whether the given marker is the one an open delete radial menu targets, for the overlay's highlight ring. */
 	function isRadialTarget(
-		holeId: string,
+		holeId: string | null,
 		kind: AnnotationMarkerKind,
 		options: { index?: number; shotId?: string } = {}
 	): boolean {
 		const marker = radialMenu?.hitMarker;
-		if (!marker || marker.holeId !== holeId || marker.kind !== kind) return false;
+		if (!marker || marker.kind !== kind) return false;
+		if (kind === 'walk') return marker.index === options.index;
+		if (marker.holeId !== holeId) return false;
 		if (kind === 'shot') return marker.shotId === options.shotId;
 		if (kind === 'bend') return marker.index === options.index;
 		return true;
@@ -615,10 +717,23 @@
 		radialMenu = null;
 		if (!menu || action === null) return;
 		if (action === 'delete') {
-			if (menu.hitMarker) holes = deleteMarker(holes, menu.hitMarker);
+			const marker = menu.hitMarker;
+			if (!marker) return;
+			if (marker.kind === 'walk') {
+				if (marker.index !== undefined) walkingPath = removeWalkPoint(walkingPath, marker.index);
+				return;
+			}
+			holes = deleteMarker(holes, marker);
+			if (isMapGeometryKind(marker.kind)) markMapGeometryEdited();
 			return;
 		}
+		if (action === 'walk') {
+			walkingPath = addWalkPoint(walkingPath, menu.at);
+			return;
+		}
+		if (!menu.holeId) return;
 		holes = placeByMode(holes, menu.holeId, action, menu.at);
+		if (isMapGeometryKind(action)) markMapGeometryEdited();
 	}
 
 	function claimAnnotationPointer(
@@ -678,7 +793,12 @@
 			image.widthPx,
 			image.heightPx
 		);
-		previewHoles = moveMarker(holes, drag.marker, point);
+		if (drag.marker.kind === 'walk') {
+			previewWalkingPath =
+				drag.marker.index !== undefined ? moveWalkPoint(walkingPath, drag.marker.index, point) : walkingPath;
+		} else {
+			previewHoles = moveMarker(holes, drag.marker, point);
+		}
 	}
 
 	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
@@ -700,11 +820,16 @@
 		const image = sourceImage();
 		if (!drag || !image) {
 			previewHoles = null;
+			previewWalkingPath = null;
 			return;
 		}
 		if (!drag.dragging) {
 			previewHoles = null;
-			const point = markerPoint(drag.marker);
+			previewWalkingPath = null;
+			const point =
+				drag.marker.kind === 'walk'
+					? (drag.marker.index !== undefined ? walkingPath[drag.marker.index] ?? null : null)
+					: markerPoint(drag.marker);
 			if (point) radialMenu = { at: point, holeId: drag.marker.holeId, hitMarker: drag.marker };
 			return;
 		}
@@ -713,8 +838,15 @@
 			image.widthPx,
 			image.heightPx
 		);
-		holes = moveMarker(holes, drag.marker, point);
+		if (drag.marker.kind === 'walk') {
+			walkingPath =
+				drag.marker.index !== undefined ? moveWalkPoint(walkingPath, drag.marker.index, point) : walkingPath;
+		} else {
+			holes = moveMarker(holes, drag.marker, point);
+			if (isMapGeometryKind(drag.marker.kind)) markMapGeometryEdited();
+		}
 		previewHoles = null;
+		previewWalkingPath = null;
 	}
 
 	function cancelAnnotationPointer(): void {
@@ -722,10 +854,17 @@
 		numberSelectDrag = null;
 		radialSelectDrag = null;
 		previewHoles = null;
+		previewWalkingPath = null;
 	}
 
+	/**
+	 * Opens the empty-space placement menu. In round mode this works even with
+	 * no hole active — the menu then offers only `walk`, since the walk path
+	 * is round-level rather than per-hole. In map mode a hole must be active,
+	 * matching the pre-mode-split behavior.
+	 */
 	function handleAnnotationPlacement(coordinates: { xPx: number; yPx: number }): void {
-		if (!activeHoleId) return;
+		if (annotationMode === 'map' && !activeHoleId) return;
 		radialMenu = { at: coordinates, holeId: activeHoleId, hitMarker: null };
 	}
 
@@ -737,11 +876,15 @@
 	function handleSourceDomainChanged(): void {
 		refresh();
 		holes = [];
+		walkingPath = [];
 		numberBadges = [];
 		labeledBaskets = [];
 		recognizedMatch = null;
 		recognizedSourceId = null;
 		activeHoleId = null;
+		annotationMode = 'map';
+		importedLibraryEntryThisSession = false;
+		mapGeometryEdited = false;
 		radialMenu = null;
 		basketCandidates = [];
 		selectedBasketCandidate = null;
@@ -926,6 +1069,15 @@
 			holes = applyLibraryEntry(recognizedMatch.entry, recognizedMatch.match, holes, { skipExisting: false });
 			activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
 			recognizedMatch = null;
+			// The imported geometry exactly matches what the library already
+			// knows; only a subsequent Map-mode edit makes it worth previewing
+			// a library write again at Done.
+			importedLibraryEntryThisSession = true;
+			mapGeometryEdited = false;
+			// The imported course geometry means the remaining work is round
+			// annotation — switch the toolbar there so the user isn't stuck on
+			// Map mode with nothing left for it to do.
+			setAnnotationMode('round');
 		} finally {
 			applyingRecognizedMatch = false;
 		}
@@ -1077,17 +1229,94 @@
 
 	let doneRunning = $state(false);
 	let doneError = $state<string | null>(null);
+	/**
+	 * A pending "this would overwrite a saved course" confirmation, opened by
+	 * `saveToLibraryBestEffort` and settled by the dialog's own buttons (or
+	 * Escape). `handleDone` awaits `confirmLibraryUpdate` before proceeding, so
+	 * the dialog blocks only the library write — never the Create Graphics
+	 * handoff, which happens regardless of the user's choice here.
+	 */
+	let pendingLibraryUpdateConfirm = $state<{ entry: CourseLibraryEntry } | null>(null);
+	let libraryUpdateResolve: ((accept: boolean) => void) | null = null;
+	let libraryUpdateKeepButton = $state<HTMLButtonElement | null>(null);
+	let libraryUpdateFocusRestore: HTMLElement | null = null;
 
 	function canFinishAnnotation(): boolean {
 		void refreshCount;
 		return sourceImage() !== null;
 	}
 
+	/** Opens the update-confirmation dialog and resolves once the user answers it (accept = "Update saved course"). */
+	function confirmLibraryUpdate(entry: CourseLibraryEntry): Promise<boolean> {
+		return new Promise((resolve) => {
+			libraryUpdateFocusRestore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			libraryUpdateResolve = resolve;
+			pendingLibraryUpdateConfirm = { entry };
+		});
+	}
+
+	/** Settles the open update-confirmation dialog, restoring focus to whatever triggered it — mirrors Stitch Map's replace-confirmation pattern. */
+	function settleLibraryUpdateConfirm(accept: boolean): void {
+		const resolve = libraryUpdateResolve;
+		libraryUpdateResolve = null;
+		pendingLibraryUpdateConfirm = null;
+		const target = libraryUpdateFocusRestore?.isConnected ? libraryUpdateFocusRestore : null;
+		libraryUpdateFocusRestore = null;
+		if (target) void tick().then(() => target.focus());
+		resolve?.(accept);
+	}
+
+	$effect(() => {
+		if (!pendingLibraryUpdateConfirm) return;
+		void tick().then(() => libraryUpdateKeepButton?.focus());
+	});
+
+	/**
+	 * Best-effort Course Memory write, called from `handleDone` before the
+	 * Create Graphics handoff. Three cases:
+	 *  - The session imported a library entry and nothing in Map mode has
+	 *    since edited it: the stored geometry has nothing new to learn, and
+	 *    writing it back would churn identical geometry into this image's
+	 *    (numerically different) pixel space for no reason — skipped entirely.
+	 *  - `previewUpsertCourse` reports `'new'` or `'identical'`: today's silent
+	 *    save, unchanged.
+	 *  - `'update'`: a saved course's geometry would be overwritten — gated on
+	 *    an explicit confirm/keep choice via `confirmLibraryUpdate`.
+	 * A preview or write failure always falls back to the pre-existing silent
+	 * best-effort upsert attempt; it must never block Done.
+	 */
+	async function saveToLibraryBestEffort(): Promise<void> {
+		if (importedLibraryEntryThisSession && !mapGeometryEdited) return;
+		const input = {
+			projectName: editor.state.project.name,
+			numberBadges: badgesToLabeledPoints(numberBadges),
+			baskets: labeledBaskets,
+			holes: toLibraryHoles(holes)
+		};
+		let preview: Awaited<ReturnType<typeof previewUpsertCourse>> | null = null;
+		try {
+			preview = await previewUpsertCourse(courseLibraryStore, input);
+		} catch {
+			preview = null;
+		}
+		if (preview?.kind === 'update') {
+			const accept = await confirmLibraryUpdate(preview.entry);
+			if (!accept) return;
+		}
+		try {
+			await upsertCourse(courseLibraryStore, input);
+		} catch {
+			// Best-effort: a course-library write failure must never block Done.
+		}
+	}
+
 	/**
 	 * Builds the AnnotatedRound (source image plus whatever holes have been
 	 * placed — annotation is optional and may stop at any hole, same as a real
 	 * played round) and hands it to Create Graphics through the pending session
-	 * slot. Walking-path capture is still a future ticket.
+	 * slot. `walkingPath` is included only when at least one vertex was
+	 * captured — an empty path is "not annotated", not "annotated as empty",
+	 * matching `createAnnotatedRound`'s optional-field contract.
 	 */
 	async function handleDone(): Promise<void> {
 		const asset = sourceImage();
@@ -1104,7 +1333,8 @@
 			try {
 				round = createAnnotatedRound({
 					sourceImage: annotatedSourceImageFromAsset(asset, resource.bytes),
-					holes
+					holes,
+					...(walkingPath.length > 0 ? { walkingPath } : {})
 				});
 			} catch (error) {
 				// Hole validation failure (for example a non-positive corridor
@@ -1114,17 +1344,7 @@
 			}
 			setPendingAnnotatedRound(round);
 			setPendingCourseBadges({ numberBadges, baskets: labeledBaskets });
-			try {
-				// Best-effort: a course-library write failure must never block Done.
-				await upsertCourse(courseLibraryStore, {
-					projectName: editor.state.project.name,
-					numberBadges: badgesToLabeledPoints(numberBadges),
-					baskets: labeledBaskets,
-					holes: toLibraryHoles(holes)
-				});
-			} catch {
-				// Ignored — see comment above.
-			}
+			await saveToLibraryBestEffort();
 			await goto(`${base}/create-graphics`);
 		} finally {
 			doneRunning = false;
@@ -1240,7 +1460,7 @@
 	<header class="toolbar">
 		<div>
 			<h1>Annotate Round</h1>
-			<p>Review the course map, mark each hole, then continue to graphics.</p>
+			<p>Mark up the course map in Map mode, then switch to Round mode for throws and the walk path.</p>
 		</div>
 		<button
 			type="button"
@@ -1256,6 +1476,31 @@
 	{#if doneError}
 		<p class="error" data-testid="annotate-done-error" role="alert">{doneError}</p>
 	{/if}
+
+	<div class="mode-toggle" role="group" aria-label="Annotation mode" data-testid="annotation-mode-toggle">
+		<button
+			type="button"
+			class="mode-toggle-button"
+			class:active={annotationMode === 'map'}
+			aria-pressed={annotationMode === 'map'}
+			data-testid="annotation-mode-map"
+			onclick={() => setAnnotationMode('map')}
+		>
+			<span class="mode-toggle-label">Map</span>
+			<span class="mode-toggle-hint">Course geometry</span>
+		</button>
+		<button
+			type="button"
+			class="mode-toggle-button"
+			class:active={annotationMode === 'round'}
+			aria-pressed={annotationMode === 'round'}
+			data-testid="annotation-mode-round"
+			onclick={() => setAnnotationMode('round')}
+		>
+			<span class="mode-toggle-label">Round</span>
+			<span class="mode-toggle-hint">Throws &amp; walk path</span>
+		</button>
+	</div>
 
 	<nav class="hole-bar" aria-label="Course holes" data-testid="hole-bar">
 		<div class="hole-bar-compact">
@@ -1354,7 +1599,7 @@
 			{decode}
 			confirmDiscard={() => true}
 			onDomainChanged={handleSourceDomainChanged}
-			onPlacement={activeHoleId ? handleAnnotationPlacement : undefined}
+			onPlacement={annotationMode === 'round' || activeHoleId ? handleAnnotationPlacement : undefined}
 			claimPointer={claimAnnotationPointer}
 			onClaimedPointerMove={previewAnnotationMove}
 			onClaimedPointerUp={commitAnnotationPointerUp}
@@ -1390,7 +1635,11 @@
 					{@const hole = activeHole()!}
 					<div class="tool-section">
 						<h2>Edit hole {hole.number}</h2>
-						<p class="empty-copy">Click the map to open the point menu — place a tee, basket, shot, or bend, or delete an existing one.</p>
+						{#if annotationMode === 'map'}
+							<p class="empty-copy">Click the map to open the point menu — place a tee, basket, or bend, or delete an existing one.</p>
+						{:else}
+							<p class="empty-copy">Click the map to open the point menu — place a shot or a walk-path vertex, or delete an existing one.</p>
+						{/if}
 						<div class="edit-actions">
 							<button type="button" data-testid="remove-last-shot" disabled={hole.shots.length === 0} onclick={handleRemoveLastShot}>Undo shot</button>
 							<button type="button" data-testid="remove-last-bend" disabled={hole.corridorBends.length === 0} onclick={handleRemoveLastBend}>Undo bend</button>
@@ -1702,6 +1951,7 @@
 								cy={bend.yPx}
 								r={5 / zoom}
 								class="bend-marker"
+								class:dimmed={annotationMode === 'round'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'bend', { index })}
 								data-testid="bend-marker-{overlayHole.number}-{index}"
 							/>
@@ -1719,6 +1969,7 @@
 								cy={overlayHole.tee.yPx}
 								r={7 / zoom}
 								class="tee-marker"
+								class:dimmed={annotationMode === 'round'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'tee')}
 								data-testid="tee-marker-{overlayHole.number}"
 							/>
@@ -1736,6 +1987,7 @@
 								cy={overlayHole.basket.yPx}
 								r={7 / zoom}
 								class="basket-marker"
+								class:dimmed={annotationMode === 'round'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'basket')}
 								data-testid="basket-marker-{overlayHole.number}"
 							/>
@@ -1753,10 +2005,31 @@
 								cy={shot.landing.yPx}
 								r={6 / zoom}
 								class="shot-marker"
+								class:dimmed={annotationMode === 'map'}
 								class:radial-target={isRadialTarget(overlayHole.id, 'shot', { shotId: shot.id })}
 								data-testid="shot-marker-{overlayHole.number}-{index}"
 							/>
 						{/each}
+					{/each}
+					{#if visibleWalkingPath.length >= 2}
+						<polyline
+							points={visibleWalkingPath.map((point) => `${point.xPx},${point.yPx}`).join(' ')}
+							class="walk-path"
+							class:dimmed={annotationMode === 'map'}
+							stroke-width={4 / zoom}
+							data-testid="walk-path"
+						/>
+					{/if}
+					{#each visibleWalkingPath as point, index (index)}
+						<circle
+							cx={point.xPx}
+							cy={point.yPx}
+							r={5 / zoom}
+							class="walk-vertex"
+							class:dimmed={annotationMode === 'map'}
+							class:radial-target={isRadialTarget(null, 'walk', { index })}
+							data-testid="walk-vertex-{index}"
+						/>
 					{/each}
 					{#if courseDetection}
 						{#each courseDetection.numberDetection.candidates as candidate, index (index)}
@@ -1872,6 +2145,43 @@
 			{/snippet}
 		</ImageEditorPane>
 	</div>
+
+	{#if pendingLibraryUpdateConfirm}
+		<div class="dialog-backdrop">
+			<div
+				class="dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Update saved course?"
+				data-testid="library-update-dialog"
+				use:dialogKeyboard={() => settleLibraryUpdateConfirm(false)}
+			>
+				<h2>Update saved course?</h2>
+				<p>
+					Your Map-mode edits will replace the stored tee/basket/corridor geometry for “{pendingLibraryUpdateConfirm.entry.name}”.
+					Either choice continues on to Create Graphics.
+				</p>
+				<div class="dialog-actions">
+					<button
+						type="button"
+						data-testid="library-update-keep"
+						bind:this={libraryUpdateKeepButton}
+						onclick={() => settleLibraryUpdateConfirm(false)}
+					>
+						Keep saved version
+					</button>
+					<button
+						type="button"
+						class="primary"
+						data-testid="library-update-confirm"
+						onclick={() => settleLibraryUpdateConfirm(true)}
+					>
+						Update saved course
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </main>
 
 <style>
@@ -1940,6 +2250,93 @@
 		background: #2563eb;
 		color: #fff;
 		font-weight: 650;
+	}
+
+	.mode-toggle {
+		display: flex;
+		gap: 0.4rem;
+		padding: 0.3rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #18181b;
+		align-self: flex-start;
+	}
+
+	.mode-toggle-button {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.05rem;
+		min-height: 2.75rem;
+		padding: 0.35rem 0.85rem;
+		border: 1px solid transparent;
+		border-radius: 6px;
+		background: transparent;
+		color: #d4d4d8;
+		text-align: left;
+	}
+
+	.mode-toggle-button.active {
+		border-color: #2563eb;
+		background: #2563eb;
+		color: #fff;
+	}
+
+	.mode-toggle-label {
+		font-weight: 650;
+		font-size: 0.9rem;
+	}
+
+	.mode-toggle-hint {
+		font-size: 0.72rem;
+		color: inherit;
+		opacity: 0.75;
+	}
+
+	.dialog-backdrop {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.6);
+		z-index: 50;
+	}
+
+	.dialog {
+		max-width: 28rem;
+		padding: 1rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #1e1e24;
+		color: #e4e4e7;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.dialog h2 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.dialog p {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #a1a1aa;
+		line-height: 1.5;
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+	}
+
+	.dialog-actions button.primary {
+		border-color: #2563eb;
+		background: #2563eb;
+		color: #fff;
 	}
 
 	.handoff-banner {
@@ -2107,6 +2504,22 @@
 		fill: #f59e0b;
 		stroke: #451a03;
 		stroke-width: 1;
+	}
+
+	/* Matches the reserved walkingPathColor default theme in $lib/graphics/style.ts. */
+	.walk-path {
+		fill: none;
+		stroke: rgba(147, 51, 234, 0.8);
+	}
+
+	.walk-vertex {
+		fill: rgba(147, 51, 234, 0.9);
+		stroke: #2e1065;
+		stroke-width: 1;
+	}
+
+	.dimmed {
+		opacity: 0.45;
 	}
 
 	.basket-candidate-marker {
@@ -2729,7 +3142,8 @@
 	.tee-marker.radial-target,
 	.basket-marker.radial-target,
 	.shot-marker.radial-target,
-	.bend-marker.radial-target {
+	.bend-marker.radial-target,
+	.walk-vertex.radial-target {
 		stroke: #f87171;
 		stroke-width: 3;
 	}
