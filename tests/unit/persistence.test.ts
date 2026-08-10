@@ -10,7 +10,11 @@ import {
 	sha256Hex
 } from '../../src/lib/imageIntake';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
-import { parseProjectJson, serializeProjectState } from '../../src/lib/projectSchema';
+import {
+	CURRENT_SCHEMA_VERSION,
+	parseProjectJson,
+	serializeProjectState
+} from '../../src/lib/projectSchema';
 import {
 	createProjectBundle,
 	isSafeBundlePath,
@@ -312,7 +316,7 @@ describe('bundle writer (B)', () => {
 		const created = await createProjectBundle(editor);
 		expect(created.ok).toBe(true);
 		if (!created.ok) return;
-		expect(created.bundle.document.schemaVersion).toBe(4);
+		expect(created.bundle.document.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 		const parsed = parseProjectJson(created.bundle.text);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
@@ -618,7 +622,10 @@ describe('import failures (D)', () => {
 	});
 
 	it('classifies unsupported newer schema versions', async () => {
-		const bytes = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 5 })) }, { level: 6 });
+		const bytes = zipSync(
+			{ 'project.json': strToU8(JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION + 1 })) },
+			{ level: 6 }
+		);
 		const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
 		expect(result.ok).toBe(false);
 		if (result.ok) return;

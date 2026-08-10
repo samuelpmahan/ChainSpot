@@ -6,7 +6,7 @@
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
 	import { dialogKeyboard } from '$lib/focusManagement';
-	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
+	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import type { ViewportFitTarget } from '$lib/viewport.svelte';
 	import { decodeImageFile, isSupportedMimeType } from '$lib/imageIntake';
 	import { isEditableTarget } from '$lib/pointSelection';
@@ -805,7 +805,7 @@
 		if (
 			!tileDrag.moved &&
 			Math.hypot(screen.x - tileDrag.startScreen.x, screen.y - tileDrag.startScreen.y) >
-				CLICK_SLOP_PX
+				clickSlopPx(event.pointerType)
 		) {
 			tileDrag.moved = true;
 		}

@@ -56,7 +56,10 @@
 	import type { GeoBoundingBox, GeoPoint } from '$lib/naip';
 	import { metersToFeet } from '$lib/units';
 	import { searchPlace } from '$lib/geocode';
-	import type { GeoSearchMatch } from '$lib/geocode';
+	import type { GeoSearchMatch, GeocodeSearchResult } from '$lib/geocode';
+	import { parseCoordinateInput, searchPlacesText } from '$lib/placesSearch';
+	import { googleMapsApiKey } from '$lib/googleMapsConfig';
+	import MapConfirm from '$lib/components/MapConfirm.svelte';
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
 	import type { PixelRect } from '$lib/naipGrid';
 	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
@@ -66,14 +69,16 @@
 	import { AlignmentFailureReason } from '$lib/alignment/types';
 	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
 	import {
+		attachCourseLocation,
 		badgesToLabeledPoints,
 		basketsFromHoles,
+		findMatchingLibraryEntry,
 		getDefaultCourseLibraryStore,
 		toLibraryHoles,
 		upsertCourse
 	} from '$lib/courseLibrary';
 	import type { CourseLibraryStore } from '$lib/courseLibrary';
-	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole, AnnotatedRound, SourcePoint } from '$lib/domain/annotatedRound';
 	import { buildHoleGraphicMarkup } from '$lib/holeGraphics';
 	import { GRAPHIC_STYLE_PRESETS } from '$lib/graphics/style';
 	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
@@ -185,6 +190,16 @@
 		return editor.state.holes;
 	}
 
+	/**
+	 * The walking path, same "durable project state, not the session artifact"
+	 * rule as `currentHoles` — a project reopened from a saved bundle has a
+	 * walking path but no session artifact at all.
+	 */
+	function currentWalkingPath(): readonly SourcePoint[] | undefined {
+		void refreshCount;
+		return editor.state.walkingPath;
+	}
+
 	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
 	function targetImageHref(): string | null {
 		const target = targetImage();
@@ -212,7 +227,8 @@
 		transform: () => (alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null),
 		targetSize: () => targetImage(),
 		targetImageHref,
-		feetPerPixel: holeGraphicFeetPerPixel
+		feetPerPixel: holeGraphicFeetPerPixel,
+		walkingPath: () => currentWalkingPath()
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -322,6 +338,18 @@
 	let geocodeError = $state<string | null>(null);
 	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
 	let geocodeSelectedIndex = $state<number | null>(null);
+	/** Which provider produced `geocodeMatches`, so the correct attribution renders (ODbL for Nominatim, Google's for Places). */
+	let geocodeResultSource = $state<'nominatim' | 'places' | null>(null);
+	/**
+	 * Set only when a key is configured AND the user has picked a result (or
+	 * pasted a recognized coordinate) — this is the sole gate that mounts
+	 * `MapConfirm`, which is itself the sole thing that ever injects the Google
+	 * Dynamic Maps script tag. Carries the key alongside the match so the
+	 * template never needs to re-derive/narrow a possibly-null key.
+	 */
+	let mapConfirmState = $state<{ match: GeoSearchMatch; apiKey: string } | null>(null);
+	/** Saved-location prefill note (Course Library location cache read path), dismissible without affecting the prefilled inputs. */
+	let savedLocationNote = $state<string | null>(null);
 
 	/** CSS-displayed-pixels-per-natural-pixel for the rendered preview `<img>`, set once it loads. */
 	let displayScale = $state(1);
@@ -1008,6 +1036,11 @@
 			// project and restored on reopen. The session artifact is only the transport;
 			// `editor.state.holes` is the single source of truth from this point on.
 			editor.setHoles(round.holes);
+			// Same crossing for the walking path. Passed through as-is (including
+			// undefined): `setWalkingPath` normalizes both "absent" and "empty" to the
+			// same undefined state, so re-importing a path-less round always clears any
+			// stale path left over from a previous import.
+			editor.setWalkingPath(round.walkingPath);
 			// Badge/basket anchors ride a separate session slot (session.ts's pending
 			// course badges) since AnnotatedRound can never carry them (Done-boundary
 			// purity rule);
@@ -1025,6 +1058,30 @@
 				// (e.g. a second basket on the hole) or stray/leftover CV noise to
 				// discard.
 				consumePendingCourseBadges();
+				// Course Library location cache read path: best-effort, prefill only —
+				// never auto-fetches imagery. `round.holes` (not the discarded
+				// `pendingBadges.baskets` above) is the same basket source
+				// `basketsFromHoles` already uses at save time, so this lookup can only
+				// ever match what `attachCourseLocation` could have written.
+				if (pendingBadges.numberBadges.length > 0) {
+					try {
+						const matchedEntry = await findMatchingLibraryEntry(
+							courseLibraryStore,
+							badgesToLabeledPoints(pendingBadges.numberBadges),
+							basketsFromHoles(round.holes)
+						);
+						if (matchedEntry?.location) {
+							naipLatInput = String(matchedEntry.location.lat);
+							naipLonInput = String(matchedEntry.location.lon);
+							if (matchedEntry.location.radiusMeters !== undefined) {
+								naipRadiusInput = String(matchedEntry.location.radiusMeters);
+							}
+							savedLocationNote = `Using saved location for '${matchedEntry.name}'.`;
+						}
+					} catch {
+						// Ignored — best-effort prefill only, never blocks the import.
+					}
+				}
 			}
 			consumePendingAnnotatedRound();
 			setActiveAnnotatedRound(round);
@@ -1098,46 +1155,121 @@
 	}
 
 	/**
+	 * Nominatim-only lookup, run either as the entire keyless search path or as
+	 * the post-Places fallback (`handleGeocodeSearch`'s "OSM occasionally has
+	 * what Google lacks" case) — same narrower-retry behavior either way: a
+	 * course may be named in OSM but not indexed under the user's metro
+	 * spelling/state abbreviation, so a `no-results` combined query retries
+	 * with just the stable course name before reporting failure. Transport/HTTP
+	 * errors are never retried.
+	 */
+	async function searchNominatim(parkName: string, combinedQuery: string | null): Promise<GeocodeSearchResult> {
+		const initialResult = await searchPlace(combinedQuery ?? parkName);
+		return !initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
+			? await searchPlace(parkName)
+			: initialResult;
+	}
+
+	/**
 	 * Looks up the course by name (city/state optional, to help when the course sits in
-	 * some small town near a metro area the user can't name off-hand) via OpenStreetMap
-	 * Nominatim and lists matches for the user to pick from — never fetches NAIP imagery
-	 * itself. Nominatim matches literal named things in OSM, not "near this metro area";
-	 * a vague region name in the city/state field wouldn't narrow the search so much as
-	 * risk matching some other named entity entirely (an airport, a neighborhood). The
-	 * safety net either way is the same: nothing is used until the user recognizes and
-	 * picks a specific result by its full display name below. Picking a match just fills
-	 * the same lat/lon inputs `handleNaipFetch` already reads, so nothing downstream needs
-	 * to know the coordinate came from a search instead of manual entry.
+	 * some small town near a metro area the user can't name off-hand) and lists matches
+	 * for the user to pick from — never fetches NAIP imagery itself. A vague region name
+	 * in the city/state field wouldn't narrow the search so much as risk matching some
+	 * other named entity entirely (an airport, a neighborhood). The safety net either way
+	 * is the same: nothing is used until the user recognizes and picks a specific result
+	 * by its full display name below (`selectLocation`).
+	 *
+	 * One search flow, provider chosen by whether a Google Maps Platform key is
+	 * configured (`googleMapsApiKey`): keyed, this calls Google Places Text
+	 * Search (course POI data Nominatim/OSM mostly doesn't have — the reason
+	 * this provider exists); keyless, this is exactly today's Nominatim-only
+	 * behavior, with zero Google contact. A keyed `no-results` from Places
+	 * falls back to one Nominatim attempt (OSM occasionally has what Google
+	 * lacks) before reporting failure — deliberately not the reverse: a keyless
+	 * search never calls Google under any circumstance.
+	 *
+	 * Also detects a pasted coordinate (or Google Maps URL) in the course-name
+	 * field first (`parseCoordinateInput`) and, when found, skips geocoding
+	 * entirely — no Nominatim or Places request fires at all.
 	 */
 	async function handleGeocodeSearch(): Promise<void> {
 		if (geocodeLoading) return;
 		geocodeError = null;
 		geocodeMatches = null;
 		geocodeSelectedIndex = null;
+		geocodeResultSource = null;
+		// A fresh search abandons any pending confirm from a previous pick.
+		mapConfirmState = null;
 		const parkName = geocodeParkNameInput.trim();
 		const cityState = geocodeCityStateInput.trim();
 		if (!parkName) {
 			geocodeError = 'Enter a course name to search for.';
 			return;
 		}
+
+		const pastedCoordinate = parseCoordinateInput(parkName);
+		if (pastedCoordinate) {
+			selectLocation({
+				displayName: `${pastedCoordinate.lat}, ${pastedCoordinate.lon}`,
+				lat: pastedCoordinate.lat,
+				lon: pastedCoordinate.lon
+			});
+			return;
+		}
+
 		geocodeLoading = true;
 		try {
 			const combinedQuery = cityState ? `${parkName}, ${cityState}` : null;
-			const initialResult = await searchPlace(combinedQuery ?? parkName);
-			// A course may be named in OSM but not indexed under the user's metro
-			// spelling/state abbreviation. Retry the stable course name before
-			// reporting failure; do not retry transport or HTTP errors.
-			const result =
-				!initialResult.ok && initialResult.error.kind === 'no-results' && combinedQuery
-					? await searchPlace(parkName)
-					: initialResult;
+			const apiKey = googleMapsApiKey();
+			if (apiKey) {
+				const placesResult = await searchPlacesText(combinedQuery ?? parkName, apiKey);
+				if (placesResult.ok) {
+					geocodeMatches = placesResult.matches;
+					geocodeResultSource = 'places';
+					return;
+				}
+				if (placesResult.error.kind !== 'no-results') {
+					geocodeError = placesResult.error.message;
+					return;
+				}
+				const fallback = await searchNominatim(parkName, combinedQuery);
+				if (!fallback.ok) {
+					geocodeError = fallback.error.message;
+					return;
+				}
+				geocodeMatches = fallback.matches;
+				geocodeResultSource = 'nominatim';
+				return;
+			}
+
+			const result = await searchNominatim(parkName, combinedQuery);
 			if (!result.ok) {
 				geocodeError = result.error.message;
 				return;
 			}
 			geocodeMatches = result.matches;
+			geocodeResultSource = 'nominatim';
 		} finally {
 			geocodeLoading = false;
+		}
+	}
+
+	/**
+	 * The one place a search result (or a parsed coordinate paste) becomes a
+	 * "selected location": keyless, it writes straight into the lat/lon inputs
+	 * exactly as before; keyed, it instead arms `mapConfirmState`, which is the
+	 * sole gate that mounts `MapConfirm` — the only place the Google Dynamic
+	 * Maps script tag is ever injected. An abandoned search therefore costs at
+	 * most one Places call and zero map loads.
+	 */
+	function selectLocation(match: GeoSearchMatch): void {
+		naipError = null;
+		const apiKey = googleMapsApiKey();
+		if (apiKey) {
+			mapConfirmState = { match, apiKey };
+		} else {
+			naipLatInput = String(match.lat);
+			naipLonInput = String(match.lon);
 		}
 	}
 
@@ -1145,9 +1277,20 @@
 		const match = geocodeMatches?.[index];
 		if (!match) return;
 		geocodeSelectedIndex = index;
-		naipLatInput = String(match.lat);
-		naipLonInput = String(match.lon);
+		selectLocation(match);
+	}
+
+	/** "Use this location" on the map confirm step: same lat/lon inputs a picked Nominatim result writes directly. */
+	function handleMapConfirmUse(point: GeoPoint): void {
+		naipLatInput = String(point.lat);
+		naipLonInput = String(point.lon);
 		naipError = null;
+		mapConfirmState = null;
+	}
+
+	/** Cancel closes the confirm step without touching the lat/lon inputs. */
+	function handleMapConfirmCancel(): void {
+		mapConfirmState = null;
 	}
 
 	/**
@@ -1208,10 +1351,30 @@
 				return;
 			}
 			const radiusUsed = naipPreviewRadiusUsed;
+			const centerUsed = naipPreviewCenter;
 			clearNaipPreview();
 			onDomainChanged('target-basemap');
 			if (radiusUsed !== null) {
 				targetGroundScaleMetersPerPixel = naipMetersPerPixel(radiusUsed, NAIP_EXPORT_SIZE_PX);
+			}
+			// Course Library location cache write: only when this fetch's center is
+			// known and the current project actually carries Course Memory signature
+			// input (badges) to match it against. Best-effort and silently ignored on
+			// failure -- see runSave's identical upsertCourse try/catch above; a
+			// convenience cache write must never affect a successful commit.
+			if (centerUsed && editor.state.numberBadges.length > 0) {
+				try {
+					await attachCourseLocation(
+						courseLibraryStore,
+						badgesToLabeledPoints(editor.state.numberBadges),
+						basketsFromHoles(editor.state.holes),
+						radiusUsed !== null
+							? { lat: centerUsed.lat, lon: centerUsed.lon, radiusMeters: radiusUsed }
+							: { lat: centerUsed.lat, lon: centerUsed.lon }
+					);
+				} catch {
+					// Ignored — see comment above.
+				}
 			}
 			activityMessage = 'Fetched NAIP aerial image imported as the clean target.';
 		} catch (error) {
@@ -1906,15 +2069,36 @@
 					</li>
 				{/each}
 			</ul>
-			<p class="geocode-attribution">
-				Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
-					>OpenStreetMap</a
-				> contributors
-			</p>
+			{#if geocodeResultSource === 'places'}
+				<p class="geocode-attribution" data-testid="geocode-attribution">Powered by Google</p>
+			{:else}
+				<p class="geocode-attribution" data-testid="geocode-attribution">
+					Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+						>OpenStreetMap</a
+					> contributors
+				</p>
+			{/if}
 		{/if}
-		{#if geocodeSelectedIndex !== null}
+		{#if mapConfirmState}
+			<MapConfirm
+				apiKey={mapConfirmState.apiKey}
+				center={{ lat: mapConfirmState.match.lat, lon: mapConfirmState.match.lon }}
+				label={mapConfirmState.match.displayName}
+				onUse={handleMapConfirmUse}
+				onCancel={handleMapConfirmCancel}
+			/>
+		{/if}
+		{#if geocodeSelectedIndex !== null && !mapConfirmState}
 			<p class="naip-selected-coords" data-testid="naip-selected-coords">
 				Selected: {naipLatInput}, {naipLonInput}
+			</p>
+		{/if}
+		{#if savedLocationNote}
+			<p class="saved-location-note" data-testid="saved-location-note">
+				{savedLocationNote}
+				<button type="button" data-testid="saved-location-dismiss" onclick={() => (savedLocationNote = null)}>
+					Dismiss
+				</button>
 			</p>
 		{/if}
 
@@ -2527,6 +2711,43 @@
 		cursor: not-allowed;
 	}
 
+	/* Base dark styling for this route's plain buttons/inputs/selects that don't
+	   opt into the sized rule below — otherwise they fall back to unstyled
+	   browser-default (light) chrome, which reads as broken against the dark
+	   panels. */
+	button {
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	button:disabled {
+		opacity: 0.5;
+	}
+
+	input:not([type='file']):not([type='radio']):not([type='checkbox']) {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #1e1e24;
+		color: #e4e4e7;
+		font: inherit;
+	}
+
+	select {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font: inherit;
+		cursor: pointer;
+	}
+
 	/* Shared sizing for the route's plain action buttons (add correspondence,
 	   undo/redo, save/open, marker toggle, geocode search) — these previously
 	   rendered as unstyled ~21px browser-default buttons, well below the
@@ -2597,9 +2818,9 @@
 	.dirty {
 		padding: 0.15rem 0.5rem;
 		border-radius: 999px;
-		background: #fff3cd;
-		border: 1px solid #e0c35a;
-		color: #6b5300;
+		background: #422006;
+		border: 1px solid #a16207;
+		color: #fde68a;
 		font-size: 0.8rem;
 	}
 
@@ -2631,9 +2852,9 @@
 		margin: 0;
 		padding: 0.4rem 0.6rem;
 		border-radius: 4px;
-		background: #fdecea;
-		border: 1px solid #f5c6cb;
-		color: #8a1f11;
+		background: #3f1d1d;
+		border: 1px solid #7f1d1d;
+		color: #fca5a5;
 		font-size: 0.85rem;
 	}
 
@@ -2653,10 +2874,10 @@
 
 	.repair-issue {
 		padding: 0.6rem 0.75rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		margin-top: 0.5rem;
 	}
 
@@ -2694,10 +2915,10 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.3rem 0.7rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: #fff;
-		color: #1f2937;
+		background: #27272a;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
@@ -2719,7 +2940,7 @@
 	.pending-guidance {
 		margin: 0.35rem 0 0;
 		font-size: 0.85rem;
-		color: #7c2d12;
+		color: #fbbf24;
 	}
 
 	.pair-diagnostics {
@@ -2728,10 +2949,10 @@
 		gap: 0.25rem;
 		margin: 0;
 		padding: 0.6rem 0.7rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 	}
 
@@ -2740,7 +2961,7 @@
 	}
 
 	.diagnostic-warning {
-		color: #92400e;
+		color: #fbbf24;
 	}
 
 	.alignment-panel {
@@ -2748,10 +2969,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.6rem 0.7rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 	}
 
@@ -2797,16 +3018,16 @@
 	}
 
 	.alignment-warning {
-		color: #92400e;
+		color: #fbbf24;
 	}
 
 	.alignment-warning[data-severity='high'] {
-		color: #8a1f11;
+		color: #fca5a5;
 	}
 
 	.alignment-failure {
 		margin: 0;
-		color: #8a1f11;
+		color: #fca5a5;
 	}
 
 	.hole-graphics {
@@ -2841,7 +3062,7 @@
 		max-width: 14rem;
 		max-height: 10rem;
 		overflow: hidden;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 	}
 
@@ -2866,10 +3087,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.7rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 	}
 
 	.point-inspector h2 {
@@ -2906,8 +3127,9 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
+		background: #18181b;
 	}
 
 	.naip-fetch h2 {
@@ -2951,7 +3173,7 @@
 		max-height: 15rem;
 		width: auto;
 		height: auto;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 	}
 
@@ -2971,9 +3193,9 @@
 		max-height: 28rem;
 		width: auto;
 		height: auto;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: #e5e7eb;
+		background: #27272a;
 		user-select: none;
 	}
 
@@ -3066,7 +3288,7 @@
 	.geocode-result {
 		text-align: left;
 		padding: 0.4rem 0.6rem;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 		background: #27272a;
 		color: #f4f4f5;
@@ -3091,6 +3313,22 @@
 		font-size: 0.85rem;
 	}
 
+	.saved-location-note {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #2a6df4;
+		border-radius: 4px;
+		background: rgb(42 109 244 / 10%);
+		font-size: 0.85rem;
+	}
+
+	.saved-location-note button {
+		margin-left: auto;
+	}
+
 	.naip-manual-entry summary {
 		cursor: pointer;
 		font-size: 0.85rem;
@@ -3106,21 +3344,23 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgb(0 0 0 / 40%);
+		background: rgb(0 0 0 / 60%);
 		z-index: 50;
 	}
 
 	.dialog {
-		background: #fff;
+		background: #1e1e24;
+		border: 1px solid #3f3f46;
 		border-radius: 8px;
 		padding: 1rem 1.25rem;
 		max-width: 26rem;
-		color: #1f2937;
+		color: #e4e4e7;
 	}
 
 	.dialog h2 {
 		margin: 0 0 0.5rem;
 		font-size: 1.1rem;
+		color: #f4f4f5;
 	}
 
 	.dialog-actions {

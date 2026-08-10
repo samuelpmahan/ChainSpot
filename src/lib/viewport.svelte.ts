@@ -26,8 +26,51 @@ import {
 } from './navigation';
 import type { ViewZoomLimits } from './navigation';
 
-/** Shared click-versus-drag threshold in CSS pixels (matches the Phase 0 panes). */
+/**
+ * Click-versus-drag / drag-start threshold in CSS pixels, kept as the mouse
+ * value for any external reference that still wants a single constant (and
+ * as `clickSlopPx`'s own fallback below). Chromium's own mouse click/drag
+ * slop is ~5px; OS-filtered trackpad drift is typically 1-3px, so 4 is
+ * defensible for mouse/trackpad input. It is deliberately too tight for
+ * touch — see `clickSlopPx`.
+ */
 export const CLICK_SLOP_PX = 4;
+
+/** Pen click/drag threshold in CSS pixels: a stylus tip is more precise than a finger but still less so than a mouse cursor. */
+const PEN_CLICK_SLOP_PX = 6;
+
+/**
+ * Touch click/drag threshold in CSS pixels. Platform touch-slop norms are
+ * ~8px (Android) to ~10px (iOS); at the mouse value of 4px an ordinary
+ * finger tap routinely drifts past the threshold before lift, so the
+ * gesture is promoted to a micro-pan/drag and the tap's `click` (or, in a
+ * claimed gesture, its non-drag outcome) never fires. See
+ * `docs/imageviewport-event-contract.md`, hazard H9.
+ */
+const TOUCH_CLICK_SLOP_PX = 10;
+
+/**
+ * Pointer-type-aware click-versus-drag / drag-start threshold in CSS
+ * pixels. Governs both directions of the same arbitration everywhere it is
+ * compared: whether an unclaimed pointer gesture is a click or a pan
+ * (`ImageViewport`), and whether a claimed gesture is a tap/click or a drag
+ * (marker drag, ribbon vertex drag, stitch tile drag, annotate-round's
+ * point/number drags). `pointerType` is `'mouse' | 'pen' | 'touch'` per the
+ * Pointer Events spec; an empty string or `undefined` — jsdom's default for
+ * a bare `new PointerEvent(...)`, and the value Safari has historically
+ * reported for some synthetic events — falls back to the mouse value so
+ * existing tests that never set `pointerType` keep their prior behavior.
+ */
+export function clickSlopPx(pointerType: string | undefined): number {
+	switch (pointerType) {
+		case 'touch':
+			return TOUCH_CLICK_SLOP_PX;
+		case 'pen':
+			return PEN_CLICK_SLOP_PX;
+		default:
+			return CLICK_SLOP_PX;
+	}
+}
 
 /** The logical content a viewport fits: an axis-aligned rect in content coordinates. */
 export interface ViewportFitTarget {
@@ -119,6 +162,16 @@ export class ViewportController {
 	/** Pointer-centered wheel zoom (limits from `zoomLimits`). */
 	zoomAtPointer(pointer: ScreenSpacePoint, zoomFactor: number): void {
 		this.view = zoomAtPointer(this.view, pointer, zoomFactor, this.zoomLimits());
+	}
+
+	/** The viewport's own center, in container-local CSS pixels — the anchor for keyboard zoom and the on-canvas zoom buttons (neither has a pointer position to anchor on). */
+	centerPoint(): ScreenSpacePoint {
+		return { x: this.size.width / 2, y: this.size.height / 2 };
+	}
+
+	/** Zoom about the viewport center (limits from `zoomLimits`, same clamp as `zoomAtPointer`). */
+	zoomAtCenter(zoomFactor: number): void {
+		this.zoomAtPointer(this.centerPoint(), zoomFactor);
 	}
 
 	/** Background drag-pan in CSS-pixel screen space, retaining zoom. */

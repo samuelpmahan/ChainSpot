@@ -119,3 +119,25 @@ test('Annotate Round hands its source image to Create Graphics, where the corres
 	await canvasClick(page, 'target-basemap', imagePoint(targetView, 1, 1));
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '1');
 });
+
+test('the diagnostics rail collapse toggle defaults expanded and remembers a collapsed choice across a full page reload', async ({
+	page
+}) => {
+	await gotoApp(page, '/annotate-round');
+
+	const toggle = page.getByTestId('diagnostics-rail-toggle');
+	await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+	await toggle.click();
+	await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+	// A full reload clears every in-memory session; only `localStorage` (the
+	// preference this toggle writes to) can be what survives it.
+	await page.reload();
+	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+	await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute('aria-expanded', 'false');
+
+	// The choice remains user-editable after the reload, in both directions.
+	await page.getByTestId('diagnostics-rail-toggle').click();
+	await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute('aria-expanded', 'true');
+});

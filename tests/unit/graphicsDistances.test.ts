@@ -14,6 +14,7 @@ function planFor(overrides: Partial<HoleGraphicPlan>): HoleGraphicPlan {
 		corridorBand: null,
 		centerline: [],
 		bends: [],
+		walkingPath: [],
 		crop: CROP,
 		targetWidthPx: 400,
 		targetHeightPx: 400,

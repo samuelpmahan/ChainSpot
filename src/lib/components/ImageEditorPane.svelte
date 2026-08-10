@@ -19,6 +19,17 @@
 		zoom: number;
 	}
 
+	/**
+	 * Context for the `popover` snippet — deliberately richer than
+	 * `OverlayContext`: a popover needs the full view transform (not just
+	 * zoom) to convert an image-space anchor into pane-local screen space, and
+	 * the pane's own CSS-px size to clamp itself fully on-screen.
+	 */
+	interface PopoverContext {
+		view: ViewTransformState;
+		paneSize: { width: number; height: number };
+	}
+
 	interface Props {
 		title: string;
 		role: ImageRole;
@@ -51,6 +62,17 @@
 		tools?: Snippet;
 		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
+		/**
+		 * Rendered as a sibling of `ImageViewport`, inside `.canvas-shell` but
+		 * OUTSIDE `.image-viewport`'s `overflow: hidden` — unlike `overlay`,
+		 * content here is never clipped at the pane's edges and its pointerdown
+		 * events never reach the viewport's own gesture handling at all (they
+		 * bubble through `.canvas-shell`, not through `.image-viewport`). Meant
+		 * for popovers anchored at a point inside the image (e.g. a placement
+		 * menu) that must stay fully visible even when that point is near an
+		 * edge or corner of the visible pane.
+		 */
+		popover?: Snippet<[PopoverContext]>;
 	}
 
 	let {
@@ -68,7 +90,8 @@
 		onClaimedPointerCancel,
 		tools,
 		diagnostics,
-		overlay
+		overlay,
+		popover
 	}: Props = $props();
 
 	let vp = new ViewportController();
@@ -234,6 +257,9 @@
 					{/if}
 				{/snippet}
 			</ImageViewport>
+			{#if popover}
+				{@render popover({ view: vp.view, paneSize: { width: vp.size.width, height: vp.size.height } })}
+			{/if}
 		</div>
 		{#if diagnostics}
 			<aside class="diagnostics" aria-label={`${title} diagnostics`}>

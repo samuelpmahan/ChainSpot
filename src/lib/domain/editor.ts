@@ -344,6 +344,43 @@ export class ProjectEditor {
 		this.commit(before, after);
 	}
 
+	/**
+	 * Replaces the walking path in one history step, the same "whole value,
+	 * one commit" shape as `setHoles`/`setNumberBadges`. Points are always
+	 * source-image pixels and bounds-checked against the loaded
+	 * `source-overview` image, exactly like a hole point. An empty array
+	 * normalizes to `undefined` so "no walking path" has one representation,
+	 * matching `AnnotatedRound.walkingPath`'s own "absent when not annotated"
+	 * convention.
+	 */
+	setWalkingPath(points: readonly SourcePoint[] | undefined): void {
+		if (points !== undefined && !Array.isArray(points)) {
+			throw new Error('setWalkingPath: points must be an array or undefined');
+		}
+		const normalized = points && points.length > 0 ? points : undefined;
+		if (normalized) {
+			const sourceImage = findImageByRole(this.#state.images, 'source-overview');
+			if (!sourceImage) {
+				throw new Error(
+					'setWalkingPath: the source-overview image must be loaded before setting a walking path'
+				);
+			}
+			normalized.forEach((point, index) => {
+				assertFiniteCoordinates(point, `setWalkingPath (point ${index + 1})`);
+				if (!pointInBounds(point, sourceImage.widthPx, sourceImage.heightPx)) {
+					throw new Error(`setWalkingPath: point ${index + 1} is outside the source image bounds`);
+				}
+			});
+		}
+
+		const before = this.#state;
+		const after = {
+			...before,
+			walkingPath: normalized ? cloneValue(normalized as SourcePoint[]) : undefined
+		};
+		this.commit(before, after);
+	}
+
 	addPair(options: AddPairOptions): ControlPointPair {
 		const { sourceCoordinates, targetCoordinates, label = null, enabled = true } = options;
 		const sourceImage = findImageByRole(this.#state.images, 'source-overview');
@@ -578,12 +615,17 @@ export class ProjectEditor {
 		// Replacing the target image never affects them.
 		const holes =
 			current.role === 'source-overview' && !retainPoints ? [] : before.holes;
+		// Same rule again for the walking path: also source-image pixels with no
+		// imageId, so it is discarded exactly when holes are.
+		const walkingPath =
+			current.role === 'source-overview' && !retainPoints ? undefined : before.walkingPath;
 
 		const after = {
 			...before,
 			images: before.images.map((candidate) => (candidate.id === current.id ? stored : candidate)),
 			controlPointPairs: pairs,
-			holes
+			holes,
+			walkingPath
 		};
 		this.#assets.set(stored.id, { bytes: Uint8Array.from(bytes), decoded: null });
 		this.commit(before, after);

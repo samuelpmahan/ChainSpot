@@ -2,33 +2,22 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { radialWedges } from '../../src/lib/radialMenu';
 import { CURRENT_SCHEMA_VERSION } from '../../src/lib/projectSchema';
 
-// Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
-// +page.svelte — there is no shared export, since they're page-local tuning.
-const RADIAL_HUB_RADIUS_PX = 20;
-const RADIAL_OUTER_RADIUS_PX = 62;
+type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-type PointKind = 'tee' | 'basket' | 'shot' | 'bend';
-
-/** The wedges a fresh radial menu offers for empty space, given what's already on the hole — mirrors +page.svelte's radialMenuActions(). */
-function availableKinds(hasTee: boolean, hasBasket: boolean): PointKind[] {
-	const kinds: PointKind[] = [];
-	if (!hasTee) kinds.push('tee');
-	if (!hasBasket) kinds.push('basket');
-	kinds.push('shot', 'bend');
-	return kinds;
+/** Clicks the Map/Round segmented toggle in the toolbar. */
+// The toggle sits above the fold; clicking it scrolls the annotation frame
+// away, so scroll back to keep previously-measured frame coordinates valid.
+async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
+	await page.getByTestId(`annotation-mode-${mode}`).click();
+	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
 }
 
-/** Clicks (x, y) to open the radial menu, then clicks the wedge for `kind` among `kinds`. */
-async function placePoint(page: Page, x: number, y: number, kind: PointKind, kinds: PointKind[]): Promise<void> {
+/** Clicks (x, y) to open the radial menu, then clicks the real button for `kind`. */
+async function placePoint(page: Page, x: number, y: number, kind: PointKind): Promise<void> {
 	await page.mouse.click(x, y);
-	const layout = radialWedges(kinds.length, { hubRadius: RADIAL_HUB_RADIUS_PX, outerRadius: RADIAL_OUTER_RADIUS_PX });
-	const index = kinds.indexOf(kind);
-	if (index === -1) throw new Error(`${kind} is not offered among ${kinds.join(', ')}`);
-	const wedge = layout.wedges[index];
-	await page.mouse.click(x + wedge.labelX, y + wedge.labelY);
+	await page.getByTestId(`radial-action-${kind}`).click();
 }
 
 /**
@@ -164,10 +153,12 @@ async function annotateOneHole(page: Page): Promise<void> {
 	const box = await frame.boundingBox();
 	if (!box) throw new Error('annotation frame has no bounding box');
 
-	await placePoint(page, box.x + 50, box.y + 50, 'tee', availableKinds(false, false));
-	await placePoint(page, box.x + 400, box.y + 300, 'basket', availableKinds(true, false));
-	await placePoint(page, box.x + 200, box.y + 150, 'shot', availableKinds(true, true));
-	await placePoint(page, box.x + 230, box.y + 180, 'bend', availableKinds(true, true));
+	await placePoint(page, box.x + 50, box.y + 50, 'tee');
+	await placePoint(page, box.x + 400, box.y + 300, 'basket');
+	await switchMode(page, 'round');
+	await placePoint(page, box.x + 200, box.y + 150, 'shot');
+	await switchMode(page, 'map');
+	await placePoint(page, box.x + 230, box.y + 180, 'bend');
 	await page.getByTestId('corridor-width').fill('90');
 	await page.getByTestId('corridor-width').blur();
 

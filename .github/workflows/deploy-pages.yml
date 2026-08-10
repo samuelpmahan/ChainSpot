@@ -30,6 +30,9 @@ jobs:
       - name: Build static site
         env:
           BASE_PATH: /${{ github.event.repository.name }}
+          # Referrer-restricted public browser key (see docs/google-maps-setup.md).
+          # Absent secret => empty => the app builds and runs keyless (Nominatim only).
+          PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: npm run build
 
       - uses: actions/configure-pages@v5

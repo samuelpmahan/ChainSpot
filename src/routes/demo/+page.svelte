@@ -15,13 +15,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { armDemoStep } from '$lib/demo/arming';
-	import {
-		DEMO_DATASET,
-		DEMO_STEPS,
-		demoAssetUrl,
-		demoRouteLabel,
-		demoStepUrl
-	} from '$lib/demo/catalog';
+	import { DEMO_DATASET, DEMO_STEPS, demoRouteLabel, demoStepUrl } from '$lib/demo/catalog';
 	import { demoTour } from '$lib/demo/tour.svelte';
 
 	let starting = $state(false);
@@ -92,26 +86,22 @@
 				order. Whatever arrangement you see on the next screen, the product worked it out from the
 				pixels while you watched.
 			</p>
+			<p>
+				Partway through, the walkthrough reloads the browser on purpose — everything in this tab's
+				memory disappears — and then annotates a second, real capture of the same course: a round
+				actually played on it, with UDisc's own landing droplets and walking path already in the
+				screenshot. What comes back after the reload is exactly what a real visit two days later
+				would have: the course, remembered, nothing else.
+			</p>
 			<p class="fine">
 				The clean basemap is not shipped with this demo. You will pull it live from public USGS
-				aerial imagery in step 3, the same way a customer would.
+				aerial imagery, the same way a customer would, once before the reload and once after.
 			</p>
 		</div>
-		<figure class="dataset-figure">
-			<img
-				src={demoAssetUrl(DEMO_DATASET.overview)}
-				alt="UDisc course map for {DEMO_DATASET.courseName}, showing all {DEMO_DATASET.holeCount} holes"
-				loading="lazy"
-			/>
-			<figcaption>
-				The whole-course view for orientation. The walkthrough works from four higher-zoom captures
-				of this same course, because detail is what survives to air.
-			</figcaption>
-		</figure>
 	</section>
 
 	<section class="steps" aria-labelledby="steps-heading">
-		<h2 id="steps-heading">The five steps</h2>
+		<h2 id="steps-heading">The six steps</h2>
 		<ol class="step-list" data-testid="demo-step-list">
 			{#each DEMO_STEPS as step, index (step.id)}
 				<li class="step-card">
@@ -263,11 +253,8 @@
 		color: #fafafa;
 	}
 
-	.dataset {
-		display: grid;
-		grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-		gap: 1.75rem;
-		align-items: start;
+	.dataset-copy {
+		max-width: 46rem;
 	}
 
 	.dataset p {
@@ -277,29 +264,6 @@
 
 	.fine {
 		font-size: 0.85rem;
-		color: #a1a1aa;
-	}
-
-	.dataset-figure {
-		margin: 0;
-		background-color: #18181b;
-		border: 1px solid #27272a;
-		border-radius: 8px;
-		padding: 0.75rem;
-	}
-
-	.dataset-figure img {
-		display: block;
-		width: 100%;
-		max-height: 26rem;
-		object-fit: contain;
-		border-radius: 4px;
-		background-color: #09090b;
-	}
-
-	.dataset-figure figcaption {
-		margin-top: 0.6rem;
-		font-size: 0.8rem;
 		color: #a1a1aa;
 	}
 
@@ -384,9 +348,4 @@
 		color: #d4d4d8;
 	}
 
-	@media (max-width: 800px) {
-		.dataset {
-			grid-template-columns: minmax(0, 1fr);
-		}
-	}
 </style>

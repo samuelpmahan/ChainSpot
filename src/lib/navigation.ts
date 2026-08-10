@@ -24,6 +24,14 @@
  * size, recompute the default fit for the new pane size. Otherwise retain zoom and
  * keep the image-space point that was under the previous pane center under the new
  * pane center.
+ *
+ * Keyboard pan/zoom (added alongside the on-canvas zoom controls, see
+ * `docs/imageviewport-event-contract.md` Part 1.7): Arrow keys pan by
+ * `KEYBOARD_PAN_STEP_PX`, `KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER`x larger with Shift
+ * held. Plus/minus zoom about the viewport center by `KEYBOARD_ZOOM_STEP_FACTOR`
+ * per keypress (its reciprocal for zoom-out), clamped by the same
+ * `zoomLimitsForFit`-derived limits interactive wheel/pinch zoom already uses —
+ * no separate clamp logic exists for keyboard input.
  */
 
 import { fitViewTransform, screenToImage } from './coords';
@@ -56,6 +64,19 @@ export const WHEEL_ZOOM_STEP_DELTA = 200;
  * needs amplification to feel proportionate to a deliberate zoom gesture.
  */
 export const PINCH_GAIN = 3;
+
+/** Keyboard pan step in CSS pixels per Arrow-key press (no modifier). */
+export const KEYBOARD_PAN_STEP_PX = 40;
+
+/** Multiplier applied to `KEYBOARD_PAN_STEP_PX` when Shift is held. */
+export const KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER = 5;
+
+/**
+ * Multiplicative zoom factor applied per keyboard zoom-in keypress (`+`/`=`);
+ * zoom-out (`-`/`_`) applies its reciprocal, so pressing one then the other
+ * returns to the original zoom exactly (`FACTOR * (1 / FACTOR) === 1`).
+ */
+export const KEYBOARD_ZOOM_STEP_FACTOR = 1.25;
 
 export interface ViewZoomLimits {
 	min: number;

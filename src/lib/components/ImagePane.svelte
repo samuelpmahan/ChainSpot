@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ImageViewport from './ImageViewport.svelte';
-	import { ViewportController, CLICK_SLOP_PX } from '$lib/viewport.svelte';
+	import { ViewportController, clickSlopPx } from '$lib/viewport.svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageRole } from '$lib/domain/project';
@@ -253,7 +253,7 @@
 		const pointer = vp.pointerIn(event);
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
-		if (!gesture.draggingMarker && Math.hypot(dx, dy) > CLICK_SLOP_PX) {
+		if (!gesture.draggingMarker && Math.hypot(dx, dy) > clickSlopPx(event.pointerType)) {
 			gesture.draggingMarker = true;
 		}
 		if (!gesture.draggingMarker) return;
@@ -692,9 +692,9 @@
 	.scene {
 		position: relative;
 		height: 420px;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: repeating-conic-gradient(#f2f2f2 0% 25%, #ffffff 0% 50%) 50% / 16px 16px;
+		background: repeating-conic-gradient(#232329 0% 25%, #1a1a1e 0% 50%) 50% / 16px 16px;
 		overflow: hidden;
 	}
 
@@ -716,12 +716,22 @@
 		font-size: 0.85rem;
 		min-height: 2.25rem;
 		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		cursor: pointer;
+	}
+
+	.nav-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
 	}
 
 	.placeholder {
 		position: absolute;
 		margin: 1rem;
-		color: #666;
+		color: #a1a1aa;
 		z-index: 1;
 		pointer-events: none;
 	}
@@ -730,9 +740,9 @@
 		margin: 0;
 		padding: 0.4rem 0.6rem;
 		border-radius: 4px;
-		background: #fdecea;
-		border: 1px solid #f5c6cb;
-		color: #8a1f11;
+		background: #3f1d1d;
+		border: 1px solid #7f1d1d;
+		color: #fca5a5;
 		font-size: 0.85rem;
 	}
 
@@ -755,6 +765,14 @@
 
 	.choose {
 		align-self: flex-start;
+		min-height: 2.25rem;
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
 	}
 
 	.file-input {

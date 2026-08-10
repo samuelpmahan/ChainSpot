@@ -52,6 +52,26 @@ function fakeStore(): CourseLibraryStore {
 	};
 }
 
+/** Same fake, with `put` spy-wrapped so a test can assert whether Done actually wrote to the library. */
+function fakeStoreWithPutSpy(): { store: CourseLibraryStore; putSpy: ReturnType<typeof vi.fn> } {
+	const entries = new Map<string, CourseLibraryEntry>();
+	const putSpy = vi.fn(async (entry: CourseLibraryEntry) => {
+		entries.set(entry.id, entry);
+	});
+	return {
+		store: {
+			async getAll() {
+				return [...entries.values()];
+			},
+			put: putSpy,
+			async delete(id: string) {
+				entries.delete(id);
+			}
+		},
+		putSpy
+	};
+}
+
 function syntheticBadges(n: number): LabeledPoint[] {
 	return Array.from({ length: n }, (_, i) => ({
 		holeNumber: i + 1,
@@ -292,6 +312,137 @@ describe('course recognition banner (Course Memory)', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="course-recognized"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+});
+
+describe('Course Memory: confirm-before-overwrite on Done', () => {
+	/**
+	 * Seeds a library entry, drives the same recognize → import flow as the
+	 * suite above (a differently cropped/zoomed "new" screenshot of the same
+	 * course), and returns the mounted page right after Import — so imported
+	 * geometry sits in the NEW image's pixel space, numerically different from
+	 * the stored entry even though nothing has been edited.
+	 */
+	async function importRecognizedCourse(): Promise<{
+		host: HTMLElement;
+		component: ReturnType<typeof mount>;
+		putSpy: ReturnType<typeof vi.fn>;
+	}> {
+		const { store, putSpy } = fakeStoreWithPutSpy();
+		const savedBadges = syntheticBadges(10);
+		const savedBaskets = syntheticBaskets(10);
+		await upsertCourse(
+			store,
+			{
+				projectName: 'My Home Course',
+				numberBadges: savedBadges,
+				baskets: savedBaskets,
+				holes: [
+					{
+						number: 1,
+						tee: { xPx: savedBadges[0].xPx - 20, yPx: savedBadges[0].yPx - 20 },
+						basket: { xPx: savedBaskets[0].xPx, yPx: savedBaskets[0].yPx },
+						corridorBends: [],
+						corridorWidthPx: 60
+					}
+				]
+			},
+			{ createId: () => 'course-1', now: NOW }
+		);
+		putSpy.mockClear(); // The seed write above is not part of what a test asserts on.
+
+		const newBadges = transformed(savedBadges, 1.6, 0.25, 300, -80);
+		const newBaskets = transformed(savedBaskets, 1.6, 0.25, 300, -80);
+		mockDetectCourseCandidates.mockResolvedValue(mockDetectionResult(newBadges, newBaskets));
+
+		const editor = makeEditor();
+		const { host, component } = mountPage(editor, decodeOf(2000, 2000), store);
+		await loadSourceImage(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]')?.click();
+		await flush();
+
+		const importButton = host.querySelector<HTMLButtonElement>('[data-testid="course-recognized-import"]');
+		if (!importButton) throw new Error('missing course-recognized-import button');
+		importButton.click();
+		await flush();
+
+		return { host, component, putSpy };
+	}
+
+	it('Done after an untouched import skips the library write entirely: no dialog, no upsert', async () => {
+		const { host, component, putSpy } = await importRecognizedCourse();
+
+		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
+		if (!doneButton) throw new Error('missing annotate-done button');
+		doneButton.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="library-update-dialog"]')).toBeNull();
+		expect(putSpy).not.toHaveBeenCalled();
+		expect(mockGoto).toHaveBeenCalledWith('/create-graphics');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('a Map-mode edit after import shows the update dialog; "Update saved course" writes and then proceeds', async () => {
+		const { host, component, putSpy } = await importRecognizedCourse();
+
+		const widthInput = host.querySelector<HTMLInputElement>('[data-testid="corridor-width"]');
+		if (!widthInput) throw new Error('missing corridor-width input');
+		widthInput.value = '90';
+		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+
+		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
+		if (!doneButton) throw new Error('missing annotate-done button');
+		doneButton.click();
+		await flush();
+
+		const dialog = host.querySelector('[data-testid="library-update-dialog"]');
+		expect(dialog).not.toBeNull();
+		expect(dialog?.textContent).toContain('My Home Course');
+		// The dialog gates only the library write — Done has not navigated yet.
+		expect(mockGoto).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(host.querySelector('[data-testid="library-update-keep"]'));
+
+		host.querySelector<HTMLButtonElement>('[data-testid="library-update-confirm"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="library-update-dialog"]')).toBeNull();
+		expect(putSpy).toHaveBeenCalledTimes(1);
+		expect(mockGoto).toHaveBeenCalledWith('/create-graphics');
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('a Map-mode edit after import shows the update dialog; "Keep saved version" skips the write but still proceeds', async () => {
+		const { host, component, putSpy } = await importRecognizedCourse();
+
+		const widthInput = host.querySelector<HTMLInputElement>('[data-testid="corridor-width"]');
+		if (!widthInput) throw new Error('missing corridor-width input');
+		widthInput.value = '90';
+		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+
+		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
+		if (!doneButton) throw new Error('missing annotate-done button');
+		doneButton.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="library-update-dialog"]')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="library-update-keep"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="library-update-dialog"]')).toBeNull();
+		expect(putSpy).not.toHaveBeenCalled();
+		expect(mockGoto).toHaveBeenCalledWith('/create-graphics');
 
 		unmount(component);
 		host.remove();

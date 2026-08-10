@@ -7,8 +7,9 @@ import {
 } from '../../src/lib/holeGraphics';
 import type { HoleFramingOptions, HoleGraphicRenderEnv } from '../../src/lib/holeGraphics';
 import { deriveCorridorBand, deriveCorridorCenterline } from '../../src/lib/corridor';
-import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
+import type { AnnotatedHole, SourcePoint } from '../../src/lib/domain/annotatedRound';
 import type { SerializableTransform } from '../../src/lib/alignment/types';
+import { DEFAULT_GRAPHIC_STYLE } from '../../src/lib/graphics/style';
 
 const IDENTITY: SerializableTransform = {
 	model: 'similarity',
@@ -120,6 +121,44 @@ describe('planHoleGraphic', () => {
 		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
 		expect(plan).toBeNull();
 	});
+
+	test('defaults to an empty walkingPath when none is supplied', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
+		expect(plan!.walkingPath).toEqual([]);
+	});
+
+	test('transforms the walking path through the same transform as every other feature', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const walkingPath: SourcePoint[] = [
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 20, yPx: 30 }
+		];
+		const plan = planHoleGraphic(hole, SCALE_AND_OFFSET, 1000, 1000, undefined, walkingPath);
+		expect(plan!.walkingPath).toEqual([
+			{ xPx: 100, yPx: 50 },
+			{ xPx: 140, yPx: 110 }
+		]);
+	});
+
+	test('the walking path never affects crop framing', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
+		const withoutPath = planHoleGraphic(hole, IDENTITY, 1000, 1000);
+		const withPath = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 999, yPx: 999 }
+		]);
+		expect(withPath!.crop).toEqual(withoutPath!.crop);
+	});
+
+	test('a hole with no other placed feature still plans to null even with a walking path supplied', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 100, yPx: 100 }
+		]);
+		expect(plan).toBeNull();
+	});
 });
 
 describe('buildHoleGraphicMarkup', () => {
@@ -160,6 +199,34 @@ describe('buildHoleGraphicMarkup', () => {
 		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
 		expect(markup).not.toContain('<polygon');
 		expect(markup).not.toContain('<polyline');
+	});
+
+	test('renders the walking path with the style preset color when present', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [
+			{ xPx: 5, yPx: 5 },
+			{ xPx: 995, yPx: 995 }
+		])!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target', DEFAULT_GRAPHIC_STYLE);
+		expect(markup).toContain(
+			`<polyline points="5,5 995,995" fill="none" stroke="${DEFAULT_GRAPHIC_STYLE.walkingPathColor}"`
+		);
+		expect(markup).toContain('stroke-linejoin="round"');
+		expect(markup).toContain('stroke-linecap="round"');
+	});
+
+	test('omits the walking path element entirely when absent', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000)!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target', DEFAULT_GRAPHIC_STYLE);
+		expect(markup).not.toContain(DEFAULT_GRAPHIC_STYLE.walkingPathColor);
+	});
+
+	test('a single-point walking path renders no polyline (nothing to connect)', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [{ xPx: 5, yPx: 5 }])!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target', DEFAULT_GRAPHIC_STYLE);
+		expect(markup).not.toContain(DEFAULT_GRAPHIC_STYLE.walkingPathColor);
 	});
 });
 

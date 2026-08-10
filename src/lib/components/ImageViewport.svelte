@@ -2,11 +2,27 @@
 	import { onDestroy } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
-	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
-	import { PINCH_GAIN, panBy, wheelZoomFactor } from '$lib/navigation';
+	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
+	import {
+		KEYBOARD_PAN_STEP_PX,
+		KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER,
+		KEYBOARD_ZOOM_STEP_FACTOR,
+		PINCH_GAIN,
+		panBy,
+		wheelZoomFactor
+	} from '$lib/navigation';
 
 	/** Wheel deltaMode 1 ("line" units, e.g. some non-Chromium browsers/mice): approximate CSS pixels per line. */
 	const WHEEL_LINE_HEIGHT_PX = 16;
+
+	/**
+	 * Appended to whatever `ariaLabel` a consumer supplies (or used alone when
+	 * none is given) so every viewport announces the keyboard contract, even the
+	 * three consumers that pass their own `ariaLabel`/`role` and are out of this
+	 * change's reach — see `docs/imageviewport-event-contract.md` Part 1.7.
+	 */
+	const KEYBOARD_HINT =
+		'Arrow keys pan, hold Shift to pan further. Plus or minus zoom. 0 fits the image.';
 
 	interface Props {
 		/** Shared controller; the consumer also reads/writes its view directly. */
@@ -57,6 +73,8 @@
 		start: ScreenSpacePoint;
 		transform: ViewTransformState;
 		panning: boolean;
+		/** Captured at pointerdown so the click-vs-pan threshold (`clickSlopPx`) stays pointer-type-aware through move and up without re-deriving it from a possibly-stale event. */
+		pointerType: string;
 	}
 
 	interface PinchGesture {
@@ -64,6 +82,22 @@
 		lastDistance: number;
 		lastMidpoint: ScreenSpacePoint;
 	}
+
+	/**
+	 * Default role is `application`, not `img`: the container is now a focusable,
+	 * keyboard-operable widget (Arrow pan, +/-/0 zoom/fit — see `onKeyDown`
+	 * below), and `role="img"` tells assistive tech the opposite — static,
+	 * non-interactive content, with no guarantee that a screen reader's browse
+	 * mode even forwards Arrow keys to the page instead of using them itself.
+	 * `role="application"` is the standard escape hatch for exactly this
+	 * (Google Maps, Figma's canvas): it hands all key events straight to this
+	 * component. Consumers may still override via the `role` prop — three do,
+	 * unavoidably (see the contract doc) — so `aria-roledescription` below is
+	 * added unconditionally as a second, independent layer that improves the
+	 * announced semantics even when `role` stays `img`.
+	 */
+	let effectiveRole = $derived(role ?? 'application');
+	let effectiveAriaLabel = $derived(ariaLabel ? `${ariaLabel} ${KEYBOARD_HINT}` : `Image viewport. ${KEYBOARD_HINT}`);
 
 	let gesture: PanGesture | null = null;
 	let claimedGesture: { pointerId: number } | null = null;
@@ -153,6 +187,92 @@
 		controller.panBy(-dx, -dy);
 	}
 
+	/** Zooms about the viewport's own center — what both the on-canvas zoom buttons and keyboard +/- use, since neither has a pointer position to anchor on. Clamped identically to wheel/pinch zoom via `controller.zoomAtCenter` → `zoomLimits()` (`zoomLimitsForFit`). */
+	function zoomAboutCenter(factor: number): void {
+		controller.zoomAtCenter(factor);
+	}
+
+	function handleZoomInClick(): void {
+		zoomAboutCenter(KEYBOARD_ZOOM_STEP_FACTOR);
+	}
+
+	function handleZoomOutClick(): void {
+		zoomAboutCenter(1 / KEYBOARD_ZOOM_STEP_FACTOR);
+	}
+
+	function handleFitClick(): void {
+		controller.fit();
+	}
+
+	/**
+	 * Keyboard pan/zoom/fit. Bound directly on this container (not delegated),
+	 * so `event.currentTarget` is always this div; bailing when
+	 * `event.target !== event.currentTarget` means a keypress that actually
+	 * landed on a focusable descendant — the empty-state "Choose image" button
+	 * some consumers render inside `content` is the one case in this codebase —
+	 * is left alone rather than double-handled. This is the same pattern
+	 * stitch-map's `handleAlignmentKeyDown` already uses for its outer
+	 * `role="group"` wrapper, which is also why the two nest without conflict:
+	 * that wrapper's own guard already rejects events whose target is this
+	 * (descendant) element, so Arrow keys act on exactly one of "nudge the
+	 * selected tile" or "pan this viewport" depending on which element has
+	 * focus, never both (see the contract doc, Part 1.7).
+	 *
+	 * `preventDefault()` is called for every key this handler recognizes
+	 * (pan/zoom/fit) regardless of whether a modifier is held and regardless of
+	 * whether `controller.fitTarget` exists — that is deliberate: it is what
+	 * stops Cmd/Ctrl+Plus/Minus/0 from triggering the browser's own page-zoom
+	 * while this viewport has focus (the Figma/Google Maps convention). The
+	 * scoping is entirely via focus: this handler only runs when this element
+	 * (or, per the guard above, one of its non-focusable descendants) is the
+	 * event target, so the browser's native zoom shortcut is untouched anywhere
+	 * else on the page, including every other viewport that isn't focused.
+	 */
+	function onKeyDown(event: KeyboardEvent): void {
+		if (event.target !== event.currentTarget) return;
+		switch (event.key) {
+			case 'ArrowLeft':
+			case 'ArrowRight':
+			case 'ArrowUp':
+			case 'ArrowDown': {
+				event.preventDefault();
+				if (!controller.fitTarget) return;
+				const step = event.shiftKey
+					? KEYBOARD_PAN_STEP_PX * KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER
+					: KEYBOARD_PAN_STEP_PX;
+				// Mirrors the wheel model's sign convention exactly (`onWheel`
+				// pans by `-dx, -dy`): Down/Right behave like scrolling down/right
+				// — content shifts up/left, revealing what's below/to the right.
+				let dx = 0;
+				let dy = 0;
+				if (event.key === 'ArrowLeft') dx = step;
+				else if (event.key === 'ArrowRight') dx = -step;
+				else if (event.key === 'ArrowUp') dy = step;
+				else dy = -step;
+				controller.panBy(dx, dy);
+				return;
+			}
+			case '+':
+			case '=':
+				event.preventDefault();
+				if (!controller.fitTarget) return;
+				zoomAboutCenter(KEYBOARD_ZOOM_STEP_FACTOR);
+				return;
+			case '-':
+			case '_':
+				event.preventDefault();
+				if (!controller.fitTarget) return;
+				zoomAboutCenter(1 / KEYBOARD_ZOOM_STEP_FACTOR);
+				return;
+			case '0':
+				event.preventDefault();
+				controller.fit();
+				return;
+			default:
+				return;
+		}
+	}
+
 	/**
 	 * Interactive controls a consumer renders inside `content` (for example the
 	 * empty-state "Choose image" button) must keep their native click behavior.
@@ -222,7 +342,8 @@
 			pointerId: event.pointerId,
 			start: pointer,
 			transform: { ...controller.view },
-			panning: false
+			panning: false,
+			pointerType: event.pointerType
 		};
 		window.addEventListener('pointermove', onPointerMove);
 		window.addEventListener('pointerup', onPointerUp);
@@ -291,7 +412,7 @@
 		activePointers.set(event.pointerId, pointer);
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
-		if (!gesture.panning && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.panning = true;
+		if (!gesture.panning && Math.hypot(dx, dy) > clickSlopPx(gesture.pointerType)) gesture.panning = true;
 		if (gesture.panning) {
 			// Pan against the gesture-start transform so a click never drifts.
 			controller.view = panBy(gesture.transform, dx, dy);
@@ -312,7 +433,8 @@
 		const pointer = controller.pointerIn(event);
 		const isClick =
 			!active.panning &&
-			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <= CLICK_SLOP_PX &&
+			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <=
+				clickSlopPx(active.pointerType) &&
 			controller.containsPoint(event);
 		activePointers.delete(event.pointerId);
 		releasePointerCapture(event.pointerId);
@@ -428,19 +550,73 @@
 	});
 </script>
 
+<!-- The dynamic `role` (default `application`, see the comment above `effectiveRole`)
+     makes this a deliberately keyboard-operable non-native widget, matching
+     stitch-map's `alignment-workspace` wrapper (`role="group"`, same two ignores).
+     tabindex="0" also serves consumers that restore focus here programmatically
+     (e.g. annotate-round's radial menu returning focus on Escape). -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	class="image-viewport"
 	class:panning={controller.panning}
 	data-testid={testid}
-	role={role}
-	aria-label={ariaLabel}
+	role={effectiveRole}
+	aria-label={effectiveAriaLabel}
 	aria-describedby={ariaDescribedby}
+	aria-roledescription="zoomable image viewport"
+	tabindex="0"
 	data-view-zoom={controller.view.zoom}
 	data-view-pan-x={controller.view.panX}
 	data-view-pan-y={controller.view.panY}
 	bind:this={controller.container}
+	onkeydown={onKeyDown}
 >
 	{@render content()}
+	{#if controller.fitTarget}
+		<div class="viewport-controls" data-testid="viewport-controls">
+			<button
+				type="button"
+				class="viewport-control"
+				data-testid="viewport-zoom-in"
+				aria-label="Zoom in"
+				onclick={handleZoomInClick}
+			>
+				<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+					<path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="viewport-control"
+				data-testid="viewport-zoom-out"
+				aria-label="Zoom out"
+				onclick={handleZoomOutClick}
+			>
+				<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+					<path d="M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="viewport-control"
+				data-testid="viewport-zoom-fit"
+				aria-label="Fit image to viewport"
+				onclick={handleFitClick}
+			>
+				<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+					<path
+						d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.6"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</button>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -456,5 +632,46 @@
 
 	.image-viewport.panning {
 		cursor: grabbing;
+	}
+
+	.image-viewport:focus-visible {
+		outline: none;
+		box-shadow: inset 0 0 0 3px #38bdf8;
+	}
+
+	.viewport-controls {
+		position: absolute;
+		right: 8px;
+		bottom: 8px;
+		z-index: 10;
+		display: flex;
+		gap: 4px;
+		padding: 4px;
+		border-radius: 8px;
+		background: rgba(24, 24, 27, 0.85);
+		border: 1px solid #52525b;
+	}
+
+	.viewport-control {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 2.25rem;
+		min-height: 2.25rem;
+		border-radius: 5px;
+		border: 1px solid #52525b;
+		background: #27272a;
+		color: #f4f4f5;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.viewport-control:hover {
+		background: #3f3f46;
+	}
+
+	.viewport-control:focus-visible {
+		outline: 3px solid #38bdf8;
+		outline-offset: 2px;
 	}
 </style>
