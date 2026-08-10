@@ -232,4 +232,108 @@ describe('P0-008 ImagePane correction interaction', () => {
 		await flush();
 		unmount(component);
 	});
+
+	it('an 8px touch drift on a marker stays a tap, not an accidental drag (pointer-type-aware click slop)', async () => {
+		// Same threshold that governs ImageViewport's own click-vs-pan arbitration
+		// also governs this claimed marker-drag gesture: at the old flat 4px slop
+		// an 8px finger drift would have crossed the threshold and committed a
+		// move; at the touch slop (10px) it must not.
+		const editor = makeEditor();
+		const host = document.createElement('div');
+		document.body.appendChild(host);
+		const onPointMove = vi.fn(() => ({ ok: true as const }));
+		const component = mount(ImagePane, {
+			target: host,
+			props: {
+				title: 'Source',
+				role: 'source-overview',
+				editor,
+				refresh: 0,
+				pairs: editor.state.controlPointPairs,
+				correctionEnabled: true,
+				onPointMove
+			}
+		});
+
+		const scene = host.querySelector<HTMLElement>('[data-testid="pane-scene-source-overview"]');
+		if (!scene) throw new Error('missing source pane scene');
+		setPaneGeometry(scene);
+		await flush();
+
+		scene.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				button: 0,
+				pointerId: 21,
+				pointerType: 'touch',
+				clientX: 20,
+				clientY: 30,
+				bubbles: true
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointermove', {
+				pointerId: 21,
+				pointerType: 'touch',
+				clientX: 28,
+				clientY: 30 // 8px, under the 10px touch slop
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointerup', { pointerId: 21, pointerType: 'touch', clientX: 28, clientY: 30 })
+		);
+		await flush();
+
+		expect(onPointMove).not.toHaveBeenCalled();
+		unmount(component);
+	});
+
+	it('an 11px touch drift on a marker does commit as a drag (past the touch slop)', async () => {
+		const editor = makeEditor();
+		const host = document.createElement('div');
+		document.body.appendChild(host);
+		const onPointMove = vi.fn(() => ({ ok: true as const }));
+		const component = mount(ImagePane, {
+			target: host,
+			props: {
+				title: 'Source',
+				role: 'source-overview',
+				editor,
+				refresh: 0,
+				pairs: editor.state.controlPointPairs,
+				correctionEnabled: true,
+				onPointMove
+			}
+		});
+
+		const scene = host.querySelector<HTMLElement>('[data-testid="pane-scene-source-overview"]');
+		if (!scene) throw new Error('missing source pane scene');
+		setPaneGeometry(scene);
+		await flush();
+
+		scene.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				button: 0,
+				pointerId: 22,
+				pointerType: 'touch',
+				clientX: 20,
+				clientY: 30,
+				bubbles: true
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointermove', {
+				pointerId: 22,
+				pointerType: 'touch',
+				clientX: 31,
+				clientY: 30 // 11px, over the 10px touch slop
+			})
+		);
+		window.dispatchEvent(
+			new PointerEvent('pointerup', { pointerId: 22, pointerType: 'touch', clientX: 31, clientY: 30 })
+		);
+		await flush();
+
+		expect(onPointMove).toHaveBeenCalledTimes(1);
+		unmount(component);
+	});
 });

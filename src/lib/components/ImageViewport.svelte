@@ -2,7 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
-	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
+	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import {
 		KEYBOARD_PAN_STEP_PX,
 		KEYBOARD_PAN_STEP_SHIFT_MULTIPLIER,
@@ -73,6 +73,8 @@
 		start: ScreenSpacePoint;
 		transform: ViewTransformState;
 		panning: boolean;
+		/** Captured at pointerdown so the click-vs-pan threshold (`clickSlopPx`) stays pointer-type-aware through move and up without re-deriving it from a possibly-stale event. */
+		pointerType: string;
 	}
 
 	interface PinchGesture {
@@ -340,7 +342,8 @@
 			pointerId: event.pointerId,
 			start: pointer,
 			transform: { ...controller.view },
-			panning: false
+			panning: false,
+			pointerType: event.pointerType
 		};
 		window.addEventListener('pointermove', onPointerMove);
 		window.addEventListener('pointerup', onPointerUp);
@@ -409,7 +412,7 @@
 		activePointers.set(event.pointerId, pointer);
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
-		if (!gesture.panning && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.panning = true;
+		if (!gesture.panning && Math.hypot(dx, dy) > clickSlopPx(gesture.pointerType)) gesture.panning = true;
 		if (gesture.panning) {
 			// Pan against the gesture-start transform so a click never drifts.
 			controller.view = panBy(gesture.transform, dx, dy);
@@ -430,7 +433,8 @@
 		const pointer = controller.pointerIn(event);
 		const isClick =
 			!active.panning &&
-			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <= CLICK_SLOP_PX &&
+			Math.hypot(pointer.x - active.start.x, pointer.y - active.start.y) <=
+				clickSlopPx(active.pointerType) &&
 			controller.containsPoint(event);
 		activePointers.delete(event.pointerId);
 		releasePointerCapture(event.pointerId);

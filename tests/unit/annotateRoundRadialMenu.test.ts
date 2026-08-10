@@ -57,6 +57,43 @@ function dispatchClick(host: HTMLElement, x: number, y: number): void {
 	window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: x, clientY: y }));
 }
 
+/**
+ * A touch tap that drifts by `driftPx` before lifting — ordinary finger
+ * imprecision, well inside the platform touch-slop norm (~8-10px) but past
+ * the flat 4px mouse/trackpad threshold this component used before pointer
+ * types were distinguished.
+ */
+function dispatchTouchTapWithDrift(host: HTMLElement, x: number, y: number, driftPx: number): void {
+	const element = scene(host);
+	const pointerId = 32;
+	element.dispatchEvent(
+		new PointerEvent('pointerdown', {
+			button: 0,
+			pointerId,
+			pointerType: 'touch',
+			clientX: x,
+			clientY: y,
+			bubbles: true
+		})
+	);
+	window.dispatchEvent(
+		new PointerEvent('pointermove', {
+			pointerId,
+			pointerType: 'touch',
+			clientX: x + driftPx,
+			clientY: y
+		})
+	);
+	window.dispatchEvent(
+		new PointerEvent('pointerup', {
+			pointerId,
+			pointerType: 'touch',
+			clientX: x + driftPx,
+			clientY: y
+		})
+	);
+}
+
 function view(host: HTMLElement): { zoom: number; panX: number; panY: number } {
 	const dataset = scene(host).dataset;
 	return {
@@ -125,6 +162,56 @@ describe('Annotate Round radial menu', () => {
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('opens on a touch tap that drifts 8px before lifting (pointer-type-aware click slop)', async () => {
+		// Below the 4px mouse threshold this tap would have crossed into a pan
+		// (see docs/imageviewport-event-contract.md, H9): onViewportClick never
+		// fires and the radial menu never opens. The touch slop (10px) fixes
+		// this — an 8px drift is still an ordinary tap.
+		//
+		// Geometry is set *before* the first flush (not inside
+		// `setUpHoleWithImage`, which sets it only after the image loads) so the
+		// viewport's own initial-size effect — this environment has no
+		// `ResizeObserver` to correct it later — captures the real 400x400 pane
+		// instead of jsdom's default 0x0-falls-back-to-1x1. A drift measured in
+		// screen px only stays proportionate to the image's 200x200 bounds at a
+		// realistic fit zoom; at the 1x1-pane zoom every other test in this file
+		// tolerates (because it round-trips a zero-drift click through the same
+		// transform), an 8px screen drift would translate to hundreds of image
+		// px and land outside the image regardless of the slop fix under test.
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		setGeometry(host);
+		await setUpHoleWithImage(host, editor);
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchTouchTapWithDrift(host, clickAt.x, clickAt.y, 8);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-tee"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('does not open on a touch tap that drifts 11px before lifting — that is a real pan', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		setGeometry(host);
+		await setUpHoleWithImage(host, editor);
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchTouchTapWithDrift(host, clickAt.x, clickAt.y, 11);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
 
 		unmount(component);
 		host.remove();

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ImageViewport from './ImageViewport.svelte';
-	import { ViewportController, CLICK_SLOP_PX } from '$lib/viewport.svelte';
+	import { ViewportController, clickSlopPx } from '$lib/viewport.svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageRole } from '$lib/domain/project';
@@ -253,7 +253,7 @@
 		const pointer = vp.pointerIn(event);
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
-		if (!gesture.draggingMarker && Math.hypot(dx, dy) > CLICK_SLOP_PX) {
+		if (!gesture.draggingMarker && Math.hypot(dx, dy) > clickSlopPx(event.pointerType)) {
 			gesture.draggingMarker = true;
 		}
 		if (!gesture.draggingMarker) return;

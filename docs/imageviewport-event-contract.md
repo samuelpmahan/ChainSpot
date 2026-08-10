@@ -155,11 +155,11 @@ highest-priority gesture in the component.
 
 | Input class | First receiver | `setPointerCapture` | `preventDefault` on down | `claimPointer` consulted | Viewport pans | Window listeners while active | Passive? |
 |---|---|---|---|---|---|---|---|
-| **Mouse, primary button, on non-interactive content, unclaimed** | container `pointerdown` | **Yes**, on container | **Yes** | Yes (returned false) | Yes, past 4 px slop | `pointermove`/`pointerup`/`pointercancel` → `onPointerMove`/`onPointerUp`/`onPointerCancel` | No |
+| **Mouse, primary button, on non-interactive content, unclaimed** | container `pointerdown` | **Yes**, on container | **Yes** | Yes (returned false) | Yes, past `clickSlopPx('mouse')` = 4 px slop | `pointermove`/`pointerup`/`pointercancel` → `onPointerMove`/`onPointerUp`/`onPointerCancel` | No |
 | **Mouse, primary, claimed** | container `pointerdown` | **No** (by design, `cc7924e`) | **No** (by design, `cc7924e`) | Yes (returned true) | No | `pointermove`/`pointerup`/`pointercancel` → `onClaimedPointer*` props | No |
 | **Mouse, non-primary button** | container `pointerdown` | No | No | **No** | No | none | — |
 | **Mouse/touch on `button, a[href], input, select, textarea, label` inside `content`** | container `pointerdown` | **No** | **No** | **No** | No | none | — |
-| **Single touch, unclaimed** | container `pointerdown` | **Yes** | **Yes** | Yes (returned false) | Yes, past 4 px slop | same as mouse-unclaimed | No |
+| **Single touch, unclaimed** | container `pointerdown` | **Yes** | **Yes** | Yes (returned false) | Yes, past `clickSlopPx('touch')` = 10 px slop (see H9 — closed) | same as mouse-unclaimed | No |
 | **Single touch, claimed** | container `pointerdown` | **No** | **Yes** (`pointerType !== 'mouse'`) | Yes (returned true) | No | same as mouse-claimed | No |
 | **Second+ pointer (pinch)** | container `pointerdown` | **Yes**, on the arriving pointer only | **Yes, unconditionally** | **No** — and any active claim is cancelled | Yes: zoom about the two-finger midpoint **and** pan by midpoint delta | `pointermove`/`pointerup`/`pointercancel` → `onAnyPointerMove`/`onAnyPointerUp` | No |
 | **Wheel / trackpad two-finger scroll** | container `wheel` | n/a | **Yes**, whenever a fit target exists and the normalized delta is nonzero | n/a | Pans (`-dx, -dy`) | none | **Explicitly `{ passive: false }`** |
@@ -576,29 +576,76 @@ the drag normally.
 
 ---
 
-### H9 — `CLICK_SLOP_PX = 4` is a single constant applied identically to mouse and touch. **MEDIUM on touch / none on mouse — evaluate only**
+### H9 — `CLICK_SLOP_PX = 4` is a single constant applied identically to mouse and touch. **CLOSED (this commit)**
 
-**Assessment against the contract, as requested (no change made).** The constant is used in five
-places: the viewport's own pan threshold and click test, `ImagePane`'s marker drag, ribbon-editor's
-vertex drag, stitch-map's tile drag, and annotate-round's three drag arbitrations.
+**Fix.** The single constant became a pointer-type-aware function, `clickSlopPx(pointerType)`, in
+`src/lib/viewport.svelte.ts`:
 
-- **For mouse and trackpad it is defensible.** Chromium's own click/drag slop is ~5 CSS px; 4 is
+| `pointerType` | Threshold (CSS px) | Rationale |
+|---|---|---|
+| `'mouse'` | **4** (unchanged) | Chromium's own click/drag slop is ~5px; OS-filtered trackpad drift is typically 1-3px. The prior value was already correct here — see the original assessment below, kept for context. |
+| `'pen'` | **6** | A stylus tip is more precise than a finger but still less so than a mouse cursor; between the mouse and touch values. |
+| `'touch'` | **10** | Platform touch-slop norms are ~8px (Android) to ~10px (iOS); at the old flat 4px an ordinary finger tap routinely drifted past the threshold before lift. |
+| `undefined` / `''` (unknown — jsdom's default for a bare `new PointerEvent(...)`) | **4** | Falls back to the mouse value so every pre-existing test that never set `pointerType` keeps its prior behavior unmodified. |
+
+`CLICK_SLOP_PX` (value `4`) stays exported for any external reference that wants a single constant —
+it is also `clickSlopPx`'s own mouse/fallback value, so the two can never drift apart.
+
+**Call sites updated — seven usages across five consumer files** (the original audit's count of "five
+places" undercounted the two separate `annotate-round` arbitrations and did not name ribbon-editor by
+file; every real usage is listed here):
+
+| File | Usage | pointerType source |
+|---|---|---|
+| `src/lib/components/ImageViewport.svelte` | pan-vs-click promotion (`onPointerMove`) | `gesture.pointerType`, captured on the `PanGesture` at `pointerdown` (the step-F branch) so move/up never re-derive it from a possibly-stale event |
+| `src/lib/components/ImageViewport.svelte` | click test (`onPointerUp`, `isClick`) | same `gesture.pointerType` |
+| `src/lib/components/ImagePane.svelte` | marker-drag threshold (`onMarkerMove`) | the `PointerEvent` already passed into the handler (`event.pointerType`) |
+| `src/routes/ribbon-editor/+page.svelte` | vertex-drag threshold (`handlePointMove`) | `handlePointMove` gained an `event: PointerEvent` second parameter (it previously discarded the event `ImageViewport`'s `onClaimedPointerMove` always supplies) |
+| `src/routes/annotate-round/+page.svelte` | number-select drag threshold (`previewAnnotationMove`) | `previewAnnotationMove` gained an `event: PointerEvent` second parameter, structurally compatible with `ImageEditorPane`'s three-argument `(pointer, event, view)` callback type |
+| `src/routes/annotate-round/+page.svelte` | annotation-marker drag threshold (`previewAnnotationMove`, same function) | same `event` parameter |
+| `src/routes/stitch-map/+page.svelte` | tile-drag threshold (`handleTileDragMove`) | the `PointerEvent` already passed into the handler (`event.pointerType`) |
+
+Five of the seven usages already received the originating `PointerEvent` in their existing handler
+signature (`ImageViewport`'s own two, `ImagePane`, and stitch-map), so those needed no plumbing change
+at all — `event.pointerType` was simply substituted for the constant. Only two call sites
+(`ribbon-editor`'s `handlePointMove`, `annotate-round`'s `previewAnnotationMove`) had their own
+`onClaimedPointerMove` handler strip the event down to just the `pointer` argument; both gained a
+second `event: PointerEvent` parameter, which is additive and does not change any existing call site
+(the viewport always passed `event` as the second argument — these handlers just ignored it before).
+
+**Consistency with claimed-gesture drag-start arbitration.** The task that closed this hazard required
+the same threshold to govern both directions of the arbitration everywhere it is compared — not just
+`ImageViewport`'s own click-vs-pan decision, but every claimed gesture's tap-vs-drag decision too, so
+that (for example) a touch tap on a correspondence marker in `ImagePane` does not itself become a
+false 5-8px marker-drag. All seven usages above use `clickSlopPx` uniformly; none was left on the flat
+4px value.
+
+**Test coverage (new).** `tests/unit/imageViewportClickSlop.test.ts` pins `clickSlopPx`'s per-type
+values directly and exercises the `ImageViewport` boundary end-to-end (mouse 5px → pan, unset
+pointerType 5px → pan, touch 8px → click, touch 11px → pan).
+`tests/unit/imagePaneCorrection.test.ts` adds the same 8px/11px touch boundary for a claimed marker
+drag. `tests/unit/annotateRoundRadialMenu.test.ts` adds the end-to-end interaction check: a touch tap
+with an 8px drift now opens the radial menu (previously it would have been promoted to a pan at 4px
+and `onViewportClick` would never have fired); an 11px drift still does not open it.
+
+---
+
+**Original assessment (superseded by the fix above; kept for the mouse-value rationale).** The
+constant was used in five places as originally counted: the viewport's own pan threshold and click
+test, `ImagePane`'s marker drag, ribbon-editor's vertex drag, stitch-map's tile drag, and
+annotate-round's three drag arbitrations.
+
+- **For mouse and trackpad it was defensible.** Chromium's own click/drag slop is ~5 CSS px; 4 is
   marginally tighter. Trackpad tap drift is typically 1-3 px because the pointer position is filtered
-  by the OS before it becomes a `pointermove`. A prior audit's "4 px is tight" flag is fair as a
-  caution but is not producing a failure mode on mouse input.
-- **For touch it is clearly too tight.** Finger-tap drift of 5-10 CSS px is routine; platform touch
-  slop is ~8 px (Android) to ~10 px (iOS). At 4 px a normal tap crosses the threshold, so:
-  the viewport starts a pan and `isClick` is false → **`onViewportClick` never fires**. That breaks
+  by the OS before it becomes a `pointermove`. A prior audit's "4 px is tight" flag was fair as a
+  caution but was not producing a failure mode on mouse input — which is why the fix above keeps 4 for
+  mouse rather than raising it.
+- **For touch it was clearly too tight.** Finger-tap drift of 5-10 CSS px is routine; platform touch
+  slop is ~8 px (Android) to ~10 px (iOS). At 4 px a normal tap crossed the threshold, so:
+  the viewport started a pan and `isClick` was false → **`onViewportClick` never fired**. That broke
   annotate-round's radial menu (opened from `onPlacement` ← `onViewportClick`), `ImagePane`'s
-  placement clicks, and stitch-map's tile click-selection. It also produces a visible few-pixel view
-  jump on every tap, because the pan begins the instant the threshold is crossed.
-- **The asymmetry is real but the fix is cross-cutting**, which is why it belongs in the contract
-  rather than in a spot change: the correct form is `event.pointerType === 'touch' ? 10 : 4`, which
-  requires threading pointer type into five call sites in four files, each with its own tests. That
-  is a scoped follow-up with its own risk budget, not a line to change while auditing.
-
-**Test coverage.** The 4 px behavior is pinned indirectly by drag/click tests at mouse-like deltas.
-Nothing tests a 5-px touch tap.
+  placement clicks, and stitch-map's tile click-selection. It also produced a visible few-pixel view
+  jump on every tap, because the pan began the instant the threshold was crossed.
 
 ---
 
@@ -656,7 +703,7 @@ removes the container's `wheel` and `pointerdown`. Verified by
 | H6 | Interactive-control guard is a tag whitelist | MEDIUM | any future `content` control | Button case only |
 | H7 | Konva binds `pointerdown` on the same element; no `stopPropagation` anywhere | MEDIUM | ImagePane, stitch-map | No |
 | H8 | Konva drag has no `pointercancel` route; `cropDragActive` can stick | MEDIUM | stitch-map crop | No |
-| H9 | `CLICK_SLOP_PX = 4` applied to touch as well as mouse | MEDIUM (touch) | annotate-round | No |
+| H9 | `CLICK_SLOP_PX = 4` applied to touch as well as mouse | **CLOSED** | annotate-round | Yes (new, see H9) |
 | H10 | Claimed mouse gesture leaves native selection defaults live | LOW-MED | annotate-round, ribbon-editor | No |
 | H11 | Magnifier vs capture/boundary-event suppression | LOW | create-graphics | n/a |
 | H12 | Destroy-time capture release and consumer listener cleanup are unenforced | LOW | — | Partly (`:522`) |
@@ -733,9 +780,11 @@ a native click must match this selector, or capture retargeting will eat its cli
 make the guard complete (nothing short of a capability test would), but it covers the realistic
 additions and, more importantly, names the rule for the next person adding something to `content`.
 
-**Not proposed: any change to `CLICK_SLOP_PX` (H9).** Documented in §2/H9 with the recommended shape
-of a future fix; changing one shared constant used by five call sites in four files is its own ticket
-with its own tests, not an audit side effect.
+**Formerly not proposed, now done: `clickSlopPx` (H9), closed in a later commit.** This section
+originally deferred the pointer-type-aware fix as its own ticket ("changing one shared constant used
+by five call sites in four files is its own ticket with its own tests, not an audit side effect"). That
+ticket has since landed — see H9 in Part 2 for the values, the full call-site list (seven usages across
+five files, not five across four — this section's original count undercounted), and the new tests.
 
 ### Missing tests that pin the contract
 
@@ -780,7 +829,9 @@ One per shipped-bug class, one per new hazard closed. All are unit tests in the 
 - **Do not decompose `stitch-map/+page.svelte` or the panes** while closing these hazards. Every
   change proposed here is a prop, a line, or a comment inside the existing structure — §11's ruling
   on those files stands.
-- **Do not change `CLICK_SLOP_PX` as part of this work.** See H9.
+- ~~Do not change `CLICK_SLOP_PX` as part of this work.~~ Superseded: this was scoped explicitly as its
+  own follow-up (see H9's original text) and has since been done, replacing the flat constant with
+  `clickSlopPx(pointerType)` while keeping `CLICK_SLOP_PX` exported as the unchanged mouse value.
 
 ---
 
@@ -799,7 +850,7 @@ One per shipped-bug class, one per new hazard closed. All are unit tests in the 
 | Pinch anchor / re-anchor | `src/lib/components/ImageViewport.svelte:350-396` |
 | Teardown | `src/lib/components/ImageViewport.svelte:486-546` |
 | Container listener registration | `src/lib/components/ImageViewport.svelte:512-532` |
-| `CLICK_SLOP_PX` | `src/lib/viewport.svelte.ts:30` |
+| `CLICK_SLOP_PX` (mouse/fallback value, `4`) and `clickSlopPx(pointerType)` | `src/lib/viewport.svelte.ts` |
 | `ImagePane` marker claim (own window listeners) | `src/lib/components/ImagePane.svelte:219-237` |
 | stitch-map tile claim (own window listeners) | `src/routes/stitch-map/+page.svelte:756-777` |
 | stitch-map crop claim (Konva-native) | `src/routes/stitch-map/+page.svelte:891-898` |

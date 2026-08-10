@@ -3,7 +3,7 @@
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import { clampPointToImageBounds, imageToScreen, pointInBounds, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
-	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
+	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import {
 		GOLDEN_HOLE_NUMBERS,
 		addRibbonPoint,
@@ -164,12 +164,12 @@
 		return true;
 	}
 
-	function handlePointMove(pointer: ScreenSpacePoint): void {
+	function handlePointMove(pointer: ScreenSpacePoint, event: PointerEvent): void {
 		const gesture = pointGesture;
 		if (!gesture || !source) return;
 		const dx = pointer.x - gesture.start.x;
 		const dy = pointer.y - gesture.start.y;
-		if (!gesture.dragging && Math.hypot(dx, dy) > CLICK_SLOP_PX) gesture.dragging = true;
+		if (!gesture.dragging && Math.hypot(dx, dy) > clickSlopPx(event.pointerType)) gesture.dragging = true;
 		if (!gesture.dragging) return;
 		const point = clampPointToImageBounds(
 			screenToImage(pointer, gesture.transform),

@@ -33,7 +33,7 @@
 	import type { SignatureMatchResult } from '$lib/courseSignature';
 	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
-	import { CLICK_SLOP_PX } from '$lib/viewport.svelte';
+	import { clickSlopPx } from '$lib/viewport.svelte';
 	import { isEditableTarget } from '$lib/pointSelection';
 	import {
 		addHole,
@@ -689,17 +689,17 @@
 		return false;
 	}
 
-	function previewAnnotationMove(pointer: ScreenSpacePoint): void {
+	function previewAnnotationMove(pointer: ScreenSpacePoint, event: PointerEvent): void {
 		if (numberSelectDrag) {
 			const distance = Math.hypot(pointer.x - numberSelectDrag.start.x, pointer.y - numberSelectDrag.start.y);
-			if (distance > CLICK_SLOP_PX) numberSelectDrag.dragging = true;
+			if (distance > clickSlopPx(event.pointerType)) numberSelectDrag.dragging = true;
 			return;
 		}
 		const drag = annotationDrag;
 		const image = sourceImage();
 		if (!drag || !image) return;
 		const distance = Math.hypot(pointer.x - drag.start.x, pointer.y - drag.start.y);
-		if (!drag.dragging && distance > CLICK_SLOP_PX) drag.dragging = true;
+		if (!drag.dragging && distance > clickSlopPx(event.pointerType)) drag.dragging = true;
 		if (!drag.dragging) return;
 		const point = clampPointToImageBounds(
 			screenToImage(pointer, drag.transform),
