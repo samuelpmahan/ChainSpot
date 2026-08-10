@@ -146,7 +146,7 @@ describe('v1/v2 migration', () => {
 		expect(result.state.holes).toEqual([]);
 	});
 
-	it('re-serializing a migrated v1 document writes it forward as v4', () => {
+	it('re-serializing a migrated v1 document writes it forward as the current version', () => {
 		const v1 = JSON.parse(JSON.stringify(serializeProjectState(stateWithHoles([])))) as Record<
 			string,
 			unknown
@@ -157,7 +157,7 @@ describe('v1/v2 migration', () => {
 		const parsed = parseProjectDocument(v1);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
-		expect(serializeProjectState(parsed.state).schemaVersion).toBe(4);
+		expect(serializeProjectState(parsed.state).schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 	});
 
 	it('drops a v2 legacy corridor polygon, initializing empty bends and the default width', () => {
@@ -188,7 +188,7 @@ describe('v1/v2 migration', () => {
 		expect('corridor' in migrated).toBe(false);
 
 		const reSerialized = serializeProjectState(result.state);
-		expect(reSerialized.schemaVersion).toBe(4);
+		expect(reSerialized.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 		expect('corridor' in reSerialized.holes[0]).toBe(false);
 	});
 });
@@ -471,6 +471,87 @@ describe('ProjectEditor.setNumberBadges', () => {
 	});
 });
 
+describe('ProjectEditor.setWalkingPath', () => {
+	function loadedEditor(): ProjectEditor {
+		return new ProjectEditor({
+			state: {
+				...createProjectState({ createId: () => 'project-1', now: NOW }),
+				images: [sourceAsset(), targetAsset()]
+			},
+			now: NOW
+		});
+	}
+
+	const PATH = [
+		{ xPx: 12.5, yPx: 18.25 },
+		{ xPx: 400, yPx: 512.75 }
+	];
+
+	it('enters history as one step and is undoable/redoable', () => {
+		const editor = loadedEditor();
+		expect(editor.state.walkingPath).toBeUndefined();
+
+		editor.setWalkingPath(PATH);
+		expect(editor.state.walkingPath).toEqual(PATH);
+		expect(editor.canUndo).toBe(true);
+
+		editor.undo();
+		expect(editor.state.walkingPath).toBeUndefined();
+		editor.redo();
+		expect(editor.state.walkingPath).toEqual(PATH);
+	});
+
+	it("isolates the stored path from the caller's array", () => {
+		const editor = loadedEditor();
+		const path = [{ xPx: 5, yPx: 5 }];
+		editor.setWalkingPath(path);
+		path.push({ xPx: 10, yPx: 10 });
+		expect(editor.state.walkingPath).toEqual([{ xPx: 5, yPx: 5 }]);
+	});
+
+	it('normalizes an empty array to undefined, same representation as never having set one', () => {
+		const editor = loadedEditor();
+		editor.setWalkingPath(PATH);
+		editor.setWalkingPath([]);
+		expect(editor.state.walkingPath).toBeUndefined();
+	});
+
+	it('setting undefined when already undefined is a no-op that does not grow history', () => {
+		const editor = loadedEditor();
+		editor.setWalkingPath(undefined);
+		expect(editor.canUndo).toBe(false);
+	});
+
+	it('rejects an out-of-bounds point before it can reach serialization', () => {
+		const editor = loadedEditor();
+		expect(() => editor.setWalkingPath([{ xPx: 5000, yPx: 5 }])).toThrow(
+			/outside the source image bounds/
+		);
+		expect(editor.state.walkingPath).toBeUndefined();
+	});
+
+	it('rejects a non-finite point', () => {
+		const editor = loadedEditor();
+		expect(() => editor.setWalkingPath([{ xPx: Number.NaN, yPx: 5 }])).toThrow(/must be finite/);
+		expect(editor.state.walkingPath).toBeUndefined();
+	});
+
+	it('rejects setting a non-empty path before a source image is loaded', () => {
+		const editor = new ProjectEditor({ state: createProjectState({ createId: () => 'project-1', now: NOW }) });
+		expect(() => editor.setWalkingPath(PATH)).toThrow(/the source-overview image must be loaded/);
+	});
+
+	it('setting an identical path is a no-op that does not grow history', () => {
+		const editor = loadedEditor();
+		editor.setWalkingPath(PATH);
+		const undoDepthProbe = editor.canUndo;
+		editor.setWalkingPath(PATH);
+		editor.undo();
+		expect(undoDepthProbe).toBe(true);
+		expect(editor.state.walkingPath).toBeUndefined();
+	});
+});
+
 describe('replacing the source image and holes', () => {
 	function editorWithHoles(): ProjectEditor {
 		const editor = new ProjectEditor({
@@ -485,10 +566,11 @@ describe('replacing the source image and holes', () => {
 			now: NOW
 		});
 		editor.setHoles([RICH_HOLE]);
+		editor.setWalkingPath([{ xPx: 12.5, yPx: 18.25 }]);
 		return editor;
 	}
 
-	it('discards holes when the source image is replaced at different dimensions', () => {
+	it('discards holes and the walking path when the source image is replaced at different dimensions', () => {
 		const editor = editorWithHoles();
 		editor.replaceImage({
 			role: 'source-overview',
@@ -497,9 +579,10 @@ describe('replacing the source image and holes', () => {
 			retainPoints: false
 		});
 		expect(editor.state.holes).toEqual([]);
+		expect(editor.state.walkingPath).toBeUndefined();
 	});
 
-	it('keeps holes when the source image is replaced at identical dimensions with points retained', () => {
+	it('keeps holes and the walking path when the source image is replaced at identical dimensions with points retained', () => {
 		const editor = editorWithHoles();
 		editor.replaceImage({
 			role: 'source-overview',
@@ -508,9 +591,10 @@ describe('replacing the source image and holes', () => {
 			retainPoints: true
 		});
 		expect(editor.state.holes).toEqual([RICH_HOLE]);
+		expect(editor.state.walkingPath).toEqual([{ xPx: 12.5, yPx: 18.25 }]);
 	});
 
-	it('never touches holes when the target image is replaced', () => {
+	it('never touches holes or the walking path when the target image is replaced', () => {
 		const editor = editorWithHoles();
 		editor.replaceImage({
 			role: 'target-basemap',
@@ -519,5 +603,6 @@ describe('replacing the source image and holes', () => {
 			retainPoints: false
 		});
 		expect(editor.state.holes).toEqual([RICH_HOLE]);
+		expect(editor.state.walkingPath).toEqual([{ xPx: 12.5, yPx: 18.25 }]);
 	});
 });

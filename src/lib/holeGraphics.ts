@@ -21,7 +21,7 @@
 import { applyTransform } from './alignment/transform';
 import type { SerializableTransform } from './alignment/types';
 import { deriveCorridorBand, deriveCorridorCenterline } from './corridor';
-import type { AnnotatedHole } from './domain/annotatedRound';
+import type { AnnotatedHole, SourcePoint } from './domain/annotatedRound';
 import { computeHoleDistances } from './graphics/distances';
 import { DEFAULT_GRAPHIC_STYLE } from './graphics/style';
 import type { GraphicStyle } from './graphics/style';
@@ -52,6 +52,13 @@ export interface HoleGraphicPlan {
 	readonly centerline: readonly TargetPoint[];
 	/** Corridor bend points alone, for their own marker — a subset of `centerline`. */
 	readonly bends: readonly TargetPoint[];
+	/**
+	 * UDisc's walking route, transformed into target-image pixels; empty when the round
+	 * carries none. This is round-level (not per-hole) geometry passed straight through
+	 * unclipped — a hole's crop only shows whatever segment falls inside it, and SVG
+	 * `viewBox` clipping handles the rest, so points outside this hole's crop are fine.
+	 */
+	readonly walkingPath: readonly TargetPoint[];
 	/** Crop rectangle in target-image pixels, already clamped to the target image bounds. */
 	readonly crop: CropRect;
 	/** The full (uncropped) target image's own pixel dimensions. */
@@ -67,7 +74,7 @@ const MIN_CROP_PADDING_PX = 40;
 /**
  * Framing/crop parameters for `planHoleGraphic`, factored out as an explicit
  * input — this is the Workstudio seam named in teardown §8/§10 step 5.
- * Today's behavior is the default; a future `PresentationStyle` (schema v5)
+ * Today's behavior is the default; a future `PresentationStyle` (schema v6)
  * supplies these instead of the caller relying on the hardcoded constants.
  */
 export interface HoleFramingOptions {
@@ -99,13 +106,20 @@ function clamp(value: number, min: number, max: number): number {
  * `framing` controls the crop's padding and defaults to today's hardcoded
  * behavior (`DEFAULT_HOLE_FRAMING`); pass it to change how tightly the crop
  * frames a hole's points without touching any other caller.
+ *
+ * `walkingPath` is the round's whole walking route (not per-hole data), passed through
+ * the same transform and included on every hole's plan unclipped; it never affects
+ * crop framing (a route with no annotated hole features nearby would otherwise force
+ * an oversized or empty crop), so a hole plans to null exactly as it did before this
+ * parameter existed whenever it has no other placed feature.
  */
 export function planHoleGraphic(
 	hole: AnnotatedHole,
 	transform: SerializableTransform,
 	targetWidthPx: number,
 	targetHeightPx: number,
-	framing: HoleFramingOptions = DEFAULT_HOLE_FRAMING
+	framing: HoleFramingOptions = DEFAULT_HOLE_FRAMING,
+	walkingPath: readonly SourcePoint[] = []
 ): HoleGraphicPlan | null {
 	const tee = hole.tee ? applyTransform(hole.tee, transform) : null;
 	const basket = hole.basket ? applyTransform(hole.basket, transform) : null;
@@ -113,6 +127,7 @@ export function planHoleGraphic(
 	const corridor = deriveCorridorBand(hole)?.map((point) => applyTransform(point, transform)) ?? null;
 	const centerline = deriveCorridorCenterline(hole).map((point) => applyTransform(point, transform));
 	const bends = hole.corridorBends.map((point) => applyTransform(point, transform));
+	const transformedWalkingPath = walkingPath.map((point) => applyTransform(point, transform));
 
 	const points: TargetPoint[] = [
 		...(tee ? [tee] : []),
@@ -149,6 +164,7 @@ export function planHoleGraphic(
 		corridorBand: corridor,
 		centerline,
 		bends,
+		walkingPath: transformedWalkingPath,
 		crop: {
 			xPx: cropX,
 			yPx: cropY,
@@ -208,10 +224,10 @@ function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel:
  * Builds one hole's clean graphic as self-contained SVG markup: the target
  * image cropped via `viewBox` (the full image is placed at its own pixel
  * size; the viewport does the cropping, so no pixel-copy step is needed),
- * the derived corridor band, centerline, bend markers, straight
- * tee-through-shots displacement guides (never a curved flight path — an
- * explicit non-goal), tee/basket/shot markers, and an info card. Every
- * themeable color comes from `style` (a `GraphicStyle` preset, see
+ * the derived corridor band, UDisc's walking path (when present), centerline,
+ * bend markers, straight tee-through-shots displacement guides (never a
+ * curved flight path — an explicit non-goal), tee/basket/shot markers, and an
+ * info card. Every themeable color comes from `style` (a `GraphicStyle` preset, see
  * `graphics/style.ts`), defaulting to `DEFAULT_GRAPHIC_STYLE`. `feetPerPixel`
  * (see `naipMetersPerPixel`/`metersToFeet`) adds real-world hole length and
  * distance-to-pin to the info card when the caller has a known ground scale;
@@ -239,6 +255,15 @@ export function buildHoleGraphicMarkup(
 	if (plan.corridorBand && plan.corridorBand.length >= 3) {
 		parts.push(
 			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="${escapeAttr(style.pathColor)}" fill-opacity="0.25" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" />`
+		);
+	}
+
+	// UDisc's walking route, sitting with the other corridor layers (under every
+	// marker) rather than dashed like the centerline: it is a real recorded path,
+	// not a derived reference line.
+	if (plan.walkingPath.length >= 2) {
+		parts.push(
+			`<polyline points="${pointsAttr(plan.walkingPath)}" fill="none" stroke="${escapeAttr(style.walkingPathColor)}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />`
 		);
 	}
 

@@ -2,9 +2,11 @@
  * Hole graphic color themes.
  *
  * A `GraphicStyle` is a plain, JSON-safe color palette applied uniformly to
- * the connecting line, markers, walking path, and the per-hole info card by
- * `holeGraphics.ts`. Presets only, for now: a freeform style editor is a
- * later increment once the preset set proves the parameterization is right.
+ * the connecting line, markers, UDisc's walking path (rendered by
+ * `buildHoleGraphicMarkup` whenever a hole's plan carries one), and the
+ * per-hole info card by `holeGraphics.ts`. Presets only, for now: a freeform
+ * style editor is a later increment once the preset set proves the
+ * parameterization is right.
  */
 
 export interface GraphicStyle {

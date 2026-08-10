@@ -148,6 +148,8 @@ export interface ProjectState {
 	holes: AnnotatedHole[];
 	/** Hole-number badge anchors from CV detection; empty until detected. Course-signature input only — see `HoleNumberBadgeAnchor`. */
 	numberBadges: HoleNumberBadgeAnchor[];
+	/** UDisc's purple walking route as one open polyline; absent when not annotated. */
+	readonly walkingPath?: readonly SourcePoint[];
 	viewState: ProjectViewState | null;
 }
 

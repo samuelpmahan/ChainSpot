@@ -73,7 +73,7 @@
 		upsertCourse
 	} from '$lib/courseLibrary';
 	import type { CourseLibraryStore } from '$lib/courseLibrary';
-	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
+	import type { AnnotatedHole, AnnotatedRound, SourcePoint } from '$lib/domain/annotatedRound';
 	import { buildHoleGraphicMarkup } from '$lib/holeGraphics';
 	import { GRAPHIC_STYLE_PRESETS } from '$lib/graphics/style';
 	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
@@ -185,6 +185,16 @@
 		return editor.state.holes;
 	}
 
+	/**
+	 * The walking path, same "durable project state, not the session artifact"
+	 * rule as `currentHoles` — a project reopened from a saved bundle has a
+	 * walking path but no session artifact at all.
+	 */
+	function currentWalkingPath(): readonly SourcePoint[] | undefined {
+		void refreshCount;
+		return editor.state.walkingPath;
+	}
+
 	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
 	function targetImageHref(): string | null {
 		const target = targetImage();
@@ -212,7 +222,8 @@
 		transform: () => (alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null),
 		targetSize: () => targetImage(),
 		targetImageHref,
-		feetPerPixel: holeGraphicFeetPerPixel
+		feetPerPixel: holeGraphicFeetPerPixel,
+		walkingPath: () => currentWalkingPath()
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -1008,6 +1019,11 @@
 			// project and restored on reopen. The session artifact is only the transport;
 			// `editor.state.holes` is the single source of truth from this point on.
 			editor.setHoles(round.holes);
+			// Same crossing for the walking path. Passed through as-is (including
+			// undefined): `setWalkingPath` normalizes both "absent" and "empty" to the
+			// same undefined state, so re-importing a path-less round always clears any
+			// stale path left over from a previous import.
+			editor.setWalkingPath(round.walkingPath);
 			// Badge/basket anchors ride a separate session slot (session.ts's pending
 			// course badges) since AnnotatedRound can never carry them (Done-boundary
 			// purity rule);
