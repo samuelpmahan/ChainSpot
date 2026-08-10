@@ -22,6 +22,8 @@ import { DEFAULT_GRAPHIC_STYLE, findGraphicStyle } from '$lib/graphics/style';
 import type { GraphicStyle } from '$lib/graphics/style';
 import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
 import type { SerializableTransform } from '$lib/alignment/types';
+import { buildElevationProfile, renderElevationProfile } from '$lib/elevationProfile';
+import type { GeoRasterReference } from '$lib/elevationProfile';
 
 export interface GraphicsModeTargetSize {
 	readonly widthPx: number;
@@ -45,6 +47,19 @@ export interface GraphicsModeInputs {
 	feetPerPixel(): number | undefined;
 	/** UDisc's walking route (round-level, not per-hole); undefined when not annotated. */
 	walkingPath(): readonly SourcePoint[] | undefined;
+	/**
+	 * WGS84 georeference for the committed target image, or null whenever it's
+	 * unknown (an uploaded image, or a committed path that doesn't retain its
+	 * fetch geometry). Gates the elevation-profile action the same way
+	 * `feetPerPixel` gates real-world distances: never estimated, never guessed.
+	 */
+	geoReference(): GeoRasterReference | null;
+}
+
+/** Climb/descent summary for one hole's built elevation profile, in the profile's own units (feet by default). */
+export interface ElevationProfileSummary {
+	readonly totalClimb: number;
+	readonly totalDescent: number;
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string): void {
@@ -64,6 +79,13 @@ export class GraphicsMode {
 	downloading = $state<Set<string>>(new Set());
 	zipping = $state(false);
 	error = $state<string | null>(null);
+
+	/** Hole IDs with an elevation-profile build/render/download in flight. */
+	elevationBuilding = $state<Set<string>>(new Set());
+	/** Set only by a failed elevation-profile build; EPQS is a flaky public service, so this is expected to happen. */
+	elevationError = $state<string | null>(null);
+	/** Climb/descent summary per hole, kept after a successful build so it stays visible next to the button. */
+	elevationStats = $state<Map<string, ElevationProfileSummary>>(new Map());
 
 	/** Every hole with at least one placed point, with a padded crop framed against the current alignment. */
 	plans: HoleGraphicPlan[] = $derived.by(() => {
@@ -106,6 +128,39 @@ export class GraphicsMode {
 			const next = new Set(this.downloading);
 			next.delete(plan.holeId);
 			this.downloading = next;
+		}
+	}
+
+	/** Whether `plan` can offer an elevation profile: a real routing path and a known target georeference. */
+	elevationEligible(plan: HoleGraphicPlan): boolean {
+		return plan.centerline.length >= 2 && this.#inputs.geoReference() !== null;
+	}
+
+	/**
+	 * Builds one hole's elevation profile (EPQS lookups over its centerline),
+	 * renders the broadcast PNG, and downloads it — mirrors `downloadOne`'s busy/
+	 * error handling, kept separate because a failed EPQS lookup is expected
+	 * (public service, no key, occasionally flaky) rather than exceptional.
+	 */
+	async buildAndDownloadElevation(plan: HoleGraphicPlan): Promise<void> {
+		const reference = this.#inputs.geoReference();
+		if (!reference || !this.elevationEligible(plan) || this.elevationBuilding.has(plan.holeId)) return;
+		this.elevationBuilding = new Set(this.elevationBuilding).add(plan.holeId);
+		this.elevationError = null;
+		try {
+			const profile = await buildElevationProfile(plan.centerline, reference);
+			const blob = await renderElevationProfile(profile, { title: `Hole ${plan.number} — Elevation` });
+			triggerBlobDownload(blob, `hole-${plan.number}-elevation.png`);
+			const next = new Map(this.elevationStats);
+			next.set(plan.holeId, { totalClimb: profile.totalClimb, totalDescent: profile.totalDescent });
+			this.elevationStats = next;
+		} catch {
+			// EPQS network hiccups and no-coverage points are normal, not a bug to surface in detail.
+			this.elevationError = 'Elevation lookup failed. The USGS elevation service can be flaky — try again.';
+		} finally {
+			const next = new Set(this.elevationBuilding);
+			next.delete(plan.holeId);
+			this.elevationBuilding = next;
 		}
 	}
 
