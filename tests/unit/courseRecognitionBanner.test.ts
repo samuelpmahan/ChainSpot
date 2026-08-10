@@ -20,7 +20,7 @@ import Page from '../../src/routes/annotate-round/+page.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
-import { consumePendingAnnotatedRound, getPendingAnnotatedRound } from '../../src/lib/annotatedRoundSession';
+import { consumePendingAnnotatedRound, getPendingAnnotatedRound } from '../../src/lib/session';
 import { upsertCourse } from '../../src/lib/courseLibrary';
 import type { CourseLibraryEntry, CourseLibraryStore } from '../../src/lib/courseLibrary';
 import type { LabeledPoint } from '../../src/lib/courseSignature';

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { CURRENT_SCHEMA_VERSION } from '../../src/lib/projectSchema';
 
 const SOURCE_ROLE = 'source-overview';
 const TARGET_ROLE = 'target-basemap';
@@ -167,7 +168,7 @@ test('saves a portable bundle, reloads, and reopens it with exact restoration an
 	expect(Buffer.from(entries['images/source-original.png']).equals(fixtureBuffer('tiny.png'))).toBe(true);
 	expect(Buffer.from(entries['images/target-original.jpg']).equals(fixtureBuffer('tiny.jpg'))).toBe(true);
 	const manifest = JSON.parse(strFromU8(entries['project.json']));
-	expect(manifest.schemaVersion).toBe(3);
+	expect(manifest.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 	expect(manifest.images[0].sha256).toBe(sha256(Buffer.from(entries['images/source-original.png'])));
 	expect(manifest.images[1].sha256).toBe(sha256(Buffer.from(entries['images/target-original.jpg'])));
 	expect(manifest.project.name).toBe('Sample Round');

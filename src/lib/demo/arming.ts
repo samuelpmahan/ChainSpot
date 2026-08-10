@@ -17,12 +17,12 @@
  * Failures are returned, not thrown, matching `naip.ts`/`geocode.ts`, so the
  * guide rail can show one clear sentence instead of crashing a sales demo.
  */
-import { getPendingHandoff, setPendingHandoff } from '../stitch/handoff';
+import { getPendingHandoff, setPendingHandoff } from '../session';
 import { fetchDemoFile, fetchDemoFiles, DemoAssetError } from './assets';
 import type { FetchLike } from './assets';
 import { DEMO_DATASET } from './catalog';
 import type { DemoStep } from './catalog';
-import { setPendingStitchCaptures } from './stageInbox';
+import { setPendingStitchCaptures } from '../session';
 
 export type ArmResult =
 	| { ok: true; message: string }

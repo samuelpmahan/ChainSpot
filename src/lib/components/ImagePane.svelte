@@ -713,6 +713,8 @@
 
 	.nav-button {
 		font-size: 0.85rem;
+		min-height: 2.25rem;
+		padding: 0.4rem 0.8rem;
 	}
 
 	.placeholder {
@@ -763,7 +765,7 @@
 	}
 
 	:global(button:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 

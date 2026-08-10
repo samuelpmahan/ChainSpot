@@ -38,11 +38,12 @@
 	import { loadCv, snapAlign, warmMatchTemplate } from '$lib/stitch/cvMatch';
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
-	import { getPendingHandoff, setPendingHandoff } from '$lib/stitch/handoff';
 	import {
+		getPendingHandoff,
+		setPendingHandoff,
 		subscribePendingStitchCaptures,
 		takePendingStitchCaptures
-	} from '$lib/demo/stageInbox';
+	} from '$lib/session';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
@@ -1736,7 +1737,7 @@
 	}
 
 	.file-label:has(input:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -1950,7 +1951,7 @@
 	}
 
 	.alignment-workspace:focus-visible {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -1974,7 +1975,7 @@
 	button:focus-visible,
 	input:focus-visible,
 	input[type='range']:focus-visible {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 

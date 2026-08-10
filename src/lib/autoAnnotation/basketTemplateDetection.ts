@@ -18,7 +18,9 @@
  * state, so it runs identically in a browser worker or a Node CLI.
  */
 
-export interface BasketRaster {
+import type { Candidate, CvRaster } from '../cv/types';
+
+export interface BasketRaster extends CvRaster {
 	readonly gray: Uint8Array;
 	readonly widthPx: number;
 	readonly heightPx: number;
@@ -32,10 +34,8 @@ export interface BasketTemplateRaster {
 	readonly heightPx: number;
 }
 
-export interface BasketCandidate {
-	/** Semantic endpoint: the bottom-center stem base, not the glyph/icon center. */
-	readonly xPx: number;
-	readonly yPx: number;
+/** xPx/yPx (from `Candidate`) are the semantic endpoint: the bottom-center stem base, not the glyph/icon center. */
+export interface BasketCandidate extends Candidate {
 	readonly score: number;
 	readonly widthPx: number;
 	readonly heightPx: number;

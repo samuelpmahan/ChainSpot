@@ -22,9 +22,9 @@ import { calculateResiduals } from './residuals';
 import {
 	AlignmentFailureReason,
 	type AlignmentPairInput,
+	type AlignmentPoint,
 	type EstimationFailure,
-	type EstimationResult,
-	type PointCoordinates
+	type EstimationResult
 } from './types';
 
 export interface AffineEstimationOptions {
@@ -41,7 +41,7 @@ const SINGULARITY_RELATIVE_TOLERANCE = 1e-9;
 
 function isCompletePair(
 	pair: AlignmentPairInput
-): pair is AlignmentPairInput & { target: PointCoordinates } {
+): pair is AlignmentPairInput & { target: AlignmentPoint } {
 	return pair.target !== null;
 }
 
@@ -147,7 +147,7 @@ function hasNonFiniteCoordinates(pairs: readonly AlignmentPairInput[]): boolean 
 }
 
 function hasNonCollinearSources(
-	pairs: readonly (AlignmentPairInput & { target: PointCoordinates })[]
+	pairs: readonly (AlignmentPairInput & { target: AlignmentPoint })[]
 ): boolean {
 	const keys = new Set(pairs.map((pair) => `${pair.source.xPx},${pair.source.yPx}`));
 	return keys.size >= MIN_PAIRS;

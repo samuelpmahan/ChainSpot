@@ -19,11 +19,7 @@
  * Same typed-result convention as `src/lib/naip.ts`: failures are returned, not thrown.
  */
 
-/** WGS84 point in decimal degrees. */
-export interface GeoPoint {
-	lat: number;
-	lon: number;
-}
+import type { GeoPoint } from './naip';
 
 /** One geocoding match: a human-readable place name plus its coordinate. */
 export interface GeoSearchMatch extends GeoPoint {

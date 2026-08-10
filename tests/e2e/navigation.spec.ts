@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { PINCH_GAIN, wheelZoomFactor, zoomAtPointer, zoomLimitsForFit } from '../../src/lib/navigation';
 
 const SOURCE_ROLE = 'source-overview';
 const TARGET_ROLE = 'target-basemap';
@@ -36,6 +37,30 @@ function attachErrorListener(page: Page): string[] {
 async function gotoApp(page: Page): Promise<void> {
 	await page.goto('/create-graphics');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+}
+
+/**
+ * Dispatches a wheel gesture with the Control modifier held, which is how the
+ * viewport's pinch-zoom branch is reached (macOS reports trackpad pinch, and
+ * Cmd+scroll, as ctrl/meta+wheel). Playwright's `mouse.wheel` picks up the
+ * currently pressed keyboard modifiers, so holding Control around it produces a
+ * real `ctrlKey: true` wheel event exactly like a physical trackpad pinch would.
+ * A plain `page.mouse.wheel(...)` call (no modifier) now pans instead.
+ */
+async function ctrlWheel(page: Page, deltaX: number, deltaY: number): Promise<void> {
+	await page.keyboard.down('Control');
+	await page.mouse.wheel(deltaX, deltaY);
+	await page.keyboard.up('Control');
+}
+
+/** Expected transform after a ctrl+wheel zoom gesture, using the real navigation math. */
+function expectedCtrlWheelZoom(
+	before: ViewState,
+	pointer: { x: number; y: number },
+	deltaY: number,
+	fitZoom: number
+): ViewState {
+	return zoomAtPointer(before, pointer, wheelZoomFactor(deltaY * PINCH_GAIN), zoomLimitsForFit(fitZoom));
 }
 
 async function loadBoth(page: Page): Promise<void> {
@@ -159,19 +184,14 @@ test('loads two differently sized fixtures and zooms the source around a known p
 	const geometry = await paneGeometry(page, SOURCE_ROLE);
 	expectViewClose(sourceBefore, fitFor(geometry, 2, 3));
 
-	// Wheel at pane-local (30, 30): deltaY -400 => zoom factor 2^(400/200) = 4.
+	// ctrl+wheel at pane-local (30, 30) is the pinch-zoom gesture (macOS trackpad
+	// pinch, Cmd+scroll); a plain wheel would pan instead. deltaY -100 is well
+	// inside the pane's zoom limits once PINCH_GAIN amplifies it.
 	const point = panePoint(geometry, 30, 30);
 	await page.mouse.move(point.x, point.y);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -100);
 
-	const factor = 4;
-	const expectedZoom = sourceBefore.zoom * factor;
-	const k = expectedZoom / sourceBefore.zoom;
-	const expected: ViewState = {
-		zoom: expectedZoom,
-		panX: 30 - (30 - sourceBefore.panX) * k,
-		panY: 30 - (30 - sourceBefore.panY) * k
-	};
+	const expected = expectedCtrlWheelZoom(sourceBefore, { x: 30, y: 30 }, -100, sourceBefore.zoom);
 	await expectViewPollClose(page, SOURCE_ROLE, expected);
 
 	// Only the source transform changed.
@@ -182,14 +202,13 @@ test('loads two differently sized fixtures and zooms the source around a known p
 	const pointerAfter = imageUnder({ x: 30, y: 30 }, await viewState(page, SOURCE_ROLE));
 	expectImagePointClose(pointerAfter, pointerBefore);
 
-	// Zooming back out at the same pointer returns to the original view.
-	await page.mouse.wheel(0, 400);
-	const backExpected: ViewState = {
-		zoom: sourceBefore.zoom,
-		panX: 30 - (30 - expected.panX) * 0.25,
-		panY: 30 - (30 - expected.panY) * 0.25
-	};
+	// Zooming back out at the same pointer returns to the original view: the
+	// inverse deltaY exactly cancels the forward factor as long as neither step
+	// clamped, which -100/+100 comfortably avoids for this fixture's fit zoom.
+	await ctrlWheel(page, 0, 100);
+	const backExpected = expectedCtrlWheelZoom(expected, { x: 30, y: 30 }, 100, sourceBefore.zoom);
 	await expectViewPollClose(page, SOURCE_ROLE, backExpected);
+	expectViewClose(backExpected, sourceBefore);
 	expect(await viewState(page, TARGET_ROLE)).toEqual(targetBefore);
 	expect(consoleErrors).toEqual([]);
 });
@@ -233,14 +252,14 @@ test('navigates both panes to different independent transforms', async ({ page }
 
 	const sourcePoint = panePoint(sourceGeometry, 25, 40);
 	await page.mouse.move(sourcePoint.x, sourcePoint.y);
-	await page.mouse.wheel(0, -400);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -100);
+	await ctrlWheel(page, 0, -100);
 
 	const targetPoint = panePoint(targetGeometry, 60, 20);
 	await page.mouse.move(targetPoint.x, targetPoint.y);
-	await page.mouse.wheel(0, -200);
-	await page.mouse.wheel(0, -200);
-	await page.mouse.wheel(0, -200);
+	await ctrlWheel(page, 0, -50);
+	await ctrlWheel(page, 0, -50);
+	await ctrlWheel(page, 0, -50);
 
 	const sourceAfter = await viewState(page, SOURCE_ROLE);
 	const targetAfter = await viewState(page, TARGET_ROLE);
@@ -261,10 +280,10 @@ test('Fit and Reset act on one pane without moving the other', async ({ page }) 
 	const sourceGeometry = await paneGeometry(page, SOURCE_ROLE);
 	const targetBefore = await viewState(page, TARGET_ROLE);
 
-	// Navigate the source away from fit, then Fit it back.
+	// Navigate the source away from fit (ctrl+wheel zoom), then Fit it back.
 	const point = panePoint(sourceGeometry, 40, 50);
 	await page.mouse.move(point.x, point.y);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -400);
 	await expect
 		.poll(() => viewState(page, SOURCE_ROLE))
 		.toMatchObject({})
@@ -275,8 +294,8 @@ test('Fit and Reset act on one pane without moving the other', async ({ page }) 
 
 	// Navigate again, then Reset; the target must not move.
 	await page.mouse.move(point.x, point.y);
-	await page.mouse.wheel(0, -400);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -400);
+	await ctrlWheel(page, 0, -400);
 	await page.getByTestId('pane-reset-source-overview').click();
 	await expectViewPollClose(page, SOURCE_ROLE, fitFor(await paneGeometry(page, SOURCE_ROLE), 2, 3));
 	expect(await viewState(page, TARGET_ROLE)).toEqual(targetBefore);
@@ -301,11 +320,11 @@ test('resize keeps image-space probes anchored and never changes metadata', asyn
 	const dimensionsBefore = await page.getByTestId('pane-dimensions-source-overview').textContent();
 	const fileNameBefore = await page.getByTestId('pane-filename-source-overview').textContent();
 
-	// Custom view on the source; target remains at default fit.
+	// Custom (ctrl+wheel-zoomed) view on the source; target remains at default fit.
 	const geometry = await paneGeometry(page, SOURCE_ROLE);
 	const point = panePoint(geometry, 30, 30);
 	await page.mouse.move(point.x, point.y);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -400);
 	await expect
 		.poll(() => viewState(page, SOURCE_ROLE))
 		.toMatchObject({})
@@ -360,6 +379,8 @@ test('wheel over a pane never scrolls the page and is prevented by default', asy
 	const point = panePoint(geometry, 50, 50);
 	await page.mouse.move(point.x, point.y);
 
+	// A plain wheel (no ctrl/meta) now pans rather than zooms, but it is still
+	// handled and must still be prevented so the page itself never scrolls.
 	const scrollBefore = await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0);
 	await page.mouse.wheel(0, 500);
 	await expect
@@ -393,6 +414,47 @@ test('wheel over a pane never scrolls the page and is prevented by default', asy
 	expect(consoleErrors).toEqual([]);
 });
 
+test('a horizontal-only scroll pans and is prevented, blocking the macOS back-swipe that used to destroy the session', async ({
+	page
+}) => {
+	const consoleErrors = attachErrorListener(page);
+
+	await gotoApp(page);
+	await loadBoth(page);
+
+	const geometry = await paneGeometry(page, SOURCE_ROLE);
+	const point = panePoint(geometry, 50, 50);
+	await page.mouse.move(point.x, point.y);
+	const before = await viewState(page, SOURCE_ROLE);
+
+	// deltaY === 0 with a nonzero deltaX is exactly the two-finger horizontal
+	// swipe macOS turns into browser back-navigation when the wheel handler
+	// leaves it unhandled. It must now be prevented and treated as a pan.
+	const prevented = await page.evaluate(
+		({ paneRole }) => {
+			const el = document.querySelector<HTMLElement>(`[data-testid="pane-scene-${paneRole}"]`);
+			if (!el) throw new Error('missing pane scene');
+			const rect = el.getBoundingClientRect();
+			const event = new WheelEvent('wheel', {
+				deltaX: 50,
+				deltaY: 0,
+				clientX: rect.left + 50,
+				clientY: rect.top + 50,
+				cancelable: true,
+				bubbles: true
+			});
+			el.dispatchEvent(event);
+			return event.defaultPrevented;
+		},
+		{ paneRole: SOURCE_ROLE }
+	);
+	expect(prevented).toBe(true);
+
+	const expected: ViewState = { zoom: before.zoom, panX: before.panX - 50, panY: before.panY };
+	await expectViewPollClose(page, SOURCE_ROLE, expected);
+	expect(consoleErrors).toEqual([]);
+});
+
 test('the full interaction set stays console-clean and Add correspondence still has no behavior', async ({
 	page
 }) => {
@@ -404,11 +466,11 @@ test('the full interaction set stays console-clean and Add correspondence still 
 	const sourceFit = await viewState(page, SOURCE_ROLE);
 	const targetFit = await viewState(page, TARGET_ROLE);
 
-	// Exercise wheel, drag, Fit, and Reset across both panes.
+	// Exercise ctrl+wheel zoom, drag-pan, Fit, and Reset across both panes.
 	const geometry = await paneGeometry(page, SOURCE_ROLE);
 	const point = panePoint(geometry, 60, 70);
 	await page.mouse.move(point.x, point.y);
-	await page.mouse.wheel(0, -400);
+	await ctrlWheel(page, 0, -400);
 	await page.mouse.down();
 	await page.mouse.move(point.x + 30, point.y + 10, { steps: 4 });
 	await page.mouse.up();

@@ -18,19 +18,17 @@ import {
 	demoStepUrl
 } from '../../src/lib/demo/catalog';
 import type { DemoStep } from '../../src/lib/demo/catalog';
-import {
-	clearPendingStitchCaptures,
-	getPendingStitchCaptures,
-	subscribePendingStitchCaptures,
-	takePendingStitchCaptures
-} from '../../src/lib/demo/stageInbox';
 import { DemoTour } from '../../src/lib/demo/tour.svelte';
 import {
+	clearPendingStitchCaptures,
 	consumePendingHandoff,
 	getPendingHandoff,
+	getPendingStitchCaptures,
 	setPendingHandoff,
-	subscribePendingHandoff
-} from '../../src/lib/stitch/handoff';
+	subscribePendingHandoff,
+	subscribePendingStitchCaptures,
+	takePendingStitchCaptures
+} from '../../src/lib/session';
 import { SUPPORTED_MIME_TYPES } from '../../src/lib/imageIntake';
 
 function stepById(id: string): DemoStep {

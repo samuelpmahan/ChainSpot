@@ -5,7 +5,7 @@ import {
 	renderHoleGraphicPng,
 	zipHoleGraphics
 } from '../../src/lib/holeGraphics';
-import type { HoleGraphicRenderEnv } from '../../src/lib/holeGraphics';
+import type { HoleFramingOptions, HoleGraphicRenderEnv } from '../../src/lib/holeGraphics';
 import { deriveCorridorBand, deriveCorridorCenterline } from '../../src/lib/corridor';
 import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 import type { SerializableTransform } from '../../src/lib/alignment/types';
@@ -91,6 +91,18 @@ describe('planHoleGraphic', () => {
 		expect(plan!.crop.yPx).toBe(0);
 		expect(plan!.crop.widthPx).toBeLessThanOrEqual(45);
 		expect(plan!.crop.heightPx).toBeLessThanOrEqual(45);
+	});
+
+	test('a non-default framing option changes the plan crop', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
+		const tightFraming: HoleFramingOptions = { paddingFraction: 0.2, minPaddingPx: 5 };
+
+		const defaultPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
+		const tightPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000, tightFraming);
+
+		expect(defaultPlan!.crop).toEqual({ xPx: 460, yPx: 460, widthPx: 80, heightPx: 80 });
+		expect(tightPlan!.crop).toEqual({ xPx: 495, yPx: 495, widthPx: 10, heightPx: 10 });
+		expect(tightPlan!.crop).not.toEqual(defaultPlan!.crop);
 	});
 
 	test('a bends-only hole (no tee/basket/shots) cannot frame a crop and plans to null', () => {

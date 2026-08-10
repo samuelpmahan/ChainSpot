@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import { createImageAsset, createProjectState } from '../../src/lib/domain/project';
 import { ProjectEditor } from '../../src/lib/domain/editor';
-import { defaultFitTransform, resizeViewTransform } from '../../src/lib/navigation';
+import {
+	PINCH_GAIN,
+	defaultFitTransform,
+	resizeViewTransform,
+	wheelZoomFactor
+} from '../../src/lib/navigation';
 import { screenToImage } from '../../src/lib/coords';
 import { intakeImageFile } from '../../src/lib/imageIntake';
 import Page from '../../src/routes/create-graphics/+page.svelte';
@@ -91,9 +96,23 @@ function expectTransformClose(actual: ViewTransformState, expected: ViewTransfor
 	expect(Math.abs(actual.panY - expected.panY)).toBeLessThanOrEqual(1e-9);
 }
 
-function dispatchWheel(host: HTMLElement, role: Role, deltaY: number): boolean {
+/**
+ * Dispatches a wheel event on the given pane's scene element. Plain wheel (the
+ * default) pans, matching a two-finger trackpad scroll; pass `ctrlKey: true` to
+ * exercise the pinch-zoom path (macOS reports trackpad pinch, and Cmd+scroll, as
+ * ctrl/meta+wheel).
+ */
+function dispatchWheel(
+	host: HTMLElement,
+	role: Role,
+	deltaY: number,
+	options: { deltaX?: number; ctrlKey?: boolean; metaKey?: boolean } = {}
+): boolean {
 	const event = new WheelEvent('wheel', {
+		deltaX: options.deltaX ?? 0,
 		deltaY,
+		ctrlKey: options.ctrlKey ?? false,
+		metaKey: options.metaKey ?? false,
 		clientX: 40,
 		clientY: 30,
 		cancelable: true,
@@ -184,11 +203,12 @@ describe('pane navigation controls', () => {
 		expectTransformClose(viewAttrs(host, 'source-overview'), fit);
 
 		const beforeZoom = viewAttrs(host, 'source-overview');
-		const notCanceled = dispatchWheel(host, 'source-overview', -200);
+		// ctrl+wheel is the pinch-zoom gesture (macOS trackpad pinch, Cmd+scroll).
+		const notCanceled = dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		expect(notCanceled).toBe(false);
 		await flush();
 		const zoomed = viewAttrs(host, 'source-overview');
-		expect(zoomed.zoom).toBeCloseTo(beforeZoom.zoom * 2, 12);
+		expect(zoomed.zoom).toBeCloseTo(beforeZoom.zoom * wheelZoomFactor(-200 * PINCH_GAIN), 12);
 		// Pointer invariance at (40, 30) in pane-local CSS pixels.
 		expect(Math.abs((40 - zoomed.panX) / zoomed.zoom - (40 - beforeZoom.panX) / beforeZoom.zoom)).toBeLessThanOrEqual(1e-9);
 		expect(Math.abs((30 - zoomed.panY) / zoomed.zoom - (30 - beforeZoom.panY) / beforeZoom.zoom)).toBeLessThanOrEqual(1e-9);
@@ -197,7 +217,7 @@ describe('pane navigation controls', () => {
 		await flush();
 		expectTransformClose(viewAttrs(host, 'source-overview'), fit);
 
-		dispatchWheel(host, 'source-overview', -200);
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		await flush();
 		sourceReset.click();
 		await flush();
@@ -212,7 +232,7 @@ describe('pane navigation controls', () => {
 		await loadBoth(host, decodeOf(2, 3));
 
 		const targetBefore = viewAttrs(host, 'target-basemap');
-		dispatchWheel(host, 'source-overview', -200);
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		await flush();
 		expectTransformClose(viewAttrs(host, 'target-basemap'), targetBefore);
 		expect(viewAttrs(host, 'source-overview').zoom).not.toBeCloseTo(targetBefore.zoom, 12);
@@ -256,8 +276,8 @@ describe('navigation and domain refreshes', () => {
 		const { component, host } = mountPage(editor, decodeOf(2, 3));
 		await loadBoth(host, decodeOf(2, 3));
 
-		dispatchWheel(host, 'source-overview', -200);
-		dispatchWheel(host, 'source-overview', -200);
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		await flush();
 		const sourceBefore = viewAttrs(host, 'source-overview');
 		expect(sourceBefore.zoom).toBeGreaterThan(1);
@@ -282,10 +302,10 @@ describe('navigation and domain refreshes', () => {
 		const { component, host } = mountPage(editor, decodeOf(2, 3));
 		await loadBoth(host, decodeOf(2, 3));
 
-		dispatchWheel(host, 'source-overview', -200);
-		dispatchWheel(host, 'source-overview', -200);
-		dispatchWheel(host, 'target-basemap', 200);
-		dispatchWheel(host, 'target-basemap', 200);
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
+		dispatchWheel(host, 'target-basemap', 200, { ctrlKey: true });
+		dispatchWheel(host, 'target-basemap', 200, { ctrlKey: true });
 		await flush();
 		const targetBefore = viewAttrs(host, 'target-basemap');
 		expect(viewAttrs(host, 'source-overview').zoom).not.toBeCloseTo(1 / 3, 12);
@@ -345,7 +365,8 @@ describe('navigation never touches durable domain state', () => {
 		expect(baseline.isDirty).toBe(false);
 		expect(editor.state.viewState).toBeNull();
 
-		dispatchWheel(host, 'source-overview', -200);
+		// Exercises both wheel branches: ctrl+wheel zoom and plain-wheel pan.
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		startDrag(host, 'source-overview', 50, 40);
 		moveDrag(90, 60);
 		endDrag(90, 60);
@@ -417,7 +438,7 @@ describe('resize behavior', () => {
 
 		FakeResizeObserver.instances[0].fire(300, 200);
 		await flush();
-		dispatchWheel(host, 'source-overview', -200);
+		dispatchWheel(host, 'source-overview', -200, { ctrlKey: true });
 		await flush();
 		const custom = viewAttrs(host, 'source-overview');
 		expect(custom.zoom).not.toBeCloseTo(defaultFitTransform(2, 3, 300, 200).zoom, 12);
@@ -438,7 +459,7 @@ describe('resize behavior', () => {
 });
 
 describe('wheel page-scroll prevention', () => {
-	it('prevents default only when an image is loaded and the gesture is actually handled', async () => {
+	it('prevents default only when an image is loaded and the gesture carries a nonzero delta', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(2, 3));
 		await flush();
@@ -450,14 +471,48 @@ describe('wheel page-scroll prevention', () => {
 		setFileInput(inputFor(host, 'source-overview'), fileOf('s.png', 'image/png'));
 		await flush();
 
-		// Zero deltaY (horizontal-only trackpad): not handled, not prevented.
+		// All-zero delta: not handled, not prevented.
 		expect(dispatchWheel(host, 'source-overview', 0)).toBe(true);
 		expectTransformClose(viewAttrs(host, 'source-overview'), defaultFitTransform(2, 3, 1, 1));
 
-		// Real zoom gesture: handled and prevented.
+		// Plain wheel (no ctrl/meta): handled and prevented, and pans rather than zooms.
 		expect(dispatchWheel(host, 'source-overview', -200)).toBe(false);
 		await flush();
-		expect(viewAttrs(host, 'source-overview').zoom).toBeCloseTo(2 / 3, 12);
+		const panned = viewAttrs(host, 'source-overview');
+		const fit = defaultFitTransform(2, 3, 1, 1);
+		expect(panned.zoom).toBe(fit.zoom);
+		expect(panned.panY).toBeCloseTo(fit.panY + 200, 9);
+		expect(panned.panX).toBeCloseTo(fit.panX, 9);
+
+		// ctrl+wheel: handled, prevented, and zooms at the pointer instead of panning.
+		const beforeZoom = viewAttrs(host, 'source-overview');
+		expect(dispatchWheel(host, 'source-overview', -200, { ctrlKey: true })).toBe(false);
+		await flush();
+		expect(viewAttrs(host, 'source-overview').zoom).toBeCloseTo(
+			beforeZoom.zoom * wheelZoomFactor(-200 * PINCH_GAIN),
+			12
+		);
+		unmount(component);
+		host.remove();
+	});
+
+	it('prevents default for a horizontal-only scroll, blocking the macOS back-swipe that would otherwise destroy the session', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(2, 3));
+		await flush();
+		setFileInput(inputFor(host, 'source-overview'), fileOf('s.png', 'image/png'));
+		await flush();
+
+		// deltaY === 0 with a nonzero deltaX is exactly the shape of the two-finger
+		// horizontal swipe macOS interprets as browser history navigation when left
+		// unhandled. It must now be consumed and panned, never left to bubble.
+		const before = viewAttrs(host, 'source-overview');
+		expect(dispatchWheel(host, 'source-overview', 0, { deltaX: 50 })).toBe(false);
+		await flush();
+		const after = viewAttrs(host, 'source-overview');
+		expect(after.zoom).toBe(before.zoom);
+		expect(after.panX).toBeCloseTo(before.panX - 50, 9);
+		expect(after.panY).toBeCloseTo(before.panY, 9);
 		unmount(component);
 		host.remove();
 	});

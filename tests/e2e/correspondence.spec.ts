@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { PINCH_GAIN } from '../../src/lib/navigation';
 
 const SOURCE_ROLE = 'source-overview';
 const TARGET_ROLE = 'target-basemap';
@@ -132,6 +133,31 @@ async function viewState(page: Page, role: string): Promise<ViewState> {
 			panY: Number(element.dataset.viewPanY)
 		};
 	}, role);
+}
+
+/**
+ * ctrl+wheel is the pinch-zoom gesture (macOS trackpad pinch, Cmd+scroll); a
+ * plain wheel now pans instead. Playwright's `mouse.wheel` picks up the
+ * currently pressed keyboard modifiers.
+ */
+async function ctrlWheel(page: Page, deltaX: number, deltaY: number): Promise<void> {
+	await page.keyboard.down('Control');
+	await page.mouse.wheel(deltaX, deltaY);
+	await page.keyboard.up('Control');
+}
+
+/**
+ * Asserts a point-inspector field is numerically close to `expected`, rather
+ * than exactly equal. A non-power-of-two PINCH_GAIN means a ctrl+wheel zoom
+ * can no longer land on a bit-exact power-of-two scale (unlike the old
+ * always-zoom wheel, doubling/halving a float is exact; multiplying by 3 is
+ * not), so a drag corrected through such a view carries a tiny float
+ * round-trip error that exact string equality no longer tolerates.
+ */
+async function expectPointFieldClose(page: Page, testId: string, expected: number): Promise<void> {
+	await expect
+		.poll(async () => Number(await page.getByTestId(testId).inputValue()))
+		.toBeCloseTo(expected, 3);
 }
 
 function panePoint(geometry: PaneGeometry, x: number, y: number): { x: number; y: number } {
@@ -282,7 +308,7 @@ test('keeps marker anchors and visible size stable through zoom, fit, reset, and
 
 	const zoomPoint = panePoint(sourceGeometry, sourceLocal.x, sourceLocal.y);
 	await page.mouse.move(zoomPoint.x, zoomPoint.y);
-	await page.mouse.wheel(0, -100);
+	await ctrlWheel(page, 0, -100);
 	const zoomedView = await viewState(page, SOURCE_ROLE);
 	const zoomedLocal = imagePoint(zoomedView, 1, 1);
 	const zoomedExtent = await markerExtent(page, SOURCE_ROLE, zoomedLocal);
@@ -373,7 +399,9 @@ test('commits a marker drag in original coordinates without panning', async ({ p
 	const before = await viewState(page, SOURCE_ROLE);
 	const start = panePoint(sourceGeometry, sourceLocal.x, sourceLocal.y);
 	await page.mouse.move(start.x, start.y);
-	await page.mouse.wheel(0, -400);
+	// Raw deltaY is pre-divided by PINCH_GAIN so this reproduces the same 4x
+	// zoom as a plain (ungained) -400 wheel notch, keeping the marker on-pane.
+	await ctrlWheel(page, 0, -400 / PINCH_GAIN);
 	const zoomed = await viewState(page, SOURCE_ROLE);
 	const emptyStart = panePoint(sourceGeometry, 500, 350);
 	await page.mouse.move(emptyStart.x, emptyStart.y);
@@ -395,8 +423,8 @@ test('commits a marker drag in original coordinates without panning', async ({ p
 	await page.mouse.up();
 
 	await expect(page.getByTestId('point-inspector')).toContainText('Pair 1 · Source point');
-	await expect(page.getByTestId('point-x')).toHaveValue('0.75');
-	await expect(page.getByTestId('point-y')).toHaveValue('0.8');
+	await expectPointFieldClose(page, 'point-x', 0.75);
+	await expectPointFieldClose(page, 'point-y', 0.8);
 	const after = await viewState(page, SOURCE_ROLE);
 	expect(after).toEqual(panned);
 	expect(errors).toEqual([]);
@@ -437,26 +465,34 @@ test('covers 50%, 100%, and 200% drag scales with pan and combined pan/zoom', as
 	const secondFit = await viewState(page, SOURCE_ROLE);
 	const secondFitScreen = imagePoint(secondFit, 10, 10);
 	await page.mouse.move(...Object.values(panePoint(sourceGeometry, secondFitScreen.x, secondFitScreen.y)) as [number, number]);
-	await page.mouse.wheel(0, 200);
+	// Raw deltaY is pre-divided by PINCH_GAIN so the ctrl+wheel zoom factor lands
+	// on exactly half, matching the "50%" scale this step is named for.
+	await ctrlWheel(page, 0, 200 / PINCH_GAIN);
 	const halfView = await viewState(page, SOURCE_ROLE);
-	expect(halfView.zoom).toBeCloseTo(secondFit.zoom / 2, 8);
+	// Precision loosened from the pre-PINCH_GAIN 8 to 5: dividing by PINCH_GAIN
+	// (an irrational-in-binary 1/3) before the browser re-multiplies it back
+	// leaves a ~1e-7 float round-trip error that 8 digits no longer tolerates.
+	expect(halfView.zoom).toBeCloseTo(secondFit.zoom / 2, 5);
 	const secondStart = panePoint(sourceGeometry, imagePoint(halfView, 10, 10).x, imagePoint(halfView, 10, 10).y);
 	const secondDestination = panePoint(sourceGeometry, imagePoint(halfView, 11, 11).x, imagePoint(halfView, 11, 11).y);
 	await page.mouse.move(secondStart.x, secondStart.y);
 	await page.mouse.down();
 	await page.mouse.move(secondDestination.x, secondDestination.y, { steps: 4 });
 	await page.mouse.up();
-	await expect(page.getByTestId('point-x')).toHaveValue('11');
-	await expect(page.getByTestId('point-y')).toHaveValue('11');
+	await expectPointFieldClose(page, 'point-x', 11);
+	await expectPointFieldClose(page, 'point-y', 11);
 
 	// 200%: fit, double the view scale, pan the zoomed image, and correct pair #3.
 	await page.getByTestId('pane-fit-source-overview').click();
 	const thirdFit = await viewState(page, SOURCE_ROLE);
 	const thirdFitScreen = imagePoint(thirdFit, 15, 15);
 	await page.mouse.move(...Object.values(panePoint(sourceGeometry, thirdFitScreen.x, thirdFitScreen.y)) as [number, number]);
-	await page.mouse.wheel(0, -200);
+	// Raw deltaY is pre-divided by PINCH_GAIN so the ctrl+wheel zoom factor lands
+	// on exactly double, matching the "200%" scale this step is named for.
+	await ctrlWheel(page, 0, -200 / PINCH_GAIN);
 	const doubleView = await viewState(page, SOURCE_ROLE);
-	expect(doubleView.zoom).toBeCloseTo(thirdFit.zoom * 2, 8);
+	// See the halfView precision note above.
+	expect(doubleView.zoom).toBeCloseTo(thirdFit.zoom * 2, 5);
 	const zoomedEmptyStart = panePoint(sourceGeometry, 500, 350);
 	await page.mouse.move(zoomedEmptyStart.x, zoomedEmptyStart.y);
 	await page.mouse.down();
@@ -469,8 +505,8 @@ test('covers 50%, 100%, and 200% drag scales with pan and combined pan/zoom', as
 	await page.mouse.down();
 	await page.mouse.move(thirdDestination.x, thirdDestination.y, { steps: 4 });
 	await page.mouse.up();
-	await expect(page.getByTestId('point-x')).toHaveValue('14');
-	await expect(page.getByTestId('point-y')).toHaveValue('14');
+	await expectPointFieldClose(page, 'point-x', 14);
+	await expectPointFieldClose(page, 'point-y', 14);
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-complete-pair-count', '3');
 	void first;
 	void second;

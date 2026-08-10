@@ -3,7 +3,10 @@
 	import type { Snippet } from 'svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { CLICK_SLOP_PX, ViewportController } from '$lib/viewport.svelte';
-	import { panBy, wheelZoomFactor } from '$lib/navigation';
+	import { PINCH_GAIN, panBy, wheelZoomFactor } from '$lib/navigation';
+
+	/** Wheel deltaMode 1 ("line" units, e.g. some non-Chromium browsers/mice): approximate CSS pixels per line. */
+	const WHEEL_LINE_HEIGHT_PX = 16;
 
 	interface Props {
 		/** Shared controller; the consumer also reads/writes its view directly. */
@@ -101,13 +104,53 @@
 		}
 	}
 
+	/**
+	 * Normalizes a wheel event's deltas to CSS pixels regardless of `deltaMode`:
+	 * mode 0 already reports pixels; mode 1 ("line" units — some non-Chromium
+	 * browsers/mice) is scaled by an approximate line height; mode 2 ("page"
+	 * units) is scaled by the viewport's own height. Non-finite results (e.g. a
+	 * malformed synthetic event) collapse to 0 rather than propagating NaN into
+	 * the view transform.
+	 */
+	function normalizedWheelDelta(event: WheelEvent): ScreenSpacePoint {
+		const scale =
+			event.deltaMode === 1
+				? WHEEL_LINE_HEIGHT_PX
+				: event.deltaMode === 2
+					? controller.size.height
+					: 1;
+		const rawX = event.deltaX * scale;
+		const rawY = event.deltaY * scale;
+		return {
+			x: Number.isFinite(rawX) ? rawX : 0,
+			y: Number.isFinite(rawY) ? rawY : 0
+		};
+	}
+
+	/**
+	 * macOS trackpad wheel model (mirrors Figma/Google Maps): a plain two-finger
+	 * scroll pans, ctrl/meta+wheel (how Chromium reports trackpad pinch, and how
+	 * Cmd+scroll is conventionally offered as a zoom modifier) zooms at the
+	 * pointer. Any nonzero wheel over the viewport is always consumed via
+	 * `preventDefault`, independent of which branch runs below — this is the key
+	 * fix: previously a horizontal-only scroll (deltaY === 0) fell through
+	 * unprevented and was interpreted by macOS as a history back-swipe, which
+	 * destroyed the in-memory session.
+	 */
 	function onWheel(event: WheelEvent): void {
-		// Without fitted content there is nothing meaningful to zoom.
+		// Without fitted content there is nothing meaningful to zoom or pan.
 		if (!controller.fitTarget) return;
-		if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return;
-		// The page must not scroll while the user intentionally zooms over a viewport.
+		const { x: dx, y: dy } = normalizedWheelDelta(event);
+		if (dx === 0 && dy === 0) return;
 		event.preventDefault();
-		controller.zoomAtPointer(controller.pointerIn(event), wheelZoomFactor(event.deltaY));
+		if (event.ctrlKey || event.metaKey) {
+			// Chromium reports trackpad pinch as ctrl+wheel with deltaY scaled down
+			// to roughly a third of an equivalent two-finger scroll; PINCH_GAIN
+			// restores a zoom that feels proportionate to the physical gesture.
+			controller.zoomAtPointer(controller.pointerIn(event), wheelZoomFactor(dy * PINCH_GAIN));
+			return;
+		}
+		controller.panBy(-dx, -dy);
 	}
 
 	function onPointerDown(event: PointerEvent): void {
@@ -375,6 +418,7 @@
 		height: 100%;
 		overflow: hidden;
 		touch-action: none;
+		overscroll-behavior: none;
 		cursor: grab;
 	}
 

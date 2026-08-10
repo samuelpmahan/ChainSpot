@@ -3,6 +3,7 @@ import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { radialWedges } from '../../src/lib/radialMenu';
+import { CURRENT_SCHEMA_VERSION } from '../../src/lib/projectSchema';
 
 // Must match the RADIAL_HUB_RADIUS_PX / RADIAL_OUTER_RADIUS_PX constants in
 // +page.svelte — there is no shared export, since they're page-local tuning.
@@ -194,10 +195,10 @@ test('holes survive save, full page reload, and reopen — and are still buildab
 	for await (const chunk of stream) chunks.push(chunk);
 	const zipBuffer = Buffer.concat(chunks);
 
-	// The saved manifest is v3 and actually carries the hole geometry.
+	// The saved manifest carries the current schema version and actually holds the hole geometry.
 	const entries = unzipSync(new Uint8Array(zipBuffer));
 	const manifest = JSON.parse(strFromU8(entries['project.json']));
-	expect(manifest.schemaVersion).toBe(3);
+	expect(manifest.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 	expect(manifest.holes).toHaveLength(1);
 	expect(manifest.holes[0].number).toBe(1);
 	expect(manifest.holes[0].tee).toBeDefined();

@@ -7,20 +7,20 @@
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
-	import { intakeImageFile } from '$lib/imageIntake';
-	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
 	import {
+		retainEditor,
+		takeRetainedEditor,
 		consumePendingHandoff,
 		getPendingHandoff,
-		subscribePendingHandoff
-	} from '$lib/stitch/handoff';
-	import type { PendingHandoff } from '$lib/stitch/handoff';
+		subscribePendingHandoff,
+		setPendingAnnotatedRound,
+		setPendingCourseBadges
+	} from '$lib/session';
+	import type { PendingHandoff, LabeledPoint } from '$lib/session';
+	import { importHandoffImage } from '$lib/handoffImport';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
 	import type { HoleNumberBadgeAnchor } from '$lib/domain/project';
-	import { setPendingAnnotatedRound } from '$lib/annotatedRoundSession';
-	import { setPendingCourseBadges } from '$lib/courseBadgeSession';
-	import type { LabeledPoint } from '$lib/courseBadgeSession';
 	import {
 		applyLibraryEntry,
 		badgesToLabeledPoints,
@@ -76,6 +76,7 @@
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
+	import { acceptCandidate } from '$lib/cv/types';
 
 	/** Shared label text for a point kind, reused by both radial-menu wedges and the hole bar. */
 	const POINT_KIND_LABELS: Record<HolePlacementMode, string> = {
@@ -964,8 +965,8 @@
 					corridorBends: [],
 					corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX
 				}),
-				tee: keepTee ? existing!.tee! : { xPx: proposal.tee!.xPx, yPx: proposal.tee!.yPx },
-				basket: keepBasket ? existing!.basket! : { xPx: proposal.basket!.xPx, yPx: proposal.basket!.yPx }
+				tee: keepTee ? existing!.tee! : acceptCandidate(proposal.tee!),
+				basket: keepBasket ? existing!.basket! : acceptCandidate(proposal.basket!)
 			};
 			existingByNumber.set(proposal.number, next);
 		}
@@ -1010,7 +1011,7 @@
 		const candidate = basketCandidates[selectedBasketCandidate];
 		if (!candidate) return;
 		holes = holes.map((hole) =>
-			hole.id === activeHoleId ? { ...hole, basket: { xPx: candidate.xPx, yPx: candidate.yPx } } : hole
+			hole.id === activeHoleId ? { ...hole, basket: acceptCandidate(candidate) } : hole
 		);
 		selectedBasketCandidate = null;
 	}
@@ -1037,10 +1038,10 @@
 	let handoffError = $state<string | null>(null);
 
 	/**
-	 * Duplicated from create-graphics/+page.svelte's handleHandoffImport rather
-	 * than shared: same intake path, minus discard-dialog machinery, because an
-	 * Annotate Round project never has correspondence pairs to lose —
-	 * confirmDiscard is trivially true here.
+	 * Uses the shared `importHandoffImage` flow (see `$lib/handoffImport.ts`)
+	 * with this route's own discard-confirmation: an Annotate Round project
+	 * never has correspondence pairs to lose, so confirmDiscard is trivially
+	 * true here, unlike create-graphics' dialog-backed confirmation.
 	 */
 	async function handleHandoffImport(): Promise<void> {
 		const handoff = pendingHandoff;
@@ -1048,24 +1049,21 @@
 		importingHandoff = true;
 		handoffError = null;
 		try {
-			const file = new File([handoff.blob], handoff.fileName, { type: 'image/png' });
-			const result = await intakeImageFile({
+			const result = await importHandoffImage({
 				editor,
+				handoff,
 				role: 'source-overview',
-				file,
 				decode,
 				confirmDiscard: () => true
 			});
-			if (!result.ok) {
-				handoffError = result.error.message;
+			if (result.status === 'error') {
+				handoffError = result.message;
 				return;
 			}
+			if (result.status === 'cancelled') return;
 			consumePendingHandoff();
 			pendingHandoff = null;
 			refresh();
-		} catch (error) {
-			handoffError =
-				error instanceof Error ? error.message : 'Could not import the stitched image.';
 		} finally {
 			importingHandoff = false;
 		}
@@ -1891,7 +1889,7 @@
 
 	:global(button:focus-visible),
 	:global(input:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
@@ -2369,7 +2367,7 @@
 	.hole-bar-grid {
 		flex-basis: 100%;
 		display: grid;
-		grid-template-columns: repeat(9, minmax(2.5rem, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
 		gap: 0.35rem;
 		min-width: 0;
 		margin-top: 0.5rem;
@@ -2773,7 +2771,7 @@
 		pointer-events: none;
 	}
 
-	@media (max-width: 900px) {
+	@media (max-width: 1180px) {
 		:global(.editor-body.with-tools) {
 			grid-template-columns: 1fr !important;
 		}

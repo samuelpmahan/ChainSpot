@@ -4,12 +4,12 @@
  * functions rather than reimplementing the formulas.
  */
 
-import type { PointCoordinates, SerializableTransform } from './types';
+import type { AlignmentPoint, SerializableTransform } from './types';
 
 /** Determinant threshold below which a 2x2 linear part is treated as singular. */
 export const DETERMINANT_TOLERANCE = 1e-12;
 
-export function applyTransform(point: PointCoordinates, transform: SerializableTransform): PointCoordinates {
+export function applyTransform(point: AlignmentPoint, transform: SerializableTransform): AlignmentPoint {
 	const [a, b, c, d, e, f] = transform.coefficients;
 	return {
 		xPx: a * point.xPx + c * point.yPx + e,
@@ -18,9 +18,9 @@ export function applyTransform(point: PointCoordinates, transform: SerializableT
 }
 
 export function transformPoints(
-	points: readonly PointCoordinates[],
+	points: readonly AlignmentPoint[],
 	transform: SerializableTransform
-): PointCoordinates[] {
+): AlignmentPoint[] {
 	return points.map((point) => applyTransform(point, transform));
 }
 

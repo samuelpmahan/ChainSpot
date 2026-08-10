@@ -96,7 +96,10 @@ test('ribbon editor uses shared viewport navigation and guarded point placement'
 
 	const zoomBefore = Number(await viewport.getAttribute('data-view-zoom'));
 	await page.mouse.move(...Object.values(screenAt(box, view, 200, 100)) as [number, number]);
+	// ctrl+wheel is the pinch-zoom gesture; a plain wheel now pans instead.
+	await page.keyboard.down('Control');
 	await page.mouse.wheel(0, -100);
+	await page.keyboard.up('Control');
 	const zoomAfter = Number(await viewport.getAttribute('data-view-zoom'));
 	expect(zoomAfter).toBeGreaterThan(zoomBefore);
 

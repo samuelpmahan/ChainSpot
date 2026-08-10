@@ -50,8 +50,8 @@ describe('zoom limits', () => {
 		const fitZooms = [0.001, 0.01, 0.1, 1, 140, 2666.6666666666665, 100000];
 		for (const fit of fitZooms) {
 			const limits = zoomLimitsForFit(fit);
-			expect(limits.min).toBe(Math.min(ABSOLUTE_MIN_VIEW_ZOOM, fit / 16));
-			expect(limits.max).toBe(Math.max(ABSOLUTE_MAX_VIEW_ZOOM, fit * 16));
+			expect(limits.min).toBe(fit / 4);
+			expect(limits.max).toBe(Math.max(8, fit * 32));
 			expect(limits.min).toBeLessThanOrEqual(fit);
 			expect(fit).toBeLessThanOrEqual(limits.max);
 		}

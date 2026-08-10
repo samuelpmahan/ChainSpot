@@ -306,10 +306,12 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	await page.getByTestId('crop-bottomPx').fill('2');
 	await page.getByTestId('crop-bottomPx').blur();
 
-	// Crop wheel zoom is pointer-centered; Fit restores the full upper-left image.
+	// Crop ctrl+wheel zoom is pointer-centered; Fit restores the full upper-left image.
 	const cropZoomBefore = (await viewOf(cropViewport)).zoom;
 	await page.mouse.move(cropBox.x + cropBox.width / 2, cropBox.y + cropBox.height / 2);
+	await page.keyboard.down('Control');
 	await page.mouse.wheel(0, -200);
+	await page.keyboard.up('Control');
 	await expect
 		.poll(async () => (await viewOf(cropViewport)).zoom)
 		.toBeGreaterThan(cropZoomBefore);
@@ -447,12 +449,14 @@ test('stitch workflow: upload, mismatch isolation, crop recovery, alignment, nat
 	await page.getByTestId('tile-select-upper-right').click();
 	await expect(page.getByTestId('tile-position-x')).toHaveValue('8');
 
-	// Wheel zoom is pointer-centered; Fit restores the full tile union. The tiles
-	// fill the fitted viewport, so the probe uses the background corner point.
+	// ctrl+wheel zoom is pointer-centered; Fit restores the full tile union. The
+	// tiles fill the fitted viewport, so the probe uses the background corner point.
 	const beforeZoom = await viewOf(alignmentViewport);
 	const wheelPoint = { x: alignmentBox.x + 5, y: alignmentBox.y + 5 };
 	await page.mouse.move(wheelPoint.x, wheelPoint.y);
+	await page.keyboard.down('Control');
 	await page.mouse.wheel(0, -200);
+	await page.keyboard.up('Control');
 	await expect
 		.poll(async () => (await viewOf(alignmentViewport)).zoom)
 		.toBeGreaterThan(beforeZoom.zoom);
@@ -541,8 +545,8 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
 	// A source-role handoff now lands on Annotate Round — a session entirely
-	// independent of Create Graphics (see src/lib/editorSession.ts's two keyed
-	// slots).
+	// independent of Create Graphics (see src/lib/session.ts's two keyed
+	// editor-retention slots).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();

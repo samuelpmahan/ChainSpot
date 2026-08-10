@@ -32,9 +32,20 @@
 		saveProject
 	} from '$lib/persistence';
 	import type { DownloadBlob, RepairCandidate, RepairResolutionResult } from '$lib/persistence';
-	import { consumePendingHandoff, getPendingHandoff } from '$lib/stitch/handoff';
-	import type { PendingHandoff } from '$lib/stitch/handoff';
-	import { retainEditor, takeRetainedEditor } from '$lib/editorSession';
+	import {
+		consumePendingHandoff,
+		getPendingHandoff,
+		retainEditor,
+		takeRetainedEditor,
+		consumePendingAnnotatedRound,
+		getActiveAnnotatedRound,
+		getPendingAnnotatedRound,
+		setActiveAnnotatedRound,
+		consumePendingCourseBadges,
+		getPendingCourseBadges
+	} from '$lib/session';
+	import type { PendingHandoff } from '$lib/session';
+	import { importHandoffImage } from '$lib/handoffImport';
 	import {
 		bboxFromCenter,
 		fetchNaipBoundingBoxImage,
@@ -55,13 +66,6 @@
 	import { AlignmentFailureReason } from '$lib/alignment/types';
 	import type { AlignmentModel, AlignmentPairInput, EstimationResultOrFailure } from '$lib/alignment/types';
 	import {
-		consumePendingAnnotatedRound,
-		getActiveAnnotatedRound,
-		getPendingAnnotatedRound,
-		setActiveAnnotatedRound
-	} from '$lib/annotatedRoundSession';
-	import { consumePendingCourseBadges, getPendingCourseBadges } from '$lib/courseBadgeSession';
-	import {
 		badgesToLabeledPoints,
 		basketsFromHoles,
 		getDefaultCourseLibraryStore,
@@ -70,9 +74,9 @@
 	} from '$lib/courseLibrary';
 	import type { CourseLibraryStore } from '$lib/courseLibrary';
 	import type { AnnotatedHole, AnnotatedRound } from '$lib/domain/annotatedRound';
-	import { buildHoleGraphicMarkup, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
-	import type { HoleGraphicPlan } from '$lib/holeGraphics';
-	import { DEFAULT_GRAPHIC_STYLE, GRAPHIC_STYLE_PRESETS, findGraphicStyle } from '$lib/graphics/style';
+	import { buildHoleGraphicMarkup } from '$lib/holeGraphics';
+	import { GRAPHIC_STYLE_PRESETS } from '$lib/graphics/style';
+	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -181,38 +185,12 @@
 		return editor.state.holes;
 	}
 
-	let holeGraphicPlans: HoleGraphicPlan[] = $derived.by(() => {
-		if (!alignmentResult || !('transform' in alignmentResult)) return [];
-		const target = targetImage();
-		if (!target) return [];
-		const transform = alignmentResult.transform;
-		const plans: HoleGraphicPlan[] = [];
-		for (const hole of currentHoles()) {
-			const plan = planHoleGraphic(hole, transform, target.widthPx, target.heightPx);
-			if (plan) plans.push(plan);
-		}
-		return plans;
-	});
-
 	/** The clean target image's own blob URL, reused directly as the SVG `<image href>` — no re-encoding. */
 	function targetImageHref(): string | null {
 		const target = targetImage();
 		if (!target) return null;
 		const decoded = editor.getAssetResource(target.id)?.decoded;
 		return decoded instanceof HTMLImageElement ? decoded.src : null;
-	}
-
-	let holeGraphicDownloading = $state<Set<string>>(new Set());
-	let holeGraphicsZipping = $state(false);
-	let holeGraphicsError = $state<string | null>(null);
-
-	function triggerBlobDownload(blob: Blob, fileName: string): void {
-		const objectUrl = URL.createObjectURL(blob);
-		const anchor = document.createElement('a');
-		anchor.href = objectUrl;
-		anchor.download = fileName;
-		anchor.click();
-		URL.revokeObjectURL(objectUrl);
 	}
 
 	/** Feet-per-pixel for the current target image, only when it has a known (never estimated) ground scale. */
@@ -222,51 +200,21 @@
 			: metersToFeet(targetGroundScaleMetersPerPixel);
 	}
 
-	async function handleDownloadHoleGraphic(plan: HoleGraphicPlan): Promise<void> {
-		const href = targetImageHref();
-		if (!href || holeGraphicDownloading.has(plan.holeId)) return;
-		holeGraphicDownloading = new Set(holeGraphicDownloading).add(plan.holeId);
-		holeGraphicsError = null;
-		try {
-			const blob = await renderHoleGraphicPng(
-				href,
-				plan,
-				undefined,
-				findGraphicStyle(holeGraphicStyleId),
-				holeGraphicFeetPerPixel()
-			);
-			triggerBlobDownload(blob, `hole-${plan.number}.png`);
-		} catch (error) {
-			holeGraphicsError = error instanceof Error ? error.message : 'Could not render the hole graphic.';
-		} finally {
-			const next = new Set(holeGraphicDownloading);
-			next.delete(plan.holeId);
-			holeGraphicDownloading = next;
-		}
-	}
+	/**
+	 * The graphics/export mode (style selection, per-hole plans, PNG/zip
+	 * export state) lives behind this module boundary — see
+	 * `graphicsMode.svelte.ts` for why. It reads alignment/annotation/NAIP
+	 * state through these getters only; it never reaches into the route
+	 * directly.
+	 */
+	const graphicsMode = new GraphicsMode({
+		holes: () => currentHoles(),
+		transform: () => (alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null),
+		targetSize: () => targetImage(),
+		targetImageHref,
+		feetPerPixel: holeGraphicFeetPerPixel
+	});
 
-	async function handleDownloadAllHoleGraphics(): Promise<void> {
-		const plans = holeGraphicPlans;
-		const href = targetImageHref();
-		if (plans.length === 0 || !href || holeGraphicsZipping) return;
-		holeGraphicsZipping = true;
-		holeGraphicsError = null;
-		try {
-			const style = findGraphicStyle(holeGraphicStyleId);
-			const feetPerPixel = holeGraphicFeetPerPixel();
-			const entries = [];
-			for (const plan of plans) {
-				const blob = await renderHoleGraphicPng(href, plan, undefined, style, feetPerPixel);
-				entries.push({ number: plan.number, blob });
-			}
-			const zip = await zipHoleGraphics(entries);
-			triggerBlobDownload(zip, 'hole-graphics.zip');
-		} catch (error) {
-			holeGraphicsError = error instanceof Error ? error.message : 'Could not build the hole graphics zip.';
-		} finally {
-			holeGraphicsZipping = false;
-		}
-	}
 	let selection = $state<PointSelection | null>(null);
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
@@ -366,7 +314,6 @@
 	 * distances rather than showing a wrong number.
 	 */
 	let targetGroundScaleMetersPerPixel = $state<number | null>(null);
-	let holeGraphicStyleId = $state(DEFAULT_GRAPHIC_STYLE.id);
 
 	/** Course-name + city/state search, the primary path to a NAIP center coordinate. */
 	let geocodeParkNameInput = $state('');
@@ -980,10 +927,10 @@
 	}
 
 	/**
-	 * Routes the pending stitched PNG through the exact same intake/replacement
-	 * path as a pane file upload, so point-discard confirmation, asset manifest
-	 * creation, undo/redo, and dirty state all apply. The handoff is consumed only
-	 * on a successful import; a declined replacement keeps it available.
+	 * Uses the shared `importHandoffImage` flow (see `$lib/handoffImport.ts`)
+	 * with this route's own dialog-backed discard confirmation. The handoff is
+	 * consumed only on a successful import; a declined replacement keeps it
+	 * available.
 	 */
 	async function handleHandoffImport(): Promise<void> {
 		const handoff = pendingHandoff;
@@ -991,16 +938,15 @@
 		importingHandoff = true;
 		handoffError = null;
 		try {
-			const file = new File([handoff.blob], handoff.fileName, { type: 'image/png' });
-			const result = await intakeImageFile({
+			const result = await importHandoffImage({
 				editor,
+				handoff,
 				role: handoff.targetRole,
-				file,
 				decode,
 				confirmDiscard: (count) => requestDiscardConfirmation(handoff.targetRole, count)
 			});
-			if (!result.ok) {
-				handoffError = result.error.message;
+			if (result.status === 'error') {
+				handoffError = result.message;
 				return;
 			}
 			if (result.status === 'cancelled') {
@@ -1014,8 +960,6 @@
 				handoff.targetRole === 'source-overview'
 					? 'Stitched image imported as the UDisc source.'
 					: 'Stitched image imported as the clean target.';
-		} catch (error) {
-			handoffError = error instanceof Error ? error.message : 'Could not import the stitched image.';
 		} finally {
 			importingHandoff = false;
 		}
@@ -1064,8 +1008,9 @@
 			// project and restored on reopen. The session artifact is only the transport;
 			// `editor.state.holes` is the single source of truth from this point on.
 			editor.setHoles(round.holes);
-			// Badge/basket anchors ride a separate session slot (courseBadgeSession.ts)
-			// since AnnotatedRound can never carry them (Done-boundary purity rule);
+			// Badge/basket anchors ride a separate session slot (session.ts's pending
+			// course badges) since AnnotatedRound can never carry them (Done-boundary
+			// purity rule);
 			// this is the only place they cross into durable ProjectState.numberBadges.
 			const pendingBadges = getPendingCourseBadges();
 			if (pendingBadges) {
@@ -2254,14 +2199,14 @@
 				bend, and corridor points, live — previews below update as annotations or
 				the alignment change. Holes with no placed points yet are skipped.
 			</p>
-			{#if holeGraphicPlans.length === 0}
+			{#if graphicsMode.plans.length === 0}
 				<p class="alignment-empty" data-testid="hole-graphics-empty">
 					No hole has both a placed point and a usable alignment yet.
 				</p>
 			{:else}
 				<label class="hole-graphic-style">
 					Color theme
-					<select data-testid="hole-graphic-style" bind:value={holeGraphicStyleId}>
+					<select data-testid="hole-graphic-style" bind:value={graphicsMode.styleId}>
 						{#each GRAPHIC_STYLE_PRESETS as preset (preset.id)}
 							<option value={preset.id}>{preset.name}</option>
 						{/each}
@@ -2275,37 +2220,32 @@
 				<button
 					type="button"
 					data-testid="download-all-hole-graphics"
-					disabled={holeGraphicsZipping}
-					onclick={handleDownloadAllHoleGraphics}
+					disabled={graphicsMode.zipping}
+					onclick={() => graphicsMode.downloadAll()}
 				>
-					{holeGraphicsZipping ? 'Zipping…' : `Download all ${holeGraphicPlans.length} as .zip`}
+					{graphicsMode.zipping ? 'Zipping…' : `Download all ${graphicsMode.plans.length} as .zip`}
 				</button>
 			{/if}
-			{#if holeGraphicsError}
-				<p class="error" data-testid="hole-graphics-error" role="alert">{holeGraphicsError}</p>
+			{#if graphicsMode.error}
+				<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
 			{/if}
-			{#if holeGraphicPlans.length > 0}
+			{#if graphicsMode.plans.length > 0}
 				{@const href = targetImageHref()}
 				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
-					{#each holeGraphicPlans as plan (plan.holeId)}
+					{#each graphicsMode.plans as plan (plan.holeId)}
 						<li class="hole-graphic-item">
 							{#if href}
 								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
-									{@html buildHoleGraphicMarkup(
-										plan,
-										href,
-										findGraphicStyle(holeGraphicStyleId),
-										holeGraphicFeetPerPixel()
-									)}
+									{@html buildHoleGraphicMarkup(plan, href, graphicsMode.style, holeGraphicFeetPerPixel())}
 								</div>
 							{/if}
 							<button
 								type="button"
 								data-testid="hole-graphic-download-{plan.number}"
-								disabled={!href || holeGraphicDownloading.has(plan.holeId)}
-								onclick={() => handleDownloadHoleGraphic(plan)}
+								disabled={!href || graphicsMode.downloading.has(plan.holeId)}
+								onclick={() => graphicsMode.downloadOne(plan)}
 							>
-								{holeGraphicDownloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
+								{graphicsMode.downloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
 							</button>
 						</li>
 					{/each}
@@ -2579,12 +2519,32 @@
 	:global(button:focus-visible),
 	:global(input:focus-visible),
 	:global([role='button']:focus-visible) {
-		outline: 3px solid #075985;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 
 	:global(button:disabled) {
 		cursor: not-allowed;
+	}
+
+	/* Shared sizing for the route's plain action buttons (add correspondence,
+	   undo/redo, save/open, marker toggle, geocode search) — these previously
+	   rendered as unstyled ~21px browser-default buttons, well below the
+	   ~40-44px targets used elsewhere in the app. */
+	.add-correspondence,
+	.cancel-correspondence,
+	.history-button,
+	.persistence-button,
+	.marker-toggle,
+	[data-testid='geocode-search-button'] {
+		min-height: 2.25rem;
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
 	}
 
 	.toolbar {
@@ -2696,6 +2656,7 @@
 		border: 1px solid #e2e8f0;
 		border-radius: 6px;
 		background: #f8fafc;
+		color: #1f2937;
 		margin-top: 0.5rem;
 	}
 
@@ -2736,6 +2697,7 @@
 		border: 1px solid #cbd5e1;
 		border-radius: 4px;
 		background: #fff;
+		color: #1f2937;
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
@@ -3145,6 +3107,7 @@
 		align-items: center;
 		justify-content: center;
 		background: rgb(0 0 0 / 40%);
+		z-index: 50;
 	}
 
 	.dialog {
@@ -3152,6 +3115,7 @@
 		border-radius: 8px;
 		padding: 1rem 1.25rem;
 		max-width: 26rem;
+		color: #1f2937;
 	}
 
 	.dialog h2 {

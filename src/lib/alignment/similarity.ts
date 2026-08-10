@@ -19,9 +19,9 @@ import { calculateResiduals } from './residuals';
 import {
 	AlignmentFailureReason,
 	type AlignmentPairInput,
+	type AlignmentPoint,
 	type EstimationFailure,
-	type EstimationResult,
-	type PointCoordinates
+	type EstimationResult
 } from './types';
 
 export interface SimilarityEstimationOptions {
@@ -38,7 +38,7 @@ const REFLECTION_IMPROVEMENT_MARGIN = 0.5;
 
 function isCompletePair(
 	pair: AlignmentPairInput
-): pair is AlignmentPairInput & { target: PointCoordinates } {
+): pair is AlignmentPairInput & { target: AlignmentPoint } {
 	return pair.target !== null;
 }
 
@@ -145,15 +145,15 @@ function hasNonFiniteCoordinates(pairs: readonly AlignmentPairInput[]): boolean 
 	);
 }
 
-function hasSpread(pairs: readonly (AlignmentPairInput & { target: PointCoordinates })[]): boolean {
+function hasSpread(pairs: readonly (AlignmentPairInput & { target: AlignmentPoint })[]): boolean {
 	const sourceKeys = new Set(pairs.map((pair) => `${pair.source.xPx},${pair.source.yPx}`));
 	const targetKeys = new Set(pairs.map((pair) => `${pair.target.xPx},${pair.target.yPx}`));
 	return sourceKeys.size >= MIN_PAIRS && targetKeys.size >= MIN_PAIRS;
 }
 
-function centeredSums(pairs: readonly (AlignmentPairInput & { target: PointCoordinates })[]): {
-	centroidSource: PointCoordinates;
-	centroidTarget: PointCoordinates;
+function centeredSums(pairs: readonly (AlignmentPairInput & { target: AlignmentPoint })[]): {
+	centroidSource: AlignmentPoint;
+	centroidTarget: AlignmentPoint;
 } {
 	let sourceX = 0;
 	let sourceY = 0;

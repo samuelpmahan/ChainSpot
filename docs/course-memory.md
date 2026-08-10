@@ -68,9 +68,9 @@ That created a second wrinkle: Annotate Round's `holes` is page-local
 `$state`, not owned by a `ProjectEditor` — only Create Graphics's
 `importAnnotatedRound()` writes to a `ProjectEditor`, on a *separate* editor
 instance from Annotate Round's. So capturing badges in Annotate Round alone
-isn't enough to make them durable. `courseBadgeSession.ts` is a minimal
-sibling to `annotatedRoundSession.ts`'s existing pending/active slot pattern,
-carrying exactly the badge/basket payload the Done-boundary rule forbids
+isn't enough to make them durable. `session.ts`'s pending course-badges slot
+is a minimal sibling to its existing AnnotatedRound pending/active slot
+pattern, carrying exactly the badge/basket payload the Done-boundary rule forbids
 attaching to `AnnotatedRound` across the same `/annotate-round` ->
 `/create-graphics` navigation. Create Graphics's `importAnnotatedRound`
 consumes it into durable `ProjectState.numberBadges` right alongside

@@ -15,7 +15,14 @@
 
 export type AlignmentModel = 'similarity' | 'affine';
 
-export interface PointCoordinates {
+/**
+ * The alignment module's own `{xPx, yPx}` point shape. Deliberately not the
+ * domain's `PointCoordinates` (`domain/project.ts`) — alignment stays
+ * standalone and structurally compatible rather than importing the domain;
+ * named `AlignmentPoint` (not `PointCoordinates`) purely so the two shapes
+ * don't collide by name.
+ */
+export interface AlignmentPoint {
 	readonly xPx: number;
 	readonly yPx: number;
 }
@@ -29,8 +36,8 @@ export interface PointCoordinates {
 export interface AlignmentPairInput {
 	readonly id: string;
 	readonly enabled: boolean;
-	readonly source: PointCoordinates;
-	readonly target: PointCoordinates | null;
+	readonly source: AlignmentPoint;
+	readonly target: AlignmentPoint | null;
 }
 
 /** Serializable source-to-target transform, shared by both models. */
@@ -73,10 +80,10 @@ export interface EstimationFailure {
 
 export interface ResidualPair {
 	readonly pairId: string;
-	readonly source: PointCoordinates;
-	readonly target: PointCoordinates;
+	readonly source: AlignmentPoint;
+	readonly target: AlignmentPoint;
 	/** Transform of the source coordinate in target-image pixels. */
-	readonly expected: PointCoordinates;
+	readonly expected: AlignmentPoint;
 	/** expected - target, in target-image pixels. */
 	readonly dx: number;
 	readonly dy: number;

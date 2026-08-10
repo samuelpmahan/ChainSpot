@@ -152,7 +152,10 @@ test('the magnifier samples original decoded pixels with an exact anchor crossha
 	// Zoom in (higher view scale): the magnifier stays readable and keeps sampling.
 	const zoomCenter = panePoint(sourceGeometry, sourceGeometry.width / 2, sourceGeometry.height / 2);
 	await page.mouse.move(zoomCenter.x, zoomCenter.y);
+	// ctrl+wheel is the pinch-zoom gesture; a plain wheel now pans instead.
+	await page.keyboard.down('Control');
 	await page.mouse.wheel(0, -200);
+	await page.keyboard.up('Control');
 	await page.mouse.move(zoomCenter.x + 20, zoomCenter.y + 10);
 	await expect(page.getByTestId('pane-magnifier-source-overview')).toBeVisible();
 	const zoomedView = await viewState(page, SOURCE_ROLE);

@@ -25,6 +25,8 @@
  * not discriminative enough to trust as a hole number.
  */
 
+import type { Candidate } from '../cv/types';
+
 export type HoleNumberRaster =
 	| {
 		readonly format: 'gray';
@@ -71,10 +73,8 @@ export interface HoleNumberCvMat {
 	delete(): void;
 }
 
-export interface HoleNumberCandidate {
-	/** Center of the physical badge, in source-image pixels. */
-	readonly xPx: number;
-	readonly yPx: number;
+/** xPx/yPx (from `Candidate`) are the center of the physical badge, in source-image pixels. */
+export interface HoleNumberCandidate extends Candidate {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	/** Measured UDisc UI scale relative to the supplied canonical templates. */

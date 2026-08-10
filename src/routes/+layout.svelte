@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import DemoGuide from '$lib/components/DemoGuide.svelte';
@@ -13,6 +14,25 @@
 	});
 
 	let { children }: { children: import('svelte').Snippet } = $props();
+
+	/**
+	 * No route in this app has a real drop zone, so a file the user drags over
+	 * the page — even a mis-aimed drop — must never be allowed to reach the
+	 * browser's default handling, which navigates away and destroys the
+	 * in-memory editor session. Guard at the document level unconditionally.
+	 */
+	function preventDefaultDrag(event: DragEvent): void {
+		event.preventDefault();
+	}
+
+	onMount(() => {
+		document.addEventListener('dragover', preventDefaultDrag);
+		document.addEventListener('drop', preventDefaultDrag);
+		return () => {
+			document.removeEventListener('dragover', preventDefaultDrag);
+			document.removeEventListener('drop', preventDefaultDrag);
+		};
+	});
 </script>
 
 <header class="app-header">
@@ -42,20 +62,22 @@
 			Create Graphics
 		</a>
 		<a
-			href="{base}/ribbon-editor"
-			class="nav-link"
-			class:active={page.url.pathname === `${base}/ribbon-editor`}
-			aria-current={page.url.pathname === `${base}/ribbon-editor` ? 'page' : undefined}
-		>
-			Ribbon Goldens
-		</a>
-		<a
 			href="{base}/demo"
 			class="nav-link"
 			class:active={page.url.pathname === `${base}/demo`}
 			aria-current={page.url.pathname === `${base}/demo` ? 'page' : undefined}
 		>
 			Demo
+		</a>
+	</nav>
+	<nav class="dev-nav" aria-label="Developer tools">
+		<a
+			href="{base}/ribbon-editor"
+			class="nav-link dev-link"
+			class:active={page.url.pathname === `${base}/ribbon-editor`}
+			aria-current={page.url.pathname === `${base}/ribbon-editor` ? 'page' : undefined}
+		>
+			Ribbon Goldens
 		</a>
 	</nav>
 </header>
@@ -95,7 +117,8 @@
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
-		width: 100%;
+		flex: 1 1 auto;
+		min-width: 0;
 		overflow-x: auto;
 		-webkit-overflow-scrolling: touch;
 		scrollbar-width: none;
@@ -103,6 +126,20 @@
 
 	.app-nav::-webkit-scrollbar {
 		display: none;
+	}
+
+	.dev-nav {
+		display: flex;
+		align-items: center;
+		flex: 0 0 auto;
+		margin-left: 0.75rem;
+		padding-left: 0.75rem;
+		border-left: 1px solid #27272a;
+	}
+
+	.dev-link {
+		font-size: 0.75rem;
+		color: #71717a;
 	}
 
 	.nav-link {

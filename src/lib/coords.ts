@@ -21,7 +21,7 @@
  * `ROUND_TRIP_TOLERANCE` original-image pixels for the supported scale range.
  */
 
-import type { ViewTransformState } from './domain/project';
+import type { PointCoordinates, ViewTransformState } from './domain/project';
 
 export type { ViewTransformState };
 
@@ -42,10 +42,11 @@ export interface ScreenSpacePoint {
 	y: number;
 }
 
-export interface ImageSpacePoint {
-	xPx: number;
-	yPx: number;
-}
+/**
+ * Alias of the domain's canonical `{xPx, yPx}` point shape (`domain/project.ts`'s
+ * `PointCoordinates`) rather than an independent type — same shape, same space.
+ */
+export type ImageSpacePoint = PointCoordinates;
 
 export interface NormalizedPoint {
 	xNorm: number;

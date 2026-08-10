@@ -118,6 +118,17 @@ async function dragMarker(page: Page, role: string, from: Point, to: Point): Pro
 	await page.mouse.up();
 }
 
+/**
+ * ctrl+wheel is the pinch-zoom gesture (macOS trackpad pinch, Cmd+scroll); a
+ * plain wheel now pans instead. Playwright's `mouse.wheel` picks up the
+ * currently pressed keyboard modifiers.
+ */
+async function ctrlWheel(page: Page, deltaX: number, deltaY: number): Promise<void> {
+	await page.keyboard.down('Control');
+	await page.mouse.wheel(deltaX, deltaY);
+	await page.keyboard.up('Control');
+}
+
 function row(page: Page, ordinal: number): Locator {
 	return page.locator(`[data-testid="pair-row"][data-ordinal="${ordinal}"]`);
 }
@@ -165,10 +176,10 @@ test('completes the five-pair save/reopen acceptance workflow without a backend'
 	const sourceFit = await viewState(page, SOURCE_ROLE);
 	const targetFit = await viewState(page, TARGET_ROLE);
 	await page.mouse.move(...Object.values(screenPoint(await paneGeometry(page, SOURCE_ROLE), { x: 210, y: 150 })) as [number, number]);
-	await page.mouse.wheel(0, -200);
+	await ctrlWheel(page, 0, -200);
 	await expect.poll(() => viewState(page, SOURCE_ROLE)).not.toEqual(sourceFit);
 	await page.mouse.move(...Object.values(screenPoint(await paneGeometry(page, TARGET_ROLE), { x: 280, y: 160 })) as [number, number]);
-	await page.mouse.wheel(0, 200);
+	await ctrlWheel(page, 0, 200);
 	await expect.poll(() => viewState(page, TARGET_ROLE)).not.toEqual(targetFit);
 	await page.getByTestId('pane-fit-source-overview').click();
 	await page.getByTestId('pane-reset-target-basemap').click();
@@ -182,7 +193,7 @@ test('completes the five-pair save/reopen acceptance workflow without a backend'
 
 	// Correct two markers through the canvas after independent navigation has been exercised.
 	await page.mouse.move(...Object.values(screenPoint(await paneGeometry(page, SOURCE_ROLE), { x: 310, y: 170 })) as [number, number]);
-	await page.mouse.wheel(0, -200);
+	await ctrlWheel(page, 0, -200);
 	await dragMarker(page, SOURCE_ROLE, sourceLandmarks[0], { xPx: 96, yPx: 76 });
 	await page.getByTestId('pane-fit-source-overview').click();
 	await dragMarker(page, TARGET_ROLE, targetLandmarks[1], { xPx: 788, yPx: 86 });

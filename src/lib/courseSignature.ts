@@ -55,6 +55,7 @@ import type { HashBytes, Sha256Hex } from './imageIntake';
 import { estimateAffine } from './alignment/affine';
 import { estimateSimilarity } from './alignment/similarity';
 import type { AlignmentPairInput, EstimationResult, SerializableTransform } from './alignment/types';
+import type { PointCoordinates } from './domain/project';
 
 /** A point resolved to its hole number, in one image's raw pixel space. */
 export interface LabeledPoint {
@@ -121,7 +122,7 @@ function combinePoints(input: CourseSignatureInput): CombinedPoint[] {
 	];
 }
 
-function centroidOf(points: readonly { xPx: number; yPx: number }[]): { xPx: number; yPx: number } {
+function centroidOf(points: readonly PointCoordinates[]): PointCoordinates {
 	if (points.length === 0) return { xPx: 0, yPx: 0 };
 	let sumX = 0;
 	let sumY = 0;
@@ -137,7 +138,7 @@ function centroidOf(points: readonly { xPx: number; yPx: number }[]): { xPx: num
  * "spread" shared by descriptor scale normalization and match-residual
  * normalization, so the two never drift apart.
  */
-export function spreadOf(points: readonly { xPx: number; yPx: number }[]): number {
+export function spreadOf(points: readonly PointCoordinates[]): number {
 	if (points.length === 0) return 0;
 	const centroid = centroidOf(points);
 	let sumSquares = 0;
