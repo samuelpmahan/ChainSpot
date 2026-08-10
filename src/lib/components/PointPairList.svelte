@@ -281,10 +281,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.7rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 	}
 
 	.pairs-header {
@@ -296,17 +296,18 @@
 	.pairs-header h2 {
 		margin: 0;
 		font-size: 1rem;
+		color: #f4f4f5;
 	}
 
 	.pair-count {
 		font-size: 0.8rem;
-		color: #475569;
+		color: #a1a1aa;
 	}
 
 	.empty {
 		margin: 0;
 		font-size: 0.85rem;
-		color: #475569;
+		color: #a1a1aa;
 	}
 
 	.pair-list {
@@ -324,15 +325,15 @@
 		gap: 0.5rem;
 		align-items: center;
 		padding: 0.4rem 0.5rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: #ffffff;
+		background: #27272a;
 	}
 
 	.pair-row.selected {
-		border-color: #b45309;
-		box-shadow: 0 0 0 2px #fde68a;
-		background: #fffbeb;
+		border-color: #f59e0b;
+		box-shadow: 0 0 0 2px rgb(245 158 11 / 35%);
+		background: #451a03;
 	}
 
 	.pair-row.disabled-pair {
@@ -348,9 +349,9 @@
 	.disabled-tag {
 		font-size: 0.75rem;
 		font-weight: 600;
-		color: #7c2d12;
-		background: #ffedd5;
-		border: 1px solid #fdba74;
+		color: #fde68a;
+		background: #422006;
+		border: 1px solid #a16207;
 		border-radius: 999px;
 		padding: 0.05rem 0.5rem;
 		white-space: nowrap;
@@ -358,6 +359,12 @@
 
 	.label-input {
 		font-size: 0.85rem;
+		padding: 0.25rem 0.4rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #1e1e24;
+		color: #e4e4e7;
+		font-family: inherit;
 	}
 
 	.side {
@@ -369,6 +376,7 @@
 		border: 1px solid transparent;
 		border-radius: 4px;
 		background: transparent;
+		color: inherit;
 		font-size: 0.8rem;
 		text-align: left;
 		cursor: pointer;
@@ -376,32 +384,32 @@
 	}
 
 	.side:hover {
-		background: #f1f5f9;
+		background: rgb(255 255 255 / 6%);
 	}
 
 	.side.selected {
-		border-color: #b45309;
-		background: #fffbeb;
+		border-color: #f59e0b;
+		background: #451a03;
 		box-shadow: 0 0 0 1px #f59e0b inset;
 	}
 
 	.side-label {
 		font-weight: 600;
-		color: #1e293b;
+		color: #f4f4f5;
 	}
 
 	.selected-mark {
-		color: #b45309;
+		color: #fbbf24;
 	}
 
 	.coord {
 		font-variant-numeric: tabular-nums;
-		color: #334155;
+		color: #d4d4d8;
 	}
 
 	.norm {
 		font-variant-numeric: tabular-nums;
-		color: #475569;
+		color: #a1a1aa;
 	}
 
 	.enabled-toggle {
@@ -418,6 +426,23 @@
 		gap: 0.2rem;
 	}
 
+	.reorder-button,
+	.delete-button {
+		min-height: 2.25rem;
+		padding: 0.3rem 0.6rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		cursor: pointer;
+	}
+
+	.reorder-button:disabled,
+	.delete-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+
 	.reorder-button {
 		font-size: 0.85rem;
 		line-height: 1.2;
@@ -429,7 +454,7 @@
 
 	button:focus-visible,
 	input:focus-visible {
-		outline: 2px solid #0f766e;
+		outline: 3px solid #38bdf8;
 		outline-offset: 2px;
 	}
 

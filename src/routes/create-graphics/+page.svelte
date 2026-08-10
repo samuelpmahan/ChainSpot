@@ -2527,6 +2527,43 @@
 		cursor: not-allowed;
 	}
 
+	/* Base dark styling for this route's plain buttons/inputs/selects that don't
+	   opt into the sized rule below — otherwise they fall back to unstyled
+	   browser-default (light) chrome, which reads as broken against the dark
+	   panels. */
+	button {
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	button:disabled {
+		opacity: 0.5;
+	}
+
+	input:not([type='file']):not([type='radio']):not([type='checkbox']) {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #1e1e24;
+		color: #e4e4e7;
+		font: inherit;
+	}
+
+	select {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+		font: inherit;
+		cursor: pointer;
+	}
+
 	/* Shared sizing for the route's plain action buttons (add correspondence,
 	   undo/redo, save/open, marker toggle, geocode search) — these previously
 	   rendered as unstyled ~21px browser-default buttons, well below the
@@ -2597,9 +2634,9 @@
 	.dirty {
 		padding: 0.15rem 0.5rem;
 		border-radius: 999px;
-		background: #fff3cd;
-		border: 1px solid #e0c35a;
-		color: #6b5300;
+		background: #422006;
+		border: 1px solid #a16207;
+		color: #fde68a;
 		font-size: 0.8rem;
 	}
 
@@ -2631,9 +2668,9 @@
 		margin: 0;
 		padding: 0.4rem 0.6rem;
 		border-radius: 4px;
-		background: #fdecea;
-		border: 1px solid #f5c6cb;
-		color: #8a1f11;
+		background: #3f1d1d;
+		border: 1px solid #7f1d1d;
+		color: #fca5a5;
 		font-size: 0.85rem;
 	}
 
@@ -2653,10 +2690,10 @@
 
 	.repair-issue {
 		padding: 0.6rem 0.75rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		margin-top: 0.5rem;
 	}
 
@@ -2694,10 +2731,10 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.3rem 0.7rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: #fff;
-		color: #1f2937;
+		background: #27272a;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
@@ -2719,7 +2756,7 @@
 	.pending-guidance {
 		margin: 0.35rem 0 0;
 		font-size: 0.85rem;
-		color: #7c2d12;
+		color: #fbbf24;
 	}
 
 	.pair-diagnostics {
@@ -2728,10 +2765,10 @@
 		gap: 0.25rem;
 		margin: 0;
 		padding: 0.6rem 0.7rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 	}
 
@@ -2740,7 +2777,7 @@
 	}
 
 	.diagnostic-warning {
-		color: #92400e;
+		color: #fbbf24;
 	}
 
 	.alignment-panel {
@@ -2748,10 +2785,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.6rem 0.7rem;
-		border: 1px solid #e2e8f0;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 		font-size: 0.85rem;
 	}
 
@@ -2797,16 +2834,16 @@
 	}
 
 	.alignment-warning {
-		color: #92400e;
+		color: #fbbf24;
 	}
 
 	.alignment-warning[data-severity='high'] {
-		color: #8a1f11;
+		color: #fca5a5;
 	}
 
 	.alignment-failure {
 		margin: 0;
-		color: #8a1f11;
+		color: #fca5a5;
 	}
 
 	.hole-graphics {
@@ -2841,7 +2878,7 @@
 		max-width: 14rem;
 		max-height: 10rem;
 		overflow: hidden;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 	}
 
@@ -2866,10 +2903,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.7rem;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
-		background: #f8fafc;
-		color: #1f2937;
+		background: #18181b;
+		color: #e4e4e7;
 	}
 
 	.point-inspector h2 {
@@ -2906,8 +2943,9 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 6px;
+		background: #18181b;
 	}
 
 	.naip-fetch h2 {
@@ -2951,7 +2989,7 @@
 		max-height: 15rem;
 		width: auto;
 		height: auto;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 	}
 
@@ -2971,9 +3009,9 @@
 		max-height: 28rem;
 		width: auto;
 		height: auto;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
-		background: #e5e7eb;
+		background: #27272a;
 		user-select: none;
 	}
 
@@ -3066,7 +3104,7 @@
 	.geocode-result {
 		text-align: left;
 		padding: 0.4rem 0.6rem;
-		border: 1px solid #ccc;
+		border: 1px solid #3f3f46;
 		border-radius: 4px;
 		background: #27272a;
 		color: #f4f4f5;
@@ -3106,21 +3144,23 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgb(0 0 0 / 40%);
+		background: rgb(0 0 0 / 60%);
 		z-index: 50;
 	}
 
 	.dialog {
-		background: #fff;
+		background: #1e1e24;
+		border: 1px solid #3f3f46;
 		border-radius: 8px;
 		padding: 1rem 1.25rem;
 		max-width: 26rem;
-		color: #1f2937;
+		color: #e4e4e7;
 	}
 
 	.dialog h2 {
 		margin: 0 0 0.5rem;
 		font-size: 1.1rem;
+		color: #f4f4f5;
 	}
 
 	.dialog-actions {
