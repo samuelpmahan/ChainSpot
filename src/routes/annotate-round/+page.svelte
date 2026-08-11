@@ -83,6 +83,12 @@
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 	import type { LocalSnapKind } from '$lib/cv/localSnap';
 	import { acceptCandidate } from '$lib/cv/types';
+	import {
+		buildActiveReviewMap,
+		recommendNextAnchor,
+		summarizeTeeInvariant
+	} from '$lib/autoAnnotation/activeReview';
+	import type { ActiveReviewRecommendation } from '$lib/autoAnnotation/activeReview';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
 	import {
@@ -285,6 +291,9 @@
 	let courseDetectionElapsedSeconds = $state(0);
 	let courseDetectionStartedAt = 0;
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
+	let activeReviewConfirmedCandidateIds = $state<string[]>([]);
+	let activeReviewRecommendation = $state<ActiveReviewRecommendation | null>(null);
+	let minAutoSuggestScore = $state(0.6);
 	let prewarmedSourceId: string | null = null;
 	let autoDetectedSourceId: string | null = null;
 	/**
@@ -389,7 +398,7 @@
 		readonly point: SourcePoint;
 		readonly holeId: string;
 		readonly holeNumber: number;
-		readonly mode: 'replace' | 'move' | 'delete';
+		readonly mode: 'replace' | 'move' | 'confirm';
 	}
 	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
 	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
@@ -671,12 +680,115 @@
 		return REVEAL_STAGE_ORDER.indexOf(revealStage) >= REVEAL_STAGE_ORDER.indexOf(stage);
 	}
 
-	/** Moves to (creating if necessary) the first hole-number proposal that still needs review, for the summary chip's jump action. */
-	function jumpToFirstNeedsReview(): void {
-		if (!courseDetection) return;
-		const target = courseDetection.grammar.holes.find((hole) => hole.status !== 'ready');
-		if (!target) return;
-		selectOrCreateHoleByNumber(target.number);
+	function recomputeActiveReview(): void {
+		if (!courseDetection) {
+			activeReviewRecommendation = null;
+			return;
+		}
+		const reviewMap = buildActiveReviewMap(courseDetection, [], activeReviewConfirmedCandidateIds);
+		activeReviewRecommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore });
+		logActiveReviewStats(reviewMap);
+	}
+
+	function logActiveReviewStats(reviewMap: ReturnType<typeof buildActiveReviewMap>): void {
+		if (!courseDetection || typeof console === 'undefined') return;
+		const teeInvariant = summarizeTeeInvariant(courseDetection);
+		const alignments = teeInvariant.map((stat) => stat.axisAlignment);
+		const distanceMargins = teeInvariant
+			.map((stat) => stat.distanceMarginPx)
+			.filter((margin): margin is number => margin !== null);
+		const mean = (values: readonly number[]): number | null =>
+			values.length === 0 ? null : Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
+		const recommendation = activeReviewRecommendation;
+		const snapshot = {
+			teeCandidates: courseDetection.tees.length,
+			basketCandidates: courseDetection.baskets.length,
+			assignedTees: teeInvariant.length,
+			unassignedTees: courseDetection.grammar.unassigned.teeCandidateIndexes.length,
+			unassignedBaskets: courseDetection.grammar.unassigned.basketCandidateIndexes.length,
+			teeAxisAlignmentMean: mean(alignments),
+			teeAxisAlignmentMin: alignments.length === 0 ? null : Math.min(...alignments),
+			teeAxisAlignmentAtLeast90Pct: alignments.filter((value) => value >= 0.9).length,
+			teeDistanceRank1: teeInvariant.filter((stat) => stat.distanceRank === 1).length,
+			teeDistanceMarginMedian: distanceMargins.length === 0 ? null : distanceMargins.slice().sort((a, b) => a - b)[Math.floor(distanceMargins.length / 2)],
+			recommendation: recommendation?.kind === 'candidate'
+				? {
+					kind: recommendation.candidateKind,
+					holeNumber: recommendation.holeNumber,
+					score: recommendation.score,
+					belowThreshold: recommendation.belowThreshold,
+					timedOut: recommendation.timedOut
+				}
+				: recommendation
+		};
+		console.info('[ChainSpot] ACTIVE_REVIEW_STATS', snapshot);
+		console.table(teeInvariant);
+		console.debug('[ChainSpot] ACTIVE_REVIEW_MAP', reviewMap);
+	}
+
+	function handleMinAutoSuggestScoreInput(event: Event): void {
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) return;
+		minAutoSuggestScore = Number(input.value);
+		recomputeActiveReview();
+	}
+
+	function courseCandidateIndex(kind: 'tee' | 'basket', point: SourcePoint): number | null {
+		const candidates = kind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
+		const index = candidates?.findIndex((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx) ?? -1;
+		return index >= 0 ? index : null;
+	}
+
+	function activeReviewTargetForClick(kind: 'tee' | 'basket'): ActiveReviewRecommendation | null {
+		const recommendation = activeReviewRecommendation;
+		if (
+			recommendation?.kind !== 'candidate' ||
+			recommendation.candidateKind !== kind
+		) {
+			return null;
+		}
+		return recommendation;
+	}
+
+	function activeReviewRecommendationPoint(): SourcePoint | null {
+		const recommendation = activeReviewRecommendation;
+		if (recommendation?.kind !== 'candidate') return null;
+		const candidates = recommendation.candidateKind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
+		const candidate = candidates?.[recommendation.candidateIndex];
+		return candidate ? { xPx: candidate.xPx, yPx: candidate.yPx } : null;
+	}
+
+	function rejectActiveReviewRecommendation(): void {
+		const recommendation = activeReviewRecommendation;
+		const point = activeReviewRecommendationPoint();
+		if (recommendation?.kind !== 'candidate' || !point) return;
+		markActiveReviewCandidateHandled(recommendation.candidateKind, point);
+	}
+
+	function acceptActiveReviewRecommendation(): void {
+		const recommendation = activeReviewRecommendation;
+		const point = activeReviewRecommendationPoint();
+		if (recommendation?.kind !== 'candidate' || !point) return;
+		handleCandidateMarkerClick(recommendation.candidateKind, point);
+	}
+
+	function rejectActiveReviewMarker(event: MouseEvent): void {
+		event.stopPropagation();
+		rejectActiveReviewRecommendation();
+	}
+
+	function acceptActiveReviewMarker(event: MouseEvent): void {
+		event.stopPropagation();
+		acceptActiveReviewRecommendation();
+	}
+
+	function markActiveReviewCandidateHandled(kind: 'tee' | 'basket', point: SourcePoint): void {
+		const index = courseCandidateIndex(kind, point);
+		if (index === null) return;
+		const id = `${kind}:${index}`;
+		if (activeReviewConfirmedCandidateIds.includes(id)) return;
+		activeReviewConfirmedCandidateIds = [...activeReviewConfirmedCandidateIds, id];
+		recomputeActiveReview();
 	}
 
 	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
@@ -941,17 +1053,21 @@
 	 * immediately.
 	 */
 	function handleCandidateMarkerClick(kind: 'tee' | 'basket', point: SourcePoint): void {
-		const active = activeHole();
+		const recommended = activeReviewTargetForClick(kind);
+		const active = recommended?.kind === 'candidate'
+			? activateHoleByNumber(recommended.holeNumber)
+			: activeHole();
 		if (!active) return;
 		const sourceHole = holeHoldingPoint(kind, point);
 		if (sourceHole?.id === active.id) {
-			// Already exactly this hole's point: clicking it again offers to remove it.
+			// A CV candidate click is a confirmation/assignment gesture. Deletion
+			// remains available through the existing marker radial menu.
 			candidateAssignConfirm = {
 				kind,
 				point,
 				holeId: active.id,
 				holeNumber: active.number,
-				mode: 'delete'
+				mode: 'confirm'
 			};
 			return;
 		}
@@ -959,6 +1075,7 @@
 		if (!activeHasFeature && !sourceHole) {
 			holes = assignCandidateToHole(holes, active.id, kind, point);
 			vibrate(8);
+			markActiveReviewCandidateHandled(kind, point);
 			return;
 		}
 		candidateAssignConfirm = {
@@ -973,34 +1090,36 @@
 	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath; delete clears the hole's feature instead. */
 	function confirmCandidateAssign(): void {
 		if (!candidateAssignConfirm) return;
-		const { holeId, kind, point, mode } = candidateAssignConfirm;
-		if (mode === 'delete') {
-			holes = kind === 'tee' ? removeTee(holes, holeId) : removeBasket(holes, holeId);
-		} else {
-			holes = assignCandidateToHole(holes, holeId, kind, point);
-		}
+		const { holeId, kind, point } = candidateAssignConfirm;
+		holes = assignCandidateToHole(holes, holeId, kind, point);
 		candidateAssignConfirm = null;
 		vibrate(8);
+		markActiveReviewCandidateHandled(kind, point);
 	}
 
 	function dismissCandidateAssign(): void {
 		candidateAssignConfirm = null;
 	}
 
-	/** Selects the hole matching a tapped map number, creating it first if it doesn't exist yet. */
-	function selectOrCreateHoleByNumber(number: number): void {
-		const existing = holes.find((hole) => hole.number === number);
-		if (existing) {
-			activeHoleId = existing.id;
-			vibrate(8);
-			return;
+	/** Activates a numbered hole, creating it in numeric order when the draft does not have it yet. */
+	function activateHoleByNumber(number: number): AnnotatedHole | null {
+		let target = holes.find((hole) => hole.number === number);
+		if (target) {
+			activeHoleId = target.id;
+			return target;
 		}
 		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHoleWithNumber(holes, number);
-		const added = nextHoles.find((hole) => !holes.some((existingHole) => existingHole.id === hole.id));
-		if (!added) return;
-		holes = setCorridorWidth(nextHoles, added.id, inheritedWidthPx);
-		activeHoleId = added.id;
+		target = nextHoles.find((hole) => hole.number === number) ?? null;
+		if (!target) return null;
+		holes = setCorridorWidth(nextHoles, target.id, inheritedWidthPx);
+		activeHoleId = target.id;
+		return target;
+	}
+
+	/** Selects the hole matching a tapped map number, creating it first if it doesn't exist yet. */
+	function selectOrCreateHoleByNumber(number: number): void {
+		if (!activateHoleByNumber(number)) return;
 		vibrate(8);
 	}
 
@@ -1458,6 +1577,8 @@
 		selectedBasketCandidate = null;
 		basketDetectionError = null;
 		courseDetection = null;
+		activeReviewConfirmedCandidateIds = [];
+		activeReviewRecommendation = null;
 		courseDetectionStatus = null;
 		courseDetectionStage = null;
 		courseDetectionElapsedSeconds = 0;
@@ -1571,6 +1692,8 @@
 			// keyed to the old raster must never be written onto the new one's state.
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
+			activeReviewConfirmedCandidateIds = [];
+			recomputeActiveReview();
 			basketCandidates = result.baskets;
 			basketCandidatesSource = 'course-detection';
 			startCandidateReveal();
@@ -1750,6 +1873,7 @@
 			hole.id === activeHoleId ? { ...hole, basket: acceptCandidate(candidate) } : hole
 		);
 		selectedBasketCandidate = null;
+		markActiveReviewCandidateHandled('basket', { xPx: candidate.xPx, yPx: candidate.yPx });
 	}
 
 	function selectBasketCandidate(index: number): void {
@@ -2788,38 +2912,67 @@
 							{compactDetectionStageCopy(courseDetectionStage)}
 						</p>
 					{:else if courseDetection && revealStage === 'done'}
-						{@const grammarHoles = courseDetection.grammar.holes}
-						{@const readyCount = grammarHoles.filter((hole) => hole.status === 'ready').length}
-						{@const reviewCount = grammarHoles.length - readyCount}
-						{@const firstNeedsReview = grammarHoles.find((hole) => hole.status !== 'ready')}
-						<div class="course-summary-chip" data-testid="course-summary-chip" role="status">
-							<p class="course-summary-line">
-								Found {grammarHoles.length} holes — {readyCount} ready, {reviewCount} need review
-							</p>
-							<p class="course-summary-honesty">
-								Detection is limited where holes overlap or crowd each other — an area of active research — which is why the review step exists.
-							</p>
-							<div class="course-summary-actions">
-								<button
-									type="button"
-									data-testid="course-summary-jump-review"
-									disabled={!firstNeedsReview}
-									onclick={jumpToFirstNeedsReview}
-								>
-									{firstNeedsReview ? `Review hole ${firstNeedsReview.number}` : 'All holes ready'}
-								</button>
-								<button
-									type="button"
-									data-testid="course-summary-apply-ready"
-									disabled={readyCount === 0}
-									onclick={() => applyReadyCourseHoles()}
-								>
-									Accept {readyCount} ready holes
-								</button>
-							</div>
+						<div class="active-review-strip" data-testid="active-review-suggestion" role="status">
+							{#if activeReviewRecommendation?.kind === 'candidate'}
+								{@const recommendation = activeReviewRecommendation}
+								<p>Click the {recommendation.candidateKind} for Hole {recommendation.holeNumber}</p>
+								<span>
+									{recommendation.belowThreshold
+										? `Best remaining at ${Math.round(recommendation.score * 100)}% — below the ${Math.round(minAutoSuggestScore * 100)}% floor`
+										: `${Math.round(recommendation.score * 100)}% usefulness`}
+									· {recommendation.rationale.competingHoleCount} competing links
+								</span>
+							{:else}
+								<p>No unreviewed detected candidate remains.</p>
+								<span>All available candidates have been decided.</span>
+							{/if}
+							<label class="active-review-threshold">
+								<span>Minimum usefulness {Math.round(minAutoSuggestScore * 100)}%</span>
+								<input
+									type="range"
+									min="0"
+									max="0.95"
+									step="0.05"
+									value={minAutoSuggestScore}
+									aria-label="Minimum automatic suggestion usefulness score"
+									data-testid="active-review-threshold-input"
+									oninput={handleMinAutoSuggestScoreInput}
+								/>
+							</label>
 						</div>
 					{/if}
 				</div>
+
+				{#if courseDetection && revealStage === 'done' && activeReviewRecommendation?.kind === 'candidate' && !activeReviewRecommendation.belowThreshold}
+					{@const markerPoint = activeReviewRecommendationPoint()}
+					{#if markerPoint}
+						{@const markerAnchor = imageToScreen(markerPoint, view)}
+						<div
+							class="active-review-marker-action"
+							data-testid="active-review-marker-action"
+							style={`left:${markerAnchor.x}px; top:${markerAnchor.y}px;`}
+							aria-label="Review suggested candidate"
+						>
+							<button
+								type="button"
+								class="active-review-reject"
+								aria-label={`Reject ${activeReviewRecommendation.candidateKind} for Hole ${activeReviewRecommendation.holeNumber}`}
+								data-testid="active-review-reject"
+								onpointerdown={(event) => event.stopPropagation()}
+								onclick={rejectActiveReviewMarker}
+							>❌</button>
+							<strong>{activeReviewRecommendation.candidateKind === 'tee' ? 'T' : 'B'}{activeReviewRecommendation.holeNumber}</strong>
+							<button
+								type="button"
+								class="active-review-accept"
+								aria-label={`Accept ${activeReviewRecommendation.candidateKind} for Hole ${activeReviewRecommendation.holeNumber}`}
+								data-testid="active-review-accept"
+								onpointerdown={(event) => event.stopPropagation()}
+								onclick={acceptActiveReviewMarker}
+							>✅</button>
+						</div>
+					{/if}
+				{/if}
 
 				{#if candidateAssignConfirm}
 					{@const anchor = imageToScreen(candidateAssignConfirm.point, view)}
@@ -2835,11 +2988,7 @@
 							data-testid="candidate-assign-confirm-accept"
 							onclick={confirmCandidateAssign}
 						>
-							{candidateAssignConfirm.mode === 'replace'
-								? `Replace ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
-								: candidateAssignConfirm.mode === 'delete'
-									? `Delete ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
-									: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
+							Confirm {candidateAssignConfirm.kind} for Hole {candidateAssignConfirm.holeNumber}?
 						</button>
 						<button
 							type="button"
@@ -3870,8 +4019,7 @@
 		stroke-width: 3;
 	}
 
-	/* PART A — compact detection status strip and PART C's summary chip, both
-	   anchored near the map (top-left of the canvas), one replacing the other. */
+	/* Detection status and the compact information-directed landmark prompt. */
 	.course-detection-overlay {
 		position: absolute;
 		top: 0.75rem;
@@ -3894,55 +4042,100 @@
 		color: #f4f4f5;
 	}
 
-	.course-summary-chip {
+	.active-review-strip {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
-		padding: 0.65rem 0.75rem;
-		border: 1px solid #3f3f46;
-		border-radius: 8px;
+		gap: 0.2rem;
+		min-width: 14rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid #854d0e;
+		border-radius: 6px;
 		background: #18181bf2;
 		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
 	}
 
-	.course-summary-line {
+	.active-review-strip p,
+	.active-review-strip span {
 		margin: 0;
-		font-size: 0.85rem;
-		font-weight: 650;
-		color: #f4f4f5;
 	}
 
-	.course-summary-honesty {
-		margin: 0;
-		font-size: 0.72rem;
-		line-height: 1.4;
-		color: #a1a1aa;
-	}
-
-	.course-summary-actions {
+	.active-review-marker-action {
+		position: absolute;
+		z-index: 24;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
+		align-items: center;
+		gap: 0.25rem;
+		transform: translate(-50%, calc(-100% - 0.35rem));
+		padding: 0.18rem 0.3rem;
+		border: 1px solid #52525b;
+		border-radius: 999px;
+		background: #18181bf5;
+		box-shadow: 0 4px 12px rgb(0 0 0 / 55%);
+		white-space: nowrap;
+		pointer-events: auto;
 	}
 
-	.course-summary-actions button {
-		min-height: 2.25rem;
-		padding: 0.35rem 0.6rem;
-		border: 1px solid #52525b;
-		border-radius: 5px;
-		background: #27272a;
+	.active-review-marker-action strong {
+		min-width: 2rem;
+		font-size: 0.78rem;
+		text-align: center;
 		color: #f4f4f5;
-		font-size: 0.75rem;
+	}
+
+	.active-review-marker-action button {
+		width: 1.45rem;
+		height: 1.45rem;
+		padding: 0;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		font-size: 0.78rem;
+		line-height: 1;
 		cursor: pointer;
 	}
 
-	.course-summary-actions button:disabled {
-		opacity: 0.45;
-		cursor: not-allowed;
+	.active-review-marker-action button:hover,
+	.active-review-marker-action button:focus-visible {
+		background: #3f3f46;
+		outline: 2px solid #f4f4f5;
+		outline-offset: 1px;
 	}
 
-	.course-summary-actions button:first-child {
-		border-color: #f59e0b;
+	.active-review-marker-action .active-review-reject {
+		color: #f87171;
+	}
+
+	.active-review-marker-action .active-review-accept {
+		color: #4ade80;
+	}
+
+	/* The action is anchored above the candidate itself; the card stays explanatory. */
+	.active-review-marker-action[aria-label] {
+		user-select: none;
+	}
+
+	.active-review-strip p {
+		font-size: 0.85rem;
+		font-weight: 700;
+		color: #fde68a;
+	}
+
+	.active-review-strip span {
+		font-size: 0.68rem;
+		color: #d4d4d8;
+	}
+
+	.active-review-threshold {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.68rem;
+		color: #d4d4d8;
+	}
+
+	.active-review-threshold input {
+		width: 100%;
+		accent-color: #f59e0b;
 	}
 
 	/* PART C — inline one-click confirmation chip anchored at the clicked candidate marker. */
