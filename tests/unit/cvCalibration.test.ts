@@ -9,6 +9,7 @@ import {
 	asUiScalePx,
 	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
+	resolveTemplateScale,
 	validateCvTemplateManifest
 } from '../../src/lib/autoAnnotation/cvCalibration';
 import type {
@@ -91,6 +92,19 @@ describe('CV calibration semantics', () => {
 		const calibration = validateCvTemplateManifest(manifest()).calibration;
 		const converted: BasketTemplateScale = deriveBasketTemplateScale(numberScale, calibration);
 		expect(converted).toBeCloseTo(1.84, 8);
+	});
+
+	it('converts analysis-space scales into source space and rejects the reverse mismatch', () => {
+		const analysisScale = asNumberTemplateScale(1.073);
+		expect(
+			resolveTemplateScale({ value: analysisScale, space: 'analysis' }, 'source', 1.687)
+		).toBeCloseTo(1.810151, 6);
+		expect(
+			resolveTemplateScale({ value: analysisScale, space: 'analysis' }, 'analysis', 1.687)
+		).toBe(analysisScale);
+		expect(() => resolveTemplateScale({ value: analysisScale, space: 'source' }, 'analysis', 1.687)).toThrow(
+			/source space cannot be used against an analysis-space raster/
+		);
 	});
 
 	it('brands the public number-detection anchor as TemplateScale', () => {

@@ -27,6 +27,7 @@ import {
 	asUiScalePx,
 	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
+	resolveTemplateScale,
 	validateCvTemplateManifest
 } from './cvCalibration';
 import type {
@@ -37,7 +38,7 @@ import type {
 import { localFeatureSnap } from '../cv/localSnap';
 import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
 
-const MAX_ANALYSIS_DIM = 2200;
+const MAX_ANALYSIS_DIM = 4096;
 // `$app/paths`'s `base` does not resolve inside this worker's separate
 // Vite bundle context (it silently resolves to `''` at runtime despite
 // compiling cleanly), so the GitHub Pages base path (e.g. `/ChainSpot`)
@@ -45,7 +46,16 @@ const MAX_ANALYSIS_DIM = 2200;
 let templateBaseUrl = '/resources/chainspot_cv_templates';
 
 interface BasketDetectionRequest {
-	readonly kind: 'detect' | 'detect-course';
+	readonly kind: 'detect';
+	readonly token: string;
+	readonly basePath: string;
+	readonly bitmap: ImageBitmap;
+	readonly widthPx: number;
+	readonly heightPx: number;
+}
+
+interface CourseDetectionRequest {
+	readonly kind: 'detect-course';
 	readonly token: string;
 	readonly basePath: string;
 	readonly bitmap: ImageBitmap;
@@ -92,6 +102,7 @@ interface LocalSnapRequest {
 
 type BasketRequest =
 	| BasketDetectionRequest
+	| CourseDetectionRequest
 	| BasketPrewarmRequest
 	| TeeDetectionRequest
 	| LocalSnapRequest;
@@ -451,7 +462,7 @@ async function detectLocalSnap(request: LocalSnapRequest): Promise<LocalSnapPoin
 }
 
 function reportCourseProgress(
-	request: BasketDetectionRequest,
+	request: CourseDetectionRequest,
 	stage: 'opencv' | 'baskets' | 'templates' | 'numbers' | 'tees' | 'grammar',
 	message: string,
 	elapsedMs?: number
@@ -464,7 +475,7 @@ function reportCourseProgress(
 	});
 }
 
-async function detectCourse(request: BasketDetectionRequest) {
+async function detectCourse(request: CourseDetectionRequest) {
 	const startedAt = performance.now();
 	const runtimeCachedAtStart = runtimePromise !== null;
 	const templatePackCachedAtStart = templatePackPromise !== null;
@@ -522,8 +533,18 @@ async function detectCourse(request: BasketDetectionRequest) {
 		},
 		pack.manifest.calibration.canonicalNumberBadge
 	);
+	// Hole-number matching runs on the downscaled analysis raster, while basket
+	// matching below runs at full source resolution. TemplateScale is a resize
+	// multiplier in the raster coordinate space where matching occurs, so move
+	// the number-template multiplier into source space before deriving the
+	// basket-family multiplier.
+	const sourceNumberTemplateScale = resolveTemplateScale(
+		{ value: numberDetection.anchor.scale, space: 'analysis' },
+		'source',
+		sourceScale
+	);
 	const basketTemplateScale = deriveBasketTemplateScale(
-		numberDetection.anchor.scale,
+		sourceNumberTemplateScale,
 		pack.manifest.calibration
 	);
 	const mapBoundsPx = deriveMapBoundsFromNumbers(numberDetection.candidates, request.heightPx);
@@ -642,10 +663,10 @@ async function detectCourse(request: BasketDetectionRequest) {
 			gapFallbackCandidates: gapFallbackCandidates.length
 		},
 		calibration: {
-			numberTemplateScale: numberDetection.anchor.scale,
+			numberTemplateScale: sourceNumberTemplateScale,
 			basketTemplateScale,
 			basketTemplateScalePerNumberTemplateScale:
-				basketTemplateScale / numberDetection.anchor.scale
+				basketTemplateScale / sourceNumberTemplateScale
 		}
 	};
 
@@ -681,8 +702,13 @@ async function processRequest(request: BasketRequest): Promise<void> {
 			(self as unknown as Worker).postMessage({ ok: true, kind: request.kind, token: request.token, snapped });
 			return;
 		}
-		const candidates = await detectBaskets(request.bitmap, request.widthPx, request.heightPx);
-		(self as unknown as Worker).postMessage({ ok: true, kind: request.kind, token: request.token, candidates });
+		if (request.kind === 'detect') {
+			const candidates = await detectBaskets(request.bitmap, request.widthPx, request.heightPx);
+			(self as unknown as Worker).postMessage({ ok: true, kind: request.kind, token: request.token, candidates });
+			return;
+		}
+		const unexpectedRequest: never = request;
+		throw new Error(`Unsupported basket detection request: ${String(unexpectedRequest)}`);
 	} catch (error) {
 		(self as unknown as Worker).postMessage({
 			ok: false,

@@ -23,9 +23,9 @@ export interface Candidate {
 /**
  * A decoded raster handed to a detector, modeled on `stitch/analysis.ts`'s
  * `AnalysisRaster`. Detectors vary in which channel(s) they need and whether
- * the raster has already been downscaled from the source image, hence the
- * optionality here (a given detector's own raster type narrows the fields it
- * actually requires to non-optional).
+ * the raster has already been downscaled from the source image, so every
+ * raster declares its source-space conversion explicitly while a given
+ * detector's own raster type narrows the channel fields it requires.
  */
 export interface CvRaster {
 	readonly widthPx: number;
@@ -33,7 +33,7 @@ export interface CvRaster {
 	readonly gray?: Uint8Array;
 	readonly rgba?: Uint8Array | Uint8ClampedArray;
 	/** Source pixels per raster pixel: 1 at full resolution, >1 after a downsample. */
-	readonly sourceScale?: number;
+	readonly sourceScale: number;
 }
 
 /**
