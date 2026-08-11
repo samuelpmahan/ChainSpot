@@ -1,20 +1,21 @@
 {
   "schemaVersion": 1,
   "policy": {
-    "requiredResolutionClasses": ["non-stitched", "stitched"],
     "numbers": {
       "enabled": true,
+      "requiredResolutionClasses": ["non-stitched", "stitched"],
       "maxCenterErrorPx": 5
     },
     "baskets": {
       "enabled": true,
-      "requiredMatched": 18,
+      "requiredResolutionClasses": ["non-stitched", "stitched"],
+      "requiredCandidateCount": 18,
       "maxFalsePositives": 0,
       "associationEvaluated": false
     },
     "tees": {
       "enabled": false,
-      "reason": "TODO: tee research is still moving quickly; report separately until its merge gate is deliberately defined."
+      "reason": "TODO: tee research is still moving quickly; development can track it separately, but it is not an MVP merge gate yet."
     }
   },
   "cases": [
@@ -27,27 +28,45 @@
       "truthPath": "resources/ribbon-reference/IMG_5641-number-golden.json"
     },
     {
+      "id": "numbers-reference-stitched",
+      "detector": "numbers",
+      "resolutionClass": "stitched",
+      "status": "pending-truth",
+      "inputPath": "resources/real-capture/ReferenceStitch.png",
+      "note": "Required stitched number gate. Add one manually verified full visible label set/center truth file; do not tune the detector to this image."
+    },
+    {
       "id": "numbers-the-rec-left",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
       "status": "pending-truth",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-L.PNG",
-      "note": "The Rec must become a 9/9 golden number gate. Select/confirm the exact 9-badge view and add manually verified label centers before activating this case."
+      "note": "The Rec must become a 9/9 golden number gate. Confirm this is the intended 9-visible-badge view, then add manually verified label centers. If the right capture is the correct view, swap statuses instead of annotating both."
     },
     {
       "id": "numbers-the-rec-right",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
-      "status": "pending-truth",
+      "status": "candidate",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-R.PNG",
-      "note": "Candidate source for the 9-hole Rec gate; keep pending until its exact visible golden label set is manually verified."
+      "note": "Development-only alternate Rec capture. Do not create a second Rec golden unless it proves useful; MVP needs one verified 9/9 Rec case, not a corpus."
     },
     {
       "id": "baskets-golden-native",
       "detector": "baskets",
       "resolutionClass": "non-stitched",
       "status": "active",
-      "inputPath": "resources/GoldenBasketSet.chainspot.zip"
+      "inputPath": "resources/GoldenBasketSet.chainspot.zip",
+      "evaluation": "golden-localization"
+    },
+    {
+      "id": "baskets-reference-stitched-smoke",
+      "detector": "baskets",
+      "resolutionClass": "stitched",
+      "status": "active",
+      "inputPath": "resources/real-capture/ReferenceStitch.png",
+      "evaluation": "candidate-count-smoke",
+      "note": "Multi-resolution scale smoke only: require 18 raw basket candidates through the production course path. No second set of 18 manually reconstructed basket centers. Association is not evaluated."
     }
   ]
 }
