@@ -1,0 +1,106 @@
+name: Rec YOLO label probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Detect Rec left
+        run: npm run detect:tees -- resources/stitch-annotate/TheRec/TheRec-L.PNG --mode fused --out artifacts/rec-left
+
+      - name: Detect Rec right
+        run: npm run detect:tees -- resources/stitch-annotate/TheRec/TheRec-R.PNG --mode fused --out artifacts/rec-right
+
+      - name: Derive provisional number truth and tee-ray support
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const specs = [
+            { id: 'left', file: 'TheRec-L.PNG', json: 'artifacts/rec-left/fused.json' },
+            { id: 'right', file: 'TheRec-R.PNG', json: 'artifacts/rec-right/fused.json' }
+          ];
+
+          function axisDeltaDeg(axis, bearing) {
+            let d = Math.abs(((axis - bearing) % 180 + 180) % 180);
+            return Math.min(d, 180 - d);
+          }
+
+          const report = { schemaVersion: 1, criterion: { maxDistanceUiScale: 45, maxAxisDeltaDeg: 8 }, captures: [] };
+          for (const spec of specs) {
+            const result = JSON.parse(fs.readFileSync(spec.json, 'utf8'));
+            const badges = result.numberDetection?.candidates ?? [];
+            const tees = result.candidates ?? [];
+            const maxDistancePx = 45 * result.uiScalePx;
+
+            const teeAssignments = [];
+            for (const tee of tees) {
+              const passing = [];
+              for (const badge of badges) {
+                const dx = badge.xPx - tee.center.xPx;
+                const dy = badge.yPx - tee.center.yPx;
+                const distancePx = Math.hypot(dx, dy);
+                if (distancePx > maxDistancePx) continue;
+                const bearingDeg = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+                const deltaDeg = axisDeltaDeg(tee.orientationDeg, bearingDeg);
+                if (deltaDeg <= 8) passing.push({ label: badge.label, distancePx, deltaDeg, xPx: badge.xPx, yPx: badge.yPx });
+              }
+              passing.sort((a, b) => a.distancePx - b.distancePx);
+              if (passing[0]) teeAssignments.push({ teeIndex: tee.index, tee: tee.center, axisDeg: tee.orientationDeg, source: tee.source, score: tee.score, badge: passing[0], alternatives: passing.slice(1) });
+            }
+
+            const badgeSupport = badges.map((badge) => {
+              const supporters = teeAssignments.filter((assignment) => assignment.badge.label === badge.label)
+                .sort((a, b) => a.badge.distancePx - b.badge.distancePx);
+              return {
+                label: badge.label,
+                xPx: badge.xPx,
+                yPx: badge.yPx,
+                supporters: supporters.map((s) => ({ teeIndex: s.teeIndex, distancePx: s.badge.distancePx, deltaDeg: s.badge.deltaDeg, source: s.source, score: s.score }))
+              };
+            });
+
+            const truth = {
+              schemaVersion: 1,
+              source: { fileName: spec.file, widthPx: result.input.widthPx, heightPx: result.input.heightPx },
+              badges: badges
+                .filter((badge) => Number.isInteger(badge.label))
+                .map((badge) => ({ label: badge.label, xPx: badge.xPx, yPx: badge.yPx }))
+                .sort((a, b) => a.label - b.label)
+            };
+            fs.writeFileSync(`artifacts/rec-${spec.id}-provisional-number-golden.json`, JSON.stringify(truth, null, 2) + '\n');
+            report.captures.push({
+              id: spec.id,
+              uiScalePx: result.uiScalePx,
+              labels: truth.badges.map((b) => b.label),
+              badgeCount: truth.badges.length,
+              rawTeeCount: tees.length,
+              teeAssignments,
+              badgeSupport
+            });
+          }
+          const union = [...new Set(report.captures.flatMap((capture) => capture.labels))].sort((a, b) => a - b);
+          report.aggregate = { labelUnion: union, coversOneThroughNine: union.join(',') === '1,2,3,4,5,6,7,8,9' };
+          fs.writeFileSync('artifacts/rec-yolo-report.json', JSON.stringify(report, null, 2) + '\n');
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rec-yolo-label-probe
+          path: artifacts/
+          if-no-files-found: error
