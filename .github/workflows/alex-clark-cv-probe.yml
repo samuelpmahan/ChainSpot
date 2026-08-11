@@ -1,0 +1,104 @@
+name: Alex Clark CV probe
+
+on:
+  push:
+    branches:
+      - agent/alex-clark-cv-probe
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Recover exact labeled source image
+        env:
+          FRAME_URL: "https://07eb83da-a596-4aac-b7be-4891357537f6.frame.claudeusercontent.com/_f/1786428015-74ba/?__frame_t=Mrm3lcRnfrlbVz-F2iXsJOCC.80361888-b704-4669-887a-108499ebf88c.d0a936e1-b1fb-4b59-b037-33bf79e2bde1.1786431646&__frame_v=manifest.8d0051def50d52f9.json"
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 "$FRAME_URL" -o /tmp/alex-frame.html
+          node <<'NODE'
+          const fs = require('node:fs');
+          const jpeg = require('jpeg-js');
+          const text = fs.readFileSync('/tmp/alex-frame.html', 'utf8');
+          const match = text.match(/data:image\/jpeg;base64,([^"'\s<]+)/);
+          if (!match) throw new Error('Claude frame did not contain the embedded Alex Clark JPEG');
+          const bytes = Buffer.from(match[1], 'base64');
+          const decoded = jpeg.decode(bytes, { useTArray: true });
+          if (decoded.width !== 1290 || decoded.height !== 2086) {
+            throw new Error(`Unexpected Alex image size ${decoded.width}x${decoded.height}; expected 1290x2086`);
+          }
+          fs.writeFileSync('resources/cv-gallery/alex-clark.jpg', bytes);
+          console.log(`Recovered Alex Clark JPEG: ${bytes.length} bytes, ${decoded.width}x${decoded.height}`);
+          NODE
+
+      - name: Build temporary truth bundle and dev-only gallery cases
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/alex-bundle/images artifacts
+          cp resources/cv-gallery/alex-clark.jpg /tmp/alex-bundle/images/alex-clark.jpg
+          node <<'NODE'
+          const fs = require('node:fs');
+          const geometry = JSON.parse(fs.readFileSync('resources/cv-gallery/alex-clark-geometry.json', 'utf8'));
+          const project = {
+            schemaVersion: 4,
+            images: [{
+              role: 'source-overview',
+              mimeType: 'image/jpeg',
+              fileName: 'alex-clark.jpg',
+              bundlePath: 'images/alex-clark.jpg'
+            }],
+            holes: geometry.holes
+          };
+          fs.writeFileSync('/tmp/alex-bundle/project.json', JSON.stringify(project, null, 2));
+
+          const galleryPath = 'resources/cv-gallery/gallery.json';
+          const gallery = JSON.parse(fs.readFileSync(galleryPath, 'utf8'));
+          gallery.cases.push(
+            {
+              id: 'numbers-alex-clark',
+              detector: 'numbers',
+              resolutionClass: 'non-stitched',
+              status: 'candidate',
+              inputPath: 'resources/cv-gallery/alex-clark.jpg',
+              note: 'Throwaway Alex Clark development probe; no number truth supplied.'
+            },
+            {
+              id: 'baskets-alex-clark',
+              detector: 'baskets',
+              resolutionClass: 'non-stitched',
+              status: 'candidate',
+              inputPath: 'resources/cv-gallery/AlexClarkProbe.chainspot.zip',
+              evaluation: 'golden-localization',
+              note: 'Throwaway Alex Clark development probe using recovered 18 basket centers.'
+            }
+          );
+          fs.writeFileSync(galleryPath, JSON.stringify(gallery, null, 2) + '\n');
+          NODE
+          (cd /tmp/alex-bundle && zip -qr "$GITHUB_WORKSPACE/resources/cv-gallery/AlexClarkProbe.chainspot.zip" .)
+
+      - name: Run number probe
+        run: npm run cv:dev -- --case numbers-alex-clark --out artifacts/alex-numbers --json | tee artifacts/alex-numbers.log
+
+      - name: Run basket localization probe
+        run: npm run cv:dev -- --case baskets-alex-clark --out artifacts/alex-baskets --json | tee artifacts/alex-baskets.log
+
+      - name: Run full course detector observationally
+        run: npm run detect:course -- resources/cv-gallery/AlexClarkProbe.chainspot.zip --out artifacts/alex-course | tee artifacts/alex-course.log
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alex-clark-cv-probe
+          path: artifacts/
+          if-no-files-found: warn
