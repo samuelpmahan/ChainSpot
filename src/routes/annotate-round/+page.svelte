@@ -381,7 +381,7 @@
 		readonly point: SourcePoint;
 		readonly holeId: string;
 		readonly holeNumber: number;
-		readonly mode: 'replace' | 'move';
+		readonly mode: 'replace' | 'move' | 'delete';
 	}
 	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
 	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
@@ -840,7 +840,7 @@
 		const active = activeHole();
 		if (!active) return `Detected ${label}`;
 		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return `Detected ${label} — already hole ${active.number}'s ${label}`;
+		if (sourceHole?.id === active.id) return `Detected ${label} — hole ${active.number}'s own ${label}, click to remove`;
 		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
 		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace`;
 		if (sourceHole) return `Detected ${label} — move to hole ${active.number}`;
@@ -859,7 +859,17 @@
 		const active = activeHole();
 		if (!active) return;
 		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return; // Already exactly this hole's point; nothing to do.
+		if (sourceHole?.id === active.id) {
+			// Already exactly this hole's point: clicking it again offers to remove it.
+			candidateAssignConfirm = {
+				kind,
+				point,
+				holeId: active.id,
+				holeNumber: active.number,
+				mode: 'delete'
+			};
+			return;
+		}
 		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
 		if (!activeHasFeature && !sourceHole) {
 			holes = assignCandidateToHole(holes, active.id, kind, point);
@@ -875,11 +885,15 @@
 		};
 	}
 
-	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath. */
+	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath; delete clears the hole's feature instead. */
 	function confirmCandidateAssign(): void {
 		if (!candidateAssignConfirm) return;
-		const { holeId, kind, point } = candidateAssignConfirm;
-		holes = assignCandidateToHole(holes, holeId, kind, point);
+		const { holeId, kind, point, mode } = candidateAssignConfirm;
+		if (mode === 'delete') {
+			holes = kind === 'tee' ? removeTee(holes, holeId) : removeBasket(holes, holeId);
+		} else {
+			holes = assignCandidateToHole(holes, holeId, kind, point);
+		}
 		candidateAssignConfirm = null;
 		vibrate(8);
 	}
@@ -1671,20 +1685,35 @@
 		activeHoleId = addedHole.id;
 	}
 
-	/** A stitched PNG awaiting explicit import from the Stitch Map page. */
+	/** A stitched PNG awaiting import from the Stitch Map page (banner shown only when import isn't safe to do automatically — see `canAutoImportHandoffSafely`). */
 	let pendingHandoff = $state<PendingHandoff | null>(null);
 	let importingHandoff = $state(false);
 	let handoffError = $state<string | null>(null);
 
 	/**
+	 * Whether the pending handoff can complete on its own, with no confirmation
+	 * click, right now. A handoff replaces the whole source image, and
+	 * `handleSourceDomainChanged` already treats any source replacement as
+	 * invalidating every existing hole (their coordinates are pixel positions
+	 * into a specific raster — see its own doc comment). So auto-import is only
+	 * safe when there is nothing to lose: no source image loaded yet and no
+	 * holes placed. If either is present, the banner stays and its copy says
+	 * plainly that importing replaces the current source.
+	 */
+	function canAutoImportHandoffSafely(): boolean {
+		return sourceImage() === null && holes.length === 0;
+	}
+
+	/**
 	 * Uses the shared `importHandoffImage` flow (see `$lib/handoffImport.ts`)
 	 * with this route's own discard-confirmation: an Annotate Round project
 	 * never has correspondence pairs to lose, so confirmDiscard is trivially
-	 * true here, unlike create-graphics' dialog-backed confirmation.
+	 * true here, unlike create-graphics' dialog-backed confirmation. Shared by
+	 * both the automatic (safe arrival) and manual (banner click) paths — the
+	 * only difference is who calls it and with which handoff.
 	 */
-	async function handleHandoffImport(): Promise<void> {
-		const handoff = pendingHandoff;
-		if (!handoff || importingHandoff) return;
+	async function importHandoff(handoff: PendingHandoff): Promise<void> {
+		if (importingHandoff) return;
 		importingHandoff = true;
 		handoffError = null;
 		try {
@@ -1696,6 +1725,12 @@
 				confirmDiscard: () => true
 			});
 			if (result.status === 'error') {
+				// Surface the failure via the normal banner instead of failing
+				// silently on the automatic path — the handoff is still pending in
+				// the session store (not consumed on error), so falling back to the
+				// banner lets the user see the error and retry with the manual
+				// Import button, or dismiss.
+				pendingHandoff = handoff;
 				handoffError = result.message;
 				return;
 			}
@@ -1706,6 +1741,11 @@
 		} finally {
 			importingHandoff = false;
 		}
+	}
+
+	function handleHandoffImport(): void {
+		if (!pendingHandoff) return;
+		void importHandoff(pendingHandoff);
 	}
 
 	function handleHandoffDismiss(): void {
@@ -1841,10 +1881,24 @@
 	/**
 	 * Gated on participatesInSession so injected-editor unit tests never observe
 	 * cross-test session leakage from the module-level handoff store.
+	 *
+	 * A safe arrival (`canAutoImportHandoffSafely`) imports immediately without
+	 * ever setting `pendingHandoff` — the banner never renders, so there's
+	 * nothing for the user to press. An unsafe arrival (a source image and/or
+	 * holes already present) leaves the banner up for an explicit decision,
+	 * exactly as before.
 	 */
 	function readPendingHandoff(): void {
 		const handoff = participatesInSession ? getPendingHandoff() : null;
-		pendingHandoff = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+		const targeted = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+		if (targeted && canAutoImportHandoffSafely()) {
+			// No stale banner from a previous (unsafe) handoff should hang around
+			// while this one imports itself.
+			pendingHandoff = null;
+			void importHandoff(targeted);
+			return;
+		}
+		pendingHandoff = targeted;
 	}
 
 	onMount(() => {
@@ -1888,7 +1942,13 @@
 			data-testid="pending-handoff"
 			aria-label="Pending stitched image"
 		>
-			<p>Stitched image “{pendingHandoff.fileName}” is ready to import as the UDisc source.</p>
+			<p>
+				Stitched image “{pendingHandoff.fileName}” is ready to import as the UDisc source.
+				{#if sourceImage() || holes.length > 0}
+					Importing will replace the current source image and discard any annotations placed
+					against it.
+				{/if}
+			</p>
 			<div class="handoff-actions">
 				<button
 					type="button"
@@ -2739,7 +2799,9 @@
 						>
 							{candidateAssignConfirm.mode === 'replace'
 								? `Replace ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
-								: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
+								: candidateAssignConfirm.mode === 'delete'
+									? `Delete ${candidateAssignConfirm.kind} on hole ${candidateAssignConfirm.holeNumber}?`
+									: `Move to hole ${candidateAssignConfirm.holeNumber}?`}
 						</button>
 						<button
 							type="button"

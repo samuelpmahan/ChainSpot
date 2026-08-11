@@ -1314,12 +1314,21 @@
 		selectLocation(match);
 	}
 
-	/** "Use this location" on the map confirm step: same lat/lon inputs a picked Nominatim result writes directly. */
+	/**
+	 * "Use this location" on the map confirm step: writes the same lat/lon inputs a
+	 * picked Nominatim result writes directly, then goes straight on to fetch the
+	 * aerial preview — the user already pinpointed the spot on the map, so a second
+	 * "Fetch aerial map" press would carry no new decision. `handleNaipFetch` reads
+	 * `naipLatInput`/`naipLonInput`/`naipRadiusInput` fresh each call, so setting
+	 * them first and then calling it (rather than passing `point` through) keeps
+	 * this on the exact same fetch path the manual button uses, radius included.
+	 */
 	function handleMapConfirmUse(point: GeoPoint): void {
 		naipLatInput = String(point.lat);
 		naipLonInput = String(point.lon);
 		naipError = null;
 		mapConfirmState = null;
+		void handleNaipFetch();
 	}
 
 	/** Cancel closes the confirm step without touching the lat/lon inputs. */
