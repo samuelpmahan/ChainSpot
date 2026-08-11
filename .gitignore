@@ -10,6 +10,7 @@ test-results/
 tickets/
 Phase1Tickets/
 tests/fixtures/smart-import-large/
+artifacts/cv-runs/
 __pycache__/
 *.pyc
 .claude/
