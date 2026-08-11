@@ -1,62 +1,107 @@
 # CV Qualification Gallery
 
-This directory is the merge-gate memory for ChainSpot CV.
+This directory is ChainSpot's lightweight CV memory: one shared gallery for merge qualification **and** day-to-day detector development.
 
-## Rule zero
+## MVP rule
+
+Qualification protects claims ChainSpot already needs for the MVP. It is not a mandate to benchmark every subsystem or hand-label every image.
+
+Adding a gate should have a demonstrated MVP regression risk or near-zero annotation cost. Coverage breadth is not a goal.
+
+Course Memory is intentionally **not** in this suite. Tees are intentionally **not** gating while that detector is under active research.
+
+## Rule zero: no per-image tuning
 
 A detector may adapt to pixels it observes at runtime. The gallery may not tune the detector per fixture.
 
-Fixture manifests contain only input/truth/provenance. `scripts/verify-cv-gallery.ts` rejects unknown case keys so there is no place to pass per-image thresholds, UI scales, template scales, crop values, or detector modes.
+Fixture entries contain inputs, truth/provenance, and the kind of evaluation available. `scripts/verify-cv-gallery.ts` rejects unknown case keys, so there is no fixture field for thresholds, UI scales, template scales, crop values, or detector modes.
 
-Every enabled gate must have at least one real **non-stitched** fixture and one real **stitched** fixture. Missing resolution coverage is a qualification failure, not a warning.
+If fixing one image breaks another, improve the shared detector. Do not add an image-specific parameter.
 
-## Current gates
+## Two modes
 
-### Numbers
+### Development mode
 
-For every active number fixture:
+```bash
+npm run cv:dev
+```
 
-- detected physical candidate count must equal the manually verified visible badge count;
-- labeled count must equal that truth count;
-- predicted label set must exactly equal the manually verified visible label set;
-- every same-label center must be within 5 source-image pixels of golden truth.
+Development mode runs every gallery case it can, including pending-truth and candidate fixtures. It does **not** care whether merge gates pass and does not exit nonzero because an individual detector result is bad.
 
-This deliberately supports partial courses. A 9-hole/9-visible The Rec fixture should therefore pass as 9/9 with the exact nine golden labels; the detector still runs with the same production/default configuration used by 18-hole fixtures.
+Each run is persisted under:
 
-### Baskets — localization only
+```text
+artifacts/cv-runs/<timestamp>/
+  run.json
+  <case-id>/... detector overlays/artifacts ...
+```
 
-- exactly 18 basket candidates;
-- 18/18 golden basket locations matched;
-- 0 false positives.
+`run.json` records the git commit, timestamps, fixture results, and detector metrics. This is the experiment notebook: compare runs instead of remembering which screenshot/version looked good.
 
-This does **not** claim basket-to-hole association. Association is explicitly outside this gate.
+To iterate on one fixture without paying for the whole gallery:
 
-### Tees
+```bash
+npm run cv:dev -- --case numbers-reference-stitched
+```
 
-TODO / non-gating while tee research is moving quickly.
+Development output deliberately says `RUN`, `SKIP`, or `ERROR`, not PASS/FAIL.
 
-## The Rec
-
-`gallery.json` already reserves the existing The Rec captures as pending number fixtures so they cannot be forgotten. They stay blocking until the exact 9-badge view is selected/confirmed and manually verified number centers are committed as truth. Do not bootstrap those centers from the detector being tested.
-
-## Running
+### Merge-gate mode
 
 ```bash
 npm run verify:cv
 ```
 
-`--json` appends a machine-readable result dump:
+Gate mode runs only active required fixtures and exits nonzero for a regression, a required pending-truth fixture, or missing required stitched/non-stitched coverage.
 
-```bash
-npm run verify:cv -- --json
+`--json` is available in either mode for machine-readable stdout.
+
+## Current MVP gates
+
+### Numbers
+
+Numbers intentionally require both non-stitched and stitched real imagery.
+
+For every active golden number fixture:
+
+- physical candidate count equals the manually verified visible badge count;
+- labeled count equals that truth count;
+- predicted label set exactly equals the visible golden label set;
+- every same-label center is within 5 source-image pixels of golden truth.
+
+The existing native 18-hole reference is active. One stitched full-course truth set is still required. The Rec must contribute **one** verified 9/9 case; the alternate Rec capture stays development-only unless it proves independently useful. Do not annotate both just for breadth.
+
+### Baskets — localization, not association
+
+The existing `GoldenBasketSet.chainspot.zip` remains the hard localization gate:
+
+- exactly 18 basket candidates;
+- 18/18 golden basket locations matched;
+- 0 false positives.
+
+For stitched imagery, MVP does **not** require manually reconstructing 18 more basket centers. The stitched gate is a scale/regression smoke test through the production course-detection path:
+
+- exactly 18 raw basket candidates.
+
+This catches the class of stitched-raster scale failures that already bit ChainSpot without turning basket annotation into a second project.
+
+Neither basket gate claims basket-to-hole association. Association is explicitly not evaluated.
+
+### Tees
+
+TODO / non-gating while tee research is moving quickly.
+
+## Fixture admission
+
+A real CV bug should usually leave behind a cheap regression fixture. But do not expand the gallery merely because another image exists.
+
+The intended MVP loop is:
+
+```text
+observe real failure
+→ add/reuse the cheapest fixture that captures it
+→ run cv:dev while iterating
+→ shared detector improves
+→ required gallery goes green
+→ merge
 ```
-
-A run exits nonzero for:
-
-- a detector regression;
-- a pending truth fixture;
-- missing stitched/non-stitched coverage;
-- a missing input/truth file;
-- an invalid gallery schema.
-
-The intended workflow is: add real failure image → add human truth → observe failing qualification → improve shared detector → entire gallery must pass.
