@@ -222,7 +222,7 @@ interface BasketTruth {
 	readonly yPx: number;
 }
 
-function loadBasketTruth(bundlePath: string): readonly BasketTruth[] {
+export function loadBasketTruth(bundlePath: string): readonly BasketTruth[] {
 	const entries = unzipSync(new Uint8Array(readFileSync(resolve(bundlePath))));
 	const jsonBytes = entries['project.json'];
 	if (!jsonBytes) throw new Error(`--baskets bundle '${bundlePath}' does not contain project.json.`);
@@ -360,7 +360,7 @@ function fitGlobalRingRadii(blobs: readonly DashBlob[], baskets: readonly Basket
 	return kept.sort((a, b) => a - b);
 }
 
-function buildDashStructures(
+export function buildDashStructures(
 	raster: TeePadRaster,
 	baskets: readonly BasketTruth[],
 	tees: readonly TeeTruth[]
@@ -409,7 +409,7 @@ interface BadgeAnchor {
 	readonly radiusPx: number;
 }
 
-function detectBadgeAnchors(cv: TeePadCv, input: LoadedInput, templateDir: string): readonly BadgeAnchor[] {
+export function detectBadgeAnchors(cv: TeePadCv, input: LoadedInput, templateDir: string): readonly BadgeAnchor[] {
 	const manifest = loadValidatedTemplateManifest(templateDir);
 	const detection = detectCalibratedHoleNumberBadges(
 		cv as unknown as HoleNumberCvModule,
@@ -446,7 +446,7 @@ interface FittedPad {
  * (exactly tee 5's situation) — but the rim outline, even bisected, keeps
  * its fragments aligned along the pad's major axis.
  */
-function fitPadAt(
+export function fitPadAt(
 	raster: TeePadRaster,
 	centerXPx: number,
 	centerYPx: number,
@@ -480,12 +480,70 @@ function fitPadAt(
 		}
 		return false;
 	};
-	for (let y = y0; y <= y1; y += 1) {
-		for (let x = x0; x <= x1; x += 1) {
-			if (!brightAt(x, y)) continue;
-			if (structures && distanceToStructuresAt(x, y, structures) <= structures.bandPx) continue;
-			if (nearBlackAt(x, y)) continue;
-			points.push({ x, y });
+	// Component-level filtering. Per-pixel on-structure suppression is too
+	// blunt for the fit: measured on tee 14, basket 13's ring runs nearly
+	// tangent along BOTH long edges of the pad, so per-pixel suppression
+	// deletes the rails and leaves only the short edges. A dash is a SMALL
+	// blob sitting on a structure; a rim is a large component that may merely
+	// graze one. So classify whole components: drop small mostly-on-structure
+	// blobs (dashes) and black-adjacent components (glyphs/badges), keep the
+	// rest intact.
+	const margin = 10;
+	const cx0 = Math.max(0, x0 - margin);
+	const cx1 = Math.min(raster.widthPx - 1, x1 + margin);
+	const cy0 = Math.max(0, y0 - margin);
+	const cy1 = Math.min(raster.heightPx - 1, y1 + margin);
+	const width = cx1 - cx0 + 1;
+	const height = cy1 - cy0 + 1;
+	const visited = new Uint8Array(width * height);
+	const stack: number[] = [];
+	for (let y = cy0; y <= cy1; y += 1) {
+		for (let x = cx0; x <= cx1; x += 1) {
+			const startIndex = (y - cy0) * width + (x - cx0);
+			if (visited[startIndex] || !brightAt(x, y)) continue;
+			const component: Array<{ x: number; y: number }> = [];
+			let minX = x;
+			let maxX = x;
+			let minY = y;
+			let maxY = y;
+			let onStructure = 0;
+			let blackAdjacent = 0;
+			visited[startIndex] = 1;
+			stack.push(startIndex);
+			while (stack.length > 0) {
+				const index = stack.pop() as number;
+				const px = cx0 + (index % width);
+				const py = cy0 + ((index / width) | 0);
+				component.push({ x: px, y: py });
+				if (px < minX) minX = px;
+				if (px > maxX) maxX = px;
+				if (py < minY) minY = py;
+				if (py > maxY) maxY = py;
+				if (structures && distanceToStructuresAt(px, py, structures) <= structures.bandPx) onStructure += 1;
+				if (nearBlackAt(px, py)) blackAdjacent += 1;
+				for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+					const nx = px + dx;
+					const ny = py + dy;
+					if (nx < cx0 || ny < cy0 || nx > cx1 || ny > cy1) continue;
+					const neighborIndex = (ny - cy0) * width + (nx - cx0);
+					if (visited[neighborIndex] || !brightAt(nx, ny)) continue;
+					visited[neighborIndex] = 1;
+					stack.push(neighborIndex);
+				}
+			}
+			const span = Math.max(maxX - minX + 1, maxY - minY + 1);
+			const isDash = span <= 25 && onStructure / component.length >= 0.5;
+			// Glyph/badge white bodies are hugely black-adjacent; but a pad rim
+			// over dark canopy also touches near-black pixels, so the black
+			// test must stay PER-PIXEL — dropping whole components on it
+			// deletes entire rims (measured: tees 1, 3, 11, 12).
+			const isGlyphLike = blackAdjacent / component.length >= 0.6;
+			if (isDash || isGlyphLike) continue;
+			for (const point of component) {
+				if (point.x < x0 || point.x > x1 || point.y < y0 || point.y > y1) continue;
+				if (nearBlackAt(point.x, point.y)) continue;
+				points.push(point);
+			}
 		}
 	}
 	if (points.length < 20) return undefined;
@@ -504,6 +562,12 @@ function fitPadAt(
 		if (length < 6) continue;
 		const nx = -dy / length;
 		const ny = dx / length;
+		// A genuine long-side line runs within about the pad's half-minor of
+		// the pad center (the scoring peak). Without this constraint, a long
+		// bright feature at the window edge — measured: a basket-glyph cup
+		// top 16px below tee 14's center — can out-inlier the pad's own
+		// ring-bisected rails.
+		if (Math.abs((centerXPx - first.x) * nx + (centerYPx - first.y) * ny) > 9) continue;
 		const inliers = points.filter((point) => Math.abs((point.x - first.x) * nx + (point.y - first.y) * ny) <= 1.5);
 		if (inliers.length > bestInliers.length) bestInliers = inliers;
 	}
@@ -582,7 +646,7 @@ function distanceToStructuresAt(xPx: number, yPx: number, structures: DashStruct
  * along its major axis, and all three parallel rays (center and the two
  * long-side offsets) pass within the badge disc.
  */
-function badgeRayInvariantHolds(pad: FittedPad, badge: BadgeAnchor): boolean {
+export function badgeRayInvariantHolds(pad: FittedPad, badge: BadgeAnchor): boolean {
 	const toBadgeX = badge.xPx - pad.xPx;
 	const toBadgeY = badge.yPx - pad.yPx;
 	let ux = pad.ux;

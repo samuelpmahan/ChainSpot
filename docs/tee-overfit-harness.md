@@ -28,15 +28,38 @@ npm run overfit:tees -- resources/GoldenTeeSet.chainspot.zip \
 
 A valid tee pad AIMS at its own number badge: the rays along both long
 sides, and the ray perpendicular to the front (short) edge, all intersect
-the badge. Measured on tee 5: the pad's major axis points within ~3.5° of
-badge 5 at 71.6px range. The harness checks it by fitting the pad's
-dominant rim line (RANSAC over clean-bright, off-structure, non-black
-pixels — blob PCA fails when the ring band bisects the rim, but the longest
-collinear fragment IS a long-side ray; fitted −30.3° vs true −29.7° on tee
-5) and requiring the center ray plus both long-side offsets to pass within
-the badge disc, badge ahead of the front edge. Note tee 5 sits 40.5 UI
-multiples from badge 5 — just past the production 40-multiple gap-fallback
-radius — so the badge-anchored search uses 45.
+the badge. The harness checks it by fitting the pad's dominant rim line
+(RANSAC over clean-bright, off-structure, non-black pixels — blob PCA fails
+when the ring band bisects the rim, but the longest collinear fragment IS a
+long-side ray) and requiring the center ray plus both long-side offsets to
+pass within the badge disc, badge ahead of the front edge. Note tee 5 sits
+40.5 UI multiples from badge 5 — just past the production 40-multiple
+gap-fallback radius — so the badge-anchored search uses 45.
+
+Measured with `npm run validate:badge-invariant` (computer-fitted axes, not
+truth-derived): the invariant holds on **18/18** truth tees. Mean
+axis-to-badge-bearing delta is 2.2°, max 5.8° (tee 14); the worst ray
+offset across all 18 pads is 9.5px against the 25px badge disc, so the
+margin holds everywhere. On specificity, 14/18 pads pass only their own
+badge; 4 pads (tees 3, 4, 9, 18) also pass exactly one farther badge, and
+those are disambiguated by taking the nearest passing badge. Only tee 2 has
+a basket sitting on its pad→badge corridor (3px clearance), so the test is
+kept as pure ray geometry against the badge disc — no first-object-hit ray
+marching against baskets or other occluders.
+
+Two fit lessons fell out of getting this to 18/18:
+
+- **Dash filtering must be component-level, not per-pixel.** Deleting every
+  pixel inside the dashed-ring structure band deletes real rail pixels too
+  when a ring happens to run tangent to the pad (tee 14). Instead, a dash is
+  identified as a connected bright component whose span is ≤25px AND whose
+  pixels are ≥50% inside the structure band, and only components meeting
+  that test are dropped — rails that merely clip the band survive.
+- **Black-adjacency must stay per-pixel.** Pads sitting over dark canopy
+  touch near-black pixels along their rim (tees 1, 3, 11, 12); suppressing
+  by component would throw those rims out entirely, so black-adjacency
+  (and the ≥60% black-adjacent "glyph-like" rejection) is applied pixel by
+  pixel when collecting rim points.
 
 ## Why hole 5 is hard, and what actually separates it
 

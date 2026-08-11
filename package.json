@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "detect:tees": "tsx scripts/detect-tees.ts",
     "overfit:tees": "tsx scripts/overfit-tees.ts",
+    "validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
     "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
     "detect:course": "tsx scripts/detect-course.ts",
     "benchmark:active-review": "node --experimental-strip-types scripts/benchmark-active-review.ts",
