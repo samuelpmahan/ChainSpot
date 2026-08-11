@@ -16,7 +16,7 @@ import type {
 import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedHoleNumberBadges,
-	detectCalibratedTeeGapFallbackCandidates,
+	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates,
 	detectCalibratedTeePadVariants,
 	findCalibratedBasketAnchorScale
@@ -578,11 +578,31 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const full = fullResolutionRaster(request.bitmap);
 	const teeRasterMs = performance.now() - teeRasterStartedAt;
 	const teeDetectionStartedAt = performance.now();
-	const tees = detectCalibratedTeePadCandidates(
+	const teeRaster = { rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 };
+	const teeBadges = numberDetection.candidates
+		.filter((candidate): candidate is typeof candidate & { label: number } => candidate.label !== undefined)
+		.map((candidate) => ({
+			holeNumber: candidate.label,
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+	const teeBootstrap = detectCalibratedTeeBootstrap(
 		cv,
-		{ rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 },
-		{ uiScalePx: calibration.uiScalePx, mapBoundsPx }
+		teeRaster,
+		{ uiScalePx: calibration.uiScalePx, mapBoundsPx },
+		teeBadges
 	);
+	const tees = teeBootstrap.candidates;
+	const grammarTees = teeBootstrap.assignments.map((assignment) => ({
+		...assignment.candidate,
+		holeNumber: assignment.holeNumber,
+		bootstrapDecision: assignment.decision,
+		confidence: assignment.decision === 'auto'
+			? Math.max(0.75, assignment.confidence)
+			: Math.min(0.49, assignment.confidence)
+	}));
 	const teeDetectionMs = performance.now() - teeDetectionStartedAt;
 	const teesMs = performance.now() - teesStartedAt;
 
@@ -590,39 +610,18 @@ async function detectCourse(request: CourseDetectionRequest) {
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
 		score: candidate.score,
-		holeNumber: candidate.label
+		holeNumber: candidate.label,
+		widthPx: candidate.widthPx,
+		heightPx: candidate.heightPx
 	}));
 	reportCourseProgress(
 		request,
 		'grammar',
-		`${tees.length} tees found · matching course grammar…`,
+		`${teeBootstrap.counts.auto} tee AUTO · ${teeBootstrap.counts.review} REVIEW · ${teeBootstrap.counts.unresolved} unresolved · matching course grammar…`,
 		elapsedMs()
 	);
 	const grammarStartedAt = performance.now();
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees, baskets });
-
-	// A hole whose tee ownership survives with low confidence typically means
-	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
-	// badge -- e.g. a bright dashed putting-circle stroke crossing the pad.
-	// Recover those specific badges with a tightly-scoped `occluded-edge-loop`
-	// fallback and re-associate once more; every other hole is untouched.
-	const gappedBadges = primaryGrammar.holes
-		.filter((hole) => hole.tee && hole.tee.confidence < 0.5 && hole.numberBadge)
-		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
-	const gapFallbackStartedAt = performance.now();
-	const gapFallbackCandidates = gappedBadges.length
-		? detectCalibratedTeeGapFallbackCandidates(
-				cv,
-				{ rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 },
-				{ uiScalePx: calibration.uiScalePx, mapBoundsPx },
-				gappedBadges
-			)
-		: [];
-	const gapFallbackMs = performance.now() - gapFallbackStartedAt;
-	const finalTees = gapFallbackCandidates.length ? [...tees, ...gapFallbackCandidates] : tees;
-	const grammar = gapFallbackCandidates.length
-		? associateCourseGrammar({ numberBadges, tees: finalTees, baskets })
-		: primaryGrammar;
+	const grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets });
 	const grammarMs = performance.now() - grammarStartedAt;
 
 	const performanceReport = {
@@ -649,7 +648,6 @@ async function detectCourse(request: CourseDetectionRequest) {
 			teesMs,
 			teeRasterMs,
 			teeDetectionMs,
-			gapFallbackMs,
 			grammarMs
 		},
 		counts: {
@@ -657,10 +655,11 @@ async function detectCourse(request: CourseDetectionRequest) {
 			numberCandidates: numberDetection.candidates.length,
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			baskets: baskets.length,
-			tees: finalTees.length,
+			tees: tees.length,
 			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
-			gappedBadges: gappedBadges.length,
-			gapFallbackCandidates: gapFallbackCandidates.length
+			teeBootstrapAuto: teeBootstrap.counts.auto,
+			teeBootstrapReview: teeBootstrap.counts.review,
+			teeBootstrapUnresolved: teeBootstrap.counts.unresolved
 		},
 		calibration: {
 			numberTemplateScale: sourceNumberTemplateScale,
@@ -670,7 +669,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 		}
 	};
 
-	return { numberDetection, tees: finalTees, baskets, grammar, performance: performanceReport };
+	return { numberDetection, tees, teeBootstrap, baskets, grammar, performance: performanceReport };
 }
 
 async function processRequest(request: BasketRequest): Promise<void> {

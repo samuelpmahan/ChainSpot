@@ -8,7 +8,7 @@ import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedHoleNumberBadges,
-	detectCalibratedTeeGapFallbackCandidates,
+	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import type { CalibratedBasketCandidate } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
@@ -95,7 +95,17 @@ export interface CourseCliResult {
 		readonly reviewHoles: number;
 		readonly incompleteHoles: number;
 	};
-	readonly gapFallback: { readonly gappedBadgeCount: number; readonly addedCandidateCount: number };
+	readonly teeBootstrap: {
+		readonly auto: number;
+		readonly review: number;
+		readonly unresolved: number;
+		readonly holes: readonly Readonly<{
+			holeNumber: number;
+			decision: 'auto' | 'review' | 'unresolved';
+			candidateIndex?: number;
+			confidence?: number;
+		}>[];
+	};
 	readonly grammar: CourseGrammarResult;
 	readonly teeTruthEvaluation?: {
 		readonly tolerancePx: number;
@@ -503,34 +513,39 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	});
 
 	const teeRaster = { rgba: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
-	const teeCandidates = detectCalibratedTeePadCandidates(cv, teeRaster, {
+	const teeBadges = numberDetection.candidates
+		.filter((candidate): candidate is typeof candidate & { label: number } => candidate.label !== undefined)
+		.map((candidate) => ({
+			holeNumber: candidate.label,
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+	const teeBootstrap = detectCalibratedTeeBootstrap(cv, teeRaster, {
 		uiScalePx,
 		mapBoundsPx,
 		maxCandidates: args.maxTeeCandidates
-	});
+	}, teeBadges);
+	const teeCandidates = teeBootstrap.candidates;
+	const grammarTees = teeBootstrap.assignments.map((assignment) => ({
+		...assignment.candidate,
+		holeNumber: assignment.holeNumber,
+		bootstrapDecision: assignment.decision,
+		confidence: assignment.decision === 'auto'
+			? Math.max(0.75, assignment.confidence)
+			: Math.min(0.49, assignment.confidence)
+	}));
 
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
 		score: candidate.score,
-		holeNumber: candidate.label
+		holeNumber: candidate.label,
+		widthPx: candidate.widthPx,
+		heightPx: candidate.heightPx
 	}));
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
-
-	// A hole whose tee ownership survives with low confidence typically means
-	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
-	// badge -- the pipeline was forced to give it someone else's leftover
-	// candidate. Recover those specific badges with a tightly-scoped
-	// `occluded-edge-loop` fallback and re-associate once more; every other
-	// hole's candidates and assignment are untouched.
-	const gappedBadges = primaryGrammar.holes
-		.filter((hole) => hole.tee && hole.tee.confidence < 0.5 && hole.numberBadge)
-		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
-	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
-	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;
-	const grammar = gapFallbackCandidates.length
-		? associateCourseGrammar({ numberBadges, tees: finalTeeCandidates, baskets: basketCandidates })
-		: primaryGrammar;
+	const grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: basketCandidates });
 
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
@@ -550,19 +565,29 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			numberCandidates: numberDetection.candidates.length,
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			basketCandidates: basketCandidates.length,
-			teeCandidates: finalTeeCandidates.length,
+			teeCandidates: teeCandidates.length,
 			readyHoles,
 			reviewHoles,
 			incompleteHoles
 		},
-		gapFallback: { gappedBadgeCount: gappedBadges.length, addedCandidateCount: gapFallbackCandidates.length },
+		teeBootstrap: {
+			...teeBootstrap.counts,
+			holes: teeBootstrap.holes.map((hole) => ({
+				holeNumber: hole.holeNumber,
+				decision: hole.decision,
+				...(hole.assignment ? {
+					candidateIndex: hole.assignment.candidateIndex,
+					confidence: hole.assignment.confidence
+				} : {})
+			}))
+		},
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		overlayPath,
 		elapsedMs: performance.now() - startedAt
 	};
 
-	writeFileSync(overlayPath, renderOverlay(input, grammar, finalTeeCandidates, basketCandidates));
+	writeFileSync(overlayPath, renderOverlay(input, grammar, teeCandidates, basketCandidates));
 	writeFileSync(jsonPath, `${JSON.stringify(output, null, 2)}\n`);
 	console.log(JSON.stringify({ ...output, jsonPath }, null, 2));
 	return output;

@@ -20,7 +20,7 @@ import type { Candidate, CvRaster } from '../cv/types';
  * candidates within one pad radius are fused rather than choosing either one.
  */
 
-export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop';
+export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop' | 'template-search';
 
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 

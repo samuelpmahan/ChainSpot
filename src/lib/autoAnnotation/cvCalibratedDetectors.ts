@@ -34,6 +34,8 @@ import type {
 	TeePadVariant,
 	TeePadVariantResult
 } from './teePadDetection';
+import { assessTeeBootstrap, proposeWeakTeeCandidates } from './teeBootstrapPolicy';
+import type { TeeBadgeAnchor, TeeBootstrapResult } from './teeBootstrapPolicy';
 import {
 	asBasketTemplateScale,
 	asNumberTemplateScale
@@ -113,53 +115,54 @@ export function detectCalibratedOccludedEdgeLoopCandidates(
 	return detectOccludedEdgeLoopCandidates(cv, raster, options);
 }
 
-const DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE = 40;
-const DEFAULT_GAP_FALLBACK_SCORE_FLOOR = 0.7;
-const GAP_FALLBACK_MAX_CANDIDATES = 80;
+export interface CalibratedTeeBootstrapResult extends TeeBootstrapResult {
+	/** Generic candidate pool assessed by the confidence ladder. */
+	readonly candidates: readonly TeePadCandidate[];
+}
 
-export interface TeeGapFallbackOptions extends CalibratedTeePadDetectionOptions {
-	/** Search radius from the badge, in uiScalePx multiples. Defaults to 40. */
-	readonly radiusUiScaleMultiple?: number;
-	/** Minimum occluded-edge-loop score to accept a fallback candidate. Defaults to 0.7. */
-	readonly fallbackScoreFloor?: number;
+function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
+	const localMinor = Math.max(1, Math.min(a.widthPx, a.heightPx, b.widthPx, b.heightPx));
+	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx) <= localMinor * 0.45;
 }
 
 /**
- * Recovers a tee for a hole whose number badge has no confident primary
- * candidate (`gray-center`/`edge-loop`) nearby -- typically because a bright
- * dashed putting-circle stroke crosses the pad and outcompetes its own
- * low-contrast edge for `edge-loop`'s contour, or skews `gray-center`'s
- * narrow interior-brightness band. `occluded-edge-loop` tolerates a broken
- * rectangle (it pairs short rail segments instead of requiring one closed
- * loop), so it is used here strictly as a *fallback*: called only for the
- * badges the caller has already identified as gapped (e.g. via
- * `associateCourseGrammar`'s `weak-tee-confidence` failures), and gated by a
- * tight radius plus a high score floor so a low-confidence guess can never
- * outrank a real primary candidate elsewhere on the course. Validated
- * against `resources/GoldenTeeSet.chainspot.zip`: recovers a genuinely
- * gapped hole while leaving all previously-correct holes unchanged, whereas
- * fusing `occluded-edge-loop` into every hole's detection (no badge
- * targeting, no score floor) let one unrelated high-scoring false positive
- * outcompete a real primary candidate elsewhere on the course.
+ * Production clean-course tee bootstrap.
+ *
+ * Primary and occlusion-tolerant proposals are pooled once. Nothing is
+ * searched around a particular hole and no candidate is promoted because a
+ * previous global grammar assignment happened to be weak. The course-level
+ * policy then derives pad world scale from the pool, measures each pad axis,
+ * and emits AUTO / REVIEW / UNRESOLVED ownership against visible badges.
+ *
+ * Occluded-only proposals are deliberately weak appearance evidence, so they
+ * can become REVIEW (the H3/H5 class) but cannot become AUTO from a lucky ray
+ * intersection alone.
  */
-export function detectCalibratedTeeGapFallbackCandidates(
+export function detectCalibratedTeeBootstrap(
 	cv: TeePadCv,
 	raster: TeePadRaster,
-	options: TeeGapFallbackOptions,
-	gappedBadges: readonly Readonly<{ xPx: number; yPx: number }>[]
-): readonly TeePadCandidate[] {
-	if (gappedBadges.length === 0) return [];
-	const radiusPx = (options.radiusUiScaleMultiple ?? DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE) * options.uiScalePx;
-	const scoreFloor = options.fallbackScoreFloor ?? DEFAULT_GAP_FALLBACK_SCORE_FLOOR;
-	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, { ...options, maxCandidates: GAP_FALLBACK_MAX_CANDIDATES }).candidates;
-	const extras: TeePadCandidate[] = [];
-	for (const badge of gappedBadges) {
-		const nearby = occluded
-			.filter((candidate) => candidate.score >= scoreFloor && Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) <= radiusPx)
-			.sort((a, b) => b.score - a.score);
-		if (nearby[0]) extras.push(nearby[0]);
+	options: CalibratedTeePadDetectionOptions,
+	badges: readonly TeeBadgeAnchor[]
+): CalibratedTeeBootstrapResult {
+	const primary = detectTeePadCandidates(cv, raster, options);
+	const requested = options.maxCandidates ?? 18;
+	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, {
+		...options,
+		maxCandidates: Math.max(requested, requested * 2)
+	}).candidates;
+	const candidates: TeePadCandidate[] = [...primary];
+	for (const candidate of occluded) {
+		if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
 	}
-	return extras;
+	let assessed = assessTeeBootstrap(raster, candidates, badges);
+	if (assessed.calibration && assessed.counts.unresolved > 0) {
+		const weak = proposeWeakTeeCandidates(raster, badges, assessed.calibration, assessed, candidates);
+		for (const candidate of weak) {
+			if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
+		}
+		if (weak.length > 0) assessed = assessTeeBootstrap(raster, candidates, badges);
+	}
+	return { candidates, ...assessed };
 }
 
 export type CalibratedBasketCandidate = Omit<RawBasketCandidate, 'scale'> & {
