@@ -32,7 +32,13 @@ export interface CvRaster {
 	readonly heightPx: number;
 	readonly gray?: Uint8Array;
 	readonly rgba?: Uint8Array | Uint8ClampedArray;
-	/** Source pixels per raster pixel: 1 at full resolution, >1 after a downsample. */
+	/**
+	 * Source pixels per raster pixel: 1 at full resolution, >1 after a
+	 * downsample. Required (not defaulted) on purpose -- an omitted value
+	 * used to silently behave as 1, which is indistinguishable from a
+	 * deliberate "this really is full resolution" declaration. Every
+	 * construction site must say which raster space it built.
+	 */
 	readonly sourceScale: number;
 }
 

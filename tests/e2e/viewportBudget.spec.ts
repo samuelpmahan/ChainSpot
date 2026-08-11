@@ -259,10 +259,10 @@ test('create-graphics: combined pane area is ≥55% of viewport width', async ({
 	expect(source.width + target.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
 });
 
-// FAILING today: the panes are a fixed 420px = 58.7% of height (51.5% at 1440).
-// Root cause and minimal fix: docs/13-inch-pass.md, ANNOYING table + Ticket A
-// (ImagePane.svelte:692 `.scene { height: 420px }`).
-test.fixme('create-graphics: pane height is ≥65% of viewport height', async ({ page }) => {
+// Fixed by Ticket A: `.scene` was a fixed 420px = 58.7% of height (51.5% at
+// 1440); it is now `clamp(420px, round(66vh, 1px), 640px)`, so the pane grows
+// with the viewport and never shrinks going 1280 → 1440.
+test('create-graphics: pane height is ≥65% of viewport height', async ({ page }) => {
 	await gotoApp(page, '/create-graphics');
 	const source = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
 	expect(source.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
@@ -275,10 +275,10 @@ test('stitch-map: alignment workspace is ≥55% of viewport width', async ({ pag
 	expect(workspace.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
 });
 
-// FAILING today: crop preview is a fixed 280px = 39.2% of height, and the
-// alignment workspace a fixed 440px = 61.8%. Root cause and minimal fix:
-// docs/13-inch-pass.md row 13 + Ticket A (stitch-map/+page.svelte:1867, :1947).
-test.fixme(
+// Fixed by Ticket A: crop preview was a fixed 280px = 39.2% of height and the
+// alignment workspace a fixed 440px = 61.8%. Both are now viewport-relative
+// clamps (`round(66vh, 1px)`), bounded so they never exceed one screen.
+test(
 	'stitch-map: crop preview and alignment workspace are ≥65% of viewport height',
 	async ({ page }) => {
 		await gotoApp(page, '/stitch-map');

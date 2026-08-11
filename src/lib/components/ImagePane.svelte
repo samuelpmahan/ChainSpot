@@ -691,7 +691,7 @@
 
 	.scene {
 		position: relative;
-		height: 420px;
+		height: clamp(420px, round(66vh, 1px), 640px);
 		border: 1px solid #3f3f46;
 		border-radius: 4px;
 		background: repeating-conic-gradient(#232329 0% 25%, #1a1a1e 0% 50%) 50% / 16px 16px;
