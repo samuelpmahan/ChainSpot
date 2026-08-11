@@ -84,7 +84,10 @@ describe('occluded edge loop detector', () => {
 			heightPx: 80,
 			sourceScale: 1
 		};
-		const result = detectOccludedEdgeLoopCandidates(cv, raster, { uiScalePx: asUiScalePx(1) });
+		// uiScalePx 1.77 is the nominal UI scale at which the occluded-edge-loop
+		// geometry constants (Stage 2's `K_UI * scale`) reproduce their exact
+		// historical absolute-pixel values, matching this fixture's raw coordinates.
+		const result = detectOccludedEdgeLoopCandidates(cv, raster, { uiScalePx: asUiScalePx(1.77) });
 
 		expect(result.variant).toBe('occluded-edge-loop');
 		expect(result.candidates).toHaveLength(1);
