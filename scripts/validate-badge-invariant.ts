@@ -9,12 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { loadInput } from './detect-tees';
 import { loadCv } from '../src/lib/stitch/cvMatch';
-import {
-	badgeRayInvariantHolds,
-	detectBadgeAnchors,
-	loadBasketTruth,
-	sweepPadOrientation
-} from './overfit-tees';
+import { detectBadgeAnchors, loadBasketTruth } from './overfit-tees';
+import { badgeRayInvariantHolds, fittedPadFromSweep, sweepPadOrientation } from '../src/lib/autoAnnotation/teePadOrientation';
 import type { TeePadCv, TeePadRaster } from '../src/lib/autoAnnotation/teePadDetection';
 
 const DEFAULT_INPUT = 'resources/GoldenTeeSet.chainspot.zip';
@@ -85,17 +81,7 @@ async function main(): Promise<void> {
 			console.log(`tee ${hole.number}: ${sweep ? `axis ${sweep.axisDeg.toFixed(1)} | score ${sweep.score.toFixed(3)}` : 'no sweep result'} | UNMEASURABLE`);
 			continue;
 		}
-		const radians = (sweep.axisDeg * Math.PI) / 180;
-		const pad = {
-			xPx: sweep.xPx,
-			yPx: sweep.yPx,
-			ux: Math.cos(radians),
-			uy: Math.sin(radians),
-			halfMajorPx: 6.5 * args.uiScalePx,
-			halfMinorPx: 4 * args.uiScalePx,
-			evidenceCount: 0,
-			orientationScore: sweep.score
-		};
+		const pad = fittedPadFromSweep(sweep, args.uiScalePx);
 		const toBadgeX = badge.xPx - pad.xPx;
 		const toBadgeY = badge.yPx - pad.yPx;
 		const badgeBearingDeg = (Math.atan2(toBadgeY, toBadgeX) * 180) / Math.PI;
