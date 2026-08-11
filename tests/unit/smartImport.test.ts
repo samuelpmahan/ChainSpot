@@ -3,7 +3,7 @@ import { assignFour, reconcilePlacements } from '../../src/lib/stitch/autoLayout
 import { smartImportFiles } from '../../src/lib/stitch/smartImport';
 import type { SmartImportFileFailureKind, SmartImportResult } from '../../src/lib/stitch/smartImport';
 import { TILE_SLOTS } from '../../src/lib/stitch/geometry';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
+import type { TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
 import type { PairEstimate } from '../../src/lib/stitch/analysis';
 import { buildGrayRaster, TILE_H, TILE_W } from '../helpers/smartMap';
 import type { RasterRegion } from '../../src/lib/stitch/analysis';
@@ -94,7 +94,8 @@ describe('P1-001 smart four-tile assignment (case 1)', () => {
 
 		// Anchor at (0,0); the other three are integer translation-only placements
 		// consistent with 25% overlap on 200x200 tiles (offset 150 per axis).
-		const placements = layout.placements;
+		// `assignFour` on four rasters always populates all four 2x2 slots.
+		const placements = layout.placements as Record<TileSlot, TilePlacement>;
 		expect(placements['upper-left']).toEqual({ xPx: 0, yPx: 0, visible: true });
 		expect(Math.abs(placements['upper-right'].xPx - (TILE_W * 3) / 4)).toBeLessThanOrEqual(
 			PLACEMENT_TOLERANCE_PX
@@ -195,6 +196,7 @@ describe('P1-001 smart four-tile assignment (case 1)', () => {
 		for (const slot of TILE_SLOTS) {
 			const fileIndex = layout.assignment[slot];
 			const expected = reordered.assignment[slot];
+			if (fileIndex === undefined || expected === undefined) throw new Error(`missing assignment for ${slot}`);
 			// rasters was rotated by -2: the file now at index `fileIndex` in the
 			// first call appears at index ((fileIndex + 2) % 4) in the second.
 			expect(((expected + 2) % 4) === fileIndex).toBe(true);
@@ -329,7 +331,8 @@ describe('P1-001 bulk intake atomicity (case 2)', () => {
 			'lower-right': 2
 		});
 
-		const placements = ok.placements;
+		// `smartImportFiles` on four files always populates all four 2x2 slots.
+		const placements = ok.placements as Record<TileSlot, TilePlacement>;
 		for (const slot of TILE_SLOTS as TileSlot[]) {
 			expect(Number.isInteger(placements[slot].xPx)).toBe(true);
 			expect(Number.isInteger(placements[slot].yPx)).toBe(true);

@@ -4,11 +4,12 @@ import type { PlacementMap } from '../../src/lib/stitch/rerunGuard';
 import { proposeCropDetailed } from '../../src/lib/stitch/autoCrop';
 import { buildGrayRaster } from '../helpers/smartMap';
 import type { AnalysisRaster } from '../../src/lib/stitch/analysis';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
+import type { TilePlacement } from '../../src/lib/stitch/geometry';
 
-const ALL_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
+const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
+type Slot2x2 = (typeof ALL_SLOTS)[number];
 
-const PORTRAIT_ORIGINS: Record<TileSlot, { x: number; y: number }> = {
+const PORTRAIT_ORIGINS: Record<Slot2x2, { x: number; y: number }> = {
 	'upper-left': { x: 0, y: 0 },
 	'upper-right': { x: 150, y: 0 },
 	'lower-left': { x: 0, y: 150 },
@@ -23,7 +24,7 @@ const PORTRAIT_ORIGINS: Record<TileSlot, { x: number; y: number }> = {
  * same screen coordinates (cross-tile agreement is what matters, not realism).
  */
 function portraitRaster(
-	slot: TileSlot,
+	slot: Slot2x2,
 	chromeTopLines: number,
 	chromeBottomLines: number
 ): AnalysisRaster {
@@ -51,14 +52,15 @@ function portraitRaster(
 function placements(
 	moves: Record<string, Partial<{ xPx: number; yPx: number; visible: boolean }>> = {}
 ): PlacementMap {
-	const base = {
+	const base: Record<Slot2x2, TilePlacement> = {
 		'upper-left': { xPx: 0, yPx: 0, visible: true },
 		'upper-right': { xPx: 150, yPx: 0, visible: true },
 		'lower-left': { xPx: 0, yPx: 150, visible: true },
 		'lower-right': { xPx: 150, yPx: 150, visible: true }
-	} as unknown as PlacementMap;
+	};
 	for (const [slot, move] of Object.entries(moves)) {
-		base[slot as keyof PlacementMap] = { ...base[slot as keyof PlacementMap], ...move };
+		const key = slot as Slot2x2;
+		base[key] = { ...base[key], ...move };
 	}
 	return base;
 }

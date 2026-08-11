@@ -3,10 +3,12 @@
  *
  * Offscreen canvas at native cropped-image resolution: identical source and
  * destination crop sizes (no resampling, no silent downsampling), union bounds
- * translated to the output origin, and a stable full-opacity draw order
- * (upper-left, upper-right, lower-left, lower-right). Preview visibility,
- * opacity, and fit never affect output pixels. The canvas environment is
- * injectable so deterministic tests can record the draw calls.
+ * translated to the output origin, and a stable full-opacity draw order (the
+ * caller's own tile order — every caller builds it in a fixed slot order, so
+ * this is deterministic without this module hardcoding a particular layout's
+ * slot names). Preview visibility, opacity, and fit never affect output
+ * pixels. The canvas environment is injectable so deterministic tests can
+ * record the draw calls.
  */
 import type { CropInsets, TilePlacement, TileSlot, TileRect } from './geometry';
 import { cropSize, tileRect, translatedOrigin, unionBounds } from './geometry';
@@ -61,8 +63,6 @@ export const defaultStitchRenderEnv: StitchRenderEnv = {
 	}
 };
 
-const DRAW_ORDER: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
-
 export async function renderStitchedPng(
 	tiles: readonly StitchRenderTile[],
 	crop: CropInsets,
@@ -81,14 +81,9 @@ export async function renderStitchedPng(
 	}
 	const { widthPx: croppedWidthPx, heightPx: croppedHeightPx } = validation;
 
-	const bySlot = new Map<TileSlot, StitchRenderTile>();
 	const rectBySlot = new Map<TileSlot, TileRect>();
 	for (const tile of tiles) {
-		bySlot.set(tile.slot, tile);
-		rectBySlot.set(
-			tile.slot,
-			tileRect(tile.placement, croppedWidthPx, croppedHeightPx)
-		);
+		rectBySlot.set(tile.slot, tileRect(tile.placement, croppedWidthPx, croppedHeightPx));
 	}
 	const union = unionBounds([...rectBySlot.values()]);
 	if (!union) {
@@ -113,10 +108,8 @@ export async function renderStitchedPng(
 	canvas.width = union.widthPx;
 	canvas.height = union.heightPx;
 
-	for (const slot of DRAW_ORDER) {
-		const tile = bySlot.get(slot);
-		if (!tile) continue;
-		const rect = rectBySlot.get(slot);
+	for (const tile of tiles) {
+		const rect = rectBySlot.get(tile.slot);
 		if (!rect) continue;
 		context.drawImage(
 			tile.image,

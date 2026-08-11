@@ -18,8 +18,9 @@
  * same screenshot supplied twice — is rejected outright before scoring rather
  * than warned about here (see `duplicates.ts`).
  */
+import { expectedEdgesForLayout } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
-import type { TileSlot } from './geometry';
+import type { StitchLayout, TileSlot } from './geometry';
 
 export type ConfidenceCategory = 'ok' | 'review';
 
@@ -36,27 +37,13 @@ export interface LayoutDiagnostic {
  */
 export const WEAK_EDGE_MAX_SCORE = 0.5;
 
-const EXPECTED_EDGES: readonly { from: TileSlot; to: TileSlot; orientation: 'left-right' | 'top-bottom' }[] = [
-	{ from: 'upper-left', to: 'upper-right', orientation: 'left-right' },
-	{ from: 'upper-left', to: 'lower-left', orientation: 'top-bottom' },
-	{ from: 'upper-right', to: 'lower-right', orientation: 'top-bottom' },
-	{ from: 'lower-left', to: 'lower-right', orientation: 'left-right' }
-];
-
-const SLOT_LABELS: Record<TileSlot, string> = {
-	'upper-left': 'upper-left',
-	'upper-right': 'upper-right',
-	'lower-left': 'lower-left',
-	'lower-right': 'lower-right'
-};
-
 interface EdgeEvidence {
 	readonly from: TileSlot;
 	readonly to: TileSlot;
 	readonly score: number;
 	/**
 	 * True when the winning orientation hypothesis of this directed pair differs
-	 * from the orientation the 2×2 layout requires for this edge.
+	 * from the orientation the layout requires for this edge.
 	 *
 	 * On its own this is not evidence of anything. Generous neighbor overlap is
 	 * a legitimate and well-supported capture style, and the more content two
@@ -72,12 +59,15 @@ interface EdgeEvidence {
 /**
  * Classifies one automatic arrangement into a text confidence category plus a
  * deterministic list of concrete warnings. Pure: never mutates, never
- * discards, and never depends on browser timing or randomness.
+ * discards, and never depends on browser timing or randomness. `layoutKind`
+ * (default `'2x2'`, unchanged from before this parameter existed) selects
+ * which expected-neighbor edges the arrangement is scored against.
  */
-export function classifyLayout(layout: AutoLayout): LayoutDiagnostic {
+export function classifyLayout(layout: AutoLayout, layoutKind: StitchLayout = '2x2'): LayoutDiagnostic {
 	const warnings: string[] = [];
+	const expectedEdges = expectedEdgesForLayout(layoutKind);
 
-	const edges: EdgeEvidence[] = EXPECTED_EDGES.map(({ from, to, orientation }) => {
+	const edges: EdgeEvidence[] = expectedEdges.map(({ from, to, orientation }) => {
 		const fromFile = layout.assignment[from];
 		const toFile = layout.assignment[to];
 		const estimates = layout.estimates[`${fromFile}>${toFile}`];
@@ -110,7 +100,7 @@ export function classifyLayout(layout: AutoLayout): LayoutDiagnostic {
 	);
 	if (mismatchedEdges.length > 0) {
 		warnings.push(
-			`Direction mismatch (${edgePairText(mismatchedEdges)}): the strongest match for these expected neighbors points the other way than the 2×2 layout requires. The screenshots were likely captured at a changed orientation or zoom.`
+			`Direction mismatch (${edgePairText(mismatchedEdges)}): the strongest match for these expected neighbors points the other way than the layout requires. The screenshots were likely captured at a changed orientation or zoom.`
 		);
 	}
 
@@ -119,7 +109,7 @@ export function classifyLayout(layout: AutoLayout): LayoutDiagnostic {
 }
 
 function edgePairText(edges: readonly EdgeEvidence[]): string {
-	return edges.map((edge) => `${SLOT_LABELS[edge.from]}–${SLOT_LABELS[edge.to]}`).join(', ');
+	return edges.map((edge) => `${edge.from}–${edge.to}`).join(', ');
 }
 
 export function categoryLabel(category: ConfidenceCategory): string {

@@ -34,7 +34,7 @@ import { matchTranslation } from './cvMatch';
 import type { MatchMode } from './cvMatch';
 import type { AnalysisRaster, PairEstimate, PairEstimates, PairOrientation } from './analysis';
 import { TILE_SLOTS } from './geometry';
-import type { TilePlacement, TileSlot } from './geometry';
+import type { StitchLayout, TilePlacement, TileSlot } from './geometry';
 
 /**
  * Runs both orientation hypotheses of one ordered pair through `cvMatch` at
@@ -75,10 +75,14 @@ function toPairEstimate(
 }
 
 export interface AutoLayout {
-	/** slot -> file index (into the caller's raster/file ordering). */
-	readonly assignment: Record<TileSlot, number>;
-	readonly placements: Record<TileSlot, TilePlacement>;
-	/** Sum of the four expected-neighbor scores of the winning assignment. */
+	/**
+	 * slot -> file index (into the caller's raster/file ordering). Populated only
+	 * for the slots the input layout actually uses (all four for a 2x2 input,
+	 * two for a 1x2/2x1 input) — see `TILE_SLOTS_BY_LAYOUT`.
+	 */
+	readonly assignment: Partial<Record<TileSlot, number>>;
+	readonly placements: Partial<Record<TileSlot, TilePlacement>>;
+	/** Sum of the expected-neighbor edge scores of the winning assignment. */
 	readonly score: number;
 	/**
 	 * Every directed pair's two orientation-specific estimates keyed
@@ -91,7 +95,7 @@ export interface AutoLayout {
 	readonly estimates: Readonly<Record<string, PairEstimates>>;
 }
 
-interface ExpectedEdge {
+export interface ExpectedEdge {
 	readonly from: TileSlot;
 	readonly to: TileSlot;
 	readonly orientation: 'left-right' | 'top-bottom';
@@ -104,9 +108,39 @@ const EXPECTED_EDGES: readonly ExpectedEdge[] = [
 	{ from: 'lower-left', to: 'lower-right', orientation: 'left-right' }
 ];
 
+/** The single expected edge of each two-tile layout. */
+const EXPECTED_EDGES_1X2: readonly ExpectedEdge[] = [
+	{ from: 'left', to: 'right', orientation: 'left-right' }
+];
+const EXPECTED_EDGES_2X1: readonly ExpectedEdge[] = [
+	{ from: 'top', to: 'bottom', orientation: 'top-bottom' }
+];
+
+/** The expected-neighbor edge list a layout's winning assignment is scored/classified against. */
+export function expectedEdgesForLayout(layout: StitchLayout): readonly ExpectedEdge[] {
+	switch (layout) {
+		case '2x2':
+			return EXPECTED_EDGES;
+		case '1x2':
+			return EXPECTED_EDGES_1X2;
+		case '2x1':
+			return EXPECTED_EDGES_2X1;
+	}
+}
+
+/** Infers which layout an `AutoLayout.assignment`'s populated slots belong to. */
+export function layoutForSlots(slots: readonly TileSlot[]): StitchLayout {
+	if (slots.includes('left') || slots.includes('right')) return '1x2';
+	if (slots.includes('top') || slots.includes('bottom')) return '2x1';
+	return '2x2';
+}
+
 function pairKey(from: number, to: number): string {
 	return `${from}>${to}`;
 }
+
+/** The four 2x2 slot names, narrowed out of the wider `TileSlot` union `assignFour` alone uses. */
+type Slot2x2 = 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right';
 
 export interface ReconciledPlacements {
 	readonly upperRight: { readonly xPx: number; readonly yPx: number };
@@ -183,7 +217,7 @@ function scoreAssignment(
 	ordered: readonly [number, number, number, number],
 	estimates: ReadonlyMap<string, PairEstimates>
 ): number {
-	const slotOf: Record<TileSlot, number> = {
+	const slotOf: Record<Slot2x2, number> = {
 		'upper-left': ordered[0],
 		'upper-right': ordered[1],
 		'lower-left': ordered[2],
@@ -191,8 +225,8 @@ function scoreAssignment(
 	};
 	let score = 0;
 	for (const edge of EXPECTED_EDGES) {
-		const from = slotOf[edge.from];
-		const to = slotOf[edge.to];
+		const from = slotOf[edge.from as Slot2x2];
+		const to = slotOf[edge.to as Slot2x2];
 		const estimate = estimates.get(pairKey(from, to))?.[edge.orientation];
 		score += estimate ? estimate.score : 0;
 	}
@@ -234,7 +268,7 @@ export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<Au
 		throw new Error('assignFour: no assignment scored');
 	}
 
-	const slotOf: Record<TileSlot, number> = {
+	const slotOf: Record<Slot2x2, number> = {
 		'upper-left': best[0],
 		'upper-right': best[1],
 		'lower-left': best[2],
@@ -252,8 +286,8 @@ export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<Au
 	// direction score competitively" without paying for a second refine pass
 	// per edge.
 	for (const edge of EXPECTED_EDGES) {
-		const from = slotOf[edge.from];
-		const to = slotOf[edge.to];
+		const from = slotOf[edge.from as Slot2x2];
+		const to = slotOf[edge.to as Slot2x2];
 		const key = pairKey(from, to);
 		const coarse = estimates.get(key);
 		if (!coarse) continue;
@@ -294,7 +328,7 @@ export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<Au
 	// combines two measurements.
 	const reconciled = reconcilePlacements(ulur, ulll, urlr, llr);
 
-	const placements: Record<TileSlot, TilePlacement> = {
+	const placements: Record<Slot2x2, TilePlacement> = {
 		'upper-left': { xPx: 0, yPx: 0, visible: true },
 		'upper-right': { ...reconciled.upperRight, visible: true },
 		'lower-left': { ...reconciled.lowerLeft, visible: true },
@@ -302,8 +336,91 @@ export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<Au
 	};
 
 	const assignment = Object.fromEntries(
-		TILE_SLOTS.map((slot) => [slot, slotOf[slot]])
+		TILE_SLOTS.map((slot) => [slot, slotOf[slot as Slot2x2]])
 	) as Record<TileSlot, number>;
+
+	const estimatesRecord: Record<string, PairEstimates> = {};
+	for (const [key, value] of estimates) {
+		estimatesRecord[key] = value;
+	}
+
+	return {
+		assignment,
+		placements,
+		score: bestScore,
+		estimates: estimatesRecord
+	};
+}
+
+const TWO_TILE_SLOTS: Record<'left-right' | 'top-bottom', readonly [TileSlot, TileSlot]> = {
+	'left-right': ['left', 'right'],
+	'top-bottom': ['top', 'bottom']
+};
+
+/**
+ * Assigns two rasters to a 1x2 (`left`/`right`) or 2x1 (`top`/`bottom`) layout
+ * and produces an integer translation-only placement, anchoring the first
+ * inferred tile at (0, 0). Unlike `assignFour`, the layout itself (which
+ * orientation, and which raster is first) is not known in advance, so all four
+ * combinations — both orientations, both orderings — are scored at `'coarse'`
+ * before the winner's single edge is re-matched at `'refine'`. There is no
+ * permutation search beyond that: with two tiles there is exactly one edge, so
+ * the winning combination directly is the answer, not a candidate to reconcile
+ * against other edges.
+ */
+export async function assignTwo(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
+	if (rasters.length !== 2) {
+		throw new Error(`assignTwo: expected exactly two rasters, got ${rasters.length}`);
+	}
+
+	const forward = await estimatePairBothCv(rasters[0], rasters[1], 'coarse');
+	const backward = await estimatePairBothCv(rasters[1], rasters[0], 'coarse');
+	const estimates = new Map<string, PairEstimates>([
+		[pairKey(0, 1), forward],
+		[pairKey(1, 0), backward]
+	]);
+
+	const candidates: readonly { readonly orientation: PairOrientation; readonly from: number; readonly to: number }[] = [
+		{ orientation: 'left-right', from: 0, to: 1 },
+		{ orientation: 'left-right', from: 1, to: 0 },
+		{ orientation: 'top-bottom', from: 0, to: 1 },
+		{ orientation: 'top-bottom', from: 1, to: 0 }
+	];
+	let best = candidates[0];
+	let bestScore = -Infinity;
+	for (const candidate of candidates) {
+		const score = estimates.get(pairKey(candidate.from, candidate.to))?.[candidate.orientation].score ?? 0;
+		if (score > bestScore) {
+			bestScore = score;
+			best = candidate;
+		}
+	}
+
+	// Refine only the winning edge, mirroring `assignFour`'s coarse-then-fine split.
+	const refinedMatch = await matchTranslation(rasters[best.from], rasters[best.to], best.orientation, {
+		mode: 'refine'
+	});
+	const refined = toPairEstimate(best.orientation, refinedMatch);
+	const winningKey = pairKey(best.from, best.to);
+	const coarse = estimates.get(winningKey);
+	const otherOrientation: PairOrientation = best.orientation === 'left-right' ? 'top-bottom' : 'left-right';
+	const other = coarse?.[otherOrientation];
+	estimates.set(winningKey, {
+		'left-right': best.orientation === 'left-right' ? refined : (other as PairEstimate),
+		'top-bottom': best.orientation === 'top-bottom' ? refined : (other as PairEstimate),
+		orientation: refined.score >= (other?.score ?? -Infinity) ? best.orientation : otherOrientation
+	});
+	bestScore = refined.score;
+
+	const [firstSlot, secondSlot] = TWO_TILE_SLOTS[best.orientation];
+	const assignment: Partial<Record<TileSlot, number>> = {
+		[firstSlot]: best.from,
+		[secondSlot]: best.to
+	};
+	const placements: Partial<Record<TileSlot, TilePlacement>> = {
+		[firstSlot]: { xPx: 0, yPx: 0, visible: true },
+		[secondSlot]: { xPx: refined.dxPx, yPx: refined.dyPx, visible: true }
+	};
 
 	const estimatesRecord: Record<string, PairEstimates> = {};
 	for (const [key, value] of estimates) {

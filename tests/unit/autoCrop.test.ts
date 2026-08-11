@@ -2,9 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { MAX_INSET_FRACTION, MIN_ORIGINAL_BAND_PX, proposeCrop } from '../../src/lib/stitch/autoCrop';
 import { buildGrayRaster, TILE_H } from '../helpers/smartMap';
 import type { AnalysisRaster } from '../../src/lib/stitch/analysis';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
 
-const ALL_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
+const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
 
 describe('P1-001 shared outer-band crop proposal (case 3)', () => {
 	test('proposes bounded common outer insets, declines conflicting or unsupported evidence, and bounds insets', () => {

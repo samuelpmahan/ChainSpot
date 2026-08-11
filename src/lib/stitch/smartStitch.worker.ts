@@ -21,7 +21,7 @@
  * results are deterministic given the same decoded pixels — identical to the
  * inline analysis path unit tests exercise.
  */
-import { assignFour } from './autoLayout';
+import { assignFour, assignTwo, layoutForSlots } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
 import { proposeCropDetailed } from './autoCrop';
 import { classifyLayout } from './diagnostics';
@@ -31,6 +31,7 @@ import { DEFAULT_CROP_ANALYSIS_MAX_DIM, DEFAULT_MAX_ANALYSIS_DIM } from './analy
 import type { AnalysisRaster, RasterRegion } from './analysis';
 import { matcherRegionFromCrop } from './cropGate';
 import { loadCv, warmMatchTemplate } from './cvMatch';
+import type { StitchLayout, TileSlot } from './geometry';
 
 // Eager warm-up (P1-002 1b, extended 1c): a worker is constructed once and
 // reused for the life of the tab (see `smartImport.ts`'s `smartStitchWorker`
@@ -66,6 +67,7 @@ interface WorkerReply {
 	readonly duplicate?: DuplicateRasterPair;
 	readonly assignment?: AutoLayout['assignment'];
 	readonly placements?: AutoLayout['placements'];
+	readonly layoutKind?: StitchLayout;
 	readonly cropProposal?: ReturnType<typeof proposeCropDetailed>['insets'];
 	readonly crop?: { readonly proposal: ReturnType<typeof proposeCropDetailed>['insets']; readonly confidence: 'high' | 'low' | 'absent' };
 	readonly diagnostic?: ReturnType<typeof classifyLayout>;
@@ -112,10 +114,10 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			const region = matcherRegionFromCrop(crop, bitmap.width, bitmap.height);
 			return rasterFromBitmap(bitmap, DEFAULT_MAX_ANALYSIS_DIM, region ?? undefined);
 		});
-		// Rejected before scoring: with the same screenshot twice there is no 2×2
-		// to find, so any arrangement `assignFour` returned would stack two tiles
-		// and export a map silently missing a quarter of the course. Reported by
-		// raster index because only the caller knows the file names.
+		// Rejected before scoring: with the same screenshot twice there is no
+		// arrangement to find, so any arrangement the matcher returned would
+		// stack two tiles and export a map silently missing part of the course.
+		// Reported by raster index because only the caller knows the file names.
 		const duplicate = findDuplicateRasters(matcher);
 		if (duplicate) {
 			const reply: WorkerReply = { ok: false, token, duplicate };
@@ -123,8 +125,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			return;
 		}
 
-		const layout = await assignFour(matcher);
-		const diagnostic = classifyLayout(layout);
+		const layout = matcher.length === 4 ? await assignFour(matcher) : await assignTwo(matcher);
+		const layoutKind = layoutForSlots(Object.keys(layout.assignment) as TileSlot[]);
+		const diagnostic = classifyLayout(layout, layoutKind);
 		// Crop confidence is independent of layout confidence (see cropGate.ts):
 		// whatever crop evidence exists is surfaced as-is.
 		const cropResult = { proposal: crop.insets, confidence: crop.confidence };
@@ -133,6 +136,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			token,
 			assignment: layout.assignment,
 			placements: layout.placements,
+			layoutKind,
 			cropProposal: cropResult.proposal,
 			crop: cropResult,
 			diagnostic

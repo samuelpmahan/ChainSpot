@@ -1,28 +1,31 @@
 /**
  * ChainSpot Stitch Map shared crop proposal (P1-001, hardened in P1-002).
  *
- * Analyzes only the shared outer edge bands of the four screenshots to propose
- * a reversible set of top/right/bottom/left insets intended to remove repeated
- * screenshot chrome, footer/attribution bands, outer-edge controls, or uniform
- * blank/black margins.
+ * Analyzes only the shared outer edge bands of the session's screenshots (four
+ * for a 2x2 capture, two for a 1x2/2x1 capture) to propose a reversible set of
+ * top/right/bottom/left insets intended to remove repeated screenshot chrome,
+ * footer/attribution bands, outer-edge controls, or uniform blank/black
+ * margins.
  *
  * The evidence model is cross-tile fixed-position agreement, not per-row
- * uniformity: under ChainSpot's capture protocol the four screenshots are the
- * same device, orientation, application mode, and zoom, so application chrome
- * occupies identical screen coordinates in every capture while map content
- * moves. For each candidate line near an outer edge the four tiles are compared
- * at the same screen coordinates:
+ * uniformity: under ChainSpot's capture protocol every screenshot in a session
+ * is the same device, orientation, application mode, and zoom, so application
+ * chrome occupies identical screen coordinates in every capture while map
+ * content moves. For each candidate line near an outer edge every tile is
+ * compared at the same screen coordinates:
  *
- * - `pooledAgree` — the fraction of line pixels where all four tiles agree;
- * - `majorityAgree` — the fraction where the best three of four agree (an
- *   asymmetric mismatch in one tile is not allowed to hide the shared band);
+ * - `pooledAgree` — the fraction of line pixels where every tile agrees;
+ * - `majorityAgree` — for a 2x2 session, the fraction where the best three of
+ *   four agree (an asymmetric mismatch in one tile is not allowed to hide the
+ *   shared band); for a two-tile session this collapses to `pooledAgree`,
+ *   since there is no third tile to fall back on;
  * - per-tile outlier fractions — the share of pixels where each tile diverges
  *   from the cross-tile consensus.
  *
  * A boundary is the start of a sustained disagreement run (fixed UI giving way
  * to moving content); a small number of locally noisy rows inside the band
  * (clock digits, spinners) is tolerated without truncating it. A side is
- * proposed only when all four screenshots support the band; majority-only
+ * proposed only when every screenshot supports the band; majority-only
  * agreement is a conflict and declines the side. Agreement that runs to the
  * analysis bound means the transition was not observed: the bounded cap is
  * proposed with low confidence rather than an unjustified depth.
@@ -237,40 +240,65 @@ interface LineEvidence {
 	readonly outlier: readonly number[];
 }
 
-/** Cross-tile evidence for one edge line at the same screen coordinates. */
+/**
+ * Cross-tile evidence for one edge line at the same screen coordinates. Two
+ * tile counts are supported: 4 (the original 2x2 capture, using a fixed
+ * sorting network with no per-pixel allocation) and 2 (a 1x2/2x1 capture,
+ * where "majority" collapses to "pooled" — with only two tiles there is no
+ * third vote to fall back on, so both tiles disagreeing is exactly what a
+ * boundary transition looks like).
+ */
 function lineEvidence(rasters: readonly AnalysisRaster[], side: CropSide, depth: number): LineEvidence {
+	const n = rasters.length;
 	const w = rasters[0].widthPx;
 	const h = rasters[0].heightPx;
 	const isRow = side === 'top' || side === 'bottom';
 	const lineIndex = isRow ? (side === 'top' ? depth : h - 1 - depth) : side === 'left' ? depth : w - 1 - depth;
 	const length = isRow ? w : h;
 	// Every tile has identical dimensions (the intake contract), so the same
-	// line offset addresses all four rasters.
+	// line offset addresses every raster.
 	const base = isRow ? lineIndex * w : lineIndex;
 	const stride = isRow ? 1 : w;
 	let pooled = 0;
 	let majority = 0;
-	const outlier = [0, 0, 0, 0];
-	for (let p = 0; p < length; p += 1) {
-		const offset = base + p * stride;
-		const v0 = rasters[0].gray[offset];
-		const v1 = rasters[1].gray[offset];
-		const v2 = rasters[2].gray[offset];
-		const v3 = rasters[3].gray[offset];
-		// Fixed 4-element sorting network (no per-pixel allocation).
-		let a = v0, b = v1, c = v2, d = v3;
-		if (a > b) { const t = a; a = b; b = t; }
-		if (c > d) { const t = c; c = d; d = t; }
-		if (a > c) { const t = a; a = c; c = t; }
-		if (b > d) { const t = b; b = d; d = t; }
-		if (b > c) { const t = b; b = c; c = t; }
-		const median = (b + c) / 2;
-		if (d - a <= CROP_AGREEMENT_MAX_RANGE) pooled += 1;
-		if (Math.min(d - b, c - a) <= CROP_AGREEMENT_MAX_RANGE) majority += 1;
-		if (Math.abs(v0 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[0] += 1;
-		if (Math.abs(v1 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[1] += 1;
-		if (Math.abs(v2 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[2] += 1;
-		if (Math.abs(v3 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[3] += 1;
+	const outlier = new Array<number>(n).fill(0);
+	if (n === 4) {
+		for (let p = 0; p < length; p += 1) {
+			const offset = base + p * stride;
+			const v0 = rasters[0].gray[offset];
+			const v1 = rasters[1].gray[offset];
+			const v2 = rasters[2].gray[offset];
+			const v3 = rasters[3].gray[offset];
+			// Fixed 4-element sorting network (no per-pixel allocation).
+			let a = v0, b = v1, c = v2, d = v3;
+			if (a > b) { const t = a; a = b; b = t; }
+			if (c > d) { const t = c; c = d; d = t; }
+			if (a > c) { const t = a; a = c; c = t; }
+			if (b > d) { const t = b; b = d; d = t; }
+			if (b > c) { const t = b; b = c; c = t; }
+			const median = (b + c) / 2;
+			if (d - a <= CROP_AGREEMENT_MAX_RANGE) pooled += 1;
+			if (Math.min(d - b, c - a) <= CROP_AGREEMENT_MAX_RANGE) majority += 1;
+			if (Math.abs(v0 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[0] += 1;
+			if (Math.abs(v1 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[1] += 1;
+			if (Math.abs(v2 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[2] += 1;
+			if (Math.abs(v3 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[3] += 1;
+		}
+	} else if (n === 2) {
+		for (let p = 0; p < length; p += 1) {
+			const offset = base + p * stride;
+			const v0 = rasters[0].gray[offset];
+			const v1 = rasters[1].gray[offset];
+			const median = (v0 + v1) / 2;
+			if (Math.abs(v0 - v1) <= CROP_AGREEMENT_MAX_RANGE) {
+				pooled += 1;
+				majority += 1;
+			}
+			if (Math.abs(v0 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[0] += 1;
+			if (Math.abs(v1 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[1] += 1;
+		}
+	} else {
+		throw new Error(`lineEvidence: unsupported tile count ${n}`);
 	}
 	return {
 		pooledAgree: pooled / length,
@@ -368,7 +396,7 @@ function analyzeSide(rasters: readonly AnalysisRaster[], side: CropSide): SidePr
 		return { kind: 'none', reason: 'conflict' };
 	}
 
-	const perTile = [0, 1, 2, 3].map((tile) => perTileBoundary(evidence, tile, boundary));
+	const perTile = rasters.map((_, tile) => perTileBoundary(evidence, tile, boundary));
 	const spreadOk = perTile.every((value) => boundary - value <= CROP_BOUNDARY_TOLERANCE_LINES);
 	const confidence: 'high' | 'low' =
 		boundary === maxBand || !spreadOk ? 'low' : 'high';

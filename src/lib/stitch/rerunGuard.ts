@@ -11,15 +11,23 @@
  */
 import type { TilePlacement, TileSlot } from './geometry';
 
-export type PlacementMap = Record<TileSlot, TilePlacement>;
+export type PlacementMap = Partial<Record<TileSlot, TilePlacement>>;
 
-/** True when both maps exist and every placement matches on x/y and visibility. */
+/**
+ * True when both maps exist and every placement matches on x/y and visibility.
+ * Compares whichever slots either map actually has, so this works unchanged
+ * for a 2x2, 1x2, or 2x1 session without a layout parameter.
+ */
 export function placementsEqual(
 	a: PlacementMap | null | undefined,
 	b: PlacementMap | null | undefined
 ): boolean {
 	if (!a || !b) return false;
-	for (const slot of TILE_SLOTS) {
+	const slots = new Set<TileSlot>([
+		...(Object.keys(a) as TileSlot[]),
+		...(Object.keys(b) as TileSlot[])
+	]);
+	for (const slot of slots) {
 		const pa = a[slot];
 		const pb = b[slot];
 		if (!pa || !pb) return false;
@@ -41,5 +49,3 @@ export function requiresReplaceDecision(
 	if (!current) return false;
 	return !placementsEqual(current, lastAuto);
 }
-
-const TILE_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];

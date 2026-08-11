@@ -12,7 +12,8 @@
 	import { isEditableTarget } from '$lib/pointSelection';
 	import { canvas2dAvailable } from '$lib/scene';
 	import {
-		TILE_SLOTS,
+		ALL_TILE_SLOTS,
+		TILE_SLOTS_BY_LAYOUT,
 		ZERO_CROP,
 		cropSize,
 		expectedNeighbors,
@@ -22,7 +23,13 @@
 		tileRect,
 		unionBounds
 	} from '$lib/stitch/geometry';
-	import type { CropInsetField, CropInsets, TilePlacement, TileSlot } from '$lib/stitch/geometry';
+	import type {
+		CropInsetField,
+		CropInsets,
+		StitchLayout,
+		TilePlacement,
+		TileSlot
+	} from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
 	import { smartImportFiles } from '$lib/stitch/smartImport';
 	import { categoryLabel } from '$lib/stitch/diagnostics';
@@ -60,7 +67,11 @@
 		'upper-left': 'Upper left',
 		'upper-right': 'Upper right',
 		'lower-left': 'Lower left',
-		'lower-right': 'Lower right'
+		'lower-right': 'Lower right',
+		left: 'Left',
+		right: 'Right',
+		top: 'Top',
+		bottom: 'Bottom'
 	};
 
 	const CROP_FIELDS: readonly CropInsetField[] = ['topPx', 'rightPx', 'bottomPx', 'leftPx'];
@@ -71,8 +82,6 @@
 		bottomPx: 'Bottom',
 		leftPx: 'Left'
 	};
-
-	const MOVABLE_SLOTS: readonly TileSlot[] = ['upper-right', 'lower-left', 'lower-right'];
 
 	const CROP_HANDLE_SIZE = 10;
 
@@ -95,7 +104,21 @@
 	});
 	let cropInputs = $state<Partial<Record<CropInsetField, HTMLInputElement | null>>>({});
 
-	let placements = $state<Record<TileSlot, TilePlacement>>(initialPlacements(1, 1));
+	/**
+	 * The session's active layout: `'2x2'` (the original four-tile grid, default)
+	 * or an auto-detected `'1x2'`/`'2x1'` two-tile set, set by a successful
+	 * two-file smart import (see `runSmartImport`). `activeSlots` is this
+	 * layout's slot list — the loop source every previously-hardcoded
+	 * `TILE_SLOTS` reference now uses (see `TILE_SLOTS_BY_LAYOUT`) — and its
+	 * first slot is always the anchor (immovable, at (0, 0)), replacing the
+	 * previous hardcoded `'upper-left'`.
+	 */
+	let activeLayout = $state<StitchLayout>('2x2');
+	const activeSlots = $derived(TILE_SLOTS_BY_LAYOUT[activeLayout]);
+	const anchorSlot = $derived(activeSlots[0]);
+	const movableSlots = $derived(activeSlots.slice(1));
+
+	let placements = $state<Partial<Record<TileSlot, TilePlacement>>>(initialPlacements(1, 1));
 	let placementsInitialized = $state(false);
 	let selectedSlot = $state<TileSlot | null>(null);
 	let positionDraft = $state({ xPx: '', yPx: '' });
@@ -149,7 +172,7 @@
 	let smartImportDiagnostic = $state<LayoutDiagnostic | null>(null);
 	let cropProposalConfidence = $state<'high' | 'low' | 'absent' | null>(null);
 	/** The automatic result's committed placements; a re-run over manual edits must confirm. */
-	let lastAutoPlacements: Record<TileSlot, TilePlacement> | null = null;
+	let lastAutoPlacements: Partial<Record<TileSlot, TilePlacement>> | null = null;
 	let pendingReplaceConfirm = $state(false);
 	let pendingSmartImportFiles: File[] | null = null;
 	/** Replace-dialog focus management follows the established P0 pattern. */
@@ -157,7 +180,7 @@
 	let replaceFocusRestore: HTMLElement | null = null;
 
 	const CROP_CONFIDENCE_LABELS: Record<'high' | 'low' | 'absent', string> = {
-		high: 'high — all four screenshots agree on the shared edge bands',
+		high: 'high — every screenshot agrees on the shared edge bands',
 		low: 'low — edge evidence is partial or conflicts; inspect before applying',
 		absent: 'none — no shared outer band could be confirmed'
 	};
@@ -179,11 +202,11 @@
 		return () => clearTimeout(timer);
 	});
 
-	const required = $derived(sessionDimensions(tiles));
+	const required = $derived(sessionDimensions(tiles, activeLayout));
 	const croppedValidation = $derived(
 		required ? cropSize(crop, required.widthPx, required.heightPx) : null
 	);
-	const report = $derived(readiness(tiles, crop, placements, required));
+	const report = $derived(readiness(tiles, crop, placements, required, activeLayout));
 	const invalidCropFields = $derived(computeInvalidCropFields());
 	const canExport = $derived(
 		report.ready && !rendering && invalidCropFields.length === 0
@@ -196,18 +219,18 @@
 	const snapAvailable = $derived.by(() => {
 		const slot = selectedSlot;
 		if (snapBusy) return false;
-		if (!slot || !MOVABLE_SLOTS.includes(slot) || !tiles[slot] || !placements[slot]) return false;
+		if (!slot || !movableSlots.includes(slot) || !tiles[slot] || !placements[slot]) return false;
 		if (!croppedValidation?.ok) return false;
-		return expectedNeighbors(slot).some((neighbor) => Boolean(tiles[neighbor]));
+		return expectedNeighbors(slot, activeLayout).some((neighbor) => Boolean(tiles[neighbor]));
 	});
 
 	/** The union of all loaded cropped tile rectangles; the alignment fit target. */
 	function alignmentFitTarget(): ViewportFitTarget | null {
 		const validation = croppedValidation;
 		if (!validation?.ok) return null;
-		const rects = TILE_SLOTS.filter((slot) => tiles[slot]).map((slot) =>
-			tileRect(placements[slot], validation.widthPx, validation.heightPx)
-		);
+		const rects = activeSlots
+			.filter((slot) => tiles[slot] && placements[slot])
+			.map((slot) => tileRect(placements[slot]!, validation.widthPx, validation.heightPx));
 		const union = unionBounds(rects);
 		if (!union) return null;
 		return { xPx: union.xPx, yPx: union.yPx, widthPx: union.widthPx, heightPx: union.heightPx };
@@ -216,7 +239,7 @@
 	function cropGeometry():
 		| { rectX: number; rectY: number; rectWidth: number; rectHeight: number }
 		| null {
-		const tile = tiles['upper-left'];
+		const tile = tiles[anchorSlot];
 		if (!tile) return null;
 		const view = cropVp.view;
 		const rectX = view.panX + crop.leftPx * view.zoom;
@@ -326,7 +349,8 @@
 
 	function syncPositionDraft(force = false): void {
 		const slot = selectedSlot;
-		if (!slot || slot === 'upper-left' || !placements[slot]) {
+		const placement = slot ? placements[slot] : undefined;
+		if (!slot || slot === anchorSlot || !placement) {
 			positionDraft = { xPx: '', yPx: '' };
 			return;
 		}
@@ -334,7 +358,7 @@
 			force ||
 			(document.activeElement !== xPositionInput && document.activeElement !== yPositionInput)
 		) {
-			positionDraft = { xPx: String(placements[slot].xPx), yPx: String(placements[slot].yPx) };
+			positionDraft = { xPx: String(placement.xPx), yPx: String(placement.yPx) };
 		}
 	}
 
@@ -367,13 +391,13 @@
 			};
 			return;
 		}
-		const other = TILE_SLOTS.find((candidate) => candidate !== slot && tiles[candidate]);
+		const other = activeSlots.find((candidate) => candidate !== slot && tiles[candidate]);
 		if (other) {
 			const otherTile = tiles[other];
 			if (otherTile && (widthPx !== otherTile.widthPx || heightPx !== otherTile.heightPx)) {
 				tileErrors = {
 					...tileErrors,
-					[slot]: `"${file.name}" is ${widthPx} x ${heightPx} but the session requires ${otherTile.widthPx} x ${otherTile.heightPx}. Recapture all four screenshots at the same device orientation and screenshot size.`
+					[slot]: `"${file.name}" is ${widthPx} x ${heightPx} but the session requires ${otherTile.widthPx} x ${otherTile.heightPx}. Recapture all screenshots at the same device orientation and screenshot size.`
 				};
 				return;
 			}
@@ -402,8 +426,8 @@
 	 * anything is recomputed or overwritten.
 	 */
 	function requestSmartImport(files: File[]): void {
-		if (files.length !== 4) {
-			statusMessage = `Import four screenshots requires exactly four files; received ${files.length}. The current session is unchanged.`;
+		if (files.length !== 2 && files.length !== 4) {
+			statusMessage = `Import screenshots requires exactly two or four files; received ${files.length}. The current session is unchanged.`;
 			return;
 		}
 		if (requiresReplaceDecision(placements, lastAutoPlacements)) {
@@ -432,20 +456,21 @@
 	});
 
 	/**
-	 * One local-only bulk import (P1-001, hardened in P1-002). Decodes and
-	 * analyzes exactly four screenshots in any order, then commits tiles,
-	 * placements, confidence, and the summary as one coherent session
-	 * replacement so a failure never damages the current valid session. A newer
-	 * selection/reset/unmount invalidates the batch; a stale result publishes
-	 * nothing. The computed placements always commit, even when the diagnostic
-	 * flags a `review` warning: the automatic arrangement is the best evidence
-	 * available and is never discarded in favor of a neutral manual layout, so
-	 * a warning is guidance for review, not a reason to withhold correct output.
+	 * One local-only bulk import (P1-001, hardened in P1-002; extended to
+	 * 1x2/2x1). Decodes and analyzes exactly two or four screenshots in any
+	 * order, then commits the inferred layout, tiles, placements, confidence,
+	 * and the summary as one coherent session replacement so a failure never
+	 * damages the current valid session. A newer selection/reset/unmount
+	 * invalidates the batch; a stale result publishes nothing. The computed
+	 * placements always commit, even when the diagnostic flags a `review`
+	 * warning: the automatic arrangement is the best evidence available and is
+	 * never discarded in favor of a neutral manual layout, so a warning is
+	 * guidance for review, not a reason to withhold correct output.
 	 */
 	async function runSmartImport(files: File[]): Promise<void> {
 		const generation = decodeCoordinator.begin(SMART_IMPORT_BATCH);
-		if (files.length !== 4) {
-			statusMessage = `Import four screenshots requires exactly four files; received ${files.length}. The current session is unchanged.`;
+		if (files.length !== 2 && files.length !== 4) {
+			statusMessage = `Import screenshots requires exactly two or four files; received ${files.length}. The current session is unchanged.`;
 			return;
 		}
 		smartImportError = null;
@@ -458,17 +483,19 @@
 			if (!result.ok) {
 				if ('stale' in result) return;
 				if (result.kind === 'wrong-count') {
-					statusMessage = `Import four screenshots requires exactly four files; received ${result.count}. The current session is unchanged.`;
+					statusMessage = `Import screenshots requires exactly two or four files; received ${result.count}. The current session is unchanged.`;
 					return;
 				}
 				smartImportError = result.message;
 				statusMessage = `Smart import rejected "${result.fileName}"; the current session is unchanged.`;
 				return;
 			}
+			const slots = TILE_SLOTS_BY_LAYOUT[result.layoutKind];
 			const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
 			const nextSummary: Partial<Record<TileSlot, string>> = {};
-			for (const slot of TILE_SLOTS) {
+			for (const slot of slots) {
 				const fileIndex = result.assignment[slot];
+				if (fileIndex === undefined) continue;
 				const tile = result.tiles[fileIndex];
 				nextTiles[slot] = {
 					fileName: tile.fileName,
@@ -484,6 +511,7 @@
 			// neutral manual layout, even when the diagnostic flags a warning.
 			const nextPlacements = result.placements;
 			// One coherent session replacement, not staggered slot mutations.
+			activeLayout = result.layoutKind;
 			tiles = nextTiles;
 			tileErrors = {};
 			placements = nextPlacements;
@@ -497,7 +525,7 @@
 			cropProposal = result.cropProposal;
 			cropProposalConfidence = result.crop.confidence;
 			alignmentVp.fit();
-			const order = TILE_SLOTS.map((slot) => `${SLOT_LABELS[slot]}: ${nextSummary[slot]}`).join(', ');
+			const order = slots.map((slot) => `${SLOT_LABELS[slot]}: ${nextSummary[slot]}`).join(', ');
 			const label = categoryLabel(result.diagnostic.category);
 			const warnings = result.diagnostic.warnings;
 			statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
@@ -510,11 +538,11 @@
 
 	/** Copies a placement map so later manual edits can never alias the snapshot. */
 	function snapshotPlacements(
-		source: Record<TileSlot, TilePlacement>
-	): Record<TileSlot, TilePlacement> {
+		source: Partial<Record<TileSlot, TilePlacement>>
+	): Partial<Record<TileSlot, TilePlacement>> {
 		return Object.fromEntries(
-			TILE_SLOTS.map((slot) => [slot, { ...source[slot] }])
-		) as Record<TileSlot, TilePlacement>;
+			(Object.keys(source) as TileSlot[]).map((slot) => [slot, { ...source[slot] }])
+		) as Partial<Record<TileSlot, TilePlacement>>;
 	}
 
 	function applyCropProposal(): void {
@@ -545,14 +573,17 @@
 			selectedSlot = null;
 			syncPositionDraft(true);
 		}
-		if (!TILE_SLOTS.some((candidate) => tiles[candidate])) resetSession();
+		if (!activeSlots.some((candidate) => tiles[candidate])) resetSession();
 		statusMessage = `${SLOT_LABELS[slot]} removed.`;
 	}
 
 	function resetSession(): void {
-		// No in-flight decode or smart-import batch may publish into the cleared session.
-		decodeCoordinator.invalidateAll(TILE_SLOTS);
+		// No in-flight decode or smart-import batch may publish into the cleared
+		// session; every slot across every layout is invalidated, not just the
+		// current layout's, in case a prior layout left a stale generation behind.
+		decodeCoordinator.invalidateAll(ALL_TILE_SLOTS);
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
+		activeLayout = '2x2';
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
 		placements = initialPlacements(1, 1);
@@ -608,13 +639,14 @@
 	}
 
 	function updatePlacement(slot: TileSlot, xPx: number, yPx: number): void {
-		if (slot === 'upper-left' || !tiles[slot] || !placements[slot]) return;
-		placements = { ...placements, [slot]: { ...placements[slot], xPx, yPx } };
+		const placement = placements[slot];
+		if (slot === anchorSlot || !tiles[slot] || !placement) return;
+		placements = { ...placements, [slot]: { ...placement, xPx, yPx } };
 		syncPositionDraft(true);
 	}
 
 	function selectSlot(slot: TileSlot | null): void {
-		if (slot !== null && (slot === 'upper-left' || !tiles[slot])) return;
+		if (slot !== null && (slot === anchorSlot || !tiles[slot])) return;
 		selectedSlot = slot;
 		syncPositionDraft(true);
 		if (slot) alignmentWorkspace?.focus();
@@ -626,7 +658,8 @@
 
 	function commitPosition(field: 'xPx' | 'yPx'): void {
 		const slot = selectedSlot;
-		if (!slot || slot === 'upper-left') return;
+		const placement = slot ? placements[slot] : undefined;
+		if (!slot || slot === anchorSlot || !placement) return;
 		const raw = positionDraft[field].trim();
 		// Signed base-10 integers only: tiles may sit left or above the anchor.
 		if (!/^[+-]?\d+$/.test(raw)) {
@@ -636,8 +669,8 @@
 		const value = parseInt(raw, 10);
 		updatePlacement(
 			slot,
-			field === 'xPx' ? value : placements[slot].xPx,
-			field === 'yPx' ? value : placements[slot].yPx
+			field === 'xPx' ? value : placement.xPx,
+			field === 'yPx' ? value : placement.yPx
 		);
 	}
 
@@ -649,7 +682,8 @@
 		if (event.target !== event.currentTarget) return;
 		if (isEditableTarget(event.target)) return;
 		const slot = selectedSlot;
-		if (!slot || slot === 'upper-left') return;
+		const placement = slot ? placements[slot] : undefined;
+		if (!slot || slot === anchorSlot || !placement) return;
 		const amount = event.shiftKey ? 10 : 1;
 		let dx = 0;
 		let dy = 0;
@@ -670,21 +704,31 @@
 				return;
 		}
 		event.preventDefault();
-		updatePlacement(slot, placements[slot].xPx + dx, placements[slot].yPx + dy);
+		updatePlacement(slot, placement.xPx + dx, placement.yPx + dy);
 	}
 
 	function toggleTileVisible(slot: TileSlot): void {
-		if (!placements[slot]) return;
+		const placement = placements[slot];
+		if (!placement) return;
 		placements = {
 			...placements,
-			[slot]: { ...placements[slot], visible: !placements[slot].visible }
+			[slot]: { ...placement, visible: !placement.visible }
 		};
+	}
+
+	function visibilityToggleLabel(): string {
+		const slot = selectedSlot;
+		const placement = slot ? placements[slot] : undefined;
+		if (!slot || !placement) return 'Show/hide tile (preview)';
+		return placement.visible
+			? `Hide ${SLOT_LABELS[slot]} (preview)`
+			: `Show ${SLOT_LABELS[slot]} (preview)`;
 	}
 
 	function resetArrangement(): void {
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
-		placements = initialPlacements(validation.widthPx, validation.heightPx);
+		placements = initialPlacements(validation.widthPx, validation.heightPx, activeLayout);
 		syncPositionDraft(true);
 		statusMessage = 'Arrangement reset to the 25% overlap layout.';
 	}
@@ -717,8 +761,8 @@
 	 * loaded expected neighbor(s) — a tile with two neighbors is snapped to the
 	 * single position that best satisfies both at once. Backed by `cvMatch.ts`'s
 	 * proven `matchTemplate` matcher (`snapAlign`/`matchTranslationNear`), the
-	 * same one that does the automatic four-tile assignment — no separate
-	 * scoring function. Async because the matcher is; `snapBusy` disables the
+	 * same one that does the automatic layout assignment — no separate scoring
+	 * function. Async because the matcher is; `snapBusy` disables the
 	 * control for the duration so a click gets feedback instead of an apparent
 	 * no-op. Commits through `updatePlacement` — the one mutation point
 	 * drag/nudge/numeric input already use — so position-draft sync and the
@@ -727,13 +771,13 @@
 	 */
 	async function snapSelectedTile(): Promise<void> {
 		const slot = selectedSlot;
-		if (!slot || !MOVABLE_SLOTS.includes(slot)) return;
+		if (!slot || !movableSlots.includes(slot)) return;
 		const tile = tiles[slot];
 		const placement = placements[slot];
 		const validation = croppedValidation;
 		if (!tile || !placement || !validation?.ok) return;
 		const neighbors: SnapNeighbor[] = [];
-		for (const neighborSlot of expectedNeighbors(slot)) {
+		for (const neighborSlot of expectedNeighbors(slot, activeLayout)) {
 			const neighborTile = tiles[neighborSlot];
 			const neighborPlacement = placements[neighborSlot];
 			if (!neighborTile || !neighborPlacement) continue;
@@ -774,7 +818,7 @@
 	function claimAlignmentPointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
 		const slot = selectedSlot;
 		const validation = croppedValidation;
-		if (!slot || slot === 'upper-left' || !validation?.ok) return false;
+		if (!slot || slot === anchorSlot || !validation?.ok) return false;
 		const placement = placements[slot];
 		const tile = tiles[slot];
 		if (!placement?.visible || !tile) return false;
@@ -890,20 +934,20 @@
 
 	/**
 	 * Click selection in the alignment view: selects a movable tile only when the
-	 * point lies inside exactly one visible tile — the anchored upper-left tile
-	 * participates in ambiguity even though it can never be selected. Hidden tiles
-	 * are never selectable.
+	 * point lies inside exactly one visible tile — the anchored tile participates
+	 * in ambiguity even though it can never be selected. Hidden tiles are never
+	 * selectable.
 	 */
 	function onAlignmentClick(pointer: ScreenSpacePoint): void {
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
 		const image = alignmentVp.toImage(pointer);
-		const hits = TILE_SLOTS.filter((slot) => {
+		const hits = activeSlots.filter((slot) => {
 			const placement = placements[slot];
 			if (!placement?.visible || !tiles[slot]) return false;
 			return pointInTileRect(image, tileRect(placement, validation.widthPx, validation.heightPx));
 		});
-		if (hits.length === 1 && hits[0] !== 'upper-left') selectSlot(hits[0]);
+		if (hits.length === 1 && hits[0] !== anchorSlot) selectSlot(hits[0]);
 	}
 
 	/** Crop-handle claim: only Konva handle nodes claim; everything else pans. */
@@ -991,7 +1035,7 @@
 			heightPx: number;
 			placement: TilePlacement;
 		}> = [];
-		for (const slot of TILE_SLOTS) {
+		for (const slot of activeSlots) {
 			const tile = tiles[slot];
 			const placement = placements[slot];
 			if (!tile || !placement) continue;
@@ -1009,7 +1053,7 @@
 
 	function readinessText(): string {
 		if (report.ready) {
-			return 'All four screenshots, the shared crop, and tile overlap are valid. Export is ready.';
+			return 'All screenshots, the shared crop, and tile overlap are valid. Export is ready.';
 		}
 		const reasons: string[] = [];
 		if (report.missing.length > 0) {
@@ -1019,7 +1063,7 @@
 		if (report.invalidCrop) reasons.push('The shared crop is invalid.');
 		if (report.disconnected.length > 0) {
 			reasons.push(
-				'Every movable tile must connect to the upper-left tile through overlapping neighbors.'
+				`Every movable tile must connect to the ${SLOT_LABELS[anchorSlot].toLowerCase()} tile through overlapping neighbors.`
 			);
 		}
 		if (invalidCropFields.length > 0) reasons.push('The crop fields contain invalid values.');
@@ -1033,7 +1077,7 @@
 		layer.destroyChildren();
 		cropRectNode = null;
 		cropHandles = {};
-		const tile = tiles['upper-left'];
+		const tile = tiles[anchorSlot];
 		if (!tile) {
 			layer.batchDraw();
 			return;
@@ -1139,7 +1183,7 @@
 			return;
 		}
 		const view = alignmentVp.view;
-		for (const slot of TILE_SLOTS) {
+		for (const slot of activeSlots) {
 			const tile = tiles[slot];
 			const placement = placements[slot];
 			if (!tile || !placement) continue;
@@ -1220,11 +1264,11 @@
 		untrack(() => alignmentVp.setFitTarget(alignmentFitTarget()));
 	});
 
-	// The crop view fits the complete original upper-left image.
+	// The crop view fits the complete original anchor-tile image.
 	$effect(() => {
 		void tiles;
 		untrack(() => {
-			const tile = tiles['upper-left'];
+			const tile = tiles[anchorSlot];
 			cropVp.setFitTarget(
 				tile ? { xPx: 0, yPx: 0, widthPx: tile.widthPx, heightPx: tile.heightPx } : null
 			);
@@ -1261,14 +1305,14 @@
 	});
 
 	$effect(() => {
-		const complete = TILE_SLOTS.every((slot) => tiles[slot] !== undefined);
+		const complete = activeSlots.every((slot) => tiles[slot] !== undefined);
 		const validation = croppedValidation;
 		if (complete && !placementsInitialized && validation?.ok) {
-			placements = initialPlacements(validation.widthPx, validation.heightPx);
+			placements = initialPlacements(validation.widthPx, validation.heightPx, activeLayout);
 			placementsInitialized = true;
 			syncPositionDraft(true);
 			alignmentVp.fit();
-			statusMessage = 'All four screenshots loaded. Initial 25% overlap layout created.';
+			statusMessage = 'All screenshots loaded. Initial 25% overlap layout created.';
 		}
 	});
 
@@ -1351,24 +1395,24 @@
 
 	<h2>Stitch Map</h2>
 	<p class="protocol">
-		Capture four screenshots of the same map at one zoom and orientation, then load them in
-		this order: upper-left, upper-right, lower-left, lower-right. Neighbors need at least
-		about 20% overlap, and more is always fine — just make sure all four are different
-		captures. This session lives only in this tab; reloading the page clears it.
+		Capture two or four screenshots of the same map at one zoom and orientation, with about
+		20–30% overlap between neighbors: two side by side, two stacked, or four in a 2x2 grid
+		(upper-left, upper-right, lower-left, lower-right). This session lives only in this tab;
+		reloading the page clears it.
 	</p>
 
 	<div class="book-columns">
 		<div class="book-column">
 	<section class="smart-import-section" aria-labelledby="smart-import-heading">
-		<h3 id="smart-import-heading">Import four screenshots</h3>
+		<h3 id="smart-import-heading">Import screenshots</h3>
 		<p class="section-note">
-			Select exactly four overlapping screenshots in any order. ChainSpot infers their
-			upper-left, upper-right, lower-left, and lower-right roles, places them, and may
-			suggest a shared crop. The existing controls remain available for correction.
+			Select exactly two or four overlapping screenshots in any order. ChainSpot infers their
+			roles — left/right, top/bottom, or the full 2x2 grid — places them, and may suggest a
+			shared crop. The existing controls remain available for correction.
 		</p>
 		<div class="smart-import-row">
 			<label class="file-label">
-				Import four screenshots
+				Import screenshots
 				<input
 					class="file-input"
 					type="file"
@@ -1388,7 +1432,7 @@
 		{/if}
 		{#if smartImportSummary}
 			<ul class="smart-assignment" data-testid="smart-import-assignment" aria-label="Inferred screenshot order">
-				{#each TILE_SLOTS as slot (slot)}
+				{#each activeSlots as slot (slot)}
 					<li>
 						<span class="assignment-label">{SLOT_LABELS[slot]}:</span>
 						<span data-testid={`smart-import-slot-${slot}`}>{smartImportSummary[slot]}</span>
@@ -1452,7 +1496,7 @@
 	<section class="tile-section" aria-labelledby="tiles-heading">
 		<h3 id="tiles-heading">Screenshots</h3>
 		<div class="tile-grid">
-			{#each TILE_SLOTS as slot (slot)}
+			{#each activeSlots as slot (slot)}
 				<StitchTileSlot
 					slot={slot}
 					label={SLOT_LABELS[slot]}
@@ -1469,8 +1513,10 @@
 	<section class="crop-section" aria-labelledby="crop-heading">
 		<h3 id="crop-heading">Shared crop</h3>
 		<p class="section-note">
-			One crop applies to all four screenshots. Adjust it on the upper-left preview or with
-			the numeric fields. Scroll over the preview to zoom; drag its background to pan.
+			One crop applies to every screenshot. Adjust it on the {SLOT_LABELS[
+				anchorSlot
+			].toLowerCase()} preview or with the numeric fields. Scroll over the preview to zoom; drag
+			its background to pan.
 		</p>
 		<div class="crop-layout">
 			<div class="crop-preview">
@@ -1518,7 +1564,7 @@
 			restores the full view.
 		</p>
 		<div class="alignment-controls">
-			{#each MOVABLE_SLOTS as slot (slot)}
+			{#each movableSlots as slot (slot)}
 				<button
 					type="button"
 					class="tile-select"
@@ -1537,11 +1583,7 @@
 				disabled={!selectedSlot}
 				onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
 			>
-				{selectedSlot && placements[selectedSlot]
-					? placements[selectedSlot].visible
-						? `Hide ${SLOT_LABELS[selectedSlot]} (preview)`
-						: `Show ${SLOT_LABELS[selectedSlot]} (preview)`
-					: 'Show/hide tile (preview)'}
+				{visibilityToggleLabel()}
 			</button>
 			<label class="position-field">
 				<span>X</span>
@@ -1589,7 +1631,7 @@
 			<button
 				type="button"
 				data-testid="reset-arrangement"
-				disabled={!TILE_SLOTS.some((slot) => tiles[slot])}
+				disabled={!activeSlots.some((slot) => tiles[slot])}
 				onclick={resetArrangement}
 			>
 				Reset arrangement
