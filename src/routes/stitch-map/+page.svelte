@@ -28,6 +28,7 @@
 	import { categoryLabel } from '$lib/stitch/diagnostics';
 	import type { LayoutDiagnostic } from '$lib/stitch/diagnostics';
 	import { requiresReplaceDecision } from '$lib/stitch/rerunGuard';
+	import { demoTour } from '$lib/demo/tour.svelte';
 	import {
 		smartImportViaWorker,
 		disposeSmartStitchWorker,
@@ -160,6 +161,23 @@
 		low: 'low — edge evidence is partial or conflicts; inspect before applying',
 		absent: 'none — no shared outer band could be confirmed'
 	};
+
+	/** The guided demo gives visitors time to notice the proposal before continuing. */
+	const DEMO_CROP_AUTO_APPLY_DELAY_MS = 20_000;
+
+	$effect(() => {
+		const proposal = cropProposal;
+		const isDemoCropStep = demoTour.active && demoTour.step.id === 'stitch';
+		if (!proposal || !isDemoCropStep) return;
+
+		const timer = setTimeout(() => {
+			if (cropProposal !== proposal || !demoTour.active || demoTour.step.id !== 'stitch') return;
+			applyCropProposal();
+			statusMessage = 'Suggested crop applied automatically after 20 seconds.';
+		}, DEMO_CROP_AUTO_APPLY_DELAY_MS);
+
+		return () => clearTimeout(timer);
+	});
 
 	const required = $derived(sessionDimensions(tiles));
 	const croppedValidation = $derived(
@@ -1339,6 +1357,8 @@
 		captures. This session lives only in this tab; reloading the page clears it.
 	</p>
 
+	<div class="book-columns">
+		<div class="book-column">
 	<section class="smart-import-section" aria-labelledby="smart-import-heading">
 		<h3 id="smart-import-heading">Import four screenshots</h3>
 		<p class="section-note">
@@ -1394,13 +1414,18 @@
 		{/if}
 		{#if cropProposal}
 			<div class="crop-proposal" data-testid="crop-proposal" role="status">
+				<h4>Apply Crop to continue</h4>
+				<p>
+					Click <strong>Apply Crop</strong> to trim the shared phone chrome from all four screenshots.
+					The demo applies it automatically after about 20 seconds if you leave this proposal open.
+				</p>
 				<p>
 					Suggested shared crop:
 					<span data-testid="crop-proposal-insets">
 						top {cropProposal.topPx}px, right {cropProposal.rightPx}px, bottom
 						{cropProposal.bottomPx}px, left {cropProposal.leftPx}px
 					</span>
-					. This is a proposal; it is not applied automatically.
+					. This is a proposal; outside the guided demo it is never applied without your action.
 				</p>
 				{#if cropProposalConfidence}
 					<p class="crop-confidence" data-testid="crop-confidence">
@@ -1408,8 +1433,13 @@
 					</p>
 				{/if}
 				<div class="proposal-actions">
-					<button type="button" data-testid="apply-suggested-crop" onclick={applyCropProposal}>
-						Apply suggested crop
+					<button
+						type="button"
+						class="apply-crop-button"
+						data-testid="apply-suggested-crop"
+						onclick={applyCropProposal}
+					>
+						Apply Crop
 					</button>
 					<button type="button" data-testid="keep-full-images" onclick={rejectCropProposal}>
 						Keep full images
@@ -1475,6 +1505,9 @@
 		</div>
 	</section>
 
+		</div>
+
+		<div class="book-column">
 	<section class="alignment-section" aria-labelledby="alignment-heading">
 		<h3 id="alignment-heading">Align tiles</h3>
 		<p id="alignment-help" class="alignment-help">
@@ -1639,6 +1672,9 @@
 		</div>
 	</section>
 
+		</div>
+	</div>
+
 	{#if pendingReplaceConfirm}
 		<div class="dialog-backdrop">
 			<div
@@ -1688,6 +1724,19 @@
 		gap: 1.25rem;
 		max-width: 1100px;
 		margin: 0 auto;
+	}
+
+	.book-columns {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+	}
+
+	.book-column {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		min-width: 0;
 	}
 
 	h2 {
@@ -1839,6 +1888,12 @@
 		background-color: #16233b;
 	}
 
+	.crop-proposal h4 {
+		margin: 0;
+		font-size: 1rem;
+		color: #fef3c7;
+	}
+
 	.crop-proposal p {
 		margin: 0;
 		font-size: 0.85rem;
@@ -1849,6 +1904,20 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.6rem;
+	}
+
+	.apply-crop-button {
+		border: 2px solid #fbbf24 !important;
+		background: #f59e0b !important;
+		color: #1c1917 !important;
+		font-size: 1rem !important;
+		font-weight: 800;
+		padding: 0.65rem 1rem !important;
+		box-shadow: 0 0 0 3px rgb(245 158 11 / 22%);
+	}
+
+	.apply-crop-button:hover {
+		background: #fbbf24 !important;
 	}
 
 	.tile-grid {
@@ -1865,9 +1934,11 @@
 	}
 
 	.crop-preview {
-		flex: 1 1 320px;
-		min-width: 280px;
-		height: 280px;
+		flex: 0 1 100%;
+		width: min(100%, 24rem);
+		min-width: 0;
+		aspect-ratio: 3 / 4;
+		height: auto;
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
@@ -1945,7 +2016,10 @@
 	}
 
 	.alignment-workspace {
-		height: 440px;
+		width: min(100%, 28rem);
+		aspect-ratio: 3 / 4;
+		height: auto;
+		min-height: 0;
 		background-color: #1e1e24;
 		border: 1px solid #27272a;
 		border-radius: 8px;
@@ -2015,5 +2089,26 @@
 		clip: rect(0 0 0 0);
 		white-space: nowrap;
 		border: 0;
+	}
+
+	@media (min-width: 700px) {
+		.book-columns {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+			align-items: start;
+			gap: 1.5rem;
+		}
+
+		.book-column {
+			min-width: 0;
+		}
+
+		.crop-layout {
+			flex-direction: column;
+		}
+
+		.crop-fields {
+			flex: 0 1 auto;
+		}
 	}
 </style>

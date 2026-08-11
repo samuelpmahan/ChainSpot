@@ -30,9 +30,8 @@
  *    narration says so rather than pretending it isn't there.
  * 2. **No mocked services.** The clean basemap is not shipped as a fixture,
  *    in either Create Graphics step. Both send the visitor through the live
- *    OpenStreetMap Nominatim search and the live USGS NAIP `exportImage`
- *    endpoint that the product already uses, with a real course name as the
- *    query.
+ *    course search and public aerial imagery endpoint that the product already
+ *    uses, with a real course name as the query.
  *
  * Adding a dataset is a data change here; it must never require a new branch
  * in a route.
@@ -179,7 +178,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		route: 'stitch-map',
 		lede: `Four real UDisc screenshots of ${DASHS_TRACK.courseName}, phone chrome and all, are loaded into the real Stitch Map in no particular order and with no position in their file names.`,
 		actions: [
-			'Watch the crop proposal: the phone status bar and UDisc chrome are trimmed from all four captures automatically, before anything else happens.',
+			'When the shared crop proposal appears, click the bright "Apply Crop" button to trim the phone status bar and UDisc chrome from all four captures. If you leave it open, this demo applies it after about 20 seconds.',
 			'Read the status line: it names which capture landed in which corner and how confident the inference was.',
 			'Nudge a tile with the arrow keys, or press Snap, to see that every automatic decision is reported with its confidence and stays fully correctable.',
 			'When the arrangement reads as connected, choose "Use as UDisc source" to carry the stitched PNG forward.'
@@ -190,18 +189,19 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 	},
 	{
 		id: 'annotate-map',
-		title: 'Watch ChainSpot find the course, then fix the one hole it missed',
+		title: 'Review the course detection one uncertain piece at a time',
 		route: 'annotate-round',
-		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees, using "Use as UDisc source" from the previous step. This is Map mode: course geometry, not any one round. What happens next is not a canned animation: watch ChainSpot actually go looking for the course.',
+		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees, using "Use as UDisc source" from the previous step. This is Map mode: course geometry, not any one round. Detection opens an active review with a live ready-versus-review split, not a promise that every hole is solved.',
 		actions: [
 			'Watch the status strip narrate detection as it runs — reading hole numbers, finding tee pads, locating baskets, assembling the course — with each stage\'s proposals fading onto the map in that same order as it finishes.',
-			'When the summary chip lands, accept the ready holes in one click — the holes detection is confident about are placed immediately, with the count right there in the chip.',
-			'Jump to the hole still flagged for review and fix it yourself: click the detected tee or basket candidate underneath it and it snaps onto the active hole instantly — no dialog, one click.',
+			'Read the live summary chip. It reports the full detected set and separates ready holes from holes that still need review — the current demo may show a split such as "18 holes — 6 ready, 12 need review", rather than just one missed hole.',
+			'Click "Review hole N" to jump to the first unresolved hole, then work one tee or basket at a time: inspect a candidate marker and click it to assign it to the active hole, confirming only when replacing or moving existing geometry.',
+			'Accept the ready holes when you want to commit the confident subset; the remaining review holes stay visible and editable instead of being silently guessed.',
 			'In Map mode, add a corridor bend on a hole to see the playing corridor update live — Map mode only ever places tee, basket, and bend, never a throw.',
 			'Press Done to save the course to Course Memory and continue to Create Graphics.'
 		],
 		mechanism:
-			'Detection is calibrated OpenCV template and centerline matching running locally in your browser, and the status strip and staged reveal report its real stage boundaries as they happen — nothing is simulated for effect. It is honestly imperfect where holes overlap or crowd each other on the map, which is an area of active research, and that is exactly why the review step and the one-click fix exist rather than a silent best guess. Done saves the course geometry to Course Memory (IndexedDB) and hands the annotated round to Create Graphics in memory — nothing is uploaded.',
+			'Detection is calibrated OpenCV template and centerline matching running locally in your browser, and the status strip and staged reveal report its real stage boundaries as they happen — nothing is simulated for effect. The active review is deliberately split: confident geometry can be accepted together, while uncertain holes remain available for one-marker-at-a-time correction where overlaps or crowded areas defeat a safe automatic guess. Done saves the course geometry to Course Memory (IndexedDB) and hands the annotated round to Create Graphics in memory — nothing is uploaded.',
 		arming: { kind: 'none' }
 	},
 	{
@@ -210,13 +210,13 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		route: 'create-graphics',
 		lede: 'Create Graphics needs a clean basemap with no UDisc overlay, aligned to what you just annotated, then exports per-hole graphics from the pair.',
 		actions: [
-			`Search "${DASHS_TRACK.cityState}" — "${DASHS_TRACK.courseName}" is UDisc's name for the course, not necessarily one OpenStreetMap resolves directly, so start from the town and pan/zoom the aerial to the course itself once it loads. Or type your own course instead; treat the query as a starting guess you can correct from the results list.`,
-			'Pick the match, set a radius that covers the whole property, and fetch the aerial from live public imagery.',
+			`Search "${DASHS_TRACK.cityState}" — "${DASHS_TRACK.courseName}" is UDisc's name for the course. Start with a 300m radius; you can adjust it after the first preview. Or type your own course instead and treat the query as a starting guess you can correct from the results list.`,
+			'Pick the match, keep the initial 300m radius, and fetch the aerial from live public imagery.',
 			'Use Add correspondence to click the same landmark in both panes — a tee pad corner, a path junction, a tree — spreading four or more pairs across the property.',
 			'Step through the holes, review each rendered graphic against the aerial, then save the project bundle.'
 		],
 		mechanism:
-			'Course search is the public OpenStreetMap Nominatim endpoint; the imagery is the public USGS NAIP exportImage service, called straight from your browser with no API key and no ChainSpot server in the middle. A similarity or affine transform is estimated from your correspondence pairs, with per-pair residuals reported in original pixels. The exported bundle is a plain zip holding project.json and your original images, byte for byte, with SHA-256 hashes that must match on open.',
+			'Course search supplies a candidate place, and the aerial imagery is fetched live from the public imagery service straight from your browser with no ChainSpot server in the middle. A similarity or affine transform is estimated from your correspondence pairs, with per-pair residuals reported in original pixels. The exported bundle is a plain zip holding project.json and your original images, byte for byte, with SHA-256 hashes that must match on open.',
 		arming: { kind: 'none' }
 	},
 	{

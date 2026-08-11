@@ -3,6 +3,11 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import DemoGuide from '$lib/components/DemoGuide.svelte';
+	import {
+		annotationNavState,
+		requestAnnotationDone,
+		requestAnnotationMode
+	} from '$lib/annotationNav.svelte';
 
 	/**
 	 * Client-only marker set after hydration and event delegation are in place.
@@ -69,6 +74,50 @@
 		>
 			Demo
 		</a>
+		{#if annotationNavState.active}
+			<span class="app-nav-divider" aria-hidden="true"></span>
+			<div class="global-annotation-controls">
+				<div
+					class="global-mode-toggle"
+					role="group"
+					aria-label="Annotation mode"
+					data-testid="annotation-mode-toggle"
+				>
+					<button
+						type="button"
+						class="global-mode-toggle-button"
+						class:active={annotationNavState.mode === 'map'}
+						aria-pressed={annotationNavState.mode === 'map'}
+						data-testid="annotation-mode-map"
+						onclick={() => requestAnnotationMode('map')}
+					>
+						<span class="global-mode-label">Map</span>
+						<span class="global-mode-hint">Course geometry</span>
+					</button>
+					<button
+						type="button"
+						class="global-mode-toggle-button"
+						class:active={annotationNavState.mode === 'round'}
+						aria-pressed={annotationNavState.mode === 'round'}
+						data-testid="annotation-mode-round"
+						onclick={() => requestAnnotationMode('round')}
+					>
+						<span class="global-mode-label">Round</span>
+						<span class="global-mode-hint">Throws &amp; walk path</span>
+					</button>
+				</div>
+				<button
+					type="button"
+					class="global-done-button"
+					data-testid="annotate-done"
+					disabled={!annotationNavState.canFinish || annotationNavState.doneRunning}
+					onclick={requestAnnotationDone}
+					title="Finish annotating and move to Create Graphics"
+				>
+					Done
+				</button>
+			</div>
+		{/if}
 	</nav>
 	<nav class="dev-nav" aria-label="Developer tools">
 		<a
@@ -128,6 +177,87 @@
 		display: none;
 	}
 
+	.app-nav-divider {
+		flex: 0 0 auto;
+		height: 2rem;
+		margin: 0 0.25rem;
+		border-left: 1px solid #27272a;
+	}
+
+	.global-annotation-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex: 0 0 auto;
+	}
+
+	.global-mode-toggle {
+		display: flex;
+		align-items: stretch;
+		gap: 0.2rem;
+		padding: 0.2rem;
+		border: 1px solid #3f3f46;
+		border-radius: 7px;
+		background: #18181b;
+	}
+
+	.global-mode-toggle-button {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: center;
+		min-width: 6.5rem;
+		min-height: 2.25rem;
+		padding: 0.25rem 0.7rem;
+		border: 1px solid transparent;
+		border-radius: 5px;
+		background: transparent;
+		color: #d4d4d8;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.global-mode-toggle-button.active {
+		border-color: #2563eb;
+		background: #2563eb;
+		color: #fff;
+	}
+
+	.global-mode-toggle-button:focus-visible,
+	.global-done-button:focus-visible {
+		outline: 2px solid #60a5fa;
+		outline-offset: 1px;
+	}
+
+	.global-mode-label {
+		font-size: 0.8rem;
+		font-weight: 650;
+		line-height: 1.05;
+	}
+
+	.global-mode-hint {
+		font-size: 0.62rem;
+		line-height: 1.05;
+		opacity: 0.78;
+	}
+
+	.global-done-button {
+		min-height: 2.65rem;
+		padding: 0.45rem 0.85rem;
+		border: 1px solid #2563eb;
+		border-radius: 6px;
+		background: #2563eb;
+		color: #fff;
+		font-size: 0.8rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.global-done-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+
 	.dev-nav {
 		display: flex;
 		align-items: center;
@@ -183,6 +313,10 @@
 		.nav-link {
 			min-height: 2.75rem;
 			padding: 0.5rem 0.85rem;
+		}
+
+		.global-mode-toggle-button {
+			min-width: 5.5rem;
 		}
 	}
 </style>

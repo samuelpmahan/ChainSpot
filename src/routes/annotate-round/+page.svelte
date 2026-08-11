@@ -39,7 +39,6 @@
 	import { dialogKeyboard, isModalOpen } from '$lib/focusManagement';
 	import {
 		addHole,
-		addHoleBeyondStandardCourse,
 		addHoleWithNumber,
 		assignCandidateToHole,
 		clearBends,
@@ -51,7 +50,6 @@
 		placeByMode,
 		removeBasket,
 		removeCorridorBend,
-		removeHole,
 		removeLastBend,
 		removeLastShot,
 		removeShot,
@@ -87,6 +85,11 @@
 	import { acceptCandidate } from '$lib/cv/types';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
+	import {
+		registerAnnotationNav,
+		unregisterAnnotationNav,
+		updateAnnotationNav
+	} from '$lib/annotationNav.svelte';
 
 	/** The two annotation activities this route now separates: course geometry (once per course/layout) vs. round-specific throws and walk path (once per round). */
 	type AnnotationMode = 'map' | 'round';
@@ -191,6 +194,7 @@
 	// svelte-ignore state_referenced_locally
 	const participatesInSession = initialEditor === undefined;
 	let editor = $state.raw(resolveInitialEditor());
+	let annotationNavRegistration = $state<number | null>(null);
 
 	function resolveInitialEditor(): ProjectEditor {
 		// An explicitly injected editor (tests) wins; otherwise reuse the retained
@@ -201,6 +205,10 @@
 	onDestroy(() => {
 		stopCourseDetectionProgress();
 		clearRevealTimers();
+		if (annotationNavRegistration !== null) {
+			unregisterAnnotationNav(annotationNavRegistration);
+			annotationNavRegistration = null;
+		}
 		if (participatesInSession) retainEditor('annotate-round', editor);
 	});
 
@@ -417,6 +425,136 @@
 		}
 	}
 
+	type DiagnosticFeatureState = 'attention' | 'live' | 'clear' | 'waiting';
+
+	interface DiagnosticFeature {
+		readonly id: 'review' | 'numbers' | 'tees' | 'baskets';
+		readonly label: string;
+		readonly summary: string;
+		readonly detail: string;
+		readonly state: DiagnosticFeatureState;
+		readonly priority: number;
+	}
+
+	/**
+	 * The diagnostics rail is a live review queue, not a second dump of worker
+	 * internals. These rows intentionally derive from detection and draft state
+	 * so the future ranked-marking list has one stable surface to update as the
+	 * user accepts or corrects individual features.
+	 */
+	const liveDiagnosticFeatures = $derived.by((): DiagnosticFeature[] => {
+		const grammarHoles = courseDetection?.grammar.holes ?? [];
+		const targetNumbers =
+			grammarHoles.length > 0 ? grammarHoles.map((hole) => hole.number) : holes.map((hole) => hole.number);
+		const targetCount = targetNumbers.length;
+		const mappedHoles = targetNumbers
+			.map((number) => holes.find((hole) => hole.number === number))
+			.filter((hole): hole is AnnotatedHole => hole !== undefined);
+		const placedTees = mappedHoles.filter((hole) => hole.tee !== undefined).length;
+		const placedBaskets = mappedHoles.filter((hole) => hole.basket !== undefined).length;
+		const unresolvedReviewCount = grammarHoles.filter((proposal) => {
+			if (proposal.status === 'ready') return false;
+			const mapped = holes.find((hole) => hole.number === proposal.number);
+			return mapped?.tee === undefined || mapped.basket === undefined;
+		}).length;
+		const assignedNumbers = courseDetection
+			? courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length
+			: numberBadges.length;
+		const numberCandidateCount = courseDetection?.numberDetection.candidates.length ?? numberBadges.length;
+		const teeCandidateCount = courseDetection?.tees.length ?? 0;
+		const basketCandidateCount = courseDetection?.baskets.length ?? basketCandidates.length;
+		const detectionInProgress = courseDetectionRunning || basketDetectionRunning || teeExperimentRunning;
+		const hasDetection = courseDetection !== null;
+
+		return [
+			{
+				id: 'review',
+				label: 'Review queue',
+				summary: detectionInProgress
+					? 'Updating from live detection'
+					: hasDetection
+						? `${unresolvedReviewCount} holes need review · ${Math.max(grammarHoles.length - unresolvedReviewCount, 0)} ready`
+						: 'Waiting for course detection',
+				detail:
+					unresolvedReviewCount > 0
+						? 'Start with the highest-impact unresolved hole.'
+						: 'No unresolved hole geometry is queued.',
+				state: detectionInProgress
+					? 'live'
+					: !hasDetection
+						? 'waiting'
+						: unresolvedReviewCount > 0
+							? 'attention'
+							: 'clear',
+				priority: unresolvedReviewCount > 0 ? 100 + unresolvedReviewCount : 10
+			},
+			{
+				id: 'numbers',
+				label: 'Hole numbers',
+				summary:
+					numberCandidateCount > 0
+						? `${assignedNumbers}/${numberCandidateCount} labels assigned`
+						: 'Waiting for badge candidates',
+				detail:
+					numberCandidateCount > assignedNumbers
+						? `${numberCandidateCount - assignedNumbers} candidate${numberCandidateCount - assignedNumbers === 1 ? '' : 's'} still need a safe match.`
+						: 'All detected badges have a label.',
+				state: detectionInProgress
+					? 'live'
+					: numberCandidateCount === 0
+						? 'waiting'
+						: assignedNumbers < numberCandidateCount
+							? 'attention'
+							: 'clear',
+				priority: numberCandidateCount > assignedNumbers ? 80 + numberCandidateCount - assignedNumbers : 8
+			},
+			{
+				id: 'tees',
+				label: 'Tee pads',
+				summary:
+					targetCount > 0
+						? `${placedTees}/${targetCount} marked`
+						: teeCandidateCount > 0
+							? `${teeCandidateCount} candidates found`
+							: 'Waiting for tee candidates',
+				detail:
+					targetCount > placedTees
+						? `${targetCount - placedTees} tee${targetCount - placedTees === 1 ? '' : 's'} remain to mark.`
+						: 'Every detected hole has a tee in the draft.',
+				state: detectionInProgress
+					? 'live'
+					: targetCount === 0
+						? 'waiting'
+						: placedTees < targetCount
+							? 'attention'
+							: 'clear',
+				priority: targetCount > placedTees ? 60 + targetCount - placedTees : 6
+			},
+			{
+				id: 'baskets',
+				label: 'Baskets',
+				summary:
+					targetCount > 0
+						? `${placedBaskets}/${targetCount} marked`
+						: basketCandidateCount > 0
+							? `${basketCandidateCount} candidates found`
+							: 'Waiting for basket candidates',
+				detail:
+					targetCount > placedBaskets
+						? `${targetCount - placedBaskets} basket${targetCount - placedBaskets === 1 ? '' : 's'} remain to mark.`
+						: 'Every detected hole has a basket in the draft.',
+				state: detectionInProgress
+					? 'live'
+					: targetCount === 0
+						? 'waiting'
+						: placedBaskets < targetCount
+							? 'attention'
+							: 'clear',
+				priority: targetCount > placedBaskets ? 50 + targetCount - placedBaskets : 5
+			}
+		].sort((left, right) => right.priority - left.priority);
+	});
+
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
 	}
@@ -589,44 +727,6 @@
 		activeHoleId = addedHole?.id ?? activeHoleId;
 	}
 
-	function handleAddHoleBeyondStandardCourse(): void {
-		const inheritedWidthPx = currentCorridorWidthPx();
-		const nextHoles = addHoleBeyondStandardCourse(holes);
-		const addedHole = nextHoles.find((hole) => !holes.some((existing) => existing.id === hole.id));
-		if (!addedHole) return;
-		holes = setCorridorWidth(nextHoles, addedHole.id, inheritedWidthPx);
-		activeHoleId = addedHole.id;
-	}
-
-	function handleRemoveHole(holeId: string): void {
-		const removedIndex = holes.findIndex((hole) => hole.id === holeId);
-		const removedHole = holes[removedIndex];
-		if (!removedHole) return;
-		const removeButton = document.querySelector<HTMLButtonElement>(
-			`[data-testid="hole-remove-${removedHole.number}"]`
-		);
-		const shouldRestoreFocus = document.activeElement === removeButton;
-		const remainingHoles = removeHole(holes, holeId);
-		const nextActiveHoleId =
-			activeHoleId === holeId ? remainingHoles[0]?.id ?? null : activeHoleId;
-		if (radialMenu?.holeId === holeId) radialMenu = null;
-		holes = remainingHoles;
-		activeHoleId = nextActiveHoleId;
-
-		if (shouldRestoreFocus) {
-			const focusHole =
-				remainingHoles.find((hole) => hole.id === nextActiveHoleId) ??
-				remainingHoles[removedIndex] ??
-				remainingHoles[removedIndex - 1];
-			void tick().then(() => {
-				const selector = focusHole
-					? `[data-testid="hole-select-${focusHole.number}"]`
-					: '[data-testid="hole-add"]';
-				document.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
-			});
-		}
-	}
-
 	function isShortcutEditableTarget(target: EventTarget | null): boolean {
 		if (target instanceof HTMLInputElement && (target.type === 'radio' || target.type === 'checkbox')) {
 			return false;
@@ -698,21 +798,6 @@
 		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
 		holes = setAllCorridorWidths(holes, corridorWidthPx);
 		markMapGeometryEdited();
-	}
-
-	/** Moves `activeHoleId` to the previous/next existing hole, wrapping around. */
-	function cycleHole(direction: 1 | -1): void {
-		if (holes.length === 0) return;
-		const sorted = [...holes].sort((left, right) => left.number - right.number);
-		const currentIndex = sorted.findIndex((hole) => hole.id === activeHoleId);
-		const nextIndex =
-			currentIndex === -1
-				? direction === 1
-					? 0
-					: sorted.length - 1
-				: (currentIndex + direction + sorted.length) % sorted.length;
-		activeHoleId = sorted[nextIndex].id;
-		vibrate(6);
 	}
 
 	/**
@@ -1773,6 +1858,16 @@
 		return sourceImage() !== null;
 	}
 
+	$effect(() => {
+		const registration = annotationNavRegistration;
+		if (registration === null) return;
+		updateAnnotationNav(registration, {
+			mode: annotationMode,
+			canFinish: canFinishAnnotation(),
+			doneRunning
+		});
+	});
+
 	/** Opens the update-confirmation dialog and resolves once the user answers it (accept = "Update saved course"). */
 	function confirmLibraryUpdate(entry: CourseLibraryEntry): Promise<boolean> {
 		return new Promise((resolve) => {
@@ -1902,6 +1997,13 @@
 	}
 
 	onMount(() => {
+		annotationNavRegistration = registerAnnotationNav({
+			mode: annotationMode,
+			canFinish: canFinishAnnotation(),
+			doneRunning,
+			onModeChange: (mode) => setAnnotationMode(mode),
+			onDone: () => void handleDone()
+		});
 		readPendingHandoff();
 		// A handoff published while this page is already mounted — the guided
 		// demo arming a step the visitor is standing on — would otherwise never
@@ -2004,75 +2106,11 @@
 		</section>
 	{/if}
 
-	<header class="toolbar">
-		<div>
-			<h1>Annotate Round</h1>
-			<p>Mark up the course map in Map mode, then switch to Round mode for throws and the walk path.</p>
-			<p>
-				Placing or dragging a tee or basket snaps to the nearest detected feature — hold Alt to place it exactly
-				where you click.
-			</p>
-		</div>
-		<button
-			type="button"
-			data-testid="annotate-done"
-			disabled={!canFinishAnnotation() || doneRunning}
-			onclick={handleDone}
-			title="Finish annotating and move to Create Graphics"
-		>
-			Done
-		</button>
-	</header>
-
 	{#if doneError}
 		<p class="error" data-testid="annotate-done-error" role="alert">{doneError}</p>
 	{/if}
 
-	<div class="mode-toggle" role="group" aria-label="Annotation mode" data-testid="annotation-mode-toggle">
-		<button
-			type="button"
-			class="mode-toggle-button"
-			class:active={annotationMode === 'map'}
-			aria-pressed={annotationMode === 'map'}
-			data-testid="annotation-mode-map"
-			onclick={() => setAnnotationMode('map')}
-		>
-			<span class="mode-toggle-label">Map</span>
-			<span class="mode-toggle-hint">Course geometry</span>
-		</button>
-		<button
-			type="button"
-			class="mode-toggle-button"
-			class:active={annotationMode === 'round'}
-			aria-pressed={annotationMode === 'round'}
-			data-testid="annotation-mode-round"
-			onclick={() => setAnnotationMode('round')}
-		>
-			<span class="mode-toggle-label">Round</span>
-			<span class="mode-toggle-hint">Throws &amp; walk path</span>
-		</button>
-	</div>
-
-	<nav class="hole-bar" aria-label="Course holes" data-testid="hole-bar">
-		<div class="hole-bar-compact">
-			<button
-				type="button"
-				class="hole-bar-compact-nav"
-				aria-label="Previous hole"
-				disabled={holes.length === 0}
-				onclick={() => cycleHole(-1)}
-			>‹</button>
-			<span class="hole-bar-compact-label" data-testid="hole-bar-current-label">
-				{activeHole() ? `Hole ${activeHole()!.number}` : 'No hole selected'}
-			</span>
-			<button
-				type="button"
-				class="hole-bar-compact-nav"
-				aria-label="Next hole"
-				disabled={holes.length === 0}
-				onclick={() => cycleHole(1)}
-			>›</button>
-		</div>
+	<nav class="hole-bar" data-testid="hole-bar">
 		<div class="hole-bar-grid">
 			{#each Array.from({ length: 18 }, (_, index) => index + 1) as holeNumber}
 				{@const hole = holes.find((candidate) => candidate.number === holeNumber)}
@@ -2101,26 +2139,6 @@
 					{/if}
 				</button>
 			{/each}
-		</div>
-		<div class="hole-bar-actions">
-			<button
-				type="button"
-				data-testid="hole-add"
-				aria-keyshortcuts="A N"
-				disabled={nextHoleNumber(holes) === null}
-				onclick={handleAddHole}
-			>
-				Add hole <kbd>A</kbd> / <kbd>N</kbd>
-			</button>
-			<button
-				type="button"
-				class="hole-add-beyond"
-				data-testid="hole-add-beyond"
-				aria-label="Add hole beyond 18"
-				onclick={handleAddHoleBeyondStandardCourse}
-			>
-				+ <span class="sr-only">Add hole beyond 18</span>
-			</button>
 		</div>
 		{#if holes.some((hole) => hole.number > 18)}
 			<div class="extra-hole-tabs" aria-label="Additional holes">
@@ -2155,33 +2173,25 @@
 			onClaimedPointerMove={previewAnnotationMove}
 			onClaimedPointerUp={commitAnnotationPointerUp}
 			onClaimedPointerCancel={cancelAnnotationPointer}
+			toolsAriaLabel={null}
 		>
+			{#snippet headerActions()}
+				{#if activeHole()}
+					{@const hole = activeHole()!}
+					<label class="header-width-control">
+						<span>Corridor width</span>
+						<input
+							type="number"
+							min="1"
+							step="1"
+							value={hole.corridorWidthPx}
+							onchange={handleCorridorWidthChange}
+							data-testid="corridor-width"
+						/>
+					</label>
+				{/if}
+			{/snippet}
 			{#snippet tools()}
-				<div class="tool-section hole-management">
-					<div class="section-heading">
-						<h2>Hole controls</h2>
-						<span>{holes.length} active</span>
-					</div>
-					{#if holes.length > 0}
-						<ul class="hole-remove-list" data-testid="hole-list">
-							{#each holes as hole (hole.id)}
-								<li class:active={hole.id === activeHoleId}>
-									<span>Hole {hole.number}</span>
-									<button
-										type="button"
-										class="remove-hole-button"
-										data-testid="hole-remove-{hole.number}"
-										aria-label={`Remove hole ${hole.number}`}
-										onclick={() => handleRemoveHole(hole.id)}
-									>Remove hole {hole.number}</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="empty-copy">Add a hole from the bar, then click directly on the map.</p>
-					{/if}
-				</div>
-
 				{#if activeHole()}
 					{@const hole = activeHole()!}
 					<div class="tool-section">
@@ -2196,17 +2206,6 @@
 							<button type="button" data-testid="remove-last-bend" disabled={hole.corridorBends.length === 0} onclick={handleRemoveLastBend}>Undo bend</button>
 							<button type="button" data-testid="clear-bends" disabled={hole.corridorBends.length === 0} onclick={handleClearBends}>Clear bends</button>
 						</div>
-						<label class="width-control">
-							<span>Corridor width — all holes (px)</span>
-							<input
-								type="number"
-								min="1"
-								step="1"
-								value={hole.corridorWidthPx}
-								onchange={handleCorridorWidthChange}
-								data-testid="corridor-width"
-							/>
-						</label>
 					</div>
 				{/if}
 
@@ -2428,6 +2427,44 @@
 					</div>
 					{#if diagnosticsRailExpanded}
 					<div id="diagnostics-rail-body" class="diagnostics-panel-body">
+						<div class="diagnostics-live-heading">
+							<span>Ranked review queue</span>
+							<span class="diagnostics-live-indicator" class:running={courseDetectionRunning} role="status">
+								<span class="diagnostics-live-dot" aria-hidden="true"></span>
+								{courseDetectionRunning ? 'Updating' : 'Live'}
+							</span>
+						</div>
+						{#if courseDetectionStatus}
+							<p class="diagnostics-live-status" data-testid="course-detection-progress" role="status">
+								{courseDetectionStatus} · {courseDetectionElapsedSeconds}s
+							</p>
+						{/if}
+						<ol
+							class="diagnostic-feature-list"
+							data-testid="diagnostics-live-list"
+							aria-label="Ranked features for review"
+							aria-live="polite"
+						>
+							{#each liveDiagnosticFeatures as feature, index (feature.id)}
+								<li
+									class="diagnostic-feature"
+									class:attention={feature.state === 'attention'}
+									class:clear={feature.state === 'clear'}
+									class:live={feature.state === 'live'}
+									class:waiting={feature.state === 'waiting'}
+									data-testid="diagnostic-feature-{feature.id}"
+								>
+									<span class="diagnostic-feature-rank" aria-hidden="true">{index + 1}</span>
+									<span class="diagnostic-feature-copy">
+										<strong>{feature.label}</strong>
+										<span>{feature.summary}</span>
+										<small>{feature.detail}</small>
+									</span>
+									<span class="diagnostic-feature-state">{feature.state === 'attention' ? 'Mark next' : feature.state === 'live' ? 'Updating' : feature.state === 'clear' ? 'Clear' : 'Waiting'}</span>
+								</li>
+							{/each}
+						</ol>
+						<div class="diagnostics-legacy" aria-hidden="true">
 					{#if courseDetectionStatus}
 						<p class="detection-progress" data-testid="course-detection-progress" role="status">
 							<span class="progress-dot" class:running={courseDetectionRunning} aria-hidden="true"></span>
@@ -2497,6 +2534,7 @@
 							Apply to Hole {activeHole()?.number ?? ''}
 						</button>
 					{/if}
+					</div>
 					</div>
 					{/if}
 				</div>
@@ -2877,7 +2915,7 @@
 		padding-right: max(1rem, env(safe-area-inset-right));
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.6rem;
 		min-height: 100vh;
 	}
 
@@ -2905,76 +2943,6 @@
 		clip: rect(0, 0, 0, 0);
 		white-space: nowrap;
 		border: 0;
-	}
-
-	.toolbar {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	h1 {
-		font-size: 1.5rem;
-		margin: 0;
-	}
-
-	.toolbar p {
-		margin: 0.15rem 0 0;
-		color: #a1a1aa;
-		font-size: 0.85rem;
-	}
-
-	.toolbar > button {
-		min-height: 2.75rem;
-		padding: 0.5rem 1.1rem;
-		border: 1px solid #2563eb;
-		border-radius: 6px;
-		background: #2563eb;
-		color: #fff;
-		font-weight: 650;
-	}
-
-	.mode-toggle {
-		display: flex;
-		gap: 0.4rem;
-		padding: 0.3rem;
-		border: 1px solid #3f3f46;
-		border-radius: 8px;
-		background: #18181b;
-		align-self: flex-start;
-	}
-
-	.mode-toggle-button {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 0.05rem;
-		min-height: 2.75rem;
-		padding: 0.35rem 0.85rem;
-		border: 1px solid transparent;
-		border-radius: 6px;
-		background: transparent;
-		color: #d4d4d8;
-		text-align: left;
-	}
-
-	.mode-toggle-button.active {
-		border-color: #2563eb;
-		background: #2563eb;
-		color: #fff;
-	}
-
-	.mode-toggle-label {
-		font-weight: 650;
-		font-size: 0.9rem;
-	}
-
-	.mode-toggle-hint {
-		font-size: 0.72rem;
-		color: inherit;
-		opacity: 0.75;
 	}
 
 	.dialog-backdrop {
@@ -3101,20 +3069,24 @@
 		stroke-width: 1;
 	}
 
-	.width-control {
+	.header-width-control {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 0.5rem;
-		font-size: 0.76rem;
+		padding: 0.25rem 0.45rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #202024;
+		font-size: 0.72rem;
 		color: #d4d4d8;
+		white-space: nowrap;
 	}
 
-	.width-control input {
-		width: 6rem;
-		min-height: 2.5rem;
+	.header-width-control input {
+		width: 4.5rem;
+		min-height: 2rem;
 		padding: 0.3rem 0.45rem;
-		border: 1px solid #52525b;
+		border: 1px solid #71717a;
 		border-radius: 5px;
 		background: #18181b;
 		color: #f4f4f5;
@@ -3284,38 +3256,6 @@
 		opacity: 0.4;
 	}
 
-	.hole-remove-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-	}
-
-	.hole-remove-list li {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 0.35rem;
-		padding-left: 0.45rem;
-		border: 1px solid #3f3f46;
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.hole-remove-list li.active {
-		border-color: #3b82f6;
-		box-shadow: inset 3px 0 #3b82f6;
-	}
-
-	.remove-hole-button {
-		border: 0 !important;
-		border-left: 1px solid #3f3f46 !important;
-		border-radius: 0 !important;
-		background: transparent !important;
-		padding: 0.4rem 0.7rem;
-		font-size: 0.78rem;
-		white-space: nowrap;
-	}
-
 	.edit-actions {
 		display: grid;
 		gap: 0.35rem;
@@ -3425,64 +3365,23 @@
 		}
 	}
 
-		.hole-bar {
-			display: flex;
-			align-items: stretch;
-			flex-wrap: wrap;
-		gap: 0.5rem;
-		padding: 0.5rem;
+	.hole-bar {
+		display: flex;
+		align-items: stretch;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		padding: 0.35rem;
 		border: 1px solid #34343a;
 		border-radius: 8px;
 		background: #18181b;
 	}
 
-	.hole-bar-compact {
-		display: flex;
-		align-items: stretch;
-		gap: 0.4rem;
-		flex: 1 1 auto;
-	}
-
-	.hole-bar-compact-nav,
-	.hole-bar-compact-label {
-		min-height: 2.75rem;
-		border: 1px solid #3f3f46;
-		border-radius: 6px;
-		background: #27272a;
-		color: #f4f4f5;
-		touch-action: manipulation;
-	}
-
-	.hole-bar-compact-nav {
-		min-width: 2.75rem;
-		font-size: 1.15rem;
-		font-weight: 700;
-		color: #a1a1aa;
-		cursor: pointer;
-	}
-
-	.hole-bar-compact-nav:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-
-	.hole-bar-compact-label {
-		flex: 1 1 auto;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.4rem;
-		font-size: 0.95rem;
-		font-weight: 650;
-	}
-
 	.hole-bar-grid {
-		flex-basis: 100%;
+		flex: 1 1 100%;
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
 		gap: 0.35rem;
 		min-width: 0;
-		margin-top: 0.5rem;
 	}
 
 	.hole-tab {
@@ -3491,9 +3390,9 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 0.2rem;
-		min-height: 2.75rem;
-		padding: 0.3rem 0.3rem;
+		gap: 0.1rem;
+		min-height: 2.15rem;
+		padding: 0.18rem 0.25rem;
 		border: 1px solid #3f3f46;
 		border-radius: 5px;
 		background: #27272a;
@@ -3533,33 +3432,10 @@
 		color: #4ade80;
 	}
 
-	.hole-bar-actions,
 	.extra-hole-tabs {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
-	}
-
-	.hole-bar-actions {
-		flex: 0 0 auto;
-	}
-
-	.hole-bar-actions button {
-		min-height: 2.75rem;
-		padding: 0.4rem 0.65rem;
-		border: 1px solid #52525b;
-		border-radius: 5px;
-		background: #27272a;
-		color: #f4f4f5;
-		cursor: pointer;
-		touch-action: manipulation;
-	}
-
-	.hole-add-beyond {
-		min-width: 2.75rem;
-		min-height: 2.75rem;
-		font-size: 1.25rem;
-		font-weight: 700;
 	}
 
 	.extra-hole-tabs {
@@ -3684,6 +3560,153 @@
 	.diagnostics-panel h2 {
 		margin: 0;
 		font-size: 1rem;
+	}
+
+	.diagnostics-live-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: #f4f4f5;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.diagnostics-live-indicator {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.68rem;
+		font-weight: 650;
+		letter-spacing: 0;
+		text-transform: none;
+		color: #86efac;
+	}
+
+	.diagnostics-live-indicator.running {
+		color: #fde68a;
+	}
+
+	.diagnostics-live-dot {
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: #22c55e;
+		box-shadow: 0 0 0 3px rgb(34 197 94 / 14%);
+	}
+
+	.diagnostics-live-indicator.running .diagnostics-live-dot {
+		background: #f59e0b;
+		box-shadow: 0 0 0 3px rgb(245 158 11 / 14%);
+	}
+
+	.diagnostics-live-status {
+		margin: 0;
+		padding: 0.45rem 0.55rem;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		background: #18181b;
+		color: #a1a1aa;
+		font-size: 0.72rem;
+		line-height: 1.35;
+	}
+
+	.diagnostic-feature-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.diagnostic-feature {
+		display: grid;
+		grid-template-columns: 1.55rem minmax(0, 1fr) auto;
+		gap: 0.45rem;
+		align-items: start;
+		padding: 0.55rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #18181b;
+	}
+
+	.diagnostic-feature.attention {
+		border-color: #a16207;
+		background: rgb(120 53 15 / 16%);
+	}
+
+	.diagnostic-feature.live {
+		border-color: #2563eb;
+		background: rgb(30 64 175 / 14%);
+	}
+
+	.diagnostic-feature.clear {
+		border-color: #166534;
+		background: rgb(20 83 45 / 14%);
+	}
+
+	.diagnostic-feature-rank {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.35rem;
+		height: 1.35rem;
+		border-radius: 50%;
+		background: #27272a;
+		color: #d4d4d8;
+		font-size: 0.7rem;
+		font-weight: 750;
+	}
+
+	.diagnostic-feature-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.12rem;
+	}
+
+	.diagnostic-feature-copy strong {
+		font-size: 0.76rem;
+		color: #f4f4f5;
+	}
+
+	.diagnostic-feature-copy > span {
+		font-size: 0.73rem;
+		font-weight: 650;
+		color: #e4e4e7;
+	}
+
+	.diagnostic-feature-copy small {
+		font-size: 0.67rem;
+		line-height: 1.3;
+		color: #a1a1aa;
+	}
+
+	.diagnostic-feature-state {
+		align-self: center;
+		font-size: 0.64rem;
+		font-weight: 750;
+		color: #a1a1aa;
+		white-space: nowrap;
+	}
+
+	.diagnostic-feature.attention .diagnostic-feature-state {
+		color: #fbbf24;
+	}
+
+	.diagnostic-feature.live .diagnostic-feature-state {
+		color: #93c5fd;
+	}
+
+	.diagnostic-feature.clear .diagnostic-feature-state {
+		color: #86efac;
+	}
+
+	.diagnostics-legacy {
+		display: none;
 	}
 
 	.tee-experiment-controls {

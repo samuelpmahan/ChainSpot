@@ -63,6 +63,10 @@
 			view: ViewTransformState
 		) => void;
 		tools?: Snippet;
+		/** Optional controls rendered beside Fit image and the file action. */
+		headerActions?: Snippet;
+		/** Override the tools landmark label; null removes it for intentionally self-explanatory rails. */
+		toolsAriaLabel?: string | null;
 		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 		/**
@@ -92,6 +96,8 @@
 		onClaimedPointerUp,
 		onClaimedPointerCancel,
 		tools,
+		headerActions,
+		toolsAriaLabel,
 		diagnostics,
 		overlay,
 		popover
@@ -177,6 +183,9 @@
 			</span>
 		</div>
 		<div class="header-actions">
+			{#if headerActions}
+				{@render headerActions()}
+			{/if}
 			<button type="button" data-testid={`pane-fit-${role}`} disabled={!currentImage()} onclick={() => vp.fit()}>Fit image</button>
 			<button
 				type="button"
@@ -195,7 +204,7 @@
 
 	<div class="editor-body" class:with-tools={Boolean(tools)}>
 		{#if tools}
-			<aside class="tools" aria-label={`${title} tools`}>
+			<aside class="tools" aria-label={toolsAriaLabel === null ? undefined : toolsAriaLabel ?? `${title} tools`}>
 				{@render tools()}
 			</aside>
 		{/if}

@@ -300,14 +300,10 @@
 	let annotatedRoundError = $state<string | null>(null);
 
 	/**
-	 * Default *preview/reference* radius for the USGS NAIP aerial pull: 900m — three
-	 * times the fixed per-tile radius below — gives enough framing margin around a
-	 * course for the coverage-box picker to be drawn and resized inside it. This is
-	 * deliberately wider than a single hole; it is a reference frame, not itself the
-	 * final clean target (though "Use this preview as-is" still commits it directly
-	 * for a course small enough not to need tiling).
+	 * Default *preview/reference* radius for the aerial pull: 300m, matching the
+	 * first-pass search radius the guided demo teaches users to try.
 	 */
-	const DEFAULT_NAIP_RADIUS_METERS = 900;
+	const DEFAULT_NAIP_RADIUS_METERS = 300;
 	/**
 	 * Fixed radius for every tile in the full-resolution grid: 300m frames one or two
 	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on every

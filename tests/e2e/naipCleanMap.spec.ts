@@ -107,8 +107,8 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 	await expect(page.getByTestId('naip-lat')).toHaveValue('33.1255198');
 	await expect(page.getByTestId('naip-lon')).toHaveValue('-96.8610387');
 
-	// 2. Fetch the wide reference preview at the default 900m radius.
-	await expect(page.getByTestId('naip-radius')).toHaveValue('900');
+	// 2. Fetch the reference preview at the default 300m radius.
+	await expect(page.getByTestId('naip-radius')).toHaveValue('300');
 	await page.getByTestId('naip-fetch-button').click();
 	await expect(page.getByTestId('naip-preview')).toBeVisible();
 	expect(naipRequestCount).toBe(1);
