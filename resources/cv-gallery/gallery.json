@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "requiredResolutionClasses": ["non-stitched", "stitched"],
+    "numbers": {
+      "enabled": true,
+      "maxCenterErrorPx": 5
+    },
+    "baskets": {
+      "enabled": true,
+      "requiredMatched": 18,
+      "maxFalsePositives": 0,
+      "associationEvaluated": false
+    },
+    "tees": {
+      "enabled": false,
+      "reason": "TODO: tee research is still moving quickly; report separately until its merge gate is deliberately defined."
+    }
+  },
+  "cases": [
+    {
+      "id": "numbers-ribbon-reference-native",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/ribbon-reference/IMG_5641.jpg",
+      "truthPath": "resources/ribbon-reference/IMG_5641-number-golden.json"
+    },
+    {
+      "id": "numbers-the-rec-left",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "pending-truth",
+      "inputPath": "resources/stitch-annotate/TheRec/TheRec-L.PNG",
+      "note": "The Rec must become a 9/9 golden number gate. Select/confirm the exact 9-badge view and add manually verified label centers before activating this case."
+    },
+    {
+      "id": "numbers-the-rec-right",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "pending-truth",
+      "inputPath": "resources/stitch-annotate/TheRec/TheRec-R.PNG",
+      "note": "Candidate source for the 9-hole Rec gate; keep pending until its exact visible golden label set is manually verified."
+    },
+    {
+      "id": "baskets-golden-native",
+      "detector": "baskets",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/GoldenBasketSet.chainspot.zip"
+    }
+  ]
+}
