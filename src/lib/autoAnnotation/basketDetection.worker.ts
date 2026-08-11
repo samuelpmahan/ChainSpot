@@ -589,8 +589,6 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
-		widthPx: candidate.widthPx,
-		heightPx: candidate.heightPx,
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
@@ -603,23 +601,13 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const grammarStartedAt = performance.now();
 	const primaryGrammar = associateCourseGrammar({ numberBadges, tees, baskets });
 
-	// A hole whose tee ownership is missing, weak, or ambiguous typically means
+	// A hole whose tee ownership survives with low confidence typically means
 	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
 	// badge -- e.g. a bright dashed putting-circle stroke crossing the pad.
-	// Recover those specific badges with tightly-scoped broken-edge and
-	// pure-white-rail fallbacks, then re-associate once more; every other hole
-	// is untouched.
+	// Recover those specific badges with a tightly-scoped `occluded-edge-loop`
+	// fallback and re-associate once more; every other hole is untouched.
 	const gappedBadges = primaryGrammar.holes
-		.filter(
-			(hole) =>
-				hole.numberBadge &&
-					(!hole.tee ||
-					hole.tee.confidence < 0.65 ||
-					hole.failures.some(
-						(failure) => failure.kind === 'ambiguous-tee' || failure.kind === 'tee-badge-ray-conflict'
-					)
-				)
-		)
+		.filter((hole) => (!hole.tee || hole.tee.confidence < 0.5) && hole.numberBadge)
 		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
 	const gapFallbackStartedAt = performance.now();
 	const gapFallbackCandidates = gappedBadges.length

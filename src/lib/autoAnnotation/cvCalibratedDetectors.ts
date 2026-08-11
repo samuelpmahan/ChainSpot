@@ -23,8 +23,7 @@ import type {
 import {
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadCandidates,
-	detectTeePadVariants,
-	detectWhiteEdgeCandidates
+	detectTeePadVariants
 } from './teePadDetection';
 import type {
 	OccludedEdgeLoopResult,
@@ -114,14 +113,14 @@ export function detectCalibratedOccludedEdgeLoopCandidates(
 	return detectOccludedEdgeLoopCandidates(cv, raster, options);
 }
 
-const DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE = 24;
+const DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE = 40;
 const DEFAULT_GAP_FALLBACK_SCORE_FLOOR = 0.7;
 const GAP_FALLBACK_MAX_CANDIDATES = 80;
 
 export interface TeeGapFallbackOptions extends CalibratedTeePadDetectionOptions {
-	/** Search radius from the badge, in uiScalePx multiples. Defaults to 24. */
+	/** Search radius from the badge, in uiScalePx multiples. Defaults to 40. */
 	readonly radiusUiScaleMultiple?: number;
-	/** Minimum broken-edge/white-rail score to accept a fallback candidate. Defaults to 0.7. */
+	/** Minimum occluded-edge-loop score to accept a fallback candidate. Defaults to 0.7. */
 	readonly fallbackScoreFloor?: number;
 }
 
@@ -132,12 +131,11 @@ export interface TeeGapFallbackOptions extends CalibratedTeePadDetectionOptions 
  * low-contrast edge for `edge-loop`'s contour, or skews `gray-center`'s
  * narrow interior-brightness band. `occluded-edge-loop` tolerates a broken
  * rectangle (it pairs short rail segments instead of requiring one closed
- * loop), while `white-edge` recovers a surviving pure-white perimeter rail
- * whose length matches the known pad size. Both are used here strictly as a
- * *fallback*: called only for badges the caller has already identified as
- * gapped or ambiguous, and gated by a tight radius plus a high score floor so
- * a low-confidence guess can never outrank a real primary candidate
- * elsewhere on the course. Validated
+ * loop), so it is used here strictly as a *fallback*: called only for the
+ * badges the caller has already identified as gapped (e.g. via
+ * `associateCourseGrammar`'s `weak-tee-confidence` failures), and gated by a
+ * tight radius plus a high score floor so a low-confidence guess can never
+ * outrank a real primary candidate elsewhere on the course. Validated
  * against `resources/GoldenTeeSet.chainspot.zip`: recovers a genuinely
  * gapped hole while leaving all previously-correct holes unchanged, whereas
  * fusing `occluded-edge-loop` into every hole's detection (no badge
@@ -154,31 +152,12 @@ export function detectCalibratedTeeGapFallbackCandidates(
 	const radiusPx = (options.radiusUiScaleMultiple ?? DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE) * options.uiScalePx;
 	const scoreFloor = options.fallbackScoreFloor ?? DEFAULT_GAP_FALLBACK_SCORE_FLOOR;
 	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, { ...options, maxCandidates: GAP_FALLBACK_MAX_CANDIDATES }).candidates;
-	const whiteEdges = detectWhiteEdgeCandidates(cv, raster, { ...options, maxCandidates: GAP_FALLBACK_MAX_CANDIDATES });
 	const extras: TeePadCandidate[] = [];
 	for (const badge of gappedBadges) {
-		const candidateQuality = (candidate: TeePadCandidate): number => {
-			const distance = Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx);
-			const locality = Math.exp(-distance / Math.max(1, radiusPx * 0.45));
-			if (candidate.orientationDeg === undefined) return candidate.score * (0.65 + locality * 0.35);
-			const targetAngle = Math.atan2(badge.yPx - candidate.yPx, badge.xPx - candidate.xPx);
-			const candidateAxis = (candidate.orientationDeg * Math.PI) / 180;
-			const axisAlignment = Math.abs(Math.cos(targetAngle - candidateAxis));
-			return candidate.score * (0.35 + locality * 0.35 + axisAlignment * 0.30);
-		};
-		const nearby = [...occluded, ...whiteEdges]
+		const nearby = occluded
 			.filter((candidate) => candidate.score >= scoreFloor && Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) <= radiusPx)
-			.sort((a, b) => candidateQuality(b) - candidateQuality(a));
-		const best = nearby[0];
-		if (
-			best &&
-			!extras.some(
-				(existing) =>
-					Math.hypot(existing.xPx - best.xPx, existing.yPx - best.yPx) <= 7 * options.uiScalePx
-			)
-		) {
-			extras.push(best);
-		}
+			.sort((a, b) => b.score - a.score);
+		if (nearby[0]) extras.push(nearby[0]);
 	}
 	return extras;
 }

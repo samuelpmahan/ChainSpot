@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it, vi } from 'vitest';
 import { createRawSnippet, mount, tick, unmount } from 'svelte';
 import ImageViewport from '../../src/lib/components/ImageViewport.svelte';

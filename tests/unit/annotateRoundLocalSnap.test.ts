@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 
@@ -146,6 +148,11 @@ function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** There is no "add hole" button in the current UI -- handleAnnotationKeyDown wires it to the 'n'/'a' keyboard shortcut only, dispatched on window to match how the app's own window-level listener receives it. */
+function addHoleViaShortcut(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+}
+
 /**
  * Geometry must be mocked BEFORE the image loads (not after): `ImageEditorPane`
  * calls `vp.fit()` reactively the moment the image resource becomes
@@ -170,7 +177,9 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	await flush();
 	void editor;
 
-	host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]')?.click();
+	addHoleViaShortcut();
+	// Radial menu is off by default; every test in this file places points through it.
+	host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
 	await flush();
 }
 

@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import { createImageAsset, createProjectState } from '../../src/lib/domain/project';

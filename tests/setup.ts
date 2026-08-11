@@ -8,8 +8,10 @@
  * test path without installing a native canvas dependency or hiding real browser
  * failures.
  */
-Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-	configurable: true,
-	writable: true,
-	value: () => null
-});
+if (typeof HTMLCanvasElement !== 'undefined') {
+	Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+		configurable: true,
+		writable: true,
+		value: () => null
+	});
+}

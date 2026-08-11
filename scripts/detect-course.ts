@@ -24,6 +24,9 @@ import type { TeePadCandidate, TeePadCv } from '../src/lib/autoAnnotation/teePad
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 import { associateCourseGrammar } from '../src/lib/autoAnnotation/courseGrammar';
 import type { CourseGrammarResult } from '../src/lib/autoAnnotation/courseGrammar';
+import { buildActiveReviewMap, recommendNextAnchor, summarizeTeeInvariant } from '../src/lib/autoAnnotation/activeReview';
+import type { ActiveReviewMap, ActiveReviewRecommendation } from '../src/lib/autoAnnotation/activeReview';
+import type { CourseDetectionResult } from '../src/lib/autoAnnotation/basketDetection';
 
 /**
  * End-to-end "what does the real pipeline actually do" CLI: runs number,
@@ -43,6 +46,7 @@ export interface CourseCliArgs {
 	readonly maxTeeCandidates: number;
 	readonly maxBasketCandidates: number;
 	readonly minBasketScore?: number;
+	readonly minAutoSuggestScore?: number;
 }
 
 interface DecodedRaster {
@@ -103,7 +107,20 @@ export interface CourseCliResult {
 		readonly wrongHoles: readonly { holeNumber: number; distancePx: number }[];
 		readonly missingHoles: readonly number[];
 	};
+	/** Same layer the browser's active-review panel runs on acceptance clicks (see activeReview.ts) — surfaced here so a CLI run shows what the reviewer would suggest next, not just raw grammar counts. */
+	readonly activeReview: {
+		readonly candidateCount: number;
+		readonly unassignedTees: number;
+		readonly unassignedBaskets: number;
+		readonly teeAxisAlignmentMean: number | null;
+		readonly teeAxisAlignmentMin: number | null;
+		readonly teeAxisAlignmentAtLeast90Pct: number;
+		readonly teeDistanceRank1: number;
+		readonly teeDistanceMarginMedian: number | null;
+		readonly recommendation: Record<string, unknown>;
+	};
 	readonly overlayPath: string;
+	readonly activeReviewPath: string;
 	readonly elapsedMs: number;
 }
 
@@ -126,6 +143,7 @@ function usage(): string {
 		'  --max-tees <count>            Tee candidate cap (default: 18)',
 		'  --max-baskets <count>         Basket candidate cap (default: 18)',
 		'  --min-basket-score <0..1>     Basket NCC floor (default: detector default)',
+		'  --min-auto-suggest-score <0..1>  Active-review auto-suggest floor (default: recommender default)',
 		'  --help'
 	].join('\n');
 }
@@ -155,6 +173,7 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 	let maxTeeCandidates = 18;
 	let maxBasketCandidates = 18;
 	let minBasketScore: number | undefined;
+	let minAutoSuggestScore: number | undefined;
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
@@ -194,6 +213,10 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 				minBasketScore = finiteNumber(requireValue(argv, index, argument), argument);
 				index += 1;
 				break;
+			case '--min-auto-suggest-score':
+				minAutoSuggestScore = finiteNumber(requireValue(argv, index, argument), argument);
+				index += 1;
+				break;
 			default:
 				throw new Error(`Unknown option '${argument}'.\n\n${usage()}`);
 		}
@@ -210,7 +233,8 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 		mapBottomPx,
 		maxTeeCandidates,
 		maxBasketCandidates,
-		minBasketScore
+		minBasketScore,
+		minAutoSuggestScore
 	};
 }
 
@@ -475,6 +499,53 @@ function evaluateTeeTruth(
 	return { tolerancePx, correctHoles, wrongHoles, missingHoles };
 }
 
+function meanOf(values: readonly number[]): number | null {
+	return values.length === 0 ? null : Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
+}
+
+function medianOf(values: readonly number[]): number | null {
+	if (values.length === 0) return null;
+	const sorted = values.slice().sort((left, right) => left - right);
+	return sorted[Math.floor(sorted.length / 2)];
+}
+
+function recommendationSummary(recommendation: ActiveReviewRecommendation): Record<string, unknown> {
+	return {
+		kind: recommendation.kind,
+		candidateKind: recommendation.kind === 'candidate' ? recommendation.candidateKind : null,
+		candidateId: recommendation.kind === 'candidate' ? recommendation.candidateId : null,
+		holeNumber: recommendation.holeNumber ?? null,
+		score: recommendation.score,
+		belowThreshold: recommendation.kind === 'candidate' ? recommendation.belowThreshold : null,
+		timedOut: recommendation.timedOut,
+		...(recommendation.kind === 'none' ? { reason: recommendation.reason } : {})
+	};
+}
+
+/** Same snapshot the browser's active-review panel logs on every recompute (+page.svelte's logActiveReviewStats) — surfaced here so a CLI run exercises and reports on the recommender layer instead of stopping at grammar association. */
+function summarizeActiveReview(
+	detection: CourseDetectionResult,
+	reviewMap: ActiveReviewMap,
+	recommendation: ActiveReviewRecommendation
+): CourseCliResult['activeReview'] {
+	const teeInvariant = summarizeTeeInvariant(detection);
+	const alignments = teeInvariant.map((stat) => stat.axisAlignment);
+	const distanceMargins = teeInvariant
+		.map((stat) => stat.distanceMarginPx)
+		.filter((margin): margin is number => margin !== null);
+	return {
+		candidateCount: reviewMap.candidates.length,
+		unassignedTees: detection.grammar.unassigned.teeCandidateIndexes.length,
+		unassignedBaskets: detection.grammar.unassigned.basketCandidateIndexes.length,
+		teeAxisAlignmentMean: meanOf(alignments),
+		teeAxisAlignmentMin: alignments.length === 0 ? null : Math.min(...alignments),
+		teeAxisAlignmentAtLeast90Pct: alignments.filter((value) => value >= 0.9).length,
+		teeDistanceRank1: teeInvariant.filter((stat) => stat.distanceRank === 1).length,
+		teeDistanceMarginMedian: medianOf(distanceMargins),
+		recommendation: recommendationSummary(recommendation)
+	};
+}
+
 export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCliResult> {
 	const startedAt = performance.now();
 	const input = loadInput(args.inputPath);
@@ -512,30 +583,19 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
-		widthPx: candidate.widthPx,
-		heightPx: candidate.heightPx,
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
 	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
 
-	// A hole whose tee ownership is missing, weak, or ambiguous typically means
+	// A hole whose tee ownership survives with low confidence typically means
 	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
 	// badge -- the pipeline was forced to give it someone else's leftover
-	// candidate. Recover those specific badges with tightly-scoped broken-edge
-	// and pure-white-rail fallbacks, then re-associate once more; every other
+	// candidate. Recover those specific badges with a tightly-scoped
+	// `occluded-edge-loop` fallback and re-associate once more; every other
 	// hole's candidates and assignment are untouched.
 	const gappedBadges = primaryGrammar.holes
-		.filter(
-			(hole) =>
-				hole.numberBadge &&
-				(!hole.tee ||
-					hole.tee.confidence < 0.65 ||
-					hole.failures.some(
-					(failure) => failure.kind === 'ambiguous-tee' || failure.kind === 'tee-badge-ray-conflict'
-				)
-				)
-		)
+		.filter((hole) => (!hole.tee || hole.tee.confidence < 0.5) && hole.numberBadge)
 		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
 	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
 	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;
@@ -547,10 +607,16 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	mkdirSync(outputDir, { recursive: true });
 	const overlayPath = join(outputDir, 'course.png');
 	const jsonPath = join(outputDir, 'course.json');
+	const activeReviewPath = join(outputDir, 'activeReview.json');
 
 	const readyHoles = grammar.holes.filter((hole) => hole.status === 'ready').length;
 	const reviewHoles = grammar.holes.filter((hole) => hole.status === 'review').length;
 	const incompleteHoles = grammar.holes.filter((hole) => hole.status === 'incomplete').length;
+
+	const detectionResult: CourseDetectionResult = { numberDetection, tees: finalTeeCandidates, baskets: basketCandidates, grammar };
+	const reviewMap = buildActiveReviewMap(detectionResult, [], []);
+	const recommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore: args.minAutoSuggestScore });
+	const activeReview = summarizeActiveReview(detectionResult, reviewMap, recommendation);
 
 	const output: CourseCliResult = {
 		input: { path: input.sourcePath, sourceEntry: input.sourceEntry, widthPx: input.widthPx, heightPx: input.heightPx },
@@ -569,12 +635,15 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		gapFallback: { gappedBadgeCount: gappedBadges.length, addedCandidateCount: gapFallbackCandidates.length },
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
+		activeReview,
 		overlayPath,
+		activeReviewPath,
 		elapsedMs: performance.now() - startedAt
 	};
 
 	writeFileSync(overlayPath, renderOverlay(input, grammar, finalTeeCandidates, basketCandidates));
 	writeFileSync(jsonPath, `${JSON.stringify(output, null, 2)}\n`);
+	writeFileSync(activeReviewPath, `${JSON.stringify({ map: reviewMap, recommendation: recommendationSummary(recommendation) }, null, 2)}\n`);
 	console.log(JSON.stringify({ ...output, jsonPath }, null, 2));
 	return output;
 }

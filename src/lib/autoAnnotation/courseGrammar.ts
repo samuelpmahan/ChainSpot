@@ -37,8 +37,6 @@ export const DEFAULT_COURSE_HOLE_NUMBERS: readonly number[] = Array.from(
 export interface CoursePointCandidate extends Candidate {
 	/** Normalized detector confidence when available (0..1). */
 	readonly confidence?: number;
-	/** Undirected major-axis direction, in degrees, when the detector fits one. */
-	readonly orientationDeg?: number;
 }
 
 /** One possible digit interpretation for a located number-badge glyph. */
@@ -74,16 +72,6 @@ export interface CourseGrammarInput {
 	 * intentionally an option for unusually small or large source rasters.
 	 */
 	readonly basketPolarityPenaltyPx?: number;
-	/**
-	 * Penalty for a tee whose major axis does not point along the ray to its
-	 * number badge.  Defaults to 90 source pixels; omitted orientation is
-	 * neutral so non-rectangular or legacy candidates remain usable.
-	 */
-	readonly teeAxisPenaltyPx?: number;
-	/** Minimum extra clearance around another badge when scoring a tee ray. */
-	readonly teeBadgeRayClearancePx?: number;
-	/** Maximum penalty for a tee ray that overlaps another badge. */
-	readonly teeBadgeRayPenaltyPx?: number;
 }
 
 export type CourseGrammarFailureKind =
@@ -96,7 +84,6 @@ export type CourseGrammarFailureKind =
 	| 'weak-basket-confidence'
 	| 'ambiguous-tee'
 	| 'ambiguous-basket'
-	| 'tee-badge-ray-conflict'
 	| 'basket-polarity-conflict';
 
 export interface CourseGrammarFailure {
@@ -123,8 +110,6 @@ export interface TeeAssignment {
 	readonly yPx: number;
 	readonly detectorConfidence: number;
 	readonly confidence: number;
-	/** Undirected tee-axis alignment with this hole's number badge, when known. */
-	readonly axisAlignment?: number;
 	readonly distancePx: number;
 	/** Distance to the next-best tee for this badge, when one exists. */
 	readonly runnerUpDistancePx?: number;
@@ -161,8 +146,6 @@ export interface CourseHoleProposal {
 export interface CourseGrammarResult {
 	readonly holes: readonly CourseHoleProposal[];
 	readonly failures: readonly CourseGrammarFailure[];
-	/** Tee candidates whose direct ray overlaps another badge and was penalized. */
-	readonly teeBadgeRayConflicts?: readonly Readonly<{ holeNumber: number; candidateIndex: number }>[];
 	readonly unassigned: {
 		readonly numberBadgeCandidateIndexes: readonly number[];
 		readonly teeCandidateIndexes: readonly number[];
@@ -175,14 +158,11 @@ interface IndexedPoint {
 	readonly xPx: number;
 	readonly yPx: number;
 	readonly confidence: number;
-	readonly orientationDeg?: number;
 }
 
 interface IndexedBadge extends IndexedPoint {
 	readonly holeNumber?: number;
 	readonly labelScores?: readonly NumberBadgeLabelScore[];
-	readonly widthPx?: number;
-	readonly heightPx?: number;
 }
 
 interface TeeDetails {
@@ -197,9 +177,6 @@ const BLOCKED_COST = 1_000_000_000;
 const DUMMY_COST = 100_000_000;
 const DEFAULT_DETECTOR_CONFIDENCE = 0.75;
 const DEFAULT_BASKET_POLARITY_PENALTY_PX = 80;
-const DEFAULT_TEE_AXIS_PENALTY_PX = 90;
-const DEFAULT_TEE_BADGE_RAY_CLEARANCE_PX = 6;
-const DEFAULT_TEE_BADGE_RAY_PENALTY_PX = 120;
 
 function clamp01(value: number): number {
 	return Math.max(0, Math.min(1, value));
@@ -252,8 +229,7 @@ function normalizePoints<T extends CoursePointCandidate>(
 			sourceIndex,
 			xPx: candidate.xPx,
 			yPx: candidate.yPx,
-			confidence: candidateConfidence(candidate),
-			...(finite(candidate.orientationDeg) ? { orientationDeg: candidate.orientationDeg } : {})
+			confidence: candidateConfidence(candidate)
 		});
 	});
 	return points;
@@ -272,9 +248,7 @@ function normalizeBadges(
 				Number.isInteger(candidate.holeNumber) && (candidate.holeNumber as number) > 0
 					? candidate.holeNumber
 					: undefined,
-			labelScores: candidate.labelScores,
-			widthPx: candidate.widthPx,
-			heightPx: candidate.heightPx
+			labelScores: candidate.labelScores
 		};
 	});
 }
@@ -392,60 +366,6 @@ function raysPolarityCosine(
 		: 1;
 }
 
-/**
- * Tee pads are rectangles, not arrows, so their major axis is undirected.
- * `1` means the axis points directly at the badge and `0` means it is
- * perpendicular.  A missing orientation is represented as `undefined` so
- * callers can leave legacy candidates neutral instead of penalizing them.
- */
-function teeBadgeAxisAlignment(
-	tee: Pick<IndexedPoint, 'xPx' | 'yPx' | 'orientationDeg'>,
-	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>
-): number | undefined {
-	if (tee.orientationDeg === undefined) return undefined;
-	const teeToBadge = Math.atan2(badge.yPx - tee.yPx, badge.xPx - tee.xPx);
-	const teeAxis = (tee.orientationDeg * Math.PI) / 180;
-	return clamp01(Math.abs(Math.cos(teeToBadge - teeAxis)));
-}
-
-/**
- * A tee's direct ray to its claimed badge should generally avoid another
- * hole's badge, but this is only a soft contradiction: real course layouts
- * can create accidental crossings in dense clusters. Return a penalty that
- * increases as the ray penetrates the other badge instead of hard-blocking it.
- */
-function teeBadgeRayCrossingPenalty(
-	tee: Pick<IndexedPoint, 'xPx' | 'yPx'>,
-	badge: IndexedBadge,
-	otherBadges: readonly IndexedBadge[],
-	clearancePx: number,
-	maximumPenaltyPx: number
-): number {
-	const deltaX = badge.xPx - tee.xPx;
-	const deltaY = badge.yPx - tee.yPx;
-	const lengthSquared = deltaX * deltaX + deltaY * deltaY;
-	if (lengthSquared <= 1e-6) return 0;
-	const length = Math.sqrt(lengthSquared);
-	let penalty = 0;
-	otherBadges.forEach((other) => {
-		if (other.sourceIndex === badge.sourceIndex) return;
-		const otherX = other.xPx - tee.xPx;
-		const otherY = other.yPx - tee.yPx;
-		const projection = (otherX * deltaX + otherY * deltaY) / lengthSquared;
-		if (projection <= 0 || projection >= 1) return;
-		const perpendicularDistance = Math.abs(otherX * deltaY - otherY * deltaX) / length;
-		const badgeRadius = Math.max(
-			clearancePx,
-			(other.widthPx ?? 0) * 0.5,
-			(other.heightPx ?? 0) * 0.5
-		);
-		if (perpendicularDistance <= badgeRadius) {
-			penalty = Math.max(penalty, maximumPenaltyPx * (1 - perpendicularDistance / badgeRadius));
-		}
-	});
-	return penalty;
-}
-
 function basketCost(
 	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
 	tee: Pick<IndexedPoint, 'xPx' | 'yPx'>,
@@ -497,18 +417,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		finite(input.basketPolarityPenaltyPx) && input.basketPolarityPenaltyPx >= 0
 			? input.basketPolarityPenaltyPx
 			: DEFAULT_BASKET_POLARITY_PENALTY_PX;
-	const teeAxisPenaltyPx =
-		finite(input.teeAxisPenaltyPx) && input.teeAxisPenaltyPx >= 0
-			? input.teeAxisPenaltyPx
-			: DEFAULT_TEE_AXIS_PENALTY_PX;
-	const teeBadgeRayClearancePx =
-		finite(input.teeBadgeRayClearancePx) && input.teeBadgeRayClearancePx >= 0
-			? input.teeBadgeRayClearancePx
-			: DEFAULT_TEE_BADGE_RAY_CLEARANCE_PX;
-	const teeBadgeRayPenaltyPx =
-		finite(input.teeBadgeRayPenaltyPx) && input.teeBadgeRayPenaltyPx >= 0
-			? input.teeBadgeRayPenaltyPx
-			: DEFAULT_TEE_BADGE_RAY_PENALTY_PX;
 
 	// Stage 1: badge ownership.  The explicit global solve is what avoids two
 	// visually similar glyphs both claiming one hole label.
@@ -551,8 +459,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 			});
 		}
 	});
-	const ownedBadgeIndexes = new Set([...badgeForHole.values()].map((assignment) => assignment.candidateIndex));
-	const ownedBadges = badges.filter((badge) => ownedBadgeIndexes.has(badge.sourceIndex));
 
 	// Stage 2: a preliminary, tee-independent basket pass.  Baskets are the more
 	// reliable detector, so their rough direction from each badge is known
@@ -581,34 +487,16 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	// Walking backward from the reliable preliminary basket resolves it: a tee
 	// on the opposite side of the badge from its known basket is preferred,
 	// using the same opposite-ray polarity concept Stage 4 already applies to
-	// baskets. The fitted tee major axis is an additional local invariant: the
-	// physical pad points at its own badge, so a perpendicular candidate pays a
-	// bounded penalty even when it is a few pixels closer.
+	// baskets.
 	const teeHoleNumbers = holeNumbers.filter((holeNumber) => badgeForHole.has(holeNumber));
-	const teeBadgeRayConflicts: Array<{ holeNumber: number; candidateIndex: number }> = [];
 	const teeCosts = teeHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
 		const preliminaryBasket = preliminaryBasketForHole.get(holeNumber);
-		const indexedBadge = ownedBadges.find((candidate) => candidate.sourceIndex === badge.candidateIndex);
 		return tees.map((tee) => {
-			const rayPenalty = indexedBadge
-				? teeBadgeRayCrossingPenalty(
-						tee,
-						indexedBadge,
-						ownedBadges,
-						teeBadgeRayClearancePx,
-						teeBadgeRayPenaltyPx
-					)
-				: 0;
-			if (rayPenalty > 0) {
-				teeBadgeRayConflicts.push({ holeNumber, candidateIndex: tee.sourceIndex });
-			}
 			const distance = pointDistance(badge, tee);
-			const axisAlignment = teeBadgeAxisAlignment(tee, badge);
-			const axisPenalty = axisAlignment === undefined ? 0 : teeAxisPenaltyPx * (1 - axisAlignment);
-			if (!preliminaryBasket) return distance + axisPenalty + rayPenalty;
+			if (!preliminaryBasket) return distance;
 			const polarityCosine = raysPolarityCosine(badge, tee, preliminaryBasket);
-			return distance + polarityPenaltyPx * (polarityCosine + 1) + axisPenalty + rayPenalty;
+			return distance + polarityPenaltyPx * (polarityCosine + 1);
 		});
 	});
 	const teeAssignments = hungarian(withDummyColumns(teeCosts, tees.length));
@@ -632,19 +520,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const runnerUp = assignmentMargin(chosen, distances);
 		const localRank = distances.filter((distance) => distance < chosen - 1e-6).length + 1;
 		const confidence = endpointConfidence(tee.confidence, localRank, chosen, nearest, runnerUp);
-		const indexedBadge = ownedBadges.find(
-			(candidate) => candidate.sourceIndex === badgeForHole.get(holeNumber)!.candidateIndex
-		);
-		const chosenRayPenalty = indexedBadge
-			? teeBadgeRayCrossingPenalty(
-					tee,
-					indexedBadge,
-					ownedBadges,
-					teeBadgeRayClearancePx,
-					teeBadgeRayPenaltyPx
-				)
-			: 0;
-		const axisAlignment = teeBadgeAxisAlignment(tee, badgeForHole.get(holeNumber)!);
 		teeForHole.set(holeNumber, {
 			assignment: {
 				candidateIndex: tee.sourceIndex,
@@ -653,7 +528,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				detectorConfidence: tee.confidence,
 				confidence,
 				distancePx: chosen,
-				...(axisAlignment === undefined ? {} : { axisAlignment }),
 				...(runnerUp === undefined ? {} : { runnerUpDistancePx: runnerUp })
 			}
 		});
@@ -665,16 +539,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				candidateKind: 'tee',
 				candidateIndex: tee.sourceIndex,
 				message: `Hole ${holeNumber}'s tee assignment is weak after global ownership matching.`
-			});
-		}
-		if (chosenRayPenalty > 0) {
-			failures.push({
-				kind: 'tee-badge-ray-conflict',
-				severity: 'warning',
-				holeNumber,
-				candidateKind: 'tee',
-				candidateIndex: tee.sourceIndex,
-				message: `Hole ${holeNumber}'s tee ray overlaps another hole badge; ownership remains reviewable, not disqualified.`
 			});
 		}
 		if (localRank > 1) {
@@ -821,7 +685,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	return {
 		holes,
 		failures,
-		teeBadgeRayConflicts,
 		unassigned: {
 			numberBadgeCandidateIndexes: badges
 				.map((badge) => badge.sourceIndex)

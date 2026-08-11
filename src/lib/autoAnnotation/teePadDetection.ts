@@ -20,7 +20,7 @@ import type { Candidate, CvRaster } from '../cv/types';
  * candidates within one pad radius are fused rather than choosing either one.
  */
 
-export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop' | 'white-edge';
+export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop';
 
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 
@@ -673,44 +673,6 @@ function houghSegments(lines: CvMat): HoughSegment[] {
 	return segments;
 }
 
-/** Fraction of samples on a calibrated rail that land on the bright-edge mask. */
-function brightRailCoverage(
-	mask: Uint8Array,
-	width: number,
-	height: number,
-	centerX: number,
-	centerY: number,
-	orientationDeg: number,
-	length: number,
-	sourceScale: number
-): number {
-	const radians = (orientationDeg * Math.PI) / 180;
-	const cosine = Math.cos(radians);
-	const sine = Math.sin(radians);
-	const samples = Math.max(8, Math.ceil(length * 2));
-	const sampleRadius = Math.max(1, Math.ceil(sourceScale));
-	let covered = 0;
-	for (let sample = 0; sample < samples; sample += 1) {
-		const offset = ((sample + 0.5) / samples - 0.5) * length;
-		const x = Math.round(centerX + offset * cosine);
-		const y = Math.round(centerY + offset * sine);
-		let hit = false;
-		for (let dy = -sampleRadius; dy <= sampleRadius && !hit; dy += 1) {
-			for (let dx = -sampleRadius; dx <= sampleRadius; dx += 1) {
-				const nearbyX = x + dx;
-				const nearbyY = y + dy;
-				if (nearbyX < 0 || nearbyX >= width || nearbyY < 0 || nearbyY >= height) continue;
-				if (mask[nearbyY * width + nearbyX] !== 0) {
-					hit = true;
-					break;
-				}
-			}
-		}
-		if (hit) covered += 1;
-	}
-	return covered / samples;
-}
-
 function maskIgnoredCircles(
 	edges: Uint8Array,
 	width: number,
@@ -738,95 +700,6 @@ function maskIgnoredCircles(
 		}
 	}
 	return circles.length;
-}
-
-const WHITE_EDGE_VALUE_MIN = 215;
-const WHITE_EDGE_SATURATION_MAX = 38;
-const WHITE_EDGE_EXPECTED_MAJOR_UI_SCALE = 13;
-const WHITE_EDGE_MAJOR_TOLERANCE_UI_SCALE = 5;
-
-/**
- * Finds a tee from a surviving pure-white perimeter rail even when the gray
- * interior is hidden by a putting-circle dash. This is intentionally a
- * candidate generator, not a course-wide detector: the caller only uses it
- * around badges whose primary tee assignment is already suspect.
- */
-export function detectWhiteEdgeCandidates(
-	cv: TeePadCv,
-	raster: TeePadRaster,
-	options: TeePadDetectionOptions
-): readonly TeePadCandidate[] {
-	validateInputs(raster, options);
-	const rows = mapRows(raster, options.mapBoundsPx);
-	if (!rows) return [];
-	const { saturation, value } = readHsv(raster);
-	const brightMask = new Uint8Array(value.length);
-	for (let index = 0; index < brightMask.length; index += 1) {
-		brightMask[index] = value[index] >= WHITE_EDGE_VALUE_MIN && saturation[index] <= WHITE_EDGE_SATURATION_MAX ? 255 : 0;
-	}
-	insideRows(brightMask, raster.widthPx, rows);
-
-	const brightMat = matFromBytes(cv, brightMask, raster.widthPx, raster.heightPx);
-	const lines = new cv.Mat();
-	try {
-		const sourceScale = raster.sourceScale;
-		const scale = options.uiScalePx / sourceScale;
-		const expected = WHITE_EDGE_EXPECTED_MAJOR_UI_SCALE * scale;
-		const tolerance = WHITE_EDGE_MAJOR_TOLERANCE_UI_SCALE * scale;
-		cv.HoughLinesP(
-			brightMat,
-			lines,
-			1,
-			Math.PI / 180,
-			4,
-			Math.max(5, expected * 0.25),
-			Math.max(4, expected * 0.25)
-		);
-		const candidates: AnalysisCandidate[] = [];
-		for (const segment of houghSegments(lines)) {
-			const length = segmentLength(segment);
-			if (length < Math.max(5, expected * 0.25) || length > expected + tolerance) continue;
-			const lengthFit = clamp(1 - Math.abs(length - expected) / Math.max(1, tolerance), 0, 1);
-			const midpointX = (segment.x1 + segment.x2) * 0.5;
-			const midpointY = (segment.y1 + segment.y2) * 0.5;
-			const orientationDeg = segmentAngle(segment);
-			const coverage = brightRailCoverage(
-				brightMask,
-				raster.widthPx,
-				raster.heightPx,
-				midpointX,
-				midpointY,
-				orientationDeg,
-				expected,
-				sourceScale
-			);
-			candidates.push({
-				x: midpointX,
-				y: midpointY,
-				orientationDeg,
-				width: length,
-				height: 7 * scale,
-				// Hough support is intentionally tolerant of a broken/occluded rail;
-				// coverage supplies the visible-edge evidence while length keeps
-				// unrelated white text and map lines from dominating.
-				score: 0.45 + coverage * 0.35 + lengthFit * 0.20,
-				support: 'white-edge'
-			});
-		}
-
-		candidates.sort((left, right) => right.score - left.score);
-		const kept: AnalysisCandidate[] = [];
-		const maximumDistance = 7 * options.uiScalePx / sourceScale;
-		for (const candidate of candidates) {
-			if (kept.some((existing) => tooClose(candidate, existing, maximumDistance))) continue;
-			kept.push(candidate);
-			if (kept.length >= (options.maxCandidates ?? DEFAULT_MAX_CANDIDATES)) break;
-		}
-		return kept.map((candidate) => sourceCandidate(candidate, raster.sourceScale));
-	} finally {
-		brightMat.delete();
-		lines.delete();
-	}
 }
 
 function occludedPair(

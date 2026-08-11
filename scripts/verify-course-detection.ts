@@ -32,6 +32,7 @@ interface GateImageResult {
 	readonly mapBoundsPx?: CourseCliResult['mapBoundsPx'];
 	readonly counts: CourseCliResult['counts'];
 	readonly gapFallback: CourseCliResult['gapFallback'];
+	readonly activeReview: CourseCliResult['activeReview'];
 	readonly gate: {
 		readonly labeledBadges: number;
 		readonly baskets: number;
@@ -206,10 +207,18 @@ async function main(): Promise<void> {
 			mapBoundsPx: result.mapBoundsPx,
 			counts: result.counts,
 			gapFallback: result.gapFallback,
+			activeReview: result.activeReview,
 			gate
 		};
 		results.push(imageResult);
-		console.log(`${gate.passed ? 'PASS' : 'FAIL'} ${basename(resolvedInput)} — badges ${gate.labeledBadges}/${args.expectedCount}, baskets ${gate.baskets}/${args.expectedCount}, tees ${result.counts.teeCandidates}, uiScale ${result.uiScalePx.toFixed(3)}, basketScale ${result.basketTemplateScale.toFixed(3)}`);
+		const recommendation = result.activeReview.recommendation;
+		const nextReview =
+			recommendation.kind === 'candidate'
+				? `${recommendation.candidateKind}→hole ${recommendation.holeNumber} (${(recommendation.score as number).toFixed(2)}${recommendation.belowThreshold ? ', below-threshold' : ''})`
+				: `none (${recommendation.reason})`;
+		console.log(
+			`${gate.passed ? 'PASS' : 'FAIL'} ${basename(resolvedInput)} — badges ${gate.labeledBadges}/${args.expectedCount}, baskets ${gate.baskets}/${args.expectedCount}, tees ${result.counts.teeCandidates}, uiScale ${result.uiScalePx.toFixed(3)}, basketScale ${result.basketTemplateScale.toFixed(3)}, unassigned tee/basket ${result.activeReview.unassignedTees}/${result.activeReview.unassignedBaskets}, next-review ${nextReview}`
+		);
 	}
 
 	const report: GateReport = {

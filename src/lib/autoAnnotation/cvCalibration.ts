@@ -143,7 +143,7 @@ export function resolveTemplateScale<Scale extends TemplateScale>(
 		return (scaled.value * positiveFinite(sourceScale, 'Source scale')) as Scale;
 	}
 	throw new Error(
-		`Scale measured in ${scaled.space} space cannot be used against a ${targetSpace}-space raster.`
+		`Scale measured in ${scaled.space} space cannot be used against ${targetSpace === 'analysis' ? 'an' : 'a'} ${targetSpace}-space raster.`
 	);
 }
 
