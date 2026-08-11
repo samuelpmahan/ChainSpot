@@ -21,45 +21,77 @@ npm run overfit:tees -- resources/GoldenTeeSet.chainspot.zip \
 - `gap-fill` verification (default): baseline keeps its 17 holes; the tuned
   scorer slides a local window anchored on the missed hole's NUMBER BADGE
   (truth is used only for evaluation), and candidate peaks are validated by
-  the badge-ray invariant below. **Auto-detects tee 5 at 4.4px from truth →
-  18/18.** Stable across sampling seeds.
+  the badge-ray invariant below. With the sweep estimator, tee 5 is
+  badge-ray-validated at `(484, 852)`, 7.6 px from truth (12.4 px tolerance),
+  with axis 152.5° and NCC 0.698: **17/18 → 18/18**.
 
 ## The badge-ray invariant
 
-A valid tee pad AIMS at its own number badge: the rays along both long
-sides, and the ray perpendicular to the front (short) edge, all intersect
-the badge. The harness checks it by fitting the pad's dominant rim line
-(RANSAC over clean-bright, off-structure, non-black pixels — blob PCA fails
-when the ring band bisects the rim, but the longest collinear fragment IS a
-long-side ray) and requiring the center ray plus both long-side offsets to
-pass within the badge disc, badge ahead of the front edge. Note tee 5 sits
-40.5 UI multiples from badge 5 — just past the production 40-multiple
+A valid tee pad AIMS at its own number badge: the pad's major axis is the
+initial throw/fairway direction, and UDisc places the number badge on that
+same ray. The harness requires the center ray plus both long-side offsets to
+pass within the badge disc, with the badge beyond the pad's front edge. Tee 5
+sits 40.5 UI multiples from badge 5 — just past the production 40-multiple
 gap-fallback radius — so the badge-anchored search uses 45.
 
-Measured with `npm run validate:badge-invariant` (computer-fitted axes, not
-truth-derived): the invariant holds on **18/18** truth tees. Mean
-axis-to-badge-bearing delta is 2.2°, max 5.8° (tee 14); the worst ray
-offset across all 18 pads is 9.5px against the 25px badge disc, so the
-margin holds everywhere. On specificity, 14/18 pads pass only their own
-badge; 4 pads (tees 3, 4, 9, 18) also pass exactly one farther badge, and
-those are disambiguated by taking the nearest passing badge. Only tee 2 has
-a basket sitting on its pad→badge corridor (3px clearance), so the test is
-kept as pure ray geometry against the badge disc — no first-object-hit ray
-marching against baskets or other occluders.
+### Correction: the old fitter was wrong, not the invariant
 
-Two fit lessons fell out of getting this to 18/18:
+The first validator estimated the axis with RANSAC over bright rim fragments.
+On a second labeled course, Alex Clark, that fitter locked onto basket glyphs,
+road edges, or putting-ring arcs on 5/18 pads and reported false invariant
+violations. Visual inspection plus independent rotation sweeps showed that the
+pads themselves still obey the rule.
 
-- **Dash filtering must be component-level, not per-pixel.** Deleting every
-  pixel inside the dashed-ring structure band deletes real rail pixels too
-  when a ring happens to run tangent to the pad (tee 14). Instead, a dash is
-  identified as a connected bright component whose span is ≤25px AND whose
-  pixels are ≥50% inside the structure band, and only components meeting
-  that test are dropped — rails that merely clip the band survive.
-- **Black-adjacency must stay per-pixel.** Pads sitting over dark canopy
-  touch near-black pixels along their rim (tees 1, 3, 11, 12); suppressing
-  by component would throw those rims out entirely, so black-adjacency
-  (and the ≥60% black-adjacent "glyph-like" rejection) is applied pixel by
-  pixel when collecting rim points.
+Orientation is now measured by `sweepPadOrientation`: rotation-swept,
+TM_CCOEFF_NORMED-equivalent NCC against synthesized hollow-pad templates
+(background 120, rim 235, interior 158), with angles from 0° to 180° in 2.5°
+steps and a small local translation search. The templates remain UI-scale
+derived; two nearby outer-footprint interpretations are searched and NCC
+chooses between them from the pixels, rather than configuring a size per
+fixture. Weak matches also get a conservative script-local pass that ignores a
+small halo around near-black glyph pixels. Badge and basket geometry never
+enter the orientation estimator.
+
+A sweep score below 0.30 is **UNMEASURABLE**: it is not a FAIL and cannot be
+used to produce an invariant verdict. Gap-fill auto-approval is intentionally
+stricter than measurement: a newly proposed location needs NCC >= 0.50 before
+its badge ray is allowed to validate it. Marginal peaks remain visible as the
+existing `UNVALIDATED top` diagnostic instead of becoming false recoveries.
+
+Measured with `npm run validate:badge-invariant`:
+
+- **GoldenTeeSet: PASS 18/18; FAIL 0; UNMEASURABLE 0.**
+- **AlexClark: PASS 17/18; FAIL 0; UNMEASURABLE 1.** Tee 12 is the sole
+  unmeasurable pad (NCC 0.272); its rendered pad is heavily buried by a glyph.
+
+The second course also exposes the physical basis of the rule: the pad tracks
+the initial fairway/throw line, and the number badge lies on that line. It does
+not blindly point at the basket. In the original visual/reference bearing
+audit, the clearest divergent cases were tee 13 (~1.5° to badge vs ~14.3° to
+basket) and tee 16 (~1.0° vs ~16.5°). With the sweep's refined centers in the
+final validator run those are 1.4° vs 17.0° for tee 13 and 1.1° vs 18.6° for
+tee 16 — the same qualitative result: **when badge and basket bearings diverge,
+the pad tracks the badge**.
+
+The invariant remains pure ray geometry against the badge disc; baskets and
+other rendered course structures can occlude the visible pad and are not
+first-object-hit constraints.
+
+### Frozen-transfer check
+
+The Golden scorer was re-derived deterministically, then transferred unchanged
+to Alex Clark:
+
+```
++2*padEvidenceScore +2*softGrayFraction +2*edgeDensity -2*satIqr
+```
+
+Alex's fused baseline remains **13/18**, missing tees 5, 8, 11, 12, and 13.
+The transferred scorer does not recover a true missing pad, so the combined
+result honestly remains **13/18**. Crucially, after the orientation correction
+and strong-confidence auto-validation threshold, all five gap proposals are
+reported as **UNVALIDATED**. The wrong-location peaks that the old rim fitter
+had falsely badge-ray-validated are no longer blessed as recoveries.
 
 ## Why hole 5 is hard, and what actually separates it
 
@@ -93,9 +125,12 @@ factors non-zero. The full tuned scorer adds `softGrayFraction`,
 `tuned-scorer.json` + the structure fit are designed to slot into
 `detectCalibratedTeeGapFallbackCandidates` (`cvCalibratedDetectors.ts`): for
 a badge with no confident tee, slide the scorer in the fallback radius and
-accept the peak. Basket positions come from the existing 18/18 basket
-detector; ring radii are fitted from dash blobs at runtime. Guard any wiring
-with a new 18/18 assertion in `verify:cv` rather than loosening the current
-one. `railCapScore` (parallel rails + perpendicular cap) measured AUC 0.74 at
-this patch scale — supportive but not sufficient alone as an auto-approve
-gate; `padEvidenceScore` is the stronger candidate for that.
+consider the peaks. A peak is only auto-approved when its independently
+measured pad orientation is strongly measurable and satisfies the badge-ray
+invariant; otherwise it remains a review candidate. Basket positions come from
+the existing 18/18 basket detector; ring radii are fitted from dash blobs at
+runtime. Guard any production wiring with a new 18/18 assertion in `verify:cv`
+rather than loosening the current one. `railCapScore` (parallel rails +
+perpendicular cap) measured AUC 0.74 at this patch scale — supportive but not
+sufficient alone as an auto-approve gate; `padEvidenceScore` is the stronger
+candidate for that.
