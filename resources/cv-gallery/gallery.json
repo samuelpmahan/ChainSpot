@@ -33,23 +33,25 @@
       "resolutionClass": "stitched",
       "status": "pending-truth",
       "inputPath": "resources/real-capture/ReferenceStitch.png",
-      "note": "Required stitched number gate. Add one manually verified full visible label set/center truth file; do not tune the detector to this image."
+      "note": "Required stitched number gate. Add one independently verified full visible label set/center truth file; do not tune the detector to this image."
     },
     {
       "id": "numbers-the-rec-left",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
-      "status": "pending-truth",
+      "status": "active",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-L.PNG",
-      "note": "The Rec must become a 9/9 golden number gate. Confirm this is the intended 9-visible-badge view, then add manually verified label centers. If the right capture is the correct view, swap statuses instead of annotating both."
+      "truthPath": "resources/stitch-annotate/TheRec/TheRec-L-number-golden.json",
+      "note": "Visible-badge golden [1,5,6,7,8,9]. Labels were visually read from the source; centers come from badge-body pixel geometry, not detector output. Together with TheRec-R, active truth covers labels 1..9."
     },
     {
       "id": "numbers-the-rec-right",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
-      "status": "candidate",
+      "status": "active",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-R.PNG",
-      "note": "Development-only alternate Rec capture. Do not create a second Rec golden unless it proves useful; MVP needs one verified 9/9 Rec case, not a corpus."
+      "truthPath": "resources/stitch-annotate/TheRec/TheRec-R-number-golden.json",
+      "note": "Visible-badge golden [2,3,4,5,8]. Labels were visually read from the source; centers come from badge-body pixel geometry, not detector output. Together with TheRec-L, active truth covers labels 1..9."
     },
     {
       "id": "baskets-golden-native",
