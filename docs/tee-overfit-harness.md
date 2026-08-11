@@ -37,15 +37,46 @@ pass within the badge disc, badge ahead of the front edge. Note tee 5 sits
 gap-fallback radius — so the badge-anchored search uses 45.
 
 Measured with `npm run validate:badge-invariant` (computer-fitted axes, not
-truth-derived): the invariant holds on **18/18** truth tees. Mean
-axis-to-badge-bearing delta is 2.2°, max 5.8° (tee 14); the worst ray
-offset across all 18 pads is 9.5px against the 25px badge disc, so the
-margin holds everywhere. On specificity, 14/18 pads pass only their own
-badge; 4 pads (tees 3, 4, 9, 18) also pass exactly one farther badge, and
-those are disambiguated by taking the nearest passing badge. Only tee 2 has
-a basket sitting on its pad→badge corridor (3px clearance), so the test is
-kept as pure ray geometry against the badge disc — no first-object-hit ray
-marching against baskets or other occluders.
+truth-derived): the invariant holds on **18/18** GoldenTeeSet tees and, on
+the second labeled course, **15/18 AlexClark tees with 1 weak fail (tee 12)
+and 2 unmeasurable (tees 11, 13 — heavily glyph-occluded, sweep score
+< 0.3)**. On specificity, most pads pass only their own badge; a few also
+pass exactly one farther badge, disambiguated by taking the nearest passing
+badge. Some corridors pass close to a basket (3px on GoldenTeeSet tee 2), so
+the test is kept as pure ray geometry against the badge disc — no
+first-object-hit ray marching against baskets or other occluders.
+
+**Orientation is measured by rotation-swept template NCC, not rim-line
+RANSAC.** The original RANSAC rim fit produced 5/18 false FAILs on AlexClark
+by locking onto basket glyphs, road edges, and ring arcs; visual
+re-inspection (user-confirmed for tee 7) established the pads DO aim at
+their badges and the RANSAC axes were the errors. See
+`docs/analysis/alexclark-invariant-wideview.png` (labeled tee green, badge
+red, and the OLD unreliable RANSAC axis cyan — the five false FAILs that
+prompted the estimator swap) and
+`docs/analysis/alexclark-invariant-closeups.png` (the pads themselves).
+
+Two further regularities fell out of the correction:
+
+- **Pad glyphs are WORLD-scaled, not UI-scaled.** GoldenTeeSet pads measure
+  ~32px major vs AlexClark's ~24px (ratio 1.33 ≈ their ring-radius ratio
+  88:64) while badges are the same UI size on both. A single UI-derived
+  template locks onto the perpendicular when smaller than the pad (15/18
+  false perpendicular fits on GoldenTeeSet); the sweep therefore covers
+  major sizes {24, 28, 32, 36}px and keeps the best score. Accuracy:
+  18/18 within 12° of true axis on GoldenTeeSet, 15/15 on AlexClark's
+  cleanly measurable pads.
+- **The pad axis is the throw line.** Cleanly measured axes match the
+  tee→basket bearing to 0–3°; badges sit along the fairway, so badge and
+  basket bearings mostly agree — and where they diverge, the pad tracks the
+  BADGE (AlexClark tee 13: 1.5° to badge vs 14.3° to basket; tee 16: 1.0°
+  vs 16.5°).
+
+Caveat from the AlexClark frozen-scorer rerun: with ~8 candidate peaks per
+gap search, wrong-location peaks pass the ray test by chance too often for
+the invariant to serve as a SOLE acceptance gate — it is a strong prior and
+a cheap filter, not a sufficiency proof; the scorer that proposes peaks
+must be fit (or re-fit) per course.
 
 Two fit lessons fell out of getting this to 18/18:
 

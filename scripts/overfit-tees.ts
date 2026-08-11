@@ -76,8 +76,6 @@ const LOCAL_RADIUS_UI = 40;
  */
 const GAP_SEARCH_RADIUS_UI = 45;
 const GAP_PEAK_CANDIDATES = 8;
-/** Rim-PCA fit window half-size, in UI px: pad half-major (6.5) plus margin. */
-const PAD_FIT_HALF_UI = 10;
 const NMS_RADIUS_UI = 10;
 const RERANK_POOL_SIZE = 80;
 
@@ -450,6 +448,8 @@ interface FittedPad {
 	readonly halfMajorPx: number;
 	readonly halfMinorPx: number;
 	readonly evidenceCount: number;
+	/** Present when this pad came from `sweepPadOrientation` rather than the RANSAC rim fit. */
+	readonly sweepScore?: number;
 }
 
 /**
@@ -630,6 +630,223 @@ export function fitPadAt(
 		halfMajorPx: Math.max(maxAlong, 10),
 		halfMinorPx: 7,
 		evidenceCount: bestInliers.length
+	};
+}
+
+export interface SweepOrientationResult {
+	/** Best-fit axis angle, mod 180 degrees. */
+	readonly axisDeg: number;
+	/** Best normalized cross-correlation score (roughly -1..1; >=0.4 reliable). */
+	readonly score: number;
+	/** Refined center, after searching the small window around the input center. */
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+/** Below this NCC score, the swept angle is not trustworthy (occluded/ambiguous pad). */
+export const SWEEP_UNMEASURABLE_SCORE = 0.3;
+
+const SWEEP_ANGLE_STEP_DEG = 2.5;
+const SWEEP_SEARCH_RADIUS_UI = 4;
+/**
+ * Template MAJOR sizes swept, in source px. Pad glyphs are WORLD-scaled, not
+ * UI-scaled: GoldenTeeSet pads measure ~32px major and AlexClark's ~24px
+ * (ratio 1.33, matching their ring-radius ratio 88:64), while badges are the
+ * same UI size on both. A single UI-derived template locks onto the
+ * perpendicular when it is smaller than the pad (measured: 15/18 false
+ * perpendicular fits on GoldenTeeSet with a 13x8-UI template), so the sweep
+ * covers the plausible world-size range and keeps the best-scoring size.
+ * Measured accuracy with this sweep: 18/18 within 12 degrees of true axis on
+ * GoldenTeeSet, 15/15 on AlexClark's cleanly measurable pads.
+ */
+const SWEEP_MAJOR_SIZES_PX = [24, 28, 32, 36] as const;
+/** Pad outer aspect (major/minor), measured 1.38-1.47 across both courses. */
+const SWEEP_PAD_ASPECT = 1.45;
+/** Rim thickness as a fraction of the major axis. */
+const SWEEP_RIM_FRACTION = 0.11;
+/** Background margin around the rotated rect so the rim has outside contrast. */
+const SWEEP_TEMPLATE_MARGIN_PX = 2;
+
+interface SweepTemplate {
+	readonly width: number;
+	readonly height: number;
+	/** Bounding-box half-extents, in px, around the template's own center pixel. */
+	readonly extentX: number;
+	readonly extentY: number;
+	readonly values: Float32Array;
+	readonly mean: number;
+	readonly energy: number;
+}
+
+/**
+ * Synthesizes a single hollow-pad template at one rotation and one world
+ * size: background 120, bright rim 235, gray interior 158.
+ */
+function synthesizeSweepTemplate(majorPx: number, angleDeg: number): SweepTemplate {
+	const major = majorPx;
+	const minor = majorPx / SWEEP_PAD_ASPECT;
+	const rim = SWEEP_RIM_FRACTION * majorPx;
+	const angle = (angleDeg * Math.PI) / 180;
+	const cosine = Math.cos(angle);
+	const sine = Math.sin(angle);
+	const extentX = Math.ceil(Math.abs((major / 2) * cosine) + Math.abs((minor / 2) * sine)) + SWEEP_TEMPLATE_MARGIN_PX;
+	const extentY = Math.ceil(Math.abs((major / 2) * sine) + Math.abs((minor / 2) * cosine)) + SWEEP_TEMPLATE_MARGIN_PX;
+	const width = extentX * 2 + 1;
+	const height = extentY * 2 + 1;
+	const values = new Float32Array(width * height);
+	for (let y = 0; y < height; y += 1) {
+		for (let x = 0; x < width; x += 1) {
+			const dx = x - extentX;
+			const dy = y - extentY;
+			const localX = dx * cosine + dy * sine;
+			const localY = -dx * sine + dy * cosine;
+			const insideOuter = Math.abs(localX) <= major / 2 && Math.abs(localY) <= minor / 2;
+			const insideInner = Math.abs(localX) <= major / 2 - rim && Math.abs(localY) <= minor / 2 - rim;
+			values[y * width + x] = insideInner ? 158 : insideOuter ? 235 : 120;
+		}
+	}
+	let mean = 0;
+	for (const value of values) mean += value;
+	mean /= values.length;
+	let energy = 0;
+	for (const value of values) energy += (value - mean) ** 2;
+	return { width, height, extentX, extentY, values, mean, energy };
+}
+
+/** Template cache keyed by rounded uiScalePx (millipixel), rebuilt only when the scale changes. */
+const sweepTemplateCache = new Map<number, readonly SizedSweepTemplate[]>();
+
+interface SizedSweepTemplate extends SweepTemplate {
+	readonly angleDeg: number;
+}
+
+function sweepTemplatesFor(): readonly SizedSweepTemplate[] {
+	const cached = sweepTemplateCache.get(0);
+	if (cached) return cached;
+	const templates: SizedSweepTemplate[] = [];
+	for (const majorPx of SWEEP_MAJOR_SIZES_PX) {
+		for (let angleDeg = 0; angleDeg < 180; angleDeg += SWEEP_ANGLE_STEP_DEG) {
+			templates.push({ ...synthesizeSweepTemplate(majorPx, angleDeg), angleDeg });
+		}
+	}
+	sweepTemplateCache.set(0, templates);
+	return templates;
+}
+
+/**
+ * Estimates a tee pad's orientation by sweeping a synthesized hollow-pad
+ * template (rotation-swept template NCC, `TM_CCOEFF_NORMED`-equivalent) over
+ * 0..180 degrees in 2.5-degree steps, searching a small window around the
+ * given center at each angle. Superior to `fitPadAt`'s RANSAC rim-line fit:
+ * measured on a second labeled course, RANSAC locked onto basket glyphs,
+ * road edges, and ring arcs on 5/18 pads, while the template sweep tracks
+ * the true pad axis reliably (score >= ~0.4) except where the pad is heavily
+ * glyph-occluded (score < ~0.3, see `SWEEP_UNMEASURABLE_SCORE`).
+ */
+export function sweepPadOrientation(
+	raster: TeePadRaster,
+	centerXPx: number,
+	centerYPx: number,
+	uiScalePx: number
+): SweepOrientationResult | undefined {
+	const templates = sweepTemplatesFor();
+	return sweepWithRadius(raster, centerXPx, centerYPx, templates, Math.round(SWEEP_SEARCH_RADIUS_UI * uiScalePx))
+		?? sweepWithRadius(raster, centerXPx, centerYPx, templates, 2);
+}
+
+/** One sweep pass; undefined when the window (incl. search radius) leaves the raster — the caller retries tighter near image edges. */
+function sweepWithRadius(
+	raster: TeePadRaster,
+	centerXPx: number,
+	centerYPx: number,
+	templates: readonly SizedSweepTemplate[],
+	searchRadius: number
+): SweepOrientationResult | undefined {
+	let maxExtentX = 0;
+	let maxExtentY = 0;
+	for (const template of templates) {
+		if (template.extentX > maxExtentX) maxExtentX = template.extentX;
+		if (template.extentY > maxExtentY) maxExtentY = template.extentY;
+	}
+	const half = Math.max(maxExtentX, maxExtentY) + searchRadius;
+	const cx = Math.round(centerXPx);
+	const cy = Math.round(centerYPx);
+	const x0 = cx - half;
+	const y0 = cy - half;
+	const size = half * 2 + 1;
+	if (x0 < 0 || y0 < 0 || x0 + size > raster.widthPx || y0 + size > raster.heightPx) return undefined;
+	const gray = new Uint8Array(size * size);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			const offset = ((y0 + y) * raster.widthPx + x0 + x) * 4;
+			const red = raster.rgba[offset];
+			const green = raster.rgba[offset + 1];
+			const blue = raster.rgba[offset + 2];
+			gray[y * size + x] = (red * 0.299 + green * 0.587 + blue * 0.114 + 0.5) | 0;
+		}
+	}
+	let bestScore = Number.NEGATIVE_INFINITY;
+	let bestAngleDeg = 0;
+	let bestX = cx;
+	let bestY = cy;
+	for (let angleIndex = 0; angleIndex < templates.length; angleIndex += 1) {
+		const template = templates[angleIndex];
+		if (template.energy === 0) continue;
+		for (let dy = -searchRadius; dy <= searchRadius; dy += 1) {
+			for (let dx = -searchRadius; dx <= searchRadius; dx += 1) {
+				const originX = half + dx - template.extentX;
+				const originY = half + dy - template.extentY;
+				if (originX < 0 || originY < 0 || originX + template.width > size || originY + template.height > size) continue;
+				let patchSum = 0;
+				for (let y = 0; y < template.height; y += 1) {
+					const rowOffset = (originY + y) * size + originX;
+					for (let x = 0; x < template.width; x += 1) patchSum += gray[rowOffset + x];
+				}
+				const patchMean = patchSum / (template.width * template.height);
+				let cross = 0;
+				let patchEnergy = 0;
+				for (let y = 0; y < template.height; y += 1) {
+					const rowOffset = (originY + y) * size + originX;
+					const templateRowOffset = y * template.width;
+					for (let x = 0; x < template.width; x += 1) {
+						const patchValue = gray[rowOffset + x] - patchMean;
+						const templateValue = template.values[templateRowOffset + x] - template.mean;
+						cross += patchValue * templateValue;
+						patchEnergy += patchValue * patchValue;
+					}
+				}
+				if (patchEnergy === 0) continue;
+				const ncc = cross / Math.sqrt(patchEnergy * template.energy);
+				if (ncc > bestScore) {
+					bestScore = ncc;
+					bestAngleDeg = template.angleDeg;
+					bestX = cx + dx;
+					bestY = cy + dy;
+				}
+			}
+		}
+	}
+	if (!Number.isFinite(bestScore)) return undefined;
+	return { axisDeg: bestAngleDeg, score: bestScore, xPx: bestX, yPx: bestY };
+}
+
+/**
+ * Builds a `FittedPad` from a sweep result: axis from `axisDeg`, center from
+ * the sweep's refined position, and the canonical pad half-extents (measured
+ * empirically better trackers of the true rim than the RANSAC evidence
+ * extent). Carries the sweep score for downstream reliability gating.
+ */
+export function fittedPadFromSweep(sweep: SweepOrientationResult, uiScalePx: number): FittedPad {
+	const angleRad = (sweep.axisDeg * Math.PI) / 180;
+	return {
+		xPx: sweep.xPx,
+		yPx: sweep.yPx,
+		ux: Math.cos(angleRad),
+		uy: Math.sin(angleRad),
+		halfMajorPx: 6.5 * uiScalePx,
+		halfMinorPx: 4 * uiScalePx,
+		evidenceCount: 0,
+		sweepScore: sweep.score
 	};
 }
 
@@ -985,18 +1202,18 @@ export async function runOverfit(args: OverfitCliArgs): Promise<OverfitResult> {
 			}
 			let chosen: { xPx: number; yPx: number; score: number; validated: boolean } | undefined;
 			for (const peak of peaks) {
-				// Fit over a wider window than the scoring patch: the scoring
-				// window is deliberately tight (interior statistics), but the
-				// rim PCA needs the pad's full extent plus margin.
-				const pad = fitPadAt(raster, peak.xPx, peak.yPx, PAD_FIT_HALF_UI * uiScalePx, dashStructures);
-				if (badge && pad) {
-					const toX = badge.xPx - pad.xPx;
-					const toY = badge.yPx - pad.yPx;
-					const sign = toX * pad.ux + toY * pad.uy < 0 ? -1 : 1;
-					const along = (toX * pad.ux + toY * pad.uy) * sign;
-					const across = Math.abs(-toX * pad.uy + toY * pad.ux);
+				// Orientation for badge-ray validation comes from the rotation-swept
+				// template NCC, not the RANSAC rim fit: measured on a second labeled
+				// course, RANSAC locked onto basket glyphs, road edges, and ring arcs
+				// on 5/18 pads, producing false invariant violations. A sweep score
+				// below SWEEP_UNMEASURABLE_SCORE means the orientation is not
+				// trustworthy (e.g. heavy glyph occlusion), so such peaks cannot be
+				// badge-ray-validated and fall through to the unvalidated path below.
+				const sweep = sweepPadOrientation(raster, peak.xPx, peak.yPx, uiScalePx);
+				const pad = sweep && sweep.score >= SWEEP_UNMEASURABLE_SCORE ? fittedPadFromSweep(sweep, uiScalePx) : undefined;
+				if (badge && sweep) {
 					console.log(
-						`[overfit]   tee ${missedNumber} peak (${peak.xPx.toFixed(0)},${peak.yPx.toFixed(0)}) s=${peak.score.toFixed(2)}: fit center (${pad.xPx.toFixed(1)},${pad.yPx.toFixed(1)}) axis ${((Math.atan2(pad.uy, pad.ux) * 180) / Math.PI).toFixed(1)}deg half ${pad.halfMajorPx.toFixed(1)}x${pad.halfMinorPx.toFixed(1)} n=${pad.evidenceCount} | along ${along.toFixed(1)} across ${across.toFixed(1)} badgeR ${badge.radiusPx.toFixed(1)}`
+						`[overfit]   tee ${missedNumber} peak (${peak.xPx.toFixed(0)},${peak.yPx.toFixed(0)}) s=${peak.score.toFixed(2)}: sweep center (${sweep.xPx.toFixed(1)},${sweep.yPx.toFixed(1)}) axis ${sweep.axisDeg.toFixed(1)}deg ncc ${sweep.score.toFixed(3)}${pad ? '' : ' (unmeasurable)'}`
 					);
 				}
 				if (!pad || !badge) continue;
