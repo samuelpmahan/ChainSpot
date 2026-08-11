@@ -1,0 +1,25 @@
+{
+  "course": "AlexClark-McKinney-TX",
+  "imageWidthPx": 1290,
+  "imageHeightPx": 2086,
+  "holes": [
+    {"number":1,"tee":{"xPx":621,"yPx":1601},"basket":{"xPx":773,"yPx":1327}},
+    {"number":2,"tee":{"xPx":636,"yPx":1289},"basket":{"xPx":495,"yPx":1396}},
+    {"number":3,"tee":{"xPx":366,"yPx":1742},"basket":{"xPx":296,"yPx":2002}},
+    {"number":4,"tee":{"xPx":373,"yPx":2055},"basket":{"xPx":607,"yPx":1946}},
+    {"number":5,"tee":{"xPx":486,"yPx":1888},"basket":{"xPx":763,"yPx":1896}},
+    {"number":6,"tee":{"xPx":677,"yPx":1847},"basket":{"xPx":433,"yPx":1583}},
+    {"number":7,"tee":{"xPx":460,"yPx":1410},"basket":{"xPx":512,"yPx":1167}},
+    {"number":8,"tee":{"xPx":449,"yPx":867},"basket":{"xPx":526,"yPx":572}},
+    {"number":9,"tee":{"xPx":431,"yPx":665},"basket":{"xPx":355,"yPx":371}},
+    {"number":10,"tee":{"xPx":384,"yPx":306},"basket":{"xPx":439,"yPx":566}},
+    {"number":11,"tee":{"xPx":543,"yPx":510},"basket":{"xPx":456,"yPx":275}},
+    {"number":12,"tee":{"xPx":459,"yPx":234},"basket":{"xPx":607,"yPx":94}},
+    {"number":13,"tee":{"xPx":735,"yPx":74},"basket":{"xPx":1018,"yPx":286}},
+    {"number":14,"tee":{"xPx":914,"yPx":311},"basket":{"xPx":751,"yPx":110}},
+    {"number":15,"tee":{"xPx":706,"yPx":114},"basket":{"xPx":674,"yPx":335}},
+    {"number":16,"tee":{"xPx":605,"yPx":445},"basket":{"xPx":864,"yPx":795}},
+    {"number":17,"tee":{"xPx":681,"yPx":706},"basket":{"xPx":491,"yPx":873}},
+    {"number":18,"tee":{"xPx":514,"yPx":1025},"basket":{"xPx":582,"yPx":1199}}
+  ]
+}
