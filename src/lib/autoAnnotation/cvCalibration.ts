@@ -103,36 +103,6 @@ export function asBasketTemplateScale(
 	return positiveFinite(value, name) as BasketTemplateScale;
 }
 
-/** The raster space in which a template scale was measured. */
-export type RasterSpace = 'source' | 'analysis';
-
-/** A template scale paired with the raster space it describes. */
-export interface SpacedTemplateScale<Scale extends TemplateScale = TemplateScale> {
-	readonly value: Scale;
-	readonly space: RasterSpace;
-}
-
-/**
- * Resolves a template scale into the raster space where it will be used.
- * Analysis pixels represent `sourceScale` source pixels; source-to-analysis
- * conversion is intentionally rejected because callers must declare the
- * direction they actually measured rather than silently invert a scale.
- */
-export function resolveTemplateScale<Scale extends TemplateScale>(
-	scaled: SpacedTemplateScale<Scale>,
-	targetSpace: RasterSpace,
-	sourceScale: number
-): Scale {
-	if (scaled.space === targetSpace) return scaled.value;
-	if (scaled.space === 'analysis' && targetSpace === 'source') {
-		return (scaled.value * positiveFinite(sourceScale, 'Source scale')) as Scale;
-	}
-	const article = targetSpace === 'analysis' ? 'an' : 'a';
-	throw new Error(
-		`Scale measured in ${scaled.space} space cannot be used against ${article} ${targetSpace}-space raster.`
-	);
-}
-
 /**
  * Which raster a `TemplateScale` was measured against. Two detectors can
  * disagree on this for the exact same numeric value: a scale measured on a
