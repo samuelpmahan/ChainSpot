@@ -1,8 +1,9 @@
 // Validates the badge-ray invariant (see docs/tee-overfit-harness.md) against
-// the full 18-tee golden truth set, using computer-fitted pad axes (RANSAC
-// dominant rim line via fitPadAt) rather than truth-derived axes.
+// a labeled truth set, using computer-fitted pad axes (RANSAC dominant rim
+// line via fitPadAt) rather than truth-derived axes.
 //
-// Usage: npm run validate:badge-invariant
+// Usage: npm run validate:badge-invariant [-- <input-bundle>] [--baskets <bundle>] [--ui-scale <n>]
+//   Defaults: input resources/GoldenTeeSet.chainspot.zip, baskets resources/GoldenBasketSet.chainspot.zip, ui-scale 1.77
 
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -17,8 +18,40 @@ import {
 } from './overfit-tees';
 import type { TeePadCv, TeePadRaster } from '../src/lib/autoAnnotation/teePadDetection';
 
-const UI = 1.77;
-const FIT_HALF = 10 * UI;
+const DEFAULT_INPUT = 'resources/GoldenTeeSet.chainspot.zip';
+const DEFAULT_BASKETS = 'resources/GoldenBasketSet.chainspot.zip';
+const DEFAULT_UI = 1.77;
+
+interface CliArgs {
+	readonly inputPath: string;
+	readonly basketsPath: string;
+	readonly uiScalePx: number;
+}
+
+function parseArgs(argv: readonly string[]): CliArgs {
+	let inputPath = DEFAULT_INPUT;
+	let basketsPath = DEFAULT_BASKETS;
+	let uiScalePx = DEFAULT_UI;
+	const positional = argv.find((value) => !value.startsWith('--'));
+	if (positional) inputPath = positional;
+	for (let index = 0; index < argv.length; index += 1) {
+		const argument = argv[index];
+		if (argument === '--baskets') {
+			const value = argv[index + 1];
+			if (!value) throw new Error('--baskets requires a value.');
+			basketsPath = value;
+			index += 1;
+		} else if (argument === '--ui-scale') {
+			const value = argv[index + 1];
+			if (!value) throw new Error('--ui-scale requires a value.');
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed)) throw new Error('--ui-scale must be a finite number.');
+			uiScalePx = parsed;
+			index += 1;
+		}
+	}
+	return { inputPath, basketsPath, uiScalePx };
+}
 
 function segmentPointDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
 	const vx = bx - ax;
@@ -29,11 +62,13 @@ function segmentPointDistance(px: number, py: number, ax: number, ay: number, bx
 }
 
 async function main(): Promise<void> {
-	const input = loadInput('resources/GoldenTeeSet.chainspot.zip');
+	const args = parseArgs(process.argv.slice(2));
+	const fitHalf = 10 * args.uiScalePx;
+	const input = loadInput(args.inputPath);
 	const truth = input.truth ?? [];
 	const cv = (await loadCv()) as unknown as TeePadCv;
 	const raster: TeePadRaster = { rgba: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
-	const baskets = loadBasketTruth('resources/GoldenBasketSet.chainspot.zip');
+	const baskets = loadBasketTruth(args.basketsPath);
 	const structures = buildDashStructures(raster, baskets, truth);
 	const badges = detectBadgeAnchors(cv, input, 'static/resources/chainspot_cv_templates');
 
@@ -42,7 +77,7 @@ async function main(): Promise<void> {
 	const crossPasses: number[] = [];
 	console.log('tee | fitted axis | badge bearing | delta | along | across | own badge | other badges passing | basket in corridor (min dist)');
 	for (const hole of truth) {
-		const pad = fitPadAt(raster, hole.xPx, hole.yPx, FIT_HALF, structures);
+		const pad = fitPadAt(raster, hole.xPx, hole.yPx, fitHalf, structures);
 		const badge = badges.find((entry) => entry.number === hole.number);
 		if (!badge) continue;
 		if (!pad) {

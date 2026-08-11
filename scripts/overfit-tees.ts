@@ -59,6 +59,8 @@ export interface OverfitCliArgs {
 	readonly verify: OverfitVerifyMode;
 	readonly targetHoles: readonly number[];
 	readonly slidingStrideUi: number;
+	/** When set, skip the greedy search and use this frozen scorer for verification. */
+	readonly scorerPath?: string;
 }
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -95,6 +97,7 @@ function usage(): string {
 		'  --verify <gap-fill|rerank|sliding|both|none>  Post-search verification (default: gap-fill)',
 		'  --target-hole <n>               Hole whose margin the search must maximize first (repeatable; default: 5)',
 		'  --sliding-stride-ui <n>         Sliding-verify stride in UI pixels (default: 3)',
+		'  --scorer <tuned-scorer.json>    Skip the greedy search; use this frozen scorer for verification (transfer test)',
 		'  --help'
 	].join('\n');
 }
@@ -131,6 +134,7 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 	let verify: OverfitVerifyMode = 'gap-fill';
 	const targetHoles: number[] = [];
 	let slidingStrideUi = 3;
+	let scorerPath: string | undefined;
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
 		if (!argument.startsWith('--')) continue;
@@ -192,6 +196,10 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 				slidingStrideUi = finiteNumber(requireValue(argv, index, argument), argument);
 				index += 1;
 				break;
+			case '--scorer':
+				scorerPath = requireValue(argv, index, argument);
+				index += 1;
+				break;
 			default:
 				throw new Error(`Unknown option '${argument}'.\n\n${usage()}`);
 		}
@@ -212,8 +220,13 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 		seed,
 		verify,
 		targetHoles: targetHoles.length > 0 ? targetHoles : [5],
-		slidingStrideUi
+		slidingStrideUi,
+		scorerPath
 	};
+}
+
+export function loadTunedScorer(scorerPath: string): TunedTeeScorer {
+	return JSON.parse(readFileSync(resolve(scorerPath), 'utf8')) as TunedTeeScorer;
 }
 
 interface BasketTruth {
@@ -905,10 +918,16 @@ export async function runOverfit(args: OverfitCliArgs): Promise<OverfitResult> {
 
 	const neighborhoods = buildLocalNeighborhoods(samples, LOCAL_RADIUS_UI * uiScalePx);
 	const metricReports = scoreMetricDiscrimination(METRIC_NAMES, samples, neighborhoods);
-	const tunedScorer = greedySearchCombination(METRIC_NAMES, samples, neighborhoods, {
-		requiredHoleNumbers: args.targetHoles
-	});
-	console.log(`[overfit] tuned scorer: ${tunedScorer.metrics.map((metric) => `${metric.weight > 0 ? '+' : ''}${metric.weight}*${metric.name}`).join(' ') || '(empty)'}`);
+	let tunedScorer: TunedTeeScorer;
+	if (args.scorerPath) {
+		tunedScorer = loadTunedScorer(args.scorerPath);
+		console.log(`[overfit] using frozen scorer from ${args.scorerPath} (greedy search skipped): ${tunedScorer.metrics.map((metric) => `${metric.weight > 0 ? '+' : ''}${metric.weight}*${metric.name}`).join(' ') || '(empty)'}`);
+	} else {
+		tunedScorer = greedySearchCombination(METRIC_NAMES, samples, neighborhoods, {
+			requiredHoleNumbers: args.targetHoles
+		});
+		console.log(`[overfit] tuned scorer: ${tunedScorer.metrics.map((metric) => `${metric.weight > 0 ? '+' : ''}${metric.weight}*${metric.name}`).join(' ') || '(empty)'}`);
+	}
 
 	const verifications: VerifyOutcome[] = [];
 	if (args.verify === 'gap-fill') {
