@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "fileName": "TheRec-L.PNG",
+    "widthPx": 1290,
+    "heightPx": 2796
+  },
+  "badges": [
+    { "label": 1, "xPx": 915, "yPx": 879 },
+    { "label": 5, "xPx": 1263, "yPx": 2084 },
+    { "label": 6, "xPx": 532, "yPx": 2133 },
+    { "label": 7, "xPx": 714, "yPx": 1724 },
+    { "label": 8, "xPx": 982, "yPx": 1290 },
+    { "label": 9, "xPx": 373, "yPx": 1190 }
+  ]
+}
