@@ -745,14 +745,43 @@ function maskIgnoredCircles(
 	return circles.length;
 }
 
+/**
+ * Occluded-edge-loop rail-pairing geometry, expressed as UI-scale-relative
+ * coefficients (`K_UI = historical_value / 1.77`) instead of raw source-pixel
+ * constants divided only by `sourceScale`. Multiplying each by the detector's
+ * local `scale = uiScalePx / sourceScale` reproduces the exact historically
+ * tuned values at the nominal uiScalePx of 1.77, while scaling correctly with
+ * the UI icon scale at other resolutions -- matching the gray-center and
+ * edge-loop detectors, which already key their geometry off `scale`. All of
+ * these encode the same ~13x8 UI-px pad envelope (a tee pad's two occluded
+ * rails, each up to ~20px long, separated by ~5-8.5px) that the other
+ * detectors target directly.
+ */
+const OCCLUDED_MIN_SEGMENT_LENGTH_UI = 5 / 1.77;
+const OCCLUDED_MAJOR_MIN_UI = 16 / 1.77;
+const OCCLUDED_MAJOR_MAX_UI = 20 / 1.77;
+const OCCLUDED_SEPARATION_MIN_UI = 5 / 1.77;
+const OCCLUDED_SEPARATION_MAX_UI = 8.5 / 1.77;
+/** occludedPairScore's target/tolerance pair for the rail-pair major axis. */
+const OCCLUDED_SCORE_MAJOR_TARGET_UI = 18 / 1.77;
+const OCCLUDED_SCORE_MAJOR_TOLERANCE_UI = 2 / 1.77;
+/** occludedPairScore's target/tolerance pair for rail separation (minor axis). */
+const OCCLUDED_SCORE_SEPARATION_TARGET_UI = 6.75 / 1.77;
+const OCCLUDED_SCORE_SEPARATION_TOLERANCE_UI = 1.75 / 1.77;
+/** HoughLinesP's minLineLength/maxLineGap for occluded-edge-loop's rail search. */
+const OCCLUDED_HOUGH_MIN_LINE_LENGTH_UI = 5 / 1.77;
+const OCCLUDED_HOUGH_MAX_LINE_GAP_UI = 6 / 1.77;
+const OCCLUDED_MAX_SEGMENT_LENGTH_UI = 20 / 1.77;
+const OCCLUDED_MAX_PAIR_DISTANCE_UI = 24 / 1.77;
+
 function occludedPair(
 	first: HoughSegment,
 	second: HoughSegment,
-	sourceScale: number
+	scale: number
 ): OccludedPair | null {
 	const firstLength = segmentLength(first);
 	const secondLength = segmentLength(second);
-	const minimumSegmentLength = 5 / sourceScale;
+	const minimumSegmentLength = OCCLUDED_MIN_SEGMENT_LENGTH_UI * scale;
 	if (firstLength < minimumSegmentLength || secondLength < minimumSegmentLength) return null;
 
 	const firstUx = (first.x2 - first.x1) / firstLength;
@@ -786,8 +815,8 @@ function occludedPair(
 	if (overlap < 0.35 * Math.min(firstLength, secondLength)) return null;
 
 	const major = Math.max(firstRange[1], secondRange[1]) - Math.min(firstRange[0], secondRange[0]);
-	const majorMinimum = 16 / sourceScale;
-	const majorMaximum = 20 / sourceScale;
+	const majorMinimum = OCCLUDED_MAJOR_MIN_UI * scale;
+	const majorMaximum = OCCLUDED_MAJOR_MAX_UI * scale;
 	if (major < majorMinimum || major > majorMaximum) return null;
 
 	const firstMidpoint = { x: (first.x1 + first.x2) * 0.5, y: (first.y1 + first.y2) * 0.5 };
@@ -795,8 +824,8 @@ function occludedPair(
 	const separation = Math.abs(
 		(secondMidpoint.x - firstMidpoint.x) * nx + (secondMidpoint.y - firstMidpoint.y) * ny
 	);
-	const separationMinimum = 5 / sourceScale;
-	const separationMaximum = 8.5 / sourceScale;
+	const separationMinimum = OCCLUDED_SEPARATION_MIN_UI * scale;
+	const separationMaximum = OCCLUDED_SEPARATION_MAX_UI * scale;
 	if (separation < separationMinimum || separation > separationMaximum) return null;
 
 	const centerAlong = (Math.min(firstRange[0], secondRange[0]) + Math.max(firstRange[1], secondRange[1])) * 0.5;
@@ -815,9 +844,19 @@ function occludedPair(
 	};
 }
 
-function occludedPairScore(pair: OccludedPair, visual: VisualStats): number {
-	const lengthFit = clamp(1 - Math.abs(pair.major - 18) / 2, 0, 1);
-	const separationFit = clamp(1 - Math.abs(pair.minor - 6.75) / 1.75, 0, 1);
+function occludedPairScore(pair: OccludedPair, visual: VisualStats, scale: number): number {
+	const lengthFit = clamp(
+		1 - Math.abs(pair.major - OCCLUDED_SCORE_MAJOR_TARGET_UI * scale) / (OCCLUDED_SCORE_MAJOR_TOLERANCE_UI * scale),
+		0,
+		1
+	);
+	const separationFit = clamp(
+		1 -
+			Math.abs(pair.minor - OCCLUDED_SCORE_SEPARATION_TARGET_UI * scale) /
+				(OCCLUDED_SCORE_SEPARATION_TOLERANCE_UI * scale),
+		0,
+		1
+	);
 	const parallelFit = clamp(1 - pair.angleDeltaDeg / 10, 0, 1);
 	const overlapFit = clamp(pair.overlap / Math.min(pair.firstLength, pair.secondLength), 0, 1);
 	const rimFit = clamp((visual.borderValue - OCCLUDED_RIM_VALUE_MIN) / OCCLUDED_RIM_VALUE_RANGE, 0, 1);
@@ -855,24 +894,23 @@ export function detectOccludedEdgeLoopCandidates(
 			options.ignoreCirclesPx
 		);
 
-		const sourceScale = raster.sourceScale;
 		cv.HoughLinesP(
 			edges,
 			lines,
 			1,
 			Math.PI / 180,
-			8,
-			5 / sourceScale,
-			6 / sourceScale
+			8, // vote count, not a pixel length -- scale-invariant, stays fixed.
+			OCCLUDED_HOUGH_MIN_LINE_LENGTH_UI * scale,
+			OCCLUDED_HOUGH_MAX_LINE_GAP_UI * scale
 		);
 		const discoveredSegments = houghSegments(lines);
-		const minimumSegmentLength = 5 / sourceScale;
-		const maximumSegmentLength = 20 / sourceScale;
+		const minimumSegmentLength = OCCLUDED_MIN_SEGMENT_LENGTH_UI * scale;
+		const maximumSegmentLength = OCCLUDED_MAX_SEGMENT_LENGTH_UI * scale;
 		const segments = discoveredSegments.filter((segment) => {
 			const length = segmentLength(segment);
 			return length >= minimumSegmentLength && length <= maximumSegmentLength;
 		});
-		const maximumPairDistance = 24 / sourceScale;
+		const maximumPairDistance = OCCLUDED_MAX_PAIR_DISTANCE_UI * scale;
 		const pairCellSize = maximumPairDistance;
 		const angleBinCount = 18;
 		const maximumSegmentsPerPairBucket = 12;
@@ -930,7 +968,7 @@ export function detectOccludedEdgeLoopCandidates(
 							const parallelDifference = Math.min(angleDifference, 180 - angleDifference);
 							if (parallelDifference > 10) continue;
 							parallelCount += 1;
-							const pair = occludedPair(first, second, sourceScale);
+							const pair = occludedPair(first, second, scale);
 							if (!pair) continue;
 							geometryCount += 1;
 							const visual = rotatedRectVisualStats(
@@ -953,7 +991,7 @@ export function detectOccludedEdgeLoopCandidates(
 								orientationDeg: pair.angleDeg,
 								width: pair.major,
 								height: pair.minor,
-								score: occludedPairScore(pair, visual),
+								score: occludedPairScore(pair, visual, scale),
 								support: 'occluded-edge-loop'
 							});
 						}
@@ -969,7 +1007,7 @@ export function detectOccludedEdgeLoopCandidates(
 			throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 		}
 		for (const candidate of candidates) {
-			if (kept.some((existing) => tooClose(candidate, existing, 7 * options.uiScalePx / sourceScale))) continue;
+			if (kept.some((existing) => tooClose(candidate, existing, 7 * options.uiScalePx / raster.sourceScale))) continue;
 			kept.push(candidate);
 			if (kept.length === maxCandidates) break;
 		}
