@@ -23,6 +23,13 @@
  * useful: it produces ranked physical-badge candidates, but deliberately does
  * not publish the stage-one template label because the shared black border is
  * not discriminative enough to trust as a hole number.
+ *
+ * The count of physical badges actually found on an image and the count of
+ * supplied templates need not match for glyph labeling to run: step 5's
+ * one-to-one assignment is padded with dummy rows/columns (see
+ * `withDummyRowsAndColumns`) so a shortfall or surplus degrades to partial
+ * labeling -- as many confident matches as exist -- rather than aborting
+ * labeling for every candidate.
  */
 
 import type { Candidate } from '../cv/types';
@@ -105,7 +112,13 @@ export interface HoleNumberScaleAnchor {
 export interface HoleNumberDetection {
 	readonly candidates: readonly HoleNumberCandidate[];
 	readonly anchor: HoleNumberScaleAnchor | null;
-	/** `assigned` means labels came from glyph-only one-to-one assignment. */
+	/**
+	 * `assigned` means glyph-only one-to-one assignment ran. This does not
+	 * guarantee every candidate got a `label` -- a physical-candidate/template
+	 * count mismatch or a genuinely unmatchable candidate can leave some
+	 * candidates unlabeled (see `note`); check each candidate's own `label`
+	 * for its individual outcome.
+	 */
 	readonly labeling: 'assigned' | 'candidate-only';
 	/**
 	 * Human-readable integration status. In particular, this makes a missing
@@ -194,6 +207,14 @@ const GLYPH_WIDTH_RATIO_TOLERANCE = 0.04;
 const GLYPH_MIN_KEEP = 3;
 /** Lower than any valid TM_CCOEFF_NORMED score; Hungarian treats pruned pairs as impossible. */
 const GLYPH_PRUNED_SCORE = -2;
+/**
+ * Sentinel for the dummy rows/columns padded into the glyph-score matrix
+ * (see `withDummyRowsAndColumns`). Deliberately far below `GLYPH_PRUNED_SCORE`
+ * so a dummy is only ever chosen when no real (even pruned) pairing remains --
+ * mirrors the gap between `DUMMY_COST` and real costs in courseGrammar.ts's
+ * own `withDummyColumns` Hungarian padding, adapted to a maximizing score.
+ */
+const DUMMY_GLYPH_SCORE = -1_000_000;
 
 interface DarkComponent {
 	readonly xPx: number;
@@ -817,6 +838,57 @@ function maximumScoreAssignment(scores: readonly (readonly number[])[]): number[
 	return assignments;
 }
 
+/**
+ * Pads a rectangular (rows = physical badge candidates, columns = supplied
+ * hole-number templates) score matrix to square with `DUMMY_GLYPH_SCORE`
+ * rows or columns, so `maximumScoreAssignment` -- which only solves square
+ * matrices -- can still run when the physical-candidate count and template
+ * count differ. This is the same "pad the short side with a sentinel and let
+ * the solver decide who goes unmatched" pattern `courseGrammar.ts` uses via
+ * `withDummyColumns` + its own `hungarian`, just adapted for a maximizing
+ * score matrix instead of a minimizing cost matrix (courseGrammar pads
+ * columns only, because it always has rows <= columns by construction; here
+ * either side can be short, so this pads whichever side is smaller).
+ *
+ * A dummy row absorbs a template that has no good physical candidate
+ * (shortfall: fewer badges found than templates supplied). A dummy column
+ * absorbs a physical candidate that has no good template match (surplus:
+ * more badges found than templates supplied, or `maxCandidates` lets more
+ * clusters through than labels exist for). Because `DUMMY_GLYPH_SCORE` is far
+ * below any real or even pruned glyph score, the solver only ever resorts to
+ * a dummy when every real pairing for that row/column is already claimed by
+ * a better-fitting counterpart -- it never displaces a genuine match.
+ */
+function withDummyRowsAndColumns(
+	scores: readonly (readonly number[])[],
+	rowCount: number,
+	columnCount: number
+): number[][] {
+	const size = Math.max(rowCount, columnCount);
+	const padded: number[][] = [];
+	for (let row = 0; row < size; row += 1) {
+		if (row < rowCount) {
+			const paddedRow = scores[row].slice();
+			for (let column = columnCount; column < size; column += 1) paddedRow.push(DUMMY_GLYPH_SCORE);
+			padded.push(paddedRow);
+		} else {
+			padded.push(new Array<number>(size).fill(DUMMY_GLYPH_SCORE));
+		}
+	}
+	return padded;
+}
+
+/**
+ * Labels as many physical badge candidates as can be confidently matched to
+ * a supplied template, via glyph-only one-to-one assignment. Physical
+ * candidates and templates do not need to be equal in count: a shortfall
+ * (fewer candidates than templates) degrades to N-of-M labels rather than
+ * zero, and a surplus (more candidates than templates) leaves the
+ * unmatched extras unlabeled rather than mislabeling them. See
+ * `withDummyRowsAndColumns` for how the count mismatch is handled, and
+ * `GLYPH_PRUNED_SCORE` below for why a forced-but-implausible pairing is
+ * reported unlabeled instead of manufactured into a label.
+ */
 function assignedCandidates(
 	cv: HoleNumberCvModule,
 	image: GrayRaster,
@@ -824,7 +896,7 @@ function assignedCandidates(
 	templates: readonly HoleNumberTemplate[],
 	anchorScale: number
 ): HoleNumberCandidate[] | null {
-	if (clusters.length !== templates.length || templates.length === 0) return null;
+	if (templates.length === 0) return null;
 	const glyphTemplates = templates.map((template) => {
 		const resized = resizedTemplate(template, anchorScale);
 		const glyph = interior(resized);
@@ -862,12 +934,15 @@ function assignedCandidates(
 				: GLYPH_PRUNED_SCORE
 		);
 	});
-	const assignments = maximumScoreAssignment(scores);
+	// Physical candidates and templates need not match in count: pad whichever
+	// side is short with dummy rows/columns so the solver can leave the
+	// difference unmatched instead of refusing to run at all (see
+	// `withDummyRowsAndColumns`).
+	const paddedScores = withDummyRowsAndColumns(scores, clusters.length, usableTemplates.length);
+	const assignments = maximumScoreAssignment(paddedScores);
 	return clusters.map((cluster, index) => {
 		const templateIndex = assignments[index];
-		const template = usableTemplates[templateIndex];
 		const badgeHit = cluster.hits[0];
-		const glyph = scores[index][templateIndex];
 		const topGlyphMatches = usableTemplates
 			.map((candidateTemplate, candidateTemplateIndex) => ({
 				label: candidateTemplate.label,
@@ -875,6 +950,27 @@ function assignedCandidates(
 			}))
 			.sort((a, b) => b.score - a.score)
 			.slice(0, 3);
+
+		// A dummy column (surplus candidates) or a forced pairing no better
+		// than "pruned" (every plausible label was already ruled out for this
+		// candidate) both mean: no confident label. Report the candidate
+		// honestly instead of manufacturing a label from a non-match.
+		const glyph = templateIndex < usableTemplates.length ? scores[index][templateIndex] : DUMMY_GLYPH_SCORE;
+		if (templateIndex >= usableTemplates.length || glyph <= GLYPH_PRUNED_SCORE) {
+			return {
+				xPx: cluster.xPx,
+				yPx: cluster.yPx,
+				widthPx: badgeHit.widthPx,
+				heightPx: badgeHit.heightPx,
+				scale: anchorScale,
+				score: badgeHit.score,
+				badgeScore: badgeHit.score,
+				diagnosticId: index + 1,
+				topGlyphMatches
+			};
+		}
+
+		const template = usableTemplates[templateIndex];
 		return {
 			xPx: cluster.xPx,
 			yPx: cluster.yPx,
@@ -925,9 +1021,12 @@ function normalizedTemplates(templates: readonly HoleNumberTemplate[]): HoleNumb
  *
  * The detector is intentionally conservative about labels. A preliminary
  * full-badge hit is allowed to locate a candidate, but a `label` is returned
- * only when every returned physical badge can be assigned one-to-one from the
- * glyph interiors. This avoids the known failure where the common black badge
- * body overwhelms the numeral during ordinary full-template matching.
+ * only for a physical badge that can be confidently assigned one-to-one from
+ * the glyph interiors -- this avoids the known failure where the common black
+ * badge body overwhelms the numeral during ordinary full-template matching.
+ * A physical candidate with no confident glyph match (including one left
+ * over because the candidate/template counts differ) is still returned, just
+ * without a `label`, rather than being dropped or mislabeled.
  */
 export function detectHoleNumberBadges(
 	cv: HoleNumberCvModule,
@@ -990,22 +1089,26 @@ export function detectHoleNumberBadges(
 	const anchor = localizationAnchor(anchorTemplate, anchorScale, clusters, assigned);
 
 	if (assigned) {
+		const sorted = assigned.sort((a, b) => (a.label ?? 0) - (b.label ?? 0));
+		const labeledCount = sorted.filter((candidate) => candidate.label !== undefined).length;
+		// Partial assignment is expected whenever the physical-candidate count
+		// and template count differ (see `assignedCandidates`): report it
+		// honestly rather than only surfacing a note on total failure.
 		return {
-			candidates: assigned.sort((a, b) => (a.label ?? 0) - (b.label ?? 0)),
+			candidates: sorted,
 			anchor,
-			labeling: 'assigned'
+			labeling: 'assigned',
+			note:
+				labeledCount < availableTemplates.length
+					? `Labeled ${labeledCount} of ${availableTemplates.length} hole numbers from ${clusters.length} physical badge candidate${clusters.length === 1 ? '' : 's'} found; the rest could not be confidently matched to a template.`
+					: undefined
 		};
 	}
 
-	const fullTemplatePack =
-		availableTemplates.length === 18 &&
-		availableTemplates.every((template, index) => template.label === index + 1);
 	return {
 		candidates: candidateOnly(clusters, anchorScale),
 		anchor,
 		labeling: 'candidate-only',
-		note: fullTemplatePack
-			? `Located ${clusters.length} badge candidates from dark components; glyph labels require one physical candidate for each of the 18 templates.`
-			: 'Candidate-only mode: supply the complete canonical hole-01.png through hole-18.png template pack for one-to-one glyph labels.'
+		note: 'Candidate-only mode: the supplied hole-number templates did not yield usable glyph interiors, so no one-to-one label assignment could run.'
 	};
 }
