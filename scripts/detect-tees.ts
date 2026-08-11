@@ -58,13 +58,13 @@ interface DecodedRaster {
 	readonly heightPx: number;
 }
 
-interface TeeTruth {
+export interface TeeTruth {
 	readonly number: number;
 	readonly xPx: number;
 	readonly yPx: number;
 }
 
-interface LoadedInput extends DecodedRaster {
+export interface LoadedInput extends DecodedRaster {
 	readonly sourcePath: string;
 	readonly sourceEntry?: string;
 	readonly truth?: readonly TeeTruth[];
@@ -257,7 +257,7 @@ function truthFromDocument(document: TeeProjectDocument): readonly TeeTruth[] {
 		.sort((a, b) => a.number - b.number);
 }
 
-function loadInput(inputPath: string): LoadedInput {
+export function loadInput(inputPath: string): LoadedInput {
 	const resolvedInput = resolve(inputPath);
 	const bytes = new Uint8Array(readFileSync(resolvedInput));
 	if (!resolvedInput.toLowerCase().endsWith('.chainspot.zip')) return { ...decodeRaster(bytes, resolvedInput), sourcePath: resolvedInput };
@@ -352,7 +352,7 @@ function candidateOutput(candidate: TeePadCandidate, index: number): TeeCliResul
 	};
 }
 
-function evaluateTruth(truth: readonly TeeTruth[], candidates: readonly TeePadCandidate[], tolerancePx: number): NonNullable<TeeCliResult['truthEvaluation']> {
+export function evaluateTruth(truth: readonly TeeTruth[], candidates: readonly TeePadCandidate[], tolerancePx: number): NonNullable<TeeCliResult['truthEvaluation']> {
 	const used = new Set<number>();
 	const matchedNumbers: number[] = [];
 	for (const expected of truth) {
