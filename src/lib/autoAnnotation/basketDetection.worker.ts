@@ -26,6 +26,7 @@ import {
 	asUiScalePx,
 	deriveBasketTemplateScale,
 	deriveUDiscCalibration,
+	resolveTemplateScale,
 	validateCvTemplateManifest
 } from './cvCalibration';
 import type {
@@ -453,8 +454,16 @@ async function detectCourse(request: BasketDetectionRequest) {
 		},
 		pack.manifest.calibration.canonicalNumberBadge
 	);
+	// `numberDetection.anchor.scale` is deliberately left un-multiplied by
+	// `sourceScale` above (see `sourceNumberDetection`) -- it is only correct
+	// for glyph matching within the downscaled analysis raster it was
+	// measured on. Basket detection below runs against the full-resolution
+	// source raster (`sourceScale: 1`), so the anchor scale must be resolved
+	// into source space first, or the basket search window ends up centered
+	// on the wrong multiplier (measured: 1.073 instead of ~1.81 on the demo
+	// fixture -- 53% short, outside the detector's own ±10% search window).
 	const basketTemplateScale = deriveBasketTemplateScale(
-		numberDetection.anchor.scale,
+		resolveTemplateScale({ value: numberDetection.anchor.scale, space: 'analysis' }, 'source', sourceScale),
 		pack.manifest.calibration
 	);
 	const mapBoundsPx = deriveMapBoundsFromNumbers(numberDetection.candidates, request.heightPx);
