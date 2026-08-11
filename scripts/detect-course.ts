@@ -531,10 +531,11 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 				hole.numberBadge &&
 				(!hole.tee ||
 					hole.tee.confidence < 0.65 ||
-				hole.failures.some(
+					hole.failures.some(
 					(failure) => failure.kind === 'ambiguous-tee' || failure.kind === 'tee-badge-ray-conflict'
 				)
-			)
+				)
+		)
 		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
 	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
 	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;
