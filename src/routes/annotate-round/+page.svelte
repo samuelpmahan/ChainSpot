@@ -7,6 +7,9 @@
 	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
+	import { intakeImageFile } from '$lib/imageIntake';
+	import { readAnnotationDraft, saveAnnotationDraft } from '$lib/annotationDraft';
+	import type { DownloadBlob } from '$lib/persistence';
 	import {
 		retainEditor,
 		takeRetainedEditor,
@@ -179,12 +182,17 @@
 		editor?: ProjectEditor;
 		decode?: DecodeImageFile;
 		hash?: HashBytes;
+		download?: DownloadBlob;
 		courseLibraryStore?: CourseLibraryStore;
 	}
 
-	let { editor: initialEditor, decode, hash, courseLibraryStore: initialCourseLibraryStore }: Props = $props();
-	// svelte-ignore state_referenced_locally
-	void hash; // Test-seam parity with create-graphics; this page never saves/opens a bundle.
+	let {
+		editor: initialEditor,
+		decode,
+		hash,
+		download,
+		courseLibraryStore: initialCourseLibraryStore
+	}: Props = $props();
 
 	// An explicitly injected store (tests) wins; otherwise every page instance
 	// shares one real IndexedDB connection via the module-level singleton in
@@ -228,11 +236,16 @@
 
 	/**
 	 * Hole annotation draft. Manual placement and basket CV proposals are both
-	 * transient until the user applies them and clicks Done. Cleared whenever the
-	 * source image is replaced, since existing points are coordinates into a
-	 * specific raster and make no sense against a different one.
+	 * transient until the user applies them, but every placed point is synced
+	 * into the `ProjectEditor` below (`setHoles`) so it survives a Save draft,
+	 * an undo/redo, and a retained cross-navigation session. Hydrated from the
+	 * editor on init so a retained or explicitly-injected editor's holes are
+	 * never dropped. Cleared whenever the source image is replaced, since
+	 * existing points are coordinates into a specific raster and make no sense
+	 * against a different one.
 	 */
-	let holes = $state<AnnotatedHole[]>([]);
+	// svelte-ignore state_referenced_locally
+	let holes = $state<AnnotatedHole[]>(editor.state.holes);
 	/**
 	 * Which of the two annotation activities the toolbar and radial menu are
 	 * scoped to right now — 'map' (course geometry: tee/basket/bend, once per
@@ -846,17 +859,34 @@
 
 	/**
 	 * Early-dev default: every source image gets run through full-course
-	 * detection automatically, so tap-to-select-by-number and ready-hole tee/
-	 * basket placement both work without a manual "Detect full course" click.
-	 * Re-running the button manually still skips auto-apply so a user's own
-	 * corrections are never silently overwritten.
+	 * detection automatically, so tap-to-select-by-number works without a
+	 * manual "Detect full course" click. Auto-apply of the detected holes is
+	 * disabled (hotfix) so hand-annotated golden data isn't silently
+	 * overwritten by generated proposals; use the "Apply N ready holes"
+	 * button to apply detections manually.
 	 */
 	$effect(() => {
 		void refreshCount;
 		const image = sourceImage();
 		if (!image || image.id === autoDetectedSourceId || typeof Worker === 'undefined') return;
 		autoDetectedSourceId = image.id;
-		void handleDetectCourse({ autoApply: true });
+		void handleDetectCourse();
+	});
+
+	/**
+	 * Mirrors the local hole-annotation draft into the `ProjectEditor`'s
+	 * durable `ProjectState` on every change, so Save (and the retained
+	 * cross-navigation session) always reflect the latest hand-placed
+	 * points. `setHoles` no-ops when the snapshot is unchanged, so hydrating
+	 * `holes` from `editor.state.holes` above never creates a spurious
+	 * history entry or dirty flag on mount. Guarded on `sourceImage()`
+	 * because "Add hole" is reachable before an image loads (an empty draft
+	 * hole with no points), and `setHoles` rejects a non-empty hole list with
+	 * no source image loaded; the sync resumes as soon as the image lands.
+	 */
+	$effect(() => {
+		if (!sourceImage() && holes.length > 0) return;
+		editor.setHoles(holes);
 	});
 
 	/**
@@ -904,6 +934,18 @@
 		}
 		if (isModalOpen()) return;
 		if (isShortcutEditableTarget(event.target)) return;
+
+		if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+			const modifierKey = event.key.toLowerCase();
+			if (modifierKey === 's') {
+				event.preventDefault();
+				if (!saving && !event.repeat) handleSave();
+			} else if (modifierKey === 'o') {
+				event.preventDefault();
+				if (!openLoading && !event.repeat) openDraftInput?.click();
+			}
+			return;
+		}
 		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
 
 		const key = event.key.toLowerCase();
@@ -2050,6 +2092,122 @@
 		handoffError = null;
 	}
 
+	let saving = $state(false);
+	let saveError = $state<string | null>(null);
+	let activityMessage = $state<string | null>(null);
+	let openLoading = $state(false);
+	let openError = $state<string | null>(null);
+	let openDraftInput = $state<HTMLInputElement | null>(null);
+
+	function isDirty(): boolean {
+		void refreshCount;
+		void holes;
+		return editor.isDirty;
+	}
+
+	function handleSave(): void {
+		if (saving) return;
+		void runSave();
+	}
+
+	/**
+	 * Saves the source image plus every hand-placed hole as a portable
+	 * `.chainspot-round.zip` draft (see `annotationDraft.ts` for why this is
+	 * a separate format from Create Graphics' two-image project bundle), so
+	 * annotation work here is durable and reopenable without needing to
+	 * finish the round first. Snapshots the editor state before the async
+	 * hash/zip work starts and only calls `markSaved` if it still matches
+	 * afterwards, so an edit that lands mid-save is never silently
+	 * checkpointed as saved — it downloads the earlier state and reports
+	 * that a re-save is needed.
+	 */
+	async function runSave(): Promise<void> {
+		saving = true;
+		saveError = null;
+		try {
+			const before = editor.state;
+			const result = await saveAnnotationDraft(editor, { hash, download });
+			if (result.ok) {
+				if (JSON.stringify(editor.state) === JSON.stringify(before)) {
+					editor.markSaved();
+				} else {
+					saveError =
+						'The annotations changed while saving. The downloaded draft contains the earlier state — save again to include your latest edits.';
+				}
+				if (!saveError) activityMessage = 'Annotation draft saved.';
+				refresh();
+			} else {
+				saveError = result.error.message;
+			}
+		} catch (error) {
+			saveError = error instanceof Error ? error.message : 'Could not save the draft.';
+		} finally {
+			saving = false;
+		}
+	}
+
+	function handleOpenDraftFile(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		void openDraft(file);
+	}
+
+	/**
+	 * Replaces the live editor with a freshly opened draft: a clean checkpoint
+	 * built from the archived source image (re-run through the normal intake
+	 * path, same as any other image load) plus the archived holes. Never
+	 * touches the live project on failure.
+	 */
+	async function openDraft(file: File): Promise<void> {
+		openLoading = true;
+		openError = null;
+		try {
+			const result = await readAnnotationDraft(file, { hash });
+			if (!result.ok) {
+				openError = result.error.message;
+				return;
+			}
+			const imageFile = new File([new Uint8Array(result.image.bytes)], result.image.fileName, {
+				type: result.image.mimeType
+			});
+			const next = new ProjectEditor();
+			const intake = await intakeImageFile({
+				editor: next,
+				role: 'source-overview',
+				file: imageFile,
+				decode,
+				hash,
+				confirmDiscard: () => true
+			});
+			if (!intake.ok) {
+				openError = intake.error.message;
+				return;
+			}
+			next.setHoles(result.holes);
+			next.markSaved();
+			editor = next;
+			holes = next.state.holes;
+			activeHoleId = null;
+			previewHoles = null;
+			radialMenu = null;
+			basketCandidates = [];
+			basketCandidatesSource = null;
+			selectedBasketCandidate = null;
+			courseDetection = null;
+			autoDetectedSourceId = null;
+			prewarmedSourceId = null;
+			saveError = null;
+			activityMessage = `Opened draft "${result.image.fileName}".`;
+			refresh();
+		} catch (error) {
+			openError = error instanceof Error ? error.message : 'Could not open the draft.';
+		} finally {
+			openLoading = false;
+		}
+	}
+
 	let doneRunning = $state(false);
 	let doneError = $state<string | null>(null);
 	/**
@@ -2249,6 +2407,63 @@
 	data-source-loaded={sourceImage() ? 'true' : 'false'}
 	data-hole-count={holes.length}
 >
+	<div class="draft-actions">
+		{#if isDirty()}
+			<span class="dirty" data-testid="dirty-indicator">Unsaved changes</span>
+		{/if}
+		<button
+			type="button"
+			data-testid="save-project"
+			disabled={saving || !sourceImage()}
+			onclick={handleSave}
+			title="Save the annotation draft as a portable .chainspot-round.zip file (⌘/Ctrl+S)"
+			aria-keyshortcuts="Control+S Meta+S"
+		>
+			Save draft (⌘/Ctrl+S)
+		</button>
+		<button
+			type="button"
+			data-testid="open-draft"
+			disabled={openLoading}
+			onclick={() => openDraftInput?.click()}
+			title="Open a saved .chainspot-round.zip annotation draft (⌘/Ctrl+O)"
+			aria-keyshortcuts="Control+O Meta+O"
+		>
+			Open draft (⌘/Ctrl+O)
+		</button>
+		<input
+			class="file-input"
+			type="file"
+			accept=".chainspot-round.zip,application/zip,application/x-zip-compressed"
+			data-testid="open-draft-input"
+			bind:this={openDraftInput}
+			tabindex="-1"
+			aria-hidden="true"
+			onchange={handleOpenDraftFile}
+		/>
+	</div>
+	<section
+		class="activity-status sr-only"
+		aria-live="polite"
+		aria-atomic="true"
+		data-testid="activity-status"
+	>
+		{#if activityMessage}
+			<p class="status" data-testid="activity-message" role="status">{activityMessage}</p>
+		{/if}
+		{#if saving}
+			<p class="status" data-testid="save-loading" role="status">Saving draft…</p>
+		{/if}
+		{#if openLoading}
+			<p class="status" data-testid="open-loading" role="status">Opening draft…</p>
+		{/if}
+	</section>
+	{#if saveError}
+		<p class="error" data-testid="save-error" role="alert">{saveError}</p>
+	{/if}
+	{#if openError}
+		<p class="error" data-testid="open-error" role="alert">{openError}</p>
+	{/if}
 	{#if pendingHandoff}
 		<section
 			class="handoff-banner"
@@ -3188,6 +3403,40 @@
 		clip: rect(0, 0, 0, 0);
 		white-space: nowrap;
 		border: 0;
+	}
+
+	.draft-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.dirty {
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		background: #fff3cd;
+		border: 1px solid #e0c35a;
+		color: #6b5300;
+		font-size: 0.8rem;
+	}
+
+	.activity-status {
+		min-height: 0;
+	}
+
+	.status {
+		margin: 0;
+		font-size: 0.85rem;
+		opacity: 0.85;
+	}
+
+	.file-input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
 	}
 
 	.dialog-backdrop {
