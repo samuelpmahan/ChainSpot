@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
-import { evaluateTruth, loadInput } from './detect-tees';
+import { evaluateTruth, loadInput, loadNumberTemplates, loadValidatedTemplateManifest } from './detect-tees';
 import type { LoadedInput, TeeTruth } from './detect-tees';
 import {
+	detectCalibratedHoleNumberBadges,
 	detectCalibratedOccludedEdgeLoopCandidates,
 	detectCalibratedTeePadVariants
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import type { HoleNumberCvModule } from '../src/lib/autoAnnotation/holeNumberDetection';
 import type { CalibratedTeePadDetectionOptions } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import { asUiScalePx } from '../src/lib/autoAnnotation/cvCalibration';
 import type { TeePadCandidate, TeePadCv, TeePadRaster } from '../src/lib/autoAnnotation/teePadDetection';
@@ -47,6 +49,7 @@ export interface OverfitCliArgs {
 	readonly outputDir: string;
 	readonly truthPath?: string;
 	readonly basketsPath?: string;
+	readonly templateDir?: string;
 	readonly uiScalePx: number;
 	readonly mapTopPx?: number;
 	readonly mapBottomPx?: number;
@@ -64,6 +67,15 @@ const projectRoot = resolve(dirname(scriptPath), '..');
 const DEFAULT_UI_SCALE = 1.77;
 const TRUTH_EXCLUSION_UI = 10;
 const LOCAL_RADIUS_UI = 40;
+/**
+ * Badge-anchored gap search radius. Slightly wider than the production
+ * 40-multiple gap-fallback radius: measured on the golden fixture, tee 5 is
+ * 71.6px from badge 5 (40.5 UI multiples), just past the production radius.
+ */
+const GAP_SEARCH_RADIUS_UI = 45;
+const GAP_PEAK_CANDIDATES = 8;
+/** Rim-PCA fit window half-size, in UI px: pad half-major (6.5) plus margin. */
+const PAD_FIT_HALF_UI = 10;
 const NMS_RADIUS_UI = 10;
 const RERANK_POOL_SIZE = 80;
 
@@ -74,6 +86,7 @@ function usage(): string {
 		'Options:',
 		'  --truth <bundle.chainspot.zip>  Take holes[].tee truth from this bundle (for plain-image inputs)',
 		'  --baskets <bundle.chainspot.zip>  Basket truth bundle; enables dash-structure metrics (rings fitted from the image, connectors basket N -> tee N+1)',
+		'  --templates <dir>               CV template pack for number-badge detection; gap-fill then anchors on the missed hole’s badge and validates the badge-ray invariant (default: static/resources/chainspot_cv_templates)',
 		'  --ui-scale <n>                  Source pixels per UI pixel (default: 1.77, the GoldenTeeSet guardrail value)',
 		'  --map-top/--map-bottom <px>     Restrict sampling band (default: derived from truth extent)',
 		'  --max-distractors <n>           Grid distractor sample cap (default: 500)',
@@ -105,6 +118,7 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 	let outputDir: string | undefined;
 	let truthPath: string | undefined;
 	let basketsPath: string | undefined;
+	let templateDir: string | undefined = join(projectRoot, 'static', 'resources', 'chainspot_cv_templates');
 	let uiScalePx = DEFAULT_UI_SCALE;
 	let mapTopPx: number | undefined;
 	let mapBottomPx: number | undefined;
@@ -131,6 +145,10 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 				break;
 			case '--baskets':
 				basketsPath = requireValue(argv, index, argument);
+				index += 1;
+				break;
+			case '--templates':
+				templateDir = requireValue(argv, index, argument);
 				index += 1;
 				break;
 			case '--ui-scale':
@@ -185,6 +203,7 @@ export function parseArgs(argv: readonly string[]): OverfitCliArgs {
 		outputDir,
 		truthPath,
 		basketsPath,
+		templateDir,
 		uiScalePx,
 		mapTopPx,
 		mapBottomPx,
@@ -381,6 +400,209 @@ function buildDashStructures(
 		});
 	}
 	return { circles, segments, bandPx: STRUCTURE_BAND_PX };
+}
+
+interface BadgeAnchor {
+	readonly number: number;
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly radiusPx: number;
+}
+
+function detectBadgeAnchors(cv: TeePadCv, input: LoadedInput, templateDir: string): readonly BadgeAnchor[] {
+	const manifest = loadValidatedTemplateManifest(templateDir);
+	const detection = detectCalibratedHoleNumberBadges(
+		cv as unknown as HoleNumberCvModule,
+		{ format: 'rgba', widthPx: input.widthPx, heightPx: input.heightPx, data: input.rgba },
+		loadNumberTemplates(templateDir, manifest)
+	);
+	return detection.candidates
+		.filter((candidate) => candidate.label !== undefined)
+		.map((candidate) => ({
+			number: candidate.label as number,
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			// Ray tests treat the badge as a disc; the short half-side plus a
+			// small margin keeps the test meaningfully tight.
+			radiusPx: Math.min(candidate.widthPx ?? 54, candidate.heightPx ?? 42) / 2 + 4
+		}));
+}
+
+interface FittedPad {
+	readonly xPx: number;
+	readonly yPx: number;
+	/** Unit major-axis direction. */
+	readonly ux: number;
+	readonly uy: number;
+	readonly halfMajorPx: number;
+	readonly halfMinorPx: number;
+	readonly evidenceCount: number;
+}
+
+/**
+ * Fits a pad rectangle at a window via PCA over the RIM pixels only: clean
+ * bright (off-structure, not black-adjacent). The interior soft-gray mask is
+ * useless for orientation — a pad sitting on a gray path floods the window
+ * (exactly tee 5's situation) — but the rim outline, even bisected, keeps
+ * its fragments aligned along the pad's major axis.
+ */
+function fitPadAt(
+	raster: TeePadRaster,
+	centerXPx: number,
+	centerYPx: number,
+	halfWindowPx: number,
+	structures: DashStructures | undefined
+): FittedPad | undefined {
+	const points: Array<{ x: number; y: number }> = [];
+	const x0 = Math.max(0, Math.round(centerXPx - halfWindowPx));
+	const x1 = Math.min(raster.widthPx - 1, Math.round(centerXPx + halfWindowPx));
+	const y0 = Math.max(0, Math.round(centerYPx - halfWindowPx));
+	const y1 = Math.min(raster.heightPx - 1, Math.round(centerYPx + halfWindowPx));
+	const brightAt = (x: number, y: number): boolean => {
+		const offset = (y * raster.widthPx + x) * 4;
+		const red = raster.rgba[offset];
+		const green = raster.rgba[offset + 1];
+		const blue = raster.rgba[offset + 2];
+		const maximum = Math.max(red, green, blue);
+		const minimum = Math.min(red, green, blue);
+		const saturation = maximum === 0 ? 0 : ((maximum - minimum) * 255) / maximum;
+		return maximum >= 185 && saturation <= 50;
+	};
+	const nearBlackAt = (x: number, y: number): boolean => {
+		for (let dy = -3; dy <= 3; dy += 1) {
+			for (let dx = -3; dx <= 3; dx += 1) {
+				const nx = x + dx;
+				const ny = y + dy;
+				if (nx < 0 || ny < 0 || nx >= raster.widthPx || ny >= raster.heightPx) continue;
+				const offset = (ny * raster.widthPx + nx) * 4;
+				if (Math.max(raster.rgba[offset], raster.rgba[offset + 1], raster.rgba[offset + 2]) < 70) return true;
+			}
+		}
+		return false;
+	};
+	for (let y = y0; y <= y1; y += 1) {
+		for (let x = x0; x <= x1; x += 1) {
+			if (!brightAt(x, y)) continue;
+			if (structures && distanceToStructuresAt(x, y, structures) <= structures.bandPx) continue;
+			if (nearBlackAt(x, y)) continue;
+			points.push({ x, y });
+		}
+	}
+	if (points.length < 20) return undefined;
+	// Dominant-line RANSAC: blob PCA is wrecked when the ring band swallows
+	// part of the rim and leaves disjoint fragments, but the longest
+	// collinear fragment IS a long-side ray — the direction the invariant
+	// needs. Deterministic sampling keeps runs reproducible.
+	const random = mulberry32(0xc0ffee);
+	let bestInliers: Array<{ x: number; y: number }> = [];
+	for (let iteration = 0; iteration < 300; iteration += 1) {
+		const first = points[Math.floor(random() * points.length)];
+		const second = points[Math.floor(random() * points.length)];
+		const dx = second.x - first.x;
+		const dy = second.y - first.y;
+		const length = Math.hypot(dx, dy);
+		if (length < 6) continue;
+		const nx = -dy / length;
+		const ny = dx / length;
+		const inliers = points.filter((point) => Math.abs((point.x - first.x) * nx + (point.y - first.y) * ny) <= 1.5);
+		if (inliers.length > bestInliers.length) bestInliers = inliers;
+	}
+	if (bestInliers.length < 12) return undefined;
+	let meanX = 0;
+	let meanY = 0;
+	for (const point of bestInliers) {
+		meanX += point.x;
+		meanY += point.y;
+	}
+	meanX /= bestInliers.length;
+	meanY /= bestInliers.length;
+	let covXx = 0;
+	let covXy = 0;
+	let covYy = 0;
+	for (const point of bestInliers) {
+		const dx = point.x - meanX;
+		const dy = point.y - meanY;
+		covXx += dx * dx;
+		covXy += dx * dy;
+		covYy += dy * dy;
+	}
+	const trace = covXx + covYy;
+	const det = covXx * covYy - covXy * covXy;
+	const lambda = trace / 2 + Math.sqrt(Math.max(0, (trace * trace) / 4 - det));
+	let ux = lambda - covYy;
+	let uy = covXy;
+	const norm = Math.hypot(ux, uy);
+	if (norm < 1e-9) {
+		ux = 1;
+		uy = 0;
+	} else {
+		ux /= norm;
+		uy /= norm;
+	}
+	let maxAlong = 0;
+	for (const point of bestInliers) {
+		maxAlong = Math.max(maxAlong, Math.abs((point.x - meanX) * ux + (point.y - meanY) * uy));
+	}
+	// Center at the scoring peak (interior evidence centers better than the
+	// surviving rim's centroid); minor half-axis from the canonical pad.
+	return {
+		xPx: centerXPx,
+		yPx: centerYPx,
+		ux,
+		uy,
+		halfMajorPx: Math.max(maxAlong, 10),
+		halfMinorPx: 7,
+		evidenceCount: bestInliers.length
+	};
+}
+
+/** Same math as the battery's structure distance; local copy for the fitter. */
+function distanceToStructuresAt(xPx: number, yPx: number, structures: DashStructures): number {
+	let best = Number.POSITIVE_INFINITY;
+	for (const circle of structures.circles) {
+		const distance = Math.abs(Math.hypot(xPx - circle.xPx, yPx - circle.yPx) - circle.radiusPx);
+		if (distance < best) best = distance;
+	}
+	for (const segment of structures.segments) {
+		const vx = segment.bxPx - segment.axPx;
+		const vy = segment.byPx - segment.ayPx;
+		const lengthSquared = vx * vx + vy * vy;
+		const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((xPx - segment.axPx) * vx + (yPx - segment.ayPx) * vy) / lengthSquared));
+		const distance = Math.hypot(xPx - (segment.axPx + t * vx), yPx - (segment.ayPx + t * vy));
+		if (distance < best) best = distance;
+	}
+	return best;
+}
+
+/**
+ * The badge-ray invariant: a valid tee pad AIMS at its own number badge —
+ * the rays along both long sides and the ray perpendicular to the front
+ * (short) edge, i.e. the major-axis ray from the front-edge midpoint, all
+ * intersect the badge. Checked as: the badge disc lies ahead of the pad
+ * along its major axis, and all three parallel rays (center and the two
+ * long-side offsets) pass within the badge disc.
+ */
+function badgeRayInvariantHolds(pad: FittedPad, badge: BadgeAnchor): boolean {
+	const toBadgeX = badge.xPx - pad.xPx;
+	const toBadgeY = badge.yPx - pad.yPx;
+	let ux = pad.ux;
+	let uy = pad.uy;
+	if (toBadgeX * ux + toBadgeY * uy < 0) {
+		ux = -ux;
+		uy = -uy;
+	}
+	const along = toBadgeX * ux + toBadgeY * uy;
+	if (along <= pad.halfMajorPx) return false;
+	const across = Math.abs(-toBadgeX * uy + toBadgeY * ux);
+	const halfMinor = Math.min(Math.max(pad.halfMinorPx, 4), 16);
+	// All three parallel rays — the front-perpendicular ray through the pad
+	// center and the two long-side rays offset +/- halfMinor — must pass
+	// within the badge disc.
+	return (
+		across <= badge.radiusPx &&
+		Math.abs(across - halfMinor) <= badge.radiusPx &&
+		across + halfMinor <= badge.radiusPx
+	);
 }
 
 /** Deterministic PRNG so distractor sampling is reproducible run to run. */
@@ -628,23 +850,37 @@ export async function runOverfit(args: OverfitCliArgs): Promise<OverfitResult> {
 	if (args.verify === 'gap-fill') {
 		// Mirrors the production integration path: the baseline fused detector
 		// keeps every hole it already matches; the tuned scorer only fills the
-		// gaps via a local sliding search (radius = the production gap-fallback
-		// radius). The truth position stands in for the hole's number badge as
-		// the search anchor — same radius, so same difficulty.
+		// gaps via a local sliding search. When number-badge detection is
+		// available the search anchors on the missed hole's BADGE (what
+		// production would do) and validates candidates with the badge-ray
+		// invariant: a valid pad's long-side rays and front-perpendicular ray
+		// all intersect its own badge. Truth is used only for evaluation.
+		let badges: readonly BadgeAnchor[] = [];
+		if (args.templateDir) {
+			try {
+				badges = detectBadgeAnchors(cv, input, args.templateDir);
+				console.log(`[overfit] badge anchors: ${badges.length} labeled badges`);
+			} catch (error) {
+				console.log(`[overfit] badge detection unavailable (${error instanceof Error ? error.message : String(error)}); gap-fill falls back to truth anchors`);
+			}
+		}
 		const baseline = detectCalibratedTeePadVariants(cv, raster, { ...detectorOptions, maxCandidates: truth.length }, ['fused'])[0]?.candidates ?? [];
 		const baselineEvaluation = evaluateTruth(truth, baseline, tolerancePx);
 		const scorerMetrics = new Set(tunedScorer.metrics.map((metric) => metric.name));
 		const gapStride = Math.max(1, uiScalePx);
-		const searchRadius = LOCAL_RADIUS_UI * uiScalePx;
+		const searchRadius = GAP_SEARCH_RADIUS_UI * uiScalePx;
+		const nmsRadius = NMS_RADIUS_UI * uiScalePx;
 		const recovered: TeePadCandidate[] = [];
 		const gapNotes: string[] = [];
 		for (const missedNumber of baselineEvaluation.missedNumbers) {
 			const hole = truth.find((entry) => entry.number === missedNumber);
-			if (!hole) continue;
-			let best: { xPx: number; yPx: number; score: number } | undefined;
-			for (let yPx = hole.yPx - searchRadius; yPx <= hole.yPx + searchRadius; yPx += gapStride) {
-				for (let xPx = hole.xPx - searchRadius; xPx <= hole.xPx + searchRadius; xPx += gapStride) {
-					if (Math.hypot(xPx - hole.xPx, yPx - hole.yPx) > searchRadius) continue;
+			const badge = badges.find((entry) => entry.number === missedNumber);
+			const anchor = badge ?? hole;
+			if (!anchor) continue;
+			const windows: Array<{ xPx: number; yPx: number; score: number }> = [];
+			for (let yPx = anchor.yPx - searchRadius; yPx <= anchor.yPx + searchRadius; yPx += gapStride) {
+				for (let xPx = anchor.xPx - searchRadius; xPx <= anchor.xPx + searchRadius; xPx += gapStride) {
+					if (Math.hypot(xPx - anchor.xPx, yPx - anchor.yPx) > searchRadius) continue;
 					const metrics = computePatchMetrics(
 						cv,
 						raster,
@@ -654,23 +890,56 @@ export async function runOverfit(args: OverfitCliArgs): Promise<OverfitResult> {
 					);
 					if (!metrics) continue;
 					const score = applyTunedScorer(tunedScorer, metrics);
-					if (Number.isFinite(score) && (!best || score > best.score)) best = { xPx, yPx, score };
+					if (Number.isFinite(score)) windows.push({ xPx, yPx, score });
 				}
 			}
-			if (best) {
-				const distance = Math.hypot(best.xPx - hole.xPx, best.yPx - hole.yPx);
-				gapNotes.push(`hole ${missedNumber}: peak at (${best.xPx.toFixed(1)}, ${best.yPx.toFixed(1)}), score ${best.score.toFixed(3)}, ${distance.toFixed(1)}px from truth (tolerance ${tolerancePx.toFixed(1)}px)`);
+			windows.sort((a, b) => b.score - a.score);
+			const peaks: Array<{ xPx: number; yPx: number; score: number }> = [];
+			for (const window of windows) {
+				if (peaks.length >= GAP_PEAK_CANDIDATES) break;
+				if (peaks.some((peak) => Math.hypot(peak.xPx - window.xPx, peak.yPx - window.yPx) < nmsRadius)) continue;
+				peaks.push(window);
+			}
+			let chosen: { xPx: number; yPx: number; score: number; validated: boolean } | undefined;
+			for (const peak of peaks) {
+				// Fit over a wider window than the scoring patch: the scoring
+				// window is deliberately tight (interior statistics), but the
+				// rim PCA needs the pad's full extent plus margin.
+				const pad = fitPadAt(raster, peak.xPx, peak.yPx, PAD_FIT_HALF_UI * uiScalePx, dashStructures);
+				if (badge && pad) {
+					const toX = badge.xPx - pad.xPx;
+					const toY = badge.yPx - pad.yPx;
+					const sign = toX * pad.ux + toY * pad.uy < 0 ? -1 : 1;
+					const along = (toX * pad.ux + toY * pad.uy) * sign;
+					const across = Math.abs(-toX * pad.uy + toY * pad.ux);
+					console.log(
+						`[overfit]   tee ${missedNumber} peak (${peak.xPx.toFixed(0)},${peak.yPx.toFixed(0)}) s=${peak.score.toFixed(2)}: fit center (${pad.xPx.toFixed(1)},${pad.yPx.toFixed(1)}) axis ${((Math.atan2(pad.uy, pad.ux) * 180) / Math.PI).toFixed(1)}deg half ${pad.halfMajorPx.toFixed(1)}x${pad.halfMinorPx.toFixed(1)} n=${pad.evidenceCount} | along ${along.toFixed(1)} across ${across.toFixed(1)} badgeR ${badge.radiusPx.toFixed(1)}`
+					);
+				}
+				if (!pad || !badge) continue;
+				if (badgeRayInvariantHolds(pad, badge)) {
+					chosen = { xPx: pad.xPx, yPx: pad.yPx, score: peak.score, validated: true };
+					break;
+				}
+			}
+			if (!chosen && peaks[0]) chosen = { ...peaks[0], validated: false };
+			if (chosen) {
+				const anchorKind = badge ? `badge ${missedNumber}` : 'truth (no badge)';
+				const distance = hole ? Math.hypot(chosen.xPx - hole.xPx, chosen.yPx - hole.yPx) : Number.NaN;
+				gapNotes.push(
+					`tee ${missedNumber}: ${chosen.validated ? 'badge-ray-validated' : 'UNVALIDATED top'} peak at (${chosen.xPx.toFixed(1)}, ${chosen.yPx.toFixed(1)}), score ${chosen.score.toFixed(3)}, anchored on ${anchorKind}, ${distance.toFixed(1)}px from truth (tolerance ${tolerancePx.toFixed(1)}px)`
+				);
 				recovered.push({
-					xPx: best.xPx,
-					yPx: best.yPx,
+					xPx: chosen.xPx,
+					yPx: chosen.yPx,
 					widthPx: 2 * halfSizePx,
 					heightPx: 2 * halfSizePx,
 					orientationDeg: 0,
-					score: best.score,
+					score: chosen.score,
 					support: []
 				} as unknown as TeePadCandidate);
 			} else {
-				gapNotes.push(`hole ${missedNumber}: no finite-score window in radius`);
+				gapNotes.push(`tee ${missedNumber}: no finite-score window in radius`);
 			}
 		}
 		const evaluation = evaluateTruth(truth, [...baseline, ...recovered], tolerancePx);
