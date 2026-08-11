@@ -36,6 +36,13 @@ import type {
 } from './teePadDetection';
 import { assessTeeBootstrap, proposeWeakTeeCandidates } from './teeBootstrapPolicy';
 import type { TeeBadgeAnchor, TeeBootstrapResult } from './teeBootstrapPolicy';
+import { findOccludedBasketMatch, basketRecoverySearchRadiusPx } from './basketOcclusionRecovery';
+import type {
+	BasketBadgeBox,
+	BasketDistanceBand,
+	BasketFallbackRaster,
+	BasketFallbackTemplate
+} from './basketOcclusionRecovery';
 import {
 	asBasketTemplateScale,
 	asNumberTemplateScale
@@ -214,4 +221,87 @@ export function findCalibratedBasketAnchorScale(
 	return anchor
 		? { ...anchor, scale: asBasketTemplateScale(anchor.scale, 'Basket anchor template scale') }
 		: null;
+}
+
+export interface BasketOcclusionFallbackBadge {
+	readonly holeNumber: number;
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+export interface OccludedBasketCandidate extends CalibratedBasketCandidate {
+	readonly holeNumber: number;
+}
+
+/**
+ * A handful of samples close to the already-calibrated basket template
+ * scale. `detectBasketCandidatesAtTemplateScale`'s own 9-sample 0.9..1.1
+ * sweep exists because that scale is itself unknown at that point; here it
+ * is already trusted (derived from the course's own successfully-matched
+ * baskets), so the fallback only needs to absorb minor local size
+ * variation, not rediscover scale from scratch -- fewer samples keeps the
+ * manual (non-OpenCV) masked correlation affordable.
+ */
+const FALLBACK_SCALE_SAMPLE_COUNT = 5;
+const FALLBACK_SCALE_RANGE_LOW = 0.9;
+const FALLBACK_SCALE_RANGE_HIGH = 1.1;
+
+function fallbackScaleSamples(basketTemplateScale: number): number[] {
+	const samples: number[] = [];
+	for (let index = 0; index < FALLBACK_SCALE_SAMPLE_COUNT; index += 1) {
+		const fraction = index / (FALLBACK_SCALE_SAMPLE_COUNT - 1);
+		samples.push(basketTemplateScale * (FALLBACK_SCALE_RANGE_LOW + fraction * (FALLBACK_SCALE_RANGE_HIGH - FALLBACK_SCALE_RANGE_LOW)));
+	}
+	return samples;
+}
+
+/**
+ * Production occlusion-tolerant basket recovery. Mirrors
+ * `detectCalibratedTeeBootstrap`'s split between "detect candidates" (this
+ * function) and "decide ownership" (the caller's course-grammar pass): this
+ * never touches `detectBasketCandidatesAtTemplateScale`'s own behavior, and
+ * only ever searches the small ROI around each already-unresolved hole's own
+ * badge -- never a full-image rescan. `unresolvedBadges` and `band` are
+ * expected to come from a first course-grammar pass plus
+ * `basketOcclusionRecovery.ts`'s course-derived distance-band classifier, so
+ * this only ever runs for holes whose primary basket assignment already
+ * looks implausible.
+ */
+export function detectCalibratedBasketOcclusionFallback(
+	raster: BasketFallbackRaster,
+	template: BasketFallbackTemplate,
+	unresolvedBadges: readonly BasketOcclusionFallbackBadge[],
+	occlusionBoxes: readonly BasketBadgeBox[],
+	band: BasketDistanceBand,
+	basketTemplateScale: BasketTemplateScale
+): readonly OccludedBasketCandidate[] {
+	if (unresolvedBadges.length === 0) return [];
+	const searchRadiusPx = basketRecoverySearchRadiusPx(band);
+	const templateScales = fallbackScaleSamples(basketTemplateScale);
+	const recovered: OccludedBasketCandidate[] = [];
+	for (const badge of unresolvedBadges) {
+		const match = findOccludedBasketMatch(
+			raster,
+			template,
+			badge.xPx,
+			badge.yPx,
+			searchRadiusPx,
+			templateScales,
+			occlusionBoxes
+		);
+		if (!match) continue;
+		recovered.push({
+			holeNumber: badge.holeNumber,
+			xPx: match.xPx,
+			yPx: match.yPx,
+			widthPx: match.widthPx,
+			heightPx: match.heightPx,
+			score: match.score,
+			scale: asBasketTemplateScale(
+				match.widthPx / template.widthPx,
+				'Occlusion-fallback basket candidate template scale'
+			)
+		});
+	}
+	return recovered;
 }

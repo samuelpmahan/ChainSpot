@@ -49,6 +49,19 @@ export interface CourseTeeCandidate extends CoursePointCandidate {
 	readonly bootstrapDecision?: 'auto' | 'review';
 }
 
+/**
+ * A basket candidate recovered by the occlusion-tolerant fallback
+ * (`basketOcclusionRecovery.ts`) instead of the primary template matcher.
+ * Mirrors `CourseTeeCandidate.bootstrapDecision`: a masked/partial-template
+ * match is real local evidence, but never full-strength evidence, so it is
+ * capped to REVIEW here rather than allowed to reach AUTO/`ready` on its own
+ * geometry score. Ordinary primary-detection baskets leave this undefined
+ * and are scored exactly as before.
+ */
+export interface CourseBasketCandidate extends CoursePointCandidate {
+	readonly bootstrapDecision?: 'auto' | 'review';
+}
+
 /** One possible digit interpretation for a located number-badge glyph. */
 export interface NumberBadgeLabelScore {
 	readonly holeNumber: number;
@@ -72,7 +85,7 @@ export interface CourseGrammarInput {
 	readonly numberBadges: readonly CourseNumberBadgeCandidate[];
 	readonly tees: readonly CourseTeeCandidate[];
 	/** Basket coordinates must be the basket stem/base, not icon centre. */
-	readonly baskets: readonly CoursePointCandidate[];
+	readonly baskets: readonly CourseBasketCandidate[];
 	/** Defaults to the standard 1..18 course. */
 	readonly holeNumbers?: readonly number[];
 	/**
@@ -604,7 +617,9 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const localRank = costs.filter((cost) => cost < chosen - 1e-6).length + 1;
 		const topologyConfidence = endpointConfidence(basket.confidence, localRank, chosen, nearest, runnerUp);
 		const polarityConfidence = clamp01((1 - detail.polarityCosine) / 2);
-		const confidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
+		const rawConfidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
+		const sourceBasket = input.baskets[basket.sourceIndex];
+		const confidence = sourceBasket.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		basketForHole.set(holeNumber, {
 			assignment: {
 				candidateIndex: basket.sourceIndex,
@@ -618,14 +633,16 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				...(runnerUp === undefined ? {} : { runnerUpCost: runnerUp })
 			}
 		});
-		if (confidence < 0.5) {
+		if (sourceBasket.bootstrapDecision === 'review' || confidence < 0.5) {
 			failures.push({
 				kind: 'weak-basket-confidence',
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
 				candidateIndex: basket.sourceIndex,
-				message: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
+				message: sourceBasket.bootstrapDecision === 'review'
+					? `Hole ${holeNumber}'s basket is an occlusion-fallback REVIEW proposal, not an automatic acceptance.`
+					: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
 			});
 		}
 		if (localRank > 1) {

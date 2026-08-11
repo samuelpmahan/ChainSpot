@@ -7,11 +7,18 @@ import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
 	detectBasketCandidatesAtTemplateScale,
+	detectCalibratedBasketOcclusionFallback,
 	detectCalibratedHoleNumberBadges,
 	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import type { CalibratedBasketCandidate } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import {
+	basketRecoverySamplesFromGrammar,
+	deriveBasketDistanceBand,
+	findUnresolvedBasketHoles,
+	isSameBasketCandidate
+} from '../src/lib/autoAnnotation/basketOcclusionRecovery';
 import {
 	asUiScalePx,
 	deriveBasketTemplateScale,
@@ -94,6 +101,8 @@ export interface CourseCliResult {
 		readonly readyHoles: number;
 		readonly reviewHoles: number;
 		readonly incompleteHoles: number;
+		readonly basketFallbackUnresolvedHoles: number;
+		readonly basketFallbackRecovered: number;
 	};
 	readonly teeBootstrap: {
 		readonly auto: number;
@@ -505,7 +514,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			: deriveMapBounds(numberDetection.candidates, input.heightPx);
 
 	const basketRaster = { gray: toGray(input), widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
-	const basketCandidates = detectBasketCandidatesAtTemplateScale(cv, basketRaster, basketTemplate, {
+	const primaryBasketCandidates = detectBasketCandidatesAtTemplateScale(cv, basketRaster, basketTemplate, {
 		templateScale: basketTemplateScale,
 		mapBoundsPx,
 		maxCandidates: args.maxBasketCandidates,
@@ -545,7 +554,55 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		widthPx: candidate.widthPx,
 		heightPx: candidate.heightPx
 	}));
-	const grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: basketCandidates });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBasketCandidates });
+
+	// Occlusion-tolerant basket recovery -- mirrors basketDetection.worker.ts's
+	// production `detectCourse` exactly, so this CLI stays a faithful preview
+	// of what the app actually does. See basketOcclusionRecovery.ts's module
+	// doc comment for the two-question policy this implements.
+	const basketRecoverySamples = basketRecoverySamplesFromGrammar(primaryGrammar.holes);
+	const basketDistanceBand = deriveBasketDistanceBand(basketRecoverySamples);
+	const unresolvedBasketHoleNumbers = basketDistanceBand
+		? findUnresolvedBasketHoles(basketRecoverySamples, basketDistanceBand)
+		: new Set<number>();
+	let basketCandidates = primaryBasketCandidates;
+	let grammar = primaryGrammar;
+	let basketFallbackRecoveredCount = 0;
+	if (basketDistanceBand && unresolvedBasketHoleNumbers.size > 0) {
+		const unresolvedBadges = numberDetection.candidates
+			.filter(
+				(candidate): candidate is typeof candidate & { label: number } =>
+					candidate.label !== undefined && unresolvedBasketHoleNumbers.has(candidate.label)
+			)
+			.map((candidate) => ({ holeNumber: candidate.label, xPx: candidate.xPx, yPx: candidate.yPx }));
+		const occlusionBoxes = numberDetection.candidates.map((candidate) => ({
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+		const basketFallbackRaster = { gray: toGray(input), widthPx: input.widthPx, heightPx: input.heightPx };
+		const recovered = detectCalibratedBasketOcclusionFallback(
+			basketFallbackRaster,
+			basketTemplate,
+			unresolvedBadges,
+			occlusionBoxes,
+			basketDistanceBand,
+			basketTemplateScale
+		);
+		const nonDuplicateRecovered = recovered.filter(
+			(candidate) => !primaryBasketCandidates.some((existing) => isSameBasketCandidate(existing, candidate))
+		);
+		basketFallbackRecoveredCount = nonDuplicateRecovered.length;
+		if (nonDuplicateRecovered.length > 0) {
+			basketCandidates = [...primaryBasketCandidates, ...nonDuplicateRecovered];
+			const grammarBaskets = [
+				...primaryBasketCandidates,
+				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
+			];
+			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets });
+		}
+	}
 
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
@@ -568,7 +625,9 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			teeCandidates: teeCandidates.length,
 			readyHoles,
 			reviewHoles,
-			incompleteHoles
+			incompleteHoles,
+			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
+			basketFallbackRecovered: basketFallbackRecoveredCount
 		},
 		teeBootstrap: {
 			...teeBootstrap.counts,

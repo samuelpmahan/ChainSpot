@@ -15,6 +15,7 @@ import type {
 } from './teePadDetection';
 import {
 	detectBasketCandidatesAtTemplateScale,
+	detectCalibratedBasketOcclusionFallback,
 	detectCalibratedHoleNumberBadges,
 	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates,
@@ -22,6 +23,12 @@ import {
 	findCalibratedBasketAnchorScale
 } from './cvCalibratedDetectors';
 import type { CalibratedBasketCandidate } from './cvCalibratedDetectors';
+import {
+	basketRecoverySamplesFromGrammar,
+	deriveBasketDistanceBand,
+	findUnresolvedBasketHoles,
+	isSameBasketCandidate
+} from './basketOcclusionRecovery';
 import {
 	asNumberTemplateScale,
 	asUiScalePx,
@@ -557,7 +564,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 	);
 	const basketTiming = emptyBasketDetectionTiming();
 	const basketsStartedAt = performance.now();
-	const baskets = await detectBaskets(
+	const primaryBaskets = await detectBaskets(
 		request.bitmap,
 		request.widthPx,
 		request.heightPx,
@@ -570,7 +577,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 	reportCourseProgress(
 		request,
 		'tees',
-		`${baskets.length} baskets found · detecting tee pads…`,
+		`${primaryBaskets.length} baskets found · detecting tee pads…`,
 		elapsedMs()
 	);
 	const teesStartedAt = performance.now();
@@ -621,7 +628,62 @@ async function detectCourse(request: CourseDetectionRequest) {
 		elapsedMs()
 	);
 	const grammarStartedAt = performance.now();
-	const grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBaskets });
+
+	// Occlusion-tolerant basket recovery. The primary basket detection and
+	// this first grammar pass above are both untouched by what follows: this
+	// only asks, of holes the pass above already could not place plausibly,
+	// whether narrow masked-template evidence exists at that hole's own
+	// location -- see `basketOcclusionRecovery.ts`'s module doc comment.
+	const basketFallbackStartedAt = performance.now();
+	const basketRecoverySamples = basketRecoverySamplesFromGrammar(primaryGrammar.holes);
+	const basketDistanceBand = deriveBasketDistanceBand(basketRecoverySamples);
+	const unresolvedBasketHoleNumbers = basketDistanceBand
+		? findUnresolvedBasketHoles(basketRecoverySamples, basketDistanceBand)
+		: new Set<number>();
+	let baskets = primaryBaskets;
+	let grammar = primaryGrammar;
+	let basketFallbackRecoveredCount = 0;
+	if (basketDistanceBand && unresolvedBasketHoleNumbers.size > 0) {
+		const unresolvedBadges = numberDetection.candidates
+			.filter(
+				(candidate): candidate is typeof candidate & { label: number } =>
+					candidate.label !== undefined && unresolvedBasketHoleNumbers.has(candidate.label)
+			)
+			.map((candidate) => ({ holeNumber: candidate.label, xPx: candidate.xPx, yPx: candidate.yPx }));
+		const occlusionBoxes = numberDetection.candidates.map((candidate) => ({
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+		const basketFallbackRaster = {
+			gray: grayscaleRgba(full.rgba, full.width * full.height),
+			widthPx: full.width,
+			heightPx: full.height
+		};
+		const recovered = detectCalibratedBasketOcclusionFallback(
+			basketFallbackRaster,
+			pack.basket,
+			unresolvedBadges,
+			occlusionBoxes,
+			basketDistanceBand,
+			basketTemplateScale
+		);
+		const nonDuplicateRecovered = recovered.filter(
+			(candidate) => !primaryBaskets.some((existing) => isSameBasketCandidate(existing, candidate))
+		);
+		basketFallbackRecoveredCount = nonDuplicateRecovered.length;
+		if (nonDuplicateRecovered.length > 0) {
+			baskets = [...primaryBaskets, ...nonDuplicateRecovered];
+			const grammarBaskets = [
+				...primaryBaskets,
+				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
+			];
+			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets });
+		}
+	}
+	const basketFallbackMs = performance.now() - basketFallbackStartedAt;
 	const grammarMs = performance.now() - grammarStartedAt;
 
 	const performanceReport = {
@@ -648,6 +710,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 			teesMs,
 			teeRasterMs,
 			teeDetectionMs,
+			basketFallbackMs,
 			grammarMs
 		},
 		counts: {
@@ -657,6 +720,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 			baskets: baskets.length,
 			tees: tees.length,
 			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
+			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
+			basketFallbackRecovered: basketFallbackRecoveredCount,
 			teeBootstrapAuto: teeBootstrap.counts.auto,
 			teeBootstrapReview: teeBootstrap.counts.review,
 			teeBootstrapUnresolved: teeBootstrap.counts.unresolved
