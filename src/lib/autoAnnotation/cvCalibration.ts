@@ -134,50 +134,6 @@ export function resolveTemplateScale<Scale extends TemplateScale>(
 }
 
 /**
- * Which raster a `TemplateScale` was measured against. Two detectors can
- * disagree on this for the exact same numeric value: a scale measured on a
- * downscaled analysis raster (`CvRaster.sourceScale > 1`) is a different
- * real-world multiplier than the same number measured on the full-resolution
- * source raster (`sourceScale === 1`). A TypeScript brand alone cannot carry
- * this distinction across a Web Worker boundary -- `postMessage`'s
- * structured-clone algorithm erases brands, keeping only plain data -- so
- * this tag is deliberately real, serializable data, not just a type.
- */
-export type RasterSpace = 'source' | 'analysis';
-
-/** A template-match scale paired with the raster space it was measured in. */
-export interface SpacedTemplateScale<Scale extends TemplateScale = TemplateScale> {
-	readonly value: Scale;
-	readonly space: RasterSpace;
-}
-
-/**
- * Resolves a spaced scale into the value that is valid for `targetSpace`.
- *
- * The only supported conversion is analysis -> source, via `sourceScale`
- * (source pixels per analysis pixel -- the reciprocal of the analysis
- * raster's own `CvRaster.sourceScale`). Every other mismatch is refused: a
- * scale already declared for `targetSpace` needs no conversion, and there is
- * no correct way to convert source -> analysis here, so asking for one is a
- * caller bug, not a value this function can produce. The thrown message
- * names both spaces so the failure reads as its cause, not a downstream
- * symptom (a mis-scaled search window, a template match that never fires).
- */
-export function resolveTemplateScale<Scale extends TemplateScale>(
-	scaled: SpacedTemplateScale<Scale>,
-	targetSpace: RasterSpace,
-	sourceScale: number
-): Scale {
-	if (scaled.space === targetSpace) return scaled.value;
-	if (scaled.space === 'analysis' && targetSpace === 'source') {
-		return (scaled.value * positiveFinite(sourceScale, 'Source scale')) as Scale;
-	}
-	throw new Error(
-		`Scale measured in ${scaled.space} space cannot be used against a ${targetSpace}-space raster.`
-	);
-}
-
-/**
  * Converts the detected hole-number template scale into the basket-template
  * family using the template pack's measured semantic calibration.
  */
