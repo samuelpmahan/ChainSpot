@@ -20,6 +20,7 @@ import type { ImageSpacePoint, ScreenSpacePoint, ViewTransformState } from './co
 import { untrack } from 'svelte';
 import {
 	DEFAULT_VIEW_ZOOM_LIMITS,
+	clampViewZoom,
 	panBy,
 	zoomAtPointer,
 	zoomLimitsForFit
@@ -183,6 +184,18 @@ export class ViewportController {
 	fit(): void {
 		if (!this.fitTarget) return;
 		this.view = { ...this.fitView };
+	}
+
+	/** Centers an image-space review point at a deliberate close-up zoom. */
+	focusOnPoint(point: { xPx: number; yPx: number }, zoomMultiplier = 2.5): void {
+		if (!this.fitTarget || !Number.isFinite(zoomMultiplier) || zoomMultiplier <= 0) return;
+		const zoom = clampViewZoom(this.fitView.zoom * zoomMultiplier, this.zoomLimits());
+		const center = this.centerPoint();
+		this.view = {
+			zoom,
+			panX: center.x - point.xPx * zoom,
+			panY: center.y - point.yPx * zoom
+		};
 	}
 
 	/**

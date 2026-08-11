@@ -133,6 +133,7 @@
 		'edge-loop': 'EL',
 		fused: 'F'
 	};
+	const ACTIVE_REVIEW_FOCUS_ZOOM_MULTIPLIER = 2.5;
 	const MARKER_HIT_RADIUS_PX = 12;
 
 	type AnnotationMarkerKind = PointKind;
@@ -781,6 +782,18 @@
 			? courseCandidateDisplayPoint(recommendation.candidateKind, recommendation.candidateIndex, candidate)
 			: null;
 	}
+
+	let activeReviewFocusRequest = $derived.by(() => {
+		const recommendation = activeReviewRecommendation;
+		if (revealStage !== 'done' || recommendation?.kind !== 'candidate') return null;
+		const point = activeReviewRecommendationPoint();
+		if (!point) return null;
+		return {
+			key: `${recommendation.candidateKind}:${recommendation.candidateIndex}:${recommendation.holeNumber}`,
+			point,
+			zoomMultiplier: ACTIVE_REVIEW_FOCUS_ZOOM_MULTIPLIER
+		};
+	});
 
 	function rejectActiveReviewRecommendation(): void {
 		const recommendation = activeReviewRecommendation;
@@ -2372,6 +2385,7 @@
 			onClaimedPointerUp={commitAnnotationPointerUp}
 			onClaimedPointerCancel={cancelAnnotationPointer}
 			toolsAriaLabel={null}
+			focusRequest={activeReviewFocusRequest}
 		>
 			{#snippet headerActions()}
 				{#if activeHole()}

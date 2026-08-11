@@ -19,6 +19,12 @@
 		zoom: number;
 	}
 
+	interface ViewportFocusRequest {
+		key: string;
+		point: { xPx: number; yPx: number };
+		zoomMultiplier?: number;
+	}
+
 	/**
 	 * Context for the `popover` snippet — deliberately richer than
 	 * `OverlayContext`: a popover needs the full view transform (not just
@@ -67,6 +73,8 @@
 		headerActions?: Snippet;
 		/** Override the tools landmark label; null removes it for intentionally self-explanatory rails. */
 		toolsAriaLabel?: string | null;
+		/** One-shot camera focus request, keyed so manual panning is never overwritten on every render. */
+		focusRequest?: ViewportFocusRequest | null;
 		diagnostics?: Snippet;
 		overlay?: Snippet<[OverlayContext]>;
 		/**
@@ -98,6 +106,7 @@
 		tools,
 		headerActions,
 		toolsAriaLabel,
+		focusRequest,
 		diagnostics,
 		overlay,
 		popover
@@ -109,6 +118,7 @@
 	let error = $state<IntakeError | null>(null);
 	let objectUrl = $state<string | null>(null);
 	let fittedImageId: string | null = null;
+	let appliedFocusKey: string | null = null;
 
 	function currentImage(): ImageAsset | null {
 		void refresh;
@@ -135,6 +145,20 @@
 			vp.fit();
 		}
 		return () => URL.revokeObjectURL(url);
+	});
+
+	$effect(() => {
+		const request = focusRequest;
+		const image = currentImage();
+		if (!request) {
+			appliedFocusKey = null;
+			return;
+		}
+		if (!image || !vp.fitTarget || vp.size.width <= 1 || vp.size.height <= 1) return;
+		const requestKey = `${image.id}:${request.key}`;
+		if (requestKey === appliedFocusKey) return;
+		vp.focusOnPoint(request.point, request.zoomMultiplier);
+		appliedFocusKey = requestKey;
 	});
 
 	function handleViewportClick(pointer: { x: number; y: number }, event: PointerEvent): void {
