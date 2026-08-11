@@ -39,19 +39,17 @@
       "id": "numbers-the-rec-left",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
-      "status": "active",
+      "status": "pending-truth",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-L.PNG",
-      "truthPath": "resources/cv-gallery/the-rec-left-number-golden.json",
-      "note": "YOLO-bootstrapped and visually verified visible truth: holes 1,5,6,7,8,9. Combined with the right capture, The Rec covers holes 1-9."
+      "note": "The Rec must become a 9/9 golden number gate. Confirm this is the intended 9-visible-badge view, then add manually verified label centers. If the right capture is the correct view, swap statuses instead of annotating both."
     },
     {
       "id": "numbers-the-rec-right",
       "detector": "numbers",
       "resolutionClass": "non-stitched",
-      "status": "active",
+      "status": "candidate",
       "inputPath": "resources/stitch-annotate/TheRec/TheRec-R.PNG",
-      "truthPath": "resources/cv-gallery/the-rec-right-number-golden.json",
-      "note": "YOLO-bootstrapped and visually verified visible truth: holes 2,3,4,5,8. Combined with the left capture, The Rec covers holes 1-9."
+      "note": "Development-only alternate Rec capture. Do not create a second Rec golden unless it proves useful; MVP needs one verified 9/9 Rec case, not a corpus."
     },
     {
       "id": "baskets-golden-native",
