@@ -293,6 +293,7 @@
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
 	let activeReviewConfirmedCandidateIds = $state<string[]>([]);
 	let activeReviewRecommendation = $state<ActiveReviewRecommendation | null>(null);
+	let activeReviewCandidateOverrides = $state<Record<string, SourcePoint>>({});
 	let minAutoSuggestScore = $state(0.6);
 	let prewarmedSourceId: string | null = null;
 	let autoDetectedSourceId: string | null = null;
@@ -406,8 +407,10 @@
 	/** Pointer-claim state for a tee/basket candidate marker, mirroring `numberSelectDrag` below. */
 	interface CourseCandidateDrag {
 		readonly kind: 'tee' | 'basket';
+		readonly candidateIndex: number;
 		readonly point: SourcePoint;
 		readonly start: ScreenSpacePoint;
+		readonly transform: ViewTransformState;
 		dragging: boolean;
 	}
 	let courseCandidateDrag = $state<CourseCandidateDrag | null>(null);
@@ -733,17 +736,36 @@
 		recomputeActiveReview();
 	}
 
+	function courseCandidateKey(kind: 'tee' | 'basket', index: number): string {
+		return `${kind}:${index}`;
+	}
+
+	function candidateIsHandled(kind: 'tee' | 'basket', index: number): boolean {
+		return activeReviewConfirmedCandidateIds.includes(courseCandidateKey(kind, index));
+	}
+
+	function courseCandidateDisplayPoint(kind: 'tee' | 'basket', index: number, point: SourcePoint): SourcePoint {
+		return activeReviewCandidateOverrides[courseCandidateKey(kind, index)] ?? point;
+	}
+
 	function courseCandidateIndex(kind: 'tee' | 'basket', point: SourcePoint): number | null {
 		const candidates = kind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
-		const index = candidates?.findIndex((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx) ?? -1;
+		const index = candidates?.findIndex((candidate, candidateIndex) => {
+			const displayPoint = courseCandidateDisplayPoint(kind, candidateIndex, candidate);
+			return displayPoint.xPx === point.xPx && displayPoint.yPx === point.yPx;
+		}) ?? -1;
 		return index >= 0 ? index : null;
 	}
 
-	function activeReviewTargetForClick(kind: 'tee' | 'basket'): ActiveReviewRecommendation | null {
+	function activeReviewTargetForClick(
+		kind: 'tee' | 'basket',
+		candidateIndex?: number
+	): ActiveReviewRecommendation | null {
 		const recommendation = activeReviewRecommendation;
 		if (
 			recommendation?.kind !== 'candidate' ||
-			recommendation.candidateKind !== kind
+			recommendation.candidateKind !== kind ||
+			(candidateIndex !== undefined && recommendation.candidateIndex !== candidateIndex)
 		) {
 			return null;
 		}
@@ -755,7 +777,9 @@
 		if (recommendation?.kind !== 'candidate') return null;
 		const candidates = recommendation.candidateKind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
 		const candidate = candidates?.[recommendation.candidateIndex];
-		return candidate ? { xPx: candidate.xPx, yPx: candidate.yPx } : null;
+		return candidate
+			? courseCandidateDisplayPoint(recommendation.candidateKind, recommendation.candidateIndex, candidate)
+			: null;
 	}
 
 	function rejectActiveReviewRecommendation(): void {
@@ -769,7 +793,7 @@
 		const recommendation = activeReviewRecommendation;
 		const point = activeReviewRecommendationPoint();
 		if (recommendation?.kind !== 'candidate' || !point) return;
-		handleCandidateMarkerClick(recommendation.candidateKind, point);
+		handleCandidateMarkerClick(recommendation.candidateKind, point, recommendation.candidateIndex);
 	}
 
 	function rejectActiveReviewMarker(event: MouseEvent): void {
@@ -785,9 +809,12 @@
 	function markActiveReviewCandidateHandled(kind: 'tee' | 'basket', point: SourcePoint): void {
 		const index = courseCandidateIndex(kind, point);
 		if (index === null) return;
-		const id = `${kind}:${index}`;
+		const id = courseCandidateKey(kind, index);
 		if (activeReviewConfirmedCandidateIds.includes(id)) return;
 		activeReviewConfirmedCandidateIds = [...activeReviewConfirmedCandidateIds, id];
+		const nextOverrides = { ...activeReviewCandidateOverrides };
+		delete nextOverrides[id];
+		activeReviewCandidateOverrides = nextOverrides;
 		recomputeActiveReview();
 	}
 
@@ -991,23 +1018,34 @@
 	function courseCandidateHitAt(
 		pointer: ScreenSpacePoint,
 		view: ViewTransformState
-	): { kind: 'tee' | 'basket'; point: SourcePoint } | null {
+	): { kind: 'tee' | 'basket'; candidateIndex: number; point: SourcePoint } | null {
 		if (!courseDetection) return null;
-		let closest: { kind: 'tee' | 'basket'; point: SourcePoint } | null = null;
+		let closest: { kind: 'tee' | 'basket'; candidateIndex: number; point: SourcePoint } | null = null;
 		let closestDistance = Number.POSITIVE_INFINITY;
 
-		function consider(kind: 'tee' | 'basket', point: SourcePoint, radiusPx: number): void {
-			const screen = imageToScreen(point, view);
+		function consider(
+			kind: 'tee' | 'basket',
+			candidateIndex: number,
+			point: SourcePoint,
+			radiusPx: number
+		): void {
+			if (candidateIsHandled(kind, candidateIndex)) return;
+			const displayPoint = courseCandidateDisplayPoint(kind, candidateIndex, point);
+			const screen = imageToScreen(displayPoint, view);
 			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
 			const radius = Math.max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom);
 			if (distance > radius || distance >= closestDistance) return;
 			closestDistance = distance;
-			closest = { kind, point: { xPx: point.xPx, yPx: point.yPx } };
+			closest = {
+				kind,
+				candidateIndex,
+				point: { xPx: displayPoint.xPx, yPx: displayPoint.yPx }
+			};
 		}
 
 		if (revealedUpTo('tees')) {
-			for (const candidate of courseDetection.tees) {
-				consider('tee', candidate, Math.max(candidate.widthPx, candidate.heightPx) / 2 + 6);
+			for (const [candidateIndex, candidate] of courseDetection.tees.entries()) {
+				consider('tee', candidateIndex, candidate, Math.max(candidate.widthPx, candidate.heightPx) / 2 + 6);
 			}
 		}
 		// `basketCandidates` is shared with the standalone "Detect baskets"
@@ -1016,8 +1054,8 @@
 		// -test baskets that are still the course-detection set the visible
 		// markers are actually drawn from.
 		if (revealedUpTo('baskets') && basketCandidatesSource === 'course-detection') {
-			for (const candidate of courseDetection.baskets) {
-				consider('basket', candidate, 12);
+			for (const [candidateIndex, candidate] of courseDetection.baskets.entries()) {
+				consider('basket', candidateIndex, candidate, 12);
 			}
 		}
 		return closest;
@@ -1035,13 +1073,13 @@
 	function candidateAriaLabel(kind: 'tee' | 'basket', point: SourcePoint): string {
 		const label = kind === 'tee' ? 'tee' : 'basket';
 		const active = activeHole();
-		if (!active) return `Detected ${label}`;
+		if (!active) return `Detected ${label}. Click to accept or drag to adjust.`;
 		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return `Detected ${label} — hole ${active.number}'s own ${label}, click to remove`;
+		if (sourceHole?.id === active.id) return `Detected ${label} — hole ${active.number}'s own ${label}, click to remove or drag to adjust`;
 		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
-		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace`;
-		if (sourceHole) return `Detected ${label} — move to hole ${active.number}`;
-		return `Detected ${label} — assign to hole ${active.number}`;
+		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace or drag to adjust`;
+		if (sourceHole) return `Detected ${label} — move to hole ${active.number}, click to accept or drag to adjust`;
+		return `Detected ${label} — assign to hole ${active.number}, click to accept or drag to adjust`;
 	}
 
 	/**
@@ -1052,8 +1090,12 @@
 	 * one-click confirmation chip anchored at the marker instead of acting
 	 * immediately.
 	 */
-	function handleCandidateMarkerClick(kind: 'tee' | 'basket', point: SourcePoint): void {
-		const recommended = activeReviewTargetForClick(kind);
+	function handleCandidateMarkerClick(
+		kind: 'tee' | 'basket',
+		point: SourcePoint,
+		candidateIndex?: number
+	): void {
+		const recommended = activeReviewTargetForClick(kind, candidateIndex);
 		const active = recommended?.kind === 'candidate'
 			? activateHoleByNumber(recommended.holeNumber)
 			: activeHole();
@@ -1440,7 +1482,12 @@
 		}
 		const courseCandidate = courseCandidateHitAt(pointer, view);
 		if (courseCandidate) {
-			courseCandidateDrag = { ...courseCandidate, start: { ...pointer }, dragging: false };
+			courseCandidateDrag = {
+				...courseCandidate,
+				start: { ...pointer },
+				transform: { ...view },
+				dragging: false
+			};
 			void event;
 			return true;
 		}
@@ -1451,6 +1498,21 @@
 		if (courseCandidateDrag) {
 			const distance = Math.hypot(pointer.x - courseCandidateDrag.start.x, pointer.y - courseCandidateDrag.start.y);
 			if (distance > clickSlopPx(event.pointerType)) courseCandidateDrag.dragging = true;
+			if (courseCandidateDrag.dragging) {
+				const image = sourceImage();
+				if (!image) return;
+				const point = clampPointToImageBounds(
+					screenToImage(pointer, courseCandidateDrag.transform),
+					image.widthPx,
+					image.heightPx
+				);
+				const key = courseCandidateKey(courseCandidateDrag.kind, courseCandidateDrag.candidateIndex);
+				activeReviewCandidateOverrides = {
+					...activeReviewCandidateOverrides,
+					[key]: point
+				};
+				courseCandidateDrag = { ...courseCandidateDrag, point };
+			}
 			return;
 		}
 		if (numberSelectDrag) {
@@ -1479,9 +1541,13 @@
 
 	function commitAnnotationPointerUp(pointer: ScreenSpacePoint, event?: PointerEvent): void {
 		if (courseCandidateDrag) {
-			const { kind, point, dragging } = courseCandidateDrag;
+			const { kind, candidateIndex, point } = courseCandidateDrag;
 			courseCandidateDrag = null;
-			if (!dragging) handleCandidateMarkerClick(kind, point);
+			// A click accepts the detected location. A drag is a deliberate location
+			// correction and accepts the corrected point through the same assignment
+			// path. Once accepted, the real tee/basket marker owns that location and
+			// the normal marker drag interaction can move it again.
+			handleCandidateMarkerClick(kind, point, candidateIndex);
 			return;
 		}
 		if (numberSelectDrag) {
@@ -1533,6 +1599,12 @@
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
 		numberSelectDrag = null;
+		if (courseCandidateDrag?.dragging) {
+			const key = courseCandidateKey(courseCandidateDrag.kind, courseCandidateDrag.candidateIndex);
+			const nextOverrides = { ...activeReviewCandidateOverrides };
+			delete nextOverrides[key];
+			activeReviewCandidateOverrides = nextOverrides;
+		}
 		courseCandidateDrag = null;
 		previewHoles = null;
 		previewWalkingPath = null;
@@ -1579,6 +1651,7 @@
 		courseDetection = null;
 		activeReviewConfirmedCandidateIds = [];
 		activeReviewRecommendation = null;
+		activeReviewCandidateOverrides = {};
 		courseDetectionStatus = null;
 		courseDetectionStage = null;
 		courseDetectionElapsedSeconds = 0;
@@ -1693,6 +1766,7 @@
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
 			activeReviewConfirmedCandidateIds = [];
+			activeReviewCandidateOverrides = {};
 			recomputeActiveReview();
 			basketCandidates = result.baskets;
 			basketCandidatesSource = 'course-detection';
@@ -2823,26 +2897,29 @@
 							</g>
 						{/each}
 						{#each courseDetection.tees as candidate, index (index)}
-							{@const point = { xPx: candidate.xPx, yPx: candidate.yPx }}
-							{@const label = candidateAriaLabel('tee', point)}
-							<g
-								class="course-candidate-group"
-								class:revealed={revealedUpTo('tees')}
-								class:interactive={Boolean(activeHoleId)}
-								role="button"
-								aria-label={label}
-								data-testid="tee-candidate-{index + 1}"
-							>
-								<title>{label}</title>
-								<rect
-									x={candidate.xPx - candidate.widthPx / 2}
-									y={candidate.yPx - candidate.heightPx / 2}
-									width={candidate.widthPx}
-									height={candidate.heightPx}
-									transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
-									class="tee-candidate-marker"
-								/>
-							</g>
+							{#if !candidateIsHandled('tee', index)}
+								{@const point = courseCandidateDisplayPoint('tee', index, candidate)}
+								{@const label = candidateAriaLabel('tee', point)}
+								<g
+									class="course-candidate-group"
+									class:revealed={revealedUpTo('tees')}
+									class:interactive={Boolean(activeHoleId)}
+									class:dragging={courseCandidateDrag?.kind === 'tee' && courseCandidateDrag.candidateIndex === index}
+									role="button"
+									aria-label={label}
+									data-testid="tee-candidate-{index + 1}"
+								>
+									<title>{label}</title>
+									<rect
+										x={point.xPx - candidate.widthPx / 2}
+										y={point.yPx - candidate.heightPx / 2}
+										width={candidate.widthPx}
+										height={candidate.heightPx}
+										transform={`rotate(${candidate.orientationDeg} ${point.xPx} ${point.yPx})`}
+										class="tee-candidate-marker"
+									/>
+								</g>
+							{/if}
 						{/each}
 					{/if}
 					{#if teeExperimentResult}
@@ -2876,25 +2953,30 @@
 					{/if}
 					{#each basketCandidates as candidate, index (index)}
 						{@const fromCourseDetection = basketCandidatesSource === 'course-detection'}
-						{@const point = { xPx: candidate.xPx, yPx: candidate.yPx }}
-						{@const label = fromCourseDetection ? candidateAriaLabel('basket', point) : undefined}
-						<g
-							class="course-candidate-group"
-							class:revealed={!fromCourseDetection || revealedUpTo('baskets')}
-							class:interactive={fromCourseDetection && Boolean(activeHoleId)}
-							role={fromCourseDetection ? 'button' : undefined}
-							aria-label={label}
-						>
-							{#if label}<title>{label}</title>{/if}
-							<circle
-								cx={candidate.xPx}
-								cy={candidate.yPx}
-								r={(selectedBasketCandidate === index ? 11 : 8) / zoom}
-								class="basket-candidate-marker"
-								class:selected={selectedBasketCandidate === index}
-								data-testid="basket-candidate-{index + 1}"
-							/>
-						</g>
+						{#if !fromCourseDetection || !candidateIsHandled('basket', index)}
+							{@const point = fromCourseDetection
+								? courseCandidateDisplayPoint('basket', index, candidate)
+								: { xPx: candidate.xPx, yPx: candidate.yPx }}
+							{@const label = fromCourseDetection ? candidateAriaLabel('basket', point) : undefined}
+							<g
+								class="course-candidate-group"
+								class:revealed={!fromCourseDetection || revealedUpTo('baskets')}
+								class:interactive={fromCourseDetection && Boolean(activeHoleId)}
+								class:dragging={fromCourseDetection && courseCandidateDrag?.kind === 'basket' && courseCandidateDrag.candidateIndex === index}
+								role={fromCourseDetection ? 'button' : undefined}
+								aria-label={label}
+							>
+								{#if label}<title>{label}</title>{/if}
+								<circle
+									cx={point.xPx}
+									cy={point.yPx}
+									r={(selectedBasketCandidate === index ? 11 : 8) / zoom}
+									class="basket-candidate-marker"
+									class:selected={selectedBasketCandidate === index}
+									data-testid="basket-candidate-{index + 1}"
+								/>
+							</g>
+						{/if}
 					{/each}
 				</svg>
 			{/snippet}
@@ -2915,7 +2997,7 @@
 						<div class="active-review-strip" data-testid="active-review-suggestion" role="status">
 							{#if activeReviewRecommendation?.kind === 'candidate'}
 								{@const recommendation = activeReviewRecommendation}
-								<p>Click the {recommendation.candidateKind} for Hole {recommendation.holeNumber}</p>
+								<p>Click to accept or drag the {recommendation.candidateKind} for Hole {recommendation.holeNumber}</p>
 								<span>
 									{recommendation.belowThreshold
 										? `Best remaining at ${Math.round(recommendation.score * 100)}% — below the ${Math.round(minAutoSuggestScore * 100)}% floor`
@@ -4214,6 +4296,16 @@
 	/* PART C — candidate markers become clickable once revealed. */
 	.course-candidate-group.interactive {
 		cursor: pointer;
+	}
+
+	.course-candidate-group.dragging {
+		cursor: grabbing;
+	}
+
+	.course-candidate-group.dragging .tee-candidate-marker,
+	.course-candidate-group.dragging .basket-candidate-marker {
+		stroke-width: 3;
+		filter: brightness(1.35);
 	}
 
 	.course-candidate-group.interactive:hover .tee-candidate-marker,
