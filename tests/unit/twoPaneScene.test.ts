@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import { createProjectState } from '../../src/lib/domain/project';

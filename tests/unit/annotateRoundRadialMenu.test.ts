@@ -1,9 +1,12 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import Page from '../../src/routes/annotate-round/+page.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
+import { requestAnnotationMode } from '../../src/lib/annotationNav.svelte';
 
 const NOW = () => new Date('2026-08-10T00:00:00.000Z');
 
@@ -115,6 +118,11 @@ function clickAction(host: HTMLElement, action: string): void {
 	button.click();
 }
 
+/** There is no "add hole" button in the current UI -- handleAnnotationKeyDown wires it to the 'n'/'a' keyboard shortcut only, dispatched on window to match how the app's own window-level listener receives it. */
+function addHoleViaShortcut(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+}
+
 async function flush(): Promise<void> {
 	for (let i = 0; i < 16; i += 1) {
 		await tick();
@@ -123,6 +131,12 @@ async function flush(): Promise<void> {
 }
 
 async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Promise<void> {
+	// Geometry must be mocked BEFORE the image loads: ImageEditorPane calls
+	// vp.fit() reactively the moment the image resource becomes available, and
+	// fit() reads the pane's client size at that exact moment. Mocking it
+	// afterward leaves that first fit() computed against jsdom's real
+	// (zero-sized) layout, producing a degenerate near-zero zoom.
+	setGeometry(host);
 	const input = host.querySelector<HTMLInputElement>('[data-testid="pane-input-source-overview"]');
 	if (!input) throw new Error('missing source input');
 	Object.defineProperty(input, 'files', {
@@ -131,10 +145,11 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	});
 	input.dispatchEvent(new Event('change', { bubbles: true }));
 	await flush();
-	setGeometry(host);
 	void editor;
 
-	host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]')?.click();
+	addHoleViaShortcut();
+	// Radial menu is off by default; every test in this file exercises it directly.
+	host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
 	await flush();
 }
 
@@ -221,7 +236,11 @@ describe('Annotate Round radial menu', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
-		host.querySelector<HTMLButtonElement>('[data-testid="annotation-mode-round"]')?.click();
+		// The mode toggle lives in +routes/+layout.svelte, not the page this test
+		// mounts in isolation, so it's triggered via the same shared-store call
+		// the layout's own button makes (registerAnnotationNav/requestAnnotationMode
+		// in annotationNav.svelte.ts) rather than a nonexistent in-page button.
+		requestAnnotationMode('round');
 		await flush();
 
 		const clickAt = screenPointFor(host, 50, 50);
@@ -304,7 +323,7 @@ describe('Annotate Round radial menu', () => {
 
 		// Adding a second hole makes it the active one (handleAddHole), so the
 		// menu opened below targets hole 2 from the start.
-		host.querySelector<HTMLButtonElement>('[data-testid="hole-add"]')?.click();
+		addHoleViaShortcut();
 		await flush();
 
 		const clickAt = screenPointFor(host, 30, 30);

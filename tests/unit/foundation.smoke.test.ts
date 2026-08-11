@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import Konva from 'konva';
 import { mount, unmount } from 'svelte';
 import { describe, expect, it } from 'vitest';

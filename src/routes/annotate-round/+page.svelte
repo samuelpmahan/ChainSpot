@@ -84,6 +84,11 @@
 		TeePadVariant
 	} from '$lib/autoAnnotation/basketDetection';
 	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
+	import {
+		groundTruthMatchesImage,
+		IMG_5641_GROUND_TRUTH,
+		mergeCourseGroundTruth
+	} from '$lib/autoAnnotation/courseGroundTruth';
 	import type { LocalSnapKind } from '$lib/cv/localSnap';
 	import { acceptCandidate } from '$lib/cv/types';
 	import {
@@ -323,6 +328,14 @@
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
+	/** Off by default -- manual placement now takes a back seat to CV detection + active review for most holes, but stays available for whoever wants to place points by hand. Toggled via the footer control at the bottom of the page. */
+	let radialMenuEnabled = $state(false);
+
+	/** Single gate for every place the radial menu can open (empty-space placement and the on-marker delete menu) so `radialMenuEnabled` only needs checking here. */
+	function openRadialMenu(state: RadialMenuState): void {
+		if (!radialMenuEnabled) return;
+		radialMenu = state;
+	}
 	/**
 	 * Snap-to-detection (design point 5, optimistic placement): keys of
 	 * `${kind}:${holeId}` markers whose most recent placement/release is still
@@ -386,6 +399,8 @@
 		fused: true
 	});
 	let teeExperimentFullResolution = $state(false);
+	/** Off by default -- "Assign ground truth" only ever does anything for one internal QA fixture (courseGroundTruth.ts), so it stays hidden from the general annotation UI until switched on via the toggle at the bottom of the page. */
+	let groundTruthToolsEnabled = $state(false);
 	let teeExperimentRunning = $state(false);
 	let teeExperimentError = $state<string | null>(null);
 	let teeExperimentResult = $state<DetectTeesResult | null>(null);
@@ -492,7 +507,7 @@
 		const detectionInProgress = courseDetectionRunning || basketDetectionRunning || teeExperimentRunning;
 		const hasDetection = courseDetection !== null;
 
-		return [
+		const features: DiagnosticFeature[] = [
 			{
 				id: 'review',
 				label: 'Review queue',
@@ -578,7 +593,8 @@
 							: 'clear',
 				priority: targetCount > placedBaskets ? 50 + targetCount - placedBaskets : 5
 			}
-		].sort((left, right) => right.priority - left.priority);
+		];
+		return features.sort((left, right) => right.priority - left.priority);
 	});
 
 	function activeHole(): AnnotatedHole | null {
@@ -1207,7 +1223,7 @@
 		}
 		const inheritedWidthPx = currentCorridorWidthPx();
 		const nextHoles = addHoleWithNumber(holes, number);
-		target = nextHoles.find((hole) => hole.number === number) ?? null;
+		target = nextHoles.find((hole) => hole.number === number);
 		if (!target) return null;
 		holes = setCorridorWidth(nextHoles, target.id, inheritedWidthPx);
 		activeHoleId = target.id;
@@ -1626,7 +1642,7 @@
 				drag.marker.kind === 'walk'
 					? (drag.marker.index !== undefined ? walkingPath[drag.marker.index] ?? null : null)
 					: markerPoint(drag.marker);
-			if (point) radialMenu = { at: point, holeId: drag.marker.holeId, hitMarker: drag.marker, altKey: false };
+			if (point) openRadialMenu({ at: point, holeId: drag.marker.holeId, hitMarker: drag.marker, altKey: false });
 			return;
 		}
 		const point = clampPointToImageBounds(
@@ -1678,7 +1694,7 @@
 		options: { altKey?: boolean } = {}
 	): void {
 		if (annotationMode === 'map' && !activeHoleId) return;
-		radialMenu = { at: coordinates, holeId: activeHoleId, hitMarker: null, altKey: options.altKey ?? false };
+		openRadialMenu({ at: coordinates, holeId: activeHoleId, hitMarker: null, altKey: options.altKey ?? false });
 	}
 
 	/**
@@ -1958,6 +1974,42 @@
 		}
 		holes = [...existingByNumber.values()].sort((a, b) => a.number - b.number);
 		activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
+	}
+
+	/**
+	 * Loads the hand-authored IMG_5641 reference points for course geometry only.
+	 * This intentionally does not touch shots, bends, corridor widths, or the
+	 * walking path; those are separate annotation work.
+	 */
+	function handleAssignGroundTruth(): void {
+		const image = sourceImage();
+		if (!image || !groundTruthMatchesImage(image)) return;
+		const groundTruth = IMG_5641_GROUND_TRUTH;
+		holes = mergeCourseGroundTruth(
+			holes,
+			groundTruth,
+			() => crypto.randomUUID(),
+			currentCorridorWidthPx()
+		);
+		numberBadges = [...groundTruth.badges];
+		labeledBaskets = groundTruth.holes.map((hole) => ({
+			holeNumber: hole.number,
+			xPx: hole.basket.xPx,
+			yPx: hole.basket.yPx
+		}));
+		activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
+		importedLibraryEntryThisSession = false;
+		mapGeometryEdited = true;
+		courseDetection = null;
+		basketCandidates = [];
+		basketCandidatesSource = null;
+		selectedBasketCandidate = null;
+		activeReviewConfirmedCandidateIds = [];
+		activeReviewRecommendation = null;
+		activeReviewCandidateOverrides = {};
+		courseDetectionStatus = 'Ground truth assigned · 18 pads · 18 baskets · 18 badges';
+		courseDetectionElapsedSeconds = 0;
+		basketDetectionError = null;
 	}
 
 	async function handleDetectBaskets(): Promise<void> {
@@ -2642,6 +2694,23 @@
 							<h2>Course assist</h2>
 							{#if basketCandidates.length > 0}<span>{basketCandidates.length} found</span>{/if}
 						</div>
+						{#if groundTruthToolsEnabled}
+							<button
+								type="button"
+								class="apply-button"
+								data-testid="assign-ground-truth"
+								disabled={
+									courseDetectionRunning ||
+									basketDetectionRunning ||
+									teeExperimentRunning ||
+									!sourceImage() ||
+									!groundTruthMatchesImage(sourceImage()!)
+								}
+								onclick={handleAssignGroundTruth}
+							>
+								Assign ground truth · 18 pads · 18 baskets · 18 badges
+							</button>
+						{/if}
 						<button
 							type="button"
 							class="detect-button"
@@ -3364,6 +3433,27 @@
 			</div>
 		</div>
 	{/if}
+
+	<footer class="dev-tools-footer">
+		<label class="dev-tools-toggle" class:active={radialMenuEnabled}>
+			<input
+				type="checkbox"
+				checked={radialMenuEnabled}
+				onchange={() => (radialMenuEnabled = !radialMenuEnabled)}
+				data-testid="radial-menu-toggle"
+			/>
+			Manual placement (radial menu)
+		</label>
+		<label class="dev-tools-toggle" class:active={groundTruthToolsEnabled}>
+			<input
+				type="checkbox"
+				checked={groundTruthToolsEnabled}
+				onchange={() => (groundTruthToolsEnabled = !groundTruthToolsEnabled)}
+				data-testid="ground-truth-tools-toggle"
+			/>
+			Ground truth tools
+		</label>
+	</footer>
 </main>
 
 <style>
@@ -4225,6 +4315,36 @@
 		border-radius: 5px;
 		font-size: 0.76rem;
 		cursor: pointer;
+	}
+
+	.dev-tools-footer {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+	}
+
+	.dev-tools-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.25rem 0.5rem;
+		border-radius: 5px;
+		font-size: 0.68rem;
+		color: #71717a;
+		cursor: pointer;
+	}
+
+	.dev-tools-toggle:hover {
+		color: #a1a1aa;
+	}
+
+	.dev-tools-toggle.active {
+		color: #3b82f6;
+	}
+
+	.dev-tools-toggle input {
+		margin: 0;
 	}
 
 	.tee-variant-toggles label.active,

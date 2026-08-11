@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import {
 	recommendNextAnchor,
@@ -6,14 +7,25 @@ import {
 	type ActiveReviewRecommendation
 } from '../src/lib/autoAnnotation/activeReview.ts';
 
-interface GoldenMapFile {
+export interface GoldenMapFile {
 	readonly name: string;
 	readonly deadlineMs?: number;
+	readonly minAutoSuggestScore?: number;
 	readonly map: ActiveReviewMap;
 	readonly groundTruth?: {
 		readonly teeByHole?: Readonly<Record<string, string>>;
 		readonly basketByHole?: Readonly<Record<string, string>>;
 	};
+}
+
+export interface ActiveReviewBenchmarkResult {
+	readonly dataset: string;
+	readonly iterations: number;
+	readonly fallbackCount: number;
+	readonly totalGoldGain: number;
+	readonly totalRegret: number;
+	readonly averageRegret: number;
+	readonly history: readonly Record<string, unknown>[];
 }
 
 function goldGain(map: ActiveReviewMap, holeNumber: number, truth: GoldenMapFile['groundTruth']): number {
@@ -46,12 +58,8 @@ function recommendationSummary(recommendation: ActiveReviewRecommendation): Reco
 	};
 }
 
-function main(): void {
-	const fixturePath = process.argv[2];
-	if (!fixturePath) {
-		throw new Error('Usage: node --experimental-strip-types scripts/benchmark-active-review.ts <golden-map.json>');
-	}
-	const fixture = JSON.parse(readFileSync(resolve(fixturePath), 'utf8')) as GoldenMapFile;
+/** Simulates accepting one recommendation at a time until the queue runs dry, scoring each pick against `fixture.groundTruth` (when present) via regret vs. the best available oracle pick. Shared by this file's standalone CLI and scripts/benchmark-course-corpus.ts's parallel runner. */
+export function runActiveReviewBenchmark(fixture: GoldenMapFile): ActiveReviewBenchmarkResult {
 	let map = fixture.map;
 	const history: Array<Record<string, unknown>> = [];
 	let totalGoldGain = 0;
@@ -60,7 +68,11 @@ function main(): void {
 	const maxIterations = map.holes.length + 1;
 
 	for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-		const recommendation = recommendNextAnchor(map, { deadlineMs: fixture.deadlineMs ?? 4000, now: () => 0 });
+		const recommendation = recommendNextAnchor(map, {
+			deadlineMs: fixture.deadlineMs ?? 4000,
+			minAutoSuggestScore: fixture.minAutoSuggestScore,
+			now: () => 0
+		});
 		const selected = recommendation.holeNumber;
 		if (recommendation.kind === 'none') fallbackCount += 1;
 		if (selected === undefined) break;
@@ -78,7 +90,7 @@ function main(): void {
 		map = { ...map, confirmedCandidateIds: [...(map.confirmedCandidateIds ?? []), recommendation.candidateId] };
 	}
 
-	const result = {
+	return {
 		dataset: fixture.name,
 		iterations: history.length,
 		fallbackCount,
@@ -87,7 +99,19 @@ function main(): void {
 		averageRegret: history.length === 0 ? 0 : totalRegret / history.length,
 		history
 	};
+}
+
+function main(): void {
+	const fixturePath = process.argv[2];
+	if (!fixturePath) {
+		throw new Error('Usage: node --experimental-strip-types scripts/benchmark-active-review.ts <golden-map.json>');
+	}
+	const fixture = JSON.parse(readFileSync(resolve(fixturePath), 'utf8')) as GoldenMapFile;
+	const result = runActiveReviewBenchmark(fixture);
 	process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-main();
+const scriptPath = fileURLToPath(import.meta.url);
+if (resolve(process.argv[1] ?? '') === resolve(scriptPath)) {
+	main();
+}

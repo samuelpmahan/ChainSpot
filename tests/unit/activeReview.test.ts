@@ -70,12 +70,13 @@ describe('active review recommendation', () => {
 		if (recommendation.kind === 'candidate') expect(recommendation.candidateId).not.toBe('tee:0');
 	});
 
-	it('can surface an incomplete hole through a weak shared candidate', () => {
+	it('does not fall back to a kind-mismatched candidate for an incomplete hole', () => {
+		// Hole 2 is missing a tee; once both tees are confirmed, basket:0 is the
+		// only unconfirmed candidate left, but it's the wrong kind for what hole 2
+		// needs. b51528e ("Recover occluded tees and constrain review locality")
+		// added this kind-match requirement to the fallback path specifically so
+		// it can't hand back a candidate that doesn't fill the hole's actual gap.
 		const recommendation = recommendNextAnchor(map({ confirmedCandidateIds: ['tee:0', 'tee:1'] }));
-		expect(recommendation.kind).toBe('candidate');
-		if (recommendation.kind === 'candidate') {
-			expect(recommendation.candidateId).toBe('basket:0');
-			expect(recommendation.rationale.targetStatus).toBe('review');
-		}
+		expect(recommendation).toMatchObject({ kind: 'none', reason: 'no-useful-candidate' });
 	});
 });
