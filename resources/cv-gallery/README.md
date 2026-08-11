@@ -64,12 +64,20 @@ Numbers intentionally require both non-stitched and stitched real imagery.
 
 For every active golden number fixture:
 
-- physical candidate count equals the manually verified visible badge count;
+- physical candidate count equals the independently verified visible badge count;
 - labeled count equals that truth count;
 - predicted label set exactly equals the visible golden label set;
 - every same-label center is within 5 source-image pixels of golden truth.
 
-The existing native 18-hole reference is active. One stitched full-course truth set is still required. The Rec must contribute **one** verified 9/9 case; the alternate Rec capture stays development-only unless it proves independently useful. Do not annotate both just for breadth.
+The existing native 18-hole reference is active. One stitched full-course truth set is still required.
+
+The Rec is represented by its two existing partial captures rather than inventing a nonexistent 9-visible-badge screenshot:
+
+- `TheRec-L.PNG`: visible labels `{1,5,6,7,8,9}` — exact 6/6 gate;
+- `TheRec-R.PNG`: visible labels `{2,3,4,5,8}` — exact 5/5 gate;
+- aggregate visible-label union: `{1..9}`.
+
+Both Rec truth files were derived independently of the number detector under test: labels were read directly from the source images, and centers are the pixel-geometry midpoints of the visible 48×36 near-black UDisc badge bodies.
 
 ### Baskets — localization, not association
 
