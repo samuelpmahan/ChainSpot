@@ -290,7 +290,7 @@ export function loadValidatedTemplateManifest(templateDir: string): CvTemplateMa
 	return manifest;
 }
 
-function loadNumberTemplates(templateDir: string, manifest: CvTemplateManifest): readonly HoleNumberTemplate[] {
+export function loadNumberTemplates(templateDir: string, manifest: CvTemplateManifest): readonly HoleNumberTemplate[] {
 	return manifest.templates.holeNumbers.map((fileName, index) => {
 		const label = index + 1;
 		const path = join(resolve(templateDir), fileName);

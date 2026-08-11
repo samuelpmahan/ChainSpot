@@ -16,12 +16,27 @@ npm run overfit:tees -- resources/GoldenTeeSet.chainspot.zip \
   --baskets resources/GoldenBasketSet.chainspot.zip --out out/overfit
 ```
 
-- Baseline fused detector: 17/18, hole 5 missed (no candidate within
+- Baseline fused detector: 17/18, tee 5 missed (no candidate within
   tolerance anywhere in the fused/occluded pool — re-ranking cannot fix it).
 - `gap-fill` verification (default): baseline keeps its 17 holes; the tuned
-  scorer slides a local window (production gap-fallback radius) over the
-  missed hole and takes the peak. **Recovers hole 5 at 5.3px from truth →
+  scorer slides a local window anchored on the missed hole's NUMBER BADGE
+  (truth is used only for evaluation), and candidate peaks are validated by
+  the badge-ray invariant below. **Auto-detects tee 5 at 4.4px from truth →
   18/18.** Stable across sampling seeds.
+
+## The badge-ray invariant
+
+A valid tee pad AIMS at its own number badge: the rays along both long
+sides, and the ray perpendicular to the front (short) edge, all intersect
+the badge. Measured on tee 5: the pad's major axis points within ~3.5° of
+badge 5 at 71.6px range. The harness checks it by fitting the pad's
+dominant rim line (RANSAC over clean-bright, off-structure, non-black
+pixels — blob PCA fails when the ring band bisects the rim, but the longest
+collinear fragment IS a long-side ray; fitted −30.3° vs true −29.7° on tee
+5) and requiring the center ray plus both long-side offsets to pass within
+the badge disc, badge ahead of the front edge. Note tee 5 sits 40.5 UI
+multiples from badge 5 — just past the production 40-multiple gap-fallback
+radius — so the badge-anchored search uses 45.
 
 ## Why hole 5 is hard, and what actually separates it
 
