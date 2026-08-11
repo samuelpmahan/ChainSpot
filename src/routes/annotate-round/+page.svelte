@@ -710,6 +710,7 @@
 			assignedTees: teeInvariant.length,
 			unassignedTees: courseDetection.grammar.unassigned.teeCandidateIndexes.length,
 			unassignedBaskets: courseDetection.grammar.unassigned.basketCandidateIndexes.length,
+			teeBadgeRayConflicts: courseDetection.grammar.teeBadgeRayConflicts?.length ?? 0,
 			teeAxisAlignmentMean: mean(alignments),
 			teeAxisAlignmentMin: alignments.length === 0 ? null : Math.min(...alignments),
 			teeAxisAlignmentAtLeast90Pct: alignments.filter((value) => value >= 0.9).length,

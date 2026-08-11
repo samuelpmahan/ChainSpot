@@ -512,19 +512,29 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
+		widthPx: candidate.widthPx,
+		heightPx: candidate.heightPx,
 		score: candidate.score,
 		holeNumber: candidate.label
 	}));
 	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
 
-	// A hole whose tee ownership survives with low confidence typically means
+	// A hole whose tee ownership is missing, weak, or ambiguous typically means
 	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
 	// badge -- the pipeline was forced to give it someone else's leftover
-	// candidate. Recover those specific badges with a tightly-scoped
-	// `occluded-edge-loop` fallback and re-associate once more; every other
+	// candidate. Recover those specific badges with tightly-scoped broken-edge
+	// and pure-white-rail fallbacks, then re-associate once more; every other
 	// hole's candidates and assignment are untouched.
 	const gappedBadges = primaryGrammar.holes
-		.filter((hole) => hole.tee && hole.tee.confidence < 0.5 && hole.numberBadge)
+		.filter(
+			(hole) =>
+				hole.numberBadge &&
+				(!hole.tee ||
+					hole.tee.confidence < 0.65 ||
+				hole.failures.some(
+					(failure) => failure.kind === 'ambiguous-tee' || failure.kind === 'tee-badge-ray-conflict'
+				)
+			)
 		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
 	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
 	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;

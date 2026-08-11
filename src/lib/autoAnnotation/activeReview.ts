@@ -98,6 +98,8 @@ interface CandidateStats {
 const DEFAULT_DEADLINE_MS = 4000;
 const DEFAULT_MIN_AUTO_SUGGEST_SCORE = 0.6;
 const UNASSIGNED_PRIOR = 0.2;
+const MIN_ACTIVE_REVIEW_LINK_RADIUS_PX = 80;
+const MAX_ACTIVE_REVIEW_LINK_RADIUS_PX = 320;
 
 function clamp01(value: number): number {
 	return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -305,20 +307,24 @@ export function recommendNextAnchor(
 
 	if (best) return recommendationFromBest(best, minAutoSuggestScore, false);
 
-	// Keep the review loop alive when the candidate graph is sparse: choose the
-	// strongest unreviewed detector candidate and the hole with the most need.
-	// This is deliberately a low-confidence prompt, not a hidden assertion that
-	// the candidate is correct.
-	const fallbackCandidate = map.candidates
-		.filter((candidate) => !confirmedCandidates.has(candidate.id))
-		.sort((left, right) => candidateScore(right) - candidateScore(left))[0];
 	const fallbackHole = map.holes
+		.filter((hole) => hole.missing.length > 0 && hole.anchor)
 		.slice()
 		.sort((left, right) => {
 			const need = (hole: ActiveReviewHole): number =>
 				hole.status === 'incomplete' ? 2 + (1 - hole.confidence) : hole.status === 'review' ? 1 + (1 - hole.confidence) : 1 - hole.confidence;
 			return need(right) - need(left);
 		})[0];
+	const fallbackCandidate = fallbackHole
+		? map.candidates
+				.filter(
+					(candidate) =>
+						!confirmedCandidates.has(candidate.id) &&
+						fallbackHole.missing.includes(candidate.kind) &&
+						pointDistance(fallbackHole.anchor!, candidate) <= MAX_ACTIVE_REVIEW_LINK_RADIUS_PX
+				)
+				.sort((left, right) => candidateScore(right) - candidateScore(left))[0]
+		: undefined;
 	if (!fallbackCandidate || !fallbackHole) return noneRecommendation(false, 'no-useful-candidate');
 	return recommendationFromBest(
 		{
@@ -377,7 +383,10 @@ export function buildActiveReviewMap(
 	];
 	const assignedDistances = detection.grammar.holes.flatMap((hole) => [hole.tee?.distancePx, hole.basket?.distancePx])
 		.filter((distance): distance is number => typeof distance === 'number' && Number.isFinite(distance) && distance > 0);
-	const linkRadius = Math.max(80, median(assignedDistances) * 2.25);
+	const linkRadius = Math.min(
+		MAX_ACTIVE_REVIEW_LINK_RADIUS_PX,
+		Math.max(MIN_ACTIVE_REVIEW_LINK_RADIUS_PX, median(assignedDistances) * 2.25)
+	);
 
 	const holes: ActiveReviewHole[] = detection.grammar.holes.map((proposal) => {
 		const anchor = proposal.numberBadge ?? proposal.tee ?? proposal.basket;
@@ -420,10 +429,10 @@ export function buildActiveReviewMap(
 		};
 	});
 
-	// Preserve unassigned detector output in the review graph. A candidate that
-	// fell through the grammar still deserves a nearby hole hypothesis; without
-	// this bridge it could appear in diagnostics as "unassigned" while the
-	// active-review queue had nothing to say about it.
+	// Preserve unassigned detector output in the review graph only when it is
+	// locally plausible. A candidate hundreds of pixels away must remain
+	// unassigned; attaching it to the nearest missing hole creates a false
+	// suggestion that looks more authoritative than the detector evidence.
 	const candidateIdsWithLinks = new Set(
 		holes.flatMap((hole) => hole.associations.map((association) => association.candidateId))
 	);
@@ -442,6 +451,7 @@ export function buildActiveReviewMap(
 			})[0];
 		if (!target) continue;
 		const distance = target.anchor ? pointDistance(target.anchor, candidate) : linkRadius;
+		if (distance > linkRadius) continue;
 		target.associations.push({
 			candidateId: candidate.id,
 			kind: candidate.kind,
