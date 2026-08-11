@@ -309,6 +309,13 @@ function insideRows(mask: Uint8Array, width: number, rows: { first: number; last
 }
 
 /**
+ * The probe's fixed 2px interior erosion, expressed as a UI-scale-relative
+ * coefficient so it derives from `scale` instead of assuming one resolution.
+ * At the nominal uiScalePx of 1.77 this reproduces the historical 2px exactly.
+ */
+const VISUAL_EROSION_UI = 2 / 1.77;
+
+/**
  * Equivalent to the probe's fillConvexPoly + two-pixel erosion, but sampled
  * directly so we do not allocate a full-image pair of temporary masks for
  * every tiny candidate rectangle.
@@ -318,12 +325,14 @@ function rotatedRectVisualStats(
 	width: number,
 	height: number,
 	saturation: Uint8Array,
-	value: Uint8Array
+	value: Uint8Array,
+	scale: number
 ): VisualStats | null {
 	const halfWidth = rect.size.width * 0.5;
 	const halfHeight = rect.size.height * 0.5;
-	const innerHalfWidth = halfWidth - 2;
-	const innerHalfHeight = halfHeight - 2;
+	const erosionPx = Math.max(1, VISUAL_EROSION_UI * scale);
+	const innerHalfWidth = halfWidth - erosionPx;
+	const innerHalfHeight = halfHeight - erosionPx;
 	if (innerHalfWidth <= 0 || innerHalfHeight <= 0) return null;
 
 	const radians = (rect.angle * Math.PI) / 180;
@@ -365,6 +374,43 @@ function rotatedRectVisualStats(
 		innerValue: innerValue / innerCount,
 		innerSaturation: innerSaturation / innerCount
 	};
+}
+
+/**
+ * The blur kernel's historical fixed size (3px) expressed as a UI-scale-
+ * relative coefficient, so it derives from `scale` instead of assuming one
+ * resolution. At the nominal uiScalePx of 1.77 this reproduces 3 exactly.
+ */
+const BLUR_KERNEL_UI = 3 / 1.77;
+
+// Canny's thresholds operate on 8-bit gradient magnitude, not source pixels,
+// so they are legitimately scale-invariant and stay fixed across resolutions.
+const CANNY_THRESHOLD_LOW = 50;
+const CANNY_THRESHOLD_HIGH = 150;
+
+// Brightness (HSV value channel) thresholds shared by the rim/interior visual
+// checks. These operate on 8-bit brightness, not source pixels, so they are
+// legitimately scale-invariant.
+/** Minimum average border (rim) brightness for both edge-loop detectors. */
+const RIM_BORDER_VALUE_MIN = 145;
+/** Edge-loop score's target interior brightness (rewards proximity to it). */
+const EDGE_SCORE_INNER_VALUE_TARGET = 165;
+/** Edge-loop score's target border brightness (rewards values above it). */
+const EDGE_SCORE_BORDER_VALUE_TARGET = 150;
+/** Occluded-edge-loop score's rim-brightness floor below which rimFit is 0. */
+const OCCLUDED_RIM_VALUE_MIN = 120;
+/** Occluded-edge-loop score's rim-brightness range over which rimFit ramps to 1. */
+const OCCLUDED_RIM_VALUE_RANGE = 80;
+
+/**
+ * Gaussian-blurs `sourceMat` into `blurredMat` and runs Canny into `edgesMat`,
+ * with the blur kernel size derived from `scale` (odd, minimum 3).
+ */
+function blurAndCanny(cv: TeePadCv, sourceMat: CvMat, blurredMat: CvMat, edgesMat: CvMat, scale: number): void {
+	const kernelSize = Math.max(3, 2 * Math.round((BLUR_KERNEL_UI * scale - 1) / 2) + 1);
+	const kernel = new cv.Size(kernelSize, kernelSize);
+	cv.GaussianBlur(sourceMat, blurredMat, kernel, 0, 0, cv.BORDER_DEFAULT);
+	cv.Canny(blurredMat, edgesMat, CANNY_THRESHOLD_LOW, CANNY_THRESHOLD_HIGH);
 }
 
 function tooClose(a: Pick<AnalysisCandidate, 'x' | 'y'>, b: Pick<AnalysisCandidate, 'x' | 'y'>, radius: number): boolean {
@@ -528,7 +574,6 @@ function detectGrayCenterCandidates(
 					areaAccepted += 1;
 					const rect = cv.minAreaRect(contour);
 					const { major, minor } = rectDimensions(rect);
-					if (minor < 2) continue;
 					if (minor < 5 * scale || minor > 12 * scale || major < 8 * scale || major > 20 * scale) continue;
 					sizeAccepted += 1;
 					if (major / minor < 1.1 || major / minor > 3.0) continue;
@@ -578,9 +623,7 @@ function detectEdgeLoopCandidates(
 	const blurred = new cv.Mat();
 	const edges = new cv.Mat();
 	try {
-		const kernel = new cv.Size(3, 3);
-		cv.GaussianBlur(grayMat, blurred, kernel, 0, 0, cv.BORDER_DEFAULT);
-		cv.Canny(blurred, edges, 50, 150);
+		blurAndCanny(cv, grayMat, blurred, edges, scale);
 		insideRows(edges.data, raster.widthPx, rows);
 		const { contours, hierarchy } = findContours(cv, edges);
 		try {
@@ -595,7 +638,6 @@ function detectEdgeLoopCandidates(
 					const area = Math.abs(cv.contourArea(contour));
 					const rect = cv.minAreaRect(contour);
 					const { major, minor } = rectDimensions(rect);
-					if (minor < 1) continue;
 					if (minor < 5.5 * scale || minor > 18 * scale || major < 8 * scale || major > 26 * scale) continue;
 					sizeAccepted += 1;
 					const rectangularity = area / (major * minor);
@@ -607,9 +649,10 @@ function detectEdgeLoopCandidates(
 						raster.widthPx,
 						raster.heightPx,
 						saturation,
-						value
+						value,
+						scale
 					);
-					if (!visual || visual.borderValue < 145) continue;
+					if (!visual || visual.borderValue < RIM_BORDER_VALUE_MIN) continue;
 					visualAccepted += 1;
 					const contrast = visual.borderValue - visual.innerValue;
 					const score =
@@ -617,8 +660,8 @@ function detectEdgeLoopCandidates(
 						0.05 * Math.abs(major - 13 * scale) -
 						0.05 * Math.abs(minor - 8 * scale) -
 						0.018 * Math.max(0, visual.innerSaturation - 10) -
-						0.015 * Math.abs(visual.innerValue - 165) +
-						0.012 * Math.max(0, visual.borderValue - 150) +
+						0.015 * Math.abs(visual.innerValue - EDGE_SCORE_INNER_VALUE_TARGET) +
+						0.012 * Math.max(0, visual.borderValue - EDGE_SCORE_BORDER_VALUE_TARGET) +
 						0.006 * Math.max(0, contrast) -
 						0.1 * Math.max(0, approximation.rows - 4);
 					edgeCandidates.push(candidateFromRect(rect, score, 'edge-loop'));
@@ -777,7 +820,7 @@ function occludedPairScore(pair: OccludedPair, visual: VisualStats): number {
 	const separationFit = clamp(1 - Math.abs(pair.minor - 6.75) / 1.75, 0, 1);
 	const parallelFit = clamp(1 - pair.angleDeltaDeg / 10, 0, 1);
 	const overlapFit = clamp(pair.overlap / Math.min(pair.firstLength, pair.secondLength), 0, 1);
-	const rimFit = clamp((visual.borderValue - 120) / 80, 0, 1);
+	const rimFit = clamp((visual.borderValue - OCCLUDED_RIM_VALUE_MIN) / OCCLUDED_RIM_VALUE_RANGE, 0, 1);
 	return 0.28 * lengthFit + 0.24 * separationFit + 0.18 * parallelFit + 0.18 * overlapFit + 0.12 * rimFit;
 }
 
@@ -796,14 +839,13 @@ export function detectOccludedEdgeLoopCandidates(
 	if (!rows) return { variant: 'occluded-edge-loop', candidates: [], stageCounts: { discovered: 0, final: 0 } };
 
 	const { gray, saturation, value } = readHsv(raster);
+	const scale = options.uiScalePx / raster.sourceScale;
 	const grayMat = matFromBytes(cv, gray, raster.widthPx, raster.heightPx);
 	const blurred = new cv.Mat();
 	const edges = new cv.Mat();
 	const lines = new cv.Mat();
 	try {
-		const kernel = new cv.Size(3, 3);
-		cv.GaussianBlur(grayMat, blurred, kernel, 0, 0, cv.BORDER_DEFAULT);
-		cv.Canny(blurred, edges, 50, 150);
+		blurAndCanny(cv, grayMat, blurred, edges, scale);
 		insideRows(edges.data, raster.widthPx, rows);
 		const masked = maskIgnoredCircles(
 			edges.data,
@@ -900,9 +942,10 @@ export function detectOccludedEdgeLoopCandidates(
 								raster.widthPx,
 								raster.heightPx,
 								saturation,
-								value
+								value,
+								scale
 							);
-							if (!visual || visual.borderValue < 145) continue;
+							if (!visual || visual.borderValue < RIM_BORDER_VALUE_MIN) continue;
 							visualCount += 1;
 							candidates.push({
 								x: pair.centerX,
