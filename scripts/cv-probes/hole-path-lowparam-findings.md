@@ -69,6 +69,44 @@ Result on IMG_5641, all 18 holes, in **~2 seconds total**:
   holes 1–3 (magenta/cyan dots lower `e` at their pixels); the trimmed mean
   hides them. On a clean capture, results should only improve.
 
+## Anchor/mask experiments (`hole_path_anchor_experiments.py`)
+
+Domain fact supplied by the course author: **each hole's first corridor
+segment is a straight line from teepad center to its number badge center**
+(the badge sits on the path), and multiple bends are uncommon but not rare
+(hole 18 here is a real multi-bend hole). Three arms against the baseline,
+all with the bend budget raised to K≤3 (full table in
+`hole-path-results/experiments.json`, 4-panel sheet in
+`experiments-contact-sheet.png`):
+
+| arm | golden containment h1/h2/h3 | notes |
+|---|---|---|
+| baseline (K≤3) | 95.2 / 94.1 / 95.3 % | as committed probe |
+| anchor (tee→badge fixed) | 95.2 / 94.1 / 95.6 % | scores dip mechanically (dark badge px lie on the anchored segment) |
+| mask (badge boxes excluded from scoring) | 95.2 / 94.1 / 88.6 % | scores rise mechanically; h3 line still visually on-ribbon, it just skims outside the golden polygon near the tee |
+| mask+anchor | 95.2 / 94.2 / 90.9 % | **preferred** |
+
+Findings:
+
+- Raw scores are not comparable across arms (masking removes low-evidence
+  badge pixels from the mean; anchoring adds them). Geometry is the
+  comparison that matters, and all four arms stay on-corridor for all 18
+  holes.
+- **The anchor fixes hole 18 structurally.** Unanchored, hole 18's true
+  second bend gains only ~0.005–0.011 score — below any reasonable
+  bend-acceptance margin — so K=1 wins and the tee-end geometry is slightly
+  wrong. With the anchor, the badge *is* the first bend (tee → badge →
+  corridor bend → basket) and the fit matches the visible corridor exactly.
+  That is the general lesson: the tee→badge segment supplies a bend as prior
+  knowledge instead of asking weak evidence to pay for it.
+- Masking lets bend selection simplify honestly (hole 12 drops from 2 bends
+  to straight with no visual change) and removes the badge-occlusion noise
+  the trimmed mean previously had to absorb.
+- **Recommendation: mask+anchor.** It consumes only primitives the static
+  parser already detects 18/18 (tee, badge, basket), encodes a true layout
+  invariant, and needs the trimmed mean less. The remaining bend budget
+  after the badge can stay at ≤2 on this course.
+
 ## Relationship to the paused work
 
 This does not revive band/edge detection — it replaces it. If this is
