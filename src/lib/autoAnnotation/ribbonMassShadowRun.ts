@@ -145,6 +145,38 @@ export interface RleLabelMap {
 	readonly rle: readonly number[];
 }
 
+/**
+ * Manual per-component confuser annotations, the optional research-data
+ * field the topology findings doc anticipated ("a separate optional
+ * confuserLabel can be added to exported research data"). These are HUMAN
+ * labels attached after looking at the overlay — there is still no
+ * ring/powerline/road classifier anywhere in the pipeline, and nothing
+ * reads these labels at inference time. `'ring-graphic'` covers C1/C2
+ * putting-circle glyphs regardless of whose basket they belong to:
+ * observed directly (2026-08) that a hole's OWN ring tears its corridor
+ * before the basket just as foreign rings do, so own-vs-foreign is not an
+ * intrinsic property of the component and is not encoded here.
+ */
+export type RibbonMassConfuserLabel =
+	| 'ring-graphic'
+	| 'powerline'
+	| 'tee-marker-graphic'
+	| 'road'
+	| 'other';
+
+export const RIBBON_MASS_CONFUSER_LABELS: readonly RibbonMassConfuserLabel[] = [
+	'ring-graphic',
+	'powerline',
+	'tee-marker-graphic',
+	'road',
+	'other'
+];
+
+export interface RibbonMassComponentAnnotation {
+	readonly confuserLabel: RibbonMassConfuserLabel;
+	readonly note?: string;
+}
+
 export interface RibbonMassShadowRun {
 	readonly schemaVersion: 1;
 	readonly runId: string;
@@ -173,6 +205,31 @@ export interface RibbonMassShadowRun {
 		readonly reviewApproved?: RibbonMassExperimentResult;
 	};
 	readonly evaluation?: RibbonMassEvaluation;
+	/**
+	 * Manual confuser labels keyed by component label. The ONE post-hoc
+	 * mutation the stored record admits — additive human research metadata
+	 * that never touches `productionSnapshot`, `labelMap`, `components`, or
+	 * `experiments`. Always update through `withComponentAnnotations` so
+	 * that boundary stays explicit.
+	 */
+	readonly componentAnnotations?: Readonly<Record<number, RibbonMassComponentAnnotation>>;
+}
+
+/**
+ * Returns a copy of `run` with the given component annotations merged in —
+ * the only sanctioned way to update a stored run after freezing. Everything
+ * except `componentAnnotations` is carried over untouched.
+ */
+export function withComponentAnnotations(
+	run: RibbonMassShadowRun,
+	annotations: Readonly<Record<number, RibbonMassComponentAnnotation | null>>
+): RibbonMassShadowRun {
+	const merged: Record<number, RibbonMassComponentAnnotation> = { ...run.componentAnnotations };
+	for (const [key, annotation] of Object.entries(annotations)) {
+		if (annotation === null) delete merged[Number(key)];
+		else merged[Number(key)] = annotation;
+	}
+	return { ...run, componentAnnotations: merged };
 }
 
 // ---------------------------------------------------------------------------

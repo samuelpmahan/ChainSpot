@@ -112,7 +112,16 @@
 		getDefaultRibbonMassShadowRunStore,
 		shadowRunsToExportBlob
 	} from '$lib/autoAnnotation/ribbonMassShadowRun';
-	import type { ReviewApprovedHole, RibbonMassShadowRun } from '$lib/autoAnnotation/ribbonMassShadowRun';
+	import type {
+		ReviewApprovedHole,
+		RibbonMassComponentAnnotation,
+		RibbonMassConfuserLabel,
+		RibbonMassShadowRun
+	} from '$lib/autoAnnotation/ribbonMassShadowRun';
+	import {
+		RIBBON_MASS_CONFUSER_LABELS,
+		withComponentAnnotations
+	} from '$lib/autoAnnotation/ribbonMassShadowRun';
 	import { renderShadowRunOverlay } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import type { ShadowOverlayRender } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
@@ -475,6 +484,10 @@
 	// only, never an input to any annotation behavior.
 	let shadowOverlayEnabled = $state(false);
 	let shadowOverlayRender = $state<ShadowOverlayRender | null>(null);
+	/** The run behind the current overlay — also the target of confuser annotations. */
+	let activeShadowRun = $state<RibbonMassShadowRun | null>(null);
+	/** Centroid (source px) of the component a hovered annotation row points at. */
+	let shadowHighlightCentroid = $state<{ xPx: number; yPx: number } | null>(null);
 	/** The run frozen by this session's own detection pass, so the toggle needs no IndexedDB round-trip. */
 	let latestShadowRun: RibbonMassShadowRun | null = null;
 
@@ -494,13 +507,69 @@
 				run = null;
 			}
 		}
+		activeShadowRun = run;
 		shadowOverlayRender = run ? renderShadowRunOverlay(run) : null;
 	}
 
 	function toggleShadowOverlay(): void {
 		shadowOverlayEnabled = !shadowOverlayEnabled;
 		if (shadowOverlayEnabled) void refreshShadowOverlay();
-		else shadowOverlayRender = null;
+		else {
+			shadowOverlayRender = null;
+			activeShadowRun = null;
+			shadowHighlightCentroid = null;
+		}
+	}
+
+	/**
+	 * The dev annotation list's rows: components the production experiment's
+	 * recommended mask keeps, largest first. Component labels are opaque
+	 * internal ids (never hole numbers — see the debug-view doc's naming
+	 * rule); the hole context comes from `seedOwners`.
+	 */
+	function shadowAnnotationRows(run: RibbonMassShadowRun): readonly {
+		label: number;
+		areaPx: number;
+		lStd: number;
+		centroid: { xPx: number; yPx: number };
+		ownerHoles: readonly number[];
+		annotation: RibbonMassComponentAnnotation | undefined;
+	}[] {
+		const kept = new Set(run.experiments.production?.recommended.keptLabels ?? []);
+		const ownersByLabel = new Map<number, Set<number>>();
+		for (const seed of run.experiments.production?.seedAssignments ?? []) {
+			if (seed.componentLabel === null || seed.holeNumber === null) continue;
+			(ownersByLabel.get(seed.componentLabel) ??
+				ownersByLabel.set(seed.componentLabel, new Set()).get(seed.componentLabel)!).add(seed.holeNumber);
+		}
+		return run.components
+			.filter((component) => kept.has(component.label))
+			.map((component) => ({
+				label: component.label,
+				areaPx: component.areaPx,
+				lStd: component.lStd,
+				centroid: component.centroidSrcPx,
+				ownerHoles: [...(ownersByLabel.get(component.label) ?? [])].sort((a, b) => a - b),
+				annotation: run.componentAnnotations?.[component.label]
+			}))
+			.sort((a, b) => b.areaPx - a.areaPx);
+	}
+
+	/** Persist one component's confuser label through the sanctioned annotation path. */
+	function setConfuserLabel(componentLabel: number, value: string): void {
+		if (!activeShadowRun) return;
+		const annotation =
+			value === ''
+				? null
+				: ({ confuserLabel: value as RibbonMassConfuserLabel } satisfies RibbonMassComponentAnnotation);
+		const updated = withComponentAnnotations(activeShadowRun, { [componentLabel]: annotation });
+		activeShadowRun = updated;
+		if (latestShadowRun?.runId === updated.runId) latestShadowRun = updated;
+		void getDefaultRibbonMassShadowRunStore()
+			.append(updated)
+			.catch(() => {
+				// Best-effort dev metadata; never surfaces as a blocking error.
+			});
 	}
 	let teeExperimentRunning = $state(false);
 	let teeExperimentError = $state<string | null>(null);
@@ -2285,7 +2354,10 @@
 			}).then((run) => {
 				if (!run || sourceImage()?.id !== detectedImageId) return;
 				latestShadowRun = run;
-				if (shadowOverlayEnabled) shadowOverlayRender = renderShadowRunOverlay(run);
+				if (shadowOverlayEnabled) {
+					activeShadowRun = run;
+					shadowOverlayRender = renderShadowRunOverlay(run);
+				}
 			});
 			activeReviewConfirmedCandidateIds = [];
 		wrongGuessCounts = {};
@@ -3569,6 +3641,14 @@
 							class="shadow-ribbon-mask"
 							data-testid="shadow-ribbon-mask"
 						/>
+						{#if shadowHighlightCentroid}
+							<circle
+								cx={shadowHighlightCentroid.xPx}
+								cy={shadowHighlightCentroid.yPx}
+								r={22 / zoom}
+								class="shadow-highlight-ring"
+							/>
+						{/if}
 						{#each shadowOverlayRender.splitLines as splitLine (splitLine.holeNumber)}
 							<line
 								x1={splitLine.badge.xPx}
@@ -4082,6 +4162,34 @@
 				</span>
 			{:else}
 				<span class="shadow-overlay-legend">no shadow run for this image yet — run course detection first</span>
+			{/if}
+			{#if activeShadowRun}
+				<details class="shadow-annotation-panel" data-testid="shadow-annotation-panel">
+					<summary>Label confusers ({Object.keys(activeShadowRun.componentAnnotations ?? {}).length} labeled)</summary>
+					<div class="shadow-annotation-list">
+						{#each shadowAnnotationRows(activeShadowRun) as row (row.label)}
+							<div
+								class="shadow-annotation-row"
+								role="listitem"
+								onmouseenter={() => (shadowHighlightCentroid = row.centroid)}
+								onmouseleave={() => (shadowHighlightCentroid = null)}
+							>
+								<span class="shadow-annotation-id">comp label={row.label}</span>
+								<span>{row.areaPx}px · lStd {row.lStd.toFixed(1)}</span>
+								<span>{row.ownerHoles.length > 0 ? `holes ${row.ownerHoles.join(', ')}` : 'texture-only'}</span>
+								<select
+									value={row.annotation?.confuserLabel ?? ''}
+									onchange={(event) => setConfuserLabel(row.label, (event.currentTarget as HTMLSelectElement).value)}
+								>
+									<option value="">—</option>
+									{#each RIBBON_MASS_CONFUSER_LABELS as confuserLabel (confuserLabel)}
+										<option value={confuserLabel}>{confuserLabel}</option>
+									{/each}
+								</select>
+							</div>
+						{/each}
+					</div>
+				</details>
 			{/if}
 		{/if}
 		{#if exportCorrectionsError}
@@ -5041,6 +5149,64 @@
 
 	.shadow-overlay-legend .swatch.texture {
 		background: rgb(96 165 250 / 70%);
+	}
+
+	.shadow-highlight-ring {
+		fill: none;
+		stroke: #f0abfc;
+		stroke-width: 3;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.shadow-annotation-panel {
+		font-size: 0.68rem;
+		color: #a1a1aa;
+	}
+
+	.shadow-annotation-panel summary {
+		cursor: pointer;
+	}
+
+	.shadow-annotation-list {
+		position: absolute;
+		right: 0.75rem;
+		bottom: 2.6rem;
+		z-index: 40;
+		display: flex;
+		flex-direction: column;
+		max-height: 20rem;
+		overflow: auto;
+		padding: 0.4rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #18181bf5;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
+	}
+
+	.shadow-annotation-row {
+		display: grid;
+		grid-template-columns: 7.5rem 8rem 7rem auto;
+		gap: 0.4rem;
+		align-items: center;
+		padding: 0.15rem 0.2rem;
+		border-bottom: 1px solid #2b2b30;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.shadow-annotation-row:hover {
+		background: #27272a;
+	}
+
+	.shadow-annotation-id {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.shadow-annotation-row select {
+		background: #27272a;
+		color: #e4e4e7;
+		border: 1px solid #52525b;
+		border-radius: 4px;
+		font-size: 0.68rem;
 	}
 
 	.dev-tools-error {

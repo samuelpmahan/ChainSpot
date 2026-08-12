@@ -8,7 +8,8 @@ import {
 	deriveShadowRunExperiments,
 	encodeLabelMap,
 	freezeProductionSnapshot,
-	shadowRunsToExportBlob
+	shadowRunsToExportBlob,
+	withComponentAnnotations
 } from '../../src/lib/autoAnnotation/ribbonMassShadowRun';
 import type {
 	FrozenBasketSeed,
@@ -314,6 +315,32 @@ describe('buildShadowRunA / experiment derivation', () => {
 		expect(holeOne?.bucket).toBe('split');
 		expect(derived.evaluation?.production?.perHole[0].teeDistPx).toBe(0);
 		expect(derived.evaluation?.textureBaseline).toBeDefined();
+	});
+});
+
+describe('withComponentAnnotations', () => {
+	it('merges, replaces, and removes labels without touching anything else', async () => {
+		const run = fixtureRun([FROZEN_BASKET]);
+		const labeled = withComponentAnnotations(run, { 1: { confuserLabel: 'ring-graphic' } });
+		expect(labeled.componentAnnotations).toEqual({ 1: { confuserLabel: 'ring-graphic' } });
+		expect(labeled.productionSnapshot).toBe(run.productionSnapshot);
+		expect(labeled.labelMap).toBe(run.labelMap);
+		expect(run.componentAnnotations).toBeUndefined();
+
+		const relabeled = withComponentAnnotations(labeled, {
+			1: { confuserLabel: 'powerline' },
+			2: { confuserLabel: 'road' }
+		});
+		expect(relabeled.componentAnnotations).toEqual({
+			1: { confuserLabel: 'powerline' },
+			2: { confuserLabel: 'road' }
+		});
+		const cleared = withComponentAnnotations(relabeled, { 2: null });
+		expect(cleared.componentAnnotations).toEqual({ 1: { confuserLabel: 'powerline' } });
+
+		// Annotations survive export.
+		const exported = JSON.parse(await shadowRunsToExportBlob([relabeled]).text());
+		expect(exported[0].componentAnnotations[2].confuserLabel).toBe('road');
 	});
 });
 
