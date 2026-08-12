@@ -880,6 +880,43 @@ export function derivePuttingCircleMasksPx(
 	}));
 }
 
+/**
+ * Basket coordinates are the icon's stem/base (see this module's callers),
+ * but the icon graphic itself is drawn almost entirely *above* that point --
+ * a tall pin/chain-basket shape, not a symbol centered on its own anchor.
+ * Measured directly off a real course image (Alex Clark, hole 8's basket):
+ * the icon's visible top sits roughly 20 uiScalePx units above the anchor,
+ * with a half-width around 22 units -- a plain disc centered on the anchor
+ * would need to be that large in every direction just to reach the top,
+ * wasting most of its coverage on the mostly-empty space below and beside
+ * the stem where a neighboring hole's real tee-pad evidence is more likely
+ * to actually be. An offset disc, shifted up toward the icon's vertical
+ * center, covers the same icon with a smaller radius and less collateral
+ * masking.
+ *
+ * Unlike the putting circle (map-scale, fit per image), the icon is a
+ * UI-drawn element at a fixed size relative to uiScalePx, the same way the
+ * number badge is -- no per-image fitting needed.
+ */
+const BASKET_ICON_MASK_VERTICAL_OFFSET_UI = 20;
+const BASKET_ICON_MASK_RADIUS_UI = 28;
+const BASKET_ICON_MIN_SCORE = 0.7;
+
+export function deriveBasketIconMasksPx(
+	baskets: readonly PuttingCircleSourceBasket[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const offsetPx = BASKET_ICON_MASK_VERTICAL_OFFSET_UI * uiScalePx;
+	const radiusPx = BASKET_ICON_MASK_RADIUS_UI * uiScalePx;
+	return baskets
+		.filter((basket) => basket.score >= BASKET_ICON_MIN_SCORE)
+		.map((basket) => ({
+			xPx: basket.xPx,
+			yPx: basket.yPx - offsetPx,
+			radiusPx
+		}));
+}
+
 function maskIgnoredCircles(
 	edges: Uint8Array,
 	width: number,

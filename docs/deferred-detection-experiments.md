@@ -54,38 +54,61 @@ redoing it from scratch.
 
 ---
 
-## Putting-circle occlusion masking for tee recovery
+## Putting-circle / basket-icon occlusion masking for tee recovery
 
-**Branch**: `claude/teepad-putting-circle-recovery` (not merged anywhere).
+**Status**: landed and wired in (unlike the other entries in this doc).
+**Branch**: `claude/teepad-putting-circle-recovery`.
 **Files**: `src/lib/autoAnnotation/teePadDetection.ts`
-(`fitPuttingCircleRadiusPx`, `derivePuttingCircleMasksPx`), a third recovery
-tier added to `detectCalibratedTeeBootstrap` in `cvCalibratedDetectors.ts`.
+(`fitPuttingCircleRadiusPx`, `derivePuttingCircleMasksPx`,
+`deriveBasketIconMasksPx`), a third recovery tier in
+`detectCalibratedTeeBootstrap` (`cvCalibratedDetectors.ts`).
 
 **Idea**: `teePadDetection.ts` already had an `ignoreCirclesPx` masking
 option built for "tee pads whose outline is broken by a putting circle or a
-basket icon," never wired to a real basket position by any live caller.
-Fits a putting circle's radius per image (pooling evidence across
-confidently-detected baskets, since the radius is constant within one image
-but varies by map zoom across different screenshots) and masks it out
-before the occluded-edge-loop tee search, scoped to only run for badges
-still not AUTO after every existing tier.
+basket icon," never wired to a real basket position by any live caller. Two
+maskers feed it: `derivePuttingCircleMasksPx` fits a putting circle's radius
+per image (pooling evidence across confidently-detected baskets, since the
+radius is constant within one image but varies by map zoom across different
+screenshots) and masks an annulus; `deriveBasketIconMasksPx` masks a disc
+offset upward from a basket's stem anchor (the icon graphic is drawn almost
+entirely above its own anchor point, measured directly off a real course
+image -- see the function's doc comment), sized as a UI-scale-relative
+constant since the icon, unlike the putting circle, is a fixed-size UI
+element rather than something drawn at map scale. Both only ever run for
+badges still not AUTO after every existing tier.
 
-**Status**: safe (zero regressions across IMG_5641, Alex Clark, and TheRec,
-confirmed against the full unit suite), but does not recover the motivating
-case (IMG_5641 hole 3's tee, occluded by hole 5's putting circle). Even with
-the dash masked out, the rail-pair (Hough) search finds nothing within
-160px of the true location -- the dash apparently crosses the pad's own
-near rail, not just open space next to it, and the pad's long axis is close
-to tangent to the ring at that point (the worst-case angle for a rail-pair
-detector). The existing weak-tee NCC template sweep, a more thorough
-angular/distance search, doesn't find it either.
+**Result**: safe on both ground-truth fixtures (IMG_5641 unaffected: still
+17/18 tees, 18/18 baskets; zero regressions confirmed against the full unit
+suite and the CV gallery gate). On Alex Clark, basket accuracy improved
+8/18 -> 9/18 (hole 9 newly correct) with the icon masking added, and no
+tee/basket regressed anywhere.
 
-**What would justify reviving it**: a masked-NCC-template approach instead
-of rail-pair detection (mirroring `basketOcclusionRecovery.ts`'s technique
-for the analogous basket case), or extending `teeBootstrapPolicy.ts`'s
-template sweep with the same dash-structure masking. The putting-circle
-radius fitter itself (`fitPuttingCircleRadiusPx`) is reusable as-is for
-either approach.
+It does **not**, however, recover the holes that motivated it: IMG_5641's
+hole 3 (putting-circle-crossed) and Alex Clark's holes 8/11/13 (icon
+sits almost directly on the tee). Checked directly (temporary debug
+logging, since removed): the masked occluded-edge-loop search does return
+*something* for these holes, but it's the same spurious noise for multiple
+different holes, not the real pad -- and the existing acceptance logic
+correctly rejects it rather than shipping a confident wrong answer, which is
+why these holes end up missing rather than wrong. For hole 3 specifically:
+the rail-pair (Hough) search finds nothing within 160px of the true
+location even with the dash masked out -- the dash apparently crosses the
+pad's own near rail, not just open space next to it, and the pad's long
+axis is close to tangent to the ring at that point (the worst-case angle
+for a rail-pair detector). The existing weak-tee NCC template sweep, a more
+thorough angular/distance search, doesn't find it either. Same story for
+the icon-occluded Alex Clark holes: not enough of the rectangle survives
+for rail-pairing to work with, regardless of what's masked out.
+
+**What would justify reviving it further**: a masked-NCC-template approach
+instead of rail-pair detection (mirroring `basketOcclusionRecovery.ts`'s
+technique for the analogous basket case), or extending
+`teeBootstrapPolicy.ts`'s template sweep with the same
+putting-circle/icon-structure masking. Both maskers here
+(`fitPuttingCircleRadiusPx`, `deriveBasketIconMasksPx`) are reusable as-is
+as the mask source for either approach -- the gap isn't the masking, it's
+that rail-pair detection needs more surviving rectangle than a masked-out
+occluder reliably leaves behind.
 
 ---
 

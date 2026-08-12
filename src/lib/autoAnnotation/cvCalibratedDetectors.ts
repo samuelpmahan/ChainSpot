@@ -21,6 +21,7 @@ import type {
 	FindBasketAnchorScaleOptions
 } from './basketTemplateDetection';
 import {
+	deriveBasketIconMasksPx,
 	derivePuttingCircleMasksPx,
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadCandidates,
@@ -188,11 +189,14 @@ export function detectCalibratedTeeBootstrap(
 	// untouched, so this cannot regress a hole that already works.
 	const stillNotAuto = assessed.holes.filter((hole) => hole.decision !== 'auto');
 	if (stillNotAuto.length > 0 && baskets.length > 0) {
-		const puttingCircleMasks = derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx);
-		if (puttingCircleMasks.length > 0) {
+		const occlusionMasks = [
+			...derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx),
+			...deriveBasketIconMasksPx(baskets, options.uiScalePx)
+		];
+		if (occlusionMasks.length > 0) {
 			const recovered = detectOccludedEdgeLoopCandidates(cv, raster, {
 				...options,
-				ignoreCirclesPx: puttingCircleMasks,
+				ignoreCirclesPx: occlusionMasks,
 				maxCandidates: Math.max(requested, requested * 2)
 			}).candidates.filter((candidate) => !candidates.some((existing) => samePhysicalPad(existing, candidate)));
 			// Distance-bounded by the course's own already-trusted geometry rather
