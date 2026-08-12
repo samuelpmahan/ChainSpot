@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "coordinateSpace": "source-image-px",
+  "source": {
+    "fileName": "IMG_5612.png",
+    "widthPx": 1290,
+    "heightPx": 2796
+  },
+  "labels": {
+    "background": 0,
+    "walkingPath": 1,
+    "ignore": 2
+  },
+  "regions": {
+    "A": [
+      60,
+      1110,
+      620,
+      1300
+    ],
+    "B": [
+      40,
+      1300,
+      220,
+      1490
+    ],
+    "C": [
+      40,
+      1490,
+      600,
+      1640
+    ],
+    "D": [
+      620,
+      1020,
+      1290,
+      1180
+    ],
+    "E": [
+      620,
+      1180,
+      1150,
+      1445
+    ],
+    "F": [
+      600,
+      1445,
+      1000,
+      1620
+    ]
+  },
+  "split": {
+    "train": [
+      "A",
+      "B",
+      "D"
+    ],
+    "test": [
+      "C",
+      "E",
+      "F"
+    ]
+  }
+}

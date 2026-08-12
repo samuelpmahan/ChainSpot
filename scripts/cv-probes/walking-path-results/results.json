@@ -1,0 +1,600 @@
+[
+  {
+    "model": "linear-svm",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.999,
+      "recall": 1.0,
+      "f1": 0.9995,
+      "tp": 24999,
+      "fp": 26,
+      "fn": 1,
+      "tn": 49974
+    },
+    "test": {
+      "precision": 0.9988,
+      "recall": 0.9996,
+      "f1": 0.9992,
+      "tp": 24989,
+      "fp": 29,
+      "fn": 11,
+      "tn": 49971
+    },
+    "fit_s": 0.4
+  },
+  {
+    "model": "logreg",
+    "features": "full",
+    "train": {
+      "precision": 0.9992,
+      "recall": 0.9998,
+      "f1": 0.9995,
+      "tp": 24994,
+      "fp": 20,
+      "fn": 6,
+      "tn": 49980
+    },
+    "test": {
+      "precision": 0.9991,
+      "recall": 0.9993,
+      "f1": 0.9992,
+      "tp": 24982,
+      "fp": 23,
+      "fn": 18,
+      "tn": 49977
+    },
+    "fit_s": 2.9
+  },
+  {
+    "model": "logreg",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.9991,
+      "recall": 0.9998,
+      "f1": 0.9995,
+      "tp": 24996,
+      "fp": 23,
+      "fn": 4,
+      "tn": 49977
+    },
+    "test": {
+      "precision": 0.9987,
+      "recall": 0.9996,
+      "f1": 0.9991,
+      "tp": 24989,
+      "fp": 33,
+      "fn": 11,
+      "tn": 49967
+    },
+    "fit_s": 1.2
+  },
+  {
+    "model": "linear-svm",
+    "features": "full",
+    "train": {
+      "precision": 0.9991,
+      "recall": 0.9999,
+      "f1": 0.9995,
+      "tp": 24997,
+      "fp": 23,
+      "fn": 3,
+      "tn": 49977
+    },
+    "test": {
+      "precision": 0.999,
+      "recall": 0.9992,
+      "f1": 0.9991,
+      "tp": 24980,
+      "fp": 25,
+      "fn": 20,
+      "tn": 49975
+    },
+    "fit_s": 1.1
+  },
+  {
+    "model": "rforest-60",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.9999,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 25000,
+      "fp": 2,
+      "fn": 0,
+      "tn": 49998
+    },
+    "test": {
+      "precision": 0.9986,
+      "recall": 0.998,
+      "f1": 0.9983,
+      "tp": 24950,
+      "fp": 35,
+      "fn": 50,
+      "tn": 49965
+    },
+    "fit_s": 2.1
+  },
+  {
+    "model": "logreg",
+    "features": "hsv",
+    "train": {
+      "precision": 0.9972,
+      "recall": 0.9973,
+      "f1": 0.9972,
+      "tp": 24932,
+      "fp": 70,
+      "fn": 68,
+      "tn": 49930
+    },
+    "test": {
+      "precision": 0.9988,
+      "recall": 0.9976,
+      "f1": 0.9982,
+      "tp": 24940,
+      "fp": 31,
+      "fn": 60,
+      "tn": 49969
+    },
+    "fit_s": 0.3
+  },
+  {
+    "model": "linear-svm",
+    "features": "hsv",
+    "train": {
+      "precision": 0.998,
+      "recall": 0.9972,
+      "f1": 0.9976,
+      "tp": 24931,
+      "fp": 51,
+      "fn": 69,
+      "tn": 49949
+    },
+    "test": {
+      "precision": 0.9988,
+      "recall": 0.9976,
+      "f1": 0.9982,
+      "tp": 24939,
+      "fp": 31,
+      "fn": 61,
+      "tn": 49969
+    },
+    "fit_s": 0.5
+  },
+  {
+    "model": "dtree-d6",
+    "features": "lab",
+    "train": {
+      "precision": 0.9977,
+      "recall": 0.9988,
+      "f1": 0.9983,
+      "tp": 24970,
+      "fp": 57,
+      "fn": 30,
+      "tn": 49943
+    },
+    "test": {
+      "precision": 0.9984,
+      "recall": 0.998,
+      "f1": 0.9982,
+      "tp": 24951,
+      "fp": 40,
+      "fn": 49,
+      "tn": 49960
+    },
+    "fit_s": 0.3
+  },
+  {
+    "model": "rforest-60",
+    "features": "lab",
+    "train": {
+      "precision": 0.9983,
+      "recall": 0.9988,
+      "f1": 0.9985,
+      "tp": 24970,
+      "fp": 43,
+      "fn": 30,
+      "tn": 49957
+    },
+    "test": {
+      "precision": 0.9983,
+      "recall": 0.9979,
+      "f1": 0.9981,
+      "tp": 24947,
+      "fp": 42,
+      "fn": 53,
+      "tn": 49958
+    },
+    "fit_s": 1.7
+  },
+  {
+    "model": "dtree-d6",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.9991,
+      "recall": 0.9999,
+      "f1": 0.9995,
+      "tp": 24998,
+      "fp": 23,
+      "fn": 2,
+      "tn": 49977
+    },
+    "test": {
+      "precision": 0.9984,
+      "recall": 0.9977,
+      "f1": 0.9981,
+      "tp": 24943,
+      "fp": 39,
+      "fn": 57,
+      "tn": 49961
+    },
+    "fit_s": 0.6
+  },
+  {
+    "model": "rforest-60",
+    "features": "full",
+    "train": {
+      "precision": 0.9998,
+      "recall": 1.0,
+      "f1": 0.9999,
+      "tp": 25000,
+      "fp": 5,
+      "fn": 0,
+      "tn": 49995
+    },
+    "test": {
+      "precision": 0.9989,
+      "recall": 0.9974,
+      "f1": 0.9981,
+      "tp": 24935,
+      "fp": 28,
+      "fn": 65,
+      "tn": 49972
+    },
+    "fit_s": 2.8
+  },
+  {
+    "model": "dtree-d6",
+    "features": "hsv",
+    "train": {
+      "precision": 0.9982,
+      "recall": 0.9986,
+      "f1": 0.9984,
+      "tp": 24966,
+      "fp": 44,
+      "fn": 34,
+      "tn": 49956
+    },
+    "test": {
+      "precision": 0.9987,
+      "recall": 0.9972,
+      "f1": 0.9979,
+      "tp": 24929,
+      "fp": 33,
+      "fn": 71,
+      "tn": 49967
+    },
+    "fit_s": 0.3
+  },
+  {
+    "model": "rforest-60",
+    "features": "hsv",
+    "train": {
+      "precision": 0.9983,
+      "recall": 0.9988,
+      "f1": 0.9985,
+      "tp": 24970,
+      "fp": 43,
+      "fn": 30,
+      "tn": 49957
+    },
+    "test": {
+      "precision": 0.9987,
+      "recall": 0.9969,
+      "f1": 0.9978,
+      "tp": 24922,
+      "fp": 33,
+      "fn": 78,
+      "tn": 49967
+    },
+    "fit_s": 2.2
+  },
+  {
+    "model": "dtree-d6",
+    "features": "full",
+    "train": {
+      "precision": 0.9998,
+      "recall": 0.9997,
+      "f1": 0.9998,
+      "tp": 24993,
+      "fp": 5,
+      "fn": 7,
+      "tn": 49995
+    },
+    "test": {
+      "precision": 0.9988,
+      "recall": 0.9965,
+      "f1": 0.9977,
+      "tp": 24913,
+      "fp": 30,
+      "fn": 87,
+      "tn": 49970
+    },
+    "fit_s": 1.1
+  },
+  {
+    "model": "rforest-60",
+    "features": "rgb",
+    "train": {
+      "precision": 0.9977,
+      "recall": 0.9988,
+      "f1": 0.9982,
+      "tp": 24969,
+      "fp": 58,
+      "fn": 31,
+      "tn": 49942
+    },
+    "test": {
+      "precision": 0.9979,
+      "recall": 0.9962,
+      "f1": 0.9971,
+      "tp": 24906,
+      "fp": 52,
+      "fn": 94,
+      "tn": 49948
+    },
+    "fit_s": 2.1
+  },
+  {
+    "model": "knn-5",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.9995,
+      "recall": 0.9991,
+      "f1": 0.9993,
+      "tp": 24977,
+      "fp": 12,
+      "fn": 23,
+      "tn": 49988
+    },
+    "test": {
+      "precision": 0.997,
+      "recall": 0.9966,
+      "f1": 0.9968,
+      "tp": 24916,
+      "fp": 76,
+      "fn": 84,
+      "tn": 49924
+    },
+    "fit_s": 1.4
+  },
+  {
+    "model": "rule-purple-delta",
+    "features": "min(R-G,B-G)",
+    "train": {
+      "precision": 0.9776,
+      "recall": 0.9912,
+      "f1": 0.9843,
+      "tp": 24781,
+      "fp": 569,
+      "fn": 219,
+      "tn": 49431
+    },
+    "test": {
+      "precision": 0.9983,
+      "recall": 0.9933,
+      "f1": 0.9958,
+      "tp": 24833,
+      "fp": 42,
+      "fn": 167,
+      "tn": 49958
+    },
+    "fit_s": 0.1
+  },
+  {
+    "model": "logreg",
+    "features": "lab",
+    "train": {
+      "precision": 0.9935,
+      "recall": 0.9992,
+      "f1": 0.9963,
+      "tp": 24979,
+      "fp": 164,
+      "fn": 21,
+      "tn": 49836
+    },
+    "test": {
+      "precision": 0.9937,
+      "recall": 0.9979,
+      "f1": 0.9958,
+      "tp": 24948,
+      "fp": 158,
+      "fn": 52,
+      "tn": 49842
+    },
+    "fit_s": 0.4
+  },
+  {
+    "model": "linear-svm",
+    "features": "lab",
+    "train": {
+      "precision": 0.9921,
+      "recall": 0.9992,
+      "f1": 0.9956,
+      "tp": 24979,
+      "fp": 199,
+      "fn": 21,
+      "tn": 49801
+    },
+    "test": {
+      "precision": 0.9934,
+      "recall": 0.998,
+      "f1": 0.9957,
+      "tp": 24950,
+      "fp": 166,
+      "fn": 50,
+      "tn": 49834
+    },
+    "fit_s": 0.3
+  },
+  {
+    "model": "knn-5",
+    "features": "lab",
+    "train": {
+      "precision": 0.9954,
+      "recall": 0.9986,
+      "f1": 0.997,
+      "tp": 24965,
+      "fp": 116,
+      "fn": 35,
+      "tn": 49884
+    },
+    "test": {
+      "precision": 0.9942,
+      "recall": 0.9966,
+      "f1": 0.9954,
+      "tp": 24916,
+      "fp": 145,
+      "fn": 84,
+      "tn": 49855
+    },
+    "fit_s": 0.9
+  },
+  {
+    "model": "mahalanobis",
+    "features": "lab+d",
+    "train": {
+      "precision": 0.9974,
+      "recall": 0.9971,
+      "f1": 0.9973,
+      "tp": 24928,
+      "fp": 64,
+      "fn": 72,
+      "tn": 49936
+    },
+    "test": {
+      "precision": 0.996,
+      "recall": 0.9936,
+      "f1": 0.9948,
+      "tp": 24840,
+      "fp": 101,
+      "fn": 160,
+      "tn": 49899
+    },
+    "fit_s": 0.5
+  },
+  {
+    "model": "dtree-d6",
+    "features": "rgb",
+    "train": {
+      "precision": 0.9882,
+      "recall": 0.9984,
+      "f1": 0.9933,
+      "tp": 24960,
+      "fp": 299,
+      "fn": 40,
+      "tn": 49701
+    },
+    "test": {
+      "precision": 0.9657,
+      "recall": 0.9964,
+      "f1": 0.9808,
+      "tp": 24909,
+      "fp": 884,
+      "fn": 91,
+      "tn": 49116
+    },
+    "fit_s": 0.2
+  },
+  {
+    "model": "linear-svm",
+    "features": "rgb",
+    "train": {
+      "precision": 0.9878,
+      "recall": 0.999,
+      "f1": 0.9934,
+      "tp": 24975,
+      "fp": 309,
+      "fn": 25,
+      "tn": 49691
+    },
+    "test": {
+      "precision": 0.9626,
+      "recall": 0.9973,
+      "f1": 0.9797,
+      "tp": 24933,
+      "fp": 968,
+      "fn": 67,
+      "tn": 49032
+    },
+    "fit_s": 0.2
+  },
+  {
+    "model": "logreg",
+    "features": "rgb",
+    "train": {
+      "precision": 0.9873,
+      "recall": 0.9982,
+      "f1": 0.9927,
+      "tp": 24954,
+      "fp": 320,
+      "fn": 46,
+      "tn": 49680
+    },
+    "test": {
+      "precision": 0.9623,
+      "recall": 0.9962,
+      "f1": 0.9789,
+      "tp": 24904,
+      "fp": 977,
+      "fn": 96,
+      "tn": 49023
+    },
+    "fit_s": 0.2
+  },
+  {
+    "model": "mahalanobis",
+    "features": "lab",
+    "train": {
+      "precision": 0.9832,
+      "recall": 0.9977,
+      "f1": 0.9904,
+      "tp": 24942,
+      "fp": 427,
+      "fn": 58,
+      "tn": 49573
+    },
+    "test": {
+      "precision": 0.9608,
+      "recall": 0.9958,
+      "f1": 0.9779,
+      "tp": 24894,
+      "fp": 1017,
+      "fn": 106,
+      "tn": 48983
+    },
+    "fit_s": 0.2
+  },
+  {
+    "model": "rule-hsv-box",
+    "features": "hsv",
+    "train": {
+      "precision": 0.9997,
+      "recall": 0.9234,
+      "f1": 0.96,
+      "tp": 23084,
+      "fp": 6,
+      "fn": 1916,
+      "tn": 49994
+    },
+    "test": {
+      "precision": 0.9996,
+      "recall": 0.9258,
+      "f1": 0.9613,
+      "tp": 23146,
+      "fp": 10,
+      "fn": 1854,
+      "tn": 49990
+    },
+    "fit_s": 0.2
+  }
+]
