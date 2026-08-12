@@ -250,6 +250,26 @@ function normalizeOrientation(angleDeg: number): number {
 	return normalized < 0 ? normalized + 180 : normalized;
 }
 
+/**
+ * Undirected orientations wrap at 180degrees, so two segments on the same
+ * line can legitimately read ~0 and ~180 depending on which endpoint Hough
+ * returned first -- a plain arithmetic mean of those is ~90, a spurious
+ * right angle to the real line. Averaging the doubled angle as a unit
+ * vector (period 360, no wraparound ambiguity) and halving the result back
+ * down avoids that.
+ */
+function circularMeanOrientationDeg(anglesDeg: readonly number[]): number {
+	let sumX = 0;
+	let sumY = 0;
+	for (const angleDeg of anglesDeg) {
+		const doubledRadians = (angleDeg * 2 * Math.PI) / 180;
+		sumX += Math.cos(doubledRadians);
+		sumY += Math.sin(doubledRadians);
+	}
+	const meanDoubledDeg = (Math.atan2(sumY, sumX) * 180) / Math.PI;
+	return normalizeOrientation(meanDoubledDeg / 2);
+}
+
 function rectDimensions(rect: CvRotatedRect): { major: number; minor: number; orientationDeg: number } {
 	const width = rect.size.width;
 	const height = rect.size.height;
@@ -725,6 +745,189 @@ function houghSegments(lines: CvMat): HoughSegment[] {
 		if (segmentLength(segment) > 0) segments.push(segment);
 	}
 	return segments;
+}
+
+export interface WalkingPathDash {
+	readonly xPx: number;
+	readonly yPx: number;
+	/** Undirected, normalized to [0, 180). */
+	readonly orientationDeg: number;
+	readonly lengthPx: number;
+}
+
+export interface WalkingPathChain {
+	readonly dashes: readonly WalkingPathDash[];
+	/** Undirected, normalized to [0, 180). */
+	readonly orientationDeg: number;
+}
+
+/**
+ * A course's walking/cart path between holes is drawn as a sequence of
+ * short bright dashes -- visually similar enough to a small tee-pad
+ * rectangle that a masked-template search can mistake one dash for a pad
+ * (see `docs/deferred-detection-experiments.md`'s masked-NCC entry). What
+ * actually distinguishes a path dash from a real, isolated pad is
+ * periodicity: a path repeats at a roughly constant spacing along a
+ * consistent direction, a real pad does not. This detector's whole job is
+ * finding that repetition, not identifying any single dash in isolation.
+ *
+ * Dash geometry was measured directly off a real course image
+ * (IMG_5641, the walking path near hole 3): ~17px long, ~24-25px
+ * start-to-start spacing, at that image's uiScalePx of ~1.81 -- expressed
+ * below as UI-scale-relative constants (dashes are a UI-drawn element, the
+ * same size class as the number badge, not something that scales with map
+ * zoom).
+ */
+const PATH_DASH_VALUE_MIN = 130;
+const PATH_DASH_SATURATION_MAX = 55;
+const PATH_DASH_LENGTH_UI = 9.5;
+const PATH_DASH_LENGTH_TOLERANCE_UI = 4;
+const PATH_DASH_PERIOD_UI = 13.6;
+const PATH_DASH_PERIOD_TOLERANCE_UI = 6;
+const PATH_CHAIN_ANGLE_TOLERANCE_DEG = 20;
+const PATH_CHAIN_PERP_TOLERANCE_UI = 4;
+/** Fewer than this is indistinguishable from an isolated rectangle -- exactly the ambiguity this detector exists to resolve. */
+const PATH_MIN_CHAIN_LENGTH = 3;
+
+interface DashCandidate {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly orientationDeg: number;
+	readonly lengthPx: number;
+}
+
+/** Two Hough detections of the same physical dash land almost on top of each other; collapse them before chaining. */
+function dedupeDashes(dashes: readonly DashCandidate[], mergeRadiusPx: number): DashCandidate[] {
+	const kept: DashCandidate[] = [];
+	for (const dash of dashes) {
+		if (kept.some((existing) => Math.hypot(existing.xPx - dash.xPx, existing.yPx - dash.yPx) <= mergeRadiusPx)) continue;
+		kept.push(dash);
+	}
+	return kept;
+}
+
+function chainDashSegments(rawDashes: readonly DashCandidate[], scale: number): WalkingPathChain[] {
+	const dashes = dedupeDashes(rawDashes, PATH_DASH_LENGTH_UI * 0.5 * scale);
+	const periodMin = (PATH_DASH_PERIOD_UI - PATH_DASH_PERIOD_TOLERANCE_UI) * scale;
+	const periodMax = (PATH_DASH_PERIOD_UI + PATH_DASH_PERIOD_TOLERANCE_UI) * scale;
+	const perpTolerance = PATH_CHAIN_PERP_TOLERANCE_UI * scale;
+
+	const parent = dashes.map((_, index) => index);
+	function find(index: number): number {
+		while (parent[index] !== index) {
+			parent[index] = parent[parent[index]];
+			index = parent[index];
+		}
+		return index;
+	}
+	function union(a: number, b: number): void {
+		const rootA = find(a);
+		const rootB = find(b);
+		if (rootA !== rootB) parent[rootA] = rootB;
+	}
+
+	for (let i = 0; i < dashes.length; i += 1) {
+		for (let j = i + 1; j < dashes.length; j += 1) {
+			const a = dashes[i];
+			const b = dashes[j];
+			const angleDelta = Math.abs(a.orientationDeg - b.orientationDeg);
+			if (Math.min(angleDelta, 180 - angleDelta) > PATH_CHAIN_ANGLE_TOLERANCE_DEG) continue;
+			const dx = b.xPx - a.xPx;
+			const dy = b.yPx - a.yPx;
+			const distance = Math.hypot(dx, dy);
+			// Up to ~1.6 periods tolerates one missed detection between real dashes without inviting an unrelated pair in.
+			if (distance < periodMin * 0.7 || distance > periodMax * 1.6) continue;
+			const radians = (circularMeanOrientationDeg([a.orientationDeg, b.orientationDeg]) * Math.PI) / 180;
+			const perpendicular = Math.abs(-Math.sin(radians) * dx + Math.cos(radians) * dy);
+			if (perpendicular > perpTolerance) continue;
+			union(i, j);
+		}
+	}
+
+	const groups = new Map<number, DashCandidate[]>();
+	dashes.forEach((dash, index) => {
+		const root = find(index);
+		const group = groups.get(root);
+		if (group) group.push(dash);
+		else groups.set(root, [dash]);
+	});
+
+	const chains: WalkingPathChain[] = [];
+	for (const group of groups.values()) {
+		if (group.length < PATH_MIN_CHAIN_LENGTH) continue;
+		chains.push({
+			dashes: group.map((dash) => ({ ...dash })),
+			orientationDeg: circularMeanOrientationDeg(group.map((dash) => dash.orientationDeg))
+		});
+	}
+	return chains;
+}
+
+/**
+ * Finds dashed walking/cart path chains within the map area. Never a target
+ * of its own detection budget -- callers use the result two ways: (1) as
+ * exclusion regions (`deriveWalkingPathMasksPx`) so a tee-pad search
+ * doesn't mistake one dash for a pad, and (2) potentially as a positional
+ * signal, since a path's terminus tends to sit right at a tee or basket
+ * (course routing walks from one green to the next tee) -- not yet used for
+ * that second purpose by any caller.
+ */
+export function detectDashedPathChains(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: TeePadDetectionOptions
+): readonly WalkingPathChain[] {
+	validateInputs(raster, options);
+	const rows = mapRows(raster, options.mapBoundsPx);
+	if (!rows) return [];
+	const { saturation, value } = readHsv(raster);
+	const scale = options.uiScalePx / raster.sourceScale;
+	const bright = new Uint8Array(value.length);
+	for (let index = 0; index < bright.length; index += 1) {
+		bright[index] =
+			value[index] >= PATH_DASH_VALUE_MIN && saturation[index] <= PATH_DASH_SATURATION_MAX ? 255 : 0;
+	}
+	insideRows(bright, raster.widthPx, rows);
+
+	const brightMat = matFromBytes(cv, bright, raster.widthPx, raster.heightPx);
+	const lines = new cv.Mat();
+	try {
+		const expectedLength = PATH_DASH_LENGTH_UI * scale;
+		const lengthTolerance = PATH_DASH_LENGTH_TOLERANCE_UI * scale;
+		cv.HoughLinesP(
+			brightMat,
+			lines,
+			1,
+			Math.PI / 180,
+			4,
+			Math.max(3, expectedLength - lengthTolerance),
+			Math.max(2, expectedLength * 0.3)
+		);
+		const rawDashes: DashCandidate[] = houghSegments(lines)
+			.filter((segment) => {
+				const length = segmentLength(segment);
+				return length >= expectedLength - lengthTolerance && length <= expectedLength + lengthTolerance;
+			})
+			.map((segment) => ({
+				xPx: (segment.x1 + segment.x2) / 2,
+				yPx: (segment.y1 + segment.y2) / 2,
+				orientationDeg: segmentAngle(segment),
+				lengthPx: segmentLength(segment)
+			}));
+		return chainDashSegments(rawDashes, scale);
+	} finally {
+		brightMat.delete();
+		lines.delete();
+	}
+}
+
+/** One small circle per dash -- just enough to cover it, not the gaps between (those are already background, nothing to mask). */
+export function deriveWalkingPathMasksPx(
+	chains: readonly WalkingPathChain[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const radiusPx = PATH_DASH_LENGTH_UI * 0.75 * uiScalePx;
+	return chains.flatMap((chain) => chain.dashes.map((dash) => ({ xPx: dash.xPx, yPx: dash.yPx, radiusPx })));
 }
 
 export interface PuttingCircleFit {
