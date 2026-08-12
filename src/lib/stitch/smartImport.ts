@@ -1,11 +1,13 @@
 /**
- * ChainSpot Stitch Map smart four-tile import orchestration (P1-001).
+ * ChainSpot Stitch Map smart import orchestration (P1-001; extended to 1x2/2x1).
  *
- * One local-only bulk action: accepts exactly four PNG/JPEG screenshots in any
- * order, validates every file (supported MIME, successful decode, finite
- * positive intrinsic dimensions, identical dimensions), runs the pairwise
- * overlap analysis, assigns the fixed 2×2 layout, proposes a shared crop, and
- * returns one coherent commit payload for the caller (the route) to publish.
+ * One local-only bulk action: accepts exactly two or four PNG/JPEG screenshots
+ * in any order, validates every file (supported MIME, successful decode,
+ * finite positive intrinsic dimensions, identical dimensions), runs the
+ * pairwise overlap analysis, assigns the inferred layout — the fixed 2×2 grid
+ * for four files, or an automatically detected 1x2 (left/right) or 2x1
+ * (top/bottom) arrangement for two — proposes a shared crop, and returns one
+ * coherent commit payload for the caller (the route) to publish.
  *
  * Atomicity: nothing is committed here and no state is mutated. On any file
  * failure the whole batch rejects with the offending file identified, leaving
@@ -21,7 +23,7 @@ import { isSupportedMimeType, decodeImageFile } from '../imageIntake';
 import type { DecodedImage, DecodeImageFile } from '../imageIntake';
 import { toAnalysisRaster, toCropRaster } from './analysis';
 import type { AnalysisRaster, RasterRegion } from './analysis';
-import { assignFour } from './autoLayout';
+import { assignFour, assignTwo, layoutForSlots } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
 import { proposeCropDetailed } from './autoCrop';
 import type { CropProposalDetail } from './autoCrop';
@@ -30,8 +32,20 @@ import type { DuplicateRasterPair } from './duplicates';
 import { classifyLayout } from './diagnostics';
 import type { LayoutDiagnostic } from './diagnostics';
 import { matcherRegionFromCrop } from './cropGate';
-import type { CropInsets } from './geometry';
+import type { CropInsets, StitchLayout } from './geometry';
 import type { TilePlacement, TileSlot } from './geometry';
+
+/** File counts smart import accepts: four for a 2x2 session, two for a 1x2/2x1 session. */
+const SUPPORTED_FILE_COUNTS: readonly number[] = [2, 4];
+
+function isSupportedFileCount(count: number): boolean {
+	return SUPPORTED_FILE_COUNTS.includes(count);
+}
+
+/** Assigns the inferred layout for however many rasters smart import validated (2 or 4). */
+function assignForFileCount(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
+	return rasters.length === 4 ? assignFour(rasters) : assignTwo(rasters);
+}
 
 export interface SmartImportTile {
 	readonly fileName: string;
@@ -52,8 +66,10 @@ export interface SmartImportSuccess {
 	readonly ok: true;
 	/** One entry per file, in selection order; `assignment` maps slots to indices. */
 	readonly tiles: readonly SmartImportTile[];
-	readonly assignment: Record<TileSlot, number>;
-	readonly placements: Record<TileSlot, TilePlacement>;
+	readonly assignment: Partial<Record<TileSlot, number>>;
+	readonly placements: Partial<Record<TileSlot, TilePlacement>>;
+	/** The inferred layout: `'2x2'` for four files, `'1x2'`/`'2x1'` (auto-detected) for two. */
+	readonly layoutKind: StitchLayout;
 	readonly layout: AutoLayout;
 	/** The proposed shared crop, or null when edge evidence is inconsistent. */
 	readonly cropProposal: CropInsets | null;
@@ -114,8 +130,8 @@ export interface SmartImportOptions {
 }
 
 /**
- * Validates, decodes, analyzes, and assembles exactly four screenshots. The
- * caller decides when to publish the returned payload, so a failure never
+ * Validates, decodes, analyzes, and assembles exactly two or four screenshots.
+ * The caller decides when to publish the returned payload, so a failure never
  * damages the current session and a stale result never publishes.
  */
 export async function smartImportFiles(
@@ -132,7 +148,7 @@ export async function smartImportFiles(
 	const buildRaster: (image: HTMLImageElement, region?: RasterRegion) => AnalysisRaster =
 		options.buildRaster ?? ((image, region) => toAnalysisRaster(image, undefined, region));
 
-	if (files.length !== 4) {
+	if (!isSupportedFileCount(files.length)) {
 		return { ok: false, kind: 'wrong-count', count: files.length };
 	}
 	if (!isCurrent()) return { ok: false, stale: true };
@@ -182,7 +198,7 @@ export async function smartImportFiles(
 				kind: 'file',
 				fileName: file.name,
 				reason: 'dimension-mismatch',
-				message: `"${file.name}" is ${widthPx} x ${heightPx} but the batch requires ${requirement.widthPx} x ${requirement.heightPx}. Recapture all four screenshots at the same device orientation and screenshot size.`
+				message: `"${file.name}" is ${widthPx} x ${heightPx} but the batch requires ${requirement.widthPx} x ${requirement.heightPx}. Recapture all screenshots at the same device orientation and screenshot size.`
 			};
 		}
 		decoded.push(result);
@@ -222,10 +238,11 @@ export async function smartImportFiles(
 	if (!isCurrent()) return { ok: false, stale: true };
 
 	// Rejected before scoring, not warned about after: with the same screenshot
-	// twice there is no 2×2 to find, so any arrangement the matcher returned
-	// would stack two tiles and silently export a map missing a quarter of the
-	// course. Heavy overlap between genuinely different captures is fine and is
-	// never rejected here — only pixel-identical images are (see duplicates.ts).
+	// twice there is no arrangement to find, so any arrangement the matcher
+	// returned would stack two tiles and silently export a map missing part of
+	// the course. Heavy overlap between genuinely different captures is fine
+	// and is never rejected here — only pixel-identical images are (see
+	// duplicates.ts).
 	const duplicate = findDuplicateRasters(rasters);
 	if (duplicate) {
 		return {
@@ -240,8 +257,9 @@ export async function smartImportFiles(
 		};
 	}
 
-	const layout = await assignFour(rasters);
-	const diagnostic = classifyLayout(layout);
+	const layout = await assignForFileCount(rasters);
+	const layoutKind = layoutForSlots(Object.keys(layout.assignment) as TileSlot[]);
+	const diagnostic = classifyLayout(layout, layoutKind);
 	if (!isCurrent()) return { ok: false, stale: true };
 
 	// Crop confidence is independent of layout confidence (see cropGate.ts):
@@ -264,6 +282,7 @@ export async function smartImportFiles(
 		tiles,
 		assignment: layout.assignment,
 		placements: layout.placements,
+		layoutKind,
 		layout,
 		cropProposal: cropResult.proposal,
 		crop: cropResult,
@@ -316,7 +335,7 @@ export async function smartImportViaWorker(
 ): Promise<SmartImportWorkerResult> {
 	const { isCurrent = () => true } = options;
 
-	if (files.length !== 4) {
+	if (!isSupportedFileCount(files.length)) {
 		return { ok: false, kind: 'wrong-count', count: files.length };
 	}
 	if (!isCurrent()) return { ok: false, stale: true };
@@ -384,7 +403,7 @@ export async function smartImportViaWorker(
 				kind: 'file',
 				fileName: file.name,
 				reason: 'dimension-mismatch',
-				message: `"${file.name}" is ${widthPx} x ${heightPx} but the batch requires ${requirement.widthPx} x ${requirement.heightPx}. Recapture all four screenshots at the same device orientation and screenshot size.`
+				message: `"${file.name}" is ${widthPx} x ${heightPx} but the batch requires ${requirement.widthPx} x ${requirement.heightPx}. Recapture all screenshots at the same device orientation and screenshot size.`
 			};
 		}
 		decoded.push(result);
@@ -451,6 +470,7 @@ export async function smartImportViaWorker(
 		tiles,
 		assignment: reply.assignment,
 		placements: reply.placements,
+		layoutKind: reply.layoutKind,
 		cropProposal: reply.cropProposal,
 		crop: reply.crop,
 		diagnostic: reply.diagnostic
@@ -463,6 +483,7 @@ type WorkerReply =
 			readonly token: string;
 			readonly assignment: SmartImportWorkerSuccess['assignment'];
 			readonly placements: SmartImportWorkerSuccess['placements'];
+			readonly layoutKind: SmartImportWorkerSuccess['layoutKind'];
 			readonly cropProposal: SmartImportWorkerSuccess['cropProposal'];
 			readonly crop: SmartImportWorkerSuccess['crop'];
 			readonly diagnostic: SmartImportWorkerSuccess['diagnostic'];

@@ -39,6 +39,29 @@ export interface CoursePointCandidate extends Candidate {
 	readonly confidence?: number;
 }
 
+/**
+ * A tee candidate whose ownership was established before global course
+ * grammar. Explicit ownership is a hard constraint: grammar may leave it
+ * unassigned, but may never give it to another hole.
+ */
+export interface CourseTeeCandidate extends CoursePointCandidate {
+	readonly holeNumber?: number;
+	readonly bootstrapDecision?: 'auto' | 'review';
+}
+
+/**
+ * A basket candidate recovered by the occlusion-tolerant fallback
+ * (`basketOcclusionRecovery.ts`) instead of the primary template matcher.
+ * Mirrors `CourseTeeCandidate.bootstrapDecision`: a masked/partial-template
+ * match is real local evidence, but never full-strength evidence, so it is
+ * capped to REVIEW here rather than allowed to reach AUTO/`ready` on its own
+ * geometry score. Ordinary primary-detection baskets leave this undefined
+ * and are scored exactly as before.
+ */
+export interface CourseBasketCandidate extends CoursePointCandidate {
+	readonly bootstrapDecision?: 'auto' | 'review';
+}
+
 /** One possible digit interpretation for a located number-badge glyph. */
 export interface NumberBadgeLabelScore {
 	readonly holeNumber: number;
@@ -60,9 +83,9 @@ export interface CourseNumberBadgeCandidate extends CoursePointCandidate {
 
 export interface CourseGrammarInput {
 	readonly numberBadges: readonly CourseNumberBadgeCandidate[];
-	readonly tees: readonly CoursePointCandidate[];
+	readonly tees: readonly CourseTeeCandidate[];
 	/** Basket coordinates must be the basket stem/base, not icon centre. */
-	readonly baskets: readonly CoursePointCandidate[];
+	readonly baskets: readonly CourseBasketCandidate[];
 	/** Defaults to the standard 1..18 course. */
 	readonly holeNumbers?: readonly number[];
 	/**
@@ -493,6 +516,8 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const badge = badgeForHole.get(holeNumber)!;
 		const preliminaryBasket = preliminaryBasketForHole.get(holeNumber);
 		return tees.map((tee) => {
+			const sourceTee = input.tees[tee.sourceIndex];
+			if (sourceTee.holeNumber !== undefined && sourceTee.holeNumber !== holeNumber) return BLOCKED_COST;
 			const distance = pointDistance(badge, tee);
 			if (!preliminaryBasket) return distance;
 			const polarityCosine = raysPolarityCosine(badge, tee, preliminaryBasket);
@@ -503,7 +528,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	const teeForHole = new Map<number, TeeDetails>();
 	teeHoleNumbers.forEach((holeNumber, row) => {
 		const teeIndex = teeAssignments[row];
-		if (teeIndex < 0 || teeIndex >= tees.length) {
+		if (teeIndex < 0 || teeIndex >= tees.length || teeCosts[row][teeIndex] >= BLOCKED_COST) {
 			failures.push({
 				kind: 'missing-tee',
 				severity: 'error',
@@ -519,7 +544,9 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const nearest = sorted[0] ?? chosen;
 		const runnerUp = assignmentMargin(chosen, distances);
 		const localRank = distances.filter((distance) => distance < chosen - 1e-6).length + 1;
-		const confidence = endpointConfidence(tee.confidence, localRank, chosen, nearest, runnerUp);
+		const sourceTee = input.tees[tee.sourceIndex];
+		const rawConfidence = endpointConfidence(tee.confidence, localRank, chosen, nearest, runnerUp);
+		const confidence = sourceTee.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		teeForHole.set(holeNumber, {
 			assignment: {
 				candidateIndex: tee.sourceIndex,
@@ -531,14 +558,16 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				...(runnerUp === undefined ? {} : { runnerUpDistancePx: runnerUp })
 			}
 		});
-		if (confidence < 0.5) {
+		if (sourceTee.bootstrapDecision === 'review' || confidence < 0.5) {
 			failures.push({
 				kind: 'weak-tee-confidence',
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'tee',
 				candidateIndex: tee.sourceIndex,
-				message: `Hole ${holeNumber}'s tee assignment is weak after global ownership matching.`
+				message: sourceTee.bootstrapDecision === 'review'
+					? `Hole ${holeNumber}'s tee is a bootstrap REVIEW proposal, not an automatic acceptance.`
+					: `Hole ${holeNumber}'s tee assignment is weak after global ownership matching.`
 			});
 		}
 		if (localRank > 1) {
@@ -588,7 +617,9 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const localRank = costs.filter((cost) => cost < chosen - 1e-6).length + 1;
 		const topologyConfidence = endpointConfidence(basket.confidence, localRank, chosen, nearest, runnerUp);
 		const polarityConfidence = clamp01((1 - detail.polarityCosine) / 2);
-		const confidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
+		const rawConfidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
+		const sourceBasket = input.baskets[basket.sourceIndex];
+		const confidence = sourceBasket.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		basketForHole.set(holeNumber, {
 			assignment: {
 				candidateIndex: basket.sourceIndex,
@@ -602,14 +633,16 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				...(runnerUp === undefined ? {} : { runnerUpCost: runnerUp })
 			}
 		});
-		if (confidence < 0.5) {
+		if (sourceBasket.bootstrapDecision === 'review' || confidence < 0.5) {
 			failures.push({
 				kind: 'weak-basket-confidence',
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
 				candidateIndex: basket.sourceIndex,
-				message: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
+				message: sourceBasket.bootstrapDecision === 'review'
+					? `Hole ${holeNumber}'s basket is an occlusion-fallback REVIEW proposal, not an automatic acceptance.`
+					: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
 			});
 		}
 		if (localRank > 1) {

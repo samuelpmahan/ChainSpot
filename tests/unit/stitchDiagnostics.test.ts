@@ -5,9 +5,8 @@ import { classifyLayout } from '../../src/lib/stitch/diagnostics';
 import { smartImportFiles } from '../../src/lib/stitch/smartImport';
 import { buildGrayRaster } from '../helpers/smartMap';
 import type { AnalysisRaster, PairEstimate } from '../../src/lib/stitch/analysis';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
 
-const ALL_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
+const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
 
 function fileOf(name: string): File {
 	return new File([new Uint8Array(8).fill(1)], name, { type: 'image/png' });
@@ -21,10 +20,12 @@ function decodedOf(widthPx: number, heightPx: number) {
 	};
 }
 
+type Slot2x2 = (typeof ALL_SLOTS)[number];
+
 function rastersFor(
-	origins: Record<TileSlot, { x: number; y: number }> | null,
+	origins: Record<Slot2x2, { x: number; y: number }> | null,
 	extra: Partial<
-		Record<TileSlot, { unrelated?: boolean; repetitive?: boolean; chromeTop?: number; chromeBottom?: number }>
+		Record<Slot2x2, { unrelated?: boolean; repetitive?: boolean; chromeTop?: number; chromeBottom?: number }>
 	> = {}
 ): AnalysisRaster[] {
 	// `assignFour` in production only ever sees matcher rasters built from the

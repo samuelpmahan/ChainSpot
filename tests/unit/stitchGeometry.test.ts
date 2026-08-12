@@ -27,7 +27,11 @@ function placementsOf(
 	positions: Partial<Record<TileSlot, { xPx: number; yPx: number }>>,
 	visible: boolean = true
 ): Record<TileSlot, TilePlacement> {
-	const base = initialPlacements(100, 80);
+	// `initialPlacements(100, 80)` with the default '2x2' layout always populates
+	// all four 2x2 slots, so this cast is safe: only the widened `TileSlot` type
+	// (which also covers the 1x2/2x1 slots this 2x2-only test never touches)
+	// makes it necessary.
+	const base = initialPlacements(100, 80) as Record<TileSlot, TilePlacement>;
 	for (const slot of TILE_SLOTS) {
 		const position = positions[slot];
 		if (position) base[slot] = { ...base[slot], xPx: position.xPx, yPx: position.yPx, visible };
@@ -64,7 +68,8 @@ describe('stitch geometry (P05-002)', () => {
 		expect(vertical.invalidFields).toEqual(['topPx', 'bottomPx']);
 
 		// --- Initial placement: documented 25% offsets, always integers ---
-		const initial = initialPlacements(1000, 800);
+		// The default '2x2' layout always populates all four slots.
+		const initial = initialPlacements(1000, 800) as Record<TileSlot, TilePlacement>;
 		expect(initial['upper-left']).toEqual({ xPx: 0, yPx: 0, visible: true });
 		expect(initial['upper-right'].xPx).toBe(750);
 		expect(initial['upper-right'].yPx).toBe(0);
@@ -73,7 +78,7 @@ describe('stitch geometry (P05-002)', () => {
 		expect(initial['lower-right']).toEqual({ xPx: 750, yPx: 600, visible: true });
 
 		// Rounding case: 0.75 products that are fractional must be rounded, not kept.
-		const rounded = initialPlacements(1002, 802);
+		const rounded = initialPlacements(1002, 802) as Record<TileSlot, TilePlacement>;
 		expect(rounded['upper-right'].xPx).toBe(752);
 		expect(rounded['lower-left'].yPx).toBe(602);
 

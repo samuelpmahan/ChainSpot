@@ -133,8 +133,13 @@ async function createPair(
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
 }
 
-/** Annotates one hole with a tee, a basket, one shot, one bend, and a custom width. */
-async function annotateOneHole(page: Page): Promise<void> {
+/**
+ * Annotates one hole (tee, basket, one shot, one bend, custom width) on a
+ * freshly uploaded source image and stops short of Done, so callers can
+ * exercise annotate-round's own Save or a cross-navigation round trip
+ * without leaving the page.
+ */
+async function annotateOneHoleDraft(page: Page): Promise<void> {
 	await page.goto('/annotate-round');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
@@ -161,7 +166,11 @@ async function annotateOneHole(page: Page): Promise<void> {
 	await placePoint(page, box.x + 230, box.y + 180, 'bend');
 	await page.getByTestId('corridor-width').fill('90');
 	await page.getByTestId('corridor-width').blur();
+}
 
+/** Annotates one hole with a tee, a basket, one shot, one bend, and a custom width. */
+async function annotateOneHole(page: Page): Promise<void> {
+	await annotateOneHoleDraft(page);
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');
 }
@@ -277,4 +286,64 @@ test('a pre-hole v1 bundle still opens, migrating forward to an empty hole list'
 
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-hole-count', '0');
+});
+
+test('annotate-round Save works on the first click, without requiring Done first, and the draft reopens with the hole intact', async ({
+	page
+}) => {
+	await annotateOneHoleDraft(page);
+	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
+
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByTestId('save-project').click();
+	const download = await downloadPromise;
+	const stream = await download.createReadStream();
+	const chunks: Buffer[] = [];
+	for await (const chunk of stream) chunks.push(chunk);
+	const zipBuffer = Buffer.concat(chunks);
+
+	await expect(page.getByTestId('save-error')).toHaveCount(0);
+	await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);
+
+	// Annotate Round has no target-basemap image, so the draft is its own
+	// single-image format (`annotation-round.json`) rather than the two-image
+	// `.chainspot.zip` project schema Create Graphics writes/reads.
+	const entries = unzipSync(new Uint8Array(zipBuffer));
+	const manifest = JSON.parse(strFromU8(entries['annotation-round.json']));
+	expect(manifest.schemaVersion).toBe(1);
+	expect(manifest.holes).toHaveLength(1);
+	expect(manifest.holes[0].tee).toBeDefined();
+	expect(manifest.holes[0].basket).toBeDefined();
+	expect(manifest.holes[0].shots).toHaveLength(1);
+	expect(manifest.holes[0].corridorBends).toHaveLength(1);
+	expect(manifest.holes[0].corridorWidthPx).toBe(90);
+
+	// A full reload clears every in-memory session slot — the exact condition
+	// under which annotate-round work used to be unrecoverable, since it had
+	// no save at all. Reopening the draft directly on Annotate Round (never
+	// having clicked Done) recovers the hole exactly.
+	await page.goto('/annotate-round');
+	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '0');
+	await page.getByTestId('open-draft-input').setInputFiles({
+		name: 'draft.chainspot-round.zip',
+		mimeType: 'application/zip',
+		buffer: zipBuffer
+	});
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+	await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);
+});
+
+test('hand-annotated holes survive navigating away from and back to Annotate Round without saving', async ({
+	page
+}) => {
+	await annotateOneHoleDraft(page);
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+
+	await page.getByRole('link', { name: 'Stitch Map' }).click();
+	await page.getByRole('link', { name: 'Annotate Round' }).click();
+	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+
+	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+	await expect(page.getByTestId('hole-select-1')).toHaveAttribute('class', /populated/);
 });

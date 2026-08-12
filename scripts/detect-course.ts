@@ -7,11 +7,18 @@ import { PNG } from 'pngjs';
 import { loadCv } from '../src/lib/stitch/cvMatch';
 import {
 	detectBasketCandidatesAtTemplateScale,
+	detectCalibratedBasketOcclusionFallback,
 	detectCalibratedHoleNumberBadges,
-	detectCalibratedTeeGapFallbackCandidates,
+	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
-import type { CalibratedBasketCandidate } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import type { CalibratedBasketCandidate, TeeBootstrapExperiments } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import {
+	basketRecoverySamplesFromGrammar,
+	deriveBasketDistanceBand,
+	findUnresolvedBasketHoles,
+	isSameBasketCandidate
+} from '../src/lib/autoAnnotation/basketOcclusionRecovery';
 import {
 	asUiScalePx,
 	deriveBasketTemplateScale,
@@ -47,6 +54,8 @@ export interface CourseCliArgs {
 	readonly maxBasketCandidates: number;
 	readonly minBasketScore?: number;
 	readonly minAutoSuggestScore?: number;
+	/** Off-by-default, safe-but-unproven detection levers. See `TeeBootstrapExperiments`. */
+	readonly experiments?: TeeBootstrapExperiments;
 }
 
 interface DecodedRaster {
@@ -98,10 +107,28 @@ export interface CourseCliResult {
 		readonly readyHoles: number;
 		readonly reviewHoles: number;
 		readonly incompleteHoles: number;
+		readonly basketFallbackUnresolvedHoles: number;
+		readonly basketFallbackRecovered: number;
 	};
-	readonly gapFallback: { readonly gappedBadgeCount: number; readonly addedCandidateCount: number };
+	readonly teeBootstrap: {
+		readonly auto: number;
+		readonly review: number;
+		readonly unresolved: number;
+		readonly holes: readonly Readonly<{
+			holeNumber: number;
+			decision: 'auto' | 'review' | 'unresolved';
+			candidateIndex?: number;
+			confidence?: number;
+		}>[];
+	};
 	readonly grammar: CourseGrammarResult;
 	readonly teeTruthEvaluation?: {
+		readonly tolerancePx: number;
+		readonly correctHoles: readonly number[];
+		readonly wrongHoles: readonly { holeNumber: number; distancePx: number }[];
+		readonly missingHoles: readonly number[];
+	};
+	readonly basketTruthEvaluation?: {
 		readonly tolerancePx: number;
 		readonly correctHoles: readonly number[];
 		readonly wrongHoles: readonly { holeNumber: number; distancePx: number }[];
@@ -144,6 +171,7 @@ function usage(): string {
 		'  --max-baskets <count>         Basket candidate cap (default: 18)',
 		'  --min-basket-score <0..1>     Basket NCC floor (default: detector default)',
 		'  --min-auto-suggest-score <0..1>  Active-review auto-suggest floor (default: recommender default)',
+		'  --experiment-walking-path-masking  Fold dashed-path chains into tee-recovery occlusion masking (off by default; see docs/deferred-detection-experiments.md)',
 		'  --help'
 	].join('\n');
 }
@@ -174,6 +202,7 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 	let maxBasketCandidates = 18;
 	let minBasketScore: number | undefined;
 	let minAutoSuggestScore: number | undefined;
+	let experimentWalkingPathMasking = false;
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
@@ -217,6 +246,9 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 				minAutoSuggestScore = finiteNumber(requireValue(argv, index, argument), argument);
 				index += 1;
 				break;
+			case '--experiment-walking-path-masking':
+				experimentWalkingPathMasking = true;
+				break;
 			default:
 				throw new Error(`Unknown option '${argument}'.\n\n${usage()}`);
 		}
@@ -234,7 +266,8 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 		maxTeeCandidates,
 		maxBasketCandidates,
 		minBasketScore,
-		minAutoSuggestScore
+		minAutoSuggestScore,
+		experiments: { walkingPathMasking: experimentWalkingPathMasking }
 	};
 }
 
@@ -499,6 +532,28 @@ function evaluateTeeTruth(
 	return { tolerancePx, correctHoles, wrongHoles, missingHoles };
 }
 
+function evaluateBasketTruth(
+	truth: readonly CourseTruthHole[],
+	grammar: CourseGrammarResult,
+	tolerancePx: number
+): NonNullable<CourseCliResult['basketTruthEvaluation']> {
+	const correctHoles: number[] = [];
+	const wrongHoles: { holeNumber: number; distancePx: number }[] = [];
+	const missingHoles: number[] = [];
+	for (const expected of truth) {
+		if (!expected.basket) continue;
+		const hole = grammar.holes.find((candidate) => candidate.number === expected.number);
+		if (!hole?.basket) {
+			missingHoles.push(expected.number);
+			continue;
+		}
+		const distancePx = Math.hypot(hole.basket.xPx - expected.basket.xPx, hole.basket.yPx - expected.basket.yPx);
+		if (distancePx <= tolerancePx) correctHoles.push(expected.number);
+		else wrongHoles.push({ holeNumber: expected.number, distancePx });
+	}
+	return { tolerancePx, correctHoles, wrongHoles, missingHoles };
+}
+
 function meanOf(values: readonly number[]): number | null {
 	return values.length === 0 ? null : Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
 }
@@ -566,7 +621,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			: deriveMapBounds(numberDetection.candidates, input.heightPx);
 
 	const basketRaster = { gray: toGray(input), widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
-	const basketCandidates = detectBasketCandidatesAtTemplateScale(cv, basketRaster, basketTemplate, {
+	const primaryBasketCandidates = detectBasketCandidatesAtTemplateScale(cv, basketRaster, basketTemplate, {
 		templateScale: basketTemplateScale,
 		mapBoundsPx,
 		maxCandidates: args.maxBasketCandidates,
@@ -574,34 +629,87 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	});
 
 	const teeRaster = { rgba: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
-	const teeCandidates = detectCalibratedTeePadCandidates(cv, teeRaster, {
+	const teeBadges = numberDetection.candidates
+		.filter((candidate): candidate is typeof candidate & { label: number } => candidate.label !== undefined)
+		.map((candidate) => ({
+			holeNumber: candidate.label,
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+	const teeBootstrap = detectCalibratedTeeBootstrap(cv, teeRaster, {
 		uiScalePx,
 		mapBoundsPx,
 		maxCandidates: args.maxTeeCandidates
-	});
+	}, teeBadges, primaryBasketCandidates, args.experiments ?? {});
+	const teeCandidates = teeBootstrap.candidates;
+	const grammarTees = teeBootstrap.assignments.map((assignment) => ({
+		...assignment.candidate,
+		holeNumber: assignment.holeNumber,
+		bootstrapDecision: assignment.decision,
+		confidence: assignment.decision === 'auto'
+			? Math.max(0.75, assignment.confidence)
+			: Math.min(0.49, assignment.confidence)
+	}));
 
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
 		xPx: candidate.xPx,
 		yPx: candidate.yPx,
 		score: candidate.score,
-		holeNumber: candidate.label
+		holeNumber: candidate.label,
+		widthPx: candidate.widthPx,
+		heightPx: candidate.heightPx
 	}));
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: teeCandidates, baskets: basketCandidates });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBasketCandidates });
 
-	// A hole whose tee ownership survives with low confidence typically means
-	// no primary (`gray-center`/`edge-loop`) candidate was ever found near its
-	// badge -- the pipeline was forced to give it someone else's leftover
-	// candidate. Recover those specific badges with a tightly-scoped
-	// `occluded-edge-loop` fallback and re-associate once more; every other
-	// hole's candidates and assignment are untouched.
-	const gappedBadges = primaryGrammar.holes
-		.filter((hole) => (!hole.tee || hole.tee.confidence < 0.5) && hole.numberBadge)
-		.map((hole) => ({ xPx: hole.numberBadge!.xPx, yPx: hole.numberBadge!.yPx }));
-	const gapFallbackCandidates = detectCalibratedTeeGapFallbackCandidates(cv, teeRaster, { uiScalePx, mapBoundsPx }, gappedBadges);
-	const finalTeeCandidates = gapFallbackCandidates.length ? [...teeCandidates, ...gapFallbackCandidates] : teeCandidates;
-	const grammar = gapFallbackCandidates.length
-		? associateCourseGrammar({ numberBadges, tees: finalTeeCandidates, baskets: basketCandidates })
-		: primaryGrammar;
+	// Occlusion-tolerant basket recovery -- mirrors basketDetection.worker.ts's
+	// production `detectCourse` exactly, so this CLI stays a faithful preview
+	// of what the app actually does. See basketOcclusionRecovery.ts's module
+	// doc comment for the two-question policy this implements.
+	const basketRecoverySamples = basketRecoverySamplesFromGrammar(primaryGrammar.holes);
+	const basketDistanceBand = deriveBasketDistanceBand(basketRecoverySamples);
+	const unresolvedBasketHoleNumbers = basketDistanceBand
+		? findUnresolvedBasketHoles(basketRecoverySamples, basketDistanceBand)
+		: new Set<number>();
+	let basketCandidates = primaryBasketCandidates;
+	let grammar = primaryGrammar;
+	let basketFallbackRecoveredCount = 0;
+	if (basketDistanceBand && unresolvedBasketHoleNumbers.size > 0) {
+		const unresolvedBadges = numberDetection.candidates
+			.filter(
+				(candidate): candidate is typeof candidate & { label: number } =>
+					candidate.label !== undefined && unresolvedBasketHoleNumbers.has(candidate.label)
+			)
+			.map((candidate) => ({ holeNumber: candidate.label, xPx: candidate.xPx, yPx: candidate.yPx }));
+		const occlusionBoxes = numberDetection.candidates.map((candidate) => ({
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+		const basketFallbackRaster = { gray: toGray(input), widthPx: input.widthPx, heightPx: input.heightPx };
+		const recovered = detectCalibratedBasketOcclusionFallback(
+			basketFallbackRaster,
+			basketTemplate,
+			unresolvedBadges,
+			occlusionBoxes,
+			basketDistanceBand,
+			basketTemplateScale
+		);
+		const nonDuplicateRecovered = recovered.filter(
+			(candidate) => !primaryBasketCandidates.some((existing) => isSameBasketCandidate(existing, candidate))
+		);
+		basketFallbackRecoveredCount = nonDuplicateRecovered.length;
+		if (nonDuplicateRecovered.length > 0) {
+			basketCandidates = [...primaryBasketCandidates, ...nonDuplicateRecovered];
+			const grammarBaskets = [
+				...primaryBasketCandidates,
+				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
+			];
+			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets });
+		}
+	}
 
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
@@ -613,7 +721,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const reviewHoles = grammar.holes.filter((hole) => hole.status === 'review').length;
 	const incompleteHoles = grammar.holes.filter((hole) => hole.status === 'incomplete').length;
 
-	const detectionResult: CourseDetectionResult = { numberDetection, tees: finalTeeCandidates, baskets: basketCandidates, grammar };
+	const detectionResult: CourseDetectionResult = { numberDetection, tees: teeCandidates, baskets: basketCandidates, grammar };
 	const reviewMap = buildActiveReviewMap(detectionResult, [], []);
 	const recommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore: args.minAutoSuggestScore });
 	const activeReview = summarizeActiveReview(detectionResult, reviewMap, recommendation);
@@ -627,21 +735,34 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			numberCandidates: numberDetection.candidates.length,
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			basketCandidates: basketCandidates.length,
-			teeCandidates: finalTeeCandidates.length,
+			teeCandidates: teeCandidates.length,
 			readyHoles,
 			reviewHoles,
-			incompleteHoles
+			incompleteHoles,
+			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
+			basketFallbackRecovered: basketFallbackRecoveredCount
 		},
-		gapFallback: { gappedBadgeCount: gappedBadges.length, addedCandidateCount: gapFallbackCandidates.length },
+		teeBootstrap: {
+			...teeBootstrap.counts,
+			holes: teeBootstrap.holes.map((hole) => ({
+				holeNumber: hole.holeNumber,
+				decision: hole.decision,
+				...(hole.assignment ? {
+					candidateIndex: hole.assignment.candidateIndex,
+					confidence: hole.assignment.confidence
+				} : {})
+			}))
+		},
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
+		basketTruthEvaluation: input.truth ? evaluateBasketTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		activeReview,
 		overlayPath,
 		activeReviewPath,
 		elapsedMs: performance.now() - startedAt
 	};
 
-	writeFileSync(overlayPath, renderOverlay(input, grammar, finalTeeCandidates, basketCandidates));
+	writeFileSync(overlayPath, renderOverlay(input, grammar, teeCandidates, basketCandidates));
 	writeFileSync(jsonPath, `${JSON.stringify(output, null, 2)}\n`);
 	writeFileSync(activeReviewPath, `${JSON.stringify({ map: reviewMap, recommendation: recommendationSummary(recommendation) }, null, 2)}\n`);
 	console.log(JSON.stringify({ ...output, jsonPath }, null, 2));

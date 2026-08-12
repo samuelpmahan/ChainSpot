@@ -21,12 +21,17 @@ import type {
 	FindBasketAnchorScaleOptions
 } from './basketTemplateDetection';
 import {
+	deriveBasketIconMasksPx,
+	derivePuttingCircleMasksPx,
+	deriveWalkingPathMasksPx,
+	detectDashedPathChains,
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadCandidates,
 	detectTeePadVariants
 } from './teePadDetection';
 import type {
 	OccludedEdgeLoopResult,
+	PuttingCircleSourceBasket,
 	TeePadCandidate,
 	TeePadCv,
 	TeePadDetectionOptions as RawTeePadDetectionOptions,
@@ -34,6 +39,15 @@ import type {
 	TeePadVariant,
 	TeePadVariantResult
 } from './teePadDetection';
+import { assessTeeBootstrap, proposeWeakTeeCandidates } from './teeBootstrapPolicy';
+import type { TeeBadgeAnchor, TeeBootstrapResult } from './teeBootstrapPolicy';
+import { findOccludedBasketMatch, basketRecoverySearchRadiusPx } from './basketOcclusionRecovery';
+import type {
+	BasketBadgeBox,
+	BasketDistanceBand,
+	BasketFallbackRaster,
+	BasketFallbackTemplate
+} from './basketOcclusionRecovery';
 import {
 	asBasketTemplateScale,
 	asNumberTemplateScale
@@ -113,53 +127,136 @@ export function detectCalibratedOccludedEdgeLoopCandidates(
 	return detectOccludedEdgeLoopCandidates(cv, raster, options);
 }
 
-const DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE = 40;
-const DEFAULT_GAP_FALLBACK_SCORE_FLOOR = 0.7;
-const GAP_FALLBACK_MAX_CANDIDATES = 80;
+export interface CalibratedTeeBootstrapResult extends TeeBootstrapResult {
+	/** Generic candidate pool assessed by the confidence ladder. */
+	readonly candidates: readonly TeePadCandidate[];
+}
 
-export interface TeeGapFallbackOptions extends CalibratedTeePadDetectionOptions {
-	/** Search radius from the badge, in uiScalePx multiples. Defaults to 40. */
-	readonly radiusUiScaleMultiple?: number;
-	/** Minimum occluded-edge-loop score to accept a fallback candidate. Defaults to 0.7. */
-	readonly fallbackScoreFloor?: number;
+function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
+	const localMinor = Math.max(1, Math.min(a.widthPx, a.heightPx, b.widthPx, b.heightPx));
+	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx) <= localMinor * 0.45;
 }
 
 /**
- * Recovers a tee for a hole whose number badge has no confident primary
- * candidate (`gray-center`/`edge-loop`) nearby -- typically because a bright
- * dashed putting-circle stroke crosses the pad and outcompetes its own
- * low-contrast edge for `edge-loop`'s contour, or skews `gray-center`'s
- * narrow interior-brightness band. `occluded-edge-loop` tolerates a broken
- * rectangle (it pairs short rail segments instead of requiring one closed
- * loop), so it is used here strictly as a *fallback*: called only for the
- * badges the caller has already identified as gapped (e.g. via
- * `associateCourseGrammar`'s `weak-tee-confidence` failures), and gated by a
- * tight radius plus a high score floor so a low-confidence guess can never
- * outrank a real primary candidate elsewhere on the course. Validated
- * against `resources/GoldenTeeSet.chainspot.zip`: recovers a genuinely
- * gapped hole while leaving all previously-correct holes unchanged, whereas
- * fusing `occluded-edge-loop` into every hole's detection (no badge
- * targeting, no score floor) let one unrelated high-scoring false positive
- * outcompete a real primary candidate elsewhere on the course.
+ * Production clean-course tee bootstrap.
+ *
+ * Primary and occlusion-tolerant proposals are pooled once. Nothing is
+ * searched around a particular hole and no candidate is promoted because a
+ * previous global grammar assignment happened to be weak. The course-level
+ * policy then derives pad world scale from the pool, measures each pad axis,
+ * and emits AUTO / REVIEW / UNRESOLVED ownership against visible badges.
+ *
+ * Occluded-only proposals are deliberately weak appearance evidence, so they
+ * can become REVIEW (the H3/H5 class) but cannot become AUTO from a lucky ray
+ * intersection alone.
  */
-export function detectCalibratedTeeGapFallbackCandidates(
+/** Fallback only, used when no AUTO tee exists yet to measure a course-specific radius from. */
+const PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI = 100;
+
+/**
+ * Levers for detection ideas that are safe but not (yet) proven to help --
+ * see `docs/deferred-detection-experiments.md`. Every flag defaults to off,
+ * so omitting this parameter reproduces exactly the production pipeline's
+ * behavior; passing one on is how a fixture re-test happens without
+ * resurrecting a diff from git history first. `scripts/detect-course.ts`
+ * exposes these as CLI flags for that purpose.
+ */
+export interface TeeBootstrapExperiments {
+	/**
+	 * Fold dashed walking/cart-path chains (`detectDashedPathChains`) into
+	 * the tier-3 occlusion-masking pool alongside the putting-circle/
+	 * basket-icon masks. Tested against GoldenTeeSet and Alex Clark:
+	 * `correctHoles` identical with and without on both, including the
+	 * path-adjacent hole that motivated it -- safe, but no measured benefit
+	 * yet. See the "Dashed walking/cart-path detector" entry in
+	 * `docs/deferred-detection-experiments.md`.
+	 */
+	readonly walkingPathMasking?: boolean;
+}
+
+export function detectCalibratedTeeBootstrap(
 	cv: TeePadCv,
 	raster: TeePadRaster,
-	options: TeeGapFallbackOptions,
-	gappedBadges: readonly Readonly<{ xPx: number; yPx: number }>[]
-): readonly TeePadCandidate[] {
-	if (gappedBadges.length === 0) return [];
-	const radiusPx = (options.radiusUiScaleMultiple ?? DEFAULT_GAP_FALLBACK_RADIUS_UI_SCALE_MULTIPLE) * options.uiScalePx;
-	const scoreFloor = options.fallbackScoreFloor ?? DEFAULT_GAP_FALLBACK_SCORE_FLOOR;
-	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, { ...options, maxCandidates: GAP_FALLBACK_MAX_CANDIDATES }).candidates;
-	const extras: TeePadCandidate[] = [];
-	for (const badge of gappedBadges) {
-		const nearby = occluded
-			.filter((candidate) => candidate.score >= scoreFloor && Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) <= radiusPx)
-			.sort((a, b) => b.score - a.score);
-		if (nearby[0]) extras.push(nearby[0]);
+	options: CalibratedTeePadDetectionOptions,
+	badges: readonly TeeBadgeAnchor[],
+	baskets: readonly PuttingCircleSourceBasket[] = [],
+	experiments: TeeBootstrapExperiments = {}
+): CalibratedTeeBootstrapResult {
+	const primary = detectTeePadCandidates(cv, raster, options);
+	const requested = options.maxCandidates ?? 18;
+	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, {
+		...options,
+		maxCandidates: Math.max(requested, requested * 2)
+	}).candidates;
+	const candidates: TeePadCandidate[] = [...primary];
+	for (const candidate of occluded) {
+		if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
 	}
-	return extras;
+	let assessed = assessTeeBootstrap(raster, candidates, badges);
+	if (assessed.calibration && assessed.counts.unresolved > 0) {
+		const weak = proposeWeakTeeCandidates(raster, badges, assessed.calibration, assessed, candidates);
+		for (const candidate of weak) {
+			if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
+		}
+		if (weak.length > 0) assessed = assessTeeBootstrap(raster, candidates, badges);
+	}
+
+	// A neighboring hole's dashed putting circle can cross a tee pad's own
+	// edge and break the rectangle the occluded-edge-loop detector looks for
+	// (the "H3" case: hole 3's pad partly erased by hole 5's putting circle).
+	// Masking every putting circle globally, up front, was tried and
+	// rejected: it perturbs the whole candidate pool and the pad-size
+	// calibration derived from it, occasionally erasing a *different* real
+	// pad's own evidence and turning a correct hole into a missing one. This
+	// only ever runs for holes still not AUTO after every existing tier above
+	// -- an already-resolved hole's candidates and assignment are completely
+	// untouched, so this cannot regress a hole that already works.
+	const stillNotAuto = assessed.holes.filter((hole) => hole.decision !== 'auto');
+	if (stillNotAuto.length > 0) {
+		const occlusionMasks = [
+			...(baskets.length > 0 ? derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx) : []),
+			...(baskets.length > 0 ? deriveBasketIconMasksPx(baskets, options.uiScalePx) : []),
+			...(experiments.walkingPathMasking
+				? deriveWalkingPathMasksPx(detectDashedPathChains(cv, raster, options), options.uiScalePx)
+				: [])
+		];
+		if (occlusionMasks.length > 0) {
+			const recovered = detectOccludedEdgeLoopCandidates(cv, raster, {
+				...options,
+				ignoreCirclesPx: occlusionMasks,
+				maxCandidates: Math.max(requested, requested * 2)
+			}).candidates.filter((candidate) => !candidates.some((existing) => samePhysicalPad(existing, candidate)));
+			// Distance-bounded by the course's own already-trusted geometry rather
+			// than a fixed constant: how far a real tee can plausibly sit from its
+			// badge varies course to course (and with map zoom), but the holes
+			// already resolved to AUTO on *this* course are a direct, cheap
+			// measurement of it.
+			const autoDistancesPx = assessed.assignments
+				.filter((assignment) => assignment.decision === 'auto')
+				.map((assignment) => assignment.badgeRay?.distancePx)
+				.filter((distance): distance is number => Number.isFinite(distance));
+			const recoveryRadiusPx =
+				autoDistancesPx.length > 0
+					? Math.max(...autoDistancesPx) * 1.5
+					: PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI * options.uiScalePx;
+			let added = false;
+			for (const hole of stillNotAuto) {
+				const badge = badges.find((candidate) => candidate.holeNumber === hole.holeNumber);
+				if (!badge) continue;
+				const best = recovered
+					.map((candidate) => ({ candidate, distancePx: Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) }))
+					.filter((entry) => entry.distancePx <= recoveryRadiusPx)
+					.sort((left, right) => left.distancePx - right.distancePx)[0];
+				if (best && !candidates.some((existing) => samePhysicalPad(existing, best.candidate))) {
+					candidates.push(best.candidate);
+					added = true;
+				}
+			}
+			if (added) assessed = assessTeeBootstrap(raster, candidates, badges);
+		}
+	}
+
+	return { candidates, ...assessed };
 }
 
 export type CalibratedBasketCandidate = Omit<RawBasketCandidate, 'scale'> & {
@@ -211,4 +308,87 @@ export function findCalibratedBasketAnchorScale(
 	return anchor
 		? { ...anchor, scale: asBasketTemplateScale(anchor.scale, 'Basket anchor template scale') }
 		: null;
+}
+
+export interface BasketOcclusionFallbackBadge {
+	readonly holeNumber: number;
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+export interface OccludedBasketCandidate extends CalibratedBasketCandidate {
+	readonly holeNumber: number;
+}
+
+/**
+ * A handful of samples close to the already-calibrated basket template
+ * scale. `detectBasketCandidatesAtTemplateScale`'s own 9-sample 0.9..1.1
+ * sweep exists because that scale is itself unknown at that point; here it
+ * is already trusted (derived from the course's own successfully-matched
+ * baskets), so the fallback only needs to absorb minor local size
+ * variation, not rediscover scale from scratch -- fewer samples keeps the
+ * manual (non-OpenCV) masked correlation affordable.
+ */
+const FALLBACK_SCALE_SAMPLE_COUNT = 5;
+const FALLBACK_SCALE_RANGE_LOW = 0.9;
+const FALLBACK_SCALE_RANGE_HIGH = 1.1;
+
+function fallbackScaleSamples(basketTemplateScale: number): number[] {
+	const samples: number[] = [];
+	for (let index = 0; index < FALLBACK_SCALE_SAMPLE_COUNT; index += 1) {
+		const fraction = index / (FALLBACK_SCALE_SAMPLE_COUNT - 1);
+		samples.push(basketTemplateScale * (FALLBACK_SCALE_RANGE_LOW + fraction * (FALLBACK_SCALE_RANGE_HIGH - FALLBACK_SCALE_RANGE_LOW)));
+	}
+	return samples;
+}
+
+/**
+ * Production occlusion-tolerant basket recovery. Mirrors
+ * `detectCalibratedTeeBootstrap`'s split between "detect candidates" (this
+ * function) and "decide ownership" (the caller's course-grammar pass): this
+ * never touches `detectBasketCandidatesAtTemplateScale`'s own behavior, and
+ * only ever searches the small ROI around each already-unresolved hole's own
+ * badge -- never a full-image rescan. `unresolvedBadges` and `band` are
+ * expected to come from a first course-grammar pass plus
+ * `basketOcclusionRecovery.ts`'s course-derived distance-band classifier, so
+ * this only ever runs for holes whose primary basket assignment already
+ * looks implausible.
+ */
+export function detectCalibratedBasketOcclusionFallback(
+	raster: BasketFallbackRaster,
+	template: BasketFallbackTemplate,
+	unresolvedBadges: readonly BasketOcclusionFallbackBadge[],
+	occlusionBoxes: readonly BasketBadgeBox[],
+	band: BasketDistanceBand,
+	basketTemplateScale: BasketTemplateScale
+): readonly OccludedBasketCandidate[] {
+	if (unresolvedBadges.length === 0) return [];
+	const searchRadiusPx = basketRecoverySearchRadiusPx(band);
+	const templateScales = fallbackScaleSamples(basketTemplateScale);
+	const recovered: OccludedBasketCandidate[] = [];
+	for (const badge of unresolvedBadges) {
+		const match = findOccludedBasketMatch(
+			raster,
+			template,
+			badge.xPx,
+			badge.yPx,
+			searchRadiusPx,
+			templateScales,
+			occlusionBoxes
+		);
+		if (!match) continue;
+		recovered.push({
+			holeNumber: badge.holeNumber,
+			xPx: match.xPx,
+			yPx: match.yPx,
+			widthPx: match.widthPx,
+			heightPx: match.heightPx,
+			score: match.score,
+			scale: asBasketTemplateScale(
+				match.widthPx / template.widthPx,
+				'Occlusion-fallback basket candidate template scale'
+			)
+		});
+	}
+	return recovered;
 }

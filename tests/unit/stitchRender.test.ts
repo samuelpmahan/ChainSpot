@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { renderStitchedPng, stitchedFileName } from '../../src/lib/stitch/render';
 import type { StitchRenderEnv, StitchRenderTile } from '../../src/lib/stitch/render';
 import { initialPlacements } from '../../src/lib/stitch/geometry';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
+import type { TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
 
 describe('stitch render (P05-002)', () => {
 	test('native renderer: union-sized canvas, translated integer draw rects, stable order, no resampling', async () => {
@@ -43,7 +43,8 @@ describe('stitch render (P05-002)', () => {
 
 		// 50 x 40 source screenshots cropped by 5px on every side -> 40 x 30 crops.
 		// Offsets: round(40 * 3 / 4) = 30, round(30 * 3 / 4) = 23.
-		const placements = initialPlacements(40, 30);
+		// The default '2x2' layout always populates all four slots.
+		const placements = initialPlacements(40, 30) as Record<TileSlot, TilePlacement>;
 		const tiles: StitchRenderTile[] = (
 			['upper-left', 'upper-right', 'lower-left', 'lower-right'] as TileSlot[]
 		).map((slot) => ({

@@ -20,7 +20,7 @@ import type { Candidate, CvRaster } from '../cv/types';
  * candidates within one pad radius are fused rather than choosing either one.
  */
 
-export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop';
+export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop' | 'template-search';
 
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 
@@ -109,8 +109,19 @@ export interface TeePadDetectionOptions {
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	/** Keep at most this many fused proposals. Defaults to the 18-hole MVP. */
 	readonly maxCandidates?: number;
-	/** Optional source-image circles whose Canny pixels should be ignored. */
-	readonly ignoreCirclesPx?: readonly Readonly<{ xPx: number; yPx: number; radiusPx: number }>[];
+	/**
+	 * Optional source-image circles whose Canny pixels should be ignored.
+	 * `innerRadiusPx` narrows the masked region to an annulus (defaults to 0,
+	 * i.e. the full disc) -- use an annulus when a real structure, such as a
+	 * neighboring hole's own tee pad, can legitimately sit inside another
+	 * circle's interior; a full-disc mask would erase it along with the ring.
+	 */
+	readonly ignoreCirclesPx?: readonly Readonly<{
+		xPx: number;
+		yPx: number;
+		radiusPx: number;
+		innerRadiusPx?: number;
+	}>[];
 }
 
 type CvMat = {
@@ -239,6 +250,26 @@ function normalizeOrientation(angleDeg: number): number {
 	return normalized < 0 ? normalized + 180 : normalized;
 }
 
+/**
+ * Undirected orientations wrap at 180degrees, so two segments on the same
+ * line can legitimately read ~0 and ~180 depending on which endpoint Hough
+ * returned first -- a plain arithmetic mean of those is ~90, a spurious
+ * right angle to the real line. Averaging the doubled angle as a unit
+ * vector (period 360, no wraparound ambiguity) and halving the result back
+ * down avoids that.
+ */
+function circularMeanOrientationDeg(anglesDeg: readonly number[]): number {
+	let sumX = 0;
+	let sumY = 0;
+	for (const angleDeg of anglesDeg) {
+		const doubledRadians = (angleDeg * 2 * Math.PI) / 180;
+		sumX += Math.cos(doubledRadians);
+		sumY += Math.sin(doubledRadians);
+	}
+	const meanDoubledDeg = (Math.atan2(sumY, sumX) * 180) / Math.PI;
+	return normalizeOrientation(meanDoubledDeg / 2);
+}
+
 function rectDimensions(rect: CvRotatedRect): { major: number; minor: number; orientationDeg: number } {
 	const width = rect.size.width;
 	const height = rect.size.height;
@@ -309,6 +340,13 @@ function insideRows(mask: Uint8Array, width: number, rows: { first: number; last
 }
 
 /**
+ * The probe's fixed 2px interior erosion, expressed as a UI-scale-relative
+ * coefficient so it derives from `scale` instead of assuming one resolution.
+ * At the nominal uiScalePx of 1.77 this reproduces the historical 2px exactly.
+ */
+const VISUAL_EROSION_UI = 2 / 1.77;
+
+/**
  * Equivalent to the probe's fillConvexPoly + two-pixel erosion, but sampled
  * directly so we do not allocate a full-image pair of temporary masks for
  * every tiny candidate rectangle.
@@ -318,12 +356,14 @@ function rotatedRectVisualStats(
 	width: number,
 	height: number,
 	saturation: Uint8Array,
-	value: Uint8Array
+	value: Uint8Array,
+	scale: number
 ): VisualStats | null {
 	const halfWidth = rect.size.width * 0.5;
 	const halfHeight = rect.size.height * 0.5;
-	const innerHalfWidth = halfWidth - 2;
-	const innerHalfHeight = halfHeight - 2;
+	const erosionPx = Math.max(1, VISUAL_EROSION_UI * scale);
+	const innerHalfWidth = halfWidth - erosionPx;
+	const innerHalfHeight = halfHeight - erosionPx;
 	if (innerHalfWidth <= 0 || innerHalfHeight <= 0) return null;
 
 	const radians = (rect.angle * Math.PI) / 180;
@@ -365,6 +405,43 @@ function rotatedRectVisualStats(
 		innerValue: innerValue / innerCount,
 		innerSaturation: innerSaturation / innerCount
 	};
+}
+
+/**
+ * The blur kernel's historical fixed size (3px) expressed as a UI-scale-
+ * relative coefficient, so it derives from `scale` instead of assuming one
+ * resolution. At the nominal uiScalePx of 1.77 this reproduces 3 exactly.
+ */
+const BLUR_KERNEL_UI = 3 / 1.77;
+
+// Canny's thresholds operate on 8-bit gradient magnitude, not source pixels,
+// so they are legitimately scale-invariant and stay fixed across resolutions.
+const CANNY_THRESHOLD_LOW = 50;
+const CANNY_THRESHOLD_HIGH = 150;
+
+// Brightness (HSV value channel) thresholds shared by the rim/interior visual
+// checks. These operate on 8-bit brightness, not source pixels, so they are
+// legitimately scale-invariant.
+/** Minimum average border (rim) brightness for both edge-loop detectors. */
+const RIM_BORDER_VALUE_MIN = 145;
+/** Edge-loop score's target interior brightness (rewards proximity to it). */
+const EDGE_SCORE_INNER_VALUE_TARGET = 165;
+/** Edge-loop score's target border brightness (rewards values above it). */
+const EDGE_SCORE_BORDER_VALUE_TARGET = 150;
+/** Occluded-edge-loop score's rim-brightness floor below which rimFit is 0. */
+const OCCLUDED_RIM_VALUE_MIN = 120;
+/** Occluded-edge-loop score's rim-brightness range over which rimFit ramps to 1. */
+const OCCLUDED_RIM_VALUE_RANGE = 80;
+
+/**
+ * Gaussian-blurs `sourceMat` into `blurredMat` and runs Canny into `edgesMat`,
+ * with the blur kernel size derived from `scale` (odd, minimum 3).
+ */
+function blurAndCanny(cv: TeePadCv, sourceMat: CvMat, blurredMat: CvMat, edgesMat: CvMat, scale: number): void {
+	const kernelSize = Math.max(3, 2 * Math.round((BLUR_KERNEL_UI * scale - 1) / 2) + 1);
+	const kernel = new cv.Size(kernelSize, kernelSize);
+	cv.GaussianBlur(sourceMat, blurredMat, kernel, 0, 0, cv.BORDER_DEFAULT);
+	cv.Canny(blurredMat, edgesMat, CANNY_THRESHOLD_LOW, CANNY_THRESHOLD_HIGH);
 }
 
 function tooClose(a: Pick<AnalysisCandidate, 'x' | 'y'>, b: Pick<AnalysisCandidate, 'x' | 'y'>, radius: number): boolean {
@@ -528,7 +605,6 @@ function detectGrayCenterCandidates(
 					areaAccepted += 1;
 					const rect = cv.minAreaRect(contour);
 					const { major, minor } = rectDimensions(rect);
-					if (minor < 2) continue;
 					if (minor < 5 * scale || minor > 12 * scale || major < 8 * scale || major > 20 * scale) continue;
 					sizeAccepted += 1;
 					if (major / minor < 1.1 || major / minor > 3.0) continue;
@@ -578,9 +654,7 @@ function detectEdgeLoopCandidates(
 	const blurred = new cv.Mat();
 	const edges = new cv.Mat();
 	try {
-		const kernel = new cv.Size(3, 3);
-		cv.GaussianBlur(grayMat, blurred, kernel, 0, 0, cv.BORDER_DEFAULT);
-		cv.Canny(blurred, edges, 50, 150);
+		blurAndCanny(cv, grayMat, blurred, edges, scale);
 		insideRows(edges.data, raster.widthPx, rows);
 		const { contours, hierarchy } = findContours(cv, edges);
 		try {
@@ -595,7 +669,6 @@ function detectEdgeLoopCandidates(
 					const area = Math.abs(cv.contourArea(contour));
 					const rect = cv.minAreaRect(contour);
 					const { major, minor } = rectDimensions(rect);
-					if (minor < 1) continue;
 					if (minor < 5.5 * scale || minor > 18 * scale || major < 8 * scale || major > 26 * scale) continue;
 					sizeAccepted += 1;
 					const rectangularity = area / (major * minor);
@@ -607,9 +680,10 @@ function detectEdgeLoopCandidates(
 						raster.widthPx,
 						raster.heightPx,
 						saturation,
-						value
+						value,
+						scale
 					);
-					if (!visual || visual.borderValue < 145) continue;
+					if (!visual || visual.borderValue < RIM_BORDER_VALUE_MIN) continue;
 					visualAccepted += 1;
 					const contrast = visual.borderValue - visual.innerValue;
 					const score =
@@ -617,8 +691,8 @@ function detectEdgeLoopCandidates(
 						0.05 * Math.abs(major - 13 * scale) -
 						0.05 * Math.abs(minor - 8 * scale) -
 						0.018 * Math.max(0, visual.innerSaturation - 10) -
-						0.015 * Math.abs(visual.innerValue - 165) +
-						0.012 * Math.max(0, visual.borderValue - 150) +
+						0.015 * Math.abs(visual.innerValue - EDGE_SCORE_INNER_VALUE_TARGET) +
+						0.012 * Math.max(0, visual.borderValue - EDGE_SCORE_BORDER_VALUE_TARGET) +
 						0.006 * Math.max(0, contrast) -
 						0.1 * Math.max(0, approximation.rows - 4);
 					edgeCandidates.push(candidateFromRect(rect, score, 'edge-loop'));
@@ -673,6 +747,379 @@ function houghSegments(lines: CvMat): HoughSegment[] {
 	return segments;
 }
 
+export interface WalkingPathDash {
+	readonly xPx: number;
+	readonly yPx: number;
+	/** Undirected, normalized to [0, 180). */
+	readonly orientationDeg: number;
+	readonly lengthPx: number;
+}
+
+export interface WalkingPathChain {
+	readonly dashes: readonly WalkingPathDash[];
+	/** Undirected, normalized to [0, 180). */
+	readonly orientationDeg: number;
+}
+
+/**
+ * A course's walking/cart path between holes is drawn as a sequence of
+ * short bright dashes -- visually similar enough to a small tee-pad
+ * rectangle that a masked-template search can mistake one dash for a pad
+ * (see `docs/deferred-detection-experiments.md`'s masked-NCC entry). What
+ * actually distinguishes a path dash from a real, isolated pad is
+ * periodicity: a path repeats at a roughly constant spacing along a
+ * consistent direction, a real pad does not. This detector's whole job is
+ * finding that repetition, not identifying any single dash in isolation.
+ *
+ * Dash geometry was measured directly off a real course image
+ * (IMG_5641, the walking path near hole 3): ~17px long, ~24-25px
+ * start-to-start spacing, at that image's uiScalePx of ~1.81 -- expressed
+ * below as UI-scale-relative constants (dashes are a UI-drawn element, the
+ * same size class as the number badge, not something that scales with map
+ * zoom).
+ */
+const PATH_DASH_VALUE_MIN = 130;
+const PATH_DASH_SATURATION_MAX = 55;
+const PATH_DASH_LENGTH_UI = 9.5;
+const PATH_DASH_LENGTH_TOLERANCE_UI = 4;
+const PATH_DASH_PERIOD_UI = 13.6;
+const PATH_DASH_PERIOD_TOLERANCE_UI = 6;
+const PATH_CHAIN_ANGLE_TOLERANCE_DEG = 20;
+const PATH_CHAIN_PERP_TOLERANCE_UI = 4;
+/** Fewer than this is indistinguishable from an isolated rectangle -- exactly the ambiguity this detector exists to resolve. */
+const PATH_MIN_CHAIN_LENGTH = 3;
+
+interface DashCandidate {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly orientationDeg: number;
+	readonly lengthPx: number;
+}
+
+/** Two Hough detections of the same physical dash land almost on top of each other; collapse them before chaining. */
+function dedupeDashes(dashes: readonly DashCandidate[], mergeRadiusPx: number): DashCandidate[] {
+	const kept: DashCandidate[] = [];
+	for (const dash of dashes) {
+		if (kept.some((existing) => Math.hypot(existing.xPx - dash.xPx, existing.yPx - dash.yPx) <= mergeRadiusPx)) continue;
+		kept.push(dash);
+	}
+	return kept;
+}
+
+function chainDashSegments(rawDashes: readonly DashCandidate[], scale: number): WalkingPathChain[] {
+	const dashes = dedupeDashes(rawDashes, PATH_DASH_LENGTH_UI * 0.5 * scale);
+	const periodMin = (PATH_DASH_PERIOD_UI - PATH_DASH_PERIOD_TOLERANCE_UI) * scale;
+	const periodMax = (PATH_DASH_PERIOD_UI + PATH_DASH_PERIOD_TOLERANCE_UI) * scale;
+	const perpTolerance = PATH_CHAIN_PERP_TOLERANCE_UI * scale;
+
+	const parent = dashes.map((_, index) => index);
+	function find(index: number): number {
+		while (parent[index] !== index) {
+			parent[index] = parent[parent[index]];
+			index = parent[index];
+		}
+		return index;
+	}
+	function union(a: number, b: number): void {
+		const rootA = find(a);
+		const rootB = find(b);
+		if (rootA !== rootB) parent[rootA] = rootB;
+	}
+
+	for (let i = 0; i < dashes.length; i += 1) {
+		for (let j = i + 1; j < dashes.length; j += 1) {
+			const a = dashes[i];
+			const b = dashes[j];
+			const angleDelta = Math.abs(a.orientationDeg - b.orientationDeg);
+			if (Math.min(angleDelta, 180 - angleDelta) > PATH_CHAIN_ANGLE_TOLERANCE_DEG) continue;
+			const dx = b.xPx - a.xPx;
+			const dy = b.yPx - a.yPx;
+			const distance = Math.hypot(dx, dy);
+			// Up to ~1.6 periods tolerates one missed detection between real dashes without inviting an unrelated pair in.
+			if (distance < periodMin * 0.7 || distance > periodMax * 1.6) continue;
+			const radians = (circularMeanOrientationDeg([a.orientationDeg, b.orientationDeg]) * Math.PI) / 180;
+			const perpendicular = Math.abs(-Math.sin(radians) * dx + Math.cos(radians) * dy);
+			if (perpendicular > perpTolerance) continue;
+			union(i, j);
+		}
+	}
+
+	const groups = new Map<number, DashCandidate[]>();
+	dashes.forEach((dash, index) => {
+		const root = find(index);
+		const group = groups.get(root);
+		if (group) group.push(dash);
+		else groups.set(root, [dash]);
+	});
+
+	const chains: WalkingPathChain[] = [];
+	for (const group of groups.values()) {
+		if (group.length < PATH_MIN_CHAIN_LENGTH) continue;
+		chains.push({
+			dashes: group.map((dash) => ({ ...dash })),
+			orientationDeg: circularMeanOrientationDeg(group.map((dash) => dash.orientationDeg))
+		});
+	}
+	return chains;
+}
+
+/**
+ * Finds dashed walking/cart path chains within the map area. Never a target
+ * of its own detection budget -- callers use the result two ways: (1) as
+ * exclusion regions (`deriveWalkingPathMasksPx`) so a tee-pad search
+ * doesn't mistake one dash for a pad, and (2) potentially as a positional
+ * signal, since a path's terminus tends to sit right at a tee or basket
+ * (course routing walks from one green to the next tee) -- not yet used for
+ * that second purpose by any caller.
+ */
+export function detectDashedPathChains(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: TeePadDetectionOptions
+): readonly WalkingPathChain[] {
+	validateInputs(raster, options);
+	const rows = mapRows(raster, options.mapBoundsPx);
+	if (!rows) return [];
+	const { saturation, value } = readHsv(raster);
+	const scale = options.uiScalePx / raster.sourceScale;
+	const bright = new Uint8Array(value.length);
+	for (let index = 0; index < bright.length; index += 1) {
+		bright[index] =
+			value[index] >= PATH_DASH_VALUE_MIN && saturation[index] <= PATH_DASH_SATURATION_MAX ? 255 : 0;
+	}
+	insideRows(bright, raster.widthPx, rows);
+
+	const brightMat = matFromBytes(cv, bright, raster.widthPx, raster.heightPx);
+	const lines = new cv.Mat();
+	try {
+		const expectedLength = PATH_DASH_LENGTH_UI * scale;
+		const lengthTolerance = PATH_DASH_LENGTH_TOLERANCE_UI * scale;
+		cv.HoughLinesP(
+			brightMat,
+			lines,
+			1,
+			Math.PI / 180,
+			4,
+			Math.max(3, expectedLength - lengthTolerance),
+			Math.max(2, expectedLength * 0.3)
+		);
+		const rawDashes: DashCandidate[] = houghSegments(lines)
+			.filter((segment) => {
+				const length = segmentLength(segment);
+				return length >= expectedLength - lengthTolerance && length <= expectedLength + lengthTolerance;
+			})
+			.map((segment) => ({
+				xPx: (segment.x1 + segment.x2) / 2,
+				yPx: (segment.y1 + segment.y2) / 2,
+				orientationDeg: segmentAngle(segment),
+				lengthPx: segmentLength(segment)
+			}));
+		return chainDashSegments(rawDashes, scale);
+	} finally {
+		brightMat.delete();
+		lines.delete();
+	}
+}
+
+/** One small circle per dash -- just enough to cover it, not the gaps between (those are already background, nothing to mask). */
+export function deriveWalkingPathMasksPx(
+	chains: readonly WalkingPathChain[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const radiusPx = PATH_DASH_LENGTH_UI * 0.75 * uiScalePx;
+	return chains.flatMap((chain) => chain.dashes.map((dash) => ({ xPx: dash.xPx, yPx: dash.yPx, radiusPx })));
+}
+
+export interface PuttingCircleFit {
+	/** Source-image pixels. */
+	readonly radiusPx: number;
+	/** Fraction of the fitted ring's circumference that landed on bright-dash evidence. */
+	readonly coverage: number;
+}
+
+export interface PuttingCircleSourceBasket {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly score: number;
+}
+
+const PUTTING_CIRCLE_BRIGHT_VALUE_MIN = 210;
+const PUTTING_CIRCLE_BRIGHT_SATURATION_MAX = 40;
+const PUTTING_CIRCLE_MIN_RADIUS_UI = 8;
+const PUTTING_CIRCLE_MAX_RADIUS_UI = 60;
+const PUTTING_CIRCLE_RADIUS_STEP_UI = 0.5;
+const PUTTING_CIRCLE_MIN_COVERAGE = 0.15;
+const PUTTING_CIRCLE_MAX_COVERAGE = 0.75;
+/**
+ * Genuine dashes hit the ring in many short, roughly evenly-spaced arcs. A
+ * real rectangle edge (a tee pad's own rail, a walking path) crossing the
+ * sweep circle only touches it at one or two localized points, however long
+ * the arc there is -- so a minimum *run count*, not just coverage fraction,
+ * is what actually distinguishes "dashed ring" from "a straight edge happens
+ * to cross this circle." Without this gate the sweep can lock onto a real
+ * pad's own edge and mask it away as if it were dash evidence.
+ */
+const PUTTING_CIRCLE_MIN_RUNS = 5;
+const PUTTING_CIRCLE_MIN_BASKET_SCORE = 0.7;
+/** UI-scale multiple: dash stroke width is UI-drawn, not map-scaled, so uiScalePx (not a real-world unit) is the right unit for it. */
+export const PUTTING_CIRCLE_RING_HALF_THICKNESS_UI = 2.5;
+
+/**
+ * Fits the radius of a dashed putting-circle drawn around a basket by
+ * sweeping candidate radii outward from the basket and keeping the one whose
+ * ring has the strongest bright-dash evidence.
+ *
+ * There is deliberately no fixed real-world-to-pixel conversion here: unlike
+ * a number badge (drawn at a fixed on-screen size regardless of map zoom),
+ * a putting circle is drawn to the *map's* scale, which varies per
+ * screenshot. A radius derived from a real-world distance constant would
+ * only be correct for whatever zoom level it was measured against, so the
+ * radius has to be measured from each image instead.
+ */
+export function fitPuttingCircleRadiusPx(
+	raster: TeePadRaster,
+	centerXPx: number,
+	centerYPx: number,
+	uiScalePx: number
+): PuttingCircleFit | null {
+	const { saturation, value } = readHsv(raster);
+	const width = raster.widthPx;
+	const height = raster.heightPx;
+	const bright = new Uint8Array(value.length);
+	for (let index = 0; index < bright.length; index += 1) {
+		bright[index] =
+			value[index] >= PUTTING_CIRCLE_BRIGHT_VALUE_MIN &&
+			saturation[index] <= PUTTING_CIRCLE_BRIGHT_SATURATION_MAX
+				? 255
+				: 0;
+	}
+	const scale = uiScalePx / raster.sourceScale;
+	const centerX = centerXPx / raster.sourceScale;
+	const centerY = centerYPx / raster.sourceScale;
+	const sampleRadius = Math.max(1, Math.round(scale * 0.6));
+	let best: PuttingCircleFit | null = null;
+	for (
+		let radiusUi = PUTTING_CIRCLE_MIN_RADIUS_UI;
+		radiusUi <= PUTTING_CIRCLE_MAX_RADIUS_UI;
+		radiusUi += PUTTING_CIRCLE_RADIUS_STEP_UI
+	) {
+		const radius = radiusUi * scale;
+		if (centerX - radius < 0 || centerX + radius >= width || centerY - radius < 0 || centerY + radius >= height) {
+			continue;
+		}
+		const samples = Math.max(24, Math.ceil(radius * 0.5));
+		const hits = new Array<boolean>(samples);
+		let hitCount = 0;
+		for (let sample = 0; sample < samples; sample += 1) {
+			const angle = (sample / samples) * Math.PI * 2;
+			const x = Math.round(centerX + radius * Math.cos(angle));
+			const y = Math.round(centerY + radius * Math.sin(angle));
+			let found = false;
+			for (let dy = -sampleRadius; dy <= sampleRadius && !found; dy += 1) {
+				for (let dx = -sampleRadius; dx <= sampleRadius; dx += 1) {
+					const nearbyX = x + dx;
+					const nearbyY = y + dy;
+					if (nearbyX < 0 || nearbyX >= width || nearbyY < 0 || nearbyY >= height) continue;
+					if (bright[nearbyY * width + nearbyX] !== 0) {
+						found = true;
+						break;
+					}
+				}
+			}
+			hits[sample] = found;
+			if (found) hitCount += 1;
+		}
+		const coverage = hitCount / samples;
+		let runs = 0;
+		for (let sample = 0; sample < samples; sample += 1) {
+			if (hits[sample] && !hits[(sample - 1 + samples) % samples]) runs += 1;
+		}
+		if (runs === 0 && hitCount === samples) runs = 1;
+		if (runs < PUTTING_CIRCLE_MIN_RUNS) continue;
+		if (coverage > PUTTING_CIRCLE_MAX_COVERAGE) continue;
+		if (!best || coverage > best.coverage) best = { radiusPx: radius * raster.sourceScale, coverage };
+	}
+	if (!best || best.coverage < PUTTING_CIRCLE_MIN_COVERAGE) return null;
+	return best;
+}
+
+function median(values: readonly number[]): number {
+	const sorted = [...values].sort((left, right) => left - right);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+/**
+ * Derives `ignoreCirclesPx` entries for every confidently-detected basket, so
+ * a neighboring hole's dashed putting circle can be masked out of the
+ * occluded-edge-loop tee search before it breaks a real pad's outline. Only
+ * baskets whose own detector score already clears a high floor are used --
+ * a shaky basket guess should not go on to erase real evidence elsewhere.
+ *
+ * The radius is fit per basket, but pooled across baskets before use: a
+ * putting circle is drawn at one constant scale throughout a single image
+ * (only the scale *between* different screenshots varies, per this module's
+ * calibration notes elsewhere), so a basket whose own dash is too faint,
+ * cropped, or occluded to fit alone can still be masked correctly using the
+ * radius measured from a cleaner dash elsewhere on the same course.
+ */
+export function derivePuttingCircleMasksPx(
+	raster: TeePadRaster,
+	baskets: readonly PuttingCircleSourceBasket[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const confident = baskets.filter((basket) => basket.score >= PUTTING_CIRCLE_MIN_BASKET_SCORE);
+	const fits = confident
+		.map((basket) => fitPuttingCircleRadiusPx(raster, basket.xPx, basket.yPx, uiScalePx))
+		.filter((fit): fit is PuttingCircleFit => fit !== null);
+	if (fits.length === 0) return [];
+	const sharedRadiusPx = median(fits.map((fit) => fit.radiusPx));
+	const halfThicknessPx = PUTTING_CIRCLE_RING_HALF_THICKNESS_UI * uiScalePx;
+	return confident.map((basket) => ({
+		xPx: basket.xPx,
+		yPx: basket.yPx,
+		radiusPx: sharedRadiusPx + halfThicknessPx,
+		innerRadiusPx: Math.max(0, sharedRadiusPx - halfThicknessPx)
+	}));
+}
+
+/**
+ * Basket coordinates are the icon's stem/base (see this module's callers),
+ * but the icon graphic itself is drawn almost entirely *above* that point --
+ * a tall pin/chain-basket shape, not a symbol centered on its own anchor.
+ * Measured directly off a real course image (Alex Clark, hole 8's basket):
+ * the icon's visible top sits roughly 20 uiScalePx units above the anchor,
+ * with a half-width around 22 units -- a plain disc centered on the anchor
+ * would need to be that large in every direction just to reach the top,
+ * wasting most of its coverage on the mostly-empty space below and beside
+ * the stem where a neighboring hole's real tee-pad evidence is more likely
+ * to actually be. An offset disc, shifted up toward the icon's vertical
+ * center, covers the same icon with a smaller radius and less collateral
+ * masking.
+ *
+ * Unlike the putting circle (map-scale, fit per image), the icon is a
+ * UI-drawn element at a fixed size relative to uiScalePx, the same way the
+ * number badge is -- no per-image fitting needed.
+ */
+const BASKET_ICON_MASK_VERTICAL_OFFSET_UI = 20;
+const BASKET_ICON_MASK_RADIUS_UI = 28;
+const BASKET_ICON_MIN_SCORE = 0.7;
+
+export function deriveBasketIconMasksPx(
+	baskets: readonly PuttingCircleSourceBasket[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const offsetPx = BASKET_ICON_MASK_VERTICAL_OFFSET_UI * uiScalePx;
+	const radiusPx = BASKET_ICON_MASK_RADIUS_UI * uiScalePx;
+	return baskets
+		.filter((basket) => basket.score >= BASKET_ICON_MIN_SCORE)
+		.map((basket) => ({
+			xPx: basket.xPx,
+			yPx: basket.yPx - offsetPx,
+			radiusPx
+		}));
+}
+
 function maskIgnoredCircles(
 	edges: Uint8Array,
 	width: number,
@@ -685,8 +1132,10 @@ function maskIgnoredCircles(
 		const centerX = circle.xPx / sourceScale;
 		const centerY = circle.yPx / sourceScale;
 		const radius = circle.radiusPx / sourceScale;
+		const innerRadius = Math.max(0, (circle.innerRadiusPx ?? 0) / sourceScale);
 		if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(radius) || radius <= 0) continue;
 		const radiusSquared = radius * radius;
+		const innerRadiusSquared = innerRadius * innerRadius;
 		const firstX = clamp(Math.floor(centerX - radius), 0, width - 1);
 		const lastX = clamp(Math.ceil(centerX + radius), 0, width - 1);
 		const firstY = clamp(Math.floor(centerY - radius), 0, height - 1);
@@ -695,21 +1144,53 @@ function maskIgnoredCircles(
 			for (let x = firstX; x <= lastX; x += 1) {
 				const dx = x - centerX;
 				const dy = y - centerY;
-				if (dx * dx + dy * dy <= radiusSquared) edges[y * width + x] = 0;
+				const distanceSquared = dx * dx + dy * dy;
+				if (distanceSquared <= radiusSquared && distanceSquared >= innerRadiusSquared) {
+					edges[y * width + x] = 0;
+				}
 			}
 		}
 	}
 	return circles.length;
 }
 
+/**
+ * Occluded-edge-loop rail-pairing geometry, expressed as UI-scale-relative
+ * coefficients (`K_UI = historical_value / 1.77`) instead of raw source-pixel
+ * constants divided only by `sourceScale`. Multiplying each by the detector's
+ * local `scale = uiScalePx / sourceScale` reproduces the exact historically
+ * tuned values at the nominal uiScalePx of 1.77, while scaling correctly with
+ * the UI icon scale at other resolutions -- matching the gray-center and
+ * edge-loop detectors, which already key their geometry off `scale`. All of
+ * these encode the same ~13x8 UI-px pad envelope (a tee pad's two occluded
+ * rails, each up to ~20px long, separated by ~5-8.5px) that the other
+ * detectors target directly.
+ */
+const OCCLUDED_MIN_SEGMENT_LENGTH_UI = 5 / 1.77;
+const OCCLUDED_MAJOR_MIN_UI = 16 / 1.77;
+const OCCLUDED_MAJOR_MAX_UI = 20 / 1.77;
+const OCCLUDED_SEPARATION_MIN_UI = 5 / 1.77;
+const OCCLUDED_SEPARATION_MAX_UI = 8.5 / 1.77;
+/** occludedPairScore's target/tolerance pair for the rail-pair major axis. */
+const OCCLUDED_SCORE_MAJOR_TARGET_UI = 18 / 1.77;
+const OCCLUDED_SCORE_MAJOR_TOLERANCE_UI = 2 / 1.77;
+/** occludedPairScore's target/tolerance pair for rail separation (minor axis). */
+const OCCLUDED_SCORE_SEPARATION_TARGET_UI = 6.75 / 1.77;
+const OCCLUDED_SCORE_SEPARATION_TOLERANCE_UI = 1.75 / 1.77;
+/** HoughLinesP's minLineLength/maxLineGap for occluded-edge-loop's rail search. */
+const OCCLUDED_HOUGH_MIN_LINE_LENGTH_UI = 5 / 1.77;
+const OCCLUDED_HOUGH_MAX_LINE_GAP_UI = 6 / 1.77;
+const OCCLUDED_MAX_SEGMENT_LENGTH_UI = 20 / 1.77;
+const OCCLUDED_MAX_PAIR_DISTANCE_UI = 24 / 1.77;
+
 function occludedPair(
 	first: HoughSegment,
 	second: HoughSegment,
-	sourceScale: number
+	scale: number
 ): OccludedPair | null {
 	const firstLength = segmentLength(first);
 	const secondLength = segmentLength(second);
-	const minimumSegmentLength = 5 / sourceScale;
+	const minimumSegmentLength = OCCLUDED_MIN_SEGMENT_LENGTH_UI * scale;
 	if (firstLength < minimumSegmentLength || secondLength < minimumSegmentLength) return null;
 
 	const firstUx = (first.x2 - first.x1) / firstLength;
@@ -743,8 +1224,8 @@ function occludedPair(
 	if (overlap < 0.35 * Math.min(firstLength, secondLength)) return null;
 
 	const major = Math.max(firstRange[1], secondRange[1]) - Math.min(firstRange[0], secondRange[0]);
-	const majorMinimum = 16 / sourceScale;
-	const majorMaximum = 20 / sourceScale;
+	const majorMinimum = OCCLUDED_MAJOR_MIN_UI * scale;
+	const majorMaximum = OCCLUDED_MAJOR_MAX_UI * scale;
 	if (major < majorMinimum || major > majorMaximum) return null;
 
 	const firstMidpoint = { x: (first.x1 + first.x2) * 0.5, y: (first.y1 + first.y2) * 0.5 };
@@ -752,8 +1233,8 @@ function occludedPair(
 	const separation = Math.abs(
 		(secondMidpoint.x - firstMidpoint.x) * nx + (secondMidpoint.y - firstMidpoint.y) * ny
 	);
-	const separationMinimum = 5 / sourceScale;
-	const separationMaximum = 8.5 / sourceScale;
+	const separationMinimum = OCCLUDED_SEPARATION_MIN_UI * scale;
+	const separationMaximum = OCCLUDED_SEPARATION_MAX_UI * scale;
 	if (separation < separationMinimum || separation > separationMaximum) return null;
 
 	const centerAlong = (Math.min(firstRange[0], secondRange[0]) + Math.max(firstRange[1], secondRange[1])) * 0.5;
@@ -772,12 +1253,22 @@ function occludedPair(
 	};
 }
 
-function occludedPairScore(pair: OccludedPair, visual: VisualStats): number {
-	const lengthFit = clamp(1 - Math.abs(pair.major - 18) / 2, 0, 1);
-	const separationFit = clamp(1 - Math.abs(pair.minor - 6.75) / 1.75, 0, 1);
+function occludedPairScore(pair: OccludedPair, visual: VisualStats, scale: number): number {
+	const lengthFit = clamp(
+		1 - Math.abs(pair.major - OCCLUDED_SCORE_MAJOR_TARGET_UI * scale) / (OCCLUDED_SCORE_MAJOR_TOLERANCE_UI * scale),
+		0,
+		1
+	);
+	const separationFit = clamp(
+		1 -
+			Math.abs(pair.minor - OCCLUDED_SCORE_SEPARATION_TARGET_UI * scale) /
+				(OCCLUDED_SCORE_SEPARATION_TOLERANCE_UI * scale),
+		0,
+		1
+	);
 	const parallelFit = clamp(1 - pair.angleDeltaDeg / 10, 0, 1);
 	const overlapFit = clamp(pair.overlap / Math.min(pair.firstLength, pair.secondLength), 0, 1);
-	const rimFit = clamp((visual.borderValue - 120) / 80, 0, 1);
+	const rimFit = clamp((visual.borderValue - OCCLUDED_RIM_VALUE_MIN) / OCCLUDED_RIM_VALUE_RANGE, 0, 1);
 	return 0.28 * lengthFit + 0.24 * separationFit + 0.18 * parallelFit + 0.18 * overlapFit + 0.12 * rimFit;
 }
 
@@ -796,14 +1287,13 @@ export function detectOccludedEdgeLoopCandidates(
 	if (!rows) return { variant: 'occluded-edge-loop', candidates: [], stageCounts: { discovered: 0, final: 0 } };
 
 	const { gray, saturation, value } = readHsv(raster);
+	const scale = options.uiScalePx / raster.sourceScale;
 	const grayMat = matFromBytes(cv, gray, raster.widthPx, raster.heightPx);
 	const blurred = new cv.Mat();
 	const edges = new cv.Mat();
 	const lines = new cv.Mat();
 	try {
-		const kernel = new cv.Size(3, 3);
-		cv.GaussianBlur(grayMat, blurred, kernel, 0, 0, cv.BORDER_DEFAULT);
-		cv.Canny(blurred, edges, 50, 150);
+		blurAndCanny(cv, grayMat, blurred, edges, scale);
 		insideRows(edges.data, raster.widthPx, rows);
 		const masked = maskIgnoredCircles(
 			edges.data,
@@ -813,24 +1303,23 @@ export function detectOccludedEdgeLoopCandidates(
 			options.ignoreCirclesPx
 		);
 
-		const sourceScale = raster.sourceScale;
 		cv.HoughLinesP(
 			edges,
 			lines,
 			1,
 			Math.PI / 180,
-			8,
-			5 / sourceScale,
-			6 / sourceScale
+			8, // vote count, not a pixel length -- scale-invariant, stays fixed.
+			OCCLUDED_HOUGH_MIN_LINE_LENGTH_UI * scale,
+			OCCLUDED_HOUGH_MAX_LINE_GAP_UI * scale
 		);
 		const discoveredSegments = houghSegments(lines);
-		const minimumSegmentLength = 5 / sourceScale;
-		const maximumSegmentLength = 20 / sourceScale;
+		const minimumSegmentLength = OCCLUDED_MIN_SEGMENT_LENGTH_UI * scale;
+		const maximumSegmentLength = OCCLUDED_MAX_SEGMENT_LENGTH_UI * scale;
 		const segments = discoveredSegments.filter((segment) => {
 			const length = segmentLength(segment);
 			return length >= minimumSegmentLength && length <= maximumSegmentLength;
 		});
-		const maximumPairDistance = 24 / sourceScale;
+		const maximumPairDistance = OCCLUDED_MAX_PAIR_DISTANCE_UI * scale;
 		const pairCellSize = maximumPairDistance;
 		const angleBinCount = 18;
 		const maximumSegmentsPerPairBucket = 12;
@@ -888,7 +1377,7 @@ export function detectOccludedEdgeLoopCandidates(
 							const parallelDifference = Math.min(angleDifference, 180 - angleDifference);
 							if (parallelDifference > 10) continue;
 							parallelCount += 1;
-							const pair = occludedPair(first, second, sourceScale);
+							const pair = occludedPair(first, second, scale);
 							if (!pair) continue;
 							geometryCount += 1;
 							const visual = rotatedRectVisualStats(
@@ -900,9 +1389,10 @@ export function detectOccludedEdgeLoopCandidates(
 								raster.widthPx,
 								raster.heightPx,
 								saturation,
-								value
+								value,
+								scale
 							);
-							if (!visual || visual.borderValue < 145) continue;
+							if (!visual || visual.borderValue < RIM_BORDER_VALUE_MIN) continue;
 							visualCount += 1;
 							candidates.push({
 								x: pair.centerX,
@@ -910,7 +1400,7 @@ export function detectOccludedEdgeLoopCandidates(
 								orientationDeg: pair.angleDeg,
 								width: pair.major,
 								height: pair.minor,
-								score: occludedPairScore(pair, visual),
+								score: occludedPairScore(pair, visual, scale),
 								support: 'occluded-edge-loop'
 							});
 						}
@@ -926,7 +1416,7 @@ export function detectOccludedEdgeLoopCandidates(
 			throw new Error('Tee-pad detection maxCandidates must be a positive integer.');
 		}
 		for (const candidate of candidates) {
-			if (kept.some((existing) => tooClose(candidate, existing, 7 * options.uiScalePx / sourceScale))) continue;
+			if (kept.some((existing) => tooClose(candidate, existing, 7 * options.uiScalePx / raster.sourceScale))) continue;
 			kept.push(candidate);
 			if (kept.length === maxCandidates) break;
 		}

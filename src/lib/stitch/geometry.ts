@@ -7,13 +7,38 @@
  * resamples or blurs. The shared crop and tile positions are always independent
  * of preview size.
  */
-export type TileSlot = 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right';
+export type TileSlot =
+	| 'upper-left'
+	| 'upper-right'
+	| 'lower-left'
+	| 'lower-right'
+	| 'left'
+	| 'right'
+	| 'top'
+	| 'bottom';
+
+/** The three supported capture layouts: the original 2x2 grid, and two-tile side-by-side/stacked sets. */
+export type StitchLayout = '2x2' | '1x2' | '2x1';
 
 export const TILE_SLOTS: readonly TileSlot[] = [
 	'upper-left',
 	'upper-right',
 	'lower-left',
 	'lower-right'
+];
+
+/** Slot vocabulary and order for each supported layout; the first slot is always the anchor. */
+export const TILE_SLOTS_BY_LAYOUT: Record<StitchLayout, readonly TileSlot[]> = {
+	'2x2': TILE_SLOTS,
+	'1x2': ['left', 'right'],
+	'2x1': ['top', 'bottom']
+};
+
+/** Every slot name across every supported layout; useful for clearing per-slot state on reset. */
+export const ALL_TILE_SLOTS: readonly TileSlot[] = [
+	...TILE_SLOTS_BY_LAYOUT['2x2'],
+	...TILE_SLOTS_BY_LAYOUT['1x2'],
+	...TILE_SLOTS_BY_LAYOUT['2x1']
 ];
 
 export type CropInsetField = 'topPx' | 'rightPx' | 'bottomPx' | 'leftPx';
@@ -75,33 +100,67 @@ export function cropSize(insets: CropInsets, widthPx: number, heightPx: number):
 /**
  * The documented 25% overlap starting layout. Positions are rounded integers so
  * placement never becomes fractional; this is also exactly what Reset arrangement
- * restores.
+ * restores. Only the slots belonging to `layout` (default `'2x2'`, unchanged from
+ * before this parameter existed) are populated.
  */
 export function initialPlacements(
 	croppedWidthPx: number,
-	croppedHeightPx: number
-): Record<TileSlot, TilePlacement> {
+	croppedHeightPx: number,
+	layout: StitchLayout = '2x2'
+): Partial<Record<TileSlot, TilePlacement>> {
 	const offsetX = Math.round((croppedWidthPx * 3) / 4);
 	const offsetY = Math.round((croppedHeightPx * 3) / 4);
-	return {
-		'upper-left': { xPx: 0, yPx: 0, visible: true },
-		'upper-right': { xPx: offsetX, yPx: 0, visible: true },
-		'lower-left': { xPx: 0, yPx: offsetY, visible: true },
-		'lower-right': { xPx: offsetX, yPx: offsetY, visible: true }
-	};
+	switch (layout) {
+		case '2x2':
+			return {
+				'upper-left': { xPx: 0, yPx: 0, visible: true },
+				'upper-right': { xPx: offsetX, yPx: 0, visible: true },
+				'lower-left': { xPx: 0, yPx: offsetY, visible: true },
+				'lower-right': { xPx: offsetX, yPx: offsetY, visible: true }
+			};
+		case '1x2':
+			return {
+				left: { xPx: 0, yPx: 0, visible: true },
+				right: { xPx: offsetX, yPx: 0, visible: true }
+			};
+		case '2x1':
+			return {
+				top: { xPx: 0, yPx: 0, visible: true },
+				bottom: { xPx: 0, yPx: offsetY, visible: true }
+			};
+	}
 }
 
-/** The expected neighbor tiles whose overlap matters for export readiness. */
-export function expectedNeighbors(slot: TileSlot): readonly TileSlot[] {
-	switch (slot) {
-		case 'upper-left':
-			return ['upper-right', 'lower-left'];
-		case 'upper-right':
-			return ['upper-left', 'lower-right'];
-		case 'lower-left':
-			return ['upper-left', 'lower-right'];
-		case 'lower-right':
-			return ['upper-right', 'lower-left'];
+/**
+ * The expected neighbor tiles whose overlap matters for export readiness, within
+ * `layout` (default `'2x2'`, unchanged from before this parameter existed).
+ */
+export function expectedNeighbors(
+	slot: TileSlot,
+	layout: StitchLayout = '2x2'
+): readonly TileSlot[] {
+	switch (layout) {
+		case '2x2':
+			switch (slot) {
+				case 'upper-left':
+					return ['upper-right', 'lower-left'];
+				case 'upper-right':
+					return ['upper-left', 'lower-right'];
+				case 'lower-left':
+					return ['upper-left', 'lower-right'];
+				case 'lower-right':
+					return ['upper-right', 'lower-left'];
+				default:
+					return [];
+			}
+		case '1x2':
+			if (slot === 'left') return ['right'];
+			if (slot === 'right') return ['left'];
+			return [];
+		case '2x1':
+			if (slot === 'top') return ['bottom'];
+			if (slot === 'bottom') return ['top'];
+			return [];
 	}
 }
 
@@ -132,9 +191,10 @@ export function overlapArea(a: TileRect, b: TileRect): number {
  * slot is empty.
  */
 export function sessionDimensions(
-	tiles: Partial<Record<TileSlot, { readonly widthPx: number; readonly heightPx: number }>>
+	tiles: Partial<Record<TileSlot, { readonly widthPx: number; readonly heightPx: number }>>,
+	layout: StitchLayout = '2x2'
 ): { widthPx: number; heightPx: number } | null {
-	for (const slot of TILE_SLOTS) {
+	for (const slot of TILE_SLOTS_BY_LAYOUT[layout]) {
 		const tile = tiles[slot];
 		if (tile) return { widthPx: tile.widthPx, heightPx: tile.heightPx };
 	}
@@ -155,9 +215,10 @@ export interface ReadinessReport {
 }
 
 /**
- * Export readiness: all four tiles present, all matching the session requirement,
- * a valid shared crop, and a connected arrangement — starting from the upper-left
- * anchor, every loaded tile must be reachable through positive-area overlaps along
+ * Export readiness: every tile of `layout` present, all matching the session
+ * requirement, a valid shared crop, and a connected arrangement — starting from
+ * the layout's anchor slot (its first slot; `upper-left` for `'2x2'`), every
+ * loaded tile must be reachable through positive-area overlaps along
  * expected-neighbor edges only. A pair of detached but internally overlapping
  * clusters is therefore never ready. Visibility and opacity are preview concerns
  * and never affect readiness. Readiness never claims visual alignment; that stays
@@ -167,11 +228,14 @@ export function readiness(
 	tiles: Partial<Record<TileSlot, { readonly widthPx: number; readonly heightPx: number }>>,
 	crop: CropInsets,
 	placements: Partial<Record<TileSlot, TilePlacement>>,
-	required: { widthPx: number; heightPx: number } | null
+	required: { widthPx: number; heightPx: number } | null,
+	layout: StitchLayout = '2x2'
 ): ReadinessReport {
+	const slots = TILE_SLOTS_BY_LAYOUT[layout];
+	const anchor = slots[0];
 	const missing: TileSlot[] = [];
 	const dimensionMismatch: TileSlot[] = [];
-	for (const slot of TILE_SLOTS) {
+	for (const slot of slots) {
 		const tile = tiles[slot];
 		if (!tile) {
 			missing.push(slot);
@@ -187,14 +251,14 @@ export function readiness(
 	const invalidCrop = !validation?.ok;
 	const disconnected: TileSlot[] = [];
 	if (validation?.ok) {
-		const visited = new Set<TileSlot>(['upper-left']);
-		const queue: TileSlot[] = tiles['upper-left'] ? ['upper-left'] : [];
+		const visited = new Set<TileSlot>([anchor]);
+		const queue: TileSlot[] = tiles[anchor] ? [anchor] : [];
 		while (queue.length > 0) {
 			const slot = queue.shift() as TileSlot;
 			const placement = placements[slot];
 			if (!placement) continue;
 			const rect = tileRect(placement, validation.widthPx, validation.heightPx);
-			for (const neighbor of expectedNeighbors(slot)) {
+			for (const neighbor of expectedNeighbors(slot, layout)) {
 				if (visited.has(neighbor) || !tiles[neighbor] || !placements[neighbor]) continue;
 				if (
 					overlapArea(
@@ -207,8 +271,8 @@ export function readiness(
 				}
 			}
 		}
-		for (const slot of TILE_SLOTS) {
-			if (slot === 'upper-left' || !tiles[slot]) continue;
+		for (const slot of slots) {
+			if (slot === anchor || !tiles[slot]) continue;
 			if (!visited.has(slot)) disconnected.push(slot);
 		}
 	}

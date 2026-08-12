@@ -45,6 +45,7 @@ export interface CourseDetectionPerformance {
 		readonly teesMs: number;
 		readonly teeRasterMs: number;
 		readonly teeDetectionMs: number;
+		readonly basketFallbackMs: number;
 		readonly grammarMs: number;
 	};
 	readonly counts: {
@@ -54,6 +55,8 @@ export interface CourseDetectionPerformance {
 		readonly baskets: number;
 		readonly tees: number;
 		readonly basketAnchorScaleEvaluations: number;
+		readonly basketFallbackUnresolvedHoles: number;
+		readonly basketFallbackRecovered: number;
 	};
 	readonly calibration: {
 		readonly numberTemplateScale: NumberTemplateScale;

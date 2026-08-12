@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "coordinateSpace": "source-image-px",
+  "source": {
+    "fileName": "TheRec-R.PNG",
+    "widthPx": 1290,
+    "heightPx": 2796
+  },
+  "provenance": {
+    "labels": "visually read from source image",
+    "centers": "midpoint of the visible 48x36 near-black UDisc badge-body bounding box; number-detector centers were not used as truth"
+  },
+  "badges": [
+    { "label": 2, "xPx": 590.5, "yPx": 1029.5 },
+    { "label": 3, "xPx": 803.5, "yPx": 1594.5 },
+    { "label": 4, "xPx": 667.5, "yPx": 1874.5 },
+    { "label": 5, "xPx": 308.5, "yPx": 2184.5 },
+    { "label": 8, "xPx": 27.5, "yPx": 1390.5 }
+  ]
+}

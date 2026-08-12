@@ -20,7 +20,6 @@ import { describe, expect, test } from 'vitest';
 import { assignFour } from '../../src/lib/stitch/autoLayout';
 import { snapAlign } from '../../src/lib/stitch/cvMatch';
 import type { SnapNeighbor } from '../../src/lib/stitch/cvMatch';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
 import { available, loadCroppedTiles, REAL_CAPTURE_GROUND_TRUTH } from '../helpers/realCapture.js';
 
 // Placement tolerance in pixels, on each axis independently. Generous enough
@@ -29,9 +28,11 @@ import { available, loadCroppedTiles, REAL_CAPTURE_GROUND_TRUTH } from '../helpe
 // regression (wrong edge, swapped tile, off-by-one orientation) still fails.
 const TOLERANCE_PX = 4;
 
+type Slot2x2 = 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right';
+
 // Deliberately not upper-left first: file-selection order must not determine
 // the result. This is the true slot for each array index.
-const SCRAMBLED_ORDER: readonly TileSlot[] = [
+const SCRAMBLED_ORDER: readonly Slot2x2[] = [
 	'lower-right',
 	'upper-left',
 	'lower-left',
@@ -52,9 +53,10 @@ describe.skipIf(!available())('real capture acceptance', () => {
 				expect(layout.assignment[slot]).toBe(expectedIndex);
 			}
 
-			for (const slot of Object.keys(REAL_CAPTURE_GROUND_TRUTH.placements) as TileSlot[]) {
+			for (const slot of Object.keys(REAL_CAPTURE_GROUND_TRUTH.placements) as Slot2x2[]) {
 				const expected = REAL_CAPTURE_GROUND_TRUTH.placements[slot];
 				const actual = layout.placements[slot];
+				if (!actual) throw new Error(`expected a placement for ${slot}`);
 				expect(actual.xPx).toBeGreaterThanOrEqual(expected.xPx - TOLERANCE_PX);
 				expect(actual.xPx).toBeLessThanOrEqual(expected.xPx + TOLERANCE_PX);
 				expect(actual.yPx).toBeGreaterThanOrEqual(expected.yPx - TOLERANCE_PX);
@@ -67,8 +69,8 @@ describe.skipIf(!available())('real capture acceptance', () => {
 			// `assignFour`'s four-tile assignment above — Snap only ever needs a
 			// tile plus its already-placed neighbors).
 			const groundTruth = REAL_CAPTURE_GROUND_TRUTH.placements;
-			const tileFor = (slot: TileSlot) => ({ ...tiles[slot], scale: 1 });
-			const neighborsFor = (slots: readonly TileSlot[]): SnapNeighbor[] =>
+			const tileFor = (slot: Slot2x2) => ({ ...tiles[slot], scale: 1 });
+			const neighborsFor = (slots: readonly Slot2x2[]): SnapNeighbor[] =>
 				slots.map((slot) => ({
 					raster: tileFor(slot),
 					xPx: groundTruth[slot].xPx,

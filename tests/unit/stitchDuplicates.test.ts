@@ -12,9 +12,12 @@ import { findDuplicateRasters } from '../../src/lib/stitch/duplicates';
 import { smartImportFiles } from '../../src/lib/stitch/smartImport';
 import { buildGrayRaster, SLOT_ORIGINS } from '../helpers/smartMap';
 import type { AnalysisRaster } from '../../src/lib/stitch/analysis';
-import type { TileSlot } from '../../src/lib/stitch/geometry';
 
-const ALL_SLOTS: readonly TileSlot[] = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
+// This file always exercises the fixed 2x2 corner layout — the four literal
+// corner names, not the broader `TileSlot` union geometry.ts now exports for
+// 1x2/2x1 layouts — so `buildGrayRaster`'s narrower `SlotKey` param accepts
+// every element without a cast.
+const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
 
 function fileOf(name: string): File {
 	return new File([new Uint8Array(8).fill(1)], name, { type: 'image/png' });
@@ -38,7 +41,7 @@ async function importRasters(
 
 function tiles(overlapPx: number): AnalysisRaster[] {
 	const step = 200 - overlapPx;
-	const origins: Record<TileSlot, { x: number; y: number }> = {
+	const origins: Record<(typeof ALL_SLOTS)[number], { x: number; y: number }> = {
 		'upper-left': { x: 0, y: 0 },
 		'upper-right': { x: step, y: 0 },
 		'lower-left': { x: 0, y: step },

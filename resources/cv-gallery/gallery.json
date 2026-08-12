@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "numbers": {
+      "enabled": true,
+      "requiredResolutionClasses": ["non-stitched", "stitched"],
+      "maxCenterErrorPx": 5
+    },
+    "baskets": {
+      "enabled": true,
+      "requiredResolutionClasses": ["non-stitched", "stitched"],
+      "requiredCandidateCount": 18,
+      "maxFalsePositives": 0,
+      "associationEvaluated": false
+    },
+    "tees": {
+      "enabled": false,
+      "reason": "TODO: tee research is still moving quickly; development can track it separately, but it is not an MVP merge gate yet."
+    }
+  },
+  "cases": [
+    {
+      "id": "numbers-ribbon-reference-native",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/ribbon-reference/IMG_5641.jpg",
+      "truthPath": "resources/ribbon-reference/IMG_5641-number-golden.json"
+    },
+    {
+      "id": "numbers-reference-stitched",
+      "detector": "numbers",
+      "resolutionClass": "stitched",
+      "status": "pending-truth",
+      "inputPath": "resources/real-capture/ReferenceStitch.png",
+      "note": "Required stitched number gate. Add one independently verified full visible label set/center truth file; do not tune the detector to this image."
+    },
+    {
+      "id": "numbers-the-rec-left",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/stitch-annotate/TheRec/TheRec-L.PNG",
+      "truthPath": "resources/stitch-annotate/TheRec/TheRec-L-number-golden.json",
+      "note": "Visible-badge golden [1,5,6,7,8,9]. Labels were visually read from the source; centers come from badge-body pixel geometry, not detector output. Together with TheRec-R, active truth covers labels 1..9."
+    },
+    {
+      "id": "numbers-the-rec-right",
+      "detector": "numbers",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/stitch-annotate/TheRec/TheRec-R.PNG",
+      "truthPath": "resources/stitch-annotate/TheRec/TheRec-R-number-golden.json",
+      "note": "Visible-badge golden [2,3,4,5,8]. Labels were visually read from the source; centers come from badge-body pixel geometry, not detector output. Together with TheRec-L, active truth covers labels 1..9."
+    },
+    {
+      "id": "baskets-golden-native",
+      "detector": "baskets",
+      "resolutionClass": "non-stitched",
+      "status": "active",
+      "inputPath": "resources/GoldenBasketSet.chainspot.zip",
+      "evaluation": "golden-localization"
+    },
+    {
+      "id": "baskets-reference-stitched-smoke",
+      "detector": "baskets",
+      "resolutionClass": "stitched",
+      "status": "active",
+      "inputPath": "resources/real-capture/ReferenceStitch.png",
+      "evaluation": "candidate-count-smoke",
+      "note": "Multi-resolution scale smoke only: require 18 raw basket candidates through the production course path. No second set of 18 manually reconstructed basket centers. Association is not evaluated."
+    }
+  ]
+}

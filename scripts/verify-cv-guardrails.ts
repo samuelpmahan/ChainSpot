@@ -27,6 +27,37 @@ function invariant(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(`CV guardrail regression failed: ${message}`);
 }
 
+/**
+ * Standalone baseline check for the occluded-edge-loop detector against
+ * GoldenTeeSet, independent of the number-badge calibration fixture (which is
+ * absent in some environments). Confirms the rail-pairing geometry still
+ * survives to produce the full 18-candidate set at the nominal UI scale --
+ * a coarse regression net for Stage 2's uiScalePx-relative geometry rewrite.
+ */
+export async function verifyOccludedTeeBaseline(
+	teeFixture: string,
+	templateDir: string,
+	outputDir: string
+): Promise<void> {
+	const occluded = await runTeeDetection({
+		inputPath: teeFixture,
+		mode: 'occluded-edge-loop',
+		outputDir,
+		templateDir,
+		uiScalePx: EXPECTED_TEE_UI_SCALE_MIN,
+		maxCandidates: 18,
+		ignoreCirclesPx: []
+	});
+	invariant(
+		(occluded.stageCounts.geometry ?? 0) > 0,
+		`occluded-edge-loop geometry stage produced ${occluded.stageCounts.geometry ?? 0} candidates, expected > 0`
+	);
+	invariant(
+		occluded.candidateCount === 18,
+		`occluded-edge-loop final candidate count is ${occluded.candidateCount}, expected 18`
+	);
+}
+
 async function main(): Promise<void> {
 	const projectRoot = resolve(import.meta.dirname, '..');
 	const templateDir = join(projectRoot, 'static', 'resources', 'chainspot_cv_templates');
@@ -41,6 +72,13 @@ async function main(): Promise<void> {
 	invariant(numberGolden.badges.length === 18, `number golden contains ${numberGolden.badges.length} badges, expected 18`);
 
 	try {
+		// Run this before the number-badge section below: it depends only on
+		// GoldenTeeSet, which is present in every environment, whereas the
+		// number-badge section needs resources/ribbon-reference/IMG_5641.jpg,
+		// which is absent in some (e.g. this one) -- keeping this check first
+		// makes it independently verifiable even when that fixture is missing.
+		await verifyOccludedTeeBaseline(teeFixture, templateDir, join(outputRoot, 'occluded-baseline'));
+
 		// Run calibration on the clean UDisc fixture that actually contains the
 		// repeated number badges. GoldenTeeSet is a separate raw-tee truth fixture
 		// and must not be overloaded as number-classification truth.
