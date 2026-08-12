@@ -389,45 +389,11 @@ function raysPolarityCosine(
 		: 1;
 }
 
-/**
- * Signed area (twice) of badge, ref, p -- positive/negative tells which side
- * of the badge->ref line p falls on. Sign only matters here; magnitude is
- * unused.
- */
-function sideOfLine(
-	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
-	ref: Pick<IndexedPoint, 'xPx' | 'yPx'>,
-	p: Pick<IndexedPoint, 'xPx' | 'yPx'>
-): number {
-	const refX = ref.xPx - badge.xPx;
-	const refY = ref.yPx - badge.yPx;
-	const pX = p.xPx - badge.xPx;
-	const pY = p.yPx - badge.yPx;
-	return refX * pY - refY * pX;
-}
-
-/**
- * On a straight hole the badge sits on the tee->basket line (polarity cosine
- * near -1). On a bent hole (a dogleg) it doesn't -- the fairway continues
- * past the badge and bends, empirically most often toward wherever the next
- * hole's tee is (course designers route the walk from one green to the next
- * tee, and doglegs tend to follow that same routing). `nextTee` is the
- * already-resolved tee of hole N+1, passed in only when it is itself a
- * confident (non-bootstrap) assignment -- corroborating one uncertain
- * candidate with another is the failure mode this guards against. When the
- * basket's deviation from straight falls on the same side as the next tee,
- * the polarity penalty is discounted rather than waived outright: a bend
- * that happens to land on the right side is still weaker evidence than a
- * clean straight-line topology.
- */
-const BEND_TOWARD_NEXT_TEE_DISCOUNT = 0.2;
-
 function basketCost(
 	badge: Pick<IndexedPoint, 'xPx' | 'yPx'>,
 	tee: Pick<IndexedPoint, 'xPx' | 'yPx'>,
 	basket: Pick<IndexedPoint, 'xPx' | 'yPx'>,
-	polarityPenaltyPx: number,
-	nextTee?: Pick<IndexedPoint, 'xPx' | 'yPx'>
+	polarityPenaltyPx: number
 ): {
 	distancePx: number;
 	polarityCosine: number;
@@ -435,18 +401,10 @@ function basketCost(
 } {
 	const basketLength = pointDistance(badge, basket);
 	const polarityCosine = raysPolarityCosine(badge, tee, basket);
-	let effectivePenaltyPx = polarityPenaltyPx;
-	if (nextTee) {
-		const basketSide = sideOfLine(badge, tee, basket);
-		const nextTeeSide = sideOfLine(badge, tee, nextTee);
-		if (basketSide !== 0 && nextTeeSide !== 0 && Math.sign(basketSide) === Math.sign(nextTeeSide)) {
-			effectivePenaltyPx = polarityPenaltyPx * BEND_TOWARD_NEXT_TEE_DISCOUNT;
-		}
-	}
 	return {
 		distancePx: basketLength,
 		polarityCosine,
-		cost: basketLength + effectivePenaltyPx * (polarityCosine + 1)
+		cost: basketLength + polarityPenaltyPx * (polarityCosine + 1)
 	};
 }
 
@@ -628,45 +586,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	// basket, so same-direction endpoints pay the proven 80px (by default)
 	// penalty.  This recomputes basket ownership with the real (Stage 3) tee
 	// now known, rather than trusting the Stage 2 preliminary pass verbatim.
-	// On a bent hole the badge doesn't sit on the tee->basket line at all --
-	// see `basketCost`'s doc comment for why the next hole's tee, when it is
-	// itself confidently known, is used to tell a plausible dogleg from a
-	// wrong basket instead of penalizing both identically.
-	const confidentNextTee = (holeNumber: number): TeeAssignment | undefined => {
-		const next = teeForHole.get(holeNumber + 1)?.assignment;
-		if (!next) return undefined;
-		return input.tees[next.candidateIndex]?.bootstrapDecision === 'review' ? undefined : next;
-	};
-	// The discount only ever applies once a straight interpretation has
-	// already failed for this specific badge: if some nearby basket already
-	// fits the classic opposite-ray topology well, that's decisive and the
-	// bend logic must not touch this hole at all. Without this gate, the
-	// discount was found (empirically, on straight holes 6/7 of the IMG_5641
-	// fixture) to cheapen a *wrong* candidate that happened to fall on the
-	// next tee's side, letting it underbid the correct, already-well-fitting
-	// straight basket in the Hungarian solve.
-	const STRAIGHT_FIT_EXISTS_COSINE = -0.85;
-	const NEARBY_STRAIGHT_FIT_CANDIDATES = 5;
-	const bentEligibleNextTee = (holeNumber: number): TeeAssignment | undefined => {
-		const nextTee = confidentNextTee(holeNumber);
-		if (!nextTee) return undefined;
-		const badge = badgeForHole.get(holeNumber)!;
-		const tee = teeForHole.get(holeNumber)!.assignment;
-		const nearest = baskets
-			.map((basket) => ({ basket, distancePx: pointDistance(badge, basket) }))
-			.sort((left, right) => left.distancePx - right.distancePx)
-			.slice(0, NEARBY_STRAIGHT_FIT_CANDIDATES);
-		const bestNearbyPolarityCosine = Math.min(
-			...nearest.map(({ basket }) => raysPolarityCosine(badge, tee, basket))
-		);
-		return bestNearbyPolarityCosine <= STRAIGHT_FIT_EXISTS_COSINE ? undefined : nextTee;
-	};
 	const basketHoleNumbers = teeHoleNumbers.filter((holeNumber) => teeForHole.has(holeNumber));
 	const basketCosts = basketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
 		const tee = teeForHole.get(holeNumber)!.assignment;
-		const nextTee = bentEligibleNextTee(holeNumber);
-		return baskets.map((basket) => basketCost(badge, tee, basket, polarityPenaltyPx, nextTee).cost);
+		return baskets.map((basket) => basketCost(badge, tee, basket, polarityPenaltyPx).cost);
 	});
 	const basketAssignments = hungarian(withDummyColumns(basketCosts, baskets.length));
 	const basketForHole = new Map<number, BasketDetails>();
@@ -684,7 +608,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const basket = baskets[basketIndex];
 		const badge = badgeForHole.get(holeNumber)!;
 		const tee = teeForHole.get(holeNumber)!.assignment;
-		const detail = basketCost(badge, tee, basket, polarityPenaltyPx, bentEligibleNextTee(holeNumber));
+		const detail = basketCost(badge, tee, basket, polarityPenaltyPx);
 		const costs = basketCosts[row];
 		const chosen = costs[basketIndex];
 		const sorted = [...costs].sort((a, b) => a - b);
