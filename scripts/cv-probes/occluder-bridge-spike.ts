@@ -33,7 +33,9 @@
  * Usage:
  *   npx tsx scripts/cv-probes/occluder-bridge-spike.ts
  */
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PNG } from 'pngjs';
 import {
 	DEFAULT_RIBBON_MASS_PARAMS,
 	nearestKeptDistancePx,
@@ -301,6 +303,11 @@ interface BridgeRecord {
 	readonly b: number;
 	readonly cause: string;
 	readonly gapPx: number;
+	/** Gap segment endpoints, source px — the exact span the bridge crosses. */
+	readonly aXPx: number;
+	readonly aYPx: number;
+	readonly bXPx: number;
+	readonly bYPx: number;
 }
 
 /**
@@ -340,7 +347,16 @@ function bridge(
 		if (pairTested.has(`${key}|${cause}`)) return;
 		pairTested.add(`${key}|${cause}`);
 		uf.union(a.label, b.label);
-		bridges.push({ a: a.label, b: b.label, cause, gapPx: Math.round(pair.distEv * scale * 10) / 10 });
+		bridges.push({
+			a: a.label,
+			b: b.label,
+			cause,
+			gapPx: Math.round(pair.distEv * scale * 10) / 10,
+			aXPx: pair.ax * scale,
+			aYPx: pair.ay * scale,
+			bXPx: pair.bx * scale,
+			bYPx: pair.by * scale
+		});
 	};
 
 	// Ring bridges: candidate components approach the ring band of some basket.
@@ -409,6 +425,89 @@ function mappedPlacements(placements: readonly RibbonMassSeedPlacement[], uf: Un
 		...p,
 		componentLabel: p.componentLabel === null ? null : uf.find(p.componentLabel)
 	}));
+}
+
+// ---------------------------------------------------------------------------
+// Rendering (--render): the bridged result drawn on the source image —
+// kept mask green, discovered rings dotted, bridges as thick red spans.
+// ---------------------------------------------------------------------------
+
+function renderBridges(
+	raster: { data: Uint8Array; widthPx: number; heightPx: number },
+	segmentation: RibbonMassSegmentation,
+	kept: ReadonlySet<number>,
+	baskets: readonly { xPx: number; yPx: number }[],
+	radii: readonly number[],
+	bridges: readonly BridgeRecord[],
+	truthTees: readonly { xPx: number; yPx: number }[],
+	outPath: string
+): void {
+	const { widthPx, heightPx } = raster;
+	const png = new PNG({ width: widthPx, height: heightPx });
+	raster.data.forEach((value, index) => {
+		png.data[index] = value;
+	});
+
+	const blend = (x: number, y: number, r: number, g: number, b: number, alpha: number) => {
+		const xi = Math.round(x);
+		const yi = Math.round(y);
+		if (xi < 0 || xi >= widthPx || yi < 0 || yi >= heightPx) return;
+		const p = (yi * widthPx + xi) * 4;
+		png.data[p] = Math.round(png.data[p] * (1 - alpha) + r * alpha);
+		png.data[p + 1] = Math.round(png.data[p + 1] * (1 - alpha) + g * alpha);
+		png.data[p + 2] = Math.round(png.data[p + 2] * (1 - alpha) + b * alpha);
+	};
+	const disc = (x: number, y: number, radius: number, r: number, g: number, b: number, alpha: number) => {
+		for (let dy = -radius; dy <= radius; dy += 1)
+			for (let dx = -radius; dx <= radius; dx += 1)
+				if (dx * dx + dy * dy <= radius * radius) blend(x + dx, y + dy, r, g, b, alpha);
+	};
+
+	// Kept mask, green tint.
+	const { labels, widthEv, heightEv, scale } = segmentation;
+	for (let y = 0; y < heightEv; y += 1) {
+		for (let x = 0; x < widthEv; x += 1) {
+			if (!kept.has(labels[y * widthEv + x])) continue;
+			for (let sy = 0; sy < scale; sy += 1)
+				for (let sx = 0; sx < scale; sx += 1) blend(x * scale + sx, y * scale + sy, 60, 230, 90, 0.35);
+		}
+	}
+	// Discovered rings, dotted white.
+	for (const basket of baskets) {
+		for (const radius of radii) {
+			for (let step = 0; step < 240; step += 1) {
+				if (step % 4 >= 2) continue;
+				const angle = (2 * Math.PI * step) / 240;
+				blend(basket.xPx + radius * Math.cos(angle), basket.yPx + radius * Math.sin(angle), 255, 255, 255, 0.8);
+			}
+		}
+	}
+	// Bridges: thick red spans across the exact gap segment.
+	for (const bridgeRecord of bridges) {
+		const steps = Math.max(2, Math.ceil(bridgeRecord.gapPx));
+		for (let step = 0; step <= steps; step += 1) {
+			const t = step / steps;
+			disc(
+				bridgeRecord.aXPx + (bridgeRecord.bXPx - bridgeRecord.aXPx) * t,
+				bridgeRecord.aYPx + (bridgeRecord.bYPx - bridgeRecord.aYPx) * t,
+				2,
+				255,
+				40,
+				40,
+				0.9
+			);
+		}
+	}
+	// Truth tees, blue rings — the endpoints bridging is supposed to reach.
+	for (const tee of truthTees) {
+		for (let step = 0; step < 90; step += 1) {
+			const angle = (2 * Math.PI * step) / 90;
+			disc(tee.xPx + 9 * Math.cos(angle), tee.yPx + 9 * Math.sin(angle), 1, 40, 140, 255, 0.95);
+		}
+	}
+
+	writeFileSync(outPath, PNG.sync.write(png));
+	console.log(`  wrote ${outPath}`);
 }
 
 for (const course of FIXTURE_COURSES) {
@@ -510,5 +609,18 @@ for (const course of FIXTURE_COURSES) {
 		console.log(
 			`  tee within 30px: ${rb.tee}/18 -> ${ra.tee}/18   basket within 30px: ${rb.basket}/18 -> ${ra.basket}/18`
 		);
+
+		if (process.argv.includes('--render') && ringRule === 'straddle') {
+			renderBridges(
+				raster,
+				segmentation,
+				keptAfter,
+				baskets,
+				radii,
+				bridges,
+				course.truth.map(([, tx, ty]) => ({ xPx: tx, yPx: ty })),
+				join(process.cwd(), `scripts/cv-probes/ribbon-mass-results-ts/${course.name}-ring-bridge.png`)
+			);
+		}
 	}
 }
