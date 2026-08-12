@@ -125,22 +125,116 @@ keeps the log a faithful record of what actually happened, including
 "user got it wrong twice before landing on the right answer," which is
 itself useful signal about how hard a hole was.
 
-## What this doesn't include (explicitly out of scope here)
+## Export, revised: no sync needed for alpha
 
-- **No export/upload/sync mechanism.** The app is fully local today --
-  no auth, no backend, no network calls (confirmed: no telemetry/analytics
-  convention exists anywhere in the codebase to align with; this is
-  greenfield). Turning a device's local correction log into part of a
-  shared labeled-course corpus needs a separate, explicit, almost
-  certainly opt-in mechanism ("share anonymized corrections to help
-  improve detection") that does not exist and is a product/privacy
-  decision, not a CV one. This doc only defines what gets recorded and
-  where it lives *before* that decision gets made.
-- **Identity.** There is no user/device ID concept in the app at all
-  today. If/when export exists, a purely local, randomly-generated,
-  non-identifying device ID (for de-duplication/weighting only, never
-  tied to a real identity) is the minimum needed -- not designed here,
-  flagged so it isn't forgotten when export is designed.
+No backend/sync mechanism is needed to start -- alpha users can just send
+whichever file gets asked for. So the only new surface is a plain **"export
+corrections" action** in Annotate Round: serializes that session's
+(or that project's) `CorrectionEvent[]` to a single JSON file the user
+downloads/shares however they already share files. No auth, no upload
+endpoint, no identity system -- just a file, on request, same as exporting
+a `.chainspot.zip` today. This replaces the earlier "no export mechanism"
+scoping-out below; it turned out to be the cheap part.
+
+- **Identity**: still none needed. Since export is "send Sam the file,"
+  not "sync to a shared corpus automatically," there's no de-duplication
+  problem to solve yet -- a course's corrections are just whatever's in
+  the file someone sent. A device ID only becomes worth adding if/when
+  multiple alpha testers are correcting the *same* course and their
+  files need reconciling; not needed for a first version.
+- **Still out of scope**: anything automatic (background sync, opt-in
+  telemetry upload, a shared server-side corpus). Those stay product/
+  privacy decisions for later, not blocked on anything in this doc.
+
+## Holeshape (corridor bends): deferred, and why specifically
+
+Validate 18/18/18 (badge + tee + basket, all three, per hole) before
+adding bend annotation, not just to sequence work but because bends have
+**no confidence signal to gate on at all** -- there's no bend-shape
+equivalent of GRayT's NCC gate or courseGrammar's confidence/failure
+taxonomy validated this session. Adding bend annotation to the
+semi-supervised UI now would mean 100% manual clicks with zero automation
+credit, which actively muddies the "clicks the user didn't have to make"
+metric this doc is trying to make legible (see below) by mixing in a
+category that can never show a saving yet. Once endpoints are solid and
+the correction log has real volume, bends become a natural second pass --
+and the accumulated corridor-adjacent data (badge/tee/basket positions
+across many real holes) might even be enough to attempt real bend
+detection by then, rather than staying pure manual entry indefinitely.
+
+## Three things to get right first
+
+Per direction: tight focus on these three, ahead of anything else in this
+doc.
+
+### 1. Simple, clear user asks
+
+The three-way split (confirm one / disambiguate between two / place from
+scratch) from the gating-policy section above is the *mechanism*; this is
+the *copy*. Each ask should be answerable in one glance and one tap, no CV
+vocabulary exposed:
+
+- **Confirm**: "Is this hole 6's tee?" + the marker shown on the image.
+  One tap confirms, a drag corrects -- reuses the existing frictionless
+  chip verbatim, just now logged.
+- **Disambiguate**: "Which pin is hole 2's basket?" with exactly the two
+  contested candidates shown, nothing else on screen competing for
+  attention. Never more than two options -- if courseGrammar's candidate
+  pool has more than one real contender beyond the top two, that's a
+  `place`-from-scratch case instead, not a three-or-more-way picker.
+- **Place**: "Tap hole 14's tee" with no candidate shown at all (per the
+  isolated-badge pattern, showing a bad guess to reject is worse than
+  admitting there isn't one) -- optionally centered/zoomed near the badge
+  as a starting point, never a system-wide guess.
+
+No hole should ever surface more than one of these at a time, and the
+copy should never mention "confidence," "NCC," "gate," or any detector
+name -- that vocabulary is for the next section, deliberately not this
+one.
+
+### 2. Clarifying the pipeline (internal only, for Sam -- not shipped)
+
+A separate, internal-only view of exactly what the end-user copy above
+hides: which detector produced (or failed to produce) each proposal, its
+confidence, the gate decision and why, and -- once corrections exist --
+whether the gate call turned out right in hindsight. This is the
+`CorrectionEvent.priorProposal`/`gateDecision`/`reason` fields, rendered
+plainly, per hole, per round.
+
+This is the direct analogue of what `grayt_tune.py`'s diagnostic overlays
+already do for the CV probes in this repo (main overlay = only what the
+system would claim; diagnostic overlay = every candidate, gate-passed or
+rejected, in context) -- same idea, pointed at real Annotate Round
+sessions instead of the two labeled fixtures. Concretely, worth showing
+per hole: `detector`, `confidence`, `gateDecision`, `reason`, and (once
+available) `userAction` next to it, so a glance answers "was this gate
+call right?" without re-deriving it from raw data. This is what makes the
+gating thresholds in this doc (GRayT's 0.55, courseGrammar's failure
+flags) something that gets *revisited against real outcomes* instead of
+staying frozen at whatever the two-course LOOCV pass found -- not
+shippable externally (raw detector names/scores are meaningless to an end
+user), but exactly what's needed to know whether a threshold should move.
+
+### 3. Quantifying "clicks the user didn't have to make"
+
+Directly computable from the correction log, no new instrumentation
+beyond what's already specified:
+
+- **Per hole/endpoint**: 1 click saved if `gateDecision === 'auto-accepted'`
+  and no `CorrectionEvent` exists for that hole/endpoint at all (never
+  needed a second look), or a `confirm` with `dragDistancePx === 0`/absent
+  (looked at it, it was already right). Not saved if `move`/`replace`
+  followed an auto-accept -- that was a wrong auto-accept, not a saved
+  click, and should count *against* the gate threshold, not for it.
+- **Per round**: `clicksAvoided = autoAcceptedAndUnchanged / totalEndpoints`
+  (out of up to 36 for 18 holes' tee+basket, before badges). Cheap,
+  legible, and directly a validation-or-indictment of wherever the gate
+  threshold currently sits -- a low number is itself a finding, not a bug
+  in the metric.
+- **Cumulative, across rounds/courses**: the same ratio over the whole
+  correction-log history is the honest, ongoing answer to "is the
+  automation actually saving anyone time," in a way that doesn't depend on
+  re-running the LOOCV report by hand every time someone wants to know.
 
 ## Semi-supervised gating policy (the "when to ask" decision)
 
