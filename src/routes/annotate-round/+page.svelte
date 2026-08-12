@@ -562,7 +562,10 @@
 			value === ''
 				? null
 				: ({ confuserLabel: value as RibbonMassConfuserLabel } satisfies RibbonMassComponentAnnotation);
-		const updated = withComponentAnnotations(activeShadowRun, { [componentLabel]: annotation });
+		// $state deep-proxies the run; IndexedDB's structured clone rejects
+		// proxies, so derive the persisted record from a plain snapshot.
+		const plainRun = $state.snapshot(activeShadowRun) as RibbonMassShadowRun;
+		const updated = withComponentAnnotations(plainRun, { [componentLabel]: annotation });
 		activeShadowRun = updated;
 		if (latestShadowRun?.runId === updated.runId) latestShadowRun = updated;
 		void getDefaultRibbonMassShadowRunStore()
