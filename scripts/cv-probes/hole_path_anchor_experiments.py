@@ -134,7 +134,15 @@ def containment(results):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="/tmp/chainspot-hole-path-exp")
+    ap.add_argument("--final", action="store_true",
+                    help="run only the tuned mask+anchor variant: evidence "
+                         "saturated at dL/4 and bend margin 0.05, which fits "
+                         "all known-straight holes (3, 9-13, 16, 17) with 0 "
+                         "bends while keeping the unambiguous bends (5, 8, 18)")
     args = ap.parse_args()
+    if args.final:
+        base.EVIDENCE_DL = 4.0
+        base.BEND_MARGIN = 0.05
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -152,12 +160,15 @@ def main():
 
     plain = make_scorer(ev, np.ones((h, w), bool))
     masked = make_scorer(ev, ~badge_mask)
-    arms = {
-        "baseline": (plain, False),
-        "anchor": (plain, True),
-        "mask": (masked, False),
-        "mask+anchor": (masked, True),
-    }
+    if args.final:
+        arms = {"mask+anchor": (masked, True)}
+    else:
+        arms = {
+            "baseline": (plain, False),
+            "anchor": (plain, True),
+            "mask": (masked, False),
+            "mask+anchor": (masked, True),
+        }
 
     all_results = {}
     for arm, (score, anchored) in arms.items():

@@ -107,6 +107,44 @@ Findings:
   invariant, and needs the trimmed mean less. The remaining bend budget
   after the badge can stay at ≤2 on this course.
 
+## Why straight holes grew spurious bends (and the fix)
+
+Course truth from the author: holes 3, 9–13, 16, 17 are perfectly straight
+(same corridor width as 1–3), yet the mask+anchor fit gave most of them 1–3
+bends. Diagnosis (see `hole-path-results/diag-straight-holes-*.png`):
+
+- **The bends are micro-adjustments, not route errors** — typically 10–20 px
+  lateral, gaining 0.03–0.23 score. Two mechanisms:
+  1. **Off-ridge anchors.** The badge center and basket point lie on the
+     corridor but a few px off its *brightness ridge*; the corridor band is
+     narrow, so a straight chord rides the band's edge and a small bend
+     recenters it (hole 11 is the clean example: the badge sits low on the
+     corridor, the chord hugs the bottom edge, the fit bends up).
+  2. **Terrain-dependent evidence.** Over dark scrub the translucent
+     ribbon's absolute brightening is smaller, so `clip(dL/12)` leaves the
+     true corridor at 0.4–0.6 and a detour toward brighter pixels can
+     outscore it.
+- **Fix: flatten the evidence so band-interior position stops mattering.**
+  Saturating at `clip(dL/4)` makes every on-corridor pixel ≈ 1 regardless of
+  underlying terrain or ridge offset; recentering then gains almost nothing,
+  and raising the bend margin to 0.05 rejects the residual micro-gains
+  (largest observed: 0.046 on hole 10). Run via
+  `hole_path_anchor_experiments.py --final`.
+- **Result:** all eight known-straight holes fit with 0 bends; the
+  unambiguous doglegs keep exactly one post-badge bend each with huge,
+  clearly-real gains (hole 18: 0.48→0.99, hole 8: 0.76→1.00, hole 5:
+  0.94→1.00).
+- **Known cost: shallow sags below ~25 px are no longer detected.** Hole 1's
+  gentle mid-corridor dip gains only 0.029 — inside the same range as the
+  spurious micro-bends (up to 0.046), and their lateral deviations overlap
+  too (~10–20 px fake vs ~25 px real), so no margin or deviation gate
+  separates them on this fixture; band-tolerant (dilated-evidence) scoring
+  was also tried and has the same blind spot. Hole 1 therefore fits straight
+  and its golden containment drops to 70 % (2 and 3 stay at 94–95 %).
+  Under-bending is the chosen failure mode: a straight proposal through the
+  corridor is easy to nudge in review, while spurious bends on straight
+  holes were the more common and more misleading error.
+
 ## Relationship to the paused work
 
 This does not revive band/edge detection — it replaces it. If this is
