@@ -147,9 +147,10 @@ export interface BasketAssignment {
 	readonly distancePx: number;
 	/**
 	 * -1 means tee and basket lie on opposite badge rays (ideal); +1 means
-	 * same ray (strongly suspicious).
+	 * same ray (strongly suspicious). Undefined when the hole has no
+	 * resolved tee to define a ray from -- distance-only ownership.
 	 */
-	readonly polarityCosine: number;
+	readonly polarityCosine?: number;
 	/** Hungarian cost: distance + opposite-direction penalty. */
 	readonly cost: number;
 	readonly runnerUpCost?: number;
@@ -586,11 +587,24 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	// basket, so same-direction endpoints pay the proven 80px (by default)
 	// penalty.  This recomputes basket ownership with the real (Stage 3) tee
 	// now known, rather than trusting the Stage 2 preliminary pass verbatim.
-	const basketHoleNumbers = teeHoleNumbers.filter((holeNumber) => teeForHole.has(holeNumber));
+	//
+	// Every badge-having hole competes here, even one whose Stage 3 tee
+	// bootstrap failed (`missing-tee`): dropping it from the pool would not
+	// remove its basket from the world, it would just leave that basket
+	// unclaimed and available for a neighboring (tee-having) hole to win by
+	// distance/polarity math, even when that neighbor's own badge is farther
+	// from it than the tee-less hole's badge is. A tee-less hole falls back
+	// to distance-only cost -- `raysPolarityCosine`/`basketCost` need a real
+	// tee point to define the ray, and there is no principled substitute for
+	// one (in particular, `preliminaryBasketForHole` is a basket, not a
+	// tee-like reference, and reusing it here would be circular).
+	const basketHoleNumbers = teeHoleNumbers;
 	const basketCosts = basketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
-		const tee = teeForHole.get(holeNumber)!.assignment;
-		return baskets.map((basket) => basketCost(badge, tee, basket, polarityPenaltyPx).cost);
+		const tee = teeForHole.get(holeNumber)?.assignment;
+		return baskets.map((basket) =>
+			tee ? basketCost(badge, tee, basket, polarityPenaltyPx).cost : pointDistance(badge, basket)
+		);
 	});
 	const basketAssignments = hungarian(withDummyColumns(basketCosts, baskets.length));
 	const basketForHole = new Map<number, BasketDetails>();
@@ -607,8 +621,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		}
 		const basket = baskets[basketIndex];
 		const badge = badgeForHole.get(holeNumber)!;
-		const tee = teeForHole.get(holeNumber)!.assignment;
-		const detail = basketCost(badge, tee, basket, polarityPenaltyPx);
+		const tee = teeForHole.get(holeNumber)?.assignment;
+		const distancePx = pointDistance(badge, basket);
+		const detail = tee
+			? basketCost(badge, tee, basket, polarityPenaltyPx)
+			: { distancePx, polarityCosine: undefined, cost: distancePx };
 		const costs = basketCosts[row];
 		const chosen = costs[basketIndex];
 		const sorted = [...costs].sort((a, b) => a - b);
@@ -616,7 +633,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const runnerUp = assignmentMargin(chosen, costs);
 		const localRank = costs.filter((cost) => cost < chosen - 1e-6).length + 1;
 		const topologyConfidence = endpointConfidence(basket.confidence, localRank, chosen, nearest, runnerUp);
-		const polarityConfidence = clamp01((1 - detail.polarityCosine) / 2);
+		// No tee means no ray to score polarity against. Rather than fabricate a
+		// polarity value that could read as more (or less) confident than the
+		// topology alone earns, the blend collapses to topology only.
+		const polarityConfidence =
+			detail.polarityCosine === undefined ? topologyConfidence : clamp01((1 - detail.polarityCosine) / 2);
 		const rawConfidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
 		const sourceBasket = input.baskets[basket.sourceIndex];
 		const confidence = sourceBasket.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
@@ -655,7 +676,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				message: `Hole ${holeNumber} received its ${localRank}th-lowest basket cost because a better basket belongs to another hole.`
 			});
 		}
-		if (detail.polarityCosine > 0.4) {
+		if (detail.polarityCosine !== undefined && detail.polarityCosine > 0.4) {
 			failures.push({
 				kind: 'basket-polarity-conflict',
 				severity: 'warning',
@@ -667,9 +688,13 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		}
 	});
 
-	// A missing badge suppresses subsequent ownership stages; make each absent
-	// endpoint explicit so UI review does not look like a partially successful
-	// automatic placement.
+	// A missing badge suppresses every subsequent ownership stage (Stage 3 and
+	// Stage 4 both key off `badgeForHole`); make each absent endpoint explicit
+	// so UI review does not look like a partially successful automatic
+	// placement. A missing *tee* no longer implies a missing basket -- Stage 4
+	// still runs distance-only basket matching for a tee-less hole and already
+	// records its own `missing-basket` failure above if that solve also comes
+	// up empty, so there is nothing to synthesize here for that case.
 	for (const holeNumber of holeNumbers) {
 		if (!badgeForHole.has(holeNumber)) {
 			failures.push({
@@ -683,13 +708,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'error',
 				holeNumber,
 				message: `Hole ${holeNumber}'s basket cannot be associated without its number badge.`
-			});
-		} else if (!teeForHole.has(holeNumber)) {
-			failures.push({
-				kind: 'missing-basket',
-				severity: 'error',
-				holeNumber,
-				message: `Hole ${holeNumber}'s basket cannot be associated without its tee.`
 			});
 		}
 	}
