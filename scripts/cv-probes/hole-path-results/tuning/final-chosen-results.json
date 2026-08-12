@@ -1,0 +1,56 @@
+{
+ "tunable": {
+  "GoldenTeeSet": {
+   "nHoles": 18,
+   "nPass": 14,
+   "nFalseAccept": 0,
+   "meanErr": 3.73,
+   "maxErr": 7.2
+  },
+  "AlexClarkSet": {
+   "nHoles": 18,
+   "nPass": 8,
+   "nFalseAccept": 0,
+   "meanErr": 5.44,
+   "maxErr": 7.6
+  }
+ },
+ "overlay": {
+  "HeritagePark-Main": {
+   "nPass": 0,
+   "nTotal": 18,
+   "checks": [],
+   "violations": []
+  },
+  "NorthPark-ShortTees": {
+   "nPass": 1,
+   "nTotal": 18,
+   "checks": [
+    {
+     "hole": 14,
+     "ribbonEvidence": 0.0,
+     "ribbonOk": false,
+     "degOffFromCenter": 6.5,
+     "bearingAdjDeg": 2.0,
+     "badgeAimOk": true,
+     "anyViolation": true
+    }
+   ],
+   "violations": [
+    14
+   ]
+  },
+  "TowneLake-RedTees-a": {
+   "nPass": 0,
+   "nTotal": 18,
+   "checks": [],
+   "violations": []
+  },
+  "TowneLake-RedTees-b": {
+   "nPass": 0,
+   "nTotal": 16,
+   "checks": [],
+   "violations": []
+  }
+ }
+}
