@@ -425,7 +425,7 @@ honest truth-provenance is meant to prevent. The value of this pass is the
 two concrete findings above (both worth a production follow-up), not a new
 parameter recommendation.
 
-## Addendum 2: ribbon-width as a stage-1 discriminator (in progress)
+## Addendum 2: ribbon-width as a stage-1 discriminator (closed out)
 
 Mid-session design discussion surfaced that the current bearing-seed
 (corridor hill-climb fit to a pre-supplied basket, reversed) adds real,
@@ -506,20 +506,66 @@ signal worse, not better (tee-ward dropout rose from 0.135/0.191 to
 legitimately passes near some *other* hole's basket, and masking it
 removes real evidence, not just confuser evidence. Excluding markers
 within ~150-200px of the current badge from the mask (leaving "nearby but
-foreign" markers alone, only masking genuinely distant ones) fixed this:
-tee-ward dropout stayed flat (0.135→0.135/0.150, 0.191→0.191 exactly) while
-wrong-direction dropout still rose (0.644→0.675, 0.657→0.666).
+foreign" markers alone, only masking genuinely distant ones) appeared to
+fix this in isolated dropout-rate testing.
 
-Wired into the real `recover_tee` pipeline (actual corridor-fit seeding,
-not an oracle bearing) with this masking applied: **GoldenTeeSet stays
-11/18 with hole 8 improving 146.5px→39.4px** (one other hole regresses
-8.8px→12.4px, still passing); **AlexClarkSet improves 4/18→6/18**
-(hole 6: 129.5px→8.2px, no other holes affected). This is a real,
-validated improvement to stage-1 accuracy on the actual shipped seeding
-path, found through this session's investigation but **not yet formalized
-as a `Stage1Params` option** -- it currently exists only as ad hoc
-verification code, not integrated into `hole_path_tee_recovery.py`, and
-has not yet been run through stage 2 or the full LOOCV protocol. Flagged
-here as the most promising concrete lead from this whole addendum;
-formalizing and re-running the full LOOCV protocol with it is the natural
-next step before it could be considered for `best-params.json`.
+**Correction (this section previously overclaimed a result here).** That
+isolated check was itself measuring a second bug: the exclusion compared
+each marker's raw center distance to the badge, but the mask around a
+marker has a 95px radius -- a marker just beyond the exclusion cutoff can
+still have its mask disk reach back and cover a genuinely short real
+tee-ward ray. Confirmed directly: GoldenTeeSet hole 8's true tee sits
+78.5px from its badge; a foreign marker 186px away (past a 175px
+raw-distance cutoff) had a mask disk reaching to 186−95=91px, swallowing
+hole 8's own evidence -- the earlier-reported "hole 8 improves
+146.5px→39.4px" was this bug nudging a wrong recovery closer to truth by
+luck, not a real fix. **Now landed properly**, as
+`Stage1Params.use_basket_marker_mask` (off by default,
+`hole_path_tee_recovery.py`), excluding on the mask disk's *near-edge*
+distance instead of raw center distance. Re-tested honestly through the
+full `recover_tee` pipeline at the recommended `closing_window_px=24`,
+both labeled courses, plus all 4 overlay-only courses: **zero effect
+anywhere** -- GoldenTeeSet 14/18 unchanged, AlexClarkSet 8/18 unchanged
+(full-pipeline gate-pass counts, not the isolated stage-1 numbers cited
+above), and every overlay-only course's gate-pass count unchanged too. The
+mask is not a no-op (it still masks something on every hole checked), it
+simply doesn't change any outcome once the false-positive bug is fixed.
+Landed anyway (tested, harmless, documented) but not recommended -- there
+is no evidence it helps on any course in this repo. Full writeup:
+`docs/deferred-detection-experiments.md`'s GRayT section.
+
+**The obvious follow-up -- ranking a full 360° sweep by width-dropout
+rate instead of raw terminus, removing the basket dependency entirely --
+was also tested and rejected**, in both a "dropout alone" form (mean
+126.6°/127.2° error -- dominated by short near-badge rays that trivially
+score 0% dropout on almost no evidence) and a "filter then farthest
+terminus" form matching `recover_tee`'s actual existing logic applied to
+the full range (mean 117.4°/131.2° error). Root cause: width-dropout
+discriminates real ribbon from non-ribbon confusers, but not *this hole's*
+ribbon from a genuinely continuous *neighboring* hole's ribbon in the
+wrong direction -- both score equally low dropout. That distinction needs
+a directional prior, which is exactly what the corridor-fit seed provides
+(despite its own measured noise) and no badge-local signal replaces. This
+closes out the badge-local-seeding line of investigation as a dead end;
+see `docs/deferred-detection-experiments.md` for the full four-variant
+writeup.
+
+## Addendum 3: production basket-ownership bug found and fixed (`src/`)
+
+Out of GRayT-tuning scope but found during this investigation and worth a
+pointer here: `src/lib/autoAnnotation/courseGrammar.ts`'s Stage 4 basket
+assignment excluded any hole whose Stage 3 tee-bootstrap failed
+(`missing-tee`) from the basket-ownership pool entirely, rather than just
+being unable to score its polarity term. That did not remove the hole's
+basket from the world -- it left it fully unclaimed and available for a
+neighboring (tee-having) hole to win, even when that neighbor's own badge
+sat farther from it than the tee-less hole's badge did. Confirmed on
+TowneLake-RedTees-b (holes 5 and 10, both `missing-tee`, both lost their
+basket to holes 2 and 9). Fixed: tee-less holes now compete in Stage 4 on
+distance-only cost instead of being dropped. Regression test added
+(`tests/unit/courseGrammarBasketFallback.test.ts`), full suite unaffected,
+`tsc` clean. This is a real production correctness fix, unrelated to any
+GRayT parameter tuning -- it's not reflected in this report's LOOCV
+numbers (those all read `courseGrammar.ts`'s basket output as a fixed
+input, per the truth-provenance bookkeeping throughout this report) and
+doesn't change any of them.
