@@ -29,6 +29,20 @@ const OWNERSHIP_PLAUSIBLE_ANGLE_DEG = 15;
 const OWNERSHIP_DISTANCE_SEPARATION = 1.25;
 const DISTANCE_ONLY_REVIEW_SEPARATION = 1.4;
 const COMPETING_CANDIDATE_MARGIN = 0.12;
+/**
+ * `ambiguous` ownership conflates two different situations: a marginal pad
+ * shape whose axis vaguely grazes a badge (little reason to trust it at
+ * all), and a pad with strong, independent, dual-detector appearance
+ * evidence that is simply equidistant between two badges by course-layout
+ * coincidence (the pad itself is not in question, only which of two badges
+ * it belongs to). The former keeps the original conservative cap; the
+ * latter is allowed a somewhat higher one so it can still be out-ranked by
+ * an unambiguous match for either badge, but is not automatically buried
+ * under a same-tier single-support guess that only *looks* unambiguous
+ * because it was searched for along one badge's ray by construction.
+ */
+const AMBIGUOUS_CONFIDENCE_CAP = 0.45;
+const AMBIGUOUS_STRONG_PAD_CONFIDENCE_CAP = 0.6;
 
 export type TeePadEvidence = 'strong' | 'weak';
 export type TeeOrientationEvidence = 'strong' | 'weak' | 'unmeasurable';
@@ -396,13 +410,26 @@ function nearestBadgeByDistance(
 	return { badge: sorted[0].badge, separated };
 }
 
+/**
+ * Almost always a single assessment for the candidate's nearest passing
+ * badge. The one exception is a genuine ownership tie (`!separated`): two
+ * badges sit at nearly identical ray distance from this pad, which happens
+ * when a real pad lands close to the line between two unrelated badges by
+ * course-layout coincidence, not detector error. Picking the marginally
+ * closer one and discarding the other silently erases this candidate from
+ * the badge it actually belongs to whenever that badge happened to be a few
+ * pixels farther away -- so a tie proposes to both badges, each capped at
+ * the same low ambiguous confidence, and lets the normal per-badge
+ * contention (plus the `usedCandidates` guard below) decide honestly rather
+ * than a coin flip inside a single candidate's own assessment.
+ */
 function assessCandidate(
 	raster: TeePadRaster,
 	candidate: TeePadCandidate,
 	candidateIndex: number,
 	badges: readonly TeeBadgeAnchor[],
 	calibration: TeeSweepCalibration
-): CandidateAssessment {
+): readonly CandidateAssessment[] {
 	const pad = padEvidence(candidate);
 	const measurement = sweepPadOrientation(raster, candidate.xPx, candidate.yPx, calibration);
 	const orientation = orientationEvidence(measurement);
@@ -413,7 +440,7 @@ function assessCandidate(
 			const nearest = nearestBadgeByDistance(candidate, badges);
 			if (nearest?.separated) {
 				reasons.push('strong pad appearance but orientation is unmeasurable; nearest badge is clearly separated');
-				return {
+				return [{
 					candidateIndex,
 					candidate,
 					proposedHoleNumber: nearest.badge.holeNumber,
@@ -424,11 +451,11 @@ function assessCandidate(
 					ownershipEvidence: 'plausible',
 					...(measurement ? { orientation: measurement } : {}),
 					reasons
-				};
+				}];
 			}
 		}
 		reasons.push('orientation is unmeasurable and ownership cannot be established safely');
-		return {
+		return [{
 			candidateIndex,
 			candidate,
 			confidence: pad === 'strong' ? 0.35 : 0.15,
@@ -438,7 +465,7 @@ function assessCandidate(
 			ownershipEvidence: 'none',
 			...(measurement ? { orientation: measurement } : {}),
 			reasons
-		};
+		}];
 	}
 
 	const rays = badges.map((badge) => rayEvidence(measurement!, badge));
@@ -448,7 +475,7 @@ function assessCandidate(
 	const best = passing[0];
 	if (!best) {
 		reasons.push('measurable pad axis does not intersect any visible badge body');
-		return {
+		return [{
 			candidateIndex,
 			candidate,
 			confidence: 0.1,
@@ -458,7 +485,7 @@ function assessCandidate(
 			ownershipEvidence: 'none',
 			orientation: measurement!,
 			reasons
-		};
+		}];
 	}
 
 	const second = passing[1];
@@ -479,7 +506,7 @@ function assessCandidate(
 
 	if (ownership === 'strong' && orientation === 'strong' && pad === 'strong') {
 		reasons.push('strong pad appearance, strong orientation, and unique badge-ray ownership');
-		return {
+		return [{
 			candidateIndex,
 			candidate,
 			proposedHoleNumber: best.holeNumber,
@@ -491,7 +518,7 @@ function assessCandidate(
 			orientation: measurement!,
 			badgeRay: best,
 			reasons
-		};
+		}];
 	}
 
 	if (ownership === 'strong' || ownership === 'plausible') {
@@ -502,7 +529,7 @@ function assessCandidate(
 					? 'pad is visible and badge ownership is plausible, but orientation confidence is weak'
 					: 'ownership is plausible but not strong enough for automatic acceptance'
 		);
-		return {
+		return [{
 			candidateIndex,
 			candidate,
 			proposedHoleNumber: best.holeNumber,
@@ -514,23 +541,29 @@ function assessCandidate(
 			orientation: measurement!,
 			badgeRay: best,
 			reasons
-		};
+		}];
 	}
 
-	reasons.push('multiple badges are similarly compatible with this pad axis');
-	return {
+	const tieReasons = [...reasons, 'multiple badges are similarly compatible with this pad axis'];
+	const ambiguousCap = pad === 'strong' ? AMBIGUOUS_STRONG_PAD_CONFIDENCE_CAP : AMBIGUOUS_CONFIDENCE_CAP;
+	const ambiguousAssessment = (rayEvidenceForBadge: TeeBadgeRayEvidence): CandidateAssessment => ({
 		candidateIndex,
 		candidate,
-		proposedHoleNumber: best.holeNumber,
-		confidence: Math.min(confidence, 0.45),
+		proposedHoleNumber: rayEvidenceForBadge.holeNumber,
+		confidence: Math.min(confidence, ambiguousCap),
 		decision: 'review',
 		padEvidence: pad,
 		orientationEvidence: orientation,
 		ownershipEvidence: 'ambiguous',
 		orientation: measurement!,
-		badgeRay: best,
-		reasons
-	};
+		badgeRay: rayEvidenceForBadge,
+		reasons: tieReasons
+	});
+	// Only a genuine proximity tie (`!separated`) gets proposed to both badges;
+	// an `ambiguous` verdict reached via a large angular error instead (ray
+	// technically intersects the badge body but off-axis) still means only
+	// `best` is a credible guess, so `second` is not proposed there.
+	return !separated && second ? [ambiguousAssessment(best), ambiguousAssessment(second)] : [ambiguousAssessment(best)];
 }
 
 
@@ -672,7 +705,7 @@ export function assessTeeBootstrap(
 		};
 	}
 
-	const assessments = candidates.map((candidate, index) => assessCandidate(raster, candidate, index, badges, calibration));
+	const assessments = candidates.flatMap((candidate, index) => assessCandidate(raster, candidate, index, badges, calibration));
 
 	// AUTO requires all three independent evidence families and has proven
 	// high precision on the labeled courses. Use those strong assignments to
@@ -696,8 +729,17 @@ export function assessTeeBootstrap(
 	const holes: TeeBootstrapHoleResult[] = [];
 
 	for (const badge of badges) {
+		// A candidate proposed to more than one badge (the ownership-tie case
+		// above) can only ever be awarded to whichever badge wins it first;
+		// `usedCandidates` keeps the same physical pad from being handed to a
+		// second hole once another badge has already claimed it.
 		let contenders = assessments
-			.filter((assessment) => assessment.proposedHoleNumber === badge.holeNumber && assessment.decision !== 'unresolved')
+			.filter(
+				(assessment) =>
+					assessment.proposedHoleNumber === badge.holeNumber &&
+					assessment.decision !== 'unresolved' &&
+					!usedCandidates.has(assessment.candidateIndex)
+			)
 			.sort((a, b) => assessmentRank(b) - assessmentRank(a));
 		if (reviewDistanceBand) {
 			contenders = contenders.filter((assessment) => {

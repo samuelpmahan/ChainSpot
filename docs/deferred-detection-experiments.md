@@ -202,3 +202,77 @@ of the Hungarian solve for holes that were already correct, not just for
 genuinely occluded ones. Any revival needs the same "only touch holes
 already struggling" scoping this file's other two entries converged on
 independently.
+
+---
+
+## Alex Clark hole 5/10 tee misses: not a terrain-color threshold, and hole 10's cause is still open
+
+**Investigated, partially fixed**: `src/lib/autoAnnotation/teeBootstrapPolicy.ts`
+now proposes a genuinely-tied candidate to both badges it's equidistant from
+(see `assessCandidate`'s ownership-tie handling and
+`AMBIGUOUS_STRONG_PAD_CONFIDENCE_CAP`); that recovers hole 5's real tee pad
+as a REVIEW proposal. Hole 10's failure has a *different* cause, described
+below, and is still open.
+
+**The working hypothesis going in was wrong**: Alex Clark hole 5's tee
+(green-grass terrain) looked like a `detectGrayCenterCandidates`/
+`detectEdgeLoopCandidates` saturation/value-band miss tuned against
+IMG_5641's brown/dirt terrain. Direct pixel measurement refutes this: the
+real pad interior at hole 5 (median HSV `~(24, 3, 147-160)`) and at the
+correctly-detected hole 1 control (median `~(75, 3, 161)`) are essentially
+identical in saturation and value -- both comfortably inside the fixed
+`[148,168]` value / `<18` saturation gray-center window, and both detectors
+in fact find hole 5's real pad (dual `edge-loop`+`gray-center` support,
+14px from the labeled ground truth) when run in isolation. Terrain color is
+not the discriminator; nothing in `teePadDetection.ts`'s thresholds needed
+to change.
+
+**Hole 5's real cause**: hole 5's pad sits almost exactly on the line
+between hole 3's badge and hole 5's own badge (a course-layout coincidence:
+badge-ray distances of ~146px and ~148px, well inside the tie margin).
+`teeBootstrapPolicy.ts`'s ownership model picked whichever badge was a few
+pixels closer and discarded the candidate for the other entirely, so hole 5
+never saw its own real pad as a candidate at all and fell back to a much
+worse `occluded-edge-loop` guess ~275px away. Fixed by proposing a
+genuinely-tied candidate to both competing badges (each capped at a
+confidence tier that lets an unambiguous real match for either badge still
+win, but that isn't automatically buried under a lower-tier single-support
+guess) -- see the "genuinely tied pad" test in
+`tests/unit/teeBootstrapPolicy.test.ts`. This lands hole 5 on its correct
+physical pad (274.9px error -> 14.3px), though it stays just outside the
+12.7px auto-grading tolerance: the labeled ground-truth point itself sits
+~14px from the pad's own measured visual center (confirmed by directly
+segmenting the rim-enclosed interior blob), which looks like a label
+placement quirk specific to this hole rather than a detector error worth
+chasing further.
+
+**Hole 10's cause is different, and unresolved**: hole 10's real pad is
+also found almost exactly (`gray-center` only, 2px from ground truth) --
+its `edge-loop` support is missing because the badge/dashed-cart-path
+occlusion visible over that tee breaks the Canny rim (a real, already-known
+occlusion problem, not terrain color either). That alone would only cost it
+`strong` pad evidence, not ownership -- unlike hole 5, there's no badge-ray
+tie here. Instead, an unrelated `occluded-edge-loop` rail-pair false
+positive elsewhere in the image (small parallel-edge structure that isn't
+a real tee, at `(388.9, 511.4)`) happens to score a fraction higher on
+`teeBootstrapPolicy.ts`'s confidence ladder -- 0.79 vs. 0.73 -- than hole
+10's real, correctly-located pad, purely because both are single-support
+("weak" pad evidence) and the false positive's orientation-NCC score and
+ray alignment happen to be marginally better. The ownership-tie fix above
+does not touch this: there is no tie, just a real candidate narrowly
+losing a magnitude contest to a decoy.
+
+**What would justify a hole-10 fix**: some terrain-independent way to
+prefer a primary-detector-supported candidate (`gray-center`/`edge-loop`)
+over an `occluded-edge-loop`-only one when they compete for the same badge
+at similar confidence -- e.g. a distinct base tier between today's binary
+`strong`/`weak` `padEvidence`, or a modest confidence discount specific to
+`occluded-edge-loop`-only support. Prototyping that (by hand, not landed)
+showed the two candidates end up within a hair of an exact tie rather than
+a clean win, which is a sign the underlying confidence formula needs more
+than a single constant tweak to separate "recovery-tier guess" from
+"occlusion-weakened but real" evidence -- and `occluded-edge-loop` is the
+exact detector tier the parallel `claude/teepad-putting-circle-recovery`
+occlusion-masking work is actively tuning, so reweighting its general
+competitiveness is higher-conflict, higher-risk surface than the narrow
+ownership-tie fix above. Left open rather than forced.

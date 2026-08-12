@@ -190,4 +190,31 @@ describe('tee bootstrap decision policy', () => {
 		expect(result.counts.auto).toBe(0);
 		expect(result.holes.find((hole) => hole.holeNumber === 1)?.decision).toBe('review');
 	});
+
+	it('offers a genuinely tied pad to the second badge once the first badge is won by its own better candidate', () => {
+		// P1 sits almost exactly between badge A and badge B (a real course-layout
+		// coincidence, not detector error): its measured axis passes both badge
+		// bodies at nearly identical ray distance, so ownership is a proximity
+		// tie. Before the fix, `assessCandidate` committed P1 to whichever badge
+		// was a few pixels closer (A) and B never saw it as a candidate at all,
+		// even though A has its own separate, unambiguous pad (P2) and would
+		// never have used P1 anyway.
+		const raster = blankRaster(500, 140);
+		drawPad(raster, 250, 65, 30, 0); // P1: the tied pad
+		drawPad(raster, 420, 65, 30, 0); // P2: badge A's own unambiguous pad
+		const badgeA = badge(1, 445, 65); // dist to P2 = 25 (auto); dist to P1 = 195
+		const badgeB = badge(2, 55, 65); // dist to P1 = 195 (tied with badge A); no pad of its own
+		const result = assessTeeBootstrap(
+			raster,
+			[candidate(250, 65, 20, 12, true), candidate(420, 65, 20, 12, true)],
+			[badgeA, badgeB]
+		);
+		const holeA = result.holes.find((hole) => hole.holeNumber === 1);
+		const holeB = result.holes.find((hole) => hole.holeNumber === 2);
+		expect(holeA?.decision).toBe('auto');
+		expect(holeA?.assignment?.candidate.xPx).toBe(420);
+		expect(holeB?.decision).toBe('review');
+		expect(holeB?.assignment?.candidate.xPx).toBe(250);
+		expect(holeB?.assignment?.ownershipEvidence).toBe('ambiguous');
+	});
 });
