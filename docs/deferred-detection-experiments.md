@@ -100,15 +100,80 @@ thorough angular/distance search, doesn't find it either. Same story for
 the icon-occluded Alex Clark holes: not enough of the rectangle survives
 for rail-pairing to work with, regardless of what's masked out.
 
-**What would justify reviving it further**: a masked-NCC-template approach
-instead of rail-pair detection (mirroring `basketOcclusionRecovery.ts`'s
-technique for the analogous basket case), or extending
-`teeBootstrapPolicy.ts`'s template sweep with the same
-putting-circle/icon-structure masking. Both maskers here
+**What would justify reviving it further**: see the masked-NCC-template
+entry below -- that's the follow-up this pointed at, and it's also deferred,
+for a different reason.
+
+---
+
+## Masked-NCC-template tee-pad recovery
+
+**File**: `src/lib/autoAnnotation/teeOcclusionRecovery.ts` (+ tests in
+`tests/unit/teeOcclusionRecovery.test.ts`). Not imported anywhere else --
+briefly wired into `detectCalibratedTeeBootstrap` as a fourth recovery tier,
+then pulled back out. Both maskers from the entry above
 (`fitPuttingCircleRadiusPx`, `deriveBasketIconMasksPx`) are reusable as-is
-as the mask source for either approach -- the gap isn't the masking, it's
-that rail-pair detection needs more surviving rectangle than a masked-out
-occluder reliably leaves behind.
+as this module's mask source, and it's built to take them directly.
+
+**Idea**: the entry above found that rail-pair (Hough) detection, even with
+the occluder masked out, often doesn't have enough surviving rectangle to
+work with. This module tries a fundamentally different signal --
+`findOccludedTeePadMatch` mirrors `basketOcclusionRecovery.ts`'s technique
+exactly: a coarse-to-fine, masked, zero-mean NCC search for a synthesized
+tee-pad rectangle template (reusing `teeBootstrapPolicy.ts`'s proven
+rim/interior/background rectangle synthesis, reimplemented self-contained
+per this module's own convention), scored only over pixels not covered by a
+known occluder (every badge on the course, plus the putting-circle/icon
+masks above). Unlike rail-pairing, this only needs *some* surviving
+pad-shaped pixels, not two intact parallel rail segments -- so in principle
+it should tolerate heavier occlusion.
+
+**Status**: the core module is sound -- 5 unit tests against synthetic
+rasters all pass, including a partially-occluded pad recovered correctly
+via masking. It's the real-world validation that failed. Wired in and
+tested against IMG_5641 (hole 3) and Alex Clark (holes 8/11/12/13):
+
+1. First pass (full `majorSizesPx` range, `max(autoDistancesPx) * 1.5`
+   search radius, `MIN_TRUSTED_FRACTION = 0.2`): found nothing correct
+   anywhere, and for hole 3 specifically, confidently matched (score 0.89)
+   a location 300px from the true tee -- a false positive from the
+   *smallest* candidate size correlating with unrelated structure, using
+   only 30% of its pixels.
+2. Tightened `MIN_TRUSTED_FRACTION` to 0.55 and `MIN_MASKED_SCORE` to 0.6:
+   still found a false positive nearby (score 0.69-0.73), just at a
+   different location.
+3. Tightened the search radius to the course's *median* auto-tier
+   badge-to-tee distance × 1.3 instead of the max × 1.5 (a max-based radius
+   sized to the course's longest hole was letting the search reach 230-300px
+   away): the false positive persisted at essentially the same location,
+   just outside the new, smaller radius by a hair less than before.
+4. Restricted the search to a single representative pad size instead of the
+   full course-observed size range: same false positive, same location,
+   now scoring against the representative size instead of the smallest one.
+5. Visually inspected the false-positive location (see this session's
+   record for the crop): it's a **dashed walking/cart path**, not a tee pad
+   or random noise. The small light-colored dashes against a darker
+   background apparently correlate with a small rectangular rim/interior
+   template closely enough to survive every threshold tightened above.
+
+This is a genuinely new failure mode, distinct from what motivated the
+module (putting-circle/basket-icon occlusion): dashed path segments are
+visually pad-*like* in exactly the features (bright rim, roughly rectangular
+dash, contrast against background) the template is built to detect. Pulled
+the live wiring back out rather than ship a recovery path that produces
+confidently wrong matches -- worse than the status quo of leaving a hole
+unresolved.
+
+**What would justify reviving it**: a way to distinguish a real, isolated
+tee-pad rectangle from one dash in a *periodic sequence* of similar small
+rectangles (a real path is a repeating pattern; a real pad is not) --
+e.g., reject a candidate whose local neighborhood contains other
+similarly-sized, similarly-oriented bright blobs at roughly regular
+spacing. Alternatively, cross-validate any masked-NCC match against the
+badge-ray invariant (`teeBootstrapPolicy.ts`'s `TeeBadgeRayEvidence`) more
+strictly than this first attempt did, since a real tee's major axis should
+point at its own badge and a path-dash's "orientation" is just whatever the
+path happens to run at.
 
 ---
 
