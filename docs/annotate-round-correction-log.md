@@ -1,12 +1,20 @@
 # Annotate Round correction log
 
-**Status**: design only, nothing here is implemented. Written to unblock the
-"semi-supervised" track of Annotate Round (auto-accept when confident, ask
-the user when not, and treat every answer as reusable truth data) discussed
-alongside `scripts/cv-probes/grayt-tuning-report.md`'s tuning work. That
-report's headline limitation is N=2 labeled courses; this doc is the
-mechanism for turning ordinary usage into more of them, without waiting on
-a separate hand-labeling effort every time.
+**Status**: the schema/storage/logging described below is implemented --
+`src/lib/correctionLog.ts` (event schema, `IndexedDbCorrectionLogStore`,
+`deriveProposalFromGrammar`, the "export corrections" action) plus its
+wiring into confirm/replace/move interactions in
+`src/routes/annotate-round/+page.svelte`. **Still design only**: the
+semi-supervised gating policy itself (auto-accept vs. flag-for-review UI
+treatment) and the three-way ask copy/debug view in the two companion docs
+-- nothing yet changes what a user sees based on `gateDecision`, corrections
+are only being recorded. Written to unblock the "semi-supervised" track of
+Annotate Round (auto-accept when confident, ask the user when not, and
+treat every answer as reusable truth data) discussed alongside
+`scripts/cv-probes/grayt-tuning-report.md`'s tuning work. That report's
+headline limitation is N=2 labeled courses; this doc is the mechanism for
+turning ordinary usage into more of them, without waiting on a separate
+hand-labeling effort every time.
 
 ## What already exists (don't rebuild this)
 
@@ -100,6 +108,25 @@ interface CorrectionEvent {
   };
 }
 ```
+
+**Implementation note on `userAction` mapping** (`+page.svelte`'s existing
+interactions don't line up 1:1 with these five values, so the mapping
+adopted is): the frictionless chip's `mode` field has three values
+(`confirm`/`replace`/`move`), where its `move` means "assign a candidate
+currently owned by another hole onto this hole, which has no feature of its
+own yet" -- a different thing from this schema's `move` (dragging an
+already-placed marker). Chip `mode: 'move'` logs as `userAction: 'replace'`
+(it overrides whatever courseGrammar proposed for this hole/endpoint, same
+as chip `mode: 'replace'`); only chip `mode: 'confirm'` logs as `confirm`.
+The schema's own `move` fires from the separate existing-marker-drag path
+(`commitAnnotationPointerUp`'s tee/basket branch), not the chip at all. The
+no-chip instant-accept path (tapping a candidate that overwrites/moves
+nothing) logs `confirm` only when the tapped point exactly matches
+courseGrammar's own proposal for that hole/endpoint; otherwise `place`,
+since the user chose a candidate the system never specifically proposed
+there. `place`/`skip` for genuinely from-scratch manual placement and an
+explicit "skip this hole" affordance are not wired up yet -- no such UI
+exists in Annotate Round today.
 
 ## Storage and lifecycle
 

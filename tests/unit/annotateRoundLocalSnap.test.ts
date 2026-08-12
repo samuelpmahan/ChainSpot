@@ -178,8 +178,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	void editor;
 
 	addHoleViaShortcut();
-	// Radial menu is off by default; every test in this file places points through it.
-	host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
+	// Radial menu (manual placement) is on by default; nothing to toggle here.
 	await flush();
 }
 

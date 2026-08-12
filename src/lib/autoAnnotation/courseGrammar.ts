@@ -37,6 +37,19 @@ export const DEFAULT_COURSE_HOLE_NUMBERS: readonly number[] = Array.from(
 export interface CoursePointCandidate extends Candidate {
 	/** Normalized detector confidence when available (0..1). */
 	readonly confidence?: number;
+	/**
+	 * The candidate's position in the caller's own raw detector-output array
+	 * (e.g. `CourseDetectionResult.tees`/`.baskets`), when that differs from
+	 * its position in the array passed to `associateCourseGrammar` here.
+	 * Some callers pass a compacted/reordered array (one entry per resolved
+	 * hole, not one per raw candidate) — array position within *that* array
+	 * is not a stable identifier a downstream consumer can index the raw
+	 * candidate list with. When present, this is used instead of array
+	 * position for every `candidateIndex` this module reports, so those
+	 * reports stay a correct raw-array index no matter how the caller's own
+	 * array is shaped.
+	 */
+	readonly candidateIndex?: number;
 }
 
 /**
@@ -178,7 +191,10 @@ export interface CourseGrammarResult {
 }
 
 interface IndexedPoint {
+	/** Position in the array this module was actually given -- used only to index back into that same array (`input.tees[tee.sourceIndex]` etc.), never reported externally. */
 	readonly sourceIndex: number;
+	/** The index reported in every externally-visible `candidateIndex` field -- the caller's raw detector-array index when supplied, array position otherwise. See `CoursePointCandidate.candidateIndex`. */
+	readonly reportedIndex: number;
 	readonly xPx: number;
 	readonly yPx: number;
 	readonly confidence: number;
@@ -239,18 +255,24 @@ function normalizePoints<T extends CoursePointCandidate>(
 ): IndexedPoint[] {
 	const points: IndexedPoint[] = [];
 	candidates.forEach((candidate, sourceIndex) => {
+		// `candidate.candidateIndex`, when supplied, is the caller's own raw
+		// detector-array index -- see `CoursePointCandidate.candidateIndex`'s
+		// doc comment. Falls back to array position for callers that pass the
+		// raw array directly (today's badges/baskets), where the two coincide.
+		const reportedIndex = candidate.candidateIndex ?? sourceIndex;
 		if (!finite(candidate.xPx) || !finite(candidate.yPx)) {
 			failures.push({
 				kind: 'invalid-candidate',
 				severity: 'warning',
 				candidateKind: kind,
-				candidateIndex: sourceIndex,
+				candidateIndex: reportedIndex,
 				message: `${kind} candidate ${sourceIndex + 1} has non-finite source-image coordinates.`
 			});
 			return;
 		}
 		points.push({
 			sourceIndex,
+			reportedIndex,
 			xPx: candidate.xPx,
 			yPx: candidate.yPx,
 			confidence: candidateConfidence(candidate)
@@ -466,7 +488,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const badge = badges[badgeIndex];
 		const confidence = labelConfidence(badge, holeNumber) ?? 0;
 		badgeForHole.set(holeNumber, {
-			candidateIndex: badge.sourceIndex,
+			candidateIndex: badge.reportedIndex,
 			xPx: badge.xPx,
 			yPx: badge.yPx,
 			confidence,
@@ -478,7 +500,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'number-badge',
-				candidateIndex: badge.sourceIndex,
+				candidateIndex: badge.reportedIndex,
 				message: `Hole ${holeNumber}'s number badge is only ${(confidence * 100).toFixed(0)}% confident.`
 			});
 		}
@@ -550,7 +572,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const confidence = sourceTee.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		teeForHole.set(holeNumber, {
 			assignment: {
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				xPx: tee.xPx,
 				yPx: tee.yPx,
 				detectorConfidence: tee.confidence,
@@ -565,7 +587,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'tee',
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				message: sourceTee.bootstrapDecision === 'review'
 					? `Hole ${holeNumber}'s tee is a bootstrap REVIEW proposal, not an automatic acceptance.`
 					: `Hole ${holeNumber}'s tee assignment is weak after global ownership matching.`
@@ -577,7 +599,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'tee',
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				message: `Hole ${holeNumber} received its ${localRank}th-nearest tee because a nearer tee belongs to another hole.`
 			});
 		}
@@ -643,7 +665,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const confidence = sourceBasket.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		basketForHole.set(holeNumber, {
 			assignment: {
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				xPx: basket.xPx,
 				yPx: basket.yPx,
 				detectorConfidence: basket.confidence,
@@ -660,7 +682,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: sourceBasket.bootstrapDecision === 'review'
 					? `Hole ${holeNumber}'s basket is an occlusion-fallback REVIEW proposal, not an automatic acceptance.`
 					: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
@@ -672,7 +694,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: `Hole ${holeNumber} received its ${localRank}th-lowest basket cost because a better basket belongs to another hole.`
 			});
 		}
@@ -682,7 +704,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: `Hole ${holeNumber}'s basket lies on the same side of its number badge as its tee.`
 			});
 		}
@@ -738,11 +760,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		failures,
 		unassigned: {
 			numberBadgeCandidateIndexes: badges
-				.map((badge) => badge.sourceIndex)
+				.map((badge) => badge.reportedIndex)
 				.filter((index) => !assignedBadgeIndexes.has(index)),
-			teeCandidateIndexes: tees.map((tee) => tee.sourceIndex).filter((index) => !assignedTeeIndexes.has(index)),
+			teeCandidateIndexes: tees.map((tee) => tee.reportedIndex).filter((index) => !assignedTeeIndexes.has(index)),
 			basketCandidateIndexes: baskets
-				.map((basket) => basket.sourceIndex)
+				.map((basket) => basket.reportedIndex)
 				.filter((index) => !assignedBasketIndexes.has(index))
 		}
 	};

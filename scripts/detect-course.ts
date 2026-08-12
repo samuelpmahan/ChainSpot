@@ -31,7 +31,12 @@ import type { TeePadCandidate, TeePadCv } from '../src/lib/autoAnnotation/teePad
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 import { associateCourseGrammar } from '../src/lib/autoAnnotation/courseGrammar';
 import type { CourseGrammarResult } from '../src/lib/autoAnnotation/courseGrammar';
-import { buildActiveReviewMap, recommendNextAnchor, summarizeTeeInvariant } from '../src/lib/autoAnnotation/activeReview';
+import {
+	buildActiveReviewMap,
+	livePlacementsFromGrammar,
+	recommendNextAnchor,
+	summarizeTeeInvariant
+} from '../src/lib/autoAnnotation/activeReview';
 import type { ActiveReviewMap, ActiveReviewRecommendation } from '../src/lib/autoAnnotation/activeReview';
 import type { CourseDetectionResult } from '../src/lib/autoAnnotation/basketDetection';
 
@@ -650,7 +655,12 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		bootstrapDecision: assignment.decision,
 		confidence: assignment.decision === 'auto'
 			? Math.max(0.75, assignment.confidence)
-			: Math.min(0.49, assignment.confidence)
+			: Math.min(0.49, assignment.confidence),
+		// assignments is compacted (one entry per resolved hole), not
+		// positionally aligned with teeCandidates -- carry the real raw index
+		// through so associateCourseGrammar's reported candidateIndex stays a
+		// valid index into teeCandidates. Mirrors basketDetection.worker.ts.
+		candidateIndex: assignment.candidateIndex
 	}));
 
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
@@ -722,7 +732,11 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const incompleteHoles = grammar.holes.filter((hole) => hole.status === 'incomplete').length;
 
 	const detectionResult: CourseDetectionResult = { numberDetection, tees: teeCandidates, baskets: basketCandidates, grammar };
-	const reviewMap = buildActiveReviewMap(detectionResult, [], []);
+	// No live annotation session exists in this CLI preview -- treat the
+	// detection's own proposals as "placed" so this stays a faithful preview
+	// of a freshly-detected, unreviewed course (see livePlacementsFromGrammar's
+	// doc comment).
+	const reviewMap = buildActiveReviewMap(detectionResult, livePlacementsFromGrammar(detectionResult), []);
 	const recommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore: args.minAutoSuggestScore });
 	const activeReview = summarizeActiveReview(detectionResult, reviewMap, recommendation);
 

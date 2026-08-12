@@ -609,7 +609,13 @@ async function detectCourse(request: CourseDetectionRequest) {
 		bootstrapDecision: assignment.decision,
 		confidence: assignment.decision === 'auto'
 			? Math.max(0.75, assignment.confidence)
-			: Math.min(0.49, assignment.confidence)
+			: Math.min(0.49, assignment.confidence),
+		// `assignments` is compacted (one entry per resolved hole), not
+		// positionally aligned with `tees`/`teeBootstrap.candidates` -- carry
+		// the real raw index through explicitly so `associateCourseGrammar`'s
+		// reported `candidateIndex` stays a valid index into `tees`, not a
+		// position in this compacted array. See `CoursePointCandidate.candidateIndex`.
+		candidateIndex: assignment.candidateIndex
 	}));
 	const teeDetectionMs = performance.now() - teeDetectionStartedAt;
 	const teesMs = performance.now() - teesStartedAt;

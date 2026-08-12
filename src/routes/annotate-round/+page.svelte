@@ -10,6 +10,14 @@
 	import { intakeImageFile } from '$lib/imageIntake';
 	import { readAnnotationDraft, saveAnnotationDraft } from '$lib/annotationDraft';
 	import type { DownloadBlob } from '$lib/persistence';
+	import { downloadBlob } from '$lib/persistence';
+	import {
+		buildCorrectionEvent,
+		correctionEventsToExportBlob,
+		deriveProposalFromGrammar,
+		getDefaultCorrectionLogStore
+	} from '$lib/correctionLog';
+	import type { CorrectionEndpoint, CorrectionLogStore, CorrectionUserAction } from '$lib/correctionLog';
 	import {
 		retainEditor,
 		takeRetainedEditor,
@@ -93,10 +101,20 @@
 	import { acceptCandidate } from '$lib/cv/types';
 	import {
 		buildActiveReviewMap,
+		exhaustedLandmarkKey,
 		recommendNextAnchor,
 		summarizeTeeInvariant
 	} from '$lib/autoAnnotation/activeReview';
-	import type { ActiveReviewRecommendation } from '$lib/autoAnnotation/activeReview';
+	import type { ActiveReviewLivePlacement, ActiveReviewRecommendation } from '$lib/autoAnnotation/activeReview';
+	import { runRibbonMassShadowPass } from '$lib/autoAnnotation/ribbonMassShadow';
+	import {
+		deriveShadowRunExperiments,
+		getDefaultRibbonMassShadowRunStore,
+		shadowRunsToExportBlob
+	} from '$lib/autoAnnotation/ribbonMassShadowRun';
+	import type { ReviewApprovedHole, RibbonMassShadowRun } from '$lib/autoAnnotation/ribbonMassShadowRun';
+	import { renderShadowRunOverlay } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
+	import type { ShadowOverlayRender } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
 	import {
@@ -189,6 +207,7 @@
 		hash?: HashBytes;
 		download?: DownloadBlob;
 		courseLibraryStore?: CourseLibraryStore;
+		correctionLogStore?: CorrectionLogStore;
 	}
 
 	let {
@@ -196,7 +215,8 @@
 		decode,
 		hash,
 		download,
-		courseLibraryStore: initialCourseLibraryStore
+		courseLibraryStore: initialCourseLibraryStore,
+		correctionLogStore: initialCorrectionLogStore
 	}: Props = $props();
 
 	// An explicitly injected store (tests) wins; otherwise every page instance
@@ -204,6 +224,10 @@
 	// courseLibrary.ts, matching how smartStitchWorker is shared elsewhere.
 	// svelte-ignore state_referenced_locally
 	const courseLibraryStore = initialCourseLibraryStore ?? getDefaultCourseLibraryStore();
+	// svelte-ignore state_referenced_locally
+	const correctionLogStore = initialCorrectionLogStore ?? getDefaultCorrectionLogStore();
+	/** Tracks package.json's version manually -- no build-time version injection exists in this project yet. */
+	const APP_VERSION = '0.1.0';
 
 	/**
 	 * Only production-created or session-retrieved editors participate in route
@@ -314,6 +338,16 @@
 	let activeReviewRecommendation = $state<ActiveReviewRecommendation | null>(null);
 	let activeReviewCandidateOverrides = $state<Record<string, SourcePoint>>({});
 	let minAutoSuggestScore = $state(0.6);
+	/**
+	 * How many times a hole/landmark's active-review or PART C suggestion has
+	 * been explicitly rejected/replaced, keyed by `exhaustedLandmarkKey`.
+	 * `WRONG_GUESS_LIMIT` guesses in a row and the system stops proposing
+	 * candidates for that hole/kind entirely -- a real tee/basket pad may
+	 * simply not be visible in the source image, and a third automatic guess
+	 * is worse than just asking the user to place it directly.
+	 */
+	let wrongGuessCounts = $state<Record<string, number>>({});
+	const WRONG_GUESS_LIMIT = 2;
 	let prewarmedSourceId: string | null = null;
 	let autoDetectedSourceId: string | null = null;
 	/**
@@ -328,12 +362,29 @@
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
-	/** Off by default -- manual placement now takes a back seat to CV detection + active review for most holes, but stays available for whoever wants to place points by hand. Toggled via the footer control at the bottom of the page. */
-	let radialMenuEnabled = $state(false);
+	/**
+	 * On by default -- CV detection still pre-fills most holes, but the
+	 * ability to click-correct a wrong point must not be gated behind an
+	 * opt-in toggle: `recommendNextAnchor` (`$lib/autoAnnotation/activeReview`)
+	 * only ever surfaces a candidate that's missing or contested by more than
+	 * one hole, so a confidently-wrong-but-uncontested detection never
+	 * reaches the ranked review queue at all and the only way to fix it is a
+	 * direct click. Still toggleable via the footer control for whoever wants
+	 * it off.
+	 */
+	let radialMenuEnabled = $state(true);
 
-	/** Single gate for every place the radial menu can open (empty-space placement and the on-marker delete menu) so `radialMenuEnabled` only needs checking here. */
+	/**
+	 * Single gate for every place the radial menu can open (empty-space
+	 * placement and the on-marker delete menu) so `radialMenuEnabled` only
+	 * needs checking here. Also closes the two marker-action chips
+	 * (`candidateAssignConfirm`, `holeMarkerActionConfirm`) so at most one
+	 * popover is ever open at a time, regardless of which path opened it.
+	 */
 	function openRadialMenu(state: RadialMenuState): void {
 		if (!radialMenuEnabled) return;
+		candidateAssignConfirm = null;
+		holeMarkerActionConfirm = null;
 		radialMenu = state;
 	}
 	/**
@@ -393,6 +444,22 @@
 		return () => window.removeEventListener('pointerdown', handlePointerDown);
 	});
 
+	/** Same click-outside contract as the effect above, for the hole-marker action chip. */
+	$effect(() => {
+		if (!holeMarkerActionConfirm) return;
+		function handlePointerDown(event: PointerEvent): void {
+			if (
+				holeMarkerActionConfirmEl &&
+				event.target instanceof Node &&
+				!holeMarkerActionConfirmEl.contains(event.target)
+			) {
+				holeMarkerActionConfirm = null;
+			}
+		}
+		window.addEventListener('pointerdown', handlePointerDown);
+		return () => window.removeEventListener('pointerdown', handlePointerDown);
+	});
+
 	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
 		'gray-center': true,
 		'edge-loop': true,
@@ -401,6 +468,40 @@
 	let teeExperimentFullResolution = $state(false);
 	/** Off by default -- "Assign ground truth" only ever does anything for one internal QA fixture (courseGroundTruth.ts), so it stays hidden from the general annotation UI until switched on via the toggle at the bottom of the page. */
 	let groundTruthToolsEnabled = $state(false);
+
+	// --- Ribbon-mass shadow overlay (internal-only dev view; see
+	// `ribbonMassShadowOverlay.ts` and docs/annotate-round-pipeline-debug-view.md's
+	// internal-only ground rules). Renders the stored ShadowRun A — display
+	// only, never an input to any annotation behavior.
+	let shadowOverlayEnabled = $state(false);
+	let shadowOverlayRender = $state<ShadowOverlayRender | null>(null);
+	/** The run frozen by this session's own detection pass, so the toggle needs no IndexedDB round-trip. */
+	let latestShadowRun: RibbonMassShadowRun | null = null;
+
+	async function refreshShadowOverlay(): Promise<void> {
+		let run = latestShadowRun;
+		const imageId = sourceImage()?.id;
+		if ((!run || run.imageId !== imageId) && imageId) {
+			// Fall back to the newest stored run for this image (e.g. the
+			// toggle was flipped before this session's own pass finished).
+			try {
+				const runs = await getDefaultRibbonMassShadowRunStore().getAll();
+				run =
+					runs
+						.filter((candidate) => candidate.imageId === imageId)
+						.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0] ?? null;
+			} catch {
+				run = null;
+			}
+		}
+		shadowOverlayRender = run ? renderShadowRunOverlay(run) : null;
+	}
+
+	function toggleShadowOverlay(): void {
+		shadowOverlayEnabled = !shadowOverlayEnabled;
+		if (shadowOverlayEnabled) void refreshShadowOverlay();
+		else shadowOverlayRender = null;
+	}
 	let teeExperimentRunning = $state(false);
 	let teeExperimentError = $state<string | null>(null);
 	let teeExperimentResult = $state<DetectTeesResult | null>(null);
@@ -432,6 +533,26 @@
 	}
 	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
 	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
+
+	/**
+	 * A plain (non-drag) click on a hole's own already-placed tee/basket
+	 * marker -- distinct from `CandidateAssignConfirm` (PART C), which is
+	 * about accepting a raw CV *candidate* marker onto a hole. This is about
+	 * an already-placed point: "Move here" relocates it to exactly where the
+	 * click landed with no CV snap involved (the deliberate, no-second-
+	 * guessing counterpart to drag-to-correct, which does snap). `point` is
+	 * the click's own image-space coordinate, not the marker's pre-click
+	 * location, so "Move here" is a precise correction even when the click
+	 * landed slightly off the marker's exact center.
+	 */
+	interface HoleMarkerActionConfirm {
+		readonly kind: 'tee' | 'basket';
+		readonly point: SourcePoint;
+		readonly holeId: string;
+		readonly holeNumber: number;
+	}
+	let holeMarkerActionConfirm = $state<HoleMarkerActionConfirm | null>(null);
+	let holeMarkerActionConfirmEl = $state<HTMLDivElement | null>(null);
 
 	/** Pointer-claim state for a tee/basket candidate marker, mirroring `numberSelectDrag` below. */
 	interface CourseCandidateDrag {
@@ -713,15 +834,47 @@
 		return REVEAL_STAGE_ORDER.indexOf(revealStage) >= REVEAL_STAGE_ORDER.indexOf(stage);
 	}
 
+	/**
+	 * The live draft's own placement state, per hole -- what `buildActiveReviewMap`
+	 * uses to decide a hole is actually resolved, instead of the one-time
+	 * detection snapshot's own (possibly weak, possibly since-rejected)
+	 * proposal. Without this, a hole whose only assignment was weak silently
+	 * drops out of the guided queue once its local candidate pool is
+	 * exhausted, even though nothing was ever actually placed for it.
+	 */
+	function currentLivePlacements(): ReadonlyMap<number, ActiveReviewLivePlacement> {
+		return new Map(holes.map((hole) => [hole.number, { tee: hole.tee !== undefined, basket: hole.basket !== undefined }]));
+	}
+
+	/** Records one rejected/replaced guess for this hole/kind (see `wrongGuessCounts`'s doc comment). */
+	function recordWrongGuess(holeNumber: number, kind: 'tee' | 'basket'): void {
+		const key = exhaustedLandmarkKey(holeNumber, kind);
+		wrongGuessCounts = { ...wrongGuessCounts, [key]: (wrongGuessCounts[key] ?? 0) + 1 };
+	}
+
+	function currentExhaustedLandmarks(): ReadonlySet<string> {
+		return new Set(
+			Object.entries(wrongGuessCounts)
+				.filter(([, count]) => count >= WRONG_GUESS_LIMIT)
+				.map(([key]) => key)
+		);
+	}
+
 	function recomputeActiveReview(): void {
 		if (!courseDetection) {
 			activeReviewRecommendation = null;
 			return;
 		}
-		const reviewMap = buildActiveReviewMap(courseDetection, [], activeReviewConfirmedCandidateIds);
+		const reviewMap = buildActiveReviewMap(
+			courseDetection,
+			currentLivePlacements(),
+			activeReviewConfirmedCandidateIds,
+			currentExhaustedLandmarks()
+		);
 		activeReviewRecommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore });
 		logActiveReviewStats(reviewMap);
 	}
+
 
 	function logActiveReviewStats(reviewMap: ReturnType<typeof buildActiveReviewMap>): void {
 		if (!courseDetection || typeof console === 'undefined') return;
@@ -828,6 +981,7 @@
 		const recommendation = activeReviewRecommendation;
 		const point = activeReviewRecommendationPoint();
 		if (recommendation?.kind !== 'candidate' || !point) return;
+		recordWrongGuess(recommendation.holeNumber, recommendation.candidateKind);
 		markActiveReviewCandidateHandled(recommendation.candidateKind, point);
 	}
 
@@ -858,6 +1012,125 @@
 		delete nextOverrides[id];
 		activeReviewCandidateOverrides = nextOverrides;
 		recomputeActiveReview();
+	}
+
+	/** What courseGrammar itself proposed for this hole/endpoint right now, per the correction log's schema (`$lib/correctionLog`). */
+	function derivePriorProposal(endpoint: CorrectionEndpoint, holeNumber: number) {
+		return deriveProposalFromGrammar(courseDetection?.grammar ?? null, holeNumber, endpoint);
+	}
+
+	/**
+	 * Appends one `CorrectionEvent` (design: `docs/annotate-round-correction-log.md`)
+	 * for a confirm/move/replace/place interaction on a hole's tee or basket.
+	 * Best-effort and fire-and-forget: a correction-log write must never block
+	 * or visibly fail an annotation action.
+	 */
+	function logCorrection(
+		endpoint: CorrectionEndpoint,
+		holeNumber: number,
+		userAction: CorrectionUserAction,
+		finalValue: { xPx: number; yPx: number } | null,
+		options: { dragDistancePx?: number; deferForSnap?: PendingSnapRef } = {}
+	): void {
+		const image = sourceImage();
+		if (!image) return;
+		if (options.deferForSnap) {
+			// A snap-to-detection pass is in flight for this exact placement: hold
+			// the event until the snap outcome is known, so `finalValue` records
+			// where the marker actually ended up (post-snap) and `rawDropPx`
+			// preserves the user's raw drop separately — a snapped correction is
+			// still influenced by existing CV geometry, and the log must be able
+			// to tell the two apart.
+			pendingCorrectionFlushes.set(options.deferForSnap.key, {
+				requestId: options.deferForSnap.requestId,
+				endpoint,
+				holeNumber,
+				userAction,
+				rawValue: finalValue,
+				dragDistancePx: options.dragDistancePx
+			});
+			return;
+		}
+		appendCorrectionEvent(endpoint, holeNumber, userAction, finalValue, {
+			dragDistancePx: options.dragDistancePx
+		});
+	}
+
+	function appendCorrectionEvent(
+		endpoint: CorrectionEndpoint,
+		holeNumber: number,
+		userAction: CorrectionUserAction,
+		finalValue: { xPx: number; yPx: number } | null,
+		meta: { dragDistancePx?: number; rawDropPx?: { xPx: number; yPx: number } } = {}
+	): void {
+		const image = sourceImage();
+		if (!image) return;
+		const interactionMeta = {
+			...(meta.dragDistancePx !== undefined ? { dragDistancePx: meta.dragDistancePx } : {}),
+			...(meta.rawDropPx !== undefined ? { rawDropPx: meta.rawDropPx } : {})
+		};
+		const event = buildCorrectionEvent({
+			appVersion: APP_VERSION,
+			projectId: editor.state.project.id,
+			imageId: image.id,
+			imageSha256: image.sha256,
+			holeNumber,
+			endpoint,
+			priorProposal: derivePriorProposal(endpoint, holeNumber),
+			userAction,
+			finalValue,
+			...(Object.keys(interactionMeta).length > 0 ? { interactionMeta } : {})
+		});
+		void correctionLogStore.append(event).catch(() => {
+			// Best-effort: a correction-log write failure must never block annotation.
+		});
+	}
+
+	interface PendingSnapRef {
+		readonly key: string;
+		readonly requestId: number;
+	}
+
+	interface PendingCorrectionFlush {
+		readonly requestId: number;
+		readonly endpoint: CorrectionEndpoint;
+		readonly holeNumber: number;
+		readonly userAction: CorrectionUserAction;
+		readonly rawValue: { xPx: number; yPx: number } | null;
+		readonly dragDistancePx?: number;
+	}
+
+	/** Correction events held back while their placement's snap pass resolves, keyed like `pendingLocalSnaps`. */
+	const pendingCorrectionFlushes = new Map<string, PendingCorrectionFlush>();
+
+	/**
+	 * Appends a held-back correction event once its snap outcome is known.
+	 * `settledPoint` is the post-snap coordinate when the snap actually moved
+	 * the marker; null when it didn't (failed, stale, no feature found), in
+	 * which case the raw drop stands as the final value with no `rawDropPx`.
+	 */
+	function flushCorrectionForSnap(
+		key: string,
+		requestId: number,
+		settledPoint: { xPx: number; yPx: number } | null
+	): void {
+		const pending = pendingCorrectionFlushes.get(key);
+		if (!pending || pending.requestId !== requestId) return;
+		pendingCorrectionFlushes.delete(key);
+		const moved =
+			settledPoint !== null &&
+			pending.rawValue !== null &&
+			(settledPoint.xPx !== pending.rawValue.xPx || settledPoint.yPx !== pending.rawValue.yPx);
+		appendCorrectionEvent(
+			pending.endpoint,
+			pending.holeNumber,
+			pending.userAction,
+			moved ? settledPoint : pending.rawValue,
+			{
+				dragDistancePx: pending.dragDistancePx,
+				...(moved && pending.rawValue !== null ? { rawDropPx: pending.rawValue } : {})
+			}
+		);
 	}
 
 	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
@@ -946,6 +1219,11 @@
 		if (event.key === 'Escape' && candidateAssignConfirm) {
 			event.preventDefault();
 			candidateAssignConfirm = null;
+			return;
+		}
+		if (event.key === 'Escape' && holeMarkerActionConfirm) {
+			event.preventDefault();
+			holeMarkerActionConfirm = null;
 			return;
 		}
 		if (isModalOpen()) return;
@@ -1175,6 +1453,7 @@
 		if (sourceHole?.id === active.id) {
 			// A CV candidate click is a confirmation/assignment gesture. Deletion
 			// remains available through the existing marker radial menu.
+			holeMarkerActionConfirm = null;
 			candidateAssignConfirm = {
 				kind,
 				point,
@@ -1189,8 +1468,17 @@
 			holes = assignCandidateToHole(holes, active.id, kind, point);
 			vibrate(8);
 			markActiveReviewCandidateHandled(kind, point);
+			// Nothing to overwrite or move from elsewhere: a straight tap-to-accept.
+			// Only counts as 'confirm' when this is literally the system's own
+			// proposal for this hole/endpoint -- otherwise the user picked a
+			// candidate the system never specifically suggested for this hole,
+			// which the correction log treats as a from-scratch placement.
+			const proposal = derivePriorProposal(kind, active.number);
+			const matchesProposal = proposal !== null && proposal.xPx === point.xPx && proposal.yPx === point.yPx;
+			logCorrection(kind, active.number, matchesProposal ? 'confirm' : 'place', { xPx: point.xPx, yPx: point.yPx });
 			return;
 		}
+		holeMarkerActionConfirm = null;
 		candidateAssignConfirm = {
 			kind,
 			point,
@@ -1203,15 +1491,63 @@
 	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath; delete clears the hole's feature instead. */
 	function confirmCandidateAssign(): void {
 		if (!candidateAssignConfirm) return;
-		const { holeId, kind, point } = candidateAssignConfirm;
+		const { holeId, holeNumber, kind, mode, point } = candidateAssignConfirm;
 		holes = assignCandidateToHole(holes, holeId, kind, point);
 		candidateAssignConfirm = null;
 		vibrate(8);
+		// 'replace' means the hole already had a system-assigned point that's
+		// explicitly being rejected for a different one -- a wrong guess, same
+		// as an active-review reject. 'move' isn't: the hole never had a guess
+		// of its own to be wrong about.
+		if (mode === 'replace') recordWrongGuess(holeNumber, kind);
 		markActiveReviewCandidateHandled(kind, point);
+		// The chip's 'move' mode (assigning a candidate currently owned by
+		// another hole onto this one, which has no feature yet) still overrides
+		// whatever the system proposed for *this* hole/endpoint, same as the
+		// chip's literal 'replace' mode -- only 'confirm' re-accepts the hole's
+		// own already-assigned point unchanged.
+		logCorrection(kind, holeNumber, mode === 'confirm' ? 'confirm' : 'replace', { xPx: point.xPx, yPx: point.yPx });
 	}
 
 	function dismissCandidateAssign(): void {
 		candidateAssignConfirm = null;
+	}
+
+	/**
+	 * "Move here": relocates the hole's existing tee/basket to exactly
+	 * `holeMarkerActionConfirm.point` (the click location) with no CV
+	 * re-snap -- the deliberate, no-second-guessing counterpart to
+	 * drag-to-correct, for a point the user can already see is wrong and
+	 * knows exactly where to put instead.
+	 */
+	function confirmHoleMarkerMove(): void {
+		if (!holeMarkerActionConfirm) return;
+		const { holeId, holeNumber, kind, point } = holeMarkerActionConfirm;
+		const hole = holes.find((candidate) => candidate.id === holeId);
+		const originalPoint = kind === 'tee' ? hole?.tee : hole?.basket;
+		holes = kind === 'tee' ? moveTee(holes, holeId, point) : moveBasket(holes, holeId, point);
+		if (isMapGeometryKind(kind)) markMapGeometryEdited();
+		holeMarkerActionConfirm = null;
+		vibrate(8);
+		const dragDistancePx = originalPoint
+			? Math.hypot(point.xPx - originalPoint.xPx, point.yPx - originalPoint.yPx)
+			: undefined;
+		logCorrection(kind, holeNumber, 'move', { xPx: point.xPx, yPx: point.yPx }, { dragDistancePx });
+		recomputeActiveReview();
+	}
+
+	function confirmHoleMarkerDelete(): void {
+		if (!holeMarkerActionConfirm) return;
+		const { holeId, kind } = holeMarkerActionConfirm;
+		holes = kind === 'tee' ? removeTee(holes, holeId) : removeBasket(holes, holeId);
+		if (isMapGeometryKind(kind)) markMapGeometryEdited();
+		holeMarkerActionConfirm = null;
+		vibrate(8);
+		recomputeActiveReview();
+	}
+
+	function dismissHoleMarkerAction(): void {
+		holeMarkerActionConfirm = null;
 	}
 
 	/** Activates a numbered hole, creating it in numeric order when the draft does not have it yet. */
@@ -1337,13 +1673,18 @@
 	 * source image, Alt held, or a failed/empty pass are all indistinguishable
 	 * outcomes to the user: the raw point already placed simply stands.
 	 */
-	function applyLocalSnap(kind: LocalSnapKind, holeId: string, rawPoint: SourcePoint, altKey: boolean): void {
-		if (altKey) return;
+	function applyLocalSnap(
+		kind: LocalSnapKind,
+		holeId: string,
+		rawPoint: SourcePoint,
+		altKey: boolean
+	): PendingSnapRef | null {
+		if (altKey) return null;
 		const anchor = currentNumberAnchor();
 		const image = sourceImage();
-		if (!anchor || !image) return;
+		if (!anchor || !image) return null;
 		const resource = editor.getAssetResource(image.id);
-		if (!resource) return;
+		if (!resource) return null;
 
 		localSnapRequestSequence += 1;
 		const requestId = localSnapRequestSequence;
@@ -1352,17 +1693,26 @@
 
 		requestLocalSnap(resource.bytes, image.mimeType, { kind, clickPx: rawPoint, numberAnchor: anchor })
 			.then((snapped) => {
-				if (!snapped) return;
+				if (!snapped) {
+					flushCorrectionForSnap(key, requestId, null);
+					return;
+				}
 				// Superseded by a newer snap request on the same marker (another
 				// placement/release, or the marker was deleted and re-placed) —
 				// this reply is stale and must not clobber whatever's current now.
-				if (pendingLocalSnaps.get(key) !== requestId) return;
-				settleLocalSnap(kind, holeId, rawPoint, snapped);
+				if (pendingLocalSnaps.get(key) !== requestId) {
+					flushCorrectionForSnap(key, requestId, null);
+					return;
+				}
+				const settled = settleLocalSnap(kind, holeId, rawPoint, snapped);
+				flushCorrectionForSnap(key, requestId, settled ? snapped : null);
 			})
 			.catch(() => {
 				// A failed pass must be indistinguishable from no feature: never
 				// surface an error for a background convenience snap.
+				flushCorrectionForSnap(key, requestId, null);
 			});
+		return { key, requestId };
 	}
 
 	/** ~100ms CSS ease (design point 4) plus a small buffer so `.settling` outlives the transition it drives rather than being pulled off mid-animation. */
@@ -1374,12 +1724,17 @@
 	 * moved, deleted, or replaced it, this reply is stale and must not
 	 * clobber newer state.
 	 */
-	function settleLocalSnap(kind: LocalSnapKind, holeId: string, rawPoint: SourcePoint, snapped: SourcePoint): void {
+	function settleLocalSnap(
+		kind: LocalSnapKind,
+		holeId: string,
+		rawPoint: SourcePoint,
+		snapped: SourcePoint
+	): boolean {
 		const hole = holes.find((candidate) => candidate.id === holeId);
-		if (!hole) return;
+		if (!hole) return false;
 		const current = kind === 'tee' ? hole.tee : hole.basket;
-		if (!current || current.xPx !== rawPoint.xPx || current.yPx !== rawPoint.yPx) return;
-		if (snapped.xPx === rawPoint.xPx && snapped.yPx === rawPoint.yPx) return;
+		if (!current || current.xPx !== rawPoint.xPx || current.yPx !== rawPoint.yPx) return false;
+		if (snapped.xPx === rawPoint.xPx && snapped.yPx === rawPoint.yPx) return false;
 
 		const key = localSnapKey(kind, holeId);
 		if (!prefersReducedMotion()) {
@@ -1389,14 +1744,20 @@
 			}, LOCAL_SNAP_SETTLE_CLASS_MS);
 		}
 		holes = kind === 'tee' ? moveTee(holes, holeId, snapped) : moveBasket(holes, holeId, snapped);
+		recomputeActiveReview();
+		return true;
 	}
 
 	/**
 	 * Wedge actions offered by an open radial menu: Delete alone for a hit
 	 * marker, otherwise the wedges the current mode's activity allows. Map
-	 * mode places course geometry (tee/basket if absent, bend always); round
-	 * mode places round-specific points (shot only with a hole active, walk
-	 * always — the walk path needs no hole).
+	 * mode always offers tee/basket/bend from empty space -- tee/basket are
+	 * offered even when the active hole already has one (relabeled "Move ...
+	 * here" by `radialMenuButtons`), covering the case where the correct spot
+	 * is far enough from the existing (wrong) marker that it never registers
+	 * as a marker click at all, only as empty space. Round mode places
+	 * round-specific points (shot only with a hole active, walk always — the
+	 * walk path needs no hole).
 	 */
 	function radialMenuActions(menu: RadialMenuState): RadialAction[] {
 		if (menu.hitMarker) return ['delete'];
@@ -1408,24 +1769,30 @@
 		}
 		const hole = holes.find((candidate) => candidate.id === menu.holeId);
 		if (!hole) return [];
-		const actions: RadialAction[] = [];
-		if (!hole.tee) actions.push('tee');
-		if (!hole.basket) actions.push('basket');
-		actions.push('bend');
-		return actions;
+		return ['tee', 'basket', 'bend'];
 	}
 
 	/** `radialMenuActions()`, projected into the generic button shape `RadialMenu.svelte` renders. */
 	function radialMenuButtons(menu: RadialMenuState): RadialMenuAction[] {
-		return radialMenuActions(menu).map((action) => ({
-			id: action,
-			label:
-				action === 'delete'
-					? `Delete ${menu.hitMarker ? POINT_KIND_LABELS[menu.hitMarker.kind] : ''}`
-					: POINT_KIND_LABELS[action],
-			icon: action === 'delete' ? '✕' : POINT_KIND_ICONS[action],
-			danger: action === 'delete'
-		}));
+		const hole = holes.find((candidate) => candidate.id === menu.holeId);
+		return radialMenuActions(menu).map((action) => {
+			if (action === 'delete') {
+				return {
+					id: action,
+					label: `Delete ${menu.hitMarker ? POINT_KIND_LABELS[menu.hitMarker.kind] : ''}`,
+					icon: '✕',
+					danger: true
+				};
+			}
+			const alreadyPlaced =
+				hole !== undefined && ((action === 'tee' && hole.tee) || (action === 'basket' && hole.basket));
+			return {
+				id: action,
+				label: alreadyPlaced ? `Move ${POINT_KIND_LABELS[action]} here` : POINT_KIND_LABELS[action],
+				icon: POINT_KIND_ICONS[action],
+				danger: false
+			};
+		});
 	}
 
 	/** Whether the given marker is the one an open delete radial menu targets, for the overlay's highlight ring. */
@@ -1463,15 +1830,37 @@
 				} else {
 					holes = deleteMarker(holes, marker);
 					if (isMapGeometryKind(marker.kind)) markMapGeometryEdited();
+					if (marker.kind === 'tee' || marker.kind === 'basket') recomputeActiveReview();
 				}
 			}
 		} else if (action === 'walk') {
 			walkingPath = addWalkPoint(walkingPath, menu.at);
 		} else if (menu.holeId) {
-			holes = placeByMode(holes, menu.holeId, action, menu.at);
+			const holeId = menu.holeId;
+			const holeBefore = holes.find((candidate) => candidate.id === holeId);
+			const hadFeatureAlready =
+				action === 'tee' ? holeBefore?.tee !== undefined : action === 'basket' ? holeBefore?.basket !== undefined : false;
+			holes = placeByMode(holes, holeId, action, menu.at);
 			if (isMapGeometryKind(action)) markMapGeometryEdited();
 			if (action === 'tee' || action === 'basket') {
-				applyLocalSnap(action, menu.holeId, menu.at, menu.altKey);
+				const snapRef = applyLocalSnap(action, holeId, menu.at, menu.altKey);
+				if (holeBefore) {
+					// A hole that already had this kind is being overridden from
+					// empty space (the "true spot is far from the wrong marker"
+					// case) -- logged as 'move', same classification as the
+					// precision-chip and drag paths. Otherwise this is a genuine
+					// from-scratch manual placement. Deferred while a snap pass is
+					// in flight so the event records the post-snap final coordinate
+					// with the raw drop preserved separately.
+					logCorrection(
+						action,
+						holeBefore.number,
+						hadFeatureAlready ? 'move' : 'place',
+						{ xPx: menu.at.xPx, yPx: menu.at.yPx },
+						snapRef ? { deferForSnap: snapRef } : {}
+					);
+				}
+				recomputeActiveReview();
 			}
 		}
 		focusViewport();
@@ -1638,6 +2027,31 @@
 		if (!drag.dragging) {
 			previewHoles = null;
 			previewWalkingPath = null;
+			// A plain click (not a drag) on an already-placed tee/basket marker
+			// opens the precision action chip instead of the generic delete-only
+			// radial menu: "Move here" relocates it to exactly this click point,
+			// no CV re-snap, so a confidently-wrong-but-uncontested detection
+			// (never surfaced by the ranked review queue's ambiguity-only scoring)
+			// can still be corrected in one click. Bend/shot/walk markers are
+			// unaffected -- they keep today's delete-only radial menu.
+			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && drag.marker.holeId) {
+				const holeNumber = holes.find((candidate) => candidate.id === drag.marker.holeId)?.number;
+				if (holeNumber !== undefined) {
+					const clickPoint = clampPointToImageBounds(
+						screenToImage(pointer, drag.transform),
+						image.widthPx,
+						image.heightPx
+					);
+					candidateAssignConfirm = null;
+					holeMarkerActionConfirm = {
+						kind: drag.marker.kind,
+						point: clickPoint,
+						holeId: drag.marker.holeId,
+						holeNumber
+					};
+					return;
+				}
+			}
 			const point =
 				drag.marker.kind === 'walk'
 					? (drag.marker.index !== undefined ? walkingPath[drag.marker.index] ?? null : null)
@@ -1654,13 +2068,28 @@
 			walkingPath =
 				drag.marker.index !== undefined ? moveWalkPoint(walkingPath, drag.marker.index, point) : walkingPath;
 		} else {
+			// Captured before `holes` is reassigned below -- this is the marker's
+			// pre-drag location, needed for the correction log's `move` event.
+			const originalPoint = markerPoint(drag.marker);
+			const draggedHoleNumber = holes.find((candidate) => candidate.id === drag.marker.holeId)?.number;
 			holes = moveMarker(holes, drag.marker, point);
 			if (isMapGeometryKind(drag.marker.kind)) markMapGeometryEdited();
 			// Snap-to-detection applies on a genuine drag-RELEASE only (never
 			// mid-drag — `previewAnnotationMove` above never calls this), and only
 			// for an existing tee/basket marker being repositioned.
 			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && drag.marker.holeId) {
-				applyLocalSnap(drag.marker.kind, drag.marker.holeId, point, event?.altKey ?? false);
+				const snapRef = applyLocalSnap(drag.marker.kind, drag.marker.holeId, point, event?.altKey ?? false);
+				if (draggedHoleNumber !== undefined) {
+					const dragDistancePx = originalPoint ? Math.hypot(point.xPx - originalPoint.xPx, point.yPx - originalPoint.yPx) : undefined;
+					logCorrection(
+						drag.marker.kind,
+						draggedHoleNumber,
+						'move',
+						{ xPx: point.xPx, yPx: point.yPx },
+						{ dragDistancePx, ...(snapRef ? { deferForSnap: snapRef } : {}) }
+					);
+				}
+				recomputeActiveReview();
 			}
 		}
 		previewHoles = null;
@@ -1721,6 +2150,7 @@
 		basketDetectionError = null;
 		courseDetection = null;
 		activeReviewConfirmedCandidateIds = [];
+		wrongGuessCounts = {};
 		activeReviewRecommendation = null;
 		activeReviewCandidateOverrides = {};
 		courseDetectionStatus = null;
@@ -1730,6 +2160,7 @@
 		clearRevealTimers();
 		revealStage = 'done';
 		candidateAssignConfirm = null;
+		holeMarkerActionConfirm = null;
 		courseCandidateDrag = null;
 		teeExperimentEnabled = { 'gray-center': true, 'edge-loop': true, fused: true };
 		teeExperimentFullResolution = false;
@@ -1819,6 +2250,7 @@
 		selectedBasketCandidate = null;
 		courseDetectionStage = null;
 		candidateAssignConfirm = null;
+		holeMarkerActionConfirm = null;
 		courseCandidateDrag = null;
 		startCourseDetectionProgress();
 		try {
@@ -1836,7 +2268,27 @@
 			// keyed to the old raster must never be written onto the new one's state.
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
+			// Ribbon-mass attribution shadow pass: freeze ShadowRun A (the
+			// immutable production-reality snapshot) NOW, before any review
+			// interaction can exist. Fire-and-forget instrumentation — it
+			// persists locally, never touches authoritative geometry, and a
+			// failure is silent by design.
+			void runRibbonMassShadowPass({
+				projectId: editor.state.project.id,
+				imageId: image.id,
+				imageSha256: image.sha256,
+				imageBytes: resource.bytes,
+				mimeType: image.mimeType,
+				widthPx: image.widthPx,
+				heightPx: image.heightPx,
+				detection: result
+			}).then((run) => {
+				if (!run || sourceImage()?.id !== detectedImageId) return;
+				latestShadowRun = run;
+				if (shadowOverlayEnabled) shadowOverlayRender = renderShadowRunOverlay(run);
+			});
 			activeReviewConfirmedCandidateIds = [];
+		wrongGuessCounts = {};
 			activeReviewCandidateOverrides = {};
 			recomputeActiveReview();
 			basketCandidates = result.baskets;
@@ -2005,6 +2457,7 @@
 		basketCandidatesSource = null;
 		selectedBasketCandidate = null;
 		activeReviewConfirmedCandidateIds = [];
+		wrongGuessCounts = {};
 		activeReviewRecommendation = null;
 		activeReviewCandidateOverrides = {};
 		courseDetectionStatus = 'Ground truth assigned · 18 pads · 18 baskets · 18 badges';
@@ -2262,6 +2715,9 @@
 
 	let doneRunning = $state(false);
 	let doneError = $state<string | null>(null);
+	let exportingCorrections = $state(false);
+	let exportingShadowRuns = $state(false);
+	let exportCorrectionsError = $state<string | null>(null);
 	/**
 	 * A pending "this would overwrite a saved course" confirmation, opened by
 	 * `saveToLibraryBestEffort` and settled by the dialog's own buttons (or
@@ -2391,6 +2847,69 @@
 			await goto(`${base}/create-graphics`);
 		} finally {
 			doneRunning = false;
+		}
+	}
+
+	/**
+	 * "Export corrections" (design: `docs/annotate-round-correction-log.md`'s
+	 * "Export, revised" section): no sync/backend, just this project's
+	 * recorded `CorrectionEvent`s serialized to a JSON file the user downloads
+	 * and shares however they already share files.
+	 */
+	async function handleExportCorrections(): Promise<void> {
+		if (exportingCorrections) return;
+		exportingCorrections = true;
+		exportCorrectionsError = null;
+		try {
+			const projectId = editor.state.project.id;
+			const events = (await correctionLogStore.getAll()).filter((event) => event.projectId === projectId);
+			const blob = correctionEventsToExportBlob(events);
+			(download ?? downloadBlob)(blob, `${editor.state.project.name || 'chainspot'}-corrections.json`);
+		} catch (error) {
+			exportCorrectionsError =
+				error instanceof Error ? error.message : 'Could not export corrections for this project.';
+		} finally {
+			exportingCorrections = false;
+		}
+	}
+
+	/**
+	 * "Export shadow runs": this project's ribbon-mass ShadowRun A records
+	 * with experiments B (ownership-only corrections, joined from the
+	 * correction log) and C (review-approved location + ownership, from the
+	 * current hole annotations) derived at export time. The stored records
+	 * stay pure production reality — derivation never writes back. Exported
+	 * alongside, but separately from, correction events; the two files join
+	 * on projectId/imageId/holeNumber/seedId.
+	 */
+	async function handleExportShadowRuns(): Promise<void> {
+		if (exportingShadowRuns) return;
+		exportingShadowRuns = true;
+		exportCorrectionsError = null;
+		try {
+			const projectId = editor.state.project.id;
+			const runs = (await getDefaultRibbonMassShadowRunStore().getAll()).filter(
+				(run) => run.projectId === projectId
+			);
+			const events = (await correctionLogStore.getAll()).filter((event) => event.projectId === projectId);
+			// Review-approved geometry = the holes as annotated right now. This
+			// is review-APPROVED, not ground truth: the coordinates may have been
+			// CV-snapped (`applyLocalSnap`) or simply mis-placed by the reviewer.
+			const reviewApproved: ReviewApprovedHole[] = holes
+				.filter((hole) => hole.tee !== undefined || hole.basket !== undefined)
+				.map((hole) => ({
+					holeNumber: hole.number,
+					...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
+					...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
+				}));
+			const derived = runs.map((run) => deriveShadowRunExperiments(run, events, reviewApproved));
+			const blob = shadowRunsToExportBlob(derived);
+			(download ?? downloadBlob)(blob, `${editor.state.project.name || 'chainspot'}-ribbon-mass-shadow.json`);
+		} catch (error) {
+			exportCorrectionsError =
+				error instanceof Error ? error.message : 'Could not export shadow runs for this project.';
+		} finally {
+			exportingShadowRuns = false;
 		}
 	}
 
@@ -3038,6 +3557,35 @@
 
 			{#snippet overlay({ image, zoom })}
 				<svg class="annotation-overlay" viewBox={`0 0 ${image.widthPx} ${image.heightPx}`} aria-hidden="true">
+					{#if shadowOverlayEnabled && shadowOverlayRender}
+						<!-- Ribbon-mass shadow overlay: display-only render of the stored ShadowRun A. -->
+						<image
+							href={shadowOverlayRender.dataUrl}
+							x="0"
+							y="0"
+							width={shadowOverlayRender.widthPx}
+							height={shadowOverlayRender.heightPx}
+							preserveAspectRatio="none"
+							class="shadow-ribbon-mask"
+							data-testid="shadow-ribbon-mask"
+						/>
+						{#each shadowOverlayRender.splitLines as splitLine (splitLine.holeNumber)}
+							<line
+								x1={splitLine.badge.xPx}
+								y1={splitLine.badge.yPx}
+								x2={splitLine.basket.xPx}
+								y2={splitLine.basket.yPx}
+								class="shadow-split-line"
+							/>
+							<text
+								x={(splitLine.badge.xPx + splitLine.basket.xPx) / 2}
+								y={(splitLine.badge.yPx + splitLine.basket.yPx) / 2 - 6 / zoom}
+								font-size={13 / zoom}
+								class="shadow-split-label"
+								text-anchor="middle">H{splitLine.holeNumber} split</text
+							>
+						{/each}
+					{/if}
 					{#each visibleHoles as overlayHole (overlayHole.id)}
 						{@const band = deriveCorridorBand(overlayHole)}
 						{#if band}
@@ -3302,9 +3850,16 @@
 										: `${Math.round(recommendation.score * 100)}% usefulness`}
 									· {recommendation.rationale.competingHoleCount} competing links
 								</span>
+							{:else if activeReviewRecommendation?.reason === 'needs-manual-placement'}
+								{@const holeNumber = activeReviewRecommendation.holeNumber}
+								<p>{holeNumber !== undefined ? `Hole ${holeNumber} needs manual placement.` : 'A hole needs manual placement.'}</p>
+								<span>No usable detected candidate nearby — place it directly on the map.</span>
+							{:else if activeReviewRecommendation?.reason === 'deadline'}
+								<p>Ran out of scoring time.</p>
+								<span>Try again, or lower the minimum usefulness floor below.</span>
 							{:else}
-								<p>No unreviewed detected candidate remains.</p>
-								<span>All available candidates have been decided.</span>
+								<p>No further automatic suggestions right now.</p>
+								<span>Every remaining candidate is below the usefulness floor.</span>
 							{/if}
 							<label class="active-review-threshold">
 								<span>Minimum usefulness {Math.round(minAutoSuggestScore * 100)}%</span>
@@ -3376,6 +3931,40 @@
 							data-testid="candidate-assign-confirm-cancel"
 							aria-label="Cancel"
 							onclick={dismissCandidateAssign}
+						>✕</button>
+					</div>
+				{/if}
+
+				{#if holeMarkerActionConfirm}
+					{@const anchor = imageToScreen(holeMarkerActionConfirm.point, view)}
+					<div
+						bind:this={holeMarkerActionConfirmEl}
+						class="hole-marker-action-confirm"
+						data-testid="hole-marker-action-confirm"
+						style={`left:${anchor.x}px; top:${anchor.y}px;`}
+					>
+						<button
+							type="button"
+							class="hole-marker-action-move"
+							data-testid="hole-marker-action-move"
+							onclick={confirmHoleMarkerMove}
+						>
+							Move {holeMarkerActionConfirm.kind} here
+						</button>
+						<button
+							type="button"
+							class="hole-marker-action-delete"
+							data-testid="hole-marker-action-delete"
+							onclick={confirmHoleMarkerDelete}
+						>
+							Delete {holeMarkerActionConfirm.kind}
+						</button>
+						<button
+							type="button"
+							class="hole-marker-action-cancel"
+							data-testid="hole-marker-action-cancel"
+							aria-label="Cancel"
+							onclick={dismissHoleMarkerAction}
 						>✕</button>
 					</div>
 				{/if}
@@ -3453,6 +4042,51 @@
 			/>
 			Ground truth tools
 		</label>
+		<button
+			type="button"
+			class="dev-tools-action"
+			disabled={exportingCorrections}
+			onclick={() => void handleExportCorrections()}
+			data-testid="export-corrections"
+		>
+			{exportingCorrections ? 'Exporting…' : 'Export corrections'}
+		</button>
+		<button
+			type="button"
+			class="dev-tools-action"
+			disabled={exportingShadowRuns}
+			onclick={() => void handleExportShadowRuns()}
+			data-testid="export-shadow-runs"
+		>
+			{exportingShadowRuns ? 'Exporting…' : 'Export shadow runs'}
+		</button>
+		<label class="dev-tools-toggle" class:active={shadowOverlayEnabled}>
+			<input
+				type="checkbox"
+				checked={shadowOverlayEnabled}
+				onchange={toggleShadowOverlay}
+				data-testid="shadow-overlay-toggle"
+			/>
+			Shadow ribbon overlay
+		</label>
+		{#if shadowOverlayEnabled}
+			{#if shadowOverlayRender}
+				<span class="shadow-overlay-legend" data-testid="shadow-overlay-legend">
+					<span class="swatch exclusive"></span>1-hole ({shadowOverlayRender.counts.exclusive})
+					<span class="swatch shared"></span>multi-hole ({shadowOverlayRender.counts.shared})
+					<span class="swatch texture"></span>texture-only ({shadowOverlayRender.counts.textureOnly})
+					· holes: {shadowOverlayRender.topologyCounts.exclusiveSameComponent} exclusive /
+					{shadowOverlayRender.topologyCounts.sharedSameComponent} shared /
+					{shadowOverlayRender.topologyCounts.split} split /
+					{shadowOverlayRender.topologyCounts.noSeedHit} no-seed
+				</span>
+			{:else}
+				<span class="shadow-overlay-legend">no shadow run for this image yet — run course detection first</span>
+			{/if}
+		{/if}
+		{#if exportCorrectionsError}
+			<span class="dev-tools-error" role="alert">{exportCorrectionsError}</span>
+		{/if}
 	</footer>
 </main>
 
@@ -4347,6 +4981,73 @@
 		margin: 0;
 	}
 
+	.dev-tools-action {
+		padding: 0.25rem 0.5rem;
+		border-radius: 5px;
+		border: 1px solid #3f3f46;
+		background: transparent;
+		font-size: 0.68rem;
+		color: #71717a;
+		cursor: pointer;
+	}
+
+	.dev-tools-action:hover:not(:disabled) {
+		color: #a1a1aa;
+		border-color: #52525b;
+	}
+
+	.shadow-ribbon-mask {
+		image-rendering: pixelated;
+	}
+
+	.shadow-split-line {
+		stroke: #f87171;
+		stroke-width: 2;
+		stroke-dasharray: 6 4;
+		vector-effect: non-scaling-stroke;
+	}
+
+	.shadow-split-label {
+		fill: #fca5a5;
+		stroke: #18181b;
+		stroke-width: 3px;
+		paint-order: stroke fill;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-weight: 700;
+	}
+
+	.shadow-overlay-legend {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.68rem;
+		color: #a1a1aa;
+	}
+
+	.shadow-overlay-legend .swatch {
+		display: inline-block;
+		width: 0.65rem;
+		height: 0.65rem;
+		border-radius: 2px;
+	}
+
+	.shadow-overlay-legend .swatch.exclusive {
+		background: rgb(34 197 94 / 70%);
+	}
+
+	.shadow-overlay-legend .swatch.shared {
+		background: rgb(245 158 11 / 70%);
+	}
+
+	.shadow-overlay-legend .swatch.texture {
+		background: rgb(96 165 250 / 70%);
+	}
+
+	.dev-tools-error {
+		font-size: 0.68rem;
+		color: #ef4444;
+	}
+
 	.tee-variant-toggles label.active,
 	.tee-full-res-toggle.active {
 		border-color: #3b82f6;
@@ -4652,6 +5353,73 @@
 	}
 
 	.candidate-assign-confirm-cancel:hover {
+		color: #f4f4f5;
+	}
+
+	.hole-marker-action-confirm {
+		position: absolute;
+		left: 0;
+		top: 0;
+		z-index: 25;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		transform: translate(-50%, calc(-100% - 0.6rem));
+		padding: 0.3rem 0.3rem 0.3rem 0.6rem;
+		border: 1px solid #38bdf8;
+		border-radius: 999px;
+		background: #18181b;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 55%);
+		white-space: nowrap;
+	}
+
+	.hole-marker-action-move {
+		min-height: 2rem;
+		padding: 0.3rem 0.6rem;
+		border: 0;
+		border-radius: 999px;
+		background: #0369a1;
+		color: #f0f9ff;
+		font-size: 0.75rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.hole-marker-action-move:hover {
+		background: #0284c7;
+	}
+
+	.hole-marker-action-delete {
+		min-height: 2rem;
+		padding: 0.3rem 0.6rem;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: #f87171;
+		font-size: 0.75rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.hole-marker-action-delete:hover {
+		background: rgb(248 113 113 / 12%);
+	}
+
+	.hole-marker-action-cancel {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.6rem;
+		height: 1.6rem;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: #a1a1aa;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.hole-marker-action-cancel:hover {
 		color: #f4f4f5;
 	}
 

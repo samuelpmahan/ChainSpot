@@ -148,8 +148,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	void editor;
 
 	addHoleViaShortcut();
-	// Radial menu is off by default; every test in this file exercises it directly.
-	host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
+	// Radial menu (manual placement) is on by default; nothing to toggle here.
 	await flush();
 }
 
@@ -263,7 +262,39 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
-	it('opens a delete-only menu on an existing marker and removes just that point', async () => {
+	it('opens the bend delete-only menu on an existing bend marker and removes just that point', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+
+		const clickAt = screenPointFor(host, 60, 60);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		clickAction(host, 'bend');
+		await flush();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+
+		// Click directly on the placed bend (no drag) to open its delete menu.
+		// Bend/shot/walk markers keep the plain delete-only radial menu; only
+		// tee/basket markers now open the precision action chip instead (see
+		// the click-on-existing-tee/basket test below).
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
+
+		clickAction(host, 'delete');
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('clicking directly on an existing tee marker opens the precision action chip, not the radial menu', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -275,19 +306,53 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
 
-		// Click directly on the placed tee (no drag) to open its delete menu.
+		// Click directly on the placed tee (no drag): opens the "Move/Delete"
+		// chip instead of the generic delete-only radial menu.
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
 
-		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="hole-marker-action-confirm"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="hole-marker-action-move"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="hole-marker-action-delete"]')).not.toBeNull();
 
-		clickAction(host, 'delete');
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-marker-action-delete"]')?.click();
 		await flush();
 
-		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="hole-marker-action-confirm"]')).toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('"Move tee here" on the precision chip relocates the tee to exactly the click point, with no CV involved', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+
+		const placeAt = screenPointFor(host, 60, 60);
+		dispatchClick(host, placeAt.x, placeAt.y);
+		await flush();
+		clickAction(host, 'tee');
+		await flush();
+
+		const marker = host.querySelector('[data-testid="tee-marker-1"]');
+		expect(marker?.getAttribute('cx')).toBe('60');
+		expect(marker?.getAttribute('cy')).toBe('60');
+
+		// A slightly-off click on the same marker should relocate it to the
+		// exact click point (precision correction), not snap back to 60,60.
+		const correctedAt = screenPointFor(host, 63, 58);
+		dispatchClick(host, correctedAt.x, correctedAt.y);
+		await flush();
+		host.querySelector<HTMLButtonElement>('[data-testid="hole-marker-action-move"]')?.click();
+		await flush();
+
+		const movedMarker = host.querySelector('[data-testid="tee-marker-1"]');
+		expect(movedMarker?.getAttribute('cx')).toBe('63');
+		expect(movedMarker?.getAttribute('cy')).toBe('58');
+		expect(host.querySelector('[data-testid="hole-marker-action-confirm"]')).toBeNull();
 
 		unmount(component);
 		host.remove();
