@@ -3332,6 +3332,29 @@
 							<p class="detection-summary" data-testid="course-detection-controls-summary">
 								{assignedNumbers} numbers · {courseDetection.tees.length} tees · {courseDetection.baskets.length} baskets · {readyHoles} ready
 							</p>
+							<!-- "What the computer sees": the ribbon-mass shadow overlay,
+							     generated fresh from every detection pass — display-only,
+							     never an input to any annotation behavior. User-facing copy
+							     stays free of internal detector vocabulary (see
+							     docs/annotate-round-ask-copy.md's split); the detailed
+							     legend and confuser labeling live in the dev-tools footer. -->
+							<button
+								type="button"
+								class="computer-sees-toggle"
+								class:active={shadowOverlayEnabled}
+								aria-pressed={shadowOverlayEnabled}
+								data-testid="computer-sees-toggle"
+								onclick={toggleShadowOverlay}
+							>
+								👁 {shadowOverlayEnabled ? 'Hide' : 'Show'} what the computer sees
+							</button>
+							{#if shadowOverlayEnabled && shadowOverlayRender}
+								<p class="computer-sees-legend">
+									<span class="swatch exclusive"></span> one hole's fairway
+									<span class="swatch shared"></span> shared between holes
+									<span class="swatch texture"></span> looks like fairway
+								</p>
+							{/if}
 							{#if courseDetection.numberDetection.note}
 								<p class="tool-note">{courseDetection.numberDetection.note}</p>
 							{/if}
@@ -5151,6 +5174,45 @@
 	}
 
 	.shadow-overlay-legend .swatch.texture {
+		background: rgb(96 165 250 / 70%);
+	}
+
+	.computer-sees-toggle {
+		width: 100%;
+	}
+
+	.computer-sees-toggle.active {
+		border-color: #22c55e !important;
+		background: #052e16 !important;
+		color: #bbf7d0 !important;
+	}
+
+	.computer-sees-legend {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin: 0;
+		font-size: 0.72rem;
+		color: #d4d4d8;
+	}
+
+	.computer-sees-legend .swatch {
+		display: inline-block;
+		width: 0.65rem;
+		height: 0.65rem;
+		border-radius: 2px;
+	}
+
+	.computer-sees-legend .swatch.exclusive {
+		background: rgb(34 197 94 / 70%);
+	}
+
+	.computer-sees-legend .swatch.shared {
+		background: rgb(245 158 11 / 70%);
+	}
+
+	.computer-sees-legend .swatch.texture {
 		background: rgb(96 165 250 / 70%);
 	}
 
