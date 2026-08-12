@@ -365,6 +365,32 @@ cart path between holes to re-run the same probe against -- Alex Clark's
 single confirmed hit (11->12) is not enough evidence either way to say
 whether it generalizes.
 
+**Why this whole thread (exclusion masking above, and this positive-signal
+version) converged on nothing, on both fixtures**: wherever a dash chain
+comes through legible and unambiguous enough to trust, that's because it
+sits on open, high-contrast terrain -- the same conditions the primary
+detectors (gray-center tee, badge template, basket NCC) already handle
+without help. The places a path signal would actually be worth something
+are the degenerate ones -- IMG_5641 hole 3's pad tangent to the putting
+ring, the icon-buried Alex Clark holes -- but there the dash itself is
+*also* degraded: crossed by the same rail, broken by the same icon. Dash
+legibility and target legibility aren't independent signals here; they're
+driven by the same underlying occlusion, so the dash rarely tells you
+something the primary detector doesn't already know. That's consistent
+with both results above: masking made no difference at the one case that
+motivated it, and the confident, long chains in the positive-signal probe
+turned out to mostly be mowing-stripe texture, not the real path.
+
+That said, "rarely" is not "never" -- a real cart path *can* run through
+open ground right up to a pad that is itself obscured by something the
+path doesn't touch (a shadow, a different building's roof, a scale
+artifact unrelated to the path/pad boundary), which would decouple the two
+legibility signals this session's two fixtures happened not to exercise.
+The `walkingPathMasking` CLI lever above stays in place for exactly that
+possibility -- worth another look if a future labeled course has an
+obscured pad next to a clean path, rather than assuming this thread is
+permanently dead.
+
 ---
 
 ## Tee-axis-alignment / white-edge-rail tee recovery
