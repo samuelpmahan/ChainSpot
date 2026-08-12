@@ -23,6 +23,8 @@ import type {
 import {
 	deriveBasketIconMasksPx,
 	derivePuttingCircleMasksPx,
+	deriveWalkingPathMasksPx,
+	detectDashedPathChains,
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadCandidates,
 	detectTeePadVariants
@@ -151,12 +153,34 @@ function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
 /** Fallback only, used when no AUTO tee exists yet to measure a course-specific radius from. */
 const PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI = 100;
 
+/**
+ * Levers for detection ideas that are safe but not (yet) proven to help --
+ * see `docs/deferred-detection-experiments.md`. Every flag defaults to off,
+ * so omitting this parameter reproduces exactly the production pipeline's
+ * behavior; passing one on is how a fixture re-test happens without
+ * resurrecting a diff from git history first. `scripts/detect-course.ts`
+ * exposes these as CLI flags for that purpose.
+ */
+export interface TeeBootstrapExperiments {
+	/**
+	 * Fold dashed walking/cart-path chains (`detectDashedPathChains`) into
+	 * the tier-3 occlusion-masking pool alongside the putting-circle/
+	 * basket-icon masks. Tested against GoldenTeeSet and Alex Clark:
+	 * `correctHoles` identical with and without on both, including the
+	 * path-adjacent hole that motivated it -- safe, but no measured benefit
+	 * yet. See the "Dashed walking/cart-path detector" entry in
+	 * `docs/deferred-detection-experiments.md`.
+	 */
+	readonly walkingPathMasking?: boolean;
+}
+
 export function detectCalibratedTeeBootstrap(
 	cv: TeePadCv,
 	raster: TeePadRaster,
 	options: CalibratedTeePadDetectionOptions,
 	badges: readonly TeeBadgeAnchor[],
-	baskets: readonly PuttingCircleSourceBasket[] = []
+	baskets: readonly PuttingCircleSourceBasket[] = [],
+	experiments: TeeBootstrapExperiments = {}
 ): CalibratedTeeBootstrapResult {
 	const primary = detectTeePadCandidates(cv, raster, options);
 	const requested = options.maxCandidates ?? 18;
@@ -188,10 +212,13 @@ export function detectCalibratedTeeBootstrap(
 	// -- an already-resolved hole's candidates and assignment are completely
 	// untouched, so this cannot regress a hole that already works.
 	const stillNotAuto = assessed.holes.filter((hole) => hole.decision !== 'auto');
-	if (stillNotAuto.length > 0 && baskets.length > 0) {
+	if (stillNotAuto.length > 0) {
 		const occlusionMasks = [
-			...derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx),
-			...deriveBasketIconMasksPx(baskets, options.uiScalePx)
+			...(baskets.length > 0 ? derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx) : []),
+			...(baskets.length > 0 ? deriveBasketIconMasksPx(baskets, options.uiScalePx) : []),
+			...(experiments.walkingPathMasking
+				? deriveWalkingPathMasksPx(detectDashedPathChains(cv, raster, options), options.uiScalePx)
+				: [])
 		];
 		if (occlusionMasks.length > 0) {
 			const recovered = detectOccludedEdgeLoopCandidates(cv, raster, {

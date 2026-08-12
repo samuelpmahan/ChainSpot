@@ -12,7 +12,7 @@ import {
 	detectCalibratedTeeBootstrap,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
-import type { CalibratedBasketCandidate } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
+import type { CalibratedBasketCandidate, TeeBootstrapExperiments } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import {
 	basketRecoverySamplesFromGrammar,
 	deriveBasketDistanceBand,
@@ -54,6 +54,8 @@ export interface CourseCliArgs {
 	readonly maxBasketCandidates: number;
 	readonly minBasketScore?: number;
 	readonly minAutoSuggestScore?: number;
+	/** Off-by-default, safe-but-unproven detection levers. See `TeeBootstrapExperiments`. */
+	readonly experiments?: TeeBootstrapExperiments;
 }
 
 interface DecodedRaster {
@@ -169,6 +171,7 @@ function usage(): string {
 		'  --max-baskets <count>         Basket candidate cap (default: 18)',
 		'  --min-basket-score <0..1>     Basket NCC floor (default: detector default)',
 		'  --min-auto-suggest-score <0..1>  Active-review auto-suggest floor (default: recommender default)',
+		'  --experiment-walking-path-masking  Fold dashed-path chains into tee-recovery occlusion masking (off by default; see docs/deferred-detection-experiments.md)',
 		'  --help'
 	].join('\n');
 }
@@ -199,6 +202,7 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 	let maxBasketCandidates = 18;
 	let minBasketScore: number | undefined;
 	let minAutoSuggestScore: number | undefined;
+	let experimentWalkingPathMasking = false;
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
@@ -242,6 +246,9 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 				minAutoSuggestScore = finiteNumber(requireValue(argv, index, argument), argument);
 				index += 1;
 				break;
+			case '--experiment-walking-path-masking':
+				experimentWalkingPathMasking = true;
+				break;
 			default:
 				throw new Error(`Unknown option '${argument}'.\n\n${usage()}`);
 		}
@@ -259,7 +266,8 @@ export function parseArgs(argv: readonly string[]): CourseCliArgs {
 		maxTeeCandidates,
 		maxBasketCandidates,
 		minBasketScore,
-		minAutoSuggestScore
+		minAutoSuggestScore,
+		experiments: { walkingPathMasking: experimentWalkingPathMasking }
 	};
 }
 
@@ -634,7 +642,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		uiScalePx,
 		mapBoundsPx,
 		maxCandidates: args.maxTeeCandidates
-	}, teeBadges, primaryBasketCandidates);
+	}, teeBadges, primaryBasketCandidates, args.experiments ?? {});
 	const teeCandidates = teeBootstrap.candidates;
 	const grammarTees = teeBootstrap.assignments.map((assignment) => ({
 		...assignment.candidate,

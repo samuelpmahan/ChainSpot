@@ -9,11 +9,16 @@ that's already been tried and found wanting.
 
 **Convention**: a deferred idea's code lives in its own file (or a clearly
 self-contained section of an existing file), fully implemented and unit
-tested, but never imported by the live pipeline (`courseGrammar.ts`,
-`cvCalibratedDetectors.ts`, `basketDetection.worker.ts`,
-`scripts/detect-course.ts`). Add an entry below when you defer something new.
-Move an entry to "graduated" (or delete it) once it actually gets wired in
-and ships.
+tested, but either (a) never imported by the live pipeline
+(`courseGrammar.ts`, `cvCalibratedDetectors.ts`, `basketDetection.worker.ts`,
+`scripts/detect-course.ts`), or (b) wired in behind an explicit,
+off-by-default flag (see `TeeBootstrapExperiments` in
+`cvCalibratedDetectors.ts`) when the idea is cheap to re-test and worth
+keeping reachable from the CLI without resurrecting a diff first --
+production call sites (`basketDetection.worker.ts`) must not pass the flag,
+so real users see (a) and (b) identically. Add an entry below when you defer
+something new. Move an entry to "graduated" (or delete it) once it actually
+gets wired in and ships (i.e. its flag, if any, flips to on by default).
 
 ---
 
@@ -214,30 +219,44 @@ neither had this bug.
 
 **Status**: wired as exclusion masking (goal 1: keep a path from being
 mistaken for a pad) into `detectCalibratedTeeBootstrap`'s tier-3 recovery,
-tested against both ground-truth fixtures, then pulled back out.
-GoldenTeeSet (IMG_5641): byte-identical result with and without --
-`correctHoles` unchanged at 17/18, hole 3 wrong at exactly the same
-151.6px both times. The path masking made no difference there at all
-(nothing near hole 3 changed candidate-side once masked). Alex Clark:
-`correctHoles` unchanged for both tee (12/18) and basket (10/18) with and
-without. Hole 10 -- the one actually adjacent to a path, the case that
-motivated this in the first place -- is untouched, wrong at exactly the
-205.5px distance either way, consistent with the subagent finding
-(commit `5f54801`) that hole 10 loses ownership to an unrelated
-occluded-edge-loop false positive, not a path-occlusion problem. One
-side effect: hole 8 (tee and basket) flipped from *missing* to *wrong*
-(spurious candidates at 241px/90px) once the path mask was live --
-`correctHoles` didn't change, but it's a sign the newly-unmasked pixels
-are exposing something, just not the truth. Safe (no regression on either
-fixture) but zero measured benefit, so per this doc's own convention it
-stays out of the live pipeline for now, same disposition as the two
-entries above it.
+tested against both ground-truth fixtures. GoldenTeeSet (IMG_5641):
+byte-identical result with and without -- `correctHoles` unchanged at
+17/18, hole 3 wrong at exactly the same 151.6px both times. The path
+masking made no difference there at all (nothing near hole 3 changed
+candidate-side once masked). Alex Clark: `correctHoles` unchanged for both
+tee (12/18) and basket (10/18) with and without. Hole 10 -- the one
+actually adjacent to a path, the case that motivated this in the first
+place -- is untouched, wrong at exactly the 205.5px distance either way,
+consistent with the subagent finding (commit `5f54801`) that hole 10
+loses ownership to an unrelated occluded-edge-loop false positive, not a
+path-occlusion problem. One side effect: hole 8 (tee and basket) flipped
+from *missing* to *wrong* (spurious candidates at 241px/90px) once the
+path mask was live -- `correctHoles` didn't change, but it's a sign the
+newly-unmasked pixels are exposing something, just not the truth. Safe
+(no regression on either fixture) but zero measured benefit, so per this
+doc's own convention it stays **off by default** in the live pipeline,
+same disposition as the two entries above it.
 
-**What would justify wiring it in**: a real course where a hole's tee/basket
-recovery search is actually blocked by a path crossing the evidence *and*
-unmasking it changes the outcome for the better -- neither ground-truth
-fixture's currently-broken holes are that case. Worth re-testing once more
-labeled courses with path-crossed pads exist.
+Rather than reverting the wiring outright (which would mean resurrecting
+a diff from git history to re-test it later), it's gated behind an
+explicit, off-by-default lever: `TeeBootstrapExperiments.walkingPathMasking`,
+the sixth parameter of `detectCalibratedTeeBootstrap`
+(`cvCalibratedDetectors.ts`). `basketDetection.worker.ts` (production)
+doesn't pass it, so real users get exactly the same behavior as a full
+revert. `scripts/detect-course.ts` exposes it as
+`--experiment-walking-path-masking` specifically so re-testing this (or
+any future course) is a one-flag CLI run, not a code change --
+`npx tsx scripts/detect-course.ts <bundle> --experiment-walking-path-masking --out <dir>`
+reproduces the "on" numbers above exactly; omitting the flag reproduces
+the "off"/production numbers exactly (both verified byte-for-byte before
+this entry was written).
+
+**What would justify wiring it in by default**: a real course where a
+hole's tee/basket recovery search is actually blocked by a path crossing
+the evidence *and* flipping the flag changes the outcome for the better --
+neither ground-truth fixture's currently-broken holes are that case yet.
+Worth re-running the flag once more labeled courses with path-crossed pads
+exist, rather than reimplementing the masking from scratch.
 
 **Goal 2 (not started by this entry)**: using a path chain's terminus and
 direction as a *positive* signal for an unresolved hole's tee position/
