@@ -49,6 +49,28 @@ Columns map 1:1 to the correction log's `CorrectionEvent` fields
 `userAction`) -- no new data needed, just a plain render of what's already
 being recorded.
 
+## Naming rule: never label a candidate by its raw internal index
+
+`courseGrammar.ts`'s detector output identifies a candidate by
+`candidateIndex` -- its position in that detector's raw, unordered
+candidate list (e.g. `"basket": {"candidateIndex": 7, "xPx": ..., "yPx": ...}`
+inside hole 6's proposal). **That index has no relationship to any hole
+number.** True hole 6's basket can be `candidateIndex: 3` -- and if this
+view (or any debug output, log line, or ad hoc script) ever displays that
+as "B3," a reader will correctly parse "B3" as "hole 3's basket" and be
+wrong. This is exactly the class of bug the "clarifying the pipeline"
+view exists to prevent, not introduce.
+
+Rule: whenever a raw `candidateIndex` needs to be shown at all (e.g. an
+expandable "raw detector output" detail row, for cross-referencing against
+`course.json`), it must always be prefixed unambiguously as an opaque
+internal id -- `candidateIndex=3`, `cand#3`, or similar -- **never** a
+bare number, and never concatenated with the endpoint letter the way hole
+labels are (`B6`, `T14`). If a candidate is currently proposed for a hole,
+say so with the hole number explicitly ("candidateIndex=3, proposed for
+hole 6"), never let the index stand in for the hole number by proximity or
+shorthand.
+
 ## Sortable/filterable by the two questions that actually matter
 
 - **"Which gate calls were wrong?"** -- filter to rows where `Gate =
