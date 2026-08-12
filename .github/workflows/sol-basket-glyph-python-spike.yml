@@ -19,7 +19,7 @@ jobs:
       - name: Run Python basket-glyph spike
         run: |
           python scripts/cv-probes/basket_glyph_close_spike.py --render
-          python scripts/cv-probes/basket_glyph_close_spike_v2.py
+          python scripts/cv-probes/basket_glyph_close_spike_v3.py
       - name: Upload probe outputs
         if: always()
         uses: actions/upload-artifact@v4
