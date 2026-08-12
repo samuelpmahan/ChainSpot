@@ -164,58 +164,21 @@ detection by then, rather than staying pure manual entry indefinitely.
 
 ## Three things to get right first
 
-Per direction: tight focus on these three, ahead of anything else in this
-doc.
+Per direction: tight focus on these three, ahead of anything else. The
+first two are split into their own docs (different audiences -- one
+shippable, one must never ship -- so they shouldn't share a file):
 
-### 1. Simple, clear user asks
+1. **Simple, clear user asks** -- `docs/annotate-round-ask-copy.md`. The
+   shippable, end-user-facing copy for the three-way ask (confirm /
+   disambiguate / place). No CV vocabulary.
+2. **Clarifying the pipeline (internal only, for Sam)** --
+   `docs/annotate-round-pipeline-debug-view.md`. Detector/confidence/gate/
+   reason per hole, the real-app analogue of this repo's diagnostic
+   overlays. **Must never ship externally.**
+3. **Quantifying "clicks the user didn't have to make"** -- below, since
+   it's a property of the log/schema itself rather than either UI.
 
-The three-way split (confirm one / disambiguate between two / place from
-scratch) from the gating-policy section above is the *mechanism*; this is
-the *copy*. Each ask should be answerable in one glance and one tap, no CV
-vocabulary exposed:
-
-- **Confirm**: "Is this hole 6's tee?" + the marker shown on the image.
-  One tap confirms, a drag corrects -- reuses the existing frictionless
-  chip verbatim, just now logged.
-- **Disambiguate**: "Which pin is hole 2's basket?" with exactly the two
-  contested candidates shown, nothing else on screen competing for
-  attention. Never more than two options -- if courseGrammar's candidate
-  pool has more than one real contender beyond the top two, that's a
-  `place`-from-scratch case instead, not a three-or-more-way picker.
-- **Place**: "Tap hole 14's tee" with no candidate shown at all (per the
-  isolated-badge pattern, showing a bad guess to reject is worse than
-  admitting there isn't one) -- optionally centered/zoomed near the badge
-  as a starting point, never a system-wide guess.
-
-No hole should ever surface more than one of these at a time, and the
-copy should never mention "confidence," "NCC," "gate," or any detector
-name -- that vocabulary is for the next section, deliberately not this
-one.
-
-### 2. Clarifying the pipeline (internal only, for Sam -- not shipped)
-
-A separate, internal-only view of exactly what the end-user copy above
-hides: which detector produced (or failed to produce) each proposal, its
-confidence, the gate decision and why, and -- once corrections exist --
-whether the gate call turned out right in hindsight. This is the
-`CorrectionEvent.priorProposal`/`gateDecision`/`reason` fields, rendered
-plainly, per hole, per round.
-
-This is the direct analogue of what `grayt_tune.py`'s diagnostic overlays
-already do for the CV probes in this repo (main overlay = only what the
-system would claim; diagnostic overlay = every candidate, gate-passed or
-rejected, in context) -- same idea, pointed at real Annotate Round
-sessions instead of the two labeled fixtures. Concretely, worth showing
-per hole: `detector`, `confidence`, `gateDecision`, `reason`, and (once
-available) `userAction` next to it, so a glance answers "was this gate
-call right?" without re-deriving it from raw data. This is what makes the
-gating thresholds in this doc (GRayT's 0.55, courseGrammar's failure
-flags) something that gets *revisited against real outcomes* instead of
-staying frozen at whatever the two-course LOOCV pass found -- not
-shippable externally (raw detector names/scores are meaningless to an end
-user), but exactly what's needed to know whether a threshold should move.
-
-### 3. Quantifying "clicks the user didn't have to make"
+### Quantifying "clicks the user didn't have to make"
 
 Directly computable from the correction log, no new instrumentation
 beyond what's already specified:
