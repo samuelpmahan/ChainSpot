@@ -145,6 +145,39 @@ bends. Diagnosis (see `hole-path-results/diag-straight-holes-*.png`):
   corridor is easy to nudge in review, while spurious bends on straight
   holes were the more common and more misleading error.
 
+## v2: capsule scoring resolves the bend/no-bend ambiguity
+
+With author truth for ALL bent holes on Dash's Track
+(`resources/ribbon-reference/IMG_5641-bent-holes-labels.json`: {4, 5, 7, 8,
+14, 15, 18}; every other hole straight), the line-sampling paradigm was
+measurably unfixable: bent holes 4/7/15 show ZERO flat-evidence line gain
+(their straight chords never leave the band) while straight hole 10 shows
+the largest graded-evidence gain of all 18 (0.235). No threshold on gain,
+deviation, or cross-scale stability separates the classes.
+
+**Scoring the corridor as a region does.** Dilating the candidate centerline
+to a capsule of corridor half-width (~21 px) and averaging graded evidence
+inside it makes off-ridge anchors and micro-wiggles worthless (same pixels
+covered either way) while a real bend leaves part of a straight capsule over
+dark terrain. K1 capsule gains on IMG_5641: bent holes 0.057–0.386,
+straight holes 0.001–0.015 — a clean 4× gap; threshold 0.03
+(`hole_path_capsule_fit.py`, ~4 s for 18 holes).
+
+Result: **6/7 bent holes get the right bend count — including hole 18 with
+two bends matching its 4-point edges — zero spurious bends on holes 3–17
+straight holes, 92–97 % gutter containment on the detected bent holes.**
+The two calibration edge cases:
+
+- Hole 4 fits straight (capsule gain 0.006): its corridor shifts by only
+  ~half a corridor width; the straight line still sits at 89 % containment.
+  This is the accepted detection floor: bends smaller than ~½ corridor
+  width are treated as straight.
+- Holes 1–2 fit with one gentle bend each (gains 0.188 / 0.070, well above
+  the gap). The bent-holes-only label file omits them, but the author
+  earlier stated their edges need 3 points each and the original hole-1
+  golden gutters show the same sag the fit finds — so these are labeled
+  as marginal/real rather than spurious.
+
 ## Second course: AlexClark (McKinney, TX) — bent holes only
 
 `hole_path_alexclark_check.py`, fixture

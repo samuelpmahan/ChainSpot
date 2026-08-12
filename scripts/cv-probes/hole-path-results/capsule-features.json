@@ -1,0 +1,128 @@
+[
+ {
+  "hole": 1,
+  "bent": false,
+  "k0": 0.647,
+  "gain": 0.188,
+  "dev": 30.6
+ },
+ {
+  "hole": 2,
+  "bent": false,
+  "k0": 0.709,
+  "gain": 0.07,
+  "dev": 18.2
+ },
+ {
+  "hole": 3,
+  "bent": false,
+  "k0": 0.693,
+  "gain": 0.003,
+  "dev": 1.1
+ },
+ {
+  "hole": 4,
+  "bent": true,
+  "k0": 0.606,
+  "gain": 0.006,
+  "dev": 6.2
+ },
+ {
+  "hole": 5,
+  "bent": true,
+  "k0": 0.553,
+  "gain": 0.108,
+  "dev": 21.9
+ },
+ {
+  "hole": 6,
+  "bent": false,
+  "k0": 0.589,
+  "gain": 0.015,
+  "dev": 8.7
+ },
+ {
+  "hole": 7,
+  "bent": true,
+  "k0": 0.69,
+  "gain": 0.057,
+  "dev": 16.1
+ },
+ {
+  "hole": 8,
+  "bent": true,
+  "k0": 0.583,
+  "gain": 0.081,
+  "dev": 23.8
+ },
+ {
+  "hole": 9,
+  "bent": false,
+  "k0": 0.72,
+  "gain": 0.003,
+  "dev": 0.8
+ },
+ {
+  "hole": 10,
+  "bent": false,
+  "k0": 0.662,
+  "gain": 0.01,
+  "dev": 15.3
+ },
+ {
+  "hole": 11,
+  "bent": false,
+  "k0": 0.702,
+  "gain": 0.001,
+  "dev": 0.2
+ },
+ {
+  "hole": 12,
+  "bent": false,
+  "k0": 0.781,
+  "gain": 0.008,
+  "dev": 3.6
+ },
+ {
+  "hole": 13,
+  "bent": false,
+  "k0": 0.734,
+  "gain": 0.001,
+  "dev": 0.1
+ },
+ {
+  "hole": 14,
+  "bent": true,
+  "k0": 0.675,
+  "gain": 0.126,
+  "dev": 28.7
+ },
+ {
+  "hole": 15,
+  "bent": true,
+  "k0": 0.674,
+  "gain": 0.094,
+  "dev": 16.4
+ },
+ {
+  "hole": 16,
+  "bent": false,
+  "k0": 0.471,
+  "gain": 0.005,
+  "dev": 2.3
+ },
+ {
+  "hole": 17,
+  "bent": false,
+  "k0": 0.674,
+  "gain": 0.004,
+  "dev": 5.9
+ },
+ {
+  "hole": 18,
+  "bent": true,
+  "k0": 0.36,
+  "gain": 0.386,
+  "dev": 65.4
+ }
+]

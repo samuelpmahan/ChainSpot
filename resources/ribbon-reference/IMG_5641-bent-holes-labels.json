@@ -1,0 +1,29 @@
+{
+  "course": "Dash's Track",
+  "imageWidthPx": 1290,
+  "imageHeightPx": 2091,
+  "note": "Author-drawn gutters for the BENT holes only; every hole not listed is straight. Edges may be imperfect where icons obscure them.",
+  "holes": [
+    {"number": 4, "tee": {"xPx": 427.9, "yPx": 647.4}, "basket": {"xPx": 434.6, "yPx": 862.9},
+     "left": [{"xPx": 451.7, "yPx": 657.1}, {"xPx": 477.7, "yPx": 831.9}, {"xPx": 454.3, "yPx": 870.3}],
+     "right": [{"xPx": 410.6, "yPx": 663.6}, {"xPx": 436.7, "yPx": 825.0}, {"xPx": 417.4, "yPx": 851.4}]},
+    {"number": 5, "tee": {"xPx": 485.1, "yPx": 853.2}, "basket": {"xPx": 688.2, "yPx": 798.6},
+     "left": [{"xPx": 483.1, "yPx": 830.2}, {"xPx": 604.7, "yPx": 760.0}, {"xPx": 694.5, "yPx": 784.2}],
+     "right": [{"xPx": 503.0, "yPx": 866.0}, {"xPx": 608.8, "yPx": 803.6}, {"xPx": 679.0, "yPx": 820.1}]},
+    {"number": 7, "tee": {"xPx": 368.4, "yPx": 981.8}, "basket": {"xPx": 618.2, "yPx": 950.2},
+     "left": [{"xPx": 378.2, "yPx": 961.8}, {"xPx": 517.8, "yPx": 961.7}, {"xPx": 609.2, "yPx": 932.3}],
+     "right": [{"xPx": 377.1, "yPx": 1003.3}, {"xPx": 521.0, "yPx": 1002.2}, {"xPx": 627.0, "yPx": 970.0}]},
+    {"number": 8, "tee": {"xPx": 519.3, "yPx": 1011.6}, "basket": {"xPx": 424.4, "yPx": 1177.9},
+     "left": [{"xPx": 530.3, "yPx": 1030.2}, {"xPx": 435.0, "yPx": 1122.8}, {"xPx": 444.0, "yPx": 1176.9}],
+     "right": [{"xPx": 498.8, "yPx": 1005.5}, {"xPx": 390.7, "yPx": 1107.8}, {"xPx": 403.4, "yPx": 1183.8}]},
+    {"number": 14, "tee": {"xPx": 677.1, "yPx": 1501.6}, "basket": {"xPx": 815.7, "yPx": 1321.1},
+     "left": [{"xPx": 662.8, "yPx": 1482.3}, {"xPx": 711.4, "yPx": 1351.1}, {"xPx": 810.5, "yPx": 1304.6}],
+     "right": [{"xPx": 700.8, "yPx": 1495.3}, {"xPx": 744.9, "yPx": 1379.6}, {"xPx": 827.4, "yPx": 1340.0}]},
+    {"number": 15, "tee": {"xPx": 872.6, "yPx": 1362.1}, "basket": {"xPx": 1032.8, "yPx": 1085.1},
+     "left": [{"xPx": 860.3, "yPx": 1343.7}, {"xPx": 918.1, "yPx": 1195.3}, {"xPx": 1018.6, "yPx": 1074.3}],
+     "right": [{"xPx": 895.9, "yPx": 1362.8}, {"xPx": 952.3, "yPx": 1218.5}, {"xPx": 1047.9, "yPx": 1099.6}]},
+    {"number": 18, "tee": {"xPx": 791.3, "yPx": 845.0}, "basket": {"xPx": 1000.1, "yPx": 437.9},
+     "left": [{"xPx": 783.9, "yPx": 823.8}, {"xPx": 909.2, "yPx": 709.9}, {"xPx": 984.5, "yPx": 554.5}, {"xPx": 979.9, "yPx": 441.3}],
+     "right": [{"xPx": 810.7, "yPx": 853.5}, {"xPx": 943.5, "yPx": 733.3}, {"xPx": 1024.9, "yPx": 562.8}, {"xPx": 1018.8, "yPx": 437.9}]}
+  ]
+}
