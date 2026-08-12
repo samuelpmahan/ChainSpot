@@ -74,10 +74,17 @@ export type ActiveReviewRecommendation =
 		}
 	| {
 			readonly kind: 'none';
-			readonly holeNumber?: undefined;
-			readonly score: 0;
+			/** Set only for 'needs-manual-placement': the orphaned hole this points at. */
+			readonly holeNumber?: number;
+			/**
+			 * 0 for 'deadline'/'no-useful-candidate' (nothing anywhere is useful).
+			 * For 'needs-manual-placement' this reflects the target's own need, so an
+			 * orphaned hole still ranks near the top of a caller's review queue
+			 * instead of silently reporting the same score as "nothing to do".
+			 */
+			readonly score: number;
 			readonly timedOut: boolean;
-			readonly reason: 'deadline' | 'no-useful-candidate';
+			readonly reason: 'deadline' | 'no-useful-candidate' | 'needs-manual-placement';
 			readonly rationale: ActiveReviewRationale;
 		};
 
@@ -223,6 +230,57 @@ function noneRecommendation(timedOut: boolean, reason: 'deadline' | 'no-useful-c
 	};
 }
 
+/** How badly a hole needs attention, independent of whether any candidate can fill it. */
+function holeNeed(hole: ActiveReviewHole): number {
+	return hole.status === 'incomplete'
+		? 2 + (1 - hole.confidence)
+		: hole.status === 'review'
+			? 1 + (1 - hole.confidence)
+			: 1 - hole.confidence;
+}
+
+/**
+ * A hole is "orphaned" for a missing landmark kind when zero unconfirmed
+ * candidates survived into its association list for that kind — i.e. nothing
+ * is close enough, or plausible enough, to ever be offered as a `'candidate'`
+ * pick for it. The main scoring loop below only ever considers candidate ->
+ * hole links, so an orphaned hole never enters that competition and would
+ * otherwise silently drop out of the review queue for as long as any other
+ * hole still has a real candidate to suggest. Surfacing it here, scored by
+ * its own need rather than a hardcoded 0, keeps it ranked at/near the top
+ * instead of invisible.
+ */
+function orphanedHoleRecommendation(
+	map: ActiveReviewMap,
+	confirmedCandidates: ReadonlySet<string>
+): ActiveReviewRecommendation | undefined {
+	const orphaned = map.holes
+		.filter((hole) =>
+			hole.missing.some(
+				(kind) => !hole.associations.some((association) => association.kind === kind && !confirmedCandidates.has(association.candidateId))
+			)
+		)
+		.slice()
+		.sort((left, right) => holeNeed(right) - holeNeed(left))[0];
+	if (!orphaned) return undefined;
+	const rawScore = holeNeed(orphaned);
+	return {
+		kind: 'none',
+		holeNumber: orphaned.number,
+		score: clamp01(rawScore / (rawScore + 1)),
+		timedOut: false,
+		reason: 'needs-manual-placement',
+		rationale: {
+			affectedAssociationCount: 0,
+			competingHoleCount: 0,
+			ambiguity: 1,
+			missingTee: orphaned.missing.includes('tee'),
+			targetConfidence: orphaned.confidence,
+			targetStatus: orphaned.status
+		}
+	};
+}
+
 function candidateIndex(candidateId: string, candidate: ActiveReviewCandidate | undefined): number {
 	if (candidate?.candidateIndex !== undefined) return candidate.candidateIndex;
 	const parsed = Number(candidateId.split(':')[1]);
@@ -305,16 +363,23 @@ export function recommendNextAnchor(
 		}
 	}
 
-	if (best) return recommendationFromBest(best, minAutoSuggestScore, false);
+	if (best) {
+		// An orphaned hole (zero surviving candidates for a landmark it's
+		// missing) never appears in the loop above, since that loop only ever
+		// iterates candidate -> hole links. Without this check it would rank
+		// behind even a barely-useful suggestion for some unrelated,
+		// already-better-off hole, for as long as any such suggestion exists
+		// anywhere on the map. Compare on the same 0..1 scale so a severely
+		// orphaned hole (e.g. 'incomplete') can still outrank a weak match.
+		const orphan = orphanedHoleRecommendation(map, confirmedCandidates);
+		if (orphan && orphan.score > best.score) return orphan;
+		return recommendationFromBest(best, minAutoSuggestScore, false);
+	}
 
 	const fallbackHole = map.holes
 		.filter((hole) => hole.missing.length > 0 && hole.anchor)
 		.slice()
-		.sort((left, right) => {
-			const need = (hole: ActiveReviewHole): number =>
-				hole.status === 'incomplete' ? 2 + (1 - hole.confidence) : hole.status === 'review' ? 1 + (1 - hole.confidence) : 1 - hole.confidence;
-			return need(right) - need(left);
-		})[0];
+		.sort((left, right) => holeNeed(right) - holeNeed(left))[0];
 	const fallbackCandidate = fallbackHole
 		? map.candidates
 				.filter(
@@ -325,7 +390,15 @@ export function recommendNextAnchor(
 				)
 				.sort((left, right) => candidateScore(right) - candidateScore(left))[0]
 		: undefined;
-	if (!fallbackCandidate || !fallbackHole) return noneRecommendation(false, 'no-useful-candidate');
+	if (!fallbackCandidate || !fallbackHole) {
+		// Nothing at all, or nothing within the broad fallback radius. If some
+		// hole is orphaned (zero candidates for a kind it's missing), say so
+		// explicitly with a need-scaled score instead of collapsing it into the
+		// same 0-score "nothing to do" reason as a genuinely empty queue.
+		const orphan = orphanedHoleRecommendation(map, confirmedCandidates);
+		if (orphan) return orphan;
+		return noneRecommendation(false, 'no-useful-candidate');
+	}
 	return recommendationFromBest(
 		{
 			candidate: fallbackCandidate,
