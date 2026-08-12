@@ -1,0 +1,460 @@
+{
+ "course": "AlexClarkSet",
+ "tag": "-jitter",
+ "totalWallClockS": 0.879,
+ "within13": 5,
+ "within25": 7,
+ "nHoles": 18,
+ "holes": [
+  {
+   "hole": 1,
+   "badgePx": [
+    693.4,
+    1456.4
+   ],
+   "recoveredTeePx": [
+    613.9,
+    1590.7
+   ],
+   "truthTeePx": [
+    621.0,
+    1601.0
+   ],
+   "distErrPx": 12.5,
+   "bearingDeg": 120.6,
+   "truthBearingDeg": 116.6,
+   "bearingErrDeg": 4.0,
+   "degOffFromCenter": -1.0,
+   "terminusPx": 171.0,
+   "meanEvidence": 0.551,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.2
+  },
+  {
+   "hole": 2,
+   "badgePx": [
+    561.9,
+    1346.6
+   ],
+   "recoveredTeePx": [
+    630.5,
+    1288.3
+   ],
+   "truthTeePx": [
+    636.0,
+    1289.0
+   ],
+   "distErrPx": 5.6,
+   "bearingDeg": 319.6,
+   "truthBearingDeg": -37.9,
+   "bearingErrDeg": 2.5,
+   "degOffFromCenter": -4.0,
+   "terminusPx": 105.0,
+   "meanEvidence": 0.802,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.4
+  },
+  {
+   "hole": 3,
+   "badgePx": [
+    327.6,
+    1885.9
+   ],
+   "recoveredTeePx": [
+    361.5,
+    1752.2
+   ],
+   "truthTeePx": [
+    366.0,
+    1742.0
+   ],
+   "distErrPx": 11.1,
+   "bearingDeg": 284.2,
+   "truthBearingDeg": -75.1,
+   "bearingErrDeg": 0.7,
+   "degOffFromCenter": -1.0,
+   "terminusPx": 153.0,
+   "meanEvidence": 0.943,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.5
+  },
+  {
+   "hole": 4,
+   "badgePx": [
+    490.0,
+    2005.2
+   ],
+   "recoveredTeePx": [
+    239.8,
+    2323.6
+   ],
+   "truthTeePx": [
+    373.0,
+    2055.0
+   ],
+   "distErrPx": 299.9,
+   "bearingDeg": 128.2,
+   "truthBearingDeg": 156.9,
+   "bearingErrDeg": 28.8,
+   "degOffFromCenter": -25.0,
+   "terminusPx": 420.0,
+   "meanEvidence": 0.295,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 10.7
+  },
+  {
+   "hole": 5,
+   "badgePx": [
+    619.7,
+    1901.7
+   ],
+   "recoveredTeePx": [
+    578.2,
+    1908.5
+   ],
+   "truthTeePx": [
+    486.0,
+    1888.0
+   ],
+   "distErrPx": 94.5,
+   "bearingDeg": 170.7,
+   "truthBearingDeg": -174.2,
+   "bearingErrDeg": 15.1,
+   "degOffFromCenter": -7.0,
+   "terminusPx": 57.0,
+   "meanEvidence": 0.74,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.3
+  },
+  {
+   "hole": 6,
+   "badgePx": [
+    582.4,
+    1781.8
+   ],
+   "recoveredTeePx": [
+    650.1,
+    1971.1
+   ],
+   "truthTeePx": [
+    677.0,
+    1847.0
+   ],
+   "distErrPx": 126.9,
+   "bearingDeg": 70.3,
+   "truthBearingDeg": 34.6,
+   "bearingErrDeg": 35.7,
+   "degOffFromCenter": 26.0,
+   "terminusPx": 216.0,
+   "meanEvidence": 0.571,
+   "corridorBends": 1,
+   "corridorScore": 0.998,
+   "runtimeMs": 11.1
+  },
+  {
+   "hole": 7,
+   "badgePx": [
+    486.4,
+    1280.3
+   ],
+   "recoveredTeePx": [
+    443.1,
+    1464.3
+   ],
+   "truthTeePx": [
+    460.0,
+    1410.0
+   ],
+   "distErrPx": 56.9,
+   "bearingDeg": 103.2,
+   "truthBearingDeg": 101.5,
+   "bearingErrDeg": 1.7,
+   "degOffFromCenter": 0.5,
+   "terminusPx": 204.0,
+   "meanEvidence": 0.462,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.3
+  },
+  {
+   "hole": 8,
+   "badgePx": [
+    492.1,
+    718.2
+   ],
+   "recoveredTeePx": [
+    461.8,
+    755.4
+   ],
+   "truthTeePx": [
+    449.0,
+    867.0
+   ],
+   "distErrPx": 112.3,
+   "bearingDeg": 129.1,
+   "truthBearingDeg": 106.1,
+   "bearingErrDeg": 22.9,
+   "degOffFromCenter": 26.0,
+   "terminusPx": 63.0,
+   "meanEvidence": 0.301,
+   "corridorBends": 0,
+   "corridorScore": 0.979,
+   "runtimeMs": 11.2
+  },
+  {
+   "hole": 9,
+   "badgePx": [
+    390.9,
+    513.9
+   ],
+   "recoveredTeePx": [
+    415.1,
+    540.6
+   ],
+   "truthTeePx": [
+    431.0,
+    665.0
+   ],
+   "distErrPx": 125.5,
+   "bearingDeg": 47.9,
+   "truthBearingDeg": 75.2,
+   "bearingErrDeg": 27.3,
+   "degOffFromCenter": -28.0,
+   "terminusPx": 51.0,
+   "meanEvidence": 0.708,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.4
+  },
+  {
+   "hole": 10,
+   "badgePx": [
+    413.4,
+    440.6
+   ],
+   "recoveredTeePx": [
+    346.5,
+    320.0
+   ],
+   "truthTeePx": [
+    384.0,
+    306.0
+   ],
+   "distErrPx": 40.0,
+   "bearingDeg": 241.0,
+   "truthBearingDeg": -102.3,
+   "bearingErrDeg": 16.7,
+   "degOffFromCenter": -17.5,
+   "terminusPx": 153.0,
+   "meanEvidence": 0.673,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.4
+  },
+  {
+   "hole": 11,
+   "badgePx": [
+    499.3,
+    387.1
+   ],
+   "recoveredTeePx": [
+    541.7,
+    592.8
+   ],
+   "truthTeePx": [
+    543.0,
+    510.0
+   ],
+   "distErrPx": 82.8,
+   "bearingDeg": 78.4,
+   "truthBearingDeg": 70.4,
+   "bearingErrDeg": 7.9,
+   "degOffFromCenter": 9.5,
+   "terminusPx": 225.0,
+   "meanEvidence": 0.707,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.2
+  },
+  {
+   "hole": 12,
+   "badgePx": [
+    535.8,
+    158.0
+   ],
+   "recoveredTeePx": [
+    459.0,
+    246.2
+   ],
+   "truthTeePx": [
+    459.0,
+    234.0
+   ],
+   "distErrPx": 12.2,
+   "bearingDeg": 131.1,
+   "truthBearingDeg": 135.3,
+   "bearingErrDeg": 4.2,
+   "degOffFromCenter": -7.0,
+   "terminusPx": 132.0,
+   "meanEvidence": 0.768,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 12.1
+  },
+  {
+   "hole": 13,
+   "badgePx": [
+    821.5,
+    104.0
+   ],
+   "recoveredTeePx": [
+    747.4,
+    53.0
+   ],
+   "truthTeePx": [
+    735.0,
+    74.0
+   ],
+   "distErrPx": 24.3,
+   "bearingDeg": 214.5,
+   "truthBearingDeg": -160.8,
+   "bearingErrDeg": 15.4,
+   "degOffFromCenter": 9.5,
+   "terminusPx": 105.0,
+   "meanEvidence": 0.662,
+   "corridorBends": 1,
+   "corridorScore": 0.983,
+   "runtimeMs": 10.3
+  },
+  {
+   "hole": 14,
+   "badgePx": [
+    829.7,
+    204.4
+   ],
+   "recoveredTeePx": [
+    905.1,
+    301.5
+   ],
+   "truthTeePx": [
+    914.0,
+    311.0
+   ],
+   "distErrPx": 13.0,
+   "bearingDeg": 52.2,
+   "truthBearingDeg": 51.7,
+   "bearingErrDeg": 0.5,
+   "degOffFromCenter": 2.0,
+   "terminusPx": 138.0,
+   "meanEvidence": 0.68,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.9
+  },
+  {
+   "hole": 15,
+   "badgePx": [
+    688.0,
+    231.2
+   ],
+   "recoveredTeePx": [
+    702.4,
+    195.0
+   ],
+   "truthTeePx": [
+    706.0,
+    114.0
+   ],
+   "distErrPx": 81.1,
+   "bearingDeg": 291.7,
+   "truthBearingDeg": -81.3,
+   "bearingErrDeg": 13.0,
+   "degOffFromCenter": 14.0,
+   "terminusPx": 54.0,
+   "meanEvidence": 0.618,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 10.3
+  },
+  {
+   "hole": 16,
+   "badgePx": [
+    651.0,
+    576.6
+   ],
+   "recoveredTeePx": [
+    605.3,
+    446.4
+   ],
+   "truthTeePx": [
+    605.0,
+    445.0
+   ],
+   "distErrPx": 1.4,
+   "bearingDeg": 250.6,
+   "truthBearingDeg": -109.3,
+   "bearingErrDeg": 0.1,
+   "degOffFromCenter": 20.0,
+   "terminusPx": 153.0,
+   "meanEvidence": 0.821,
+   "corridorBends": 1,
+   "corridorScore": 0.997,
+   "runtimeMs": 11.2
+  },
+  {
+   "hole": 17,
+   "badgePx": [
+    574.9,
+    792.8
+   ],
+   "recoveredTeePx": [
+    640.4,
+    740.2
+   ],
+   "truthTeePx": [
+    681.0,
+    706.0
+   ],
+   "distErrPx": 53.1,
+   "bearingDeg": 321.3,
+   "truthBearingDeg": -39.3,
+   "bearingErrDeg": 0.6,
+   "degOffFromCenter": 5.0,
+   "terminusPx": 99.0,
+   "meanEvidence": 0.622,
+   "corridorBends": 0,
+   "corridorScore": 1.0,
+   "runtimeMs": 11.2
+  },
+  {
+   "hole": 18,
+   "badgePx": [
+    549.5,
+    1115.2
+   ],
+   "recoveredTeePx": [
+    520.1,
+    1094.5
+   ],
+   "truthTeePx": [
+    514.0,
+    1025.0
+   ],
+   "distErrPx": 69.8,
+   "bearingDeg": 215.2,
+   "truthBearingDeg": -111.5,
+   "bearingErrDeg": 33.3,
+   "degOffFromCenter": -28.0,
+   "terminusPx": 51.0,
+   "meanEvidence": 0.0,
+   "corridorBends": 1,
+   "corridorScore": 0.999,
+   "runtimeMs": 10.5
+  }
+ ]
+}
