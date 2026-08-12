@@ -279,3 +279,107 @@ automatically on every overlay-only course.
   near-zero gate-pass rate, while expected and arguably reassuring
   (zero-false-accept held even out-of-domain), doesn't add cross-validation
   signal for the tuned parameters themselves.
+
+## Addendum: manual vision pass on the 4 overlay-only courses
+
+Follow-up requested by the user: inspect the overlay-only courses "using
+your own vision and best judgement," with Sonnet subagents checking the
+assessment. This section documents that pass. **It does not change
+`best-params.json`** -- see why at the end.
+
+### Method
+
+The production detector (`scripts/detect-course.ts`) self-flags holes
+where badge->basket ownership is uncertain (`ambiguous-basket` /
+`weak-basket-confidence`). Across the 4 courses, 10 of 72 holes were
+flagged: NorthPark-ShortTees {6, 8, 14}, HeritagePark-Main {2},
+TowneLake-RedTees-a {2, 13}, TowneLake-RedTees-b {1, 2, 4, 14}. Rather than
+re-deriving all 72 holes' truth from scratch, effort focused on these 10 --
+exactly where a human/AI visual judgment call adds value over the
+algorithm's own (self-admitted) uncertainty.
+
+I personally reviewed NorthPark-ShortTees using zoomed, grid-overlaid crops
+(50px grid, labeled every 100px, generated via a small crop helper script)
+to read pixel positions against a ruler rather than free-hand estimate.
+Three parallel Sonnet subagents then independently did the same for the
+other three courses, using the same method, each also spot-checking 3-4
+*non*-flagged holes per course as a trustworthiness check on the
+detector's self-flagging. I did not show them my NorthPark conclusions
+first, so their read is independent.
+
+**Precision caveat**: reading pixel coordinates off a 50px grid by eye is
+accurate to roughly ±20-50px (marker icons alone are ~40-60px), far coarser
+than the 12.69px tolerance used throughout the rest of this report. This
+pass is therefore categorical (is hole N's basket pin A or pin B? is a
+pairing plausible or not?), not a source of new precise ground truth --
+it does not attempt to produce numbers comparable to the LOOCV table above.
+
+### Findings on the 10 flagged holes
+
+| Course | Hole | Verdict | Note |
+|---|---|---|---|
+| NorthPark-ShortTees | 6 | **Genuinely ambiguous** | Badge sits in open fairway; no pin within ~400px even on a wide search. The detector's own pick isn't near any pin either. |
+| NorthPark-ShortTees | 14 | **Genuinely ambiguous** | Same pattern -- nearest candidate pins are 330-350px away, no confident pick. |
+| NorthPark-ShortTees | 8 | Low-confidence guess | Two pins sit in a tight 7/8 cluster; genuinely hard to disambiguate by eye. |
+| HeritagePark-Main | 2 | **Corrected** | A pin sits ~70-90px from badge 2 (same tight pattern as every confident hole on this course) but was assigned to hole 4 instead, where it's actually farther (89px) than from hole 2 (70px). A real ownership swap, not pure ambiguity. |
+| TowneLake-RedTees-a | 2 | Confirmed correct | Detector's pick is unambiguously the closest pin; the flag looks like a soft cost-competition signal, not an error. |
+| TowneLake-RedTees-a | 13 | Confirmed correct | Closest pin, though the tee->badge->basket geometry is nearly perpendicular (polarity cosine 0.12) -- a genuine oddity worth downstream scrutiny even though the pin choice itself is right. |
+| TowneLake-RedTees-b | 1 | Confirmed correct | Closest remaining pin once hole 18's own (closer) pin is correctly excluded. |
+| TowneLake-RedTees-b | 2 | **Corrected** | An unclaimed pin sits ~50-60px from badge 2. The detector's pick (708,1602) actually belongs to hole 5 (94px away) -- hijacked because hole 5's *own* tee resolution failed first, excluding hole 5 from the basket-matching pool entirely. |
+| TowneLake-RedTees-b | 4 | **Genuinely ambiguous** | Badge isolated in open fairway out to 600px; the detector's pick is closer to holes 5 and 11 than to hole 4. |
+| TowneLake-RedTees-b | 14 | **Genuinely ambiguous** | A real tie: one candidate pin is 132px away (the detector's pick, currently assigned), another is 80px away but already claimed by hole 15 -- both are defensible, dense-cluster genuine tie. |
+
+**Net**: 3 confirmed correct despite being flagged, 2 corrected (concrete
+ownership swaps), 4 genuinely ambiguous (no confident call possible even
+under careful inspection), 1 low-confidence guess. The detector's
+self-flagging is largely trustworthy -- every non-flagged spot-checked hole
+(12+ holes across the 3 subagent courses) paired correctly -- but roughly
+half the *flagged* holes are cases no amount of proximity reasoning can
+resolve, because UDisc's own label layout pushes the number away from its
+own pin under crowding, sometimes past the point where "nearest pin" is a
+meaningful heuristic at all.
+
+**A previously-undetected root cause**: TowneLake-RedTees-b holes 5 and 10
+lost their true basket to neighboring holes 2 and 9 respectively, not
+because of proximity ambiguity, but because holes 5 and 10's *own* tee
+bootstrap failed first, which excludes a hole from the basket-matching pool
+entirely -- so its rightful basket becomes fair game for a neighbor. This
+is a concrete, reproducible failure mode (tee-resolution failure cascading
+into a neighbor's basket mis-assignment) worth a production fix, though
+that fix is out of scope here (`src/` was not touched, per the task's
+boundary).
+
+### Does correcting the basket anchor rescue the gate-pass rate?
+
+Applying the two confirmed corrections (HeritagePark hole 2, TowneLake-b
+hole 2) and re-running the full chain on just those holes:
+
+| Hole | NCC before (detector's basket) | NCC after (vision-corrected basket) |
+|---|---|---|
+| HeritagePark-Main hole 2 | 0.457 | 0.289 (worse) |
+| TowneLake-RedTees-b hole 2 | 0.443 | 0.440 (unchanged) |
+
+**Neither crosses the 0.55 gate, and one gets worse.** This is itself an
+informative result: it confirms the *dominant* explanation for the
+near-zero gate-pass rate across these 4 courses is the domain mismatch
+already reported above (no rendered tee-pad symbol for the template to
+match), not primarily basket mis-assignment. Basket-ownership correction
+matters for getting the search corridor's *direction* right, but on this
+image domain there is usually nothing pad-shaped for stage 2 to lock onto
+regardless of anchor quality -- so it doesn't by itself convert a rejection
+into a confident, correct gate-pass.
+
+### Why this doesn't change `best-params.json`
+
+This pass diagnoses a *production basket-detection* issue (ownership
+assignment in dense clusters, and a tee-failure-cascade bug) and confirms
+the *image-domain-mismatch* explanation for the overlay-only courses'
+low pass rate -- neither is a GRayT stage-1/stage-2 parameter question, and
+neither comes with pixel-precise, sub-13px truth the way the two labeled
+fixtures do (see the precision caveat above). Feeding ±20-50px
+hand-corrected anchors into the LOOCV objective would silently lower the
+quality bar for every future number in this report without a clear
+disclosure boundary, which is exactly what the task's hard rule about
+honest truth-provenance is meant to prevent. The value of this pass is the
+two concrete findings above (both worth a production follow-up), not a new
+parameter recommendation.
