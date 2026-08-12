@@ -44,6 +44,11 @@ as a caveat in the findings doc). Badge positions are DETECTED, via
 the coordinates below are that detector's literal output (see
 hole-path-tee-recovery-findings.md for provenance / regen instructions).
 
+All stage-1 knobs are exposed as `Stage1Params` (see below) so an external
+driver (`grayt_tune.py`) can sweep them for cross-validated tuning without
+editing this file. CLI defaults are unchanged from the original hardcoded
+constants -- running this file directly reproduces the findings-doc numbers.
+
 Usage:
   python3 scripts/cv-probes/hole_path_tee_recovery.py --out scripts/cv-probes/hole-path-results
 """
@@ -51,6 +56,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import time
@@ -63,24 +69,41 @@ from skimage.color import rgb2lab
 
 REPO = Path(__file__).resolve().parents[2]
 
-SCALE = 3            # evidence-map downscale, matches prior art
-EVIDENCE_DL = 4.0     # saturating flatten, per the lowparam "--final" lesson
-                      # (used for corridor STRUCTURE / bend fitting only)
-RAY_EVIDENCE_DL = 10.0  # graded evidence for the terminus ray walk -- flat
-                        # (dL/4) evidence is too saturated to find where the
-                        # ribbon ends: nearly all bright terrain reads 1.0.
-BEND_MARGIN = 0.05
-MAX_BENDS = 2         # badge->basket bend budget for the anchor fit
+# Grading tolerance shared with ray_template_fusion.py / grayt_tune.py: a
+# recovery within this many source px of truth counts as "within13" / a
+# gate-passed recovery farther than this is a false accept.
+TOLERANCE_PX = 12.691304347826087
 
-BADGE_HALF_W, BADGE_HALF_H = 40, 30   # generous badge-box half-extents, source px
 
-RAY_SWEEP_DEG = 28.0
-RAY_STEP_DEG = 1.5
-RAY_STEP_PX = 3.0        # source px per ray sample
-MAX_RAY_PX = 420.0       # source px; covers observed tee<->badge distances (70-215px)
-WINDOW_PX = 18.0         # closing window, source px -- tuned by grid search (see trailing_terminus)
-EVIDENCE_THRESH = 0.2    # tuned by grid search over both courses' 36 holes
-STEPBACK_PX = 15.0       # half a tee pad, per the task's suggested starting point
+# ---------------------------------------------------------------------------
+# Stage-1 tunable parameters. Defaults reproduce the pre-tuning hardcoded
+# constants exactly (backward compatible).
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class Stage1Params:
+    scale: int = 3                    # evidence-map downscale factor
+    evidence_dl: float = 4.0          # saturating flatten divisor, corridor-fit evidence ("dL/4")
+    ray_evidence_dl: float = 10.0     # graded (less-saturated) divisor for the terminus ray walk
+    box_mean_window: int = 41         # boxmean window (1/3-scale px) subtracted from LAB L
+    open_size: int = 7                # grey-opening kernel (1/3-scale px) that denoises the ray evidence
+    bend_margin: float = 0.05         # corridor-fit bend-acceptance margin
+    max_bends: int = 2                # corridor-fit bend budget
+    badge_half_w: float = 40.0        # badge mask box half-extents, source px
+    badge_half_h: float = 30.0
+    bearing_sweep_deg: float = 28.0   # +/- sweep width around the reversed corridor-entry bearing
+    bearing_step_deg: float = 1.5
+    ray_step_px: float = 3.0          # source px per ray sample
+    max_ray_px: float = 420.0         # source px search ceiling
+    closing_window_px: float = 18.0   # 1-D grey-closing window applied to the ray evidence trace
+    evidence_thresh: float = 0.2      # terminus-run threshold on the closed trace
+    stepback_px: float = 15.0         # half a tee pad, stepped back from terminus toward the badge
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+DEFAULT_STAGE1 = Stage1Params()
 
 
 # ---------------------------------------------------------------------------
@@ -164,39 +187,27 @@ def load_source_image(zip_path: Path, image_name: str) -> Image.Image:
             return Image.open(f).convert("RGB").copy()
 
 
-def lightness_delta(full: Image.Image) -> np.ndarray:
-    im = np.asarray(full.resize((full.width // SCALE, full.height // SCALE),
+def lightness_delta(full: Image.Image, params: Stage1Params = DEFAULT_STAGE1) -> np.ndarray:
+    im = np.asarray(full.resize((full.width // params.scale, full.height // params.scale),
                                  Image.LANCZOS)).astype(np.float32) / 255
     lightness = rgb2lab(im)[..., 0]
-    return lightness - ndi.uniform_filter(lightness, 41)
+    return lightness - ndi.uniform_filter(lightness, params.box_mean_window)
 
 
 def evidence_from_dl(d_l: np.ndarray, dl_scale: float) -> np.ndarray:
     return np.clip(d_l / dl_scale, 0, 1)
 
 
-def evidence_map(full: Image.Image) -> np.ndarray:
-    return evidence_from_dl(lightness_delta(full), EVIDENCE_DL)
+def evidence_map(full: Image.Image, params: Stage1Params = DEFAULT_STAGE1) -> np.ndarray:
+    return evidence_from_dl(lightness_delta(full, params), params.evidence_dl)
 
 
-# Grey-scale morphological opening size (1/3-scale px) applied to the ray
-# (terminus-search) evidence map. This is the single fix that made the
-# terminus usable: raw per-pixel evidence is noisy (glare, other holes'
-# ribbons/tee pads/icons crossing the ray), and it does not decay with
-# distance from the true tee -- rays stayed "hot" 300+px out. Opening erodes
-# every bright blob narrower than OPEN_SIZE (much narrower than the ~40-60px
-# source-scale ribbon) before dilating back, so isolated bright noise drops
-# to ~0 while the continuous ribbon band survives untouched. See findings
-# for the before/after evidence traces.
-OPEN_SIZE = 7  # 1/3-scale px (~21 source px)
-
-
-def opened_evidence(ev: np.ndarray, fill_boxes=()) -> np.ndarray:
+def opened_evidence(ev: np.ndarray, fill_boxes=(), params: Stage1Params = DEFAULT_STAGE1) -> np.ndarray:
     """Grey-opening with badge boxes pre-filled to 1.0 before opening.
 
     The badge glyph/background reads as low evidence (dark text on a light
     disc, disc edges); left as-is, opening's erosion step drags that low
-    value outward and kills the true ribbon signal for ~OPEN_SIZE/2 px on
+    value outward and kills the true ribbon signal for ~open_size/2 px on
     either side of the badge box -- exactly the region the ray walk starts
     in. Since the badge sits ON the ribbon (the anchor domain fact this
     whole probe is built on), filling the box to 1.0 before opening is the
@@ -207,14 +218,14 @@ def opened_evidence(ev: np.ndarray, fill_boxes=()) -> np.ndarray:
     ev = ev.copy()
     for x0, x1, y0, y1 in fill_boxes:
         ev[y0:y1, x0:x1] = 1.0
-    return grey_opening(ev, size=OPEN_SIZE)
+    return grey_opening(ev, size=params.open_size)
 
 
-def badge_mask_box(h, w, bx, by):
-    x0 = max(0, int((bx - BADGE_HALF_W) / SCALE))
-    x1 = min(w, int((bx + BADGE_HALF_W) / SCALE) + 1)
-    y0 = max(0, int((by - BADGE_HALF_H) / SCALE))
-    y1 = min(h, int((by + BADGE_HALF_H) / SCALE) + 1)
+def badge_mask_box(h, w, bx, by, params: Stage1Params = DEFAULT_STAGE1):
+    x0 = max(0, int((bx - params.badge_half_w) / params.scale))
+    x1 = min(w, int((bx + params.badge_half_w) / params.scale) + 1)
+    y0 = max(0, int((by - params.badge_half_h) / params.scale))
+    y1 = min(h, int((by + params.badge_half_h) / params.scale) + 1)
     return x0, x1, y0, y1
 
 
@@ -272,8 +283,8 @@ def split_longest(pts):
     return pts[:i + 1] + [mid] + pts[i + 1:]
 
 
-def fit_corridor(score, badge_scaled, basket_scaled):
-    """badge -> basket corridor fit, 0..MAX_BENDS bends, badge boxes masked."""
+def fit_corridor(score, badge_scaled, basket_scaled, params: Stage1Params = DEFAULT_STAGE1):
+    """badge -> basket corridor fit, 0..max_bends bends, badge boxes masked."""
     cands = {0: ([list(badge_scaled), list(basket_scaled)], score([badge_scaled, basket_scaled]))}
     d = np.array([basket_scaled[0] - badge_scaled[0], basket_scaled[1] - badge_scaled[1]])
     length = max(np.hypot(*d), 1e-6)
@@ -287,12 +298,12 @@ def fit_corridor(score, badge_scaled, basket_scaled):
             if best1 is None or s > best1[1]:
                 best1 = ([list(badge_scaled), mid, list(basket_scaled)], s)
     cands[1] = hill_climb(score, best1[0], [1])
-    for k in range(2, MAX_BENDS + 1):
+    for k in range(2, params.max_bends + 1):
         cands[k] = hill_climb(score, split_longest(cands[k - 1][0]), list(range(1, k + 1)))
 
     k = 0
-    for kk in range(1, MAX_BENDS + 1):
-        if cands[kk][1] > cands[k][1] + BEND_MARGIN:
+    for kk in range(1, params.max_bends + 1):
+        if cands[kk][1] > cands[k][1] + params.bend_margin:
             k = kk
     return cands[k][0], k, cands[k][1]
 
@@ -301,10 +312,10 @@ def fit_corridor(score, badge_scaled, basket_scaled):
 # Ray sweep / terminus search
 # ---------------------------------------------------------------------------
 
-def sample_evidence_at(ev, x_src, y_src, badge_mask_box_full):
+def sample_evidence_at(ev, x_src, y_src, badge_mask_box_full, params: Stage1Params = DEFAULT_STAGE1):
     """Evidence at a source-px coordinate; returns (value, is_masked)."""
     h, w = ev.shape
-    xi, yi = int(x_src / SCALE), int(y_src / SCALE)
+    xi, yi = int(x_src / params.scale), int(y_src / params.scale)
     if not (0 <= xi < w and 0 <= yi < h):
         return 0.0, True
     bx0, bx1, by0, by1 = badge_mask_box_full
@@ -312,18 +323,18 @@ def sample_evidence_at(ev, x_src, y_src, badge_mask_box_full):
     return float(ev[yi, xi]), masked
 
 
-def walk_ray(ev, origin, bearing_rad, badge_box):
+def walk_ray(ev, origin, bearing_rad, badge_box, params: Stage1Params = DEFAULT_STAGE1):
     """Walk outward from origin along bearing_rad. Returns (positions_px,
     evidence[], masked[])."""
-    n = int(MAX_RAY_PX / RAY_STEP_PX)
+    n = int(params.max_ray_px / params.ray_step_px)
     dx, dy = math.cos(bearing_rad), math.sin(bearing_rad)
-    ds = np.arange(1, n + 1) * RAY_STEP_PX
+    ds = np.arange(1, n + 1) * params.ray_step_px
     xs = origin[0] + dx * ds
     ys = origin[1] + dy * ds
     vals = np.empty(n)
     masked = np.empty(n, bool)
     for i in range(n):
-        v, m = sample_evidence_at(ev, xs[i], ys[i], badge_box)
+        v, m = sample_evidence_at(ev, xs[i], ys[i], badge_box, params)
         vals[i] = v
         masked[i] = m
     return ds, xs, ys, vals, masked
@@ -359,7 +370,7 @@ def trailing_terminus(ds, vals, masked, window_px, thresh):
     and where it still fails (holes whose true dip reads fully to ~0).
     """
     from scipy.ndimage import grey_closing
-    step = ds[1] - ds[0] if len(ds) > 1 else RAY_STEP_PX
+    step = ds[1] - ds[0] if len(ds) > 1 else 1.0
     win_n = max(1, int(round(window_px / step)))
     valid = ~masked
     v = np.where(valid, vals, 1.0)  # masked (badge-adjacent) treated as "in run"
@@ -372,7 +383,8 @@ def trailing_terminus(ds, vals, masked, window_px, thresh):
     return terminus_px, run_vals
 
 
-def recover_tee(ray_ev, badge_src, corridor_first_pt_src, bearing_center_override=None):
+def recover_tee(ray_ev, badge_src, corridor_first_pt_src, params: Stage1Params = DEFAULT_STAGE1,
+                 bearing_center_override=None):
     """Sweep bearings around reverse(badge->first corridor point); return
     dict with recovered tee, chosen bearing, terminus, score, all-bearing
     trace for diagnostics."""
@@ -385,16 +397,17 @@ def recover_tee(ray_ev, badge_src, corridor_first_pt_src, bearing_center_overrid
         center_bearing = into + math.pi  # reverse
 
     h, w = ray_ev.shape
-    badge_box = badge_mask_box(h, w, bx, by)
+    badge_box = badge_mask_box(h, w, bx, by, params)
 
     best = None
     trace = []
-    n_steps = int(round(2 * RAY_SWEEP_DEG / RAY_STEP_DEG)) + 1
+    n_steps = int(round(2 * params.bearing_sweep_deg / params.bearing_step_deg)) + 1
     for i in range(n_steps):
-        deg_off = -RAY_SWEEP_DEG + i * RAY_STEP_DEG
+        deg_off = -params.bearing_sweep_deg + i * params.bearing_step_deg
         bearing = center_bearing + math.radians(deg_off)
-        ds, xs, ys, vals, masked = walk_ray(ray_ev, (bx, by), bearing, badge_box)
-        terminus_px, run_vals = trailing_terminus(ds, vals, masked, WINDOW_PX, EVIDENCE_THRESH)
+        ds, xs, ys, vals, masked = walk_ray(ray_ev, (bx, by), bearing, badge_box, params)
+        terminus_px, run_vals = trailing_terminus(ds, vals, masked, params.closing_window_px,
+                                                   params.evidence_thresh)
         mean_ev = float(run_vals.mean()) if len(run_vals) else 0.0
         # Rank primarily by how far sustained evidence reaches (a wrong
         # bearing decays fast off the ribbon), tie-broken by mean evidence.
@@ -405,7 +418,7 @@ def recover_tee(ray_ev, badge_src, corridor_first_pt_src, bearing_center_overrid
             best = (rank, bearing, deg_off, terminus_px, mean_ev)
 
     _, bearing, deg_off, terminus_px, mean_ev = best
-    stepback = min(STEPBACK_PX, terminus_px)
+    stepback = min(params.stepback_px, terminus_px)
     tee_px = terminus_px - stepback
     tee_x = bx + math.cos(bearing) * tee_px
     tee_y = by + math.sin(bearing) * tee_px
@@ -423,64 +436,85 @@ def recover_tee(ray_ev, badge_src, corridor_first_pt_src, bearing_center_overrid
 
 
 # ---------------------------------------------------------------------------
-# Per-course run
+# Generic per-course stage-1 run, usable on arbitrary courses (not just the
+# two hardcoded fixtures) -- badges and basket are passed in, truth is
+# optional (None entries mean "grading unavailable", used for overlay-only
+# captures).
 # ---------------------------------------------------------------------------
 
-def run_course(name, cfg, out_dir, badge_jitter=(0.0, 0.0), tag=""):
-    t_start = time.time()
-    full = load_source_image(cfg["zip_path"], cfg["image_name"])
-    d_l = lightness_delta(full)
-    ev = evidence_from_dl(d_l, EVIDENCE_DL)           # flat, for corridor structure
+def run_stage1(full: Image.Image, badges, baskets_by_n, truth_by_n, params: Stage1Params = DEFAULT_STAGE1,
+               badge_jitter=(0.0, 0.0)):
+    """badges: list of (number, bx, by). baskets_by_n: {number: (bx, by)}.
+    truth_by_n: {number: (tx, ty)} or {} if truth is unavailable (overlay-only).
+    Returns list of per-hole result dicts (JSON-safe)."""
+    d_l = lightness_delta(full, params)
+    ev = evidence_from_dl(d_l, params.evidence_dl)             # flat, for corridor structure
     h, w = ev.shape
-    badge_boxes = [badge_mask_box(h, w, bx, by) for _, bx, by in cfg["badges"]]
-    ray_ev = opened_evidence(evidence_from_dl(d_l, RAY_EVIDENCE_DL), badge_boxes)  # graded+opened, for the ray
+    badge_boxes = [badge_mask_box(h, w, bx, by, params) for _, bx, by in badges]
+    ray_ev = opened_evidence(evidence_from_dl(d_l, params.ray_evidence_dl), badge_boxes, params)
 
     valid_all = np.ones((h, w), bool)
     for x0, x1, y0, y1 in badge_boxes:
         valid_all[y0:y1, x0:x1] = False
     scorer = make_masked_scorer(ev, valid_all)
 
-    truth_by_n = {n: (tx, ty, bx, by) for n, tx, ty, bx, by in cfg["truth"]}
-    rng = np.random.default_rng(12345)
-
     rows = []
-    for n, bx0, by0 in cfg["badges"]:
+    for n, bx0, by0 in badges:
         jx, jy = badge_jitter
         bx, by = bx0 + jx, by0 + jy
-        tx_truth, ty_truth, xbask, ybask = truth_by_n[n]
+        xbask, ybask = baskets_by_n[n]
 
-        badge_scaled = (bx / SCALE, by / SCALE)
-        basket_scaled = (xbask / SCALE, ybask / SCALE)
-        corridor_pts, bends, corridor_score = fit_corridor(scorer, badge_scaled, basket_scaled)
-        first_pt_src = (corridor_pts[1][0] * SCALE, corridor_pts[1][1] * SCALE)
+        badge_scaled = (bx / params.scale, by / params.scale)
+        basket_scaled = (xbask / params.scale, ybask / params.scale)
+        corridor_pts, bends, corridor_score = fit_corridor(scorer, badge_scaled, basket_scaled, params)
+        first_pt_src = (corridor_pts[1][0] * params.scale, corridor_pts[1][1] * params.scale)
 
         t0 = time.time()
-        rec = recover_tee(ray_ev, (bx, by), first_pt_src)
+        rec = recover_tee(ray_ev, (bx, by), first_pt_src, params)
         elapsed = time.time() - t0
 
         rec_x, rec_y = rec["teePx"]
-        dist_err = math.hypot(rec_x - tx_truth, rec_y - ty_truth)
-        truth_bearing = math.degrees(math.atan2(ty_truth - by, tx_truth - bx))
-        bearing_err = abs(((rec["bearingDeg"] - truth_bearing) + 180) % 360 - 180)
-
-        rows.append(dict(
+        row = dict(
             hole=n, badgePx=(round(bx, 1), round(by, 1)),
+            basketPx=(round(xbask, 1), round(ybask, 1)),
             recoveredTeePx=(round(rec_x, 1), round(rec_y, 1)),
-            truthTeePx=(round(tx_truth, 1), round(ty_truth, 1)),
-            distErrPx=round(dist_err, 1),
             bearingDeg=round(rec["bearingDeg"], 1),
-            truthBearingDeg=round(truth_bearing, 1),
-            bearingErrDeg=round(bearing_err, 1),
             degOffFromCenter=rec["degOffFromCenter"],
             terminusPx=rec["terminusPx"],
             meanEvidence=rec["meanEvidence"],
             corridorBends=bends,
             corridorScore=round(corridor_score, 3),
             runtimeMs=round(elapsed * 1000, 1),
-        ))
+        )
+        if n in truth_by_n:
+            tx_truth, ty_truth = truth_by_n[n]
+            dist_err = math.hypot(rec_x - tx_truth, rec_y - ty_truth)
+            truth_bearing = math.degrees(math.atan2(ty_truth - by, tx_truth - bx))
+            bearing_err = abs(((rec["bearingDeg"] - truth_bearing) + 180) % 360 - 180)
+            row.update(
+                truthTeePx=(round(tx_truth, 1), round(ty_truth, 1)),
+                distErrPx=round(dist_err, 1),
+                truthBearingDeg=round(truth_bearing, 1),
+                bearingErrDeg=round(bearing_err, 1),
+            )
+        rows.append(row)
+    return rows
 
+
+# ---------------------------------------------------------------------------
+# Per-course run (fixture-CLI compatible wrapper around run_stage1)
+# ---------------------------------------------------------------------------
+
+def run_course(name, cfg, out_dir, params: Stage1Params = DEFAULT_STAGE1, badge_jitter=(0.0, 0.0), tag=""):
+    t_start = time.time()
+    full = load_source_image(cfg["zip_path"], cfg["image_name"])
+
+    truth_by_n = {n: (tx, ty) for n, tx, ty, bx, by in cfg["truth"]}
+    baskets_by_n = {n: (bx, by) for n, tx, ty, bx, by in cfg["truth"]}
+
+    rows = run_stage1(full, cfg["badges"], baskets_by_n, truth_by_n, params, badge_jitter)
     total_elapsed = time.time() - t_start
-    within13 = sum(1 for r in rows if r["distErrPx"] <= 12.691304347826087)
+    within13 = sum(1 for r in rows if r["distErrPx"] <= TOLERANCE_PX)
     within25 = sum(1 for r in rows if r["distErrPx"] <= 25.0)
 
     print(f"\n=== {name}{tag} ===  total wall-clock {total_elapsed:.2f}s "
@@ -492,7 +526,7 @@ def run_course(name, cfg, out_dir, badge_jitter=(0.0, 0.0), tag=""):
               f"terminus={r['terminusPx']:5.1f}px  ev={r['meanEvidence']:.3f}  "
               f"bends={r['corridorBends']}  {r['runtimeMs']:.0f}ms")
 
-    result = dict(course=name, tag=tag, totalWallClockS=round(total_elapsed, 3),
+    result = dict(course=name, tag=tag, params=params.to_dict(), totalWallClockS=round(total_elapsed, 3),
                   within13=within13, within25=within25, nHoles=len(rows), holes=rows)
     (out_dir / f"{name}{tag}-tee-recovery.json").write_text(json.dumps(result, indent=1) + "\n")
 
@@ -500,7 +534,8 @@ def run_course(name, cfg, out_dir, badge_jitter=(0.0, 0.0), tag=""):
     overlay = full.copy()
     d = ImageDraw.Draw(overlay)
     for _, bx, by in cfg["badges"]:
-        d.rectangle([bx - BADGE_HALF_W, by - BADGE_HALF_H, bx + BADGE_HALF_W, by + BADGE_HALF_H],
+        d.rectangle([bx - params.badge_half_w, by - params.badge_half_h,
+                     bx + params.badge_half_w, by + params.badge_half_h],
                     outline=(0, 200, 255), width=2)
     for n, tx, ty, xbask, ybask in cfg["truth"]:
         d.ellipse([xbask - 10, ybask - 10, xbask + 10, ybask + 10], outline=(0, 140, 255), width=3)
@@ -516,18 +551,52 @@ def run_course(name, cfg, out_dir, badge_jitter=(0.0, 0.0), tag=""):
     return result
 
 
+def add_stage1_cli_args(ap: argparse.ArgumentParser) -> None:
+    d = DEFAULT_STAGE1
+    ap.add_argument("--scale", type=int, default=d.scale)
+    ap.add_argument("--evidence-dl", type=float, default=d.evidence_dl)
+    ap.add_argument("--ray-evidence-dl", type=float, default=d.ray_evidence_dl)
+    ap.add_argument("--box-mean-window", type=int, default=d.box_mean_window)
+    ap.add_argument("--open-size", type=int, default=d.open_size)
+    ap.add_argument("--bend-margin", type=float, default=d.bend_margin)
+    ap.add_argument("--max-bends", type=int, default=d.max_bends)
+    ap.add_argument("--badge-half-w", type=float, default=d.badge_half_w)
+    ap.add_argument("--badge-half-h", type=float, default=d.badge_half_h)
+    ap.add_argument("--bearing-sweep-deg", type=float, default=d.bearing_sweep_deg)
+    ap.add_argument("--bearing-step-deg", type=float, default=d.bearing_step_deg)
+    ap.add_argument("--ray-step-px", type=float, default=d.ray_step_px)
+    ap.add_argument("--max-ray-px", type=float, default=d.max_ray_px)
+    ap.add_argument("--closing-window-px", type=float, default=d.closing_window_px)
+    ap.add_argument("--evidence-thresh", type=float, default=d.evidence_thresh)
+    ap.add_argument("--stepback-px", type=float, default=d.stepback_px)
+
+
+def stage1_params_from_args(args) -> Stage1Params:
+    return Stage1Params(
+        scale=args.scale, evidence_dl=args.evidence_dl, ray_evidence_dl=args.ray_evidence_dl,
+        box_mean_window=args.box_mean_window, open_size=args.open_size, bend_margin=args.bend_margin,
+        max_bends=args.max_bends, badge_half_w=args.badge_half_w, badge_half_h=args.badge_half_h,
+        bearing_sweep_deg=args.bearing_sweep_deg, bearing_step_deg=args.bearing_step_deg,
+        ray_step_px=args.ray_step_px, max_ray_px=args.max_ray_px,
+        closing_window_px=args.closing_window_px, evidence_thresh=args.evidence_thresh,
+        stepback_px=args.stepback_px,
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="scripts/cv-probes/hole-path-results")
     ap.add_argument("--jitter", type=float, default=0.0,
                      help="badge-position jitter magnitude (px) for the robustness control")
+    add_stage1_cli_args(ap)
     args = ap.parse_args()
     out_dir = REPO / args.out
     out_dir.mkdir(parents=True, exist_ok=True)
+    params = stage1_params_from_args(args)
 
     summary = {}
     for name, cfg in COURSES.items():
-        summary[name] = run_course(name, cfg, out_dir)
+        summary[name] = run_course(name, cfg, out_dir, params)
 
     if args.jitter > 0:
         rng = np.random.default_rng(777)
@@ -541,7 +610,7 @@ def main():
                 jy = args.jitter * math.sin(angle[i])
                 jittered_badges.append((n, bx + jx, by + jy))
             jittered_cfg["badges"] = jittered_badges
-            summary[f"{name}-jitter"] = run_course(name, jittered_cfg, out_dir, tag="-jitter")
+            summary[f"{name}-jitter"] = run_course(name, jittered_cfg, out_dir, params, tag="-jitter")
 
     (out_dir / "tee-recovery-summary.json").write_text(json.dumps(summary, indent=1) + "\n")
 
