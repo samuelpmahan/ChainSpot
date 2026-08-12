@@ -145,6 +145,33 @@ bends. Diagnosis (see `hole-path-results/diag-straight-holes-*.png`):
   corridor is easy to nudge in review, while spurious bends on straight
   holes were the more common and more misleading error.
 
+## Second course: AlexClark (McKinney, TX) — bent holes only
+
+`hole_path_alexclark_check.py`, fixture
+`resources/stitch-annotate/AlexClark/AlexClark-McKinney-TX.jpg` + hand-drawn
+gutters for the course's three bent holes
+(`AlexClark-McKinney-TX-labels.json`; the labels' "number" is an index, not
+the course hole number). Much harder terrain than IMG_5641: narrow corridors
+cut through dense dark woods, JPEG source, no badge ground truth (fit runs
+unanchored).
+
+- **Bend detection transfers cleanly: 3/3 holes get exactly one bend**, with
+  unambiguous gains (straight 0.51–0.56 → bent 0.99) — the tuned flat-evidence
+  config was not over-flattened into missing real doglegs on a second course.
+- Saturated evidence alone places lines loosely inside narrow corridors
+  (containment 59–93 %), because within-band position has no gradient. A
+  second stage — hill-climbing the chosen bends with graded `clip(dL/12)`
+  evidence, structure fixed — recenters them: **94 / 71 / 93 % containment**.
+- Residual failure mode (label-hole 2, 71 %): the corridor is bounded by
+  sunlit open grass, and lightness-vs-local-background cannot distinguish
+  "translucent ribbon" from "naturally bright terrain", so the refined line
+  hugs the field edge ~10 px high. Fixing this likely needs a second evidence
+  channel (e.g. chroma reduction — the ribbon desaturates, sunlit grass does
+  not), untested here.
+
+Two courses now; the two-stage shape (flat evidence for structure, graded
+for geometry) is the version worth porting.
+
 ## Relationship to the paused work
 
 This does not revive band/edge detection — it replaces it. If this is
