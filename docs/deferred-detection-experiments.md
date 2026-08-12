@@ -597,9 +597,9 @@ pattern than what these six courses happen to contain -- worth re-checking
 once more labeled/overlay courses exist, not worth chasing further on the
 current sample.
 
-## Badge-local bearing seeding without a basket (two variants, both rejected)
+## Badge-local bearing seeding without a basket (four variants, all rejected)
 
-**File**: none landed -- both were throwaway verification code.
+**File**: none landed -- all four were throwaway verification code.
 
 **Idea**: stage 1's bearing seed currently requires a pre-supplied basket
 (fits a corridor to it, reverses the first segment) and is measurably
@@ -608,7 +608,8 @@ up to 26.9deg on one hole) -- worth checking whether a purely badge-local
 signal could seed (or replace) it, removing the basket dependency
 entirely.
 
-**Status**: two variants tried, both worse than the corridor-fit baseline:
+**Status: closed, all four variants worse than the corridor-fit baseline.**
+Two point-evidence variants:
 - Full 360deg sweep ranked by farthest raw point-evidence (no basket, no
   prior): mean 80.0deg/66.6deg bearing error. Grabs unrelated bright
   terrain with nothing to constrain the search -- the road/parking/basket-
@@ -618,16 +619,42 @@ entirely.
   position error 105.9px/125.7px, `within13` 4/18 and 0/18. Free rotation
   search matches incidental noise, not real pads.
 
-**What would justify revisiting**: re-running the full-360deg sweep
-variant ranked by width-dropout rate (see first entry above) instead of
-raw terminus distance -- proposed, still untested as of this writing.
-(Note: an earlier version of this entry suggested pairing it with basket-
-marker masking on the theory that masking's positive result came from
-constraining *what* gets measured -- that theory doesn't hold anymore, see
-the masking entry above's correction: once its near-badge false-positive
-bug was fixed, masking turned out net-neutral on every course checked.
-The dropout-ranked full sweep is still worth trying on its own merits, just
-not on the assumption that masking will compound with it.)
+And two width-dropout-ranked variants (the "untested combination" this
+entry previously flagged -- now tested and closed out):
+- Full 360deg sweep ranked by lowest width-dropout rate alone: mean
+  126.6deg/127.2deg error, *worse* than even the naive point-evidence
+  sweep above. A short ray with only 1-2 width samples can trivially score
+  0% dropout on almost no evidence at all, so this ranking is dominated by
+  noise from near-badge candidates that terminate almost immediately, not
+  by genuine ribbon-following.
+- Full 360deg sweep, filtered to dropout <= `width_dropout_max` (0.40) then
+  ranked by farthest terminus among survivors -- i.e. exactly
+  `recover_tee`'s existing width-discriminator logic, just applied to a
+  full 360deg range instead of the narrow +-28deg corridor-fit-seeded
+  window it was designed for: mean 117.4deg/131.2deg error, `within10deg`
+  3/18 and 0/18. Still bad. The width-dropout signal discriminates real
+  ribbon from non-ribbon confusers (its original, validated purpose), but
+  it cannot discriminate *this hole's own* ribbon from a genuinely
+  continuous *neighboring* hole's ribbon lying in the wrong direction --
+  both score equally low dropout. That distinction needs a directional
+  prior to narrow the search first, which is exactly what the corridor fit
+  (for all its own noise) provides and a badge-local signal alone cannot.
+
+**Verdict**: the corridor-fit-to-basket seed, despite its measured noise,
+is not something a badge-local signal (point-evidence, pad-template
+rotation, or width-dropout, alone or filtered) can replace. Removing the
+basket dependency for bearing-seeding is not a promising direction on the
+evidence gathered across all four variants -- stop trying local-only
+seeding; if the basket-dependency problem still matters, the fix is
+upstream (better basket detection/ownership, e.g. the courseGrammar fix
+landed alongside this investigation), not a replacement for the seed
+itself.
+(Note: an earlier version of this entry suggested pairing the dropout-
+ranked variant with basket-marker masking on the theory that masking's
+positive result came from constraining *what* gets measured -- that theory
+doesn't hold, see the masking entry above's correction: once its near-
+badge false-positive bug was fixed, masking turned out net-neutral on
+every course checked, so it wouldn't have rescued this either.)
 
 ## Untouched stage1/stage2 search space
 
