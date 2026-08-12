@@ -424,3 +424,40 @@ disclosure boundary, which is exactly what the task's hard rule about
 honest truth-provenance is meant to prevent. The value of this pass is the
 two concrete findings above (both worth a production follow-up), not a new
 parameter recommendation.
+
+## Addendum 2: ribbon-width as a stage-1 discriminator (in progress)
+
+Mid-session design discussion surfaced that the current bearing-seed
+(corridor hill-climb fit to a pre-supplied basket, reversed) adds real,
+avoidable noise -- mean 8.6°/3.9° error vs. true badge->tee bearing on
+Golden/Alex respectively, up to 26.9° on one hole -- and that `RAY_SWEEP_DEG
+= 28.0` has no documented derivation and sits suspiciously close to the
+minimum width that specific hole needs to pass (single commit, never
+tuned since).
+
+Two badge-local, basket-independent replacement ideas were tested and both
+performed *worse* than the current approach:
+- Full 360° "farthest sustained point-evidence wins" sweep: mean
+  80.0°/66.6° bearing error (worse than the corridor-fit baseline) --
+  grabs unrelated bright terrain (the same road/parking confuser already
+  documented) with no prior to constrain it.
+- Full 360° pad-template NCC search in an 80px radius around the badge:
+  mean 105.9px/125.7px position error, within13 4/18 and 0/18 -- far
+  worse than either stage-1 or stage-2's existing gated results. Free
+  rotation search matches incidental noise, not real pads.
+
+A third idea -- **perpendicular ribbon width as a discriminator** -- tested
+positive and is a real, quantified signal, not yet implemented:
+measuring the evidence map's perpendicular extent (not just point
+brightness) every 15px along a ray, real (truth) tee-ward/basket-ward rays
+across all 36 labeled holes hold width in the **~24-90px range** (flagged
+here for review -- this is the number a width-based filter would be tuned
+around, and it should be checked against more courses before being treated
+as load-bearing) with a **0.19 mean dropout rate** (fraction of samples
+where the ribbon evidence disappears entirely), vs. **0.66** for random
+wrong-direction rays (>=30° off both true rays). Width *consistency*
+(coefficient of variation) did not discriminate (0.37 vs 0.32-0.34) --
+the real signal is "ribbon doesn't disappear," not "constant width" per
+se. An implementation of this as a stage-1 ranking/filter mode is in
+progress; results will be added here once tested against the same 36-hole
+seeding-accuracy check and the full LOOCV protocol above.
