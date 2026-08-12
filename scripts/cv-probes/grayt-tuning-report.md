@@ -321,7 +321,7 @@ it does not attempt to produce numbers comparable to the LOOCV table above.
 | NorthPark-ShortTees | 6 | **Genuinely ambiguous** | Badge sits in open fairway; no pin within ~400px even on a wide search. The detector's own pick isn't near any pin either. |
 | NorthPark-ShortTees | 14 | **Genuinely ambiguous** | Same pattern -- nearest candidate pins are 330-350px away, no confident pick. |
 | NorthPark-ShortTees | 8 | Low-confidence guess | Two pins sit in a tight 7/8 cluster; genuinely hard to disambiguate by eye. |
-| HeritagePark-Main | 2 | **Corrected** | A pin sits ~70-90px from badge 2 (same tight pattern as every confident hole on this course) but was assigned to hole 4 instead, where it's actually farther (89px) than from hole 2 (70px). A real ownership swap, not pure ambiguity. |
+| HeritagePark-Main | 2 | **Retracted -- likely NOT wrong** | See correction below: the subagent's distance-only reasoning missed that the production cost function (distance + polarity penalty) makes the *actual* assignment the true global-cost optimum with near-perfect polarity, while the proposed swap scores worse on both dimensions. |
 | TowneLake-RedTees-a | 2 | Confirmed correct | Detector's pick is unambiguously the closest pin; the flag looks like a soft cost-competition signal, not an error. |
 | TowneLake-RedTees-a | 13 | Confirmed correct | Closest pin, though the tee->badge->basket geometry is nearly perpendicular (polarity cosine 0.12) -- a genuine oddity worth downstream scrutiny even though the pin choice itself is right. |
 | TowneLake-RedTees-b | 1 | Confirmed correct | Closest remaining pin once hole 18's own (closer) pin is correctly excluded. |
@@ -329,34 +329,75 @@ it does not attempt to produce numbers comparable to the LOOCV table above.
 | TowneLake-RedTees-b | 4 | **Genuinely ambiguous** | Badge isolated in open fairway out to 600px; the detector's pick is closer to holes 5 and 11 than to hole 4. |
 | TowneLake-RedTees-b | 14 | **Genuinely ambiguous** | A real tie: one candidate pin is 132px away (the detector's pick, currently assigned), another is 80px away but already claimed by hole 15 -- both are defensible, dense-cluster genuine tie. |
 
-**Net**: 3 confirmed correct despite being flagged, 2 corrected (concrete
-ownership swaps), 4 genuinely ambiguous (no confident call possible even
-under careful inspection), 1 low-confidence guess. The detector's
-self-flagging is largely trustworthy -- every non-flagged spot-checked hole
-(12+ holes across the 3 subagent courses) paired correctly -- but roughly
-half the *flagged* holes are cases no amount of proximity reasoning can
-resolve, because UDisc's own label layout pushes the number away from its
-own pin under crowding, sometimes past the point where "nearest pin" is a
-meaningful heuristic at all.
+**Net (revised after the correctness check below)**: 3 confirmed correct
+despite being flagged, 1 corrected (TowneLake-b hole 2, still holds up), 1
+retracted (HeritagePark hole 2 -- see below, the subagent's proposed
+"correction" turned out to itself be wrong), 4 genuinely ambiguous (no
+confident call possible even under careful inspection), 1 low-confidence
+guess.
 
-**A previously-undetected root cause**: TowneLake-RedTees-b holes 5 and 10
-lost their true basket to neighboring holes 2 and 9 respectively, not
-because of proximity ambiguity, but because holes 5 and 10's *own* tee
-bootstrap failed first, which excludes a hole from the basket-matching pool
-entirely -- so its rightful basket becomes fair game for a neighbor. This
-is a concrete, reproducible failure mode (tee-resolution failure cascading
-into a neighbor's basket mis-assignment) worth a production fix, though
-that fix is out of scope here (`src/` was not touched, per the task's
-boundary).
+**Retraction: the HeritagePark hole 2 "correction" does not hold up.** The
+subagent that reviewed HeritagePark reasoned from raw pixel distance only
+-- it never checked the production ownership algorithm's actual cost
+function (distance + an 80px penalty when the tee and basket fall on the
+same side of the badge, i.e. `raysPolarityCosine`; see
+`src/lib/autoAnnotation/courseGrammar.ts`). Recomputing that cost function
+by hand for both holes:
+
+| | hole 2 → pin A (1022,1411) | hole 4 → pin B (905,1453) | total |
+|---|---|---|---|
+| **Actual (production) assignment** | cost 140.2, polarity **-1.000** | cost 89.3, polarity **-1.000** | **229.5** |
+| **Subagent's proposed swap** | cost 113.2, polarity -0.463 | cost 190.3, polarity -0.687 | **303.5** |
+
+The production assignment is the true global-cost optimum under its own
+cost function *and* gives near-perfect polarity (tee and basket exactly
+opposite the badge) for both holes, while the swap is worse on every
+dimension for both holes. The subagent's "hole 2 loses its closer pin to
+hole 4" framing was true but not evidence of an error -- global one-to-one
+assignment routinely gives a hole its second-best option when that's what
+minimizes total cost across all holes simultaneously. This is retracted;
+treat that row as **not corrected**.
+
+Worth noting for calibration: the underlying claim "tee → badge → basket
+forms a roughly straight line" should not be read as a strong geometric
+law -- it degrades on any hole with a bend near the badge, and a check that
+found "0/36 violations" against the two labeled fixtures mostly confirms
+badges sit close to their tee (true almost by construction of how badges
+get placed) rather than validating the straight-line framing in general.
+It happens to hold up on these two courses; that is not a proof it holds
+on a course with sharper doglegs.
+
+**TowneLake-b hole 2 holds up.** Same cost-function check: the detector's
+actual pick costs 536.5 (distance 466px, polarity -0.12 -- barely opposite
+at all), the proposed pin costs 90.3 (distance 49px, polarity -0.48). That
+gap is far too large to be a global-cost tradeoff with some other hole; the
+proposed pin is a real improvement under the algorithm's own logic. Whether
+this is an ownership-assignment bug (the candidate existed and was
+mis-priced or claimed elsewhere) or the candidate was simply never in the
+detected pool at all (an upstream detection gap, not an ownership bug) is
+not yet determined.
+
+**A previously-undetected root cause (still holds)**: TowneLake-RedTees-b
+holes 5 and 10 lost their true basket to neighboring holes 2 and 9
+respectively, not because of proximity ambiguity, but because holes 5 and
+10's *own* tee bootstrap failed first, which excludes a hole from the
+basket-matching pool entirely -- so its rightful basket becomes fair game
+for a neighbor. This is a concrete, reproducible failure mode (tee-
+resolution failure cascading into a neighbor's basket mis-assignment)
+worth a production fix, though that fix is out of scope here (`src/` was
+not touched, per the task's boundary).
 
 ### Does correcting the basket anchor rescue the gate-pass rate?
 
-Applying the two confirmed corrections (HeritagePark hole 2, TowneLake-b
-hole 2) and re-running the full chain on just those holes:
+Applying the corrections and re-running the full chain on those holes
+(HeritagePark hole 2 kept here for the record even though the "correction"
+is retracted above -- and note the NCC got *worse* with the retracted
+"correction," which is itself consistent with that basket having been
+wrong to swap to):
 
-| Hole | NCC before (detector's basket) | NCC after (vision-corrected basket) |
+| Hole | NCC before (detector's basket) | NCC after (proposed basket) |
 |---|---|---|
-| HeritagePark-Main hole 2 | 0.457 | 0.289 (worse) |
+| HeritagePark-Main hole 2 (retracted correction) | 0.457 | 0.289 (worse, consistent with the retraction) |
 | TowneLake-RedTees-b hole 2 | 0.443 | 0.440 (unchanged) |
 
 **Neither crosses the 0.55 gate, and one gets worse.** This is itself an
