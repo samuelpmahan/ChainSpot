@@ -606,7 +606,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		uiScalePx,
 		mapBoundsPx,
 		maxCandidates: args.maxTeeCandidates
-	}, teeBadges);
+	}, teeBadges, primaryBasketCandidates);
 	const teeCandidates = teeBootstrap.candidates;
 	const grammarTees = teeBootstrap.assignments.map((assignment) => ({
 		...assignment.candidate,

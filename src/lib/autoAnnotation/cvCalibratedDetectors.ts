@@ -21,12 +21,14 @@ import type {
 	FindBasketAnchorScaleOptions
 } from './basketTemplateDetection';
 import {
+	derivePuttingCircleMasksPx,
 	detectOccludedEdgeLoopCandidates,
 	detectTeePadCandidates,
 	detectTeePadVariants
 } from './teePadDetection';
 import type {
 	OccludedEdgeLoopResult,
+	PuttingCircleSourceBasket,
 	TeePadCandidate,
 	TeePadCv,
 	TeePadDetectionOptions as RawTeePadDetectionOptions,
@@ -145,11 +147,15 @@ function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
  * can become REVIEW (the H3/H5 class) but cannot become AUTO from a lucky ray
  * intersection alone.
  */
+/** Fallback only, used when no AUTO tee exists yet to measure a course-specific radius from. */
+const PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI = 100;
+
 export function detectCalibratedTeeBootstrap(
 	cv: TeePadCv,
 	raster: TeePadRaster,
 	options: CalibratedTeePadDetectionOptions,
-	badges: readonly TeeBadgeAnchor[]
+	badges: readonly TeeBadgeAnchor[],
+	baskets: readonly PuttingCircleSourceBasket[] = []
 ): CalibratedTeeBootstrapResult {
 	const primary = detectTeePadCandidates(cv, raster, options);
 	const requested = options.maxCandidates ?? 18;
@@ -169,6 +175,56 @@ export function detectCalibratedTeeBootstrap(
 		}
 		if (weak.length > 0) assessed = assessTeeBootstrap(raster, candidates, badges);
 	}
+
+	// A neighboring hole's dashed putting circle can cross a tee pad's own
+	// edge and break the rectangle the occluded-edge-loop detector looks for
+	// (the "H3" case: hole 3's pad partly erased by hole 5's putting circle).
+	// Masking every putting circle globally, up front, was tried and
+	// rejected: it perturbs the whole candidate pool and the pad-size
+	// calibration derived from it, occasionally erasing a *different* real
+	// pad's own evidence and turning a correct hole into a missing one. This
+	// only ever runs for holes still not AUTO after every existing tier above
+	// -- an already-resolved hole's candidates and assignment are completely
+	// untouched, so this cannot regress a hole that already works.
+	const stillNotAuto = assessed.holes.filter((hole) => hole.decision !== 'auto');
+	if (stillNotAuto.length > 0 && baskets.length > 0) {
+		const puttingCircleMasks = derivePuttingCircleMasksPx(raster, baskets, options.uiScalePx);
+		if (puttingCircleMasks.length > 0) {
+			const recovered = detectOccludedEdgeLoopCandidates(cv, raster, {
+				...options,
+				ignoreCirclesPx: puttingCircleMasks,
+				maxCandidates: Math.max(requested, requested * 2)
+			}).candidates.filter((candidate) => !candidates.some((existing) => samePhysicalPad(existing, candidate)));
+			// Distance-bounded by the course's own already-trusted geometry rather
+			// than a fixed constant: how far a real tee can plausibly sit from its
+			// badge varies course to course (and with map zoom), but the holes
+			// already resolved to AUTO on *this* course are a direct, cheap
+			// measurement of it.
+			const autoDistancesPx = assessed.assignments
+				.filter((assignment) => assignment.decision === 'auto')
+				.map((assignment) => assignment.badgeRay?.distancePx)
+				.filter((distance): distance is number => Number.isFinite(distance));
+			const recoveryRadiusPx =
+				autoDistancesPx.length > 0
+					? Math.max(...autoDistancesPx) * 1.5
+					: PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI * options.uiScalePx;
+			let added = false;
+			for (const hole of stillNotAuto) {
+				const badge = badges.find((candidate) => candidate.holeNumber === hole.holeNumber);
+				if (!badge) continue;
+				const best = recovered
+					.map((candidate) => ({ candidate, distancePx: Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) }))
+					.filter((entry) => entry.distancePx <= recoveryRadiusPx)
+					.sort((left, right) => left.distancePx - right.distancePx)[0];
+				if (best && !candidates.some((existing) => samePhysicalPad(existing, best.candidate))) {
+					candidates.push(best.candidate);
+					added = true;
+				}
+			}
+			if (added) assessed = assessTeeBootstrap(raster, candidates, badges);
+		}
+	}
+
 	return { candidates, ...assessed };
 }
 

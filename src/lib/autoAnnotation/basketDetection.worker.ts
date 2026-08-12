@@ -599,7 +599,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 		cv,
 		teeRaster,
 		{ uiScalePx: calibration.uiScalePx, mapBoundsPx },
-		teeBadges
+		teeBadges,
+		primaryBaskets
 	);
 	const tees = teeBootstrap.candidates;
 	const grammarTees = teeBootstrap.assignments.map((assignment) => ({

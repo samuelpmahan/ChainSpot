@@ -109,8 +109,19 @@ export interface TeePadDetectionOptions {
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	/** Keep at most this many fused proposals. Defaults to the 18-hole MVP. */
 	readonly maxCandidates?: number;
-	/** Optional source-image circles whose Canny pixels should be ignored. */
-	readonly ignoreCirclesPx?: readonly Readonly<{ xPx: number; yPx: number; radiusPx: number }>[];
+	/**
+	 * Optional source-image circles whose Canny pixels should be ignored.
+	 * `innerRadiusPx` narrows the masked region to an annulus (defaults to 0,
+	 * i.e. the full disc) -- use an annulus when a real structure, such as a
+	 * neighboring hole's own tee pad, can legitimately sit inside another
+	 * circle's interior; a full-disc mask would erase it along with the ring.
+	 */
+	readonly ignoreCirclesPx?: readonly Readonly<{
+		xPx: number;
+		yPx: number;
+		radiusPx: number;
+		innerRadiusPx?: number;
+	}>[];
 }
 
 type CvMat = {
@@ -716,6 +727,159 @@ function houghSegments(lines: CvMat): HoughSegment[] {
 	return segments;
 }
 
+export interface PuttingCircleFit {
+	/** Source-image pixels. */
+	readonly radiusPx: number;
+	/** Fraction of the fitted ring's circumference that landed on bright-dash evidence. */
+	readonly coverage: number;
+}
+
+export interface PuttingCircleSourceBasket {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly score: number;
+}
+
+const PUTTING_CIRCLE_BRIGHT_VALUE_MIN = 210;
+const PUTTING_CIRCLE_BRIGHT_SATURATION_MAX = 40;
+const PUTTING_CIRCLE_MIN_RADIUS_UI = 8;
+const PUTTING_CIRCLE_MAX_RADIUS_UI = 60;
+const PUTTING_CIRCLE_RADIUS_STEP_UI = 0.5;
+const PUTTING_CIRCLE_MIN_COVERAGE = 0.15;
+const PUTTING_CIRCLE_MAX_COVERAGE = 0.75;
+/**
+ * Genuine dashes hit the ring in many short, roughly evenly-spaced arcs. A
+ * real rectangle edge (a tee pad's own rail, a walking path) crossing the
+ * sweep circle only touches it at one or two localized points, however long
+ * the arc there is -- so a minimum *run count*, not just coverage fraction,
+ * is what actually distinguishes "dashed ring" from "a straight edge happens
+ * to cross this circle." Without this gate the sweep can lock onto a real
+ * pad's own edge and mask it away as if it were dash evidence.
+ */
+const PUTTING_CIRCLE_MIN_RUNS = 5;
+const PUTTING_CIRCLE_MIN_BASKET_SCORE = 0.7;
+/** UI-scale multiple: dash stroke width is UI-drawn, not map-scaled, so uiScalePx (not a real-world unit) is the right unit for it. */
+export const PUTTING_CIRCLE_RING_HALF_THICKNESS_UI = 2.5;
+
+/**
+ * Fits the radius of a dashed putting-circle drawn around a basket by
+ * sweeping candidate radii outward from the basket and keeping the one whose
+ * ring has the strongest bright-dash evidence.
+ *
+ * There is deliberately no fixed real-world-to-pixel conversion here: unlike
+ * a number badge (drawn at a fixed on-screen size regardless of map zoom),
+ * a putting circle is drawn to the *map's* scale, which varies per
+ * screenshot. A radius derived from a real-world distance constant would
+ * only be correct for whatever zoom level it was measured against, so the
+ * radius has to be measured from each image instead.
+ */
+export function fitPuttingCircleRadiusPx(
+	raster: TeePadRaster,
+	centerXPx: number,
+	centerYPx: number,
+	uiScalePx: number
+): PuttingCircleFit | null {
+	const { saturation, value } = readHsv(raster);
+	const width = raster.widthPx;
+	const height = raster.heightPx;
+	const bright = new Uint8Array(value.length);
+	for (let index = 0; index < bright.length; index += 1) {
+		bright[index] =
+			value[index] >= PUTTING_CIRCLE_BRIGHT_VALUE_MIN &&
+			saturation[index] <= PUTTING_CIRCLE_BRIGHT_SATURATION_MAX
+				? 255
+				: 0;
+	}
+	const scale = uiScalePx / raster.sourceScale;
+	const centerX = centerXPx / raster.sourceScale;
+	const centerY = centerYPx / raster.sourceScale;
+	const sampleRadius = Math.max(1, Math.round(scale * 0.6));
+	let best: PuttingCircleFit | null = null;
+	for (
+		let radiusUi = PUTTING_CIRCLE_MIN_RADIUS_UI;
+		radiusUi <= PUTTING_CIRCLE_MAX_RADIUS_UI;
+		radiusUi += PUTTING_CIRCLE_RADIUS_STEP_UI
+	) {
+		const radius = radiusUi * scale;
+		if (centerX - radius < 0 || centerX + radius >= width || centerY - radius < 0 || centerY + radius >= height) {
+			continue;
+		}
+		const samples = Math.max(24, Math.ceil(radius * 0.5));
+		const hits = new Array<boolean>(samples);
+		let hitCount = 0;
+		for (let sample = 0; sample < samples; sample += 1) {
+			const angle = (sample / samples) * Math.PI * 2;
+			const x = Math.round(centerX + radius * Math.cos(angle));
+			const y = Math.round(centerY + radius * Math.sin(angle));
+			let found = false;
+			for (let dy = -sampleRadius; dy <= sampleRadius && !found; dy += 1) {
+				for (let dx = -sampleRadius; dx <= sampleRadius; dx += 1) {
+					const nearbyX = x + dx;
+					const nearbyY = y + dy;
+					if (nearbyX < 0 || nearbyX >= width || nearbyY < 0 || nearbyY >= height) continue;
+					if (bright[nearbyY * width + nearbyX] !== 0) {
+						found = true;
+						break;
+					}
+				}
+			}
+			hits[sample] = found;
+			if (found) hitCount += 1;
+		}
+		const coverage = hitCount / samples;
+		let runs = 0;
+		for (let sample = 0; sample < samples; sample += 1) {
+			if (hits[sample] && !hits[(sample - 1 + samples) % samples]) runs += 1;
+		}
+		if (runs === 0 && hitCount === samples) runs = 1;
+		if (runs < PUTTING_CIRCLE_MIN_RUNS) continue;
+		if (coverage > PUTTING_CIRCLE_MAX_COVERAGE) continue;
+		if (!best || coverage > best.coverage) best = { radiusPx: radius * raster.sourceScale, coverage };
+	}
+	if (!best || best.coverage < PUTTING_CIRCLE_MIN_COVERAGE) return null;
+	return best;
+}
+
+function median(values: readonly number[]): number {
+	const sorted = [...values].sort((left, right) => left - right);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+/**
+ * Derives `ignoreCirclesPx` entries for every confidently-detected basket, so
+ * a neighboring hole's dashed putting circle can be masked out of the
+ * occluded-edge-loop tee search before it breaks a real pad's outline. Only
+ * baskets whose own detector score already clears a high floor are used --
+ * a shaky basket guess should not go on to erase real evidence elsewhere.
+ *
+ * The radius is fit per basket, but pooled across baskets before use: a
+ * putting circle is drawn at one constant scale throughout a single image
+ * (only the scale *between* different screenshots varies, per this module's
+ * calibration notes elsewhere), so a basket whose own dash is too faint,
+ * cropped, or occluded to fit alone can still be masked correctly using the
+ * radius measured from a cleaner dash elsewhere on the same course.
+ */
+export function derivePuttingCircleMasksPx(
+	raster: TeePadRaster,
+	baskets: readonly PuttingCircleSourceBasket[],
+	uiScalePx: number
+): NonNullable<TeePadDetectionOptions['ignoreCirclesPx']> {
+	const confident = baskets.filter((basket) => basket.score >= PUTTING_CIRCLE_MIN_BASKET_SCORE);
+	const fits = confident
+		.map((basket) => fitPuttingCircleRadiusPx(raster, basket.xPx, basket.yPx, uiScalePx))
+		.filter((fit): fit is PuttingCircleFit => fit !== null);
+	if (fits.length === 0) return [];
+	const sharedRadiusPx = median(fits.map((fit) => fit.radiusPx));
+	const halfThicknessPx = PUTTING_CIRCLE_RING_HALF_THICKNESS_UI * uiScalePx;
+	return confident.map((basket) => ({
+		xPx: basket.xPx,
+		yPx: basket.yPx,
+		radiusPx: sharedRadiusPx + halfThicknessPx,
+		innerRadiusPx: Math.max(0, sharedRadiusPx - halfThicknessPx)
+	}));
+}
+
 function maskIgnoredCircles(
 	edges: Uint8Array,
 	width: number,
@@ -728,8 +892,10 @@ function maskIgnoredCircles(
 		const centerX = circle.xPx / sourceScale;
 		const centerY = circle.yPx / sourceScale;
 		const radius = circle.radiusPx / sourceScale;
+		const innerRadius = Math.max(0, (circle.innerRadiusPx ?? 0) / sourceScale);
 		if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(radius) || radius <= 0) continue;
 		const radiusSquared = radius * radius;
+		const innerRadiusSquared = innerRadius * innerRadius;
 		const firstX = clamp(Math.floor(centerX - radius), 0, width - 1);
 		const lastX = clamp(Math.ceil(centerX + radius), 0, width - 1);
 		const firstY = clamp(Math.floor(centerY - radius), 0, height - 1);
@@ -738,7 +904,10 @@ function maskIgnoredCircles(
 			for (let x = firstX; x <= lastX; x += 1) {
 				const dx = x - centerX;
 				const dy = y - centerY;
-				if (dx * dx + dy * dy <= radiusSquared) edges[y * width + x] = 0;
+				const distanceSquared = dx * dx + dy * dy;
+				if (distanceSquared <= radiusSquared && distanceSquared >= innerRadiusSquared) {
+					edges[y * width + x] = 0;
+				}
 			}
 		}
 	}
