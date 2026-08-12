@@ -66,6 +66,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 from skimage.color import rgb2lab
+from skimage.measure import label as cc_label, regionprops
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -109,6 +110,26 @@ class Stage1Params:
     width_dropout_max: float = 0.40         # candidates with dropout rate above this are filtered out (real
                                              # rays measured ~0.19 mean dropout on truth data; wrong-direction
                                              # rays ~0.66 -- see width_discriminator_eval.py)
+
+    # --- opt-in basket/pin-marker-circle masking (see find_basket_marker_centers /
+    # basket_marker_mask_for_badge) ---
+    # OFF by default: existing behavior (and CLI byte-compatibility) is unchanged
+    # unless a caller explicitly sets use_basket_marker_mask=True.
+    use_basket_marker_mask: bool = False    # zero out ray evidence inside detected marker circles
+    marker_mask_a_thresh: float = -10.0     # LAB a* threshold for the marker's inner-disc seed (source-scale
+                                             # image, resized to evidence-map scale before thresholding)
+    marker_mask_seed_min_r_px: float = 8.0  # evidence-map-scale seed-blob radius bounds (source inner disc
+    marker_mask_seed_max_r_px: float = 18.0 # measured ~40px radius -> ~13px at scale=3; generous margin either side)
+    marker_mask_seed_min_circularity: float = 0.5  # area / bounding-box-area, rejects non-circular blobs
+    marker_mask_radius_px: float = 95.0     # fixed source-px mask radius applied around each detected center
+                                             # (measured outer marker-ring boundary ~85-90px + small margin)
+    marker_mask_exclude_within_px: float = 175.0  # a detected marker within this many source px of the
+                                             # CURRENT badge is left unmasked ("nearby-but-foreign" exclusion --
+                                             # on a dense course a real tee-ward ray often legitimately runs
+                                             # near a neighboring hole's own basket; masking every marker
+                                             # indiscriminately regressed real tee-ward dropout from 0.135/0.191
+                                             # to 0.384/0.414 in testing. 150-200px band tested clean; 175 is
+                                             # the midpoint.)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -446,6 +467,90 @@ def width_dropout_rate(ev, origin, bearing_rad, max_dist_px, params: Stage1Param
     return zeros / len(widths)
 
 
+# ---------------------------------------------------------------------------
+# Basket/pin-marker-circle masking. A meaningful fraction of the width
+# discriminator's "wrong ray" false positives turned out to be a specific,
+# identifiable cause: other holes' own basket/pin marker graphics (a two-ring
+# UI element: solid inner disc + dashed "putting circle" outer ring), not
+# roads or unrelated terrain. Measured directly against both labeled
+# fixtures: the marker has a distinctive, remarkably consistent LAB
+# signature (a* ~ -15 at the inner disc, ~ -6 to -8 at the outer ring, vs.
+# ~0 on real ribbon/fairway) and a consistent physical size (inner disc
+# radius ~40px, outer boundary ~85-90px, source px) regardless of which
+# hole or course -- strong evidence it's a fixed-size rendered element, not
+# organic terrain, and therefore detectable/maskable independent of any
+# hole-ownership resolution.
+# ---------------------------------------------------------------------------
+
+def find_basket_marker_centers(full: Image.Image, params: Stage1Params = DEFAULT_STAGE1):
+    """Detect basket/pin marker centers via their small, reliable inner-disc
+    LAB a* seed (NOT the full two-ring shape -- that was tried first and
+    under-detected badly, ~4-6/18 markers found on a course, because dense
+    clusters merge/fragment the outer ring's dashed edge under a plain
+    threshold). The seed is compact (~13px radius at scale=3) and rarely
+    touches a neighboring marker's seed even when their outer rings overlap,
+    which is why this two-stage approach (small reliable seed -> fixed-radius
+    mask) finds 16-18/18 markers where a single whole-shape blob detector
+    does not. Returns a list of (x_src, y_src) marker centers, source px."""
+    im = np.asarray(full.resize((full.width // params.scale, full.height // params.scale),
+                                 Image.LANCZOS)).astype(np.float32) / 255
+    lab = rgb2lab(im)
+    raw = lab[..., 1] < params.marker_mask_a_thresh
+    labeled = cc_label(raw)
+    centers = []
+    for region in regionprops(labeled):
+        r_equiv = math.sqrt(region.area / math.pi)
+        if not (params.marker_mask_seed_min_r_px <= r_equiv <= params.marker_mask_seed_max_r_px):
+            continue
+        bbox_area = (region.bbox[2] - region.bbox[0]) * (region.bbox[3] - region.bbox[1])
+        circularity = region.area / max(bbox_area, 1)
+        if circularity < params.marker_mask_seed_min_circularity:
+            continue
+        cy, cx = region.centroid
+        centers.append((cx * params.scale, cy * params.scale))
+    return centers
+
+
+def basket_marker_mask_for_badge(shape_hw, centers, badge_src, params: Stage1Params = DEFAULT_STAGE1):
+    """Boolean mask (evidence-map scale, shape_hw) True inside a fixed
+    marker_mask_radius_px circle around every detected marker center EXCEPT
+    those "nearby-but-foreign" to badge_src -- masking every marker
+    indiscriminately regressed real tee-ward rays (a dense course's true
+    tee-ward path often legitimately runs near an unrelated neighboring
+    hole's basket); excluding nearby markers from the mask fixed most of
+    that while still catching genuinely distant confusers.
+
+    Exclusion is measured from the mask disk's NEAR EDGE
+    (dist_to_marker_center - marker_mask_radius_px), not the marker's raw
+    center distance. A center-distance-only version left a real gap: a
+    marker just beyond marker_mask_exclude_within_px in raw distance can
+    still have its marker_mask_radius_px disk reach back well inside that
+    boundary and cover a genuinely short tee-ward ray (found directly:
+    GoldenTeeSet hole 8's true tee sits 78.5px from its badge; a foreign
+    marker 186px away -- past a 175px raw-distance cutoff -- has a mask
+    disk reaching to 186-95=91px, swallowing the true tee's own evidence
+    and flipping that hole from a clean gate-pass to a false reject).
+    Near-edge exclusion is monotonically more conservative (excludes a
+    superset of what center-distance exclusion would) and fixes this
+    without giving up genuinely distant confusers, whose near edge still
+    clears the threshold by construction.
+
+    Per-badge, not a single course-wide mask, since "nearby" is relative to
+    which badge is being evaluated."""
+    h, w = shape_hw
+    mask = np.zeros((h, w), bool)
+    bx, by = badge_src
+    yy, xx = np.mgrid[0:h, 0:w]
+    for cx, cy in centers:
+        near_edge_px = math.hypot(cx - bx, cy - by) - params.marker_mask_radius_px
+        if near_edge_px < params.marker_mask_exclude_within_px:
+            continue
+        cxe, cye = cx / params.scale, cy / params.scale
+        re = params.marker_mask_radius_px / params.scale
+        mask |= (xx - cxe) ** 2 + (yy - cye) ** 2 <= re ** 2
+    return mask
+
+
 def recover_tee(ray_ev, badge_src, corridor_first_pt_src, params: Stage1Params = DEFAULT_STAGE1,
                  bearing_center_override=None):
     """Sweep bearings around reverse(badge->first corridor point); return
@@ -538,6 +643,11 @@ def run_stage1(full: Image.Image, badges, baskets_by_n, truth_by_n, params: Stag
         valid_all[y0:y1, x0:x1] = False
     scorer = make_masked_scorer(ev, valid_all)
 
+    # Marker centers are a course-wide, one-time cost (image resize + LAB
+    # conversion + connected components); the per-badge exclusion mask
+    # built from them is cheap and applied per-hole below.
+    marker_centers = find_basket_marker_centers(full, params) if params.use_basket_marker_mask else []
+
     rows = []
     for n, bx0, by0 in badges:
         jx, jy = badge_jitter
@@ -549,8 +659,15 @@ def run_stage1(full: Image.Image, badges, baskets_by_n, truth_by_n, params: Stag
         corridor_pts, bends, corridor_score = fit_corridor(scorer, badge_scaled, basket_scaled, params)
         first_pt_src = (corridor_pts[1][0] * params.scale, corridor_pts[1][1] * params.scale)
 
+        ray_ev_hole = ray_ev
+        if params.use_basket_marker_mask and marker_centers:
+            marker_mask = basket_marker_mask_for_badge((h, w), marker_centers, (bx, by), params)
+            if marker_mask.any():
+                ray_ev_hole = ray_ev.copy()
+                ray_ev_hole[marker_mask] = 0.0
+
         t0 = time.time()
-        rec = recover_tee(ray_ev, (bx, by), first_pt_src, params)
+        rec = recover_tee(ray_ev_hole, (bx, by), first_pt_src, params)
         elapsed = time.time() - t0
 
         rec_x, rec_y = rec["teePx"]
@@ -654,6 +771,13 @@ def add_stage1_cli_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--width-perp-step-px", type=float, default=d.width_perp_step_px)
     ap.add_argument("--width-max-half-px", type=float, default=d.width_max_half_px)
     ap.add_argument("--width-dropout-max", type=float, default=d.width_dropout_max)
+    ap.add_argument("--use-basket-marker-mask", action="store_true", default=d.use_basket_marker_mask)
+    ap.add_argument("--marker-mask-a-thresh", type=float, default=d.marker_mask_a_thresh)
+    ap.add_argument("--marker-mask-seed-min-r-px", type=float, default=d.marker_mask_seed_min_r_px)
+    ap.add_argument("--marker-mask-seed-max-r-px", type=float, default=d.marker_mask_seed_max_r_px)
+    ap.add_argument("--marker-mask-seed-min-circularity", type=float, default=d.marker_mask_seed_min_circularity)
+    ap.add_argument("--marker-mask-radius-px", type=float, default=d.marker_mask_radius_px)
+    ap.add_argument("--marker-mask-exclude-within-px", type=float, default=d.marker_mask_exclude_within_px)
 
 
 def stage1_params_from_args(args) -> Stage1Params:
@@ -668,6 +792,12 @@ def stage1_params_from_args(args) -> Stage1Params:
         use_width_discriminator=args.use_width_discriminator, width_step_px=args.width_step_px,
         width_perp_step_px=args.width_perp_step_px, width_max_half_px=args.width_max_half_px,
         width_dropout_max=args.width_dropout_max,
+        use_basket_marker_mask=args.use_basket_marker_mask, marker_mask_a_thresh=args.marker_mask_a_thresh,
+        marker_mask_seed_min_r_px=args.marker_mask_seed_min_r_px,
+        marker_mask_seed_max_r_px=args.marker_mask_seed_max_r_px,
+        marker_mask_seed_min_circularity=args.marker_mask_seed_min_circularity,
+        marker_mask_radius_px=args.marker_mask_radius_px,
+        marker_mask_exclude_within_px=args.marker_mask_exclude_within_px,
     )
 
 

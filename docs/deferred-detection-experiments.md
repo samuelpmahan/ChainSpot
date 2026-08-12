@@ -545,9 +545,9 @@ discriminator; neither has been retried *with* it).
 
 ## Basket/pin-marker-circle masking
 
-**File**: none yet -- exists only as ad hoc verification code from this
-session's investigation, never landed. Would extend
-`hole_path_tee_recovery.py`'s `opened_evidence`/`ray_ev` construction.
+**File**: `hole_path_tee_recovery.py` (`Stage1Params.use_basket_marker_mask`,
+`find_basket_marker_centers`, `basket_marker_mask_for_badge`). Landed,
+off by default, CLI-compatible.
 
 **Idea**: the width discriminator's false positives traced back to a
 specific, consistent cause: other holes' own basket/pin marker graphics (a
@@ -562,22 +562,40 @@ a*-threshold mask, finding small reliable inner-disc seeds (18/18 and 16/18
 markers found on Golden/Alex, vs. 4-6/18 with a cruder whole-shape blob
 detector) then applying a fixed 95px mask around each.
 
-**Status**: masking *every* detected marker regressed the signal (tee-ward
-dropout rose from 0.135/0.191 to 0.384/0.414 -- on a dense course a real
-tee-ward ray often legitimately passes near an unrelated hole's basket, and
-masking it removes real evidence). Excluding markers within ~150-200px of
-the current badge from the mask (only masking genuinely distant ones)
-fixed this: tee-ward dropout held flat while wrong-direction dropout still
-rose. Wired into the real `recover_tee` pipeline (actual corridor-fit
-seeding): **GoldenTeeSet stays 11/18** (hole 8 improves 146.5px -> 39.4px,
-one other hole regresses 8.8px -> 12.4px but still passes); **AlexClarkSet
-improves 4/18 -> 6/18** (hole 6: 129.5px -> 8.2px, no other holes
-affected). The most promising unlanded idea from this investigation.
+**Status: landed, net-neutral, NOT a win -- an earlier claim in this doc
+was wrong and is corrected here.** Masking *every* detected marker
+regressed real tee-ward rays (dense-course rays legitimately pass near an
+unrelated hole's basket). A first fix -- excluding markers within a fixed
+150-200px of the *current badge's raw distance* from the mask -- appeared
+to help when spot-checked (GoldenTeeSet hole 8, AlexClarkSet hole 6), but
+that check was measuring a bug, not a real fix: a marker's mask disk has a
+95px radius, so a marker just beyond the raw-distance exclusion boundary
+can still have its disk reach back and cover a genuinely short real
+tee-ward ray. Confirmed directly: GoldenTeeSet hole 8's true tee sits
+78.5px from its badge; a foreign marker 186px away (past a 175px raw-
+distance cutoff) has a mask disk reaching to 186-95=91px, swallowing that
+tee's real evidence -- the apparent "improvement" was this masking
+happening to nudge a wrong recovery closer to truth by luck, not fixing
+the wrong-ray-confuser problem it was built for. **Fixed** by excluding on
+the mask disk's *near edge* distance (`dist_to_center - marker_mask_radius_px
+< marker_mask_exclude_within_px`) instead of raw center distance --
+strictly more conservative, still catches genuinely distant confusers.
+Re-tested with the fix, full `recover_tee` pipeline, both labeled courses
+at the currently-recommended `closing_window_px=24`: **GoldenTeeSet 14/18
+unchanged, AlexClarkSet 8/18 unchanged** -- zero holes flip either
+direction. Also checked against all 4 overlay-only UDisc courses: gate-
+pass counts unchanged there too (1/0/0/0, same as without masking). The
+mask is not a no-op (it still masks something on every hole on both
+courses), it just doesn't change any of the 36+72 holes' outcomes once the
+near-badge false-positive bug is fixed.
 
-**What would justify wiring it in**: formalizing this as a real
-`Stage1Params` option and re-running the full LOOCV protocol from
-`grayt-tuning-report.md` with it (not just the isolated stage-1 `within13`
-check above) -- was flagged mid-session and not yet done.
+**What would justify enabling it by default**: nothing found yet. It's
+landed, tested, harmless (no regression anywhere checked), and off by
+default because there's no evidence it helps on any course available in
+this repo. It may still matter on a course with a different confuser
+pattern than what these six courses happen to contain -- worth re-checking
+once more labeled/overlay courses exist, not worth chasing further on the
+current sample.
 
 ## Badge-local bearing seeding without a basket (two variants, both rejected)
 
@@ -602,13 +620,14 @@ entirely.
 
 **What would justify revisiting**: re-running the full-360deg sweep
 variant ranked by width-dropout rate (see first entry above) instead of
-raw terminus distance -- this was proposed mid-session but never actually
-run before the investigation moved to basket-marker masking instead. Given
-masking's positive result came from constraining *what* gets measured
-(excluding foreign-marker noise) rather than *where* to look, a dropout-
-ranked full sweep combined with basket-marker masking is the untested
-combination most likely to actually remove the corridor-fit/basket
-dependency, if that's still a goal once more labeled data exists.
+raw terminus distance -- proposed, still untested as of this writing.
+(Note: an earlier version of this entry suggested pairing it with basket-
+marker masking on the theory that masking's positive result came from
+constraining *what* gets measured -- that theory doesn't hold anymore, see
+the masking entry above's correction: once its near-badge false-positive
+bug was fixed, masking turned out net-neutral on every course checked.
+The dropout-ranked full sweep is still worth trying on its own merits, just
+not on the assumption that masking will compound with it.)
 
 ## Untouched stage1/stage2 search space
 
