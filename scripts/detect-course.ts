@@ -126,6 +126,12 @@ export interface CourseCliResult {
 		readonly wrongHoles: readonly { holeNumber: number; distancePx: number }[];
 		readonly missingHoles: readonly number[];
 	};
+	readonly basketTruthEvaluation?: {
+		readonly tolerancePx: number;
+		readonly correctHoles: readonly number[];
+		readonly wrongHoles: readonly { holeNumber: number; distancePx: number }[];
+		readonly missingHoles: readonly number[];
+	};
 	/** Same layer the browser's active-review panel runs on acceptance clicks (see activeReview.ts) — surfaced here so a CLI run shows what the reviewer would suggest next, not just raw grammar counts. */
 	readonly activeReview: {
 		readonly candidateCount: number;
@@ -518,6 +524,28 @@ function evaluateTeeTruth(
 	return { tolerancePx, correctHoles, wrongHoles, missingHoles };
 }
 
+function evaluateBasketTruth(
+	truth: readonly CourseTruthHole[],
+	grammar: CourseGrammarResult,
+	tolerancePx: number
+): NonNullable<CourseCliResult['basketTruthEvaluation']> {
+	const correctHoles: number[] = [];
+	const wrongHoles: { holeNumber: number; distancePx: number }[] = [];
+	const missingHoles: number[] = [];
+	for (const expected of truth) {
+		if (!expected.basket) continue;
+		const hole = grammar.holes.find((candidate) => candidate.number === expected.number);
+		if (!hole?.basket) {
+			missingHoles.push(expected.number);
+			continue;
+		}
+		const distancePx = Math.hypot(hole.basket.xPx - expected.basket.xPx, hole.basket.yPx - expected.basket.yPx);
+		if (distancePx <= tolerancePx) correctHoles.push(expected.number);
+		else wrongHoles.push({ holeNumber: expected.number, distancePx });
+	}
+	return { tolerancePx, correctHoles, wrongHoles, missingHoles };
+}
+
 function meanOf(values: readonly number[]): number | null {
 	return values.length === 0 ? null : Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
 }
@@ -719,6 +747,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		},
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
+		basketTruthEvaluation: input.truth ? evaluateBasketTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		activeReview,
 		overlayPath,
 		activeReviewPath,
