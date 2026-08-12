@@ -177,6 +177,77 @@ path happens to run at.
 
 ---
 
+## Dashed walking/cart-path detector
+
+**File**: `src/lib/autoAnnotation/teePadDetection.ts`
+(`detectDashedPathChains`, `deriveWalkingPathMasksPx`, + tests in
+`tests/unit/walkingPathDetection.test.ts`). Exported, but only ever called
+by tests -- no production caller.
+
+**Idea**: this is the periodicity discriminator the masked-NCC entry above
+asked for. A course's walking/cart path is drawn as a sequence of short
+bright dashes, calibrated straight off a real image (IMG_5641, the path
+near hole 3): ~17px dashes, ~24-25px start-to-start spacing at
+uiScalePx~1.81. `detectDashedPathChains` finds dashes via HoughLinesP on a
+bright/low-saturation mask, then unions them into chains via union-find on
+angle + distance + perpendicular-offset from the chain's own line, keeping
+only groups of >=3 (fewer is indistinguishable from an isolated rectangle,
+the exact ambiguity this exists to resolve). `deriveWalkingPathMasksPx`
+turns a chain into one `ignoreCirclesPx` exclusion circle per dash, for the
+same masking pool `derivePuttingCircleMasksPx`/`deriveBasketIconMasksPx`
+feed.
+
+Building this surfaced a real, separate bug: `orientationDeg` is undirected
+mod 180, so two dashes on the same physical line can legitimately read ~0
+and ~180 depending on which end Hough returns first (arbitrary per
+detection). Naively averaging two such readings gives ~90 -- a spurious
+perpendicular reference angle that silently fractured real chains in
+testing (a synthetic 6-dash chain was only grouping 3). Fixed with
+`circularMeanOrientationDeg` (averages the doubled angle as a unit vector,
+which has no wraparound ambiguity) for both the pairwise perpendicular
+check and the chain's summary orientation. Checked the two places in the
+*live* pipeline that combine multiple angle/direction estimates
+(`occludedPair` in this file, `badgeRayInvariantHolds` in
+`teePadOrientation.ts`) -- both already sign-align via dot product before
+combining, a different but equally correct fix for the same ambiguity, so
+neither had this bug.
+
+**Status**: wired as exclusion masking (goal 1: keep a path from being
+mistaken for a pad) into `detectCalibratedTeeBootstrap`'s tier-3 recovery,
+tested against both ground-truth fixtures, then pulled back out.
+GoldenTeeSet (IMG_5641): byte-identical result with and without --
+`correctHoles` unchanged at 17/18, hole 3 wrong at exactly the same
+151.6px both times. The path masking made no difference there at all
+(nothing near hole 3 changed candidate-side once masked). Alex Clark:
+`correctHoles` unchanged for both tee (12/18) and basket (10/18) with and
+without. Hole 10 -- the one actually adjacent to a path, the case that
+motivated this in the first place -- is untouched, wrong at exactly the
+205.5px distance either way, consistent with the subagent finding
+(commit `5f54801`) that hole 10 loses ownership to an unrelated
+occluded-edge-loop false positive, not a path-occlusion problem. One
+side effect: hole 8 (tee and basket) flipped from *missing* to *wrong*
+(spurious candidates at 241px/90px) once the path mask was live --
+`correctHoles` didn't change, but it's a sign the newly-unmasked pixels
+are exposing something, just not the truth. Safe (no regression on either
+fixture) but zero measured benefit, so per this doc's own convention it
+stays out of the live pipeline for now, same disposition as the two
+entries above it.
+
+**What would justify wiring it in**: a real course where a hole's tee/basket
+recovery search is actually blocked by a path crossing the evidence *and*
+unmasking it changes the outcome for the better -- neither ground-truth
+fixture's currently-broken holes are that case. Worth re-testing once more
+labeled courses with path-crossed pads exist.
+
+**Goal 2 (not started by this entry)**: using a path chain's terminus and
+direction as a *positive* signal for an unresolved hole's tee position/
+orientation -- course routing walks from one green to the next tee, so a
+chain ending near a badge with no resolved tee is suggestive. Needs its own
+empirical validation (does this actually hold on the labeled courses, and
+often enough to be useful) before any implementation; not attempted here.
+
+---
+
 ## Tee-axis-alignment / white-edge-rail tee recovery
 
 **Source**: commit `b51528e` on `origin/main`'s history (reverted by
