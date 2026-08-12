@@ -45,12 +45,20 @@ pads themselves still obey the rule.
 Orientation is now measured by `sweepPadOrientation`: rotation-swept,
 TM_CCOEFF_NORMED-equivalent NCC against synthesized hollow-pad templates
 (background 120, rim 235, interior 158), with angles from 0° to 180° in 2.5°
-steps and a small local translation search. The templates remain UI-scale
-derived; two nearby outer-footprint interpretations are searched and NCC
-chooses between them from the pixels, rather than configuring a size per
-fixture. Weak matches also get a conservative script-local pass that ignores a
-small halo around near-black glyph pixels. Badge and basket geometry never
-enter the orientation estimator.
+steps and a small local translation search. Pad glyphs are WORLD-scaled, not
+UI-scaled: GoldenTeeSet pads measure ~32px major and AlexClark's ~24px, while
+a single UI-derived template locked onto the perpendicular whenever it was
+smaller than the true pad (measured: 15/18 false perpendicular fits on
+GoldenTeeSet with a 13x8-UI template). The templates are now a fixed
+world-size bank — major sizes 24/28/32/36px, aspect 1.45, rim 0.11 of major —
+and NCC keeps the best-scoring size per pad from the pixels, rather than
+configuring a size per fixture or deriving one from UI zoom. See
+`docs/analysis/alexclark-invariant-wideview.png` and
+`docs/analysis/alexclark-invariant-closeups.png` for the measured pad
+footprints this bank is calibrated against. Weak matches also get a
+conservative script-local pass that ignores a small halo around near-black
+glyph pixels. Badge and basket geometry never enter the orientation
+estimator.
 
 A sweep score below 0.30 is **UNMEASURABLE**: it is not a FAIL and cannot be
 used to produce an invariant verdict. Gap-fill auto-approval is intentionally

@@ -75,37 +75,44 @@ interface SweepRoi {
 const SWEEP_ANGLE_STEP_DEG = 2.5;
 const SWEEP_SEARCH_RADIUS_UI = 4;
 const SWEEP_OCCLUSION_SEARCH_RADIUS_UI = 2;
-const SWEEP_RIM_UI = 1.4;
-const SWEEP_PAD_MAJOR_UI = 13;
-const SWEEP_PAD_MINOR_UI = 8;
+/**
+ * Template MAJOR sizes swept, in source (world) px. Pad glyphs are
+ * WORLD-scaled, not UI-scaled: GoldenTeeSet pads measure ~32px major and
+ * AlexClark's ~24px, while a single UI-derived template (the former
+ * 13x8-UI rectangle) produced 15/18 false perpendicular fits on
+ * GoldenTeeSet because it was smaller than the true pad footprint. The
+ * fixed bank below covers the measured world-size range across both
+ * courses and lets NCC keep the best-scoring size per pad, instead of
+ * deriving a single size from UI zoom.
+ */
+const SWEEP_MAJOR_SIZES_PX = [24, 28, 32, 36] as const;
+/** Pad outer aspect (major/minor), measured 1.38-1.47 across both courses. */
+const SWEEP_PAD_ASPECT = 1.45;
+/** Rim thickness as a fraction of the major axis (minimum 1px). */
+const SWEEP_RIM_FRACTION = 0.11;
+/** Background margin, in px, around the rotated rect so the rim has outside contrast. */
+const SWEEP_TEMPLATE_MARGIN_PX = 2;
 const SWEEP_RAW_RELIABLE_SCORE = 0.4;
 const SWEEP_MEASURABLE_SCORE = 0.3;
 const SWEEP_MASKED_RESCUE_SCORE = 0.4;
 const SWEEP_NEAR_RAW_DEG = 10;
 const sweepTemplateCache = new Map<string, readonly SweepPadTemplate[]>();
 
-function sweepTemplates(uiScalePx: number): readonly SweepPadTemplate[] {
-	const key = uiScalePx.toFixed(6);
+function sweepTemplates(majorSizesPx: readonly number[] = SWEEP_MAJOR_SIZES_PX): readonly SweepPadTemplate[] {
+	const key = majorSizesPx.join(',');
 	const cached = sweepTemplateCache.get(key);
 	if (cached) return cached;
 
-	const rim = Math.max(1, SWEEP_RIM_UI * uiScalePx);
-	const margin = Math.ceil(rim) + 1;
 	const templates: SweepPadTemplate[] = [];
-	// The 13x8 UI canonical rectangle describes the pad body/rim centerline
-	// closely, but real UDisc captures in this repo expose two nearby outer
-	// footprints. Search both UI-derived interpretations instead of choosing a
-	// fixture-specific size: compact adds one rim to each full dimension,
-	// full adds a rim on each side. NCC decides from pixels at runtime.
-	for (const outerRimMultiples of [1, 2] as const) {
-		const major = SWEEP_PAD_MAJOR_UI * uiScalePx + outerRimMultiples * rim;
-		const minor = SWEEP_PAD_MINOR_UI * uiScalePx + outerRimMultiples * rim;
+	for (const major of majorSizesPx) {
+		const minor = major / SWEEP_PAD_ASPECT;
+		const rim = Math.max(1, SWEEP_RIM_FRACTION * major);
 		for (let axisDeg = 0; axisDeg < 180 - 1e-9; axisDeg += SWEEP_ANGLE_STEP_DEG) {
 			const radians = (axisDeg * Math.PI) / 180;
 			const cosine = Math.cos(radians);
 			const sine = Math.sin(radians);
-			const halfWidth = Math.ceil(Math.abs((major / 2) * cosine) + Math.abs((minor / 2) * sine)) + margin;
-			const halfHeight = Math.ceil(Math.abs((major / 2) * sine) + Math.abs((minor / 2) * cosine)) + margin;
+			const halfWidth = Math.ceil(Math.abs((major / 2) * cosine) + Math.abs((minor / 2) * sine)) + SWEEP_TEMPLATE_MARGIN_PX;
+			const halfHeight = Math.ceil(Math.abs((major / 2) * sine) + Math.abs((minor / 2) * cosine)) + SWEEP_TEMPLATE_MARGIN_PX;
 			const width = halfWidth * 2 + 1;
 			const height = halfHeight * 2 + 1;
 			const values = new Float64Array(width * height);
@@ -327,15 +334,23 @@ function maskedSweepSearch(
  * over a +-4 UI search window. Only weak raw matches invoke a second,
  * conservative pass that ignores black-glyph halos; no badge or basket
  * geometry enters the orientation estimate.
+ *
+ * Template bodies are sized in fixed world px (`SWEEP_MAJOR_SIZES_PX`), not
+ * derived from `uiScalePx` — pad glyphs are world-scaled, not UI-scaled (see
+ * the constant's doc comment). `uiScalePx` still sizes the search radii and
+ * the black-glyph halo, which really do scale with UI zoom. Callers that
+ * have measured their own major-size bank (e.g. a course-specific
+ * calibration) may pass it via `majorSizesPx` instead of the module default.
  */
 export function sweepPadOrientation(
 	raster: TeePadRaster,
 	centerXPx: number,
 	centerYPx: number,
-	uiScalePx: number
+	uiScalePx: number,
+	majorSizesPx: readonly number[] = SWEEP_MAJOR_SIZES_PX
 ): PadOrientationSweep | undefined {
 	if (!Number.isFinite(centerXPx) || !Number.isFinite(centerYPx) || !Number.isFinite(uiScalePx) || uiScalePx <= 0) return undefined;
-	const templates = sweepTemplates(uiScalePx);
+	const templates = sweepTemplates(majorSizesPx);
 	if (templates.length === 0) return undefined;
 	const rawRadius = Math.max(1, Math.round(SWEEP_SEARCH_RADIUS_UI * uiScalePx));
 	const roi = buildSweepRoi(raster, centerXPx, centerYPx, rawRadius, templates, uiScalePx);

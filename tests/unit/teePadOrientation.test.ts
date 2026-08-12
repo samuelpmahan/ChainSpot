@@ -16,11 +16,16 @@ function blankRaster(widthPx = 220, heightPx = 180): TeePadRaster {
 	return { rgba, widthPx, heightPx, sourceScale: 1 };
 }
 
-/** Draws a hollow pad matching the module's canonical 13x8 UI outer rect at the given axis. */
-function drawPad(raster: TeePadRaster, centerXPx: number, centerYPx: number, uiScalePx: number, axisDeg: number): void {
-	const major = 13 * uiScalePx;
-	const minor = 8 * uiScalePx;
-	const rim = 1.4 * uiScalePx;
+/**
+ * Draws a hollow pad at a fixed WORLD size within the module's swept major-size
+ * bank (24-36px), matching measured pad footprints (~24-32px major) rather
+ * than a UI-scale-derived size. `uiScalePx` is unused for sizing here — it is
+ * only relevant to the module's search radii and glyph-halo masking.
+ */
+function drawPad(raster: TeePadRaster, centerXPx: number, centerYPx: number, _uiScalePx: number, axisDeg: number): void {
+	const major = 30;
+	const minor = major / 1.45;
+	const rim = Math.max(1, 0.11 * major);
 	const radians = (axisDeg * Math.PI) / 180;
 	const cosine = Math.cos(radians);
 	const sine = Math.sin(radians);
