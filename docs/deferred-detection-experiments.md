@@ -258,12 +258,112 @@ neither ground-truth fixture's currently-broken holes are that case yet.
 Worth re-running the flag once more labeled courses with path-crossed pads
 exist, rather than reimplementing the masking from scratch.
 
-**Goal 2 (not started by this entry)**: using a path chain's terminus and
-direction as a *positive* signal for an unresolved hole's tee position/
-orientation -- course routing walks from one green to the next tee, so a
-chain ending near a badge with no resolved tee is suggestive. Needs its own
-empirical validation (does this actually hold on the labeled courses, and
-often enough to be useful) before any implementation; not attempted here.
+**Goal 2**: using a path chain's terminus and direction as a *positive*
+signal for an unresolved hole's tee position/orientation -- course routing
+walks from one green to the next tee, so a chain ending near a badge with no
+resolved tee is suggestive. Investigated and found not useful enough to
+implement -- see "Path-terminus-as-positive-signal for tee recovery" below.
+
+---
+
+## Path-terminus-as-positive-signal for tee recovery
+
+**Status**: investigated, not implemented. No new production or deferred
+module -- this is a pure measurement pass. The probe script is kept at
+`scripts/cv-probes/probe-path-terminus.ts` (not wired into any test suite or
+CLI) so the numbers below are reproducible:
+`npx tsx scripts/cv-probes/probe-path-terminus.ts <fixture.chainspot.zip> <uiScalePx> <mapTopPx> <mapBottomPx>`.
+
+**Idea** (this doc's own "Goal 2" from the entry above, and the course
+owner's hypothesis): a course's walking/cart path runs from one hole's
+green/basket to the next hole's tee, so a `detectDashedPathChains` chain's
+terminus -- and its direction near an unresolved badge -- could be a
+*positive* signal for where that hole's tee is and how it's oriented, not
+just something to mask out.
+
+**What was checked**: ran `detectDashedPathChains` at production
+`uiScalePx`/`mapBoundsPx` against both ground-truth fixtures (GoldenTeeSet
+1290x2091, AlexClarkSet 1290x2086) and tested two versions of the
+hypothesis:
+
+1. *Loose*: for every truth tee, what's the distance to the nearest chain
+   terminus anywhere on the course, and does the terminus's outward
+   direction roughly point at the tee?
+2. *Specific* (the actual routing claim): for every consecutive hole pair
+   (N, N+1) with basket and tee truth (Alex Clark only -- GoldenTeeSet's
+   truth is tee-only, so the routing claim can't be tested there at all),
+   does a *single* chain have one terminus near hole N's basket and another
+   near hole (N+1)'s tee?
+
+Both were run against two controls: 200 random points sampled across the map
+area (for the loose version), and every *non-consecutive* basket-i/tee-j
+pair among the 18x18 truth grid (307 pairs, for the specific version) -- to
+separate "this detector fires near real routing" from "this detector fires
+almost everywhere so proximity means nothing."
+
+**Result -- the detector fires far more broadly than one cart path per
+course**: `detectDashedPathChains` found 237 chains / 474 termini on
+GoldenTeeSet and 230 chains / 460 termini on AlexClarkSet, with chains up to
+50 dashes long -- far more, and far longer, than a single walking path
+between a couple of holes would produce. The periodicity discriminator this
+detector was built around (see the entry above) turns out not to be specific
+to the drawn cart path; it also fires on whatever else on a real UDisc
+course map repeats at ~24px spacing with a bright, low-saturation dash (most
+likely fairway mowing-stripe texture, never isolated and checked pixel-by-
+pixel, but consistent with the very long chain lengths observed). That
+volume is what both controls exist to correct for.
+
+*Loose version*: truth tees do sit closer to some chain terminus than random
+points do (GoldenTeeSet: median 15.7px vs. 42.5px control; AlexClarkSet:
+median 30.1px vs. 44.9px control) -- a real but modest effect, plausibly
+just "built features have more nearby texture/edges than open fairway,"
+not evidence of the specific green-to-tee routing claim. The direction
+check found nothing usable: `angleDelta` (terminus's outward direction vs.
+bearing to the true tee) ranged 0.8 deg to 167 deg across both fixtures with
+no clustering near 0 -- a terminus's local direction does not reliably point
+at its hole's tee.
+
+*Specific routing version (AlexClarkSet only, 17 consecutive hole pairs)*:
+at a 25-40px per-endpoint radius (tight enough to be locationally useful
+given the 12.7px auto-grading tolerance), **1 of 17** hole pairs (11->12)
+had a chain connecting basket 11 to tee 12, at 14.0px/21.7px -- vs. 0/307
+and 1/307 for the non-consecutive control at the same radii, so when this
+fires tightly it is genuinely enriched (not noise) and not a coincidence.
+But it only fires for 1 of 17 real transitions, and even that one hit's
+21.7px terminus-to-tee distance is outside the 12.7px auto tolerance --
+using it wouldn't have flipped hole 12 from missing to correct, only from
+missing to a closer-but-still-wrong guess. Loosening the radius to 60-80px
+raises the raw hit rate (6/17, then 11/17) but the control rises just as
+fast (2.6%, then 4.9% of 307 pairs), and the endpoint distances at that
+looseness (up to 78px) are far too coarse to locate or orient a tee pad.
+
+**Checked directly against both fixtures' known problem holes** (the actual
+motivating cases): GoldenTeeSet hole 3 (currently wrong, 151.6px off) has a
+terminus 21.8px from its true tee -- closer than today's wrong answer, but
+still outside the 12.7px tolerance, so it would not become correct.
+AlexClarkSet holes 8/10/11/12/13 (currently missing/wrong) have
+nearest-terminus distances of 26.0/48.9/23.3/39.6/28.9px respectively --
+none within tolerance either. No problem hole on either fixture would flip
+to correct under this signal even with a perfect implementation.
+
+**Conclusion**: the hypothesis is not spurious -- there's a real, measurable
+enrichment over the random-pair base rate -- but it is far too sparse (1 of
+17 testable transitions) and too imprecise (best case 14-22px, typically
+40-80px) to recover or correctly orient any of the specific holes currently
+missing or wrong on either fixture. Per this doc's own bar ("more than a
+token number of cases"), 1/17 does not clear it. Not implemented.
+
+**What would justify reviving it**: either (a) a way to reject the
+mowing-stripe-texture false-positive chains specifically (e.g. requiring a
+minimum chain length upper bound, since a real cart-path segment between two
+holes is short while the texture chains ran up to 50 dashes; or filtering by
+a color/material check distinct from the generic bright/low-saturation dash
+test) so the chain population shrinks to something closer to "one real path
+per hole transition," which would make the routing-specific test far more
+informative; or (b) more labeled courses with a visibly drawn, uncluttered
+cart path between holes to re-run the same probe against -- Alex Clark's
+single confirmed hit (11->12) is not enough evidence either way to say
+whether it generalizes.
 
 ---
 
