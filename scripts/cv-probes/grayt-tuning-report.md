@@ -458,6 +458,68 @@ where the ribbon evidence disappears entirely), vs. **0.66** for random
 wrong-direction rays (>=30° off both true rays). Width *consistency*
 (coefficient of variation) did not discriminate (0.37 vs 0.32-0.34) --
 the real signal is "ribbon doesn't disappear," not "constant width" per
-se. An implementation of this as a stage-1 ranking/filter mode is in
-progress; results will be added here once tested against the same 36-hole
-seeding-accuracy check and the full LOOCV protocol above.
+se.
+
+**Implemented** as an opt-in `Stage1Params` mode (`use_width_discriminator`,
+default `False` -- existing behavior/CLI compatibility unchanged): within
+`recover_tee`'s existing ±28° bearing sweep, candidates whose width-dropout
+rate exceeds `width_dropout_max` (default 0.40) are filtered out before
+ranking survivors by the existing farthest-terminus rule (falls back to the
+unfiltered pool if nothing survives). Tested via
+`scripts/cv-probes/width_discriminator_eval.py` against both labeled
+courses' full 18-hole sets:
+
+- **GoldenTeeSet: no change on any of the 18 holes** (identical bearing,
+  distance, and within13/within25 counts to the default).
+- **AlexClarkSet: 17/18 holes unchanged; hole 4 improved substantially**
+  (bearing error 28.2°→7.2°, distance error 296.9px→56.4px) but not enough
+  to cross the 12.69px pass tolerance, so `within13`/`within25` counts are
+  unchanged on this course too (4/18 / 8/18 both ways).
+- Runtime cost: +3.7ms/hole (52.4→56.1ms) GoldenTeeSet, +0.8ms/hole
+  (49.4→50.2ms) AlexClarkSet -- negligible.
+
+**Verdict**: net neutral on pass/fail counts as implemented. The
+narrow ±28° sweep rarely contains a dramatic ribbon-vanishing confuser to
+filter out -- the confusers this signal actually catches (see below) live
+in a wider search space than the current corridor-fit-seeded sweep
+explores. Not yet worth adopting into `best-params.json` on its own.
+
+**Follow-up finding: basket/pin marker circles are a specific, filterable
+confuser.** Manually tracing several of the width signal's false-positive
+"wrong-direction" readings back to source pixels found the ribbon is not
+being fooled by roads or parking (as the original findings doc's language
+suggested) but specifically by other holes' own basket/pin marker
+graphics -- a two-ring UI element (solid inner disc + dashed outer
+"putting circle") with a **remarkably consistent LAB signature**
+(a* ≈ -15 in the inner disc, ≈ -6 to -8 in the outer ring, vs. a* ≈ 0 on
+genuine ribbon/fairway) **and consistent size** (inner disc radius ~40px,
+outer boundary ~85-90px, source px) across every marker checked -- strong
+evidence this is a fixed-size rendered UI element, not organic terrain.
+
+A detector built on this (find small, reliable inner-disc seeds via
+`skimage.measure.label`/`regionprops` on an LAB a*-threshold mask, then
+apply a fixed 95px-radius mask around each) found 18/18 and 16/18 markers
+on GoldenTeeSet/AlexClarkSet respectively (up from 4-6/18 with a cruder
+whole-shape blob detector). Masking *every* detected marker made the
+signal worse, not better (tee-ward dropout rose from 0.135/0.191 to
+0.384/0.414) -- on a dense 18-hole course a genuine tee-ward ray often
+legitimately passes near some *other* hole's basket, and masking it
+removes real evidence, not just confuser evidence. Excluding markers
+within ~150-200px of the current badge from the mask (leaving "nearby but
+foreign" markers alone, only masking genuinely distant ones) fixed this:
+tee-ward dropout stayed flat (0.135→0.135/0.150, 0.191→0.191 exactly) while
+wrong-direction dropout still rose (0.644→0.675, 0.657→0.666).
+
+Wired into the real `recover_tee` pipeline (actual corridor-fit seeding,
+not an oracle bearing) with this masking applied: **GoldenTeeSet stays
+11/18 with hole 8 improving 146.5px→39.4px** (one other hole regresses
+8.8px→12.4px, still passing); **AlexClarkSet improves 4/18→6/18**
+(hole 6: 129.5px→8.2px, no other holes affected). This is a real,
+validated improvement to stage-1 accuracy on the actual shipped seeding
+path, found through this session's investigation but **not yet formalized
+as a `Stage1Params` option** -- it currently exists only as ad hoc
+verification code, not integrated into `hole_path_tee_recovery.py`, and
+has not yet been run through stage 2 or the full LOOCV protocol. Flagged
+here as the most promising concrete lead from this whole addendum;
+formalizing and re-running the full LOOCV protocol with it is the natural
+next step before it could be considered for `best-params.json`.

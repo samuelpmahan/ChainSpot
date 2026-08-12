@@ -99,6 +99,17 @@ class Stage1Params:
     evidence_thresh: float = 0.2      # terminus-run threshold on the closed trace
     stepback_px: float = 15.0         # half a tee pad, stepped back from terminus toward the badge
 
+    # --- opt-in perpendicular-width discriminator (see width_profile / recover_tee) ---
+    # OFF by default: existing behavior (and CLI byte-compatibility) is unchanged
+    # unless a caller explicitly sets use_width_discriminator=True.
+    use_width_discriminator: bool = False   # fold ribbon-width dropout rate into bearing ranking
+    width_step_px: float = 15.0             # spacing (source px) between width_profile samples along the ray
+    width_perp_step_px: float = 3.0         # spacing (source px) of the perpendicular probe within one width sample
+    width_max_half_px: float = 60.0         # max perpendicular half-extent probed on each side
+    width_dropout_max: float = 0.40         # candidates with dropout rate above this are filtered out (real
+                                             # rays measured ~0.19 mean dropout on truth data; wrong-direction
+                                             # rays ~0.66 -- see width_discriminator_eval.py)
+
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
 
@@ -383,6 +394,58 @@ def trailing_terminus(ds, vals, masked, window_px, thresh):
     return terminus_px, run_vals
 
 
+def perpendicular_width(ev, origin, bearing_rad, dist_px, params: Stage1Params = DEFAULT_STAGE1):
+    """Perpendicular extent (source px) of evidence >= evidence_thresh at a
+    point `dist_px` out along `bearing_rad` from `origin`. Point-samples the
+    ray's brightness only tells you the ray is ON a bright pixel; this tells
+    you whether that pixel sits inside a ribbon-wide (tens-of-px) blob or an
+    isolated bright speck (road edges, glyph noise, JPEG artifacts) -- the
+    empirical discriminator validated in width_discriminator_eval.py."""
+    h, w = ev.shape
+    px, py = -math.sin(bearing_rad), math.cos(bearing_rad)  # perpendicular unit vector
+    cx = origin[0] + math.cos(bearing_rad) * dist_px
+    cy = origin[1] + math.sin(bearing_rad) * dist_px
+
+    def side(sign):
+        d = 0.0
+        while d <= params.width_max_half_px:
+            x, y = cx + px * sign * d, cy + py * sign * d
+            xi, yi = int(x / params.scale), int(y / params.scale)
+            if not (0 <= xi < w and 0 <= yi < h):
+                break
+            if ev[yi, xi] < params.evidence_thresh:
+                break
+            d += params.width_perp_step_px
+        return d
+
+    return side(1) + side(-1)
+
+
+def width_profile(ev, origin, bearing_rad, max_dist_px, params: Stage1Params = DEFAULT_STAGE1):
+    """Perpendicular-width samples every width_step_px out to max_dist_px."""
+    widths = []
+    d = params.width_step_px
+    while d <= max_dist_px:
+        widths.append(perpendicular_width(ev, origin, bearing_rad, d, params))
+        d += params.width_step_px
+    return widths
+
+
+def width_dropout_rate(ev, origin, bearing_rad, max_dist_px, params: Stage1Params = DEFAULT_STAGE1):
+    """Fraction of width_profile samples (out to max_dist_px, i.e. the ray's
+    own point-evidence terminus) whose perpendicular width is 0 -- the
+    ribbon vanishing rather than merely being narrow. Real tee-ward /
+    basket-ward rays hold this low (~0.19 mean on truth data); wrong
+    directions grabbing incidental bright terrain lose the ribbon far more
+    often (~0.66 mean). Returns 0.0 (no evidence of vanishing) when the
+    terminus is too close in to take any samples."""
+    widths = width_profile(ev, origin, bearing_rad, max_dist_px, params)
+    if not widths:
+        return 0.0
+    zeros = sum(1 for width in widths if width == 0)
+    return zeros / len(widths)
+
+
 def recover_tee(ray_ev, badge_src, corridor_first_pt_src, params: Stage1Params = DEFAULT_STAGE1,
                  bearing_center_override=None):
     """Sweep bearings around reverse(badge->first corridor point); return
@@ -399,7 +462,7 @@ def recover_tee(ray_ev, badge_src, corridor_first_pt_src, params: Stage1Params =
     h, w = ray_ev.shape
     badge_box = badge_mask_box(h, w, bx, by, params)
 
-    best = None
+    candidates = []
     trace = []
     n_steps = int(round(2 * params.bearing_sweep_deg / params.bearing_step_deg)) + 1
     for i in range(n_steps):
@@ -412,12 +475,29 @@ def recover_tee(ray_ev, badge_src, corridor_first_pt_src, params: Stage1Params =
         # Rank primarily by how far sustained evidence reaches (a wrong
         # bearing decays fast off the ribbon), tie-broken by mean evidence.
         rank = (terminus_px, mean_ev)
-        trace.append(dict(degOff=round(deg_off, 2), terminusPx=round(terminus_px, 1),
-                           meanEvidence=round(mean_ev, 3)))
-        if best is None or rank > best[0]:
-            best = (rank, bearing, deg_off, terminus_px, mean_ev)
+        trace_row = dict(degOff=round(deg_off, 2), terminusPx=round(terminus_px, 1),
+                          meanEvidence=round(mean_ev, 3))
+        dropout_rate = None
+        if params.use_width_discriminator:
+            dropout_rate = width_dropout_rate(ray_ev, (bx, by), bearing, terminus_px, params)
+            trace_row["widthDropoutRate"] = round(dropout_rate, 3)
+        trace.append(trace_row)
+        candidates.append(dict(rank=rank, bearing=bearing, deg_off=deg_off, terminus_px=terminus_px,
+                                mean_ev=mean_ev, dropout_rate=dropout_rate))
 
-    _, bearing, deg_off, terminus_px, mean_ev = best
+    if params.use_width_discriminator:
+        # Filter out candidates whose ribbon vanishes too often, then rank
+        # the survivors exactly as before (farthest sustained terminus,
+        # tie-broken by mean evidence). If NOTHING survives the filter
+        # (e.g. every candidate's evidence run is too short to sample),
+        # fall back to the unfiltered ranking rather than failing outright.
+        survivors = [c for c in candidates if c["dropout_rate"] <= params.width_dropout_max]
+        pool = survivors if survivors else candidates
+    else:
+        pool = candidates
+    best = max(pool, key=lambda c: c["rank"])
+    bearing, deg_off, terminus_px, mean_ev = (best["bearing"], best["deg_off"], best["terminus_px"],
+                                               best["mean_ev"])
     stepback = min(params.stepback_px, terminus_px)
     tee_px = terminus_px - stepback
     tee_x = bx + math.cos(bearing) * tee_px
@@ -569,6 +649,11 @@ def add_stage1_cli_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--closing-window-px", type=float, default=d.closing_window_px)
     ap.add_argument("--evidence-thresh", type=float, default=d.evidence_thresh)
     ap.add_argument("--stepback-px", type=float, default=d.stepback_px)
+    ap.add_argument("--use-width-discriminator", action="store_true", default=d.use_width_discriminator)
+    ap.add_argument("--width-step-px", type=float, default=d.width_step_px)
+    ap.add_argument("--width-perp-step-px", type=float, default=d.width_perp_step_px)
+    ap.add_argument("--width-max-half-px", type=float, default=d.width_max_half_px)
+    ap.add_argument("--width-dropout-max", type=float, default=d.width_dropout_max)
 
 
 def stage1_params_from_args(args) -> Stage1Params:
@@ -580,6 +665,9 @@ def stage1_params_from_args(args) -> Stage1Params:
         ray_step_px=args.ray_step_px, max_ray_px=args.max_ray_px,
         closing_window_px=args.closing_window_px, evidence_thresh=args.evidence_thresh,
         stepback_px=args.stepback_px,
+        use_width_discriminator=args.use_width_discriminator, width_step_px=args.width_step_px,
+        width_perp_step_px=args.width_perp_step_px, width_max_half_px=args.width_max_half_px,
+        width_dropout_max=args.width_dropout_max,
     )
 
 
