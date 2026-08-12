@@ -1,0 +1,27 @@
+name: Sol basket-glyph Python spike
+
+on:
+  push:
+    branches:
+      - sol/dash-basket-glyph-close-spike
+  workflow_dispatch:
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install probe dependencies
+        run: python -m pip install --disable-pip-version-check numpy scipy scikit-image pillow
+      - name: Run Python basket-glyph spike
+        run: python scripts/cv-probes/basket_glyph_close_spike.py --render
+      - name: Upload probe outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basket-glyph-python-spike
+          path: scripts/cv-probes/ribbon-mass-results-py/
+          if-no-files-found: warn
