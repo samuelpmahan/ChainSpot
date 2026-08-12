@@ -161,3 +161,33 @@ length or threshold alone on this evidence signal) means it should ship as
 a **fast first-pass suggestion for review**, not a silent auto-accept,
 until a better discriminator (e.g. a second evidence channel, or corridor
 half-width consistency) closes that gap.
+
+## Follow-up: ray + pad-template fusion (`ray_template_fusion.py`)
+
+The terminus rule's weakness (a genuine mid-corridor dip vs the true post-tee
+gap is not separable from ribbon evidence alone) is fixed by changing what is
+localized: keep the recovered ray, but slide the world-size hollow-pad
+template bank ({24,28,32,36}px major, aspect 1.45, rim 0.11 — the same model
+as `teePadOrientation.ts` after the world-scale fix) along it and take the
+NCC peak. The pad template peaks at the tee-pad bump, not at generic bright
+terrain. Sweep: ±4° bearing, ±3px lateral, 2px along-ray steps, 20–400px.
+
+Results (vs truth, tolerance 13px):
+
+- **GoldenTeeSet: 15/18** (ray-only terminus: 11/18); failures h6/h12/h16.
+- **AlexClarkSet: 7/18**, but every success ≤7.6px.
+- **Confidence separates perfectly on both courses: every hole with peak
+  NCC ≥ 0.55 is correct (22/22, all ≤8px); every failure scores < 0.5.**
+  So gated at 0.55 this is a zero-false-accept recovery channel.
+- Ray-terminus and template-peak fail on *different* holes (Golden h8:
+  terminus 146px off, template 3.2px; Alex h12: terminus 10.8px, template
+  lost) — agreement between the two is a further confidence tier, and
+  disagreement is itself a review signal carrying both suggestions.
+- GoldenTeeSet hole 3, the production pipeline's 152px-off review
+  suggestion, recovers at 3.3px with NCC 0.70.
+- ~4s/course in unoptimized numpy (on top of ~1s for the ray fit).
+
+Verdict update: gated at NCC ≥ 0.55, ray+template fusion is accurate enough
+to *auto-suggest* (not just review-suggest) recovered tees, with the
+ungated remainder feeding review. Reads `tee-recovery-summary.json` for the
+ray bearings, so run `hole_path_tee_recovery.py` first.
