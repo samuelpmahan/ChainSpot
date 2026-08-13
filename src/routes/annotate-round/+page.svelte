@@ -1328,6 +1328,17 @@
 	let bendPhaseDone = $state(false);
 
 	/**
+	 * Set to a hole's id while that hole's own "+ Add Bend(s)" banner action is
+	 * active — lets a hole under review (or already approved) get a bend added
+	 * right there, without waiting for the all-18-confirmed guided bends phase
+	 * and without leaving/re-entering the hole. Compared against `activeHoleId`
+	 * rather than cleared on every focus change: switching the active hole
+	 * already invalidates it for free (see `sidebarBanner`), so it only needs
+	 * an explicit reset on the source-image-replacement lifecycle.
+	 */
+	let manualBendHoleId = $state<string | null>(null);
+
+	/**
 	 * Entry point for clicking a hole in the sidebar grid: activates it
 	 * (creating an empty draft hole on demand for a section-1 hole with no
 	 * record yet) and engages the camera jump. The placing/approve banner
@@ -1355,7 +1366,7 @@
 	type SidebarBanner =
 		| { kind: 'placing'; holeNumber: number; piece: 'Tee' | 'Basket' }
 		| { kind: 'approve'; holeNumber: number }
-		| { kind: 'bends'; holeNumber: number }
+		| { kind: 'bends'; holeNumber: number; manual: boolean }
 		| { kind: 'confirmed'; holeNumber: number };
 
 	/** Derived purely from the active hole's own section — see requirement 3/4: which piece a placing click will create, or the Approve prompt, follows automatically from hole state. Map mode only; Round mode's own hole selection has nothing to do with tee/basket sections. */
@@ -1365,8 +1376,12 @@
 		if (!hole) return null;
 		const section = sectionOfHole(hole);
 		if (section <= 2) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
+		// A manual "+ Add Bend(s)" click wins over the hole's own section — it
+		// must be reachable mid-review (section 3) or after approval (section
+		// 4/"confirmed") alike, not just during the guided all-18 bends phase.
+		if (manualBendHoleId === activeHoleId) return { kind: 'bends', holeNumber: hole.number, manual: true };
 		if (section === 3) return { kind: 'approve', holeNumber: hole.number };
-		if (allHolesConfirmed && !bendPhaseDone) return { kind: 'bends', holeNumber: hole.number };
+		if (allHolesConfirmed && !bendPhaseDone) return { kind: 'bends', holeNumber: hole.number, manual: false };
 		return { kind: 'confirmed', holeNumber: hole.number };
 	});
 
@@ -1378,6 +1393,21 @@
 		const next = holes.find((hole) => hole.id !== activeHoleId && sectionOfHole(hole) === 3);
 		if (next) onHoleBoxClick(next.number);
 		else exitSidebarFocus();
+	}
+
+	/** The approve/confirmed banner's "+ Add Bend(s)" action: switches the banner to bend-placing instructions for the active hole without losing focus on it. */
+	function startManualBends(): void {
+		if (!activeHoleId) return;
+		manualBendHoleId = activeHoleId;
+	}
+
+	/** The bends banner's Close/Done action: a manual add-bend session returns to reviewing the same hole; the guided all-18 phase still exits focus entirely, matching its previous behavior. */
+	function closeBendsBanner(): void {
+		if (manualBendHoleId) {
+			manualBendHoleId = null;
+			return;
+		}
+		exitSidebarFocus();
 	}
 
 	/** The completion panel's first action — reuses the exact best-effort Course Memory write Done already performs, so "saved" here means the same thing it means everywhere else in this file. */
@@ -1988,16 +2018,20 @@
 				placeNextPiece(activeHoleId, coordinates, options.altKey ?? false);
 				return;
 			}
-			// A fully-placed hole's empty-map click drops a corridor bend
-			// directly — the guided bends step (and the only default-UI path to
-			// bends at all; the radial menu is a dev-toggle nicety, and gating
-			// bends behind it silently removed them from the flow). The radial
-			// menu, when enabled, still wins so its delete/bend wedges stay
-			// reachable.
 			if (hole && !radialMenuEnabled) {
-				holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
-				markMapGeometryEdited();
-				vibrate(8);
+				// A fully-placed hole's empty-map click drops a corridor bend
+				// directly, but only while the banner is actually asking for bends
+				// — the guided all-18 phase, or a hole's own "+ Add Bend(s)"
+				// action (`sidebarBanner`'s `manual` flag distinguishes the two
+				// just for copy/Close-vs-Done, not for this). Outside that, a
+				// stray click during ordinary review/approval must not silently
+				// drop a bend. The radial menu, when enabled, still wins so its
+				// delete/bend wedges stay reachable.
+				if (sidebarBanner?.kind === 'bends') {
+					holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
+					markMapGeometryEdited();
+					vibrate(8);
+				}
 				return;
 			}
 		}
@@ -2022,6 +2056,7 @@
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = false;
 		bendPhaseDone = false;
+		manualBendHoleId = null;
 		radialMenu = null;
 		markerChip = null;
 		sidebarFocusRequest = null;
@@ -2390,6 +2425,7 @@
 			editor = next;
 			holes = next.state.holes;
 			activeHoleId = null;
+			manualBendHoleId = null;
 			previewHoles = null;
 			radialMenu = null;
 			markerChip = null;
@@ -3337,33 +3373,35 @@
 							<span><strong>Placing Hole {sidebarBanner.holeNumber} — {sidebarBanner.piece}.</strong> Click empty map to place. Click any existing marker to fix it.</span>
 							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
 						{:else if sidebarBanner.kind === 'approve'}
-							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Drag either marker to adjust, then Approve.</span>
+							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Drag either marker to adjust.</span>
+							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
+								+ Add Bend(s)
+							</button>
+							<button type="button" class="banner-action approve" data-testid="approve-hole-button" onclick={approveActiveHole}>
+								✓ Approve Hole {sidebarBanner.holeNumber}
+							</button>
 							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
 						{:else if sidebarBanner.kind === 'bends'}
-							<span><strong>Bends — Hole {sidebarBanner.holeNumber}.</strong> Click the map wherever the fairway turns. Straight hole? Pick the next one.</span>
-							<button type="button" class="banner-close" data-testid="placement-banner-close" onclick={exitSidebarFocus}>Close</button>
+							<span>
+								<strong>Bends — Hole {sidebarBanner.holeNumber}.</strong> Click the map wherever the fairway turns.
+								{sidebarBanner.manual ? 'Click Done when finished.' : 'Straight hole? Pick the next one.'}
+							</span>
+							<button
+								type="button"
+								class="banner-close"
+								data-testid="placement-banner-close"
+								onclick={closeBendsBanner}
+							>
+								{sidebarBanner.manual ? 'Done' : 'Close'}
+							</button>
 						{:else}
 							<span>Hole {sidebarBanner.holeNumber} is confirmed.</span>
+							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
+								+ Add Bend(s)
+							</button>
 							<button type="button" class="banner-close" data-testid="placement-banner-close" onclick={exitSidebarFocus}>Close</button>
 						{/if}
 					</div>
-				{/if}
-
-				{#if sidebarBanner?.kind === 'approve'}
-					{@const hole = holes.find((candidate) => candidate.id === activeHoleId)}
-					{#if hole?.tee && hole.basket}
-						{@const midpoint = { xPx: (hole.tee.xPx + hole.basket.xPx) / 2, yPx: (hole.tee.yPx + hole.basket.yPx) / 2 }}
-						{@const anchor = imageToScreen(midpoint, view)}
-						<button
-							type="button"
-							class="approve-hole-button"
-							data-testid="approve-hole-button"
-							style={`left:${anchor.x}px; top:${anchor.y}px;`}
-							onclick={approveActiveHole}
-						>
-							✓ Approve Hole {hole.number}
-						</button>
-					{/if}
 				{/if}
 
 				{#if markerChip}
@@ -4662,7 +4700,15 @@
 		background: transparent !important;
 	}
 
-	/* Placing/approve banner, floating over the map (popover layer, never clipped). */
+	/*
+	 * Placing/approve/bends banner, floating over the map (popover layer,
+	 * never clipped) but fixed to the top-center of the pane rather than
+	 * anchored to any in-image point — so it never sits on top of the
+	 * corridor/marker geometry it's reviewing, regardless of hole shape.
+	 * All of a hole's review actions (Approve, Add Bend(s), Cancel/Close)
+	 * live here now, wrapping onto a second line on narrow panes rather than
+	 * spilling a separate floating control over the map.
+	 */
 	.placement-banner {
 		position: absolute;
 		top: 0.85rem;
@@ -4670,12 +4716,13 @@
 		transform: translateX(-50%);
 		z-index: 26;
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.75rem;
-		max-width: min(30rem, calc(100% - 1.5rem));
+		gap: 0.5rem 0.75rem;
+		max-width: min(34rem, calc(100% - 1.5rem));
 		padding: 0.5rem 0.5rem 0.5rem 0.9rem;
 		border: 1px solid #52525b;
-		border-radius: 999px;
+		border-radius: 1.4rem;
 		background: #18181bf2;
 		box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
 		font-size: 0.78rem;
@@ -4691,7 +4738,8 @@
 		color: #4fd1c5;
 	}
 
-	.banner-close {
+	.banner-close,
+	.banner-action {
 		flex: none;
 		min-height: 1.9rem;
 		padding: 0.25rem 0.6rem;
@@ -4700,24 +4748,16 @@
 		background: #27272a;
 		color: #f4f4f5;
 		font-size: 0.72rem;
+		font-weight: 600;
 		cursor: pointer;
+		white-space: nowrap;
 	}
 
-	.approve-hole-button {
-		position: absolute;
-		z-index: 24;
-		transform: translate(-50%, -50%);
-		min-height: 2.2rem;
-		padding: 0.35rem 0.75rem;
-		border: 1px solid #4fd1c5;
-		border-radius: 999px;
+	.banner-action.approve {
+		border-color: #4fd1c5;
 		background: #4fd1c5;
 		color: #04211f;
 		font-weight: 650;
-		font-size: 0.78rem;
-		cursor: pointer;
-		pointer-events: auto;
-		white-space: nowrap;
 	}
 
 	/* Marker correction chip — reassign to any hole or delete, opened on any tee/basket marker at any time. */

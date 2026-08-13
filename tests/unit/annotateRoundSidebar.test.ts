@@ -224,6 +224,117 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 	});
 });
 
+describe('"+ Add Bend(s)" — a hole under review or already approved gets bends without leaving it', () => {
+	async function placeHoleFully(host: HTMLElement, number: number): Promise<void> {
+		sidebarHoleButton(host, number).click();
+		await flush();
+		const tee = screenPointFor(host, 20, 20);
+		dispatchClick(host, tee.x, tee.y);
+		await flush();
+		const basket = screenPointFor(host, 80, 80);
+		dispatchClick(host, basket.x, basket.y);
+		await flush();
+	}
+
+	it('the Approve action lives inside the fixed placement-banner, not floating over the corridor', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+
+		const banner = host.querySelector('[data-testid="placement-banner"]');
+		const approveButton = host.querySelector('[data-testid="approve-hole-button"]');
+		expect(banner).not.toBeNull();
+		expect(approveButton).not.toBeNull();
+		// Contained in the always-top-center banner, not a separate element
+		// positioned at an in-image point (which is what used to sit on top
+		// of the corridor being reviewed).
+		expect(banner?.contains(approveButton)).toBe(true);
+		expect(approveButton?.hasAttribute('style')).toBe(false);
+	});
+
+	it('an empty-map click during ordinary review no longer drops a stray bend', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+
+		const empty = screenPointFor(host, 50, 5);
+		dispatchClick(host, empty.x, empty.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
+		// Still reviewing hole 1, unapproved — the stray click was a no-op.
+		expect(host.querySelector('[data-testid="approve-hole-button"]')).not.toBeNull();
+	});
+
+	it('adds a bend mid-review (before Approve) via the banner action, then still approves normally', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="add-bend-button"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Bends');
+
+		const bendAt = screenPointFor(host, 50, 5);
+		dispatchClick(host, bendAt.x, bendAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-close"]')?.click();
+		await flush();
+
+		// Back to reviewing the same hole (not kicked out of focus) — Approve
+		// is available again, and the bend just added survived.
+		const approveButton = host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]');
+		expect(approveButton).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+
+		approveButton?.click();
+		await flush();
+		expect(sidebarSection(host, 4).textContent).toContain('1');
+	});
+
+	it('adds a bend to an already-approved hole without any unapprove step', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		await flush();
+		expect(sidebarSection(host, 4).textContent).toContain('1');
+
+		// Return to the now-confirmed hole 1 — this is the "revisit" path a
+		// user takes if a needed bend is only noticed after approving.
+		sidebarHoleButton(host, 1).click();
+		await flush();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('confirmed');
+
+		host.querySelector<HTMLButtonElement>('[data-testid="add-bend-button"]')?.click();
+		await flush();
+		// Re-focusing an already-placed hole zooms the camera onto its own
+		// tee/basket bounding box (see the guided-bends-phase test below), so
+		// the bend click must land between the two markers to stay in view.
+		const bendAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, bendAt.x, bendAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-close"]')?.click();
+		await flush();
+
+		// No unapprove: still confirmed, section 4.
+		expect(sidebarSection(host, 4).textContent).toContain('1');
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('confirmed');
+	});
+});
+
 describe('guided bends phase — after all 18 confirm, before the completion panel', () => {
 	/** Image-space placement grid: 6 columns × 3 rows, spaced so no click ever lands within another marker's hit radius. */
 	function holeSpots(number: number): { tee: [number, number]; basket: [number, number] } {
