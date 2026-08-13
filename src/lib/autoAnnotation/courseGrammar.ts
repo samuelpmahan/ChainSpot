@@ -73,8 +73,16 @@ export interface CourseTeeCandidate extends CoursePointCandidate {
  * and are scored exactly as before.
  */
 export interface CourseBasketCandidate extends CoursePointCandidate {
-	/** Hard semantic owner established before global grammar (e.g. an exclusive ribbon component). */
-	readonly holeNumber?: number;
+	/**
+	 * Hard semantic owner established before global grammar (e.g. an exclusive
+	 * ribbon component). Deliberately NOT named `holeNumber`: occlusion-fallback
+	 * recovered candidates (`OccludedBasketCandidate` in `cvCalibratedDetectors.ts`)
+	 * already carry a `holeNumber` field recording which hole's badge the masked
+	 * search was centered on -- that is provenance, not a hard ownership claim,
+	 * and must never be read as one here. Reusing that field name would silently
+	 * promote every REVIEW-tier recovered candidate into an unstealable lock.
+	 */
+	readonly lockedHoleNumber?: number;
 	readonly bootstrapDecision?: 'auto' | 'review';
 }
 
@@ -502,7 +510,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	// therefore preserves its learned distance distribution) while preventing a
 	// structurally-proven basket from participating in a permutation.
 	const explicitBasketOwner = baskets.map((basket) => {
-		const owner = input.baskets[basket.sourceIndex].holeNumber;
+		const owner = input.baskets[basket.sourceIndex].lockedHoleNumber;
 		return Number.isInteger(owner) && (owner as number) > 0 ? owner as number : undefined;
 	});
 	const ownedBasketIndexesByHole = new Map<number, number[]>();

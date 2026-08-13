@@ -709,8 +709,8 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		basketFloodOwnership.locks.map((lock) => [lock.basketCandidateIndex, lock.holeNumber] as const)
 	);
 	const primaryGrammarBaskets = primaryBasketCandidates.map((basket, basketIndex) => {
-		const holeNumber = floodOwnerByBasketIndex.get(basketIndex);
-		return holeNumber === undefined ? basket : { ...basket, holeNumber };
+		const lockedHoleNumber = floodOwnerByBasketIndex.get(basketIndex);
+		return lockedHoleNumber === undefined ? basket : { ...basket, lockedHoleNumber };
 	});
 	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBasketCandidates);
 	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryGrammarBaskets, basketPolarityPenaltyPx });

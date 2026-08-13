@@ -66,7 +66,7 @@ describe('basket flood-fill ownership', () => {
 			// Candidate 0 is intentionally much closer to hole 2's badge, but its
 			// exclusive ribbon component has already established hole 1 as owner.
 			baskets: [
-				{ xPx: 90, yPx: 0, confidence: 1, holeNumber: 1 },
+				{ xPx: 90, yPx: 0, confidence: 1, lockedHoleNumber: 1 },
 				{ xPx: 40, yPx: 0, confidence: 1 }
 			],
 			basketPolarityPenaltyPx: 0

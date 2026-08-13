@@ -53,7 +53,7 @@ const grammar = associateCourseGrammar({
 		{ xPx: 120, yPx: 0, confidence: 1, holeNumber: 2, bootstrapDecision: 'auto' }
 	],
 	baskets: [
-		{ xPx: 90, yPx: 0, confidence: 1, holeNumber: 1 },
+		{ xPx: 90, yPx: 0, confidence: 1, lockedHoleNumber: 1 },
 		{ xPx: 40, yPx: 0, confidence: 1 }
 	],
 	basketPolarityPenaltyPx: 0

@@ -36,6 +36,56 @@ describe('course grammar with occlusion-fallback basket ownership', () => {
 		expect(hole.status).toBe('ready');
 		expect(hole.failures.some((failure) => failure.kind === 'weak-basket-confidence')).toBe(false);
 	});
+
+	// Regression: `OccludedBasketCandidate` (cvCalibratedDetectors.ts) already
+	// carries `holeNumber` -- the hole its masked search was centered on, pure
+	// provenance -- and `basketDetection.worker.ts`/`detect-course.ts` splice
+	// `bootstrapDecision: 'review'` onto that same object before handing it to
+	// `associateCourseGrammar`. That object shape must never be read as an
+	// explicit ownership lock (`CourseBasketCandidate.lockedHoleNumber`):
+	// doing so would silently force a hole onto its weak, masked-correlation
+	// fallback match even when a much better, ordinary primary-detection
+	// basket is sitting right there unclaimed.
+	it('does not let an occlusion-fallback candidate\'s provenance `holeNumber` act as a hard ownership lock', () => {
+		// Built via a plain variable rather than an inline object literal, like
+		// `nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' }))`
+		// actually produces in basketDetection.worker.ts/detect-course.ts: an
+		// `OccludedBasketCandidate`-shaped value carrying `holeNumber` (the hole
+		// its masked search was centered on -- provenance, not ownership) plus
+		// `bootstrapDecision: 'review'`, but no `lockedHoleNumber`. Farther from
+		// hole 1's badge than the ordinary primary candidate below.
+		const occlusionFallbackShapedCandidate = {
+			xPx: 200,
+			yPx: 0,
+			confidence: 1,
+			holeNumber: 1,
+			bootstrapDecision: 'review' as const
+		};
+		const result = associateCourseGrammar({
+			holeNumbers: [1, 2],
+			basketPolarityPenaltyPx: 0,
+			numberBadges: [
+				{ xPx: 0, yPx: 0, confidence: 1, holeNumber: 1 },
+				{ xPx: 500, yPx: 0, confidence: 1, holeNumber: 2 }
+			],
+			tees: [
+				{ xPx: -20, yPx: 0, confidence: 1, holeNumber: 1, bootstrapDecision: 'auto' as const },
+				{ xPx: 480, yPx: 0, confidence: 1, holeNumber: 2, bootstrapDecision: 'auto' as const }
+			],
+			baskets: [
+				occlusionFallbackShapedCandidate,
+				// An ordinary, unowned, much closer primary-detection basket for hole 1.
+				{ xPx: 10, yPx: 0, confidence: 1 },
+				// Hole 2's own basket, far away and unambiguous.
+				{ xPx: 600, yPx: 0, confidence: 1 }
+			]
+		});
+
+		const hole1 = result.holes.find((hole) => hole.number === 1);
+		const hole2 = result.holes.find((hole) => hole.number === 2);
+		expect(hole1?.basket?.xPx).toBe(10);
+		expect(hole2?.basket?.xPx).toBe(600);
+	});
 });
 
 describe('course grammar Stage 4 basket ownership for a tee-less hole', () => {

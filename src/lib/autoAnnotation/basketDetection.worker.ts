@@ -654,8 +654,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 		basketFloodOwnership.locks.map((lock) => [lock.basketCandidateIndex, lock.holeNumber] as const)
 	);
 	const primaryGrammarBaskets = primaryBaskets.map((basket, basketIndex) => {
-		const holeNumber = floodOwnerByBasketIndex.get(basketIndex);
-		return holeNumber === undefined ? basket : { ...basket, holeNumber };
+		const lockedHoleNumber = floodOwnerByBasketIndex.get(basketIndex);
+		return lockedHoleNumber === undefined ? basket : { ...basket, lockedHoleNumber };
 	});
 	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBaskets);
 	reportCourseProgress(
