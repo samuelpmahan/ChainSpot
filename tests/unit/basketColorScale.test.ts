@@ -39,6 +39,12 @@ function fillRect(
 	}
 }
 
+function basketTemplate(): BasketColorRaster {
+	const template = raster(30, 44);
+	fillRect(template, 4, 4, 22, 36);
+	return template;
+}
+
 describe('basket color scale bootstrap', () => {
 	it('matches the measured cool off-white basket family rather than literal white', () => {
 		expect(isBasketColorPixel(231, 234, 241)).toBe(true);
@@ -57,10 +63,25 @@ describe('basket color scale bootstrap', () => {
 		expect(components[0]).toMatchObject({ widthPx: 2, heightPx: 2, areaPx: 2 });
 	});
 
-	it('recovers the large repeated basket mode even when more tiny distractors repeat at another scale', () => {
-		const template = raster(30, 44);
-		fillRect(template, 4, 4, 22, 36);
+	it('recovers a strong repeated basket mode at the measured template scale', () => {
+		const source = raster(520, 360);
+		const basketOrigins = [
+			[20, 20], [110, 20], [200, 20], [290, 20],
+			[20, 150], [110, 150], [200, 150], [290, 150]
+		] as const;
+		for (const [x, y] of basketOrigins) fillRect(source, x, y, 42, 67);
 
+		const estimate = estimateBasketTemplateScaleFromColor(source, basketTemplate());
+		expect(estimate).not.toBeNull();
+		expect(estimate!.scale).toBeGreaterThan(1.82);
+		expect(estimate!.scale).toBeLessThan(1.94);
+		expect(estimate!.representativeSource).toEqual({ widthPx: 42, heightPx: 67 });
+		expect(estimate!.representativeTemplate).toEqual({ widthPx: 22, heightPx: 36 });
+		expect(estimate!.support).toBe(8);
+		expect(estimate!.reliable).toBe(true);
+	});
+
+	it('chooses coherent component mass over a larger count of tiny repeated distractors, but abstains when the modes are too close', () => {
 		const source = raster(520, 360);
 		const basketOrigins = [
 			[20, 20], [110, 20], [200, 20],
@@ -68,29 +89,26 @@ describe('basket color scale bootstrap', () => {
 		] as const;
 		for (const [x, y] of basketOrigins) fillRect(source, x, y, 42, 67);
 
-		// Deliberately more numerous than the real basket components. Raw repeat
-		// count would prefer this ~0.6x family; coherent component mass should not.
+		// Deliberately more numerous than the real basket components. The weighted
+		// mode should still select the large family, while the conservative
+		// reliability guard rejects this artificially coherent two-scale scene.
 		for (let index = 0; index < 8; index += 1) {
 			fillRect(source, 330 + (index % 4) * 40, 20 + Math.floor(index / 4) * 80, 13, 21);
 		}
 
-		const estimate = estimateBasketTemplateScaleFromColor(source, template);
+		const estimate = estimateBasketTemplateScaleFromColor(source, basketTemplate());
 		expect(estimate).not.toBeNull();
 		expect(estimate!.scale).toBeGreaterThan(1.82);
 		expect(estimate!.scale).toBeLessThan(1.94);
-		expect(estimate!.representativeSource).toEqual({ widthPx: 42, heightPx: 67 });
-		expect(estimate!.representativeTemplate).toEqual({ widthPx: 22, heightPx: 36 });
 		expect(estimate!.support).toBe(6);
-		expect(estimate!.reliable).toBe(true);
-		expect(estimate!.dominance).toBeGreaterThan(1);
+		expect(estimate!.weight).toBeGreaterThan(estimate!.secondWeight);
+		expect(estimate!.reliable).toBe(false);
 	});
 
 	it('refuses to trust a single accidental component', () => {
-		const template = raster(30, 44);
-		fillRect(template, 4, 4, 22, 36);
 		const source = raster(160, 120);
 		fillRect(source, 30, 25, 42, 67);
-		const estimate = estimateBasketTemplateScaleFromColor(source, template);
+		const estimate = estimateBasketTemplateScaleFromColor(source, basketTemplate());
 		expect(estimate).not.toBeNull();
 		expect(estimate!.support).toBe(1);
 		expect(estimate!.reliable).toBe(false);
