@@ -2087,7 +2087,7 @@
 						</div>
 						<div class="export-card">
 							<h4>Use as UDisc source</h4>
-							<p>Send it into UDisc's course editor as the reference image.</p>
+							<p>Carry it into Annotate Round as the UDisc reference image.</p>
 							<button
 								type="button"
 								class="btn small"
@@ -2095,12 +2095,12 @@
 								disabled={!canExport}
 								onclick={() => handleUseAs('source-overview')}
 							>
-								Send to UDisc
+								Send to Annotate Round
 							</button>
 						</div>
 						<div class="export-card">
 							<h4>Use as clean target</h4>
-							<p>Carry it into Annotate Round as an unmarked base.</p>
+							<p>Carry it into Create Graphics as an unmarked base.</p>
 							<button
 								type="button"
 								class="btn small"
@@ -2108,7 +2108,7 @@
 								disabled={!canExport}
 								onclick={() => handleUseAs('target-basemap')}
 							>
-								Send to Annotate Round
+								Send to Create Graphics
 							</button>
 						</div>
 						{#if rendering}
