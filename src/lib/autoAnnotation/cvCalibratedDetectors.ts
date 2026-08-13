@@ -50,13 +50,16 @@ import type {
 } from './basketOcclusionRecovery';
 import {
 	asBasketTemplateScale,
-	asNumberTemplateScale
+	asNumberTemplateScale,
+	asUiScalePx
 } from './cvCalibration';
 import type {
 	BasketTemplateScale,
 	NumberTemplateScale,
 	UiScalePx
 } from './cvCalibration';
+import { measureWorldScale, resizeRgbaArea } from './worldScale';
+import type { WorldScaleMeasurement } from './worldScale';
 
 export type CalibratedHoleNumberScaleAnchor = Omit<HoleNumberScaleAnchor, 'scale'> & {
 	readonly scale: NumberTemplateScale;
@@ -391,4 +394,129 @@ export function detectCalibratedBasketOcclusionFallback(
 		});
 	}
 	return recovered;
+}
+
+/**
+ * The UI scale the tee constants were tuned at (IMG_5641). In the canonical
+ * tee workspace, pads are resized to exactly that regime's world size, so
+ * the frozen constants (`X / 1.77 * uiScalePx`) evaluate to their tuned
+ * source-pixel values when this scale is passed. Validated end-to-end in
+ * scripts/cv-probes/white-rect-scale-findings.md.
+ */
+const CANONICAL_TEE_UI_SCALE = 1.77;
+/**
+ * worldScale this close to 1 runs the existing path untouched — IMG_5641
+ * and same-zoom captures reproduce today's behavior bit-for-bit, and the
+ * synthetic scale-sweep guardrail keeps covering the coupled-scale case.
+ */
+const WORLD_SCALE_PASSTHROUGH_BAND = 0.12;
+
+export interface WorldNormalizedTeeBootstrapResult extends CalibratedTeeBootstrapResult {
+	/** Null when no white-frame measurement was possible (fallback: native path ran). */
+	readonly worldScaleMeasurement: WorldScaleMeasurement | null;
+	/** True when the tee stage actually ran in the canonical workspace. */
+	readonly normalized: boolean;
+}
+
+/**
+ * World-normalized tee bootstrap: the production entry point for tee
+ * detection on captures whose map zoom differs from the tuned regime.
+ *
+ * Pipeline position (see white-rect-scale-findings.md): UI-semantic
+ * detection (badges, baskets) has already run on the NATIVE raster; this
+ * stage privately builds a canonical tee workspace — the raster resized so
+ * pad frames match IMG_5641's measured size — runs the frozen tee detector
+ * there, and maps every candidate back to native pixels. Canonicalization
+ * never leaks: callers put native coordinates in and get native coordinates
+ * out, and nothing else in the pipeline sees the resized raster.
+ *
+ * Falls back to the existing native-raster path when the white-frame
+ * measurement finds too few pads, when worldScale is within the
+ * passthrough band of 1, or when normalization would UPSCALE (worldScale
+ * < 1 means the capture is zoomed further out than the tuned regime;
+ * inventing detail via upscale is worse than the current behavior).
+ */
+export function detectWorldNormalizedTeeBootstrap(
+	cv: TeePadCv,
+	raster: TeePadRaster,
+	options: CalibratedTeePadDetectionOptions,
+	badges: readonly TeeBadgeAnchor[],
+	baskets: readonly PuttingCircleSourceBasket[] = [],
+	experiments: TeeBootstrapExperiments = {}
+): WorldNormalizedTeeBootstrapResult {
+	const measurement = measureWorldScale({
+		rgba: raster.rgba,
+		widthPx: raster.widthPx,
+		heightPx: raster.heightPx
+	});
+	const worldScale = measurement?.worldScale ?? null;
+	if (
+		worldScale === null ||
+		Math.abs(worldScale - 1) <= WORLD_SCALE_PASSTHROUGH_BAND ||
+		worldScale < 1
+	) {
+		return {
+			...detectCalibratedTeeBootstrap(cv, raster, options, badges, baskets, experiments),
+			worldScaleMeasurement: measurement,
+			normalized: false
+		};
+	}
+
+	const factor = 1 / worldScale;
+	const resized = resizeRgbaArea(
+		{ rgba: raster.rgba, widthPx: raster.widthPx, heightPx: raster.heightPx },
+		factor
+	);
+	const scalePoint = <T extends { readonly xPx: number; readonly yPx: number }>(point: T, s: number): T => ({
+		...point,
+		xPx: point.xPx * s,
+		yPx: point.yPx * s
+	});
+	const normalizedBadges = badges.map((badge) => ({
+		...scalePoint(badge, factor),
+		...(badge.widthPx !== undefined ? { widthPx: badge.widthPx * factor } : {}),
+		...(badge.heightPx !== undefined ? { heightPx: badge.heightPx * factor } : {})
+	}));
+	const normalizedBaskets = baskets.map((basket) => scalePoint(basket, factor));
+	const normalizedBounds = options.mapBoundsPx
+		? { topPx: options.mapBoundsPx.topPx * factor, bottomPx: options.mapBoundsPx.bottomPx * factor }
+		: undefined;
+	const result = detectCalibratedTeeBootstrap(
+		cv,
+		{ rgba: resized.rgba, widthPx: resized.widthPx, heightPx: resized.heightPx, sourceScale: raster.sourceScale },
+		{
+			...options,
+			uiScalePx: asUiScalePx(CANONICAL_TEE_UI_SCALE, 'canonical tee workspace'),
+			...(normalizedBounds ? { mapBoundsPx: normalizedBounds } : {})
+		},
+		normalizedBadges,
+		normalizedBaskets,
+		experiments
+	);
+
+	// Map every coordinate-bearing output back to native pixels. `holes`,
+	// `calibration`, and `rejectedCandidateIndexes` stay in workspace units:
+	// they are diagnostics of the normalized run, and nothing downstream
+	// consumes their coordinates (the worker reads candidates, assignments,
+	// and counts only).
+	const backToNative = (candidate: TeePadCandidate): TeePadCandidate => ({
+		...candidate,
+		xPx: candidate.xPx * worldScale,
+		yPx: candidate.yPx * worldScale,
+		widthPx: candidate.widthPx * worldScale,
+		heightPx: candidate.heightPx * worldScale
+	});
+	return {
+		...result,
+		candidates: result.candidates.map(backToNative),
+		assignments: result.assignments.map((assignment) => ({
+			...assignment,
+			candidate: backToNative(assignment.candidate),
+			...(assignment.badgeRay
+				? { badgeRay: { ...assignment.badgeRay, distancePx: assignment.badgeRay.distancePx * worldScale } }
+				: {})
+		})),
+		worldScaleMeasurement: measurement,
+		normalized: true
+	};
 }

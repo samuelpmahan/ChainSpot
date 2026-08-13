@@ -17,7 +17,7 @@ import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedBasketOcclusionFallback,
 	detectCalibratedHoleNumberBadges,
-	detectCalibratedTeeBootstrap,
+	detectWorldNormalizedTeeBootstrap,
 	detectCalibratedTeePadCandidates,
 	detectCalibratedTeePadVariants,
 	findCalibratedBasketAnchorScale
@@ -595,7 +595,12 @@ async function detectCourse(request: CourseDetectionRequest) {
 			widthPx: candidate.widthPx,
 			heightPx: candidate.heightPx
 		}));
-	const teeBootstrap = detectCalibratedTeeBootstrap(
+	// World-normalized tee stage: badges/baskets above ran on the native
+	// raster (UI chrome detects at native resolution); the tee detector runs
+	// in a private canonical workspace resized so pad frames match the tuned
+	// regime, with every output mapped back to native pixels. See
+	// scripts/cv-probes/white-rect-scale-findings.md for the evidence.
+	const teeBootstrap = detectWorldNormalizedTeeBootstrap(
 		cv,
 		teeRaster,
 		{ uiScalePx: calibration.uiScalePx, mapBoundsPx },
