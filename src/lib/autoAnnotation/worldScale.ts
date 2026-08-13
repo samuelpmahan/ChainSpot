@@ -160,7 +160,13 @@ function growComponent(
 ): FrameComponent | null {
 	let head = 0;
 	let tail = 0;
-	queue[tail] = seed;
+	// Grown (never wrapped) rather than used as a fixed-size ring buffer: labeling must
+	// visit every reachable pixel of the component even past maxArea, so the outer seed
+	// scan never re-discovers an unlabeled remnant of an already-rejected region as a new
+	// "frame" candidate. A ring buffer sized to maxArea would either clobber unread entries
+	// (corrupting the traversal) or stop early and leave the component partially labeled.
+	let buffer = queue;
+	buffer[tail] = seed;
 	tail += 1;
 	labels[seed] = label;
 	let minX = width;
@@ -170,9 +176,10 @@ function growComponent(
 	let overflow = false;
 	const pixels: number[] = [];
 	while (head < tail) {
-		const index = queue[head % queue.length];
+		const index = buffer[head];
 		head += 1;
 		if (!overflow) pixels.push(index);
+		if (pixels.length >= maxArea) overflow = true;
 		const x = index % width;
 		const y = (index - x) / width;
 		if (x < minX) minX = x;
@@ -186,12 +193,16 @@ function growComponent(
 			if (Math.abs(nx - x) > 1) continue; // row wrap
 			if (bright[neighbor] === 0 || labels[neighbor] !== 0) continue;
 			labels[neighbor] = label;
-			queue[tail % queue.length] = neighbor;
+			if (tail >= buffer.length) {
+				const grown = new Int32Array(buffer.length * 2);
+				grown.set(buffer);
+				buffer = grown;
+			}
+			buffer[tail] = neighbor;
 			tail += 1;
-			if (tail - head > queue.length - 4 || pixels.length >= maxArea) overflow = true;
 		}
 	}
-	if (overflow || pixels.length >= maxArea) return null;
+	if (overflow) return null;
 	return { pixels: Int32Array.from(pixels), count: pixels.length, minX, minY, maxX, maxY };
 }
 

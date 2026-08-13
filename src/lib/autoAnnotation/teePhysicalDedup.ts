@@ -47,8 +47,12 @@ export function deduplicatePhysicalTeePads(candidates: readonly TeePadCandidate[
 		.sort((a, b) => b.candidate.support.length - a.candidate.support.length || b.candidate.score - a.candidate.score);
 	const clusters: Array<{ members: TeePadCandidate[]; sourceIndexes: number[] }> = [];
 	for (const entry of order) {
+		// Match against the cluster's representative (its first/highest-priority
+		// member — `order` is sorted the same way `mergedCandidate` picks `best`)
+		// rather than any member: single-linkage chain matching could bridge two
+		// physically distinct pads through a weak in-between candidate.
 		const cluster = clusters.find((candidateCluster) =>
-			candidateCluster.members.some((member) => samePhysicalTeePad(member, entry.candidate))
+			samePhysicalTeePad(candidateCluster.members[0], entry.candidate)
 		);
 		if (cluster) {
 			cluster.members.push(entry.candidate);

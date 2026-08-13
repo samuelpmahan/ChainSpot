@@ -45,9 +45,11 @@ export interface ActiveReviewMap {
  * not `CourseHoleProposal.tee`/`.basket` presence, to decide `missing`: a
  * hole whose only assignment was weak and has since been rejected (or
  * never had one at all) must keep reading as unresolved for as long as
- * nothing is actually placed, matching the diagnostics rail's own "N holes
- * need review" count -- not silently drop out of the guided queue once its
- * local candidate pool runs out.
+ * nothing is actually placed, matching a "N holes need review" style count
+ * -- not silently drop out of the guided queue once its local candidate
+ * pool runs out. As of this module, no live session actually supplies this
+ * (see `livePlacementsFromGrammar`'s doc comment) -- CLI/benchmark callers
+ * are the only current consumers.
  */
 export interface ActiveReviewLivePlacement {
 	readonly tee: boolean;
@@ -56,9 +58,10 @@ export interface ActiveReviewLivePlacement {
 
 /**
  * Stable key for a hole/landmark pair, used to track "wrong guess" counts
- * (rejected or replaced recommendations) across recomputes. Shared between
- * the page (which records rejections) and `buildActiveReviewMap` (which
- * consumes the resulting exhausted set), so both sides agree on the format.
+ * (rejected or replaced recommendations) across recomputes, so a caller that
+ * records rejections and `buildActiveReviewMap` (which consumes the
+ * resulting exhausted set) agree on the format. No current caller does both
+ * halves of this -- see `livePlacementsFromGrammar`'s doc comment.
  */
 export function exhaustedLandmarkKey(holeNumber: number, kind: ActiveReviewLandmarkKind): string {
 	return `${holeNumber}:${kind}`;
@@ -458,9 +461,14 @@ function candidateScore(candidate: { readonly score?: number }): number {
  * A `livePlacements` map for callers with no live annotation session at all
  * (the CLI preview, benchmarks) -- treats the one-time detection's own
  * proposal presence as "placed", exactly `buildActiveReviewMap`'s pre-live-
- * state behavior. Never use this from the real app: `+page.svelte` has an
- * actual live session and must build its map from the annotation draft's
- * real `holes[]`, not from the frozen detection snapshot this reconstructs.
+ * state behavior. Do not use this as a stand-in for a real live session: a
+ * caller with an actual annotation draft must build its map from that
+ * draft's real `holes[]`, not from the frozen detection snapshot this
+ * reconstructs. Note the redesigned Annotate Round page (`+page.svelte`)
+ * does not currently call `buildActiveReviewMap` at all -- it tracks its own
+ * "N holes need review" count independently -- so today this module's only
+ * callers are CLI/benchmark tooling (`scripts/detect-course.ts`,
+ * `scripts/verify-course-detection.ts`, `scripts/benchmark-active-review.ts`).
  */
 export function livePlacementsFromGrammar(
 	detection: CourseDetectionResult

@@ -822,9 +822,13 @@
 	 */
 	function reassignHolePiece(fromHoleId: string, toHoleId: string, kind: 'tee' | 'basket'): void {
 		if (fromHoleId === toHoleId) return;
-		const next = reassignMarker(holes, fromHoleId, toHoleId, kind);
-		if (next === holes) return;
-		holes = next;
+		// reassignMarker always returns a fresh array, even as a no-op (pure-reducer
+		// convention — see holeAnnotation.test.ts), so a reference check can't detect
+		// "nothing moved". Check the source point ourselves instead.
+		const fromHole = holes.find((hole) => hole.id === fromHoleId);
+		const point = kind === 'tee' ? fromHole?.tee : fromHole?.basket;
+		if (!point) return;
+		holes = reassignMarker(holes, fromHoleId, toHoleId, kind);
 		setPieceConfirmed(fromHoleId, kind, false);
 		setPieceConfirmed(toHoleId, kind, false);
 		markMapGeometryEdited();
@@ -1498,7 +1502,23 @@
 			// preserves the user's raw drop separately — a snapped correction is
 			// still influenced by existing CV geometry, and the log must be able
 			// to tell the two apart.
-			pendingCorrectionFlushes.set(options.deferForSnap.key, {
+			const key = options.deferForSnap.key;
+			const superseded = pendingCorrectionFlushes.get(key);
+			if (superseded) {
+				// Another deferred snap on this same marker (place-then-drag before
+				// the first snap settled) is about to replace this entry. Flush the
+				// superseded interaction now on its raw value rather than losing it —
+				// its own in-flight snap reply will find nothing left to flush.
+				pendingCorrectionFlushes.delete(key);
+				appendCorrectionEvent(
+					superseded.endpoint,
+					superseded.holeNumber,
+					superseded.userAction,
+					superseded.rawValue,
+					{ dragDistancePx: superseded.dragDistancePx }
+				);
+			}
+			pendingCorrectionFlushes.set(key, {
 				requestId: options.deferForSnap.requestId,
 				endpoint,
 				holeNumber,

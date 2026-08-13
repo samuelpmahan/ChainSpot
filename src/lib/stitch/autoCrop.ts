@@ -477,7 +477,7 @@ export function proposeCropDetailed(
 
 		const proposal = analyzeSide(rasters, side);
 		if (proposal.kind === 'none') {
-			perSide[side] = [0, 0, 0, 0];
+			perSide[side] = new Array(rasters.length).fill(0);
 			if (proposal.reason !== 'absent') anyWeak = true;
 			continue;
 		}
