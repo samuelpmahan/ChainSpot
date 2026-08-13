@@ -22,6 +22,13 @@ import type { Candidate, CvRaster } from '../cv/types';
 
 export type TeePadSupport = 'gray-center' | 'edge-loop' | 'occluded-edge-loop' | 'template-search';
 
+export type TeeCandidateTier = 'primary' | 'occluded' | 'weak-template' | 'masked-recovery';
+
+export interface TeeCandidateProvenance {
+	readonly tier: TeeCandidateTier;
+	readonly support: TeePadSupport;
+}
+
 export type TeePadVariant = 'gray-center' | 'edge-loop' | 'fused';
 
 /** xPx/yPx (from `Candidate`) are the fitted rectangle's source-image center. */
@@ -37,6 +44,8 @@ export interface TeePadCandidate extends Candidate {
 	 */
 	readonly score: number;
 	readonly support: readonly TeePadSupport[];
+	/** Detector/recovery sources retained when physical hypotheses are merged. */
+	readonly provenance?: readonly TeeCandidateProvenance[];
 }
 
 export type TeePadNumberAnchor = Pick<HoleNumberScaleAnchor, 'widthPx' | 'heightPx'>;

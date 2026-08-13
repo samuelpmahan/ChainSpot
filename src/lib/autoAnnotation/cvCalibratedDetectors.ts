@@ -32,6 +32,7 @@ import {
 import type {
 	OccludedEdgeLoopResult,
 	PuttingCircleSourceBasket,
+	TeeCandidateTier,
 	TeePadCandidate,
 	TeePadCv,
 	TeePadDetectionOptions as RawTeePadDetectionOptions,
@@ -60,6 +61,7 @@ import type {
 } from './cvCalibration';
 import { measureWorldScale, resizeRgbaArea } from './worldScale';
 import type { WorldScaleMeasurement } from './worldScale';
+import { deduplicatePhysicalTeePads } from './teePhysicalDedup';
 
 export type CalibratedHoleNumberScaleAnchor = Omit<HoleNumberScaleAnchor, 'scale'> & {
 	readonly scale: NumberTemplateScale;
@@ -131,13 +133,11 @@ export function detectCalibratedOccludedEdgeLoopCandidates(
 }
 
 export interface CalibratedTeeBootstrapResult extends TeeBootstrapResult {
-	/** Generic candidate pool assessed by the confidence ladder. */
+	/** Deduplicated physical-pad pool assessed by the confidence ladder. */
 	readonly candidates: readonly TeePadCandidate[];
-}
-
-function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
-	const localMinor = Math.max(1, Math.min(a.widthPx, a.heightPx, b.widthPx, b.heightPx));
-	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx) <= localMinor * 0.45;
+	/** All tier outputs before physical-pad NMS; diagnostics only. */
+	readonly rawCandidates: readonly TeePadCandidate[];
+	readonly dedupClusters: readonly (readonly number[])[];
 }
 
 /**
@@ -153,9 +153,6 @@ function samePhysicalPad(a: TeePadCandidate, b: TeePadCandidate): boolean {
  * can become REVIEW (the H3/H5 class) but cannot become AUTO from a lucky ray
  * intersection alone.
  */
-/** Fallback only, used when no AUTO tee exists yet to measure a course-specific radius from. */
-const PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI = 100;
-
 /**
  * Levers for detection ideas that are safe but not (yet) proven to help --
  * see `docs/deferred-detection-experiments.md`. Every flag defaults to off,
@@ -185,22 +182,25 @@ export function detectCalibratedTeeBootstrap(
 	baskets: readonly PuttingCircleSourceBasket[] = [],
 	experiments: TeeBootstrapExperiments = {}
 ): CalibratedTeeBootstrapResult {
-	const primary = detectTeePadCandidates(cv, raster, options);
+	const withTier = (candidate: TeePadCandidate, tier: TeeCandidateTier): TeePadCandidate => ({
+		...candidate,
+		provenance: candidate.support.map((support) => ({ tier, support }))
+	});
+	const primary = detectTeePadCandidates(cv, raster, options).map((candidate) => withTier(candidate, 'primary'));
 	const requested = options.maxCandidates ?? 18;
 	const occluded = detectOccludedEdgeLoopCandidates(cv, raster, {
 		...options,
 		maxCandidates: Math.max(requested, requested * 2)
-	}).candidates;
-	const candidates: TeePadCandidate[] = [...primary];
-	for (const candidate of occluded) {
-		if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
-	}
+	}).candidates.map((candidate) => withTier(candidate, 'occluded'));
+	// Detector-local NMS has already happened inside each detector. Cross-tier
+	// hypotheses remain raw here so one explicit physical-pad NMS stage below
+	// owns all primary/recovery deduplication and can retain provenance.
+	const candidates: TeePadCandidate[] = [...primary, ...occluded];
 	let assessed = assessTeeBootstrap(raster, candidates, badges);
 	if (assessed.calibration && assessed.counts.unresolved > 0) {
-		const weak = proposeWeakTeeCandidates(raster, badges, assessed.calibration, assessed, candidates);
-		for (const candidate of weak) {
-			if (!candidates.some((existing) => samePhysicalPad(existing, candidate))) candidates.push(candidate);
-		}
+		const weak = proposeWeakTeeCandidates(raster, badges, assessed.calibration, assessed, candidates)
+			.map((candidate) => withTier(candidate, 'weak-template'));
+		candidates.push(...weak);
 		if (weak.length > 0) assessed = assessTeeBootstrap(raster, candidates, badges);
 	}
 
@@ -228,38 +228,26 @@ export function detectCalibratedTeeBootstrap(
 				...options,
 				ignoreCirclesPx: occlusionMasks,
 				maxCandidates: Math.max(requested, requested * 2)
-			}).candidates.filter((candidate) => !candidates.some((existing) => samePhysicalPad(existing, candidate)));
-			// Distance-bounded by the course's own already-trusted geometry rather
-			// than a fixed constant: how far a real tee can plausibly sit from its
-			// badge varies course to course (and with map zoom), but the holes
-			// already resolved to AUTO on *this* course are a direct, cheap
-			// measurement of it.
-			const autoDistancesPx = assessed.assignments
-				.filter((assignment) => assignment.decision === 'auto')
-				.map((assignment) => assignment.badgeRay?.distancePx)
-				.filter((distance): distance is number => Number.isFinite(distance));
-			const recoveryRadiusPx =
-				autoDistancesPx.length > 0
-					? Math.max(...autoDistancesPx) * 1.5
-					: PUTTING_CIRCLE_RECOVERY_FALLBACK_RADIUS_UI * options.uiScalePx;
-			let added = false;
-			for (const hole of stillNotAuto) {
-				const badge = badges.find((candidate) => candidate.holeNumber === hole.holeNumber);
-				if (!badge) continue;
-				const best = recovered
-					.map((candidate) => ({ candidate, distancePx: Math.hypot(candidate.xPx - badge.xPx, candidate.yPx - badge.yPx) }))
-					.filter((entry) => entry.distancePx <= recoveryRadiusPx)
-					.sort((left, right) => left.distancePx - right.distancePx)[0];
-				if (best && !candidates.some((existing) => samePhysicalPad(existing, best.candidate))) {
-					candidates.push(best.candidate);
-					added = true;
-				}
-			}
-			if (added) assessed = assessTeeBootstrap(raster, candidates, badges);
+			}).candidates.map((candidate) => withTier(candidate, 'masked-recovery'));
+			// Masked recovery is still appearance generation. Do not choose the
+			// nearest result per badge here; that would mix ownership into detection.
+			candidates.push(...recovered);
+			if (recovered.length > 0) assessed = assessTeeBootstrap(raster, candidates, badges);
 		}
 	}
 
-	return { candidates, ...assessed };
+	// Recovery tiers intentionally over-generate. Collapse physical pads only
+	// after every appearance tier has run, before semantic ownership. This is
+	// geometric NMS, not a top-18 policy.
+	const clusters = deduplicatePhysicalTeePads(candidates);
+	const deduped = clusters.map((cluster) => cluster.candidate);
+	assessed = assessTeeBootstrap(raster, deduped, badges);
+	return {
+		candidates: deduped,
+		rawCandidates: candidates,
+		dedupClusters: clusters.map((cluster) => cluster.sourceIndexes),
+		...assessed
+	};
 }
 
 export type CalibratedBasketCandidate = Omit<RawBasketCandidate, 'scale'> & {
@@ -506,16 +494,19 @@ export function detectWorldNormalizedTeeBootstrap(
 		widthPx: candidate.widthPx * worldScale,
 		heightPx: candidate.heightPx * worldScale
 	});
+	const nativeRawCandidates = result.rawCandidates.map(backToNative);
+	const nativeClusters = deduplicatePhysicalTeePads(nativeRawCandidates);
+	const nativeCandidates = nativeClusters.map((cluster) => cluster.candidate);
+	// Ownership is deliberately recomputed against native badge coordinates
+	// after native-coordinate NMS. Appearance scores still come from the
+	// canonical detector; badge geometry never creates a candidate.
+	const nativeAssessment = assessTeeBootstrap(raster, nativeCandidates, badges);
 	return {
 		...result,
-		candidates: result.candidates.map(backToNative),
-		assignments: result.assignments.map((assignment) => ({
-			...assignment,
-			candidate: backToNative(assignment.candidate),
-			...(assignment.badgeRay
-				? { badgeRay: { ...assignment.badgeRay, distancePx: assignment.badgeRay.distancePx * worldScale } }
-				: {})
-		})),
+		...nativeAssessment,
+		candidates: nativeCandidates,
+		rawCandidates: nativeRawCandidates,
+		dedupClusters: nativeClusters.map((cluster) => cluster.sourceIndexes),
 		worldScaleMeasurement: measurement,
 		normalized: true
 	};

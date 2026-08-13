@@ -1,5 +1,5 @@
 import { loadCv } from '../stitch/cvMatch';
-import { associateCourseGrammar } from './courseGrammar';
+import { associateCourseGrammar, deriveBasketPolarityPenaltyPx } from './courseGrammar';
 import type {
 	HoleNumberCvModule,
 	HoleNumberTemplate
@@ -520,7 +520,11 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const analysisNumbers = detectCalibratedHoleNumberBadges(
 		cv,
 		{ format: 'gray', widthPx: analysis.width, heightPx: analysis.height, data: analysis.gray },
-		pack.holeNumbers
+		pack.holeNumbers,
+		// Keep a surplus localization pool. The label solver leaves extras
+		// unlabeled; capping physical bodies at exactly 18 lets one dark false
+		// body crowd a real badge out on tall stitched captures.
+		{ maxCandidates: 24 }
 	);
 	const numbersMs = performance.now() - numbersStartedAt;
 	const sourceScale = 1 / analysis.scale;
@@ -633,6 +637,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 		widthPx: candidate.widthPx,
 		heightPx: candidate.heightPx
 	}));
+	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBaskets);
 	reportCourseProgress(
 		request,
 		'grammar',
@@ -640,7 +645,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 		elapsedMs()
 	);
 	const grammarStartedAt = performance.now();
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBaskets });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBaskets, basketPolarityPenaltyPx });
 
 	// Occlusion-tolerant basket recovery. The primary basket detection and
 	// this first grammar pass above are both untouched by what follows: this
@@ -692,7 +697,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 				...primaryBaskets,
 				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
 			];
-			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets });
+			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets, basketPolarityPenaltyPx });
 		}
 	}
 	const basketFallbackMs = performance.now() - basketFallbackStartedAt;
