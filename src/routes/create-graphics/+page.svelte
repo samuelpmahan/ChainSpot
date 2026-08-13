@@ -902,6 +902,11 @@
 		pendingRepairDiscard = null;
 		saveError = null;
 		openError = null;
+		// The previous project's selected hole id doesn't exist in the newly
+		// opened project (hole ids are per-project UUIDs) -- clearing it lets
+		// the auto-select effect seed the new project's own first hole instead
+		// of leaving the workspace stuck on an empty "Select a hole below" state.
+		graphicsMode.selectedHoleId = null;
 		// An opened project's target-basemap has no known fetch geometry -- ground
 		// scale and geo-reference belong to the session that fetched the imagery,
 		// and carrying them across projects would place elevation profiles (and
