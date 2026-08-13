@@ -19,6 +19,7 @@
     "benchmark:active-review": "node --experimental-strip-types scripts/benchmark-active-review.ts",
     "benchmark:course-corpus": "tsx scripts/benchmark-course-corpus.ts",
     "benchmark:corridor-bends": "tsx scripts/benchmark-corridor-bend-detection.ts",
+    "benchmark:collinearity-straightness": "tsx scripts/collinearity-straightness-check.ts",
     "detect:landing-droplets": "tsx scripts/detect-landing-droplets.ts",
     "verify:tee-scale": "tsx scripts/verify-tee-scale-sweep.ts",
     "cv:dev": "tsx scripts/verify-cv-gallery.ts --mode dev",
