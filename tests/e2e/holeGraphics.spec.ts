@@ -12,8 +12,15 @@ async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
 	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
 }
 
-/** Clicks (x, y) to open the radial menu, then clicks the real button for `kind`. */
+/**
+ * Clicks (x, y) to open the radial menu, then clicks the real button for
+ * `kind`. The radial menu is a dev-tools opt-in (off by default — Map mode's
+ * default flow places tee/basket/bends directly, with no menu at all), so
+ * shot placement in Round mode needs it switched on first.
+ */
 async function placePoint(page: Page, x: number, y: number, kind: PointKind): Promise<void> {
+	const radialToggle = page.getByTestId('radial-menu-toggle');
+	if (!(await radialToggle.isChecked())) await radialToggle.check();
 	await page.mouse.click(x, y);
 	await page.getByTestId(`radial-action-${kind}`).click();
 }
@@ -115,6 +122,38 @@ function imagePoint(view: ViewState, xPx: number, yPx: number): { x: number; y: 
 	return { x: xPx * view.zoom + view.panX, y: yPx * view.zoom + view.panY };
 }
 
+/**
+ * Uploads a source image and places hole 1's tee + basket through the
+ * sidebar-driven flow: selecting hole 1 creates its draft record, and with
+ * no piece yet placed the first two map clicks land tee then basket
+ * directly (no radial menu) — see `handleAnnotationPlacement` in
+ * annotate-round's `+page.svelte`. Returns the annotation frame's bounding
+ * box for any further clicks (a shot, a bend) the caller wants to place.
+ */
+async function placeHoleOneTeeAndBasket(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+	await page.goto('/annotate-round');
+	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+	await page.getByTestId('pane-input-source-overview').setInputFiles({
+		name: 'course.png',
+		mimeType: 'image/png',
+		buffer: pngPayload(800, 600, 80, 120, 60)
+	});
+	await page.waitForSelector('[data-testid="hole-annotation"]');
+	await page.getByTestId('sidebar-hole-1').click();
+	const frame = page.getByTestId('annotation-frame');
+	await frame.scrollIntoViewIfNeeded();
+	await page.waitForFunction(() => {
+		const img = document.querySelector('.annotation-image');
+		return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0;
+	});
+	const box = await frame.boundingBox();
+	if (!box) throw new Error('annotation frame has no bounding box');
+
+	await page.mouse.click(box.x + 50, box.y + 50); // tee — hole 1's first missing piece
+	await page.mouse.click(box.x + 400, box.y + 300); // basket — its second
+	return box;
+}
+
 async function createPair(
 	page: Page,
 	sourcePoint: { xPx: number; yPx: number },
@@ -140,49 +179,41 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	page
 }) => {
 	// 1. Annotate Round: place a fully-featured hole (tee, basket, one shot, a bend).
-	await page.goto('/annotate-round');
-	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
-	await page.getByTestId('pane-input-source-overview').setInputFiles({
-		name: 'course.png',
-		mimeType: 'image/png',
-		buffer: pngPayload(800, 600, 80, 120, 60)
-	});
-	await page.waitForSelector('[data-testid="hole-annotation"]');
-	await page.getByTestId('hole-add').click();
-	const frame = page.getByTestId('annotation-frame');
-	await frame.scrollIntoViewIfNeeded();
-	await page.waitForFunction(() => {
-		const img = document.querySelector('.annotation-image');
-		return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0;
-	});
-	const box = await frame.boundingBox();
-	if (!box) throw new Error('annotation frame has no bounding box');
-
-	await placePoint(page, box.x + 50, box.y + 50, 'tee');
-	await placePoint(page, box.x + 400, box.y + 300, 'basket');
+	const box = await placeHoleOneTeeAndBasket(page);
 	await switchMode(page, 'round');
 	await placePoint(page, box.x + 200, box.y + 150, 'shot');
 	await switchMode(page, 'map');
-	await placePoint(page, box.x + 230, box.y + 180, 'bend'); // one dogleg bend
+	// placePoint's shot placement switched the radial-menu toggle on, so a
+	// bend now goes through the same menu rather than the toggle-off direct
+	// placement path (see `handleAnnotationPlacement`'s doc comment). Placed
+	// well off the tee-basket line — the floating "Approve Hole 1" button
+	// anchors at that line's midpoint and would otherwise eat this click.
+	await placePoint(page, box.x + 350, box.y + 50, 'bend'); // one dogleg bend
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');
 
-	// 2. The annotated source auto-imports; load a clean target and align.
+	// 2. The annotated source auto-imports; load a clean target and align. The
+	// target is large and the hole's translated position generously centered
+	// (offset (600, 600), scale 1, well clear of every edge) so its 16:9,
+	// padded camera fits comfortably regardless of exactly where the bend
+	// above landed in source-image pixels.
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
 	await page.getByTestId('pane-input-target-basemap').setInputFiles({
 		name: 'clean.png',
 		mimeType: 'image/png',
-		buffer: pngPayload(1000, 800, 60, 90, 40)
+		buffer: pngPayload(2400, 1800, 60, 90, 40)
 	});
-	await createPair(page, { xPx: 50, yPx: 50 }, { xPx: 100, yPx: 100 });
-	await createPair(page, { xPx: 700, yPx: 500 }, { xPx: 900, yPx: 700 });
+	await createPair(page, { xPx: 50, yPx: 50 }, { xPx: 650, yPx: 650 });
+	await createPair(page, { xPx: 700, yPx: 500 }, { xPx: 1300, yPx: 1100 });
 	await expect(page.getByTestId('alignment-summary')).toContainText('similarity transform from 2 pairs');
 
-	// 3. Exactly one buildable plan (the fully-annotated hole). Its preview
-	// renders live, with no explicit "build" step, framed to the hole's own
-	// bounding box (with padding), not the full 1000x800 target.
+	// 3. Exactly one buildable plan (the fully-annotated hole), and the
+	// workspace auto-selects it with no explicit "build" step. The preview is
+	// always framed to the canonical 16:9 camera, never the hole's own bbox
+	// shape, and stays well inside the full 2400x1800 target.
 	await page.getByTestId('hole-graphics').scrollIntoViewIfNeeded();
+	await expect(page.getByTestId('hole-thumb-1')).toHaveClass(/active/);
 	await page.waitForSelector('[data-testid="hole-graphic-preview-1"]');
 
 	const viewBox = await page.evaluate(() => {
@@ -193,12 +224,13 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	const [, , cropWidth, cropHeight] = (viewBox as string).split(' ').map(Number);
 	expect(cropWidth).toBeGreaterThan(0);
 	expect(cropHeight).toBeGreaterThan(0);
-	expect(cropWidth).toBeLessThan(1000);
-	expect(cropHeight).toBeLessThan(800);
+	expect(cropWidth).toBeLessThan(2400);
+	expect(cropHeight).toBeLessThan(1800);
+	expect(cropWidth / cropHeight).toBeCloseTo(16 / 9, 1);
 
 	// 4. Downloading renders the same geometry to a real PNG on demand.
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByTestId('hole-graphic-download-1').click();
+	await page.getByTestId('hole-graphic-download-selected').click();
 	const download = await downloadPromise;
 	expect(download.suggestedFilename()).toBe('hole-1.png');
 	const stream = await download.createReadStream();
@@ -213,4 +245,47 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	await page.getByTestId('download-all-hole-graphics').click();
 	const zipDownload = await zipDownloadPromise;
 	expect(zipDownload.suggestedFilename()).toBe('hole-graphics.zip');
+});
+
+/**
+ * Coverage for the out-of-bounds path this workspace exists to fix: a hole
+ * whose transformed geometry doesn't fit inside the clean target at the
+ * canonical framing must show a loud, specific message in the preview area —
+ * never a silently truncated crop — and must be excluded from both single
+ * and batch export.
+ */
+test('a hole that does not fit inside the clean target shows a loud out-of-bounds message, not a truncated graphic', async ({
+	page
+}) => {
+	await placeHoleOneTeeAndBasket(page);
+
+	await page.getByTestId('annotate-done').click();
+	await page.waitForURL('**/create-graphics');
+
+	// A deliberately tiny clean target: this hole's padded, 16:9-framed crop
+	// (well over 400px on a side, per the same padding math as the first test)
+	// cannot fit inside a 300x200 target regardless of exactly where the two
+	// correspondence pairs land, so alignment succeeding here reliably
+	// reproduces the "geometry extends past the target's edge" case.
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
+	await page.getByTestId('pane-input-target-basemap').setInputFiles({
+		name: 'clean.png',
+		mimeType: 'image/png',
+		buffer: pngPayload(300, 200, 60, 90, 40)
+	});
+	await createPair(page, { xPx: 50, yPx: 50 }, { xPx: 20, yPx: 20 });
+	await createPair(page, { xPx: 400, yPx: 300 }, { xPx: 200, yPx: 150 });
+	await expect(page.getByTestId('alignment-summary')).toContainText('similarity transform from 2 pairs');
+
+	await page.getByTestId('hole-graphics').scrollIntoViewIfNeeded();
+	await expect(page.getByTestId('hole-preview-out-of-bounds')).toHaveText(
+		'Hole 1 extends outside clean target — adjust target/alignment'
+	);
+	await expect(page.getByTestId('hole-thumb-1')).toHaveClass(/hole-thumb-warning/);
+
+	// Neither export path offers this graphic: the single-hole action is
+	// disabled, and "export all" both excludes it and says so.
+	await expect(page.getByTestId('hole-graphic-download-selected')).toBeDisabled();
+	await expect(page.getByTestId('download-all-hole-graphics')).toBeDisabled();
+	await expect(page.getByTestId('hole-graphics-out-of-bounds-count')).toContainText('1 hole out of bounds, excluded');
 });

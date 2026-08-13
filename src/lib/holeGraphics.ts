@@ -59,8 +59,22 @@ export interface HoleGraphicPlan {
 	 * `viewBox` clipping handles the rest, so points outside this hole's crop are fine.
 	 */
 	readonly walkingPath: readonly TargetPoint[];
-	/** Crop rectangle in target-image pixels, already clamped to the target image bounds. */
+	/**
+	 * Crop rectangle in target-image pixels, framed at `HoleFramingOptions.aspectRatio`
+	 * around the hole's own padded bounding box. Never clamped to the target image's
+	 * bounds — when the hole's geometry sits close enough to the target's edge that
+	 * this crop would fall outside it, `outOfBounds` is true instead, and this rect
+	 * is the true (unclamped) camera a caller would need if the target were larger.
+	 */
 	readonly crop: CropRect;
+	/**
+	 * True when `crop` extends beyond `[0, targetWidthPx] x [0, targetHeightPx]` — the
+	 * transformed hole doesn't fit inside the clean target at this framing. A caller
+	 * must treat this as invalid framing (surface it, exclude it from export), never
+	 * render `crop` as-is: doing so would silently cut the hole's geometry off at the
+	 * target's edge instead of flagging the misalignment that caused it.
+	 */
+	readonly outOfBounds: boolean;
 	/** The full (uncropped) target image's own pixel dimensions. */
 	readonly targetWidthPx: number;
 	readonly targetHeightPx: number;
@@ -70,6 +84,8 @@ export interface HoleGraphicPlan {
 const CROP_PADDING_FRACTION = 0.2;
 /** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
 const MIN_CROP_PADDING_PX = 40;
+/** Canonical output shape: every crop is framed to this width/height ratio, never the hole's own bbox shape. */
+const DEFAULT_ASPECT_RATIO = 16 / 9;
 
 /**
  * Framing/crop parameters for `planHoleGraphic`, factored out as an explicit
@@ -82,30 +98,42 @@ export interface HoleFramingOptions {
 	readonly paddingFraction: number;
 	/** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
 	readonly minPaddingPx: number;
+	/**
+	 * Output crop's width/height ratio. The crop is always framed to this shape — a
+	 * camera that contains the hole's padded bounding box — rather than letting the
+	 * bounding box's own aspect ratio dictate the output shape.
+	 */
+	readonly aspectRatio: number;
 }
 
 export const DEFAULT_HOLE_FRAMING: HoleFramingOptions = {
 	paddingFraction: CROP_PADDING_FRACTION,
-	minPaddingPx: MIN_CROP_PADDING_PX
+	minPaddingPx: MIN_CROP_PADDING_PX,
+	aspectRatio: DEFAULT_ASPECT_RATIO
 };
-
-function clamp(value: number, min: number, max: number): number {
-	return Math.min(Math.max(value, min), Math.max(min, max));
-}
 
 /**
  * Plans one hole's clean graphic: transforms every present feature point into
- * target-image pixels and derives a padded crop rectangle, clamped to the
- * target image's own bounds. Returns null for a hole with no placed features
- * at all — there's nothing to frame. The crop frame itself is intentionally
+ * target-image pixels and derives a padded crop rectangle framed to
+ * `framing.aspectRatio`. Returns null for a hole with no placed features at
+ * all — there's nothing to frame. The crop frame itself is intentionally
  * driven only by tee/basket/shots/corridorBand (unchanged from before
  * centerline/bends were added as renderable fields): the corridor band, when
  * present, already encloses every bend on its centerline, so a bends-only
  * hole with no tee or basket still correctly plans to null.
  *
- * `framing` controls the crop's padding and defaults to today's hardcoded
- * behavior (`DEFAULT_HOLE_FRAMING`); pass it to change how tightly the crop
- * frames a hole's points without touching any other caller.
+ * `framing` controls the crop's padding and output shape and defaults to
+ * today's hardcoded behavior (`DEFAULT_HOLE_FRAMING`); pass it to change how
+ * tightly or in what aspect ratio the crop frames a hole's points without
+ * touching any other caller.
+ *
+ * The crop is a camera that *contains* the padded bounding box at a fixed
+ * aspect ratio, centered on it — never the bounding box's own shape, and
+ * never clamped to the target image's bounds. When that camera would fall
+ * outside the target image, the hole's geometry doesn't actually fit inside
+ * the clean target at this framing; `outOfBounds` reports that instead of
+ * silently truncating the crop (which would cut the hole's geometry off at
+ * the target's edge with no signal that anything was wrong).
  *
  * `walkingPath` is the round's whole walking route (not per-hole data), passed through
  * the same transform and included on every hole's plan unclipped; it never affects
@@ -144,15 +172,20 @@ export function planHoleGraphic(
 	const paddingX = Math.max(framing.minPaddingPx, (maxX - minX) * framing.paddingFraction);
 	const paddingY = Math.max(framing.minPaddingPx, (maxY - minY) * framing.paddingFraction);
 
-	const rawX = minX - paddingX;
-	const rawY = minY - paddingY;
-	const rawRight = maxX + paddingX;
-	const rawBottom = maxY + paddingY;
+	const paddedWidth = maxX - minX + paddingX * 2;
+	const paddedHeight = maxY - minY + paddingY * 2;
+	const centerX = minX - paddingX + paddedWidth / 2;
+	const centerY = minY - paddingY + paddedHeight / 2;
 
-	const cropX = clamp(rawX, 0, targetWidthPx);
-	const cropY = clamp(rawY, 0, targetHeightPx);
-	const cropRight = clamp(rawRight, cropX, targetWidthPx);
-	const cropBottom = clamp(rawBottom, cropY, targetHeightPx);
+	// The camera that contains the padded bounding box at `framing.aspectRatio`,
+	// centered on it — grows whichever dimension the bbox is short on, never
+	// shrinks below it.
+	const cropWidth = paddedWidth / paddedHeight > framing.aspectRatio ? paddedWidth : paddedHeight * framing.aspectRatio;
+	const cropHeight = cropWidth / framing.aspectRatio;
+	const cropX = centerX - cropWidth / 2;
+	const cropY = centerY - cropHeight / 2;
+
+	const outOfBounds = cropX < 0 || cropY < 0 || cropX + cropWidth > targetWidthPx || cropY + cropHeight > targetHeightPx;
 
 	return {
 		holeId: hole.id,
@@ -168,9 +201,10 @@ export function planHoleGraphic(
 		crop: {
 			xPx: cropX,
 			yPx: cropY,
-			widthPx: Math.max(cropRight - cropX, 1),
-			heightPx: Math.max(cropBottom - cropY, 1)
+			widthPx: Math.max(cropWidth, 1),
+			heightPx: Math.max(cropHeight, 1)
 		},
+		outOfBounds,
 		targetWidthPx,
 		targetHeightPx
 	};
@@ -221,6 +255,26 @@ function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel:
 }
 
 /**
+ * Which optional overlay layers `buildHoleGraphicMarkup` renders. The
+ * corridor band, info card, and tee/basket markers are never toggled — they
+ * are the hole's core shape and essential reference points, not clutter.
+ * These three are the layers a course-graphics creator would plausibly want
+ * to declutter: UDisc's recorded walking route, the derived centerline/bend
+ * guide, and shot markers with their tee-through-shots guide line.
+ */
+export interface HoleGraphicLayers {
+	readonly walkingPath: boolean;
+	readonly centerlineAndBends: boolean;
+	readonly shots: boolean;
+}
+
+export const DEFAULT_HOLE_GRAPHIC_LAYERS: HoleGraphicLayers = {
+	walkingPath: true,
+	centerlineAndBends: true,
+	shots: true
+};
+
+/**
  * Builds one hole's clean graphic as self-contained SVG markup: the target
  * image cropped via `viewBox` (the full image is placed at its own pixel
  * size; the viewport does the cropping, so no pixel-copy step is needed),
@@ -231,7 +285,9 @@ function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel:
  * `graphics/style.ts`), defaulting to `DEFAULT_GRAPHIC_STYLE`. `feetPerPixel`
  * (see `naipMetersPerPixel`/`metersToFeet`) adds real-world hole length and
  * distance-to-pin to the info card when the caller has a known ground scale;
- * omit it to leave those lines off.
+ * omit it to leave those lines off. `layers` toggles the optional overlays
+ * (see `HoleGraphicLayers`) and defaults to everything visible, matching this
+ * function's behavior before layer toggles existed.
  *
  * Styling is inlined (not CSS classes) so the markup rasterizes correctly
  * standalone — e.g. via a `data:image/svg+xml` URI — without depending on an
@@ -241,7 +297,8 @@ export function buildHoleGraphicMarkup(
 	plan: HoleGraphicPlan,
 	targetImageHref: string,
 	style: GraphicStyle = DEFAULT_GRAPHIC_STYLE,
-	feetPerPixel?: number
+	feetPerPixel?: number,
+	layers: HoleGraphicLayers = DEFAULT_HOLE_GRAPHIC_LAYERS
 ): string {
 	const { crop } = plan;
 	const parts: string[] = [];
@@ -261,32 +318,34 @@ export function buildHoleGraphicMarkup(
 	// UDisc's walking route, sitting with the other corridor layers (under every
 	// marker) rather than dashed like the centerline: it is a real recorded path,
 	// not a derived reference line.
-	if (plan.walkingPath.length >= 2) {
+	if (layers.walkingPath && plan.walkingPath.length >= 2) {
 		parts.push(
 			`<polyline points="${pointsAttr(plan.walkingPath)}" fill="none" stroke="${escapeAttr(style.walkingPathColor)}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />`
 		);
 	}
 
-	if (plan.centerline.length >= 2) {
+	if (layers.centerlineAndBends && plan.centerline.length >= 2) {
 		parts.push(
 			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="${escapeAttr(style.pathHaloColor)}" stroke-width="1.5" stroke-dasharray="6 4" />`
 		);
 	}
 
-	for (const bend of plan.bends) {
-		parts.push(
-			`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="${escapeAttr(style.pathColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
-		);
+	if (layers.centerlineAndBends) {
+		for (const bend of plan.bends) {
+			parts.push(
+				`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="${escapeAttr(style.pathColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+			);
+		}
 	}
 
-	const guidePoints = [...(plan.tee ? [plan.tee] : []), ...plan.shots];
+	const guidePoints = layers.shots ? [...(plan.tee ? [plan.tee] : []), ...plan.shots] : [];
 	if (guidePoints.length >= 2) {
 		parts.push(
 			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" stroke-dasharray="6 4" />`
 		);
 	}
 
-	for (const shot of plan.shots) {
+	for (const shot of layers.shots ? plan.shots : []) {
 		parts.push(
 			`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="8" fill="${escapeAttr(style.shotColor)}" stroke="${escapeAttr(style.shotStrokeColor)}" stroke-width="1.5" />`
 		);
@@ -352,9 +411,10 @@ export async function renderHoleGraphicPng(
 	plan: HoleGraphicPlan,
 	env: HoleGraphicRenderEnv = defaultHoleGraphicRenderEnv,
 	style: GraphicStyle = DEFAULT_GRAPHIC_STYLE,
-	feetPerPixel?: number
+	feetPerPixel?: number,
+	layers: HoleGraphicLayers = DEFAULT_HOLE_GRAPHIC_LAYERS
 ): Promise<Blob> {
-	const markup = buildHoleGraphicMarkup(plan, targetImageHref, style, feetPerPixel);
+	const markup = buildHoleGraphicMarkup(plan, targetImageHref, style, feetPerPixel, layers);
 	const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
 	const image = await env.loadImage(svgUrl);
 

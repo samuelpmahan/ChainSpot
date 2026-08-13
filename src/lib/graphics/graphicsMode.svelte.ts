@@ -16,8 +16,14 @@
  * rasterized. Nothing here builds that yet; it just names the boundary so
  * the next engineer knows why it exists.
  */
-import { DEFAULT_HOLE_FRAMING, planHoleGraphic, renderHoleGraphicPng, zipHoleGraphics } from '$lib/holeGraphics';
-import type { HoleGraphicPlan } from '$lib/holeGraphics';
+import {
+	DEFAULT_HOLE_FRAMING,
+	DEFAULT_HOLE_GRAPHIC_LAYERS,
+	planHoleGraphic,
+	renderHoleGraphicPng,
+	zipHoleGraphics
+} from '$lib/holeGraphics';
+import type { HoleGraphicLayers, HoleGraphicPlan } from '$lib/holeGraphics';
 import { DEFAULT_GRAPHIC_STYLE, findGraphicStyle } from '$lib/graphics/style';
 import type { GraphicStyle } from '$lib/graphics/style';
 import type { AnnotatedHole, SourcePoint } from '$lib/domain/annotatedRound';
@@ -76,6 +82,16 @@ export class GraphicsMode {
 	#inputs: GraphicsModeInputs;
 
 	styleId = $state(DEFAULT_GRAPHIC_STYLE.id);
+	/** Optional overlay toggles (see `HoleGraphicLayers`) — bound directly from the workspace's visibility checkboxes, same pattern as `styleId`. */
+	layers = $state<HoleGraphicLayers>({ ...DEFAULT_HOLE_GRAPHIC_LAYERS });
+	/**
+	 * The workspace's active hole, by `AnnotatedHole.id` — set explicitly via
+	 * `selectHole`, never inferred. A hole with no placed points yet is a
+	 * valid selection (its plan is simply absent); this never substitutes a
+	 * different hole's graphic just because the selected one has nothing to
+	 * show, since that would silently show the wrong hole.
+	 */
+	selectedHoleId = $state<string | null>(null);
 	downloading = $state<Set<string>>(new Set());
 	zipping = $state(false);
 	error = $state<string | null>(null);
@@ -115,17 +131,41 @@ export class GraphicsMode {
 
 	style: GraphicStyle = $derived(findGraphicStyle(this.styleId));
 
+	/**
+	 * The selected hole's plan, or null when nothing is selected yet or the
+	 * selected hole has no placed points. Deliberately does not fall back to
+	 * a different hole — see `selectedHoleId`'s docstring.
+	 */
+	selectedPlan: HoleGraphicPlan | null = $derived.by(() => {
+		if (!this.selectedHoleId) return null;
+		return this.plans.find((plan) => plan.holeId === this.selectedHoleId) ?? null;
+	});
+
+	/** How many of `plans` are out-of-bounds and therefore excluded from `downloadAll` — surfaced so a skip is never silent. */
+	outOfBoundsCount: number = $derived.by(() => this.plans.filter((plan) => plan.outOfBounds).length);
+
 	constructor(inputs: GraphicsModeInputs) {
 		this.#inputs = inputs;
 	}
 
+	selectHole(holeId: string): void {
+		this.selectedHoleId = holeId;
+	}
+
 	async downloadOne(plan: HoleGraphicPlan): Promise<void> {
 		const href = this.#inputs.targetImageHref();
-		if (!href || this.downloading.has(plan.holeId)) return;
+		if (!href || plan.outOfBounds || this.downloading.has(plan.holeId)) return;
 		this.downloading = new Set(this.downloading).add(plan.holeId);
 		this.error = null;
 		try {
-			const blob = await renderHoleGraphicPng(href, plan, undefined, this.style, this.#inputs.feetPerPixel());
+			const blob = await renderHoleGraphicPng(
+				href,
+				plan,
+				undefined,
+				this.style,
+				this.#inputs.feetPerPixel(),
+				this.layers
+			);
 			triggerBlobDownload(blob, `hole-${plan.number}.png`);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Could not render the hole graphic.';
@@ -176,18 +216,24 @@ export class GraphicsMode {
 		}
 	}
 
+	/**
+	 * Zips every in-bounds plan. Out-of-bounds holes are excluded rather than
+	 * zipped with a truncated crop — `outOfBoundsCount` is how the workspace
+	 * surfaces that exclusion instead of it being a silent skip.
+	 */
 	async downloadAll(): Promise<void> {
-		const plans = this.plans;
+		const exportablePlans = this.plans.filter((plan) => !plan.outOfBounds);
 		const href = this.#inputs.targetImageHref();
-		if (plans.length === 0 || !href || this.zipping) return;
+		if (exportablePlans.length === 0 || !href || this.zipping) return;
 		this.zipping = true;
 		this.error = null;
 		try {
 			const style = this.style;
 			const feetPerPixel = this.#inputs.feetPerPixel();
+			const layers = this.layers;
 			const entries: { number: number; blob: Blob }[] = [];
-			for (const plan of plans) {
-				const blob = await renderHoleGraphicPng(href, plan, undefined, style, feetPerPixel);
+			for (const plan of exportablePlans) {
+				const blob = await renderHoleGraphicPng(href, plan, undefined, style, feetPerPixel, layers);
 				entries.push({ number: plan.number, blob });
 			}
 			const zip = await zipHoleGraphics(entries);

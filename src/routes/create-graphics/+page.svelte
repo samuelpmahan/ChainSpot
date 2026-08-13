@@ -192,6 +192,11 @@
 		return editor.state.holes;
 	}
 
+	/** Holes 1-18 in scorecard order, for the Hole graphics workspace's thumbnail strip. */
+	function orderedHoles(): AnnotatedHole[] {
+		return [...currentHoles()].filter((hole) => hole.number >= 1 && hole.number <= 18).sort((a, b) => a.number - b.number);
+	}
+
 	/**
 	 * The walking path, same "durable project state, not the session artifact"
 	 * rule as `currentHoles` — a project reopened from a saved bundle has a
@@ -242,6 +247,18 @@
 		feetPerPixel: holeGraphicFeetPerPixel,
 		walkingPath: () => currentWalkingPath(),
 		geoReference: () => targetGeoReference()
+	});
+
+	/**
+	 * Seeds the Hole graphics workspace's selection with the first hole that
+	 * has a plan, exactly once — never re-fires once a selection exists, so
+	 * clearing the selected hole's own points shows its empty state in place
+	 * rather than silently jumping the user to a different hole.
+	 */
+	$effect(() => {
+		if (graphicsMode.selectedHoleId !== null) return;
+		const first = graphicsMode.plans[0];
+		if (first) graphicsMode.selectHole(first.holeId);
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -2421,83 +2438,173 @@
 	{#if currentHoles().length > 0 && targetImage()}
 		<section class="hole-graphics" data-testid="hole-graphics" aria-labelledby="hole-graphics-heading">
 			<h2 id="hole-graphics-heading">Hole graphics</h2>
-			<p class="alignment-empty">
-				Applies the alignment above to every annotated hole's tee, basket, shot,
-				bend, and corridor points, live — previews below update as annotations or
-				the alignment change. Holes with no placed points yet are skipped.
-			</p>
 			{#if graphicsMode.plans.length === 0}
 				<p class="alignment-empty" data-testid="hole-graphics-empty">
 					No hole has both a placed point and a usable alignment yet.
 				</p>
 			{:else}
-				<label class="hole-graphic-style">
-					Color theme
-					<select data-testid="hole-graphic-style" bind:value={graphicsMode.styleId}>
-						{#each GRAPHIC_STYLE_PRESETS as preset (preset.id)}
-							<option value={preset.id}>{preset.name}</option>
-						{/each}
-					</select>
-				</label>
-				{#if targetGroundScaleMetersPerPixel !== null}
-					<p class="alignment-empty" data-testid="hole-graphics-ground-scale">
-						Real hole distances shown (ground scale from the NAIP fetch).
-					</p>
-				{/if}
-				<button
-					type="button"
-					data-testid="download-all-hole-graphics"
-					disabled={graphicsMode.zipping}
-					onclick={() => graphicsMode.downloadAll()}
-				>
-					{graphicsMode.zipping ? 'Zipping…' : `Download all ${graphicsMode.plans.length} as .zip`}
-				</button>
-			{/if}
-			{#if graphicsMode.error}
-				<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
-			{/if}
-			{#if graphicsMode.plans.length > 0}
 				{@const href = targetImageHref()}
-				<ul class="hole-graphic-list" data-testid="hole-graphic-list">
-					{#each graphicsMode.plans as plan (plan.holeId)}
-						<li class="hole-graphic-item">
-							{#if href}
-								<div class="hole-graphic-preview" data-testid="hole-graphic-preview-{plan.number}">
-									{@html buildHoleGraphicMarkup(plan, href, graphicsMode.style, holeGraphicFeetPerPixel())}
+				{@const selectedPlan = graphicsMode.selectedPlan}
+				{@const selectedHole = orderedHoles().find((hole) => hole.id === graphicsMode.selectedHoleId) ?? null}
+				<p class="alignment-empty">
+					Select a hole below to preview and export its clean graphic — framed to a
+					16:9 camera around its tee, basket, shots, bends, and corridor, live as
+					annotations or the alignment above change.
+				</p>
+				<div class="hole-workspace" data-testid="hole-workspace">
+					<div class="hole-workspace-main">
+						<div class="hole-preview-frame" data-testid="hole-preview-frame">
+							{#if !selectedHole}
+								<p class="hole-preview-placeholder">Select a hole below.</p>
+							{:else if !selectedPlan}
+								<p class="hole-preview-placeholder" data-testid="hole-preview-no-points">
+									No points placed for Hole {selectedHole.number} yet.
+								</p>
+							{:else if selectedPlan.outOfBounds}
+								<p class="hole-preview-out-of-bounds error" data-testid="hole-preview-out-of-bounds" role="alert">
+									Hole {selectedPlan.number} extends outside clean target — adjust target/alignment
+								</p>
+							{:else if href}
+								<div class="hole-preview-svg" data-testid="hole-graphic-preview-{selectedPlan.number}">
+									{@html buildHoleGraphicMarkup(
+										selectedPlan,
+										href,
+										graphicsMode.style,
+										holeGraphicFeetPerPixel(),
+										graphicsMode.layers
+									)}
 								</div>
 							{/if}
+						</div>
+						<div class="hole-workspace-actions">
 							<button
 								type="button"
-								data-testid="hole-graphic-download-{plan.number}"
-								disabled={!href || graphicsMode.downloading.has(plan.holeId)}
-								onclick={() => graphicsMode.downloadOne(plan)}
+								class="primary-button"
+								data-testid="hole-graphic-download-selected"
+								disabled={!href ||
+									!selectedPlan ||
+									selectedPlan.outOfBounds ||
+									graphicsMode.downloading.has(selectedPlan?.holeId ?? '')}
+								onclick={() => selectedPlan && graphicsMode.downloadOne(selectedPlan)}
 							>
-								{graphicsMode.downloading.has(plan.holeId) ? 'Rendering…' : `Download hole ${plan.number}`}
+								{selectedPlan && graphicsMode.downloading.has(selectedPlan.holeId)
+									? 'Rendering…'
+									: 'Export PNG'}
 							</button>
-							{#if graphicsMode.elevationEligible(plan)}
+							<button
+								type="button"
+								data-testid="download-all-hole-graphics"
+								disabled={graphicsMode.zipping ||
+									graphicsMode.plans.length === graphicsMode.outOfBoundsCount}
+								onclick={() => graphicsMode.downloadAll()}
+							>
+								{graphicsMode.zipping
+									? 'Zipping…'
+									: `Export all ${graphicsMode.plans.length - graphicsMode.outOfBoundsCount} as .zip`}
+							</button>
+							{#if graphicsMode.outOfBoundsCount > 0}
+								<span class="hole-workspace-note" data-testid="hole-graphics-out-of-bounds-count">
+									{graphicsMode.outOfBoundsCount} hole{graphicsMode.outOfBoundsCount === 1 ? '' : 's'} out
+									of bounds, excluded
+								</span>
+							{/if}
+						</div>
+						{#if selectedPlan && graphicsMode.elevationEligible(selectedPlan)}
+							{@const stats = graphicsMode.elevationStats.get(selectedPlan.holeId)}
+							{@const elevationError = graphicsMode.elevationErrors.get(selectedPlan.holeId)}
+							<div class="hole-workspace-actions">
 								<button
 									type="button"
-									data-testid="elevation-profile-{plan.number}"
-									disabled={graphicsMode.elevationBuilding.has(plan.holeId)}
-									onclick={() => graphicsMode.buildAndDownloadElevation(plan)}
+									data-testid="elevation-profile-{selectedPlan.number}"
+									disabled={graphicsMode.elevationBuilding.has(selectedPlan.holeId)}
+									onclick={() => selectedPlan && graphicsMode.buildAndDownloadElevation(selectedPlan)}
 								>
-									{graphicsMode.elevationBuilding.has(plan.holeId)
+									{graphicsMode.elevationBuilding.has(selectedPlan.holeId)
 										? 'Building elevation profile…'
 										: 'Elevation profile'}
 								</button>
-								{@const stats = graphicsMode.elevationStats.get(plan.holeId)}
 								{#if stats}
-									<span class="elevation-stats" data-testid="elevation-profile-stats-{plan.number}">
+									<span class="elevation-stats" data-testid="elevation-profile-stats-{selectedPlan.number}">
 										&uarr;{Math.round(stats.totalClimb)} ft &darr;{Math.round(stats.totalDescent)} ft
 									</span>
 								{/if}
-								{@const elevationError = graphicsMode.elevationErrors.get(plan.holeId)}
-								{#if elevationError}
-									<p class="error" data-testid="elevation-profile-error-{plan.number}" role="alert">
-										{elevationError}
-									</p>
-								{/if}
+							</div>
+							{#if elevationError}
+								<p class="error" data-testid="elevation-profile-error-{selectedPlan.number}" role="alert">
+									{elevationError}
+								</p>
 							{/if}
+						{/if}
+						{#if graphicsMode.error}
+							<p class="error" data-testid="hole-graphics-error" role="alert">{graphicsMode.error}</p>
+						{/if}
+					</div>
+					<div class="hole-workspace-panel">
+						<label class="hole-graphic-style">
+							Color theme
+							<select data-testid="hole-graphic-style" bind:value={graphicsMode.styleId}>
+								{#each GRAPHIC_STYLE_PRESETS as preset (preset.id)}
+									<option value={preset.id}>{preset.name}</option>
+								{/each}
+							</select>
+						</label>
+						<fieldset class="hole-layer-toggles">
+							<legend>Layers</legend>
+							<label>
+								<input
+									type="checkbox"
+									data-testid="hole-layer-walking-path"
+									bind:checked={graphicsMode.layers.walkingPath}
+								/>
+								Walking path
+							</label>
+							<label>
+								<input
+									type="checkbox"
+									data-testid="hole-layer-centerline"
+									bind:checked={graphicsMode.layers.centerlineAndBends}
+								/>
+								Centerline & bends
+							</label>
+							<label>
+								<input
+									type="checkbox"
+									data-testid="hole-layer-shots"
+									bind:checked={graphicsMode.layers.shots}
+								/>
+								Shots
+							</label>
+						</fieldset>
+						{#if targetGroundScaleMetersPerPixel !== null}
+							<p class="alignment-empty" data-testid="hole-graphics-ground-scale">
+								Real hole distances shown (ground scale from the NAIP fetch).
+							</p>
+						{/if}
+					</div>
+				</div>
+				<ul class="hole-thumb-strip" data-testid="hole-thumb-strip">
+					{#each orderedHoles() as hole (hole.id)}
+						{@const plan = graphicsMode.plans.find((candidate) => candidate.holeId === hole.id) ?? null}
+						<li>
+							<button
+								type="button"
+								class="hole-thumb"
+								class:active={hole.id === graphicsMode.selectedHoleId}
+								class:hole-thumb-empty={!plan}
+								class:hole-thumb-warning={plan?.outOfBounds}
+								data-testid="hole-thumb-{hole.number}"
+								title={plan?.outOfBounds
+									? `Hole ${hole.number} extends outside clean target`
+									: !plan
+										? `Hole ${hole.number}: no points placed yet`
+										: `Hole ${hole.number}`}
+								onclick={() => graphicsMode.selectHole(hole.id)}
+							>
+								<span class="hole-thumb-number">{hole.number}</span>
+								{#if plan?.outOfBounds}
+									<span class="hole-thumb-flag" aria-hidden="true">&#9888;</span>
+								{/if}
+							</button>
 						</li>
 					{/each}
 				</ul>
@@ -3101,7 +3208,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
-		max-width: 48rem;
+		max-width: 70rem;
 	}
 
 	.hole-graphics h2 {
@@ -3109,38 +3216,157 @@
 		font-size: 1rem;
 	}
 
-	.hole-graphic-list {
+	/* One-hole-at-a-time workspace: a big fixed-aspect preview + actions on the
+	   left, style/framing/visibility controls on the right. Collapses to a
+	   single column on narrow viewports. */
+	.hole-workspace {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 16rem;
+		gap: 1rem;
+		align-items: start;
+	}
+
+	@media (max-width: 52rem) {
+		.hole-workspace {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	.hole-workspace-main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		min-width: 0;
+	}
+
+	/* Canonical output shape (see `HoleFramingOptions.aspectRatio`, holeGraphics.ts):
+	   the preview frame is always 16:9, never the shape of whatever hole is selected. */
+	.hole-preview-frame {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		overflow: hidden;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #0f0f12;
+	}
+
+	.hole-preview-svg {
+		width: 100%;
+		height: 100%;
+	}
+
+	.hole-preview-svg :global(svg) {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+
+	.hole-preview-placeholder {
+		margin: 0;
+		padding: 1rem;
+		font-size: 0.85rem;
+		text-align: center;
+		opacity: 0.65;
+	}
+
+	.hole-preview-out-of-bounds {
+		max-width: 26rem;
+		text-align: center;
+	}
+
+	.hole-workspace-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 1rem;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.primary-button {
+		background: #2a6df4 !important;
+		border-color: #2a6df4 !important;
+		color: #f8fafc !important;
+		font-weight: 650;
+	}
+
+	.hole-workspace-note {
+		font-size: 0.75rem;
+		opacity: 0.75;
+	}
+
+	.hole-workspace-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+		padding: 0.75rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #1e1e24;
+	}
+
+	.hole-layer-toggles {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		margin: 0;
+		padding: 0;
+		border: none;
+	}
+
+	.hole-layer-toggles legend {
+		padding: 0;
+		margin-bottom: 0.15rem;
+		font-size: 0.8rem;
+		font-weight: 650;
+		opacity: 0.85;
+	}
+
+	.hole-layer-toggles label {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+	}
+
+	.hole-thumb-strip {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 
-	.hole-graphic-item {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		align-items: flex-start;
+	.hole-thumb {
+		position: relative;
+		min-width: 2.4rem;
+		min-height: 2.4rem;
+		padding: 0.3rem;
 	}
 
-	.hole-graphic-preview {
-		max-width: 14rem;
-		max-height: 10rem;
-		overflow: hidden;
-		border: 1px solid #3f3f46;
-		border-radius: 4px;
+	.hole-thumb.active {
+		border-color: #2a6df4;
+		background: rgb(42 109 244 / 15%);
 	}
 
-	.hole-graphic-preview :global(svg) {
-		display: block;
-		max-width: 100%;
-		max-height: 100%;
+	.hole-thumb-empty {
+		opacity: 0.45;
 	}
 
-	.hole-graphic-item button {
-		font-size: 0.8rem;
+	.hole-thumb-warning {
+		border-color: #fbbf24;
+	}
+
+	.hole-thumb-flag {
+		position: absolute;
+		top: -0.3rem;
+		right: -0.3rem;
+		font-size: 0.7rem;
+		line-height: 1;
+		color: #fbbf24;
 	}
 
 	.elevation-stats {
@@ -3150,8 +3376,10 @@
 
 	.hole-graphic-style {
 		display: flex;
-		align-items: center;
-		gap: 0.4rem;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.25rem;
+		font-size: 0.85rem;
 	}
 
 	.point-inspector {

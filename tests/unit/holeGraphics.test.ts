@@ -35,7 +35,7 @@ describe('planHoleGraphic', () => {
 		expect(planHoleGraphic(hole, IDENTITY, 1000, 1000)).toBeNull();
 	});
 
-	test('transforms tee/basket/shots/centerline/bends and the derived corridor band, and frames a padded, clamped crop', () => {
+	test('transforms tee/basket/shots/centerline/bends and the derived corridor band, and frames a padded in-bounds crop', () => {
 		const hole: AnnotatedHole = {
 			id: 'h1',
 			number: 5,
@@ -77,31 +77,44 @@ describe('planHoleGraphic', () => {
 		expect(plan!.crop.xPx + plan!.crop.widthPx).toBeGreaterThanOrEqual(Math.max(...bandX));
 		expect(plan!.crop.yPx).toBeLessThanOrEqual(Math.min(...bandY));
 		expect(plan!.crop.yPx + plan!.crop.heightPx).toBeGreaterThanOrEqual(Math.max(...bandY));
+		expect(plan!.outOfBounds).toBe(false);
 	});
 
-	test('a single-point hole gets the minimum padding floor, not a zero-size crop', () => {
+	test('a single-point hole gets the minimum padding floor, framed to the default 16:9 aspect ratio', () => {
 		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
 		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
-		expect(plan!.crop).toEqual({ xPx: 460, yPx: 460, widthPx: 80, heightPx: 80 });
+		// Padded bbox is 80x80 (the 40px floor on every side of a single point);
+		// height-driven since 80/80 < 16/9, so height stays 80 and width grows to fill 16:9.
+		const cropWidth = 80 * (16 / 9);
+		expect(plan!.crop.heightPx).toBeCloseTo(80);
+		expect(plan!.crop.widthPx).toBeCloseTo(cropWidth);
+		expect(plan!.crop.yPx).toBeCloseTo(460);
+		expect(plan!.crop.xPx).toBeCloseTo(500 - cropWidth / 2);
+		expect(plan!.outOfBounds).toBe(false);
 	});
 
-	test('clamps the crop to the target image bounds near an edge', () => {
+	test('flags an out-of-bounds hole instead of clamping its crop', () => {
 		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 5, yPx: 5 }, corridorBends: [], corridorWidthPx: 60 };
 		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
-		expect(plan!.crop.xPx).toBe(0);
-		expect(plan!.crop.yPx).toBe(0);
-		expect(plan!.crop.widthPx).toBeLessThanOrEqual(45);
-		expect(plan!.crop.heightPx).toBeLessThanOrEqual(45);
+		// The 40px padding floor alone pushes the padded bbox's top-left negative
+		// (5 - 40 = -35); the 16:9 camera only grows from there, so the crop must
+		// extend further out of bounds, not get truncated to fit.
+		expect(plan!.outOfBounds).toBe(true);
+		expect(plan!.crop.xPx).toBeLessThan(0);
+		expect(plan!.crop.yPx).toBeLessThan(0);
 	});
 
 	test('a non-default framing option changes the plan crop', () => {
 		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
-		const tightFraming: HoleFramingOptions = { paddingFraction: 0.2, minPaddingPx: 5 };
+		// A square (1:1) aspect keeps this specific case's numbers simple to assert exactly.
+		const tightFraming: HoleFramingOptions = { paddingFraction: 0.2, minPaddingPx: 5, aspectRatio: 1 };
 
 		const defaultPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
 		const tightPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000, tightFraming);
 
-		expect(defaultPlan!.crop).toEqual({ xPx: 460, yPx: 460, widthPx: 80, heightPx: 80 });
+		const defaultCropWidth = 80 * (16 / 9);
+		expect(defaultPlan!.crop.heightPx).toBeCloseTo(80);
+		expect(defaultPlan!.crop.widthPx).toBeCloseTo(defaultCropWidth);
 		expect(tightPlan!.crop).toEqual({ xPx: 495, yPx: 495, widthPx: 10, heightPx: 10 });
 		expect(tightPlan!.crop).not.toEqual(defaultPlan!.crop);
 	});

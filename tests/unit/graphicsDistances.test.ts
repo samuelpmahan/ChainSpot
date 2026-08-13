@@ -16,6 +16,7 @@ function planFor(overrides: Partial<HoleGraphicPlan>): HoleGraphicPlan {
 		bends: [],
 		walkingPath: [],
 		crop: CROP,
+		outOfBounds: false,
 		targetWidthPx: 400,
 		targetHeightPx: 400,
 		...overrides
