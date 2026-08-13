@@ -1,0 +1,22 @@
+course,hole,truth_category,truth_count,shape_truth_containment_before,rdp_count,rdp_bends_px,rdp_location_errors_px,rdp_incoming_headings_deg,rdp_outgoing_headings_deg,rdp_turn_angles_deg,rdp_turn_angles_rad,rdp_detected_shape_containment_before,rdp_detected_shape_containment_after,rdp_truth_containment_after,status,piecewise_count,piecewise_location_errors_px,heading_count,heading_location_errors_px,capsule_count,capsule_location_errors_px
+Dash,1,gentle,1,0.948,1,"(610.9,475.1)",33.3,171.0,-151.6,37.3,0.6516,1.0,1.0,0.948,GOOD,1,37.7,1,33.7,1,33.3
+Dash,2,gentle,1,0.949,1,"(668.8,586.2)",21.6,3.7,-14.5,-18.3,-0.319,1.0,1.0,0.949,GOOD,1,21.6,1,20.7,1,21.6
+Dash,3,straight,0,0.946,0,,,,,,,1.0,1.0,0.946,GOOD,0,,0,,0,
+Dash,4,late bend,1,0.903,1,"(444.0,744.0)",85.5,82.4,95.6,13.2,0.2302,1.0,1.0,0.903,LOCATION WRONG,1,85.5,1,85.9,0,
+Dash,5,dogleg,1,0.982,1,"(605.6,777.7)",4.3,-33.4,13.1,46.6,0.813,1.0,1.0,0.982,GOOD,1,4.3,1,4.1,1,4.3
+Dash,6,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,7,gentle,1,0.954,1,"(549.1,980.7)",29.7,-0.5,-23.5,-23.0,-0.4012,1.0,1.0,0.954,GOOD,1,29.7,1,29.3,1,29.7
+Dash,8,dogleg,1,0.91,1,"(461.0,1068.0)",67.5,133.3,109.1,-24.2,-0.4232,1.0,1.0,0.838,LOCATION WRONG,1,67.5,1,68.1,1,49.2
+Dash,9,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,10,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,11,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,12,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,13,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,14,dogleg,1,0.927,1,"(734.3,1377.5)",13.6,-67.3,-33.2,34.1,0.5952,1.0,1.0,0.926,GOOD,1,21.9,1,13.6,1,13.6
+Dash,15,gentle,1,0.958,1,"(943.3,1179.5)",28.6,-69.5,-46.1,23.4,0.409,1.0,1.0,0.958,GOOD,1,28.6,1,27.9,1,28.6
+Dash,16,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,17,straight,0,,0,,,,,,,1.0,1.0,,GOOD,0,,0,,0,
+Dash,18,two-bend,2,0.967,2,"(906.9,738.4);(999.3,572.7)",25.7;15.1,-43.4;-60.9,-60.9;-89.6,-17.4;-28.8,-0.3041;-0.502,1.0,1.0,0.967,GOOD,2,20.2;15.1,2,26.6;15.7,2,25.7;15.1
+AlexClark,1,bent,1,0.945,1,"(725.6,732.9)",48.1,67.6,23.9,-43.7,-0.7626,1.0,1.0,0.945,LOCATION WRONG,1,48.1,1,48.1,1,48.1
+AlexClark,2,bent,1,0.739,1,"(850.6,93.2)",66.9,10.6,49.4,38.8,0.6777,1.0,1.0,0.739,SHAPE BAD,1,66.9,1,67.3,1,66.9
+AlexClark,3,bent,1,0.94,1,"(485.2,1691.9)",20.9,-140.7,-116.7,24.0,0.4194,1.0,1.0,0.94,GOOD,1,20.9,1,21.2,1,20.9

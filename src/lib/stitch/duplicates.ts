@@ -64,6 +64,6 @@ export function findDuplicateRasters(
  */
 export function duplicateImageMessage(firstName: string, duplicateName: string): string {
 	return firstName === duplicateName
-		? `"${duplicateName}" was selected twice. The four screenshots must be four different captures of the course.`
-		: `"${duplicateName}" is the same image as "${firstName}". The four screenshots must be four different captures of the course, so check for a duplicated or re-saved screenshot.`;
+		? `"${duplicateName}" was selected twice. Every screenshot must be a different capture of the course.`
+		: `"${duplicateName}" is the same image as "${firstName}". Every screenshot must be a different capture of the course, so check for a duplicated or re-saved screenshot.`;
 }

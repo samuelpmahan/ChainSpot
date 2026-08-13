@@ -21,9 +21,9 @@
  * results are deterministic given the same decoded pixels — identical to the
  * inline analysis path unit tests exercise.
  */
-import { assignFour, assignTwo, layoutForSlots } from './autoLayout';
+import { assignN } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
-import { proposeCropDetailed } from './autoCrop';
+import { DEFAULT_CROP_SAFETY_MARGIN_PX, proposeCropDetailed } from './autoCrop';
 import { classifyLayout } from './diagnostics';
 import { findDuplicateRasters } from './duplicates';
 import type { DuplicateRasterPair } from './duplicates';
@@ -31,7 +31,7 @@ import { DEFAULT_CROP_ANALYSIS_MAX_DIM, DEFAULT_MAX_ANALYSIS_DIM } from './analy
 import type { AnalysisRaster, RasterRegion } from './analysis';
 import { matcherRegionFromCrop } from './cropGate';
 import { loadCv, warmMatchTemplate } from './cvMatch';
-import type { StitchLayout, TileSlot } from './geometry';
+import type { TileNeighbors, TileSlot } from './geometry';
 
 // Eager warm-up (P1-002 1b, extended 1c): a worker is constructed once and
 // reused for the life of the tab (see `smartImport.ts`'s `smartStitchWorker`
@@ -39,7 +39,7 @@ import type { StitchLayout, TileSlot } from './geometry';
 // first evaluates — i.e. as soon as the worker is constructed, well before
 // any real analysis request arrives — moves the ~6-8.5s cold parse+compile
 // off the critical path of the first actual smart-import call. Fire-and-
-// forget: `loadCv()` caches its promise, so the real `assignFour` call below
+// forget: `loadCv()` caches its promise, so the real `assignN` call below
 // simply awaits the same (by then likely already-resolved) instance.
 //
 // Once `loadCv()` resolves, `warmMatchTemplate` runs one throwaway
@@ -53,6 +53,8 @@ void loadCv().then((cv) => warmMatchTemplate(cv));
 interface WorkerRequest {
 	readonly token: string;
 	readonly bitmaps: readonly ImageBitmap[];
+	/** See `SmartImportOptions.applyCropMargin` in smartImport.ts. */
+	readonly applyCropMargin?: boolean;
 }
 
 interface WorkerReply {
@@ -67,7 +69,8 @@ interface WorkerReply {
 	readonly duplicate?: DuplicateRasterPair;
 	readonly assignment?: AutoLayout['assignment'];
 	readonly placements?: AutoLayout['placements'];
-	readonly layoutKind?: StitchLayout;
+	readonly order?: readonly TileSlot[];
+	readonly neighbors?: TileNeighbors;
 	readonly cropProposal?: ReturnType<typeof proposeCropDetailed>['insets'];
 	readonly crop?: { readonly proposal: ReturnType<typeof proposeCropDetailed>['insets']; readonly confidence: 'high' | 'low' | 'absent' };
 	readonly diagnostic?: ReturnType<typeof classifyLayout>;
@@ -101,7 +104,7 @@ function rasterFromBitmap(bitmap: ImageBitmap, maxDim: number, region?: RasterRe
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-	const { token, bitmaps } = event.data;
+	const { token, bitmaps, applyCropMargin = true } = event.data;
 	try {
 		// Crop evidence is computed first, from the full frame, so a confidently
 		// defensible shared crop can trim the matcher rasters to their interior
@@ -109,7 +112,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 		const cropRasters = bitmaps.map((bitmap) =>
 			rasterFromBitmap(bitmap, DEFAULT_CROP_ANALYSIS_MAX_DIM)
 		);
-		const crop = proposeCropDetailed(cropRasters);
+		const crop = proposeCropDetailed(cropRasters, {
+			marginPx: applyCropMargin ? DEFAULT_CROP_SAFETY_MARGIN_PX : 0
+		});
 		const matcher = bitmaps.map((bitmap) => {
 			const region = matcherRegionFromCrop(crop, bitmap.width, bitmap.height);
 			return rasterFromBitmap(bitmap, DEFAULT_MAX_ANALYSIS_DIM, region ?? undefined);
@@ -125,9 +130,8 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			return;
 		}
 
-		const layout = matcher.length === 4 ? await assignFour(matcher) : await assignTwo(matcher);
-		const layoutKind = layoutForSlots(Object.keys(layout.assignment) as TileSlot[]);
-		const diagnostic = classifyLayout(layout, layoutKind);
+		const layout = await assignN(matcher);
+		const diagnostic = classifyLayout(layout);
 		// Crop confidence is independent of layout confidence (see cropGate.ts):
 		// whatever crop evidence exists is surfaced as-is.
 		const cropResult = { proposal: crop.insets, confidence: crop.confidence };
@@ -136,7 +140,8 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 			token,
 			assignment: layout.assignment,
 			placements: layout.placements,
-			layoutKind,
+			order: layout.order,
+			neighbors: layout.neighbors,
 			cropProposal: cropResult.proposal,
 			crop: cropResult,
 			diagnostic

@@ -1,0 +1,193 @@
+{
+  "frozenInput": {
+    "Dash": "hole-path-results/hole-paths-v2.json",
+    "AlexClark": "hole-path-results/alexclark-hole-paths.json",
+    "note": "No raster segmentation/path fitting is run."
+  },
+  "parameters": {
+    "rdpEpsilonPx": 10.0,
+    "piecewisePenaltyPx2PerBend": 25.0,
+    "headingWindowPx": 50.0,
+    "headingThresholdDeg": 10.0,
+    "detectedCorridorRadiusPx": 21.0,
+    "diagnosticLocationWrongPx": 42.0,
+    "diagnosticShapeBadContainment": 0.8
+  },
+  "aggregates": {
+    "capsule": {
+      "Dash": {
+        "rawLabeledHoles": 18,
+        "rawExact012CountAccuracy": 0.944,
+        "evaluatedShapeGoodHoles": 18,
+        "shapeBadHoles": 0,
+        "straightVsBentAccuracy": 0.944,
+        "exact012CountAccuracy": 0.944,
+        "falseBendsOnStraightHoles": 0,
+        "straightHoleCount": 9,
+        "missedBendCount": 1,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 25.7,
+        "maxBendLocationErrorPx": 49.2,
+        "rawMedianBendLocationErrorPx": 25.7,
+        "rawMaxBendLocationErrorPx": 49.2
+      },
+      "AlexClark": {
+        "rawLabeledHoles": 3,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 2,
+        "shapeBadHoles": 1,
+        "straightVsBentAccuracy": null,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": null,
+        "straightHoleCount": 0,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 34.5,
+        "maxBendLocationErrorPx": 48.1,
+        "rawMedianBendLocationErrorPx": 48.1,
+        "rawMaxBendLocationErrorPx": 66.9
+      }
+    },
+    "rdp": {
+      "Dash": {
+        "rawLabeledHoles": 18,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 18,
+        "shapeBadHoles": 0,
+        "straightVsBentAccuracy": 1.0,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": 0,
+        "straightHoleCount": 9,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 27.1,
+        "maxBendLocationErrorPx": 85.5,
+        "rawMedianBendLocationErrorPx": 27.1,
+        "rawMaxBendLocationErrorPx": 85.5
+      },
+      "AlexClark": {
+        "rawLabeledHoles": 3,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 2,
+        "shapeBadHoles": 1,
+        "straightVsBentAccuracy": null,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": null,
+        "straightHoleCount": 0,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 34.5,
+        "maxBendLocationErrorPx": 48.1,
+        "rawMedianBendLocationErrorPx": 48.1,
+        "rawMaxBendLocationErrorPx": 66.9
+      }
+    },
+    "piecewise": {
+      "Dash": {
+        "rawLabeledHoles": 18,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 18,
+        "shapeBadHoles": 0,
+        "straightVsBentAccuracy": 1.0,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": 0,
+        "straightHoleCount": 9,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 25.2,
+        "maxBendLocationErrorPx": 85.5,
+        "rawMedianBendLocationErrorPx": 25.2,
+        "rawMaxBendLocationErrorPx": 85.5
+      },
+      "AlexClark": {
+        "rawLabeledHoles": 3,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 2,
+        "shapeBadHoles": 1,
+        "straightVsBentAccuracy": null,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": null,
+        "straightHoleCount": 0,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 34.5,
+        "maxBendLocationErrorPx": 48.1,
+        "rawMedianBendLocationErrorPx": 48.1,
+        "rawMaxBendLocationErrorPx": 66.9
+      }
+    },
+    "heading": {
+      "Dash": {
+        "rawLabeledHoles": 18,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 18,
+        "shapeBadHoles": 0,
+        "straightVsBentAccuracy": 1.0,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": 0,
+        "straightHoleCount": 9,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 27.2,
+        "maxBendLocationErrorPx": 85.9,
+        "rawMedianBendLocationErrorPx": 27.2,
+        "rawMaxBendLocationErrorPx": 85.9
+      },
+      "AlexClark": {
+        "rawLabeledHoles": 3,
+        "rawExact012CountAccuracy": 1.0,
+        "evaluatedShapeGoodHoles": 2,
+        "shapeBadHoles": 1,
+        "straightVsBentAccuracy": null,
+        "exact012CountAccuracy": 1.0,
+        "falseBendsOnStraightHoles": null,
+        "straightHoleCount": 0,
+        "missedBendCount": 0,
+        "extraBendCount": 0,
+        "medianBendLocationErrorPx": 34.6,
+        "maxBendLocationErrorPx": 48.1,
+        "rawMedianBendLocationErrorPx": 48.1,
+        "rawMaxBendLocationErrorPx": 67.3
+      }
+    }
+  },
+  "robustnessChecks": {
+    "rdpDashExactCount": {
+      "8": 17,
+      "10": 18,
+      "12": 18,
+      "14": 17
+    },
+    "piecewiseDashExactCount": {
+      "16": 18,
+      "25": 18,
+      "36": 18,
+      "49": 18
+    },
+    "headingDashExactCount": {
+      "8": 18,
+      "10": 18,
+      "12": 18,
+      "14": 16
+    }
+  },
+  "turnMagnitudeFloor": {
+    "Dash": [
+      {"hole": 7, "bend": 1, "trueApproxTurnDeg": 17.5, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 15, "bend": 1, "trueApproxTurnDeg": 17.9, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 18, "bend": 1, "trueApproxTurnDeg": 21.2, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 2, "bend": 1, "trueApproxTurnDeg": 23.1, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 1, "bend": 1, "trueApproxTurnDeg": 26.9, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 18, "bend": 2, "trueApproxTurnDeg": 27.8, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 5, "bend": 1, "trueApproxTurnDeg": 42.2, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 4, "bend": 1, "trueApproxTurnDeg": 43.3, "detectedByRdp": true, "rdpStatus": "LOCATION WRONG"},
+      {"hole": 14, "bend": 1, "trueApproxTurnDeg": 46.0, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 8, "bend": 1, "trueApproxTurnDeg": 54.3, "detectedByRdp": true, "rdpStatus": "LOCATION WRONG"}
+    ],
+    "AlexClark": [
+      {"hole": 3, "bend": 1, "trueApproxTurnDeg": 27.1, "detectedByRdp": true, "rdpStatus": "GOOD"},
+      {"hole": 2, "bend": 1, "trueApproxTurnDeg": 29.3, "detectedByRdp": true, "rdpStatus": "SHAPE BAD"},
+      {"hole": 1, "bend": 1, "trueApproxTurnDeg": 42.1, "detectedByRdp": true, "rdpStatus": "LOCATION WRONG"}
+    ]
+  }
+}

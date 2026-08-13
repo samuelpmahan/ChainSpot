@@ -19,6 +19,10 @@ production call sites (`basketDetection.worker.ts`) must not pass the flag,
 so real users see (a) and (b) identically. Add an entry below when you defer
 something new. Move an entry to "graduated" (or delete it) once it actually
 gets wired in and ships (i.e. its flag, if any, flips to on by default).
+This also covers `scripts/cv-probes/` experimental probes (GRayT and
+friends) that aren't production `src/` code at all but follow the same
+"tested, parked, don't re-litigate from scratch" logic -- see the GRayT
+section near the end.
 
 ---
 
@@ -492,3 +496,185 @@ exact detector tier the parallel `claude/teepad-putting-circle-recovery`
 occlusion-masking work is actively tuning, so reweighting its general
 competitiveness is higher-conflict, higher-risk surface than the narrow
 ownership-tie fix above. Left open rather than forced.
+
+---
+
+# GRayT (`scripts/cv-probes/`)
+
+The tee-recovery ribbon-ray-fit + pad-template-fusion chain
+(`hole_path_tee_recovery.py` + `ray_template_fusion.py`), tuned and
+cross-validated in `scripts/cv-probes/grayt-tuning-report.md`. That report
+is the source of truth for current numbers; entries below are ideas from
+that investigation that were built and tested but not adopted, using this
+doc's same convention. All of GRayT's LOOCV/tuning work to date sits on
+**N=2 labeled courses** (GoldenTeeSet, AlexClarkSet) -- every "not enough
+benefit" verdict below should be read against that ceiling, not as a
+permanent verdict. **Once 5-10+ annotated courses exist, re-running a
+proper grid search across these (and the stage1/stage2 params never swept
+at all -- see the last entry) is the obvious next move**, not re-deriving
+them from first principles again.
+
+## Perpendicular ribbon-width bearing discriminator
+
+**File**: `scripts/cv-probes/hole_path_tee_recovery.py`
+(`Stage1Params.use_width_discriminator`, `perpendicular_width`,
+`width_profile`, `width_dropout_rate`) + eval in
+`scripts/cv-probes/width_discriminator_eval.py`.
+
+**Idea**: stage 1's bearing sweep ranks candidates by how far sustained
+point-evidence reaches along a 1px-wide ray, which can't tell "ribbon" from
+"any bright thing in a line" (e.g. a road). Measuring the evidence map's
+*perpendicular* extent every 15px, real (truth) tee-ward/basket-ward rays
+across all 36 labeled holes hold a mean dropout rate (fraction of samples
+where the ribbon vanishes entirely) of 0.19, vs. 0.66 for random
+wrong-direction rays -- a real, quantified discriminator.
+
+**Status**: implemented as an opt-in filter within the existing +-28deg
+sweep (default off, CLI-compatible). Tested against both courses: net
+neutral on `within13`/`within25` pass counts -- GoldenTeeSet unchanged on
+all 18 holes, AlexClarkSet unchanged except hole 4 (296.9px -> 56.4px,
+real improvement but doesn't cross the 12.69px pass tolerance). The narrow
+existing sweep rarely contains a dramatic-enough confuser for this to bite.
++0.8-3.7ms/hole, negligible.
+
+**What would justify wiring it in**: either (a) more labeled courses where
+the narrow-sweep filter demonstrably flips holes from fail to pass, not
+just improves their margin, or (b) pairing it with a wider bearing search
+(see the two rejected ideas below -- both failed *without* this
+discriminator; neither has been retried *with* it).
+
+## Basket/pin-marker-circle masking
+
+**File**: `hole_path_tee_recovery.py` (`Stage1Params.use_basket_marker_mask`,
+`find_basket_marker_centers`, `basket_marker_mask_for_badge`). Landed,
+off by default, CLI-compatible.
+
+**Idea**: the width discriminator's false positives traced back to a
+specific, consistent cause: other holes' own basket/pin marker graphics (a
+two-ring UI element -- solid inner disc + dashed "putting circle" outer
+ring) have a distinctive, remarkably consistent LAB signature (a* ~ -15
+inner, ~ -6 to -8 outer, vs. ~0 on real ribbon) and consistent size (inner
+disc radius ~40px, outer boundary ~85-90px, source px) across every marker
+checked on both courses -- strong evidence of a fixed-size rendered UI
+element, detectable and maskable independent of any hole-ownership
+resolution. Detected via `skimage.measure.label`/`regionprops` on an LAB
+a*-threshold mask, finding small reliable inner-disc seeds (18/18 and 16/18
+markers found on Golden/Alex, vs. 4-6/18 with a cruder whole-shape blob
+detector) then applying a fixed 95px mask around each.
+
+**Status: landed, net-neutral, NOT a win -- an earlier claim in this doc
+was wrong and is corrected here.** Masking *every* detected marker
+regressed real tee-ward rays (dense-course rays legitimately pass near an
+unrelated hole's basket). A first fix -- excluding markers within a fixed
+150-200px of the *current badge's raw distance* from the mask -- appeared
+to help when spot-checked (GoldenTeeSet hole 8, AlexClarkSet hole 6), but
+that check was measuring a bug, not a real fix: a marker's mask disk has a
+95px radius, so a marker just beyond the raw-distance exclusion boundary
+can still have its disk reach back and cover a genuinely short real
+tee-ward ray. Confirmed directly: GoldenTeeSet hole 8's true tee sits
+78.5px from its badge; a foreign marker 186px away (past a 175px raw-
+distance cutoff) has a mask disk reaching to 186-95=91px, swallowing that
+tee's real evidence -- the apparent "improvement" was this masking
+happening to nudge a wrong recovery closer to truth by luck, not fixing
+the wrong-ray-confuser problem it was built for. **Fixed** by excluding on
+the mask disk's *near edge* distance (`dist_to_center - marker_mask_radius_px
+< marker_mask_exclude_within_px`) instead of raw center distance --
+strictly more conservative, still catches genuinely distant confusers.
+Re-tested with the fix, full `recover_tee` pipeline, both labeled courses
+at the currently-recommended `closing_window_px=24`: **GoldenTeeSet 14/18
+unchanged, AlexClarkSet 8/18 unchanged** -- zero holes flip either
+direction. Also checked against all 4 overlay-only UDisc courses: gate-
+pass counts unchanged there too (1/0/0/0, same as without masking). The
+mask is not a no-op (it still masks something on every hole on both
+courses), it just doesn't change any of the 36+72 holes' outcomes once the
+near-badge false-positive bug is fixed.
+
+**What would justify enabling it by default**: nothing found yet. It's
+landed, tested, harmless (no regression anywhere checked), and off by
+default because there's no evidence it helps on any course available in
+this repo. It may still matter on a course with a different confuser
+pattern than what these six courses happen to contain -- worth re-checking
+once more labeled/overlay courses exist, not worth chasing further on the
+current sample.
+
+## Badge-local bearing seeding without a basket (four variants, all rejected)
+
+**File**: none landed -- all four were throwaway verification code.
+
+**Idea**: stage 1's bearing seed currently requires a pre-supplied basket
+(fits a corridor to it, reverses the first segment) and is measurably
+noisy (mean 8.6deg/3.9deg error vs. true badge->tee bearing on Golden/Alex,
+up to 26.9deg on one hole) -- worth checking whether a purely badge-local
+signal could seed (or replace) it, removing the basket dependency
+entirely.
+
+**Status: closed, all four variants worse than the corridor-fit baseline.**
+Two point-evidence variants:
+- Full 360deg sweep ranked by farthest raw point-evidence (no basket, no
+  prior): mean 80.0deg/66.6deg bearing error. Grabs unrelated bright
+  terrain with nothing to constrain the search -- the road/parking/basket-
+  marker confuser problem, unconstrained.
+- Full 360deg pad-template NCC rotation search in an 80px radius around
+  the badge (stage 2's template matcher, no directional prior): mean
+  position error 105.9px/125.7px, `within13` 4/18 and 0/18. Free rotation
+  search matches incidental noise, not real pads.
+
+And two width-dropout-ranked variants (the "untested combination" this
+entry previously flagged -- now tested and closed out):
+- Full 360deg sweep ranked by lowest width-dropout rate alone: mean
+  126.6deg/127.2deg error, *worse* than even the naive point-evidence
+  sweep above. A short ray with only 1-2 width samples can trivially score
+  0% dropout on almost no evidence at all, so this ranking is dominated by
+  noise from near-badge candidates that terminate almost immediately, not
+  by genuine ribbon-following.
+- Full 360deg sweep, filtered to dropout <= `width_dropout_max` (0.40) then
+  ranked by farthest terminus among survivors -- i.e. exactly
+  `recover_tee`'s existing width-discriminator logic, just applied to a
+  full 360deg range instead of the narrow +-28deg corridor-fit-seeded
+  window it was designed for: mean 117.4deg/131.2deg error, `within10deg`
+  3/18 and 0/18. Still bad. The width-dropout signal discriminates real
+  ribbon from non-ribbon confusers (its original, validated purpose), but
+  it cannot discriminate *this hole's own* ribbon from a genuinely
+  continuous *neighboring* hole's ribbon lying in the wrong direction --
+  both score equally low dropout. That distinction needs a directional
+  prior to narrow the search first, which is exactly what the corridor fit
+  (for all its own noise) provides and a badge-local signal alone cannot.
+
+**Verdict**: the corridor-fit-to-basket seed, despite its measured noise,
+is not something a badge-local signal (point-evidence, pad-template
+rotation, or width-dropout, alone or filtered) can replace. Removing the
+basket dependency for bearing-seeding is not a promising direction on the
+evidence gathered across all four variants -- stop trying local-only
+seeding; if the basket-dependency problem still matters, the fix is
+upstream (better basket detection/ownership, e.g. the courseGrammar fix
+landed alongside this investigation), not a replacement for the seed
+itself.
+(Note: an earlier version of this entry suggested pairing the dropout-
+ranked variant with basket-marker masking on the theory that masking's
+positive result came from constraining *what* gets measured -- that theory
+doesn't hold, see the masking entry above's correction: once its near-
+badge false-positive bug was fixed, masking turned out net-neutral on
+every course checked, so it wouldn't have rescued this either.)
+
+## Untouched stage1/stage2 search space
+
+**File**: `Stage1Params`/`Stage2Params` in `hole_path_tee_recovery.py` /
+`ray_template_fusion.py` -- every field is a real CLI flag today, not a
+future one.
+
+**Idea/status**: `grayt-tuning-report.md`'s LOOCV grid search (N=2 courses)
+covered `evidence_thresh` x `closing_window_px` x `rim_fraction` only (27
+combos) to keep runtime sane at that sample size. Never swept at all:
+`bearing_sweep_deg` (fixed at 28deg the whole session, see the "was this
+reverse-tuned to fit one hole" discussion in the report's LOOCV section),
+`box_mean_window`, `scale`/downscale factor, `evidence_dl` (the corridor-
+fit's own flatten divisor, separate from the ray-walk's), stage 2's
+`major_sizes` bank, `aspect`, `bearing_refine_degs`/`lateral_offsets_px`
+widths, `along_step_px`, and the search range bounds.
+
+**What would justify a real sweep**: purely sample size. This is not a
+"tried and failed" entry like the others above -- it's an explicit list of
+what a grid search should cover once 5-10+ labeled courses exist to make
+it safe against the overfitting this session repeatedly found at N=2 (see
+the report's gate-threshold retraction: a threshold picked from one course
+alone produced a real false accept on the other).

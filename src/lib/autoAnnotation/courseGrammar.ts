@@ -17,10 +17,11 @@
  * basket, through the badge, to find the tee on the far side.  This resolves
  * dense clusters where a neighboring hole's badge sits nominally closer to
  * this hole's tee than its own badge does.  Baskets are then matched
- * one-to-one, final pass, by distance plus a penalty when the tee and basket
- * lie on the same side of that badge.  The latter is important on maps where
- * a basket is physically closer to a tee from another hole than to its own
- * tee.
+ * in two ownership tiers: independently AUTO-owned tees reserve their
+ * polarity-consistent basket first, then REVIEW/unresolved holes solve the
+ * remaining vocabulary from badge distance and the trusted course-distance
+ * distribution. This prevents one wrong REVIEW tee from permuting several
+ * otherwise-correct native baskets.
  */
 
 import type { Candidate } from '../cv/types';
@@ -37,6 +38,19 @@ export const DEFAULT_COURSE_HOLE_NUMBERS: readonly number[] = Array.from(
 export interface CoursePointCandidate extends Candidate {
 	/** Normalized detector confidence when available (0..1). */
 	readonly confidence?: number;
+	/**
+	 * The candidate's position in the caller's own raw detector-output array
+	 * (e.g. `CourseDetectionResult.tees`/`.baskets`), when that differs from
+	 * its position in the array passed to `associateCourseGrammar` here.
+	 * Some callers pass a compacted/reordered array (one entry per resolved
+	 * hole, not one per raw candidate) — array position within *that* array
+	 * is not a stable identifier a downstream consumer can index the raw
+	 * candidate list with. When present, this is used instead of array
+	 * position for every `candidateIndex` this module reports, so those
+	 * reports stay a correct raw-array index no matter how the caller's own
+	 * array is shaped.
+	 */
+	readonly candidateIndex?: number;
 }
 
 /**
@@ -147,9 +161,10 @@ export interface BasketAssignment {
 	readonly distancePx: number;
 	/**
 	 * -1 means tee and basket lie on opposite badge rays (ideal); +1 means
-	 * same ray (strongly suspicious).
+	 * same ray (strongly suspicious). Undefined when the hole has no
+	 * resolved tee to define a ray from -- distance-only ownership.
 	 */
-	readonly polarityCosine: number;
+	readonly polarityCosine?: number;
 	/** Hungarian cost: distance + opposite-direction penalty. */
 	readonly cost: number;
 	readonly runnerUpCost?: number;
@@ -177,7 +192,10 @@ export interface CourseGrammarResult {
 }
 
 interface IndexedPoint {
+	/** Position in the array this module was actually given -- used only to index back into that same array (`input.tees[tee.sourceIndex]` etc.), never reported externally. */
 	readonly sourceIndex: number;
+	/** The index reported in every externally-visible `candidateIndex` field -- the caller's raw detector-array index when supplied, array position otherwise. See `CoursePointCandidate.candidateIndex`. */
+	readonly reportedIndex: number;
 	readonly xPx: number;
 	readonly yPx: number;
 	readonly confidence: number;
@@ -201,8 +219,36 @@ const DUMMY_COST = 100_000_000;
 const DEFAULT_DETECTOR_CONFIDENCE = 0.75;
 const DEFAULT_BASKET_POLARITY_PENALTY_PX = 80;
 
+/**
+ * Derives the polarity weight from this course's own native geometry. The
+ * median nearest badge-to-basket distance is robust to a few false peaks;
+ * doubling it makes a fully same-ray endpoint pay four median distances
+ * relative to an opposite-ray endpoint, without encoding capture scale.
+ */
+export function deriveBasketPolarityPenaltyPx(
+	badges: readonly Pick<CourseNumberBadgeCandidate, 'xPx' | 'yPx'>[],
+	baskets: readonly Pick<CourseBasketCandidate, 'xPx' | 'yPx'>[]
+): number {
+	if (badges.length === 0 || baskets.length === 0) return DEFAULT_BASKET_POLARITY_PENALTY_PX;
+	const distances = badges
+		.map((badge) => Math.min(...baskets.map((basket) => Math.hypot(basket.xPx - badge.xPx, basket.yPx - badge.yPx))))
+		.filter((distance) => Number.isFinite(distance) && distance > 0)
+		.sort((a, b) => a - b);
+	if (distances.length === 0) return DEFAULT_BASKET_POLARITY_PENALTY_PX;
+	const middle = Math.floor(distances.length / 2);
+	const median = distances.length % 2 === 0 ? (distances[middle - 1] + distances[middle]) / 2 : distances[middle];
+	return median * 2;
+}
+
 function clamp01(value: number): number {
 	return Math.max(0, Math.min(1, value));
+}
+
+function medianNumber(values: readonly number[]): number | undefined {
+	if (values.length === 0) return undefined;
+	const sorted = [...values].sort((a, b) => a - b);
+	const middle = Math.floor(sorted.length / 2);
+	return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
 function finite(value: unknown): value is number {
@@ -238,18 +284,24 @@ function normalizePoints<T extends CoursePointCandidate>(
 ): IndexedPoint[] {
 	const points: IndexedPoint[] = [];
 	candidates.forEach((candidate, sourceIndex) => {
+		// `candidate.candidateIndex`, when supplied, is the caller's own raw
+		// detector-array index -- see `CoursePointCandidate.candidateIndex`'s
+		// doc comment. Falls back to array position for callers that pass the
+		// raw array directly (today's badges/baskets), where the two coincide.
+		const reportedIndex = candidate.candidateIndex ?? sourceIndex;
 		if (!finite(candidate.xPx) || !finite(candidate.yPx)) {
 			failures.push({
 				kind: 'invalid-candidate',
 				severity: 'warning',
 				candidateKind: kind,
-				candidateIndex: sourceIndex,
+				candidateIndex: reportedIndex,
 				message: `${kind} candidate ${sourceIndex + 1} has non-finite source-image coordinates.`
 			});
 			return;
 		}
 		points.push({
 			sourceIndex,
+			reportedIndex,
 			xPx: candidate.xPx,
 			yPx: candidate.yPx,
 			confidence: candidateConfidence(candidate)
@@ -465,7 +517,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const badge = badges[badgeIndex];
 		const confidence = labelConfidence(badge, holeNumber) ?? 0;
 		badgeForHole.set(holeNumber, {
-			candidateIndex: badge.sourceIndex,
+			candidateIndex: badge.reportedIndex,
 			xPx: badge.xPx,
 			yPx: badge.yPx,
 			confidence,
@@ -477,7 +529,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'number-badge',
-				candidateIndex: badge.sourceIndex,
+				candidateIndex: badge.reportedIndex,
 				message: `Hole ${holeNumber}'s number badge is only ${(confidence * 100).toFixed(0)}% confident.`
 			});
 		}
@@ -549,7 +601,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const confidence = sourceTee.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		teeForHole.set(holeNumber, {
 			assignment: {
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				xPx: tee.xPx,
 				yPx: tee.yPx,
 				detectorConfidence: tee.confidence,
@@ -564,7 +616,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'tee',
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				message: sourceTee.bootstrapDecision === 'review'
 					? `Hole ${holeNumber}'s tee is a bootstrap REVIEW proposal, not an automatic acceptance.`
 					: `Hole ${holeNumber}'s tee assignment is weak after global ownership matching.`
@@ -576,23 +628,108 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'tee',
-				candidateIndex: tee.sourceIndex,
+				candidateIndex: tee.reportedIndex,
 				message: `Hole ${holeNumber} received its ${localRank}th-nearest tee because a nearer tee belongs to another hole.`
 			});
 		}
 	});
 
-	// Stage 4: baskets, final pass.  A badge normally sits between its tee and
-	// basket, so same-direction endpoints pay the proven 80px (by default)
-	// penalty.  This recomputes basket ownership with the real (Stage 3) tee
-	// now known, rather than trusting the Stage 2 preliminary pass verbatim.
-	const basketHoleNumbers = teeHoleNumbers.filter((holeNumber) => teeForHole.has(holeNumber));
+	// Stage 4: baskets, final two-tier pass. A badge normally sits between its
+	// tee and basket. Independently AUTO-owned tees may reserve from polarity;
+	// weaker holes then consume the remaining vocabulary via distance only.
+	//
+	// Every badge-having hole competes here, even one whose Stage 3 tee
+	// bootstrap failed (`missing-tee`): dropping it from the pool would not
+	// remove its basket from the world, it would just leave that basket
+	// unclaimed and available for a neighboring (tee-having) hole to win by
+	// distance/polarity math, even when that neighbor's own badge is farther
+	// from it than the tee-less hole's badge is. A tee-less hole falls back
+	// to distance-only cost -- `raysPolarityCosine`/`basketCost` need a real
+	// tee point to define the ray, and there is no principled substitute for
+	// one (in particular, `preliminaryBasketForHole` is a basket, not a
+	// tee-like reference, and reusing it here would be circular).
+	const basketHoleNumbers = teeHoleNumbers;
 	const basketCosts = basketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
-		const tee = teeForHole.get(holeNumber)!.assignment;
-		return baskets.map((basket) => basketCost(badge, tee, basket, polarityPenaltyPx).cost);
+		const tee = teeForHole.get(holeNumber)?.assignment;
+		return baskets.map((basket) =>
+			tee ? basketCost(badge, tee, basket, polarityPenaltyPx).cost : pointDistance(badge, basket)
+		);
 	});
-	const basketAssignments = hungarian(withDummyColumns(basketCosts, baskets.length));
+	// Basket ownership is intentionally two-stage. Only independently AUTO-
+	// owned tees may use tee/basket polarity to reserve a basket. REVIEW tees
+	// are useful grading evidence, but allowing one wrong review proposal into
+	// a single global solve can permute several otherwise-correct baskets.
+	const basketAssignments = new Array<number>(basketHoleNumbers.length).fill(-1);
+	const assignmentCosts = basketHoleNumbers.map((holeNumber, row) => {
+		const badge = badgeForHole.get(holeNumber)!;
+		const sourceTee = input.tees.find(
+			(candidate) => candidate.holeNumber === holeNumber && candidate.bootstrapDecision === 'auto'
+		);
+		return sourceTee ? basketCosts[row] : baskets.map((basket) => pointDistance(badge, basket));
+	});
+	const autoRows = basketHoleNumbers
+		.map((holeNumber, row) => ({ holeNumber, row }))
+		.filter(({ holeNumber }) => polarityPenaltyPx > 0 && input.tees.some(
+			(candidate) => candidate.holeNumber === holeNumber && candidate.bootstrapDecision === 'auto'
+		));
+	const claimedBasketIndexes = new Set<number>();
+	// Each AUTO tee proposes only its own best polarity-aware basket. Conflicts
+	// are resolved by local cost margin (then tee confidence); a loser defers to
+	// stage 2 rather than taking a second-best basket and cascading a swap.
+	const autoClaims = autoRows.map(({ row }) => {
+		const sorted = assignmentCosts[row]
+			.map((cost, basketIndex) => ({ cost, basketIndex }))
+			.sort((a, b) => a.cost - b.cost || a.basketIndex - b.basketIndex);
+		return {
+			row,
+			basketIndex: sorted[0]?.basketIndex ?? -1,
+			margin: (sorted[1]?.cost ?? BLOCKED_COST) - (sorted[0]?.cost ?? BLOCKED_COST),
+			confidence: teeForHole.get(basketHoleNumbers[row])?.assignment.detectorConfidence ?? 0
+		};
+	}).sort((a, b) => b.margin - a.margin || b.confidence - a.confidence || a.row - b.row);
+	for (const claim of autoClaims) {
+		if (claim.basketIndex < 0 || claimedBasketIndexes.has(claim.basketIndex)) continue;
+		basketAssignments[claim.row] = claim.basketIndex;
+		claimedBasketIndexes.add(claim.basketIndex);
+	}
+
+	const remainingRows = basketHoleNumbers
+		.map((holeNumber, row) => ({ holeNumber, row }))
+		.filter(({ row }) => basketAssignments[row] < 0);
+	const remainingBasketIndexes = baskets
+		.map((_, index) => index)
+		.filter((index) => !claimedBasketIndexes.has(index));
+	if (remainingRows.length > 0 && remainingBasketIndexes.length > 0) {
+		const trustedDistanceMedian = medianNumber(
+			autoClaims
+				.filter((claim) => basketAssignments[claim.row] >= 0)
+				.map((claim) => pointDistance(
+					badgeForHole.get(basketHoleNumbers[claim.row])!,
+					baskets[basketAssignments[claim.row]]
+				))
+		);
+		for (const { row } of remainingRows) {
+			const badge = badgeForHole.get(basketHoleNumbers[row])!;
+			assignmentCosts[row] = baskets.map((basket) => {
+				const distance = pointDistance(badge, basket);
+				// Still distance-only: prefer distances plausible for baskets already
+				// secured by trusted AUTO topology, without using REVIEW tee direction.
+				return trustedDistanceMedian === undefined
+					? distance
+					: distance + Math.abs(distance - trustedDistanceMedian);
+			});
+		}
+		const remainingCosts = remainingRows.map(({ row }) =>
+			remainingBasketIndexes.map((basketIndex) => assignmentCosts[row][basketIndex])
+		);
+		const remainingAssignment = hungarian(withDummyColumns(remainingCosts, remainingBasketIndexes.length));
+		remainingRows.forEach(({ row }, index) => {
+			const localBasketIndex = remainingAssignment[index];
+			if (localBasketIndex < 0 || localBasketIndex >= remainingBasketIndexes.length) return;
+			basketAssignments[row] = remainingBasketIndexes[localBasketIndex];
+		});
+	}
 	const basketForHole = new Map<number, BasketDetails>();
 	basketHoleNumbers.forEach((holeNumber, row) => {
 		const basketIndex = basketAssignments[row];
@@ -607,22 +744,29 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		}
 		const basket = baskets[basketIndex];
 		const badge = badgeForHole.get(holeNumber)!;
-		const tee = teeForHole.get(holeNumber)!.assignment;
-		const detail = basketCost(badge, tee, basket, polarityPenaltyPx);
-		const costs = basketCosts[row];
+		const tee = teeForHole.get(holeNumber)?.assignment;
+		const distancePx = pointDistance(badge, basket);
+		const detail = tee
+			? basketCost(badge, tee, basket, polarityPenaltyPx)
+			: { distancePx, polarityCosine: undefined, cost: distancePx };
+		const costs = assignmentCosts[row];
 		const chosen = costs[basketIndex];
 		const sorted = [...costs].sort((a, b) => a - b);
 		const nearest = sorted[0] ?? chosen;
 		const runnerUp = assignmentMargin(chosen, costs);
 		const localRank = costs.filter((cost) => cost < chosen - 1e-6).length + 1;
 		const topologyConfidence = endpointConfidence(basket.confidence, localRank, chosen, nearest, runnerUp);
-		const polarityConfidence = clamp01((1 - detail.polarityCosine) / 2);
+		// No tee means no ray to score polarity against. Rather than fabricate a
+		// polarity value that could read as more (or less) confident than the
+		// topology alone earns, the blend collapses to topology only.
+		const polarityConfidence =
+			detail.polarityCosine === undefined ? topologyConfidence : clamp01((1 - detail.polarityCosine) / 2);
 		const rawConfidence = clamp01(topologyConfidence * 0.75 + polarityConfidence * 0.25);
 		const sourceBasket = input.baskets[basket.sourceIndex];
 		const confidence = sourceBasket.bootstrapDecision === 'review' ? Math.min(rawConfidence, 0.49) : rawConfidence;
 		basketForHole.set(holeNumber, {
 			assignment: {
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				xPx: basket.xPx,
 				yPx: basket.yPx,
 				detectorConfidence: basket.confidence,
@@ -639,7 +783,7 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: sourceBasket.bootstrapDecision === 'review'
 					? `Hole ${holeNumber}'s basket is an occlusion-fallback REVIEW proposal, not an automatic acceptance.`
 					: `Hole ${holeNumber}'s basket assignment is weak after polarity-aware matching.`
@@ -651,25 +795,29 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: `Hole ${holeNumber} received its ${localRank}th-lowest basket cost because a better basket belongs to another hole.`
 			});
 		}
-		if (detail.polarityCosine > 0.4) {
+		if (detail.polarityCosine !== undefined && detail.polarityCosine > 0.4) {
 			failures.push({
 				kind: 'basket-polarity-conflict',
 				severity: 'warning',
 				holeNumber,
 				candidateKind: 'basket',
-				candidateIndex: basket.sourceIndex,
+				candidateIndex: basket.reportedIndex,
 				message: `Hole ${holeNumber}'s basket lies on the same side of its number badge as its tee.`
 			});
 		}
 	});
 
-	// A missing badge suppresses subsequent ownership stages; make each absent
-	// endpoint explicit so UI review does not look like a partially successful
-	// automatic placement.
+	// A missing badge suppresses every subsequent ownership stage (Stage 3 and
+	// Stage 4 both key off `badgeForHole`); make each absent endpoint explicit
+	// so UI review does not look like a partially successful automatic
+	// placement. A missing *tee* no longer implies a missing basket -- Stage 4
+	// still runs distance-only basket matching for a tee-less hole and already
+	// records its own `missing-basket` failure above if that solve also comes
+	// up empty, so there is nothing to synthesize here for that case.
 	for (const holeNumber of holeNumbers) {
 		if (!badgeForHole.has(holeNumber)) {
 			failures.push({
@@ -683,13 +831,6 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				severity: 'error',
 				holeNumber,
 				message: `Hole ${holeNumber}'s basket cannot be associated without its number badge.`
-			});
-		} else if (!teeForHole.has(holeNumber)) {
-			failures.push({
-				kind: 'missing-basket',
-				severity: 'error',
-				holeNumber,
-				message: `Hole ${holeNumber}'s basket cannot be associated without its tee.`
 			});
 		}
 	}
@@ -720,11 +861,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		failures,
 		unassigned: {
 			numberBadgeCandidateIndexes: badges
-				.map((badge) => badge.sourceIndex)
+				.map((badge) => badge.reportedIndex)
 				.filter((index) => !assignedBadgeIndexes.has(index)),
-			teeCandidateIndexes: tees.map((tee) => tee.sourceIndex).filter((index) => !assignedTeeIndexes.has(index)),
+			teeCandidateIndexes: tees.map((tee) => tee.reportedIndex).filter((index) => !assignedTeeIndexes.has(index)),
 			basketCandidateIndexes: baskets
-				.map((basket) => basket.sourceIndex)
+				.map((basket) => basket.reportedIndex)
 				.filter((index) => !assignedBasketIndexes.has(index))
 		}
 	};

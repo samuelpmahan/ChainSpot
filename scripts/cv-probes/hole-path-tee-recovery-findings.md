@@ -191,3 +191,15 @@ Verdict update: gated at NCC ≥ 0.55, ray+template fusion is accurate enough
 to *auto-suggest* (not just review-suggest) recovered tees, with the
 ungated remainder feeding review. Reads `tee-recovery-summary.json` for the
 ray bearings, so run `hole_path_tee_recovery.py` first.
+
+## Cross-validated tuning pass: `grayt-tuning-report.md`
+
+Both probes above are now parameterized (`Stage1Params`/`Stage2Params`,
+CLI flags, defaults unchanged) and were swept under leave-one-course-out
+cross-validation across every labeled + overlay-only capture available.
+Headline finding: naively lowering the NCC gate below 0.55 to chase more
+passes is **not** safe -- it produced a real false accept when
+cross-validated (parameters fit on one course, tested blind on the other).
+See `grayt-tuning-report.md` for the full LOOCV table, `best-params.json`
+for the recommended (conservative) config, and `hole-path-results/tuning/`
+for overlays.

@@ -1,40 +1,59 @@
 /**
- * ChainSpot Stitch Map four-tile assignment and placement (P1-001).
+ * ChainSpot Stitch Map N-tile assignment and placement (P1-001; generalized
+ * beyond the original fixed 2x2 puzzle to any N >= 2 screenshots).
  *
- * Treats the four same-size screenshots as a fixed 2×2 puzzle rather than
- * trusting file-selection order. Every one of the 24 possible assignments is
- * scored by summing the four expected-neighbor pair matches (upper-left ↔
- * upper-right, upper-left ↔ lower-left, upper-right ↔ lower-right, lower-left ↔
- * lower-right); the strongest globally consistent assignment wins. Ties resolve
- * to the earliest permutation in lexicographic order (a documented stable rule).
+ * Treats the N same-size screenshots as an unknown overlap graph rather than
+ * trusting file-selection order or assuming a fixed grid topology. Every
+ * ordered pair's both orientation hypotheses are matched at `'coarse'`
+ * quality (N*(N-1) ordered pairs x 2 orientations); for each unordered pair
+ * the better-scoring of its two directed hypotheses becomes that pair's edge
+ * weight. A maximum-weight spanning tree over those edges (Prim's algorithm,
+ * seeded at the tile with the strongest total evidence) is the placement
+ * topology: exactly N-1 edges, guaranteed to connect every tile regardless of
+ * how weak some of the evidence is (a genuinely unrelated tile still gets
+ * placed, and its weak edges are exactly what `diagnostics.ts` warns about).
  *
- * The upper-left tile anchors at (0, 0). Upper-right and lower-left each take
- * their own directly measured pairwise offset as-is: a real hand-held capture
- * has no reason to overlap identically on every edge, so one edge's
- * measurement is never adjusted to make another edge's measurement "fit" a
- * rectangle. Lower-right has no direct measurement against the anchor, so its
- * placement genuinely does combine two independent measurements of the same
- * point (`reconcilePlacements`) — via upper-right, and via lower-left — which
- * is ordinary two-measurement averaging, not a grid-consistency assumption.
+ * The tree's own edges are re-matched at `'refine'` quality for exact pixels
+ * — the same coarse-then-refine split the original algorithm used, applied
+ * over N-1 edges instead of a fixed four. A tile with additional strong
+ * (non-tree) evidence to more than one already-placed neighbor has its final
+ * position averaged across every such qualifying edge, generalizing the
+ * original algorithm's two-measurement fusion for its unmeasured corner
+ * (`reconcilePlacements`) to however many independent measurements a tile
+ * actually has.
  *
- * Pairwise translation estimates come from `cvMatch.matchTranslation`
- * (OpenCV `matchTemplate`), asynchronously, in two qualities:
- *
- * 1. `'coarse'` for every ordered pair's both orientation hypotheses (12
- *    ordered pairs x 2 orientations = 24 evaluations) — cheap enough to score
- *    all 24 permutations of the 2x2 assignment.
- * 2. `'refine'` for just the four edges the winning assignment actually
- *    commits as placements — exact pixels, paid for only where it matters.
- *
- * This is the same coarse-then-fine split `cvMatch.ts` documents for a single
- * pair, applied one level up: coarse to choose *which* four edges win, refine
- * to place them precisely.
+ * Anchors: the seed tile is placed at (0, 0); every other tile's position is
+ * relative to it, never to the original file order.
  */
 import { matchTranslation } from './cvMatch';
 import type { MatchMode } from './cvMatch';
 import type { AnalysisRaster, PairEstimate, PairEstimates, PairOrientation } from './analysis';
-import { TILE_SLOTS } from './geometry';
-import type { StitchLayout, TilePlacement, TileSlot } from './geometry';
+import { defaultSlotOrder } from './geometry';
+import type { TileNeighbors, TilePlacement, TileSlot } from './geometry';
+
+/**
+ * Practical ceiling on automatic arrangement: comparing every pair of tiles is
+ * O(N^2), which is cheap at ordinary capture counts (a handful to a couple
+ * dozen screenshots) but not meant to scale to hundreds. Beyond this, a
+ * different (spatially-prefiltered) strategy would be needed.
+ */
+export const MAX_AUTO_ARRANGE_TILES = 24;
+
+/**
+ * An edge scoring below this is not trusted as extra fusion evidence (see the
+ * module comment). Deliberately much stricter than `diagnostics.ts`'s
+ * `WEAK_EDGE_MAX_SCORE` (0.5): that threshold only ever gated a tree edge,
+ * which real content always has to place somewhere regardless of quality.
+ * Fusion is optional corroborating evidence for a tile that's already placed,
+ * so a spurious match must never be allowed to drag it away from a correct
+ * position. On a real captured course, a genuinely non-overlapping (e.g.
+ * diagonal) pair was observed scoring 0.54 — well above 0.5 — purely from
+ * shared terrain/style, not real content overlap, and got wrongly fused in
+ * before this threshold was raised. Real matching edges in the same capture
+ * scored 0.99+, so 0.85 sits safely between confirmed genuine matches and
+ * observed real-world false-positive correlation.
+ */
+const FUSION_MIN_SCORE = 0.85;
 
 /**
  * Runs both orientation hypotheses of one ordered pair through `cvMatch` at
@@ -74,363 +93,300 @@ function toPairEstimate(
 	};
 }
 
-export interface AutoLayout {
-	/**
-	 * slot -> file index (into the caller's raster/file ordering). Populated only
-	 * for the slots the input layout actually uses (all four for a 2x2 input,
-	 * two for a 1x2/2x1 input) — see `TILE_SLOTS_BY_LAYOUT`.
-	 */
-	readonly assignment: Partial<Record<TileSlot, number>>;
-	readonly placements: Partial<Record<TileSlot, TilePlacement>>;
-	/** Sum of the expected-neighbor edge scores of the winning assignment. */
-	readonly score: number;
-	/**
-	 * Every directed pair's two orientation-specific estimates keyed
-	 * `fileIndex>fileIndex` in the original raster ordering. Raw evidence P1-002
-	 * diagnostics consume; never persisted. An expected edge is always scored
-	 * with the hypothesis matching its required orientation, so a winning
-	 * hypothesis that points the other way is visible as a mismatch rather than
-	 * being silently committed.
-	 */
-	readonly estimates: Readonly<Record<string, PairEstimates>>;
-}
-
-export interface ExpectedEdge {
-	readonly from: TileSlot;
-	readonly to: TileSlot;
-	readonly orientation: 'left-right' | 'top-bottom';
-}
-
-const EXPECTED_EDGES: readonly ExpectedEdge[] = [
-	{ from: 'upper-left', to: 'upper-right', orientation: 'left-right' },
-	{ from: 'upper-left', to: 'lower-left', orientation: 'top-bottom' },
-	{ from: 'upper-right', to: 'lower-right', orientation: 'top-bottom' },
-	{ from: 'lower-left', to: 'lower-right', orientation: 'left-right' }
-];
-
-/** The single expected edge of each two-tile layout. */
-const EXPECTED_EDGES_1X2: readonly ExpectedEdge[] = [
-	{ from: 'left', to: 'right', orientation: 'left-right' }
-];
-const EXPECTED_EDGES_2X1: readonly ExpectedEdge[] = [
-	{ from: 'top', to: 'bottom', orientation: 'top-bottom' }
-];
-
-/** The expected-neighbor edge list a layout's winning assignment is scored/classified against. */
-export function expectedEdgesForLayout(layout: StitchLayout): readonly ExpectedEdge[] {
-	switch (layout) {
-		case '2x2':
-			return EXPECTED_EDGES;
-		case '1x2':
-			return EXPECTED_EDGES_1X2;
-		case '2x1':
-			return EXPECTED_EDGES_2X1;
-	}
-}
-
-/** Infers which layout an `AutoLayout.assignment`'s populated slots belong to. */
-export function layoutForSlots(slots: readonly TileSlot[]): StitchLayout {
-	if (slots.includes('left') || slots.includes('right')) return '1x2';
-	if (slots.includes('top') || slots.includes('bottom')) return '2x1';
-	return '2x2';
-}
-
 function pairKey(from: number, to: number): string {
 	return `${from}>${to}`;
 }
 
-/** The four 2x2 slot names, narrowed out of the wider `TileSlot` union `assignFour` alone uses. */
-type Slot2x2 = 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right';
-
-export interface ReconciledPlacements {
-	readonly upperRight: { readonly xPx: number; readonly yPx: number };
-	readonly lowerLeft: { readonly xPx: number; readonly yPx: number };
-	readonly lowerRight: { readonly xPx: number; readonly yPx: number };
+/** One edge the placement algorithm actually used to position a tile. */
+export interface PlacementEdge {
+	readonly from: TileSlot;
+	readonly to: TileSlot;
+	readonly orientation: PairOrientation;
+	readonly score: number;
+	readonly dxPx: number;
+	readonly dyPx: number;
 }
 
-/**
- * Places the three non-anchor tiles independently, each from its own directly
- * measured evidence. Upper-right and lower-left take their single
- * expected-neighbor measurement (`ulur`, `ulll`) exactly as measured: a real
- * hand-held capture has no reason to overlap identically on every edge, so one
- * edge's measurement must never be adjusted just to make a different edge's
- * measurement agree with it (a previous version of this function did exactly
- * that, blending all four edges together under a rigid-rectangle assumption —
- * removed because real captures routinely and legitimately disagree).
- *
- * Lower-right has no direct measurement against the upper-left anchor, so it
- * is the one point that genuinely requires combining two independent
- * measurements of the same location: the position implied via upper-right
- * (`urlr`) and via lower-left (`llr`). Averaging those two paths is ordinary
- * two-measurement fusion for an otherwise-unmeasured point, not a
- * grid-consistency assumption — it says nothing about whether the top and
- * bottom rows agree.
- */
-export function reconcilePlacements(
-	ulur: PairEstimate,
-	ulll: PairEstimate,
-	urlr: PairEstimate,
-	llr: PairEstimate
-): ReconciledPlacements {
-	const upperRight = { xPx: ulur.dxPx, yPx: ulur.dyPx };
-	const lowerLeft = { xPx: ulll.dxPx, yPx: ulll.dyPx };
-	const viaRight = { xPx: upperRight.xPx + urlr.dxPx, yPx: upperRight.yPx + urlr.dyPx };
-	const viaBottom = { xPx: lowerLeft.xPx + llr.dxPx, yPx: lowerLeft.yPx + llr.dyPx };
-	return {
-		upperRight,
-		lowerLeft,
-		lowerRight: {
-			xPx: Math.round((viaRight.xPx + viaBottom.xPx) / 2),
-			yPx: Math.round((viaRight.yPx + viaBottom.yPx) / 2)
-		}
-	};
+export interface AutoLayout {
+	/** Stable per-tile ids in seed-then-tree-growth order; `order[0]` is the anchor. */
+	readonly order: readonly TileSlot[];
+	/** slot -> file index (into the caller's raster/file ordering). */
+	readonly assignment: Partial<Record<TileSlot, number>>;
+	readonly placements: Partial<Record<TileSlot, TilePlacement>>;
+	/** Expected-neighbor adjacency: the spanning tree plus any other strong (non-tree) edges. */
+	readonly neighbors: TileNeighbors;
+	/** The N-1 spanning-tree edges actually used to place each non-anchor tile. */
+	readonly placementEdges: readonly PlacementEdge[];
+	/** Sum of the placement edges' scores. */
+	readonly score: number;
+	/**
+	 * Every directed pair's two orientation-specific coarse estimates, keyed
+	 * `fileIndex>fileIndex` in the original raster ordering. Raw evidence;
+	 * never persisted.
+	 */
+	readonly estimates: Readonly<Record<string, PairEstimates>>;
 }
 
-/** All 24 permutations of the four file indices in lexicographic order. */
-function permutations(): readonly (readonly [number, number, number, number])[] {
-	const result: [number, number, number, number][] = [];
-	const indices = [0, 1, 2, 3];
-	const visit = (current: number[], remaining: number[]): void => {
-		if (remaining.length === 0) {
-			result.push(current as unknown as [number, number, number, number]);
-			return;
-		}
-		for (let i = 0; i < remaining.length; i += 1) {
-			visit(
-				[...current, remaining[i]],
-				remaining.slice(0, i).concat(remaining.slice(i + 1))
-			);
-		}
-	};
-	visit([], indices);
-	return result;
+interface DirectedCandidate {
+	readonly sourceDirection: 'ij' | 'ji';
+	readonly orientation: PairOrientation;
+	/** Offset of tile `j` relative to tile `i`, already normalized regardless of source direction. */
+	readonly dxPx: number;
+	readonly dyPx: number;
+	readonly score: number;
 }
 
-/**
- * Scores one assignment: the sum of its four expected-neighbor directed pair
- * scores, each read from the hypothesis matching the edge's required
- * orientation. A winner pointing the other way is never rewarded; it simply
- * contributes its (typically poor) required-orientation score and is surfaced
- * by P1-002's direction-mismatch diagnostic.
- */
-function scoreAssignment(
-	ordered: readonly [number, number, number, number],
+/** The best-scoring of the four hypotheses (2 orientations x 2 directions) for the pair (i, j). */
+function bestCandidate(
+	i: number,
+	j: number,
 	estimates: ReadonlyMap<string, PairEstimates>
-): number {
-	const slotOf: Record<Slot2x2, number> = {
-		'upper-left': ordered[0],
-		'upper-right': ordered[1],
-		'lower-left': ordered[2],
-		'lower-right': ordered[3]
-	};
-	let score = 0;
-	for (const edge of EXPECTED_EDGES) {
-		const from = slotOf[edge.from as Slot2x2];
-		const to = slotOf[edge.to as Slot2x2];
-		const estimate = estimates.get(pairKey(from, to))?.[edge.orientation];
-		score += estimate ? estimate.score : 0;
+): DirectedCandidate | null {
+	const ij = estimates.get(pairKey(i, j));
+	const ji = estimates.get(pairKey(j, i));
+	const candidates: DirectedCandidate[] = [];
+	if (ij) {
+		candidates.push({
+			sourceDirection: 'ij',
+			orientation: 'left-right',
+			dxPx: ij['left-right'].dxPx,
+			dyPx: ij['left-right'].dyPx,
+			score: ij['left-right'].score
+		});
+		candidates.push({
+			sourceDirection: 'ij',
+			orientation: 'top-bottom',
+			dxPx: ij['top-bottom'].dxPx,
+			dyPx: ij['top-bottom'].dyPx,
+			score: ij['top-bottom'].score
+		});
 	}
-	return score;
+	if (ji) {
+		candidates.push({
+			sourceDirection: 'ji',
+			orientation: 'left-right',
+			dxPx: -ji['left-right'].dxPx,
+			dyPx: -ji['left-right'].dyPx,
+			score: ji['left-right'].score
+		});
+		candidates.push({
+			sourceDirection: 'ji',
+			orientation: 'top-bottom',
+			dxPx: -ji['top-bottom'].dxPx,
+			dyPx: -ji['top-bottom'].dyPx,
+			score: ji['top-bottom'].score
+		});
+	}
+	if (candidates.length === 0) return null;
+	return candidates.reduce((best, candidate) => (candidate.score > best.score ? candidate : best));
+}
+
+/** Re-matches the winning candidate at `'refine'` quality, preserving its `i`-relative-to-`j` sense. */
+async function refineCandidate(
+	rasters: readonly AnalysisRaster[],
+	i: number,
+	j: number,
+	candidate: DirectedCandidate
+): Promise<DirectedCandidate> {
+	if (candidate.sourceDirection === 'ij') {
+		const match = await matchTranslation(rasters[i], rasters[j], candidate.orientation, {
+			mode: 'refine'
+		});
+		return { ...candidate, dxPx: match.dxPx, dyPx: match.dyPx, score: match.score };
+	}
+	const match = await matchTranslation(rasters[j], rasters[i], candidate.orientation, {
+		mode: 'refine'
+	});
+	return { ...candidate, dxPx: -match.dxPx, dyPx: -match.dyPx, score: match.score };
+}
+
+interface TreeEdge {
+	readonly parent: number;
+	readonly child: number;
 }
 
 /**
- * Assigns the four rasters to 2×2 slots and produces integer translation-only
- * placements, anchoring the inferred upper-left tile at (0, 0).
- *
- * Two-quality strategy (see the module doc comment): every ordered pair's both
- * orientations are matched at `'coarse'` first, cheaply enough to score all 24
- * permutations; only the four edges the winner actually commits are then
- * re-matched at `'refine'` for exact pixels.
+ * Maximum-weight spanning tree over the complete graph of `n` raster indices,
+ * via Prim's algorithm. Seeded at the index with the strongest total pairwise
+ * evidence (ties resolve to the lowest index), so the anchor is whichever tile
+ * has the most to go on rather than an arbitrary file-order choice. Returns
+ * edges in tree-growth order, so a caller placing tiles in that same order
+ * always has the parent already placed.
  */
-export async function assignFour(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
-	if (rasters.length !== 4) {
-		throw new Error(`assignFour: expected exactly four rasters, got ${rasters.length}`);
+function buildSpanningTree(n: number, weight: (i: number, j: number) => number): TreeEdge[] {
+	let seed = 0;
+	let bestSum = -Infinity;
+	for (let i = 0; i < n; i += 1) {
+		let sum = 0;
+		for (let j = 0; j < n; j += 1) {
+			if (i !== j) sum += weight(i, j);
+		}
+		if (sum > bestSum) {
+			bestSum = sum;
+			seed = i;
+		}
+	}
+	const inTree = new Array<boolean>(n).fill(false);
+	inTree[seed] = true;
+	const visitOrder = [seed];
+	const edges: TreeEdge[] = [];
+	while (visitOrder.length < n) {
+		let bestI = -1;
+		let bestJ = -1;
+		let bestWeight = -Infinity;
+		for (const i of visitOrder) {
+			for (let j = 0; j < n; j += 1) {
+				if (inTree[j]) continue;
+				const w = weight(i, j);
+				if (w > bestWeight) {
+					bestWeight = w;
+					bestI = i;
+					bestJ = j;
+				}
+			}
+		}
+		if (bestJ === -1) break;
+		inTree[bestJ] = true;
+		visitOrder.push(bestJ);
+		edges.push({ parent: bestI, child: bestJ });
+	}
+	return edges;
+}
+
+/**
+ * Assigns the N rasters to placement slots and produces integer
+ * translation-only placements, anchoring the inferred seed tile at (0, 0).
+ */
+export async function assignN(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
+	const n = rasters.length;
+	if (n < 2) {
+		throw new Error(`assignN: expected at least two rasters, got ${n}`);
+	}
+	if (n > MAX_AUTO_ARRANGE_TILES) {
+		throw new Error(
+			`assignN: ${n} tiles exceeds the automatic-arrangement limit of ${MAX_AUTO_ARRANGE_TILES}`
+		);
 	}
 
 	const estimates = new Map<string, PairEstimates>();
-	for (let i = 0; i < rasters.length; i += 1) {
-		for (let j = 0; j < rasters.length; j += 1) {
+	for (let i = 0; i < n; i += 1) {
+		for (let j = 0; j < n; j += 1) {
 			if (i === j) continue;
 			estimates.set(pairKey(i, j), await estimatePairBothCv(rasters[i], rasters[j], 'coarse'));
 		}
 	}
 
-	let best: readonly [number, number, number, number] | null = null;
-	let bestScore = -Infinity;
-	for (const ordered of permutations()) {
-		const score = scoreAssignment(ordered, estimates);
-		if (score > bestScore) {
-			bestScore = score;
-			best = ordered;
+	const candidateCache = new Map<string, DirectedCandidate | null>();
+	const candidateFor = (i: number, j: number): DirectedCandidate | null => {
+		const lo = Math.min(i, j);
+		const hi = Math.max(i, j);
+		const key = pairKey(lo, hi);
+		if (!candidateCache.has(key)) {
+			candidateCache.set(key, bestCandidate(lo, hi, estimates));
 		}
-	}
-	if (!best) {
-		throw new Error('assignFour: no assignment scored');
-	}
+		const candidate = candidateCache.get(key) ?? null;
+		if (!candidate) return null;
+		// `candidate` is always "hi relative to lo". Flip when the caller asked the
+		// other way — `sourceDirection` must flip too ('ij' <-> 'ji'), since it is
+		// interpreted relative to the caller's own (i, j) order (see
+		// `refineCandidate`): the same underlying raw estimate that was "computed
+		// via rasters[lo] -> rasters[hi]" from lo's perspective is "computed via
+		// rasters[j] -> rasters[i]" from a (hi, lo) caller's perspective. Leaving
+		// it unflipped previously caused `refineCandidate` to re-match in the
+		// wrong raster order whenever a tree edge was queried in reverse.
+		if (i === lo) return candidate;
+		return {
+			...candidate,
+			sourceDirection: candidate.sourceDirection === 'ij' ? 'ji' : 'ij',
+			dxPx: -candidate.dxPx,
+			dyPx: -candidate.dyPx
+		};
+	};
+	const weight = (i: number, j: number): number => candidateFor(i, j)?.score ?? -Infinity;
 
-	const slotOf: Record<Slot2x2, number> = {
-		'upper-left': best[0],
-		'upper-right': best[1],
-		'lower-left': best[2],
-		'lower-right': best[3]
+	const tree = buildSpanningTree(n, weight);
+	const visitOrder = [tree.length > 0 ? tree[0].parent : 0, ...tree.map((edge) => edge.child)];
+	const slots = defaultSlotOrder(n);
+	const slotOfRaster = new Map<number, TileSlot>();
+	visitOrder.forEach((rasterIndex, k) => slotOfRaster.set(rasterIndex, slots[k]));
+
+	const positions = new Map<number, { xPx: number; yPx: number }>();
+	positions.set(visitOrder[0], { xPx: 0, yPx: 0 });
+	const placementEdges: PlacementEdge[] = [];
+	const neighborSet = new Map<TileSlot, Set<TileSlot>>();
+	const addNeighbor = (a: TileSlot, b: TileSlot): void => {
+		if (!neighborSet.has(a)) neighborSet.set(a, new Set());
+		if (!neighborSet.has(b)) neighborSet.set(b, new Set());
+		neighborSet.get(a)!.add(b);
+		neighborSet.get(b)!.add(a);
 	};
 
-	// Refine only the four edges the winning assignment actually commits: the
-	// 24-permutation scoring above only ever needed to know *which* assignment
-	// wins, not exact pixels, so it ran entirely at 'coarse'. Now that the
-	// winner is fixed, its four edges are re-matched at 'refine' for the exact
-	// placement pixels. The pair's *other* orientation (not required by this
-	// edge) is left at its already-computed coarse value — recomputing it at
-	// full cost would only ever feed the direction-mismatch check below, and a
-	// coarse estimate is already sufficient signal for "does the other
-	// direction score competitively" without paying for a second refine pass
-	// per edge.
-	for (const edge of EXPECTED_EDGES) {
-		const from = slotOf[edge.from as Slot2x2];
-		const to = slotOf[edge.to as Slot2x2];
-		const key = pairKey(from, to);
-		const coarse = estimates.get(key);
-		if (!coarse) continue;
-		const refinedMatch = await matchTranslation(rasters[from], rasters[to], edge.orientation, {
-			mode: 'refine'
+	for (const edge of tree) {
+		const raw = candidateFor(edge.parent, edge.child);
+		if (!raw) continue;
+		const refined = await refineCandidate(rasters, edge.parent, edge.child, raw);
+		const parentPos = positions.get(edge.parent)!;
+		positions.set(edge.child, {
+			xPx: parentPos.xPx + refined.dxPx,
+			yPx: parentPos.yPx + refined.dyPx
 		});
-		const refined = toPairEstimate(edge.orientation, refinedMatch);
-		const otherOrientation: PairOrientation =
-			edge.orientation === 'left-right' ? 'top-bottom' : 'left-right';
-		const other = coarse[otherOrientation];
-		estimates.set(key, {
-			'left-right': edge.orientation === 'left-right' ? refined : other,
-			'top-bottom': edge.orientation === 'top-bottom' ? refined : other,
-			orientation: refined.score >= other.score ? edge.orientation : otherOrientation
+		const fromSlot = slotOfRaster.get(edge.parent)!;
+		const toSlot = slotOfRaster.get(edge.child)!;
+		placementEdges.push({
+			from: fromSlot,
+			to: toSlot,
+			orientation: refined.orientation,
+			score: refined.score,
+			dxPx: refined.dxPx,
+			dyPx: refined.dyPx
+		});
+		addNeighbor(fromSlot, toSlot);
+	}
+
+	// Fuse any additional strong evidence: a tile with more than one qualifying
+	// edge to an already-placed neighbor has its position averaged across every
+	// such measurement, generalizing the original two-path fusion.
+	for (let k = 1; k < visitOrder.length; k += 1) {
+		const child = visitOrder[k];
+		const implied: { xPx: number; yPx: number }[] = [];
+		for (let m = 0; m < k; m += 1) {
+			const other = visitOrder[m];
+			const candidate = candidateFor(other, child);
+			if (!candidate || candidate.score < FUSION_MIN_SCORE) continue;
+			const otherPos = positions.get(other)!;
+			implied.push({ xPx: otherPos.xPx + candidate.dxPx, yPx: otherPos.yPx + candidate.dyPx });
+			addNeighbor(slotOfRaster.get(other)!, slotOfRaster.get(child)!);
+		}
+		if (implied.length === 0) continue;
+		const sum = implied.reduce(
+			(acc, p) => ({ xPx: acc.xPx + p.xPx, yPx: acc.yPx + p.yPx }),
+			{ xPx: 0, yPx: 0 }
+		);
+		positions.set(child, {
+			xPx: Math.round(sum.xPx / implied.length),
+			yPx: Math.round(sum.yPx / implied.length)
 		});
 	}
 
-	// The permutation-scoring loop above only ever compared assignments at
-	// 'coarse' quality. Re-derive the winner's own score from the now-refined
-	// estimates so `layout.score` (which diagnostics thresholds against)
-	// reflects the same exact-pixel evidence the placements themselves use, not
-	// the coarse approximation that merely picked the winner.
-	bestScore = scoreAssignment(best, estimates);
+	const placements: Record<TileSlot, TilePlacement> = {};
+	const assignment: Record<TileSlot, number> = {};
+	visitOrder.forEach((rasterIndex, k) => {
+		const slot = slots[k];
+		const pos = positions.get(rasterIndex)!;
+		placements[slot] = { xPx: pos.xPx, yPx: pos.yPx, visible: true };
+		assignment[slot] = rasterIndex;
+	});
 
-	// Each expected edge is placed from the hypothesis matching its required
-	// orientation, so a winning hypothesis that points the other way can never
-	// become the actual placement of the edge.
-	const ulur = estimates.get(pairKey(slotOf['upper-left'], slotOf['upper-right']))?.['left-right'];
-	const ulll = estimates.get(pairKey(slotOf['upper-left'], slotOf['lower-left']))?.['top-bottom'];
-	const urlr = estimates.get(pairKey(slotOf['upper-right'], slotOf['lower-right']))?.['top-bottom'];
-	const llr = estimates.get(pairKey(slotOf['lower-left'], slotOf['lower-right']))?.['left-right'];
-	if (!ulur || !ulll || !urlr || !llr) {
-		throw new Error('assignFour: missing directed edge estimate');
-	}
-
-	// Each non-anchor tile is placed independently from its own evidence; see
-	// `reconcilePlacements` for why lower-right is the sole exception that
-	// combines two measurements.
-	const reconciled = reconcilePlacements(ulur, ulll, urlr, llr);
-
-	const placements: Record<Slot2x2, TilePlacement> = {
-		'upper-left': { xPx: 0, yPx: 0, visible: true },
-		'upper-right': { ...reconciled.upperRight, visible: true },
-		'lower-left': { ...reconciled.lowerLeft, visible: true },
-		'lower-right': { ...reconciled.lowerRight, visible: true }
-	};
-
-	const assignment = Object.fromEntries(
-		TILE_SLOTS.map((slot) => [slot, slotOf[slot as Slot2x2]])
-	) as Record<TileSlot, number>;
-
-	const estimatesRecord: Record<string, PairEstimates> = {};
-	for (const [key, value] of estimates) {
-		estimatesRecord[key] = value;
-	}
+	const neighbors: Record<TileSlot, readonly TileSlot[]> = {};
+	for (const slot of slots) neighbors[slot] = [...(neighborSet.get(slot) ?? [])];
 
 	return {
+		order: slots,
 		assignment,
 		placements,
-		score: bestScore,
-		estimates: estimatesRecord
-	};
-}
-
-const TWO_TILE_SLOTS: Record<'left-right' | 'top-bottom', readonly [TileSlot, TileSlot]> = {
-	'left-right': ['left', 'right'],
-	'top-bottom': ['top', 'bottom']
-};
-
-/**
- * Assigns two rasters to a 1x2 (`left`/`right`) or 2x1 (`top`/`bottom`) layout
- * and produces an integer translation-only placement, anchoring the first
- * inferred tile at (0, 0). Unlike `assignFour`, the layout itself (which
- * orientation, and which raster is first) is not known in advance, so all four
- * combinations — both orientations, both orderings — are scored at `'coarse'`
- * before the winner's single edge is re-matched at `'refine'`. There is no
- * permutation search beyond that: with two tiles there is exactly one edge, so
- * the winning combination directly is the answer, not a candidate to reconcile
- * against other edges.
- */
-export async function assignTwo(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
-	if (rasters.length !== 2) {
-		throw new Error(`assignTwo: expected exactly two rasters, got ${rasters.length}`);
-	}
-
-	const forward = await estimatePairBothCv(rasters[0], rasters[1], 'coarse');
-	const backward = await estimatePairBothCv(rasters[1], rasters[0], 'coarse');
-	const estimates = new Map<string, PairEstimates>([
-		[pairKey(0, 1), forward],
-		[pairKey(1, 0), backward]
-	]);
-
-	const candidates: readonly { readonly orientation: PairOrientation; readonly from: number; readonly to: number }[] = [
-		{ orientation: 'left-right', from: 0, to: 1 },
-		{ orientation: 'left-right', from: 1, to: 0 },
-		{ orientation: 'top-bottom', from: 0, to: 1 },
-		{ orientation: 'top-bottom', from: 1, to: 0 }
-	];
-	let best = candidates[0];
-	let bestScore = -Infinity;
-	for (const candidate of candidates) {
-		const score = estimates.get(pairKey(candidate.from, candidate.to))?.[candidate.orientation].score ?? 0;
-		if (score > bestScore) {
-			bestScore = score;
-			best = candidate;
-		}
-	}
-
-	// Refine only the winning edge, mirroring `assignFour`'s coarse-then-fine split.
-	const refinedMatch = await matchTranslation(rasters[best.from], rasters[best.to], best.orientation, {
-		mode: 'refine'
-	});
-	const refined = toPairEstimate(best.orientation, refinedMatch);
-	const winningKey = pairKey(best.from, best.to);
-	const coarse = estimates.get(winningKey);
-	const otherOrientation: PairOrientation = best.orientation === 'left-right' ? 'top-bottom' : 'left-right';
-	const other = coarse?.[otherOrientation];
-	estimates.set(winningKey, {
-		'left-right': best.orientation === 'left-right' ? refined : (other as PairEstimate),
-		'top-bottom': best.orientation === 'top-bottom' ? refined : (other as PairEstimate),
-		orientation: refined.score >= (other?.score ?? -Infinity) ? best.orientation : otherOrientation
-	});
-	bestScore = refined.score;
-
-	const [firstSlot, secondSlot] = TWO_TILE_SLOTS[best.orientation];
-	const assignment: Partial<Record<TileSlot, number>> = {
-		[firstSlot]: best.from,
-		[secondSlot]: best.to
-	};
-	const placements: Partial<Record<TileSlot, TilePlacement>> = {
-		[firstSlot]: { xPx: 0, yPx: 0, visible: true },
-		[secondSlot]: { xPx: refined.dxPx, yPx: refined.dyPx, visible: true }
-	};
-
-	const estimatesRecord: Record<string, PairEstimates> = {};
-	for (const [key, value] of estimates) {
-		estimatesRecord[key] = value;
-	}
-
-	return {
-		assignment,
-		placements,
-		score: bestScore,
-		estimates: estimatesRecord
+		neighbors,
+		placementEdges,
+		score: placementEdges.reduce((sum, edge) => sum + edge.score, 0),
+		estimates: Object.fromEntries(estimates)
 	};
 }

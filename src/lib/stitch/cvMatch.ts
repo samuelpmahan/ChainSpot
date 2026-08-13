@@ -668,9 +668,9 @@ export interface SnapResult {
  * converts that neighbor-relative offset into an absolute placement estimate
  * for the tile; a tile with more than one loaded neighbor (e.g. lower-right,
  * checked against both upper-right and lower-left) averages every neighbor's
- * estimate with equal weight — the same two-measurement-fusion convention
- * `autoLayout.ts`'s `reconcilePlacements` already uses for lower-right, not a
- * new weighting scheme.
+ * estimate with equal weight — the same multi-measurement-fusion convention
+ * `autoLayout.ts`'s `assignN` already uses for a tile with more than one
+ * strong edge, not a new weighting scheme.
  *
  * Orientation and which tile plays which role in the `matchTranslation`
  * a/b convention (`a` is whichever tile sits first along the primary axis,

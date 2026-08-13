@@ -151,10 +151,32 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	// Radial menu is off by default; every test in this file exercises it directly.
 	host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
 	await flush();
+
+	// An empty-space Map-mode click on a hole still missing its tee or basket
+	// bypasses the radial menu entirely now (it places that piece directly via
+	// the sidebar-driven placing flow — see annotateRoundSidebar.test.ts). This
+	// file is only about what the radial menu itself still does (bends, and
+	// Round mode's shot/walk), so hole 1 is pre-completed with a tee and basket
+	// — opposite corners, well outside MARKER_HIT_RADIUS_PX of each other (else
+	// the second click would hit the first marker instead of empty space) and
+	// away from every test's own 30-70 range click coordinates — putting it in
+	// section 4/5 where an empty click reaches the radial menu again (bend
+	// only in Map mode).
+	const tee = screenPointFor(host, 2, 2);
+	dispatchClick(host, tee.x, tee.y);
+	await flush();
+	const basket = screenPointFor(host, 198, 2);
+	dispatchClick(host, basket.x, basket.y);
+	await flush();
 }
 
 describe('Annotate Round radial menu', () => {
-	it('in the default Map mode, opens on an empty-space click with a button per course-geometry kind not yet on the hole (no shot), and places a tee', async () => {
+	// Tee/basket creation no longer opens the radial menu at all — the
+	// redesigned sidebar's placing flow (see annotateRoundSidebar.test.ts)
+	// intercepts an empty-space Map-mode click and places the missing piece
+	// directly whenever the active hole is still missing a tee or basket.
+	// The radial menu's Map-mode empty-space wedge set is now bend-only.
+	it('in the default Map mode, opens on an empty-space click with only a bend action (tee/basket bypass the menu entirely), and places a bend', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -166,17 +188,17 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-tee"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-basket"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-basket"]')).toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-shot"]')).toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-bend"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 
-		clickAction(host, 'tee');
+		clickAction(host, 'bend');
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -210,7 +232,7 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-tee"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-bend"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -263,7 +285,7 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
-	it('opens a delete-only menu on an existing marker and removes just that point', async () => {
+	it('opens a delete-only menu on an existing bend marker and removes just that point', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		await setUpHoleWithImage(host, editor);
@@ -271,23 +293,23 @@ describe('Annotate Round radial menu', () => {
 		const clickAt = screenPointFor(host, 60, 60);
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
-		clickAction(host, 'tee');
+		clickAction(host, 'bend');
 		await flush();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
 
-		// Click directly on the placed tee (no drag) to open its delete menu.
+		// Click directly on the placed bend (no drag) to open its delete menu.
 		dispatchClick(host, clickAt.x, clickAt.y);
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="radial-action-tee"]')).toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-bend"]')).toBeNull();
 
 		clickAction(host, 'delete');
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -309,8 +331,7 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
-		expect(host.querySelector('[data-testid="basket-marker-1"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -322,8 +343,17 @@ describe('Annotate Round radial menu', () => {
 		await setUpHoleWithImage(host, editor);
 
 		// Adding a second hole makes it the active one (handleAddHole), so the
-		// menu opened below targets hole 2 from the start.
+		// menu opened below targets hole 2 from the start. It also needs its own
+		// tee+basket first (off-path points, same reasoning as setUpHoleWithImage)
+		// so its own empty clicks reach the bend radial menu instead of the
+		// placing flow claiming them.
 		addHoleViaShortcut();
+		await flush();
+		const hole2Tee = screenPointFor(host, 2, 198);
+		dispatchClick(host, hole2Tee.x, hole2Tee.y);
+		await flush();
+		const hole2Basket = screenPointFor(host, 198, 198);
+		dispatchClick(host, hole2Basket.x, hole2Basket.y);
 		await flush();
 
 		const clickAt = screenPointFor(host, 30, 30);
@@ -331,21 +361,29 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 
-		// Switching back to hole 1 without dismissing the menu must close it.
-		host.querySelector<HTMLButtonElement>('[data-testid="hole-select-1"]')?.click();
+		// Switching back to hole 1 without dismissing the menu must close it. In
+		// Map mode hole selection now lives in the sidebar grid, not the flat bar
+		// — and, unlike the old flat bar, clicking a sidebar hole also zooms the
+		// camera to it, so screen coordinates computed before this click are
+		// stale afterward.
+		host.querySelector<HTMLButtonElement>('[data-testid="sidebar-hole-1"]')?.click();
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
 
 		// A fresh click now correctly opens a menu for hole 1, and choosing an
 		// action places on hole 1, not hole 2 (the stale menu's original target).
-		dispatchClick(host, clickAt.x, clickAt.y);
+		// The sidebar click also zoomed the camera to hole 1's midpoint,
+		// centering it at the pane's own center — clicking there (rather than
+		// reusing the pre-zoom `clickAt`, now off-pane under the new transform,
+		// which a real click could never be) is the realistic empty-space click.
+		dispatchClick(host, 200, 200);
 		await flush();
-		clickAction(host, 'tee');
+		clickAction(host, 'bend');
 		await flush();
 
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-2"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-2-0"]')).toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -366,7 +404,7 @@ describe('Annotate Round radial menu', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 		expect(document.activeElement).toBe(scene(host));
 
 		unmount(component);
@@ -387,14 +425,14 @@ describe('Annotate Round radial menu', () => {
 		expect(menu?.tagName).toBe('DIV');
 		expect(menu?.getAttribute('role')).toBe('menu');
 
-		const teeButton = host.querySelector<HTMLButtonElement>('[data-testid="radial-action-tee"]');
-		expect(teeButton?.tagName).toBe('BUTTON');
-		expect(teeButton?.getAttribute('role')).toBe('menuitem');
-		expect(teeButton?.getAttribute('aria-label')).toBe('Tee');
+		const bendButton = host.querySelector<HTMLButtonElement>('[data-testid="radial-action-bend"]');
+		expect(bendButton?.tagName).toBe('BUTTON');
+		expect(bendButton?.getAttribute('role')).toBe('menuitem');
+		expect(bendButton?.getAttribute('aria-label')).toBe('Corridor bend');
 		// Roving tabindex: exactly one item is a tab stop, and focus already
 		// moved into the menu on open.
-		expect(teeButton?.getAttribute('tabindex')).toBe('0');
-		expect(document.activeElement).toBe(teeButton);
+		expect(bendButton?.getAttribute('tabindex')).toBe('0');
+		expect(document.activeElement).toBe(bendButton);
 
 		unmount(component);
 		host.remove();

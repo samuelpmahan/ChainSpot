@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { MAX_INSET_FRACTION, MIN_ORIGINAL_BAND_PX, proposeCrop } from '../../src/lib/stitch/autoCrop';
+import {
+	DEFAULT_CROP_SAFETY_MARGIN_PX,
+	MAX_INSET_FRACTION,
+	MIN_ORIGINAL_BAND_PX,
+	proposeCrop
+} from '../../src/lib/stitch/autoCrop';
 import { buildGrayRaster, TILE_H } from '../helpers/smartMap';
 import type { AnalysisRaster } from '../../src/lib/stitch/analysis';
 
@@ -73,5 +78,52 @@ describe('P1-001 shared outer-band crop proposal (case 3)', () => {
 
 		// An empty set returns null rather than failing.
 		expect(proposeCrop([] as AnalysisRaster[])).toBeNull();
+	});
+});
+
+describe('P1-001 crop safety margin (marginPx option)', () => {
+	test('adds the margin only to sides that were actually proposed, clamped to the same bound detection itself respects', () => {
+		const rasters = [
+			buildGrayRaster('upper-left'),
+			buildGrayRaster('upper-right'),
+			buildGrayRaster('lower-left'),
+			buildGrayRaster('lower-right')
+		];
+		// No margin: the exact detected boundary (matches the case-3 fixture above).
+		const exact = proposeCrop(rasters, { marginPx: 0 });
+		expect(exact).toEqual({ topPx: 4, rightPx: 0, bottomPx: 3, leftPx: 0 });
+
+		// The default suggested margin is added to every proposed side (top,
+		// bottom) but never invents a crop on a side with no evidence (right,
+		// left stay 0, not 0 + margin).
+		const margined = proposeCrop(rasters, { marginPx: DEFAULT_CROP_SAFETY_MARGIN_PX });
+		expect(margined).toEqual({
+			topPx: 4 + DEFAULT_CROP_SAFETY_MARGIN_PX,
+			rightPx: 0,
+			bottomPx: 3 + DEFAULT_CROP_SAFETY_MARGIN_PX,
+			leftPx: 0
+		});
+
+		// A single conflicting tile declines that side outright (see the case-3
+		// fixture above); margin must not resurrect it.
+		const conflicting = [
+			buildGrayRaster('upper-left'),
+			buildGrayRaster('upper-right'),
+			buildGrayRaster('lower-left', { chromeTop: 0 }),
+			buildGrayRaster('lower-right')
+		];
+		expect(proposeCrop(conflicting, { marginPx: DEFAULT_CROP_SAFETY_MARGIN_PX })).toEqual({
+			topPx: 0,
+			rightPx: 0,
+			bottomPx: 3 + DEFAULT_CROP_SAFETY_MARGIN_PX,
+			leftPx: 0
+		});
+
+		// A very deep band is already capped at the bounded-inset rule; a large
+		// margin must not push it past that same bound.
+		const deep = ALL_SLOTS.map((slot) => buildGrayRaster(slot, { chromeTop: 40 }));
+		const maxInset = Math.floor(TILE_H * MAX_INSET_FRACTION);
+		const cappedWithMargin = proposeCrop(deep, { marginPx: 1000 });
+		expect(cappedWithMargin?.topPx).toBe(maxInset);
 	});
 });

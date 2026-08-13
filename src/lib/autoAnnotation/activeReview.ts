@@ -35,8 +35,36 @@ export interface ActiveReviewHole {
 export interface ActiveReviewMap {
 	readonly holes: readonly ActiveReviewHole[];
 	readonly candidates: readonly ActiveReviewCandidate[];
-	readonly confirmedHoleNumbers?: readonly number[];
 	readonly confirmedCandidateIds?: readonly string[];
+}
+
+/**
+ * Whether a hole's tee/basket is actually placed right now, in the live
+ * annotation draft -- as opposed to whether the one-time detection pass
+ * originally proposed something for it. `buildActiveReviewMap` uses this,
+ * not `CourseHoleProposal.tee`/`.basket` presence, to decide `missing`: a
+ * hole whose only assignment was weak and has since been rejected (or
+ * never had one at all) must keep reading as unresolved for as long as
+ * nothing is actually placed, matching a "N holes need review" style count
+ * -- not silently drop out of the guided queue once its local candidate
+ * pool runs out. As of this module, no live session actually supplies this
+ * (see `livePlacementsFromGrammar`'s doc comment) -- CLI/benchmark callers
+ * are the only current consumers.
+ */
+export interface ActiveReviewLivePlacement {
+	readonly tee: boolean;
+	readonly basket: boolean;
+}
+
+/**
+ * Stable key for a hole/landmark pair, used to track "wrong guess" counts
+ * (rejected or replaced recommendations) across recomputes, so a caller that
+ * records rejections and `buildActiveReviewMap` (which consumes the
+ * resulting exhausted set) agree on the format. No current caller does both
+ * halves of this -- see `livePlacementsFromGrammar`'s doc comment.
+ */
+export function exhaustedLandmarkKey(holeNumber: number, kind: ActiveReviewLandmarkKind): string {
+	return `${holeNumber}:${kind}`;
 }
 
 export interface ActiveReviewRationale {
@@ -429,11 +457,45 @@ function candidateScore(candidate: { readonly score?: number }): number {
 	return clamp01(candidate.score ?? 0.5);
 }
 
+/**
+ * A `livePlacements` map for callers with no live annotation session at all
+ * (the CLI preview, benchmarks) -- treats the one-time detection's own
+ * proposal presence as "placed", exactly `buildActiveReviewMap`'s pre-live-
+ * state behavior. Do not use this as a stand-in for a real live session: a
+ * caller with an actual annotation draft must build its map from that
+ * draft's real `holes[]`, not from the frozen detection snapshot this
+ * reconstructs. Note the redesigned Annotate Round page (`+page.svelte`)
+ * does not currently call `buildActiveReviewMap` at all -- it tracks its own
+ * "N holes need review" count independently -- so today this module's only
+ * callers are CLI/benchmark tooling (`scripts/detect-course.ts`,
+ * `scripts/verify-course-detection.ts`, `scripts/benchmark-active-review.ts`).
+ */
+export function livePlacementsFromGrammar(
+	detection: CourseDetectionResult
+): ReadonlyMap<number, ActiveReviewLivePlacement> {
+	return new Map(
+		detection.grammar.holes.map((proposal) => [
+			proposal.number,
+			{ tee: proposal.tee !== undefined, basket: proposal.basket !== undefined }
+		])
+	);
+}
+
 /** Converts the shipped grammar output into the small graph used by the recommender. */
 export function buildActiveReviewMap(
 	detection: CourseDetectionResult,
-	confirmedHoleNumbers: readonly number[] = [],
-	confirmedCandidateIds: readonly string[] = []
+	livePlacements: ReadonlyMap<number, ActiveReviewLivePlacement> = new Map(),
+	confirmedCandidateIds: readonly string[] = [],
+	/**
+	 * Hole/landmark pairs (`exhaustedLandmarkKey`) the caller has decided to
+	 * stop auto-suggesting for -- after enough rejected/replaced guesses, a
+	 * real tee/basket pad may simply not be visible in the source image, and
+	 * continuing to offer candidates for it is worse than just asking the
+	 * user to place it directly. Treated as if zero candidates exist for
+	 * that hole/kind, which routes it through the same "needs manual
+	 * placement" path an already-orphaned hole takes.
+	 */
+	exhaustedLandmarks: ReadonlySet<string> = new Set()
 ): ActiveReviewMap {
 	const candidates: ActiveReviewCandidate[] = [
 		...detection.tees.map((candidate, index) => ({
@@ -464,16 +526,35 @@ export function buildActiveReviewMap(
 	const holes: ActiveReviewHole[] = detection.grammar.holes.map((proposal) => {
 		const anchor = proposal.numberBadge ?? proposal.tee ?? proposal.basket;
 		const badgeAnchor = proposal.numberBadge ?? anchor;
+		// Live placement state, not the one-time proposal's own tee/basket
+		// presence, decides `missing` -- see `ActiveReviewLivePlacement`'s doc
+		// comment. A hole whose only detected assignment was weak and has
+		// since been rejected must keep reading as unresolved, not silently
+		// stop being `missing` just because a (rejected) proposal once existed.
+		const live = livePlacements.get(proposal.number);
+		const teePlaced = live?.tee ?? false;
+		const basketPlaced = live?.basket ?? false;
+		const teeExhausted = exhaustedLandmarks.has(exhaustedLandmarkKey(proposal.number, 'tee'));
+		const basketExhausted = exhaustedLandmarks.has(exhaustedLandmarkKey(proposal.number, 'basket'));
 		const missing: ActiveReviewLandmarkKind[] = [];
-		if (!proposal.tee || proposal.failures.some((failure) => failure.kind === 'missing-tee')) missing.push('tee');
-		if (!proposal.basket || proposal.failures.some((failure) => failure.kind === 'missing-basket')) missing.push('basket');
+		if (!teePlaced) missing.push('tee');
+		if (!basketPlaced) missing.push('basket');
 		const associations: ActiveReviewAssociation[] = [];
 		const assigned = new Map<string, number>();
 		if (proposal.tee) assigned.set(`tee:${proposal.tee.candidateIndex}`, proposal.tee.confidence);
 		if (proposal.basket) assigned.set(`basket:${proposal.basket.candidateIndex}`, proposal.basket.confidence);
 		for (const candidate of candidates) {
-			if (candidate.kind === 'tee' && !proposal.tee && !missing.includes('tee')) continue;
-			if (candidate.kind === 'basket' && !proposal.basket && !missing.includes('basket')) continue;
+			// Once a landmark is actually placed, this hole is done for that
+			// kind -- never keep offering alternatives for it, regardless of
+			// what the original detection proposed (see doc comment above).
+			if (candidate.kind === 'tee' && teePlaced) continue;
+			if (candidate.kind === 'basket' && basketPlaced) continue;
+			// Two wrong guesses in a row and we stop guessing: treat this
+			// hole/kind as if no candidate exists at all, which routes it
+			// through the orphaned-hole "needs manual placement" path instead
+			// of a third automatic suggestion.
+			if (candidate.kind === 'tee' && teeExhausted) continue;
+			if (candidate.kind === 'basket' && basketExhausted) continue;
 			const assignedScore = assigned.get(candidate.id);
 			const associationAnchor = candidate.kind === 'tee' ? badgeAnchor : anchor;
 			const distance = associationAnchor ? pointDistance(associationAnchor, candidate) : Number.POSITIVE_INFINITY;
@@ -516,7 +597,13 @@ export function buildActiveReviewMap(
 	for (const candidate of candidates) {
 		if (candidateIdsWithLinks.has(candidate.id)) continue;
 		const target = holesWithUnassignedCandidates
-			.filter((hole) => hole.missing.includes(candidate.kind))
+			// An exhausted hole/kind must stay unassigned here too, or this pass
+			// undoes the skip above by re-attaching a stray nearby candidate.
+			.filter(
+				(hole) =>
+					hole.missing.includes(candidate.kind) &&
+					!exhaustedLandmarks.has(exhaustedLandmarkKey(hole.number, candidate.kind))
+			)
 			.sort((left, right) => {
 				const leftDistance = left.anchor ? pointDistance(left.anchor, candidate) : Number.POSITIVE_INFINITY;
 				const rightDistance = right.anchor ? pointDistance(right.anchor, candidate) : Number.POSITIVE_INFINITY;
@@ -534,5 +621,5 @@ export function buildActiveReviewMap(
 			)
 		});
 	}
-	return { holes: holesWithUnassignedCandidates, candidates, confirmedHoleNumbers, confirmedCandidateIds };
+	return { holes: holesWithUnassignedCandidates, candidates, confirmedCandidateIds };
 }

@@ -9,7 +9,7 @@ import {
 	detectBasketCandidatesAtTemplateScale,
 	detectCalibratedBasketOcclusionFallback,
 	detectCalibratedHoleNumberBadges,
-	detectCalibratedTeeBootstrap,
+	detectWorldNormalizedTeeBootstrap,
 	detectCalibratedTeePadCandidates
 } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
 import type { CalibratedBasketCandidate, TeeBootstrapExperiments } from '../src/lib/autoAnnotation/cvCalibratedDetectors';
@@ -29,9 +29,14 @@ import type { CvTemplateManifest, UiScalePx } from '../src/lib/autoAnnotation/cv
 import type { BasketCv, BasketTemplateRaster } from '../src/lib/autoAnnotation/basketTemplateDetection';
 import type { TeePadCandidate, TeePadCv } from '../src/lib/autoAnnotation/teePadDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
-import { associateCourseGrammar } from '../src/lib/autoAnnotation/courseGrammar';
+import { associateCourseGrammar, deriveBasketPolarityPenaltyPx } from '../src/lib/autoAnnotation/courseGrammar';
 import type { CourseGrammarResult } from '../src/lib/autoAnnotation/courseGrammar';
-import { buildActiveReviewMap, recommendNextAnchor, summarizeTeeInvariant } from '../src/lib/autoAnnotation/activeReview';
+import {
+	buildActiveReviewMap,
+	livePlacementsFromGrammar,
+	recommendNextAnchor,
+	summarizeTeeInvariant
+} from '../src/lib/autoAnnotation/activeReview';
 import type { ActiveReviewMap, ActiveReviewRecommendation } from '../src/lib/autoAnnotation/activeReview';
 import type { CourseDetectionResult } from '../src/lib/autoAnnotation/basketDetection';
 
@@ -111,6 +116,10 @@ export interface CourseCliResult {
 		readonly basketFallbackRecovered: number;
 	};
 	readonly teeBootstrap: {
+		readonly normalized: boolean;
+		readonly worldScale: number | null;
+		readonly rawCandidates: number;
+		readonly dedupedCandidates: number;
 		readonly auto: number;
 		readonly review: number;
 		readonly unresolved: number;
@@ -120,6 +129,11 @@ export interface CourseCliResult {
 			candidateIndex?: number;
 			confidence?: number;
 		}>[];
+	};
+	readonly teeStages: {
+		readonly raw: readonly Record<string, unknown>[];
+		readonly deduped: readonly Record<string, unknown>[];
+		readonly assigned: readonly Record<string, unknown>[];
 	};
 	readonly grammar: CourseGrammarResult;
 	readonly teeTruthEvaluation?: {
@@ -147,6 +161,7 @@ export interface CourseCliResult {
 		readonly recommendation: Record<string, unknown>;
 	};
 	readonly overlayPath: string;
+	readonly stageOverlayPaths: readonly string[];
 	readonly activeReviewPath: string;
 	readonly elapsedMs: number;
 }
@@ -510,6 +525,17 @@ function renderOverlay(
 	return PNG.sync.write(png);
 }
 
+function renderCandidateOverlay(
+	raster: DecodedRaster,
+	candidates: readonly Pick<TeePadCandidate, 'xPx' | 'yPx'>[],
+	color: readonly [number, number, number, number]
+): Buffer {
+	const png = new PNG({ width: raster.widthPx, height: raster.heightPx });
+	png.data.set(raster.rgba);
+	for (const candidate of candidates) drawDisc(png, candidate.xPx, candidate.yPx, 5, color);
+	return PNG.sync.write(png);
+}
+
 function evaluateTeeTruth(
 	truth: readonly CourseTruthHole[],
 	grammar: CourseGrammarResult,
@@ -609,7 +635,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const numberTemplates = loadNumberTemplates(args.templateDir, manifest);
 	const basketTemplate = loadBasketTemplate(args.templateDir, manifest);
 
-	const numberDetection = detectCalibratedHoleNumberBadges(cv, { format: 'rgba', widthPx: input.widthPx, heightPx: input.heightPx, data: input.rgba }, numberTemplates);
+	const numberDetection = detectCalibratedHoleNumberBadges(cv, { format: 'rgba', widthPx: input.widthPx, heightPx: input.heightPx, data: input.rgba }, numberTemplates, { maxCandidates: 24 });
 	if (!numberDetection.anchor) throw new Error(numberDetection.note ?? 'Could not derive UI scale from hole-number templates; pass --ui-scale.');
 
 	const calibration = deriveUDiscCalibration(numberDetection.anchor, manifest.calibration.canonicalNumberBadge);
@@ -618,7 +644,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const mapBoundsPx =
 		args.mapTopPx !== undefined && args.mapBottomPx !== undefined
 			? { topPx: args.mapTopPx, bottomPx: args.mapBottomPx }
-			: deriveMapBounds(numberDetection.candidates, input.heightPx);
+			: deriveMapBounds(numberDetection.candidates.filter((candidate) => candidate.label !== undefined), input.heightPx);
 
 	const basketRaster = { gray: toGray(input), widthPx: input.widthPx, heightPx: input.heightPx, sourceScale: 1 };
 	const primaryBasketCandidates = detectBasketCandidatesAtTemplateScale(cv, basketRaster, basketTemplate, {
@@ -638,7 +664,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			widthPx: candidate.widthPx,
 			heightPx: candidate.heightPx
 		}));
-	const teeBootstrap = detectCalibratedTeeBootstrap(cv, teeRaster, {
+	const teeBootstrap = detectWorldNormalizedTeeBootstrap(cv, teeRaster, {
 		uiScalePx,
 		mapBoundsPx,
 		maxCandidates: args.maxTeeCandidates
@@ -650,7 +676,12 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		bootstrapDecision: assignment.decision,
 		confidence: assignment.decision === 'auto'
 			? Math.max(0.75, assignment.confidence)
-			: Math.min(0.49, assignment.confidence)
+			: Math.min(0.49, assignment.confidence),
+		// assignments is compacted (one entry per resolved hole), not
+		// positionally aligned with teeCandidates -- carry the real raw index
+		// through so associateCourseGrammar's reported candidateIndex stays a
+		// valid index into teeCandidates. Mirrors basketDetection.worker.ts.
+		candidateIndex: assignment.candidateIndex
 	}));
 
 	const numberBadges = numberDetection.candidates.map((candidate) => ({
@@ -661,7 +692,8 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		widthPx: candidate.widthPx,
 		heightPx: candidate.heightPx
 	}));
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBasketCandidates });
+	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBasketCandidates);
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBasketCandidates, basketPolarityPenaltyPx });
 
 	// Occlusion-tolerant basket recovery -- mirrors basketDetection.worker.ts's
 	// production `detectCourse` exactly, so this CLI stays a faithful preview
@@ -707,13 +739,19 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 				...primaryBasketCandidates,
 				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
 			];
-			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets });
+			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets, basketPolarityPenaltyPx });
 		}
 	}
 
 	const outputDir = resolve(args.outputDir);
 	mkdirSync(outputDir, { recursive: true });
 	const overlayPath = join(outputDir, 'course.png');
+	const rawTeeOverlayPath = join(outputDir, 'tee-raw.png');
+	const dedupedTeeOverlayPath = join(outputDir, 'tee-deduped.png');
+	const assignedTeeOverlayPath = join(outputDir, 'tee-assigned.png');
+	const rawBasketOverlayPath = join(outputDir, 'basket-raw.png');
+	const assignedBasketOverlayPath = join(outputDir, 'basket-assigned.png');
+	const stageOverlayPaths = [rawTeeOverlayPath, dedupedTeeOverlayPath, assignedTeeOverlayPath, rawBasketOverlayPath, assignedBasketOverlayPath];
 	const jsonPath = join(outputDir, 'course.json');
 	const activeReviewPath = join(outputDir, 'activeReview.json');
 
@@ -722,7 +760,11 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 	const incompleteHoles = grammar.holes.filter((hole) => hole.status === 'incomplete').length;
 
 	const detectionResult: CourseDetectionResult = { numberDetection, tees: teeCandidates, baskets: basketCandidates, grammar };
-	const reviewMap = buildActiveReviewMap(detectionResult, [], []);
+	// No live annotation session exists in this CLI preview -- treat the
+	// detection's own proposals as "placed" so this stays a faithful preview
+	// of a freshly-detected, unreviewed course (see livePlacementsFromGrammar's
+	// doc comment).
+	const reviewMap = buildActiveReviewMap(detectionResult, livePlacementsFromGrammar(detectionResult), []);
 	const recommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore: args.minAutoSuggestScore });
 	const activeReview = summarizeActiveReview(detectionResult, reviewMap, recommendation);
 
@@ -743,6 +785,10 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			basketFallbackRecovered: basketFallbackRecoveredCount
 		},
 		teeBootstrap: {
+			normalized: teeBootstrap.normalized,
+			worldScale: teeBootstrap.worldScaleMeasurement?.worldScale ?? null,
+			rawCandidates: teeBootstrap.rawCandidates.length,
+			dedupedCandidates: teeBootstrap.candidates.length,
 			...teeBootstrap.counts,
 			holes: teeBootstrap.holes.map((hole) => ({
 				holeNumber: hole.holeNumber,
@@ -753,16 +799,57 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 				} : {})
 			}))
 		},
+		teeStages: (() => {
+			const worldScale = teeBootstrap.worldScaleMeasurement?.worldScale ?? 1;
+			const axisError = (candidate: TeePadCandidate, badge: { xPx: number; yPx: number }): number => {
+				const bearing = ((Math.atan2(badge.yPx - candidate.yPx, badge.xPx - candidate.xPx) * 180) / Math.PI + 180) % 180;
+				const delta = Math.abs(candidate.orientationDeg - bearing);
+				return Math.min(delta, 180 - delta);
+			};
+			const detail = (candidate: TeePadCandidate, semanticOwner?: number): Record<string, unknown> => {
+				const nearest = teeBadges
+					.map((badge) => ({ badge, distancePx: Math.hypot(badge.xPx - candidate.xPx, badge.yPx - candidate.yPx) }))
+					.sort((a, b) => a.distancePx - b.distancePx)[0];
+				return {
+					native: { xPx: candidate.xPx, yPx: candidate.yPx },
+					canonical: { xPx: candidate.xPx / worldScale, yPx: candidate.yPx / worldScale },
+					majorPx: candidate.widthPx,
+					minorPx: candidate.heightPx,
+					orientationDeg: candidate.orientationDeg,
+					appearanceScore: candidate.score,
+					support: candidate.support,
+					provenance: candidate.provenance ?? [],
+					nearestBadge: nearest?.badge.holeNumber ?? null,
+					badgeDistancePx: nearest?.distancePx ?? null,
+					badgeAxisErrorDeg: nearest ? axisError(candidate, nearest.badge) : null,
+					semanticOwner: semanticOwner ?? null
+				};
+			};
+			const ownerByDedupIndex = new Map(teeBootstrap.assignments.map((assignment) => [assignment.candidateIndex, assignment.holeNumber]));
+			const raw = teeBootstrap.rawCandidates.map((candidate, rawIndex) => {
+				const clusterIndex = teeBootstrap.dedupClusters.findIndex((cluster) => cluster.includes(rawIndex));
+				return { rawIndex, clusterIndex, ...detail(candidate, ownerByDedupIndex.get(clusterIndex)) };
+			});
+			const deduped = teeBootstrap.candidates.map((candidate, index) => ({ index, sourceIndexes: teeBootstrap.dedupClusters[index] ?? [], ...detail(candidate, ownerByDedupIndex.get(index)) }));
+			const assigned = teeBootstrap.assignments.map((assignment) => ({ holeNumber: assignment.holeNumber, decision: assignment.decision, confidence: assignment.confidence, candidateIndex: assignment.candidateIndex, ...detail(assignment.candidate, assignment.holeNumber) }));
+			return { raw, deduped, assigned };
+		})(),
 		grammar,
 		teeTruthEvaluation: input.truth ? evaluateTeeTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		basketTruthEvaluation: input.truth ? evaluateBasketTruth(input.truth, grammar, 7 * uiScalePx) : undefined,
 		activeReview,
 		overlayPath,
+		stageOverlayPaths,
 		activeReviewPath,
 		elapsedMs: performance.now() - startedAt
 	};
 
 	writeFileSync(overlayPath, renderOverlay(input, grammar, teeCandidates, basketCandidates));
+	writeFileSync(rawTeeOverlayPath, renderCandidateOverlay(input, teeBootstrap.rawCandidates, COLOR_TEE));
+	writeFileSync(dedupedTeeOverlayPath, renderCandidateOverlay(input, teeCandidates, COLOR_TEE));
+	writeFileSync(assignedTeeOverlayPath, renderCandidateOverlay(input, grammar.holes.flatMap((hole) => hole.tee ? [hole.tee] : []), COLOR_TEE));
+	writeFileSync(rawBasketOverlayPath, renderCandidateOverlay(input, basketCandidates, COLOR_BASKET));
+	writeFileSync(assignedBasketOverlayPath, renderCandidateOverlay(input, grammar.holes.flatMap((hole) => hole.basket ? [hole.basket] : []), COLOR_BASKET));
 	writeFileSync(jsonPath, `${JSON.stringify(output, null, 2)}\n`);
 	writeFileSync(activeReviewPath, `${JSON.stringify({ map: reviewMap, recommendation: recommendationSummary(recommendation) }, null, 2)}\n`);
 	console.log(JSON.stringify({ ...output, jsonPath }, null, 2));

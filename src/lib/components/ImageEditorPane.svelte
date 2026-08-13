@@ -119,6 +119,26 @@
 	let objectUrl = $state<string | null>(null);
 	let fittedImageId: string | null = null;
 	let appliedFocusKey: string | null = null;
+	/**
+	 * True for the brief window a `focusRequest` jump is animating, so
+	 * `.workspace` picks up a transition on its transform ONLY for that
+	 * programmatic jump — ordinary wheel-zoom/drag-pan stay perfectly instant,
+	 * matching every other pane using this component. Cleared the moment the
+	 * user starts their own gesture (`clearFocusing` on pointerdown/wheel) so
+	 * an in-flight jump animation never fights live input.
+	 */
+	let focusing = $state(false);
+	let focusingTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Matches the CSS transition duration below plus a small buffer. */
+	const FOCUS_TRANSITION_MS = 650;
+
+	function clearFocusing(): void {
+		focusing = false;
+		if (focusingTimer !== null) {
+			clearTimeout(focusingTimer);
+			focusingTimer = null;
+		}
+	}
 
 	function currentImage(): ImageAsset | null {
 		void refresh;
@@ -157,6 +177,9 @@
 		if (!image || !vp.fitTarget || vp.size.width <= 1 || vp.size.height <= 1) return;
 		const requestKey = `${image.id}:${request.key}`;
 		if (requestKey === appliedFocusKey) return;
+		focusing = true;
+		if (focusingTimer !== null) clearTimeout(focusingTimer);
+		focusingTimer = setTimeout(() => { focusing = false; focusingTimer = null; }, FOCUS_TRANSITION_MS);
 		vp.focusOnPoint(request.point, request.zoomMultiplier);
 		appliedFocusKey = requestKey;
 	});
@@ -233,7 +256,13 @@
 			</aside>
 		{/if}
 
-		<div class="canvas-shell" class:placing={Boolean(onPlacement)}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="canvas-shell"
+			class:placing={Boolean(onPlacement)}
+			onpointerdown={clearFocusing}
+			onwheel={clearFocusing}
+		>
 			<ImageViewport
 				controller={vp}
 				testid={`pane-scene-${role}`}
@@ -262,6 +291,7 @@
 						{@const image = currentImage()!}
 						<div
 							class="workspace"
+							class:focusing
 							data-testid="annotation-frame"
 							style={`width:${image.widthPx}px;height:${image.heightPx}px;transform:translate(${vp.view.panX}px,${vp.view.panY}px) scale(${vp.view.zoom})`}
 						>
@@ -411,6 +441,17 @@
 	.workspace {
 		position: absolute;
 		transform-origin: 0 0;
+	}
+
+	/** Only a programmatic focus jump (`focusRequest`) transitions; interactive wheel-zoom/drag-pan write `vp.view` every frame and must stay instant. */
+	.workspace.focusing {
+		transition: transform 0.6s cubic-bezier(0.4, 0.7, 0.25, 1);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.workspace.focusing {
+			transition: none;
+		}
 	}
 
 	.source-image {

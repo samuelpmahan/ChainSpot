@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { assignFour, reconcilePlacements } from '../../src/lib/stitch/autoLayout';
+import { assignN } from '../../src/lib/stitch/autoLayout';
+import type { AutoLayout } from '../../src/lib/stitch/autoLayout';
 import { smartImportFiles } from '../../src/lib/stitch/smartImport';
 import type { SmartImportFileFailureKind, SmartImportResult } from '../../src/lib/stitch/smartImport';
-import { TILE_SLOTS } from '../../src/lib/stitch/geometry';
 import type { TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
-import type { PairEstimate } from '../../src/lib/stitch/analysis';
 import { buildGrayRaster, TILE_H, TILE_W } from '../helpers/smartMap';
 import type { RasterRegion } from '../../src/lib/stitch/analysis';
 
@@ -32,6 +31,40 @@ function sliceGrayRaster(
 /** The documented tolerance for inferred integer placements, in original px. */
 const PLACEMENT_TOLERANCE_PX = 5;
 
+/** Each corner fixture's true origin in the shared 350x350 synthetic course (see smartMap.js). */
+const CORNER_ORIGIN: Record<string, { x: number; y: number }> = {
+	'upper-left': { x: 0, y: 0 },
+	'upper-right': { x: (TILE_W * 3) / 4, y: 0 },
+	'lower-left': { x: 0, y: (TILE_H * 3) / 4 },
+	'lower-right': { x: (TILE_W * 3) / 4, y: (TILE_H * 3) / 4 }
+};
+
+/**
+ * Asserts every placement edge's measured offset matches the true relative
+ * geometry between the corners it connects, however `assignN` chose to
+ * label/anchor them — `assignN`'s output slot ids are dynamic (`tile-0`,
+ * `tile-1`, ...), not the fixed named corners the old `assignFour` produced,
+ * so tests can no longer assert a specific slot-to-file mapping; they assert
+ * the arrangement is geometrically correct instead.
+ */
+function expectGeometricallyCorrectEdges(layout: AutoLayout, cornerOfIndex: readonly string[]): void {
+	expect(layout.placementEdges).toHaveLength(layout.order.length - 1);
+	for (const edge of layout.placementEdges) {
+		const fromIndex = layout.assignment[edge.from];
+		const toIndex = layout.assignment[edge.to];
+		if (fromIndex === undefined || toIndex === undefined) throw new Error('missing assignment');
+		const fromCorner = CORNER_ORIGIN[cornerOfIndex[fromIndex]];
+		const toCorner = CORNER_ORIGIN[cornerOfIndex[toIndex]];
+		expect(Math.abs(edge.dxPx - (toCorner.x - fromCorner.x))).toBeLessThanOrEqual(
+			PLACEMENT_TOLERANCE_PX
+		);
+		expect(Math.abs(edge.dyPx - (toCorner.y - fromCorner.y))).toBeLessThanOrEqual(
+			PLACEMENT_TOLERANCE_PX
+		);
+		expect(edge.score).toBeGreaterThan(0.5);
+	}
+}
+
 function fileOf(name: string, type: string, size = 8): File {
 	return new File([new Uint8Array(size).fill(1)], name, { type });
 }
@@ -58,149 +91,49 @@ function expectFileFailure(
 	expect(result.fileName).toBe(fileName);
 }
 
-describe('P1-001 smart four-tile assignment (case 1)', () => {
-	test('unordered deterministic fixture produces the expected roles and integer placements', async () => {
+describe('P1-001 N-tile assignment (case 1)', () => {
+	test('unordered deterministic fixture produces a geometrically correct, deterministic arrangement', async () => {
 		// Enter in one nontrivial order: lower-left, upper-right, lower-right,
-		// upper-left. File-selection order must not determine the roles.
+		// upper-left. File-selection order must not determine the geometry.
 		//
-		// `assignFour` is exercised directly here, with no crop stage in front of
-		// it - in production it only ever receives rasters built from the
-		// post-crop interior (see `matcherRegionFromCrop` in
-		// src/lib/stitch/smartImport.ts). The `chromeTop`/`chromeBottom`
-		// overrides strip the fixture's synthetic top/bottom chrome band to match
-		// that: the band is identical on every tile, so it carries zero
-		// positional information, but it is a strong dark outlier against the
-		// scene content, and under `cvMatch`'s normalized cross-correlation it
-		// injects a spurious covariance term whenever one tile's band aligns with
-		// another's, dragging the true vertical peak off-target. Feeding it here
-		// would test a raster shape assignFour never actually sees.
+		// `assignN` is exercised directly here, with no crop stage in front of it
+		// - in production it only ever receives rasters built from the post-crop
+		// interior (see `matcherRegionFromCrop` in src/lib/stitch/smartImport.ts).
+		// The `chromeTop`/`chromeBottom` overrides strip the fixture's synthetic
+		// top/bottom chrome band to match that: the band is identical on every
+		// tile, so it carries zero positional information, but it is a strong
+		// dark outlier against the scene content, and under `cvMatch`'s
+		// normalized cross-correlation it injects a spurious covariance term
+		// whenever one tile's band aligns with another's, dragging the true
+		// vertical peak off-target. Feeding it here would test a raster shape
+		// `assignN` never actually sees.
 		const noChrome = { chromeTop: 0, chromeBottom: 0 };
-		const rasters = [
-			buildGrayRaster('lower-left', noChrome),
-			buildGrayRaster('upper-right', noChrome),
-			buildGrayRaster('lower-right', noChrome),
-			buildGrayRaster('upper-left', noChrome)
-		];
-		const layout = await assignFour(rasters);
+		const cornerOfIndex = ['lower-left', 'upper-right', 'lower-right', 'upper-left'] as const;
+		const rasters = cornerOfIndex.map((corner) => buildGrayRaster(corner, noChrome));
+		const layout = await assignN(rasters);
 
-		// Every 24-permutation scoring path is exercised inside this case; the
-		// correct assignment must win.
-		expect(layout.assignment).toEqual({
-			'upper-left': 3,
-			'upper-right': 1,
-			'lower-left': 0,
-			'lower-right': 2
-		});
+		// Every raster is assigned to exactly one slot (a bijection), the anchor
+		// sits at the origin, and every placement is an integer.
+		const assignedIndices = Object.values(layout.assignment).sort();
+		expect(assignedIndices).toEqual([0, 1, 2, 3]);
+		const anchor = layout.order[0];
+		expect(layout.placements[anchor]).toEqual({ xPx: 0, yPx: 0, visible: true });
+		for (const slot of layout.order) {
+			const placement = layout.placements[slot];
+			if (!placement) throw new Error(`missing placement for ${slot}`);
+			expect(Number.isInteger(placement.xPx)).toBe(true);
+			expect(Number.isInteger(placement.yPx)).toBe(true);
+		}
 
-		// Anchor at (0,0); the other three are integer translation-only placements
-		// consistent with 25% overlap on 200x200 tiles (offset 150 per axis).
-		// `assignFour` on four rasters always populates all four 2x2 slots.
-		const placements = layout.placements as Record<TileSlot, TilePlacement>;
-		expect(placements['upper-left']).toEqual({ xPx: 0, yPx: 0, visible: true });
-		expect(Math.abs(placements['upper-right'].xPx - (TILE_W * 3) / 4)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-		expect(placements['upper-right'].yPx).toBe(0);
-		expect(placements['lower-left'].xPx).toBe(0);
-		expect(Math.abs(placements['lower-left'].yPx - (TILE_H * 3) / 4)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-
-		// Lower-right is reconciled from the redundant right-column and bottom-row
-		// paths rather than one edge alone.
-		const expectedX = (TILE_W * 3) / 4;
-		const expectedY = (TILE_H * 3) / 4;
-		expect(Math.abs(placements['lower-right'].xPx - expectedX)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-		expect(Math.abs(placements['lower-right'].yPx - expectedY)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-
-		// The reconciliation helper reproduces the shipped placements exactly on
-		// this ideal fixture.
-		const a = layout.assignment;
-		const ulur = layout.estimates[`${a['upper-left']}>${a['upper-right']}`]['left-right'];
-		const ulll = layout.estimates[`${a['upper-left']}>${a['lower-left']}`]['top-bottom'];
-		const urlr = layout.estimates[`${a['upper-right']}>${a['lower-right']}`]['top-bottom'];
-		const llr = layout.estimates[`${a['lower-left']}>${a['lower-right']}`]['left-right'];
-		const reconciled = reconcilePlacements(ulur, ulll, urlr, llr);
-		expect(reconciled.upperRight).toEqual({
-			xPx: placements['upper-right'].xPx,
-			yPx: placements['upper-right'].yPx
-		});
-		expect(reconciled.lowerLeft).toEqual({
-			xPx: placements['lower-left'].xPx,
-			yPx: placements['lower-left'].yPx
-		});
-		expect(reconciled.lowerRight).toEqual({
-			xPx: placements['lower-right'].xPx,
-			yPx: placements['lower-right'].yPx
-		});
-
-		// A hand-built inconsistent edge set — the four measurements disagree,
-		// exactly as a real hand-held capture's irregular per-pair overlap would.
-		// Upper-right and lower-left must stay EXACTLY their own raw
-		// measurement — never adjusted to make another edge's measurement
-		// "agree" — while lower-right (the one point with no direct anchor
-		// measurement) legitimately averages its two paths.
-		const edgeEstimate = (
-			orientation: 'left-right' | 'top-bottom',
-			dxPx: number,
-			dyPx: number
-		): PairEstimate => ({
-			orientation,
-			dxPx,
-			dyPx,
-			score: 0.9,
-			overlapFractionPx: 0.25,
-			runnerUpScore: 0.5
-		});
-		const inconsistent = reconcilePlacements(
-			edgeEstimate('left-right', 160, 0),
-			edgeEstimate('top-bottom', 10, 0),
-			edgeEstimate('top-bottom', -5, 150),
-			edgeEstimate('left-right', 140, 150)
-		);
-		expect(inconsistent.upperRight).toEqual({ xPx: 160, yPx: 0 });
-		expect(inconsistent.lowerLeft).toEqual({ xPx: 10, yPx: 0 });
-		// viaRight = upperRight + urlr = (155, 150); viaBottom = lowerLeft + llr
-		// = (150, 150); lowerRight is their rounded average.
-		expect(inconsistent.lowerRight).toEqual({ xPx: 153, yPx: 150 });
-
-		// Diagnostics: the winning assignment's own score is positive and every
-		// expected edge exposes a positive per-edge score through `estimates`
-		// (the raw evidence `AutoLayout` still carries; `edgeScores` itself is a
-		// deleted dead field, not a signal any caller reads).
+		// Three placement edges (a spanning tree over four tiles), each matching
+		// the true corner-to-corner geometry within the documented tolerance.
+		expectGeometricallyCorrectEdges(layout, cornerOfIndex);
 		expect(layout.score).toBeGreaterThan(0);
-		const expectedEdges: readonly { from: TileSlot; to: TileSlot; orientation: 'left-right' | 'top-bottom' }[] = [
-			{ from: 'upper-left', to: 'upper-right', orientation: 'left-right' },
-			{ from: 'upper-left', to: 'lower-left', orientation: 'top-bottom' },
-			{ from: 'upper-right', to: 'lower-right', orientation: 'top-bottom' },
-			{ from: 'lower-left', to: 'lower-right', orientation: 'left-right' }
-		];
-		for (const edge of expectedEdges) {
-			const from = layout.assignment[edge.from];
-			const to = layout.assignment[edge.to];
-			const score = layout.estimates[`${from}>${to}`]?.[edge.orientation]?.score ?? 0;
-			expect(score).toBeGreaterThan(0);
-		}
 
-		// Determinism: a different entry order yields the same slot-to-file mapping.
-		const reordered = await assignFour([
-			rasters[2],
-			rasters[3],
-			rasters[0],
-			rasters[1]
-		]);
-		for (const slot of TILE_SLOTS) {
-			const fileIndex = layout.assignment[slot];
-			const expected = reordered.assignment[slot];
-			if (fileIndex === undefined || expected === undefined) throw new Error(`missing assignment for ${slot}`);
-			// rasters was rotated by -2: the file now at index `fileIndex` in the
-			// first call appears at index ((fileIndex + 2) % 4) in the second.
-			expect(((expected + 2) % 4) === fileIndex).toBe(true);
-		}
+		// Determinism: the same input always produces the same output.
+		const repeat = await assignN(rasters);
+		expect(repeat.assignment).toEqual(layout.assignment);
+		expect(repeat.placements).toEqual(layout.placements);
 	});
 });
 
@@ -286,15 +219,11 @@ describe('P1-001 bulk intake atomicity (case 2)', () => {
 		const result = await pending;
 		expect(result).toEqual({ ok: false, stale: true });
 
-		// A valid unordered batch commits one coherent result with a bounded crop
-		// proposal: the same single-session replacement semantics the failures
-		// above protect.
-		const rasters = [
-			buildGrayRaster('lower-left'),
-			buildGrayRaster('upper-right'),
-			buildGrayRaster('lower-right'),
-			buildGrayRaster('upper-left')
-		];
+		// A valid unordered batch commits one coherent, geometrically correct
+		// result with a bounded crop proposal: the same single-session
+		// replacement semantics the failures above protect.
+		const cornerOfIndex = ['lower-left', 'upper-right', 'lower-right', 'upper-left'] as const;
+		const rasters = cornerOfIndex.map((corner) => buildGrayRaster(corner));
 		const files = ['ll.png', 'ur.png', 'lr.png', 'ul.png'].map((name) => fileOf(name, 'image/png'));
 		let rasterIndex = 0;
 		let cropRasterIndex = 0;
@@ -302,6 +231,9 @@ describe('P1-001 bulk intake atomicity (case 2)', () => {
 			[];
 		const ok = await smartImportFiles(files, {
 			decode: async () => decodedOf(200, 200),
+			// This fixture exercises the raw detected boundary (and the matcher
+			// region it drives), not the separate safety-margin feature.
+			applyCropMargin: false,
 			buildRaster: (_image, region) => {
 				matcherRegions.push(region);
 				// The real `toAnalysisRaster` draws only from `region` when one is
@@ -324,30 +256,16 @@ describe('P1-001 bulk intake atomicity (case 2)', () => {
 		expect(ok.tiles).toHaveLength(4);
 		expect(ok.tiles.map((tile) => tile.fileName)).toEqual(['ll.png', 'ur.png', 'lr.png', 'ul.png']);
 		expect(ok.tiles.every((tile) => tile.widthPx === 200 && tile.heightPx === 200)).toBe(true);
-		expect(ok.assignment).toEqual({
-			'upper-left': 3,
-			'upper-right': 1,
-			'lower-left': 0,
-			'lower-right': 2
-		});
+		expect(Object.values(ok.assignment).sort()).toEqual([0, 1, 2, 3]);
 
-		// `smartImportFiles` on four files always populates all four 2x2 slots.
+		// `smartImportFiles` on four files always populates all four slots.
 		const placements = ok.placements as Record<TileSlot, TilePlacement>;
-		for (const slot of TILE_SLOTS as TileSlot[]) {
+		for (const slot of ok.order) {
 			expect(Number.isInteger(placements[slot].xPx)).toBe(true);
 			expect(Number.isInteger(placements[slot].yPx)).toBe(true);
 			expect(placements[slot].visible).toBe(true);
 		}
-		expect(placements['upper-left']).toEqual({ xPx: 0, yPx: 0, visible: true });
-		expect(Math.abs(placements['upper-right'].xPx - (TILE_W * 3) / 4)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-		expect(Math.abs(placements['lower-right'].xPx - (TILE_W * 3) / 4)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
-		expect(Math.abs(placements['lower-right'].yPx - (TILE_H * 3) / 4)).toBeLessThanOrEqual(
-			PLACEMENT_TOLERANCE_PX
-		);
+		expectGeometricallyCorrectEdges(ok.layout, cornerOfIndex);
 
 		// The shared top/bottom chrome bands are proposed; left/right are not.
 		expect(ok.cropProposal).toEqual({ topPx: 4, rightPx: 0, bottomPx: 3, leftPx: 0 });

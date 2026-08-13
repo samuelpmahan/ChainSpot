@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { renderStitchedPng, stitchedFileName } from '../../src/lib/stitch/render';
 import type { StitchRenderEnv, StitchRenderTile } from '../../src/lib/stitch/render';
-import { initialPlacements } from '../../src/lib/stitch/geometry';
+import { defaultSlotOrder, initialPlacements } from '../../src/lib/stitch/geometry';
 import type { TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
 
 describe('stitch render (P05-002)', () => {
-	test('native renderer: union-sized canvas, translated integer draw rects, stable order, no resampling', async () => {
+	test('native renderer: union-sized canvas, translated integer draw rects, bottom-right-on-top draw order, no resampling', async () => {
 		const drawCalls: Array<{
 			sx: number;
 			sy: number;
@@ -43,11 +43,11 @@ describe('stitch render (P05-002)', () => {
 
 		// 50 x 40 source screenshots cropped by 5px on every side -> 40 x 30 crops.
 		// Offsets: round(40 * 3 / 4) = 30, round(30 * 3 / 4) = 23.
-		// The default '2x2' layout always populates all four slots.
-		const placements = initialPlacements(40, 30) as Record<TileSlot, TilePlacement>;
-		const tiles: StitchRenderTile[] = (
-			['upper-left', 'upper-right', 'lower-left', 'lower-right'] as TileSlot[]
-		).map((slot) => ({
+		// Four slots, in the default grid order (upper-left, upper-right,
+		// lower-left, lower-right equivalent); tiles[0] is always the anchor.
+		const slots = defaultSlotOrder(4);
+		const placements = initialPlacements(slots, 40, 30) as Record<TileSlot, TilePlacement>;
+		const tiles: StitchRenderTile[] = slots.map((slot) => ({
 			slot,
 			image: {} as HTMLImageElement,
 			widthPx: 50,
@@ -63,7 +63,12 @@ describe('stitch render (P05-002)', () => {
 		expect(canvas.height).toBe(53);
 		expect(drawCalls).toHaveLength(4);
 
-		// Stable draw order: upper-left, upper-right, lower-left, lower-right.
+		// Draw order is position-derived, not the caller's array order: ascending
+		// by placement xPx + yPx, so upper-left (sum 0) paints first, then
+		// lower-left (sum 23), then upper-right (sum 30), ending with
+		// lower-right (sum 53) on top — whichever tile is bottom-right-most
+		// paints last, covering any fixed on-screen control (e.g. a map app's
+		// own map/satellite toggle) baked into its neighbors' corners.
 		expect(drawCalls.map((call) => call.sx)).toEqual([5, 5, 5, 5]);
 		expect(drawCalls.map((call) => call.sy)).toEqual([5, 5, 5, 5]);
 		expect(drawCalls.map((call) => call.sWidth)).toEqual([40, 40, 40, 40]);
@@ -73,9 +78,10 @@ describe('stitch render (P05-002)', () => {
 		expect(drawCalls.map((call) => call.dWidth)).toEqual([40, 40, 40, 40]);
 		expect(drawCalls.map((call) => call.dHeight)).toEqual([30, 30, 30, 30]);
 
-		// Integer destinations translated to the output origin.
-		expect(drawCalls.map((call) => call.dx)).toEqual([0, 30, 0, 30]);
-		expect(drawCalls.map((call) => call.dy)).toEqual([0, 0, 23, 23]);
+		// Integer destinations translated to the output origin, in
+		// upper-left, lower-left, upper-right, lower-right paint order.
+		expect(drawCalls.map((call) => call.dx)).toEqual([0, 0, 30, 30]);
+		expect(drawCalls.map((call) => call.dy)).toEqual([0, 23, 0, 23]);
 
 		expect(blob).toBeInstanceOf(Blob);
 		expect(blob.size).toBeGreaterThan(0);
