@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import {
-	TILE_SLOTS,
 	ZERO_CROP,
 	cropSize,
+	defaultSlotOrder,
 	expectedNeighbors,
+	gridNeighbors,
 	initialPlacements,
 	overlapArea,
 	readiness,
@@ -12,10 +13,17 @@ import {
 	translatedOrigin,
 	unionBounds
 } from '../../src/lib/stitch/geometry';
-import type { CropInsets, TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
+import type { CropInsets, TileNeighbors, TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
 import { TileDecodeCoordinator, guardedDecode } from '../../src/lib/stitch/tileIntake';
 import { ViewportController, fitViewportTransform } from '../../src/lib/viewport.svelte';
 import type { ViewportFitTarget } from '../../src/lib/viewport.svelte';
+
+// A 4-tile session's slots, in `gridNeighbors`' 2-column grid order: tile-0 is
+// upper-left (the anchor), tile-1 upper-right, tile-2 lower-left, tile-3
+// lower-right — the same adjacency the original hardcoded 2x2 slots had.
+const [UL, UR, LL, LR] = defaultSlotOrder(4);
+const FOUR: readonly TileSlot[] = [UL, UR, LL, LR];
+const FOUR_NEIGHBORS: TileNeighbors = gridNeighbors(FOUR);
 
 function tilesOf(
 	dims: Partial<Record<TileSlot, { widthPx: number; heightPx: number }>>
@@ -27,19 +35,17 @@ function placementsOf(
 	positions: Partial<Record<TileSlot, { xPx: number; yPx: number }>>,
 	visible: boolean = true
 ): Record<TileSlot, TilePlacement> {
-	// `initialPlacements(100, 80)` with the default '2x2' layout always populates
-	// all four 2x2 slots, so this cast is safe: only the widened `TileSlot` type
-	// (which also covers the 1x2/2x1 slots this 2x2-only test never touches)
-	// makes it necessary.
-	const base = initialPlacements(100, 80) as Record<TileSlot, TilePlacement>;
-	for (const slot of TILE_SLOTS) {
+	// `initialPlacements(FOUR, 100, 80)` always populates all four slots, so this
+	// cast is safe.
+	const base = initialPlacements(FOUR, 100, 80) as Record<TileSlot, TilePlacement>;
+	for (const slot of FOUR) {
 		const position = positions[slot];
 		if (position) base[slot] = { ...base[slot], xPx: position.xPx, yPx: position.yPx, visible };
 	}
 	return base;
 }
 
-describe('stitch geometry (P05-002)', () => {
+describe('stitch geometry (P05-002; generalized to N tiles)', () => {
 	test('contract: crop validation, initial placement, readiness, union translation, and decode race protection', async () => {
 		// --- Shared crop: valid insets produce the cropped size ---
 		const valid = cropSize({ topPx: 10, rightPx: 20, bottomPx: 30, leftPx: 40 }, 1000, 800);
@@ -68,25 +74,32 @@ describe('stitch geometry (P05-002)', () => {
 		expect(vertical.invalidFields).toEqual(['topPx', 'bottomPx']);
 
 		// --- Initial placement: documented 25% offsets, always integers ---
-		// The default '2x2' layout always populates all four slots.
-		const initial = initialPlacements(1000, 800) as Record<TileSlot, TilePlacement>;
-		expect(initial['upper-left']).toEqual({ xPx: 0, yPx: 0, visible: true });
-		expect(initial['upper-right'].xPx).toBe(750);
-		expect(initial['upper-right'].yPx).toBe(0);
-		expect(initial['lower-left'].xPx).toBe(0);
-		expect(initial['lower-left'].yPx).toBe(600);
-		expect(initial['lower-right']).toEqual({ xPx: 750, yPx: 600, visible: true });
+		const initial = initialPlacements(FOUR, 1000, 800) as Record<TileSlot, TilePlacement>;
+		expect(initial[UL]).toEqual({ xPx: 0, yPx: 0, visible: true });
+		expect(initial[UR].xPx).toBe(750);
+		expect(initial[UR].yPx).toBe(0);
+		expect(initial[LL].xPx).toBe(0);
+		expect(initial[LL].yPx).toBe(600);
+		expect(initial[LR]).toEqual({ xPx: 750, yPx: 600, visible: true });
 
 		// Rounding case: 0.75 products that are fractional must be rounded, not kept.
-		const rounded = initialPlacements(1002, 802) as Record<TileSlot, TilePlacement>;
-		expect(rounded['upper-right'].xPx).toBe(752);
-		expect(rounded['lower-left'].yPx).toBe(602);
+		const rounded = initialPlacements(FOUR, 1002, 802) as Record<TileSlot, TilePlacement>;
+		expect(rounded[UR].xPx).toBe(752);
+		expect(rounded[LL].yPx).toBe(602);
+
+		// A three-tile session grids into a 2-column, 2-row layout too (ceil(sqrt(3)) = 2):
+		// tile-0/tile-1 on row 0, tile-2 alone on row 1 under tile-0.
+		const [t0, t1, t2] = defaultSlotOrder(3);
+		const three = initialPlacements([t0, t1, t2], 100, 80) as Record<TileSlot, TilePlacement>;
+		expect(three[t0]).toEqual({ xPx: 0, yPx: 0, visible: true });
+		expect(three[t1]).toEqual({ xPx: 75, yPx: 0, visible: true });
+		expect(three[t2]).toEqual({ xPx: 0, yPx: 60, visible: true });
 
 		// --- Expected neighbors per slot ---
-		expect(expectedNeighbors('upper-left')).toEqual(['upper-right', 'lower-left']);
-		expect(expectedNeighbors('upper-right')).toEqual(['upper-left', 'lower-right']);
-		expect(expectedNeighbors('lower-left')).toEqual(['upper-left', 'lower-right']);
-		expect(expectedNeighbors('lower-right')).toEqual(['upper-right', 'lower-left']);
+		expect(expectedNeighbors(UL, FOUR_NEIGHBORS)).toEqual([UR, LL]);
+		expect(expectedNeighbors(UR, FOUR_NEIGHBORS)).toEqual([UL, LR]);
+		expect(expectedNeighbors(LL, FOUR_NEIGHBORS)).toEqual([UL, LR]);
+		expect(expectedNeighbors(LR, FOUR_NEIGHBORS)).toEqual([UR, LL]);
 
 		// --- Overlap area ---
 		const rectA = tileRect({ xPx: 0, yPx: 0, visible: true }, 100, 80);
@@ -97,81 +110,104 @@ describe('stitch geometry (P05-002)', () => {
 
 		// --- Readiness: all valid ---
 		const allTiles = tilesOf({
-			'upper-left': { widthPx: 100, heightPx: 80 },
-			'upper-right': { widthPx: 100, heightPx: 80 },
-			'lower-left': { widthPx: 100, heightPx: 80 },
-			'lower-right': { widthPx: 100, heightPx: 80 }
+			[UL]: { widthPx: 100, heightPx: 80 },
+			[UR]: { widthPx: 100, heightPx: 80 },
+			[LL]: { widthPx: 100, heightPx: 80 },
+			[LR]: { widthPx: 100, heightPx: 80 }
 		});
-		const required = sessionDimensions(allTiles);
+		const required = sessionDimensions(allTiles, FOUR);
 		expect(required).toEqual({ widthPx: 100, heightPx: 80 });
-		expect(readiness(allTiles, ZERO_CROP, initialPlacements(100, 80), required).ready).toBe(true);
+		expect(
+			readiness(allTiles, ZERO_CROP, initialPlacements(FOUR, 100, 80), required, FOUR, FOUR_NEIGHBORS)
+				.ready
+		).toBe(true);
 
 		// --- Missing tile ---
 		const missingRight = tilesOf(allTiles);
-		delete missingRight['upper-right'];
-		expect(readiness(missingRight, ZERO_CROP, initialPlacements(100, 80), required).missing).toEqual([
-			'upper-right'
-		]);
+		delete missingRight[UR];
+		expect(
+			readiness(
+				missingRight,
+				ZERO_CROP,
+				initialPlacements(FOUR, 100, 80),
+				required,
+				FOUR,
+				FOUR_NEIGHBORS
+			).missing
+		).toEqual([UR]);
 
 		// --- Dimension mismatch against the established requirement ---
-		const mismatched = { ...allTiles, 'upper-right': { widthPx: 101, heightPx: 80 } };
-		expect(readiness(mismatched, ZERO_CROP, initialPlacements(100, 80), required).dimensionMismatch).toEqual([
-			'upper-right'
-		]);
+		const mismatched = { ...allTiles, [UR]: { widthPx: 101, heightPx: 80 } };
+		expect(
+			readiness(
+				mismatched,
+				ZERO_CROP,
+				initialPlacements(FOUR, 100, 80),
+				required,
+				FOUR,
+				FOUR_NEIGHBORS
+			).dimensionMismatch
+		).toEqual([UR]);
 
 		// --- Invalid crop ---
 		const invalidCrop: CropInsets = { ...ZERO_CROP, leftPx: 60, rightPx: 60 };
-		expect(readiness(allTiles, invalidCrop, initialPlacements(100, 80), required).invalidCrop).toBe(true);
+		expect(
+			readiness(allTiles, invalidCrop, initialPlacements(FOUR, 100, 80), required, FOUR, FOUR_NEIGHBORS)
+				.invalidCrop
+		).toBe(true);
 
 		// --- A connected manually adjusted arrangement stays ready ---
 		const connected = placementsOf({
-			'upper-right': { xPx: 40, yPx: 0 },
-			'lower-left': { xPx: 0, yPx: 40 },
-			'lower-right': { xPx: 40, yPx: 40 }
+			[UR]: { xPx: 40, yPx: 0 },
+			[LL]: { xPx: 0, yPx: 40 },
+			[LR]: { xPx: 40, yPx: 40 }
 		});
-		expect(readiness(allTiles, ZERO_CROP, connected, required).ready).toBe(true);
+		expect(readiness(allTiles, ZERO_CROP, connected, required, FOUR, FOUR_NEIGHBORS).ready).toBe(true);
 
 		// --- Visibility never affects readiness ---
 		const hidden = placementsOf(
 			{
-				'upper-right': { xPx: 40, yPx: 0 },
-				'lower-left': { xPx: 0, yPx: 40 },
-				'lower-right': { xPx: 40, yPx: 40 }
+				[UR]: { xPx: 40, yPx: 0 },
+				[LL]: { xPx: 0, yPx: 40 },
+				[LR]: { xPx: 40, yPx: 40 }
 			},
 			false
 		);
-		expect(readiness(allTiles, ZERO_CROP, hidden, required).ready).toBe(true);
+		expect(readiness(allTiles, ZERO_CROP, hidden, required, FOUR, FOUR_NEIGHBORS).ready).toBe(true);
 
 		// --- Two detached but internally overlapping clusters are NOT ready ---
 		// Left cluster: UL overlaps LL. Right cluster: UR overlaps LR. No edge
-		// connects the clusters, so upper-left cannot reach the right cluster.
+		// connects the clusters, so the anchor cannot reach the right cluster.
 		const clusters = placementsOf({
-			'upper-right': { xPx: 500, yPx: 0 },
-			'lower-left': { xPx: 0, yPx: 40 },
-			'lower-right': { xPx: 500, yPx: 40 }
+			[UR]: { xPx: 500, yPx: 0 },
+			[LL]: { xPx: 0, yPx: 40 },
+			[LR]: { xPx: 500, yPx: 40 }
 		});
-		const clustersReport = readiness(allTiles, ZERO_CROP, clusters, required);
+		const clustersReport = readiness(allTiles, ZERO_CROP, clusters, required, FOUR, FOUR_NEIGHBORS);
 		expect(clustersReport.ready).toBe(false);
-		expect(clustersReport.disconnected).toEqual(['upper-right', 'lower-right']);
+		expect(clustersReport.disconnected).toEqual([UR, LR]);
 
 		// --- Fully detached tiles report disconnected ---
 		const drifted = placementsOf({
-			'upper-right': { xPx: 500, yPx: 0 },
-			'lower-left': { xPx: 0, yPx: 500 },
-			'lower-right': { xPx: 500, yPx: 500 }
+			[UR]: { xPx: 500, yPx: 0 },
+			[LL]: { xPx: 0, yPx: 500 },
+			[LR]: { xPx: 500, yPx: 500 }
 		});
-		const driftedReport = readiness(allTiles, ZERO_CROP, drifted, required);
+		const driftedReport = readiness(allTiles, ZERO_CROP, drifted, required, FOUR, FOUR_NEIGHBORS);
 		expect(driftedReport.ready).toBe(false);
-		expect(driftedReport.disconnected).toEqual(['upper-right', 'lower-left', 'lower-right']);
+		expect(driftedReport.disconnected).toEqual([UR, LL, LR]);
 
 		// --- Session dimensions: first valid tile in slot order establishes them ---
-		expect(sessionDimensions({})).toBeNull();
-		expect(sessionDimensions({ 'lower-left': { widthPx: 20, heightPx: 21 } })).toEqual({
+		expect(sessionDimensions({}, FOUR)).toBeNull();
+		expect(sessionDimensions({ [LL]: { widthPx: 20, heightPx: 21 } }, FOUR)).toEqual({
 			widthPx: 20,
 			heightPx: 21
 		});
 		expect(
-			sessionDimensions({ 'upper-left': { widthPx: 10, heightPx: 11 }, 'lower-left': { widthPx: 20, heightPx: 21 } })
+			sessionDimensions(
+				{ [UL]: { widthPx: 10, heightPx: 11 }, [LL]: { widthPx: 20, heightPx: 21 } },
+				FOUR
+			)
 		).toEqual({ widthPx: 10, heightPx: 11 });
 
 		// --- Union bounds and translation to origin ---
@@ -194,7 +230,7 @@ describe('stitch geometry (P05-002)', () => {
 
 		// --- Stale decode protection: the guarded intake path (deterministic seam) ---
 		const coordinator = new TileDecodeCoordinator();
-		const slot = 'upper-right';
+		const slot = UR;
 		const file = new File([], 'tile.png', { type: 'image/png' });
 		const decodedOf = (widthPx: number, heightPx: number) => ({
 			image: {} as HTMLImageElement,
@@ -273,28 +309,22 @@ describe('stitch geometry (P05-002)', () => {
 		const gateOther = new Promise<{ image: HTMLImageElement; widthPx: number; heightPx: number }>(
 			(resolve) => (resolveOther = resolve)
 		);
-		const attemptOther = guardedDecode(
-			coordinator,
-			'lower-left',
-			coordinator.begin('lower-left'),
-			file,
-			() => gateOther
-		);
+		const attemptOther = guardedDecode(coordinator, LL, coordinator.begin(LL), file, () => gateOther);
 		resolveOther(decodedOf(50, 50));
 		expect(await attemptOther).toEqual({ ok: true, decoded: decodedOf(50, 50) });
 
 		// Session reset invalidates every in-flight decode (generations retained
 		// from begin(), never assumed).
 		const handedOut = new Map<TileSlot, number>();
-		for (const candidate of TILE_SLOTS) {
+		for (const candidate of FOUR) {
 			handedOut.set(candidate, coordinator.begin(candidate));
 		}
-		coordinator.invalidateAll(TILE_SLOTS);
+		coordinator.invalidateAll(FOUR);
 		for (const [candidate, generation] of handedOut) {
 			expect(coordinator.isCurrent(candidate, generation)).toBe(false);
 		}
-		const fresh = coordinator.begin('upper-left');
-		expect(coordinator.isCurrent('upper-left', fresh)).toBe(true);
+		const fresh = coordinator.begin(UL);
+		expect(coordinator.isCurrent(UL, fresh)).toBe(true);
 
 		// --- Shared viewport: a fitted translated (nonzero-origin) tile union
 		// stays fitted across resize, and clearing the target resets the view ---

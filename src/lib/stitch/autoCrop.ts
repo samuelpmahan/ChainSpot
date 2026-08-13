@@ -1,11 +1,11 @@
 /**
- * ChainSpot Stitch Map shared crop proposal (P1-001, hardened in P1-002).
+ * ChainSpot Stitch Map shared crop proposal (P1-001, hardened in P1-002;
+ * generalized to N tiles).
  *
- * Analyzes only the shared outer edge bands of the session's screenshots (four
- * for a 2x2 capture, two for a 1x2/2x1 capture) to propose a reversible set of
- * top/right/bottom/left insets intended to remove repeated screenshot chrome,
- * footer/attribution bands, outer-edge controls, or uniform blank/black
- * margins.
+ * Analyzes only the shared outer edge bands of the session's N (N >= 2)
+ * screenshots to propose a reversible set of top/right/bottom/left insets
+ * intended to remove repeated screenshot chrome, footer/attribution bands,
+ * outer-edge controls, or uniform blank/black margins.
  *
  * The evidence model is cross-tile fixed-position agreement, not per-row
  * uniformity: under ChainSpot's capture protocol every screenshot in a session
@@ -15,10 +15,10 @@
  * compared at the same screen coordinates:
  *
  * - `pooledAgree` — the fraction of line pixels where every tile agrees;
- * - `majorityAgree` — for a 2x2 session, the fraction where the best three of
- *   four agree (an asymmetric mismatch in one tile is not allowed to hide the
- *   shared band); for a two-tile session this collapses to `pooledAgree`,
- *   since there is no third tile to fall back on;
+ * - `majorityAgree` — the fraction where the best N-1 of N agree (a single
+ *   asymmetric mismatch is not allowed to hide the shared band); for a
+ *   two-tile session this collapses to `pooledAgree`, since there is no third
+ *   tile to fall back on;
  * - per-tile outlier fractions — the share of pixels where each tile diverges
  *   from the cross-tile consensus.
  *
@@ -59,7 +59,7 @@ const ENTROPY_RUN_LINES = 6;
 const ENTROPY_REQUIRED_LINES = 4;
 const ENTROPY_INWARD_SAFETY_PX = 1;
 /**
- * A line pixel "agrees" across tiles when the range of the four captured values
+ * A line pixel "agrees" across tiles when the range of the captured values
  * is within this many gray levels. Fixed chrome is bit-identical across
  * captures (range 0); moving map content differs by far more on most pixels.
  */
@@ -210,7 +210,22 @@ function usePerImageEntropyVerticalCrop(rasters: readonly AnalysisRaster[]): boo
 
 export interface CropProposalOptions {
 	maxInsetFraction?: number;
+	/**
+	 * Extra inset added to every side that was actually proposed, beyond the
+	 * detected boundary — never to a side with no evidence at all. A purely
+	 * additive safety margin, applied after detection, not a change to the
+	 * detection heuristics themselves: real captures' status/nav bars carry
+	 * per-capture-unique content (the device clock, battery level) right at
+	 * the detected edge, and leaving even one row of it in produces a shared
+	 * "crop" that isn't actually identical across tiles. Clamped to the same
+	 * per-side bound (`maxInsetFraction`) detection itself respects. Default 0
+	 * (off); see `DEFAULT_CROP_SAFETY_MARGIN_PX` for the app's suggested value.
+	 */
+	marginPx?: number;
 }
+
+/** The app's suggested `marginPx` when a caller wants the safety margin on. */
+export const DEFAULT_CROP_SAFETY_MARGIN_PX = 2;
 
 export type CropSide = 'top' | 'right' | 'bottom' | 'left';
 
@@ -232,24 +247,30 @@ export interface CropProposalDetail {
 const SIDES: readonly CropSide[] = ['top', 'right', 'bottom', 'left'];
 
 interface LineEvidence {
-	/** Fraction of line pixels where all four tiles agree within the range bound. */
+	/** Fraction of line pixels where every tile agrees within the range bound. */
 	readonly pooledAgree: number;
-	/** Fraction of line pixels where the best three of four tiles agree. */
+	/** Fraction of line pixels where the best N-1 of N tiles agree. */
 	readonly majorityAgree: number;
 	/** Per tile, the fraction of line pixels diverging from the cross-tile median. */
 	readonly outlier: readonly number[];
 }
 
 /**
- * Cross-tile evidence for one edge line at the same screen coordinates. Two
- * tile counts are supported: 4 (the original 2x2 capture, using a fixed
- * sorting network with no per-pixel allocation) and 2 (a 1x2/2x1 capture,
- * where "majority" collapses to "pooled" — with only two tiles there is no
- * third vote to fall back on, so both tiles disagreeing is exactly what a
- * boundary transition looks like).
+ * Cross-tile evidence for one edge line at the same screen coordinates, for
+ * any N >= 2 tiles. Per pixel, sorting the N tile values gives both
+ * agreement statistics directly: `pooledAgree` is the full sorted range;
+ * `majorityAgree` is the smaller of the two ranges obtainable by dropping a
+ * single extreme value (the highest or the lowest) — for N === 2 there is no
+ * third vote to fall back on, so this collapses to `pooledAgree`, exactly
+ * matching the original two-tile behavior. The median of the sorted values is
+ * each pixel's cross-tile consensus for the per-tile outlier check. This is
+ * an exact generalization of the original fixed 4- and 2-element sorting
+ * networks (same formulas, unrolled for those two counts), not an
+ * approximation — existing four- and two-tile expectations are unchanged.
  */
 function lineEvidence(rasters: readonly AnalysisRaster[], side: CropSide, depth: number): LineEvidence {
 	const n = rasters.length;
+	if (n < 2) throw new Error(`lineEvidence: unsupported tile count ${n}`);
 	const w = rasters[0].widthPx;
 	const h = rasters[0].heightPx;
 	const isRow = side === 'top' || side === 'bottom';
@@ -262,43 +283,25 @@ function lineEvidence(rasters: readonly AnalysisRaster[], side: CropSide, depth:
 	let pooled = 0;
 	let majority = 0;
 	const outlier = new Array<number>(n).fill(0);
-	if (n === 4) {
-		for (let p = 0; p < length; p += 1) {
-			const offset = base + p * stride;
-			const v0 = rasters[0].gray[offset];
-			const v1 = rasters[1].gray[offset];
-			const v2 = rasters[2].gray[offset];
-			const v3 = rasters[3].gray[offset];
-			// Fixed 4-element sorting network (no per-pixel allocation).
-			let a = v0, b = v1, c = v2, d = v3;
-			if (a > b) { const t = a; a = b; b = t; }
-			if (c > d) { const t = c; c = d; d = t; }
-			if (a > c) { const t = a; a = c; c = t; }
-			if (b > d) { const t = b; b = d; d = t; }
-			if (b > c) { const t = b; b = c; c = t; }
-			const median = (b + c) / 2;
-			if (d - a <= CROP_AGREEMENT_MAX_RANGE) pooled += 1;
-			if (Math.min(d - b, c - a) <= CROP_AGREEMENT_MAX_RANGE) majority += 1;
-			if (Math.abs(v0 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[0] += 1;
-			if (Math.abs(v1 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[1] += 1;
-			if (Math.abs(v2 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[2] += 1;
-			if (Math.abs(v3 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[3] += 1;
+	const values = new Array<number>(n);
+	const sorted = new Array<number>(n);
+	for (let p = 0; p < length; p += 1) {
+		const offset = base + p * stride;
+		for (let t = 0; t < n; t += 1) {
+			const v = rasters[t].gray[offset];
+			values[t] = v;
+			sorted[t] = v;
 		}
-	} else if (n === 2) {
-		for (let p = 0; p < length; p += 1) {
-			const offset = base + p * stride;
-			const v0 = rasters[0].gray[offset];
-			const v1 = rasters[1].gray[offset];
-			const median = (v0 + v1) / 2;
-			if (Math.abs(v0 - v1) <= CROP_AGREEMENT_MAX_RANGE) {
-				pooled += 1;
-				majority += 1;
-			}
-			if (Math.abs(v0 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[0] += 1;
-			if (Math.abs(v1 - median) > CROP_AGREEMENT_MAX_RANGE) outlier[1] += 1;
+		sorted.sort((a, b) => a - b);
+		const pooledRange = sorted[n - 1] - sorted[0];
+		const majorityRange =
+			n >= 3 ? Math.min(sorted[n - 1] - sorted[1], sorted[n - 2] - sorted[0]) : pooledRange;
+		if (pooledRange <= CROP_AGREEMENT_MAX_RANGE) pooled += 1;
+		if (majorityRange <= CROP_AGREEMENT_MAX_RANGE) majority += 1;
+		const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[(n - 1) / 2];
+		for (let t = 0; t < n; t += 1) {
+			if (Math.abs(values[t] - median) > CROP_AGREEMENT_MAX_RANGE) outlier[t] += 1;
 		}
-	} else {
-		throw new Error(`lineEvidence: unsupported tile count ${n}`);
 	}
 	return {
 		pooledAgree: pooled / length,
@@ -385,7 +388,7 @@ function analyzeSide(rasters: readonly AnalysisRaster[], side: CropSide): SidePr
 		boundary = maxBand;
 	}
 
-	// A proposed band must be supported by all four screenshots. A line where
+	// A proposed band must be supported by every screenshot. A line where
 	// majority agrees but pooled does not means one tile's chrome differs there:
 	// mismatched per-tile evidence declines the side.
 	let pooledDrops = 0;
@@ -404,7 +407,7 @@ function analyzeSide(rasters: readonly AnalysisRaster[], side: CropSide): SidePr
 }
 
 /**
- * Proposes a bounded shared crop from the outer edge bands of all four tiles
+ * Proposes a bounded shared crop from the outer edge bands of all N tiles
  * (P1-002 hardening), plus a crop confidence separate from layout confidence.
  * Returns a null proposal when there is no consistent, repeated-chrome edge
  * evidence (an unjustified crop is never proposed).
@@ -426,6 +429,8 @@ export function proposeCropDetailed(
 	const scale = rasters[0].scale;
 
 	const insets: Record<keyof CropInsets, number> = { topPx: 0, rightPx: 0, bottomPx: 0, leftPx: 0 };
+	const maxInsetBySide: Record<CropSide, number> = { top: 0, right: 0, bottom: 0, left: 0 };
+	const proposedSides = new Set<CropSide>();
 	let anyProposed = false;
 	let anyWeak = false;
 
@@ -439,6 +444,7 @@ export function proposeCropDetailed(
 				? rasters[0].heightPx * scale
 				: rasters[0].widthPx * scale;
 		const maxInset = Math.floor(dim * maxInsetFraction);
+		maxInsetBySide[side] = maxInset;
 
 		if (entropyVertical && (side === 'top' || side === 'bottom')) {
 			const detected = entropyVertical.map((bounds) =>
@@ -464,6 +470,7 @@ export function proposeCropDetailed(
 			}
 			insets[`${side}Px` as keyof CropInsets] = clamped;
 			anyProposed = true;
+			proposedSides.add(side);
 			if (clamped !== shared) anyWeak = true;
 			continue;
 		}
@@ -482,6 +489,7 @@ export function proposeCropDetailed(
 		}
 		insets[`${side}Px` as keyof CropInsets] = clamped;
 		anyProposed = true;
+		proposedSides.add(side);
 		if (proposal.confidence === 'low') anyWeak = true;
 	}
 
@@ -492,6 +500,15 @@ export function proposeCropDetailed(
 			perSide
 		};
 	}
+
+	const margin = options?.marginPx ?? 0;
+	if (margin > 0) {
+		for (const side of proposedSides) {
+			const field = `${side}Px` as keyof CropInsets;
+			insets[field] = Math.min(insets[field] + margin, maxInsetBySide[side]);
+		}
+	}
+
 	return {
 		insets: {
 			topPx: insets.topPx,

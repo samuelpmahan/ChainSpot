@@ -1,13 +1,13 @@
 /**
- * ChainSpot Stitch Map smart import orchestration (P1-001; extended to 1x2/2x1).
+ * ChainSpot Stitch Map smart import orchestration (P1-001; generalized to any
+ * N >= 2 screenshots).
  *
- * One local-only bulk action: accepts exactly two or four PNG/JPEG screenshots
- * in any order, validates every file (supported MIME, successful decode,
- * finite positive intrinsic dimensions, identical dimensions), runs the
- * pairwise overlap analysis, assigns the inferred layout — the fixed 2×2 grid
- * for four files, or an automatically detected 1x2 (left/right) or 2x1
- * (top/bottom) arrangement for two — proposes a shared crop, and returns one
- * coherent commit payload for the caller (the route) to publish.
+ * One local-only bulk action: accepts N >= 2 PNG/JPEG screenshots in any
+ * order, validates every file (supported MIME, successful decode, finite
+ * positive intrinsic dimensions, identical dimensions), runs the pairwise
+ * overlap analysis, assigns the inferred arrangement (`assignN`), proposes a
+ * shared crop, and returns one coherent commit payload for the caller (the
+ * route) to publish.
  *
  * Atomicity: nothing is committed here and no state is mutated. On any file
  * failure the whole batch rejects with the offending file identified, leaving
@@ -23,28 +23,23 @@ import { isSupportedMimeType, decodeImageFile } from '../imageIntake';
 import type { DecodedImage, DecodeImageFile } from '../imageIntake';
 import { toAnalysisRaster, toCropRaster } from './analysis';
 import type { AnalysisRaster, RasterRegion } from './analysis';
-import { assignFour, assignTwo, layoutForSlots } from './autoLayout';
+import { assignN, MAX_AUTO_ARRANGE_TILES } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
-import { proposeCropDetailed } from './autoCrop';
+import { DEFAULT_CROP_SAFETY_MARGIN_PX, proposeCropDetailed } from './autoCrop';
 import type { CropProposalDetail } from './autoCrop';
 import { duplicateImageMessage, findDuplicateRasters } from './duplicates';
 import type { DuplicateRasterPair } from './duplicates';
 import { classifyLayout } from './diagnostics';
 import type { LayoutDiagnostic } from './diagnostics';
 import { matcherRegionFromCrop } from './cropGate';
-import type { CropInsets, StitchLayout } from './geometry';
+import type { CropInsets, TileNeighbors } from './geometry';
 import type { TilePlacement, TileSlot } from './geometry';
 
-/** File counts smart import accepts: four for a 2x2 session, two for a 1x2/2x1 session. */
-const SUPPORTED_FILE_COUNTS: readonly number[] = [2, 4];
+/** Minimum file count smart import accepts; there is no fixed upper bound beyond `MAX_AUTO_ARRANGE_TILES`. */
+const MIN_FILE_COUNT = 2;
 
 function isSupportedFileCount(count: number): boolean {
-	return SUPPORTED_FILE_COUNTS.includes(count);
-}
-
-/** Assigns the inferred layout for however many rasters smart import validated (2 or 4). */
-function assignForFileCount(rasters: readonly AnalysisRaster[]): Promise<AutoLayout> {
-	return rasters.length === 4 ? assignFour(rasters) : assignTwo(rasters);
+	return count >= MIN_FILE_COUNT && count <= MAX_AUTO_ARRANGE_TILES;
 }
 
 export interface SmartImportTile {
@@ -68,8 +63,10 @@ export interface SmartImportSuccess {
 	readonly tiles: readonly SmartImportTile[];
 	readonly assignment: Partial<Record<TileSlot, number>>;
 	readonly placements: Partial<Record<TileSlot, TilePlacement>>;
-	/** The inferred layout: `'2x2'` for four files, `'1x2'`/`'2x1'` (auto-detected) for two. */
-	readonly layoutKind: StitchLayout;
+	/** Stable per-tile ids in placement order; `order[0]` is the anchor. */
+	readonly order: readonly TileSlot[];
+	/** Expected-neighbor adjacency the arrangement inferred; drives readiness/Snap. */
+	readonly neighbors: TileNeighbors;
 	readonly layout: AutoLayout;
 	/** The proposed shared crop, or null when edge evidence is inconsistent. */
 	readonly cropProposal: CropInsets | null;
@@ -127,6 +124,15 @@ export interface SmartImportOptions {
 	buildCropRaster?: (image: HTMLImageElement) => AnalysisRaster;
 	/** Returns false once a newer selection/reset invalidated this batch. */
 	isCurrent?: () => boolean;
+	/**
+	 * Adds `DEFAULT_CROP_SAFETY_MARGIN_PX` to every side the crop proposal
+	 * actually detects, before matcher rasters are ever built from it — a
+	 * borderline chrome row (or per-capture-unique status-bar content, e.g. the
+	 * device clock) left in by an exact-boundary crop is exactly the kind of
+	 * shared-crop violation that erodes match quality. Defaults to on; the
+	 * caller (the route's "Add margin" toggle) can turn it off.
+	 */
+	applyCropMargin?: boolean;
 }
 
 /**
@@ -141,7 +147,8 @@ export async function smartImportFiles(
 	const {
 		decode = decodeImageFile,
 		buildCropRaster = toCropRaster,
-		isCurrent = () => true
+		isCurrent = () => true,
+		applyCropMargin = true
 	} = options;
 	// `toAnalysisRaster` takes a `maxDim` in the middle, so it is wrapped to
 	// match this narrower two-argument shape instead of being used directly.
@@ -213,7 +220,9 @@ export async function smartImportFiles(
 	// honest absent proposal and matcher rasters fall back to the whole frame.
 	let crop: CropProposalDetail | null = null;
 	try {
-		crop = proposeCropDetailed(decoded.map((result) => buildCropRaster(result.image)));
+		crop = proposeCropDetailed(decoded.map((result) => buildCropRaster(result.image)), {
+			marginPx: applyCropMargin ? DEFAULT_CROP_SAFETY_MARGIN_PX : 0
+		});
 	} catch {
 		crop = null;
 	}
@@ -257,9 +266,8 @@ export async function smartImportFiles(
 		};
 	}
 
-	const layout = await assignForFileCount(rasters);
-	const layoutKind = layoutForSlots(Object.keys(layout.assignment) as TileSlot[]);
-	const diagnostic = classifyLayout(layout, layoutKind);
+	const layout = await assignN(rasters);
+	const diagnostic = classifyLayout(layout);
 	if (!isCurrent()) return { ok: false, stale: true };
 
 	// Crop confidence is independent of layout confidence (see cropGate.ts):
@@ -282,7 +290,8 @@ export async function smartImportFiles(
 		tiles,
 		assignment: layout.assignment,
 		placements: layout.placements,
-		layoutKind,
+		order: layout.order,
+		neighbors: layout.neighbors,
 		layout,
 		cropProposal: cropResult.proposal,
 		crop: cropResult,
@@ -331,9 +340,9 @@ export function warmSmartStitchWorker(): void {
  */
 export async function smartImportViaWorker(
 	files: readonly File[],
-	options: { isCurrent?: () => boolean } = {}
+	options: { isCurrent?: () => boolean; applyCropMargin?: boolean } = {}
 ): Promise<SmartImportWorkerResult> {
-	const { isCurrent = () => true } = options;
+	const { isCurrent = () => true, applyCropMargin = true } = options;
 
 	if (!isSupportedFileCount(files.length)) {
 		return { ok: false, kind: 'wrong-count', count: files.length };
@@ -414,7 +423,7 @@ export async function smartImportViaWorker(
 	const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 	let reply: WorkerReply;
 	try {
-		reply = await analyzeInWorker(token, bitmaps);
+		reply = await analyzeInWorker(token, bitmaps, applyCropMargin);
 	} catch (error) {
 		// A rejection here means the worker transport itself failed (construction,
 		// message-channel error) rather than an internal analysis error — internal
@@ -470,7 +479,8 @@ export async function smartImportViaWorker(
 		tiles,
 		assignment: reply.assignment,
 		placements: reply.placements,
-		layoutKind: reply.layoutKind,
+		order: reply.order,
+		neighbors: reply.neighbors,
 		cropProposal: reply.cropProposal,
 		crop: reply.crop,
 		diagnostic: reply.diagnostic
@@ -483,7 +493,8 @@ type WorkerReply =
 			readonly token: string;
 			readonly assignment: SmartImportWorkerSuccess['assignment'];
 			readonly placements: SmartImportWorkerSuccess['placements'];
-			readonly layoutKind: SmartImportWorkerSuccess['layoutKind'];
+			readonly order: SmartImportWorkerSuccess['order'];
+			readonly neighbors: SmartImportWorkerSuccess['neighbors'];
 			readonly cropProposal: SmartImportWorkerSuccess['cropProposal'];
 			readonly crop: SmartImportWorkerSuccess['crop'];
 			readonly diagnostic: SmartImportWorkerSuccess['diagnostic'];
@@ -495,7 +506,11 @@ type WorkerReply =
 			readonly duplicate?: DuplicateRasterPair;
 	  };
 
-function analyzeInWorker(token: string, bitmaps: readonly ImageBitmap[]): Promise<WorkerReply> {
+function analyzeInWorker(
+	token: string,
+	bitmaps: readonly ImageBitmap[],
+	applyCropMargin: boolean
+): Promise<WorkerReply> {
 	warmSmartStitchWorker();
 	const worker = smartStitchWorker as Worker;
 	return new Promise((resolve, reject) => {
@@ -511,6 +526,9 @@ function analyzeInWorker(token: string, bitmaps: readonly ImageBitmap[]): Promis
 		};
 		worker.addEventListener('message', onMessage);
 		worker.addEventListener('error', onError, { once: true });
-		worker.postMessage({ token, bitmaps }, bitmaps as unknown as Transferable[]);
+		worker.postMessage(
+			{ token, bitmaps, applyCropMargin },
+			bitmaps as unknown as Transferable[]
+		);
 	});
 }

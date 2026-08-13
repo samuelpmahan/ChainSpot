@@ -3,12 +3,22 @@
  *
  * Offscreen canvas at native cropped-image resolution: identical source and
  * destination crop sizes (no resampling, no silent downsampling), union bounds
- * translated to the output origin, and a stable full-opacity draw order (the
- * caller's own tile order — every caller builds it in a fixed slot order, so
- * this is deterministic without this module hardcoding a particular layout's
- * slot names). Preview visibility, opacity, and fit never affect output
- * pixels. The canvas environment is injectable so deterministic tests can
- * record the draw calls.
+ * translated to the output origin, and a deterministic, position-derived draw
+ * order — never the caller's array order. Tiles paint in ascending
+ * bottom-right order, ending with whichever tile is bottom-right-most in the
+ * whole mosaic on top, so the tile that ends up covering any given patch of
+ * overlap is always whichever neighbor sits further down and to the right.
+ * This matters for real captures: a map app's own on-screen
+ * controls (e.g. Apple Maps' map/satellite toggle) sit fixed in one corner of
+ * every single screenshot, so every tile carries a copy of it baked into its
+ * bottom-right corner; painting in bottom-right-first order lets whichever
+ * neighbor legitimately owns that overlapping region draw over it with real
+ * content, the same way a physical stack of overlapping photos would. The one
+ * tile with no such neighbor — whichever tile is bottom-right-most in the
+ * whole mosaic — keeps its own corner controls, since nothing else covers
+ * that specific patch of the output either way. Preview visibility, opacity,
+ * and fit never affect output pixels. The canvas environment is injectable so
+ * deterministic tests can record the draw calls.
  */
 import type { CropInsets, TilePlacement, TileSlot, TileRect } from './geometry';
 import { cropSize, tileRect, translatedOrigin, unionBounds } from './geometry';
@@ -68,7 +78,7 @@ export async function renderStitchedPng(
 	crop: CropInsets,
 	env: StitchRenderEnv = defaultStitchRenderEnv
 ): Promise<Blob> {
-	const anchor = tiles.find((tile) => tile.slot === 'upper-left') ?? tiles[0];
+	const anchor = tiles[0];
 	if (!anchor) {
 		throw new StitchRenderError('dimension', 'No tiles to stitch.');
 	}
@@ -108,7 +118,16 @@ export async function renderStitchedPng(
 	canvas.width = union.widthPx;
 	canvas.height = union.heightPx;
 
-	for (const tile of tiles) {
+	// Ascending bottom-right order: the tile closest to the anchor paints
+	// first, and each later tile paints over it, ending with whichever tile
+	// is bottom-right-most in the whole mosaic on top. Every tile shares the
+	// same cropped size, so ranking by top-left xPx + yPx is equivalent to
+	// ranking by the tile's own bottom-right corner. Ties keep the caller's
+	// relative order (stable sort) rather than picking arbitrarily.
+	const drawOrder = [...tiles].sort(
+		(a, b) => a.placement.xPx + a.placement.yPx - (b.placement.xPx + b.placement.yPx)
+	);
+	for (const tile of drawOrder) {
 		const rect = rectBySlot.get(tile.slot);
 		if (!rect) continue;
 		context.drawImage(

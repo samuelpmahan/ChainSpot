@@ -2,13 +2,18 @@
  * End-to-end acceptance test for the product's core promise: four real phone
  * screenshots of a disc-golf course map, stitched correctly, automatically.
  *
- * Everything else in the suite exercises `assignFour` against synthetic
+ * Everything else in the suite exercises `assignN` against synthetic
  * fixtures. This is the one test that runs the actual OpenCV `matchTemplate`
  * matcher against the actual real capture and checks its output against an
  * independently-established ground truth (`tests/helpers/realCapture.js`,
  * derived by a brute-force ZNCC search that shares no code with the shipped
  * matcher). Nothing else in the repo proves the rewritten matcher actually
  * works end to end; this test IS that proof.
+ *
+ * `assignN` no longer commits to named 2x2 roles — it anchors whichever tile
+ * scores best overall, which may not be `'upper-left'` — so every comparison
+ * below is made relative to whichever tile actually won the anchor role,
+ * rather than assuming the ground truth's own upper-left-anchored convention.
  *
  * The real capture is the user's own screenshots (including a personal GPS
  * track) and is deliberately gitignored, so it is absent on a fresh clone or
@@ -17,7 +22,7 @@
  * `resources/real-capture/` gets the real regression check.
  */
 import { describe, expect, test } from 'vitest';
-import { assignFour } from '../../src/lib/stitch/autoLayout';
+import { assignN } from '../../src/lib/stitch/autoLayout';
 import { snapAlign } from '../../src/lib/stitch/cvMatch';
 import type { SnapNeighbor } from '../../src/lib/stitch/cvMatch';
 import { available, loadCroppedTiles, REAL_CAPTURE_GROUND_TRUTH } from '../helpers/realCapture.js';
@@ -41,22 +46,34 @@ const SCRAMBLED_ORDER: readonly Slot2x2[] = [
 
 describe.skipIf(!available())('real capture acceptance', () => {
 	test(
-		'assignFour recovers the correct slots and placements for the real capture, regardless of input order',
+		'assignN recovers the correct geometry for the real capture, regardless of input order or which tile anchors',
 		async () => {
 			const tiles = loadCroppedTiles();
 			const rasters = SCRAMBLED_ORDER.map((slot) => ({ ...tiles[slot], scale: 1 }));
 
-			const layout = await assignFour(rasters);
+			const layout = await assignN(rasters);
 
-			for (const slot of SCRAMBLED_ORDER) {
-				const expectedIndex = SCRAMBLED_ORDER.indexOf(slot);
-				expect(layout.assignment[slot]).toBe(expectedIndex);
-			}
+			// Every raster is assigned to exactly one output slot (a bijection);
+			// `assignN` no longer commits to named 2x2 roles, so identity is
+			// checked structurally rather than by slot name.
+			expect(Object.values(layout.assignment).sort()).toEqual([0, 1, 2, 3]);
 
-			for (const slot of Object.keys(REAL_CAPTURE_GROUND_TRUTH.placements) as Slot2x2[]) {
-				const expected = REAL_CAPTURE_GROUND_TRUTH.placements[slot];
-				const actual = layout.placements[slot];
-				if (!actual) throw new Error(`expected a placement for ${slot}`);
+			const groundTruth = REAL_CAPTURE_GROUND_TRUTH.placements;
+			const trueSlotOfIndex = (fileIndex: number): Slot2x2 => SCRAMBLED_ORDER[fileIndex];
+			const anchorFileIndex = layout.assignment[layout.order[0]];
+			if (anchorFileIndex === undefined) throw new Error('missing anchor assignment');
+			const anchorGroundTruth = groundTruth[trueSlotOfIndex(anchorFileIndex)];
+
+			for (const outputSlot of layout.order) {
+				const fileIndex = layout.assignment[outputSlot];
+				if (fileIndex === undefined) throw new Error(`missing assignment for ${outputSlot}`);
+				const trueSlot = trueSlotOfIndex(fileIndex);
+				const expected = {
+					xPx: groundTruth[trueSlot].xPx - anchorGroundTruth.xPx,
+					yPx: groundTruth[trueSlot].yPx - anchorGroundTruth.yPx
+				};
+				const actual = layout.placements[outputSlot];
+				if (!actual) throw new Error(`expected a placement for ${outputSlot}`);
 				expect(actual.xPx).toBeGreaterThanOrEqual(expected.xPx - TOLERANCE_PX);
 				expect(actual.xPx).toBeLessThanOrEqual(expected.xPx + TOLERANCE_PX);
 				expect(actual.yPx).toBeGreaterThanOrEqual(expected.yPx - TOLERANCE_PX);
@@ -66,9 +83,8 @@ describe.skipIf(!available())('real capture acceptance', () => {
 			// P1-002 1b: Snap now shares this same `cvMatch` matcher instead of the
 			// old hand-rolled MAD search, so its two invariants are mirrored here
 			// against the real capture's own ground truth (independent of
-			// `assignFour`'s four-tile assignment above — Snap only ever needs a
-			// tile plus its already-placed neighbors).
-			const groundTruth = REAL_CAPTURE_GROUND_TRUTH.placements;
+			// `assignN`'s assignment above — Snap only ever needs a tile plus its
+			// already-placed neighbors).
 			const tileFor = (slot: Slot2x2) => ({ ...tiles[slot], scale: 1 });
 			const neighborsFor = (slots: readonly Slot2x2[]): SnapNeighbor[] =>
 				slots.map((slot) => ({

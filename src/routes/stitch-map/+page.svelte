@@ -12,11 +12,11 @@
 	import { isEditableTarget } from '$lib/pointSelection';
 	import { canvas2dAvailable } from '$lib/scene';
 	import {
-		ALL_TILE_SLOTS,
-		TILE_SLOTS_BY_LAYOUT,
 		ZERO_CROP,
 		cropSize,
+		defaultSlotOrder,
 		expectedNeighbors,
+		gridNeighbors,
 		initialPlacements,
 		readiness,
 		sessionDimensions,
@@ -26,12 +26,13 @@
 	import type {
 		CropInsetField,
 		CropInsets,
-		StitchLayout,
+		TileNeighbors,
 		TilePlacement,
 		TileSlot
 	} from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
 	import { smartImportFiles } from '$lib/stitch/smartImport';
+	import { MAX_AUTO_ARRANGE_TILES } from '$lib/stitch/autoLayout';
 	import { categoryLabel } from '$lib/stitch/diagnostics';
 	import type { LayoutDiagnostic } from '$lib/stitch/diagnostics';
 	import { requiresReplaceDecision } from '$lib/stitch/rerunGuard';
@@ -63,16 +64,11 @@
 		image: HTMLImageElement;
 	}
 
-	const SLOT_LABELS: Record<TileSlot, string> = {
-		'upper-left': 'Upper left',
-		'upper-right': 'Upper right',
-		'lower-left': 'Lower left',
-		'lower-right': 'Lower right',
-		left: 'Left',
-		right: 'Right',
-		top: 'Top',
-		bottom: 'Bottom'
-	};
+	/** A slot's display label is its 1-based position in the current session, not its stable id. */
+	function slotLabel(slot: TileSlot): string {
+		const index = activeSlots.indexOf(slot);
+		return index >= 0 ? `Capture ${index + 1}` : slot;
+	}
 
 	const CROP_FIELDS: readonly CropInsetField[] = ['topPx', 'rightPx', 'bottomPx', 'leftPx'];
 
@@ -83,8 +79,6 @@
 		leftPx: 'Left'
 	};
 
-	const CROP_HANDLE_SIZE = 10;
-
 	/** Reserved coordinator key guarding one whole smart-import batch (P1-001). */
 	const SMART_IMPORT_BATCH = '__smart-import__';
 
@@ -94,7 +88,7 @@
 	/** Per-slot decode generations: stale in-flight decodes never publish results. */
 	const decodeCoordinator = new TileDecodeCoordinator();
 
-	/** Authoritative committed crop; drafts may be invalid without touching it. */
+	/** Authoritative committed crop; drafts may be invalid without touching it. Shared by every tile — see the design note on the review-phase guides below. */
 	let crop = $state<CropInsets>({ ...ZERO_CROP });
 	let cropDraft = $state<{ topPx: string; rightPx: string; bottomPx: string; leftPx: string }>({
 		topPx: '0',
@@ -105,41 +99,50 @@
 	let cropInputs = $state<Partial<Record<CropInsetField, HTMLInputElement | null>>>({});
 
 	/**
-	 * The session's active layout: `'2x2'` (the original four-tile grid, default)
-	 * or an auto-detected `'1x2'`/`'2x1'` two-tile set, set by a successful
-	 * two-file smart import (see `runSmartImport`). `activeSlots` is this
-	 * layout's slot list — the loop source every previously-hardcoded
-	 * `TILE_SLOTS` reference now uses (see `TILE_SLOTS_BY_LAYOUT`) — and its
-	 * first slot is always the anchor (immovable, at (0, 0)), replacing the
-	 * previous hardcoded `'upper-left'`.
+	 * The session's active slots: four fresh, empty ids by default, or however
+	 * many tiles a successful smart import inferred (see `runSmartImport`), or
+	 * one more than that after "+ Add capture". `tileNeighbors` is the
+	 * expected-overlap adjacency for those slots — a placeholder grid before any
+	 * arrangement has run, or the real inferred topology afterward. The first
+	 * slot in `activeSlots` is always the anchor (immovable, at (0, 0)).
 	 */
-	let activeLayout = $state<StitchLayout>('2x2');
-	const activeSlots = $derived(TILE_SLOTS_BY_LAYOUT[activeLayout]);
+	const INITIAL_SLOTS: readonly TileSlot[] = defaultSlotOrder(4);
+	let activeSlots = $state<TileSlot[]>([...INITIAL_SLOTS]);
+	let tileNeighbors = $state<TileNeighbors>(gridNeighbors(INITIAL_SLOTS));
 	const anchorSlot = $derived(activeSlots[0]);
 	const movableSlots = $derived(activeSlots.slice(1));
+	/** Every slot id ever active this session, so a reset invalidates stale in-flight decodes from a prior (possibly larger) session too. */
+	let everActiveSlots = new Set<TileSlot>(INITIAL_SLOTS);
 
-	let placements = $state<Partial<Record<TileSlot, TilePlacement>>>(initialPlacements(1, 1));
+	let placements = $state<Partial<Record<TileSlot, TilePlacement>>>(
+		initialPlacements(INITIAL_SLOTS, 1, 1)
+	);
 	let placementsInitialized = $state(false);
 	let selectedSlot = $state<TileSlot | null>(null);
 	let positionDraft = $state({ xPx: '', yPx: '' });
 	let xPositionInput = $state<HTMLInputElement | null>(null);
 	let yPositionInput = $state<HTMLInputElement | null>(null);
 	let previewOpacity = $state(0.6);
-	let alignmentWorkspace = $state<HTMLDivElement | null>(null);
+	let stageWorkspace = $state<HTMLDivElement | null>(null);
 
-	let alignmentVp = new ViewportController();
-	let cropVp = new ViewportController();
-
-	let alignmentStage = $state<Konva.Stage | null>(null);
-	let cropStage = $state<Konva.Stage | null>(null);
-	let alignmentLayer = $state<Konva.Layer | null>(null);
-	let cropLayer = $state<Konva.Layer | null>(null);
-	/** Live tile groups so a drag preview moves the image and its highlight together. */
+	/**
+	 * One persistent viewport/stage shared by every non-import phase (P2:
+	 * single-viewport redesign) — the review filmstrip, the assembling
+	 * transition, the assembled mosaic, and export all render into the same
+	 * Konva scene; tiles are repositioned/resized/cropped in place, never
+	 * unmounted and rebuilt as a different component. Import stays plain HTML
+	 * (see the template) since it is fundamentally a file-picker grid, not a
+	 * scene with real geometry to preserve continuity for.
+	 */
+	let stageVp = new ViewportController();
+	let stage = $state<Konva.Stage | null>(null);
+	let layer = $state<Konva.Layer | null>(null);
+	/** Live tile groups so a drag preview moves the image and its highlight together, and so a phase transition can tween the existing node instead of rebuilding it. */
 	let tileNodes = new Map<TileSlot, Konva.Group>();
-	/** Live nodes of the crop scene so drags can move them without rebuilding. */
-	let cropRectNode = $state<Konva.Rect | null>(null);
-	let cropHandles = $state<Partial<Record<CropInsetField, Konva.Rect>>>({});
-	/** True only between a crop-handle dragstart and dragend (Konva-native drag). */
+	/** Live review-phase crop guide nodes, per tile, so a drag moves them without a full rebuild. */
+	let cropGuideTop = new Map<TileSlot, Konva.Rect>();
+	let cropGuideBottom = new Map<TileSlot, Konva.Rect>();
+	/** True only between a crop-guide dragstart and dragend (Konva-native drag). */
 	let cropDragActive = false;
 	/**
 	 * Custom alignment tile drag claimed from the shared viewport. The node is
@@ -167,6 +170,15 @@
 	let smartImportError = $state<string | null>(null);
 	let smartImportSummary = $state<Partial<Record<TileSlot, string>> | null>(null);
 	let cropProposal = $state<CropInsets | null>(null);
+	/**
+	 * Adds a small safety margin to the auto-proposed crop so a borderline
+	 * chrome pixel (or per-capture-unique status-bar content, e.g. the device
+	 * clock) never survives into the shared crop — on by default, since a
+	 * slightly deeper crop is far cheaper than a stitch corrupted by leftover
+	 * chrome. Decided before import runs, since it affects the analysis itself,
+	 * not just how the proposal is displayed afterward.
+	 */
+	let addCropMargin = $state(true);
 
 	/** P1-002 hardening state: transient diagnostic/confirmation state only. */
 	let smartImportDiagnostic = $state<LayoutDiagnostic | null>(null);
@@ -191,7 +203,7 @@
 	$effect(() => {
 		const proposal = cropProposal;
 		const isDemoCropStep = demoTour.active && demoTour.step.id === 'stitch';
-		if (!proposal || !isDemoCropStep) return;
+		if (!proposal || !isDemoCropStep || phase !== 'review') return;
 
 		const timer = setTimeout(() => {
 			if (cropProposal !== proposal || !demoTour.active || demoTour.step.id !== 'stitch') return;
@@ -202,15 +214,15 @@
 		return () => clearTimeout(timer);
 	});
 
-	const required = $derived(sessionDimensions(tiles, activeLayout));
+	const required = $derived(sessionDimensions(tiles, activeSlots));
 	const croppedValidation = $derived(
 		required ? cropSize(crop, required.widthPx, required.heightPx) : null
 	);
-	const report = $derived(readiness(tiles, crop, placements, required, activeLayout));
-	const invalidCropFields = $derived(computeInvalidCropFields());
-	const canExport = $derived(
-		report.ready && !rendering && invalidCropFields.length === 0
+	const report = $derived(
+		readiness(tiles, crop, placements, required, activeSlots, tileNeighbors)
 	);
+	const invalidCropFields = $derived(computeInvalidCropFields());
+	const canExport = $derived(report.ready && !rendering && invalidCropFields.length === 0);
 	/**
 	 * Snap assist availability: a selected, loaded movable tile with a valid
 	 * shared crop and at least one loaded expected neighbor to match against,
@@ -221,11 +233,116 @@
 		if (snapBusy) return false;
 		if (!slot || !movableSlots.includes(slot) || !tiles[slot] || !placements[slot]) return false;
 		if (!croppedValidation?.ok) return false;
-		return expectedNeighbors(slot, activeLayout).some((neighbor) => Boolean(tiles[neighbor]));
+		return expectedNeighbors(slot, tileNeighbors).some((neighbor) => Boolean(tiles[neighbor]));
 	});
 
-	/** The union of all loaded cropped tile rectangles; the alignment fit target. */
-	function alignmentFitTarget(): ViewportFitTarget | null {
+	// ---------------------------------------------------------------------
+	// Phase state machine (P2 single-viewport redesign)
+	// ---------------------------------------------------------------------
+
+	type Phase = 'import' | 'review' | 'assembling' | 'assembled' | 'export';
+	let phase = $state<Phase>('import');
+	let finetuneOpen = $state(false);
+	let assemblingTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const PROGRESS_LABELS = ['Import', 'Review', 'Assemble', 'Export'] as const;
+	const PROGRESS_INDEX: Record<Phase, number> = {
+		import: 0,
+		review: 1,
+		assembling: 2,
+		assembled: 2,
+		export: 3
+	};
+
+	function prefersReducedMotion(): boolean {
+		return (
+			typeof window !== 'undefined' &&
+			typeof window.matchMedia === 'function' &&
+			window.matchMedia('(prefers-reduced-motion: reduce)').matches
+		);
+	}
+
+	/** All currently-active slots hold a decoded, dimension-matching tile — the gate for leaving Import. */
+	const importComplete = $derived(
+		activeSlots.length >= 2 && activeSlots.every((slot) => tiles[slot] !== undefined)
+	);
+
+	function addSlot(): void {
+		activeSlots = [...activeSlots, `tile-${activeSlots.length}`];
+		tileNeighbors = gridNeighbors(activeSlots);
+		everActiveSlots.add(activeSlots[activeSlots.length - 1]);
+		placementsInitialized = false;
+	}
+
+	function setPhase(next: Phase): void {
+		phase = next;
+		if (next === 'export') {
+			finetuneOpen = false;
+		}
+		if (next === 'assembled') {
+			statusMessage = `Stitched from ${activeSlots.length} capture${activeSlots.length === 1 ? '' : 's'}.`;
+		}
+		if (next === 'assembling') {
+			finetuneOpen = false;
+			if (assemblingTimer) clearTimeout(assemblingTimer);
+			const durationMs = prefersReducedMotion()
+				? 60
+				: Math.min(2400, 90 * activeSlots.length + 900);
+			assemblingTimer = setTimeout(() => {
+				assemblingTimer = null;
+				if (phase === 'assembling') setPhase('assembled');
+			}, durationMs);
+		}
+	}
+
+	function advance(): void {
+		if (phase === 'import') {
+			if (!importComplete) return;
+			setPhase('review');
+		} else if (phase === 'review') {
+			if (!croppedValidation?.ok) return;
+			setPhase('assembling');
+		} else if (phase === 'assembled') {
+			setPhase('export');
+		}
+	}
+
+	function goBack(): void {
+		if (assemblingTimer) {
+			clearTimeout(assemblingTimer);
+			assemblingTimer = null;
+		}
+		if (phase === 'review') setPhase('import');
+		else if (phase === 'assembling' || phase === 'assembled') setPhase('review');
+		else if (phase === 'export') setPhase('assembled');
+	}
+
+	function primaryButtonLabel(): string {
+		switch (phase) {
+			case 'import':
+				return 'Review crop →';
+			case 'review':
+				return 'Approve crop & assemble →';
+			case 'assembling':
+				return 'Assembling…';
+			case 'assembled':
+				return 'Continue to export →';
+			case 'export':
+				return '';
+		}
+	}
+
+	function primaryButtonDisabled(): boolean {
+		if (phase === 'import') return !importComplete;
+		if (phase === 'review') return !croppedValidation?.ok;
+		if (phase === 'assembling') return true;
+		return false;
+	}
+
+	// ---------------------------------------------------------------------
+
+	/** The union of all loaded cropped tile rectangles; the assembled/export fit target. */
+	function assembledFitTarget(): ViewportFitTarget | null {
 		const validation = croppedValidation;
 		if (!validation?.ok) return null;
 		const rects = activeSlots
@@ -236,69 +353,34 @@
 		return { xPx: union.xPx, yPx: union.yPx, widthPx: union.widthPx, heightPx: union.heightPx };
 	}
 
-	function cropGeometry():
-		| { rectX: number; rectY: number; rectWidth: number; rectHeight: number }
-		| null {
-		const tile = tiles[anchorSlot];
-		if (!tile) return null;
-		const view = cropVp.view;
-		const rectX = view.panX + crop.leftPx * view.zoom;
-		const rectY = view.panY + crop.topPx * view.zoom;
-		const rectWidth = Math.max(0, (tile.widthPx - crop.leftPx - crop.rightPx) * view.zoom);
-		const rectHeight = Math.max(0, (tile.heightPx - crop.topPx - crop.bottomPx) * view.zoom);
-		return { rectX, rectY, rectWidth, rectHeight };
+	/** Filmstrip layout for the review phase, in original (uncropped) tile pixels: one row, left to right. */
+	function filmstripPlacements(): Partial<Record<TileSlot, TilePlacement>> {
+		if (!required) return {};
+		const gap = Math.max(8, Math.round(required.widthPx * 0.08));
+		const result: Partial<Record<TileSlot, TilePlacement>> = {};
+		activeSlots.forEach((slot, i) => {
+			if (!tiles[slot]) return;
+			result[slot] = { xPx: i * (required!.widthPx + gap), yPx: 0, visible: true };
+		});
+		return result;
 	}
 
-	function cropHandleAnchor(
-		field: CropInsetField,
-		g: { rectX: number; rectY: number; rectWidth: number; rectHeight: number }
-	): { x: number; y: number } {
-		switch (field) {
-			case 'topPx':
-				return { x: g.rectX + g.rectWidth / 2, y: g.rectY };
-			case 'rightPx':
-				return { x: g.rectX + g.rectWidth, y: g.rectY + g.rectHeight / 2 };
-			case 'bottomPx':
-				return { x: g.rectX + g.rectWidth / 2, y: g.rectY + g.rectHeight };
-			case 'leftPx':
-				return { x: g.rectX, y: g.rectY + g.rectHeight / 2 };
-		}
-	}
-
-	/** Per-handle clamp keeps the crop box at least 1 px so it can never collapse. */
-	function maxInset(field: CropInsetField, tile: StitchTile): number {
-		switch (field) {
-			case 'leftPx':
-				return Math.max(0, tile.widthPx - crop.rightPx - 1);
-			case 'rightPx':
-				return Math.max(0, tile.widthPx - crop.leftPx - 1);
-			case 'topPx':
-				return Math.max(0, tile.heightPx - crop.bottomPx - 1);
-			case 'bottomPx':
-				return Math.max(0, tile.heightPx - crop.topPx - 1);
-		}
-	}
-
-	/**
-	 * Moves the existing crop rect and non-dragged handles to the current crop
-	 * values without rebuilding the layer, so a handle drag slides smoothly and
-	 * the dragged node is never destroyed mid-drag.
-	 */
-	function updateCropSceneGeometry(): void {
-		const g = cropGeometry();
-		if (!g) return;
-		cropRectNode?.position({ x: g.rectX, y: g.rectY });
-		cropRectNode?.size({ width: g.rectWidth, height: g.rectHeight });
-		for (const field of CROP_FIELDS) {
-			const handle = cropHandles[field];
-			if (!handle || handle.isDragging()) continue;
-			const anchor = cropHandleAnchor(field, g);
-			handle.position({
-				x: anchor.x - CROP_HANDLE_SIZE / 2,
-				y: anchor.y - CROP_HANDLE_SIZE / 2
+	function filmstripFitTarget(): ViewportFitTarget | null {
+		if (!required) return null;
+		const rects = activeSlots
+			.filter((slot) => tiles[slot])
+			.map((slot, i, arr) => {
+				const gap = Math.max(8, Math.round(required!.widthPx * 0.08));
+				const index = activeSlots.indexOf(slot);
+				return tileRect(
+					{ xPx: index * (required!.widthPx + gap), yPx: 0, visible: true },
+					required!.widthPx,
+					required!.heightPx
+				);
 			});
-		}
-		cropLayer?.batchDraw();
+		const union = unionBounds(rects);
+		if (!union) return null;
+		return { xPx: union.xPx, yPx: union.yPx, widthPx: union.widthPx, heightPx: union.heightPx };
 	}
 
 	function computeInvalidCropFields(): CropInsetField[] {
@@ -409,7 +491,7 @@
 		const cleared = { ...tileErrors };
 		delete cleared[slot];
 		tileErrors = cleared;
-		statusMessage = `${SLOT_LABELS[slot]} loaded (${widthPx} x ${heightPx}).`;
+		statusMessage = `${slotLabel(slot)} loaded (${widthPx} x ${heightPx}).`;
 	}
 
 	function handleSmartImportFiles(event: Event): void {
@@ -426,8 +508,8 @@
 	 * anything is recomputed or overwritten.
 	 */
 	function requestSmartImport(files: File[]): void {
-		if (files.length !== 2 && files.length !== 4) {
-			statusMessage = `Import screenshots requires exactly two or four files; received ${files.length}. The current session is unchanged.`;
+		if (files.length < 2) {
+			statusMessage = `Import screenshots requires at least two files; received ${files.length}. The current session is unchanged.`;
 			return;
 		}
 		if (requiresReplaceDecision(placements, lastAutoPlacements)) {
@@ -456,10 +538,10 @@
 	});
 
 	/**
-	 * One local-only bulk import (P1-001, hardened in P1-002; extended to
-	 * 1x2/2x1). Decodes and analyzes exactly two or four screenshots in any
-	 * order, then commits the inferred layout, tiles, placements, confidence,
-	 * and the summary as one coherent session replacement so a failure never
+	 * One local-only bulk import (P1-001, hardened in P1-002; generalized to
+	 * any N >= 2 screenshots). Decodes and analyzes N screenshots in any order,
+	 * then commits the inferred arrangement, tiles, placements, confidence, and
+	 * the summary as one coherent session replacement so a failure never
 	 * damages the current valid session. A newer selection/reset/unmount
 	 * invalidates the batch; a stale result publishes nothing. The computed
 	 * placements always commit, even when the diagnostic flags a `review`
@@ -469,8 +551,8 @@
 	 */
 	async function runSmartImport(files: File[]): Promise<void> {
 		const generation = decodeCoordinator.begin(SMART_IMPORT_BATCH);
-		if (files.length !== 2 && files.length !== 4) {
-			statusMessage = `Import screenshots requires exactly two or four files; received ${files.length}. The current session is unchanged.`;
+		if (files.length < 2) {
+			statusMessage = `Import screenshots requires at least two files; received ${files.length}. The current session is unchanged.`;
 			return;
 		}
 		smartImportError = null;
@@ -478,19 +560,20 @@
 		statusMessage = `Analyzing ${files.length} screenshots…`;
 		try {
 			const result = await smartImportViaWorker(files, {
-				isCurrent: () => decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)
+				isCurrent: () => decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation),
+				applyCropMargin: addCropMargin
 			});
 			if (!result.ok) {
 				if ('stale' in result) return;
 				if (result.kind === 'wrong-count') {
-					statusMessage = `Import screenshots requires exactly two or four files; received ${result.count}. The current session is unchanged.`;
+					statusMessage = `Import screenshots supports two to ${MAX_AUTO_ARRANGE_TILES} files; received ${result.count}. The current session is unchanged.`;
 					return;
 				}
 				smartImportError = result.message;
 				statusMessage = `Smart import rejected "${result.fileName}"; the current session is unchanged.`;
 				return;
 			}
-			const slots = TILE_SLOTS_BY_LAYOUT[result.layoutKind];
+			const slots = result.order;
 			const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
 			const nextSummary: Partial<Record<TileSlot, string>> = {};
 			for (const slot of slots) {
@@ -511,7 +594,9 @@
 			// neutral manual layout, even when the diagnostic flags a warning.
 			const nextPlacements = result.placements;
 			// One coherent session replacement, not staggered slot mutations.
-			activeLayout = result.layoutKind;
+			activeSlots = [...slots];
+			tileNeighbors = result.neighbors;
+			for (const slot of slots) everActiveSlots.add(slot);
 			tiles = nextTiles;
 			tileErrors = {};
 			placements = nextPlacements;
@@ -524,13 +609,17 @@
 			smartImportDiagnostic = result.diagnostic;
 			cropProposal = result.cropProposal;
 			cropProposalConfidence = result.crop.confidence;
-			alignmentVp.fit();
-			const order = slots.map((slot) => `${SLOT_LABELS[slot]}: ${nextSummary[slot]}`).join(', ');
+			const order = slots.map((slot) => `${slotLabel(slot)}: ${nextSummary[slot]}`).join(', ');
 			const label = categoryLabel(result.diagnostic.category);
 			const warnings = result.diagnostic.warnings;
 			statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
 				warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
 			} Manual correction remains available.`;
+			// A successful import is itself the "done" signal — advance straight to
+			// Review instead of making the user click through a step that only
+			// ever leads one place. Guarded to the import phase so a demo-capture
+			// handoff arriving late can never yank a user back out of Review/Export.
+			if (phase === 'import') setPhase('review');
 		} finally {
 			smartImportBusy = false;
 		}
@@ -549,7 +638,6 @@
 		if (!cropProposal) return;
 		crop = { ...cropProposal };
 		syncCropDraft(true);
-		renderCropScene();
 		cropProposal = null;
 		statusMessage = 'Suggested crop applied. Edit or reset it with the existing crop controls.';
 	}
@@ -574,19 +662,22 @@
 			syncPositionDraft(true);
 		}
 		if (!activeSlots.some((candidate) => tiles[candidate])) resetSession();
-		statusMessage = `${SLOT_LABELS[slot]} removed.`;
+		statusMessage = `${slotLabel(slot)} removed.`;
 	}
 
 	function resetSession(): void {
 		// No in-flight decode or smart-import batch may publish into the cleared
-		// session; every slot across every layout is invalidated, not just the
-		// current layout's, in case a prior layout left a stale generation behind.
-		decodeCoordinator.invalidateAll(ALL_TILE_SLOTS);
+		// session; every slot ever active this session is invalidated, not just
+		// the current active set, in case a prior (possibly larger) session left
+		// a stale generation behind.
+		decodeCoordinator.invalidateAll([...everActiveSlots]);
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
-		activeLayout = '2x2';
+		activeSlots = [...defaultSlotOrder(4)];
+		tileNeighbors = gridNeighbors(activeSlots);
+		everActiveSlots = new Set(activeSlots);
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
-		placements = initialPlacements(1, 1);
+		placements = initialPlacements(activeSlots, 1, 1);
 		placementsInitialized = false;
 		selectedSlot = null;
 		positionDraft = { xPx: '', yPx: '' };
@@ -602,6 +693,12 @@
 		pendingReplaceConfirm = false;
 		pendingSmartImportFiles = null;
 		replaceFocusRestore = null;
+		finetuneOpen = false;
+		if (assemblingTimer) {
+			clearTimeout(assemblingTimer);
+			assemblingTimer = null;
+		}
+		phase = 'import';
 		statusMessage = 'All screenshots cleared. The session and its crop and arrangement were reset.';
 	}
 
@@ -618,14 +715,129 @@
 		const value = parseInt(raw, 10);
 		crop = { ...crop, [field]: value };
 		syncCropDraft(true);
-		renderCropScene();
 	}
 
 	function resetCrop(): void {
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
-		renderCropScene();
 		statusMessage = 'Shared crop reset.';
+	}
+
+	// ---------------------------------------------------------------------
+	// Crop-line close-up preview: a small per-tile magnified strip centered on
+	// the exact boundary pixel, with a marker line at the cut itself. At the
+	// review filmstrip's normal zoom a 1-2px chrome misread is invisible, and
+	// getting that line wrong crops either real map content or leaves a sliver
+	// of chrome in the stitched output — this exists so a user can actually
+	// see the pixel the crop commits to, on every tile, before trusting it.
+	// ---------------------------------------------------------------------
+
+	/**
+	 * Original-pixel size of the magnified region drawn into each strip: a
+	 * small, fixed number of individual pixel ROWS above and below the cut,
+	 * each rendered as its own large, gridlined block — not a continuously
+	 * scaled image, where a multi-pixel-wide marker line can itself obscure
+	 * the exact row it's supposed to indicate. Narrow on purpose (horizontal
+	 * content doesn't help judge a horizontal crop line) and tall on purpose
+	 * (more rows of real context), so all four captures' strips for both
+	 * edges fit on screen at once without scrolling. The one row that's kept
+	 * is outlined in green — the only unambiguous answer to "which row does
+	 * this commit to."
+	 */
+	const CROP_ZOOM_SOURCE_WIDTH_PX = 24;
+	const CROP_ZOOM_ROWS_ABOVE = 8;
+	const CROP_ZOOM_ROWS_BELOW = 8;
+	const CROP_ZOOM_SCALE = 8;
+
+	function drawCropZoomStrip(
+		canvas: HTMLCanvasElement,
+		image: HTMLImageElement,
+		imageWidthPx: number,
+		imageHeightPx: number,
+		boundaryY: number,
+		edge: 'top' | 'bottom'
+	): void {
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		const srcW = Math.min(CROP_ZOOM_SOURCE_WIDTH_PX, imageWidthPx);
+		const srcH = Math.min(CROP_ZOOM_ROWS_ABOVE + CROP_ZOOM_ROWS_BELOW, imageHeightPx);
+		const width = srcW * CROP_ZOOM_SCALE;
+		const height = srcH * CROP_ZOOM_SCALE;
+		canvas.width = width;
+		canvas.height = height;
+		ctx.imageSmoothingEnabled = false;
+		const srcX = Math.min(
+			Math.max(0, imageWidthPx - srcW),
+			Math.max(0, Math.round((imageWidthPx - srcW) / 2))
+		);
+		const srcY = Math.min(
+			Math.max(0, imageHeightPx - srcH),
+			Math.max(0, boundaryY - CROP_ZOOM_ROWS_ABOVE)
+		);
+		ctx.clearRect(0, 0, width, height);
+		ctx.drawImage(image, srcX, srcY, srcW, srcH, 0, 0, width, height);
+
+		// `boundaryY` is the row index where state changes going downward: for
+		// the top edge, everything before it is cropped and it is itself the
+		// first kept row; for the bottom edge, everything before it is kept and
+		// it is itself the first cropped row.
+		const boundaryCanvasY = (boundaryY - srcY) * CROP_ZOOM_SCALE;
+
+		// Shade the side that actually gets cut away — "kept vs. discarded" reads
+		// at a glance; a bare line does not, especially on real chrome that
+		// doesn't have a hard color edge (translucent status bars, gradients).
+		ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+		if (edge === 'top') {
+			ctx.fillRect(0, 0, width, boundaryCanvasY);
+		} else {
+			ctx.fillRect(0, boundaryCanvasY, width, height - boundaryCanvasY);
+		}
+
+		// A gridline between every individual source pixel row, so rows can be
+		// counted rather than estimated.
+		ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+		ctx.lineWidth = 1;
+		for (let row = 0; row <= srcH; row += 1) {
+			const y = Math.round(row * CROP_ZOOM_SCALE) + 0.5;
+			ctx.beginPath();
+			ctx.moveTo(0, y);
+			ctx.lineTo(width, y);
+			ctx.stroke();
+		}
+
+		// The one row that's kept, outlined in green — the single unambiguous
+		// answer to "which row does this commit to." Whichever side `edge`
+		// puts it on flips which canvas position gets the outline.
+		const keptRowY = edge === 'top' ? boundaryCanvasY : boundaryCanvasY - CROP_ZOOM_SCALE;
+		ctx.lineWidth = 2;
+		ctx.strokeStyle = '#4ade80';
+		ctx.strokeRect(1, keptRowY + 1, width - 2, CROP_ZOOM_SCALE - 2);
+
+		// The cut itself: a crisp 1px line exactly on the row boundary — never
+		// more than 1 canvas pixel, so it can never read as covering a row of
+		// real content.
+		ctx.strokeStyle = '#facc15';
+		ctx.lineWidth = 1;
+		ctx.beginPath();
+		ctx.moveTo(0, Math.round(boundaryCanvasY) + 0.5);
+		ctx.lineTo(width, Math.round(boundaryCanvasY) + 0.5);
+		ctx.stroke();
+	}
+
+	interface CropZoomParams {
+		readonly image: HTMLImageElement;
+		readonly imageWidthPx: number;
+		readonly imageHeightPx: number;
+		readonly boundaryY: number;
+		readonly edge: 'top' | 'bottom';
+	}
+
+	/** Svelte action: draws the close-up strip on mount and redraws whenever the boundary/tile changes. */
+	function cropZoom(node: HTMLCanvasElement, params: CropZoomParams): { update(next: CropZoomParams): void } {
+		const draw = (p: CropZoomParams): void =>
+			drawCropZoomStrip(node, p.image, p.imageWidthPx, p.imageHeightPx, p.boundaryY, p.edge);
+		draw(params);
+		return { update: draw };
 	}
 
 	function updateCropDrag(field: CropInsetField, value: number): void {
@@ -635,7 +847,6 @@
 
 	function endCropDrag(): void {
 		syncCropDraft(true);
-		renderCropScene();
 	}
 
 	function updatePlacement(slot: TileSlot, xPx: number, yPx: number): void {
@@ -649,7 +860,7 @@
 		if (slot !== null && (slot === anchorSlot || !tiles[slot])) return;
 		selectedSlot = slot;
 		syncPositionDraft(true);
-		if (slot) alignmentWorkspace?.focus();
+		if (slot) stageWorkspace?.focus();
 	}
 
 	function handlePositionInput(field: 'xPx' | 'yPx', event: Event): void {
@@ -675,12 +886,13 @@
 	}
 
 	/**
-	 * Scoped arrow-key nudge: only fires when the alignment group itself owns
+	 * Scoped arrow-key nudge: only fires when the stage workspace itself owns
 	 * focus, never from bubbled events on descendant controls or editable fields.
 	 */
-	function handleAlignmentKeyDown(event: KeyboardEvent): void {
+	function handleStageKeyDown(event: KeyboardEvent): void {
 		if (event.target !== event.currentTarget) return;
 		if (isEditableTarget(event.target)) return;
+		if (phase !== 'assembled') return;
 		const slot = selectedSlot;
 		const placement = slot ? placements[slot] : undefined;
 		if (!slot || slot === anchorSlot || !placement) return;
@@ -721,14 +933,14 @@
 		const placement = slot ? placements[slot] : undefined;
 		if (!slot || !placement) return 'Show/hide tile (preview)';
 		return placement.visible
-			? `Hide ${SLOT_LABELS[slot]} (preview)`
-			: `Show ${SLOT_LABELS[slot]} (preview)`;
+			? `Hide ${slotLabel(slot)} (preview)`
+			: `Show ${slotLabel(slot)} (preview)`;
 	}
 
 	function resetArrangement(): void {
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
-		placements = initialPlacements(validation.widthPx, validation.heightPx, activeLayout);
+		placements = initialPlacements(activeSlots, validation.widthPx, validation.heightPx);
 		syncPositionDraft(true);
 		statusMessage = 'Arrangement reset to the 25% overlap layout.';
 	}
@@ -777,7 +989,7 @@
 		const validation = croppedValidation;
 		if (!tile || !placement || !validation?.ok) return;
 		const neighbors: SnapNeighbor[] = [];
-		for (const neighborSlot of expectedNeighbors(slot, activeLayout)) {
+		for (const neighborSlot of expectedNeighbors(slot, tileNeighbors)) {
 			const neighborTile = tiles[neighborSlot];
 			const neighborPlacement = placements[neighborSlot];
 			if (!neighborTile || !neighborPlacement) continue;
@@ -789,7 +1001,7 @@
 		}
 		if (neighbors.length === 0) return;
 		snapBusy = true;
-		statusMessage = `Snapping ${SLOT_LABELS[slot]}…`;
+		statusMessage = `Snapping ${slotLabel(slot)}…`;
 		try {
 			const result = await snapAlign(
 				buildSnapRaster(tile, validation),
@@ -801,7 +1013,7 @@
 			// never commit a stale result onto a different tile.
 			if (selectedSlot !== slot || !tiles[slot]) return;
 			updatePlacement(slot, result.xPx, result.yPx);
-			statusMessage = `${SLOT_LABELS[slot]} snapped to the best nearby match against ${
+			statusMessage = `${slotLabel(slot)} snapped to the best nearby match against ${
 				neighbors.length > 1 ? 'its neighbors' : 'its neighbor'
 			} (match strength ${Math.round(result.score * 100)}%).`;
 		} finally {
@@ -813,9 +1025,12 @@
 	 * Alignment gesture arbitration (shared viewport claim): a pointer that begins
 	 * inside the currently selected, visible, movable tile claims the gesture for
 	 * tile movement — even when other tiles cover the point. Everything else is
-	 * left to the viewport (background pan) or click selection.
+	 * left to the viewport (background pan) or click selection. Only active in
+	 * the assembled phase — review's crop guides and import's plain HTML have
+	 * their own claim paths.
 	 */
 	function claimAlignmentPointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
+		if (phase !== 'assembled') return false;
 		const slot = selectedSlot;
 		const validation = croppedValidation;
 		if (!slot || slot === anchorSlot || !validation?.ok) return false;
@@ -823,7 +1038,7 @@
 		const tile = tiles[slot];
 		if (!placement?.visible || !tile) return false;
 		const rect = tileRect(placement, validation.widthPx, validation.heightPx);
-		const image = alignmentVp.toImage(pointer);
+		const image = stageVp.toImage(pointer);
 		if (!pointInTileRect(image, rect)) return false;
 		tileDrag = {
 			slot,
@@ -863,7 +1078,7 @@
 			reconcileTileDrag();
 			return;
 		}
-		const screen = alignmentVp.pointerIn(event);
+		const screen = stageVp.pointerIn(event);
 		if (
 			!tileDrag.moved &&
 			Math.hypot(screen.x - tileDrag.startScreen.x, screen.y - tileDrag.startScreen.y) >
@@ -872,11 +1087,11 @@
 			tileDrag.moved = true;
 		}
 		if (!tileDrag.moved) return;
-		const dx = (screen.x - tileDrag.startScreen.x) / alignmentVp.view.zoom;
-		const dy = (screen.y - tileDrag.startScreen.y) / alignmentVp.view.zoom;
+		const dx = (screen.x - tileDrag.startScreen.x) / stageVp.view.zoom;
+		const dy = (screen.y - tileDrag.startScreen.y) / stageVp.view.zoom;
 		const node = tileNodes.get(tileDrag.slot);
 		if (!node) return;
-		const next = alignmentVp.toScreen({
+		const next = stageVp.toScreen({
 			xPx: tileDrag.startPlacement.xPx + dx,
 			yPx: tileDrag.startPlacement.yPx + dy
 		});
@@ -897,19 +1112,15 @@
 			reconcileTileDrag();
 			return;
 		}
-		const screen = alignmentVp.pointerIn(event);
-		const dx = (screen.x - drag.startScreen.x) / alignmentVp.view.zoom;
-		const dy = (screen.y - drag.startScreen.y) / alignmentVp.view.zoom;
+		const screen = stageVp.pointerIn(event);
+		const dx = (screen.x - drag.startScreen.x) / stageVp.view.zoom;
+		const dy = (screen.y - drag.startScreen.y) / stageVp.view.zoom;
 		// The drag delta applies to the tile's committed position; the grab point
 		// inside the tile is only the anchor for the preview.
 		const placement = placements[drag.slot];
 		if (!placement) return;
 		// Final placements are committed as integer cropped-image pixels.
-		updatePlacement(
-			drag.slot,
-			placement.xPx + Math.round(dx),
-			placement.yPx + Math.round(dy)
-		);
+		updatePlacement(drag.slot, placement.xPx + Math.round(dx), placement.yPx + Math.round(dy));
 	}
 
 	/** pointercancel must never commit; the live node returns to its placement. */
@@ -921,7 +1132,7 @@
 
 	/** Restores the live node from the authoritative placements after a no-commit end. */
 	function reconcileTileDrag(): void {
-		renderAlignmentScene();
+		renderStage();
 	}
 
 	function endTileDrag(): void {
@@ -933,15 +1144,16 @@
 	}
 
 	/**
-	 * Click selection in the alignment view: selects a movable tile only when the
-	 * point lies inside exactly one visible tile — the anchored tile participates
-	 * in ambiguity even though it can never be selected. Hidden tiles are never
-	 * selectable.
+	 * Click selection in the assembled view: selects a movable tile only when
+	 * the point lies inside exactly one visible tile — the anchored tile
+	 * participates in ambiguity even though it can never be selected. Hidden
+	 * tiles are never selectable.
 	 */
-	function onAlignmentClick(pointer: ScreenSpacePoint): void {
+	function onStageClick(pointer: ScreenSpacePoint): void {
+		if (phase !== 'assembled') return;
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
-		const image = alignmentVp.toImage(pointer);
+		const image = stageVp.toImage(pointer);
 		const hits = activeSlots.filter((slot) => {
 			const placement = placements[slot];
 			if (!placement?.visible || !tiles[slot]) return false;
@@ -950,13 +1162,20 @@
 		if (hits.length === 1 && hits[0] !== anchorSlot) selectSlot(hits[0]);
 	}
 
-	/** Crop-handle claim: only Konva handle nodes claim; everything else pans. */
-	function claimCropPointer(pointer: ScreenSpacePoint): boolean {
-		const stage = cropStage;
-		if (!stage) return false;
-		const hit = stage.getIntersection(pointer);
+	/** Crop-guide claim (review phase only): only Konva guide nodes claim; everything else pans. */
+	function claimCropGuidePointer(pointer: ScreenSpacePoint): boolean {
+		if (phase !== 'review') return false;
+		const activeStage = stage;
+		if (!activeStage) return false;
+		const hit = activeStage.getIntersection(pointer);
 		if (!hit) return false;
-		return CROP_FIELDS.some((field) => cropHandles[field] === hit);
+		return [...cropGuideTop.values(), ...cropGuideBottom.values()].includes(hit as Konva.Rect);
+	}
+
+	function claimStagePointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
+		if (phase === 'review') return claimCropGuidePointer(pointer);
+		if (phase === 'assembled') return claimAlignmentPointer(pointer, event);
+		return false;
 	}
 
 	function handleDownload(): void {
@@ -1057,138 +1276,195 @@
 		}
 		const reasons: string[] = [];
 		if (report.missing.length > 0) {
-			reasons.push(`Missing: ${report.missing.map((slot) => SLOT_LABELS[slot]).join(', ')}`);
+			reasons.push(`Missing: ${report.missing.map((slot) => slotLabel(slot)).join(', ')}`);
 		}
 		if (report.dimensionMismatch.length > 0) reasons.push('Screenshots must share one size.');
 		if (report.invalidCrop) reasons.push('The shared crop is invalid.');
 		if (report.disconnected.length > 0) {
 			reasons.push(
-				`Every movable tile must connect to the ${SLOT_LABELS[anchorSlot].toLowerCase()} tile through overlapping neighbors.`
+				`Every movable tile must connect to the ${slotLabel(anchorSlot).toLowerCase()} tile through overlapping neighbors.`
 			);
 		}
 		if (invalidCropFields.length > 0) reasons.push('The crop fields contain invalid values.');
 		return `Not ready to export: ${reasons.join('; ')}.`;
 	}
 
-	function renderCropScene(): void {
-		const stage = cropStage;
-		const layer = cropLayer;
-		if (!stage || !layer) return;
-		layer.destroyChildren();
-		cropRectNode = null;
-		cropHandles = {};
-		const tile = tiles[anchorSlot];
-		if (!tile) {
-			layer.batchDraw();
-			return;
-		}
-		const view = cropVp.view;
-		const g = cropGeometry();
-		if (!g) return;
-		layer.add(
-			new Konva.Image({
-				image: tile.image,
-				x: view.panX,
-				y: view.panY,
-				width: tile.widthPx * view.zoom,
-				height: tile.heightPx * view.zoom,
-				listening: false
-			})
-		);
-		const validation = cropSize(crop, tile.widthPx, tile.heightPx);
-		if (validation.ok && g.rectWidth > 0 && g.rectHeight > 0) {
-			cropRectNode = new Konva.Rect({
-				x: g.rectX,
-				y: g.rectY,
-				width: g.rectWidth,
-				height: g.rectHeight,
-				stroke: '#3b82f6',
-				strokeWidth: 2,
-				fill: 'rgba(59, 130, 246, 0.08)',
-				listening: false
-			});
-			layer.add(cropRectNode);
-			for (const field of CROP_FIELDS) {
-				const anchor = cropHandleAnchor(field, g);
-				const axis: 'x' | 'y' = field === 'leftPx' || field === 'rightPx' ? 'x' : 'y';
-				const handle = cropHandle(field, anchor.x, anchor.y, axis, tile);
-				cropHandles[field] = handle;
-				layer.add(handle);
-			}
-		}
-		layer.batchDraw();
+	// ---------------------------------------------------------------------
+	// Unified Konva scene (P2 single-viewport redesign)
+	// ---------------------------------------------------------------------
+
+	/** Per-tile crop-guide geometry in stage px, for the review phase (top/bottom only — see the template note). */
+	function reviewGuideY(field: 'topPx' | 'bottomPx', tileTopScreenY: number, tileHeightScreenPx: number): number {
+		if (!required) return tileTopScreenY;
+		const scale = tileHeightScreenPx / required.heightPx;
+		return field === 'topPx'
+			? tileTopScreenY + crop.topPx * scale
+			: tileTopScreenY + tileHeightScreenPx - crop.bottomPx * scale;
 	}
 
-	function cropHandle(
-		field: CropInsetField,
-		anchorX: number,
-		anchorY: number,
-		axis: 'x' | 'y',
-		tile: StitchTile
-	): Konva.Rect {
-		const size = CROP_HANDLE_SIZE;
-		const handle = new Konva.Rect({
-			x: anchorX - size / 2,
-			y: anchorY - size / 2,
-			width: size,
-			height: size,
-			fill: '#3b82f6',
-			stroke: '#ffffff',
-			strokeWidth: 1,
+	function reviewValueFromGuideY(field: 'topPx' | 'bottomPx', guideScreenY: number): number {
+		if (!required) return 0;
+		const layout = filmstripPlacements();
+		// Every tile shares the same scale/row in the filmstrip, so any one
+		// placement's screen transform is representative.
+		const anySlot = activeSlots.find((slot) => layout[slot]);
+		const placement = anySlot ? layout[anySlot] : undefined;
+		if (!placement) return 0;
+		const view = stageVp.view;
+		const tileTopScreenY = placement.yPx * view.zoom + view.panY;
+		const scale = view.zoom;
+		const fromTop = (guideScreenY - tileTopScreenY) / scale;
+		const value =
+			field === 'topPx' ? Math.round(fromTop) : required.heightPx - Math.round(fromTop);
+		const maxTop = Math.max(0, required.heightPx - crop.bottomPx - 1);
+		const maxBottom = Math.max(0, required.heightPx - crop.topPx - 1);
+		return field === 'topPx'
+			? Math.min(maxTop, Math.max(0, value))
+			: Math.min(maxBottom, Math.max(0, value));
+	}
+
+	function buildReviewGuide(field: 'topPx' | 'bottomPx', slot: TileSlot, x: number, y: number, width: number): Konva.Rect {
+		const guide = new Konva.Rect({
+			x,
+			y: y - 1,
+			width,
+			height: 3,
+			fill: '#facc15',
 			draggable: true,
-			dragBoundFunc:
-				axis === 'x' ? (pos) => ({ x: pos.x, y: anchorY }) : (pos) => ({ x: anchorX, y: pos.y })
+			hitStrokeWidth: 12,
+			dragBoundFunc: (pos) => ({ x, y: pos.y })
 		});
-		const valueFromDrag = (): number => {
-			// Konva positions the rect by its top-left corner; the handle center
-			// is the edge coordinate. Map the edge back to an inset in image
-			// pixels: top/left measure from the image origin, bottom/right from
-			// the opposite edge, so the handle's rest position exactly matches
-			// the committed value and never jumps on the first drag move.
-			const pixels = (axis === 'x' ? handle.x() : handle.y()) + size / 2;
-			const offset = axis === 'x' ? cropVp.view.panX : cropVp.view.panY;
-			const dimension = axis === 'x' ? tile.widthPx : tile.heightPx;
-			const fromOrigin = (pixels - offset) / cropVp.view.zoom;
-			const value =
-				field === 'topPx' || field === 'leftPx'
-					? Math.round(fromOrigin)
-					: dimension - Math.round(fromOrigin);
-			return Math.min(maxInset(field, tile), Math.max(0, value));
-		};
-		handle.on('dragstart', () => {
+		guide.on('dragstart', () => {
 			cropDragActive = true;
 		});
-		handle.on('dragmove', () => {
-			updateCropDrag(field, valueFromDrag());
-			updateCropSceneGeometry();
+		guide.on('dragmove', () => {
+			const value = reviewValueFromGuideY(field, guide.y() + 1);
+			updateCropDrag(field, value);
+			positionReviewGuides();
 		});
-		handle.on('dragend', () => {
+		guide.on('dragend', () => {
 			cropDragActive = false;
-			updateCropDrag(field, valueFromDrag());
-			updateCropSceneGeometry();
 			endCropDrag();
+			renderStage();
 		});
-		return handle;
+		void slot;
+		return guide;
 	}
 
-	function renderAlignmentScene(): void {
-		const stage = alignmentStage;
-		const layer = alignmentLayer;
-		if (!stage || !layer) return;
-		layer.destroyChildren();
+	/** Repositions every tile's crop guides + dim overlay from the current shared `crop`, without a full rebuild (called during an active drag). */
+	function positionReviewGuides(): void {
+		if (!required) return;
+		const layout = filmstripPlacements();
+		const view = stageVp.view;
+		for (const slot of activeSlots) {
+			const placement = layout[slot];
+			const group = tileNodes.get(slot);
+			if (!placement || !group) continue;
+			const topScreenY = placement.yPx * view.zoom + view.panY;
+			const heightScreen = required.heightPx * view.zoom;
+			const widthScreen = required.widthPx * view.zoom;
+			const topGuide = cropGuideTop.get(slot);
+			const bottomGuide = cropGuideBottom.get(slot);
+			if (topGuide && !topGuide.isDragging()) {
+				topGuide.position({ x: 0, y: reviewGuideY('topPx', 0, heightScreen) - 1 });
+			}
+			if (bottomGuide && !bottomGuide.isDragging()) {
+				bottomGuide.position({ x: 0, y: reviewGuideY('bottomPx', 0, heightScreen) - 1 });
+			}
+			const dimTop = group.findOne<Konva.Rect>('.dim-top');
+			const dimBottom = group.findOne<Konva.Rect>('.dim-bottom');
+			dimTop?.height(reviewGuideY('topPx', 0, heightScreen));
+			dimBottom?.setAttrs({
+				y: reviewGuideY('bottomPx', 0, heightScreen),
+				height: heightScreen - reviewGuideY('bottomPx', 0, heightScreen)
+			});
+			void widthScreen;
+		}
+		layer?.batchDraw();
+	}
+
+	/**
+	 * Renders the current phase's static layout into the persistent Konva
+	 * scene. Instant (no tween) — phase-to-phase motion is handled separately
+	 * by `animateAssembling` so a transition is never interrupted by an
+	 * unrelated re-render.
+	 */
+	function renderStage(): void {
+		const activeStage = stage;
+		const activeLayer = layer;
+		if (!activeStage || !activeLayer || phase === 'import') return;
+		activeLayer.destroyChildren();
 		tileNodes.clear();
-		const validation = croppedValidation;
-		if (!validation?.ok) {
-			layer.batchDraw();
+		cropGuideTop.clear();
+		cropGuideBottom.clear();
+
+		if (phase === 'review') {
+			if (!required) {
+				activeLayer.batchDraw();
+				return;
+			}
+			const view = stageVp.view;
+			const layoutMap = filmstripPlacements();
+			for (const slot of activeSlots) {
+				const tile = tiles[slot];
+				const placement = layoutMap[slot];
+				if (!tile || !placement) continue;
+				const x = placement.xPx * view.zoom + view.panX;
+				const y = placement.yPx * view.zoom + view.panY;
+				const w = required.widthPx * view.zoom;
+				const h = required.heightPx * view.zoom;
+				const group = new Konva.Group({ x, y, listening: false });
+				group.add(
+					new Konva.Image({ image: tile.image, width: w, height: h, listening: false })
+				);
+				const topDimHeight = reviewGuideY('topPx', 0, h);
+				const bottomDimY = reviewGuideY('bottomPx', 0, h);
+				group.add(
+					new Konva.Rect({
+						name: 'dim-top',
+						width: w,
+						height: topDimHeight,
+						fill: 'rgba(0,0,0,0.55)',
+						listening: false
+					})
+				);
+				group.add(
+					new Konva.Rect({
+						name: 'dim-bottom',
+						y: bottomDimY,
+						width: w,
+						height: h - bottomDimY,
+						fill: 'rgba(0,0,0,0.55)',
+						listening: false
+					})
+				);
+				group.add(
+					new Konva.Rect({ width: w, height: h, stroke: '#3f3f46', strokeWidth: 1, listening: false })
+				);
+				tileNodes.set(slot, group);
+				activeLayer.add(group);
+				const topGuide = buildReviewGuide('topPx', slot, x, y + topDimHeight, w);
+				const bottomGuide = buildReviewGuide('bottomPx', slot, x, y + bottomDimY, w);
+				cropGuideTop.set(slot, topGuide);
+				cropGuideBottom.set(slot, bottomGuide);
+				activeLayer.add(topGuide);
+				activeLayer.add(bottomGuide);
+			}
+			activeLayer.batchDraw();
 			return;
 		}
-		const view = alignmentVp.view;
+
+		// assembling / assembled / export: real computed placements, cropped.
+		const validation = croppedValidation;
+		if (!validation?.ok) {
+			activeLayer.batchDraw();
+			return;
+		}
+		const view = stageVp.view;
 		for (const slot of activeSlots) {
 			const tile = tiles[slot];
 			const placement = placements[slot];
 			if (!tile || !placement) continue;
-			// One group per tile so the drag preview moves the image and its
-			// selected highlight together without rebuilding the scene.
 			const group = new Konva.Group({
 				x: placement.xPx * view.zoom + view.panX,
 				y: placement.yPx * view.zoom + view.panY,
@@ -1200,17 +1476,12 @@
 					image: tile.image,
 					width: validation.widthPx * view.zoom,
 					height: validation.heightPx * view.zoom,
-					crop: {
-						x: crop.leftPx,
-						y: crop.topPx,
-						width: validation.widthPx,
-						height: validation.heightPx
-					},
-					opacity: slot === selectedSlot ? previewOpacity : 1,
+					crop: { x: crop.leftPx, y: crop.topPx, width: validation.widthPx, height: validation.heightPx },
+					opacity: phase === 'export' ? 0.85 : slot === selectedSlot ? previewOpacity : 1,
 					listening: false
 				})
 			);
-			if (slot === selectedSlot) {
+			if (slot === selectedSlot && phase === 'assembled') {
 				group.add(
 					new Konva.Rect({
 						width: validation.widthPx * view.zoom,
@@ -1222,85 +1493,118 @@
 				);
 			}
 			tileNodes.set(slot, group);
-			layer.add(group);
+			activeLayer.add(group);
 		}
-		layer.batchDraw();
+		activeLayer.batchDraw();
 	}
 
-	$effect(() => {
-		const container = alignmentVp.container;
-		if (!container || !canvas2dAvailable() || alignmentStage) return;
-		alignmentStage = new Konva.Stage({
-			container,
-			width: alignmentVp.size.width,
-			height: alignmentVp.size.height
+	/**
+	 * The pile → filmstrip → assemble choreography's one real animated moment:
+	 * tweens every tile node from its just-rendered review (filmstrip)
+	 * position/size to its real computed placement. The crop itself swaps
+	 * instantly at the start (not itself tweened — see the module note above
+	 * `renderStage`) while position and size animate, which is what actually
+	 * reads as "the mosaic assembling."
+	 */
+	function animateAssembling(): void {
+		const activeLayer = layer;
+		const validation = croppedValidation;
+		if (!activeLayer || !validation?.ok) {
+			renderStage();
+			return;
+		}
+		const view = stageVp.view;
+		const reduced = prefersReducedMotion();
+		const duration = reduced ? 0.05 : 0.85;
+		activeSlots.forEach((slot, index) => {
+			const group = tileNodes.get(slot);
+			const placement = placements[slot];
+			const tile = tiles[slot];
+			if (!group || !placement || !tile) return;
+			const image = group.findOne<Konva.Image>('Image');
+			image?.crop({ x: crop.leftPx, y: crop.topPx, width: validation.widthPx, height: validation.heightPx });
+			image?.opacity(1);
+			group.find('Rect').forEach((node) => node.destroy());
+			const targetX = placement.xPx * view.zoom + view.panX;
+			const targetY = placement.yPx * view.zoom + view.panY;
+			const targetW = validation.widthPx * view.zoom;
+			const targetH = validation.heightPx * view.zoom;
+			group.to({
+				x: targetX,
+				y: targetY,
+				duration,
+				delay: reduced ? 0 : index * 0.06,
+				easing: Konva.Easings.EaseInOut
+			});
+			image?.to({
+				width: targetW,
+				height: targetH,
+				duration,
+				delay: reduced ? 0 : index * 0.06,
+				easing: Konva.Easings.EaseInOut
+			});
 		});
-		alignmentLayer = new Konva.Layer();
-		alignmentStage.add(alignmentLayer);
-	});
+	}
+
+	let lastRenderedPhase: Phase | null = null;
 
 	$effect(() => {
-		const container = cropVp.container;
-		if (!container || !canvas2dAvailable() || cropStage) return;
-		cropStage = new Konva.Stage({
-			container,
-			width: cropVp.size.width,
-			height: cropVp.size.height
+		const current = phase;
+		if (current === lastRenderedPhase) return;
+		const previous = lastRenderedPhase;
+		lastRenderedPhase = current;
+		if (current === 'import') return;
+		untrack(() => {
+			if (current === 'assembling' && previous === 'review') {
+				renderStage(); // ensure the filmstrip nodes exist as the animation's starting point
+				animateAssembling();
+			} else {
+				renderStage();
+			}
 		});
-		cropLayer = new Konva.Layer();
-		cropStage.add(cropLayer);
 	});
 
 	$effect(() => {
-		alignmentStage?.size(alignmentVp.size);
-		cropStage?.size(cropVp.size);
+		const container = stageVp.container;
+		if (!container || !canvas2dAvailable() || stage) return;
+		stage = new Konva.Stage({ container, width: stageVp.size.width, height: stageVp.size.height });
+		layer = new Konva.Layer();
+		stage.add(layer);
 	});
 
-	// The alignment fit follows the union of loaded cropped tile rectangles.
+	$effect(() => {
+		stage?.size(stageVp.size);
+	});
+
+	// The fit target follows whichever layout the current phase actually shows.
 	$effect(() => {
 		void tiles;
 		void placements;
 		void crop;
-		untrack(() => alignmentVp.setFitTarget(alignmentFitTarget()));
-	});
-
-	// The crop view fits the complete original anchor-tile image.
-	$effect(() => {
-		void tiles;
+		void activeSlots;
+		const current = phase;
 		untrack(() => {
-			const tile = tiles[anchorSlot];
-			cropVp.setFitTarget(
-				tile ? { xPx: 0, yPx: 0, widthPx: tile.widthPx, heightPx: tile.heightPx } : null
-			);
+			if (current === 'review') stageVp.setFitTarget(filmstripFitTarget());
+			else if (current === 'assembled' || current === 'export' || current === 'assembling') {
+				stageVp.setFitTarget(assembledFitTarget());
+			}
 		});
 	});
 
-	// Rebuild the alignment scene when the session, crop, or view changes. Tile
-	// drags update only the live Konva node, and committed placements land after
-	// the gesture ends, so a rebuild never interrupts an active drag.
+	// Rebuild the scene when the session, crop, or view changes (but never
+	// mid-drag, and never for the phase's own entry animation — that already
+	// rendered the correct end state via the phase-change effect above).
 	$effect(() => {
 		void tiles;
 		void crop;
 		void placements;
 		void selectedSlot;
 		void previewOpacity;
-		void alignmentVp.view;
-		void alignmentVp.size;
+		void stageVp.view;
+		void stageVp.size;
 		untrack(() => {
-			if (!tileDrag) renderAlignmentScene();
-		});
-	});
-
-	// The crop preview rebuilds on tile, crop, or view changes. Crop values never
-	// trigger a rebuild during a handle drag (cropDragActive), so the dragged
-	// handle node is never destroyed mid-drag; handle drags re-render explicitly.
-	$effect(() => {
-		void tiles;
-		void crop;
-		void cropVp.view;
-		void cropVp.size;
-		untrack(() => {
-			if (!cropDragActive) renderCropScene();
+			if (phase === 'import' || phase === 'assembling') return;
+			if (!tileDrag && !cropDragActive) renderStage();
 		});
 	});
 
@@ -1308,10 +1612,9 @@
 		const complete = activeSlots.every((slot) => tiles[slot] !== undefined);
 		const validation = croppedValidation;
 		if (complete && !placementsInitialized && validation?.ok) {
-			placements = initialPlacements(validation.widthPx, validation.heightPx, activeLayout);
+			placements = initialPlacements(activeSlots, validation.widthPx, validation.heightPx);
 			placementsInitialized = true;
 			syncPositionDraft(true);
-			alignmentVp.fit();
 			statusMessage = 'All screenshots loaded. Initial 25% overlap layout created.';
 		}
 	});
@@ -1328,13 +1631,6 @@
 	 * a real Snap or smart-import call later simply awaits the by-then-likely-
 	 * already-resolved cached promise instead of paying the cold-load cost
 	 * itself.
-	 *
-	 * Once `loadCv()` resolves, `warmMatchTemplate` runs one throwaway
-	 * `matchTemplate` call so that if this thread's first real call carries any
-	 * one-time compile/lazy-init cost on top of the module load, it is paid
-	 * here, during this same idle warm-up window, instead of on the user's
-	 * first real Snap click (see `cvMatch.ts`'s `warmMatchTemplate` doc comment
-	 * for what this session's own re-measurement did and did not confirm).
 	 */
 	$effect(() => {
 		void loadCv().then((cv) => warmMatchTemplate(cv));
@@ -1344,7 +1640,7 @@
 	onMount(() => {
 		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
 		// and navigates here. They enter through requestSmartImport — the exact
-		// entry point the "Import four screenshots" file input uses — so the
+		// entry point the "Import screenshots" file input uses — so the
 		// arrangement a visitor watches appear is computed by the product now,
 		// never supplied by the demo. Re-run protection still applies: a session
 		// already refined by hand asks before it is replaced.
@@ -1365,12 +1661,10 @@
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		disposeSmartStitchWorker();
 		endTileDrag();
-		alignmentStage?.destroy();
-		alignmentStage = null;
-		alignmentLayer = null;
-		cropStage?.destroy();
-		cropStage = null;
-		cropLayer = null;
+		if (assemblingTimer) clearTimeout(assemblingTimer);
+		stage?.destroy();
+		stage = null;
+		layer = null;
 	});
 </script>
 
@@ -1378,376 +1672,522 @@
 	<title>Stitch Map | ChainSpot</title>
 </svelte:head>
 
-<main class="stitch-map" data-testid="stitch-map">
-	<section
-		class="stitch-status sr-only"
-		aria-live="polite"
-		aria-atomic="true"
-		data-testid="stitch-status"
-	>
-		{#if statusMessage}
-			<p role="status">{statusMessage}</p>
-		{/if}
-	</section>
+<main>
 	{#if exportError}
 		<p class="error" data-testid="stitch-error" role="alert">{exportError}</p>
 	{/if}
 
 	<h2>Stitch Map</h2>
-	<p class="protocol">
-		Capture two or four screenshots of the same map at one zoom and orientation, with about
-		20–30% overlap between neighbors: two side by side, two stacked, or four in a 2x2 grid
-		(upper-left, upper-right, lower-left, lower-right). This session lives only in this tab;
-		reloading the page clears it.
-	</p>
 
-	<div class="book-columns">
-		<div class="book-column">
-	<section class="smart-import-section" aria-labelledby="smart-import-heading">
-		<h3 id="smart-import-heading">Import screenshots</h3>
-		<p class="section-note">
-			Select exactly two or four overlapping screenshots in any order. ChainSpot infers their
-			roles — left/right, top/bottom, or the full 2x2 grid — places them, and may suggest a
-			shared crop. The existing controls remain available for correction.
-		</p>
-		<div class="smart-import-row">
-			<label class="file-label">
-				Import screenshots
-				<input
-					class="file-input"
-					type="file"
-					accept="image/png,image/jpeg"
-					multiple
-					data-testid="smart-import-input"
-					disabled={smartImportBusy}
-					onchange={handleSmartImportFiles}
-				/>
-			</label>
-			{#if smartImportBusy}
-				<span class="status" role="status">Analyzing…</span>
+	<div class="stage-card">
+		<div class="stage-progress">
+			{#each PROGRESS_LABELS as label, i (label)}
+				{#if i > 0}
+					<div class="prog-line" class:done={i <= PROGRESS_INDEX[phase]}></div>
+				{/if}
+				<div
+					class="prog-step"
+					class:done={i < PROGRESS_INDEX[phase]}
+					class:current={i === PROGRESS_INDEX[phase]}
+				>
+					<span class="prog-dot">{i < PROGRESS_INDEX[phase] ? '✓' : i + 1}</span>{label}
+				</div>
+			{/each}
+		</div>
+
+		<div class="stage-context">
+			{#if phase === 'import'}
+				<span
+					>Add two or more overlapping screenshots. ChainSpot infers their arrangement, places
+					them, and may suggest a shared crop.</span
+				>
+				<span class="badge">{activeSlots.filter((slot) => tiles[slot]).length} added</span>
+			{:else if phase === 'review'}
+				<span>Drag a line to nudge the shared crop, or use the numeric fields below.</span>
+				{#if smartImportDiagnostic}
+					<span class="badge" class:strong={smartImportDiagnostic.category === 'ok'}
+						>{categoryLabel(smartImportDiagnostic.category)}</span
+					>
+				{/if}
+			{:else if phase === 'assembling'}
+				<span>Cropping and stitching…</span>
+				<span class="badge strong">● working</span>
+			{:else if phase === 'assembled'}
+				<span>Stitched from {activeSlots.length} capture{activeSlots.length === 1 ? '' : 's'}.</span>
+				{#if smartImportDiagnostic}
+					<span class="badge" class:strong={smartImportDiagnostic.category === 'ok'}
+						>{categoryLabel(smartImportDiagnostic.category)}</span
+					>
+				{/if}
+			{:else if phase === 'export'}
+				<span>Choose where the stitched map goes next.</span>
 			{/if}
 		</div>
-		{#if smartImportError}
-			<p class="error" data-testid="smart-import-error" role="alert">{smartImportError}</p>
-		{/if}
-		{#if smartImportSummary}
-			<ul class="smart-assignment" data-testid="smart-import-assignment" aria-label="Inferred screenshot order">
-				{#each activeSlots as slot (slot)}
-					<li>
-						<span class="assignment-label">{SLOT_LABELS[slot]}:</span>
-						<span data-testid={`smart-import-slot-${slot}`}>{smartImportSummary[slot]}</span>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-		{#if smartImportDiagnostic}
-			<p class="smart-confidence" data-testid="smart-import-confidence" role="status">
-				Automatic arrangement confidence: {categoryLabel(smartImportDiagnostic.category)}.
-			</p>
-			{#if smartImportDiagnostic.warnings.length > 0}
-				<ul
-					class="smart-warnings"
-					data-testid="smart-import-warnings"
-					aria-label="Automatic arrangement warnings"
-				>
-					{#each smartImportDiagnostic.warnings as warning, index (warning)}
-						<li data-testid={`smart-import-warning-${index}`}>{warning}</li>
-					{/each}
-				</ul>
-			{/if}
-		{/if}
-		{#if cropProposal}
-			<div class="crop-proposal" data-testid="crop-proposal" role="status">
-				<h4>Apply Crop to continue</h4>
-				<p>
-					Click <strong>Apply Crop</strong> to trim the shared phone chrome from all four screenshots.
-					The demo applies it automatically after about 20 seconds if you leave this proposal open.
-				</p>
-				<p>
-					Suggested shared crop:
-					<span data-testid="crop-proposal-insets">
-						top {cropProposal.topPx}px, right {cropProposal.rightPx}px, bottom
-						{cropProposal.bottomPx}px, left {cropProposal.leftPx}px
-					</span>
-					. This is a proposal; outside the guided demo it is never applied without your action.
-				</p>
-				{#if cropProposalConfidence}
-					<p class="crop-confidence" data-testid="crop-confidence">
-						Crop suggestion confidence: {CROP_CONFIDENCE_LABELS[cropProposalConfidence]}.
+
+		{#if phase === 'import'}
+			<div class="import-panel">
+				<section class="smart-import-section" aria-labelledby="smart-import-heading">
+					<h3 id="smart-import-heading">Import screenshots</h3>
+					<p class="section-note">
+						Select two or more overlapping screenshots in any order. The existing controls remain
+						available for correction.
 					</p>
+					<div class="smart-import-row">
+						<label class="file-label">
+							Import screenshots
+							<input
+								class="file-input"
+								type="file"
+								accept="image/png,image/jpeg"
+								multiple
+								data-testid="smart-import-input"
+								disabled={smartImportBusy}
+								onchange={handleSmartImportFiles}
+							/>
+						</label>
+						{#if smartImportBusy}
+							<span class="status" role="status">Analyzing…</span>
+						{/if}
+					</div>
+					<label
+						class="crop-margin-toggle"
+						title="AutoStitch may be unreliable without Add margin. If you have it disabled and your stitch doesn't align, try enabling Add margin."
+					>
+						<input type="checkbox" bind:checked={addCropMargin} data-testid="crop-margin-toggle" />
+						Add margin — trim a couple extra pixels of the suggested crop for safety
+					</label>
+					{#if smartImportError}
+						<p class="error" data-testid="smart-import-error" role="alert">{smartImportError}</p>
+					{/if}
+					{#if smartImportSummary}
+						<ul
+							class="smart-assignment"
+							data-testid="smart-import-assignment"
+							aria-label="Inferred screenshot order"
+						>
+							{#each activeSlots as slot (slot)}
+								<li>
+									<span class="assignment-label">{slotLabel(slot)}:</span>
+									<span data-testid={`smart-import-slot-${slot}`}>{smartImportSummary[slot]}</span>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if smartImportDiagnostic}
+						<p class="smart-confidence" data-testid="smart-import-confidence" role="status">
+							Automatic arrangement confidence: {categoryLabel(smartImportDiagnostic.category)}.
+						</p>
+						{#if smartImportDiagnostic.warnings.length > 0}
+							<ul
+								class="smart-warnings"
+								data-testid="smart-import-warnings"
+								aria-label="Automatic arrangement warnings"
+							>
+								{#each smartImportDiagnostic.warnings as warning, index (warning)}
+									<li data-testid={`smart-import-warning-${index}`}>{warning}</li>
+								{/each}
+							</ul>
+						{/if}
+					{/if}
+				</section>
+
+				<section class="tile-section" aria-labelledby="tiles-heading">
+					<h3 id="tiles-heading">Screenshots</h3>
+					<div class="tile-grid">
+						{#each activeSlots as slot (slot)}
+							<StitchTileSlot
+								slot={slot}
+								label={slotLabel(slot)}
+								fileName={tiles[slot]?.fileName ?? null}
+								dimensions={tiles[slot] ? `${tiles[slot].widthPx} x ${tiles[slot].heightPx}` : null}
+								error={tileErrors[slot] ?? null}
+								onFile={(file) => handleSlotFile(slot, file)}
+								onRemove={() => handleRemove(slot)}
+							/>
+						{/each}
+						<button type="button" class="add-tile" data-testid="add-capture" onclick={addSlot}>
+							+ Add capture
+						</button>
+					</div>
+				</section>
+			</div>
+		{:else}
+			<div class="stage-canvas" data-phase={phase}>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+				<div
+					class="stage-workspace"
+					data-testid="stage-workspace"
+					bind:this={stageWorkspace}
+					tabindex="0"
+					role="group"
+					aria-label="Stitch stage"
+					data-stitch-nudge-scope
+					onkeydown={handleStageKeyDown}
+				>
+					<ImageViewport
+						controller={stageVp}
+						testid="stage-viewport"
+						claimPointer={claimStagePointer}
+						onViewportClick={onStageClick}
+						onClaimedPointerCancel={handleTileDragCancel}
+					>
+						{#snippet content()}{/snippet}
+					</ImageViewport>
+				</div>
+
+				{#snippet cropZoomRow(topPx: number, bottomPx: number)}
+					<div class="crop-zoom-block">
+						<p class="crop-zoom-legend">
+							Each row is one real pixel. <span class="crop-zoom-swatch kept"></span> first row kept.
+						</p>
+						<div class="crop-zoom-edge">
+							<span class="crop-zoom-label">Top edge — {topPx}px</span>
+							<div class="crop-zoom-strip">
+								{#each activeSlots as slot (slot)}
+									{@const tile = tiles[slot]}
+									{#if tile}
+										<div class="crop-zoom-tile">
+											<canvas
+												use:cropZoom={{
+													image: tile.image,
+													imageWidthPx: tile.widthPx,
+													imageHeightPx: tile.heightPx,
+													boundaryY: topPx,
+													edge: 'top'
+												}}
+											></canvas>
+											<span>{slotLabel(slot)}</span>
+										</div>
+									{/if}
+								{/each}
+							</div>
+						</div>
+						<div class="crop-zoom-edge">
+							<span class="crop-zoom-label">Bottom edge — {bottomPx}px</span>
+							<div class="crop-zoom-strip">
+								{#each activeSlots as slot (slot)}
+									{@const tile = tiles[slot]}
+									{#if tile}
+										<div class="crop-zoom-tile">
+											<canvas
+												use:cropZoom={{
+													image: tile.image,
+													imageWidthPx: tile.widthPx,
+													imageHeightPx: tile.heightPx,
+													boundaryY: tile.heightPx - bottomPx,
+													edge: 'bottom'
+												}}
+											></canvas>
+											<span>{slotLabel(slot)}</span>
+										</div>
+									{/if}
+								{/each}
+							</div>
+						</div>
+					</div>
+				{/snippet}
+
+				{#if phase === 'review'}
+					{#if !cropProposal}
+						<div class="crop-fields-overlay">
+							<div class="crop-fields-row">
+								{#each CROP_FIELDS as field (field)}
+									<label class="crop-field">
+										<span>{CROP_FIELD_LABELS[field]}</span>
+										<input
+											type="text"
+											inputmode="numeric"
+											autocomplete="off"
+											data-testid={`crop-${field}`}
+											bind:this={cropInputs[field]}
+											value={cropDraft[field]}
+											aria-invalid={invalidCropFields.includes(field) ? 'true' : undefined}
+											oninput={(event) => handleCropInput(field, event)}
+											onchange={() => commitCrop(field)}
+										/>
+									</label>
+								{/each}
+								<button type="button" data-testid="crop-reset" onclick={resetCrop}>Reset crop</button>
+								<button type="button" data-testid="crop-fit" onclick={() => stageVp.fit()}>Fit</button>
+							</div>
+							<p class="crop-zoom-hint">
+								Close-up at the exact crop line, per screenshot — check every one before advancing.
+							</p>
+							{@render cropZoomRow(crop.topPx, crop.bottomPx)}
+						</div>
+					{/if}
+					{#if cropProposal}
+						<div class="crop-proposal" data-testid="crop-proposal" role="status">
+							<h4>Apply suggested crop?</h4>
+							<p>
+								Suggested shared crop:
+								<span data-testid="crop-proposal-insets">
+									top {cropProposal.topPx}px, right {cropProposal.rightPx}px, bottom
+									{cropProposal.bottomPx}px, left {cropProposal.leftPx}px
+								</span>
+								{#if addCropMargin}
+									<span class="crop-margin-note">(includes the safety margin)</span>
+								{/if}
+							</p>
+							<p class="crop-zoom-hint">
+								Verify the line lands on chrome, not map content, on every screenshot — a 1-2px
+								miss here is invisible at normal zoom but ruins the stitch.
+							</p>
+							{@render cropZoomRow(cropProposal.topPx, cropProposal.bottomPx)}
+							{#if cropProposalConfidence}
+								<p class="crop-confidence" data-testid="crop-confidence">
+									Crop suggestion confidence: {CROP_CONFIDENCE_LABELS[cropProposalConfidence]}.
+								</p>
+							{/if}
+							<div class="proposal-actions">
+								<button
+									type="button"
+									class="apply-crop-button"
+									data-testid="apply-suggested-crop"
+									onclick={applyCropProposal}
+								>
+									Apply Crop
+								</button>
+								<button type="button" data-testid="keep-full-images" onclick={rejectCropProposal}>
+									Keep full images
+								</button>
+							</div>
+						</div>
+					{/if}
 				{/if}
-				<div class="proposal-actions">
+
+				<div class="finetune-drawer" class:open={finetuneOpen}>
 					<button
 						type="button"
-						class="apply-crop-button"
-						data-testid="apply-suggested-crop"
-						onclick={applyCropProposal}
+						class="drawer-close"
+						onclick={() => (finetuneOpen = false)}
+						aria-label="Close fine-tune drawer"
 					>
-						Apply Crop
+						Close ✕
 					</button>
-					<button type="button" data-testid="keep-full-images" onclick={rejectCropProposal}>
-						Keep full images
-					</button>
+					<div class="tool-block">
+						<h3>Selected tile</h3>
+						<div class="segmented">
+							{#each movableSlots as slot (slot)}
+								<button
+									type="button"
+									class="tile-select"
+									class:sel={selectedSlot === slot}
+									data-testid={`tile-select-${slot}`}
+									aria-pressed={selectedSlot === slot}
+									disabled={!tiles[slot]}
+									onclick={() => selectSlot(slot)}
+								>
+									{slotLabel(slot)}
+								</button>
+							{/each}
+						</div>
+					</div>
+					<div class="tool-block">
+						<h3>Position</h3>
+						<div class="field-row">
+							<label class="field">
+								<span>X</span>
+								<input
+									type="text"
+									inputmode="numeric"
+									autocomplete="off"
+									data-testid="tile-position-x"
+									bind:this={xPositionInput}
+									value={positionDraft.xPx}
+									disabled={!selectedSlot}
+									oninput={(event) => handlePositionInput('xPx', event)}
+									onchange={() => commitPosition('xPx')}
+								/>
+							</label>
+							<label class="field">
+								<span>Y</span>
+								<input
+									type="text"
+									inputmode="numeric"
+									autocomplete="off"
+									data-testid="tile-position-y"
+									bind:this={yPositionInput}
+									value={positionDraft.yPx}
+									disabled={!selectedSlot}
+									oninput={(event) => handlePositionInput('yPx', event)}
+									onchange={() => commitPosition('yPx')}
+								/>
+							</label>
+						</div>
+						<label class="opacity-field">
+							<span>Selected tile opacity (preview)</span>
+							<input
+								type="range"
+								min="0.15"
+								max="1"
+								step="0.05"
+								data-testid="tile-opacity"
+								bind:value={previewOpacity}
+								disabled={!selectedSlot}
+							/>
+						</label>
+					</div>
+					<div class="tool-block">
+						<h3>Actions</h3>
+						<div class="field-row">
+							<button
+								type="button"
+								class="btn primary small"
+								data-testid="snap-tile"
+								disabled={!snapAvailable}
+								onclick={() => void snapSelectedTile()}
+							>
+								Snap
+							</button>
+							<button
+								type="button"
+								class="btn ghost small"
+								data-testid="reset-arrangement"
+								disabled={!activeSlots.some((slot) => tiles[slot])}
+								onclick={resetArrangement}
+							>
+								Reset
+							</button>
+							<button
+								type="button"
+								class="btn ghost small"
+								disabled={!selectedSlot}
+								onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
+							>
+								{visibilityToggleLabel()}
+							</button>
+							{#if snapBusy}
+								<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
+							{/if}
+						</div>
+					</div>
 				</div>
+
+				{#if phase === 'export'}
+					<div class="export-panel open">
+						<h3>Export</h3>
+						<p class="sub">
+							All {activeSlots.length} capture{activeSlots.length === 1 ? '' : 's'}, the shared
+							crop, and tile overlap are valid.
+						</p>
+						<div class="export-card primary">
+							<h4>Download stitched PNG</h4>
+							<p>Full-resolution stitched map, no annotations.</p>
+							<button
+								type="button"
+								class="btn primary small"
+								data-testid="download-stitched"
+								disabled={!canExport}
+								onclick={handleDownload}
+							>
+								Download PNG
+							</button>
+						</div>
+						<div class="export-card">
+							<h4>Use as UDisc source</h4>
+							<p>Send it into UDisc's course editor as the reference image.</p>
+							<button
+								type="button"
+								class="btn small"
+								data-testid="use-as-source"
+								disabled={!canExport}
+								onclick={() => handleUseAs('source-overview')}
+							>
+								Send to UDisc
+							</button>
+						</div>
+						<div class="export-card">
+							<h4>Use as clean target</h4>
+							<p>Carry it into Annotate Round as an unmarked base.</p>
+							<button
+								type="button"
+								class="btn small"
+								data-testid="use-as-target"
+								disabled={!canExport}
+								onclick={() => handleUseAs('target-basemap')}
+							>
+								Send to Annotate Round
+							</button>
+						</div>
+						{#if rendering}
+							<span class="status" role="status">Rendering…</span>
+						{/if}
+						<button type="button" class="btn ghost small" style="margin-top:auto;" onclick={resetSession}>
+							↻ Start a new map
+						</button>
+					</div>
+				{/if}
+
 			</div>
+			<p class="preview-note">
+				Preview-only: hiding a tile, changing opacity, zooming, or panning never changes the
+				exported PNG.
+			</p>
+			<p class="stage-readiness" data-testid="stitch-readiness" role="status">{readinessText()}</p>
 		{/if}
-	</section>
 
-	<section class="tile-section" aria-labelledby="tiles-heading">
-		<h3 id="tiles-heading">Screenshots</h3>
-		<div class="tile-grid">
-			{#each activeSlots as slot (slot)}
-				<StitchTileSlot
-					slot={slot}
-					label={SLOT_LABELS[slot]}
-					fileName={tiles[slot]?.fileName ?? null}
-					dimensions={tiles[slot] ? `${tiles[slot].widthPx} x ${tiles[slot].heightPx}` : null}
-					error={tileErrors[slot] ?? null}
-					onFile={(file) => handleSlotFile(slot, file)}
-					onRemove={() => handleRemove(slot)}
-				/>
-			{/each}
-		</div>
-	</section>
-
-	<section class="crop-section" aria-labelledby="crop-heading">
-		<h3 id="crop-heading">Shared crop</h3>
-		<p class="section-note">
-			One crop applies to every screenshot. Adjust it on the {SLOT_LABELS[
-				anchorSlot
-			].toLowerCase()} preview or with the numeric fields. Scroll over the preview to zoom; drag
-			its background to pan.
-		</p>
-		<div class="crop-layout">
-			<div class="crop-preview">
-				<ImageViewport controller={cropVp} testid="crop-viewport" claimPointer={claimCropPointer}>
-					{#snippet content()}{/snippet}
-				</ImageViewport>
-			</div>
-			<div class="crop-fields">
-				{#each CROP_FIELDS as field (field)}
-					<label class="crop-field">
-						<span>{CROP_FIELD_LABELS[field]}</span>
-						<input
-							type="text"
-							inputmode="numeric"
-							autocomplete="off"
-							data-testid={`crop-${field}`}
-							bind:this={cropInputs[field]}
-							value={cropDraft[field]}
-							aria-invalid={invalidCropFields.includes(field) ? 'true' : undefined}
-							oninput={(event) => handleCropInput(field, event)}
-							onchange={() => commitCrop(field)}
-						/>
-					</label>
-				{/each}
-				<button type="button" data-testid="crop-reset" onclick={resetCrop}>
-					Reset crop
-				</button>
-				<button type="button" data-testid="crop-fit" onclick={() => cropVp.fit()}>
-					Fit
-				</button>
-			</div>
-		</div>
-	</section>
-
-		</div>
-
-		<div class="book-column">
-	<section class="alignment-section" aria-labelledby="alignment-heading">
-		<h3 id="alignment-heading">Align tiles</h3>
-		<p id="alignment-help" class="alignment-help">
-			Select a movable tile, then use the arrow keys to adjust it. Hold Shift to move 10
-			pixels. Click an exposed tile region to select it; drag the selected tile to move it.
-			Once a tile is roughly in place, Snap selected tile locks it to the best nearby match
-			against its expected neighbor tiles. Drag the background to pan and scroll to zoom; Fit
-			restores the full view.
-		</p>
-		<div class="alignment-controls">
-			{#each movableSlots as slot (slot)}
+		<div class="stage-actions">
+			<button
+				type="button"
+				class="btn ghost"
+				data-testid="back-button"
+				style:visibility={phase === 'import' ? 'hidden' : 'visible'}
+				onclick={goBack}
+			>
+				← Back
+			</button>
+			<button
+				type="button"
+				class="finetune-link"
+				style:visibility={phase === 'assembled' ? 'visible' : 'hidden'}
+				onclick={() => (finetuneOpen = !finetuneOpen)}
+			>
+				Looks a little off? Fine-tune manually
+			</button>
+			{#if phase !== 'export'}
 				<button
 					type="button"
-					class="tile-select"
-					data-testid={`tile-select-${slot}`}
-					aria-pressed={selectedSlot === slot}
-					disabled={!tiles[slot]}
-					onclick={() => selectSlot(slot)}
+					class="btn primary"
+					data-testid="primary-advance"
+					disabled={primaryButtonDisabled()}
+					onclick={advance}
 				>
-					{SLOT_LABELS[slot]}
+					{primaryButtonLabel()}
 				</button>
-			{/each}
-			<button
-				type="button"
-				class="visibility-toggle"
-				data-testid={`tile-visible-${selectedSlot ?? ''}`}
-				disabled={!selectedSlot}
-				onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
-			>
-				{visibilityToggleLabel()}
-			</button>
-			<label class="position-field">
-				<span>X</span>
-				<input
-					type="text"
-					inputmode="numeric"
-					autocomplete="off"
-					data-testid="tile-position-x"
-					bind:this={xPositionInput}
-					value={positionDraft.xPx}
-					disabled={!selectedSlot}
-					oninput={(event) => handlePositionInput('xPx', event)}
-					onchange={() => commitPosition('xPx')}
-				/>
-			</label>
-			<label class="position-field">
-				<span>Y</span>
-				<input
-					type="text"
-					inputmode="numeric"
-					autocomplete="off"
-					data-testid="tile-position-y"
-					bind:this={yPositionInput}
-					value={positionDraft.yPx}
-					disabled={!selectedSlot}
-					oninput={(event) => handlePositionInput('yPx', event)}
-					onchange={() => commitPosition('yPx')}
-				/>
-			</label>
-			<label class="opacity-field">
-				<span>Selected tile opacity (preview)</span>
-				<input
-					type="range"
-					min="0.15"
-					max="1"
-					step="0.05"
-					data-testid="tile-opacity"
-					bind:value={previewOpacity}
-					disabled={!selectedSlot}
-				/>
-			</label>
-			<button type="button" data-testid="fit-preview" onclick={() => alignmentVp.fit()}>
-				Fit preview
-			</button>
-			<button
-				type="button"
-				data-testid="reset-arrangement"
-				disabled={!activeSlots.some((slot) => tiles[slot])}
-				onclick={resetArrangement}
-			>
-				Reset arrangement
-			</button>
-			<button
-				type="button"
-				data-testid="snap-tile"
-				disabled={!snapAvailable}
-				onclick={() => void snapSelectedTile()}
-			>
-				Snap selected tile
-			</button>
-			{#if snapBusy}
-				<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
 			{/if}
-		</div>
-		<!-- The alignment workspace is a deliberate keyboard-operable region (P05-002):
-			role="group", a real focus target for the scoped Arrow-key nudge handler,
-			and help text via aria-describedby. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-		<div
-			class="alignment-workspace"
-			data-testid="alignment-workspace"
-			bind:this={alignmentWorkspace}
-			tabindex="0"
-			role="group"
-			aria-label="Stitch alignment workspace"
-			aria-describedby="alignment-help"
-			data-stitch-nudge-scope
-			onkeydown={handleAlignmentKeyDown}
-		>
-			<ImageViewport
-				controller={alignmentVp}
-				testid="alignment-viewport"
-				claimPointer={claimAlignmentPointer}
-				onViewportClick={onAlignmentClick}
-				onClaimedPointerCancel={handleTileDragCancel}
-			>
-				{#snippet content()}{/snippet}
-			</ImageViewport>
-		</div>
-		<p class="preview-note">
-			Preview-only: hiding a tile, changing opacity, zooming, or panning never changes the
-			exported PNG.
-		</p>
-		<p data-testid="stitch-readiness" role="status">{readinessText()}</p>
-	</section>
-
-	<section class="export-section" aria-labelledby="export-heading">
-		<h3 id="export-heading">Export</h3>
-		<div class="export-actions">
-			<button
-				type="button"
-				data-testid="download-stitched"
-				disabled={!canExport}
-				onclick={handleDownload}
-			>
-				Download stitched PNG
-			</button>
-			<button
-				type="button"
-				data-testid="use-as-source"
-				disabled={!canExport}
-				onclick={() => handleUseAs('source-overview')}
-			>
-				Use as UDisc source
-			</button>
-			<button
-				type="button"
-				data-testid="use-as-target"
-				disabled={!canExport}
-				onclick={() => handleUseAs('target-basemap')}
-			>
-				Use as clean target
-			</button>
-			{#if rendering}
-				<span class="status" role="status">Rendering…</span>
-			{/if}
-		</div>
-	</section>
-
 		</div>
 	</div>
 
+	{#if statusMessage}
+		<p role="status">{statusMessage}</p>
+	{/if}
+
 	{#if pendingReplaceConfirm}
-		<div class="dialog-backdrop">
+		<div class="modal-backdrop" role="presentation">
 			<div
-				class="dialog"
+				class="modal"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Replace current arrangement?"
-				data-testid="replace-arrangement-confirmation"
+				aria-labelledby="replace-confirm-title"
 				use:dialogKeyboard={() => settleReplaceConfirm(false)}
 			>
-				<h2>Replace current arrangement?</h2>
+				<h3 id="replace-confirm-title">Replace current arrangement?</h3>
 				<p>
-					The current tile placements differ from the last automatic result. Running automatic
-					arrangement again will replace them. Cancel keeps the current crop, placements,
-					selection, visibility, opacity, and export state.
+					You've manually adjusted the current arrangement. Importing new screenshots will
+					recompute the arrangement from scratch and discard your manual changes.
 				</p>
-				<div class="dialog-actions">
+				<div class="modal-actions">
 					<button
 						type="button"
-						data-testid="replace-confirm-cancel"
 						bind:this={replaceCancelButton}
 						onclick={() => settleReplaceConfirm(false)}
 					>
 						Cancel
 					</button>
-					<button
-						type="button"
-						data-testid="replace-confirm-accept"
-						onclick={() => settleReplaceConfirm(true)}
-					>
-						Replace current arrangement
+					<button type="button" onclick={() => settleReplaceConfirm(true)}>
+						Replace arrangement
 					</button>
 				</div>
 			</div>
@@ -1768,19 +2208,6 @@
 		margin: 0 auto;
 	}
 
-	.book-columns {
-		display: flex;
-		flex-direction: column;
-		gap: 1.25rem;
-	}
-
-	.book-column {
-		display: flex;
-		flex-direction: column;
-		gap: 1.25rem;
-		min-width: 0;
-	}
-
 	h2 {
 		margin: 0;
 		font-size: 1.35rem;
@@ -1793,15 +2220,124 @@
 		color: #f4f4f5;
 	}
 
-	.protocol,
 	.section-note,
-	.alignment-help,
 	.preview-note {
 		margin: 0;
 		font-size: 0.9rem;
 		color: #a1a1aa;
 		line-height: 1.5;
-		max-width: 60rem;
+	}
+
+	.error {
+		margin: 0;
+		padding: 0.6rem 0.8rem;
+		border-radius: 6px;
+		background: #3f1d1d;
+		border: 1px solid #7f1d1d;
+		color: #fca5a5;
+	}
+
+	/* ---- persistent stage card ---- */
+	.stage-card {
+		width: min(100%, 960px);
+		border: 1px solid #27272a;
+		border-radius: 14px;
+		background: #18181b;
+		overflow: hidden;
+		margin: 0 auto;
+	}
+
+	.stage-progress {
+		display: flex;
+		align-items: center;
+		padding: 1rem 1.25rem 0.85rem;
+		border-bottom: 1px solid #27272a;
+	}
+
+	.prog-step {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.8rem;
+		color: #71717a;
+		white-space: nowrap;
+	}
+
+	.prog-dot {
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		border: 1px solid #3f3f46;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.6rem;
+		flex: none;
+	}
+
+	.prog-step.done .prog-dot {
+		background: #2dd4bf;
+		border-color: #2dd4bf;
+		color: #04211f;
+	}
+
+	.prog-step.current .prog-dot {
+		border-color: #fbbf24;
+		color: #fbbf24;
+	}
+
+	.prog-step.current {
+		color: #f4f4f5;
+		font-weight: 600;
+	}
+
+	.prog-line {
+		flex: 1;
+		height: 1px;
+		background: #3f3f46;
+		margin: 0 0.75rem;
+		max-width: 3rem;
+	}
+
+	.prog-line.done {
+		background: #2dd4bf;
+	}
+
+	.stage-context {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.75rem 1.25rem;
+		font-size: 0.8rem;
+		color: #a1a1aa;
+		flex-wrap: wrap;
+	}
+
+	.badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.7rem;
+		padding: 0.2rem 0.6rem;
+		border-radius: 100px;
+		border: 1px solid #3f3f46;
+		color: #a1a1aa;
+		white-space: nowrap;
+	}
+
+	.badge.strong {
+		border-color: #2e5c48;
+		color: #2dd4bf;
+		background: #0f2320;
+	}
+
+	/* ---- import phase (plain HTML — no arranged geometry to preserve yet) ---- */
+	.import-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		padding: 1.25rem;
 	}
 
 	.smart-import-section {
@@ -1813,24 +2349,38 @@
 	.smart-import-row {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.75rem;
+	}
+
+	.crop-margin-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.8rem;
+		color: #a1a1aa;
+		cursor: help;
+		width: fit-content;
+	}
+
+	.crop-margin-toggle input {
+		accent-color: #fbbf24;
+	}
+
+	.crop-margin-note {
+		color: #71717a;
+		font-size: 0.75rem;
 	}
 
 	.file-label {
 		display: inline-flex;
 		align-items: center;
-		padding: 0.4rem 0.8rem;
+		padding: 0.5rem 0.9rem;
 		border: 1px solid #3f3f46;
-		border-radius: 4px;
+		border-radius: 6px;
 		background-color: #27272a;
 		color: #e4e4e7;
 		font-size: 0.85rem;
 		cursor: pointer;
-	}
-
-	.file-label:has(input:focus-visible) {
-		outline: 3px solid #38bdf8;
-		outline-offset: 2px;
 	}
 
 	.file-input {
@@ -1841,316 +2391,535 @@
 		clip: rect(0 0 0 0);
 	}
 
-	.file-label:has(input:disabled) {
-		cursor: not-allowed;
-		opacity: 0.5;
+	.status {
+		font-size: 0.85rem;
+		color: #a1a1aa;
 	}
 
 	.smart-assignment {
+		list-style: none;
 		margin: 0;
 		padding: 0;
-		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 0.2rem;
+		gap: 0.25rem;
 		font-size: 0.85rem;
+	}
+
+	.assignment-label {
 		color: #a1a1aa;
+		margin-right: 0.35rem;
 	}
 
 	.smart-confidence {
 		margin: 0;
 		font-size: 0.85rem;
-		color: #f4f4f5;
+		color: #a1a1aa;
 	}
 
 	.smart-warnings {
 		margin: 0;
-		padding: 0 0 0 1rem;
-		font-size: 0.85rem;
-		color: #a1a1aa;
-	}
-
-	.crop-confidence {
-		margin: 0;
+		padding-left: 1.1rem;
 		font-size: 0.8rem;
-		color: #a1a1aa;
+		color: #fbbf24;
 	}
 
-	.dialog-backdrop {
-		position: fixed;
-		inset: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(0, 0, 0, 0.6);
-		z-index: 50;
-	}
-
-	.dialog {
-		max-width: 28rem;
-		padding: 1rem;
-		border: 1px solid #3f3f46;
-		border-radius: 8px;
-		background: #1e1e24;
-		color: #e4e4e7;
-		display: flex;
-		flex-direction: column;
-		gap: 0.6rem;
-	}
-
-	.dialog h2 {
-		margin: 0;
-		font-size: 1rem;
-	}
-
-	.dialog p {
-		margin: 0;
-		font-size: 0.85rem;
-		color: #a1a1aa;
-		line-height: 1.5;
-	}
-
-	.dialog-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.6rem;
-	}
-
-	.assignment-label {
-		color: #f4f4f5;
-	}
-
-	.crop-proposal {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		padding: 0.6rem 0.8rem;
-		border: 1px solid #3b82f6;
-		border-radius: 6px;
-		background-color: #16233b;
-	}
-
-	.crop-proposal h4 {
-		margin: 0;
-		font-size: 1rem;
-		color: #fef3c7;
-	}
-
-	.crop-proposal p {
-		margin: 0;
-		font-size: 0.85rem;
-		color: #dbeafe;
-	}
-
-	.proposal-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.6rem;
-	}
-
-	.apply-crop-button {
-		border: 2px solid #fbbf24 !important;
-		background: #f59e0b !important;
-		color: #1c1917 !important;
-		font-size: 1rem !important;
-		font-weight: 800;
-		padding: 0.65rem 1rem !important;
-		box-shadow: 0 0 0 3px rgb(245 158 11 / 22%);
-	}
-
-	.apply-crop-button:hover {
-		background: #fbbf24 !important;
+	.tile-section h3 {
+		margin-bottom: 0.75rem;
 	}
 
 	.tile-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 		gap: 0.75rem;
 	}
 
-	.crop-layout {
+	.add-tile {
 		display: flex;
-		gap: 1rem;
-		flex-wrap: wrap;
-		align-items: flex-start;
+		align-items: center;
+		justify-content: center;
+		min-height: 100px;
+		border: 1.5px dashed #3f3f46;
+		border-radius: 8px;
+		background: transparent;
+		color: #71717a;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 
-	.crop-preview {
-		flex: 0 1 100%;
-		width: min(100%, 24rem);
-		min-width: 0;
-		aspect-ratio: 3 / 4;
-		height: auto;
-		background-color: #1e1e24;
-		border: 1px solid #27272a;
-		border-radius: 8px;
+	.add-tile:hover {
+		color: #e4e4e7;
+		border-color: #52525b;
+	}
+
+	/* ---- persistent canvas (review / assembling / assembled / export) ---- */
+	.stage-canvas {
+		position: relative;
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		min-height: 320px;
+		max-height: 70vh;
+		background: #0e0e10;
 		overflow: hidden;
 	}
 
-	.crop-fields {
+	.stage-workspace {
+		position: absolute;
+		inset: 0;
+	}
+
+	.stage-workspace:focus-visible {
+		outline: none;
+	}
+
+	.crop-fields-overlay {
+		position: absolute;
+		left: 12px;
+		right: 12px;
+		bottom: 12px;
+		z-index: 6;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.6rem;
-		align-items: end;
-		flex: 0 0 200px;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.6rem;
+		border-radius: 8px;
+		background: rgba(24, 24, 27, 0.94);
+		border: 1px solid #3f3f46;
+		max-height: 78%;
+		overflow-y: auto;
+	}
+
+	.crop-fields-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.5rem;
 	}
 
 	.crop-field {
 		display: flex;
 		flex-direction: column;
 		gap: 0.2rem;
-		font-size: 0.8rem;
+		font-size: 0.65rem;
 		color: #a1a1aa;
 	}
 
 	.crop-field input {
-		width: 5rem;
-		padding: 0.3rem 0.5rem;
-		background-color: #1e1e24;
+		width: 3.5rem;
+		background: #0e0e10;
 		border: 1px solid #3f3f46;
-		border-radius: 4px;
+		border-radius: 5px;
+		padding: 0.3rem 0.4rem;
 		color: #e4e4e7;
+		font-family: ui-monospace, monospace;
+		font-size: 0.75rem;
 	}
 
-	.crop-field input[aria-invalid='true'] {
-		border-color: #f87171;
-	}
-
-	.alignment-controls {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.6rem;
-		align-items: end;
-		margin-bottom: 0.75rem;
-	}
-
-	.tile-select {
-		padding: 0.4rem 0.8rem;
+	.crop-fields-overlay button {
+		font-size: 0.7rem;
+		padding: 0.35rem 0.5rem;
+		border-radius: 5px;
 		border: 1px solid #3f3f46;
-		border-radius: 4px;
-		background-color: #27272a;
+		background: #27272a;
 		color: #e4e4e7;
-		font-size: 0.85rem;
 		cursor: pointer;
 	}
 
-	.tile-select[aria-pressed='true'] {
-		border-color: #facc15;
-		color: #ffffff;
+	.crop-zoom-hint {
+		margin: 0;
+		font-size: 0.65rem;
+		color: #71717a;
 	}
 
-	.position-field,
+	.crop-zoom-legend {
+		margin: 0;
+		font-size: 0.65rem;
+		color: #a1a1aa;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		flex-wrap: wrap;
+	}
+
+	.crop-zoom-swatch {
+		display: inline-block;
+		width: 0.7rem;
+		height: 0.7rem;
+		border-radius: 2px;
+		border: 2px solid;
+	}
+
+	.crop-zoom-swatch.kept {
+		border-color: #4ade80;
+	}
+
+	.crop-zoom-block {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.crop-zoom-edge {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.crop-zoom-label {
+		font-size: 0.65rem;
+		color: #a1a1aa;
+		font-family: ui-monospace, monospace;
+	}
+
+	.crop-zoom-strip {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+
+	.crop-zoom-tile {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.crop-zoom-tile canvas {
+		display: block;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background: #000;
+		image-rendering: pixelated;
+	}
+
+	.crop-zoom-tile span {
+		font-size: 0.65rem;
+		color: #a1a1aa;
+	}
+
+	.crop-proposal {
+		position: absolute;
+		top: 12px;
+		left: 12px;
+		right: 12px;
+		z-index: 6;
+		max-height: calc(100% - 24px);
+		overflow-y: auto;
+		padding: 0.85rem 1rem;
+		border-radius: 8px;
+		background: #0f2320;
+		border: 1px solid #2e5c48;
+		font-size: 0.8rem;
+	}
+
+	.crop-proposal h4 {
+		margin: 0 0 0.4rem;
+		font-size: 0.9rem;
+	}
+
+	.crop-proposal p {
+		margin: 0 0 0.4rem;
+		color: #a1a1aa;
+	}
+
+	.crop-proposal .crop-zoom-block {
+		margin-bottom: 0.5rem;
+	}
+
+	.proposal-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	.apply-crop-button {
+		background: #2dd4bf;
+		color: #04211f;
+		border: none;
+		font-weight: 600;
+	}
+
+	.proposal-actions button {
+		font-size: 0.75rem;
+		padding: 0.4rem 0.7rem;
+		border-radius: 6px;
+		border: 1px solid #3f3f46;
+		background: #27272a;
+		color: #e4e4e7;
+		cursor: pointer;
+	}
+
+	/* ---- fine-tune drawer (bottom sheet) ---- */
+	.finetune-drawer {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: #18181b;
+		border-top: 1px solid #3f3f46;
+		transform: translateY(100%);
+		transition: transform 0.4s cubic-bezier(0.4, 0.7, 0.25, 1);
+		padding: 1rem 1.25rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1.5rem;
+		z-index: 7;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.finetune-drawer,
+		.export-panel {
+			transition-duration: 0.01ms;
+		}
+	}
+
+	.finetune-drawer.open {
+		transform: translateY(0);
+	}
+
+	.tool-block h3 {
+		margin: 0 0 0.5rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #71717a;
+	}
+
+	.segmented {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		max-width: 20rem;
+	}
+
+	.tile-select {
+		font-size: 0.75rem;
+		padding: 0.35rem 0.6rem;
+		border-radius: 6px;
+		border: 1px solid #3f3f46;
+		background: #27272a;
+		color: #a1a1aa;
+		cursor: pointer;
+	}
+
+	.tile-select.sel {
+		border-color: #fbbf24;
+		color: #f4f4f5;
+	}
+
+	.tile-select:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.field-row {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.65rem;
+		color: #71717a;
+	}
+
+	.field input {
+		width: 4.5rem;
+		background: #0e0e10;
+		border: 1px solid #3f3f46;
+		border-radius: 5px;
+		padding: 0.35rem 0.4rem;
+		color: #e4e4e7;
+		font-family: ui-monospace, monospace;
+	}
+
 	.opacity-field {
 		display: flex;
 		flex-direction: column;
 		gap: 0.2rem;
-		font-size: 0.8rem;
-		color: #a1a1aa;
+		font-size: 0.65rem;
+		color: #71717a;
+		margin-top: 0.6rem;
 	}
 
-	.position-field input {
-		width: 5.5rem;
-		padding: 0.3rem 0.5rem;
-		background-color: #1e1e24;
+	.drawer-close {
+		position: absolute;
+		top: 0.5rem;
+		right: 0.75rem;
+		background: none;
+		border: none;
+		color: #71717a;
+		cursor: pointer;
+		font-size: 0.75rem;
+	}
+
+	.btn {
+		font-size: 0.75rem;
+		padding: 0.4rem 0.7rem;
+		border-radius: 6px;
 		border: 1px solid #3f3f46;
-		border-radius: 4px;
+		background: #27272a;
 		color: #e4e4e7;
-	}
-
-	.alignment-workspace {
-		width: min(100%, 28rem);
-		aspect-ratio: 3 / 4;
-		height: auto;
-		min-height: 0;
-		background-color: #1e1e24;
-		border: 1px solid #27272a;
-		border-radius: 8px;
-	}
-
-	.alignment-workspace:focus-visible {
-		outline: 3px solid #38bdf8;
-		outline-offset: 2px;
-	}
-
-	.export-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.6rem;
-		align-items: center;
-	}
-
-	button {
-		padding: 0.4rem 0.8rem;
-		border: 1px solid #3f3f46;
-		border-radius: 4px;
-		background-color: #27272a;
-		color: #e4e4e7;
-		font-size: 0.85rem;
 		cursor: pointer;
 	}
 
-	button:focus-visible,
-	input:focus-visible,
-	input[type='range']:focus-visible {
-		outline: 3px solid #38bdf8;
-		outline-offset: 2px;
+	.btn.ghost {
+		background: transparent;
+		color: #a1a1aa;
 	}
 
-	button:disabled,
-	input:disabled {
+	.btn.primary {
+		background: #fbbf24;
+		border-color: #fbbf24;
+		color: #241804;
+		font-weight: 650;
+	}
+
+	.btn:disabled {
+		opacity: 0.4;
 		cursor: not-allowed;
-		opacity: 0.5;
 	}
 
-	.status {
+	.btn.small {
+		font-size: 0.7rem;
+		padding: 0.3rem 0.55rem;
+	}
+
+	/* ---- export drawer (right slide-in) ---- */
+	.export-panel {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: min(100%, 320px);
+		background: #18181b;
+		border-left: 1px solid #3f3f46;
+		transform: translateX(100%);
+		transition: transform 0.5s cubic-bezier(0.4, 0.7, 0.25, 1);
+		padding: 1.1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		z-index: 8;
+		overflow-y: auto;
+	}
+
+	.export-panel.open {
+		transform: translateX(0);
+	}
+
+	.export-panel .sub {
+		margin: 0 0 0.4rem;
+		font-size: 0.75rem;
+		color: #a1a1aa;
+	}
+
+	.export-card {
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		padding: 0.75rem;
+		background: #0e0e10;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.export-card.primary {
+		border-color: #fbbf24;
+		background: #1b1608;
+	}
+
+	.export-card h4 {
+		margin: 0;
+		font-size: 0.8rem;
+	}
+
+	.export-card p {
+		margin: 0;
+		font-size: 0.7rem;
+		color: #a1a1aa;
+		line-height: 1.4;
+	}
+
+	.preview-note {
+		margin: 0.75rem 1.25rem 0;
+		font-size: 0.7rem;
+	}
+
+	.stage-readiness {
+		margin: 0.35rem 1.25rem 0;
+		font-size: 0.7rem;
+		color: #a1a1aa;
+	}
+
+	/* ---- bottom action bar ---- */
+	.stage-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.9rem 1.25rem;
+		border-top: 1px solid #27272a;
+	}
+
+	.finetune-link {
+		font-size: 0.8rem;
+		color: #a1a1aa;
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.finetune-link:hover {
+		color: #e4e4e7;
+	}
+
+	/* ---- replace-confirmation modal ---- */
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 20;
+	}
+
+	.modal {
+		background: #18181b;
+		border: 1px solid #3f3f46;
+		border-radius: 10px;
+		padding: 1.25rem;
+		max-width: 26rem;
+	}
+
+	.modal h3 {
+		margin: 0 0 0.6rem;
+	}
+
+	.modal p {
+		margin: 0 0 1rem;
 		font-size: 0.85rem;
 		color: #a1a1aa;
 	}
 
-	.error {
-		margin: 0;
-		padding: 0.4rem 0.6rem;
-		border-radius: 4px;
-		background: #3f1d1d;
-		border: 1px solid #7f1d1d;
-		color: #fca5a5;
-		font-size: 0.85rem;
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
 	}
 
-	.stitch-status {
-		min-height: 0;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
-	@media (min-width: 700px) {
-		.book-columns {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-			align-items: start;
-			gap: 1.5rem;
-		}
-
-		.book-column {
-			min-width: 0;
-		}
-
-		.crop-layout {
-			flex-direction: column;
-		}
-
-		.crop-fields {
-			flex: 0 1 auto;
-		}
+	.modal-actions button {
+		font-size: 0.8rem;
+		padding: 0.4rem 0.8rem;
+		border-radius: 6px;
+		border: 1px solid #3f3f46;
+		background: #27272a;
+		color: #e4e4e7;
+		cursor: pointer;
 	}
 </style>
