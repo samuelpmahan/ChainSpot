@@ -174,14 +174,17 @@ describe('tee calibration handoff audit', () => {
 		const worker = readFileSync('src/lib/autoAnnotation/basketDetection.worker.ts', 'utf8');
 		const cli = readFileSync('scripts/detect-tees.ts', 'utf8');
 		const basketCli = readFileSync('scripts/detect-baskets.ts', 'utf8');
-		const browser = readFileSync('src/routes/annotate-round/+page.svelte', 'utf8');
 		expect(worker).toContain('deriveUDiscCalibration(');
 		expect(worker).not.toContain('median(baskets.map((candidate) => candidate.scale))');
 		expect(cli).toContain('deriveUDiscCalibration(');
 		expect(basketCli).toContain('detectBasketCandidatesAtTemplateScale(');
 		expect(basketCli).not.toContain('uiScalePx: basketScale');
-		expect(browser).toContain('deriveUDiscCalibration(');
+	});
+
+	it('has no direct browser-side tee-detection entry point to guard — the Annotate Round redesign removed the standalone "Detect tees" experiment tool, so course detection (routed through the worker above) is the only path', async () => {
+		const { readFileSync } = await import('node:fs');
+		const browser = readFileSync('src/routes/annotate-round/+page.svelte', 'utf8');
+		expect(browser).not.toContain('deriveUDiscCalibration(');
 		expect(browser).not.toContain('deriveTeePadUiScalePx(');
-		expect(browser).not.toContain('uiScalePx: courseDetection?.numberDetection?.anchor?.scale');
 	});
 });

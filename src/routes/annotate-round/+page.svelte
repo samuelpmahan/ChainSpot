@@ -71,20 +71,14 @@
 		DEFAULT_CORRIDOR_WIDTH_PX
 	} from '$lib/corridor';
 	import {
-		detectBasketCandidates,
 		detectCourseCandidates,
-		detectTees,
 		prewarmBasketDetection,
 		requestLocalSnap
 	} from '$lib/autoAnnotation/basketDetection';
 	import type {
-		BasketCandidate,
 		CourseDetectionProgressStage,
-		CourseDetectionResult,
-		DetectTeesResult,
-		TeePadVariant
+		CourseDetectionResult
 	} from '$lib/autoAnnotation/basketDetection';
-	import { deriveUDiscCalibration } from '$lib/autoAnnotation/cvCalibration';
 	import {
 		groundTruthMatchesImage,
 		IMG_5641_GROUND_TRUTH,
@@ -92,12 +86,6 @@
 	} from '$lib/autoAnnotation/courseGroundTruth';
 	import type { LocalSnapKind } from '$lib/cv/localSnap';
 	import { acceptCandidate } from '$lib/cv/types';
-	import {
-		buildActiveReviewMap,
-		recommendNextAnchor,
-		summarizeTeeInvariant
-	} from '$lib/autoAnnotation/activeReview';
-	import type { ActiveReviewRecommendation } from '$lib/autoAnnotation/activeReview';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
 	import {
@@ -131,18 +119,7 @@
 	/** A radial-menu action either places a point kind or deletes the marker that opened the menu. */
 	type RadialAction = PointKind | 'delete';
 
-	const TEE_VARIANTS: readonly TeePadVariant[] = ['gray-center', 'edge-loop', 'fused'];
-	const TEE_VARIANT_LABELS: Record<TeePadVariant, string> = {
-		'gray-center': 'Gray center',
-		'edge-loop': 'Edge loop',
-		fused: 'Fused'
-	};
-	const TEE_VARIANT_SHORT_LABELS: Record<TeePadVariant, string> = {
-		'gray-center': 'GC',
-		'edge-loop': 'EL',
-		fused: 'F'
-	};
-	const ACTIVE_REVIEW_FOCUS_ZOOM_MULTIPLIER = 2.5;
+	const SIDEBAR_FOCUS_ZOOM_MULTIPLIER = 2.5;
 	const MARKER_HIT_RADIUS_PX = 12;
 
 	type AnnotationMarkerKind = PointKind;
@@ -173,15 +150,20 @@
 		/** Null in round mode when opened with no hole active — only the `walk` wedge is offered then. */
 		holeId: string | null;
 		hitMarker: AnnotationMarkerHit | null;
-		/**
-		 * Whether Alt was held on the empty-space click that opened this menu
-		 * (irrelevant, always `false`, for a `hitMarker` delete menu — deleting
-		 * never places a point). Snap-to-detection's escape hatch: threaded
-		 * through to `chooseRadialAction`'s tee/basket placement so a user who
-		 * deliberately wants the raw click, not the nearest detected feature,
-		 * can suppress the snap.
-		 */
-		altKey: boolean;
+	}
+
+	/**
+	 * The correction chip open on a placed tee/basket marker, anchored at its
+	 * current point. Opened by a non-dragging click on ANY tee/basket marker
+	 * at any time — never proximity-gated to the active hole or to any other
+	 * marker, since a mislabeled marker can already be sitting exactly where
+	 * it belongs and only needs a different hole number, not a nudge.
+	 */
+	interface MarkerChipState {
+		readonly holeId: string;
+		readonly holeNumber: number;
+		readonly kind: 'tee' | 'basket';
+		readonly point: SourcePoint;
 	}
 
 	interface Props {
@@ -225,7 +207,6 @@
 
 	onDestroy(() => {
 		stopCourseDetectionProgress();
-		clearRevealTimers();
 		if (annotationNavRegistration !== null) {
 			unregisterAnnotationNav(annotationNavRegistration);
 			annotationNavRegistration = null;
@@ -291,29 +272,19 @@
 	let numberBadges = $state<HoleNumberBadgeAnchor[]>([]);
 	let labeledBaskets = $state<LabeledPoint[]>([]);
 	let activeHoleId = $state<string | null>(null);
-	let basketCandidates = $state<readonly BasketCandidate[]>([]);
-	/**
-	 * Which flow last populated `basketCandidates` — the full course-detection
-	 * pipeline, or the standalone "Detect baskets" fallback below it. Needed
-	 * because `$state` deep-proxies arrays/objects: `basketCandidates` and
-	 * `courseDetection.baskets` are assigned from the exact same array at the
-	 * same statement, but each becomes its own reactive proxy, so `===`
-	 * between them is unreliable. This flag is what candidate reveal/
-	 * interactivity gates on instead.
-	 */
-	let basketCandidatesSource = $state<'course-detection' | 'standalone' | null>(null);
-	let selectedBasketCandidate = $state<number | null>(null);
-	let basketDetectionRunning = $state(false);
-	let basketDetectionError = $state<string | null>(null);
+	/** Bumped on every sidebar hole click so `sidebarFocusRequest` gets a fresh key even when the target point hasn't moved (re-clicking the same hole re-jumps the camera). */
+	let sidebarFocusTick = $state(0);
+	let markerChip = $state<MarkerChipState | null>(null);
+	let markerChipReassignInput = $state('');
+	let savingCourseToMemory = $state(false);
+	let savedCourseToMemory = $state(false);
+	let courseDetectionError = $state<string | null>(null);
 	let courseDetection = $state<CourseDetectionResult | null>(null);
 	let courseDetectionRunning = $state(false);
 	let courseDetectionStatus = $state<string | null>(null);
 	let courseDetectionElapsedSeconds = $state(0);
 	let courseDetectionStartedAt = 0;
 	let courseDetectionTimer: ReturnType<typeof setInterval> | null = null;
-	let activeReviewConfirmedCandidateIds = $state<string[]>([]);
-	let activeReviewRecommendation = $state<ActiveReviewRecommendation | null>(null);
-	let activeReviewCandidateOverrides = $state<Record<string, SourcePoint>>({});
 	let minAutoSuggestScore = $state(0.6);
 	/**
 	 * Whether `minAutoSuggestScore` actually filters which detected tee/basket
@@ -329,10 +300,9 @@
 	 * 5-section hole grid (`sectionOfHole`) — deliberately NOT a field on
 	 * `AnnotatedHole`: `annotatedRound.ts`'s provenance rule forbids any
 	 * provisional/confidence/status flag from ever reaching that artifact, so
-	 * this lives entirely outside the domain type, the same way
-	 * `activeReviewConfirmedCandidateIds` above already tracks handled-ness
-	 * without touching domain data. Cleared on the same source-image-replacement
-	 * lifecycle as the rest of this section's state (`handleSourceDomainChanged`).
+	 * this lives entirely outside the domain type. Cleared on the same
+	 * source-image-replacement lifecycle as the rest of this section's state
+	 * (`handleSourceDomainChanged`).
 	 */
 	let confirmedPieces = $state<Set<string>>(new Set());
 	let prewarmedSourceId: string | null = null;
@@ -349,7 +319,15 @@
 	let annotationDrag = $state<AnnotationDragGesture | null>(null);
 	let numberSelectDrag = $state<{ label: number; start: ScreenSpacePoint; dragging: boolean } | null>(null);
 	let radialMenu = $state<RadialMenuState | null>(null);
-	/** Off by default -- manual placement now takes a back seat to CV detection + active review for most holes, but stays available for whoever wants to place points by hand. Toggled via the footer control at the bottom of the page. */
+	let markerChipEl = $state<HTMLDivElement | null>(null);
+	/**
+	 * Off by default. Tee/basket placement and correction now go through the
+	 * sidebar-driven placing flow and the marker chip unconditionally — this
+	 * toggle only still gates the RadialMenu's remaining uses (corridor bends
+	 * in Map mode, shots/walk path in Round mode), which stay a hand-placement
+	 * nicety rather than the primary flow. Toggled via the footer control at
+	 * the bottom of the page.
+	 */
 	let radialMenuEnabled = $state(false);
 
 	/** Single gate for every place the radial menu can open (empty-space placement and the on-marker delete menu) so `radialMenuEnabled` only needs checking here. */
@@ -397,73 +375,27 @@
 	});
 
 	/**
-	 * A pointerdown anywhere outside the open candidate-assign confirmation
-	 * chip dismisses it without acting — the same click-outside contract
-	 * `RadialMenu.svelte` implements for itself, reproduced here because this
-	 * chip is a plain page-owned popover, not a component with its own
-	 * lifecycle.
+	 * A pointerdown anywhere outside the open marker chip dismisses it without
+	 * acting — the same click-outside contract `RadialMenu.svelte` implements
+	 * for itself, reproduced here because this chip is a plain page-owned
+	 * popover, not a component with its own lifecycle.
 	 */
 	$effect(() => {
-		if (!candidateAssignConfirm) return;
+		if (!markerChip) return;
 		function handlePointerDown(event: PointerEvent): void {
-			if (candidateConfirmEl && event.target instanceof Node && !candidateConfirmEl.contains(event.target)) {
-				candidateAssignConfirm = null;
+			if (markerChipEl && event.target instanceof Node && !markerChipEl.contains(event.target)) {
+				markerChip = null;
 			}
 		}
 		window.addEventListener('pointerdown', handlePointerDown);
 		return () => window.removeEventListener('pointerdown', handlePointerDown);
 	});
 
-	let teeExperimentEnabled = $state<Record<TeePadVariant, boolean>>({
-		'gray-center': true,
-		'edge-loop': true,
-		fused: true
-	});
-	let teeExperimentFullResolution = $state(false);
 	/** Off by default -- "Assign ground truth" only ever does anything for one internal QA fixture (courseGroundTruth.ts), so it stays hidden from the general annotation UI until switched on via the toggle at the bottom of the page. */
 	let groundTruthToolsEnabled = $state(false);
-	let teeExperimentRunning = $state(false);
-	let teeExperimentError = $state<string | null>(null);
-	let teeExperimentResult = $state<DetectTeesResult | null>(null);
-	let selectedTeeCandidateKey = $state<string | null>(null);
 
 	/** The compact status-strip's current stage, mirrored from the worker's real progress messages (never simulated). */
 	let courseDetectionStage = $state<CourseDetectionProgressStage | null>(null);
-
-	/**
-	 * Staged reveal of a completed course-detection result (PART B): once
-	 * `'done'`, every candidate overlay is fully visible — the initial value
-	 * and the reduced-motion outcome, both of which are "today's behavior",
-	 * everything at once. `startCandidateReveal` steps this through the
-	 * intermediate stages with a short stagger when motion is allowed.
-	 */
-	type RevealStage = 'numbers' | 'tees' | 'baskets' | 'grammar' | 'done';
-	const REVEAL_STAGE_ORDER: readonly RevealStage[] = ['numbers', 'tees', 'baskets', 'grammar'];
-	const REVEAL_STAGGER_MS = 250;
-	let revealStage = $state<RevealStage>('done');
-	let revealTimers: ReturnType<typeof setTimeout>[] = [];
-
-	/** A candidate assignment awaiting one-click confirmation (PART C), anchored at the clicked marker. */
-	interface CandidateAssignConfirm {
-		readonly kind: 'tee' | 'basket';
-		readonly point: SourcePoint;
-		readonly holeId: string;
-		readonly holeNumber: number;
-		readonly mode: 'replace' | 'move' | 'confirm';
-	}
-	let candidateAssignConfirm = $state<CandidateAssignConfirm | null>(null);
-	let candidateConfirmEl = $state<HTMLDivElement | null>(null);
-
-	/** Pointer-claim state for a tee/basket candidate marker, mirroring `numberSelectDrag` below. */
-	interface CourseCandidateDrag {
-		readonly kind: 'tee' | 'basket';
-		readonly candidateIndex: number;
-		readonly point: SourcePoint;
-		readonly start: ScreenSpacePoint;
-		readonly transform: ViewTransformState;
-		dragging: boolean;
-	}
-	let courseCandidateDrag = $state<CourseCandidateDrag | null>(null);
 
 	const DIAGNOSTICS_RAIL_STORAGE_KEY = 'chainspot.diagnosticsRail';
 
@@ -524,8 +456,8 @@
 			: numberBadges.length;
 		const numberCandidateCount = courseDetection?.numberDetection.candidates.length ?? numberBadges.length;
 		const teeCandidateCount = courseDetection?.tees.length ?? 0;
-		const basketCandidateCount = courseDetection?.baskets.length ?? basketCandidates.length;
-		const detectionInProgress = courseDetectionRunning || basketDetectionRunning || teeExperimentRunning;
+		const basketCandidateCount = courseDetection?.baskets.length ?? 0;
+		const detectionInProgress = courseDetectionRunning;
 		const hasDetection = courseDetection !== null;
 
 		const features: DiagnosticFeature[] = [
@@ -657,6 +589,14 @@
 		confirmedPieces = next;
 	}
 
+	const SIDEBAR_SECTION_LABELS: Record<1 | 2 | 3 | 4 | 5, string> = {
+		1: 'No tee or basket',
+		2: 'Has basket only',
+		3: 'Has tee only',
+		4: 'Has both — unconfirmed',
+		5: 'Has both — confirmed'
+	};
+
 	/**
 	 * The sidebar hole grid's five sections, derived purely from what data
 	 * exists on the hole plus its per-piece confirmed status — no separate
@@ -770,186 +710,62 @@
 		}
 	}
 
-	function clearRevealTimers(): void {
-		for (const timer of revealTimers) clearTimeout(timer);
-		revealTimers = [];
-	}
-
 	/**
-	 * Steps `revealStage` through `REVEAL_STAGE_ORDER` with a short stagger
-	 * (PART B) once a course-detection result exists — presentation only, the
-	 * single already-computed result is never re-run or re-ordered. Under
-	 * `prefers-reduced-motion: reduce`, every stage lands at once: today's
-	 * exact behavior, and also this function's starting state, so no timers
-	 * are ever created in that case.
+	 * Applies every tee/basket the grammar proposed, per piece rather than
+	 * requiring both and a `ready` status — the sidebar's five sections are
+	 * the review gate now, not the grammar's own confidence bucket. A piece
+	 * is skipped when `applyDetectionThreshold` is on and its confidence
+	 * falls under `minAutoSuggestScore` (never created at all, so that hole
+	 * simply stays in a less-complete section until placed by hand or the
+	 * threshold is lowered), and — with `skipExisting: true` — whenever the
+	 * hole already has a piece of that kind, so a manual placement or a prior
+	 * correction is never silently clobbered by a re-run.
 	 */
-	function startCandidateReveal(): void {
-		clearRevealTimers();
-		if (prefersReducedMotion()) {
-			revealStage = 'done';
-			return;
+	function applyDetectedPieces(options: { skipExisting?: boolean } = {}): void {
+		if (!courseDetection) return;
+		const inheritedWidthPx = currentCorridorWidthPx();
+		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
+		const meetsThreshold = (confidence: number): boolean =>
+			!applyDetectionThreshold || confidence >= minAutoSuggestScore;
+
+		for (const proposal of courseDetection.grammar.holes) {
+			const existing = existingByNumber.get(proposal.number);
+			const keepTee = options.skipExisting && existing?.tee;
+			const keepBasket = options.skipExisting && existing?.basket;
+			const applyTee = !keepTee && proposal.tee && meetsThreshold(proposal.tee.confidence);
+			const applyBasket = !keepBasket && proposal.basket && meetsThreshold(proposal.basket.confidence);
+			if (!applyTee && !applyBasket) continue;
+
+			const base = existing ?? {
+				id: crypto.randomUUID(),
+				number: proposal.number,
+				shots: [],
+				corridorBends: [],
+				corridorWidthPx: inheritedWidthPx
+			};
+			const next: AnnotatedHole = {
+				...base,
+				tee: applyTee ? acceptCandidate(proposal.tee!) : base.tee,
+				basket: applyBasket ? acceptCandidate(proposal.basket!) : base.basket
+			};
+			existingByNumber.set(proposal.number, next);
 		}
-		revealStage = REVEAL_STAGE_ORDER[0];
-		for (let index = 1; index < REVEAL_STAGE_ORDER.length; index += 1) {
-			const stage = REVEAL_STAGE_ORDER[index];
-			revealTimers.push(setTimeout(() => { revealStage = stage; }, REVEAL_STAGGER_MS * index));
-		}
-		revealTimers.push(
-			setTimeout(() => { revealStage = 'done'; }, REVEAL_STAGGER_MS * REVEAL_STAGE_ORDER.length)
-		);
+		holes = [...existingByNumber.values()].sort((a, b) => a.number - b.number);
+		activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
 	}
 
-	/** Whether a candidate overlay stage has been revealed yet (or motion is reduced, in which case everything has). */
-	function revealedUpTo(stage: 'numbers' | 'tees' | 'baskets' | 'grammar'): boolean {
-		if (revealStage === 'done') return true;
-		return REVEAL_STAGE_ORDER.indexOf(revealStage) >= REVEAL_STAGE_ORDER.indexOf(stage);
-	}
-
-	function recomputeActiveReview(): void {
-		if (!courseDetection) {
-			activeReviewRecommendation = null;
-			return;
-		}
-		const reviewMap = buildActiveReviewMap(courseDetection, [], activeReviewConfirmedCandidateIds);
-		activeReviewRecommendation = recommendNextAnchor(reviewMap, { deadlineMs: 4000, minAutoSuggestScore });
-		logActiveReviewStats(reviewMap);
-	}
-
-	function logActiveReviewStats(reviewMap: ReturnType<typeof buildActiveReviewMap>): void {
-		if (!courseDetection || typeof console === 'undefined') return;
-		const teeInvariant = summarizeTeeInvariant(courseDetection);
-		const alignments = teeInvariant.map((stat) => stat.axisAlignment);
-		const distanceMargins = teeInvariant
-			.map((stat) => stat.distanceMarginPx)
-			.filter((margin): margin is number => margin !== null);
-		const mean = (values: readonly number[]): number | null =>
-			values.length === 0 ? null : Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3));
-		const recommendation = activeReviewRecommendation;
-		const snapshot = {
-			teeCandidates: courseDetection.tees.length,
-			basketCandidates: courseDetection.baskets.length,
-			assignedTees: teeInvariant.length,
-			unassignedTees: courseDetection.grammar.unassigned.teeCandidateIndexes.length,
-			unassignedBaskets: courseDetection.grammar.unassigned.basketCandidateIndexes.length,
-			teeAxisAlignmentMean: mean(alignments),
-			teeAxisAlignmentMin: alignments.length === 0 ? null : Math.min(...alignments),
-			teeAxisAlignmentAtLeast90Pct: alignments.filter((value) => value >= 0.9).length,
-			teeDistanceRank1: teeInvariant.filter((stat) => stat.distanceRank === 1).length,
-			teeDistanceMarginMedian: distanceMargins.length === 0 ? null : distanceMargins.slice().sort((a, b) => a - b)[Math.floor(distanceMargins.length / 2)],
-			recommendation: recommendation?.kind === 'candidate'
-				? {
-					kind: recommendation.candidateKind,
-					holeNumber: recommendation.holeNumber,
-					score: recommendation.score,
-					belowThreshold: recommendation.belowThreshold,
-					timedOut: recommendation.timedOut
-				}
-				: recommendation
-		};
-		console.info('[ChainSpot] ACTIVE_REVIEW_STATS', snapshot);
-		console.table(teeInvariant);
-		console.debug('[ChainSpot] ACTIVE_REVIEW_MAP', reviewMap);
-	}
-
+	/** The slim sidebar row's slider — re-applies detection with the new floor so raising/lowering it live-updates which sections holes fall into. */
 	function handleMinAutoSuggestScoreInput(event: Event): void {
 		const input = event.currentTarget;
 		if (!(input instanceof HTMLInputElement)) return;
 		minAutoSuggestScore = Number(input.value);
-		recomputeActiveReview();
+		applyDetectedPieces({ skipExisting: true });
 	}
 
-	function courseCandidateKey(kind: 'tee' | 'basket', index: number): string {
-		return `${kind}:${index}`;
-	}
-
-	function candidateIsHandled(kind: 'tee' | 'basket', index: number): boolean {
-		return activeReviewConfirmedCandidateIds.includes(courseCandidateKey(kind, index));
-	}
-
-	function courseCandidateDisplayPoint(kind: 'tee' | 'basket', index: number, point: SourcePoint): SourcePoint {
-		return activeReviewCandidateOverrides[courseCandidateKey(kind, index)] ?? point;
-	}
-
-	function courseCandidateIndex(kind: 'tee' | 'basket', point: SourcePoint): number | null {
-		const candidates = kind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
-		const index = candidates?.findIndex((candidate, candidateIndex) => {
-			const displayPoint = courseCandidateDisplayPoint(kind, candidateIndex, candidate);
-			return displayPoint.xPx === point.xPx && displayPoint.yPx === point.yPx;
-		}) ?? -1;
-		return index >= 0 ? index : null;
-	}
-
-	function activeReviewTargetForClick(
-		kind: 'tee' | 'basket',
-		candidateIndex?: number
-	): ActiveReviewRecommendation | null {
-		const recommendation = activeReviewRecommendation;
-		if (
-			recommendation?.kind !== 'candidate' ||
-			recommendation.candidateKind !== kind ||
-			(candidateIndex !== undefined && recommendation.candidateIndex !== candidateIndex)
-		) {
-			return null;
-		}
-		return recommendation;
-	}
-
-	function activeReviewRecommendationPoint(): SourcePoint | null {
-		const recommendation = activeReviewRecommendation;
-		if (recommendation?.kind !== 'candidate') return null;
-		const candidates = recommendation.candidateKind === 'tee' ? courseDetection?.tees : courseDetection?.baskets;
-		const candidate = candidates?.[recommendation.candidateIndex];
-		return candidate
-			? courseCandidateDisplayPoint(recommendation.candidateKind, recommendation.candidateIndex, candidate)
-			: null;
-	}
-
-	let activeReviewFocusRequest = $derived.by(() => {
-		const recommendation = activeReviewRecommendation;
-		if (revealStage !== 'done' || recommendation?.kind !== 'candidate') return null;
-		const point = activeReviewRecommendationPoint();
-		if (!point) return null;
-		return {
-			key: `${recommendation.candidateKind}:${recommendation.candidateIndex}:${recommendation.holeNumber}`,
-			point,
-			zoomMultiplier: ACTIVE_REVIEW_FOCUS_ZOOM_MULTIPLIER
-		};
-	});
-
-	function rejectActiveReviewRecommendation(): void {
-		const recommendation = activeReviewRecommendation;
-		const point = activeReviewRecommendationPoint();
-		if (recommendation?.kind !== 'candidate' || !point) return;
-		markActiveReviewCandidateHandled(recommendation.candidateKind, point);
-	}
-
-	function acceptActiveReviewRecommendation(): void {
-		const recommendation = activeReviewRecommendation;
-		const point = activeReviewRecommendationPoint();
-		if (recommendation?.kind !== 'candidate' || !point) return;
-		handleCandidateMarkerClick(recommendation.candidateKind, point, recommendation.candidateIndex);
-	}
-
-	function rejectActiveReviewMarker(event: MouseEvent): void {
-		event.stopPropagation();
-		rejectActiveReviewRecommendation();
-	}
-
-	function acceptActiveReviewMarker(event: MouseEvent): void {
-		event.stopPropagation();
-		acceptActiveReviewRecommendation();
-	}
-
-	function markActiveReviewCandidateHandled(kind: 'tee' | 'basket', point: SourcePoint): void {
-		const index = courseCandidateIndex(kind, point);
-		if (index === null) return;
-		const id = courseCandidateKey(kind, index);
-		if (activeReviewConfirmedCandidateIds.includes(id)) return;
-		activeReviewConfirmedCandidateIds = [...activeReviewConfirmedCandidateIds, id];
-		const nextOverrides = { ...activeReviewCandidateOverrides };
-		delete nextOverrides[id];
-		activeReviewCandidateOverrides = nextOverrides;
-		recomputeActiveReview();
+	/** The slim sidebar row's "only above threshold" toggle. */
+	function handleApplyDetectionThresholdToggle(): void {
+		applyDetectionThreshold = !applyDetectionThreshold;
+		applyDetectedPieces({ skipExisting: true });
 	}
 
 	// OpenCV's embedded WASM payload is large. Start its reusable worker as soon
@@ -966,12 +782,11 @@
 	});
 
 	/**
-	 * Early-dev default: every source image gets run through full-course
-	 * detection automatically, so tap-to-select-by-number works without a
-	 * manual "Detect full course" click. Auto-apply of the detected holes is
-	 * disabled (hotfix) so hand-annotated golden data isn't silently
-	 * overwritten by generated proposals; use the "Apply N ready holes"
-	 * button to apply detections manually.
+	 * Every source image gets run through full-course detection automatically
+	 * — there is no manual "Detect" button anymore. `handleDetectCourse`
+	 * itself applies every resulting tee/basket onto `holes` (as pending) via
+	 * `applyDetectedPieces`, with `skipExisting: true` so a hand-placed or
+	 * already-corrected piece is never clobbered by a re-run.
 	 */
 	$effect(() => {
 		void refreshCount;
@@ -1035,9 +850,9 @@
 			closeRadialMenu(radialMenu, 'escape');
 			return;
 		}
-		if (event.key === 'Escape' && candidateAssignConfirm) {
+		if (event.key === 'Escape' && markerChip) {
 			event.preventDefault();
-			candidateAssignConfirm = null;
+			markerChip = null;
 			return;
 		}
 		if (isModalOpen()) return;
@@ -1170,140 +985,53 @@
 	}
 
 	/**
-	 * Nearest revealed tee/basket CV candidate under the pointer, if any — the
-	 * hit-test `claimAnnotationPointer` uses so a candidate-marker click is
-	 * claimed before it ever reaches `onPlacement`, exactly like
-	 * `numberCandidateHitAt` above (the same precedence mechanism keeps the
-	 * radial menu from opening on either kind of candidate click). Only
-	 * markers the staged reveal has actually shown are hit-testable, so a
-	 * candidate can't be clicked a moment before its overlay fades in.
+	 * Opens the correction chip for an existing tee/basket marker — the
+	 * redesign's core correction affordance (requirement 5): clicking ANY
+	 * placed tee/basket, at any time, regardless of what else is active or
+	 * how close it is to anything else. There is deliberately no distance
+	 * heuristic here at all: a mislabeled marker can already sit exactly
+	 * where it belongs, just tagged with the wrong hole, so "how close is it"
+	 * was never the right signal — the user identifies the error by looking
+	 * at the marker and says which hole it really belongs to.
 	 */
-	function courseCandidateHitAt(
-		pointer: ScreenSpacePoint,
-		view: ViewTransformState
-	): { kind: 'tee' | 'basket'; candidateIndex: number; point: SourcePoint } | null {
-		if (!courseDetection) return null;
-		let closest: { kind: 'tee' | 'basket'; candidateIndex: number; point: SourcePoint } | null = null;
-		let closestDistance = Number.POSITIVE_INFINITY;
-
-		function consider(
-			kind: 'tee' | 'basket',
-			candidateIndex: number,
-			point: SourcePoint,
-			radiusPx: number
-		): void {
-			if (candidateIsHandled(kind, candidateIndex)) return;
-			const displayPoint = courseCandidateDisplayPoint(kind, candidateIndex, point);
-			const screen = imageToScreen(displayPoint, view);
-			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
-			const radius = Math.max(MARKER_HIT_RADIUS_PX, radiusPx * view.zoom);
-			if (distance > radius || distance >= closestDistance) return;
-			closestDistance = distance;
-			closest = {
-				kind,
-				candidateIndex,
-				point: { xPx: displayPoint.xPx, yPx: displayPoint.yPx }
-			};
-		}
-
-		if (revealedUpTo('tees')) {
-			for (const [candidateIndex, candidate] of courseDetection.tees.entries()) {
-				consider('tee', candidateIndex, candidate, Math.max(candidate.widthPx, candidate.heightPx) / 2 + 6);
-			}
-		}
-		// `basketCandidates` is shared with the standalone "Detect baskets"
-		// fallback (`handleDetectBaskets`), which can overwrite it with an
-		// unrelated result after a full course detection already ran. Only hit
-		// -test baskets that are still the course-detection set the visible
-		// markers are actually drawn from.
-		if (revealedUpTo('baskets') && basketCandidatesSource === 'course-detection') {
-			for (const [candidateIndex, candidate] of courseDetection.baskets.entries()) {
-				consider('basket', candidateIndex, candidate, 12);
-			}
-		}
-		return closest;
+	function openMarkerChip(holeId: string, kind: 'tee' | 'basket'): void {
+		const hole = holes.find((candidate) => candidate.id === holeId);
+		const point = kind === 'tee' ? hole?.tee : hole?.basket;
+		if (!hole || !point) return;
+		markerChip = { holeId, holeNumber: hole.number, kind, point };
+		markerChipReassignInput = '';
 	}
 
-	/** The draft hole (if any) whose current tee/basket is exactly this candidate point — i.e. the point's current "home". */
-	function holeHoldingPoint(kind: 'tee' | 'basket', point: SourcePoint): AnnotatedHole | undefined {
-		return holes.find((hole) => {
-			const existing = kind === 'tee' ? hole.tee : hole.basket;
-			return existing !== undefined && existing.xPx === point.xPx && existing.yPx === point.yPx;
-		});
+	function closeMarkerChip(): void {
+		markerChip = null;
 	}
 
-	/** Accessible name for a candidate marker, describing exactly what a click on it right now would do. */
-	function candidateAriaLabel(kind: 'tee' | 'basket', point: SourcePoint): string {
-		const label = kind === 'tee' ? 'tee' : 'basket';
-		const active = activeHole();
-		if (!active) return `Detected ${label}. Click to accept or drag to adjust.`;
-		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) return `Detected ${label} — hole ${active.number}'s own ${label}, click to remove or drag to adjust`;
-		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
-		if (activeHasFeature) return `Detected ${label} — hole ${active.number} already has a ${label}, click to replace or drag to adjust`;
-		if (sourceHole) return `Detected ${label} — move to hole ${active.number}, click to accept or drag to adjust`;
-		return `Detected ${label} — assign to hole ${active.number}, click to accept or drag to adjust`;
-	}
-
-	/**
-	 * The frictionless-correction interaction (PART C): clicking a detected
-	 * tee/basket candidate assigns its `{xPx, yPx}` — coordinates only, via
-	 * `assignCandidateToHole` — to the active hole instantly when nothing
-	 * would be overwritten or moved from elsewhere; otherwise it opens a
-	 * one-click confirmation chip anchored at the marker instead of acting
-	 * immediately.
-	 */
-	function handleCandidateMarkerClick(
-		kind: 'tee' | 'basket',
-		point: SourcePoint,
-		candidateIndex?: number
-	): void {
-		const recommended = activeReviewTargetForClick(kind, candidateIndex);
-		const active = recommended?.kind === 'candidate'
-			? activateHoleByNumber(recommended.holeNumber)
-			: activeHole();
-		if (!active) return;
-		const sourceHole = holeHoldingPoint(kind, point);
-		if (sourceHole?.id === active.id) {
-			// A CV candidate click is a confirmation/assignment gesture. Deletion
-			// remains available through the existing marker radial menu.
-			candidateAssignConfirm = {
-				kind,
-				point,
-				holeId: active.id,
-				holeNumber: active.number,
-				mode: 'confirm'
-			};
-			return;
-		}
-		const activeHasFeature = kind === 'tee' ? active.tee !== undefined : active.basket !== undefined;
-		if (!activeHasFeature && !sourceHole) {
-			holes = assignCandidateToHole(holes, active.id, kind, point);
-			vibrate(8);
-			markActiveReviewCandidateHandled(kind, point);
-			return;
-		}
-		candidateAssignConfirm = {
-			kind,
-			point,
-			holeId: active.id,
-			holeNumber: active.number,
-			mode: activeHasFeature ? 'replace' : 'move'
-		};
-	}
-
-	/** Executes the pending confirmation — replace and move are the same coordinates-only assignment underneath; delete clears the hole's feature instead. */
-	function confirmCandidateAssign(): void {
-		if (!candidateAssignConfirm) return;
-		const { holeId, kind, point } = candidateAssignConfirm;
-		holes = assignCandidateToHole(holes, holeId, kind, point);
-		candidateAssignConfirm = null;
+	/** The chip's "reassign to hole N" action, and the shortcut to reassign straight to whichever hole the sidebar currently has active. */
+	function reassignFromChip(toHoleId: string): void {
+		if (!markerChip) return;
+		reassignHolePiece(markerChip.holeId, toHoleId, markerChip.kind);
 		vibrate(8);
-		markActiveReviewCandidateHandled(kind, point);
+		closeMarkerChip();
 	}
 
-	function dismissCandidateAssign(): void {
-		candidateAssignConfirm = null;
+	/** Resolves the chip's free-typed hole-number input to a target hole, creating it in numeric order if the draft doesn't have it yet. */
+	function reassignFromChipInput(): void {
+		if (!markerChip) return;
+		const target = Number(markerChipReassignInput);
+		if (!Number.isInteger(target) || target < 1 || target > 999 || target === markerChip.holeNumber) {
+			activityMessage = 'Enter a different hole number.';
+			return;
+		}
+		const targetHole = activateHoleByNumber(target);
+		if (!targetHole) return;
+		reassignFromChip(targetHole.id);
+	}
+
+	/** The chip's "not a real tee/basket" delete action. */
+	function deleteFromChip(): void {
+		if (!markerChip) return;
+		deleteHolePiece(markerChip.holeId, markerChip.kind);
+		closeMarkerChip();
 	}
 
 	/** Activates a numbered hole, creating it in numeric order when the draft does not have it yet. */
@@ -1335,6 +1063,122 @@
 		} catch {
 			// Haptics are a nicety; never let an unsupported/blocked call surface.
 		}
+	}
+
+	/**
+	 * Where to zoom for a sidebar hole click. Real markers win (their
+	 * midpoint if both exist); otherwise the hole's detected number-badge
+	 * position stands in, since it's the only approximate location that can
+	 * exist before any tee/basket has been placed (see `numberBadges`'s
+	 * doc comment — populated from CV detection, never invented geometry).
+	 * `null` when neither exists: the view deliberately stays put rather than
+	 * jumping somewhere ungrounded.
+	 */
+	function holeFocusPoint(hole: AnnotatedHole): SourcePoint | null {
+		if (hole.tee && hole.basket) {
+			return { xPx: (hole.tee.xPx + hole.basket.xPx) / 2, yPx: (hole.tee.yPx + hole.basket.yPx) / 2 };
+		}
+		if (hole.tee) return hole.tee;
+		if (hole.basket) return hole.basket;
+		const badge = numberBadges.find((candidate) => candidate.number === hole.number);
+		return badge ? { xPx: badge.xPx, yPx: badge.yPx } : null;
+	}
+
+	/**
+	 * A snapshot taken once, at the moment of a deliberate sidebar click (see
+	 * `onHoleBoxClick`) — deliberately NOT a `$derived` over live hole state.
+	 * If it re-read `holes` reactively by id, placing a hole's first piece
+	 * while it's the current focus target would hand `holeFocusPoint` a fresh
+	 * non-null point and silently re-trigger a second, unrequested camera
+	 * jump the instant that piece landed, on top of the click's own jump.
+	 */
+	let sidebarFocusRequest = $state<{ key: string; point: SourcePoint; zoomMultiplier: number } | null>(null);
+
+	/**
+	 * The sidebar's per-hole "which section" bucketing for all 18 standard
+	 * holes (extra holes past 18, if any, aren't shown in the redesigned grid
+	 * — same 1-18 scope the old flat hole bar's main grid had). A hole with no
+	 * draft record yet is section 1: it has neither tee nor basket, exactly
+	 * like an empty `AnnotatedHole` would score.
+	 */
+	let sidebarSections = $derived.by(() => {
+		const buckets: Record<1 | 2 | 3 | 4 | 5, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+		for (let number = 1; number <= 18; number += 1) {
+			const hole = holes.find((candidate) => candidate.number === number);
+			buckets[hole ? sectionOfHole(hole) : 1].push(number);
+		}
+		return buckets;
+	});
+
+	let allHolesConfirmed = $derived(sidebarSections[5].length === 18);
+
+	/**
+	 * Entry point for clicking a hole in the sidebar grid: activates it
+	 * (creating an empty draft hole on demand for a section-1 hole with no
+	 * record yet) and engages the camera jump. The placing/approve banner
+	 * itself is fully derived from the resulting hole state — see
+	 * `sidebarBanner` — no separate mode flag to keep in sync here.
+	 */
+	function onHoleBoxClick(number: number): void {
+		const hole = activateHoleByNumber(number);
+		if (!hole) return;
+		sidebarFocusTick += 1;
+		const point = holeFocusPoint(hole);
+		sidebarFocusRequest = point
+			? { key: `${hole.id}:${sidebarFocusTick}`, point, zoomMultiplier: SIDEBAR_FOCUS_ZOOM_MULTIPLIER }
+			: null;
+		markerChip = null;
+		radialMenu = null;
+	}
+
+	/** Clears sidebar focus — the placing/approve banner's Cancel/Close action. Cannot force the camera back out (the pane exposes no such API to the page); the user can still use the pane's own "Fit image" control. */
+	function exitSidebarFocus(): void {
+		activeHoleId = null;
+		markerChip = null;
+	}
+
+	type SidebarBanner =
+		| { kind: 'placing'; holeNumber: number; piece: 'Tee' | 'Basket' }
+		| { kind: 'approve'; holeNumber: number }
+		| { kind: 'confirmed'; holeNumber: number };
+
+	/** Derived purely from the active hole's own section — see requirement 3/4: which piece a placing click will create, or the Approve prompt, follows automatically from hole state. Map mode only; Round mode's own hole selection has nothing to do with tee/basket sections. */
+	let sidebarBanner = $derived.by((): SidebarBanner | null => {
+		if (annotationMode !== 'map' || !activeHoleId) return null;
+		const hole = holes.find((candidate) => candidate.id === activeHoleId);
+		if (!hole) return null;
+		const section = sectionOfHole(hole);
+		if (section <= 3) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
+		if (section === 4) return { kind: 'approve', holeNumber: hole.number };
+		return { kind: 'confirmed', holeNumber: hole.number };
+	});
+
+	/** The Approve banner's action: confirms both pieces, then auto-advances to the next section-4 hole if one exists, else exits focus — mirroring the reference flow's `approveHole`. */
+	function approveActiveHole(): void {
+		if (!activeHoleId) return;
+		approveHolePieces(activeHoleId);
+		vibrate(8);
+		const next = holes.find((hole) => hole.id !== activeHoleId && sectionOfHole(hole) === 4);
+		if (next) onHoleBoxClick(next.number);
+		else exitSidebarFocus();
+	}
+
+	/** The completion panel's first action — reuses the exact best-effort Course Memory write Done already performs, so "saved" here means the same thing it means everywhere else in this file. */
+	async function handleSaveCourseToMemory(): Promise<void> {
+		if (savingCourseToMemory) return;
+		savingCourseToMemory = true;
+		try {
+			await saveToLibraryBestEffort();
+			savedCourseToMemory = true;
+		} finally {
+			savingCourseToMemory = false;
+		}
+	}
+
+	/** The completion panel's second action, gated on the first succeeding — hands this course off to Create Graphics exactly like the topbar Done button, since "upload a round from this course" and "finish this annotation" are the same handoff. */
+	async function handleUploadRoundFromCourse(): Promise<void> {
+		if (!savedCourseToMemory) return;
+		await handleDone();
 	}
 
 	/** Hole-scoped markers only — a `walk` marker never reaches here, its own kind is handled by the caller before this is invoked. */
@@ -1408,7 +1252,7 @@
 		return `${kind}:${holeId}`;
 	}
 
-	/** The number-badge anchor `requestLocalSnap`'s worker request re-derives `UiScalePx`/`BasketTemplateScale` from — the same one `handleDetectTees` already reads out of `courseDetection`, raw (unbranded) since only the worker needs to re-brand it. `null` before "Detect course" has ever run: there is no calibration to crop or size a snap window from yet. */
+	/** The number-badge anchor `requestLocalSnap`'s worker request re-derives `UiScalePx`/`BasketTemplateScale` from, raw (unbranded) since only the worker needs to re-brand it. `null` before course detection has ever run: there is no calibration to crop or size a snap window from yet. */
 	function currentNumberAnchor(): { scale: number; widthPx: number; heightPx: number } | null {
 		const anchor = courseDetection?.numberDetection?.anchor;
 		return anchor ? { scale: anchor.scale, widthPx: anchor.widthPx, heightPx: anchor.heightPx } : null;
@@ -1485,10 +1329,13 @@
 
 	/**
 	 * Wedge actions offered by an open radial menu: Delete alone for a hit
-	 * marker, otherwise the wedges the current mode's activity allows. Map
-	 * mode places course geometry (tee/basket if absent, bend always); round
-	 * mode places round-specific points (shot only with a hole active, walk
-	 * always — the walk path needs no hole).
+	 * marker (bend/shot/walk only — tee/basket markers never reach this menu,
+	 * see `commitAnnotationPointerUp`), otherwise the wedges the current
+	 * mode's activity allows. Map mode's empty-space menu offers only `bend`
+	 * now — tee/basket creation goes through the sidebar-driven placing flow
+	 * (`placeNextPiece`) before this menu is ever reached, see
+	 * `handleAnnotationPlacement`. Round mode is untouched: shot with a hole
+	 * active, walk always (the walk path needs no hole).
 	 */
 	function radialMenuActions(menu: RadialMenuState): RadialAction[] {
 		if (menu.hitMarker) return ['delete'];
@@ -1498,13 +1345,7 @@
 			actions.push('walk');
 			return actions;
 		}
-		const hole = holes.find((candidate) => candidate.id === menu.holeId);
-		if (!hole) return [];
-		const actions: RadialAction[] = [];
-		if (!hole.tee) actions.push('tee');
-		if (!hole.basket) actions.push('basket');
-		actions.push('bend');
-		return actions;
+		return menu.holeId ? ['bend'] : [];
 	}
 
 	/** `radialMenuActions()`, projected into the generic button shape `RadialMenu.svelte` renders. */
@@ -1560,11 +1401,11 @@
 		} else if (action === 'walk') {
 			walkingPath = addWalkPoint(walkingPath, menu.at);
 		} else if (menu.holeId) {
+			// Only 'bend' (map mode) or 'shot' (round mode) ever reach here now —
+			// tee/basket creation is intercepted earlier by `handleAnnotationPlacement`
+			// into the sidebar-driven placing flow, see `radialMenuActions`.
 			holes = placeByMode(holes, menu.holeId, action, menu.at);
 			if (isMapGeometryKind(action)) markMapGeometryEdited();
-			if (action === 'tee' || action === 'basket') {
-				applyLocalSnap(action, menu.holeId, menu.at, menu.altKey);
-			}
 		}
 		focusViewport();
 	}
@@ -1594,32 +1435,6 @@
 		});
 	}
 
-	/**
-	 * A real tee/basket marker belonging to a hole OTHER than the active one
-	 * can exactly coincide with a revealed CV candidate — the ordinary case
-	 * right after accepting a ready hole, whose point is the candidate's
-	 * coordinates verbatim. In exactly that case the candidate interpretation
-	 * wins, so PART C's move-to-the-active-hole interaction stays reachable
-	 * instead of being permanently shadowed by the foreign hole's delete
-	 * menu. The active hole's OWN marker is untouched by this — clicking it
-	 * still opens its delete menu exactly as before, since a candidate that
-	 * exactly matches the active hole's own point is already a no-op in
-	 * `handleCandidateMarkerClick`.
-	 */
-	function shouldPreferCandidateOverMarker(marker: AnnotationMarkerHit): boolean {
-		if (marker.kind !== 'tee' && marker.kind !== 'basket') return false;
-		if (marker.holeId === activeHoleId) return false;
-		if (!courseDetection) return false;
-		const point = markerPoint(marker);
-		if (!point) return false;
-		if (marker.kind === 'tee') {
-			if (!revealedUpTo('tees')) return false;
-			return courseDetection.tees.some((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx);
-		}
-		if (!revealedUpTo('baskets') || basketCandidatesSource !== 'course-detection') return false;
-		return courseDetection.baskets.some((candidate) => candidate.xPx === point.xPx && candidate.yPx === point.yPx);
-	}
-
 	function claimAnnotationPointer(
 		pointer: ScreenSpacePoint,
 		event: PointerEvent,
@@ -1627,7 +1442,7 @@
 	): boolean {
 		if (!sourceImage()) return false;
 		const marker = pointHitAt(pointer, view);
-		if (marker && !shouldPreferCandidateOverMarker(marker)) {
+		if (marker) {
 			annotationDrag = {
 				marker,
 				start: { ...pointer },
@@ -1643,41 +1458,10 @@
 			void event;
 			return true;
 		}
-		const courseCandidate = courseCandidateHitAt(pointer, view);
-		if (courseCandidate) {
-			courseCandidateDrag = {
-				...courseCandidate,
-				start: { ...pointer },
-				transform: { ...view },
-				dragging: false
-			};
-			void event;
-			return true;
-		}
 		return false;
 	}
 
 	function previewAnnotationMove(pointer: ScreenSpacePoint, event: PointerEvent): void {
-		if (courseCandidateDrag) {
-			const distance = Math.hypot(pointer.x - courseCandidateDrag.start.x, pointer.y - courseCandidateDrag.start.y);
-			if (distance > clickSlopPx(event.pointerType)) courseCandidateDrag.dragging = true;
-			if (courseCandidateDrag.dragging) {
-				const image = sourceImage();
-				if (!image) return;
-				const point = clampPointToImageBounds(
-					screenToImage(pointer, courseCandidateDrag.transform),
-					image.widthPx,
-					image.heightPx
-				);
-				const key = courseCandidateKey(courseCandidateDrag.kind, courseCandidateDrag.candidateIndex);
-				activeReviewCandidateOverrides = {
-					...activeReviewCandidateOverrides,
-					[key]: point
-				};
-				courseCandidateDrag = { ...courseCandidateDrag, point };
-			}
-			return;
-		}
 		if (numberSelectDrag) {
 			const distance = Math.hypot(pointer.x - numberSelectDrag.start.x, pointer.y - numberSelectDrag.start.y);
 			if (distance > clickSlopPx(event.pointerType)) numberSelectDrag.dragging = true;
@@ -1702,17 +1486,14 @@
 		}
 	}
 
+	/**
+	 * A non-dragging release on an existing marker opens a correction UI —
+	 * which one depends on the marker kind. Tee/basket (map mode) always open
+	 * the marker chip (requirement 5: any marker, any time, no gating);
+	 * bend/shot/walk keep the pre-existing delete-only radial menu, since
+	 * those aren't part of this redesign.
+	 */
 	function commitAnnotationPointerUp(pointer: ScreenSpacePoint, event?: PointerEvent): void {
-		if (courseCandidateDrag) {
-			const { kind, candidateIndex, point } = courseCandidateDrag;
-			courseCandidateDrag = null;
-			// A click accepts the detected location. A drag is a deliberate location
-			// correction and accepts the corrected point through the same assignment
-			// path. Once accepted, the real tee/basket marker owns that location and
-			// the normal marker drag interaction can move it again.
-			handleCandidateMarkerClick(kind, point, candidateIndex);
-			return;
-		}
 		if (numberSelectDrag) {
 			const { label, dragging } = numberSelectDrag;
 			numberSelectDrag = null;
@@ -1730,11 +1511,15 @@
 		if (!drag.dragging) {
 			previewHoles = null;
 			previewWalkingPath = null;
+			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && drag.marker.holeId) {
+				openMarkerChip(drag.marker.holeId, drag.marker.kind);
+				return;
+			}
 			const point =
 				drag.marker.kind === 'walk'
 					? (drag.marker.index !== undefined ? walkingPath[drag.marker.index] ?? null : null)
 					: markerPoint(drag.marker);
-			if (point) openRadialMenu({ at: point, holeId: drag.marker.holeId, hitMarker: drag.marker, altKey: false });
+			if (point) openRadialMenu({ at: point, holeId: drag.marker.holeId, hitMarker: drag.marker });
 			return;
 		}
 		const point = clampPointToImageBounds(
@@ -1762,31 +1547,51 @@
 	function cancelAnnotationPointer(): void {
 		annotationDrag = null;
 		numberSelectDrag = null;
-		if (courseCandidateDrag?.dragging) {
-			const key = courseCandidateKey(courseCandidateDrag.kind, courseCandidateDrag.candidateIndex);
-			const nextOverrides = { ...activeReviewCandidateOverrides };
-			delete nextOverrides[key];
-			activeReviewCandidateOverrides = nextOverrides;
-		}
-		courseCandidateDrag = null;
 		previewHoles = null;
 		previewWalkingPath = null;
 	}
 
 	/**
-	 * Opens the empty-space placement menu. In round mode this works even with
-	 * no hole active — the menu then offers only `walk`, since the walk path
-	 * is round-level rather than per-hole. In map mode a hole must be active,
-	 * matching the pre-mode-split behavior. `altKey` carries snap-to-detection's
-	 * escape hatch (see `RadialMenuState.altKey`'s doc comment) from the click
-	 * that opened this menu through to the eventual placement.
+	 * Places the missing piece for `holeId` (tee first, then basket — matches
+	 * the sidebar's own ordering, see `sectionOfHole`) and asks for the second
+	 * piece in place if one is still missing, no return trip to the sidebar.
+	 * The one entry point for the redesign's "placing" flow, called from
+	 * `handleAnnotationPlacement` for an empty-map click and from
+	 * `onHoleBoxClick` when a section 1-3 hole is already fully in view.
+	 */
+	function placeNextPiece(holeId: string, point: SourcePoint, altKey: boolean): void {
+		const hole = holes.find((candidate) => candidate.id === holeId);
+		if (!hole) return;
+		const kind: 'tee' | 'basket' = hole.tee ? 'basket' : 'tee';
+		holes = placeByMode(holes, holeId, kind, point);
+		markMapGeometryEdited();
+		applyLocalSnap(kind, holeId, point, altKey);
+		vibrate(8);
+	}
+
+	/**
+	 * Opens the empty-space placement menu/flow. In round mode this works even
+	 * with no hole active — the menu then offers only `walk`, since the walk
+	 * path is round-level rather than per-hole. In map mode a hole must be
+	 * active; if it's still missing a tee or basket (sections 1-3), the click
+	 * places that piece directly through the sidebar's placing flow instead of
+	 * opening a menu at all. Otherwise (section 4/5, or Round mode) the
+	 * existing empty-space radial menu handles it — bends in Map mode, shots
+	 * in Round mode.
 	 */
 	function handleAnnotationPlacement(
 		coordinates: { xPx: number; yPx: number },
 		options: { altKey?: boolean } = {}
 	): void {
-		if (annotationMode === 'map' && !activeHoleId) return;
-		openRadialMenu({ at: coordinates, holeId: activeHoleId, hitMarker: null, altKey: options.altKey ?? false });
+		if (annotationMode === 'map') {
+			if (!activeHoleId) return;
+			const hole = activeHole();
+			if (hole && sectionOfHole(hole) <= 3) {
+				placeNextPiece(activeHoleId, coordinates, options.altKey ?? false);
+				return;
+			}
+		}
+		openRadialMenu({ at: coordinates, holeId: activeHoleId, hitMarker: null });
 	}
 
 	/**
@@ -1807,112 +1612,33 @@
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = false;
 		radialMenu = null;
-		basketCandidates = [];
-		basketCandidatesSource = null;
-		selectedBasketCandidate = null;
-		basketDetectionError = null;
+		markerChip = null;
+		sidebarFocusRequest = null;
+		savingCourseToMemory = false;
+		savedCourseToMemory = false;
+		courseDetectionError = null;
 		courseDetection = null;
-		activeReviewConfirmedCandidateIds = [];
-		activeReviewRecommendation = null;
-		activeReviewCandidateOverrides = {};
 		confirmedPieces = new Set();
 		courseDetectionStatus = null;
 		courseDetectionStage = null;
 		courseDetectionElapsedSeconds = 0;
 		stopCourseDetectionProgress();
-		clearRevealTimers();
-		revealStage = 'done';
-		candidateAssignConfirm = null;
-		courseCandidateDrag = null;
-		teeExperimentEnabled = { 'gray-center': true, 'edge-loop': true, fused: true };
-		teeExperimentFullResolution = false;
-		teeExperimentResult = null;
-		teeExperimentError = null;
-		selectedTeeCandidateKey = null;
 	}
 
-	function deriveMapBoundsFromNumbers(
-		candidates: readonly { readonly label?: number; readonly yPx: number }[] | undefined,
-		imageHeightPx: number
-	): { topPx: number; bottomPx: number } | undefined {
-		const labeled = candidates?.filter((candidate) => candidate.label !== undefined) ?? [];
-		if (labeled.length < 3) return undefined;
-		const ys = labeled.map((candidate) => candidate.yPx);
-		const minY = Math.min(...ys);
-		const maxY = Math.max(...ys);
-		const spread = maxY - minY;
-		const margin = Math.max(80, Math.min(300, spread * 0.3));
-		return {
-			topPx: Math.max(0, minY - margin),
-			bottomPx: Math.min(imageHeightPx, maxY + margin)
-		};
-	}
-
-	async function handleDetectTees(): Promise<void> {
+	async function handleDetectCourse(): Promise<void> {
 		const image = sourceImage();
-		if (!image || teeExperimentRunning) return;
+		if (!image || courseDetectionRunning) return;
 		const resource = editor.getAssetResource(image.id);
 		if (!resource) {
-			teeExperimentError = 'The source image bytes are no longer available.';
-			return;
-		}
-
-		const variants = TEE_VARIANTS.filter((variant) => teeExperimentEnabled[variant]);
-		if (variants.length === 0) return;
-
-		teeExperimentRunning = true;
-		teeExperimentError = null;
-		teeExperimentResult = null;
-		selectedTeeCandidateKey = null;
-		try {
-			const numberAnchor = courseDetection?.numberDetection?.anchor;
-			const cachedScale = numberAnchor
-				? deriveUDiscCalibration({
-						scale: numberAnchor.scale,
-						widthPx: numberAnchor.widthPx,
-						heightPx: numberAnchor.heightPx
-				  }).uiScalePx
-				: undefined;
-			const mapBoundsPx = deriveMapBoundsFromNumbers(
-				courseDetection?.numberDetection?.candidates,
-				image.heightPx
-			);
-			teeExperimentResult = await detectTees(
-				resource.bytes,
-				image.mimeType,
-				image.widthPx,
-				image.heightPx,
-				{
-					variants,
-					uiScalePx: cachedScale,
-					mapBoundsPx,
-					fullResolution: teeExperimentFullResolution
-				}
-			);
-		} catch (error) {
-			teeExperimentResult = null;
-			teeExperimentError = error instanceof Error ? error.message : 'Tee detection failed.';
-		} finally {
-			teeExperimentRunning = false;
-		}
-	}
-
-	async function handleDetectCourse(options: { autoApply?: boolean } = {}): Promise<void> {
-		const image = sourceImage();
-		if (!image || courseDetectionRunning || basketDetectionRunning) return;
-		const resource = editor.getAssetResource(image.id);
-		if (!resource) {
-			basketDetectionError = 'The source image bytes are no longer available.';
+			courseDetectionError = 'The source image bytes are no longer available.';
 			return;
 		}
 
 		const detectedImageId = image.id;
 		courseDetectionRunning = true;
-		basketDetectionError = null;
-		selectedBasketCandidate = null;
+		courseDetectionError = null;
 		courseDetectionStage = null;
-		candidateAssignConfirm = null;
-		courseCandidateDrag = null;
+		markerChip = null;
 		startCourseDetectionProgress();
 		try {
 			const result = await detectCourseCandidates(
@@ -1929,12 +1655,6 @@
 			// keyed to the old raster must never be written onto the new one's state.
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = result;
-			activeReviewConfirmedCandidateIds = [];
-			activeReviewCandidateOverrides = {};
-			recomputeActiveReview();
-			basketCandidates = result.baskets;
-			basketCandidatesSource = 'course-detection';
-			startCandidateReveal();
 			// Captured regardless of proposal.status: badge/basket ownership
 			// (courseGrammar's Stages 1 and 4) each succeed independently of the
 			// hole's overall tee/basket-complete status, so an "incomplete" or
@@ -1958,15 +1678,13 @@
 				(candidate) => candidate.label !== undefined
 			).length;
 			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
-			if (options.autoApply) applyReadyCourseHoles({ skipExisting: true });
+			applyDetectedPieces({ skipExisting: true });
 			await recognizeCourse(detectedImageId, numberBadges, labeledBaskets);
 		} catch (error) {
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = null;
 			courseDetectionStatus = 'Detection failed';
-			clearRevealTimers();
-			revealStage = 'done';
-			basketDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
+			courseDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
 		} finally {
 			courseDetectionRunning = false;
 			stopCourseDetectionProgress();
@@ -2030,49 +1748,12 @@
 	}
 
 	/**
-	 * `skipExisting` protects a manually-placed tee or basket from being
-	 * silently clobbered by a re-run of detection — used by the auto-detect
-	 * effect, which can fire against a hole the user is already correcting
-	 * (checked per field: a hole with a manual tee but no basket yet still
-	 * gets the detector's basket, without touching the tee). The explicit
-	 * "Apply N ready holes" button leaves it off: a user pressing that button
-	 * is deliberately asking to reapply both.
-	 */
-	function applyReadyCourseHoles(options: { skipExisting?: boolean } = {}): void {
-		if (!courseDetection) return;
-		const ready = courseDetection.grammar.holes.filter(
-			(proposal) => proposal.status === 'ready' && proposal.tee && proposal.basket
-		);
-		if (ready.length === 0) return;
-
-		const inheritedWidthPx = currentCorridorWidthPx();
-		const existingByNumber = new Map(holes.map((hole) => [hole.number, hole]));
-		for (const proposal of ready) {
-			const existing = existingByNumber.get(proposal.number);
-			const keepTee = options.skipExisting && existing?.tee;
-			const keepBasket = options.skipExisting && existing?.basket;
-			if (keepTee && keepBasket) continue;
-			const next: AnnotatedHole = {
-				...(existing ?? {
-					id: crypto.randomUUID(),
-					number: proposal.number,
-					shots: [],
-					corridorBends: [],
-					corridorWidthPx: inheritedWidthPx
-				}),
-				tee: keepTee ? existing!.tee! : acceptCandidate(proposal.tee!),
-				basket: keepBasket ? existing!.basket! : acceptCandidate(proposal.basket!)
-			};
-			existingByNumber.set(proposal.number, next);
-		}
-		holes = [...existingByNumber.values()].sort((a, b) => a.number - b.number);
-		activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
-	}
-
-	/**
-	 * Loads the hand-authored IMG_5641 reference points for course geometry only.
-	 * This intentionally does not touch shots, bends, corridor widths, or the
-	 * walking path; those are separate annotation work.
+	 * Loads the hand-authored IMG_5641 reference points for course geometry
+	 * only. This intentionally does not touch shots, bends, corridor widths,
+	 * or the walking path; those are separate annotation work. Every hole's
+	 * tee and basket is marked confirmed: this fixture is known-correct QA
+	 * data, not something the sidebar should ask a developer to re-review
+	 * piece by piece.
 	 */
 	function handleAssignGroundTruth(): void {
 		const image = sourceImage();
@@ -2094,78 +1775,15 @@
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = true;
 		courseDetection = null;
-		basketCandidates = [];
-		basketCandidatesSource = null;
-		selectedBasketCandidate = null;
-		activeReviewConfirmedCandidateIds = [];
-		activeReviewRecommendation = null;
-		activeReviewCandidateOverrides = {};
+		const confirmed = new Set<string>();
+		for (const hole of holes) {
+			if (hole.tee) confirmed.add(pieceStatusKey(hole.id, 'tee'));
+			if (hole.basket) confirmed.add(pieceStatusKey(hole.id, 'basket'));
+		}
+		confirmedPieces = confirmed;
 		courseDetectionStatus = 'Ground truth assigned · 18 pads · 18 baskets · 18 badges';
 		courseDetectionElapsedSeconds = 0;
-		basketDetectionError = null;
-	}
-
-	async function handleDetectBaskets(): Promise<void> {
-		const image = sourceImage();
-		if (!image || basketDetectionRunning) return;
-		const resource = editor.getAssetResource(image.id);
-		if (!resource) {
-			basketDetectionError = 'The source image bytes are no longer available.';
-			return;
-		}
-
-		basketDetectionRunning = true;
-		basketDetectionError = null;
-		selectedBasketCandidate = null;
-		try {
-			basketCandidates = await detectBasketCandidates(
-				resource.bytes,
-				image.mimeType,
-				image.widthPx,
-				image.heightPx
-			);
-			basketCandidatesSource = 'standalone';
-			if (basketCandidates.length === 0) {
-				basketDetectionError =
-					'No basket candidates found. Try a full UDisc map screenshot with the basket icons visible.';
-			}
-		} catch (error) {
-			basketCandidates = [];
-			basketCandidatesSource = null;
-			basketDetectionError =
-				error instanceof Error ? error.message : 'Basket detection failed.';
-		} finally {
-			basketDetectionRunning = false;
-		}
-	}
-
-	function applySelectedBasket(): void {
-		if (selectedBasketCandidate === null || !activeHoleId) return;
-		const candidate = basketCandidates[selectedBasketCandidate];
-		if (!candidate) return;
-		holes = holes.map((hole) =>
-			hole.id === activeHoleId ? { ...hole, basket: acceptCandidate(candidate) } : hole
-		);
-		selectedBasketCandidate = null;
-		markActiveReviewCandidateHandled('basket', { xPx: candidate.xPx, yPx: candidate.yPx });
-	}
-
-	function selectBasketCandidate(index: number): void {
-		selectedBasketCandidate = index;
-		if (activeHoleId) return;
-
-		// Candidate review needs an active hole to show the preview and enable
-		// Apply. Create the first draft hole on demand so the detector is usable
-		// immediately after the user clicks a candidate.
-		if (holes.length > 0) {
-			activeHoleId = holes[holes.length - 1].id;
-			return;
-		}
-		const inheritedWidthPx = currentCorridorWidthPx();
-		const nextHoles = addHole(holes);
-		const addedHole = nextHoles[nextHoles.length - 1];
-		holes = setCorridorWidth(nextHoles, addedHole.id, inheritedWidthPx);
-		activeHoleId = addedHole.id;
+		courseDetectionError = null;
 	}
 
 	/** A stitched PNG awaiting import from the Stitch Map page (banner shown only when import isn't safe to do automatically — see `canAutoImportHandoffSafely`). */
@@ -2337,9 +1955,11 @@
 			activeHoleId = null;
 			previewHoles = null;
 			radialMenu = null;
-			basketCandidates = [];
-			basketCandidatesSource = null;
-			selectedBasketCandidate = null;
+			markerChip = null;
+			sidebarFocusRequest = null;
+			savingCourseToMemory = false;
+			savedCourseToMemory = false;
+			confirmedPieces = new Set();
 			courseDetection = null;
 			autoDetectedSourceId = null;
 			prewarmedSourceId = null;
@@ -2681,6 +2301,13 @@
 		<p class="error" data-testid="annotate-done-error" role="alert">{doneError}</p>
 	{/if}
 
+	<!--
+		Map mode's hole navigation moved into the sidebar (ImageEditorPane's
+		`tools` snippet below) as part of the redesign. Round mode's own hole
+		selection (for shots/walk path) is untouched — same flat 1-18 bar as
+		before, just no longer shown in Map mode now that the sidebar covers it.
+	-->
+	{#if annotationMode === 'round'}
 	<nav class="hole-bar" data-testid="hole-bar">
 		<div class="hole-bar-grid">
 			{#each Array.from({ length: 18 }, (_, index) => index + 1) as holeNumber}
@@ -2729,6 +2356,7 @@
 			</div>
 		{/if}
 	</nav>
+	{/if}
 
 	<div class="hole-annotation" class:diagnostics-collapsed={!diagnosticsRailExpanded} data-testid="hole-annotation">
 		<ImageEditorPane
@@ -2745,7 +2373,7 @@
 			onClaimedPointerUp={commitAnnotationPointerUp}
 			onClaimedPointerCancel={cancelAnnotationPointer}
 			toolsAriaLabel={null}
-			focusRequest={activeReviewFocusRequest}
+			focusRequest={sidebarFocusRequest}
 		>
 			{#snippet headerActions()}
 				{#if activeHole()}
@@ -2781,38 +2409,34 @@
 					</div>
 				{/if}
 
-				{#if sourceImage()}
-					<div class="tool-section detection">
-						<div class="section-heading">
-							<h2>Course assist</h2>
-							{#if basketCandidates.length > 0}<span>{basketCandidates.length} found</span>{/if}
+				{#if sourceImage() && annotationMode === 'map'}
+					<div class="tool-section hole-sidebar" data-testid="hole-sidebar">
+						<div class="thresh-row">
+							<label for="min-usefulness-input">Min usefulness</label>
+							<input
+								type="range"
+								id="min-usefulness-input"
+								min="0"
+								max="0.95"
+								step="0.05"
+								value={minAutoSuggestScore}
+								disabled={!applyDetectionThreshold}
+								aria-label="Minimum usefulness for auto-applying detected tee/basket pieces"
+								data-testid="min-usefulness-input"
+								oninput={handleMinAutoSuggestScoreInput}
+							/>
+							<span class="thresh-val">{Math.round(minAutoSuggestScore * 100)}%</span>
+							<label class="thresh-toggle" class:active={applyDetectionThreshold}>
+								<input
+									type="checkbox"
+									checked={applyDetectionThreshold}
+									onchange={handleApplyDetectionThresholdToggle}
+									data-testid="apply-detection-threshold-toggle"
+								/>
+								Filter
+							</label>
 						</div>
-						{#if groundTruthToolsEnabled}
-							<button
-								type="button"
-								class="apply-button"
-								data-testid="assign-ground-truth"
-								disabled={
-									courseDetectionRunning ||
-									basketDetectionRunning ||
-									teeExperimentRunning ||
-									!sourceImage() ||
-									!groundTruthMatchesImage(sourceImage()!)
-								}
-								onclick={handleAssignGroundTruth}
-							>
-								Assign ground truth · 18 pads · 18 baskets · 18 badges
-							</button>
-						{/if}
-						<button
-							type="button"
-							class="detect-button"
-							data-testid="detect-course"
-							disabled={courseDetectionRunning || basketDetectionRunning}
-							onclick={() => void handleDetectCourse()}
-						>
-							{courseDetectionRunning ? 'Detecting the course…' : 'Detect full course'}
-						</button>
+
 						{#if courseDetectionStatus}
 							<p
 								class="detection-progress"
@@ -2822,177 +2446,81 @@
 							>
 								<span class="progress-dot" class:running={courseDetectionRunning} aria-hidden="true"></span>
 								<span class="progress-copy">{courseDetectionStatus}</span>
-								<span class="progress-time">{courseDetectionElapsedSeconds}s</span>
+								{#if courseDetectionRunning}<span class="progress-time">{courseDetectionElapsedSeconds}s</span>{/if}
 							</p>
 						{/if}
-						{#if courseDetection}
-							{@const assignedNumbers = courseDetection.numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length}
-							{@const readyHoles = courseDetection.grammar.holes.filter((proposal) => proposal.status === 'ready').length}
-							<p class="detection-summary" data-testid="course-detection-controls-summary">
-								{assignedNumbers} numbers · {courseDetection.tees.length} tees · {courseDetection.baskets.length} baskets · {readyHoles} ready
-							</p>
-							{#if courseDetection.numberDetection.note}
-								<p class="tool-note">{courseDetection.numberDetection.note}</p>
-							{/if}
-							{#if courseDetection.numberDetection.candidates.some((candidate) => candidate.topGlyphMatches?.length)}
-								<details class="number-diagnostics" open>
-									<summary>Number classifier diagnostics</summary>
-									<p class="diagnostic-help">Raw top 3 are independent glyph scores. Assigned is the forced one-to-one Hungarian result.</p>
-									<div class="diagnostic-list">
-										{#each courseDetection.numberDetection.candidates as candidate, index (index)}
-											{@const candidateId = candidate.diagnosticId ?? index + 1}
-											{@const rawMatches = candidate.topGlyphMatches ?? []}
-											{@const forcedAssignment = candidate.label !== undefined && rawMatches[0] !== undefined && rawMatches[0].label !== candidate.label}
-											<div class="diagnostic-row" class:forced={forcedAssignment}>
-												<strong>C{candidateId}</strong>
-												<span class="diagnostic-assigned">assigned {candidate.label !== undefined ? `H${candidate.label}` : '—'}</span>
-												<span class="diagnostic-raw">
-													raw
-													{#each rawMatches as match, matchIndex (match.label)}
-														{matchIndex > 0 ? ' · ' : ' '}H{match.label} {(match.score * 100).toFixed(0)}%
-													{/each}
-												</span>
-											</div>
-										{/each}
-									</div>
-								</details>
-							{/if}
+						{#if courseDetectionError}
+							<p class="tool-error" data-testid="course-detection-error" role="alert">{courseDetectionError}</p>
+						{/if}
+						{#if groundTruthToolsEnabled}
 							<button
 								type="button"
 								class="apply-button"
-								data-testid="apply-ready-course-holes"
-								disabled={readyHoles === 0}
-								onclick={() => applyReadyCourseHoles()}
+								data-testid="assign-ground-truth"
+								disabled={courseDetectionRunning || !sourceImage() || !groundTruthMatchesImage(sourceImage()!)}
+								onclick={handleAssignGroundTruth}
 							>
-								Apply {readyHoles} ready holes
+								Assign ground truth · 18 pads · 18 baskets · 18 badges
 							</button>
 						{/if}
-						<p class="assist-divider">Tee experiments</p>
-						<div class="tee-experiment-controls">
-							<div class="tee-variant-toggles">
-								{#each TEE_VARIANTS as variant (variant)}
-									<label class:active={teeExperimentEnabled[variant]}>
-										<input
-											type="checkbox"
-											checked={teeExperimentEnabled[variant]}
-											onchange={() =>
-												(teeExperimentEnabled = {
-													...teeExperimentEnabled,
-													[variant]: !teeExperimentEnabled[variant]
-												})}
-											data-testid="tee-variant-{variant}"
-										/>
-										{TEE_VARIANT_LABELS[variant]}
-									</label>
-								{/each}
+
+						{#if allHolesConfirmed}
+							<div class="done-panel" data-testid="course-complete-panel">
+								<h3>Course complete</h3>
+								<p>All 18 holes have confirmed tee and basket placements.</p>
+								<div class="stack">
+									<button
+										type="button"
+										class="save-course-button"
+										data-testid="save-course-to-memory"
+										disabled={savingCourseToMemory}
+										onclick={() => void handleSaveCourseToMemory()}
+									>
+										{savingCourseToMemory ? 'Saving…' : savedCourseToMemory ? 'Saved to memory ✓' : 'Save course to memory'}
+									</button>
+									<button
+										type="button"
+										class="upload-round-button"
+										data-testid="upload-round-from-course"
+										disabled={!savedCourseToMemory || doneRunning}
+										title={savedCourseToMemory ? undefined : 'Save the course first'}
+										onclick={() => void handleUploadRoundFromCourse()}
+									>
+										Upload a round from this course →
+									</button>
+								</div>
 							</div>
-							<label class="tee-full-res-toggle" class:active={teeExperimentFullResolution}>
-								<input
-									type="checkbox"
-									checked={teeExperimentFullResolution}
-									onchange={() => (teeExperimentFullResolution = !teeExperimentFullResolution)}
-									data-testid="tee-full-resolution"
-								/>
-								Full resolution
-							</label>
-							<button
-								type="button"
-								class="detect-button"
-								data-testid="detect-tees"
-								disabled={teeExperimentRunning || courseDetectionRunning || basketDetectionRunning}
-								onclick={() => void handleDetectTees()}
-							>
-								{teeExperimentRunning ? 'Detecting tees…' : 'Detect tees'}
-							</button>
-							{#if teeExperimentError}
-								<p class="tool-error" data-testid="tee-detection-error" role="alert">
-									{teeExperimentError}
-								</p>
-							{/if}
-							{#if teeExperimentResult}
-								{@const total = teeExperimentResult.results.reduce(
-									(sum, result) => sum + result.candidates.length,
-									0
-								)}
-								<p class="detection-summary" data-testid="tee-detection-controls-summary">
-									scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates
-								</p>
-								{#each teeExperimentResult.results as result (result.variant)}
-									<details class="tee-diagnostics" open>
-										<summary>
-											{TEE_VARIANT_LABELS[result.variant]} · {result.candidates.length} found
-										</summary>
-										<div class="tee-stage-counts">
-											{#each Object.entries(result.stageCounts) as [stage, count]}
-												<span>{stage}: {count}</span>
-											{/each}
-										</div>
-										<div class="tee-candidate-list">
-											{#each result.candidates as candidate, index (index)}
-												{@const key = `${result.variant}-${index}`}
+						{:else}
+							{#each [1, 2, 3, 4, 5] as const as section (section)}
+								<div class="grid-section sec{section}" data-testid="sidebar-section-{section}">
+									<div class="grid-head">
+										<h3>{SIDEBAR_SECTION_LABELS[section]}</h3>
+										<span class="count">{sidebarSections[section].length}</span>
+									</div>
+									{#if sidebarSections[section].length === 0}
+										<p class="empty-note">none</p>
+									{:else}
+										<div class="hole-grid">
+											{#each sidebarSections[section] as number (number)}
+												{@const hole = holes.find((candidate) => candidate.number === number)}
 												<button
 													type="button"
-													class:selected={selectedTeeCandidateKey === key}
-													aria-pressed={selectedTeeCandidateKey === key}
-													onclick={() => (selectedTeeCandidateKey = key)}
+													class="hbox"
+													class:active={hole?.id === activeHoleId}
+													data-testid="sidebar-hole-{number}"
+													onclick={() => onHoleBoxClick(number)}
 												>
-													<span class="tee-candidate-tag">
-														{TEE_VARIANT_LABELS[result.variant]} tee
-													</span>
-													<span class="tee-candidate-score">
-														{(candidate.score * 100).toFixed(0)}%
-													</span>
-													<span class="tee-candidate-dims">
-														{candidate.widthPx.toFixed(0)}×{candidate.heightPx.toFixed(0)}
-													</span>
-													<span class="tee-candidate-orient">
-														{candidate.orientationDeg.toFixed(0)}°
-													</span>
-													<span class="tee-candidate-support">
-														{candidate.support.join('+')}
+													<span class="num">{number}</span>
+													<span class="tb">
+														<span class={hole?.tee ? (isPieceConfirmed(hole.id, 'tee') ? 'confirmed' : 'pending') : ''}>T</span>
+														<span class={hole?.basket ? (isPieceConfirmed(hole.id, 'basket') ? 'confirmed' : 'pending') : ''}>B</span>
 													</span>
 												</button>
 											{/each}
 										</div>
-									</details>
-								{/each}
-							{/if}
-						</div>
-						<p class="assist-divider">Basket-only fallback</p>
-						<button
-							type="button"
-							class="detect-button"
-							data-testid="detect-baskets"
-							disabled={basketDetectionRunning || courseDetectionRunning}
-							onclick={() => void handleDetectBaskets()}
-						>
-							{basketDetectionRunning ? 'Loading OpenCV and detecting…' : 'Detect baskets'}
-						</button>
-						{#if basketDetectionError}
-							<p class="tool-error" data-testid="basket-detection-error" role="alert">{basketDetectionError}</p>
-						{/if}
-						{#if basketCandidates.length > 0}
-							<div class="candidate-list" aria-label="Detected basket candidates">
-								{#each basketCandidates as candidate, index (index)}
-									<button
-										type="button"
-										class:selected={selectedBasketCandidate === index}
-										aria-pressed={selectedBasketCandidate === index}
-										onclick={() => selectBasketCandidate(index)}
-									>
-										Basket candidate {index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
-									</button>
-								{/each}
-							</div>
-							<button
-								type="button"
-								class="apply-button"
-								data-testid="apply-basket-candidate-controls"
-								disabled={selectedBasketCandidate === null || !activeHoleId}
-								onclick={applySelectedBasket}
-							>
-								Apply to Hole {activeHole()?.number ?? ''}
-							</button>
+									{/if}
+								</div>
+							{/each}
 						{/if}
 					</div>
 				{/if}
@@ -3088,40 +2616,6 @@
 								</div>
 							</details>
 						{/if}
-					{/if}
-					{#if teeExperimentResult}
-						{@const total = teeExperimentResult.results.reduce((sum, result) => sum + result.candidates.length, 0)}
-						<p class="detection-summary" data-testid="tee-detection-summary">scale {teeExperimentResult.uiScalePx.toFixed(1)} px · {total} candidates</p>
-						{#each teeExperimentResult.results as result (result.variant)}
-							<details class="tee-diagnostics">
-								<summary>{TEE_VARIANT_LABELS[result.variant]} · {result.candidates.length} found</summary>
-								<div class="tee-stage-counts">
-									{#each Object.entries(result.stageCounts) as [stage, count]}<span>{stage}: {count}</span>{/each}
-								</div>
-								<div class="tee-candidate-list">
-									{#each result.candidates as candidate, index (index)}
-										{@const key = `${result.variant}-${index}`}
-										<button type="button" class:selected={selectedTeeCandidateKey === key} aria-pressed={selectedTeeCandidateKey === key} onclick={() => (selectedTeeCandidateKey = key)}>
-											<span class="tee-candidate-tag">{TEE_VARIANT_LABELS[result.variant]} tee</span>
-											<span class="tee-candidate-score">{(candidate.score * 100).toFixed(0)}%</span>
-											<span class="tee-candidate-dims">{candidate.widthPx.toFixed(0)}×{candidate.heightPx.toFixed(0)}</span>
-										</button>
-									{/each}
-								</div>
-							</details>
-						{/each}
-					{/if}
-					{#if basketCandidates.length > 0}
-						<div class="candidate-list" aria-label="Detected basket candidates">
-							{#each basketCandidates as candidate, index (index)}
-								<button type="button" class:selected={selectedBasketCandidate === index} aria-pressed={selectedBasketCandidate === index} onclick={() => selectBasketCandidate(index)}>
-									Basket candidate {index + 1} <span>{(candidate.score * 100).toFixed(0)}%</span>
-								</button>
-							{/each}
-						</div>
-						<button type="button" class="apply-button" data-testid="apply-basket-candidate" disabled={selectedBasketCandidate === null || !activeHoleId} onclick={applySelectedBasket}>
-							Apply to Hole {activeHole()?.number ?? ''}
-						</button>
 					{/if}
 					</div>
 					</div>
@@ -3236,8 +2730,7 @@
 									y1={proposal.numberBadge.yPx}
 									x2={proposal.tee.xPx}
 									y2={proposal.tee.yPx}
-									class="grammar-link-candidate"
-									class:revealed={revealedUpTo('grammar')}
+									class="grammar-link-candidate revealed"
 									data-testid="grammar-link-{proposal.number}-badge-tee"
 								/>
 							{/if}
@@ -3247,8 +2740,7 @@
 									y1={proposal.tee.yPx}
 									x2={proposal.basket.xPx}
 									y2={proposal.basket.yPx}
-									class="grammar-link-candidate"
-									class:revealed={revealedUpTo('grammar')}
+									class="grammar-link-candidate revealed"
 									data-testid="grammar-link-{proposal.number}-tee-basket"
 								/>
 							{/if}
@@ -3258,11 +2750,10 @@
 							{@const rawTopMatch = candidate.topGlyphMatches?.[0]}
 							{@const forcedAssignment = candidate.label !== undefined && rawTopMatch !== undefined && rawTopMatch.label !== candidate.label}
 							<g
-								class="number-candidate-marker"
+								class="number-candidate-marker revealed"
 								class:forced-assignment={forcedAssignment}
 								class:selected-hole={candidate.label !== undefined && candidate.label === activeHole()?.number}
 								class:tappable={candidate.label !== undefined}
-								class:revealed={revealedUpTo('numbers')}
 								data-testid="number-candidate-{candidateId}"
 							>
 								<rect
@@ -3287,88 +2778,7 @@
 								</text>
 							</g>
 						{/each}
-						{#each courseDetection.tees as candidate, index (index)}
-							{#if !candidateIsHandled('tee', index)}
-								{@const point = courseCandidateDisplayPoint('tee', index, candidate)}
-								{@const label = candidateAriaLabel('tee', point)}
-								<g
-									class="course-candidate-group"
-									class:revealed={revealedUpTo('tees')}
-									class:interactive={Boolean(activeHoleId)}
-									class:dragging={courseCandidateDrag?.kind === 'tee' && courseCandidateDrag.candidateIndex === index}
-									role="button"
-									aria-label={label}
-									data-testid="tee-candidate-{index + 1}"
-								>
-									<title>{label}</title>
-									<rect
-										x={point.xPx - candidate.widthPx / 2}
-										y={point.yPx - candidate.heightPx / 2}
-										width={candidate.widthPx}
-										height={candidate.heightPx}
-										transform={`rotate(${candidate.orientationDeg} ${point.xPx} ${point.yPx})`}
-										class="tee-candidate-marker"
-									/>
-								</g>
-							{/if}
-						{/each}
 					{/if}
-					{#if teeExperimentResult}
-						{#each teeExperimentResult.results as result (result.variant)}
-							{@const colorClass = `tee-candidate-${result.variant}`}
-							{@const short = TEE_VARIANT_SHORT_LABELS[result.variant]}
-							{#each result.candidates as candidate, index (index)}
-								{@const key = `${result.variant}-${index}`}
-								<g class="tee-experiment-candidate">
-									<rect
-										x={candidate.xPx - candidate.widthPx / 2}
-										y={candidate.yPx - candidate.heightPx / 2}
-										width={candidate.widthPx}
-										height={candidate.heightPx}
-										transform={`rotate(${candidate.orientationDeg} ${candidate.xPx} ${candidate.yPx})`}
-										class="tee-candidate-marker {colorClass}"
-										class:selected={selectedTeeCandidateKey === key}
-									/>
-									<text
-										x={candidate.xPx}
-										y={candidate.yPx - candidate.heightPx / 2 - 5 / zoom}
-										text-anchor="middle"
-										class="tee-experiment-label"
-										style={`font-size:${10 / zoom}px`}
-									>
-										{short} {candidate.score.toFixed(2)}
-									</text>
-								</g>
-							{/each}
-						{/each}
-					{/if}
-					{#each basketCandidates as candidate, index (index)}
-						{@const fromCourseDetection = basketCandidatesSource === 'course-detection'}
-						{#if !fromCourseDetection || !candidateIsHandled('basket', index)}
-							{@const point = fromCourseDetection
-								? courseCandidateDisplayPoint('basket', index, candidate)
-								: { xPx: candidate.xPx, yPx: candidate.yPx }}
-							{@const label = fromCourseDetection ? candidateAriaLabel('basket', point) : undefined}
-							<g
-								class="course-candidate-group"
-								class:revealed={!fromCourseDetection || revealedUpTo('baskets')}
-								class:interactive={fromCourseDetection && Boolean(activeHoleId)}
-								class:dragging={fromCourseDetection && courseCandidateDrag?.kind === 'basket' && courseCandidateDrag.candidateIndex === index}
-								role={fromCourseDetection ? 'button' : undefined}
-								aria-label={label}
-							>
-								{#if label}<title>{label}</title>{/if}
-								<circle
-									cx={point.xPx}
-									cy={point.yPx}
-									r={(selectedBasketCandidate === index ? 11 : 8) / zoom}
-									class="basket-candidate-marker"
-									class:selected={selectedBasketCandidate === index}
-									data-testid="basket-candidate-{index + 1}"
-								/>
-							</g>
-						{/if}
-					{/each}
 				</svg>
 			{/snippet}
 
@@ -3384,92 +2794,82 @@
 							<span class="progress-dot running" aria-hidden="true"></span>
 							{compactDetectionStageCopy(courseDetectionStage)}
 						</p>
-					{:else if courseDetection && revealStage === 'done'}
-						<div class="active-review-strip" data-testid="active-review-suggestion" role="status">
-							{#if activeReviewRecommendation?.kind === 'candidate'}
-								{@const recommendation = activeReviewRecommendation}
-								<p>Click to accept or drag the {recommendation.candidateKind} for Hole {recommendation.holeNumber}</p>
-								<span>
-									{recommendation.belowThreshold
-										? `Best remaining at ${Math.round(recommendation.score * 100)}% — below the ${Math.round(minAutoSuggestScore * 100)}% floor`
-										: `${Math.round(recommendation.score * 100)}% usefulness`}
-									· {recommendation.rationale.competingHoleCount} competing links
-								</span>
-							{:else}
-								<p>No unreviewed detected candidate remains.</p>
-								<span>All available candidates have been decided.</span>
-							{/if}
-							<label class="active-review-threshold">
-								<span>Minimum usefulness {Math.round(minAutoSuggestScore * 100)}%</span>
-								<input
-									type="range"
-									min="0"
-									max="0.95"
-									step="0.05"
-									value={minAutoSuggestScore}
-									aria-label="Minimum automatic suggestion usefulness score"
-									data-testid="active-review-threshold-input"
-									oninput={handleMinAutoSuggestScoreInput}
-								/>
-							</label>
-						</div>
 					{/if}
 				</div>
 
-				{#if courseDetection && revealStage === 'done' && activeReviewRecommendation?.kind === 'candidate' && !activeReviewRecommendation.belowThreshold}
-					{@const markerPoint = activeReviewRecommendationPoint()}
-					{#if markerPoint}
-						{@const markerAnchor = imageToScreen(markerPoint, view)}
-						<div
-							class="active-review-marker-action"
-							data-testid="active-review-marker-action"
-							style={`left:${markerAnchor.x}px; top:${markerAnchor.y}px;`}
-							aria-label="Review suggested candidate"
+				{#if sidebarBanner}
+					<div class="placement-banner" class:approve={sidebarBanner.kind === 'approve'} data-testid="placement-banner" role="status">
+						{#if sidebarBanner.kind === 'placing'}
+							<span><strong>Placing Hole {sidebarBanner.holeNumber} — {sidebarBanner.piece}.</strong> Click empty map to place. Click any existing marker to fix it.</span>
+							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
+						{:else if sidebarBanner.kind === 'approve'}
+							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Drag either marker to adjust, then Approve.</span>
+							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
+						{:else}
+							<span>Hole {sidebarBanner.holeNumber} is confirmed.</span>
+							<button type="button" class="banner-close" data-testid="placement-banner-close" onclick={exitSidebarFocus}>Close</button>
+						{/if}
+					</div>
+				{/if}
+
+				{#if sidebarBanner?.kind === 'approve'}
+					{@const hole = holes.find((candidate) => candidate.id === activeHoleId)}
+					{#if hole?.tee && hole.basket}
+						{@const midpoint = { xPx: (hole.tee.xPx + hole.basket.xPx) / 2, yPx: (hole.tee.yPx + hole.basket.yPx) / 2 }}
+						{@const anchor = imageToScreen(midpoint, view)}
+						<button
+							type="button"
+							class="approve-hole-button"
+							data-testid="approve-hole-button"
+							style={`left:${anchor.x}px; top:${anchor.y}px;`}
+							onclick={approveActiveHole}
 						>
-							<button
-								type="button"
-								class="active-review-reject"
-								aria-label={`Reject ${activeReviewRecommendation.candidateKind} for Hole ${activeReviewRecommendation.holeNumber}`}
-								data-testid="active-review-reject"
-								onpointerdown={(event) => event.stopPropagation()}
-								onclick={rejectActiveReviewMarker}
-							>❌</button>
-							<strong>{activeReviewRecommendation.candidateKind === 'tee' ? 'T' : 'B'}{activeReviewRecommendation.holeNumber}</strong>
-							<button
-								type="button"
-								class="active-review-accept"
-								aria-label={`Accept ${activeReviewRecommendation.candidateKind} for Hole ${activeReviewRecommendation.holeNumber}`}
-								data-testid="active-review-accept"
-								onpointerdown={(event) => event.stopPropagation()}
-								onclick={acceptActiveReviewMarker}
-							>✅</button>
-						</div>
+							✓ Approve Hole {hole.number}
+						</button>
 					{/if}
 				{/if}
 
-				{#if candidateAssignConfirm}
-					{@const anchor = imageToScreen(candidateAssignConfirm.point, view)}
+				{#if markerChip}
+					{@const anchor = imageToScreen(markerChip.point, view)}
+					{@const activeNumber = holes.find((candidate) => candidate.id === activeHoleId)?.number}
 					<div
-						bind:this={candidateConfirmEl}
-						class="candidate-assign-confirm"
-						data-testid="candidate-assign-confirm"
+						bind:this={markerChipEl}
+						class="marker-chip"
+						data-testid="marker-chip"
 						style={`left:${anchor.x}px; top:${anchor.y}px;`}
 					>
-						<button
-							type="button"
-							class="candidate-assign-confirm-accept"
-							data-testid="candidate-assign-confirm-accept"
-							onclick={confirmCandidateAssign}
-						>
-							Confirm {candidateAssignConfirm.kind} for Hole {candidateAssignConfirm.holeNumber}?
-						</button>
-						<button
-							type="button"
-							class="candidate-assign-confirm-cancel"
-							data-testid="candidate-assign-confirm-cancel"
-							aria-label="Cancel"
-							onclick={dismissCandidateAssign}
-						>✕</button>
+						<div class="chip-head">Hole {markerChip.holeNumber} · {markerChip.kind === 'tee' ? 'Tee' : 'Basket'}</div>
+						<div class="chip-sub">{isPieceConfirmed(markerChip.holeId, markerChip.kind) ? 'confirmed' : 'pending'}</div>
+						<div class="chip-stack">
+							{#if activeHoleId && activeHoleId !== markerChip.holeId && activeNumber !== undefined}
+								{@const quickTargetHoleId = activeHoleId}
+								<button
+									type="button"
+									class="chip-quick-reassign"
+									data-testid="marker-chip-quick-reassign"
+									onclick={() => reassignFromChip(quickTargetHoleId)}
+								>
+									Reassign to Hole {activeNumber} (active)
+								</button>
+							{/if}
+							<div class="chip-reassign-row">
+								<span>Reassign to hole</span>
+								<input
+									type="number"
+									min="1"
+									max="999"
+									bind:value={markerChipReassignInput}
+									aria-label="Reassign to hole number"
+									data-testid="marker-chip-reassign-input"
+								/>
+								<button type="button" data-testid="marker-chip-reassign-go" onclick={reassignFromChipInput}>Go</button>
+							</div>
+							<div class="chip-divider"></div>
+							<button type="button" class="chip-delete" data-testid="marker-chip-delete" onclick={deleteFromChip}>
+								Delete — not a real {markerChip.kind}
+							</button>
+							<button type="button" class="chip-dismiss" data-testid="marker-chip-dismiss" onclick={closeMarkerChip}>Dismiss</button>
+						</div>
 					</div>
 				{/if}
 
@@ -3835,13 +3235,6 @@
 		pointer-events: none;
 	}
 
-	.tee-candidate-marker {
-		fill: rgb(56 189 248 / 20%);
-		stroke: #38bdf8;
-		stroke-width: 2;
-		vector-effect: non-scaling-stroke;
-	}
-
 	.basket-marker {
 		fill: #ef4444;
 		stroke: #450a0a;
@@ -3870,19 +3263,6 @@
 		opacity: 0.45;
 	}
 
-	.basket-candidate-marker {
-		fill: #facc15;
-		stroke: #713f12;
-		stroke-width: 2;
-		stroke-dasharray: 3 2;
-	}
-
-	.basket-candidate-marker.selected {
-		fill: #fb923c;
-		stroke: #7c2d12;
-		stroke-width: 3;
-	}
-
 	.tool-section {
 		display: flex;
 		flex-direction: column;
@@ -3905,14 +3285,6 @@
 		color: #d4d4d8;
 	}
 
-	.section-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
-	}
-
-	.section-heading > span,
 	.empty-copy {
 		margin: 0;
 		color: #a1a1aa;
@@ -3938,41 +3310,10 @@
 		gap: 0.35rem;
 	}
 
-	.detect-button,
 	.apply-button {
 		width: 100%;
-	}
-
-	.detect-button {
-		border-color: #a16207 !important;
-		background: #422006 !important;
-		color: #fde68a !important;
-	}
-
-	.apply-button {
 		border-color: #2563eb !important;
 		background: #1d4ed8 !important;
-	}
-
-	.candidate-list {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 0.3rem;
-	}
-
-	.candidate-list button {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.72rem;
-	}
-
-	.candidate-list button.selected {
-		border-color: #f59e0b;
-		background: #451a03;
-	}
-
-	.candidate-list span {
-		color: #fbbf24;
 	}
 
 	.tool-error {
@@ -3982,8 +3323,7 @@
 	}
 
 	.detection-summary,
-	.tool-note,
-	.assist-divider {
+	.tool-note {
 		margin: 0;
 		font-size: 0.75rem;
 		line-height: 1.35;
@@ -4194,12 +3534,6 @@
 		white-space: normal;
 	}
 
-	.assist-divider {
-		padding-top: 0.35rem;
-		border-top: 1px solid #3f3f46;
-		color: #a1a1aa;
-	}
-
 	.annotation-overlay {
 		width: 100%;
 		height: 100%;
@@ -4216,14 +3550,9 @@
 	}
 
 	:global(.tools .number-diagnostics),
-		:global(.tools .tee-diagnostics),
 	:global(.tools [data-testid='course-detection-controls-summary']),
 	:global(.tools [data-testid='course-detection-controls-progress']),
-	:global(.tools [data-testid='tee-detection-controls-summary']),
-		:global(.tools .tool-note),
-	:global(.tools .tee-candidate-list),
-	:global(.tools .candidate-list),
-	:global(.tools [data-testid='apply-basket-candidate-controls']) {
+	:global(.tools .tool-note) {
 		display: none;
 	}
 
@@ -4386,30 +3715,6 @@
 		display: none;
 	}
 
-	.tee-experiment-controls {
-		display: flex;
-		flex-direction: column;
-		gap: 0.55rem;
-	}
-
-	.tee-variant-toggles {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-	}
-
-	.tee-variant-toggles label,
-	.tee-full-res-toggle {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		padding: 0.4rem 0.55rem;
-		border: 1px solid #3f3f46;
-		border-radius: 5px;
-		font-size: 0.76rem;
-		cursor: pointer;
-	}
-
 	.dev-tools-footer {
 		display: flex;
 		justify-content: flex-end;
@@ -4438,124 +3743,6 @@
 
 	.dev-tools-toggle input {
 		margin: 0;
-	}
-
-	.tee-variant-toggles label.active,
-	.tee-full-res-toggle.active {
-		border-color: #3b82f6;
-		background: rgb(59 130 246 / 15%);
-	}
-
-	.tee-variant-toggles input,
-	.tee-full-res-toggle input {
-		margin: 0;
-	}
-
-	.tee-experiment-candidate rect {
-		fill-opacity: 0.15;
-		stroke-width: 2;
-		vector-effect: non-scaling-stroke;
-	}
-
-	.tee-experiment-candidate rect.selected {
-		stroke-width: 4;
-	}
-
-	.tee-experiment-candidate .tee-candidate-gray-center {
-		fill: #38bdf8;
-		stroke: #38bdf8;
-	}
-
-	.tee-experiment-candidate .tee-candidate-edge-loop {
-		fill: #c084fc;
-		stroke: #c084fc;
-		stroke-dasharray: 4 3;
-	}
-
-	.tee-experiment-candidate .tee-candidate-fused {
-		fill: #facc15;
-		stroke: #facc15;
-		stroke-dasharray: 2 2;
-	}
-
-	.tee-experiment-label {
-		fill: #fff;
-		stroke: #18181b;
-		stroke-width: 3px;
-		paint-order: stroke fill;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-		font-weight: 700;
-		pointer-events: none;
-	}
-
-	.tee-diagnostics {
-		border: 1px solid #3f3f46;
-		border-radius: 5px;
-		background: #18181b;
-	}
-
-	.tee-diagnostics summary {
-		padding: 0.5rem 0.55rem;
-		cursor: pointer;
-		font-size: 0.75rem;
-		font-weight: 650;
-		color: #e4e4e7;
-	}
-
-	.tee-stage-counts {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-		padding: 0 0.55rem 0.45rem;
-		font-size: 0.68rem;
-		color: #a1a1aa;
-	}
-
-	.tee-stage-counts span {
-		background: #27272a;
-		padding: 0.15rem 0.3rem;
-		border-radius: 4px;
-	}
-
-	.tee-candidate-list {
-		display: flex;
-		flex-direction: column;
-		max-height: 16rem;
-		overflow: auto;
-		border-top: 1px solid #3f3f46;
-	}
-
-	.tee-candidate-list button {
-		display: grid;
-		grid-template-columns: minmax(7rem, 1.2fr) 3.5rem 5rem 3rem minmax(0, 1fr);
-		gap: 0.35rem;
-		align-items: baseline;
-		padding: 0.35rem 0.5rem;
-		border-bottom: 1px solid #2b2b30;
-		font-size: 0.68rem;
-		text-align: left;
-	}
-
-	.tee-candidate-list button:last-child {
-		border-bottom: 0;
-	}
-
-	.tee-candidate-list button.selected {
-		background: rgb(59 130 246 / 15%);
-	}
-
-	.tee-candidate-tag {
-		font-weight: 700;
-	}
-
-	.tee-candidate-score {
-		color: #fbbf24;
-	}
-
-	.tee-candidate-dims,
-	.tee-candidate-orient,
-	.tee-candidate-support {
-		color: #a1a1aa;
 	}
 
 	.point-hole-label {
@@ -4600,164 +3787,14 @@
 		color: #f4f4f5;
 	}
 
-	.active-review-strip {
-		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
-		min-width: 14rem;
-		padding: 0.45rem 0.6rem;
-		border: 1px solid #854d0e;
-		border-radius: 6px;
-		background: #18181bf2;
-		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
-	}
-
-	.active-review-strip p,
-	.active-review-strip span {
-		margin: 0;
-	}
-
-	.active-review-marker-action {
-		position: absolute;
-		z-index: 24;
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		transform: translate(-50%, calc(-100% - 0.35rem));
-		padding: 0.18rem 0.3rem;
-		border: 1px solid #52525b;
-		border-radius: 999px;
-		background: #18181bf5;
-		box-shadow: 0 4px 12px rgb(0 0 0 / 55%);
-		white-space: nowrap;
-		pointer-events: auto;
-	}
-
-	.active-review-marker-action strong {
-		min-width: 2rem;
-		font-size: 0.78rem;
-		text-align: center;
-		color: #f4f4f5;
-	}
-
-	.active-review-marker-action button {
-		width: 1.45rem;
-		height: 1.45rem;
-		padding: 0;
-		border: 0;
-		border-radius: 999px;
-		background: transparent;
-		font-size: 0.78rem;
-		line-height: 1;
-		cursor: pointer;
-	}
-
-	.active-review-marker-action button:hover,
-	.active-review-marker-action button:focus-visible {
-		background: #3f3f46;
-		outline: 2px solid #f4f4f5;
-		outline-offset: 1px;
-	}
-
-	.active-review-marker-action .active-review-reject {
-		color: #f87171;
-	}
-
-	.active-review-marker-action .active-review-accept {
-		color: #4ade80;
-	}
-
-	/* The action is anchored above the candidate itself; the card stays explanatory. */
-	.active-review-marker-action[aria-label] {
-		user-select: none;
-	}
-
-	.active-review-strip p {
-		font-size: 0.85rem;
-		font-weight: 700;
-		color: #fde68a;
-	}
-
-	.active-review-strip span {
-		font-size: 0.68rem;
-		color: #d4d4d8;
-	}
-
-	.active-review-threshold {
-		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
-		font-size: 0.68rem;
-		color: #d4d4d8;
-	}
-
-	.active-review-threshold input {
-		width: 100%;
-		accent-color: #f59e0b;
-	}
-
-	/* PART C — inline one-click confirmation chip anchored at the clicked candidate marker. */
-	.candidate-assign-confirm {
-		position: absolute;
-		left: 0;
-		top: 0;
-		z-index: 25;
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		transform: translate(-50%, calc(-100% - 0.6rem));
-		padding: 0.3rem 0.3rem 0.3rem 0.6rem;
-		border: 1px solid #38bdf8;
-		border-radius: 999px;
-		background: #18181b;
-		box-shadow: 0 6px 16px rgb(0 0 0 / 55%);
-		white-space: nowrap;
-	}
-
-	.candidate-assign-confirm-accept {
-		min-height: 2rem;
-		padding: 0.3rem 0.6rem;
-		border: 0;
-		border-radius: 999px;
-		background: #0369a1;
-		color: #f0f9ff;
-		font-size: 0.75rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.candidate-assign-confirm-accept:hover {
-		background: #0284c7;
-	}
-
-	.candidate-assign-confirm-cancel {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.6rem;
-		height: 1.6rem;
-		border: 0;
-		border-radius: 999px;
-		background: transparent;
-		color: #a1a1aa;
-		font-size: 0.75rem;
-		cursor: pointer;
-	}
-
-	.candidate-assign-confirm-cancel:hover {
-		color: #f4f4f5;
-	}
-
-	/* PART B — staged reveal: hidden until each stage's turn, fading in via CSS transition. */
+	/* Fade-in for number badges and grammar links once course detection completes. */
 	.number-candidate-marker,
-	.course-candidate-group,
 	.grammar-link-candidate {
 		opacity: 0;
 		transition: opacity 220ms ease;
 	}
 
 	.number-candidate-marker.revealed,
-	.course-candidate-group.revealed,
 	.grammar-link-candidate.revealed {
 		opacity: 1;
 	}
@@ -4769,30 +3806,8 @@
 		pointer-events: none;
 	}
 
-	/* PART C — candidate markers become clickable once revealed. */
-	.course-candidate-group.interactive {
-		cursor: pointer;
-	}
-
-	.course-candidate-group.dragging {
-		cursor: grabbing;
-	}
-
-	.course-candidate-group.dragging .tee-candidate-marker,
-	.course-candidate-group.dragging .basket-candidate-marker {
-		stroke-width: 3;
-		filter: brightness(1.35);
-	}
-
-	.course-candidate-group.interactive:hover .tee-candidate-marker,
-	.course-candidate-group.interactive:hover .basket-candidate-marker {
-		stroke-width: 3;
-		filter: brightness(1.25);
-	}
-
 	@media (prefers-reduced-motion: reduce) {
 		.number-candidate-marker,
-		.course-candidate-group,
 		.grammar-link-candidate {
 			transition: none;
 		}
@@ -4852,5 +3867,332 @@
 			padding-right: max(0.75rem, env(safe-area-inset-right));
 			gap: 0.75rem;
 		}
+	}
+
+	/* ---- Redesigned Map-mode sidebar: threshold row, five-section hole grid, completion panel ---- */
+
+	.hole-sidebar {
+		gap: 0.7rem;
+	}
+
+	.thresh-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.72rem;
+		color: #a1a1aa;
+	}
+
+	.thresh-row label {
+		white-space: nowrap;
+	}
+
+	.thresh-row input[type='range'] {
+		flex: 1;
+		min-width: 0;
+		accent-color: #f59e0b;
+	}
+
+	.thresh-val {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		min-width: 2.4rem;
+		text-align: right;
+		color: #d4d4d8;
+	}
+
+	.thresh-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.thresh-toggle.active {
+		color: #3b82f6;
+	}
+
+	.thresh-toggle input {
+		margin: 0;
+	}
+
+	.grid-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.grid-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.grid-head h3 {
+		margin: 0;
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: #a1a1aa;
+		font-weight: 700;
+	}
+
+	.grid-head .count {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.68rem;
+		color: #71717a;
+	}
+
+	.hole-grid {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.35rem;
+	}
+
+	.hbox {
+		aspect-ratio: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.15rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #27272a;
+		color: #f4f4f5;
+		cursor: pointer;
+		min-height: 0;
+		padding: 0;
+	}
+
+	.hbox:hover {
+		background: #313136;
+	}
+
+	.hbox.active {
+		outline: 2px solid #f59e0b;
+		outline-offset: 1px;
+	}
+
+	.hbox .num {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.75rem;
+	}
+
+	.hbox .tb {
+		display: flex;
+		gap: 0.2rem;
+	}
+
+	.hbox .tb span {
+		width: 0.85rem;
+		height: 0.85rem;
+		border-radius: 2px;
+		font-size: 0.5rem;
+		font-weight: 700;
+		line-height: 0.85rem;
+		text-align: center;
+		background: #1f1f23;
+		color: #71717a;
+	}
+
+	.hbox .tb span.pending {
+		background: #f59e0b;
+		color: #241804;
+	}
+
+	.hbox .tb span.confirmed {
+		background: #4fd1c5;
+		color: #04211f;
+	}
+
+	.empty-note {
+		margin: 0;
+		padding: 0.15rem 0.1rem;
+		color: #71717a;
+		font-size: 0.7rem;
+		font-style: italic;
+	}
+
+	.done-panel {
+		text-align: center;
+		padding: 1rem 0.8rem;
+		border: 1px solid #2e5c48;
+		border-radius: 8px;
+		background: #0f2320;
+	}
+
+	.done-panel h3 {
+		margin: 0 0 0.35rem;
+		font-size: 0.9rem;
+		color: #4fd1c5;
+	}
+
+	.done-panel p {
+		margin: 0 0 0.85rem;
+		font-size: 0.75rem;
+		color: #a1a1aa;
+	}
+
+	.done-panel .stack {
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+	}
+
+	.save-course-button {
+		background: #4fd1c5 !important;
+		border-color: #4fd1c5 !important;
+		color: #04211f !important;
+		font-weight: 650;
+	}
+
+	.upload-round-button {
+		background: transparent !important;
+	}
+
+	/* Placing/approve banner, floating over the map (popover layer, never clipped). */
+	.placement-banner {
+		position: absolute;
+		top: 0.85rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 26;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		max-width: min(30rem, calc(100% - 1.5rem));
+		padding: 0.5rem 0.5rem 0.5rem 0.9rem;
+		border: 1px solid #52525b;
+		border-radius: 999px;
+		background: #18181bf2;
+		box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
+		font-size: 0.78rem;
+		color: #f4f4f5;
+		pointer-events: auto;
+	}
+
+	.placement-banner strong {
+		color: #f59e0b;
+	}
+
+	.placement-banner.approve strong {
+		color: #4fd1c5;
+	}
+
+	.banner-close {
+		flex: none;
+		min-height: 1.9rem;
+		padding: 0.25rem 0.6rem;
+		border: 1px solid #52525b;
+		border-radius: 999px;
+		background: #27272a;
+		color: #f4f4f5;
+		font-size: 0.72rem;
+		cursor: pointer;
+	}
+
+	.approve-hole-button {
+		position: absolute;
+		z-index: 24;
+		transform: translate(-50%, -50%);
+		min-height: 2.2rem;
+		padding: 0.35rem 0.75rem;
+		border: 1px solid #4fd1c5;
+		border-radius: 999px;
+		background: #4fd1c5;
+		color: #04211f;
+		font-weight: 650;
+		font-size: 0.78rem;
+		cursor: pointer;
+		pointer-events: auto;
+		white-space: nowrap;
+	}
+
+	/* Marker correction chip — reassign to any hole or delete, opened on any tee/basket marker at any time. */
+	.marker-chip {
+		position: absolute;
+		z-index: 28;
+		width: 15rem;
+		transform: translate(-50%, calc(-100% - 0.6rem));
+		padding: 0.7rem;
+		border: 1px solid #f59e0b;
+		border-radius: 10px;
+		background: #18181b;
+		box-shadow: 0 14px 34px rgb(0 0 0 / 55%);
+		pointer-events: auto;
+	}
+
+	.chip-head {
+		font-size: 0.78rem;
+		font-weight: 650;
+		color: #f4f4f5;
+		margin-bottom: 0.1rem;
+	}
+
+	.chip-sub {
+		font-size: 0.68rem;
+		color: #71717a;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		margin-bottom: 0.6rem;
+	}
+
+	.chip-stack {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.chip-stack button {
+		width: 100%;
+		min-height: 2.1rem;
+		border: 1px solid #52525b;
+		border-radius: 6px;
+		background: #27272a;
+		color: #f4f4f5;
+		font-size: 0.72rem;
+		cursor: pointer;
+	}
+
+	.chip-quick-reassign {
+		border-color: #4fd1c5 !important;
+		color: #4fd1c5 !important;
+	}
+
+	.chip-reassign-row {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.7rem;
+		color: #a1a1aa;
+	}
+
+	.chip-reassign-row input {
+		width: 3.4rem;
+		min-height: 2rem;
+		padding: 0.3rem;
+		border: 1px solid #52525b;
+		border-radius: 6px;
+		background: #0b0d10;
+		color: #f4f4f5;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		text-align: center;
+	}
+
+	.chip-divider {
+		height: 1px;
+		background: #3f3f46;
+		margin: 0.1rem 0;
+	}
+
+	.chip-delete {
+		border-color: #7f1d1d !important;
+		color: #f87171 !important;
+	}
+
+	.chip-dismiss {
+		background: transparent !important;
+		color: #a1a1aa;
 	}
 </style>
