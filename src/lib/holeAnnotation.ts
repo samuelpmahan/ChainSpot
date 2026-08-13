@@ -239,6 +239,28 @@ export function assignCandidateToHole(
 }
 
 /**
+ * Moves an existing tee/basket from one hole to another, by hole id rather
+ * than by matching coordinates — the primitive behind the marker-correction
+ * chip's "reassign to hole" action. Delegates to `assignCandidateToHole`,
+ * which already clears the point from any hole currently holding it (so a
+ * marker already sitting on `toHoleId`'s own tee/basket is silently
+ * replaced, matching a plain `setTee`/`setBasket` overwrite). A no-op if
+ * `fromHoleId` has no such point, or if `fromHoleId === toHoleId`.
+ */
+export function reassignMarker(
+	holes: readonly AnnotatedHole[],
+	fromHoleId: string,
+	toHoleId: string,
+	kind: 'tee' | 'basket'
+): AnnotatedHole[] {
+	if (fromHoleId === toHoleId) return holes.slice();
+	const fromHole = holes.find((hole) => hole.id === fromHoleId);
+	const point = kind === 'tee' ? fromHole?.tee : fromHole?.basket;
+	if (!point) return holes.slice();
+	return assignCandidateToHole(holes, toHoleId, kind, point);
+}
+
+/**
  * Places `point` on `holeId` according to `mode` — the one entry point the UI
  * click handler needs, so it doesn't have to branch on mode itself.
  */

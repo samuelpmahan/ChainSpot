@@ -51,6 +51,7 @@
 		moveTee,
 		nextHoleNumber,
 		placeByMode,
+		reassignMarker,
 		removeBasket,
 		removeCorridorBend,
 		removeLastBend,
@@ -314,6 +315,26 @@
 	let activeReviewRecommendation = $state<ActiveReviewRecommendation | null>(null);
 	let activeReviewCandidateOverrides = $state<Record<string, SourcePoint>>({});
 	let minAutoSuggestScore = $state(0.6);
+	/**
+	 * Whether `minAutoSuggestScore` actually filters which detected tee/basket
+	 * pieces get auto-applied onto holes (see `applyDetectedPieces`), or is
+	 * purely informational. Deliberately NOT stored on `AnnotatedHole` or
+	 * `CourseHoleProposal` — this is a session-only review-UI knob, not
+	 * detector output.
+	 */
+	let applyDetectionThreshold = $state(true);
+	/**
+	 * Session-only per-piece approval, keyed by `${holeId}:${kind}`
+	 * (`pieceStatusKey`). This is the sidebar's "confirmed" bit for the
+	 * 5-section hole grid (`sectionOfHole`) — deliberately NOT a field on
+	 * `AnnotatedHole`: `annotatedRound.ts`'s provenance rule forbids any
+	 * provisional/confidence/status flag from ever reaching that artifact, so
+	 * this lives entirely outside the domain type, the same way
+	 * `activeReviewConfirmedCandidateIds` above already tracks handled-ness
+	 * without touching domain data. Cleared on the same source-image-replacement
+	 * lifecycle as the rest of this section's state (`handleSourceDomainChanged`).
+	 */
+	let confirmedPieces = $state<Set<string>>(new Set());
 	let prewarmedSourceId: string | null = null;
 	let autoDetectedSourceId: string | null = null;
 	/**
@@ -616,6 +637,77 @@
 	/** tee/basket/bend are course geometry (Map mode); shot/walk are round-specific and never mark the draft as geometry-edited. */
 	function isMapGeometryKind(kind: PointKind): boolean {
 		return kind === 'tee' || kind === 'basket' || kind === 'bend';
+	}
+
+	function pieceStatusKey(holeId: string, kind: 'tee' | 'basket'): string {
+		return `${holeId}:${kind}`;
+	}
+
+	function isPieceConfirmed(holeId: string, kind: 'tee' | 'basket'): boolean {
+		return confirmedPieces.has(pieceStatusKey(holeId, kind));
+	}
+
+	/** Every mutation replaces the Set so `$state` sees a new reference — matches every other collection-valued state on this page (`activeReviewConfirmedCandidateIds`, `settlingMarkerKeys`). */
+	function setPieceConfirmed(holeId: string, kind: 'tee' | 'basket', confirmed: boolean): void {
+		const key = pieceStatusKey(holeId, kind);
+		if (confirmed === confirmedPieces.has(key)) return;
+		const next = new Set(confirmedPieces);
+		if (confirmed) next.add(key);
+		else next.delete(key);
+		confirmedPieces = next;
+	}
+
+	/**
+	 * The sidebar hole grid's five sections, derived purely from what data
+	 * exists on the hole plus its per-piece confirmed status — no separate
+	 * status flag beyond tee/basket presence and `confirmedPieces`:
+	 *   1. no tee, no basket
+	 *   2. basket only
+	 *   3. tee only
+	 *   4. both, but not both confirmed
+	 *   5. both, confirmed
+	 */
+	function sectionOfHole(hole: AnnotatedHole): 1 | 2 | 3 | 4 | 5 {
+		const hasTee = hole.tee !== undefined;
+		const hasBasket = hole.basket !== undefined;
+		if (!hasTee && !hasBasket) return 1;
+		if (hasBasket && !hasTee) return 2;
+		if (hasTee && !hasBasket) return 3;
+		const confirmed = isPieceConfirmed(hole.id, 'tee') && isPieceConfirmed(hole.id, 'basket');
+		return confirmed ? 5 : 4;
+	}
+
+	/**
+	 * Moves a tee/basket from `fromHoleId` to `toHoleId` — the marker-chip
+	 * "reassign to hole" action. A correction always drops back to pending,
+	 * even if the point was confirmed at its old hole (a re-homed marker
+	 * hasn't been looked at *in its new place* yet) and even if it silently
+	 * overwrote an existing confirmed point on the target (that point is a
+	 * different physical marker now).
+	 */
+	function reassignHolePiece(fromHoleId: string, toHoleId: string, kind: 'tee' | 'basket'): void {
+		if (fromHoleId === toHoleId) return;
+		const next = reassignMarker(holes, fromHoleId, toHoleId, kind);
+		if (next === holes) return;
+		holes = next;
+		setPieceConfirmed(fromHoleId, kind, false);
+		setPieceConfirmed(toHoleId, kind, false);
+		markMapGeometryEdited();
+	}
+
+	/** Deletes a tee/basket entirely — the marker chip's "not a real tee/basket" action. Clears confirmed status along with the data; nothing is left behind for a future piece at this hole to inherit. */
+	function deleteHolePiece(holeId: string, kind: 'tee' | 'basket'): void {
+		holes = kind === 'tee' ? removeTee(holes, holeId) : removeBasket(holes, holeId);
+		setPieceConfirmed(holeId, kind, false);
+		markMapGeometryEdited();
+	}
+
+	/** Approves both pieces on a hole at once — the sidebar's Approve action for a section-4 hole. No-op unless both are already placed. */
+	function approveHolePieces(holeId: string): void {
+		const hole = holes.find((candidate) => candidate.id === holeId);
+		if (!hole?.tee || !hole.basket) return;
+		setPieceConfirmed(holeId, 'tee', true);
+		setPieceConfirmed(holeId, 'basket', true);
 	}
 
 	function startCourseDetectionProgress(): void {
@@ -1723,6 +1815,7 @@
 		activeReviewConfirmedCandidateIds = [];
 		activeReviewRecommendation = null;
 		activeReviewCandidateOverrides = {};
+		confirmedPieces = new Set();
 		courseDetectionStatus = null;
 		courseDetectionStage = null;
 		courseDetectionElapsedSeconds = 0;
