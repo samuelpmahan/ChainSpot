@@ -29,7 +29,10 @@ import {
 	findUnresolvedBasketHoles,
 	isSameBasketCandidate
 } from './basketOcclusionRecovery';
+import { estimateBasketTemplateScaleFromColor } from './basketColorScale';
+import type { BasketColorRaster } from './basketColorScale';
 import {
+	asBasketTemplateScale,
 	asNumberTemplateScale,
 	asUiScalePx,
 	deriveBasketTemplateScale,
@@ -121,6 +124,8 @@ interface LoadedTemplatePack {
 	readonly manifest: CvTemplateManifest;
 	readonly holeNumbers: readonly HoleNumberTemplate[];
 	readonly basket: BasketTemplateRaster;
+	/** Same canonical basket.png as `basket`, kept in color for the mask-based scale bootstrap below. */
+	readonly basketColor: BasketColorRaster;
 }
 
 interface BasketDetectionTiming {
@@ -128,10 +133,12 @@ interface BasketDetectionTiming {
 	anchorMs: number;
 	candidatesMs: number;
 	anchorScaleEvaluations: number;
+	/** Set once `detectBaskets` resolves an unknown scale, so callers can see which path ran. */
+	anchorSource: 'color-bootstrap' | 'blind-sweep' | 'provided' | 'none';
 }
 
 function emptyBasketDetectionTiming(): BasketDetectionTiming {
-	return { rasterMs: 0, anchorMs: 0, candidatesMs: 0, anchorScaleEvaluations: 0 };
+	return { rasterMs: 0, anchorMs: 0, candidatesMs: 0, anchorScaleEvaluations: 0, anchorSource: 'none' };
 }
 
 let runtimePromise: Promise<RuntimeCv> | null = null;
@@ -211,7 +218,9 @@ async function rasterizeNumberTemplate(label: number, fileName: string): Promise
 	}
 }
 
-async function rasterizeBasketTemplate(fileName: string): Promise<BasketTemplateRaster> {
+async function rasterizeBasketTemplate(
+	fileName: string
+): Promise<{ readonly template: BasketTemplateRaster; readonly color: BasketColorRaster }> {
 	const bitmap = await createImageBitmap(await fetchAsset(fileName));
 	try {
 		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -220,9 +229,12 @@ async function rasterizeBasketTemplate(fileName: string): Promise<BasketTemplate
 		context.drawImage(bitmap, 0, 0);
 		const rgba = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
 		return {
-			gray: grayscaleRgba(rgba, bitmap.width * bitmap.height),
-			widthPx: bitmap.width,
-			heightPx: bitmap.height
+			template: {
+				gray: grayscaleRgba(rgba, bitmap.width * bitmap.height),
+				widthPx: bitmap.width,
+				heightPx: bitmap.height
+			},
+			color: { rgba, widthPx: bitmap.width, heightPx: bitmap.height }
 		};
 	} finally {
 		bitmap.close();
@@ -235,7 +247,7 @@ function loadTemplatePack(): Promise<LoadedTemplatePack> {
 		.then(async (response) => {
 			if (!response.ok) throw new Error(`CV template manifest could not be loaded (${response.status}).`);
 			const manifest = validateCvTemplateManifest(await response.json());
-			const [holeNumbers, basket] = await Promise.all([
+			const [holeNumbers, rasterizedBasket] = await Promise.all([
 				Promise.all(
 					manifest.templates.holeNumbers.map((fileName, index) =>
 						rasterizeNumberTemplate(index + 1, fileName)
@@ -243,7 +255,12 @@ function loadTemplatePack(): Promise<LoadedTemplatePack> {
 				),
 				rasterizeBasketTemplate(manifest.templates.basket)
 			]);
-			return { manifest, holeNumbers, basket };
+			return {
+				manifest,
+				holeNumbers,
+				basket: rasterizedBasket.template,
+				basketColor: rasterizedBasket.color
+			};
 		})
 		.catch((error) => {
 			templatePackPromise = null;
@@ -301,22 +318,47 @@ async function detectBaskets(
 	if (timing) timing.rasterMs = performance.now() - rasterStartedAt;
 
 	let resolvedBasketTemplateScale = basketTemplateScale;
-	if (!resolvedBasketTemplateScale) {
+	if (resolvedBasketTemplateScale) {
+		if (timing) timing.anchorSource = 'provided';
+	} else {
 		const anchorStartedAt = performance.now();
-		const anchor = findCalibratedBasketAnchorScale(
-			cv,
-			raster,
-			pack.basket,
-			timing
-				? {
-						onProgress: () => {
-							timing.anchorScaleEvaluations += 1;
-						}
-					}
-				: {}
+		// Cheap color-mask bootstrap first (see `basketColorScale.ts`): a repeated
+		// cool off-white basket-interior component family directly measures the
+		// template multiplier without a blind full-image NCC sweep. Only trusted
+		// when its own conservative `reliable` signal agrees; otherwise this falls
+		// back to the proven blind sweep unchanged.
+		const colorEstimate = estimateBasketTemplateScaleFromColor(
+			{ rgba: full.rgba, widthPx: full.width, heightPx: full.height },
+			pack.basketColor
 		);
-		if (timing) timing.anchorMs = performance.now() - anchorStartedAt;
-		resolvedBasketTemplateScale = anchor?.scale;
+		if (colorEstimate?.reliable) {
+			resolvedBasketTemplateScale = asBasketTemplateScale(
+				colorEstimate.scale,
+				'Color-bootstrap basket template scale'
+			);
+			if (timing) {
+				timing.anchorMs = performance.now() - anchorStartedAt;
+				timing.anchorSource = 'color-bootstrap';
+			}
+		} else {
+			const anchor = findCalibratedBasketAnchorScale(
+				cv,
+				raster,
+				pack.basket,
+				timing
+					? {
+							onProgress: () => {
+								timing.anchorScaleEvaluations += 1;
+							}
+						}
+					: {}
+			);
+			if (timing) {
+				timing.anchorMs = performance.now() - anchorStartedAt;
+				timing.anchorSource = 'blind-sweep';
+			}
+			resolvedBasketTemplateScale = anchor?.scale;
+		}
 	}
 	if (!resolvedBasketTemplateScale) return [];
 
@@ -737,6 +779,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 			baskets: baskets.length,
 			tees: tees.length,
 			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
+			basketAnchorSource: basketTiming.anchorSource,
 			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
 			basketFallbackRecovered: basketFallbackRecoveredCount,
 			teeBootstrapAuto: teeBootstrap.counts.auto,

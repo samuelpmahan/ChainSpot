@@ -24,7 +24,7 @@
     "verify:cv": "tsx scripts/verify-cv-gallery.ts --mode gate",
     "verify:cv:legacy": "tsx scripts/verify-cv-guardrails.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
+    "test:unit": "svelte-kit sync && NODE_OPTIONS=--experimental-require-module vitest run",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:e2e"
   },

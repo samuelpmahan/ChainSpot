@@ -17,6 +17,8 @@ import type {
 	BasketTemplateRaster
 } from '../src/lib/autoAnnotation/basketTemplateDetection';
 import type { BasketTemplateScale } from '../src/lib/autoAnnotation/cvCalibration';
+import { estimateBasketTemplateScaleFromColor } from '../src/lib/autoAnnotation/basketColorScale';
+import type { BasketColorRaster } from '../src/lib/autoAnnotation/basketColorScale';
 import { detectHoleNumberBadges } from '../src/lib/autoAnnotation/holeNumberDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 
@@ -71,6 +73,7 @@ export interface BasketCliResult {
 		readonly heightPx: number;
 	};
 	readonly basketScale: number;
+	readonly basketScaleSource: 'requested' | 'color-bootstrap' | 'blind-sweep' | 'none';
 	readonly mapBoundsPx?: Readonly<{ topPx: number; bottomPx: number }>;
 	readonly candidateCount: number;
 	readonly candidates: readonly Readonly<{
@@ -256,9 +259,14 @@ function loadTemplateRaster(templateDir: string, fileName: string): DecodedRaste
 	return decodeRaster(new Uint8Array(readFileSync(path)), path);
 }
 
-function loadBasketTemplate(templateDir: string): BasketTemplateRaster {
+function loadBasketTemplate(
+	templateDir: string
+): { readonly template: BasketTemplateRaster; readonly color: BasketColorRaster } {
 	const decoded = loadTemplateRaster(templateDir, 'basket.png');
-	return { gray: toGray(decoded), widthPx: decoded.widthPx, heightPx: decoded.heightPx };
+	return {
+		template: { gray: toGray(decoded), widthPx: decoded.widthPx, heightPx: decoded.heightPx },
+		color: { rgba: decoded.rgba, widthPx: decoded.widthPx, heightPx: decoded.heightPx }
+	};
 }
 
 function loadNumberTemplates(templateDir: string): readonly HoleNumberTemplate[] {
@@ -410,6 +418,34 @@ function candidateOutput(candidate: BasketCandidate, index: number): BasketCliRe
 	};
 }
 
+function resolveBasketScale(
+	cv: BasketCv,
+	raster: BasketRaster,
+	sourceColor: BasketColorRaster,
+	basketTemplate: { readonly template: BasketTemplateRaster; readonly color: BasketColorRaster },
+	requestedScale: number | undefined
+): { readonly scale: BasketTemplateScale | undefined; readonly source: 'requested' | 'color-bootstrap' | 'blind-sweep' | 'none' } {
+	if (requestedScale !== undefined) {
+		return { scale: asBasketTemplateScale(requestedScale, 'CLI basket template scale'), source: 'requested' };
+	}
+	// Cheap color-mask bootstrap first (see `basketColorScale.ts`): only trusted
+	// when its own conservative `reliable` signal agrees, otherwise falls back
+	// to the proven blind NCC sweep unchanged.
+	const colorEstimate = estimateBasketTemplateScaleFromColor(sourceColor, basketTemplate.color);
+	if (colorEstimate?.reliable) {
+		return {
+			scale: asBasketTemplateScale(colorEstimate.scale, 'Color-bootstrap basket template scale'),
+			source: 'color-bootstrap'
+		};
+	}
+	const anchor = findCalibratedBasketAnchorScale(cv, raster, basketTemplate.template, {
+		onProgress: ({ scale, score }) => {
+			process.stderr.write(`basket scale ${scale.toFixed(2)} · max score ${score.toFixed(3)}\n`);
+		}
+	});
+	return { scale: anchor?.scale, source: anchor ? 'blind-sweep' : 'none' };
+}
+
 export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult> {
 	const input = loadInput(args.inputPath);
 	const cv = (await loadCv()) as unknown as HoleNumberCvModule & BasketCv;
@@ -421,16 +457,17 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 		sourceScale: 1
 	};
 	const mapBoundsPx = deriveMapBoundsPx(cv, input, args);
-	const basketScale: BasketTemplateScale | undefined = args.basketScale !== undefined
-		? asBasketTemplateScale(args.basketScale, 'CLI basket template scale')
-		: findCalibratedBasketAnchorScale(cv, raster, basketTemplate, {
-			onProgress: ({ scale, score }) => {
-				process.stderr.write(`basket scale ${scale.toFixed(2)} · max score ${score.toFixed(3)}\n`);
-			}
-		})?.scale;
+	const resolvedScale = resolveBasketScale(
+		cv,
+		raster,
+		{ rgba: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx },
+		basketTemplate,
+		args.basketScale
+	);
+	const basketScale = resolvedScale.scale;
 	if (!basketScale) throw new Error('Could not find a basket template scale via blind sweep; pass --basket-scale.');
 
-	const candidates = detectBasketCandidatesAtTemplateScale(cv, raster, basketTemplate, {
+	const candidates = detectBasketCandidatesAtTemplateScale(cv, raster, basketTemplate.template, {
 		templateScale: basketScale,
 		mapBoundsPx,
 		maxCandidates: args.maxCandidates,
@@ -448,6 +485,7 @@ export async function runDetection(args: BasketCliArgs): Promise<BasketCliResult
 			heightPx: input.heightPx
 		},
 		basketScale,
+		basketScaleSource: resolvedScale.source,
 		mapBoundsPx,
 		candidateCount: candidates.length,
 		candidates: candidates.map(candidateOutput),
