@@ -6,10 +6,13 @@
  * findings: `ribbon-mass-phase1-findings.md`, `ribbon-mass-topology-findings.md`).
  *
  * This module is a pure computation over a decoded raster: no DOM, no
- * worker, no persistence, no effect on authoritative geometry. It exists to
- * feed the instrumented attribution shadow path
- * (`ribbonMassShadowRun.ts`) — it never outputs a tee, never arbitrates
- * shared components, and never gates any production decision.
+ * worker, no persistence, no direct mutation of authoritative geometry. Most
+ * consumers feed the instrumented attribution shadow path
+ * (`ribbonMassShadowRun.ts`). Production basket ownership also reuses the raw
+ * segmentation + seed placement for one deliberately narrow decision:
+ * exclusive components may lock an already-detected basket to the only hole
+ * whose badge touches that component. This module still never outputs a tee
+ * and never arbitrates shared components.
  *
  * Faithfulness notes, relative to the Python probe:
  * - The evidence map is the same machinery as the research ray-walk stage:

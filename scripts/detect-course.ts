@@ -30,6 +30,8 @@ import type { BasketCv, BasketTemplateRaster } from '../src/lib/autoAnnotation/b
 import type { TeePadCandidate, TeePadCv } from '../src/lib/autoAnnotation/teePadDetection';
 import type { HoleNumberCvModule, HoleNumberTemplate } from '../src/lib/autoAnnotation/holeNumberDetection';
 import { associateCourseGrammar, deriveBasketPolarityPenaltyPx } from '../src/lib/autoAnnotation/courseGrammar';
+import { findExclusiveBasketFloodOwnership } from '../src/lib/autoAnnotation/basketFloodOwnership';
+import { segmentRibbonMass } from '../src/lib/autoAnnotation/ribbonMass';
 import type { CourseGrammarResult } from '../src/lib/autoAnnotation/courseGrammar';
 import {
 	buildActiveReviewMap,
@@ -114,6 +116,8 @@ export interface CourseCliResult {
 		readonly incompleteHoles: number;
 		readonly basketFallbackUnresolvedHoles: number;
 		readonly basketFallbackRecovered: number;
+		readonly basketFloodLocks: number;
+		readonly basketFloodAmbiguousComponents: number;
 	};
 	readonly teeBootstrap: {
 		readonly normalized: boolean;
@@ -692,8 +696,24 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		widthPx: candidate.widthPx,
 		heightPx: candidate.heightPx
 	}));
+	const basketFloodSegmentation = segmentRibbonMass(
+		{ data: input.rgba, widthPx: input.widthPx, heightPx: input.heightPx, channels: 4 },
+		teeBadges
+	);
+	const basketFloodOwnership = findExclusiveBasketFloodOwnership(
+		basketFloodSegmentation,
+		teeBadges,
+		primaryBasketCandidates
+	);
+	const floodOwnerByBasketIndex = new Map(
+		basketFloodOwnership.locks.map((lock) => [lock.basketCandidateIndex, lock.holeNumber] as const)
+	);
+	const primaryGrammarBaskets = primaryBasketCandidates.map((basket, basketIndex) => {
+		const holeNumber = floodOwnerByBasketIndex.get(basketIndex);
+		return holeNumber === undefined ? basket : { ...basket, holeNumber };
+	});
 	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBasketCandidates);
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBasketCandidates, basketPolarityPenaltyPx });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryGrammarBaskets, basketPolarityPenaltyPx });
 
 	// Occlusion-tolerant basket recovery -- mirrors basketDetection.worker.ts's
 	// production `detectCourse` exactly, so this CLI stays a faithful preview
@@ -736,7 +756,7 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 		if (nonDuplicateRecovered.length > 0) {
 			basketCandidates = [...primaryBasketCandidates, ...nonDuplicateRecovered];
 			const grammarBaskets = [
-				...primaryBasketCandidates,
+				...primaryGrammarBaskets,
 				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
 			];
 			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets, basketPolarityPenaltyPx });
@@ -782,7 +802,9 @@ export async function runCourseDetection(args: CourseCliArgs): Promise<CourseCli
 			reviewHoles,
 			incompleteHoles,
 			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
-			basketFallbackRecovered: basketFallbackRecoveredCount
+			basketFallbackRecovered: basketFallbackRecoveredCount,
+			basketFloodLocks: basketFloodOwnership.locks.length,
+			basketFloodAmbiguousComponents: basketFloodOwnership.ambiguousComponents.length
 		},
 		teeBootstrap: {
 			normalized: teeBootstrap.normalized,

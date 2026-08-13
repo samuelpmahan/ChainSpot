@@ -73,6 +73,8 @@ export interface CourseTeeCandidate extends CoursePointCandidate {
  * and are scored exactly as before.
  */
 export interface CourseBasketCandidate extends CoursePointCandidate {
+	/** Hard semantic owner established before global grammar (e.g. an exclusive ribbon component). */
+	readonly holeNumber?: number;
 	readonly bootstrapDecision?: 'auto' | 'review';
 }
 
@@ -493,6 +495,30 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 			? input.basketPolarityPenaltyPx
 			: DEFAULT_BASKET_POLARITY_PENALTY_PX;
 
+	// A pre-owned basket is a hard constraint, mirroring explicit tee ownership:
+	// it may not be stolen by another hole. If a hole has one or more explicitly
+	// owned basket candidates, that hole must choose among those candidates rather
+	// than an unowned alternative. This keeps the full-course solve intact (and
+	// therefore preserves its learned distance distribution) while preventing a
+	// structurally-proven basket from participating in a permutation.
+	const explicitBasketOwner = baskets.map((basket) => {
+		const owner = input.baskets[basket.sourceIndex].holeNumber;
+		return Number.isInteger(owner) && (owner as number) > 0 ? owner as number : undefined;
+	});
+	const ownedBasketIndexesByHole = new Map<number, number[]>();
+	explicitBasketOwner.forEach((owner, basketIndex) => {
+		if (owner === undefined) return;
+		const indexes = ownedBasketIndexesByHole.get(owner) ?? [];
+		indexes.push(basketIndex);
+		ownedBasketIndexesByHole.set(owner, indexes);
+	});
+	const basketOwnershipAllows = (holeNumber: number, basketIndex: number): boolean => {
+		const owner = explicitBasketOwner[basketIndex];
+		if (owner !== undefined && owner !== holeNumber) return false;
+		const owned = ownedBasketIndexesByHole.get(holeNumber);
+		return !owned || owned.length === 0 || owner === holeNumber;
+	};
+
 	// Stage 1: badge ownership.  The explicit global solve is what avoids two
 	// visually similar glyphs both claiming one hole label.
 	const badgeCosts = holeNumbers.map((holeNumber) =>
@@ -543,13 +569,19 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	const preliminaryBasketHoleNumbers = holeNumbers.filter((holeNumber) => badgeForHole.has(holeNumber));
 	const preliminaryBasketCosts = preliminaryBasketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
-		return baskets.map((basket) => pointDistance(badge, basket));
+		return baskets.map((basket, basketIndex) =>
+			basketOwnershipAllows(holeNumber, basketIndex) ? pointDistance(badge, basket) : BLOCKED_COST
+		);
 	});
 	const preliminaryBasketAssignments = hungarian(withDummyColumns(preliminaryBasketCosts, baskets.length));
 	const preliminaryBasketForHole = new Map<number, IndexedPoint>();
 	preliminaryBasketHoleNumbers.forEach((holeNumber, row) => {
 		const basketIndex = preliminaryBasketAssignments[row];
-		if (basketIndex >= 0 && basketIndex < baskets.length) {
+		if (
+			basketIndex >= 0 &&
+			basketIndex < baskets.length &&
+			preliminaryBasketCosts[row][basketIndex] < BLOCKED_COST
+		) {
 			preliminaryBasketForHole.set(holeNumber, baskets[basketIndex]);
 		}
 	});
@@ -652,9 +684,10 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	const basketCosts = basketHoleNumbers.map((holeNumber) => {
 		const badge = badgeForHole.get(holeNumber)!;
 		const tee = teeForHole.get(holeNumber)?.assignment;
-		return baskets.map((basket) =>
-			tee ? basketCost(badge, tee, basket, polarityPenaltyPx).cost : pointDistance(badge, basket)
-		);
+		return baskets.map((basket, basketIndex) => {
+			if (!basketOwnershipAllows(holeNumber, basketIndex)) return BLOCKED_COST;
+			return tee ? basketCost(badge, tee, basket, polarityPenaltyPx).cost : pointDistance(badge, basket);
+		});
 	});
 	// Basket ownership is intentionally two-stage. Only independently AUTO-
 	// owned tees may use tee/basket polarity to reserve a basket. REVIEW tees
@@ -666,7 +699,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		const sourceTee = input.tees.find(
 			(candidate) => candidate.holeNumber === holeNumber && candidate.bootstrapDecision === 'auto'
 		);
-		return sourceTee ? basketCosts[row] : baskets.map((basket) => pointDistance(badge, basket));
+		return sourceTee
+			? basketCosts[row]
+			: baskets.map((basket, basketIndex) =>
+				basketOwnershipAllows(holeNumber, basketIndex) ? pointDistance(badge, basket) : BLOCKED_COST
+			);
 	});
 	const autoRows = basketHoleNumbers
 		.map((holeNumber, row) => ({ holeNumber, row }))
@@ -689,7 +726,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 		};
 	}).sort((a, b) => b.margin - a.margin || b.confidence - a.confidence || a.row - b.row);
 	for (const claim of autoClaims) {
-		if (claim.basketIndex < 0 || claimedBasketIndexes.has(claim.basketIndex)) continue;
+		if (
+			claim.basketIndex < 0 ||
+			claimedBasketIndexes.has(claim.basketIndex) ||
+			assignmentCosts[claim.row][claim.basketIndex] >= BLOCKED_COST
+		) continue;
 		basketAssignments[claim.row] = claim.basketIndex;
 		claimedBasketIndexes.add(claim.basketIndex);
 	}
@@ -710,8 +751,10 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 				))
 		);
 		for (const { row } of remainingRows) {
-			const badge = badgeForHole.get(basketHoleNumbers[row])!;
-			assignmentCosts[row] = baskets.map((basket) => {
+			const holeNumber = basketHoleNumbers[row];
+			const badge = badgeForHole.get(holeNumber)!;
+			assignmentCosts[row] = baskets.map((basket, basketIndex) => {
+				if (!basketOwnershipAllows(holeNumber, basketIndex)) return BLOCKED_COST;
 				const distance = pointDistance(badge, basket);
 				// Still distance-only: prefer distances plausible for baskets already
 				// secured by trusted AUTO topology, without using REVIEW tee direction.
@@ -733,7 +776,11 @@ export function associateCourseGrammar(input: CourseGrammarInput): CourseGrammar
 	const basketForHole = new Map<number, BasketDetails>();
 	basketHoleNumbers.forEach((holeNumber, row) => {
 		const basketIndex = basketAssignments[row];
-		if (basketIndex < 0 || basketIndex >= baskets.length) {
+		if (
+			basketIndex < 0 ||
+			basketIndex >= baskets.length ||
+			assignmentCosts[row][basketIndex] >= BLOCKED_COST
+		) {
 			failures.push({
 				kind: 'missing-basket',
 				severity: 'error',

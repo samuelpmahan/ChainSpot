@@ -1,5 +1,7 @@
 import { loadCv } from '../stitch/cvMatch';
 import { associateCourseGrammar, deriveBasketPolarityPenaltyPx } from './courseGrammar';
+import { findExclusiveBasketFloodOwnership } from './basketFloodOwnership';
+import { segmentRibbonMass } from './ribbonMass';
 import type {
 	HoleNumberCvModule,
 	HoleNumberTemplate
@@ -637,15 +639,33 @@ async function detectCourse(request: CourseDetectionRequest) {
 		widthPx: candidate.widthPx,
 		heightPx: candidate.heightPx
 	}));
+	const basketFloodStartedAt = performance.now();
+	const basketFloodSegmentation = segmentRibbonMass(
+		{ data: full.rgba, widthPx: full.width, heightPx: full.height, channels: 4 },
+		teeBadges
+	);
+	const basketFloodOwnership = findExclusiveBasketFloodOwnership(
+		basketFloodSegmentation,
+		teeBadges,
+		primaryBaskets
+	);
+	const basketFloodOwnershipMs = performance.now() - basketFloodStartedAt;
+	const floodOwnerByBasketIndex = new Map(
+		basketFloodOwnership.locks.map((lock) => [lock.basketCandidateIndex, lock.holeNumber] as const)
+	);
+	const primaryGrammarBaskets = primaryBaskets.map((basket, basketIndex) => {
+		const holeNumber = floodOwnerByBasketIndex.get(basketIndex);
+		return holeNumber === undefined ? basket : { ...basket, holeNumber };
+	});
 	const basketPolarityPenaltyPx = deriveBasketPolarityPenaltyPx(numberBadges, primaryBaskets);
 	reportCourseProgress(
 		request,
 		'grammar',
-		`${teeBootstrap.counts.auto} tee AUTO · ${teeBootstrap.counts.review} REVIEW · ${teeBootstrap.counts.unresolved} unresolved · matching course grammar…`,
+		`${teeBootstrap.counts.auto} tee AUTO · ${teeBootstrap.counts.review} REVIEW · ${teeBootstrap.counts.unresolved} unresolved · ${basketFloodOwnership.locks.length} basket flood locks · matching course grammar…`,
 		elapsedMs()
 	);
 	const grammarStartedAt = performance.now();
-	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryBaskets, basketPolarityPenaltyPx });
+	const primaryGrammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: primaryGrammarBaskets, basketPolarityPenaltyPx });
 
 	// Occlusion-tolerant basket recovery. The primary basket detection and
 	// this first grammar pass above are both untouched by what follows: this
@@ -694,7 +714,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 		if (nonDuplicateRecovered.length > 0) {
 			baskets = [...primaryBaskets, ...nonDuplicateRecovered];
 			const grammarBaskets = [
-				...primaryBaskets,
+				...primaryGrammarBaskets,
 				...nonDuplicateRecovered.map((candidate) => ({ ...candidate, bootstrapDecision: 'review' as const }))
 			];
 			grammar = associateCourseGrammar({ numberBadges, tees: grammarTees, baskets: grammarBaskets, basketPolarityPenaltyPx });
@@ -728,6 +748,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 			teeRasterMs,
 			teeDetectionMs,
 			basketFallbackMs,
+			basketFloodOwnershipMs,
 			grammarMs
 		},
 		counts: {
@@ -739,6 +760,10 @@ async function detectCourse(request: CourseDetectionRequest) {
 			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
 			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
 			basketFallbackRecovered: basketFallbackRecoveredCount,
+			basketFloodLocks: basketFloodOwnership.locks.length,
+			basketFloodAmbiguousComponents: basketFloodOwnership.ambiguousComponents.length,
+			basketFloodBadgeSeedMisses: basketFloodOwnership.badgeSeedMissHoleNumbers.length,
+			basketFloodBasketSeedMisses: basketFloodOwnership.basketSeedMissCandidateIndexes.length,
 			teeBootstrapAuto: teeBootstrap.counts.auto,
 			teeBootstrapReview: teeBootstrap.counts.review,
 			teeBootstrapUnresolved: teeBootstrap.counts.unresolved
