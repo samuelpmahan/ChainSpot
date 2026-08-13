@@ -6,11 +6,20 @@
  * place its missing piece), the section-3 approve flow, the marker
  * correction chip (reassign to any hole / delete, not proximity-gated), real
  * drag-vs-click disambiguation on an existing marker, and the completion
- * panel's save/upload gating.
+ * panel's save and upload actions.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
+
+/** Observes Upload's Create Graphics handoff without a real SvelteKit router. */
+const gotoCalls: string[] = [];
+vi.mock('$app/navigation', () => ({
+	goto: async (url: string) => {
+		gotoCalls.push(url);
+	}
+}));
+
 import Page from '../../src/routes/annotate-round/+page.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
@@ -133,6 +142,7 @@ afterEach(() => {
 		mounted.host.remove();
 		mounted = null;
 	}
+	gotoCalls.length = 0;
 });
 
 describe('sidebar hole grid — sections derive from real hole state', () => {
@@ -451,12 +461,7 @@ describe('drag vs click on an existing marker', () => {
 });
 
 describe('completion panel', () => {
-	it('appears only once all 18 holes are confirmed, and gates uploading a round on saving the course first', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-
+	async function confirmAllHoles(host: HTMLElement): Promise<void> {
 		for (let number = 1; number <= 18; number += 1) {
 			sidebarHoleButton(host, number).click();
 			await flush();
@@ -478,17 +483,43 @@ describe('completion panel', () => {
 		expect(host.querySelector('[data-testid="bend-phase-panel"]')).not.toBeNull();
 		host.querySelector<HTMLButtonElement>('[data-testid="finish-bends"]')?.click();
 		await flush();
+	}
+
+	it('appears only once all 18 holes are confirmed, and lets uploading a round save the course on its own', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await confirmAllHoles(host);
 
 		const panel = host.querySelector('[data-testid="course-complete-panel"]');
 		expect(panel).not.toBeNull();
 		expect(host.querySelector('[data-testid="sidebar-section-1"]')).toBeNull();
 
+		// Upload never sits disabled behind an unclicked Save button — it
+		// performs the same best-effort Course Memory write itself before
+		// handing off to Create Graphics.
 		const uploadButton = host.querySelector<HTMLButtonElement>('[data-testid="upload-round-from-course"]');
-		expect(uploadButton?.disabled).toBe(true);
+		expect(uploadButton?.disabled).toBe(false);
 
 		host.querySelector<HTMLButtonElement>('[data-testid="save-course-to-memory"]')?.click();
 		await flush();
 
 		expect(host.querySelector<HTMLButtonElement>('[data-testid="upload-round-from-course"]')?.disabled).toBe(false);
+	});
+
+	it('uploading a round without saving first still hands the round off to Create Graphics', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await confirmAllHoles(host);
+
+		const uploadButton = host.querySelector<HTMLButtonElement>('[data-testid="upload-round-from-course"]');
+		expect(uploadButton?.disabled).toBe(false);
+		uploadButton?.click();
+		await flush();
+
+		expect(gotoCalls).toEqual(['/create-graphics']);
 	});
 });

@@ -1388,9 +1388,8 @@
 		}
 	}
 
-	/** The completion panel's second action, gated on the first succeeding — hands this course off to Create Graphics exactly like the topbar Done button, since "upload a round from this course" and "finish this annotation" are the same handoff. */
+	/** The completion panel's second action — hands this course off to Create Graphics exactly like the topbar Done button, since "upload a round from this course" and "finish this annotation" are the same handoff. `handleDone` performs its own best-effort Course Memory write, so this never needs the first action to have run already. */
 	async function handleUploadRoundFromCourse(): Promise<void> {
-		if (!savedCourseToMemory) return;
 		await handleDone();
 	}
 
@@ -2936,8 +2935,7 @@
 										type="button"
 										class="upload-round-button"
 										data-testid="upload-round-from-course"
-										disabled={!savedCourseToMemory || doneRunning}
-										title={savedCourseToMemory ? undefined : 'Save the course first'}
+										disabled={doneRunning}
 										onclick={() => void handleUploadRoundFromCourse()}
 									>
 										Upload a round from this course →
