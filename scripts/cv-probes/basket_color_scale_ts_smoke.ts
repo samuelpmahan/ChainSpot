@@ -21,8 +21,8 @@ function fill(image: BasketColorRaster, x0: number, y0: number, width: number, h
 
 const template = raster(30, 44);
 fill(template, 4, 4, 22, 36);
-const source = raster(520, 360);
-for (const [x, y] of [[20, 20], [110, 20], [200, 20], [290, 20], [20, 150], [110, 150], [200, 150], [290, 150]]) {
+const source = raster(640, 640);
+for (const [x, y] of [[20, 20], [110, 20], [200, 20], [290, 20], [20, 180], [110, 180], [200, 180], [290, 180]]) {
 	fill(source, x, y, 42, 67);
 }
 
