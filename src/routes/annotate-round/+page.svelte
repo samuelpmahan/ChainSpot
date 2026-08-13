@@ -785,32 +785,31 @@
 		confirmedPieces = next;
 	}
 
-	const SIDEBAR_SECTION_LABELS: Record<1 | 2 | 3 | 4 | 5, string> = {
-		1: 'No tee or basket',
-		2: 'Has basket only',
-		3: 'Has tee only',
-		4: 'Has both — unconfirmed',
-		5: 'Has both — confirmed'
+	const SIDEBAR_SECTION_LABELS: Record<1 | 2 | 3 | 4, string> = {
+		1: 'Missing tee',
+		2: 'Missing basket',
+		3: 'Placed — unconfirmed',
+		4: 'Confirmed'
 	};
 
 	/**
-	 * The sidebar hole grid's five sections, derived purely from what data
+	 * The sidebar hole grid's four sections, derived purely from what data
 	 * exists on the hole plus its per-piece confirmed status — no separate
 	 * status flag beyond tee/basket presence and `confirmedPieces`:
-	 *   1. no tee, no basket
-	 *   2. basket only
-	 *   3. tee only
-	 *   4. both, but not both confirmed
-	 *   5. both, confirmed
+	 *   1. missing tee (whether or not a basket exists)
+	 *   2. has a tee, missing basket
+	 *   3. both placed, but not both confirmed
+	 *   4. both placed and confirmed
+	 * Tees lead deliberately: detection finds baskets far more reliably than
+	 * tees, so step 1 of the guided flow is marking whatever tees are missing
+	 * or too uncertain for detection to have placed — a hole that already has
+	 * its basket still surfaces here first until its tee exists.
 	 */
-	function sectionOfHole(hole: AnnotatedHole): 1 | 2 | 3 | 4 | 5 {
-		const hasTee = hole.tee !== undefined;
-		const hasBasket = hole.basket !== undefined;
-		if (!hasTee && !hasBasket) return 1;
-		if (hasBasket && !hasTee) return 2;
-		if (hasTee && !hasBasket) return 3;
+	function sectionOfHole(hole: AnnotatedHole): 1 | 2 | 3 | 4 {
+		if (hole.tee === undefined) return 1;
+		if (hole.basket === undefined) return 2;
 		const confirmed = isPieceConfirmed(hole.id, 'tee') && isPieceConfirmed(hole.id, 'basket');
-		return confirmed ? 5 : 4;
+		return confirmed ? 4 : 3;
 	}
 
 	/**
@@ -838,7 +837,7 @@
 		markMapGeometryEdited();
 	}
 
-	/** Approves both pieces on a hole at once — the sidebar's Approve action for a section-4 hole. No-op unless both are already placed. */
+	/** Approves both pieces on a hole at once — the sidebar's Approve action for a section-3 hole. No-op unless both are already placed. */
 	function approveHolePieces(holeId: string): void {
 		const hole = holes.find((candidate) => candidate.id === holeId);
 		if (!hole?.tee || !hole.basket) return;
@@ -912,7 +911,7 @@
 
 	/**
 	 * Applies every tee/basket the grammar proposed, per piece rather than
-	 * requiring both and a `ready` status — the sidebar's five sections are
+	 * requiring both and a `ready` status — the sidebar's four sections are
 	 * the review gate now, not the grammar's own confidence bucket. A piece
 	 * is skipped when `applyDetectionThreshold` is on and its confidence
 	 * falls under `minAutoSuggestScore` (never created at all, so that hole
@@ -1302,7 +1301,7 @@
 	 * like an empty `AnnotatedHole` would score.
 	 */
 	let sidebarSections = $derived.by(() => {
-		const buckets: Record<1 | 2 | 3 | 4 | 5, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+		const buckets: Record<1 | 2 | 3 | 4, number[]> = { 1: [], 2: [], 3: [], 4: [] };
 		for (let number = 1; number <= 18; number += 1) {
 			const hole = holes.find((candidate) => candidate.number === number);
 			buckets[hole ? sectionOfHole(hole) : 1].push(number);
@@ -1310,7 +1309,19 @@
 		return buckets;
 	});
 
-	let allHolesConfirmed = $derived(sidebarSections[5].length === 18);
+	let allHolesConfirmed = $derived(sidebarSections[4].length === 18);
+
+	/**
+	 * The guided flow's final step: once all 18 tees/baskets are confirmed the
+	 * sidebar walks through corridor-bend annotation before offering the
+	 * completion panel. Bends have no detection pass today (nothing in
+	 * courseGrammar proposes them — automation is a parallel effort), so this
+	 * step is the only place they'd ever get marked; without it the guide
+	 * jumped straight from confirmation to "Course complete" and bends were
+	 * silently skipped. Sticky once finished ("Finish bends" doubles as skip);
+	 * cleared on the same source-image-replacement lifecycle as the rest.
+	 */
+	let bendPhaseDone = $state(false);
 
 	/**
 	 * Entry point for clicking a hole in the sidebar grid: activates it
@@ -1340,6 +1351,7 @@
 	type SidebarBanner =
 		| { kind: 'placing'; holeNumber: number; piece: 'Tee' | 'Basket' }
 		| { kind: 'approve'; holeNumber: number }
+		| { kind: 'bends'; holeNumber: number }
 		| { kind: 'confirmed'; holeNumber: number };
 
 	/** Derived purely from the active hole's own section — see requirement 3/4: which piece a placing click will create, or the Approve prompt, follows automatically from hole state. Map mode only; Round mode's own hole selection has nothing to do with tee/basket sections. */
@@ -1348,17 +1360,18 @@
 		const hole = holes.find((candidate) => candidate.id === activeHoleId);
 		if (!hole) return null;
 		const section = sectionOfHole(hole);
-		if (section <= 3) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
-		if (section === 4) return { kind: 'approve', holeNumber: hole.number };
+		if (section <= 2) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
+		if (section === 3) return { kind: 'approve', holeNumber: hole.number };
+		if (allHolesConfirmed && !bendPhaseDone) return { kind: 'bends', holeNumber: hole.number };
 		return { kind: 'confirmed', holeNumber: hole.number };
 	});
 
-	/** The Approve banner's action: confirms both pieces, then auto-advances to the next section-4 hole if one exists, else exits focus — mirroring the reference flow's `approveHole`. */
+	/** The Approve banner's action: confirms both pieces, then auto-advances to the next section-3 hole if one exists, else exits focus — mirroring the reference flow's `approveHole`. */
 	function approveActiveHole(): void {
 		if (!activeHoleId) return;
 		approveHolePieces(activeHoleId);
 		vibrate(8);
-		const next = holes.find((hole) => hole.id !== activeHoleId && sectionOfHole(hole) === 4);
+		const next = holes.find((hole) => hole.id !== activeHoleId && sectionOfHole(hole) === 3);
 		if (next) onHoleBoxClick(next.number);
 		else exitSidebarFocus();
 	}
@@ -1938,9 +1951,9 @@
 	 * Opens the empty-space placement menu/flow. In round mode this works even
 	 * with no hole active — the menu then offers only `walk`, since the walk
 	 * path is round-level rather than per-hole. In map mode a hole must be
-	 * active; if it's still missing a tee or basket (sections 1-3), the click
+	 * active; if it's still missing a tee or basket (sections 1-2), the click
 	 * places that piece directly through the sidebar's placing flow instead of
-	 * opening a menu at all. Otherwise (section 4/5, or Round mode) the
+	 * opening a menu at all. Otherwise (section 3/4, or Round mode) the
 	 * existing empty-space radial menu handles it — bends in Map mode, shots
 	 * in Round mode.
 	 */
@@ -1951,8 +1964,20 @@
 		if (annotationMode === 'map') {
 			if (!activeHoleId) return;
 			const hole = activeHole();
-			if (hole && sectionOfHole(hole) <= 3) {
+			if (hole && sectionOfHole(hole) <= 2) {
 				placeNextPiece(activeHoleId, coordinates, options.altKey ?? false);
+				return;
+			}
+			// A fully-placed hole's empty-map click drops a corridor bend
+			// directly — the guided bends step (and the only default-UI path to
+			// bends at all; the radial menu is a dev-toggle nicety, and gating
+			// bends behind it silently removed them from the flow). The radial
+			// menu, when enabled, still wins so its delete/bend wedges stay
+			// reachable.
+			if (hole && !radialMenuEnabled) {
+				holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
+				markMapGeometryEdited();
+				vibrate(8);
 				return;
 			}
 		}
@@ -1976,6 +2001,7 @@
 		annotationMode = 'map';
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = false;
+		bendPhaseDone = false;
 		radialMenu = null;
 		markerChip = null;
 		sidebarFocusRequest = null;
@@ -2855,7 +2881,44 @@
 							</button>
 						{/if}
 
-						{#if allHolesConfirmed}
+						{#if allHolesConfirmed && !bendPhaseDone}
+							<div class="done-panel bends-panel" data-testid="bend-phase-panel">
+								<h3>Mark corridor bends</h3>
+								<p>
+									All 18 tees and baskets are confirmed. Now walk the doglegs: pick a hole, then
+									click the map wherever its fairway turns. Straight holes need nothing.
+								</p>
+								<div class="hole-grid">
+									{#each holes.filter((hole) => hole.number >= 1 && hole.number <= 18) as hole (hole.id)}
+										<button
+											type="button"
+											class="hbox"
+											class:active={hole.id === activeHoleId}
+											data-testid="bend-phase-hole-{hole.number}"
+											onclick={() => onHoleBoxClick(hole.number)}
+										>
+											<span class="num">{hole.number}</span>
+											<span class="tb">
+												<span class={hole.corridorBends.length > 0 ? 'confirmed' : ''}>↯{hole.corridorBends.length || ''}</span>
+											</span>
+										</button>
+									{/each}
+								</div>
+								<div class="stack">
+									<button
+										type="button"
+										class="save-course-button"
+										data-testid="finish-bends"
+										onclick={() => {
+											bendPhaseDone = true;
+											exitSidebarFocus();
+										}}
+									>
+										Finish bends →
+									</button>
+								</div>
+							</div>
+						{:else if allHolesConfirmed}
 							<div class="done-panel" data-testid="course-complete-panel">
 								<h3>Course complete</h3>
 								<p>All 18 holes have confirmed tee and basket placements.</p>
@@ -2882,7 +2945,7 @@
 								</div>
 							</div>
 						{:else}
-							{#each [1, 2, 3, 4, 5] as const as section (section)}
+							{#each [1, 2, 3, 4] as const as section (section)}
 								<div class="grid-section sec{section}" data-testid="sidebar-section-{section}">
 									<div class="grid-head">
 										<h3>{SIDEBAR_SECTION_LABELS[section]}</h3>
@@ -3256,6 +3319,9 @@
 						{:else if sidebarBanner.kind === 'approve'}
 							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Drag either marker to adjust, then Approve.</span>
 							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
+						{:else if sidebarBanner.kind === 'bends'}
+							<span><strong>Bends — Hole {sidebarBanner.holeNumber}.</strong> Click the map wherever the fairway turns. Straight hole? Pick the next one.</span>
+							<button type="button" class="banner-close" data-testid="placement-banner-close" onclick={exitSidebarFocus}>Close</button>
 						{:else}
 							<span>Hole {sidebarBanner.holeNumber} is confirmed.</span>
 							<button type="button" class="banner-close" data-testid="placement-banner-close" onclick={exitSidebarFocus}>Close</button>
@@ -4393,7 +4459,7 @@
 		}
 	}
 
-	/* ---- Redesigned Map-mode sidebar: threshold row, five-section hole grid, completion panel ---- */
+	/* ---- Redesigned Map-mode sidebar: threshold row, four-section hole grid, completion panel ---- */
 
 	.hole-sidebar {
 		gap: 0.7rem;

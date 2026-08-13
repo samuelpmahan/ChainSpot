@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 /**
- * Coverage for the redesigned Annotate Round sidebar: the five-section hole
+ * Coverage for the redesigned Annotate Round sidebar: the four-section hole
  * grid, the sidebar-driven placing flow (click a hole, click empty map to
- * place its missing piece), the section-4 approve flow, the marker
+ * place its missing piece), the section-3 approve flow, the marker
  * correction chip (reassign to any hole / delete, not proximity-gated), real
  * drag-vs-click disambiguation on an existing marker, and the completion
  * panel's save/upload gating.
@@ -136,7 +136,7 @@ afterEach(() => {
 });
 
 describe('sidebar hole grid — sections derive from real hole state', () => {
-	it('starts with all 18 holes in "No tee or basket", and moves a hole through every section as it is placed and approved', async () => {
+	it('starts with all 18 holes in "Missing tee", and moves a hole through every section as it is placed and approved', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -154,8 +154,8 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
-		// Section 3 (tee only) now — the banner should ask for the basket next, no return trip to the sidebar.
-		expect(sidebarSection(host, 3).textContent).toContain('1');
+		// Section 2 (missing basket) now — the banner should ask for the basket next, no return trip to the sidebar.
+		expect(sidebarSection(host, 2).textContent).toContain('1');
 		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Basket');
 
 		const basketAt = screenPointFor(host, 60, 60);
@@ -163,8 +163,8 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
 
-		// Both placed but unconfirmed: section 4, with an Approve button near the markers.
-		expect(sidebarSection(host, 4).textContent).toContain('1');
+		// Both placed but unconfirmed: section 3, with an Approve button near the markers.
+		expect(sidebarSection(host, 3).textContent).toContain('1');
 		const approveButton = host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]');
 		expect(approveButton).not.toBeNull();
 		expect(approveButton?.textContent).toContain('1');
@@ -172,12 +172,12 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		approveButton?.click();
 		await flush();
 
-		// Confirmed: section 5.
-		expect(sidebarSection(host, 5).textContent).toContain('1');
+		// Confirmed: section 4.
+		expect(sidebarSection(host, 4).textContent).toContain('1');
 		expect(sidebarSection(host, 1).textContent).toContain('17');
 	});
 
-	it('basket-only and tee-only holes land in their own distinct sections', async () => {
+	it('a tee-only hole waits in Missing basket; a basket-only hole goes back to Missing tee (tees lead the guided flow)', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -192,7 +192,7 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-cancel"]')?.click();
 		await flush();
 
-		expect(sidebarSection(host, 3).textContent).toContain('1');
+		expect(sidebarSection(host, 2).textContent).toContain('1');
 
 		// Hole 2: place a basket directly by reassigning hole 1's future basket
 		// is unnecessary — place hole 2's tee, then use the marker chip to
@@ -214,9 +214,81 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		host.querySelector<HTMLButtonElement>('[data-testid="marker-chip-delete"]')?.click();
 		await flush();
 
+		// Basket-only means the tee is still missing — hole 2 rejoins section 1
+		// (16 never-touched holes + hole 2 = 17), while tee-only hole 1 stays
+		// alone in Missing basket.
+		expect(sidebarSection(host, 1).textContent).toContain('17');
 		expect(sidebarSection(host, 2).textContent).toContain('1');
 		expect(host.querySelector('[data-testid="tee-marker-2"]')).toBeNull();
 		expect(host.querySelector('[data-testid="basket-marker-2"]')).not.toBeNull();
+	});
+});
+
+describe('guided bends phase — after all 18 confirm, before the completion panel', () => {
+	/** Image-space placement grid: 6 columns × 3 rows, spaced so no click ever lands within another marker's hit radius. */
+	function holeSpots(number: number): { tee: [number, number]; basket: [number, number] } {
+		const col = (number - 1) % 6;
+		const row = Math.floor((number - 1) / 6);
+		const x = 15 + col * 30;
+		const y = 15 + row * 60;
+		return { tee: [x, y], basket: [x, y + 25] };
+	}
+
+	async function confirmAllHoles(host: HTMLElement): Promise<void> {
+		for (let number = 1; number <= 18; number += 1) {
+			const { tee, basket } = holeSpots(number);
+			sidebarHoleButton(host, number).click();
+			await flush();
+			const teeScreen = screenPointFor(host, ...tee);
+			dispatchClick(host, teeScreen.x, teeScreen.y);
+			await flush();
+			const basketScreen = screenPointFor(host, ...basket);
+			dispatchClick(host, basketScreen.x, basketScreen.y);
+			await flush();
+			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+			await flush();
+		}
+	}
+
+	it('walks through bends after the 18th approval, places bends by direct map click, and only then offers the completion panel', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+
+		await confirmAllHoles(host);
+
+		// Every hole confirmed: the bends panel appears first — the completion
+		// panel must NOT short-circuit past bend annotation.
+		expect(host.querySelector('[data-testid="bend-phase-panel"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="course-complete-panel"]')).toBeNull();
+
+		// Pick hole 1 and click empty map twice: each click drops a bend
+		// directly — no radial menu involved (it stays off by default).
+		host.querySelector<HTMLButtonElement>('[data-testid="bend-phase-hole-1"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Bends');
+
+		// Clicking a bends-panel hole zooms the camera onto that hole, so the
+		// bend clicks must land near hole 1's own markers (tee 15,15 / basket
+		// 15,40) to stay inside the focused viewport — but beyond the 12px
+		// marker hit radius so they read as empty-map clicks.
+		const bendA = screenPointFor(host, 30, 27);
+		dispatchClick(host, bendA.x, bendA.y);
+		await flush();
+		const bendB = screenPointFor(host, 35, 50);
+		dispatchClick(host, bendB.x, bendB.y);
+		await flush();
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="bend-phase-hole-1"]')?.textContent).toContain('↯2');
+
+		// Finish bends: only now does the completion panel take over.
+		host.querySelector<HTMLButtonElement>('[data-testid="finish-bends"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="bend-phase-panel"]')).toBeNull();
+		expect(host.querySelector('[data-testid="course-complete-panel"]')).not.toBeNull();
 	});
 });
 
@@ -241,7 +313,7 @@ describe('marker correction chip — reassign and delete, not proximity-gated', 
 		await placeHoleFully(host, 1, [30, 30], [40, 40]);
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
-		expect(sidebarSection(host, 5).textContent).toContain('1');
+		expect(sidebarSection(host, 4).textContent).toContain('1');
 
 		// Click hole 1's confirmed tee — the marker chip opens for ANY marker at
 		// any time, not just an actively-placing one.
@@ -262,11 +334,12 @@ describe('marker correction chip — reassign and delete, not proximity-gated', 
 		// The point genuinely moved: hole 1 no longer has a tee, hole 5 does.
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
 		expect(host.querySelector('[data-testid="tee-marker-5"]')).not.toBeNull();
-		// Hole 1 drops out of section 5 (basket-only now); hole 5 is tee-only,
-		// pending — a correction never carries over a stale confirmation.
-		expect(sidebarSection(host, 5).textContent).toContain('0');
+		// Hole 1 drops out of Confirmed (its tee is missing again, so it's back
+		// in section 1 with the 16 untouched holes); hole 5 is tee-only, pending
+		// its basket — a correction never carries over a stale confirmation.
+		expect(sidebarSection(host, 4).textContent).toContain('0');
+		expect(sidebarSection(host, 1).textContent).toContain('17');
 		expect(sidebarSection(host, 2).textContent).toContain('1');
-		expect(sidebarSection(host, 3).textContent).toContain('1');
 	});
 
 	it('the quick "reassign to the active hole" shortcut targets whichever hole the sidebar currently has active', async () => {
@@ -314,7 +387,7 @@ describe('marker correction chip — reassign and delete, not proximity-gated', 
 		await flush();
 		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-cancel"]')?.click();
 		await flush();
-		expect(sidebarSection(host, 3).textContent).toContain('1');
+		expect(sidebarSection(host, 2).textContent).toContain('1');
 
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
@@ -399,6 +472,12 @@ describe('completion panel', () => {
 			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 			await flush();
 		}
+
+		// The guided bends phase now sits between the 18th approval and the
+		// completion panel; finish it (doubles as skip) to reach completion.
+		expect(host.querySelector('[data-testid="bend-phase-panel"]')).not.toBeNull();
+		host.querySelector<HTMLButtonElement>('[data-testid="finish-bends"]')?.click();
+		await flush();
 
 		const panel = host.querySelector('[data-testid="course-complete-panel"]');
 		expect(panel).not.toBeNull();
