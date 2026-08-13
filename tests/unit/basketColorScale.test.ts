@@ -64,10 +64,10 @@ describe('basket color scale bootstrap', () => {
 	});
 
 	it('recovers a strong repeated basket mode at the measured template scale', () => {
-		const source = raster(520, 360);
+		const source = raster(640, 640);
 		const basketOrigins = [
 			[20, 20], [110, 20], [200, 20], [290, 20],
-			[20, 150], [110, 150], [200, 150], [290, 150]
+			[20, 180], [110, 180], [200, 180], [290, 180]
 		] as const;
 		for (const [x, y] of basketOrigins) fillRect(source, x, y, 42, 67);
 
@@ -82,10 +82,10 @@ describe('basket color scale bootstrap', () => {
 	});
 
 	it('chooses coherent component mass over a larger count of tiny repeated distractors, but abstains when the modes are too close', () => {
-		const source = raster(520, 360);
+		const source = raster(640, 640);
 		const basketOrigins = [
 			[20, 20], [110, 20], [200, 20],
-			[20, 150], [110, 150], [200, 150]
+			[20, 180], [110, 180], [200, 180]
 		] as const;
 		for (const [x, y] of basketOrigins) fillRect(source, x, y, 42, 67);
 
@@ -93,7 +93,7 @@ describe('basket color scale bootstrap', () => {
 		// mode should still select the large family, while the conservative
 		// reliability guard rejects this artificially coherent two-scale scene.
 		for (let index = 0; index < 8; index += 1) {
-			fillRect(source, 330 + (index % 4) * 40, 20 + Math.floor(index / 4) * 80, 13, 21);
+			fillRect(source, 380 + (index % 4) * 40, 20 + Math.floor(index / 4) * 100, 13, 21);
 		}
 
 		const estimate = estimateBasketTemplateScaleFromColor(source, basketTemplate());
@@ -106,7 +106,7 @@ describe('basket color scale bootstrap', () => {
 	});
 
 	it('refuses to trust a single accidental component', () => {
-		const source = raster(160, 120);
+		const source = raster(640, 640);
 		fillRect(source, 30, 25, 42, 67);
 		const estimate = estimateBasketTemplateScaleFromColor(source, basketTemplate());
 		expect(estimate).not.toBeNull();
