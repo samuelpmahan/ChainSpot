@@ -12,6 +12,7 @@ import {
 	moveTee,
 	nextHoleNumber,
 	placeByMode,
+	reassignMarker,
 	removeBasket,
 	removeCorridorBend,
 	removeHole,
@@ -455,5 +456,63 @@ describe('assignCandidateToHole', () => {
 		// Undo: move it back from hole b to hole a.
 		const restored = assignCandidateToHole(moved, 'a', 'basket', { xPx: 5, yPx: 6 });
 		expect(restored).toEqual(original);
+	});
+});
+
+describe('reassignMarker', () => {
+	it('moves an existing tee from its owning hole onto the target hole, by id rather than coordinate match', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { tee: { xPx: 5, yPx: 6 } }),
+			emptyHole('b', 2)
+		];
+		const result = reassignMarker(holes, 'a', 'b', 'tee');
+
+		expect(result.find((hole) => hole.id === 'a')?.tee).toBeUndefined();
+		expect(result.find((hole) => hole.id === 'b')?.tee).toEqual({ xPx: 5, yPx: 6 });
+	});
+
+	it('overwrites a basket already on the target hole, discarding it', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { basket: { xPx: 1, yPx: 1 } }),
+			emptyHole('b', 2, { basket: { xPx: 9, yPx: 9 } })
+		];
+		const result = reassignMarker(holes, 'a', 'b', 'basket');
+
+		expect(result.find((hole) => hole.id === 'a')?.basket).toBeUndefined();
+		expect(result.find((hole) => hole.id === 'b')?.basket).toEqual({ xPx: 1, yPx: 1 });
+	});
+
+	it('is a no-op when the source hole has no point of that kind', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1), emptyHole('b', 2)];
+		const result = reassignMarker(holes, 'a', 'b', 'tee');
+
+		expect(result).toEqual(holes);
+		expect(result).not.toBe(holes); // still returns a fresh array, per the pure-reducer convention
+	});
+
+	it('is a no-op when the source and target hole are the same', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1, { tee: { xPx: 5, yPx: 6 } })];
+		const result = reassignMarker(holes, 'a', 'a', 'tee');
+
+		expect(result).toEqual(holes);
+	});
+
+	it('leaves every other field on both holes untouched', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, {
+				tee: { xPx: 5, yPx: 6 },
+				basket: { xPx: 50, yPx: 60 },
+				shots: [{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } }]
+			}),
+			emptyHole('b', 2, { corridorBends: [{ xPx: 3, yPx: 4 }] })
+		];
+		const result = reassignMarker(holes, 'a', 'b', 'tee');
+
+		const source = result.find((hole) => hole.id === 'a');
+		const target = result.find((hole) => hole.id === 'b');
+		expect(source?.basket).toEqual({ xPx: 50, yPx: 60 });
+		expect(source?.shots).toEqual(holes[0].shots);
+		expect(target?.corridorBends).toEqual(holes[1].corridorBends);
+		expect(target?.tee).toEqual({ xPx: 5, yPx: 6 });
 	});
 });

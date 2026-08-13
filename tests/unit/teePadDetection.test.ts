@@ -39,17 +39,22 @@ describe('deriveUDiscCalibration', () => {
 		expect(atAnotherResize).toBe(atOne);
 	});
 
+	// Annotate Round's own sidebar redesign removed the standalone "Detect
+	// tees" experiment tool, so `+page.svelte` no longer has a direct
+	// browser-side tee-detection entry point at all — the worker (driven by
+	// course detection) is the only active path left to guard.
 	it('routes every tee scale entry path through the shared helper', () => {
 		const root = resolve(process.cwd());
 		const entryPaths = [
 			'src/lib/autoAnnotation/basketDetection.worker.ts',
-			'scripts/detect-tees.ts',
-			'src/routes/annotate-round/+page.svelte'
+			'scripts/detect-tees.ts'
 		];
 		for (const entryPath of entryPaths) {
 			const source = readFileSync(resolve(root, entryPath), 'utf8');
 			expect(source, entryPath).toContain('deriveUDiscCalibration');
 		}
+		const pageSource = readFileSync(resolve(root, 'src/routes/annotate-round/+page.svelte'), 'utf8');
+		expect(pageSource).not.toContain('deriveUDiscCalibration');
 		const workerSource = readFileSync(
 			resolve(root, 'src/lib/autoAnnotation/basketDetection.worker.ts'),
 			'utf8'

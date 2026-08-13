@@ -131,12 +131,6 @@ function screenPointFor(host: HTMLElement, imageX: number, imageY: number): { x:
 	return { x: imageX * zoom + panX, y: imageY * zoom + panY };
 }
 
-function clickAction(host: HTMLElement, action: string): void {
-	const button = host.querySelector<HTMLButtonElement>(`[data-testid="radial-action-${action}"]`);
-	if (!button) throw new Error(`missing radial-action-${action}`);
-	button.click();
-}
-
 async function flush(): Promise<void> {
 	for (let i = 0; i < 16; i += 1) {
 		await tick();
@@ -164,6 +158,11 @@ function addHoleViaShortcut(): void {
  * number-badge candidate this file's fixture always carries included) fire
  * regardless of how far apart two points actually are in image space, which
  * several tests here rely on distinguishing.
+ *
+ * Course detection now auto-runs the instant the image loads (there is no
+ * "Detect course" button anymore) — the caller must script
+ * `detectCourseCandidatesMock` BEFORE calling this, so the auto-detect effect
+ * that fires during image load resolves to it.
  */
 async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Promise<void> {
 	setGeometry(host);
@@ -178,7 +177,6 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	void editor;
 
 	addHoleViaShortcut();
-	// Radial menu (manual placement) is on by default; nothing to toggle here.
 	await flush();
 }
 
@@ -227,10 +225,10 @@ function deferredLocalSnap(): { resolve: (point: { xPx: number; yPx: number } | 
 	return { resolve: (point) => resolveFn(point) };
 }
 
-/** Runs "Detect course" (mocked) so a number-badge anchor exists to calibrate snap requests from. */
-async function detectReady(host: HTMLElement): Promise<void> {
+/** Scripts the mocked course-detection result and loads the image, so the auto-detect effect that fires during image load resolves to a number-badge anchor to calibrate snap requests from. */
+async function setUpDetectedHole(host: HTMLElement, editor: ProjectEditor): Promise<void> {
 	detectCourseCandidatesMock.mockResolvedValueOnce(courseDetectionFixture());
-	host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]')?.click();
+	await setUpHoleWithImage(host, editor);
 	await flush();
 }
 
@@ -246,6 +244,13 @@ beforeEach(() => {
 	requestLocalSnapMock.mockResolvedValue(null);
 	localStorage.clear();
 	mockReducedMotion(false);
+	// jsdom has no real Worker; course detection now only ever runs via the
+	// page's own auto-detect effect (no manual "Detect course" button
+	// remains), and that effect no-ops without `Worker` defined — same stub
+	// pattern as tests/unit/basketDetection.test.ts. `detectCourseCandidates`
+	// itself is fully mocked above, so this stub is never actually
+	// constructed; it only needs to make `typeof Worker !== 'undefined'` true.
+	vi.stubGlobal('Worker', class {});
 });
 
 afterEach(() => {
@@ -256,19 +261,20 @@ afterEach(() => {
 	}
 });
 
-describe('snap-to-detection — placement via the point menu', () => {
+describe('snap-to-detection — placement via the sidebar-driven placing flow', () => {
+	// Tee/basket placement no longer goes through the radial menu — clicking
+	// empty map space directly places the missing piece (tee first, then
+	// basket) for whichever hole is active, per the redesigned sidebar's
+	// placing flow. A single click is the whole interaction now.
 	it('places the raw click immediately, then settles onto the snap result', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 
 		const gate = deferredLocalSnap();
 		const clickAt = screenPointFor(host, 150, 150);
 		dispatchClick(host, clickAt.x, clickAt.y);
-		await flush();
-		clickAction(host, 'tee');
 		await tick();
 
 		// Optimistic placement: the marker is already at the raw click before
@@ -294,14 +300,18 @@ describe('snap-to-detection — placement via the point menu', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
+
+		// First click places the tee (asked for first, per the placing flow's
+		// ordering); the basket this test is actually about is the second.
+		requestLocalSnapMock.mockResolvedValueOnce(null);
+		const teeAt = screenPointFor(host, 40, 150);
+		dispatchClick(host, teeAt.x, teeAt.y);
+		await flush();
 
 		requestLocalSnapMock.mockResolvedValueOnce(null);
 		const clickAt = screenPointFor(host, 150, 150);
 		dispatchClick(host, clickAt.x, clickAt.y);
-		await flush();
-		clickAction(host, 'basket');
 		await flush();
 
 		const marker = host.querySelector('[data-testid="basket-marker-1"]');
@@ -314,13 +324,10 @@ describe('snap-to-detection — placement via the point menu', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 
 		const clickAt = screenPointFor(host, 150, 150);
 		dispatchClick(host, clickAt.x, clickAt.y, { altKey: true });
-		await flush();
-		clickAction(host, 'tee');
 		await flush();
 
 		expect(requestLocalSnapMock).not.toHaveBeenCalled();
@@ -334,14 +341,11 @@ describe('snap-to-detection — placement via the point menu', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 
 		const gate = deferredLocalSnap();
 		const clickAt = screenPointFor(host, 150, 150);
 		dispatchClick(host, clickAt.x, clickAt.y);
-		await flush();
-		clickAction(host, 'tee');
 		await tick();
 
 		gate.resolve({ xPx: 65, yPx: 82 });
@@ -355,13 +359,11 @@ describe('snap-to-detection — placement via the point menu', () => {
 });
 
 describe('snap-to-detection — drag-release of an existing marker', () => {
-	/** Places a tee via the point menu with the snap request stubbed to resolve null, so the marker starts exactly at a known point unaffected by any snap, then clears the mock's call history so the drag-release assertions below see only their own request. */
+	/** Places a tee via the placing flow's direct empty-click (the snap request stubbed to resolve null so the marker starts exactly at a known point unaffected by any snap), then clears the mock's call history so the drag-release assertions below see only their own request. */
 	async function placeTeeAt(host: HTMLElement, imageX: number, imageY: number): Promise<void> {
 		requestLocalSnapMock.mockResolvedValueOnce(null);
 		const clickAt = screenPointFor(host, imageX, imageY);
 		dispatchClick(host, clickAt.x, clickAt.y);
-		await flush();
-		clickAction(host, 'tee');
 		await flush();
 		requestLocalSnapMock.mockClear();
 	}
@@ -370,8 +372,7 @@ describe('snap-to-detection — drag-release of an existing marker', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 		await placeTeeAt(host, 150, 150);
 
 		const gate = deferredLocalSnap();
@@ -398,8 +399,7 @@ describe('snap-to-detection — drag-release of an existing marker', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 		await placeTeeAt(host, 150, 150);
 
 		const element = scene(host);
@@ -423,8 +423,7 @@ describe('snap-to-detection — drag-release of an existing marker', () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await setUpHoleWithImage(host, editor);
-		await detectReady(host);
+		await setUpDetectedHole(host, editor);
 		await placeTeeAt(host, 150, 150);
 
 		const from = screenPointFor(host, 150, 150);
