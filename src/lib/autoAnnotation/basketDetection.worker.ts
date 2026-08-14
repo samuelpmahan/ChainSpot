@@ -1,8 +1,9 @@
 import { loadCv } from '../stitch/cvMatch';
 import { associateCourseGrammar, deriveBasketPolarityPenaltyPx } from './courseGrammar';
-import type {
-	HoleNumberCvModule,
-	HoleNumberTemplate
+import {
+	labelKnownHoleNumberBadges,
+	type HoleNumberCvModule,
+	type HoleNumberTemplate
 } from './holeNumberDetection';
 import type {
 	BasketCv,
@@ -44,8 +45,16 @@ import type {
 } from './cvCalibration';
 import { localFeatureSnap } from '../cv/localSnap';
 import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
+import { detectRawObjectMask } from './rawObjectMask';
+import { deriveP3Ownership } from './rawObjectOwnership';
+import { deriveP45EndpointBridgeExperiment } from './p4RibbonOwnership';
+import { deriveP5SparseAssignment } from './p5SparseAssignment';
+import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
+import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
 
 const MAX_ANALYSIS_DIM = 4096;
+// TEMP DEV ONLY: benchmark Pancake 1-3 without paying for legacy ownership CV.
+const PANCAKE_STACK_ONLY = true;
 // `$app/paths`'s `base` does not resolve inside this worker's separate
 // Vite bundle context (it silently resolves to `''` at runtime despite
 // compiling cleanly), so the GitHub Pages base path (e.g. `/ChainSpot`)
@@ -498,6 +507,195 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
 	const bootstrapMs = performance.now() - bootstrapStartedAt;
 
+	if (PANCAKE_STACK_ONLY) {
+		const fullRasterStartedAt = performance.now();
+		const full = fullResolutionRaster(request.bitmap);
+		const fullRasterMs = performance.now() - fullRasterStartedAt;
+
+		const p1MaskStartedAt = performance.now();
+		const rawMaskObjects = detectRawObjectMask({ rgba: full.rgba, widthPx: full.width, heightPx: full.height });
+		const p1MaskMs = performance.now() - p1MaskStartedAt;
+
+		const p2BadgeLabelStartedAt = performance.now();
+		const p2BadgeDetectionRaw = labelKnownHoleNumberBadges(
+			cv,
+			{ format: 'rgba', widthPx: full.width, heightPx: full.height, data: full.rgba },
+			pack.holeNumbers,
+			rawMaskObjects.badges
+		);
+		const p2BadgeDetection = {
+			...p2BadgeDetectionRaw,
+			anchor: p2BadgeDetectionRaw.anchor
+				? { ...p2BadgeDetectionRaw.anchor, scale: asNumberTemplateScale(p2BadgeDetectionRaw.anchor.scale) }
+				: null,
+			candidates: p2BadgeDetectionRaw.candidates.map((candidate) => ({
+				...candidate,
+				scale: asNumberTemplateScale(candidate.scale)
+			}))
+		};
+		const p2BadgeLabelMs = performance.now() - p2BadgeLabelStartedAt;
+		const p2LabeledBadges = p2BadgeDetection.candidates
+			.filter((candidate): candidate is typeof candidate & { label: number; glyphScore: number } =>
+				candidate.label !== undefined && candidate.glyphScore !== undefined
+			)
+			.map((candidate) => ({
+				holeNumber: candidate.label,
+				glyphScore: candidate.glyphScore,
+				xPx: candidate.xPx,
+				yPx: candidate.yPx,
+				widthPx: candidate.widthPx,
+				heightPx: candidate.heightPx
+			}));
+
+		const p3StartedAt = performance.now();
+		const p3Ownership = deriveP3Ownership(
+			rawMaskObjects.tees,
+			p2LabeledBadges,
+			rawMaskObjects.baskets
+		);
+		const p3Ms = performance.now() - p3StartedAt;
+
+		const p45StartedAt = performance.now();
+		const p45EndpointBridge = deriveP45EndpointBridgeExperiment(
+			{ data: full.rgba, widthPx: full.width, heightPx: full.height, channels: 4 },
+			rawMaskObjects.tees,
+			p2LabeledBadges,
+			rawMaskObjects.baskets,
+			p3Ownership
+		);
+		const p45Ms = performance.now() - p45StartedAt;
+		const p4RibbonOwnership = p45EndpointBridge.original;
+		const p4Ms = p45EndpointBridge.originalMs;
+
+		const p5StartedAt = performance.now();
+		const p5SparseAssignment = deriveP5SparseAssignment(
+			rawMaskObjects.tees,
+			p2LabeledBadges,
+			p3Ownership,
+			p4RibbonOwnership
+		);
+		const p5Ms = performance.now() - p5StartedAt;
+
+		const p6StartedAt = performance.now();
+		const p6LowParBasketAssignment = deriveP6LowParBasketAssignment(
+			{
+				data: full.rgba,
+				widthPx: full.width,
+				heightPx: full.height,
+				originXPx: 0,
+				originYPx: 0,
+				scale: 1,
+				channels: 4
+			},
+			rawMaskObjects.tees,
+			rawMaskObjects.baskets,
+			p2LabeledBadges,
+			p5SparseAssignment,
+			p4RibbonOwnership
+		);
+		const p6Ms = performance.now() - p6StartedAt;
+
+		const numberTemplateScale = p2BadgeDetection.anchor?.scale ?? asNumberTemplateScale(1);
+		const basketTemplateScale = deriveBasketTemplateScale(numberTemplateScale, pack.manifest.calibration);
+		const performanceReport = {
+			totalMs: elapsedMs(),
+			cachedAtStart: {
+				runtime: runtimeCachedAtStart,
+				templatePack: templatePackCachedAtStart
+			},
+			input: {
+				sourceWidthPx: request.widthPx,
+				sourceHeightPx: request.heightPx,
+				analysisWidthPx: full.width,
+				analysisHeightPx: full.height,
+				analysisScale: 1
+			},
+			stages: {
+				bootstrapMs,
+				analysisRasterMs: 0,
+				numbersMs: 0,
+				basketsMs: 0,
+				basketRasterMs: 0,
+				basketAnchorMs: 0,
+				basketCandidatesMs: 0,
+				p1MaskMs,
+				p2BadgeLabelMs,
+				p3Ms,
+				p4Ms,
+				p45Ms,
+				p5Ms,
+				p6Ms,
+				teesMs: 0,
+				teeRasterMs: fullRasterMs,
+				teeDetectionMs: 0,
+				basketFallbackMs: 0,
+				grammarMs: 0
+			},
+			counts: {
+				numberTemplates: pack.holeNumbers.length,
+				numberCandidates: p2BadgeDetection.candidates.length,
+				labeledNumbers: p2LabeledBadges.length,
+				baskets: rawMaskObjects.baskets.length,
+				tees: rawMaskObjects.tees.length,
+				p1MaskTees: rawMaskObjects.tees.length,
+				p1MaskBadges: rawMaskObjects.badges.length,
+				p1MaskBaskets: rawMaskObjects.baskets.length,
+				p2LabeledBadges: p2LabeledBadges.length,
+				p2UniqueLabels: new Set(p2LabeledBadges.map((badge) => badge.holeNumber)).size,
+				p3OwnedTees: p3Ownership.teeBadgeHits.length,
+				p3StraightBasketHits: p3Ownership.straightBasketHits.length,
+				p3TeeConflicts: p3Ownership.teeConflictIndexes.length,
+				p3StraightBasketConflicts: p3Ownership.straightBasketConflictHoleNumbers.length,
+				p4ResolvedTees: p4RibbonOwnership.teeResolutions.filter((resolution) => resolution.status === 'resolved').length,
+				p4AmbiguousTees: p4RibbonOwnership.teeResolutions.filter((resolution) => resolution.status === 'ambiguous').length,
+				p4NoRibbonSupportTees: p4RibbonOwnership.teeResolutions.filter(
+					(resolution) => resolution.status === 'noRibbonSupport'
+				).length,
+				p4BasketResolved: p4RibbonOwnership.holes.filter((hole) => hole.status === 'basketResolved').length,
+				p4BasketAmbiguous: p4RibbonOwnership.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
+				p4NoBasket: p4RibbonOwnership.holes.filter((hole) => hole.status === 'noBasket').length,
+				p4SharedComponents: p4RibbonOwnership.sharedComponentLabels.length,
+				p5AssignedTees: p5SparseAssignment.assignedTees,
+				p5UnresolvedTees: p5SparseAssignment.unresolvedTees,
+				p6LockedByP4: p6LowParBasketAssignment.lockedByP4,
+				p6AssignedByLowPar: p6LowParBasketAssignment.assignedByLowPar,
+				p6Unresolved: p6LowParBasketAssignment.unresolved,
+				basketAnchorScaleEvaluations: 0,
+				basketFallbackUnresolvedHoles: 0,
+				basketFallbackRecovered: 0,
+				teeBootstrapAuto: 0,
+				teeBootstrapReview: 0,
+				teeBootstrapUnresolved: rawMaskObjects.tees.length
+			},
+			calibration: {
+				numberTemplateScale,
+				basketTemplateScale,
+				basketTemplateScalePerNumberTemplateScale: basketTemplateScale / numberTemplateScale
+			}
+		};
+		const displayGrammar = buildPancakeDisplayGrammar(
+			rawMaskObjects,
+			p2BadgeDetection,
+			p5SparseAssignment,
+			p6LowParBasketAssignment
+		);
+
+		return {
+			numberDetection: p2BadgeDetection,
+			tees: [],
+			baskets: [],
+			grammar: displayGrammar,
+			rawMaskObjects,
+			p2BadgeDetection,
+			p3Ownership,
+			p4RibbonOwnership,
+			p45EndpointBridge,
+			p5SparseAssignment,
+			p6LowParBasketAssignment,
+			performance: performanceReport
+		};
+	}
+
 	const analysisStartedAt = performance.now();
 	const analysis = grayscaleRaster(request.bitmap);
 	const analysisRasterMs = performance.now() - analysisStartedAt;
@@ -588,6 +786,49 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const teeRasterStartedAt = performance.now();
 	const full = fullResolutionRaster(request.bitmap);
 	const teeRasterMs = performance.now() - teeRasterStartedAt;
+	const p1MaskStartedAt = performance.now();
+	const rawMaskObjects = detectRawObjectMask({ rgba: full.rgba, widthPx: full.width, heightPx: full.height });
+	const p1MaskMs = performance.now() - p1MaskStartedAt;
+
+	const p2BadgeLabelStartedAt = performance.now();
+	const p2BadgeDetectionRaw = labelKnownHoleNumberBadges(
+		cv,
+		{ format: 'rgba', widthPx: full.width, heightPx: full.height, data: full.rgba },
+		pack.holeNumbers,
+		rawMaskObjects.badges
+	);
+	const p2BadgeDetection = {
+		...p2BadgeDetectionRaw,
+		anchor: p2BadgeDetectionRaw.anchor
+			? { ...p2BadgeDetectionRaw.anchor, scale: asNumberTemplateScale(p2BadgeDetectionRaw.anchor.scale) }
+			: null,
+		candidates: p2BadgeDetectionRaw.candidates.map((candidate) => ({
+			...candidate,
+			scale: asNumberTemplateScale(candidate.scale)
+		}))
+	};
+	const p2BadgeLabelMs = performance.now() - p2BadgeLabelStartedAt;
+	const p2LabeledBadges = p2BadgeDetection.candidates
+		.filter((candidate): candidate is typeof candidate & { label: number; glyphScore: number } =>
+			candidate.label !== undefined && candidate.glyphScore !== undefined
+		)
+		.map((candidate) => ({
+			holeNumber: candidate.label,
+			glyphScore: candidate.glyphScore,
+			xPx: candidate.xPx,
+			yPx: candidate.yPx,
+			widthPx: candidate.widthPx,
+			heightPx: candidate.heightPx
+		}));
+
+	const p3StartedAt = performance.now();
+	const p3Ownership = deriveP3Ownership(
+		rawMaskObjects.tees,
+		p2LabeledBadges,
+		rawMaskObjects.baskets
+	);
+	const p3Ms = performance.now() - p3StartedAt;
+
 	const teeDetectionStartedAt = performance.now();
 	const teeRaster = { rgba: full.rgba, widthPx: full.width, heightPx: full.height, sourceScale: 1 };
 	const teeBadges = numberDetection.candidates
@@ -724,6 +965,9 @@ async function detectCourse(request: CourseDetectionRequest) {
 			basketRasterMs: basketTiming.rasterMs,
 			basketAnchorMs: basketTiming.anchorMs,
 			basketCandidatesMs: basketTiming.candidatesMs,
+			p1MaskMs,
+			p2BadgeLabelMs,
+			p3Ms,
 			teesMs,
 			teeRasterMs,
 			teeDetectionMs,
@@ -736,6 +980,15 @@ async function detectCourse(request: CourseDetectionRequest) {
 			labeledNumbers: numberDetection.candidates.filter((candidate) => candidate.label !== undefined).length,
 			baskets: baskets.length,
 			tees: tees.length,
+			p1MaskTees: rawMaskObjects.tees.length,
+			p1MaskBadges: rawMaskObjects.badges.length,
+			p1MaskBaskets: rawMaskObjects.baskets.length,
+			p2LabeledBadges: p2LabeledBadges.length,
+			p2UniqueLabels: new Set(p2LabeledBadges.map((badge) => badge.holeNumber)).size,
+			p3OwnedTees: p3Ownership.teeBadgeHits.length,
+			p3StraightBasketHits: p3Ownership.straightBasketHits.length,
+			p3TeeConflicts: p3Ownership.teeConflictIndexes.length,
+			p3StraightBasketConflicts: p3Ownership.straightBasketConflictHoleNumbers.length,
 			basketAnchorScaleEvaluations: basketTiming.anchorScaleEvaluations,
 			basketFallbackUnresolvedHoles: unresolvedBasketHoleNumbers.size,
 			basketFallbackRecovered: basketFallbackRecoveredCount,
@@ -751,7 +1004,17 @@ async function detectCourse(request: CourseDetectionRequest) {
 		}
 	};
 
-	return { numberDetection, tees, teeBootstrap, baskets, grammar, performance: performanceReport };
+	return {
+		numberDetection,
+		tees,
+		teeBootstrap,
+		baskets,
+		grammar,
+		rawMaskObjects,
+		p2BadgeDetection,
+		p3Ownership,
+		performance: performanceReport
+	};
 }
 
 async function processRequest(request: BasketRequest): Promise<void> {

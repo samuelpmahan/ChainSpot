@@ -18,6 +18,12 @@ import type {
 	TeePadVariantResult
 } from './teePadDetection';
 import type { LocalSnapKind, LocalSnapPoint } from '../cv/localSnap';
+import type { RawObjectMaskResult } from './rawObjectMask';
+import type { HoleNumberDetection } from './holeNumberDetection';
+import type { P3OwnershipResult } from './rawObjectOwnership';
+import type { P45EndpointBridgeResult, P4RibbonOwnershipResult } from './p4RibbonOwnership';
+import type { P5SparseAssignmentResult } from './p5SparseAssignment';
+import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
 
 export type BasketCandidate = CalibratedBasketCandidate;
 
@@ -42,6 +48,13 @@ export interface CourseDetectionPerformance {
 		readonly basketRasterMs: number;
 		readonly basketAnchorMs: number;
 		readonly basketCandidatesMs: number;
+		readonly p1MaskMs: number;
+		readonly p2BadgeLabelMs: number;
+		readonly p3Ms: number;
+		readonly p4Ms?: number;
+		readonly p45Ms?: number;
+		readonly p5Ms?: number;
+		readonly p6Ms?: number;
 		readonly teesMs: number;
 		readonly teeRasterMs: number;
 		readonly teeDetectionMs: number;
@@ -54,6 +67,27 @@ export interface CourseDetectionPerformance {
 		readonly labeledNumbers: number;
 		readonly baskets: number;
 		readonly tees: number;
+		readonly p1MaskTees: number;
+		readonly p1MaskBadges: number;
+		readonly p1MaskBaskets: number;
+		readonly p2LabeledBadges: number;
+		readonly p2UniqueLabels: number;
+		readonly p3OwnedTees: number;
+		readonly p3StraightBasketHits: number;
+		readonly p3TeeConflicts: number;
+		readonly p3StraightBasketConflicts: number;
+		readonly p4ResolvedTees?: number;
+		readonly p4AmbiguousTees?: number;
+		readonly p4NoRibbonSupportTees?: number;
+		readonly p4BasketResolved?: number;
+		readonly p4BasketAmbiguous?: number;
+		readonly p4NoBasket?: number;
+		readonly p4SharedComponents?: number;
+		readonly p5AssignedTees?: number;
+		readonly p5UnresolvedTees?: number;
+		readonly p6LockedByP4?: number;
+		readonly p6AssignedByLowPar?: number;
+		readonly p6Unresolved?: number;
 		readonly basketAnchorScaleEvaluations: number;
 		readonly basketFallbackUnresolvedHoles: number;
 		readonly basketFallbackRecovered: number;
@@ -70,6 +104,20 @@ export interface CourseDetectionResult {
 	readonly tees: readonly TeePadCandidate[];
 	readonly baskets: readonly BasketCandidate[];
 	readonly grammar: CourseGrammarResult;
+	/** Pancake-1 shadow result: raw physical objects only, no ownership. */
+	readonly rawMaskObjects?: RawObjectMaskResult;
+	/** Pancake-2 shadow result: labels only the badge bodies P1 supplied. */
+	readonly p2BadgeDetection?: HoleNumberDetection;
+	/** Pancake-3 shadow result: tee->badge axis ownership + straight-ray basket hits. */
+	readonly p3Ownership?: P3OwnershipResult;
+	/** Pancake-4 shadow result: ribbon-component candidate elimination and basket membership. */
+	readonly p4RibbonOwnership?: P4RibbonOwnershipResult;
+	/** Pancake-4.5 shadow experiment: local endpoint-gap bridge A/B comparison. */
+	readonly p45EndpointBridge?: P45EndpointBridgeResult;
+	/** Pancake-5 shadow result: sparse one-to-one tee -> labeled-badge assignment. */
+	readonly p5SparseAssignment?: P5SparseAssignmentResult;
+	/** Pancake-6 shadow result: local LowPar one-to-one basket assignment. */
+	readonly p6LowParBasketAssignment?: P6LowParBasketAssignmentResult;
 	/** Present on production worker results; optional so existing test fixtures/mocks remain source-compatible. */
 	readonly performance?: CourseDetectionPerformance;
 }
@@ -367,6 +415,298 @@ export async function detectCourseCandidates(
 		if (reply.course.performance) {
 			console.info('[ChainSpot CV benchmark]', reply.course.performance);
 			console.table(reply.course.performance.stages);
+		}
+		if (reply.course.rawMaskObjects) {
+			console.info('[ChainSpot P1 raw-object mask]', reply.course.rawMaskObjects);
+			console.table({
+				tees: reply.course.rawMaskObjects.tees.length,
+				badges: reply.course.rawMaskObjects.badges.length,
+				baskets: reply.course.rawMaskObjects.baskets.length,
+				ms: reply.course.performance?.stages.p1MaskMs ?? Number.NaN
+			});
+		}
+		if (reply.course.p2BadgeDetection) {
+			const labeled = reply.course.p2BadgeDetection.candidates.filter(
+				(candidate) => candidate.label !== undefined
+			);
+			const glyphScores = labeled
+				.map((candidate) => candidate.glyphScore)
+				.filter((score): score is number => score !== undefined)
+				.sort((a, b) => a - b);
+			const middle = Math.floor(glyphScores.length / 2);
+			const medianGlyphScore = glyphScores.length === 0
+				? Number.NaN
+				: glyphScores.length % 2 === 0
+					? (glyphScores[middle - 1] + glyphScores[middle]) / 2
+					: glyphScores[middle];
+			console.info('[ChainSpot P2 badge labeling]', {
+				labeling: reply.course.p2BadgeDetection.labeling,
+				candidates: reply.course.p2BadgeDetection.candidates.map((candidate) => ({
+					hole: candidate.label ?? null,
+					xPx: candidate.xPx,
+					yPx: candidate.yPx,
+					glyphScore: candidate.glyphScore ?? null,
+					badgeScore: candidate.badgeScore
+				}))
+			});
+			console.table({
+				labeled: labeled.length,
+				uniqueLabels: new Set(labeled.map((candidate) => candidate.label)).size,
+				minGlyphScore: glyphScores[0] ?? Number.NaN,
+				medianGlyphScore,
+				ms: reply.course.performance?.stages.p2BadgeLabelMs ?? Number.NaN
+			});
+		}
+		if (reply.course.p3Ownership) {
+			console.info('[ChainSpot P3 tee/badge/straight-ray ownership]');
+			const p3Diagnostics = reply.course.p3Ownership.teeDiagnostics;
+			console.table({
+				ownedTees: reply.course.p3Ownership.teeBadgeHits.length,
+				straightBasketHits: reply.course.p3Ownership.straightBasketHits.length,
+				unresolvedTees: reply.course.p3Ownership.unresolvedTeeIndexes.length,
+				teeConflicts: reply.course.p3Ownership.teeConflictIndexes.length,
+				noBadgeHit: p3Diagnostics.filter((diagnostic) => diagnostic.teeBadgeStatus === 'noBadgeHit').length,
+				bidirectionalBadgeConflicts: p3Diagnostics.filter(
+					(diagnostic) => diagnostic.teeBadgeStatus === 'bidirectionalBadgeConflict'
+				).length,
+				sameDirectionTies: p3Diagnostics.filter(
+					(diagnostic) => diagnostic.teeBadgeStatus === 'sameDirectionTie'
+				).length,
+				straightBasketConflicts: reply.course.p3Ownership.straightBasketConflictHoleNumbers.length,
+				ms: reply.course.performance?.stages.p3Ms ?? Number.NaN
+			});
+			console.table(
+				reply.course.p3Ownership.teeDiagnostics.map((diagnostic) => ({
+					hole: diagnostic.holeNumber ?? (diagnostic.candidateHoleNumbers.join('/') || null),
+					candidateHoles: diagnostic.candidateHoleNumbers.join('/') || null,
+					teeHole: diagnostic.teeBadgeStatus === 'owned' ? diagnostic.holeNumber ?? null : null,
+					teeBadgeStatus: diagnostic.teeBadgeStatus,
+					badgeRayDirection: diagnostic.badgeRayDirection ?? null,
+					badgeAlongPx: diagnostic.badgeAlongPx ?? null,
+					badgeAxisErrorPx: diagnostic.badgeAxisErrorPx ?? null,
+					basketHole: diagnostic.straightBasketStatus === 'hit' ? diagnostic.holeNumber ?? null : null,
+					straightBasketStatus: diagnostic.straightBasketStatus,
+					basketAlongAfterBadgePx: diagnostic.basketAlongAfterBadgePx ?? null,
+					basketAxisErrorPx: diagnostic.basketAxisErrorPx ?? null
+				}))
+			);
+		}
+		if (reply.course.p4RibbonOwnership) {
+			const p4 = reply.course.p4RibbonOwnership;
+			console.info('[ChainSpot P4 ribbon ownership]');
+			console.table({
+				resolvedTees: p4.teeResolutions.filter((resolution) => resolution.status === 'resolved').length,
+				ambiguousTees: p4.teeResolutions.filter((resolution) => resolution.status === 'ambiguous').length,
+				noRibbonSupportTees: p4.teeResolutions.filter(
+					(resolution) => resolution.status === 'noRibbonSupport'
+				).length,
+				basketResolved: p4.holes.filter((hole) => hole.status === 'basketResolved').length,
+				basketAmbiguous: p4.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
+				noBasket: p4.holes.filter((hole) => hole.status === 'noBasket').length,
+				sharedComponents: p4.sharedComponentLabels.length,
+				endpointContactRadiusPx: p4.endpointContactRadiusPx,
+				ms: reply.course.performance?.stages.p4Ms ?? Number.NaN
+			});
+			console.table(
+				p4.teeResolutions.flatMap((resolution) =>
+					resolution.candidateEvidence.map((evidence) => ({
+						hole: evidence.holeNumber,
+						teeStatus: resolution.status,
+						badgeComponent: evidence.badgeComponentLabel,
+						teeContactDistancePx: evidence.teeContactDistancePx,
+						touches: evidence.teeTouchesComponent,
+						badgeAxisErrorPx: evidence.badgeAxisErrorPx
+					}))
+				)
+			);
+			console.table(
+				p4.holes.map((hole) => {
+					const resolution = p4.teeResolutions.find((candidate) => candidate.teeIndex === hole.teeIndex);
+					const resolvedEvidence = resolution?.candidateEvidence.find(
+						(evidence) => evidence.holeNumber === hole.holeNumber
+					);
+					return {
+						hole: hole.holeNumber,
+						teeHole: hole.teeIndex === undefined ? null : hole.holeNumber,
+						teeStatus: resolution?.status ?? 'unresolved',
+						candidateBadges: resolution?.candidateHoleNumbers.join('/') ?? null,
+						ribbonComponent: hole.ribbonComponentLabel ?? null,
+						teeContactDistancePx: resolvedEvidence?.teeContactDistancePx ?? null,
+						componentShared: hole.status === 'sharedComponent',
+						basketStatus: hole.status,
+						basketHole: hole.basketIndexes.length === 0 ? null : hole.holeNumber,
+						basketCount: hole.basketIndexes.length,
+						basketContactDistancesPx: hole.basketContactDistancesPx
+					};
+				})
+			);
+		}
+		if (reply.course.p45EndpointBridge) {
+			const p45 = reply.course.p45EndpointBridge;
+			const before = p45.original;
+			const after = p45.bridged;
+			const countTees = (status: 'resolved' | 'ambiguous' | 'noRibbonSupport') =>
+				p45.original.teeResolutions.filter((resolution) => resolution.status === status).length;
+			const countTeesAfter = (status: 'resolved' | 'ambiguous' | 'noRibbonSupport') =>
+				p45.bridged.teeResolutions.filter((resolution) => resolution.status === status).length;
+			console.info('[ChainSpot P4.5 endpoint bridge]');
+			console.table({
+				bridgeRadiusPx: p45.bridgeRadiusPx,
+				bridgeBandHalfWidthPx: p45.bridgeBandHalfWidthPx,
+				gapThresholdsPx: p45.gapThresholdsPx.join('/'),
+				resolvedTeesBefore: countTees('resolved'),
+				resolvedTeesAfter: countTeesAfter('resolved'),
+				newlyResolvedTees: p45.newlyResolvedHoleNumbers.length,
+				ambiguousTeesBefore: countTees('ambiguous'),
+				ambiguousTeesAfter: countTeesAfter('ambiguous'),
+				noRibbonSupportBefore: countTees('noRibbonSupport'),
+				noRibbonSupportAfter: countTeesAfter('noRibbonSupport'),
+				basketResolvedBefore: before.holes.filter((hole) => hole.status === 'basketResolved').length,
+				basketResolvedAfter: after.holes.filter((hole) => hole.status === 'basketResolved').length,
+				basketAmbiguousBefore: before.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
+				basketAmbiguousAfter: after.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
+				noBasketBefore: before.holes.filter((hole) => hole.status === 'noBasket').length,
+				noBasketAfter: after.holes.filter((hole) => hole.status === 'noBasket').length,
+				sharedComponentsBefore: before.sharedComponentLabels.length,
+				sharedComponentsAfter: after.sharedComponentLabels.length,
+				acceptedBridgeGapCount: p45.acceptedBridgeGapsPx.length,
+				acceptedBridgeGapsPx: p45.acceptedBridgeGapsPx.join('/') || null,
+				ms: reply.course.performance?.stages.p45Ms ?? Number.NaN
+			});
+			console.table({
+				newlyResolvedHoleNumbers: p45.newlyResolvedHoleNumbers.join('/') || null,
+				newlyBasketResolvedHoleNumbers: p45.newlyBasketResolvedHoleNumbers.join('/') || null,
+				newlyAmbiguousHoleNumbers: p45.newlyAmbiguousHoleNumbers.join('/') || null,
+				ownershipChangedHoleNumbers: p45.ownershipChangedHoleNumbers.join('/') || null
+			});
+			console.table(
+				p45.changedHoles.map((hole) => ({
+					hole: hole.holeNumber,
+					beforeTeeStatus: hole.beforeTeeStatus,
+					afterTeeStatus: hole.afterTeeStatus,
+					candidateBadges: hole.candidateBadges.join('/') || null,
+					component: hole.component,
+					beforeTeeContact: hole.beforeTeeContact,
+					afterTeeContact: hole.afterTeeContact,
+					beforeBasketStatus: hole.beforeBasketStatus,
+					afterBasketStatus: hole.afterBasketStatus,
+					basketHoles: hole.basketHoles.join('/') || null
+				}))
+			);
+		}
+		if (reply.course.p5SparseAssignment) {
+			const p5 = reply.course.p5SparseAssignment;
+			console.info('[ChainSpot P5 sparse assignment]');
+			console.table({
+				assignedTees: p5.assignedTees,
+				unresolvedTees: p5.unresolvedTees,
+				totalAssignmentCost: p5.totalAssignmentCost,
+				disallowedAssignmentsRejected: p5.disallowedAssignmentsRejected,
+				duplicateBadges: p5.duplicateBadges.join('/') || null,
+				perfectMatchingFound: p5.perfectMatchingFound,
+				ms: reply.course.performance?.stages.p5Ms ?? Number.NaN
+			});
+			console.table(
+				p5.assignments.map((assignment) => ({
+					teeHole: assignment.p4HoleNumber ?? assignment.assignedHoleNumber ?? null,
+					p3Candidates: assignment.candidateHoleNumbers.join('/') || null,
+					p4Status: assignment.p4Status,
+					p4Hole: assignment.p4HoleNumber,
+					assignedHole: assignment.assignedHoleNumber,
+					assignmentReason: assignment.reason,
+					assignedAxisErrorPx: assignment.assignedAxisErrorPx,
+					status: assignment.status
+				}))
+			);
+		}
+		if (reply.course.p6LowParBasketAssignment) {
+			const p6 = reply.course.p6LowParBasketAssignment;
+			(globalThis as typeof globalThis & { __chainspotP6?: typeof p6 }).__chainspotP6 = p6;
+			console.info('[ChainSpot P6 LowPar basket assignment]');
+			console.table({
+				lockedByP4: p6.lockedByP4,
+				assignedByLowPar: p6.assignedByLowPar,
+				unresolved: p6.unresolved,
+					duplicateBaskets: p6.duplicateBaskets.join('/') || null,
+					disallowedAssignmentsRejected: p6.disallowedAssignmentsRejected,
+					totalAssignmentCost: p6.totalAssignmentCost,
+					lowParHigherIsBetter: p6.lowParHigherIsBetter,
+					forwardGateAngleDeg: p6.forwardGateAngleDeg,
+					candidatesBeforeGate: p6.candidatesBeforeGate,
+					candidatesAfterGate: p6.candidatesAfterGate,
+					gateFallbackHoles: p6.gateFallbackHoles,
+					changedHoleNumbers: p6.changedHoleNumbers?.join('/') || null,
+					ms: reply.course.performance?.stages.p6Ms ?? Number.NaN
+				});
+			console.table(
+				p6.assignments.map((assignment) => {
+					const scores = p6.candidates
+						.filter((candidate) => candidate.holeNumber === assignment.holeNumber)
+						.map((candidate) => candidate.lowParScore)
+						.filter((score): score is number => score !== null && Number.isFinite(score))
+						.sort((left, right) => right - left);
+					const bestScore = scores[0] ?? null;
+					const secondBestScore = scores[1] ?? null;
+					const assignedCandidate = p6.candidates.find(
+						(candidate) =>
+							candidate.holeNumber === assignment.holeNumber &&
+							candidate.basketIndex === assignment.assignedBasketIndex
+					);
+					return {
+						hole: assignment.holeNumber,
+						teeIndex: assignment.teeIndex,
+						p4BasketStatus: assignment.p4BasketStatus,
+						p4BasketIndex: assignment.p4BasketIndex,
+						candidateBasketCount: assignment.candidateBasketCount,
+						candidatesBeforeGate: assignment.candidatesBeforeGate,
+						candidatesAfterGate: assignment.candidatesAfterGate,
+						bestScore,
+						secondBestScore,
+						scoreMargin: bestScore !== null && secondBestScore !== null ? bestScore - secondBestScore : null,
+						assignedBasketIndex: assignment.assignedBasketIndex,
+						assignedRank: assignedCandidate?.rankWithinHole ?? null,
+						assignedForwardAngleDeg: assignment.assignedForwardAngleDeg,
+						assignmentReason: assignment.assignmentReason,
+						lowParScore: assignment.lowParScore,
+						status: assignment.status
+					};
+				})
+			);
+			const assignedByHole = new Map(
+				p6.assignments.map((assignment) => [assignment.holeNumber, assignment])
+			);
+			console.table(
+				p6.candidates
+					.filter((candidate) => assignedByHole.get(candidate.holeNumber)?.status !== 'p4Locked')
+					.map((candidate) => {
+						const assignment = assignedByHole.get(candidate.holeNumber);
+						return {
+							hole: candidate.holeNumber,
+							basketIndex: candidate.basketIndex,
+							forwardProjectionPx: candidate.forwardProjectionPx,
+							forwardAngleDeg: candidate.forwardAngleDeg,
+							passedForwardGate: candidate.passedForwardGate,
+							lowParScore: candidate.lowParScore,
+							valid: candidate.valid,
+							rankWithinHole: candidate.rankWithinHole,
+							assignedByHungarian:
+								assignment?.status === 'lowParAssigned' &&
+								assignment.assignedBasketIndex === candidate.basketIndex
+						};
+					})
+					.sort((left, right) => {
+						if (left.hole !== right.hole) return left.hole - right.hole;
+						const leftScore = left.lowParScore ?? Number.NEGATIVE_INFINITY;
+						const rightScore = right.lowParScore ?? Number.NEGATIVE_INFINITY;
+						return (Number.isFinite(rightScore) ? rightScore : Number.NEGATIVE_INFINITY) -
+							(Number.isFinite(leftScore) ? leftScore : Number.NEGATIVE_INFINITY);
+						})
+				);
+			console.info('[ChainSpot P6.1 original vs gated]', {
+				originalP6: p6.originalP6 ?? null,
+				gatedP6: p6,
+				changedHoleNumbers: p6.changedHoleNumbers ?? []
+			});
 		}
 		return reply.course;
 	} catch (error) {

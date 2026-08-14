@@ -99,6 +99,14 @@ export interface HoleNumberCandidate extends Candidate {
 	readonly topGlyphMatches?: readonly Readonly<{ label: number; score: number }>[];
 }
 
+export interface KnownBadgeBody {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly widthPx: number;
+	readonly heightPx: number;
+	readonly fill: number;
+}
+
 export interface HoleNumberScaleAnchor {
 	readonly label: number;
 	readonly score: number;
@@ -985,6 +993,79 @@ function assignedCandidates(
 			topGlyphMatches
 		};
 	});
+}
+
+/**
+ * Pancake-2 adapter: label ALREADY-LOCALIZED physical badge bodies.
+ *
+ * This deliberately skips `darkComponents()` and `selectBadgeBodies()`.
+ * P1 has already paid that cost and supplied the physical objects. Everything
+ * after localization is the existing proven glyph classifier:
+ * shared scale -> tiny glyph crops -> width-ratio pruning -> NCC ->
+ * one-to-one maximum-score assignment.
+ */
+export function labelKnownHoleNumberBadges(
+	cv: HoleNumberCvModule,
+	source: HoleNumberRaster,
+	templates: readonly HoleNumberTemplate[],
+	knownBadges: readonly KnownBadgeBody[]
+): HoleNumberDetection {
+	const image = grayscale(source, 'Hole-number source image');
+	const availableTemplates = normalizedTemplates(templates);
+	if (availableTemplates.length === 0 || knownBadges.length === 0) {
+		return {
+			candidates: [],
+			anchor: null,
+			labeling: 'candidate-only',
+			note: availableTemplates.length === 0
+				? 'No canonical hole-number templates were supplied.'
+				: 'P1 supplied no physical badge bodies.'
+		};
+	}
+
+	const anchorTemplate = availableTemplates.find((template) => template.label === 1) ?? availableTemplates[0];
+	const canonicalAnchor = grayscale(anchorTemplate.raster, `Hole ${anchorTemplate.label} template`);
+	const canonicalBody = templateBadgeBody(canonicalAnchor);
+	if (!canonicalBody) {
+		return {
+			candidates: [],
+			anchor: null,
+			labeling: 'candidate-only',
+			note: `Hole ${anchorTemplate.label} template does not contain a plausible dark badge body.`
+		};
+	}
+
+	const bodies: DarkComponent[] = knownBadges.map((badge) => ({
+		xPx: badge.xPx - badge.widthPx / 2,
+		yPx: badge.yPx - badge.heightPx / 2,
+		widthPx: badge.widthPx,
+		heightPx: badge.heightPx,
+		areaPx: badge.fill * badge.widthPx * badge.heightPx,
+		fillRatio: badge.fill
+	}));
+	const anchorScale = componentAnchorScale(bodies, canonicalBody);
+	const clusters = clustersFromBadgeBodies(bodies, anchorTemplate, anchorScale);
+	const assigned = assignedCandidates(cv, image, clusters, availableTemplates, anchorScale);
+	const anchor = localizationAnchor(anchorTemplate, anchorScale, clusters, assigned);
+
+	if (!assigned) {
+		return {
+			candidates: candidateOnly(clusters, anchorScale),
+			anchor,
+			labeling: 'candidate-only',
+			note: 'P1 badge bodies localized, but glyph-only assignment could not run.'
+		};
+	}
+	const sorted = assigned.sort((a, b) => (a.label ?? 0) - (b.label ?? 0));
+	const labeledCount = sorted.filter((candidate) => candidate.label !== undefined).length;
+	return {
+		candidates: sorted,
+		anchor,
+		labeling: 'assigned',
+		note: labeledCount < availableTemplates.length
+			? `P2 labeled ${labeledCount} of ${availableTemplates.length} hole numbers from ${clusters.length} P1 badge bodies.`
+			: undefined
+	};
 }
 
 function candidateOnly(clusters: readonly BadgeCluster[], anchorScale: number): HoleNumberCandidate[] {
