@@ -82,7 +82,7 @@ const projectRoot = resolve(dirname(scriptPath), '..');
 const DASH_IMAGE_PATH = join(projectRoot, 'resources/ribbon-reference/IMG_5641.jpg');
 const ALEX_IMAGE_PATH = join(projectRoot, 'resources/stitch-annotate/AlexClark/AlexClark-McKinney-TX.jpg');
 const DEFAULT_OUTPUT_DIR = '/tmp/chainspot-corridor-bend-benchmark';
-const LOCATION_WRONG_PX = 42;
+export const LOCATION_WRONG_PX = 42;
 const TIMING_REPETITIONS = 5;
 const SEGMENTATION_TIMING_REPETITIONS = 3;
 
@@ -225,7 +225,7 @@ function timedMedian<T>(fn: () => T, repetitions: number): { readonly result: T;
 // Scoring — ports hole_path_semantic_bends.py's per-hole status logic.
 // ---------------------------------------------------------------------------
 
-interface HoleScore {
+export interface HoleScore {
 	readonly holeNumber: number;
 	readonly truthCount: number;
 	readonly predictedCount: number;
@@ -239,7 +239,7 @@ function nearestTruthDistancePx(point: SourcePoint, truthBends: readonly SourceP
 	return Math.min(...truthBends.map((truth) => Math.hypot(truth.xPx - point.xPx, truth.yPx - point.yPx)));
 }
 
-function scoreHole(truth: HoleBendTruth, predicted: readonly SourcePoint[]): HoleScore {
+export function scoreHole(truth: HoleBendTruth, predicted: readonly SourcePoint[]): HoleScore {
 	const predictedCount = predicted.length;
 	const isStraightTruth = truth.truthCount === 0;
 	const falseBend = isStraightTruth && predictedCount > 0;
@@ -255,7 +255,7 @@ function scoreHole(truth: HoleBendTruth, predicted: readonly SourcePoint[]): Hol
 	return { holeNumber: truth.holeNumber, truthCount: truth.truthCount, predictedCount, status, errorsPx, isStraightTruth, falseBend };
 }
 
-interface AggregateStats {
+export interface AggregateStats {
 	readonly holesEvaluated: number;
 	readonly exactCountMatches: number;
 	readonly exactCountAccuracy: number;
@@ -268,7 +268,7 @@ interface AggregateStats {
 	readonly maxLocationErrorPx: number | null;
 }
 
-function aggregate(scores: readonly HoleScore[]): AggregateStats {
+export function aggregate(scores: readonly HoleScore[]): AggregateStats {
 	const exactCountMatches = scores.filter((score) => score.predictedCount === score.truthCount).length;
 	const straight = scores.filter((score) => score.isStraightTruth);
 	const falseBends = straight.filter((score) => score.falseBend).length;
@@ -600,7 +600,14 @@ async function main(): Promise<void> {
 	console.log(`\nFull report: ${reportPath}`);
 }
 
-main().catch((error: unknown) => {
-	console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
-	process.exitCode = 1;
-});
+// Only run the full 5-arm benchmark when this file is executed directly --
+// scripts/verify-production-corridor-bend-parity.ts imports scoreHole/
+// aggregate from this module to avoid re-deriving scoring logic, and must
+// not trigger this benchmark's own (much slower) full course run as a side
+// effect of that import.
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
+	main().catch((error: unknown) => {
+		console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+		process.exitCode = 1;
+	});
+}

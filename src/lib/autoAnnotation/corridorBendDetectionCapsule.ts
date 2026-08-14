@@ -85,13 +85,28 @@
  *
  * Same output contract as the other three detectors: a plain `SourcePoint[]`
  * of bend points, ordered tee-to-basket, no confidence/provenance field ever
- * attached (see `annotatedRound.ts`'s provenance rule). This module is NOT
- * wired into `applyDetectedCorridorBends` or any live editing flow.
+ * attached (see `annotatedRound.ts`'s provenance rule).
+ *
+ * PRODUCTION STATUS: `detectAndApplyCorridorBendsCapsule` below (arm C, this
+ * module's own `buildClassicCorridorEvidence` + `fitCapsuleBends`) is the
+ * authoritative automatic bend proposal `approveHolePieces` in the Annotate
+ * Round page calls — promoted after `scripts/benchmark-corridor-bend-detection.ts`
+ * showed it correctly locating a real bend on 16/18 Dash holes and all 3
+ * AlexClark holes (17/18 and 3/3 exact bend COUNT respectively), where the
+ * previously-shipped shortest-path detector (`corridorBendDetection.ts`'s
+ * `detectCorridorBends`) never once correctly located a real bend on either
+ * course, and the ribbon-mass shortest-path detector
+ * (`corridorBendDetectionRibbonMass.ts`) and the ribbon-mass-driven capsule
+ * hybrid (`corridorBendDetectionCapsuleRibbonMass.ts`) both underperformed
+ * this module's own classic evidence. Those three remain in the repo,
+ * unmodified, for benchmark history/debugging only — none of them are called
+ * from production anymore.
  */
+import type { AnnotatedHole, SourcePoint } from '../domain/annotatedRound';
+import { applyDetectedCorridorBends } from './corridorBendDetection';
 import type { CorridorBendRaster } from './corridorBendDetection';
 import type { CorridorEvidenceGrid } from './corridorEvidenceGrid';
 import { isInsideEvidenceGrid, toEvidenceGridLocal, toEvidenceGridSource } from './corridorEvidenceGrid';
-import type { SourcePoint } from '../domain/annotatedRound';
 
 // ---------------------------------------------------------------------------
 // fitCapsuleBends: the evidence-agnostic engine.
@@ -702,4 +717,56 @@ export function detectCorridorBendsCapsule(
 ): SourcePoint[] {
 	const grid = buildClassicCorridorEvidence(raster, teeSrcPx, basketSrcPx, params.evidence);
 	return fitCapsuleBends(grid, teeSrcPx, basketSrcPx, badgeSrcPx, params.fit);
+}
+
+// ---------------------------------------------------------------------------
+// Production integration — see the PRODUCTION STATUS note in this module's
+// own doc comment. `approveHolePieces` calls ONLY this function; it must
+// never run alongside another detector (no dual-detector arbitration).
+// ---------------------------------------------------------------------------
+
+/**
+ * Detects and applies corridor bends for one hole, in one step — the
+ * production entry point `approveHolePieces` calls once a hole's tee and
+ * basket are both confirmed. Combines `detectCorridorBendsCapsule` with the
+ * SAME `applyDetectedCorridorBends` rules every detector in this family uses
+ * (`corridorBendDetection.ts`): proposed bends are added via the ordinary
+ * `addCorridorBend` primitive, exactly like a hand-placed bend — no
+ * confidence/provenance field, immediately draggable/deletable.
+ *
+ * A no-op (returns a fresh, unchanged array — the pure-reducer convention;
+ * see `applyDetectedCorridorBends`'s own doc comment) whenever:
+ *  - the hole is missing a tee or basket;
+ *  - the hole already has at least one corridor bend — manual "+ Add
+ *    Bend(s)" work before Approve is never clobbered, and in this case the
+ *    detector is never even invoked, not merely discarded;
+ *  - `raster` is `null` — the caller's own crop step failed (mirrors
+ *    `cropSourceRasterAroundHole`'s nullable return: no decoded image yet,
+ *    canvas unsupported, or a degenerate crop window);
+ *  - the detector finds no evidence worth proposing, or throws for any
+ *    reason (caught here, not left to the caller).
+ * Detection failing or finding nothing is always valid and must never block
+ * hole approval — `approveHolePieces` calls this only AFTER confirming both
+ * pieces, so nothing here can undo that confirmation.
+ *
+ * `badgeSrcPx` is optional — omit it (no detected number badge for this hole
+ * yet, or none at all) and the underlying fit runs unanchored, exactly like
+ * the AlexClark benchmark course, which ships no badge ground truth at all
+ * and still reached 3/3 exact bend counts.
+ */
+export function detectAndApplyCorridorBendsCapsule(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	raster: CorridorBendRaster | null,
+	badgeSrcPx: SourcePoint | undefined,
+	params: DetectCorridorBendsCapsuleParams = DEFAULT_DETECT_CORRIDOR_BENDS_CAPSULE_PARAMS
+): AnnotatedHole[] {
+	const hole = holes.find((candidate) => candidate.id === holeId);
+	if (!hole?.tee || !hole.basket || hole.corridorBends.length > 0 || !raster) return holes.slice();
+	try {
+		const bends = detectCorridorBendsCapsule(raster, hole.tee, hole.basket, badgeSrcPx, params);
+		return applyDetectedCorridorBends(holes, holeId, bends);
+	} catch {
+		return holes.slice();
+	}
 }

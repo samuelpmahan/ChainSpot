@@ -1,45 +1,39 @@
 /**
- * Preliminary automatic corridor-bend detector — fires once a hole's tee and
- * basket are both confirmed (see `approveHolePieces` in the Annotate Round
- * page), and proposes zero or more bend points along the fairway between
- * them. Proposals are added through the existing `addCorridorBend` primitive
- * as plain `SourcePoint`s, exactly like a hand-placed bend — nothing here
- * ever attaches a confidence/provenance field (see `annotatedRound.ts`'s
- * provenance rule).
+ * FORMER production automatic corridor-bend detector (`detectCorridorBends`,
+ * `traceShortestOpenPath`, `buildTraversabilityMask` below) — superseded in
+ * production by the capsule-region-scoring detector in
+ * `corridorBendDetectionCapsule.ts` (see that module's PRODUCTION STATUS
+ * note and `scripts/benchmark-corridor-bend-detection.ts`: this
+ * shortest-path detector never once correctly located a real bend on either
+ * benchmark course, 44% exact bend count on Dash / 0% on AlexClark, vs. arm
+ * C's 94%/100%). Kept here, unmodified, for benchmark history/debugging
+ * only — nothing in the live app calls `detectCorridorBends` anymore.
  *
- * Substrate: NOT the whole-course ribbon-mass segmentation
- * (`ribbonMass.ts`/`ribbonMassShadow*.ts`). That pipeline's own module docs
- * declare it must never gate a production decision ("it never outputs a tee,
- * never arbitrates shared components, and never gates any production
- * decision" / "must not change authoritative AnnotatedHole geometry ... or
- * gate any production decision") — adding real `corridorBends` from it would
- * break that documented invariant, and it is tuned for whole-course
- * badge/basket ownership, not per-hole fairway tracing. Instead this module
- * runs a small, self-contained, per-hole heuristic: crop a local region
- * around the hole's own tee/basket, classify pixels by color similarity to
- * swatches sampled next to tee and basket themselves (self-calibrating per
- * hole/course, not a fixed cross-course color threshold), trace the shortest
- * path through the "open" pixels between tee and basket, and simplify that
- * path with Ramer-Douglas-Peucker (RDP) — the same simplification the
- * `hole_path_semantic_bends` research probe validated (18/18 and 3/3 correct
- * bend counts, zero false bends on 9 straight holes) against a different,
- * paused substrate (`centerlineDetection.ts`). RDP itself is substrate-
- * independent; only the "what path do we simplify" step changed here.
+ * `cropSourceRasterAroundHole` and `applyDetectedCorridorBends` below are
+ * DETECTOR-AGNOSTIC shared plumbing, not part of the shortest-path substrate
+ * itself: `cropSourceRasterAroundHole` just produces the `CorridorBendRaster`
+ * any per-hole detector in this family consumes, and
+ * `applyDetectedCorridorBends` just applies a `SourcePoint[]` proposal
+ * through the ordinary `addCorridorBend` primitive under the "don't clobber
+ * manual work" rule. Both are still very much live — the production capsule
+ * detector's own entry point (`detectAndApplyCorridorBendsCapsule` in
+ * `corridorBendDetectionCapsule.ts`) is built directly on top of
+ * `applyDetectedCorridorBends`, and the Annotate Round page still calls
+ * `cropSourceRasterAroundHole` to build the raster it passes in.
  *
- * Conservative by construction: a poor/noisy color classification tends to
- * leave a generous "open" region around the true corridor, and the shortest
- * path through a generous open region is close to a straight line — RDP
- * then collapses it to zero interior points. A false bend instead requires
- * the classifier to block the direct line while leaving a genuine detour
- * open, which is a comparatively narrow failure mode. Additional guards
- * (`maxDetourRatio`, `minTurnAngleDeg`) bias further toward proposing
- * nothing over proposing something wrong, matching this feature's brief: a
- * good-enough starting point for a fully draggable/deletable marker, not a
- * final answer.
- *
- * This has NOT been validated against any labeled course (no ground-truth
- * fixture for raw pixel-color bend tracing exists in this repo) — treat it
- * as a first-pass heuristic, not a tuned detector.
+ * Substrate this module's own `detectCorridorBends` used (retained for
+ * benchmark/debugging, not production): NOT the whole-course ribbon-mass
+ * segmentation (`ribbonMass.ts`/`ribbonMassShadow*.ts`) — that pipeline's own
+ * module docs declare it must never gate a production decision. Instead a
+ * small, self-contained, per-hole heuristic: crop a local region around the
+ * hole's own tee/basket, classify pixels by color similarity to swatches
+ * sampled next to tee and basket themselves, trace the shortest path through
+ * the "open" pixels between tee and basket, and simplify that path with
+ * Ramer-Douglas-Peucker (RDP). Proposals were (and, via the capsule
+ * detector, still are) added through the existing `addCorridorBend`
+ * primitive as plain `SourcePoint`s, exactly like a hand-placed bend —
+ * nothing in this family ever attaches a confidence/provenance field (see
+ * `annotatedRound.ts`'s provenance rule).
  */
 import type { AnnotatedHole, SourcePoint } from '../domain/annotatedRound';
 import { addCorridorBend } from '../holeAnnotation';

@@ -3,13 +3,20 @@ import {
 	DEFAULT_CAPSULE_FIT_PARAMS,
 	DEFAULT_CLASSIC_CORRIDOR_EVIDENCE_PARAMS,
 	buildClassicCorridorEvidence,
+	detectAndApplyCorridorBendsCapsule,
 	detectCorridorBendsCapsule,
 	fitCapsuleBends
 } from '../../src/lib/autoAnnotation/corridorBendDetectionCapsule';
 import type { CapsuleFitParams } from '../../src/lib/autoAnnotation/corridorBendDetectionCapsule';
 import type { CorridorBendRaster } from '../../src/lib/autoAnnotation/corridorBendDetection';
 import type { CorridorEvidenceGrid } from '../../src/lib/autoAnnotation/corridorEvidenceGrid';
+import { DEFAULT_CORRIDOR_WIDTH_PX } from '../../src/lib/corridor';
+import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 import type { SourcePoint } from '../../src/lib/domain/project';
+
+function emptyHole(id: string, number: number, overrides: Partial<AnnotatedHole> = {}): AnnotatedHole {
+	return { id, number, shots: [], corridorBends: [], corridorWidthPx: DEFAULT_CORRIDOR_WIDTH_PX, ...overrides };
+}
 
 // Smaller-scale params tailored to compact synthetic grids (the defaults'
 // 21px capsule radius / 18,9,3px + 24,12,6,3px hill-climb steps are sized for
@@ -215,5 +222,133 @@ describe('detectCorridorBendsCapsule', () => {
 		const bends = detectCorridorBendsCapsule(raster, { xPx: 30, yPx: 30 }, { xPx: 170, yPx: 170 }, undefined, detectParams);
 		expect(bends.length).toBeGreaterThanOrEqual(1);
 		expect(bends.length).toBeLessThanOrEqual(3);
+	});
+});
+
+/**
+ * `detectAndApplyCorridorBendsCapsule` is the PRODUCTION entry point (see
+ * this module's PRODUCTION STATUS doc note) — `approveHolePieces` in the
+ * Annotate Round page calls it, and only it, once a hole's tee and basket
+ * are both confirmed. These tests exercise the full production contract
+ * end-to-end (raster in, `AnnotatedHole[]` out) rather than re-testing
+ * `fitCapsuleBends`/`detectCorridorBendsCapsule` in isolation (already
+ * covered above).
+ */
+describe('detectAndApplyCorridorBendsCapsule', () => {
+	function paintRaster(widthPx: number, heightPx: number, colorAt: (x: number, y: number) => readonly [number, number, number]): CorridorBendRaster {
+		const data = new Uint8ClampedArray(widthPx * heightPx * 4);
+		for (let y = 0; y < heightPx; y += 1) {
+			for (let x = 0; x < widthPx; x += 1) {
+				const [r, g, b] = colorAt(x, y);
+				const p = (y * widthPx + x) * 4;
+				data[p] = r;
+				data[p + 1] = g;
+				data[p + 2] = b;
+				data[p + 3] = 255;
+			}
+		}
+		return { widthPx, heightPx, originXPx: 0, originYPx: 0, scale: 1, data, channels: 4 };
+	}
+	const params = { evidence: { ...DEFAULT_CLASSIC_CORRIDOR_EVIDENCE_PARAMS, boxMeanWindowSrcPx: 61 }, fit: TEST_PARAMS };
+
+	const straightTee: SourcePoint = { xPx: 20, yPx: 100 };
+	const straightBasket: SourcePoint = { xPx: 240, yPx: 100 };
+	function straightRaster(): CorridorBendRaster {
+		const isBand = (x: number, y: number) => Math.abs(y - 100) <= 20;
+		return paintRaster(260, 200, (x, y) => (isBand(x, y) ? [220, 220, 220] : [60, 60, 60]));
+	}
+
+	const doglegTee: SourcePoint = { xPx: 30, yPx: 30 };
+	const doglegBasket: SourcePoint = { xPx: 170, yPx: 170 };
+	function doglegRaster(): CorridorBendRaster {
+		const isBand = (x: number, y: number) => (x >= 10 && x <= 50 && y >= 10 && y <= 190) || (y >= 150 && y <= 190 && x >= 10 && x <= 190);
+		return paintRaster(200, 200, (x, y) => (isBand(x, y) ? [220, 220, 220] : [60, 60, 60]));
+	}
+
+	// Three straight legs joined at two corners (a "staircase"): vertical near
+	// the top-left, a horizontal middle run, vertical again near the
+	// bottom-right. The direct tee-basket chord cuts off-corridor territory
+	// near BOTH transitions (verified: at y=50 it sits at x~56, outside the
+	// top leg's x<=50; at y=150 it sits at x~144, outside the bottom leg's
+	// x>=150), so two bends is the shape's genuine, verifiable optimum, not
+	// an artifact of the search's bend cap.
+	const twoBendTee: SourcePoint = { xPx: 30, yPx: 20 };
+	const twoBendBasket: SourcePoint = { xPx: 170, yPx: 180 };
+	function twoBendRaster(): CorridorBendRaster {
+		const isBand = (x: number, y: number) =>
+			(x >= 10 && x <= 50 && y >= 10 && y <= 90) || (x >= 10 && x <= 190 && y >= 70 && y <= 110) || (x >= 150 && x <= 190 && y >= 90 && y <= 190);
+		return paintRaster(200, 200, (x, y) => (isBand(x, y) ? [220, 220, 220] : [60, 60, 60]));
+	}
+
+	function flatRaster(): CorridorBendRaster {
+		return paintRaster(260, 200, () => [128, 128, 128]);
+	}
+
+	it('1. straight hole -> no bends', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: straightTee, basket: straightBasket })];
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', straightRaster(), undefined, params);
+		expect(result[0].corridorBends).toEqual([]);
+	});
+
+	it('2. one-bend hole -> one ordinary corridor bend', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: doglegTee, basket: doglegBasket })];
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', doglegRaster(), undefined, params);
+		expect(result[0].corridorBends).toHaveLength(1);
+		const bend = result[0].corridorBends[0];
+		// "Ordinary" SourcePoint: exactly xPx/yPx, no confidence/provenance field
+		// ever attached (see annotatedRound.ts's provenance rule).
+		expect(Object.keys(bend).sort()).toEqual(['xPx', 'yPx']);
+		expect(Number.isFinite(bend.xPx)).toBe(true);
+		expect(Number.isFinite(bend.yPx)).toBe(true);
+	});
+
+	it('3. two-bend hole -> two ordered corridor bends', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: twoBendTee, basket: twoBendBasket })];
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', twoBendRaster(), undefined, params);
+		expect(result[0].corridorBends).toHaveLength(2);
+		const [first, second] = result[0].corridorBends;
+		// Ordered tee-to-basket: the first bend sits nearer the tee than the
+		// second does, matching the staircase's tee->corner1->corner2->basket shape.
+		const distToTee = (p: SourcePoint) => Math.hypot(p.xPx - twoBendTee.xPx, p.yPx - twoBendTee.yPx);
+		expect(distToTee(first)).toBeLessThan(distToTee(second));
+	});
+
+	it('4. existing manual bend -> detector does not run/overwrite', () => {
+		const existing: SourcePoint = { xPx: 25, yPx: 25 };
+		const holes: AnnotatedHole[] = [
+			emptyHole('h1', 1, { tee: doglegTee, basket: doglegBasket, corridorBends: [existing] })
+		];
+		// doglegRaster() is proven bend-producing above (test 2) -- if the
+		// detector ran here, the result would differ from [existing].
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', doglegRaster(), undefined, params);
+		expect(result[0].corridorBends).toEqual([existing]);
+	});
+
+	it('5. missing badge -> detector still operates', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: doglegTee, basket: doglegBasket })];
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', doglegRaster(), undefined, params);
+		expect(result[0].corridorBends.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('6a. detector failure (crop returned null) -> approval still succeeds with zero bends', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: straightTee, basket: straightBasket })];
+		expect(() => detectAndApplyCorridorBendsCapsule(holes, 'h1', null, undefined, params)).not.toThrow();
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', null, undefined, params);
+		expect(result[0].corridorBends).toEqual([]);
+		expect(result[0].tee).toEqual(straightTee);
+		expect(result[0].basket).toEqual(straightBasket);
+	});
+
+	it('6b. detector finds no evidence (flat, uniform-brightness crop) -> approval still succeeds with zero bends', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: straightTee, basket: straightBasket })];
+		expect(() => detectAndApplyCorridorBendsCapsule(holes, 'h1', flatRaster(), undefined, params)).not.toThrow();
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', flatRaster(), undefined, params);
+		expect(result[0].corridorBends).toEqual([]);
+	});
+
+	it('is a no-op when the hole is missing a tee or basket, even with a bend-producing raster', () => {
+		const holes: AnnotatedHole[] = [emptyHole('h1', 1, { tee: doglegTee })];
+		const result = detectAndApplyCorridorBendsCapsule(holes, 'h1', doglegRaster(), undefined, params);
+		expect(result[0].corridorBends).toEqual([]);
 	});
 });

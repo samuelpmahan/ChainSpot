@@ -112,11 +112,8 @@
 	} from '$lib/autoAnnotation/ribbonMassShadowRun';
 	import { renderShadowRunOverlay } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import type { ShadowOverlayRender } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
-	import {
-		applyDetectedCorridorBends,
-		cropSourceRasterAroundHole,
-		detectCorridorBends
-	} from '$lib/autoAnnotation/corridorBendDetection';
+	import { cropSourceRasterAroundHole } from '$lib/autoAnnotation/corridorBendDetection';
+	import { detectAndApplyCorridorBendsCapsule } from '$lib/autoAnnotation/corridorBendDetectionCapsule';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
 	import {
@@ -867,9 +864,12 @@
 	 * must never be clobbered) or if pixel data isn't available (no decoded
 	 * source image yet, or canvas unsupported) — best-effort only, exactly
 	 * like the ribbon-mass shadow pass: a miss here is silent and safe, the
-	 * hole just stays straight until reviewed by hand. See
-	 * `corridorBendDetection.ts` for why this runs its own small per-hole
-	 * heuristic instead of reusing the ribbon-mass segmentation.
+	 * hole just stays straight until reviewed by hand. Runs the capsule
+	 * detector (`corridorBendDetectionCapsule.ts` — see that module's
+	 * PRODUCTION STATUS note for why it replaced the shortest-path detector
+	 * that used to run here), anchored to this hole's own detected number
+	 * badge when one exists (`numberBadges`), unanchored otherwise — a
+	 * missing badge never disables detection.
 	 */
 	function detectAndApplyCorridorBends(holeId: string): void {
 		const hole = holes.find((candidate) => candidate.id === holeId);
@@ -880,10 +880,15 @@
 		if (!(decoded instanceof HTMLImageElement)) return;
 		try {
 			const raster = cropSourceRasterAroundHole(decoded, image.widthPx, image.heightPx, hole.tee, hole.basket);
-			if (!raster) return;
-			const bends = detectCorridorBends(raster, hole.tee, hole.basket);
-			if (bends.length === 0) return;
-			holes = applyDetectedCorridorBends(holes, holeId, bends);
+			const badge = numberBadges.find((candidate) => candidate.number === hole.number);
+			const nextHoles = detectAndApplyCorridorBendsCapsule(
+				holes,
+				holeId,
+				raster,
+				badge ? { xPx: badge.xPx, yPx: badge.yPx } : undefined
+			);
+			if (nextHoles.find((candidate) => candidate.id === holeId)?.corridorBends.length === 0) return;
+			holes = nextHoles;
 			markMapGeometryEdited();
 		} catch {
 			// Best-effort preliminary detection; never blocks the approve flow.
