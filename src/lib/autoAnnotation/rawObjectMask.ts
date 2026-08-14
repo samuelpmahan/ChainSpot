@@ -18,8 +18,14 @@
  * Connected components are then measured on those masks. Basket and badge
  * families are selected by repeated same-size glyph consensus; tees are the
  * remaining pad-sized bright components after removing badge interiors and
- * using the two UI glyph families as scale references.
+ * using the two UI glyph families as scale references, then a cheap
+ * rotation-normalized appearance check (see teeAppearance.ts) against a
+ * small real-tee template bank, since on-screen UI chrome (map-control
+ * button text, attribution watermarks) can satisfy the same size/aspect/
+ * fill bounds as a real tee-pad.
  */
+
+import { passesTeeAppearanceCheck } from './teeAppearance';
 
 export interface RawObjectMaskRaster {
 	readonly rgba: Uint8Array | Uint8ClampedArray;
@@ -333,6 +339,16 @@ export function detectRawObjectMask(raster: RawObjectMaskRaster): RawObjectMaskR
 				component.fill <= 0.55
 			);
 		});
+
+		teeComponents = teeComponents.filter((component) =>
+			passesTeeAppearanceCheck(raster, {
+				xPx: component.centroidX,
+				yPx: component.centroidY,
+				orientationDeg: component.orientationDeg,
+				widthPx: component.widthPx,
+				heightPx: component.heightPx
+			})
+		);
 	}
 
 	const tees = sortComponents(teeComponents).map(

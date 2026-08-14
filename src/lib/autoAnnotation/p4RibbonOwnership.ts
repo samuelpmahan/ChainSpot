@@ -363,14 +363,18 @@ function deriveP4RibbonOwnershipFromSegmentation(
 	const p3DiagnosticsByTee = new Map(
 		p3Ownership.teeDiagnostics.map((diagnostic) => [diagnostic.teeIndex, diagnostic])
 	);
-	const p3AxisErrorByTeeHole = new Map(
-		p3Ownership.teeBadgeHits.map((hit) => [`${hit.teeIndex}:${hit.holeNumber}`, hit.badgeAxisErrorPx])
-	);
 
 	const teeResolutions = tees.map((_, teeIndex): P4TeeResolution => {
 		const diagnostic = p3DiagnosticsByTee.get(teeIndex);
 		const candidateHoleNumbers = uniqueNumbers(diagnostic?.candidateHoleNumbers ?? []);
 		const teeComponentLabel = teeComponentLabels[teeIndex];
+		// P3's per-candidate axis error (`candidateBadgeEvidence`, populated for both
+		// `owned` and conflicted tees) rather than `teeBadgeHits` (populated only for
+		// `owned` tees) -- the latter is always empty for a conflicted tee, so its
+		// candidates' axis errors were previously invisible to P4 entirely.
+		const axisErrorByHole = new Map(
+			(diagnostic?.candidateBadgeEvidence ?? []).map((evidence) => [evidence.holeNumber, evidence.badgeAxisErrorPx])
+		);
 		const candidateEvidence = candidateHoleNumbers.map((holeNumber): P4BadgeCandidateEvidence => {
 			const badgeComponentLabel = badgeComponentLabels.get(holeNumber) ?? null;
 			const teeContactDistancePx = contactDistanceToComponent(
@@ -384,18 +388,35 @@ function deriveP4RibbonOwnershipFromSegmentation(
 				teeComponentLabel,
 				teeContactDistancePx,
 				teeTouchesComponent: teeContactDistancePx !== null,
-				badgeAxisErrorPx: p3AxisErrorByTeeHole.get(`${teeIndex}:${holeNumber}`) ?? Number.NaN
+				badgeAxisErrorPx: axisErrorByHole.get(holeNumber) ?? Number.NaN
 			};
 		});
 		const supported = candidateEvidence.filter((candidate) => candidate.teeTouchesComponent);
 		if (supported.length === 1) {
-			return {
-				teeIndex,
-				candidateHoleNumbers,
-				candidateEvidence,
-				status: 'resolved',
-				resolvedHoleNumber: supported[0].holeNumber
-			};
+			const resolvedCandidate = supported[0];
+			// Topology picked a single candidate, but only trust that pick when P3's
+			// own geometry doesn't actively contradict it. A candidate the ribbon
+			// merely brushes (contact right at the tolerance edge) can still win
+			// `supported.length === 1` outright when the true tee-to-badge relation
+			// simply never touches any component -- exactly the shape of a false
+			// positive. Ordinal, not a magic distance: if some OTHER candidate's axis
+			// error is strictly better than the resolved candidate's own, geometry
+			// disagrees with topology and neither signal alone is trustworthy here,
+			// so abstain rather than lock in a pick that may be topology's own wrong
+			// contact. When topology's pick also has the best (or tied-best) axis
+			// error, geometry corroborates it and the resolution stands as before.
+			const contradictedByGeometry = candidateEvidence.some(
+				(candidate) => candidate.holeNumber !== resolvedCandidate.holeNumber && candidate.badgeAxisErrorPx < resolvedCandidate.badgeAxisErrorPx
+			);
+			if (!contradictedByGeometry) {
+				return {
+					teeIndex,
+					candidateHoleNumbers,
+					candidateEvidence,
+					status: 'resolved',
+					resolvedHoleNumber: resolvedCandidate.holeNumber
+				};
+			}
 		}
 		return {
 			teeIndex,
