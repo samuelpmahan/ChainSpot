@@ -1080,8 +1080,8 @@
 				editor.setNumberBadges(pendingBadges.numberBadges);
 				// TODO(course-memory): pendingBadges.baskets is discarded here — it can
 				// include CV-detected basket points for holes that were never fully
-				// confirmed in Annotate Round (see labeledBaskets capture at
-				// annotate-round/+page.svelte), so it isn't always redundant with
+				// confirmed in Annotate Course (see labeledBaskets capture at
+				// $lib/components/AnnotationWorkspace.svelte), so it isn't always redundant with
 				// basketsFromHoles(holes) at save time. Rather than silently apply or
 				// silently drop it, surface it as an export/import option dialog: let
 				// the user decide per basket whether it's a real extra marker to keep
@@ -1675,10 +1675,12 @@
 	}
 
 	onMount(() => {
-		// Only the target-basemap handoff belongs here now; the source-role case
-		// is entirely Annotate Round's since P1 Ticket 1.
+		// Only a handoff explicitly destined here belongs on this page; the
+		// source-role case belongs to Annotate Course or Map Round, both of
+		// which now share the 'source-overview' targetRole (see
+		// `PendingHandoffDestination` in `$lib/session.ts`).
 		const handoff = getPendingHandoff();
-		pendingHandoff = handoff && handoff.targetRole === 'target-basemap' ? handoff : null;
+		pendingHandoff = handoff && handoff.destination === 'create-graphics' ? handoff : null;
 
 		// Every new session-module read here is gated on participatesInSession:
 		// only production-created or session-retrieved editors participate, so

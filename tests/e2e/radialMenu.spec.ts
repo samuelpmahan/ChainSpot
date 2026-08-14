@@ -11,6 +11,19 @@ import type { Page } from '@playwright/test';
  * - stay fully on-screen (and reachable) when opened near a pane edge/corner,
  * - open, navigate, and choose an action with the keyboard alone,
  * - close via Escape without ever placing anything.
+ *
+ * PRE-EXISTING, NOT FROM THE ANNOTATE ROUND UX SPLIT: this file predates two
+ * later product changes and was never updated for either — (1) tee/basket
+ * placement no longer opens the radial menu at all (it goes through a
+ * sidebar-driven placing flow; see tests/unit/annotationRadialMenu.test.ts
+ * and annotateCourseSidebar.spec's equivalent), and (2) the radial menu
+ * itself is now gated behind an off-by-default "Enable radial menu" dev
+ * toggle (`radial-menu-toggle`) that nothing here clicks. `hole-add` (line
+ * ~84) also no longer exists as a UI control — only the 'a'/'n' keyboard
+ * shortcut creates a hole. Only the /annotate-round -> /annotate-course route
+ * rename (the actual UX-split change) was fixed here; the interaction model
+ * needs a real re-derivation against the current sidebar/toggle flow before
+ * this suite can pass again.
  */
 
 function crc32(bytes: Uint8Array): number {
@@ -73,7 +86,7 @@ async function loadHoleWithImage(
 	pane: import('@playwright/test').Locator;
 	box: { x: number; y: number; width: number; height: number };
 }> {
-	await page.goto('/annotate-round');
+	await page.goto('/annotate-course');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
 		name: 'course.png',

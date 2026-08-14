@@ -4,7 +4,7 @@
 `src/lib/correctionLog.ts` (event schema, `IndexedDbCorrectionLogStore`,
 `deriveProposalFromGrammar`, the "export corrections" action) plus its
 wiring into confirm/replace/move interactions in
-`src/routes/annotate-round/+page.svelte`. **Still design only**: the
+`src/lib/components/AnnotationWorkspace.svelte` (the shared implementation behind `/annotate-course` and `/map-round`, since the route split — originally `src/routes/annotate-round/+page.svelte`). **Still design only**: the
 semi-supervised gating policy itself (auto-accept vs. flag-for-review UI
 treatment) and the three-way ask copy/debug view in the two companion docs
 -- nothing yet changes what a user sees based on `gateDecision`, corrections
@@ -18,7 +18,7 @@ hand-labeling effort every time.
 
 ## What already exists (don't rebuild this)
 
-Annotate Round (`src/routes/annotate-round/+page.svelte`) already has the
+Annotate Course/Map Round's shared implementation (`src/lib/components/AnnotationWorkspace.svelte`) already has the
 correction interactions this log needs to observe -- it just doesn't record
 any of them today:
 

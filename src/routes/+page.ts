@@ -3,5 +3,5 @@ import { base } from '$app/paths';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = () => {
-	redirect(307, `${base}/annotate-round`);
+	redirect(307, `${base}/annotate-course`);
 };

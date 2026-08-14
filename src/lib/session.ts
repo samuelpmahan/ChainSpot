@@ -53,7 +53,7 @@ export type { LabeledPoint };
  * keyed slots avoid this entirely, since each key is only ever written by
  * its own route's destroy and read by its own route's mount.
  */
-export type EditorSessionKey = 'annotate-round' | 'create-graphics';
+export type EditorSessionKey = 'annotate-course' | 'map-round' | 'create-graphics';
 
 const retainedEditors = new Map<EditorSessionKey, ProjectEditor>();
 
@@ -83,17 +83,30 @@ export function takeRetainedEditor(key: EditorSessionKey): ProjectEditor | null 
 
 /**
  * A tiny module-level store carrying the stitched PNG blob from /stitch-map to
- * whichever downstream stage owns `targetRole` — /annotate-round for
- * `source-overview`, /create-graphics for `target-basemap` — across
- * client-side navigation. Survives SPA route changes; a full page reload
- * clears it (stitch sessions are deliberately never persisted). The item is
- * consumed only on a successful import or explicit dismissal on the
- * destination page; a cancelled replacement leaves it available.
+ * whichever downstream stage owns `destination` — /annotate-course or
+ * /map-round for a `source-overview`-role image, /create-graphics for
+ * `target-basemap` — across client-side navigation. Survives SPA route
+ * changes; a full page reload clears it (stitch sessions are deliberately
+ * never persisted). The item is consumed only on a successful import or
+ * explicit dismissal on the destination page; a cancelled replacement leaves
+ * it available.
+ *
+ * `targetRole` and `destination` answer different questions and both are
+ * needed: `targetRole` is the domain role the imported image gets inside
+ * `ProjectState` (still a plain `ImageRole`, unchanged by the Annotate Round
+ * split), while `destination` is session-routing only — which of the two
+ * routes that both accept a `source-overview` image should claim this
+ * particular handoff. Before the split a single `targetRole` was enough
+ * because exactly one route claimed each role; now two routes share
+ * `source-overview`.
  */
+export type PendingHandoffDestination = 'annotate-course' | 'map-round' | 'create-graphics';
+
 export interface PendingHandoff {
 	readonly blob: Blob;
 	readonly fileName: string;
 	readonly targetRole: ImageRole;
+	readonly destination: PendingHandoffDestination;
 }
 
 let pendingHandoff: PendingHandoff | null = null;
@@ -201,10 +214,11 @@ export function clearPendingStitchCaptures(): void {
 
 /**
  * Two module-level in-memory slots carrying the AnnotatedRound artifact
- * across client-side navigation between /annotate-round and /create-graphics,
- * using the same `pending`/`active` vocabulary as the rest of this module.
- * `pending` is the one-shot crossing slot: Annotate Round sets it on Done,
- * Create Graphics reads it on mount and consumes it after importing. `active`
+ * across client-side navigation from /annotate-course or /map-round to
+ * /create-graphics, using the same `pending`/`active` vocabulary as the rest
+ * of this module. `pending` is the one-shot crossing slot: either annotation
+ * route sets it on Done, Create Graphics reads it on mount and consumes it
+ * after importing. `active`
  * is longer-lived: Create Graphics sets it once the artifact is imported, and
  * it survives Create Graphics <-> Stitch Map round trips for future tickets
  * to read. Both survive SPA route changes; a full page reload clears them
@@ -244,10 +258,11 @@ export function getActiveAnnotatedRound(): AnnotatedRound | null {
  * signature input, not round annotation — cannot ride inside that artifact's
  * handoff. This is a minimal sibling to the AnnotatedRound slots above,
  * carrying exactly the payload that rule forbids attaching directly, across
- * the same /annotate-round -> /create-graphics client-side navigation.
+ * the same /annotate-course or /map-round -> /create-graphics client-side
+ * navigation.
  *
- * One module-level, one-shot slot: Annotate Round's `handleDone` sets it
- * alongside `setPendingAnnotatedRound`; Create Graphics's
+ * One module-level, one-shot slot: either annotation route's `handleDone`
+ * sets it alongside `setPendingAnnotatedRound`; Create Graphics's
  * `importAnnotatedRound` reads it right after `editor.setHoles(round.holes)`
  * and consumes it. A full page reload clears it — never persisted, exactly
  * like its sibling.

@@ -85,7 +85,7 @@ describe('demo catalog', () => {
 	it('routes every step to a real product route', () => {
 		expect(DEMO_STEP_COUNT).toBeGreaterThan(0);
 		for (const step of DEMO_STEPS) {
-			expect(['stitch-map', 'annotate-round', 'create-graphics']).toContain(step.route);
+			expect(['stitch-map', 'annotate-course', 'map-round', 'create-graphics']).toContain(step.route);
 			expect(demoStepUrl(step)).toBe(`/${step.route}`);
 			expect(step.actions.length).toBeGreaterThan(0);
 		}
@@ -95,22 +95,26 @@ describe('demo catalog', () => {
 		expect(DEMO_STEP_COUNT).toBe(6);
 		expect(DEMO_STEPS.map((step) => step.id)).toEqual([
 			'stitch',
-			'annotate-map',
+			'annotate-course',
 			'basemap-and-export',
 			'reload',
-			'annotate-round',
+			'map-round',
 			'export-round'
 		]);
 	});
 
-	it('visits Annotate Round twice — once for course geometry, once for a played round — each armed appropriately', () => {
-		const annotateSteps = DEMO_STEPS.filter((step) => step.route === 'annotate-round');
-		expect(annotateSteps).toHaveLength(2);
+	it('visits Annotate Course once for course geometry and Map Round once for a played round, each armed appropriately', () => {
+		// The pre-split script visited a single shared /annotate-round route
+		// twice; the split gives each activity its own route, visited once.
+		expect(DEMO_STEPS.filter((step) => step.route === 'annotate-course')).toHaveLength(1);
+		expect(DEMO_STEPS.filter((step) => step.route === 'map-round')).toHaveLength(1);
 
-		const mapStep = stepById('annotate-map');
+		const mapStep = stepById('annotate-course');
+		expect(mapStep.route).toBe('annotate-course');
 		expect(mapStep.arming).toEqual({ kind: 'none' });
 
-		const roundStep = stepById('annotate-round');
+		const roundStep = stepById('map-round');
+		expect(roundStep.route).toBe('map-round');
 		expect(roundStep.arming).toEqual({ kind: 'annotate-source' });
 	});
 
@@ -131,7 +135,7 @@ describe('demo catalog', () => {
 		expect(reloadIndex).toBeLessThan(DEMO_STEP_COUNT - 1);
 		// Its successor is the step that actually needs a fresh session to prove
 		// anything — the played-round annotation.
-		expect(DEMO_STEPS[reloadIndex + 1].id).toBe('annotate-round');
+		expect(DEMO_STEPS[reloadIndex + 1].id).toBe('map-round');
 		// Every other step defaults to ordinary (undefined/'default') navigation.
 		for (const step of DEMO_STEPS) {
 			if (step.kind === 'reload') continue;
@@ -195,9 +199,9 @@ describe('armDemoStep', () => {
 		expect(getPendingStitchCaptures()).toBeNull();
 	});
 
-	it('is a no-op for the Map-mode annotate step: it relies on the product\'s own "Use as UDisc source" handoff, not demo arming', async () => {
+	it('is a no-op for the Annotate Course step: it relies on the product\'s own "Use as UDisc source" handoff, not demo arming', async () => {
 		const spy = vi.fn();
-		const step = stepById('annotate-map');
+		const step = stepById('annotate-course');
 
 		expect(stepHasArming(step)).toBe(false);
 		const result = await armDemoStep(step, spy as unknown as typeof fetch);
@@ -207,12 +211,13 @@ describe('armDemoStep', () => {
 		expect(getPendingHandoff()).toBeNull();
 	});
 
-	it('publishes the played-round capture through the product handoff store for the Round-mode annotate step', async () => {
-		const result = await armDemoStep(stepById('annotate-round'), okFetch());
+	it('publishes the played-round capture through the product handoff store for the Map Round annotate step', async () => {
+		const result = await armDemoStep(stepById('map-round'), okFetch());
 
 		expect(result.ok).toBe(true);
 		const handoff = getPendingHandoff();
 		expect(handoff?.targetRole).toBe('source-overview');
+		expect(handoff?.destination).toBe('map-round');
 		expect(handoff?.fileName).toBe(DEMO_DATASET.roundOverview.fileName);
 	});
 
@@ -221,17 +226,21 @@ describe('armDemoStep', () => {
 	// sample just as surely as a same-role one would be. Guarding only the role
 	// this step happens to use left the visitor's "Use as clean basemap" stitch
 	// silently discarded.
-	it.each(['source-overview', 'target-basemap'] as const)(
+	it.each([
+		['source-overview', 'annotate-course'],
+		['target-basemap', 'create-graphics']
+	] as const)(
 		"never overwrites a pending %s handoff the visitor's own work placed",
-		async (targetRole) => {
+		async (targetRole, destination) => {
 			setPendingHandoff({
 				blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
 				fileName: 'my-own-stitch.png',
-				targetRole
+				targetRole,
+				destination
 			});
 			const spy = vi.fn();
 
-			const result = await armDemoStep(stepById('annotate-round'), spy as unknown as typeof fetch);
+			const result = await armDemoStep(stepById('map-round'), spy as unknown as typeof fetch);
 
 			expect(result.ok).toBe(true);
 			expect(spy).not.toHaveBeenCalled();
@@ -246,13 +255,14 @@ describe('armDemoStep', () => {
 			seen.push(getPendingHandoff()?.fileName ?? '');
 		});
 
-		await armDemoStep(stepById('annotate-round'), okFetch());
+		await armDemoStep(stepById('map-round'), okFetch());
 		unsubscribe();
 		const afterUnsubscribe = seen.length;
 		setPendingHandoff({
 			blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
 			fileName: 'later.png',
-			targetRole: 'source-overview'
+			targetRole: 'source-overview',
+			destination: 'map-round'
 		});
 
 		expect(seen).toEqual([DEMO_DATASET.roundOverview.fileName]);
@@ -356,13 +366,13 @@ describe('DemoTour', () => {
 		// Mirrors DemoGuide.reloadAndAdvance: advance the cursor (persisting the
 		// *next* step to sessionStorage), then — in the real component — reload.
 		const next = tour.goTo(reloadIndex + 1);
-		expect(next.id).toBe('annotate-round');
-		expect(next.route).toBe('annotate-round');
+		expect(next.id).toBe('map-round');
+		expect(next.route).toBe('map-round');
 
 		const afterReload = new DemoTour();
 		afterReload.restore();
 		expect(afterReload.active).toBe(true);
 		expect(afterReload.stepIndex).toBe(reloadIndex + 1);
-		expect(afterReload.step.id).toBe('annotate-round');
+		expect(afterReload.step.id).toBe('map-round');
 	});
 });

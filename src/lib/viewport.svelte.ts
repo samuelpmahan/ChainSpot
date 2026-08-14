@@ -55,8 +55,8 @@ const TOUCH_CLICK_SLOP_PX = 10;
  * pixels. Governs both directions of the same arbitration everywhere it is
  * compared: whether an unclaimed pointer gesture is a click or a pan
  * (`ImageViewport`), and whether a claimed gesture is a tap/click or a drag
- * (marker drag, ribbon vertex drag, stitch tile drag, annotate-round's
- * point/number drags). `pointerType` is `'mouse' | 'pen' | 'touch'` per the
+ * (marker drag, ribbon vertex drag, stitch tile drag, the annotation
+ * workspace's point/number drags). `pointerType` is `'mouse' | 'pen' | 'touch'` per the
  * Pointer Events spec; an empty string or `undefined` — jsdom's default for
  * a bare `new PointerEvent(...)`, and the value Safari has historically
  * reported for some synthetic events — falls back to the mouse value so

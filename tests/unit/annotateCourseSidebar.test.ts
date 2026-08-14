@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 
 /**
- * Coverage for the redesigned Annotate Round sidebar: the four-section hole
- * grid, the sidebar-driven placing flow (click a hole, click empty map to
- * place its missing piece), the section-3 approve flow, the marker
- * correction chip (reassign to any hole / delete, not proximity-gated), real
- * drag-vs-click disambiguation on an existing marker, and the completion
- * panel's save/upload gating.
+ * Coverage for Annotate Course's sidebar: the four-section hole grid, the
+ * sidebar-driven placing flow (click a hole, click empty map to place its
+ * missing piece), the section-3 approve flow, the marker correction chip
+ * (reassign to any hole / delete, not proximity-gated), real drag-vs-click
+ * disambiguation on an existing marker, and the completion panel's
+ * save/map-round gating.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
-import Page from '../../src/routes/annotate-round/+page.svelte';
+import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
@@ -36,7 +36,10 @@ interface Mounted {
 function mountPage(editor: ProjectEditor, decode: DecodeImageFile): Mounted {
 	const host = document.createElement('div');
 	document.body.appendChild(host);
-	const component = mount(Page, { target: host, props: { editor, decode } });
+	const component = mount(AnnotationWorkspace, {
+		target: host,
+		props: { mode: 'map', sessionKey: 'annotate-course', editor, decode }
+	});
 	return { editor, component, host };
 }
 
@@ -562,7 +565,7 @@ describe('drag vs click on an existing marker', () => {
 });
 
 describe('completion panel', () => {
-	it('appears only once all 18 holes are confirmed, and gates uploading a round on saving the course first', async () => {
+	it('appears only once all 18 holes are confirmed, and gates mapping a round on saving the course first', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -594,12 +597,12 @@ describe('completion panel', () => {
 		expect(panel).not.toBeNull();
 		expect(host.querySelector('[data-testid="sidebar-section-1"]')).toBeNull();
 
-		const uploadButton = host.querySelector<HTMLButtonElement>('[data-testid="upload-round-from-course"]');
+		const uploadButton = host.querySelector<HTMLButtonElement>('[data-testid="map-round-from-course"]');
 		expect(uploadButton?.disabled).toBe(true);
 
 		host.querySelector<HTMLButtonElement>('[data-testid="save-course-to-memory"]')?.click();
 		await flush();
 
-		expect(host.querySelector<HTMLButtonElement>('[data-testid="upload-round-from-course"]')?.disabled).toBe(false);
+		expect(host.querySelector<HTMLButtonElement>('[data-testid="map-round-from-course"]')?.disabled).toBe(false);
 	});
 });

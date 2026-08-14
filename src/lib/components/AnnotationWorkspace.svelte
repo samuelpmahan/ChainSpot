@@ -27,7 +27,7 @@
 		setPendingAnnotatedRound,
 		setPendingCourseBadges
 	} from '$lib/session';
-	import type { PendingHandoff, LabeledPoint } from '$lib/session';
+	import type { PendingHandoff, LabeledPoint, EditorSessionKey } from '$lib/session';
 	import { importHandoffImage } from '$lib/handoffImport';
 	import { annotatedSourceImageFromAsset, createAnnotatedRound } from '$lib/domain/annotatedRound';
 	import type { AnnotatedHole } from '$lib/domain/annotatedRound';
@@ -122,7 +122,13 @@
 		updateAnnotationNav
 	} from '$lib/annotationNav.svelte';
 
-	/** The two annotation activities this route now separates: course geometry (once per course/layout) vs. round-specific throws and walk path (once per round). */
+	/**
+	 * The two annotation activities ChainSpot separates into their own routes:
+	 * course geometry (`/annotate-course`, once per course/layout) vs.
+	 * round-specific throws and walk path (`/map-round`, once per round).
+	 * `mode` is a fixed prop, set once by whichever thin route mounts this
+	 * component — there is no in-page control that changes it.
+	 */
 	type AnnotationMode = 'map' | 'round';
 
 	/** A point kind offered by the radial menu, either a hole-scoped placement mode or the round-level walk path. */
@@ -195,6 +201,10 @@
 	}
 
 	interface Props {
+		/** Fixed for the lifetime of this instance — set once by the mounting route, never changed from inside. */
+		mode: AnnotationMode;
+		/** This instance's slot in the cross-route retained-editor session (`$lib/session.ts`); distinct per route so Annotate Course and Map Round never share an in-memory editor. */
+		sessionKey: Extract<EditorSessionKey, 'annotate-course' | 'map-round'>;
 		editor?: ProjectEditor;
 		decode?: DecodeImageFile;
 		hash?: HashBytes;
@@ -204,6 +214,8 @@
 	}
 
 	let {
+		mode: annotationMode,
+		sessionKey,
 		editor: initialEditor,
 		decode,
 		hash,
@@ -236,7 +248,7 @@
 	function resolveInitialEditor(): ProjectEditor {
 		// An explicitly injected editor (tests) wins; otherwise reuse the retained
 		// in-memory session across SPA navigation, or start a fresh project.
-		return initialEditor ?? takeRetainedEditor('annotate-round') ?? new ProjectEditor();
+		return initialEditor ?? takeRetainedEditor(sessionKey) ?? new ProjectEditor();
 	}
 
 	onDestroy(() => {
@@ -245,7 +257,7 @@
 			unregisterAnnotationNav(annotationNavRegistration);
 			annotationNavRegistration = null;
 		}
-		if (participatesInSession) retainEditor('annotate-round', editor);
+		if (participatesInSession) retainEditor(sessionKey, editor);
 	});
 
 	let refreshCount = $state(0);
@@ -267,13 +279,6 @@
 	 */
 	// svelte-ignore state_referenced_locally
 	let holes = $state<AnnotatedHole[]>(editor.state.holes);
-	/**
-	 * Which of the two annotation activities the toolbar and radial menu are
-	 * scoped to right now — 'map' (course geometry: tee/basket/bend, once per
-	 * course) or 'round' (throws and walk path, once per round). Defaults to
-	 * 'map' since a fresh source image needs its geometry established first.
-	 */
-	let annotationMode = $state<AnnotationMode>('map');
 	/**
 	 * UDisc's purple walking route as one open polyline spanning the whole
 	 * round — round-level, not scoped to any hole. Cleared on the same
@@ -750,13 +755,6 @@
 
 	function activeHole(): AnnotatedHole | null {
 		return holes.find((hole) => hole.id === activeHoleId) ?? null;
-	}
-
-	/** Switches the annotation activity; closes any open radial menu since its wedge set is mode-scoped. */
-	function setAnnotationMode(mode: AnnotationMode): void {
-		if (annotationMode === mode) return;
-		annotationMode = mode;
-		radialMenu = null;
 	}
 
 	/** Marks the map (course-geometry) side of the draft as diverged from whatever library entry was last imported. */
@@ -1464,10 +1462,17 @@
 		}
 	}
 
-	/** The completion panel's second action, gated on the first succeeding — hands this course off to Create Graphics exactly like the topbar Done button, since "upload a round from this course" and "finish this annotation" are the same handoff. */
+	/**
+	 * The completion panel's second action, gated on the first succeeding —
+	 * takes the course just saved to Course Memory to `/map-round`, the real
+	 * destination for annotating a played round on it. Map Round starts with
+	 * its own empty editor and recovers this course's geometry the same way
+	 * any visit does: importing a round screenshot and recognizing it against
+	 * the entry `handleSaveCourseToMemory` just wrote.
+	 */
 	async function handleUploadRoundFromCourse(): Promise<void> {
 		if (!savedCourseToMemory) return;
-		await handleDone();
+		await goto(`${base}/map-round`);
 	}
 
 	/** Hole-scoped markers only — a `walk` marker never reaches here, its own kind is handled by the caller before this is invoked. */
@@ -2094,7 +2099,6 @@
 		recognizedMatch = null;
 		recognizedSourceId = null;
 		activeHoleId = null;
-		annotationMode = 'map';
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = false;
 		bendPhaseDone = false;
@@ -2244,14 +2248,10 @@
 			activeHoleId = activeHoleId ?? holes[0]?.id ?? null;
 			recognizedMatch = null;
 			// The imported geometry exactly matches what the library already
-			// knows; only a subsequent Map-mode edit makes it worth previewing
-			// a library write again at Done.
+			// knows; only a subsequent Annotate Course edit makes it worth
+			// previewing a library write again at Done.
 			importedLibraryEntryThisSession = true;
 			mapGeometryEdited = false;
-			// The imported course geometry means the remaining work is round
-			// annotation — switch the toolbar there so the user isn't stuck on
-			// Map mode with nothing left for it to do.
-			setAnnotationMode('round');
 		} finally {
 			applyingRecognizedMatch = false;
 		}
@@ -2511,7 +2511,6 @@
 		const registration = annotationNavRegistration;
 		if (registration === null) return;
 		updateAnnotationNav(registration, {
-			mode: annotationMode,
 			canFinish: canFinishAnnotation(),
 			doneRunning
 		});
@@ -2634,7 +2633,10 @@
 	 */
 	function readPendingHandoff(): void {
 		const handoff = participatesInSession ? getPendingHandoff() : null;
-		const targeted = handoff && handoff.targetRole === 'source-overview' ? handoff : null;
+		const targeted =
+			handoff && handoff.targetRole === 'source-overview' && handoff.destination === sessionKey
+				? handoff
+				: null;
 		if (targeted && canAutoImportHandoffSafely()) {
 			// No stale banner from a previous (unsafe) handoff should hang around
 			// while this one imports itself.
@@ -2647,10 +2649,8 @@
 
 	onMount(() => {
 		annotationNavRegistration = registerAnnotationNav({
-			mode: annotationMode,
 			canFinish: canFinishAnnotation(),
 			doneRunning,
-			onModeChange: (mode) => setAnnotationMode(mode),
 			onDone: () => void handleDone()
 		});
 		readPendingHandoff();
@@ -2679,11 +2679,12 @@
 </script>
 
 <svelte:head>
-	<title>Annotate Round | ChainSpot</title>
+	<title>{annotationMode === 'map' ? 'Annotate Course' : 'Map Round'} | ChainSpot</title>
 </svelte:head>
 
 <main
-	data-testid="annotate-round"
+	data-testid="annotation-workspace"
+	data-mode={annotationMode}
 	data-source-loaded={sourceImage() ? 'true' : 'false'}
 	data-hole-count={holes.length}
 >
@@ -3033,12 +3034,12 @@
 									<button
 										type="button"
 										class="upload-round-button"
-										data-testid="upload-round-from-course"
+										data-testid="map-round-from-course"
 										disabled={!savedCourseToMemory || doneRunning}
 										title={savedCourseToMemory ? undefined : 'Save the course first'}
 										onclick={() => void handleUploadRoundFromCourse()}
 									>
-										Upload a round from this course →
+										Map a round on this course →
 									</button>
 								</div>
 							</div>
@@ -3519,7 +3520,7 @@
 			>
 				<h2>Update saved course?</h2>
 				<p>
-					Your Map-mode edits will replace the stored tee/basket/corridor geometry for “{pendingLibraryUpdateConfirm.entry.name}”.
+					Your course edits will replace the stored tee/basket/corridor geometry for “{pendingLibraryUpdateConfirm.entry.name}”.
 					Either choice continues on to Create Graphics.
 				</p>
 				<div class="dialog-actions">

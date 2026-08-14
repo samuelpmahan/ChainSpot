@@ -73,7 +73,7 @@ async function canvasClick(page: Page, role: string, local: { x: number; y: numb
 }
 
 test('empty-state "Choose image" button opens the native file picker', async ({ page }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/annotate-course');
 
 	// Regression test: a pointerdown on a control rendered inside the pannable
 	// ImageViewport must not be swallowed by the viewport's own pan-gesture
@@ -86,16 +86,16 @@ test('empty-state "Choose image" button opens the native file picker', async ({ 
 	expect(chooser.isMultiple()).toBe(false);
 });
 
-test('Annotate Round hands its source image to Create Graphics, where the correspondence workflow still works', async ({
+test('Annotate Course hands its source image to Create Graphics, where the correspondence workflow still works', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/annotate-course');
 
 	// Done is gated on a loaded source image.
 	await expect(page.getByTestId('annotate-done')).toBeDisabled();
 	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('tiny.png · 2 × 3');
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true');
 	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
 	// Finishing navigates to Create Graphics with the same source image already
@@ -123,7 +123,7 @@ test('Annotate Round hands its source image to Create Graphics, where the corres
 test('the diagnostics rail collapse toggle defaults expanded and remembers a collapsed choice across a full page reload', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/annotate-course');
 
 	const toggle = page.getByTestId('diagnostics-rail-toggle');
 	await expect(toggle).toHaveAttribute('aria-expanded', 'true');

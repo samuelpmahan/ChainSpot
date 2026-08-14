@@ -3,22 +3,45 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 /**
- * Browser coverage for Annotate Round's hole-annotation workflow: adding holes,
- * placing tee/basket/shot/bend points via the radial menu, deleting an existing
- * point via the same menu, per-hole correction (remove last shot/bend, clear
- * bends), switching the active hole without cross-contaminating another hole's
- * points, immediate corridor-band rendering from tee + basket + bends + width,
- * and the resulting AnnotatedRound handing off to Create Graphics once
- * corrected.
+ * Browser coverage for the hole-annotation workflow: adding holes, placing
+ * tee/basket/shot/bend points via the radial menu, deleting an existing point
+ * via the same menu, per-hole correction (remove last shot/bend, clear
+ * bends), switching the active hole without cross-contaminating another
+ * hole's points, immediate corridor-band rendering from tee + basket + bends
+ * + width, and the resulting AnnotatedRound handing off to Create Graphics
+ * once corrected.
+ *
+ * PRE-EXISTING, NOT FROM THE ANNOTATE ROUND UX SPLIT — needs a real redesign,
+ * not a mechanical rename, before this suite can pass again:
+ *
+ * 1. This file predates the sidebar-driven placing flow: tee/basket no longer
+ *    open the radial menu at all (`placePoint(..., 'tee'|'basket')` and
+ *    `hole-add`, used throughout, no longer exist as UI controls — only the
+ *    'a'/'n' keyboard shortcut creates a hole, and an empty-space click places
+ *    a hole's missing tee/basket directly). The radial menu is also now
+ *    gated behind an off-by-default "Enable radial menu" dev toggle
+ *    (`radial-menu-toggle`) nothing here clicks. See
+ *    tests/unit/annotationRadialMenu.test.ts and annotateCourseSidebar's
+ *    equivalent for the current flow.
+ * 2. `switchMode`, below, interleaves Map and Round actions on the *same*
+ *    hole within one continuous session (e.g. place a shot in Round, switch
+ *    back to Map, assert the tee/basket are undisturbed). Annotate Course and
+ *    Map Round are now separate routes with independent retained-editor
+ *    sessions (see `$lib/session.ts`'s `EditorSessionKey`) — a plain route
+ *    navigation between them does not carry geometry across; only Course
+ *    Memory recognition does (save on Annotate Course, then import/recognize
+ *    on Map Round — see tests/unit/mapRoundPage.test.ts's destination tests
+ *    and courseRecognitionBanner.test.ts). Tests relying on switchMode to
+ *    round-trip within one session need re-deriving against that flow.
+ *
+ * `switchMode` is left referencing the now-deleted mode-toggle testids
+ * on purpose: it fails loudly and immediately rather than silently
+ * navigating to a route that discards the very geometry these tests are
+ * mid-way through building.
  */
 
 type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-/**
- * Clicks the Map/Round segmented toggle in the toolbar. The toggle sits above
- * the fold, so clicking it scrolls the annotation frame away — scroll it back
- * so frame coordinates measured earlier stay valid for subsequent clicks.
- */
 async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
 	await page.getByTestId(`annotation-mode-${mode}`).click();
 	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
@@ -70,7 +93,7 @@ function pngPayload(width: number, height: number): Buffer {
 }
 
 async function loadSourceImage(page: Page): Promise<void> {
-	await page.goto('/annotate-round');
+	await page.goto('/annotate-course');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
 		name: 'course.png',
@@ -183,7 +206,7 @@ test('hole annotation: place tee/basket/shots/bends via the radial menu, correct
 	// marker so the radial menu opens for empty space, not that marker's own
 	// delete menu.
 	await page.getByTestId('hole-add').click();
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '2');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '2');
 	await placePoint(page, box.x + 600, box.y + 440, 'tee');
 	await expect(page.getByTestId('tee-marker-2')).toBeVisible();
 	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
@@ -312,7 +335,7 @@ test('hole annotation: corridor width applies to every hole (UDisc parity), and 
 	await expect(page.getByTestId('corridor-band-1')).toBeVisible();
 
 	await page.getByTestId('hole-add').click();
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '2');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '2');
 	// Adding a hole can grow the sidebar above the frame and shift it within
 	// the viewport, so the frame's box must be re-measured before it's used
 	// for further clicks — a stale box silently misses the image entirely.
@@ -334,6 +357,6 @@ test('hole annotation: corridor width applies to every hole (UDisc parity), and 
 	// A hole added afterward inherits that width immediately, rather than
 	// resetting to the bare default.
 	await page.getByTestId('hole-add').click();
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '3');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '3');
 	await expect(page.getByTestId('corridor-width')).toHaveValue('110');
 });

@@ -3,11 +3,7 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import DemoGuide from '$lib/components/DemoGuide.svelte';
-	import {
-		annotationNavState,
-		requestAnnotationDone,
-		requestAnnotationMode
-	} from '$lib/annotationNav.svelte';
+	import { annotationNavState, requestAnnotationDone } from '$lib/annotationNav.svelte';
 
 	/**
 	 * Client-only marker set after hydration and event delegation are in place.
@@ -51,12 +47,20 @@
 			Stitch Map
 		</a>
 		<a
-			href="{base}/annotate-round"
+			href="{base}/annotate-course"
 			class="nav-link"
-			class:active={page.url.pathname === `${base}/annotate-round` || page.url.pathname === `${base}/`}
-			aria-current={page.url.pathname === `${base}/annotate-round` || page.url.pathname === `${base}/` ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/annotate-course` || page.url.pathname === `${base}/`}
+			aria-current={page.url.pathname === `${base}/annotate-course` || page.url.pathname === `${base}/` ? 'page' : undefined}
 		>
-			Annotate Round
+			Annotate Course
+		</a>
+		<a
+			href="{base}/map-round"
+			class="nav-link"
+			class:active={page.url.pathname === `${base}/map-round`}
+			aria-current={page.url.pathname === `${base}/map-round` ? 'page' : undefined}
+		>
+			Map Round
 		</a>
 		<a
 			href="{base}/create-graphics"
@@ -77,35 +81,6 @@
 		{#if annotationNavState.active}
 			<span class="app-nav-divider" aria-hidden="true"></span>
 			<div class="global-annotation-controls">
-				<div
-					class="global-mode-toggle"
-					role="group"
-					aria-label="Annotation mode"
-					data-testid="annotation-mode-toggle"
-				>
-					<button
-						type="button"
-						class="global-mode-toggle-button"
-						class:active={annotationNavState.mode === 'map'}
-						aria-pressed={annotationNavState.mode === 'map'}
-						data-testid="annotation-mode-map"
-						onclick={() => requestAnnotationMode('map')}
-					>
-						<span class="global-mode-label">Map</span>
-						<span class="global-mode-hint">Course geometry</span>
-					</button>
-					<button
-						type="button"
-						class="global-mode-toggle-button"
-						class:active={annotationNavState.mode === 'round'}
-						aria-pressed={annotationNavState.mode === 'round'}
-						data-testid="annotation-mode-round"
-						onclick={() => requestAnnotationMode('round')}
-					>
-						<span class="global-mode-label">Round</span>
-						<span class="global-mode-hint">Throws &amp; walk path</span>
-					</button>
-				</div>
 				<button
 					type="button"
 					class="global-done-button"
@@ -191,54 +166,9 @@
 		flex: 0 0 auto;
 	}
 
-	.global-mode-toggle {
-		display: flex;
-		align-items: stretch;
-		gap: 0.2rem;
-		padding: 0.2rem;
-		border: 1px solid #3f3f46;
-		border-radius: 7px;
-		background: #18181b;
-	}
-
-	.global-mode-toggle-button {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		justify-content: center;
-		min-width: 6.5rem;
-		min-height: 2.25rem;
-		padding: 0.25rem 0.7rem;
-		border: 1px solid transparent;
-		border-radius: 5px;
-		background: transparent;
-		color: #d4d4d8;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.global-mode-toggle-button.active {
-		border-color: #2563eb;
-		background: #2563eb;
-		color: #fff;
-	}
-
-	.global-mode-toggle-button:focus-visible,
 	.global-done-button:focus-visible {
 		outline: 2px solid #60a5fa;
 		outline-offset: 1px;
-	}
-
-	.global-mode-label {
-		font-size: 0.8rem;
-		font-weight: 650;
-		line-height: 1.05;
-	}
-
-	.global-mode-hint {
-		font-size: 0.62rem;
-		line-height: 1.05;
-		opacity: 0.78;
 	}
 
 	.global-done-button {
@@ -313,10 +243,6 @@
 		.nav-link {
 			min-height: 2.75rem;
 			padding: 0.5rem 0.85rem;
-		}
-
-		.global-mode-toggle-button {
-			min-width: 5.5rem;
 		}
 	}
 </style>

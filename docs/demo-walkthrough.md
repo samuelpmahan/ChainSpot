@@ -31,18 +31,21 @@ implementation of it.
   │  "Start the walkthrough"
   │    1. fetch real assets  →  2. hand to a real intake path  →  3. goto(real route)
   ▼
-/stitch-map ──▶ /annotate-round ──▶ /create-graphics ──▶ (real reload) ──▶ /annotate-round ──▶ /create-graphics
+/stitch-map ──▶ /annotate-course ──▶ /create-graphics ──▶ (real reload) ──▶ /map-round ──▶ /create-graphics
       ▲                 ▲                    ▲                                    ▲                    ▲
       └───────────────────────────  DemoGuide rail (mounted once in +layout.svelte)  ─────────────────────┘
                               narration · step navigation · "Load the real inputs"
 ```
 
-Build the map once (stitch, annotate in Map mode), put one course on air
-(basemap + export), then prove the map is worth having built: a real browser
-reload — the guide's own affordance, never a proxy for a product control —
-clears every in-memory session the app keeps, and the walkthrough finishes by
-annotating a *played round* of the same course (Round mode: throws and walking
-path) purely from what Course Memory remembered across that reload.
+Build the map once (stitch, annotate on Annotate Course), put one course on
+air (basemap + export), then prove the map is worth having built: a real
+browser reload — the guide's own affordance, never a proxy for a product
+control — clears every in-memory session the app keeps, and the walkthrough
+finishes by annotating a *played round* of the same course (Map Round: throws
+and walking path) purely from what Course Memory remembered across that
+reload. Annotate Course and Map Round used to be one shared `/annotate-round`
+route with an internal mode toggle; they are now two real routes, each visited
+exactly once by the script.
 
 Every step is performed on a production route by production code. The demo owns
 exactly three things: which real assets to hand over, what the visitor is told,
@@ -86,7 +89,7 @@ The round-annotation dataset is a second, independent real capture of the
 walking path are pixels in that screenshot, and the visitor annotates over
 them. It carries full phone chrome — status bar, course title bar, hole/par
 banner, bottom nav — and, unlike the four map-creation tiles, nothing crops
-it before Annotate Round sees it; the narration says so rather than
+it before Map Round sees it; the narration says so rather than
 pretending otherwise. It is a deliberate interim stand-in the user has said
 will be replaced with a cleaner capture (see
 `static/resources/demo/dashs-track/README.md`) — swapping it for a better
@@ -112,18 +115,22 @@ Two of the three stages needed no new seam at all.
 
 | Stage | Path in | New code |
 | --- | --- | --- |
-| Annotate Round (Map mode, step 2) | `setPendingHandoff({ targetRole: 'source-overview' })` — the store Stitch Map's "Use as UDisc source" already writes. No demo-side arming: the product's own handoff carries the visitor's own stitched export forward. | none |
-| Annotate Round (Round mode, step 5) | Same store, demo-armed this time (`DemoArming` kind `annotate-source`) with the played-round capture, since there is no upstream product step to hand this one off. | none — reuses the same store |
-| Create Graphics | Same store, `targetRole: 'target-basemap'` (unused: the basemap steps fetch their own aerial live) | none |
+| Annotate Course (step 2) | `setPendingHandoff({ targetRole: 'source-overview', destination: 'annotate-course' })` — the store Stitch Map's "Use as UDisc source" already writes. No demo-side arming: the product's own handoff carries the visitor's own stitched export forward. | none |
+| Map Round (step 5) | Same store, demo-armed this time (`DemoArming` kind `annotate-source`) with the played-round capture and `destination: 'map-round'`, since there is no upstream product step to hand this one off. | none — reuses the same store |
+| Create Graphics | Same store, `targetRole: 'target-basemap'`, `destination: 'create-graphics'` (unused: the basemap steps fetch their own aerial live) | none |
 | Stitch Map | The pending-stitch-captures slot in `src/lib/session.ts` (originally its own `demo/stageInbox.ts`, folded into the session-state consolidation), claimed on mount and passed straight to `requestSmartImport` | 2 lines in the route |
 
-Reusing the product's own handoff store is the load-bearing choice. Annotate
-Round shows its ordinary import banner, applies its ordinary replacement and
-point-discard rules, and reports its ordinary errors — a demo visitor sees the
-real intake contract, and the demo has nothing of its own that can drift away
-from it. This is why the Round-mode step's arming still routes through that
-store instead of inventing a second one, even though nothing upstream produced
-its input.
+Reusing the product's own handoff store is the load-bearing choice. Either
+annotation route shows its ordinary import banner, applies its ordinary
+replacement and point-discard rules, and reports its ordinary errors — a demo
+visitor sees the real intake contract, and the demo has nothing of its own
+that can drift away from it. This is why the Map Round step's arming still
+routes through that store instead of inventing a second one, even though
+nothing upstream produced its input. `destination` is what disambiguates the
+two annotation routes now that both accept a `source-overview`-role image
+(see `PendingHandoffDestination` in `$lib/session.ts`) — before the route
+split a single shared `targetRole` was enough, because exactly one route
+claimed each role.
 
 The Stitch Map inbox exists because Stitch Map has no equivalent store, and it
 is modelled directly on `src/lib/stitch/handoff.ts`: module-level, one-shot,
@@ -133,7 +140,7 @@ cleared by a full page reload, carrying plain `File`s and nothing precomputed.
 
 `armDemoStep` refuses to overwrite a pending handoff that is already waiting,
 because a waiting handoff is usually the visitor's own work in transit — their
-stitched export on the way to Annotate Round in step 2, or (less likely, but
+stitched export on the way to Annotate Course in step 2, or (less likely, but
 the guard does not special-case which role) a basemap export on its way to
 Create Graphics. Replacing it with a sample would be the single most damaging
 thing this code could do, so it is a guard in `src/lib/demo/arming.ts` and a
@@ -166,9 +173,13 @@ mount, so a storage-disabled browser still runs the demo.
 Advancing only navigates when the next step lives on a different route. The
 basemap/export step and the reload step both happen on Create Graphics, and
 re-navigating between them would throw away the basemap and correspondences
-the visitor just created. Annotate Round is visited twice — once in Map mode
-(step 2), once in Round mode (step 5) — and each of those *is* preceded by a
-route change, so the ordinary `goto` path applies there same as anywhere else.
+the visitor just created. Annotate Course (step 2) and Map Round (step 5) are
+two distinct routes now, each visited exactly once, so the ordinary `goto`
+path applies there same as anywhere else — before the route split they were
+one shared `/annotate-round` route visited twice (once per mode), which is
+what originally motivated `DemoGuide`'s repeated-route fallback logic. That
+fallback is still needed today for Create Graphics, which is still visited
+three times.
 
 ### The reload step
 

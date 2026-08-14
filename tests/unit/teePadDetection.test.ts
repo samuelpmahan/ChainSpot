@@ -53,7 +53,7 @@ describe('deriveUDiscCalibration', () => {
 			const source = readFileSync(resolve(root, entryPath), 'utf8');
 			expect(source, entryPath).toContain('deriveUDiscCalibration');
 		}
-		const pageSource = readFileSync(resolve(root, 'src/routes/annotate-round/+page.svelte'), 'utf8');
+		const pageSource = readFileSync(resolve(root, 'src/lib/components/AnnotationWorkspace.svelte'), 'utf8');
 		expect(pageSource).not.toContain('deriveUDiscCalibration');
 		const workerSource = readFileSync(
 			resolve(root, 'src/lib/autoAnnotation/basketDetection.worker.ts'),

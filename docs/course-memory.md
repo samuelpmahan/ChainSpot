@@ -64,14 +64,15 @@ and are signature-quality input, not round annotation, so they live as a
 sibling `ProjectState.numberBadges` field (schema v4), never inside
 `AnnotatedHole`.
 
-That created a second wrinkle: Annotate Round's `holes` is page-local
-`$state`, not owned by a `ProjectEditor` — only Create Graphics's
-`importAnnotatedRound()` writes to a `ProjectEditor`, on a *separate* editor
-instance from Annotate Round's. So capturing badges in Annotate Round alone
-isn't enough to make them durable. `session.ts`'s pending course-badges slot
-is a minimal sibling to its existing AnnotatedRound pending/active slot
-pattern, carrying exactly the badge/basket payload the Done-boundary rule forbids
-attaching to `AnnotatedRound` across the same `/annotate-round` ->
+That created a second wrinkle: Annotate Course's/Map Round's `holes` is
+page-local `$state` (both share `AnnotationWorkspace.svelte`), not owned by a
+`ProjectEditor` — only Create Graphics's `importAnnotatedRound()` writes to a
+`ProjectEditor`, on a *separate* editor instance from either annotation
+route's. So capturing badges in the annotation route alone isn't enough to
+make them durable. `session.ts`'s pending course-badges slot is a minimal
+sibling to its existing AnnotatedRound pending/active slot pattern, carrying
+exactly the badge/basket payload the Done-boundary rule forbids attaching to
+`AnnotatedRound` across the same `/annotate-course` or `/map-round` ->
 `/create-graphics` navigation. Create Graphics's `importAnnotatedRound`
 consumes it into durable `ProjectState.numberBadges` right alongside
 `editor.setHoles(round.holes)`.
@@ -106,8 +107,10 @@ forward.
 ## Recognition is always explicit
 
 A confident library match never auto-imports. `applyLibraryEntry` is only
-ever reachable from Annotate Round's explicit "Import saved holes" button
-click — the recognized-course state (`recognizedMatch`) only ever renders a
+ever reachable from Annotate Course's or Map Round's explicit "Import saved
+holes" button click (both routes share the same recognition wiring in
+`AnnotationWorkspace.svelte`) — the recognized-course state (`recognizedMatch`)
+only ever renders a
 confirm/dismiss banner, mirroring the existing Stitch Map handoff banner
 pattern. A wrong auto-import onto the wrong course would silently corrupt
 tee/basket placement; recognition is probabilistic, but authoritative

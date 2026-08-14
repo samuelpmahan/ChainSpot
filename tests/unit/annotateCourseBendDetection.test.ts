@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
-import Page from '../../src/routes/annotate-round/+page.svelte';
+import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
@@ -39,7 +39,10 @@ interface Mounted {
 function mountPage(editor: ProjectEditor, decode: DecodeImageFile): Mounted {
 	const host = document.createElement('div');
 	document.body.appendChild(host);
-	const component = mount(Page, { target: host, props: { editor, decode } });
+	const component = mount(AnnotationWorkspace, {
+		target: host,
+		props: { mode: 'map', sessionKey: 'annotate-course', editor, decode }
+	});
 	return { editor, component, host };
 }
 

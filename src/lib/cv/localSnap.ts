@@ -20,7 +20,7 @@
  *
  * Main-thread vs. worker (point 5 of the design): this module itself doesn't
  * decide -- it just needs a `cv` instance. The actual choice lives in the
- * caller. `src/routes/annotate-round/+page.svelte` calls through the
+ * caller. `$lib/components/AnnotationWorkspace.svelte` calls through the
  * *existing* `basketDetection.worker.ts` (a new `'local-snap'` request kind)
  * rather than loading a second OpenCV WASM instance on the main thread,
  * because:

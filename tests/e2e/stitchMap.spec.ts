@@ -537,9 +537,9 @@ test('handoff: a safe arrival (no existing source image or holes) auto-imports t
 	await gotoApp(page, '/stitch-map');
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page).toHaveURL(/\/annotate-course$/);
 
-	// A fresh Annotate Round session has no source image and no holes yet, so
+	// A fresh Annotate Course session has no source image and no holes yet, so
 	// the handoff is safe to complete on its own — no banner, no click.
 	await expect(page.getByTestId('pending-handoff')).toBeHidden();
 	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText(
@@ -561,15 +561,15 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	await createPair(page);
 	await expect(page.getByTestId('dirty-indicator')).toBeVisible();
 
-	// A source-role handoff now lands on Annotate Round — a session entirely
+	// A source-role handoff now lands on Annotate Course — a session entirely
 	// independent of Create Graphics (see src/lib/session.ts's two keyed
-	// editor-retention slots). This is a fresh Annotate Round session (no
+	// editor-retention slots). This is a fresh Annotate Course session (no
 	// source image, no holes yet), so the handoff is safe to complete on its
 	// own: no banner, no click (see the dedicated "safe arrival" test above).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page).toHaveURL(/\/annotate-course$/);
 
 	const sourceBanner = page.getByTestId('pending-handoff');
 	await expect(sourceBanner).toBeHidden();
@@ -582,11 +582,11 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	// auto-import (it would silently replace the current source out from under
 	// it) — the banner returns, with copy that says plainly importing replaces
 	// the current source, and Dismiss consumes the pending handoff without
-	// importing it (Annotate Round's own handleHandoffDismiss).
+	// importing it (Annotate Course's own handleHandoffDismiss).
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page).toHaveURL(/\/annotate-course$/);
 	await expect(sourceBanner).toBeVisible();
 	await expect(sourceBanner).toContainText('UDisc source');
 	await expect(sourceBanner).toContainText('replace the current source');
@@ -595,13 +595,13 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
 	// A third handoff reaches the same (still-unsafe) banner. Importing it
-	// never shows a discard dialog — an Annotate Round project never has
+	// never shows a discard dialog — an Annotate Course project never has
 	// correspondence pairs to lose — and Done stays enabled once the replaced
 	// source pane has loaded.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await uploadTiles(page, tileFiles());
 	await page.getByTestId('use-as-source').click();
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page).toHaveURL(/\/annotate-course$/);
 	await expect(sourceBanner).toBeVisible();
 	await page.getByTestId('handoff-import').click();
 	await expect(sourceBanner).toBeHidden();
@@ -610,7 +610,7 @@ test('handoff: independent per-stage sessions, replacement semantics, blocked se
 	);
 	await expect(page.getByTestId('annotate-done')).toBeEnabled();
 
-	// Create Graphics' retained session is untouched by the Annotate Round
+	// Create Graphics' retained session is untouched by the Annotate Course
 	// handoff: its own images, project name, pair, dirty state, and undo/redo
 	// history all survive the round trip through its own keyed slot.
 	await page.getByRole('link', { name: 'Create Graphics' }).click();

@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 
 // vi.mock is hoisted above every import, so the CV worker module is replaced
-// before the page (which imports it directly, not via a prop) ever loads it.
-// This is the only way to drive "Detect full course" without a real
+// before the workspace (which imports it directly, not via a prop) ever loads
+// it. Course detection runs automatically the moment a source image loads (an
+// $effect watching sourceImage(), not a button), so mocking this module is
+// the only way to drive it deterministically without a real
 // OffscreenCanvas/worker environment, matching this repo's stated jsdom
 // canvas limitation (see README.md).
 const { mockDetectCourseCandidates } = vi.hoisted(() => ({ mockDetectCourseCandidates: vi.fn() }));
@@ -13,12 +15,22 @@ vi.mock('$lib/autoAnnotation/basketDetection', () => ({
 	detectCourseCandidates: mockDetectCourseCandidates,
 	detectBasketCandidates: vi.fn(),
 	detectTees: vi.fn(),
-	prewarmBasketDetection: vi.fn()
+	prewarmBasketDetection: vi.fn().mockResolvedValue(undefined)
 }));
 const { mockGoto } = vi.hoisted(() => ({ mockGoto: vi.fn() }));
 vi.mock('$app/navigation', () => ({ goto: mockGoto }));
 
-import Page from '../../src/routes/annotate-round/+page.svelte';
+// jsdom has no Worker implementation, and both the prewarm and auto-detect
+// effects bail out early on `typeof Worker === 'undefined'` — real-browser
+// guards against ever touching the worker path in an environment that lacks
+// one. Detection itself is fully mocked above (no real worker involved), so a
+// minimal stub satisfying the `typeof` check is enough to let those effects
+// run and call the mock.
+if (typeof globalThis.Worker === 'undefined') {
+	(globalThis as { Worker?: unknown }).Worker = class {};
+}
+
+import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
@@ -26,6 +38,7 @@ import { consumePendingAnnotatedRound, getPendingAnnotatedRound } from '../../sr
 import { upsertCourse } from '../../src/lib/courseLibrary';
 import type { CourseLibraryEntry, CourseLibraryStore } from '../../src/lib/courseLibrary';
 import type { LabeledPoint } from '../../src/lib/courseSignature';
+import { requestAnnotationDone } from '../../src/lib/annotationNav.svelte';
 
 const NOW = () => new Date('2026-08-10T00:00:00.000Z');
 
@@ -148,7 +161,10 @@ interface Mounted {
 function mountPage(editor: ProjectEditor, decode: DecodeImageFile, courseLibraryStore: CourseLibraryStore): Mounted {
 	const host = document.createElement('div');
 	document.body.appendChild(host);
-	const component = mount(Page, { target: host, props: { editor, decode, courseLibraryStore } });
+	const component = mount(AnnotationWorkspace, {
+		target: host,
+		props: { mode: 'map', sessionKey: 'annotate-course', editor, decode, courseLibraryStore }
+	});
 	return { editor, component, host };
 }
 
@@ -217,9 +233,8 @@ describe('course recognition banner (Course Memory)', () => {
 		const { host, component } = mountPage(editor, decodeOf(2000, 2000), store);
 		await loadSourceImage(host);
 
-		const detectButton = host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]');
-		if (!detectButton) throw new Error('missing detect-course button');
-		detectButton.click();
+		// Detection runs automatically on image load (see loadSourceImage); give
+		// its async chain (detect -> recognize) another tick to settle.
 		await flush();
 
 		const banner = host.querySelector('[data-testid="course-recognized"]');
@@ -233,9 +248,9 @@ describe('course recognition banner (Course Memory)', () => {
 
 		expect(host.querySelector('[data-testid="course-recognized"]')).toBeNull();
 
-		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
-		if (!doneButton) throw new Error('missing annotate-done button');
-		doneButton.click();
+		// The "Done" control lives in the shared app header, not this component
+		// — see annotationNav.svelte.ts.
+		requestAnnotationDone();
 		await flush();
 
 		const round = getPendingAnnotatedRound();
@@ -249,7 +264,7 @@ describe('course recognition banner (Course Memory)', () => {
 		host.remove();
 	});
 
-	it('Dismiss clears the banner without importing anything', async () => {
+	it('Dismiss clears the banner without importing the library entry\'s geometry', async () => {
 		const store = fakeStore();
 		const savedBadges = syntheticBadges(10);
 		const savedBaskets = syntheticBaskets(10);
@@ -259,7 +274,19 @@ describe('course recognition banner (Course Memory)', () => {
 				projectName: 'My Home Course',
 				numberBadges: savedBadges,
 				baskets: savedBaskets,
-				holes: [{ number: 1, basket: { xPx: savedBaskets[0].xPx, yPx: savedBaskets[0].yPx }, corridorBends: [], corridorWidthPx: 60 }]
+				// A tee, specifically, so a would-be silent import is distinguishable
+				// from CV auto-detection: this file's mockDetectionResult never
+				// includes tees, so hole 1 gaining one could only mean Import ran
+				// despite being dismissed.
+				holes: [
+					{
+						number: 1,
+						tee: { xPx: savedBadges[0].xPx - 20, yPx: savedBadges[0].yPx - 20 },
+						basket: { xPx: savedBaskets[0].xPx, yPx: savedBaskets[0].yPx },
+						corridorBends: [],
+						corridorWidthPx: 60
+					}
+				]
 			},
 			{ createId: () => 'course-1', now: NOW }
 		);
@@ -271,8 +298,8 @@ describe('course recognition banner (Course Memory)', () => {
 		const { host, component } = mountPage(editor, decodeOf(2000, 2000), store);
 		await loadSourceImage(host);
 
-		const detectButton = host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]');
-		detectButton?.click();
+		// Detection runs automatically on image load (see loadSourceImage); give
+		// its async chain (detect -> recognize) another tick to settle.
 		await flush();
 		expect(host.querySelector('[data-testid="course-recognized"]')).not.toBeNull();
 
@@ -281,10 +308,16 @@ describe('course recognition banner (Course Memory)', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="course-recognized"]')).toBeNull();
 
-		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
-		doneButton?.click();
+		requestAnnotationDone();
 		await flush();
-		expect(getPendingAnnotatedRound()?.holes).toEqual([]);
+		// CV auto-detection still runs and applies its own baskets regardless of
+		// the recognition banner (a separate mechanism — see
+		// `handleDetectCourse`), so holes are not empty; what Dismiss must
+		// prevent is specifically the *library entry's* geometry landing, and a
+		// tee is the one field only Import could have supplied here.
+		const holes = getPendingAnnotatedRound()?.holes ?? [];
+		expect(holes.length).toBeGreaterThan(0);
+		expect(holes.every((hole) => hole.tee === undefined)).toBe(true);
 
 		unmount(component);
 		host.remove();
@@ -309,8 +342,8 @@ describe('course recognition banner (Course Memory)', () => {
 		const { host, component } = mountPage(editor, decodeOf(2000, 2000), store);
 		await loadSourceImage(host);
 
-		const detectButton = host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]');
-		detectButton?.click();
+		// Detection runs automatically on image load (see loadSourceImage); give
+		// its async chain (detect -> recognize) another tick to settle.
 		await flush();
 
 		expect(host.querySelector('[data-testid="course-recognized"]')).toBeNull();
@@ -363,8 +396,8 @@ describe('Course Memory: confirm-before-overwrite on Done', () => {
 		const editor = makeEditor();
 		const { host, component } = mountPage(editor, decodeOf(2000, 2000), store);
 		await loadSourceImage(host);
-
-		host.querySelector<HTMLButtonElement>('[data-testid="detect-course"]')?.click();
+		// Detection runs automatically on image load; give its async chain
+		// (detect -> recognize) another tick to settle.
 		await flush();
 
 		const importButton = host.querySelector<HTMLButtonElement>('[data-testid="course-recognized-import"]');
@@ -378,9 +411,7 @@ describe('Course Memory: confirm-before-overwrite on Done', () => {
 	it('Done after an untouched import skips the library write entirely: no dialog, no upsert', async () => {
 		const { host, component, putSpy } = await importRecognizedCourse();
 
-		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
-		if (!doneButton) throw new Error('missing annotate-done button');
-		doneButton.click();
+		requestAnnotationDone();
 		await flush();
 
 		expect(host.querySelector('[data-testid="library-update-dialog"]')).toBeNull();
@@ -400,9 +431,7 @@ describe('Course Memory: confirm-before-overwrite on Done', () => {
 		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
 		await flush();
 
-		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
-		if (!doneButton) throw new Error('missing annotate-done button');
-		doneButton.click();
+		requestAnnotationDone();
 		await flush();
 
 		const dialog = host.querySelector('[data-testid="library-update-dialog"]');
@@ -432,9 +461,7 @@ describe('Course Memory: confirm-before-overwrite on Done', () => {
 		widthInput.dispatchEvent(new Event('change', { bubbles: true }));
 		await flush();
 
-		const doneButton = host.querySelector<HTMLButtonElement>('[data-testid="annotate-done"]');
-		if (!doneButton) throw new Error('missing annotate-done button');
-		doneButton.click();
+		requestAnnotationDone();
 		await flush();
 
 		expect(host.querySelector('[data-testid="library-update-dialog"]')).not.toBeNull();

@@ -1,10 +1,11 @@
 /**
  * Shared data/flow logic for importing a pending stitched-image handoff
  * (`session.ts`'s `PendingHandoff`) into a `ProjectEditor`, factored out of
- * annotate-round and create-graphics' near-identical `handleHandoffImport`
- * handlers (the annotate-round copy used to note the duplication explicitly).
+ * the annotation routes' (`AnnotationWorkspace.svelte`, shared by Annotate
+ * Course and Map Round) and create-graphics' near-identical
+ * `handleHandoffImport` handlers.
  *
- * Both routes route the handoff through the exact same intake/replacement
+ * Every route routes the handoff through the exact same intake/replacement
  * path as a pane file upload (`intakeImageFile`), so point-discard
  * confirmation, asset manifest creation, undo/redo, and dirty state all
  * apply identically. What differs between the two call sites — which role
@@ -22,7 +23,7 @@ import type { PendingHandoff } from './session';
 export interface ImportHandoffImageOptions {
 	editor: ProjectEditor;
 	handoff: PendingHandoff;
-	/** The role to assign the imported image to (not always `handoff.targetRole` verbatim — annotate-round always imports as `source-overview`, the only role it ever shows a handoff banner for). */
+	/** The role to assign the imported image to (not always `handoff.targetRole` verbatim — Annotate Course and Map Round always import as `source-overview`, the only role either ever shows a handoff banner for). */
 	role: ImageRole;
 	decode?: DecodeImageFile;
 	confirmDiscard: (affectedPairCount: number) => boolean | Promise<boolean>;

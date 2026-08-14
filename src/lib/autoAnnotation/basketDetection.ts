@@ -436,7 +436,7 @@ export interface LocalSnapRequestOptions {
  * "nothing found": resolves to `null` exactly like a failed local pass
  * should. Callers on a latency budget (this feature's own wiring included)
  * should not await this before placing the raw click -- see
- * `annotate-round/+page.svelte`'s optimistic-placement call site.
+ * `$lib/components/AnnotationWorkspace.svelte`'s optimistic-placement call site.
  */
 export async function requestLocalSnap(
 	bytes: Uint8Array,

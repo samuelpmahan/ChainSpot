@@ -109,27 +109,30 @@
 	 * Keeps the narration on the route the visitor is actually looking at.
 	 *
 	 * The script deliberately tells visitors to advance using the product's own
-	 * controls — "Use as UDisc source" on Stitch Map, "Done" on Annotate Round —
-	 * and those call `goto` directly, knowing nothing about this rail. Without
-	 * this the cursor stays behind, showing the previous step's instructions and,
-	 * worse, a "Load the real inputs" button that would navigate the visitor
-	 * backward and re-trigger Smart Import's replace confirmation.
+	 * controls — "Use as UDisc source" on Stitch Map, "Done" on Annotate Course
+	 * or Map Round — and those call `goto` directly, knowing nothing about this
+	 * rail. Without this the cursor stays behind, showing the previous step's
+	 * instructions and, worse, a "Load the real inputs" button that would
+	 * navigate the visitor backward and re-trigger Smart Import's replace
+	 * confirmation.
 	 *
 	 * Only a pathname that no longer matches the current step moves the cursor.
-	 * Several steps share a route (Create Graphics runs the basemap/export step
-	 * both before and after the reload step; Annotate Round runs both the
-	 * Map-mode and Round-mode steps), so a match on the current step must always
-	 * win over the fallback lookup below — the fallback is only ever a guess for
-	 * when the current step's own URL stopped matching.
+	 * One route is still visited more than once (Create Graphics runs the
+	 * basemap/export step, the reload step, and the export-the-round step —
+	 * Annotate Course and Map Round split what used to be Annotate Round's two
+	 * repeated visits into their own distinct routes, one visit each), so a
+	 * match on the current step must always win over the fallback lookup below
+	 * — the fallback is only ever a guess for when the current step's own URL
+	 * stopped matching.
 	 *
 	 * That fallback prefers the *nearest step at or after the current position*
 	 * that matches the route, falling back further to the first occurrence in
 	 * the script only when none exists ahead. A plain first-match `findIndex`
-	 * would always resolve a repeated route to its earliest step — correct for
-	 * the old script, where every repeated route's steps ran contiguously, but
-	 * wrong here: navigating from the Round-mode annotate step (script position
-	 * 5) to Create Graphics via the product's own header link must land on the
-	 * export-the-round step (6), not snap back to the basemap step (3).
+	 * would always resolve a repeated route to its earliest step — correct when
+	 * a repeated route's steps run contiguously, but wrong here: navigating
+	 * from the reload step (script position 4) to Create Graphics via the
+	 * product's own header link must land on the export-the-round step (6),
+	 * not snap back to the basemap step (3).
 	 *
 	 * The effect must depend on the pathname ONLY. `moveTo` advances the cursor
 	 * before its own `goto` resolves; if cursor reads were tracked here, that

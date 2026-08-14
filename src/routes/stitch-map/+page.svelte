@@ -1206,11 +1206,11 @@
 	}
 
 	function handoffDestination(role: ImageRole): string {
-		return role === 'source-overview' ? `${base}/annotate-round` : `${base}/create-graphics`;
+		return role === 'source-overview' ? `${base}/annotate-course` : `${base}/create-graphics`;
 	}
 
 	function handoffDestinationName(role: ImageRole): string {
-		return role === 'source-overview' ? 'Annotate Round' : 'Create Graphics';
+		return role === 'source-overview' ? 'Annotate Course' : 'Create Graphics';
 	}
 
 	function handleUseAs(role: ImageRole): void {
@@ -1228,7 +1228,12 @@
 		rendering = true;
 		try {
 			const blob = await renderStitchedPng(exportTiles(), crop);
-			setPendingHandoff({ blob, fileName: stitchedFileName(exportTiles()), targetRole: role });
+			setPendingHandoff({
+				blob,
+				fileName: stitchedFileName(exportTiles()),
+				targetRole: role,
+				destination: role === 'source-overview' ? 'annotate-course' : 'create-graphics'
+			});
 			statusMessage = `Stitched image handed to ${handoffDestinationName(role)}.`;
 			await goto(handoffDestination(role));
 		} catch (error) {
@@ -2087,7 +2092,7 @@
 						</div>
 						<div class="export-card">
 							<h4>Use as UDisc source</h4>
-							<p>Carry it into Annotate Round as the UDisc reference image.</p>
+							<p>Carry it into Annotate Course as the UDisc reference image.</p>
 							<button
 								type="button"
 								class="btn small"
@@ -2095,7 +2100,7 @@
 								disabled={!canExport}
 								onclick={() => handleUseAs('source-overview')}
 							>
-								Send to Annotate Round
+								Send to Annotate Course
 							</button>
 						</div>
 						<div class="export-card">

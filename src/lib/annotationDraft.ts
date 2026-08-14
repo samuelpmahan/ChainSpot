@@ -1,5 +1,5 @@
 /**
- * ChainSpot annotate-round draft persistence.
+ * ChainSpot annotation draft persistence (Annotate Course / Map Round).
  *
  * The two-image `.chainspot.zip` project bundle (`persistence.ts`, schema v3)
  * requires exactly one `source-overview` AND exactly one `target-basemap`

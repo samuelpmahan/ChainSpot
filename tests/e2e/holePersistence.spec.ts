@@ -4,11 +4,20 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { CURRENT_SCHEMA_VERSION } from '../../src/lib/projectSchema';
 
+/**
+ * PRE-EXISTING, NOT FROM THE ANNOTATE ROUND UX SPLIT — see the matching note
+ * at the top of tests/e2e/holeAnnotation.spec.ts for the full explanation.
+ * In short: `placePoint(..., 'tee'|'basket')` no longer opens the radial menu
+ * (a sidebar-driven placing flow does, gated behind a dev toggle this file
+ * never clicks), and `switchMode` interleaves Map/Round actions within one
+ * session — impossible now that Annotate Course and Map Round are separate
+ * routes with independent editor sessions (Course Memory recognition is the
+ * real replacement path). `switchMode` is left referencing the deleted
+ * mode-toggle testids on purpose, so it fails loudly rather than silently
+ * navigating to a route that discards in-progress geometry.
+ */
 type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-/** Clicks the Map/Round segmented toggle in the toolbar. */
-// The toggle sits above the fold; clicking it scrolls the annotation frame
-// away, so scroll back to keep previously-measured frame coordinates valid.
 async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
 	await page.getByTestId(`annotation-mode-${mode}`).click();
 	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
@@ -136,11 +145,11 @@ async function createPair(
 /**
  * Annotates one hole (tee, basket, one shot, one bend, custom width) on a
  * freshly uploaded source image and stops short of Done, so callers can
- * exercise annotate-round's own Save or a cross-navigation round trip
+ * exercise Annotate Course's own Save or a cross-navigation round trip
  * without leaving the page.
  */
 async function annotateOneHoleDraft(page: Page): Promise<void> {
-	await page.goto('/annotate-round');
+	await page.goto('/annotate-course');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
 		name: 'course.png',
@@ -288,7 +297,7 @@ test('a pre-hole v1 bundle still opens, migrating forward to an empty hole list'
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-hole-count', '0');
 });
 
-test('annotate-round Save works on the first click, without requiring Done first, and the draft reopens with the hole intact', async ({
+test('annotate-course Save works on the first click, without requiring Done first, and the draft reopens with the hole intact', async ({
 	page
 }) => {
 	await annotateOneHoleDraft(page);
@@ -305,9 +314,10 @@ test('annotate-round Save works on the first click, without requiring Done first
 	await expect(page.getByTestId('save-error')).toHaveCount(0);
 	await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);
 
-	// Annotate Round has no target-basemap image, so the draft is its own
-	// single-image format (`annotation-round.json`) rather than the two-image
-	// `.chainspot.zip` project schema Create Graphics writes/reads.
+	// Annotate Course has no target-basemap image, so the draft is its own
+	// single-image format (`annotation-round.json` — the on-disk format name
+	// predates and is independent of the route split) rather than the
+	// two-image `.chainspot.zip` project schema Create Graphics writes/reads.
 	const entries = unzipSync(new Uint8Array(zipBuffer));
 	const manifest = JSON.parse(strFromU8(entries['annotation-round.json']));
 	expect(manifest.schemaVersion).toBe(1);
@@ -319,31 +329,31 @@ test('annotate-round Save works on the first click, without requiring Done first
 	expect(manifest.holes[0].corridorWidthPx).toBe(90);
 
 	// A full reload clears every in-memory session slot — the exact condition
-	// under which annotate-round work used to be unrecoverable, since it had
-	// no save at all. Reopening the draft directly on Annotate Round (never
+	// under which annotation work used to be unrecoverable, since it had
+	// no save at all. Reopening the draft directly on Annotate Course (never
 	// having clicked Done) recovers the hole exactly.
-	await page.goto('/annotate-round');
+	await page.goto('/annotate-course');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '0');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '0');
 	await page.getByTestId('open-draft-input').setInputFiles({
 		name: 'draft.chainspot-round.zip',
 		mimeType: 'application/zip',
 		buffer: zipBuffer
 	});
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '1');
 	await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);
 });
 
-test('hand-annotated holes survive navigating away from and back to Annotate Round without saving', async ({
+test('hand-annotated holes survive navigating away from and back to Annotate Course without saving', async ({
 	page
 }) => {
 	await annotateOneHoleDraft(page);
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '1');
 
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
-	await page.getByRole('link', { name: 'Annotate Round' }).click();
+	await page.getByRole('link', { name: 'Annotate Course' }).click();
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '1');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '1');
 	await expect(page.getByTestId('hole-select-1')).toHaveAttribute('class', /populated/);
 });

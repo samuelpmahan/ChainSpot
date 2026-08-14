@@ -11,9 +11,9 @@ import type { Page } from '@playwright/test';
  * worse off than one who never started it.
  *
  * The script now tells the whole product story in six steps: build the map
- * once (stitch, annotate in Map mode), put one course on air (basemap +
+ * once (stitch, annotate on Annotate Course), put one course on air (basemap +
  * export), reload the browser for real, then annotate a *played round* of the
- * same course (Round mode: throws + walking path) purely from what Course
+ * same course (Map Round: throws + walking path) purely from what Course
  * Memory remembered, and export again. This file does not attempt to drive
  * the reload step itself — a real `window.location.assign` mid-test is
  * exactly the kind of thing worth a dedicated, deliberately isolated case
@@ -81,15 +81,16 @@ test('the round-annotation step imports its sample source automatically and can 
 	test.setTimeout(90000);
 	await gotoDemo(page);
 
-	// Start at the Round-mode annotate step (script position 5) so this case
+	// Start at the Map Round annotate step (script position 5) so this case
 	// exercises narration and the handoff import without paying for the
-	// four-screenshot stitch analysis, the Map-mode annotate pass, or a real
+	// four-screenshot stitch analysis, the Annotate Course pass, or a real
 	// page reload. This is the step demo arming still supplies a fallback
-	// asset for — the Map-mode step relies entirely on the product's own "Use
-	// as UDisc source" handoff from step 1 and has nothing to arm on its own.
-	await page.getByTestId('demo-start-step-annotate-round').click();
+	// asset for — the Annotate Course step relies entirely on the product's
+	// own "Use as UDisc source" handoff from step 1 and has nothing to arm on
+	// its own.
+	await page.getByTestId('demo-start-step-map-round').click();
 
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await expect(page).toHaveURL(/\/map-round$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
 	// This is a fresh visit — no source image, no annotations yet — so the
@@ -97,7 +98,7 @@ test('the round-annotation step imports its sample source automatically and can 
 	// the product's ordinary handoff path (same as a real visitor's stitched
 	// export would) with no banner and no click required.
 	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true', {
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true', {
 		timeout: 30000
 	});
 
@@ -117,26 +118,25 @@ test('the round-annotation step imports its sample source automatically and can 
  * Both were reachable on the walkthrough's own recommended path, and both are
  * invisible in unit tests: one depends on SvelteKit treating `goto` to the
  * current URL as a no-op, the other on the product's controls navigating
- * without the rail's knowledge. Anchored on the Round-mode annotate step (the
- * later of the two Annotate Round visits) specifically because Create
- * Graphics is now visited both before and after the reload step: following
- * product navigation here must land forward on the export-the-round step, not
- * snap back to the earlier basemap step just because it happens to share a
- * route and comes first in the script array.
+ * without the rail's knowledge. Anchored on the Map Round annotate step
+ * specifically because Create Graphics is now visited both before and after
+ * the reload step: following product navigation here must land forward on the
+ * export-the-round step, not snap back to the earlier basemap step just
+ * because it happens to share a route and comes first in the script array.
  */
 test('the rail stays usable when the visitor is already on the step route, and follows product navigation to the correct occurrence of a repeated route', async ({
 	page
 }) => {
 	test.setTimeout(60000);
 	await gotoDemo(page);
-	await page.getByTestId('demo-start-step-annotate-round').click();
-	await expect(page).toHaveURL(/\/annotate-round$/);
+	await page.getByTestId('demo-start-step-map-round').click();
+	await expect(page).toHaveURL(/\/map-round$/);
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 5 of 6');
 
 	// This is a fresh visit, so the step's sample source imports itself
 	// automatically — no banner, nothing to dismiss.
 	await expect(page.getByTestId('pending-handoff')).toHaveCount(0);
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true', {
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true', {
 		timeout: 30000
 	});
 

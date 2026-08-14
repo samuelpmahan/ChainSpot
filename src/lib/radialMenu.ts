@@ -1,13 +1,13 @@
 /**
- * Pure geometry for the Annotate Round radial placement menu.
+ * Pure geometry for the Annotate Course / Map Round radial placement menu.
  *
  * The menu itself is rendered as real HTML `<button>` elements by
  * `$lib/components/RadialMenu.svelte` (an accessible popover, not SVG), so the
  * only thing this module owns is the math: where each action's button sits on
  * a ring around the anchor point, and how far the whole ring must be nudged
  * so every button stays fully within the viewport pane's bounds. Both
- * functions are pure and reusable independent of Svelte, DOM, or the
- * annotate-round route's domain types.
+ * functions are pure and reusable independent of Svelte, DOM, or
+ * `AnnotationWorkspace`'s domain types.
  */
 
 /** A button's center point, relative to the ring's anchor (0, 0). */

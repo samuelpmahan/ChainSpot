@@ -21,12 +21,12 @@ test('application shell loads with no console or page errors on /create-graphics
 	expect(consoleErrors).toEqual([]);
 });
 
-test('root route / redirects to /annotate-round with Annotate Round active', async ({ page }) => {
+test('root route / redirects to /annotate-course with Annotate Course active', async ({ page }) => {
 	await page.goto('/');
-	await expect(page).toHaveURL(/\/annotate-round$/);
-	await expect(page).toHaveTitle('Annotate Round | ChainSpot');
-	const annotateRoundLink = page.getByRole('link', { name: 'Annotate Round' });
-	await expect(annotateRoundLink).toHaveAttribute('aria-current', 'page');
+	await expect(page).toHaveURL(/\/annotate-course$/);
+	await expect(page).toHaveTitle('Annotate Course | ChainSpot');
+	const annotateCourseLink = page.getByRole('link', { name: 'Annotate Course' });
+	await expect(annotateCourseLink).toHaveAttribute('aria-current', 'page');
 });
 
 test('direct load of /stitch-map shows Stitch Map title, workflow, and active link', async ({ page }) => {
@@ -38,7 +38,13 @@ test('direct load of /stitch-map shows Stitch Map title, workflow, and active li
 });
 
 test('header navigation switches between routes via pointer and keyboard', async ({ page }) => {
-	await page.goto('/annotate-round');
+	await page.goto('/annotate-course');
+
+	// Pointer navigation to Map Round
+	await page.getByRole('link', { name: 'Map Round' }).click();
+	await expect(page).toHaveURL(/\/map-round$/);
+	await expect(page).toHaveTitle('Map Round | ChainSpot');
+	await expect(page.getByRole('link', { name: 'Map Round' })).toHaveAttribute('aria-current', 'page');
 
 	// Pointer navigation to Stitch Map
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
@@ -52,12 +58,12 @@ test('header navigation switches between routes via pointer and keyboard', async
 	await expect(page).toHaveTitle('Create Graphics | ChainSpot');
 	await expect(page.getByRole('link', { name: 'Create Graphics' })).toHaveAttribute('aria-current', 'page');
 
-	// Keyboard navigation back to Annotate Round
-	await page.getByRole('link', { name: 'Annotate Round' }).focus();
+	// Keyboard navigation back to Annotate Course
+	await page.getByRole('link', { name: 'Annotate Course' }).focus();
 	await page.keyboard.press('Enter');
-	await expect(page).toHaveURL(/\/annotate-round$/);
-	await expect(page).toHaveTitle('Annotate Round | ChainSpot');
-	await expect(page.getByRole('link', { name: 'Annotate Round' })).toHaveAttribute('aria-current', 'page');
+	await expect(page).toHaveURL(/\/annotate-course$/);
+	await expect(page).toHaveTitle('Annotate Course | ChainSpot');
+	await expect(page.getByRole('link', { name: 'Annotate Course' })).toHaveAttribute('aria-current', 'page');
 });
 
 test('tiny synthetic fixtures decode in Chromium with their documented dimensions', async ({

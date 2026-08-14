@@ -3,11 +3,11 @@
  *
  * The demo is a *narration layer* over the real product, never a second
  * implementation of it: every step sends a prospective customer into a real
- * route (`/stitch-map`, `/annotate-round`, `/create-graphics`) holding real
- * inputs, and the work is done by the same code a paying user runs. This
- * module owns only the two things that are genuinely demo-specific — which
- * real assets the walkthrough hands over, and what the visitor is told at
- * each stop.
+ * route (`/stitch-map`, `/annotate-course`, `/map-round`, `/create-graphics`)
+ * holding real inputs, and the work is done by the same code a paying user
+ * runs. This module owns only the two things that are genuinely demo-specific
+ * — which real assets the walkthrough hands over, and what the visitor is
+ * told at each stop.
  *
  * The script tells the product's whole story, not just half of it: build the
  * map once (steps 1–2), pull a clean basemap and export graphics from it
@@ -25,8 +25,8 @@
  *    not a filename lookup. The round-annotation input is a second, real
  *    capture of the same course, already played — the blue landing droplets
  *    and purple walking path the visitor annotates over are pixels in the
- *    image, not something the demo drew. That capture is handed to Annotate
- *    Round exactly as taken, phone chrome included; nothing crops it, and the
+ *    image, not something the demo drew. That capture is handed to Map Round
+ *    exactly as taken, phone chrome included; nothing crops it, and the
  *    narration says so rather than pretending it isn't there.
  * 2. **No mocked services.** The clean basemap is not shipped as a fixture,
  *    in either Create Graphics step. Both send the visitor through the live
@@ -62,7 +62,7 @@ export interface DemoDataset {
 	/**
 	 * A single screenshot of a *played* round of the same course — blue
 	 * landing droplets and a purple walking path already in the pixels —
-	 * handed to Annotate Round in step 5 through the same pending-handoff
+	 * handed to Map Round in step 5 through the same pending-handoff
 	 * path the stitched export uses in step 2. Unlike `captures`, this one is
 	 * not run through any crop step: it arrives with full phone chrome
 	 * (status bar, course title bar, hole/par banner, bottom nav) exactly as
@@ -74,7 +74,7 @@ export interface DemoDataset {
 }
 
 /** Which real route a step is performed on. */
-export type DemoRoute = 'stitch-map' | 'annotate-round' | 'create-graphics';
+export type DemoRoute = 'stitch-map' | 'annotate-course' | 'map-round' | 'create-graphics';
 
 /**
  * Almost every step is `'default'`: the guide's Next button either stays put
@@ -93,16 +93,17 @@ export type DemoStepKind = 'default' | 'reload';
  * What a step can load on the visitor's behalf. Arming is always an
  * accelerator, never the only path: every armed input is something the visitor
  * could equally have supplied through the route's own file picker, and the
- * natural route-to-route path (Stitch Map's "Use as UDisc source", Annotate
- * Round's "Done") is always still available.
+ * natural route-to-route path (Stitch Map's "Use as UDisc source", either
+ * annotation route's "Done") is always still available.
  *
  * - `stitch-captures` drops the four captures into Stitch Map's Smart Import,
  *   the same entry point its "Import four screenshots" control uses.
  * - `annotate-source` publishes `DEMO_DATASET.roundOverview` through the
- *   product's existing pending-handoff store, so Annotate Round shows its
- *   ordinary import banner and applies its ordinary replacement rules.
+ *   product's existing pending-handoff store (destined for `/map-round`), so
+ *   Map Round shows its ordinary import banner and applies its ordinary
+ *   replacement rules.
  * - `none` means the step's input is the visitor's own typing (course search),
- *   the artifact the previous step produced, or — for the Map-mode annotate
+ *   the artifact the previous step produced, or — for the Annotate Course
  *   step — the product's own "Use as UDisc source" handoff from step 1, which
  *   needs no demo-side arming at all.
  */
@@ -188,16 +189,16 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		arming: { kind: 'stitch-captures' }
 	},
 	{
-		id: 'annotate-map',
+		id: 'annotate-course',
 		title: 'Review the course detection one uncertain piece at a time',
-		route: 'annotate-round',
-		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees, using "Use as UDisc source" from the previous step. This is Map mode: course geometry, not any one round. Detection opens an active review with a live ready-versus-review split, not a promise that every hole is solved.',
+		route: 'annotate-course',
+		lede: 'The map you just stitched arrives through the product\'s ordinary handoff banner — the same banner a user sees, using "Use as UDisc source" from the previous step. Annotate Course is course geometry, not any one round. Detection opens an active review with a live ready-versus-review split, not a promise that every hole is solved.',
 		actions: [
 			'Watch the status strip narrate detection as it runs — reading hole numbers, finding tee pads, locating baskets, assembling the course — with each stage\'s proposals fading onto the map in that same order as it finishes.',
 			'Read the live summary chip. It reports the full detected set and separates ready holes from holes that still need review — the current demo may show a split such as "18 holes — 6 ready, 12 need review", rather than just one missed hole.',
 			'Click "Review hole N" to jump to the first unresolved hole, then work one tee or basket at a time: inspect a candidate marker and click it to assign it to the active hole, confirming only when replacing or moving existing geometry.',
 			'Accept the ready holes when you want to commit the confident subset; the remaining review holes stay visible and editable instead of being silently guessed.',
-			'In Map mode, add a corridor bend on a hole to see the playing corridor update live — Map mode only ever places tee, basket, and bend, never a throw.',
+			'Add a corridor bend on a hole to see the playing corridor update live — Annotate Course only ever places tee, basket, and bend, never a throw; that is Map Round\'s job.',
 			'Press Done to save the course to Course Memory and continue to Create Graphics.'
 		],
 		mechanism:
@@ -235,14 +236,14 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		arming: { kind: 'none' }
 	},
 	{
-		id: 'annotate-round',
+		id: 'map-round',
 		title: 'Annotate a round actually played on that course',
-		route: 'annotate-round',
-		lede: `A second, real capture of ${DASHS_TRACK.courseName} — this one played, with UDisc's own blue landing droplets and purple walking path already in the screenshot. Unlike the map tiles in step 1, this capture is handed over exactly as taken, full phone chrome included — the status bar, the course title bar, the hole/par banner, the bottom nav. This is Round mode: one round's throws and path, not course geometry.`,
+		route: 'map-round',
+		lede: `A second, real capture of ${DASHS_TRACK.courseName} — this one played, with UDisc's own blue landing droplets and purple walking path already in the screenshot. Unlike the map tiles in step 1, this capture is handed over exactly as taken, full phone chrome included — the status bar, the course title bar, the hole/par banner, the bottom nav. This is Map Round: one round's throws and path, not course geometry.`,
 		actions: [
 			'Import the incoming image from the handoff banner. Nothing crops it first, so the phone chrome around the map is part of what you are looking at — that is expected for this capture, not a defect.',
 			'Watch for "Recognized course" — Course Memory found this course from the map you built earlier — and choose "Import saved holes" rather than re-annotating tee pads and baskets from scratch.',
-			'The page switches to Round mode automatically. Click each blue landing droplet already in the screenshot to place that throw as a shot.',
+			'With the course geometry in place, click each blue landing droplet already in the screenshot to place that throw as a shot.',
 			'Select the walk tool and trace the purple walking path already drawn in the screenshot, vertex by vertex — the walking path needs no hole selected.',
 			'Press Done to hand the round, throws and all, to Create Graphics.'
 		],
@@ -284,8 +285,10 @@ export function demoRouteLabel(route: DemoRoute): string {
 	switch (route) {
 		case 'stitch-map':
 			return 'Stitch Map';
-		case 'annotate-round':
-			return 'Annotate Round';
+		case 'annotate-course':
+			return 'Annotate Course';
+		case 'map-round':
+			return 'Map Round';
 		case 'create-graphics':
 			return 'Create Graphics';
 	}

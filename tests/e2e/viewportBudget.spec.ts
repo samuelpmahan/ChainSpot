@@ -13,12 +13,14 @@ import type { Page } from '@playwright/test';
  * measured in the audit doc and its logic is pinned by
  * `tests/unit/annotateRoundCvUx.test.ts`.
  *
- * The annotate-round and `/demo` cases were re-measured against the Map/Round
- * mode split and the two-act "Dash's Track" walkthrough (see the re-audit
- * section of `docs/13-inch-pass.md`); every number quoted in a comment below is
- * from that run, not from the original pass. Two rules for editing this file:
- * a threshold only ever comes from the budget in that doc, and a case only
- * loses its `test.fixme` when the product actually meets the threshold.
+ * The annotate-course/map-round and `/demo` cases were re-measured against the
+ * Map/Round mode split (later promoted to two separate routes,
+ * `/annotate-course` and `/map-round`) and the two-act "Dash's Track"
+ * walkthrough (see the re-audit section of `docs/13-inch-pass.md`); every
+ * number quoted in a comment below is from that run, not from the original
+ * pass. Two rules for editing this file: a threshold only ever comes from the
+ * budget in that doc, and a case only loses its `test.fixme` when the product
+ * actually meets the threshold.
  */
 
 // 13″ MacBook logical resolution minus typical browser chrome.
@@ -67,21 +69,21 @@ async function boxOf(page: Page, selector: string): Promise<ElementBox> {
 }
 
 /**
- * Annotate Round's two activities are one route and one pane: `Map` places
- * course geometry (tee/basket/bend), `Round` places a played round's shots and
- * walk path. The canvas budget applies to both, so the sizing cases run in
- * both — the mode toggle is a route-level control, not a per-pane one.
+ * Annotate Course (course geometry: tee/basket/bend) and Map Round (a played
+ * round's shots and walk path) share one implementation
+ * (`$lib/components/AnnotationWorkspace.svelte`) and its canvas budget, but
+ * are two real routes now, not a toggle over one route — the sizing cases run
+ * against both routes directly.
  */
 type AnnotationMode = 'map' | 'round';
-
-async function selectAnnotationMode(page: Page, mode: AnnotationMode): Promise<void> {
-	await page.getByTestId(`annotation-mode-${mode}`).click();
-	await expect(page.getByTestId(`annotation-mode-${mode}`)).toHaveAttribute('aria-pressed', 'true');
-}
+const ANNOTATION_ROUTE: Record<AnnotationMode, string> = {
+	map: '/annotate-course',
+	round: '/map-round'
+};
 
 async function loadAnnotateSource(page: Page): Promise<void> {
 	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true');
 }
 
 /**
@@ -89,10 +91,18 @@ async function loadAnnotateSource(page: Page): Promise<void> {
  * the tools column carries its "Edit hole" section. It matters for geometry —
  * the canvas cell stretches to the tools column, which is what pushes the pane
  * past one screen height (see the re-audit's C-series measurements).
+ *
+ * There is no "add hole" button in either route's UI — the 'n'/'a' keyboard
+ * shortcut is the only way to create one, and it works identically on both
+ * (see `AnnotationWorkspace.svelte`'s `handleAnnotationKeyDown`). "Selected"
+ * is asserted via the shared "Edit hole" tools-panel heading rather than
+ * `hole-select-1`'s `aria-current`, since hole selection UI itself differs
+ * between the two routes (Annotate Course: sidebar hole grid; Map Round: the
+ * flat 1–18 hole bar).
  */
 async function selectFirstHole(page: Page): Promise<void> {
-	await page.getByTestId('hole-add').click();
-	await expect(page.getByTestId('hole-select-1')).toHaveAttribute('aria-current', 'true');
+	await page.keyboard.press('n');
+	await expect(page.getByRole('heading', { name: 'Edit hole 1' })).toBeVisible();
 }
 
 /** The action ids a radial menu is currently offering, in DOM order. */
@@ -161,7 +171,14 @@ async function horizontalOverflowPx(page: Page): Promise<number> {
 // Budget 1 — zero horizontal page scroll, on any route, in any state.
 // ---------------------------------------------------------------------------
 
-const ROUTES = ['/stitch-map', '/annotate-round', '/create-graphics', '/demo', '/ribbon-editor'];
+const ROUTES = [
+	'/stitch-map',
+	'/annotate-course',
+	'/map-round',
+	'/create-graphics',
+	'/demo',
+	'/ribbon-editor'
+];
 
 for (const route of ROUTES) {
 	test(`no horizontal overflow on ${route} (empty state)`, async ({ page }) => {
@@ -170,21 +187,23 @@ for (const route of ROUTES) {
 	});
 }
 
-test('no horizontal overflow on annotate-round with a source loaded, in both rail states', async ({
-	page
-}) => {
-	await gotoApp(page, '/annotate-round');
-	await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-source-loaded', 'true');
-	expect(await horizontalOverflowPx(page)).toBe(0);
+for (const mode of ['map', 'round'] as const) {
+	test(`no horizontal overflow on ${ANNOTATION_ROUTE[mode]} with a source loaded, in both rail states`, async ({
+		page
+	}) => {
+		await gotoApp(page, ANNOTATION_ROUTE[mode]);
+		await page.getByTestId('pane-input-source-overview').setInputFiles(fixturePath('tiny.png'));
+		await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true');
+		expect(await horizontalOverflowPx(page)).toBe(0);
 
-	await page.getByTestId('diagnostics-rail-toggle').click();
-	await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute(
-		'aria-expanded',
-		'false'
-	);
-	expect(await horizontalOverflowPx(page)).toBe(0);
-});
+		await page.getByTestId('diagnostics-rail-toggle').click();
+		await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute(
+			'aria-expanded',
+			'false'
+		);
+		expect(await horizontalOverflowPx(page)).toBe(0);
+	});
+}
 
 test('no horizontal overflow on create-graphics with both images and a complete pair', async ({
 	page
@@ -206,17 +225,16 @@ test('no horizontal overflow on create-graphics with both images and a complete 
 // difference to either number). Both clear the 55%/65% bars. This runs in both
 // modes so the mode split cannot silently regress one of them.
 for (const mode of ['map', 'round'] as const) {
-	test(`annotate-round (${mode} mode): canvas is ≥55% of viewport width with the diagnostics rail collapsed`, async ({
+	test(`${ANNOTATION_ROUTE[mode]}: canvas is ≥55% of viewport width with the diagnostics rail collapsed`, async ({
 		page
 	}) => {
 		// The stored preference is the supported way to open in the collapsed state
-		// (see tests/e2e/annotateRound.spec.ts for the toggle/persistence contract).
+		// (see tests/e2e/annotateCourse.spec.ts for the toggle/persistence contract).
 		await page.addInitScript(() =>
 			localStorage.setItem('chainspot.diagnosticsRail', 'collapsed')
 		);
-		await gotoApp(page, '/annotate-round');
+		await gotoApp(page, ANNOTATION_ROUTE[mode]);
 		await loadAnnotateSource(page);
-		await selectAnnotationMode(page, mode);
 		// Measure the state a user annotates in, not the empty one.
 		await selectFirstHole(page);
 
@@ -229,27 +247,25 @@ for (const mode of ['map', 'round'] as const) {
 	});
 }
 
-// FAILING today, identically in both modes: re-measured 638px = 49.8% with the
-// rail expanded (still the default). The chrome is mode-independent — 288px
+// FAILING today, identically on both routes: re-measured 638px = 49.8% with the
+// rail expanded (still the default). The chrome is route-independent — 288px
 // tools + 320px rail — so this is one case, not two.
 // Root cause and minimal fix: docs/13-inch-pass.md F1 (ImageEditorPane.svelte:346).
-test.fixme(
-	'annotate-round: canvas is ≥55% of viewport width with the diagnostics rail expanded',
-	async ({ page }) => {
-		await gotoApp(page, '/annotate-round');
-		await loadAnnotateSource(page);
-		await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute(
-			'aria-expanded',
-			'true'
-		);
-		const mapCanvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
-		expect(mapCanvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
-
-		await selectAnnotationMode(page, 'round');
-		const roundCanvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
-		expect(roundCanvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
-	}
-);
+for (const mode of ['map', 'round'] as const) {
+	test.fixme(
+		`${ANNOTATION_ROUTE[mode]}: canvas is ≥55% of viewport width with the diagnostics rail expanded`,
+		async ({ page }) => {
+			await gotoApp(page, ANNOTATION_ROUTE[mode]);
+			await loadAnnotateSource(page);
+			await expect(page.getByTestId('diagnostics-rail-toggle')).toHaveAttribute(
+				'aria-expanded',
+				'true'
+			);
+			const canvas = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+			expect(canvas.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
+		}
+	);
+}
 
 test('create-graphics: combined pane area is ≥55% of viewport width', async ({ page }) => {
 	await gotoApp(page, '/create-graphics');
@@ -297,10 +313,10 @@ test(
 // 640px tall and scrolling it into view leaves the bottom-right zoom cluster at
 // y = 666–702, inside the 715px fold. The working state (a hole selected)
 // does not — that is the fixme immediately below, not a weakening of this one.
-test('annotate-round: on-canvas zoom controls are ≥36px and visible while the canvas is in view', async ({
+test('annotate-course: on-canvas zoom controls are ≥36px and visible while the canvas is in view', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/annotate-course');
 	await loadAnnotateSource(page);
 	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
 
@@ -320,9 +336,9 @@ test('annotate-round: on-canvas zoom controls are ≥36px and visible while the 
 // state is the trap closing completely. Root cause and minimal fix:
 // docs/13-inch-pass.md Ticket C item 2 (cap the canvas cell height).
 test.fixme(
-	'annotate-round: on-canvas zoom controls stay in view with a hole selected',
+	'annotate-course: on-canvas zoom controls stay in view with a hole selected',
 	async ({ page }) => {
-		await gotoApp(page, '/annotate-round');
+		await gotoApp(page, '/annotate-course');
 		await loadAnnotateSource(page);
 		await selectFirstHole(page);
 		await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
@@ -336,29 +352,27 @@ test.fixme(
 	}
 );
 
-// FAILING today, and worse than at the original pass: the Map/Round toggle and
-// the taller canvas cell pushed the pane further down the page, so with the
-// canvas scrolled into view (scrollY 457) the hole bar now ends at y = −82, the
-// compact ‹/current/› row at y = −203, the mode toggle at y = −274 and Done at
-// y = −346.8. Switching hole *or* activity is a ~330–460px scroll round trip,
-// in both modes. The mode toggle is included here because the split made it a
-// mid-task control: Map and Round are two halves of one annotation session.
+// FAILING today: the taller canvas cell pushes the pane further down the page,
+// so with the canvas scrolled into view the hole bar and Done both scroll out
+// of reach. Switching hole is a large scroll round trip on both routes.
 // Root cause and minimal fix: docs/13-inch-pass.md F2 (sticky compact hole-bar
-// row, annotate-round/+page.svelte:1870/2811).
+// row). The route split retired the Map/Round toggle this case used to also
+// check (mode is now which route you're on, nothing left to keep in reach
+// mid-task); only hole navigation is asserted here now.
 for (const mode of ['map', 'round'] as const) {
 	test.fixme(
-		`annotate-round (${mode} mode): hole navigation and the mode toggle stay reachable while the canvas is in view`,
+		`${ANNOTATION_ROUTE[mode]}: hole navigation stays reachable while the canvas is in view`,
 		async ({ page }) => {
-			await gotoApp(page, '/annotate-round');
+			await gotoApp(page, ANNOTATION_ROUTE[mode]);
 			await loadAnnotateSource(page);
-			await selectAnnotationMode(page, mode);
 			await selectFirstHole(page);
 			await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
 
-			const compactBar = await boxOf(page, '[data-testid="hole-bar-current-label"]');
-			expect(compactBar.insideViewport, 'compact hole row').toBe(true);
-			const modeToggle = await boxOf(page, '[data-testid="annotation-mode-toggle"]');
-			expect(modeToggle.insideViewport, 'Map/Round toggle').toBe(true);
+			const holeNav = await boxOf(
+				page,
+				mode === 'round' ? '[data-testid="hole-bar"]' : '[data-testid="hole-sidebar"]'
+			);
+			expect(holeNav.insideViewport, 'hole navigation').toBe(true);
 		}
 	);
 }
@@ -371,14 +385,14 @@ for (const mode of ['map', 'round'] as const) {
 // bare locator click in a test would deceptively pass — this asserts geometry
 // instead. Its 30.4 × 30.4 box is also under the 36px target budget.
 // Root cause and minimal fix: docs/13-inch-pass.md F3
-// (annotate-round/+page.svelte:3433).
+// ($lib/components/AnnotationWorkspace.svelte).
 test.fixme(
-	'annotate-round: the collapsed diagnostics rail keeps its re-expand toggle inside the viewport',
+	'annotate-course: the collapsed diagnostics rail keeps its re-expand toggle inside the viewport',
 	async ({ page }) => {
 		await page.addInitScript(() =>
 			localStorage.setItem('chainspot.diagnosticsRail', 'collapsed')
 		);
-		await gotoApp(page, '/annotate-round');
+		await gotoApp(page, '/annotate-course');
 		await loadAnnotateSource(page);
 		const toggle = await boxOf(page, '[data-testid="diagnostics-rail-toggle"]');
 		expect(toggle.right).toBeLessThanOrEqual(VIEWPORT.width);
@@ -414,32 +428,47 @@ test('create-graphics: correspondence placement controls and both panes share on
 // Budget 4 — target sizes and dialog containment.
 // ---------------------------------------------------------------------------
 
-// Map mode offers exactly tee/basket/bend on an empty hole; the action set is
-// asserted as a whole so a wedge appearing in the wrong mode is a failure here
-// rather than a silently unmeasured target. All wedges re-measured 44 × 44.
-test('annotate-round: the map radial menu keeps geometry actions fully on-screen', async ({
+// The radial menu itself is gated on the "Enable radial menu" dev toggle
+// regardless of route (`AnnotationWorkspace.svelte`'s `openRadialMenu` is the
+// single check) — off by default.
+async function enableRadialMenu(page: Page): Promise<void> {
+	await page.getByTestId('radial-menu-toggle').click();
+}
+
+// Annotate Course's empty-space menu is bend-only: tee/basket creation no
+// longer opens the radial menu at all — it goes through the sidebar-driven
+// placing flow (see tests/unit/annotationRadialMenu.test.ts). So hole 1 needs
+// its tee and basket placed first (two placing-flow clicks at opposite
+// corners) before a further empty click reaches the bend-only menu. All
+// wedges re-measured 44 × 44.
+test('annotate-course: the geometry radial menu (bend) keeps its action fully on-screen', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/annotate-course');
 	await loadAnnotateSource(page);
 	await selectFirstHole(page);
+	await enableRadialMenu(page);
+
+	const scene = await boxOf(page, '[data-testid="pane-scene-source-overview"]');
+	await page.mouse.click(scene.x + 20, Math.max(scene.y, 0) + 20); // tee (placing flow)
+	await page.mouse.click(scene.x + scene.width - 20, Math.max(scene.y, 0) + 20); // basket (placing flow)
 
 	await openRadialMenuAtVisibleScene(page);
 
-	await expect(page.getByTestId('radial-action-tee')).toBeVisible();
-	expect(await radialActionIds(page)).toEqual(['tee', 'basket', 'bend']);
-	await expectRadialActionsInsideViewport(page, ['tee', 'basket', 'bend']);
+	await expect(page.getByTestId('radial-action-bend')).toBeVisible();
+	expect(await radialActionIds(page)).toEqual(['bend']);
+	await expectRadialActionsInsideViewport(page, ['bend']);
 	await page.keyboard.press('Escape');
 });
 
-// Round mode offers shot (needs an active hole) and walk (never does).
-test('annotate-round: the round radial menu keeps throw actions fully on-screen', async ({
+// Map Round offers shot (needs an active hole) and walk (never does).
+test('map-round: the round radial menu keeps throw actions fully on-screen', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/map-round');
 	await loadAnnotateSource(page);
 	await selectFirstHole(page);
-	await selectAnnotationMode(page, 'round');
+	await enableRadialMenu(page);
 
 	await openRadialMenuAtVisibleScene(page);
 
@@ -450,13 +479,13 @@ test('annotate-round: the round radial menu keeps throw actions fully on-screen'
 });
 
 // The walk path deliberately needs no hole selected, so it is reachable in the
-// one Round-mode state where nothing else is: re-measured 44 × 44, on-screen.
-test('annotate-round: the round radial menu offers the walk path with no hole selected', async ({
+// one Map Round state where nothing else is: re-measured 44 × 44, on-screen.
+test('map-round: the round radial menu offers the walk path with no hole selected', async ({
 	page
 }) => {
-	await gotoApp(page, '/annotate-round');
+	await gotoApp(page, '/map-round');
 	await loadAnnotateSource(page);
-	await selectAnnotationMode(page, 'round');
+	await enableRadialMenu(page);
 
 	await openRadialMenuAtVisibleScene(page);
 
@@ -472,11 +501,20 @@ test('annotate-round: the round radial menu offers the walk path with no hole se
 // away (placement menu), i.e. an effective 24 × 24px target for every tee,
 // basket, bend, shot and walk vertex, against a 36px budget. The drawn marker
 // is 14 × 14. Root cause and minimal fix: docs/13-inch-pass.md F4
-// (annotate-round/+page.svelte:125).
-test.fixme('annotate-round: an existing marker is a ≥36px pointer target', async ({ page }) => {
-	await gotoApp(page, '/annotate-round');
+// ($lib/components/AnnotationWorkspace.svelte).
+//
+// NOTE: written against an older placing flow where an empty click opened a
+// radial menu with a `tee` wedge. Since the sidebar-driven placing flow
+// (annotateCourseSidebar.spec equivalent), an empty click places a hole's
+// missing tee/basket directly, and re-clicking an existing tee/basket marker
+// opens the marker *chip* (`marker-chip`), not the radial delete menu — only
+// bend/shot/walk markers still use the radial menu. This body needs
+// re-deriving against that flow before its `.fixme` is lifted.
+test.fixme('annotate-course: an existing marker is a ≥36px pointer target', async ({ page }) => {
+	await gotoApp(page, '/annotate-course');
 	await loadAnnotateSource(page);
 	await selectFirstHole(page);
+	await enableRadialMenu(page);
 	await openRadialMenuAtVisibleScene(page);
 	await page.getByTestId('radial-action-tee').click();
 	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
@@ -528,10 +566,10 @@ async function startDemoAt(page: Page, stepId: string, route: RegExp): Promise<v
 test('demo: the guide rail is fully inside the viewport and leaves no horizontal overflow', async ({
 	page
 }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	const rail = await boxOf(page, '[data-testid="demo-guide"]');
 	// Re-measured 386 × 514 at (878, 185) — docs/13-inch-pass.md re-audit D1.
-	expect(rail.insideViewport, 'rail on annotate-round').toBe(true);
+	expect(rail.insideViewport, 'rail on annotate-course').toBe(true);
 	expect(await horizontalOverflowPx(page)).toBe(0);
 
 	await page.getByTestId('demo-next').click();
@@ -542,13 +580,14 @@ test('demo: the guide rail is fully inside the viewport and leaves no horizontal
 });
 
 // What is genuinely good and worth protecting: the rail is docked clear of
-// Annotate Round's page-level controls, in both modes (all re-measured at zero
-// overlap). The controls it *does* cover are the fixme'd cases below.
-test('demo: the guide rail clears Annotate Round’s page-level controls', async ({ page }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+// Annotate Course's page-level controls (all re-measured at zero overlap).
+// The controls it *does* cover are the fixme'd cases below. The Map/Round
+// mode toggle this used to also check no longer exists post-route-split.
+test('demo: the guide rail clears Annotate Course’s page-level controls', async ({ page }) => {
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	await loadAnnotateSource(page);
 	const rail = await boxOf(page, '[data-testid="demo-guide"]');
-	for (const control of ['annotate-done', 'annotation-mode-toggle', 'hole-add']) {
+	for (const control of ['annotate-done']) {
 		const box = await boxOf(page, `[data-testid="${control}"]`);
 		expect(overlapArea(rail, box), `rail overlaps ${control}`).toBe(0);
 	}
@@ -561,7 +600,7 @@ test('demo: the guide rail clears Annotate Round’s page-level controls', async
 // laptop gets nothing. Root cause and minimal fix: docs/13-inch-pass.md
 // Ticket E item 1 (DemoGuide.svelte:371-425).
 test.fixme('demo: the guide rail’s own controls are ≥36px', async ({ page }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	for (const control of DEMO_RAIL_CONTROLS) {
 		const box = await boxOf(page, `[data-testid="${control}"]`);
 		expect(box.width, `${control} width`).toBeGreaterThanOrEqual(36);
@@ -577,7 +616,7 @@ test.fixme('demo: the guide rail’s own controls are ≥36px', async ({ page })
 // close this. Keyboard `0`/`+`/`-` still work. Root cause and minimal fix:
 // docs/13-inch-pass.md Ticket D (DemoGuide.svelte:244-259).
 test.fixme('demo: the guide rail does not cover the on-canvas zoom cluster', async ({ page }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	await loadAnnotateSource(page);
 	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
 	const rail = await boxOf(page, '[data-testid="demo-guide"]');
@@ -594,15 +633,22 @@ test.fixme('demo: the guide rail does not cover the on-canvas zoom cluster', asy
 // Those are the controls the step-2 script tells a visitor to use to reach the
 // hole flagged for review. Root cause and minimal fix: docs/13-inch-pass.md
 // Ticket E item 2.
-test.fixme('demo: the guide rail does not cover the hole bar’s own controls', async ({ page }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+//
+// NOTE: written against the old flat hole-bar, which Annotate Course no
+// longer has (hole selection moved to the sidebar grid — `sidebar-hole-N`,
+// see annotateCourseSidebar tests); the "compact ‹/current/› row" this
+// referenced is gone too. Rebased onto the sidebar grid's own hole boxes, but
+// unverified — this needs a real re-measure against the sidebar layout before
+// its `.fixme` is lifted.
+test.fixme('demo: the guide rail does not cover the hole sidebar’s own controls', async ({ page }) => {
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	await loadAnnotateSource(page);
-	for (let index = 0; index < 18; index += 1) await page.getByTestId('hole-add').click();
-	await expect(page.getByTestId('annotate-round')).toHaveAttribute('data-hole-count', '18');
+	for (let index = 0; index < 18; index += 1) await page.keyboard.press('n');
+	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-hole-count', '18');
 
 	const rail = await boxOf(page, '[data-testid="demo-guide"]');
 	for (const number of [15, 16, 17, 18]) {
-		const tab = await boxOf(page, `[data-testid="hole-select-${number}"]`);
+		const tab = await boxOf(page, `[data-testid="sidebar-hole-${number}"]`);
 		expect(overlapArea(rail, tab), `rail overlaps hole ${number}`).toBe(0);
 	}
 	const nextHole = await boxOf(page, '.hole-bar-compact-nav:last-of-type');
@@ -635,7 +681,7 @@ test.fixme('demo: the guide rail does not cover the Create Graphics target pane'
 test.fixme('demo: the cover page’s own controls stay reachable while a tour is running', async ({
 	page
 }) => {
-	await startDemoAt(page, 'annotate-map', /\/annotate-round$/);
+	await startDemoAt(page, 'annotate-course', /\/annotate-course$/);
 	await gotoApp(page, '/demo');
 	await expect(page.getByTestId('demo-guide')).toBeVisible();
 	const card = page.getByTestId('demo-start-step-export-round');

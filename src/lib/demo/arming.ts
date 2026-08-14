@@ -9,8 +9,8 @@
  *
  * Arming is idempotent-ish by design rather than by accident. Stitch Map's
  * inbox is a one-shot slot, so a second arm before navigation simply replaces
- * an unclaimed set of the same four files. The Annotate Round handoff refuses
- * to overwrite a pending handoff that is already waiting, because that handoff
+ * an unclaimed set of the same four files. The Map Round handoff refuses to
+ * overwrite a pending handoff that is already waiting, because that handoff
  * is usually the visitor's own stitched export from step 1 — silently replacing
  * their work with a sample is the one thing this module must never do.
  *
@@ -62,7 +62,8 @@ export async function armDemoStep(step: DemoStep, fetchImpl: FetchLike = fetch):
 				setPendingHandoff({
 					blob: file,
 					fileName: file.name,
-					targetRole: 'source-overview'
+					targetRole: 'source-overview',
+					destination: 'map-round'
 				});
 				return {
 					ok: true,

@@ -2,11 +2,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
-import Page from '../../src/routes/annotate-round/+page.svelte';
+import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
-import { requestAnnotationMode } from '../../src/lib/annotationNav.svelte';
 
 const NOW = () => new Date('2026-08-10T00:00:00.000Z');
 
@@ -25,10 +24,18 @@ interface Mounted {
 	host: HTMLDivElement;
 }
 
-function mountPage(editor: ProjectEditor, decode: DecodeImageFile): Mounted {
+function mountPage(
+	editor: ProjectEditor,
+	decode: DecodeImageFile,
+	mode: 'map' | 'round' = 'map'
+): Mounted {
 	const host = document.createElement('div');
 	document.body.appendChild(host);
-	const component = mount(Page, { target: host, props: { editor, decode } });
+	const sessionKey = mode === 'map' ? 'annotate-course' : 'map-round';
+	const component = mount(AnnotationWorkspace, {
+		target: host,
+		props: { mode, sessionKey, editor, decode }
+	});
 	return { editor, component, host };
 }
 
@@ -170,7 +177,7 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	await flush();
 }
 
-describe('Annotate Round radial menu', () => {
+describe('Annotation radial menu (Annotate Course / Map Round)', () => {
 	// Tee/basket creation no longer opens the radial menu at all — the
 	// redesigned sidebar's placing flow (see annotateRoundSidebar.test.ts)
 	// intercepts an empty-space Map-mode click and places the missing piece
@@ -254,15 +261,29 @@ describe('Annotate Round radial menu', () => {
 		host.remove();
 	});
 
-	it('in Round mode, opens on an empty-space click with a shot action (hole active) and a walk action, and places a shot', async () => {
+	it('on Map Round, opens on an empty-space click with a shot action (hole active) and a walk action, and places a shot', async () => {
 		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		await setUpHoleWithImage(host, editor);
-		// The mode toggle lives in +routes/+layout.svelte, not the page this test
-		// mounts in isolation, so it's triggered via the same shared-store call
-		// the layout's own button makes (registerAnnotationNav/requestAnnotationMode
-		// in annotationNav.svelte.ts) rather than a nonexistent in-page button.
-		requestAnnotationMode('round');
+		// Mode is a fixed prop set once by the mounting route (Annotate Course vs.
+		// Map Round), not a runtime toggle — this instance mounts directly in
+		// round mode rather than mounting in map mode and switching afterward.
+		// `setUpHoleWithImage`'s tail (placing tee/basket via empty-space clicks)
+		// is Map-mode-only wiring, so this test only reuses its image-load half
+		// and adds a hole directly — Round mode's `shot` wedge only needs an
+		// active hole, never a placed tee/basket.
+		const { component, host } = mountPage(editor, decodeOf(200, 200), 'round');
+		setGeometry(host);
+		const input = host.querySelector<HTMLInputElement>('[data-testid="pane-input-source-overview"]');
+		if (!input) throw new Error('missing source input');
+		Object.defineProperty(input, 'files', {
+			configurable: true,
+			value: [new File([new Uint8Array([1, 2, 3, 4])], 'course.png', { type: 'image/png' })]
+		});
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+		addHoleViaShortcut();
+		// The radial menu itself is gated on this dev toggle regardless of mode
+		// (`openRadialMenu`'s single check) — off by default, exercised directly.
+		host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]')?.click();
 		await flush();
 
 		const clickAt = screenPointFor(host, 50, 50);

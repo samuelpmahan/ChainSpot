@@ -2,11 +2,20 @@ import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+/**
+ * PRE-EXISTING, NOT FROM THE ANNOTATE ROUND UX SPLIT — see the matching note
+ * at the top of tests/e2e/holeAnnotation.spec.ts for the full explanation.
+ * In short: `placePoint(..., 'tee'|'basket')` no longer opens the radial menu
+ * (a sidebar-driven placing flow does, gated behind a dev toggle this file
+ * never clicks), and `switchMode` interleaves Map/Round actions within one
+ * session — impossible now that Annotate Course and Map Round are separate
+ * routes with independent editor sessions (Course Memory recognition is the
+ * real replacement path). `switchMode` is left referencing the deleted
+ * mode-toggle testids on purpose, so it fails loudly rather than silently
+ * navigating to a route that discards in-progress geometry.
+ */
 type PointKind = 'tee' | 'basket' | 'shot' | 'bend' | 'walk';
 
-/** Clicks the Map/Round segmented toggle in the toolbar. */
-// The toggle sits above the fold; clicking it scrolls the annotation frame
-// away, so scroll back to keep previously-measured frame coordinates valid.
 async function switchMode(page: Page, mode: 'map' | 'round'): Promise<void> {
 	await page.getByTestId(`annotation-mode-${mode}`).click();
 	await page.getByTestId('annotation-frame').scrollIntoViewIfNeeded();
@@ -20,7 +29,7 @@ async function placePoint(page: Page, x: number, y: number, kind: PointKind): Pr
 
 /**
  * End-to-end coverage for the full "clean hole construction" flow: annotate a
- * hole in Annotate Round (tee, basket, a shot, a bend), hand off to
+ * hole across Annotate Course and Map Round (tee, basket, a shot, a bend), hand off to
  * Create Graphics, load a clean target and create correspondence pairs so
  * alignment succeeds, then build and download the resulting clean hole
  * graphic. Each stage (hole annotation, alignment estimation, hole-graphic
@@ -139,8 +148,8 @@ async function createPair(
 test('clean hole construction: annotate a hole, align, build and download the resulting clean graphic', async ({
 	page
 }) => {
-	// 1. Annotate Round: place a fully-featured hole (tee, basket, one shot, a bend).
-	await page.goto('/annotate-round');
+	// 1. Annotate Course: place a fully-featured hole (tee, basket, one shot, a bend).
+	await page.goto('/annotate-course');
 	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
 	await page.getByTestId('pane-input-source-overview').setInputFiles({
 		name: 'course.png',

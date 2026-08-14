@@ -2,7 +2,7 @@
 
 Real captures of a real disc golf course, served publicly so the `/demo`
 walkthrough can feed genuine inputs into the genuine `/stitch-map`,
-`/annotate-round`, and `/create-graphics` routes. Nothing here is synthetic and
+`/annotate-course`, `/map-round`, and `/create-graphics` routes. Nothing here is synthetic and
 nothing here is a screenshot of ChainSpot itself.
 
 | File | What it is |

@@ -183,7 +183,7 @@ describe('tee calibration handoff audit', () => {
 
 	it('has no direct browser-side tee-detection entry point to guard — the Annotate Round redesign removed the standalone "Detect tees" experiment tool, so course detection (routed through the worker above) is the only path', async () => {
 		const { readFileSync } = await import('node:fs');
-		const browser = readFileSync('src/routes/annotate-round/+page.svelte', 'utf8');
+		const browser = readFileSync('src/lib/components/AnnotationWorkspace.svelte', 'utf8');
 		expect(browser).not.toContain('deriveUDiscCalibration(');
 		expect(browser).not.toContain('deriveTeePadUiScalePx(');
 	});

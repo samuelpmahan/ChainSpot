@@ -27,6 +27,19 @@ candidates they describe.
 > `ca268e7` on 2026-08-10** — see [Re-audit](#re-audit--mapround-split-and-the-two-act-demo-2026-08-10-commit-ca268e7).
 > Rows 11–20 (stitch-map, create-graphics) and Tickets A and D were **not** re-measured;
 > their numbers below stand as first measured.
+>
+> **Later still — route split, unmeasured.** Map mode and Round mode described
+> throughout this document (a toggle within one shared `/annotate-round` route)
+> have since become two separate routes, `/annotate-course` and `/map-round`,
+> sharing one implementation (`$lib/components/AnnotationWorkspace.svelte`)
+> with mode fixed per route instead of a runtime toggle — the mode toggle
+> testid and control this document measures no longer exist. Every pixel
+> figure and every `test.fixme` below reflects the pre-split UI and has **not**
+> been re-measured against the split; `tests/e2e/viewportBudget.spec.ts` was
+> updated mechanically (route paths, testids, dropped the mode-toggle checks)
+> to keep referencing real controls, but its own thresholds carry the same
+> unmeasured caveat. A real re-audit against the split routes is follow-up
+> work, not done here.
 
 ---
 

@@ -1,8 +1,8 @@
 /**
- * Annotate Round correction log (design: `docs/annotate-round-correction-log.md`).
+ * Annotate Course correction log (design: `docs/annotate-round-correction-log.md`).
  *
  * Records every confirm/move/replace/place/skip interaction a user makes
- * against a CV proposal in Annotate Round, so ordinary usage becomes
+ * against a CV proposal in Annotate Course, so ordinary usage becomes
  * reusable truth data over time instead of requiring a separate hand-
  * labeling effort. Entirely local (IndexedDB) and kept out of
  * `project.json`/the `.chainspot.zip` bundle — per the "Done" boundary in
