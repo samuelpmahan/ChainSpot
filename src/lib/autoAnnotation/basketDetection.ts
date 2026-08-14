@@ -707,6 +707,36 @@ export async function detectCourseCandidates(
 				gatedP6: p6,
 				changedHoleNumbers: p6.changedHoleNumbers ?? []
 			});
+			if (p6.swapAdjudication) {
+				const swap = p6.swapAdjudication;
+				console.info('[ChainSpot P6.2 local swap adjudication]');
+				console.table({
+					pairsConsidered: swap.pairsConsidered,
+					swapsApplied: swap.swapsApplied,
+					changedHoleNumbers: swap.changedHoleNumbers.join('/') || null,
+					ms: swap.ms
+				});
+				console.table(
+					swap.pairs.map((pair) => ({
+						holeA: pair.holeA,
+						holeB: pair.holeB,
+						basketX: pair.basketX,
+						basketY: pair.basketY,
+						lowParAX: pair.lowParAX,
+						lowParAY: pair.lowParAY,
+						lowParBX: pair.lowParBX,
+						lowParBY: pair.lowParBY,
+						ribbonAX: pair.ribbonAX,
+						ribbonAY: pair.ribbonAY,
+						ribbonBX: pair.ribbonBX,
+						ribbonBY: pair.ribbonBY,
+						currentRibbonCost: pair.currentRibbonCost,
+						swappedRibbonCost: pair.swappedRibbonCost,
+						ribbonImprovementPx: pair.ribbonImprovementPx,
+						swapApplied: pair.swapApplied
+					}))
+				);
+			}
 		}
 		return reply.course;
 	} catch (error) {

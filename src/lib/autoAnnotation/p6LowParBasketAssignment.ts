@@ -19,9 +19,29 @@ import type { P4HoleRibbonResult, P4RibbonOwnershipResult } from './p4RibbonOwne
 import type { P2LabeledBadge } from './rawObjectOwnership';
 import type { RawMaskBasket, RawMaskTee } from './rawObjectMask';
 import type { P5SparseAssignmentResult, P5TeeAssignment } from './p5SparseAssignment';
+import {
+	DEFAULT_RIBBON_MASS_PARAMS,
+	nearestComponentLabel,
+	nearestKeptDistancePx,
+	segmentRibbonMass
+} from './ribbonMass';
+import type { RibbonMassParams } from './ribbonMass';
 
 export const P6_DISALLOWED_COST = 1_000_000;
 export const LOW_PAR_HIGHER_IS_BETTER = true;
+
+/**
+ * Pancake 6.2: conservative local 2-hole / 2-basket swap correction.
+ *
+ * P6.1's global Hungarian LowPar solve occasionally prefers a slightly
+ * straighter cross-pair over the correct assignment on a locally-ambiguous
+ * pair of holes. This stage never touches the Hungarian matrix or LowPar
+ * scoring itself; it only inspects the already-gated P6.1 result for pairs
+ * of LowPar-assigned holes whose baskets could swap, and swaps them when the
+ * existing badge-associated ribbon-component evidence conservatively and
+ * decisively favors the alternate permutation.
+ */
+export const MIN_RIBBON_IMPROVEMENT_PX = 20;
 
 const LOW_PAR_LINE_SAMPLE_STEP_SRC_PX = 2 * 3;
 const LOW_PAR_TRIM_FRACTION = 0.2;
@@ -81,6 +101,36 @@ export interface P6LowParBasketAssignmentResult extends P6LowParBasketAssignment
 	/** The unchanged ungated P6 result retained for the P6.1 comparison. */
 	readonly originalP6?: P6LowParBasketAssignmentSnapshot;
 	readonly changedHoleNumbers?: readonly number[];
+	/** Pancake-6.2 local ribbon-evidence swap adjudication over the P6.1 gated assignment. */
+	readonly swapAdjudication?: P6SwapAdjudicationResult;
+}
+
+/** One considered 2-hole / 2-basket swap: hole A/B currently own basket X/Y respectively. */
+export interface P6SwapPairDiagnostic {
+	readonly holeA: number;
+	readonly holeB: number;
+	readonly basketX: number;
+	readonly basketY: number;
+	readonly lowParAX: number | null;
+	readonly lowParAY: number | null;
+	readonly lowParBX: number | null;
+	readonly lowParBY: number | null;
+	readonly ribbonAX: number | null;
+	readonly ribbonAY: number | null;
+	readonly ribbonBX: number | null;
+	readonly ribbonBY: number | null;
+	readonly currentRibbonCost: number | null;
+	readonly swappedRibbonCost: number | null;
+	readonly ribbonImprovementPx: number | null;
+	readonly swapApplied: boolean;
+}
+
+export interface P6SwapAdjudicationResult {
+	readonly pairsConsidered: number;
+	readonly swapsApplied: number;
+	readonly changedHoleNumbers: readonly number[];
+	readonly ms: number;
+	readonly pairs: readonly P6SwapPairDiagnostic[];
 }
 
 function sampleAlongPolyline(points: readonly SourcePoint[], stepPx: number): SourcePoint[] {
@@ -546,6 +596,230 @@ function changedP6HoleNumbers(
 		.sort((left, right) => left - right);
 }
 
+/**
+ * Finds every unordered pair of LowPar-assigned holes (A, B) whose current
+ * baskets (X, Y) could swap: the alternate edges A->Y and B->X must already
+ * exist as valid scored candidates in the P6.1 candidate pool (no new
+ * candidate edges are created). P4-locked and unresolved holes never
+ * participate.
+ */
+function findSwapCandidatePairs(
+	gatedP6: P6LowParBasketAssignmentSnapshot
+): readonly {
+	readonly holeA: P6BasketAssignment & { readonly assignedBasketIndex: number; readonly lowParScore: number };
+	readonly holeB: P6BasketAssignment & { readonly assignedBasketIndex: number; readonly lowParScore: number };
+	readonly candidateAY: P6BasketCandidate;
+	readonly candidateBX: P6BasketCandidate;
+}[] {
+	const lowParAssigned = gatedP6.assignments.filter(
+		(
+			assignment
+		): assignment is P6BasketAssignment & { readonly assignedBasketIndex: number; readonly lowParScore: number } =>
+			assignment.status === 'lowParAssigned' &&
+			assignment.assignedBasketIndex !== null &&
+			assignment.lowParScore !== null
+	);
+	const candidateByHoleAndBasket = new Map<string, P6BasketCandidate>();
+	for (const candidate of gatedP6.candidates) {
+		candidateByHoleAndBasket.set(`${candidate.holeNumber}:${candidate.basketIndex}`, candidate);
+	}
+
+	const pairs: {
+		readonly holeA: P6BasketAssignment & { readonly assignedBasketIndex: number; readonly lowParScore: number };
+		readonly holeB: P6BasketAssignment & { readonly assignedBasketIndex: number; readonly lowParScore: number };
+		readonly candidateAY: P6BasketCandidate;
+		readonly candidateBX: P6BasketCandidate;
+	}[] = [];
+	for (let indexA = 0; indexA < lowParAssigned.length; indexA += 1) {
+		for (let indexB = indexA + 1; indexB < lowParAssigned.length; indexB += 1) {
+			const holeA = lowParAssigned[indexA];
+			const holeB = lowParAssigned[indexB];
+			if (holeA.assignedBasketIndex === holeB.assignedBasketIndex) continue;
+			const candidateAY = candidateByHoleAndBasket.get(`${holeA.holeNumber}:${holeB.assignedBasketIndex}`);
+			const candidateBX = candidateByHoleAndBasket.get(`${holeB.holeNumber}:${holeA.assignedBasketIndex}`);
+			if (!candidateAY?.valid || candidateAY.lowParScore === null) continue;
+			if (!candidateBX?.valid || candidateBX.lowParScore === null) continue;
+			pairs.push({ holeA, holeB, candidateAY, candidateBX });
+		}
+	}
+	return pairs;
+}
+
+/**
+ * Nearest source-pixel distance from a P1 basket anchor to a hole's
+ * badge-associated ribbon component (P4's `nearestComponentLabel`/
+ * `nearestKeptDistancePx` machinery, reused as-is). `null` when the badge
+ * has no local ribbon component or the component has no reachable pixels —
+ * the caller must skip the pair rather than guess.
+ */
+function ribbonComponentDistancePx(
+	segmentation: ReturnType<typeof segmentRibbonMass>,
+	componentLabel: number | null,
+	basket: RawMaskBasket
+): number | null {
+	if (componentLabel === null) return null;
+	const distancePx = nearestKeptDistancePx(
+		segmentation.labels,
+		segmentation.widthEv,
+		segmentation.heightEv,
+		segmentation.scale,
+		new Set([componentLabel]),
+		basket.centerXPx,
+		basket.centerYPx
+	);
+	return Number.isFinite(distancePx) ? distancePx : null;
+}
+
+/**
+ * Pancake 6.2: derives the conservative post-assignment 2-cycle correction.
+ * Reuses the existing UNBRIDGED ribbon segmentation (same raster, badges,
+ * and params P4 already segmented with) rather than P4's own internal
+ * segmentation object, which P4 does not expose; the call is deterministic,
+ * so it reproduces P4's identical component map.
+ */
+function derive2x2SwapAdjudication(
+	gatedP6: P6LowParBasketAssignmentSnapshot,
+	raster: CorridorBendRaster,
+	baskets: readonly RawMaskBasket[],
+	badges: readonly P2LabeledBadge[],
+	ribbonParams: RibbonMassParams = DEFAULT_RIBBON_MASS_PARAMS
+): P6SwapAdjudicationResult {
+	const startedAt = performance.now();
+	const candidatePairs = findSwapCandidatePairs(gatedP6);
+	if (candidatePairs.length === 0) {
+		return { pairsConsidered: 0, swapsApplied: 0, changedHoleNumbers: [], ms: performance.now() - startedAt, pairs: [] };
+	}
+
+	const segmentation = segmentRibbonMass(
+		raster,
+		badges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
+		ribbonParams
+	);
+	const badgeByHole = new Map(badges.map((badge) => [badge.holeNumber, badge]));
+	const ribbonComponentByHole = new Map<number, number | null>();
+	const ribbonComponentForHole = (holeNumber: number): number | null => {
+		const cached = ribbonComponentByHole.get(holeNumber);
+		if (cached !== undefined) return cached;
+		const badge = badgeByHole.get(holeNumber);
+		const componentLabel = badge
+			? nearestComponentLabel(
+					segmentation.labels,
+					segmentation.widthEv,
+					segmentation.heightEv,
+					segmentation.scale,
+					badge.xPx,
+					badge.yPx,
+					ribbonParams.seedRadiusPx
+				)
+			: null;
+		ribbonComponentByHole.set(holeNumber, componentLabel);
+		return componentLabel;
+	};
+
+	const pairs: P6SwapPairDiagnostic[] = [];
+	const swappedHoleNumbers = new Set<number>();
+	let swapsApplied = 0;
+
+	for (const { holeA, holeB, candidateAY, candidateBX } of candidatePairs) {
+		const basketX = holeA.assignedBasketIndex;
+		const basketY = holeB.assignedBasketIndex;
+		const componentA = ribbonComponentForHole(holeA.holeNumber);
+		const componentB = ribbonComponentForHole(holeB.holeNumber);
+		const ribbonAX = ribbonComponentDistancePx(segmentation, componentA, baskets[basketX]);
+		const ribbonAY = ribbonComponentDistancePx(segmentation, componentA, baskets[basketY]);
+		const ribbonBX = ribbonComponentDistancePx(segmentation, componentB, baskets[basketX]);
+		const ribbonBY = ribbonComponentDistancePx(segmentation, componentB, baskets[basketY]);
+		const allAvailable = ribbonAX !== null && ribbonAY !== null && ribbonBX !== null && ribbonBY !== null;
+		const currentRibbonCost = allAvailable ? ribbonAX + ribbonBY : null;
+		const swappedRibbonCost = allAvailable ? ribbonAY + ribbonBX : null;
+		const ribbonImprovementPx =
+			currentRibbonCost !== null && swappedRibbonCost !== null ? currentRibbonCost - swappedRibbonCost : null;
+		const swapApplied =
+			currentRibbonCost !== null &&
+			swappedRibbonCost !== null &&
+			swappedRibbonCost < currentRibbonCost &&
+			ribbonImprovementPx !== null &&
+			ribbonImprovementPx >= MIN_RIBBON_IMPROVEMENT_PX &&
+			!swappedHoleNumbers.has(holeA.holeNumber) &&
+			!swappedHoleNumbers.has(holeB.holeNumber);
+
+		pairs.push({
+			holeA: holeA.holeNumber,
+			holeB: holeB.holeNumber,
+			basketX,
+			basketY,
+			lowParAX: holeA.lowParScore,
+			lowParAY: candidateAY.lowParScore,
+			lowParBX: candidateBX.lowParScore,
+			lowParBY: holeB.lowParScore,
+			ribbonAX,
+			ribbonAY,
+			ribbonBX,
+			ribbonBY,
+			currentRibbonCost,
+			swappedRibbonCost,
+			ribbonImprovementPx,
+			swapApplied
+		});
+
+		if (swapApplied) {
+			swapsApplied += 1;
+			swappedHoleNumbers.add(holeA.holeNumber);
+			swappedHoleNumbers.add(holeB.holeNumber);
+		}
+	}
+
+	return {
+		pairsConsidered: pairs.length,
+		swapsApplied,
+		changedHoleNumbers: Array.from(swappedHoleNumbers).sort((left, right) => left - right),
+		ms: performance.now() - startedAt,
+		pairs
+	};
+}
+
+/** Applies confirmed P6.2 swaps to the P6.1 gated snapshot; a no-op when nothing swapped. */
+function applySwapAdjudication(
+	gatedP6: P6LowParBasketAssignmentSnapshot,
+	swapAdjudication: P6SwapAdjudicationResult
+): P6LowParBasketAssignmentSnapshot {
+	if (swapAdjudication.swapsApplied === 0) return gatedP6;
+
+	const candidateByHoleAndBasket = new Map<string, P6BasketCandidate>();
+	for (const candidate of gatedP6.candidates) {
+		candidateByHoleAndBasket.set(`${candidate.holeNumber}:${candidate.basketIndex}`, candidate);
+	}
+	const newBasketByHole = new Map<number, number>();
+	for (const pair of swapAdjudication.pairs) {
+		if (!pair.swapApplied) continue;
+		newBasketByHole.set(pair.holeA, pair.basketY);
+		newBasketByHole.set(pair.holeB, pair.basketX);
+	}
+
+	const assignments = gatedP6.assignments.map((assignment): P6BasketAssignment => {
+		const newBasketIndex = newBasketByHole.get(assignment.holeNumber);
+		if (newBasketIndex === undefined) return assignment;
+		const candidate = candidateByHoleAndBasket.get(`${assignment.holeNumber}:${newBasketIndex}`);
+		return {
+			...assignment,
+			assignedBasketIndex: newBasketIndex,
+			assignedForwardAngleDeg: candidate?.forwardAngleDeg ?? assignment.assignedForwardAngleDeg,
+			lowParScore: candidate?.lowParScore ?? assignment.lowParScore
+		};
+	});
+	const totalAssignmentCost = assignments
+		.filter(
+			(assignment): assignment is P6BasketAssignment & { readonly lowParScore: number } =>
+				assignment.status === 'lowParAssigned' && assignment.lowParScore !== null
+		)
+		.reduce(
+			(total, assignment) => total + (LOW_PAR_HIGHER_IS_BETTER ? -assignment.lowParScore : assignment.lowParScore),
+			0
+		);
+
+	return { ...gatedP6, assignments, totalAssignmentCost };
+}
+
 export function deriveP6LowParBasketAssignment(
 	raster: CorridorBendRaster,
 	tees: readonly RawMaskTee[],
@@ -556,9 +830,12 @@ export function deriveP6LowParBasketAssignment(
 ): P6LowParBasketAssignmentResult {
 	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, false);
 	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, true);
+	const swapAdjudication = derive2x2SwapAdjudication(gatedP6, raster, baskets, badges);
+	const adjudicatedP6 = applySwapAdjudication(gatedP6, swapAdjudication);
 	return {
-		...gatedP6,
+		...adjudicatedP6,
 		originalP6,
-		changedHoleNumbers: changedP6HoleNumbers(originalP6, gatedP6)
+		changedHoleNumbers: changedP6HoleNumbers(originalP6, gatedP6),
+		swapAdjudication
 	};
 }
