@@ -30,12 +30,29 @@ export interface WorldScaleRaster {
 	readonly heightPx: number;
 }
 
+/**
+ * Geometry of one white tee-pad frame that survived the same unitless gates
+ * used for world-scale calibration. The scale detector always computed this
+ * internally; expose it so tee detection can reuse the object instead of
+ * throwing its location away after measuring only its size.
+ */
+export interface WhiteTeeFrameCandidate {
+	readonly xPx: number;
+	readonly yPx: number;
+	readonly majorPx: number;
+	readonly minorPx: number;
+	/** Undirected major-axis orientation normalized to [0, 180). */
+	readonly orientationDeg: number;
+}
+
 export interface WorldScaleMeasurement {
 	readonly worldScale: WorldScale;
 	readonly medianFrameMajorPx: number;
 	readonly frameCount: number;
 	/** Every accepted frame's major axis, sorted — diagnostics only. */
 	readonly frameMajorsPx: readonly number[];
+	/** Frames belonging to the winning same-size pad consensus cluster. */
+	readonly frameCandidates?: readonly WhiteTeeFrameCandidate[];
 }
 
 /**
@@ -103,7 +120,7 @@ export function measureWorldScale(raster: WorldScaleRaster): WorldScaleMeasureme
 	const labels = new Int32Array(pixelCount); // 0 = unlabeled
 	const maxArea = Math.max(MIN_RIM_AREA_PX + 1, Math.round(MAX_AREA_FRACTION * pixelCount));
 	const queue = new Int32Array(maxArea + 8);
-	const majors: number[] = [];
+	const frames: WhiteTeeFrameCandidate[] = [];
 	let nextLabel = 0;
 
 	for (let seed = 0; seed < pixelCount; seed += 1) {
@@ -120,30 +137,36 @@ export function measureWorldScale(raster: WorldScaleRaster): WorldScaleMeasureme
 		) {
 			continue;
 		}
-		const major = assessFrame(component, bright, value, width);
-		if (major !== null) majors.push(major);
+		const frame = assessFrame(component, bright, value, width);
+		if (frame !== null) frames.push(frame);
 	}
 
+	const majors = frames.map((frame) => frame.majorPx).sort((a, b) => a - b);
 	if (majors.length < MIN_FRAMES) return null;
-	majors.sort((a, b) => a - b);
 	// Consensus cluster: real pads on one map share one size to within a few
 	// percent, while stray accepts (odd white structures) scatter. Keep the
 	// largest ±12% agreement window and take its median — a mode, not a mean,
 	// so a handful of outliers can never drag the scale.
-	let cluster: number[] = [];
-	for (let i = 0; i < majors.length; i += 1) {
-		const anchor = majors[i];
-		const windowValues = majors.filter((m) => Math.abs(m - anchor) <= anchor * CLUSTER_TOLERANCE);
-		if (windowValues.length > cluster.length) cluster = windowValues;
+	let clusterFrames: WhiteTeeFrameCandidate[] = [];
+	for (const anchor of frames) {
+		const windowFrames = frames.filter(
+			(frame) => Math.abs(frame.majorPx - anchor.majorPx) <= anchor.majorPx * CLUSTER_TOLERANCE
+		);
+		if (windowFrames.length > clusterFrames.length) clusterFrames = windowFrames;
 	}
-	if (cluster.length < MIN_FRAMES) return null;
-	const middle = Math.floor(cluster.length / 2);
-	const median = cluster.length % 2 === 0 ? (cluster[middle - 1] + cluster[middle]) / 2 : cluster[middle];
+	if (clusterFrames.length < MIN_FRAMES) return null;
+	const clusterMajors = clusterFrames.map((frame) => frame.majorPx).sort((a, b) => a - b);
+	const middle = Math.floor(clusterMajors.length / 2);
+	const median =
+		clusterMajors.length % 2 === 0
+			? (clusterMajors[middle - 1] + clusterMajors[middle]) / 2
+			: clusterMajors[middle];
 	return {
 		worldScale: asWorldScale(median / REFERENCE_FRAME_MAJOR_PX, 'measured white-frame world scale'),
 		medianFrameMajorPx: median,
 		frameCount: majors.length,
-		frameMajorsPx: majors
+		frameMajorsPx: majors,
+		frameCandidates: [...clusterFrames].sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx)
 	};
 }
 
@@ -206,13 +229,13 @@ function growComponent(
 	return { pixels: Int32Array.from(pixels), count: pixels.length, minX, minY, maxX, maxY };
 }
 
-/** Applies the frame gates; returns the projected major-axis extent, or null. */
+/** Applies the frame gates; returns the accepted frame geometry, or null. */
 function assessFrame(
 	component: FrameComponent,
 	bright: Uint8Array,
 	value: Uint8Array,
 	width: number
-): number | null {
+): WhiteTeeFrameCandidate | null {
 	const { pixels, count } = component;
 	// Principal axis via second moments.
 	let sumX = 0;
@@ -242,8 +265,11 @@ function assessFrame(
 	const det = covXX * covYY - covXY * covXY;
 	const disc = Math.sqrt(Math.max(0, (trace * trace) / 4 - det));
 	const lambda1 = trace / 2 + disc;
-	const axisX = covXY !== 0 ? lambda1 - covYY : 1;
-	const axisY = covXY !== 0 ? covXY : 0;
+	// Scale-only callers previously did not care which axis was chosen when
+	// covXY==0. Now that orientation escapes this function, pick the actual
+	// principal image axis for horizontal/vertical frames too.
+	const axisX = Math.abs(covXY) > 1e-9 ? lambda1 - covYY : covXX >= covYY ? 1 : 0;
+	const axisY = Math.abs(covXY) > 1e-9 ? covXY : covXX >= covYY ? 0 : 1;
 	const axisNorm = Math.hypot(axisX, axisY) || 1;
 	const ux = axisX / axisNorm;
 	const uy = axisY / axisNorm;
@@ -265,8 +291,11 @@ function assessFrame(
 	}
 	const extentMajor = maxA - minA + 1;
 	const extentMinor = maxB - minB + 1;
-	const major = Math.max(extentMajor, extentMinor);
-	const minor = Math.min(extentMajor, extentMinor);
+	const firstAxisIsMajor = extentMajor >= extentMinor;
+	const major = firstAxisIsMajor ? extentMajor : extentMinor;
+	const minor = firstAxisIsMajor ? extentMinor : extentMajor;
+	const majorUx = firstAxisIsMajor ? ux : -uy;
+	const majorUy = firstAxisIsMajor ? uy : ux;
 	if (major < MIN_MAJOR_PX || minor < MIN_MINOR_PX) return null;
 	const aspect = major / minor;
 	if (aspect < ASPECT_MIN || aspect > ASPECT_MAX) return null;
@@ -318,7 +347,15 @@ function assessFrame(
 	holeValues.sort((a, b) => a - b);
 	const interiorValue = holeValues[Math.floor(holeValues.length / 2)];
 	if (interiorValue < INTERIOR_VALUE_MIN || interiorValue > INTERIOR_VALUE_MAX) return null;
-	return major;
+	const rawOrientationDeg = (Math.atan2(majorUy, majorUx) * 180) / Math.PI;
+	const orientationDeg = ((rawOrientationDeg % 180) + 180) % 180;
+	return {
+		xPx: meanX,
+		yPx: meanY,
+		majorPx: major,
+		minorPx: minor,
+		orientationDeg
+	};
 }
 
 /**

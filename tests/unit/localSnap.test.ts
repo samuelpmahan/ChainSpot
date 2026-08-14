@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	localFeatureSnap,
 	LOCAL_SNAP_CROP_FEATURE_MULTIPLE,
+	LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
 	LOCAL_SNAP_MIN_SCORE,
 	TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE
 } from '../../src/lib/cv/localSnap';
@@ -144,7 +145,7 @@ function fakeBasketCv(
 const UI_SCALE_PX = asUiScalePx(1);
 const TEE_FOOTPRINT_PX = TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * UI_SCALE_PX; // 26
 const TEE_CROP_SIDE_PX = TEE_FOOTPRINT_PX * LOCAL_SNAP_CROP_FEATURE_MULTIPLE; // 104
-const TEE_SNAP_RADIUS_PX = TEE_CROP_SIDE_PX / 2; // 52
+const TEE_SNAP_RADIUS_PX = TEE_FOOTPRINT_PX * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE; // 13
 
 function teeRaster(widthPx = 400, heightPx = 400): LocalSnapRaster {
 	return { rgba: new Uint8Array(widthPx * heightPx * 4), widthPx, heightPx, sourceScale: 1 };
@@ -191,7 +192,7 @@ describe('localFeatureSnap — tee', () => {
 		const raster = teeRaster();
 		const clickPx = { xPx: 200, yPx: 200 };
 		// Crop is 105x105 (148..252 on each axis); a candidate near its far
-		// corner is well inside the crop but outside the 52px snap radius.
+		// corner is well inside the crop but outside the tiny 13px snap radius.
 		const cv = fakeTeeCv({ x: 100, y: 100 }, TEE_PASSING_RECT.size, TEE_PASSING_RECT.area);
 
 		const result = localFeatureSnap('tee', cv as unknown as LocalSnapCv, raster, clickPx, TEE_CALIBRATION);
@@ -233,7 +234,7 @@ const TEMPLATE = { gray: new Uint8Array(27 * 41), widthPx: 27, heightPx: 41 };
 const BASKET_TEMPLATE_SCALE = asBasketTemplateScale(1);
 const BASKET_FOOTPRINT_PX = Math.max(TEMPLATE.widthPx, TEMPLATE.heightPx) * BASKET_TEMPLATE_SCALE; // 41
 const BASKET_CROP_SIDE_PX = BASKET_FOOTPRINT_PX * LOCAL_SNAP_CROP_FEATURE_MULTIPLE; // 164
-const BASKET_SNAP_RADIUS_PX = BASKET_CROP_SIDE_PX / 2; // 82
+const BASKET_SNAP_RADIUS_PX = BASKET_FOOTPRINT_PX * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE; // 20.5
 // `scaleSamples`'s lowest sample is `templateScale * 0.9`; NMS/sort ties keep
 // the first-inserted (lowest-scale) hit, so this is the resized template size
 // that actually determines a peak's candidate center in every scenario below.
@@ -302,7 +303,7 @@ describe('localFeatureSnap — basket', () => {
 		const raster = basketRaster();
 		const clickPx = { xPx: 200, yPx: 200 };
 		// Near the crop's far corner: well inside the 165x165 crop, but its
-		// distance from the click exceeds the 82px snap radius.
+		// distance from the click exceeds the tiny 20.5px snap radius.
 		const peakX = 138;
 		const peakY = 114;
 		const cv = fakeBasketCv([{ x: peakX, y: peakY, score: 0.95 }], 165, 165);

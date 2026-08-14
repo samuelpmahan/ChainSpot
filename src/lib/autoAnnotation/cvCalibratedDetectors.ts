@@ -437,6 +437,45 @@ export function detectWorldNormalizedTeeBootstrap(
 		widthPx: raster.widthPx,
 		heightPx: raster.heightPx
 	});
+
+	// SPIKE: the scale pass already found white rectangular tee-pad frames.
+	// Try those exact objects before paying for primary + Hough + recovery.
+	// Only short-circuit if they account for every visible badge with zero
+	// unresolved ownership; otherwise the existing detector runs unchanged.
+	//
+	// For this local spike, mark frame proposals as dual-support so the
+	// existing bootstrap policy treats the compound white-frame gate as
+	// strong appearance evidence without plumbing a new production support
+	// enum yet. If this wins, formalize `white-frame` provenance afterward.
+	const whiteFrameCandidates: TeePadCandidate[] = (measurement?.frameCandidates ?? []).map((frame) => ({
+		xPx: frame.xPx,
+		yPx: frame.yPx,
+		orientationDeg: frame.orientationDeg,
+		widthPx: frame.majorPx,
+		heightPx: frame.minorPx,
+		score: 1,
+		support: ['gray-center', 'edge-loop']
+	}));
+	const targetCount = Math.min(options.maxCandidates ?? badges.length, badges.length);
+	if (targetCount > 0 && whiteFrameCandidates.length >= targetCount) {
+		const frameClusters = deduplicatePhysicalTeePads(whiteFrameCandidates);
+		const dedupedFrames = frameClusters.map((cluster) => cluster.candidate);
+		const frameAssessment = assessTeeBootstrap(raster, dedupedFrames, badges);
+		if (
+			frameAssessment.counts.unresolved === 0 &&
+			frameAssessment.assignments.length >= targetCount
+		) {
+			return {
+				candidates: dedupedFrames,
+				rawCandidates: whiteFrameCandidates,
+				dedupClusters: frameClusters.map((cluster) => cluster.sourceIndexes),
+				...frameAssessment,
+				worldScaleMeasurement: measurement,
+				normalized: false
+			};
+		}
+	}
+
 	const worldScale = measurement?.worldScale ?? null;
 	if (
 		worldScale === null ||

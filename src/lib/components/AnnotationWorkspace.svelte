@@ -1553,13 +1553,24 @@
 		return { kind: 'confirmed', holeNumber: hole.number };
 	});
 
-	/** The Approve banner's action: confirms both pieces, then auto-advances to the next section-3 hole if one exists, else exits focus — mirroring the reference flow's `approveHole`. */
+	/** Finds the next hole in the guided 1–18 pass. Already-confirmed holes are skipped, but incomplete holes are still included so the flow never jumps over work just because it belongs to another sidebar section. */
+	function nextGuidedHoleNumber(afterNumber: number): number | null {
+		for (let number = Math.max(1, afterNumber + 1); number <= 18; number += 1) {
+			const hole = holes.find((candidate) => candidate.number === number);
+			if (!hole || sectionOfHole(hole) !== 4) return number;
+		}
+		return null;
+	}
+
+	/** The Approve banner's action: confirms both pieces, then auto-advances through holes 1–18 in numeric order, skipping only holes already confirmed. */
 	function approveActiveHole(): void {
 		if (!activeHoleId) return;
+		const approvedHole = holes.find((hole) => hole.id === activeHoleId);
+		if (!approvedHole) return;
 		approveHolePieces(activeHoleId);
 		vibrate(8);
-		const next = holes.find((hole) => hole.id !== activeHoleId && sectionOfHole(hole) === 3);
-		if (next) onHoleBoxClick(next.number);
+		const nextNumber = nextGuidedHoleNumber(approvedHole.number);
+		if (nextNumber !== null) onHoleBoxClick(nextNumber);
 		else exitSidebarFocus();
 	}
 

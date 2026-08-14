@@ -132,6 +132,14 @@ export const TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE = 26;
 export const LOCAL_SNAP_CROP_FEATURE_MULTIPLE = 4;
 
 /**
+ * A snap is only allowed when the detected feature center is within half of
+ * the expected feature footprint from the user's click. The crop stays wider
+ * than this guard so nearby false positives can be rejected instead of being
+ * accepted merely because they were visible to the detector.
+ */
+export const LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE = 0.5;
+
+/**
  * A candidate must score at least this well to be trusted. Matches
  * `basketTemplateDetection.ts`'s own `DEFAULT_MIN_SCORE` floor used for
  * full-course basket detection; applied uniformly to tee-pad candidates too
@@ -258,9 +266,10 @@ function basketCropCandidates(
  * the one relevant existing detector against that crop, and offset its best
  * candidate back into `raster`'s own source-image coordinate space. The
  * result is accepted only when that candidate both clears
- * `LOCAL_SNAP_MIN_SCORE` and lies within `LOCAL_SNAP_CROP_FEATURE_MULTIPLE/2`
- * (half the crop) of `clickPx` -- a real nearby feature, not just the least-
- * bad thing the detector could find inside an arbitrary window.
+ * `LOCAL_SNAP_MIN_SCORE` and lies within
+ * `LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE` expected feature footprints of
+ * `clickPx` -- a real nearby feature, not just the least-bad thing the
+ * detector could find inside an arbitrary window.
  */
 export function localFeatureSnap(
 	kind: LocalSnapKind,
@@ -276,7 +285,7 @@ export function localFeatureSnap(
 	if (footprintPx === null || !(footprintPx > 0)) return null;
 
 	const cropSideSourcePx = footprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE;
-	const snapRadiusPx = cropSideSourcePx / 2;
+	const snapRadiusPx = footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE;
 	const bounds = computeCropBounds(raster, clickPx, cropSideSourcePx);
 	if (!bounds) return null;
 

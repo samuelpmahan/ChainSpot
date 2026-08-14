@@ -225,6 +225,40 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		expect(host.querySelector('[data-testid="tee-marker-2"]')).toBeNull();
 		expect(host.querySelector('[data-testid="basket-marker-2"]')).not.toBeNull();
 	});
+
+	it('advances through hole numbers instead of jumping to a later status section', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+
+		// Put hole 3 into the approval queue before hole 1 is approved. Hole 2
+		// remains untouched, so the guided flow must still stop at hole 2.
+		sidebarHoleButton(host, 3).click();
+		await flush();
+		const tee3 = screenPointFor(host, 30, 30);
+		dispatchClick(host, tee3.x, tee3.y);
+		await flush();
+		const basket3 = screenPointFor(host, 40, 40);
+		dispatchClick(host, basket3.x, basket3.y);
+		await flush();
+		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-cancel"]')?.click();
+		await flush();
+
+		sidebarHoleButton(host, 1).click();
+		await flush();
+		const tee1 = screenPointFor(host, 80, 80);
+		dispatchClick(host, tee1.x, tee1.y);
+		await flush();
+		const basket1 = screenPointFor(host, 90, 90);
+		dispatchClick(host, basket1.x, basket1.y);
+		await flush();
+		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		await flush();
+
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Hole 2');
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Tee');
+	});
 });
 
 describe('"+ Add Bend(s)" — a hole under review or already approved gets bends without leaving it', () => {
