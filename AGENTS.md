@@ -16,6 +16,7 @@ Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No back
 - If a task starts in Local, ask before modifying files unless the user explicitly requests Local work.
 - Before making changes, inspect `git status --short` and preserve unrelated user changes.
 - Try not to run E2E tests or tests involving browser control for now. This is a build out, there are no users to worry about. Instead give the user manual browser tasks to carry out themselves.
+- Default to focused unit tests only: run the specific file(s) touched by your change (`npx vitest run tests/unit/<file>.test.ts`), not the full `npm run test:unit` sweep, plus `npm run check` for type errors. Only run the full unit suite or `test:e2e` when the user directs you to — dev machines here are resource-constrained and a full run competes with the agent session for CPU.
 
 ## Long-running tasks
 
