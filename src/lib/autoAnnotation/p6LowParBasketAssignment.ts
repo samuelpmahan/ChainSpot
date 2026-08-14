@@ -705,11 +705,38 @@ function derive2x2SwapAdjudication(
 		return componentLabel;
 	};
 
-	const pairs: P6SwapPairDiagnostic[] = [];
-	const swappedHoleNumbers = new Set<number>();
-	let swapsApplied = 0;
+	// Compute every pair's ribbon-cost diagnostics up front (order-independent),
+	// then decide which pairs actually swap in a SEPARATE pass ordered by
+	// evidence strength (largest ribbonImprovementPx first) rather than by
+	// enumeration order (ascending hole number). Enumeration order is
+	// arbitrary with respect to evidence: on courses where a hole belongs to
+	// more than one candidate pair, deciding by enumeration order lets a
+	// weak, barely-qualifying swap permanently consume a hole before a much
+	// stronger swap for that same hole is even evaluated -- including cases
+	// where the weak swap sacrifices a hole whose current assignment was
+	// already correct to "average out" a noisy partner. Ordering by
+	// strongest-evidence-first instead lets the most decisive swaps claim
+	// their holes first, which is what "conservative" is supposed to mean.
+	interface PairEvaluation {
+		readonly holeA: (typeof candidatePairs)[number]['holeA'];
+		readonly holeB: (typeof candidatePairs)[number]['holeB'];
+		readonly basketX: number;
+		readonly basketY: number;
+		readonly lowParAX: number | null;
+		readonly lowParAY: number | null;
+		readonly lowParBX: number | null;
+		readonly lowParBY: number | null;
+		readonly ribbonAX: number | null;
+		readonly ribbonAY: number | null;
+		readonly ribbonBX: number | null;
+		readonly ribbonBY: number | null;
+		readonly currentRibbonCost: number | null;
+		readonly swappedRibbonCost: number | null;
+		readonly ribbonImprovementPx: number | null;
+		readonly eligible: boolean;
+	}
 
-	for (const { holeA, holeB, candidateAY, candidateBX } of candidatePairs) {
+	const evaluations: PairEvaluation[] = candidatePairs.map(({ holeA, holeB, candidateAY, candidateBX }) => {
 		const basketX = holeA.assignedBasketIndex;
 		const basketY = holeB.assignedBasketIndex;
 		const componentA = ribbonComponentForHole(holeA.holeNumber);
@@ -723,18 +750,15 @@ function derive2x2SwapAdjudication(
 		const swappedRibbonCost = allAvailable ? ribbonAY + ribbonBX : null;
 		const ribbonImprovementPx =
 			currentRibbonCost !== null && swappedRibbonCost !== null ? currentRibbonCost - swappedRibbonCost : null;
-		const swapApplied =
+		const eligible =
 			currentRibbonCost !== null &&
 			swappedRibbonCost !== null &&
 			swappedRibbonCost < currentRibbonCost &&
 			ribbonImprovementPx !== null &&
-			ribbonImprovementPx >= MIN_RIBBON_IMPROVEMENT_PX &&
-			!swappedHoleNumbers.has(holeA.holeNumber) &&
-			!swappedHoleNumbers.has(holeB.holeNumber);
-
-		pairs.push({
-			holeA: holeA.holeNumber,
-			holeB: holeB.holeNumber,
+			ribbonImprovementPx >= MIN_RIBBON_IMPROVEMENT_PX;
+		return {
+			holeA,
+			holeB,
 			basketX,
 			basketY,
 			lowParAX: holeA.lowParScore,
@@ -748,19 +772,47 @@ function derive2x2SwapAdjudication(
 			currentRibbonCost,
 			swappedRibbonCost,
 			ribbonImprovementPx,
-			swapApplied
-		});
+			eligible
+		};
+	});
 
-		if (swapApplied) {
-			swapsApplied += 1;
-			swappedHoleNumbers.add(holeA.holeNumber);
-			swappedHoleNumbers.add(holeB.holeNumber);
+	const swappedHoleNumbers = new Set<number>();
+	const appliedPairIndexes = new Set<number>();
+	const byImprovementDesc = evaluations
+		.map((evaluation, index) => ({ evaluation, index }))
+		.filter(({ evaluation }) => evaluation.eligible)
+		.sort((left, right) => (right.evaluation.ribbonImprovementPx ?? 0) - (left.evaluation.ribbonImprovementPx ?? 0));
+	for (const { evaluation, index } of byImprovementDesc) {
+		if (swappedHoleNumbers.has(evaluation.holeA.holeNumber) || swappedHoleNumbers.has(evaluation.holeB.holeNumber)) {
+			continue;
 		}
+		appliedPairIndexes.add(index);
+		swappedHoleNumbers.add(evaluation.holeA.holeNumber);
+		swappedHoleNumbers.add(evaluation.holeB.holeNumber);
 	}
+
+	const pairs: P6SwapPairDiagnostic[] = evaluations.map((evaluation, index) => ({
+		holeA: evaluation.holeA.holeNumber,
+		holeB: evaluation.holeB.holeNumber,
+		basketX: evaluation.basketX,
+		basketY: evaluation.basketY,
+		lowParAX: evaluation.lowParAX,
+		lowParAY: evaluation.lowParAY,
+		lowParBX: evaluation.lowParBX,
+		lowParBY: evaluation.lowParBY,
+		ribbonAX: evaluation.ribbonAX,
+		ribbonAY: evaluation.ribbonAY,
+		ribbonBX: evaluation.ribbonBX,
+		ribbonBY: evaluation.ribbonBY,
+		currentRibbonCost: evaluation.currentRibbonCost,
+		swappedRibbonCost: evaluation.swappedRibbonCost,
+		ribbonImprovementPx: evaluation.ribbonImprovementPx,
+		swapApplied: appliedPairIndexes.has(index)
+	}));
 
 	return {
 		pairsConsidered: pairs.length,
-		swapsApplied,
+		swapsApplied: appliedPairIndexes.size,
 		changedHoleNumbers: Array.from(swappedHoleNumbers).sort((left, right) => left - right),
 		ms: performance.now() - startedAt,
 		pairs
