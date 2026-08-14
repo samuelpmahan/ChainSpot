@@ -1,15 +1,28 @@
 /**
  * Ad-hoc investigation tool (not a gate, not part of any test budget).
  *
- * Runs the real `resources/real-capture/{TL,TR,BL,BR}.PNG` quadrant
- * screenshots ("Dash's Track", see `src/lib/demo/catalog.ts`'s tour copy)
- * through the actual `smartImportFiles` pipeline — the same production code
- * the app calls, not a reimplementation — and then through the actual
- * `renderStitchedPng` renderer to produce a genuine pixel composite, so a
- * second real stitched reference image (at a different device
- * resolution/scale than `resources/ribbon-reference/IMG_5641.jpg`) can be
- * produced without the walk-path overlay baked into
- * `resources/real-capture/ReferenceStitch.png`.
+ * Runs one of two real four-screenshot capture sets of "Dash's Track" (see
+ * `src/lib/demo/catalog.ts`'s tour copy) through the actual `smartImportFiles`
+ * pipeline — the same production code the app calls, not a reimplementation —
+ * and then through the actual `renderStitchedPng` renderer to produce a
+ * genuine pixel composite: a second real stitched reference image, at a
+ * different device resolution/scale than `resources/ribbon-reference/IMG_5641.jpg`.
+ *
+ * Two datasets, selected by the first CLI arg (default `dashs-track-demo`):
+ *
+ * - `dashs-track-demo` (recommended): `static/resources/demo/dashs-track/
+ *   udisc-capture-{1..4}.png`, the app's own demo tiles. Confirmed clean of
+ *   any walk-path overlay on every hole, including 1-2.
+ * - `real-capture`: `resources/real-capture/{TL,TR,BL,BR}.PNG`. A DIFFERENT
+ *   real capture set of the same course (different checksums, different
+ *   capture session) that was apparently taken mid-round: it has UDisc's
+ *   purple walk-path overlay baked into the raw screenshots themselves,
+ *   obstructing holes 1-2, in every one of its four tiles — re-stitching
+ *   cannot remove it, since it predates stitching. Kept here only for
+ *   completeness/comparison; prefer `dashs-track-demo` for anything that
+ *   needs a clean reference. (`resources/real-capture/ReferenceStitch.png`,
+ *   the pre-existing checked-in composite of this same dataset, has the
+ *   identical obstruction for the identical reason.)
  *
  * `smartImportFiles` takes browser `File`s and calls back into injectable
  * `decode`/`buildRaster`/`buildCropRaster` hooks (the same injection points
@@ -33,7 +46,9 @@
  * that buffer to PNG with `pngjs` — no native canvas package, no browser.
  *
  * Usage:
- *   npx tsx scripts/stitch-real-capture-reference.ts [outputPath]
+ *   npx tsx scripts/stitch-real-capture-reference.ts [dataset] [outputPath]
+ *   npx tsx scripts/stitch-real-capture-reference.ts dashs-track-demo
+ *   npx tsx scripts/stitch-real-capture-reference.ts real-capture
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -46,11 +61,39 @@ import { renderStitchedPng } from '../src/lib/stitch/render';
 import type { StitchRenderEnv, StitchRenderTile } from '../src/lib/stitch/render';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const captureDir = join(root, 'resources', 'real-capture');
-// Deliberately not upper-left/top/left-first, matching stitch-annotate-check.ts's
-// intent of not handing the pipeline an already-sorted arrangement.
-const FILE_NAMES = ['TR.PNG', 'BL.PNG', 'TL.PNG', 'BR.PNG'];
-const DEFAULT_OUTPUT_PATH = join(root, 'artifacts', 'cv-runs', 'real-capture-fresh-stitch.png');
+
+interface CaptureDataset {
+	readonly captureDir: string;
+	// Deliberately not upper-left/top/left-first, matching stitch-annotate-check.ts's
+	// intent of not handing the pipeline an already-sorted arrangement.
+	readonly fileNames: readonly string[];
+	readonly outputPath: string;
+	/**
+	 * Extra bottom-crop depth (source px), on top of `smartImportFiles`'s own
+	 * proposal, needed to fully remove UDisc's translucent "Apple Maps/Legal +
+	 * MAP/SAT" chrome band — see the long comment at its use site below for
+	 * why this can't just be `autoCrop.ts`'s job. Both datasets share this
+	 * capture device/UI layout (confirmed empirically: the same +136 clears
+	 * the same band on both; removing it leaves the identical chrome visible
+	 * on both), but a THIRD dataset should re-verify rather than assume it.
+	 */
+	readonly extraBottomCropPx: number;
+}
+
+const DATASETS: Readonly<Record<string, CaptureDataset>> = {
+	'dashs-track-demo': {
+		captureDir: join(root, 'static', 'resources', 'demo', 'dashs-track'),
+		fileNames: ['udisc-capture-3.png', 'udisc-capture-1.png', 'udisc-capture-4.png', 'udisc-capture-2.png'],
+		outputPath: join(root, 'artifacts', 'cv-runs', 'dashs-track-demo-fresh-stitch.png'),
+		extraBottomCropPx: 136
+	},
+	'real-capture': {
+		captureDir: join(root, 'resources', 'real-capture'),
+		fileNames: ['TR.PNG', 'BL.PNG', 'TL.PNG', 'BR.PNG'],
+		outputPath: join(root, 'artifacts', 'cv-runs', 'real-capture-fresh-stitch.png'),
+		extraBottomCropPx: 136
+	}
+};
 
 interface RgbaImage {
 	readonly name: string;
@@ -181,8 +224,12 @@ function makeNodeStitchRenderEnv(): StitchRenderEnv {
 }
 
 async function main(): Promise<void> {
-	const outputPath = process.argv[2] ? join(process.cwd(), process.argv[2]) : DEFAULT_OUTPUT_PATH;
+	const datasetName = process.argv[2] && process.argv[2] in DATASETS ? process.argv[2] : 'dashs-track-demo';
+	const dataset = DATASETS[datasetName];
+	const outputPath = process.argv[3] ? join(process.cwd(), process.argv[3]) : dataset.outputPath;
+	const { captureDir, fileNames: FILE_NAMES } = dataset;
 
+	console.log(`Dataset: ${datasetName}`);
 	console.log(`Loading ${FILE_NAMES.length} real captures from ${captureDir} ...`);
 	const fullRes = new Map(
 		FILE_NAMES.map((name) => [name, loadRgba(join(captureDir, name), name)] as const)
@@ -292,10 +339,9 @@ async function main(): Promise<void> {
 	// changes). See the task report for the full writeup; this is a
 	// deliberate, content-safe crop choice for a clean reference image, not a
 	// `src/lib/stitch/*` change.
-	const CLEAN_EXPORT_EXTRA_BOTTOM_CROP_PX = 136;
-	const crop = { ...result.cropProposal, bottomPx: result.cropProposal.bottomPx + CLEAN_EXPORT_EXTRA_BOTTOM_CROP_PX };
+	const crop = { ...result.cropProposal, bottomPx: result.cropProposal.bottomPx + dataset.extraBottomCropPx };
 	console.log(
-		`  clean-export crop override: bottomPx ${result.cropProposal.bottomPx} -> ${crop.bottomPx} (+${CLEAN_EXPORT_EXTRA_BOTTOM_CROP_PX}, see comment)`
+		`  clean-export crop override: bottomPx ${result.cropProposal.bottomPx} -> ${crop.bottomPx} (+${dataset.extraBottomCropPx}, see comment)`
 	);
 
 	console.log('Rendering the actual composite via renderStitchedPng (Node StitchRenderEnv) ...');
