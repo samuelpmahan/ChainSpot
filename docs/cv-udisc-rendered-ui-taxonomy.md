@@ -60,6 +60,29 @@ controls (e.g. "MAP"/"SAT" toggle buttons) at the screenshot's edges. Not course
 noise the landing-droplet detector already confirms it doesn't false-positive on. No dedicated
 handling needed elsewhere unless a future detector starts tripping on it.
 
+### Circle 1 / Circle 2 (C1 / C2) — the putting-proximity rings around every basket
+**Universal, not occasional** — every single basket on every hole gets both, always. This is
+standard disc golf scoring terminology, not a ChainSpot-specific name: **Circle 1 (C1)** is the
+~10m/33ft putting radius, **Circle 2 (C2)** the ~20m/66ft extended scoring radius, both centered
+on the basket. UDisc renders C1 as a solid semi-transparent tinted fill and C2 as a larger dashed
+boundary ring just outside it (confirmed visually — see a basket crop from either real fixture;
+the solid tint and the dashed outline are two concentric, distinct rings, not one). Treat their
+presence at a basket the same way you'd treat the free-throw semicircle on a basketball court —
+expected, not a discovery each time.
+
+This codebase already has a related but DIFFERENT piece of C1/C2 vocabulary:
+`landingDropletDetection.ts`'s `LandingMarkerKind = 'c1' | 'c2' | 'off-fairway'` classifies which
+zone a *thrown disc's landing droplet* fell in, on a **round** screenshot (a small glyph inside a
+landing marker) — not the same signal as these basket-centered rings on a **course-map**
+screenshot, but the same real-world course feature underneath both.
+
+**Why this matters for bend detection:** C1's tinted fill composites into a similar mid-tone
+grey-green as the corridor ribbon itself (see below). This is the confirmed, root-caused reason
+`corridorBendDetectionRibbon.ts` currently recalls few real bends — its self-calibrating
+alpha/bandColor fit can match C1's fill about as well as the true ribbon near many baskets, so its
+mask swallows the circle instead of tracing the corridor. See that module's doc comment and the
+corridor-ribbon write-up below.
+
 ## Unconfirmed — needs a real answer before relying on it
 
 ### Small grey rotated-square ("diamond") icon
@@ -70,14 +93,13 @@ been cross-checked against ground truth. Do not assume either way; if it matters
 verify first (crop and compare against several instances, check whether it always sits near a
 tee vs. inconsistently near other features).
 
-### Dashed circle around tee/basket areas
-A large dashed light-gray circle surrounding the tee (and separately the basket) icon in
-`IMG_5641.jpg` crops. Confirmed to be baked into the raw source JPG itself (not a live ChainSpot
-render — the crops that first surfaced this were taken directly from the on-disk fixture, not
-from the running app), so it is UDisc's own rendering, not this app's. Purpose/semantics unknown
-— possibly an interaction/selection radius, possibly something course-design-relevant (e.g. an
-out-of-bounds or mando circle). Do not guess at its meaning in code or detection logic until
-confirmed.
+### Dashed circle around tee icons
+Separate from the confirmed C1/C2 rings above (which are basket-centered): tee pad icons also
+show a similar dashed light-gray circle in several crops (e.g. `IMG_5641.jpg` hole 13/14 tee
+areas). Confirmed to be baked into the raw source JPG itself, so it's UDisc's own rendering — but
+whether it's a tee-specific analog of C1/C2, a generic "interaction/selection radius" UDisc
+applies to any placed icon, or something else, is still unconfirmed. Don't assume it shares C1/C2's
+real-world meaning without checking.
 
 ---
 
@@ -91,17 +113,33 @@ color varies with the local background, but in a predictable way: `observed = al
 `src/lib/autoAnnotation/corridorBendDetectionRibbon.ts` and `scripts/measure-corridor-band.ts`.
 
 **Width is fixed within one screenshot, not across screenshots — measured, not assumed.**
-Empirically measured via perpendicular cross-sections on `IMG_5641.jpg`'s 9 straight holes
-(29 accepted samples across 8/9 holes; the 9th, hole 16, runs along a treeline whose canopy
-texture never passed the measurement's contamination guard): **mean 39.3px, median 40.6px,
-stdev 10.9px, range 19.1–64.0px.** Cross-checked on `resources/real-capture/ReferenceStitch.png`
-(no ground truth there, so measured by locating a plausible straight stretch by eye and
-refining endpoints via contrast maximization): **median 9.3px, range 4.3–20.2px** — roughly 4x
-narrower, confirming width genuinely varies by screenshot/capture scale and must be re-measured
-per photo. Do not derive it from a cross-device "canonical UI scale" the way badge/tee-pad size
-sometimes is elsewhere in this codebase (`deriveCanonicalUiScalePx`) — the owner is explicit that
-assuming uniform UI scaling across every device UDisc renders on is not a safe premise, and this
-measurement bears that out directly.
+Empirically measured via perpendicular cross-sections on `IMG_5641.jpg`'s 9 straight holes, using
+real ground-truth tee/basket coordinates to place the cross-section lines (29 accepted samples
+across 8/9 holes; the 9th, hole 16, runs along a treeline whose canopy texture never passed the
+measurement's contamination guard): **mean 39.3px, median 40.6px, stdev 10.9px, range
+19.1–64.0px.** This number is trustworthy — it's anchored to real, independently-known tee/basket
+positions, not a guess.
+
+**The `ReferenceStitch.png` cross-check number is RETRACTED — do not use it.** It was originally
+reported as "median 9.3px, range 4.3–20.2px," framed as confirming a ~4x narrower band on that
+fixture. That measurement has no ground truth to anchor it, so it relied on three manually
+eyeballed line segments guessed to sit on a clean ribbon stretch. A visual overlay (draw the
+segment, the probed cross-sections, and the measured edges directly on the image — do this before
+trusting any eyeballed-segment measurement like this one) showed two of the three segments were
+NOT measuring the ribbon at all: one sat on a real, narrow dirt/gravel trail in the terrain, the
+other cut through the solid C1 tint next to a basket (see the Circle 1/Circle 2 entry above — this
+is the exact contamination that entry warns about). Even the one segment that did cross real
+ribbon gave inconsistent per-sample widths (4.3–13.6px), so it isn't a clean reference either.
+**Net effect: this fixture's true ribbon width is currently unknown, not "~9px" and not "~4x
+narrower than IMG_5641."** A real measurement here would need either genuine tee/basket ground
+truth for this course (the way IMG_5641 has), or manually-picked segments individually verified
+against a visual overlay before being trusted — not picked by eye alone. Until then, don't derive
+a cross-screenshot width ratio from this fixture, and don't cite the retracted numbers elsewhere.
+
+Either way: do not derive width from a cross-device "canonical UI scale" the way badge/tee-pad
+size sometimes is elsewhere in this codebase (`deriveCanonicalUiScalePx`) — the owner is explicit
+that assuming uniform UI scaling across every device UDisc renders on is not a safe premise.
+Measure it directly per photo, and verify the measurement visually before trusting it.
 
 **Color/alpha — fit cleanly, self-calibrate per hole, don't hard-code either fixture's numbers.**
 Least-squares fit over 106 (on-band, off-band) pixel pairs pooled across 15 Dash holes (varied
@@ -130,15 +168,15 @@ on purpose, benchmarks as follows on Dash's 18 real holes (same methodology as t
 
 Perfect specificity (every straight hole correctly called straight, zero false bends — better
 than either prior detector) but still zero correctly-located bends on genuinely bent holes.
-Documented root cause in the module: many baskets on real screenshots carry a SECOND
-semi-transparent overlay — a tinted landing-zone/OB-circle fill, roughly 90px radius on
-`IMG_5641.jpg` — that composites into a similar mid-tone grey-green as the ribbon itself. A
-hole whose fitted alpha/bandColor happens to resemble that circle's own blend has its mask
-swallow the circle's interior instead of tracing the ribbon; the existing detour-ratio guard then
+Documented, confirmed root cause: **every** basket carries a Circle 1 ring (see the C1/C2 entry
+above) — a solid semi-transparent tint, roughly 90px radius on `IMG_5641.jpg` — that composites
+into a similar mid-tone grey-green as the ribbon itself, universally, not as an occasional edge
+case. A hole whose fitted alpha/bandColor happens to resemble C1's own blend has its mask swallow
+the circle's interior instead of tracing the ribbon; the existing detour-ratio guard then
 conservatively rejects rather than proposing a wrong bend, so this collapses to "no bends found"
 on many real doglegs rather than a wrong answer. Not yet solved — the ribbon's own measured width
-is a plausible next signal for telling a narrow ribbon apart from a much wider landing-zone
-circle, not yet used for that purpose.
+is a plausible next signal for telling a narrow ribbon apart from C1's much wider fill, not yet
+used for that purpose.
 
 **None of the three detectors above are wired into the live app.** Only the color-heuristic one
 is — it shipped first, before this characterization existed, and its own real-world accuracy on

@@ -70,23 +70,27 @@
  *     `corridorBendDetectionRibbonMass.ts` already does, not reimplemented.
  *
  * KNOWN LIMITATION, found and left honestly documented rather than papered
- * over: UDisc's course-map screenshots can carry MORE than one semi-
- * transparent overlay near a basket -- the ribbon corridor itself, and a
- * separate tinted "landing zone"/OB-circle fill that surrounds many baskets
- * at roughly a 90px radius on IMG_5641. Measured directly (see the task
- * write-up): both overlays composite into a similar mid-tone grey-green
- * range, so a hole whose fitted `alpha`/`bandColor` happens to resemble the
- * circle's own blend will have its residual mask swallow the circle's
- * interior as if it were band. `traceShortestOpenPath`'s detour-ratio guard
- * usually keeps this from producing an outright WRONG bend (an over-
- * permissive blob rarely forms a plausible direct path), but it means many
- * genuinely bent holes near a basket-side circle collapse to "no path
- * found" -- zero proposed bends -- rather than a correct dogleg. This is why
- * this detector is very conservative (see the benchmark numbers: it beats
- * both other detectors' false-bend rate) but currently recalls few real
- * bends. Distinguishing "ribbon" from "other tinted overlay" would need a
- * signal this module does not yet use (e.g. the ribbon's own measured WIDTH,
- * since a landing-zone circle's fill is far wider than any ribbon).
+ * over: UDisc's course-map screenshots carry MORE than one semi-transparent
+ * overlay near a basket -- the ribbon corridor itself, and Circle 1 (C1), the
+ * standard disc golf ~10m/33ft putting-proximity ring UDisc renders as a
+ * solid tinted fill around EVERY basket on EVERY hole (see
+ * `docs/cv-udisc-rendered-ui-taxonomy.md`'s C1/C2 entry -- this is not an
+ * occasional edge case, it is universal, the same way a basketball court
+ * always has a free-throw semicircle). Measured directly (see the task
+ * write-up): C1's fill composites into a similar mid-tone grey-green range as
+ * the ribbon, at roughly a 90px radius on IMG_5641, so a hole whose fitted
+ * `alpha`/`bandColor` happens to resemble C1's own blend will have its
+ * residual mask swallow the circle's interior as if it were band.
+ * `traceShortestOpenPath`'s detour-ratio guard usually keeps this from
+ * producing an outright WRONG bend (an over-permissive blob rarely forms a
+ * plausible direct path), but it means many genuinely bent holes near their
+ * own basket's C1 ring collapse to "no path found" -- zero proposed bends --
+ * rather than a correct dogleg. This is why this detector is very
+ * conservative (see the benchmark numbers: it beats both other detectors'
+ * false-bend rate) but currently recalls few real bends. Distinguishing
+ * "ribbon" from "C1 fill" would need a signal this module does not yet use
+ * (e.g. the ribbon's own measured WIDTH, since C1's fill is far wider than
+ * any ribbon).
  *
  * Same output contract as the other two detectors: a plain `SourcePoint[]`,
  * ordered tee-to-basket, no confidence/provenance field ever attached (see
