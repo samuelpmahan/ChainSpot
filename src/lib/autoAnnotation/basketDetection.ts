@@ -21,7 +21,7 @@ import type { LocalSnapKind, LocalSnapPoint } from '../cv/localSnap';
 import type { RawObjectMaskResult } from './rawObjectMask';
 import type { HoleNumberDetection } from './holeNumberDetection';
 import type { P3OwnershipResult } from './rawObjectOwnership';
-import type { P45EndpointBridgeResult, P4RibbonOwnershipResult } from './p4RibbonOwnership';
+import type { P4RibbonOwnershipResult } from './p4RibbonOwnership';
 import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
 
@@ -29,6 +29,8 @@ export type BasketCandidate = CalibratedBasketCandidate;
 
 export interface CourseDetectionPerformance {
 	readonly totalMs: number;
+	/** Ribbon segmentation is computed once per detection pass and shared by P4 and P6.2; always 1 in the pancake path. */
+	readonly ribbonSegmentationRuns?: number;
 	readonly cachedAtStart: {
 		readonly runtime: boolean;
 		readonly templatePack: boolean;
@@ -51,8 +53,9 @@ export interface CourseDetectionPerformance {
 		readonly p1MaskMs: number;
 		readonly p2BadgeLabelMs: number;
 		readonly p3Ms: number;
+		/** Shared ribbon segmentation cost, paid once and reused by P4 and P6.2 — not duplicated into p4Ms/p6Ms. */
+		readonly ribbonSegmentationMs?: number;
 		readonly p4Ms?: number;
-		readonly p45Ms?: number;
 		readonly p5Ms?: number;
 		readonly p6Ms?: number;
 		readonly teesMs: number;
@@ -112,8 +115,6 @@ export interface CourseDetectionResult {
 	readonly p3Ownership?: P3OwnershipResult;
 	/** Pancake-4 shadow result: ribbon-component candidate elimination and basket membership. */
 	readonly p4RibbonOwnership?: P4RibbonOwnershipResult;
-	/** Pancake-4.5 shadow experiment: local endpoint-gap bridge A/B comparison. */
-	readonly p45EndpointBridge?: P45EndpointBridgeResult;
 	/** Pancake-5 shadow result: sparse one-to-one tee -> labeled-badge assignment. */
 	readonly p5SparseAssignment?: P5SparseAssignmentResult;
 	/** Pancake-6 shadow result: local LowPar one-to-one basket assignment. */
@@ -541,59 +542,6 @@ export async function detectCourseCandidates(
 				})
 			);
 		}
-		if (reply.course.p45EndpointBridge) {
-			const p45 = reply.course.p45EndpointBridge;
-			const before = p45.original;
-			const after = p45.bridged;
-			const countTees = (status: 'resolved' | 'ambiguous' | 'noRibbonSupport') =>
-				p45.original.teeResolutions.filter((resolution) => resolution.status === status).length;
-			const countTeesAfter = (status: 'resolved' | 'ambiguous' | 'noRibbonSupport') =>
-				p45.bridged.teeResolutions.filter((resolution) => resolution.status === status).length;
-			console.info('[ChainSpot P4.5 endpoint bridge]');
-			console.table({
-				bridgeRadiusPx: p45.bridgeRadiusPx,
-				bridgeBandHalfWidthPx: p45.bridgeBandHalfWidthPx,
-				gapThresholdsPx: p45.gapThresholdsPx.join('/'),
-				resolvedTeesBefore: countTees('resolved'),
-				resolvedTeesAfter: countTeesAfter('resolved'),
-				newlyResolvedTees: p45.newlyResolvedHoleNumbers.length,
-				ambiguousTeesBefore: countTees('ambiguous'),
-				ambiguousTeesAfter: countTeesAfter('ambiguous'),
-				noRibbonSupportBefore: countTees('noRibbonSupport'),
-				noRibbonSupportAfter: countTeesAfter('noRibbonSupport'),
-				basketResolvedBefore: before.holes.filter((hole) => hole.status === 'basketResolved').length,
-				basketResolvedAfter: after.holes.filter((hole) => hole.status === 'basketResolved').length,
-				basketAmbiguousBefore: before.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
-				basketAmbiguousAfter: after.holes.filter((hole) => hole.status === 'basketAmbiguous').length,
-				noBasketBefore: before.holes.filter((hole) => hole.status === 'noBasket').length,
-				noBasketAfter: after.holes.filter((hole) => hole.status === 'noBasket').length,
-				sharedComponentsBefore: before.sharedComponentLabels.length,
-				sharedComponentsAfter: after.sharedComponentLabels.length,
-				acceptedBridgeGapCount: p45.acceptedBridgeGapsPx.length,
-				acceptedBridgeGapsPx: p45.acceptedBridgeGapsPx.join('/') || null,
-				ms: reply.course.performance?.stages.p45Ms ?? Number.NaN
-			});
-			console.table({
-				newlyResolvedHoleNumbers: p45.newlyResolvedHoleNumbers.join('/') || null,
-				newlyBasketResolvedHoleNumbers: p45.newlyBasketResolvedHoleNumbers.join('/') || null,
-				newlyAmbiguousHoleNumbers: p45.newlyAmbiguousHoleNumbers.join('/') || null,
-				ownershipChangedHoleNumbers: p45.ownershipChangedHoleNumbers.join('/') || null
-			});
-			console.table(
-				p45.changedHoles.map((hole) => ({
-					hole: hole.holeNumber,
-					beforeTeeStatus: hole.beforeTeeStatus,
-					afterTeeStatus: hole.afterTeeStatus,
-					candidateBadges: hole.candidateBadges.join('/') || null,
-					component: hole.component,
-					beforeTeeContact: hole.beforeTeeContact,
-					afterTeeContact: hole.afterTeeContact,
-					beforeBasketStatus: hole.beforeBasketStatus,
-					afterBasketStatus: hole.afterBasketStatus,
-					basketHoles: hole.basketHoles.join('/') || null
-				}))
-			);
-		}
 		if (reply.course.p5SparseAssignment) {
 			const p5 = reply.course.p5SparseAssignment;
 			console.info('[ChainSpot P5 sparse assignment]');
@@ -672,41 +620,6 @@ export async function detectCourseCandidates(
 					};
 				})
 			);
-			const assignedByHole = new Map(
-				p6.assignments.map((assignment) => [assignment.holeNumber, assignment])
-			);
-			console.table(
-				p6.candidates
-					.filter((candidate) => assignedByHole.get(candidate.holeNumber)?.status !== 'p4Locked')
-					.map((candidate) => {
-						const assignment = assignedByHole.get(candidate.holeNumber);
-						return {
-							hole: candidate.holeNumber,
-							basketIndex: candidate.basketIndex,
-							forwardProjectionPx: candidate.forwardProjectionPx,
-							forwardAngleDeg: candidate.forwardAngleDeg,
-							passedForwardGate: candidate.passedForwardGate,
-							lowParScore: candidate.lowParScore,
-							valid: candidate.valid,
-							rankWithinHole: candidate.rankWithinHole,
-							assignedByHungarian:
-								assignment?.status === 'lowParAssigned' &&
-								assignment.assignedBasketIndex === candidate.basketIndex
-						};
-					})
-					.sort((left, right) => {
-						if (left.hole !== right.hole) return left.hole - right.hole;
-						const leftScore = left.lowParScore ?? Number.NEGATIVE_INFINITY;
-						const rightScore = right.lowParScore ?? Number.NEGATIVE_INFINITY;
-						return (Number.isFinite(rightScore) ? rightScore : Number.NEGATIVE_INFINITY) -
-							(Number.isFinite(leftScore) ? leftScore : Number.NEGATIVE_INFINITY);
-						})
-				);
-			console.info('[ChainSpot P6.1 original vs gated]', {
-				originalP6: p6.originalP6 ?? null,
-				gatedP6: p6,
-				changedHoleNumbers: p6.changedHoleNumbers ?? []
-			});
 			if (p6.swapAdjudication) {
 				const swap = p6.swapAdjudication;
 				console.info('[ChainSpot P6.2 local swap adjudication]');

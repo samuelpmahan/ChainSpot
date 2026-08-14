@@ -491,19 +491,19 @@ function deriveP4RibbonOwnershipFromSegmentation(
 	return { teeResolutions, basketEvidence, holes, sharedComponentLabels, endpointContactRadiusPx };
 }
 
+/**
+ * `segmentation` is supplied by the caller rather than computed here — the
+ * pancake worker builds it once (see `basketDetection.worker.ts`) and shares
+ * it with P6.2, so ribbon segmentation runs exactly once per detection pass.
+ */
 export function deriveP4RibbonOwnership(
-	raster: RibbonMassRaster,
+	segmentation: RibbonMassSegmentation,
 	tees: readonly RawMaskTee[],
 	badges: readonly P2LabeledBadge[],
 	baskets: readonly RawMaskBasket[],
 	p3Ownership: P3OwnershipResult,
 	params: RibbonMassParams = DEFAULT_RIBBON_MASS_PARAMS
 ): P4RibbonOwnershipResult {
-	const segmentation = segmentRibbonMass(
-		raster,
-		badges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
-		params
-	);
 	return deriveP4RibbonOwnershipFromSegmentation(segmentation, tees, badges, baskets, p3Ownership, params);
 }
 

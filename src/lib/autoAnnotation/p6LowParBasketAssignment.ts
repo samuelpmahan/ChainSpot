@@ -19,13 +19,8 @@ import type { P4HoleRibbonResult, P4RibbonOwnershipResult } from './p4RibbonOwne
 import type { P2LabeledBadge } from './rawObjectOwnership';
 import type { RawMaskBasket, RawMaskTee } from './rawObjectMask';
 import type { P5SparseAssignmentResult, P5TeeAssignment } from './p5SparseAssignment';
-import {
-	DEFAULT_RIBBON_MASS_PARAMS,
-	nearestComponentLabel,
-	nearestKeptDistancePx,
-	segmentRibbonMass
-} from './ribbonMass';
-import type { RibbonMassParams } from './ribbonMass';
+import { DEFAULT_RIBBON_MASS_PARAMS, nearestComponentLabel, nearestKeptDistancePx } from './ribbonMass';
+import type { RibbonMassParams, RibbonMassSegmentation } from './ribbonMass';
 
 export const P6_DISALLOWED_COST = 1_000_000;
 export const LOW_PAR_HIGHER_IS_BETTER = true;
@@ -653,7 +648,7 @@ function findSwapCandidatePairs(
  * the caller must skip the pair rather than guess.
  */
 function ribbonComponentDistancePx(
-	segmentation: ReturnType<typeof segmentRibbonMass>,
+	segmentation: RibbonMassSegmentation,
 	componentLabel: number | null,
 	basket: RawMaskBasket
 ): number | null {
@@ -672,14 +667,13 @@ function ribbonComponentDistancePx(
 
 /**
  * Pancake 6.2: derives the conservative post-assignment 2-cycle correction.
- * Reuses the existing UNBRIDGED ribbon segmentation (same raster, badges,
- * and params P4 already segmented with) rather than P4's own internal
- * segmentation object, which P4 does not expose; the call is deterministic,
- * so it reproduces P4's identical component map.
+ * Takes the SAME ribbon segmentation P4 used (built once by the caller and
+ * shared across stages) rather than re-segmenting; this stage never
+ * segments the raster itself.
  */
 function derive2x2SwapAdjudication(
 	gatedP6: P6LowParBasketAssignmentSnapshot,
-	raster: CorridorBendRaster,
+	segmentation: RibbonMassSegmentation,
 	baskets: readonly RawMaskBasket[],
 	badges: readonly P2LabeledBadge[],
 	ribbonParams: RibbonMassParams = DEFAULT_RIBBON_MASS_PARAMS
@@ -690,11 +684,6 @@ function derive2x2SwapAdjudication(
 		return { pairsConsidered: 0, swapsApplied: 0, changedHoleNumbers: [], ms: performance.now() - startedAt, pairs: [] };
 	}
 
-	const segmentation = segmentRibbonMass(
-		raster,
-		badges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
-		ribbonParams
-	);
 	const badgeByHole = new Map(badges.map((badge) => [badge.holeNumber, badge]));
 	const ribbonComponentByHole = new Map<number, number | null>();
 	const ribbonComponentForHole = (holeNumber: number): number | null => {
@@ -820,17 +809,23 @@ function applySwapAdjudication(
 	return { ...gatedP6, assignments, totalAssignmentCost };
 }
 
+/**
+ * `ribbonSegmentation` is the SAME segmentation P4 was derived from — built
+ * once by the caller (see `basketDetection.worker.ts`) and passed down here
+ * so P6.2's ribbon-distance evidence never re-segments the raster.
+ */
 export function deriveP6LowParBasketAssignment(
 	raster: CorridorBendRaster,
 	tees: readonly RawMaskTee[],
 	baskets: readonly RawMaskBasket[],
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
-	p4: P4RibbonOwnershipResult
+	p4: P4RibbonOwnershipResult,
+	ribbonSegmentation: RibbonMassSegmentation
 ): P6LowParBasketAssignmentResult {
 	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, false);
 	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, true);
-	const swapAdjudication = derive2x2SwapAdjudication(gatedP6, raster, baskets, badges);
+	const swapAdjudication = derive2x2SwapAdjudication(gatedP6, ribbonSegmentation, baskets, badges);
 	const adjudicatedP6 = applySwapAdjudication(gatedP6, swapAdjudication);
 	return {
 		...adjudicatedP6,

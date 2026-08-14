@@ -47,7 +47,8 @@ import { localFeatureSnap } from '../cv/localSnap';
 import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
 import { detectRawObjectMask } from './rawObjectMask';
 import { deriveP3Ownership } from './rawObjectOwnership';
-import { deriveP45EndpointBridgeExperiment } from './p4RibbonOwnership';
+import { deriveP4RibbonOwnership } from './p4RibbonOwnership';
+import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from './ribbonMass';
 import { deriveP5SparseAssignment } from './p5SparseAssignment';
 import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
 import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
@@ -555,17 +556,30 @@ async function detectCourse(request: CourseDetectionRequest) {
 		);
 		const p3Ms = performance.now() - p3StartedAt;
 
-		const p45StartedAt = performance.now();
-		const p45EndpointBridge = deriveP45EndpointBridgeExperiment(
+		// Ribbon segmentation is the expensive shared input to both P4 and
+		// P6.2's ribbon-distance evidence. Run it exactly once here and pass
+		// the same segmentation object to both — neither stage segments the
+		// raster itself. (P4.5's endpoint-bridge experiment was a negative
+		// result — see p4RibbonOwnership.ts — and no longer runs in this path.)
+		const ribbonSegmentationStartedAt = performance.now();
+		const ribbonSegmentation = segmentRibbonMass(
 			{ data: full.rgba, widthPx: full.width, heightPx: full.height, channels: 4 },
+			p2LabeledBadges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
+			DEFAULT_RIBBON_MASS_PARAMS
+		);
+		const ribbonSegmentationMs = performance.now() - ribbonSegmentationStartedAt;
+		// Structurally guaranteed by the single segmentRibbonMass call site above.
+		const ribbonSegmentationRuns = 1;
+
+		const p4StartedAt = performance.now();
+		const p4RibbonOwnership = deriveP4RibbonOwnership(
+			ribbonSegmentation,
 			rawMaskObjects.tees,
 			p2LabeledBadges,
 			rawMaskObjects.baskets,
 			p3Ownership
 		);
-		const p45Ms = performance.now() - p45StartedAt;
-		const p4RibbonOwnership = p45EndpointBridge.original;
-		const p4Ms = p45EndpointBridge.originalMs;
+		const p4Ms = performance.now() - p4StartedAt;
 
 		const p5StartedAt = performance.now();
 		const p5SparseAssignment = deriveP5SparseAssignment(
@@ -591,7 +605,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 			rawMaskObjects.baskets,
 			p2LabeledBadges,
 			p5SparseAssignment,
-			p4RibbonOwnership
+			p4RibbonOwnership,
+			ribbonSegmentation
 		);
 		const p6Ms = performance.now() - p6StartedAt;
 
@@ -599,6 +614,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 		const basketTemplateScale = deriveBasketTemplateScale(numberTemplateScale, pack.manifest.calibration);
 		const performanceReport = {
 			totalMs: elapsedMs(),
+			ribbonSegmentationRuns,
 			cachedAtStart: {
 				runtime: runtimeCachedAtStart,
 				templatePack: templatePackCachedAtStart
@@ -621,8 +637,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 				p1MaskMs,
 				p2BadgeLabelMs,
 				p3Ms,
+				ribbonSegmentationMs,
 				p4Ms,
-				p45Ms,
 				p5Ms,
 				p6Ms,
 				teesMs: 0,
@@ -689,7 +705,6 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p2BadgeDetection,
 			p3Ownership,
 			p4RibbonOwnership,
-			p45EndpointBridge,
 			p5SparseAssignment,
 			p6LowParBasketAssignment,
 			performance: performanceReport
