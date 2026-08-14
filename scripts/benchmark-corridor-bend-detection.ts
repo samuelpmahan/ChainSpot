@@ -12,36 +12,59 @@ import {
 } from '../src/lib/autoAnnotation/corridorBendDetectionRibbonMass';
 import type { RibbonMassSegmentationForBends } from '../src/lib/autoAnnotation/corridorBendDetectionRibbonMass';
 import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from '../src/lib/autoAnnotation/ribbonMass';
-import type { RibbonMassBadgeBox, RibbonMassRaster } from '../src/lib/autoAnnotation/ribbonMass';
+import type { RibbonMassBadgeBox, RibbonMassRaster, RibbonMassSegmentation } from '../src/lib/autoAnnotation/ribbonMass';
 import { DEFAULT_CORRIDOR_BEND_RIBBON_PARAMS, detectCorridorBendsRibbon } from '../src/lib/autoAnnotation/corridorBendDetectionRibbon';
+import { DEFAULT_DETECT_CORRIDOR_BENDS_CAPSULE_PARAMS, detectCorridorBendsCapsule } from '../src/lib/autoAnnotation/corridorBendDetectionCapsule';
+import {
+	DEFAULT_DETECT_CORRIDOR_BENDS_CAPSULE_RIBBON_MASS_PARAMS,
+	detectCorridorBendsCapsuleRibbonMass
+} from '../src/lib/autoAnnotation/corridorBendDetectionCapsuleRibbonMass';
+import { discoverBasketRingRadiiPx } from '../src/lib/autoAnnotation/corridorEvidenceGridRibbonMass';
+import type { RibbonMassSegmentationForEvidence } from '../src/lib/autoAnnotation/corridorEvidenceGridRibbonMass';
 import { IMG_5641_GROUND_TRUTH } from '../src/lib/autoAnnotation/courseGroundTruth';
 import type { SourcePoint } from '../src/lib/domain/annotatedRound';
 import { buildAlexClarkGroundTruth, buildDashGroundTruth, loadAlexClarkFixture } from './corridorBendGroundTruth';
 import type { HoleBendTruth } from './corridorBendGroundTruth';
 
 /**
- * Head-to-head benchmark for THREE corridor-bend-detection substrates:
+ * Head-to-head benchmark for FIVE corridor-bend-detection substrates:
  *
  * - the SHIPPED per-hole color-heuristic detector (`corridorBendDetection.ts`,
  *   already wired into `approveHolePieces` — unmodified here);
  * - the EVALUATION-ONLY ribbon-mass-segmentation detector
- *   (`corridorBendDetectionRibbonMass.ts` — not wired into anything); and
+ *   (`corridorBendDetectionRibbonMass.ts` — not wired into anything);
  * - the EVALUATION-ONLY band-targeted detector
- *   (`corridorBendDetectionRibbon.ts` — not wired into anything), the first
- *   of the three built on the CORRECT premise: the grey band on a UDisc
- *   course-map screenshot is not terrain to infer, it is UDisc's own
- *   pre-rendered corridor overlay, alpha-composited over whatever is
- *   underneath. See that module's doc comment and
- *   `scripts/measure-corridor-band.ts` for the empirical measurement its
- *   design is grounded in.
+ *   (`corridorBendDetectionRibbon.ts` — not wired into anything), built on
+ *   the premise that the grey band on a UDisc course-map screenshot is not
+ *   terrain to infer, it is UDisc's own pre-rendered corridor overlay,
+ *   alpha-composited over whatever is underneath (see that module's doc
+ *   comment and `scripts/measure-corridor-band.ts`);
+ * - arm C, "capsule" (EVALUATION-ONLY): the capsule-REGION-scoring engine
+ *   (`corridorBendDetectionCapsule.ts`'s `fitCapsuleBends`, a faithful port
+ *   of `scripts/cv-probes/hole_path_capsule_fit.py`, validated against fresh
+ *   Python output) driven by that module's own classic LAB-lightness
+ *   evidence — the first of the five NOT built on shortest-path-through-a-
+ *   mask (see that module's doc comment for why the capsule paradigm fixes
+ *   the other four's structural blind spot: it cannot separate a real
+ *   shallow bend from a spurious micro-wiggle);
+ * - arm D, "capsule+ribbon-mass" (EVALUATION-ONLY): the SAME capsule engine,
+ *   driven instead by this branch's modern ribbon-mass/occluder-bridge/
+ *   ring-arc evidence substrate (`corridorEvidenceGridRibbonMass.ts`'s
+ *   `buildModernCorridorEvidence`) — built as a genuinely independent,
+ *   parallel piece of work around the shared `CorridorEvidenceGrid` contract
+ *   (`corridorEvidenceGrid.ts`), wired together in
+ *   `corridorBendDetectionCapsuleRibbonMass.ts`.
  *
- * All three take the SAME tee/basket ground-truth anchors per hole and the
- * SAME default params-equivalents wherever the substrates share a concept
- * (crop margin geometry, RDP epsilon, turn-angle floor, detour ratio, bend
- * cap) so a difference in results reflects the substrate, not a tuning
- * mismatch. Scoring ports `scripts/cv-probes/hole_path_semantic_bends.py`'s
- * methodology: exact bend-count match, false-bend rate on straight holes
- * specifically, and (only when the count is correct) bend-location error via
+ * All five take the SAME tee/basket ground-truth anchors per hole (arms C/D
+ * additionally take the same badge ground truth used to pre-fill
+ * `ribbonMass.ts`'s seeds, since capsule anchoring is badge-dependent) and
+ * the SAME default params-equivalents wherever the substrates share a
+ * concept (crop margin geometry, RDP epsilon / turn-angle floor / detour
+ * ratio / bend cap for the shortest-path arms) so a difference in results
+ * reflects the substrate, not a tuning mismatch. Scoring ports
+ * `scripts/cv-probes/hole_path_semantic_bends.py`'s methodology: exact
+ * bend-count match, false-bend rate on straight holes specifically, and
+ * (only when the count is correct) bend-location error via
  * nearest-truth-point distance, flagged "LOCATION WRONG" past the same 42px
  * diagnostic cutoff that probe used. See `corridorBendGroundTruth.ts`'s doc
  * comment for what is deliberately NOT ported (the frozen-centerline
@@ -272,6 +295,8 @@ interface HoleInput {
 	readonly holeNumber: number;
 	readonly tee: SourcePoint;
 	readonly basket: SourcePoint;
+	/** Badge ground truth, for arms C/D's capsule anchoring (see `fitCapsuleBends`'s doc comment). Undefined for AlexClark, which ships no numbered-badge ground truth (see `main`'s `alexBadges` comment) — those holes fit unanchored. */
+	readonly badge?: SourcePoint;
 }
 
 interface DetectorHoleResult {
@@ -308,6 +333,24 @@ interface CourseResult {
 		readonly medianMsPerHole: number | null;
 		readonly meanMsPerHole: number | null;
 	};
+	/** Arm C: capsule-region scoring over `corridorBendDetectionCapsule.ts`'s own classic evidence -- per-hole cost shape like `colorHeuristic`/`ribbonBand` (crop + build-evidence + fit, no whole-course precomputation). */
+	readonly capsule: {
+		readonly perHole: readonly DetectorHoleResult[];
+		readonly aggregate: AggregateStats;
+		readonly medianMsPerHole: number | null;
+		readonly meanMsPerHole: number | null;
+	};
+	/** Arm D: the SAME capsule engine over the modern ribbon-mass evidence substrate -- cost shape like `ribbonMass` (whole-course segmentation + ring-radius discovery, amortized, plus cheap per-hole evidence+fit). */
+	readonly capsuleRibbonMass: {
+		readonly perHole: readonly DetectorHoleResult[];
+		readonly aggregate: AggregateStats;
+		readonly segmentationMedianMs: number;
+		readonly ringDiscoveryMedianMs: number;
+		readonly perHoleMedianMs: number | null;
+		readonly perHoleMeanMs: number | null;
+		readonly rawIndependentMsPerHole: number;
+		readonly amortizedMsPerHole: number;
+	};
 }
 
 function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInput[], truth: readonly HoleBendTruth[], badges: readonly RibbonMassBadgeBox[]): CourseResult {
@@ -327,7 +370,7 @@ function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInp
 
 	// --- Ribbon mass: whole-course segmentation once (timed separately), then cheap per-hole seeding/windowing/pathfinding. ---
 	const raster: RibbonMassRaster = { data: image.rgba, widthPx: image.widthPx, heightPx: image.heightPx, channels: 4 };
-	let segmentation: RibbonMassSegmentationForBends | undefined;
+	let segmentation: RibbonMassSegmentation | undefined;
 	const segmentationTimes: number[] = [];
 	for (let i = 0; i < SEGMENTATION_TIMING_REPETITIONS; i += 1) {
 		const start = performance.now();
@@ -358,10 +401,56 @@ function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInp
 		return { holeNumber: hole.holeNumber, predicted: result, medianMs, score: scoreHole(holeTruth, result) };
 	});
 
+	// --- Arm C (capsule, classic evidence): crop + build-evidence + fit, per hole -- same cost shape as color-heuristic/ribbon-band. ---
+	const capsulePerHole: DetectorHoleResult[] = holes.map((hole) => {
+		const bounds = cropBounds(image.widthPx, image.heightPx, hole.tee, hole.basket);
+		const { result, medianMs } = timedMedian(() => {
+			const raster = cropAndDownscale(image, bounds, CROP_MAX_DIM);
+			return detectCorridorBendsCapsule(raster, hole.tee, hole.basket, hole.badge, DEFAULT_DETECT_CORRIDOR_BENDS_CAPSULE_PARAMS);
+		}, TIMING_REPETITIONS);
+		const holeTruth = truthByHole.get(hole.holeNumber);
+		if (!holeTruth) throw new Error(`No ground truth for ${course} hole ${hole.holeNumber}`);
+		return { holeNumber: hole.holeNumber, predicted: result, medianMs, score: scoreHole(holeTruth, result) };
+	});
+
+	// --- Arm D (capsule + modern ribbon-mass evidence): reuses the SAME `segmentation` computed above, plus a whole-course ring-radius discovery pass (also amortized), then cheap per-hole evidence+fit. ---
+	if (!segmentation?.evidence) throw new Error(`segmentRibbonMass did not populate evidence for ${course}`);
+	const segmentationWithEvidence: RibbonMassSegmentationForEvidence = { ...segmentation, evidence: segmentation.evidence };
+	const ringDiscoveryTimes: number[] = [];
+	let ringRadiiPx: number[] = [];
+	for (let i = 0; i < SEGMENTATION_TIMING_REPETITIONS; i += 1) {
+		const start = performance.now();
+		ringRadiiPx = discoverBasketRingRadiiPx(raster, holes.map((hole) => hole.basket));
+		ringDiscoveryTimes.push(performance.now() - start);
+	}
+	const ringDiscoveryMedianMs = median(ringDiscoveryTimes) ?? 0;
+
+	const capsuleRibbonMassPerHole: DetectorHoleResult[] = holes.map((hole) => {
+		const { result, medianMs } = timedMedian(
+			() =>
+				detectCorridorBendsCapsuleRibbonMass(
+					segmentationWithEvidence,
+					hole.tee,
+					hole.basket,
+					hole.badge,
+					ringRadiiPx,
+					DEFAULT_DETECT_CORRIDOR_BENDS_CAPSULE_RIBBON_MASS_PARAMS
+				),
+			TIMING_REPETITIONS
+		);
+		const holeTruth = truthByHole.get(hole.holeNumber);
+		if (!holeTruth) throw new Error(`No ground truth for ${course} hole ${hole.holeNumber}`);
+		return { holeNumber: hole.holeNumber, predicted: result, medianMs, score: scoreHole(holeTruth, result) };
+	});
+
 	const colorMs = colorPerHole.map((entry) => entry.medianMs);
 	const ribbonMs = ribbonPerHole.map((entry) => entry.medianMs);
 	const ribbonPerHoleMean = mean(ribbonMs) ?? 0;
 	const ribbonBandMs = ribbonBandPerHole.map((entry) => entry.medianMs);
+	const capsuleMs = capsulePerHole.map((entry) => entry.medianMs);
+	const capsuleRibbonMassMs = capsuleRibbonMassPerHole.map((entry) => entry.medianMs);
+	const capsuleRibbonMassPerHoleMean = mean(capsuleRibbonMassMs) ?? 0;
+	const capsuleRibbonMassOneTimeMs = segmentationMedianMs + ringDiscoveryMedianMs;
 
 	return {
 		course,
@@ -386,6 +475,22 @@ function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInp
 			perHoleMeanMs: mean(ribbonMs),
 			rawIndependentMsPerHole: segmentationMedianMs + ribbonPerHoleMean,
 			amortizedMsPerHole: segmentationMedianMs / Math.max(1, holes.length) + ribbonPerHoleMean
+		},
+		capsule: {
+			perHole: capsulePerHole,
+			aggregate: aggregate(capsulePerHole.map((entry) => entry.score)),
+			medianMsPerHole: median(capsuleMs),
+			meanMsPerHole: mean(capsuleMs)
+		},
+		capsuleRibbonMass: {
+			perHole: capsuleRibbonMassPerHole,
+			aggregate: aggregate(capsuleRibbonMassPerHole.map((entry) => entry.score)),
+			segmentationMedianMs,
+			ringDiscoveryMedianMs,
+			perHoleMedianMs: median(capsuleRibbonMassMs),
+			perHoleMeanMs: mean(capsuleRibbonMassMs),
+			rawIndependentMsPerHole: capsuleRibbonMassOneTimeMs + capsuleRibbonMassPerHoleMean,
+			amortizedMsPerHole: capsuleRibbonMassOneTimeMs / Math.max(1, holes.length) + capsuleRibbonMassPerHoleMean
 		}
 	};
 }
@@ -414,11 +519,13 @@ function printCourseReport(result: CourseResult): void {
 	for (const [label, run] of [
 		['color-heuristic', result.colorHeuristic] as const,
 		['ribbon-mass', result.ribbonMass] as const,
-		['ribbon-band', result.ribbonBand] as const
+		['ribbon-band', result.ribbonBand] as const,
+		['capsule', result.capsule] as const,
+		['capsule+ribbon-mass', result.capsuleRibbonMass] as const
 	]) {
 		const a = run.aggregate;
 		console.log(
-			`${label.padEnd(18)} | ${formatPct(a.exactCountAccuracy).padEnd(11)} | ${`${a.falseBendsOnStraightHoles}/${a.straightHoleCount} (${formatPct(a.falseBendRate)})`.padEnd(27)} | ${String(a.goodCount).padEnd(4)} | ${String(a.locationWrongCount).padEnd(9)} | ${formatPx(a.medianLocationErrorPx).padEnd(14)} | ${formatPx(a.maxLocationErrorPx)}`
+			`${label.padEnd(20)} | ${formatPct(a.exactCountAccuracy).padEnd(11)} | ${`${a.falseBendsOnStraightHoles}/${a.straightHoleCount} (${formatPct(a.falseBendRate)})`.padEnd(27)} | ${String(a.goodCount).padEnd(4)} | ${String(a.locationWrongCount).padEnd(9)} | ${formatPx(a.medianLocationErrorPx).padEnd(14)} | ${formatPx(a.maxLocationErrorPx)}`
 		);
 	}
 	console.log(
@@ -431,13 +538,22 @@ function printCourseReport(result: CourseResult): void {
 	console.log(
 		`ribbon-band speed: median ${formatMs(result.ribbonBand.medianMsPerHole)}/hole, mean ${formatMs(result.ribbonBand.meanMsPerHole)}/hole`
 	);
+	console.log(
+		`capsule speed: median ${formatMs(result.capsule.medianMsPerHole)}/hole, mean ${formatMs(result.capsule.meanMsPerHole)}/hole`
+	);
+	console.log(
+		`capsule+ribbon-mass speed: whole-course segmentation+ring-discovery median ${formatMs(result.capsuleRibbonMass.segmentationMedianMs + result.capsuleRibbonMass.ringDiscoveryMedianMs)}, per-hole median ${formatMs(result.capsuleRibbonMass.perHoleMedianMs)} ` +
+			`(raw independent-per-hole: ${formatMs(result.capsuleRibbonMass.rawIndependentMsPerHole)}/hole; amortized reuse: ${formatMs(result.capsuleRibbonMass.amortizedMsPerHole)}/hole)`
+	);
 	console.log('\nper-hole detail:');
-	console.log('hole | truth | color pred/status | ribbon-mass pred/status | ribbon-band pred/status');
+	console.log('hole | truth | color pred/status | ribbon-mass pred/status | ribbon-band pred/status | capsule pred/status | capsule+RM pred/status');
 	for (const hole of result.colorHeuristic.perHole) {
 		const ribbon = result.ribbonMass.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
 		const band = result.ribbonBand.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
+		const capsule = result.capsule.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
+		const capsuleRibbonMass = result.capsuleRibbonMass.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
 		console.log(
-			`${String(hole.holeNumber).padStart(4)} | ${String(hole.score.truthCount).padStart(5)} | ${String(hole.score.predictedCount)}/${hole.score.status.padEnd(13)} | ${String(ribbon.score.predictedCount)}/${ribbon.score.status.padEnd(13)} | ${String(band.score.predictedCount)}/${band.score.status}`
+			`${String(hole.holeNumber).padStart(4)} | ${String(hole.score.truthCount).padStart(5)} | ${String(hole.score.predictedCount)}/${hole.score.status.padEnd(13)} | ${String(ribbon.score.predictedCount)}/${ribbon.score.status.padEnd(13)} | ${String(band.score.predictedCount)}/${band.score.status.padEnd(13)} | ${String(capsule.score.predictedCount)}/${capsule.score.status.padEnd(13)} | ${String(capsuleRibbonMass.score.predictedCount)}/${capsuleRibbonMass.score.status}`
 		);
 	}
 }
@@ -457,7 +573,9 @@ async function main(): Promise<void> {
 	const alexTruth = buildAlexClarkGroundTruth();
 	const alexFixture = loadAlexClarkFixture();
 
-	const dashHoles: HoleInput[] = IMG_5641_GROUND_TRUTH.holes.map((hole) => ({ holeNumber: hole.number, tee: hole.tee, basket: hole.basket }));
+	const dashBadgeByHole = new Map(IMG_5641_GROUND_TRUTH.badges.map((badge) => [badge.number, { xPx: badge.xPx, yPx: badge.yPx }]));
+	const dashHoles: HoleInput[] = IMG_5641_GROUND_TRUTH.holes.map((hole) => ({ holeNumber: hole.number, tee: hole.tee, basket: hole.basket, badge: dashBadgeByHole.get(hole.number) }));
+	// AlexClark ships no numbered-badge ground truth (see `alexBadges` below) -- arms C/D fit these holes unanchored, matching `hole_path_alexclark_check.py`'s own unanchored variant.
 	const alexHoles: HoleInput[] = alexFixture.holes.map((hole) => ({ holeNumber: Number(hole.number), tee: hole.tee, basket: hole.basket }));
 	const dashBadges: RibbonMassBadgeBox[] = IMG_5641_GROUND_TRUTH.badges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx }));
 	// No numbered-badge ground truth ships for AlexClark -- segmentRibbonMass

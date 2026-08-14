@@ -104,6 +104,27 @@ export interface RibbonMassSegmentation {
 	readonly components: readonly RibbonMassComponentRecord[];
 	/** Labels of texture-admitted components (`lStd >= textureLstdMin`, area floor applied). */
 	readonly textureKeptLabels: ReadonlySet<number>;
+	/**
+	 * The graded ΔL evidence this module already computes internally, one
+	 * step before it gets collapsed to `labels`: badge-pre-filled, grey-
+	 * opened, still in [0,1], but NOT YET thresholded/binarized. Row-major,
+	 * same `widthEv`x`heightEv` shape as `labels`. Added so a consumer that
+	 * wants a continuous evidence SIGNAL (e.g. a per-hole
+	 * `CorridorEvidenceGrid`, see `corridorEvidenceGridRibbonMass.ts`) isn't
+	 * forced back down to this module's own binary threshold decision —
+	 * every cell with `labels[i] !== 0` has `evidence[i] >= params.evidenceThresh`
+	 * by construction (that IS the threshold), but sub-threshold cells keep
+	 * their real, non-zero graded value here instead of reading as a flat 0.
+	 * Purely additive: nothing above reads this field, so it changes no
+	 * existing behavior. Optional (not every `RibbonMassSegmentation`-typed
+	 * value flows through `segmentRibbonMass` itself — e.g.
+	 * `ribbonMassShadow.ts` reassembles one from a worker reply that never
+	 * carries this array over the wire) — a consumer that needs it should
+	 * type its own parameter as `RibbonMassSegmentation & { evidence: Float32Array }`
+	 * (see `corridorEvidenceGridRibbonMass.ts`'s `RibbonMassSegmentationForEvidence`)
+	 * rather than assuming every value has it.
+	 */
+	readonly evidence?: Float32Array;
 }
 
 export type RibbonMassSeedKind = 'badge' | 'basket';
@@ -507,7 +528,7 @@ export function segmentRibbonMass(
 		});
 	}
 
-	return { widthEv: w, heightEv: h, scale: params.scale, labels, components, textureKeptLabels };
+	return { widthEv: w, heightEv: h, scale: params.scale, labels, components, textureKeptLabels, evidence: opened };
 }
 
 // ---------------------------------------------------------------------------
