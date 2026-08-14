@@ -13,30 +13,40 @@ import {
 import type { RibbonMassSegmentationForBends } from '../src/lib/autoAnnotation/corridorBendDetectionRibbonMass';
 import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from '../src/lib/autoAnnotation/ribbonMass';
 import type { RibbonMassBadgeBox, RibbonMassRaster } from '../src/lib/autoAnnotation/ribbonMass';
+import { DEFAULT_CORRIDOR_BEND_RIBBON_PARAMS, detectCorridorBendsRibbon } from '../src/lib/autoAnnotation/corridorBendDetectionRibbon';
 import { IMG_5641_GROUND_TRUTH } from '../src/lib/autoAnnotation/courseGroundTruth';
 import type { SourcePoint } from '../src/lib/domain/annotatedRound';
 import { buildAlexClarkGroundTruth, buildDashGroundTruth, loadAlexClarkFixture } from './corridorBendGroundTruth';
 import type { HoleBendTruth } from './corridorBendGroundTruth';
 
 /**
- * Head-to-head benchmark for the two corridor-bend-detection substrates:
+ * Head-to-head benchmark for THREE corridor-bend-detection substrates:
  *
  * - the SHIPPED per-hole color-heuristic detector (`corridorBendDetection.ts`,
- *   already wired into `approveHolePieces` — unmodified here); and
+ *   already wired into `approveHolePieces` — unmodified here);
  * - the EVALUATION-ONLY ribbon-mass-segmentation detector
- *   (`corridorBendDetectionRibbonMass.ts` — not wired into anything).
+ *   (`corridorBendDetectionRibbonMass.ts` — not wired into anything); and
+ * - the EVALUATION-ONLY band-targeted detector
+ *   (`corridorBendDetectionRibbon.ts` — not wired into anything), the first
+ *   of the three built on the CORRECT premise: the grey band on a UDisc
+ *   course-map screenshot is not terrain to infer, it is UDisc's own
+ *   pre-rendered corridor overlay, alpha-composited over whatever is
+ *   underneath. See that module's doc comment and
+ *   `scripts/measure-corridor-band.ts` for the empirical measurement its
+ *   design is grounded in.
  *
- * Both take the SAME tee/basket ground-truth anchors per hole and the SAME
- * default params-equivalents (crop margin geometry, RDP epsilon, turn-angle
- * floor, detour ratio, bend cap) so a difference in results reflects the
- * substrate, not a tuning mismatch. Scoring ports
- * `scripts/cv-probes/hole_path_semantic_bends.py`'s methodology: exact
- * bend-count match, false-bend rate on straight holes specifically, and
- * (only when the count is correct) bend-location error via nearest-truth-point
- * distance, flagged "LOCATION WRONG" past the same 42px diagnostic cutoff
- * that probe used. See `corridorBendGroundTruth.ts`'s doc comment for what
- * is deliberately NOT ported (the frozen-centerline shape-goodness filter —
- * it has no equivalent for a detector that traces its own path from pixels).
+ * All three take the SAME tee/basket ground-truth anchors per hole and the
+ * SAME default params-equivalents wherever the substrates share a concept
+ * (crop margin geometry, RDP epsilon, turn-angle floor, detour ratio, bend
+ * cap) so a difference in results reflects the substrate, not a tuning
+ * mismatch. Scoring ports `scripts/cv-probes/hole_path_semantic_bends.py`'s
+ * methodology: exact bend-count match, false-bend rate on straight holes
+ * specifically, and (only when the count is correct) bend-location error via
+ * nearest-truth-point distance, flagged "LOCATION WRONG" past the same 42px
+ * diagnostic cutoff that probe used. See `corridorBendGroundTruth.ts`'s doc
+ * comment for what is deliberately NOT ported (the frozen-centerline
+ * shape-goodness filter — it has no equivalent for a detector that traces its
+ * own path from pixels).
  *
  * This script does not mutate `AnnotatedHole`/`corridorBends` state and does
  * not touch the live app — it is read-only analysis over checked-in fixture
@@ -291,6 +301,13 @@ interface CourseResult {
 		/** Scenario (b): segmentation computed once for the whole course, amortized across its holes, plus per-hole cost. */
 		readonly amortizedMsPerHole: number;
 	};
+	/** The new band-targeted detector (`corridorBendDetectionRibbon.ts`) -- per-hole cost shape like `colorHeuristic` (crop + self-calibrate + detect, no whole-course precomputation to amortize). */
+	readonly ribbonBand: {
+		readonly perHole: readonly DetectorHoleResult[];
+		readonly aggregate: AggregateStats;
+		readonly medianMsPerHole: number | null;
+		readonly meanMsPerHole: number | null;
+	};
 }
 
 function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInput[], truth: readonly HoleBendTruth[], badges: readonly RibbonMassBadgeBox[]): CourseResult {
@@ -329,9 +346,22 @@ function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInp
 		return { holeNumber: hole.holeNumber, predicted: result, medianMs, score: scoreHole(holeTruth, result) };
 	});
 
+	// --- Ribbon band (new, band-targeted): crop + self-calibrate + detect, per hole -- same cost shape as the color heuristic (no whole-course precomputation). ---
+	const ribbonBandPerHole: DetectorHoleResult[] = holes.map((hole) => {
+		const bounds = cropBounds(image.widthPx, image.heightPx, hole.tee, hole.basket);
+		const { result, medianMs } = timedMedian(() => {
+			const cropped = cropAndDownscale(image, bounds, CROP_MAX_DIM);
+			return detectCorridorBendsRibbon(cropped, hole.tee, hole.basket, DEFAULT_CORRIDOR_BEND_RIBBON_PARAMS);
+		}, TIMING_REPETITIONS);
+		const holeTruth = truthByHole.get(hole.holeNumber);
+		if (!holeTruth) throw new Error(`No ground truth for ${course} hole ${hole.holeNumber}`);
+		return { holeNumber: hole.holeNumber, predicted: result, medianMs, score: scoreHole(holeTruth, result) };
+	});
+
 	const colorMs = colorPerHole.map((entry) => entry.medianMs);
 	const ribbonMs = ribbonPerHole.map((entry) => entry.medianMs);
 	const ribbonPerHoleMean = mean(ribbonMs) ?? 0;
+	const ribbonBandMs = ribbonBandPerHole.map((entry) => entry.medianMs);
 
 	return {
 		course,
@@ -341,6 +371,12 @@ function runCourse(course: string, image: DecodedRaster, holes: readonly HoleInp
 			aggregate: aggregate(colorPerHole.map((entry) => entry.score)),
 			medianMsPerHole: median(colorMs),
 			meanMsPerHole: mean(colorMs)
+		},
+		ribbonBand: {
+			perHole: ribbonBandPerHole,
+			aggregate: aggregate(ribbonBandPerHole.map((entry) => entry.score)),
+			medianMsPerHole: median(ribbonBandMs),
+			meanMsPerHole: mean(ribbonBandMs)
 		},
 		ribbonMass: {
 			perHole: ribbonPerHole,
@@ -377,7 +413,8 @@ function printCourseReport(result: CourseResult): void {
 	);
 	for (const [label, run] of [
 		['color-heuristic', result.colorHeuristic] as const,
-		['ribbon-mass', result.ribbonMass] as const
+		['ribbon-mass', result.ribbonMass] as const,
+		['ribbon-band', result.ribbonBand] as const
 	]) {
 		const a = run.aggregate;
 		console.log(
@@ -391,12 +428,16 @@ function printCourseReport(result: CourseResult): void {
 		`ribbon-mass speed: whole-course segmentation median ${formatMs(result.ribbonMass.segmentationMedianMs)}, per-hole median ${formatMs(result.ribbonMass.perHoleMedianMs)} ` +
 			`(raw independent-per-hole: ${formatMs(result.ribbonMass.rawIndependentMsPerHole)}/hole; amortized reuse: ${formatMs(result.ribbonMass.amortizedMsPerHole)}/hole)`
 	);
+	console.log(
+		`ribbon-band speed: median ${formatMs(result.ribbonBand.medianMsPerHole)}/hole, mean ${formatMs(result.ribbonBand.meanMsPerHole)}/hole`
+	);
 	console.log('\nper-hole detail:');
-	console.log('hole | truth | color pred/status | ribbon-mass pred/status');
+	console.log('hole | truth | color pred/status | ribbon-mass pred/status | ribbon-band pred/status');
 	for (const hole of result.colorHeuristic.perHole) {
 		const ribbon = result.ribbonMass.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
+		const band = result.ribbonBand.perHole.find((entry) => entry.holeNumber === hole.holeNumber)!;
 		console.log(
-			`${String(hole.holeNumber).padStart(4)} | ${String(hole.score.truthCount).padStart(5)} | ${String(hole.score.predictedCount)}/${hole.score.status.padEnd(13)} | ${String(ribbon.score.predictedCount)}/${ribbon.score.status}`
+			`${String(hole.holeNumber).padStart(4)} | ${String(hole.score.truthCount).padStart(5)} | ${String(hole.score.predictedCount)}/${hole.score.status.padEnd(13)} | ${String(ribbon.score.predictedCount)}/${ribbon.score.status.padEnd(13)} | ${String(band.score.predictedCount)}/${band.score.status}`
 		);
 	}
 }
