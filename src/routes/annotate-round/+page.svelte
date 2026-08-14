@@ -113,7 +113,7 @@
 	import { renderShadowRunOverlay } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import type { ShadowOverlayRender } from '$lib/autoAnnotation/ribbonMassShadowOverlay';
 	import { cropSourceRasterAroundHole } from '$lib/autoAnnotation/corridorBendDetection';
-	import { detectAndApplyCorridorBendsCapsule } from '$lib/autoAnnotation/corridorBendDetectionCapsule';
+	import { detectAndApplyCorridorBendsCapsuleAsync } from '$lib/autoAnnotation/corridorBendDetectionCapsuleWorker';
 	import { addWalkPoint, moveWalkPoint, removeWalkPoint } from '$lib/walkingPath';
 	import type { SourcePoint } from '$lib/domain/project';
 	import {
@@ -552,6 +552,29 @@
 	 * matching every other motion decision on this page.
 	 */
 	let settlingMarkerKeys = $state<ReadonlySet<string>>(new Set());
+	/**
+	 * Holes whose CURRENT corridorBends came from eager auto-detection (fired
+	 * as soon as tee+basket are both placed, before Approve — see the
+	 * `$effect` near `runEagerBendDetection`) and are still cancelable: if
+	 * tee/basket subsequently moves more than `EAGER_BEND_CANCEL_DISTANCE_PX`
+	 * from `eagerBendAnchorByHoleId`'s recorded position, the bends are
+	 * discarded and detection is free to try again at the new position. A
+	 * hole leaves this set (bends "promoted" to ordinary/permanent) the
+	 * moment the user touches one of its bends directly, or approves the
+	 * hole — see `promoteEagerBends`. Never part of `AnnotatedHole`/
+	 * `SourcePoint` itself (`annotatedRound.ts`'s provenance rule) — purely
+	 * transient page-local UI state, same convention as `confirmedPieces`.
+	 */
+	let autoProposedBendHoleIds = $state<ReadonlySet<string>>(new Set());
+	/** tee/basket position `autoProposedBendHoleIds`' eager bends were computed from, for the cancel-on-drag distance check. Plain (non-reactive) bookkeeping, mirrors `autoDetectedSourceId`'s once-per-image guard convention. */
+	const eagerBendAnchorByHoleId = new Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>();
+	/** holeId -> tee/basket signature already attempted (or currently scheduled/in-flight) by the eager trigger, so it does not re-fire for a position it has already tried. Plain bookkeeping, not rendered. */
+	const eagerBendAttemptSignature = new Map<string, string>();
+	/** Per-hole debounce timer for the eager trigger, so a mid-drag flurry of tee/basket updates schedules one attempt at the settled position, not one per intermediate frame. */
+	const eagerBendDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const EAGER_BEND_DEBOUNCE_MS = 400;
+	/** Source px: a tee/basket nudge within this distance of the anchor keeps the eager bend as-is ("looks like magical bend detection that just needs a little fine tuning"); beyond it, the proposal is stale and gets discarded. */
+	const EAGER_BEND_CANCEL_DISTANCE_PX = 6;
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
 	let previewWalkingPath = $state<SourcePoint[] | null>(null);
@@ -843,7 +866,19 @@
 		markMapGeometryEdited();
 	}
 
-	/** Approves both pieces on a hole at once — the sidebar's Approve action for a section-3 hole. No-op unless both are already placed. */
+	/**
+	 * Approves both pieces on a hole at once — the sidebar's Approve action
+	 * for a section-3 hole. No-op unless both are already placed. Bend
+	 * detection normally already ran (and, common case, already landed) the
+	 * moment both pieces were placed — see the eager-detection `$effect`
+	 * below — so Approve's own job is just to confirm and, if this hole's
+	 * bends are still eager-proposed, accept them as final
+	 * (`promoteEagerBends`) so a later tee/basket nudge elsewhere never
+	 * quietly discards them. `scheduleEagerBendDetection` below is also a
+	 * safety net for the rare case Approve is clicked before the debounce
+	 * even fires (e.g. both pieces placed and Approve clicked within
+	 * `EAGER_BEND_DEBOUNCE_MS`) — it is a no-op if detection already ran.
+	 */
 	function approveHolePieces(holeId: string): void {
 		const hole = holes.find((candidate) => candidate.id === holeId);
 		if (!hole?.tee || !hole.basket) return;
@@ -853,47 +888,138 @@
 		// right" gesture — the correction log's 'confirm' for both endpoints.
 		logCorrection('tee', hole.number, 'confirm', { xPx: hole.tee.xPx, yPx: hole.tee.yPx });
 		logCorrection('basket', hole.number, 'confirm', { xPx: hole.basket.xPx, yPx: hole.basket.yPx });
-		detectAndApplyCorridorBends(holeId);
+		promoteEagerBends(holeId);
+		if (hole.corridorBends.length === 0) {
+			scheduleEagerBendDetection(holeId, corridorBendSignature(hole.tee, hole.basket), { immediate: true });
+		}
+	}
+
+	/** `tee`/`basket` position signature — a cheap equality/identity check for "has this hole's anchor geometry actually changed" without deep-comparing whole `AnnotatedHole` objects. */
+	function corridorBendSignature(tee: SourcePoint, basket: SourcePoint): string {
+		return `${tee.xPx.toFixed(1)},${tee.yPx.toFixed(1)}|${basket.xPx.toFixed(1)},${basket.yPx.toFixed(1)}`;
+	}
+
+	/** A hole's bends stop being eager-cancelable the moment the user touches them directly (add/move/delete a bend) or approves the hole — from then on a later tee/basket nudge must never silently discard them. */
+	function promoteEagerBends(holeId: string): void {
+		if (!autoProposedBendHoleIds.has(holeId)) return;
+		autoProposedBendHoleIds = new Set([...autoProposedBendHoleIds].filter((id) => id !== holeId));
+		eagerBendAnchorByHoleId.delete(holeId);
+	}
+
+	/** The eager proposal is stale (tee/basket moved beyond tolerance since it was computed): discard it and free the hole up for a fresh attempt once it settles at the new position. */
+	function cancelEagerBends(holeId: string): void {
+		holes = clearBends(holes, holeId);
+		autoProposedBendHoleIds = new Set([...autoProposedBendHoleIds].filter((id) => id !== holeId));
+		eagerBendAnchorByHoleId.delete(holeId);
+		eagerBendAttemptSignature.delete(holeId);
+		markMapGeometryEdited();
+	}
+
+	/** Debounces `runEagerBendDetection` so a mid-drag flurry of tee/basket updates schedules one attempt at the settled position, not one per frame. `immediate` (Approve's safety-net call) skips the wait — the user has already explicitly signaled "this is done." */
+	function scheduleEagerBendDetection(holeId: string, signature: string, options: { immediate?: boolean } = {}): void {
+		const existing = eagerBendDebounceTimers.get(holeId);
+		if (existing !== undefined) clearTimeout(existing);
+		const run = () => {
+			eagerBendDebounceTimers.delete(holeId);
+			void runEagerBendDetection(holeId, signature);
+		};
+		if (options.immediate) {
+			run();
+			return;
+		}
+		eagerBendDebounceTimers.set(holeId, setTimeout(run, EAGER_BEND_DEBOUNCE_MS));
 	}
 
 	/**
-	 * Preliminary automatic corridor-bend proposal — fires once, right when
-	 * `approveHolePieces` confirms this hole's tee AND basket (never at the
-	 * course-wide `allHolesConfirmed` guided-bends phase). Skips entirely if
-	 * the hole already has bends (manual "+ Add Bend(s)" work before Approve
-	 * must never be clobbered) or if pixel data isn't available (no decoded
-	 * source image yet, or canvas unsupported) — best-effort only, exactly
-	 * like the ribbon-mass shadow pass: a miss here is silent and safe, the
-	 * hole just stays straight until reviewed by hand. Runs the capsule
-	 * detector (`corridorBendDetectionCapsule.ts` — see that module's
-	 * PRODUCTION STATUS note for why it replaced the shortest-path detector
-	 * that used to run here), anchored to this hole's own detected number
-	 * badge when one exists (`numberBadges`), unanchored otherwise — a
-	 * missing badge never disables detection.
+	 * Automatic corridor-bend proposal — runs the capsule detector
+	 * (`corridorBendDetectionCapsule.ts`'s PRODUCTION STATUS note) in its
+	 * dedicated worker (`corridorBendDetectionCapsuleWorker.ts`) so the
+	 * up-to-~600ms search cost never blocks the main thread. Anchored to
+	 * this hole's own detected number badge when one exists (`numberBadges`),
+	 * unanchored otherwise — a missing badge never disables detection.
+	 * Skips entirely (or discards its own result) whenever: the hole is
+	 * missing a tee/basket, already has bends (manual work is never
+	 * clobbered — the detector isn't even invoked), pixel data isn't
+	 * available yet, or `signatureAtDispatch` no longer matches the hole's
+	 * CURRENT tee/basket (it moved again — before dispatch, or while this
+	 * call was in flight — so the result would land on the wrong geometry;
+	 * a fresh attempt for the new position is already scheduled by the
+	 * `$effect` below). Best-effort and silent on any failure, exactly like
+	 * the ribbon-mass shadow pass: a miss here never blocks anything, the
+	 * hole just stays straight until reviewed by hand.
 	 */
-	function detectAndApplyCorridorBends(holeId: string): void {
+	async function runEagerBendDetection(holeId: string, signatureAtDispatch: string): Promise<void> {
 		const hole = holes.find((candidate) => candidate.id === holeId);
 		if (!hole?.tee || !hole.basket || hole.corridorBends.length > 0) return;
+		if (corridorBendSignature(hole.tee, hole.basket) !== signatureAtDispatch) return;
 		const image = sourceImage();
 		if (!image) return;
 		const decoded = editor.getAssetResource(image.id)?.decoded;
 		if (!(decoded instanceof HTMLImageElement)) return;
+		const anchorTee = hole.tee;
+		const anchorBasket = hole.basket;
 		try {
 			const raster = cropSourceRasterAroundHole(decoded, image.widthPx, image.heightPx, hole.tee, hole.basket);
 			const badge = numberBadges.find((candidate) => candidate.number === hole.number);
-			const nextHoles = detectAndApplyCorridorBendsCapsule(
+			const nextHoles = await detectAndApplyCorridorBendsCapsuleAsync(
 				holes,
 				holeId,
 				raster,
 				badge ? { xPx: badge.xPx, yPx: badge.yPx } : undefined
 			);
-			if (nextHoles.find((candidate) => candidate.id === holeId)?.corridorBends.length === 0) return;
+			const proposed = nextHoles.find((candidate) => candidate.id === holeId);
+			if (!proposed || proposed.corridorBends.length === 0) return;
+			// Re-check against the LATEST state -- tee/basket may have moved
+			// again, or gained manual bends, while detection was in flight.
+			const latest = holes.find((candidate) => candidate.id === holeId);
+			if (!latest?.tee || !latest.basket || latest.corridorBends.length > 0) return;
+			if (corridorBendSignature(latest.tee, latest.basket) !== signatureAtDispatch) return;
 			holes = nextHoles;
+			autoProposedBendHoleIds = new Set([...autoProposedBendHoleIds, holeId]);
+			eagerBendAnchorByHoleId.set(holeId, { tee: anchorTee, basket: anchorBasket });
 			markMapGeometryEdited();
 		} catch {
-			// Best-effort preliminary detection; never blocks the approve flow.
+			// Best-effort eager detection; never blocks anything.
 		}
 	}
+
+	/**
+	 * Eager bend-detection trigger: as soon as a hole has both a tee and a
+	 * basket and no bends yet, this schedules a detection attempt — the user
+	 * never has to click Approve first to see a proposed bend; by the time
+	 * they review the hole it's (best-effort) already there, and Approve just
+	 * finalizes it. Also the cancel side of the same contract: a hole whose
+	 * CURRENT eager bends were computed from a tee/basket position it has
+	 * since moved away from (beyond `EAGER_BEND_CANCEL_DISTANCE_PX`) has them
+	 * discarded here, freeing it up for a fresh attempt at the new position.
+	 * Runs on every `holes` change (any tee/basket mutation path — CV
+	 * auto-accept, manual placement, drag, reassignment — funnels through
+	 * here uniformly) but only ever *acts* on a hole whose signature hasn't
+	 * already been tried, so this is not an unbounded loop — mirrors the
+	 * `autoDetectedSourceId`/`prewarmedSourceId` once-per-change guard
+	 * convention used elsewhere on this page.
+	 */
+	$effect(() => {
+		for (const hole of holes) {
+			if (!hole.tee || !hole.basket) continue;
+			if (autoProposedBendHoleIds.has(hole.id)) {
+				const anchor = eagerBendAnchorByHoleId.get(hole.id);
+				if (anchor) {
+					const teeMovedPx = Math.hypot(hole.tee.xPx - anchor.tee.xPx, hole.tee.yPx - anchor.tee.yPx);
+					const basketMovedPx = Math.hypot(hole.basket.xPx - anchor.basket.xPx, hole.basket.yPx - anchor.basket.yPx);
+					if (teeMovedPx > EAGER_BEND_CANCEL_DISTANCE_PX || basketMovedPx > EAGER_BEND_CANCEL_DISTANCE_PX) {
+						cancelEagerBends(hole.id);
+					}
+				}
+				continue;
+			}
+			if (hole.corridorBends.length > 0) continue;
+			const signature = corridorBendSignature(hole.tee, hole.basket);
+			if (eagerBendAttemptSignature.get(hole.id) === signature) continue;
+			eagerBendAttemptSignature.set(hole.id, signature);
+			scheduleEagerBendDetection(hole.id, signature);
+		}
+	});
 
 	function startCourseDetectionProgress(): void {
 		if (courseDetectionTimer !== null) clearInterval(courseDetectionTimer);
@@ -1132,12 +1258,14 @@
 
 	function handleRemoveLastBend(): void {
 		if (!activeHoleId) return;
+		promoteEagerBends(activeHoleId);
 		holes = removeLastBend(holes, activeHoleId);
 		markMapGeometryEdited();
 	}
 
 	function handleClearBends(): void {
 		if (!activeHoleId) return;
+		promoteEagerBends(activeHoleId);
 		holes = clearBends(holes, activeHoleId);
 		markMapGeometryEdited();
 	}
@@ -1838,6 +1966,7 @@
 				if (marker.kind === 'walk') {
 					if (marker.index !== undefined) walkingPath = removeWalkPoint(walkingPath, marker.index);
 				} else {
+					if (marker.kind === 'bend' && marker.holeId) promoteEagerBends(marker.holeId);
 					holes = deleteMarker(holes, marker);
 					if (isMapGeometryKind(marker.kind)) markMapGeometryEdited();
 				}
@@ -1848,6 +1977,7 @@
 			// Only 'bend' (map mode) or 'shot' (round mode) ever reach here now —
 			// tee/basket creation is intercepted earlier by `handleAnnotationPlacement`
 			// into the sidebar-driven placing flow, see `radialMenuActions`.
+			if (action === 'bend') promoteEagerBends(menu.holeId);
 			holes = placeByMode(holes, menu.holeId, action, menu.at);
 			if (isMapGeometryKind(action)) markMapGeometryEdited();
 		}
@@ -1979,6 +2109,7 @@
 			// pre-drag location, needed for the correction log's `move` event.
 			const originalPoint = markerPoint(drag.marker);
 			const draggedHoleNumber = holes.find((candidate) => candidate.id === drag.marker.holeId)?.number;
+			if (drag.marker.kind === 'bend' && drag.marker.holeId) promoteEagerBends(drag.marker.holeId);
 			holes = moveMarker(holes, drag.marker, point);
 			if (isMapGeometryKind(drag.marker.kind)) markMapGeometryEdited();
 			// Snap-to-detection applies on a genuine drag-RELEASE only (never
@@ -2070,6 +2201,7 @@
 				// drop a bend. The radial menu, when enabled, still wins so its
 				// delete/bend wedges stay reachable.
 				if (sidebarBanner?.kind === 'bends') {
+					promoteEagerBends(activeHoleId);
 					holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
 					markMapGeometryEdited();
 					vibrate(8);
