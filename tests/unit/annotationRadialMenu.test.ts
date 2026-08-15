@@ -476,11 +476,16 @@ describe('Annotation radial menu (Annotate Course / Map Round)', () => {
 
 		// A fresh click now correctly opens a menu for hole 1, and choosing an
 		// action places on hole 1, not hole 2 (the stale menu's original target).
-		// The sidebar click also zoomed the camera to hole 1's midpoint,
-		// centering it at the pane's own center — clicking there (rather than
-		// reusing the pre-zoom `clickAt`, now off-pane under the new transform,
-		// which a real click could never be) is the realistic empty-space click.
-		dispatchClick(host, 200, 200);
+		// The sidebar click also panned the camera to hole 1's canonical focus
+		// anchor (its badge if one exists, else its tee — see CHSPT-47), at
+		// whatever zoom was already in effect — so screen coordinates computed
+		// before this click are stale afterward. This hole has no CV-detected
+		// badge (it was placed by hand), so focus lands on its tee; clicking
+		// well away from the tee, in image space where nothing is placed, is
+		// the realistic empty-space click, recomputed live via `screenPointFor`
+		// rather than assuming a fixed pane-center coordinate.
+		const emptySpaceOnHole1 = screenPointFor(host, 100, 100);
+		dispatchClick(host, emptySpaceOnHole1.x, emptySpaceOnHole1.y);
 		await flush();
 		clickAction(host, 'bend');
 		await flush();
