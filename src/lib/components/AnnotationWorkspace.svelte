@@ -369,9 +369,15 @@
 	 */
 	let radialMenuEnabled = $state(false);
 
-	/** Single gate for every place the radial menu can open (empty-space placement and the on-marker delete menu) so `radialMenuEnabled` only needs checking here. */
+	/**
+	 * Two layers on one entry point: the on-marker delete menu (`hitMarker` set)
+	 * is always reachable, mirroring how tee/basket already bypass the radial
+	 * menu entirely via the marker chip. Only the empty-space placement menu
+	 * (bends in Map mode, shot/walk in Round mode) stays behind the
+	 * `radialMenuEnabled` dev-tools toggle.
+	 */
 	function openRadialMenu(state: RadialMenuState): void {
-		if (!radialMenuEnabled) return;
+		if (!radialMenuEnabled && state.hitMarker === null) return;
 		radialMenu = state;
 	}
 
@@ -1247,6 +1253,18 @@
 			handleAddHole();
 			return;
 		}
+		if (key === 'enter') {
+			// Enter is the browser's native activation key for a focused <button>;
+			// without these guards this global handler would hijack Tab+Enter on
+			// Cancel/+Add Bend(s), and would fire underneath an open radial
+			// menu/marker chip that owns its own keyboard contract.
+			if (radialMenu || markerChip) return;
+			if (event.target instanceof HTMLButtonElement || event.target instanceof HTMLAnchorElement) return;
+			if (sidebarBanner?.kind !== 'approve') return;
+			event.preventDefault();
+			approveActiveHole();
+			return;
+		}
 	}
 
 	function handleRemoveLastShot(): void {
@@ -1829,17 +1847,19 @@
 	/**
 	 * Snap-to-detection (design points 1/2/3/5): fires a short local
 	 * object-finding pass around a tee/basket point that has *already* been
-	 * placed at the raw click/release coordinates by the caller
-	 * (`chooseRadialAction`'s placement, `commitAnnotationPointerUp`'s
-	 * drag-release) — this never blocks that raw placement, it only settles
-	 * the marker onto a detected feature later if one is confidently found
-	 * nearby (optimistic placement: a course screenshot decode plus a cold
-	 * worker can plausibly exceed the ~100ms "feels instant" budget even
-	 * though the crop-sized detector pass itself is fast once warm — see
-	 * `src/lib/cv/localSnap.ts`'s doc comment for the measurements behind
-	 * that choice). No calibration yet (course detection hasn't run), no
-	 * source image, Alt held, or a failed/empty pass are all indistinguishable
-	 * outcomes to the user: the raw point already placed simply stands.
+	 * placed at the raw click coordinates by the caller (`placeNextPiece`'s
+	 * first-time placement of a hole's tee or basket) — this never blocks
+	 * that raw placement, it only settles the marker onto a detected feature
+	 * later if one is confidently found nearby (optimistic placement: a
+	 * course screenshot decode plus a cold worker can plausibly exceed the
+	 * ~100ms "feels instant" budget even though the crop-sized detector pass
+	 * itself is fast once warm — see `src/lib/cv/localSnap.ts`'s doc comment
+	 * for the measurements behind that choice). No calibration yet (course
+	 * detection hasn't run), no source image, Alt held, or a failed/empty
+	 * pass are all indistinguishable outcomes to the user: the raw point
+	 * already placed simply stands. Deliberately never re-fires on a later
+	 * manual drag of an already-placed marker — see
+	 * `commitAnnotationPointerUp`'s drag-release branch for why.
 	 */
 	function applyLocalSnap(
 		kind: LocalSnapKind,
@@ -2083,7 +2103,7 @@
 	 * bend/shot/walk keep the pre-existing delete-only radial menu, since
 	 * those aren't part of this redesign.
 	 */
-	function commitAnnotationPointerUp(pointer: ScreenSpacePoint, event?: PointerEvent): void {
+	function commitAnnotationPointerUp(pointer: ScreenSpacePoint): void {
 		if (numberSelectDrag) {
 			const { label, dragging } = numberSelectDrag;
 			numberSelectDrag = null;
@@ -2128,23 +2148,22 @@
 			if (drag.marker.kind === 'bend' && drag.marker.holeId) promoteEagerBends(drag.marker.holeId);
 			holes = moveMarker(holes, drag.marker, point);
 			if (isMapGeometryKind(drag.marker.kind)) markMapGeometryEdited();
-			// Snap-to-detection applies on a genuine drag-RELEASE only (never
-			// mid-drag — `previewAnnotationMove` above never calls this), and only
-			// for an existing tee/basket marker being repositioned.
-			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && drag.marker.holeId) {
-				const snapRef = applyLocalSnap(drag.marker.kind, drag.marker.holeId, point, event?.altKey ?? false);
-				if (draggedHoleNumber !== undefined) {
-					const dragDistancePx = originalPoint
-						? Math.hypot(point.xPx - originalPoint.xPx, point.yPx - originalPoint.yPx)
-						: undefined;
-					logCorrection(
-						drag.marker.kind,
-						draggedHoleNumber,
-						'move',
-						{ xPx: point.xPx, yPx: point.yPx },
-						{ dragDistancePx, ...(snapRef ? { deferForSnap: snapRef } : {}) }
-					);
-				}
+			// Snap-to-detection intentionally never re-fires on a drag-release of an
+			// already-placed tee/basket: CV isn't perfect, and re-running it on every
+			// manual reposition risked silently pulling the marker back to the same
+			// wrong detection the user had just corrected away from. It only ever
+			// runs once, on a hole's very first raw placement — see `placeNextPiece`.
+			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && draggedHoleNumber !== undefined) {
+				const dragDistancePx = originalPoint
+					? Math.hypot(point.xPx - originalPoint.xPx, point.yPx - originalPoint.yPx)
+					: undefined;
+				logCorrection(
+					drag.marker.kind,
+					draggedHoleNumber,
+					'move',
+					{ xPx: point.xPx, yPx: point.yPx },
+					{ dragDistancePx }
+				);
 			}
 		}
 		previewHoles = null;
@@ -3056,9 +3075,9 @@
 					<div class="tool-section">
 						<h2>Edit hole {hole.number}</h2>
 						{#if annotationMode === 'map'}
-							<p class="empty-copy">Click the map to open the point menu — place a tee, basket, or bend, or delete an existing one.</p>
+							<p class="empty-copy">Click empty map space to place a bend; click an existing point to delete it.</p>
 						{:else}
-							<p class="empty-copy">Click the map to open the point menu — place a shot or a walk-path vertex, or delete an existing one.</p>
+							<p class="empty-copy">Click empty map space to place a shot or a walk-path vertex; click an existing point to delete it.</p>
 						{/if}
 						<div class="edit-actions">
 							<button type="button" data-testid="remove-last-shot" disabled={hole.shots.length === 0} onclick={handleRemoveLastShot}>Undo shot</button>

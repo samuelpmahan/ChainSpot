@@ -306,6 +306,52 @@ describe('Annotation radial menu (Annotate Course / Map Round)', () => {
 		host.remove();
 	});
 
+	it('on Map Round, deletes an existing shot by clicking it directly, with the radial-menu dev toggle left OFF', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200), 'round');
+		setGeometry(host);
+		const input = host.querySelector<HTMLInputElement>('[data-testid="pane-input-source-overview"]');
+		if (!input) throw new Error('missing source input');
+		Object.defineProperty(input, 'files', {
+			configurable: true,
+			value: [new File([new Uint8Array([1, 2, 3, 4])], 'course.png', { type: 'image/png' })]
+		});
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+		addHoleViaShortcut();
+		const toggle = host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]');
+		toggle?.click();
+		await flush();
+
+		const clickAt = screenPointFor(host, 50, 50);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		clickAction(host, 'shot');
+		await flush();
+		expect(host.querySelector('[data-testid="shot-marker-1-0"]')).not.toBeNull();
+
+		// Flip the dev toggle back off, then prove the on-marker delete menu
+		// still opens (it's no longer gated by it).
+		toggle?.click();
+		await flush();
+		expect(toggle?.checked).toBe(false);
+
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
+
+		clickAction(host, 'delete');
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="shot-marker-1-0"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('opens a delete-only menu on an existing bend marker and removes just that point', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
@@ -325,6 +371,42 @@ describe('Annotation radial menu (Annotate Course / Map Round)', () => {
 		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
 		expect(host.querySelector('[data-testid="radial-action-bend"]')).toBeNull();
+
+		clickAction(host, 'delete');
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).toBeNull();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('deletes an existing bend by clicking it directly, with the radial-menu dev toggle left OFF — the on-marker delete menu is never gated', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		await setUpHoleWithImage(host, editor);
+
+		// Placing the bend is still the empty-space case, so it needs the
+		// toggle on (matching every other test in this file); flip it back off
+		// immediately after to prove the *delete* menu doesn't need it.
+		const clickAt = screenPointFor(host, 60, 60);
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+		clickAction(host, 'bend');
+		await flush();
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+
+		const toggle = host.querySelector<HTMLInputElement>('[data-testid="radial-menu-toggle"]');
+		toggle?.click();
+		await flush();
+		expect(toggle?.checked).toBe(false);
+
+		dispatchClick(host, clickAt.x, clickAt.y);
+		await flush();
+
+		expect(host.querySelector('[data-testid="radial-menu"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="radial-action-delete"]')).not.toBeNull();
 
 		clickAction(host, 'delete');
 		await flush();

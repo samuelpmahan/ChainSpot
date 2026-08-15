@@ -371,34 +371,26 @@ describe('snap-to-detection — drag-release of an existing marker', () => {
 		requestLocalSnapMock.mockClear();
 	}
 
-	it('applies the raw drag endpoint immediately, then settles onto the snap result', async () => {
+	it('moves the marker to the raw drop point and never requests a snap — a manual reposition must never be silently overridden', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
 		await setUpDetectedHole(host, editor);
 		await placeTeeAt(host, 150, 150);
 
-		const gate = deferredLocalSnap();
 		const from = screenPointFor(host, 150, 150);
 		const to = screenPointFor(host, 170, 180);
 		dispatchDrag(host, from, to);
-		await tick();
+		await flush();
 
-		const marker = () => host.querySelector('[data-testid="tee-marker-1"]');
-		expect(marker()?.getAttribute('cx')).toBe('170');
-		expect(marker()?.getAttribute('cy')).toBe('180');
-		expect(requestLocalSnapMock).toHaveBeenCalledTimes(1);
-		expect(requestLocalSnapMock.mock.calls[0]?.[2]).toMatchObject({ kind: 'tee', clickPx: { xPx: 170, yPx: 180 } });
-
-		gate.resolve({ xPx: 175, yPx: 178 });
-		await tick();
-
-		expect(marker()?.getAttribute('cx')).toBe('175');
-		expect(marker()?.getAttribute('cy')).toBe('178');
-		expect(marker()?.classList.contains('settling')).toBe(true);
+		const marker = host.querySelector('[data-testid="tee-marker-1"]');
+		expect(marker?.getAttribute('cx')).toBe('170');
+		expect(marker?.getAttribute('cy')).toBe('180');
+		expect(marker?.classList.contains('settling')).toBe(false);
+		expect(requestLocalSnapMock).not.toHaveBeenCalled();
 	});
 
-	it('never requests a snap mid-drag — only on release', async () => {
+	it('never requests a snap during a drag, mid-drag or on release', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -419,24 +411,6 @@ describe('snap-to-detection — drag-release of an existing marker', () => {
 
 		window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: mid.x, clientY: mid.y }));
 		await flush();
-		expect(requestLocalSnapMock).toHaveBeenCalledTimes(1);
-	});
-
-	it('holding Alt on release suppresses the snap request entirely', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await setUpDetectedHole(host, editor);
-		await placeTeeAt(host, 150, 150);
-
-		const from = screenPointFor(host, 150, 150);
-		const to = screenPointFor(host, 170, 180);
-		dispatchDrag(host, from, to, { altKey: true });
-		await flush();
-
 		expect(requestLocalSnapMock).not.toHaveBeenCalled();
-		const marker = host.querySelector('[data-testid="tee-marker-1"]');
-		expect(marker?.getAttribute('cx')).toBe('170');
-		expect(marker?.getAttribute('cy')).toBe('180');
 	});
 });

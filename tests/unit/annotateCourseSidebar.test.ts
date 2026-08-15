@@ -372,6 +372,107 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 	});
 });
 
+describe('"Enter" approves the active hole', () => {
+	async function placeHoleFully(host: HTMLElement, number: number): Promise<void> {
+		sidebarHoleButton(host, number).click();
+		await flush();
+		const tee = screenPointFor(host, 20, 20);
+		dispatchClick(host, tee.x, tee.y);
+		await flush();
+		const basket = screenPointFor(host, 80, 80);
+		dispatchClick(host, basket.x, basket.y);
+		await flush();
+	}
+
+	function pressEnter(target: EventTarget = window): void {
+		target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+	}
+
+	it('approves the hole once both pieces are placed and the Approve banner is showing', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+		expect(host.querySelector('[data-testid="approve-hole-button"]')).not.toBeNull();
+
+		pressEnter();
+		await flush();
+
+		expect(sidebarSection(host, 4).textContent).toContain('1');
+	});
+
+	it('is a no-op while the banner is still asking for a tee or basket', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+
+		sidebarHoleButton(host, 1).click();
+		await flush();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Tee');
+
+		pressEnter();
+		await flush();
+
+		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Tee');
+	});
+
+	it('is a no-op while the banner is asking for bends', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+		host.querySelector<HTMLButtonElement>('[data-testid="add-bend-button"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Bends');
+
+		pressEnter();
+		await flush();
+
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
+		expect(sidebarSection(host, 3).textContent).toContain('1');
+	});
+
+	it('does not hijack Enter on a focused banner button (e.g. Cancel)', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+
+		const cancelButton = host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-cancel"]');
+		expect(cancelButton).not.toBeNull();
+		pressEnter(cancelButton as HTMLButtonElement);
+		await flush();
+
+		// The global handler bailed out (button target); the hole was not
+		// approved by our shortcut. (The button's own native activation is a
+		// jsdom/browser concern outside this handler's responsibility.)
+		expect(sidebarSection(host, 3).textContent).toContain('1');
+	});
+
+	it('is a no-op while a marker correction chip is open', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+		await placeHoleFully(host, 1);
+
+		const teeAt = screenPointFor(host, 20, 20);
+		dispatchClick(host, teeAt.x, teeAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="marker-chip"]')).not.toBeNull();
+
+		pressEnter();
+		await flush();
+
+		expect(sidebarSection(host, 3).textContent).toContain('1');
+	});
+});
+
 describe('guided bends phase — after all 18 confirm, before the completion panel', () => {
 	/** Image-space placement grid: 6 columns × 3 rows, spaced so no click ever lands within another marker's hit radius. */
 	function holeSpots(number: number): { tee: [number, number]; basket: [number, number] } {

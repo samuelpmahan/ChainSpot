@@ -1,7 +1,11 @@
 /**
- * "Snap-to-detection": when a user places or repositions a tee/basket marker
- * in Annotate Round's Map mode, a short LOCAL object-finding pass runs around
- * the click and the placement snaps to whatever real feature it finds nearby.
+ * "Snap-to-detection": when a user places a tee/basket marker for the first
+ * time in Annotate Round's Map mode, a short LOCAL object-finding pass runs
+ * around the click and the placement snaps to whatever real feature it finds
+ * nearby. It never re-fires on a later manual drag of an already-placed
+ * marker — see `AnnotationWorkspace.svelte`'s `commitAnnotationPointerUp` for
+ * why (CV isn't perfect, and re-running it on every reposition risked
+ * silently overriding a user's own correction).
  *
  * This module is the pure, environment-agnostic core -- modeled directly on
  * `teePadDetection.ts`/`basketTemplateDetection.ts`'s own boundary: it is
