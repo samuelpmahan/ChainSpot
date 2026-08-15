@@ -153,7 +153,6 @@
 	/** A radial-menu action either places a point kind or deletes the marker that opened the menu. */
 	type RadialAction = PointKind | 'delete';
 
-	const SIDEBAR_FOCUS_ZOOM_MULTIPLIER = 2.5;
 	const MARKER_HIT_RADIUS_PX = 12;
 
 	type AnnotationMarkerKind = PointKind;
