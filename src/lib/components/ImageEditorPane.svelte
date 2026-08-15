@@ -28,7 +28,13 @@
 	interface ViewportFocusRequest {
 		key: string;
 		point: { xPx: number; yPx: number };
-		zoomMultiplier?: number;
+		/**
+		 * Optional zoom multiplier. If omitted or null, focus pans to the point
+		 * while preserving the current zoom level (used for hole badge navigation).
+		 * If present, focus applies the multiplier to the fit zoom (legacy behavior
+		 * for zoom+pan requests).
+		 */
+		zoomMultiplier?: number | null;
 	}
 
 	/**
@@ -205,7 +211,13 @@
 		focusing = true;
 		if (focusingTimer !== null) clearTimeout(focusingTimer);
 		focusingTimer = setTimeout(() => { focusing = false; focusingTimer = null; }, FOCUS_TRANSITION_MS);
-		vp.focusOnPoint(request.point, request.zoomMultiplier);
+		// If zoomMultiplier is null/undefined, pan to point while preserving zoom
+		// (for hole badge navigation). Otherwise, apply the zoom multiplier.
+		if (request.zoomMultiplier === null || request.zoomMultiplier === undefined) {
+			vp.panToPoint(request.point);
+		} else {
+			vp.focusOnPoint(request.point, request.zoomMultiplier);
+		}
 		appliedFocusKey = requestKey;
 	});
 

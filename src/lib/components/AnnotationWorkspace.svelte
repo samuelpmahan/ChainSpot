@@ -1455,22 +1455,39 @@
 	}
 
 	/**
-	 * Where to zoom for a sidebar hole click. Real markers win (their
-	 * midpoint if both exist); otherwise the hole's detected number-badge
-	 * position stands in, since it's the only approximate location that can
-	 * exist before any tee/basket has been placed (see `numberBadges`'s
-	 * doc comment — populated from CV detection, never invented geometry).
-	 * `null` when neither exists: the view deliberately stays put rather than
-	 * jumping somewhere ungrounded.
+	 * The canonical focus point for hole navigation (see `onHoleBoxClick`).
+	 * Prioritizes the CV-detected number badge as the primary anchor, ensuring
+	 * stable focus independent of tee/basket availability or correctness.
+	 *
+	 * The badge is the CV-detected hole-number anchor, populated from course
+	 * grammar's badge assignment (Stage 1 only — requires badge detection but
+	 * never tee/basket, so an "incomplete" hole can still anchor a badge).
+	 * It exists before any tee/basket can be placed, making it the only stable
+	 * position that can anchor focus from the start. Critically: tee detection
+	 * is the hardest/least reliable CV endpoint, so the badge must be primary,
+	 * not a fallback. The tee/basket/midpoint are never consulted for focus
+	 * decisions — they remain editable markers, just not focus inputs.
+	 *
+	 * Fallback hierarchy:
+	 *   1. Number badge (primary, never changes based on tee/basket edits)
+	 *   2. Tee (if badge missing, temporary fallback for existing geometry)
+	 *   3. Basket (if badge and tee both missing)
+	 *
+	 * Returns `null` when none exist: the view deliberately stays put rather
+	 * than jumping somewhere ungrounded. This gracefully handles section-1/2
+	 * holes during the placing flow or holes with CV failures.
 	 */
 	function holeFocusPoint(hole: AnnotatedHole): SourcePoint | null {
-		if (hole.tee && hole.basket) {
-			return { xPx: (hole.tee.xPx + hole.basket.xPx) / 2, yPx: (hole.tee.yPx + hole.basket.yPx) / 2 };
+		// Primary anchor: CV-detected number badge, independent of tee/basket
+		const badge = numberBadges.find((candidate) => candidate.number === hole.number);
+		if (badge) {
+			return { xPx: badge.xPx, yPx: badge.yPx };
 		}
+		// Fallback: existing tee/basket geometry (only if badge missing)
 		if (hole.tee) return hole.tee;
 		if (hole.basket) return hole.basket;
-		const badge = numberBadges.find((candidate) => candidate.number === hole.number);
-		return badge ? { xPx: badge.xPx, yPx: badge.yPx } : null;
+		// No usable focus point available
+		return null;
 	}
 
 	/**
@@ -1480,8 +1497,10 @@
 	 * while it's the current focus target would hand `holeFocusPoint` a fresh
 	 * non-null point and silently re-trigger a second, unrequested camera
 	 * jump the instant that piece landed, on top of the click's own jump.
+	 * `zoomMultiplier` is null for badge-anchor focus (preserve current zoom)
+	 * and undefined otherwise (legacy behavior, for backward compatibility).
 	 */
-	let sidebarFocusRequest = $state<{ key: string; point: SourcePoint; zoomMultiplier: number } | null>(null);
+	let sidebarFocusRequest = $state<{ key: string; point: SourcePoint; zoomMultiplier?: number | null } | null>(null);
 
 	/**
 	 * The sidebar's per-hole "which section" bucketing for all 18 standard
@@ -1527,9 +1546,13 @@
 	/**
 	 * Entry point for clicking a hole in the sidebar grid: activates it
 	 * (creating an empty draft hole on demand for a section-1 hole with no
-	 * record yet) and engages the camera jump. The placing/approve banner
+	 * record yet) and engages the camera pan. The placing/approve banner
 	 * itself is fully derived from the resulting hole state — see
 	 * `sidebarBanner` — no separate mode flag to keep in sync here.
+	 *
+	 * Focus pans the badge to center without changing zoom: the user's zoom
+	 * preference is preserved, and zoom only changes via explicit Fit/Reset.
+	 * Re-clicking the same hole recenters its badge (fresh key each time).
 	 */
 	function onHoleBoxClick(number: number): void {
 		const hole = activateHoleByNumber(number);
@@ -1537,7 +1560,7 @@
 		sidebarFocusTick += 1;
 		const point = holeFocusPoint(hole);
 		sidebarFocusRequest = point
-			? { key: `${hole.id}:${sidebarFocusTick}`, point, zoomMultiplier: SIDEBAR_FOCUS_ZOOM_MULTIPLIER }
+			? { key: `${hole.id}:${sidebarFocusTick}`, point, zoomMultiplier: null }
 			: null;
 		markerChip = null;
 		radialMenu = null;

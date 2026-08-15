@@ -199,6 +199,24 @@ export class ViewportController {
 	}
 
 	/**
+	 * Pans to center an image-space point in the viewport WITHOUT changing the
+	 * current zoom level. Preserves user's zoom preference while centering the
+	 * canonical focus anchor (e.g., hole badge). Used for hole navigation where
+	 * zoom should only change via explicit user action (Fit/Reset), not as a
+	 * side effect of selecting a hole.
+	 */
+	panToPoint(point: { xPx: number; yPx: number }): void {
+		if (!this.fitTarget) return;
+		const center = this.centerPoint();
+		const zoom = this.view.zoom;
+		this.view = {
+			zoom,
+			panX: center.x - point.xPx * zoom,
+			panY: center.y - point.yPx * zoom
+		};
+	}
+
+	/**
 	 * Updates the fitted content. When the view is currently at the previous fit,
 	 * the view follows the new fit; a custom zoom/pan is preserved. Clearing the
 	 * target resets the view to identity so a later session never inherits stale
