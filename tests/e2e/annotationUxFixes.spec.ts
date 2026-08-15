@@ -188,7 +188,7 @@ test('an existing bend can be deleted by clicking it, with the radial-menu dev t
 	await expect(page.getByTestId('bend-marker-1-0')).toHaveCount(0);
 });
 
-test('dragging a tee marker after a settled snap is a manual correction that never re-snaps', async ({
+test('a tee marker dragged and released twice lands exactly where dropped both times, in a real browser', async ({
 	page
 }) => {
 	await gotoApp(page);
