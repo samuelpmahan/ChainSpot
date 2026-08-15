@@ -11,6 +11,10 @@
  * viewport click handler, mirroring `ImagePane`'s own `onViewportClick`)
  * already rejects an out-of-bounds click before it reaches these functions,
  * and `createAnnotatedRound` performs the final authoritative validation.
+ *
+ * Bend ordering is derived from geometry, not insertion order: bends are
+ * sorted by their projection along the tee→basket centerline so that
+ * correctness depends only on spatial relationships, not placement chronology.
  */
 import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type { AnnotatedHole, OrderedShot, SourcePoint } from './domain/annotatedRound';
@@ -44,6 +48,83 @@ function insertHoleInNumberOrder(holes: readonly AnnotatedHole[], hole: Annotate
 	const next = [...holes, hole];
 	next.sort((left, right) => left.number - right.number);
 	return next;
+}
+
+// ---------------------------------------------------------------------------
+// Geometry-based bend ordering: derive bend position along tee→basket path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Projects a point onto the line segment from start to end, returning a
+ * parameter t where 0 is at start, 1 is at end, <0 is before start, >1 is
+ * after end. Used to sort bends by their position along the tee→basket path.
+ */
+function projectPointOntoSegment(point: SourcePoint, start: SourcePoint, end: SourcePoint): number {
+	const dx = end.xPx - start.xPx;
+	const dy = end.yPx - start.yPx;
+	const lengthSq = dx * dx + dy * dy;
+	if (lengthSq === 0) {
+		// Start and end are the same point; return 0 as a neutral value.
+		return 0;
+	}
+	const t = ((point.xPx - start.xPx) * dx + (point.yPx - start.yPx) * dy) / lengthSq;
+	return t;
+}
+
+/**
+ * Calculates the position of a bend along the hole's centerline [tee, basket].
+ * Returns a scalar representing position along the path: 0 at tee, 1 at basket.
+ * If tee or basket is missing, returns a fallback based on distance to the
+ * available endpoint (defensive, should not happen in normal operation).
+ */
+function bendPositionOnCenterline(bend: SourcePoint, tee: SourcePoint | undefined, basket: SourcePoint | undefined): number {
+	if (!tee || !basket) {
+		// Fallback for incomplete hole geometry: use distance as proxy.
+		if (tee) {
+			const dx = bend.xPx - tee.xPx;
+			const dy = bend.yPx - tee.yPx;
+			return Math.hypot(dx, dy);
+		}
+		if (basket) {
+			const dx = bend.xPx - basket.xPx;
+			const dy = bend.yPx - basket.yPx;
+			return -Math.hypot(dx, dy);
+		}
+		return 0;
+	}
+	return projectPointOntoSegment(bend, tee, basket);
+}
+
+/**
+ * Sorts `bends` by their geometric position along the tee→basket centerline.
+ * Preserves the input array if already sorted (stable, no unnecessary mutations).
+ * Returns a new sorted array only if reordering is required.
+ */
+function sortBendsByPosition(bends: readonly SourcePoint[], tee: SourcePoint | undefined, basket: SourcePoint | undefined): SourcePoint[] {
+	if (bends.length <= 1) return bends.slice();
+
+	const indexed = bends.map((bend, originalIndex) => ({
+		bend,
+		position: bendPositionOnCenterline(bend, tee, basket),
+		originalIndex
+	}));
+
+	// Check if already sorted; if so, return original array reference to avoid unnecessary mutation.
+	let isSorted = true;
+	for (let i = 1; i < indexed.length; i++) {
+		if (indexed[i].position < indexed[i - 1].position) {
+			isSorted = false;
+			break;
+		}
+	}
+
+	if (isSorted) {
+		return bends.slice();
+	}
+
+	// Sort by position and return just the bend points.
+	indexed.sort((a, b) => a.position - b.position);
+	return indexed.map((item) => item.bend);
 }
 
 /** Adds an empty hole in numeric order, using the lowest missing 1–18 number. */
@@ -152,10 +233,19 @@ export function moveShot(
 }
 
 export function addCorridorBend(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
-	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: [...hole.corridorBends, point] }));
+	return updateHole(holes, holeId, (hole) => {
+		const newBends = [...hole.corridorBends, point];
+		const sortedBends = sortBendsByPosition(newBends, hole.tee, hole.basket);
+		return { ...hole, corridorBends: sortedBends };
+	});
 }
 
-/** Moves one existing bend while preserving its position in the bend array. */
+/**
+ * Moves one existing bend to a new position and reorders the array if the
+ * new geometry places it before/after other bends. Identifies the bend to move
+ * by its current index in the corridorBends array, updates its coordinates,
+ * and re-sorts all bends by their position along the tee→basket centerline.
+ */
 export function moveCorridorBend(
 	holes: readonly AnnotatedHole[],
 	holeId: string,
@@ -164,11 +254,13 @@ export function moveCorridorBend(
 ): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => {
 		if (index < 0 || index >= hole.corridorBends.length) return hole;
+		const newBends = hole.corridorBends.map((bend, bendIndex) =>
+			bendIndex === index ? point : bend
+		);
+		const sortedBends = sortBendsByPosition(newBends, hole.tee, hole.basket);
 		return {
 			...hole,
-			corridorBends: hole.corridorBends.map((bend, bendIndex) =>
-				bendIndex === index ? point : bend
-			)
+			corridorBends: sortedBends
 		};
 	});
 }
