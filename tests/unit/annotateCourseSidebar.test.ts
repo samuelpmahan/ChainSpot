@@ -291,7 +291,10 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 		expect(approveButton?.hasAttribute('style')).toBe(false);
 	});
 
-	it('an empty-map click during ordinary review no longer drops a stray bend', async () => {
+	it('ordinary map clicks during review place bends directly (guided flow)', async () => {
+		// After Tee + Basket are placed (section 3), ordinary empty-map clicks
+		// place bends directly without requiring the "+ Add Bend(s)" button click.
+		// This is the natural guided flow per CHSPT-48.
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -302,8 +305,9 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 		dispatchClick(host, empty.x, empty.y);
 		await flush();
 
-		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
-		// Still reviewing hole 1, unapproved — the stray click was a no-op.
+		// The click placed a bend directly — no manual mode toggle required.
+		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+		// Still reviewing hole 1, unapproved — can still approve or add more bends.
 		expect(host.querySelector('[data-testid="approve-hole-button"]')).not.toBeNull();
 	});
 

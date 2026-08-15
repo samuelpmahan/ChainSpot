@@ -2211,9 +2211,9 @@
 	 * path is round-level rather than per-hole. In map mode a hole must be
 	 * active; if it's still missing a tee or basket (sections 1-2), the click
 	 * places that piece directly through the sidebar's placing flow instead of
-	 * opening a menu at all. Otherwise (section 3/4, or Round mode) the
-	 * existing empty-space radial menu handles it — bends in Map mode, shots
-	 * in Round mode.
+	 * opening a menu at all. Once both endpoints exist (section 3/4), any
+	 * empty-map click places a bend directly (the guided flow) unless the radial
+	 * menu is enabled. Round mode opens a shots/walk radial menu.
 	 */
 	function handleAnnotationPlacement(
 		coordinates: { xPx: number; yPx: number },
@@ -2227,15 +2227,14 @@
 				return;
 			}
 			if (hole && !radialMenuEnabled) {
-				// A fully-placed hole's empty-map click drops a corridor bend
-				// directly, but only while the banner is actually asking for bends
-				// — the guided all-18 phase, or a hole's own "+ Add Bend(s)"
-				// action (`sidebarBanner`'s `manual` flag distinguishes the two
-				// just for copy/Close-vs-Done, not for this). Outside that, a
-				// stray click during ordinary review/approval must not silently
-				// drop a bend. The radial menu, when enabled, still wins so its
-				// delete/bend wedges stay reachable.
-				if (sidebarBanner?.kind === 'bends') {
+				// Once both tee and basket exist (section >= 3), any empty-map click
+				// places a corridor bend directly — the natural guided flow. This
+				// works whether the hole is under initial review (section 3) or
+				// already approved (section 4), and regardless of how tee/basket
+				// were placed (CV, manual, or mixed). The radial menu, when enabled,
+				// still wins so its delete/bend wedges stay reachable.
+				const section = sectionOfHole(hole);
+				if (section >= 3) {
 					promoteEagerBends(activeHoleId);
 					holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
 					markMapGeometryEdited();
@@ -3578,7 +3577,7 @@
 							<span><strong>Placing Hole {sidebarBanner.holeNumber} — {sidebarBanner.piece}.</strong> Click empty map to place. Click any existing marker to fix it.</span>
 							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
 						{:else if sidebarBanner.kind === 'approve'}
-							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Drag either marker to adjust.</span>
+							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Click the map to add bends, or drag either marker to adjust.</span>
 							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
 								+ Add Bend(s)
 							</button>
