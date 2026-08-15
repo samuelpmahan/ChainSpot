@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import ImageViewport from './ImageViewport.svelte';
 	import { ViewportController } from '$lib/viewport.svelte';
@@ -10,9 +11,14 @@
 	import {
 		IntakeError,
 		decodeImageFile,
-		intakeImageFile
+		intakeImageFile,
+		isSupportedMimeType
 	} from '$lib/imageIntake';
-	import type { DecodeImageFile } from '$lib/imageIntake';
+	import type { DecodeImageFile, DecodedImage } from '$lib/imageIntake';
+	import { detectSingleImageCrop, renderCroppedImage } from '$lib/singleImageAutoCrop';
+	import { dialogKeyboard } from '$lib/focusManagement';
+	import type { CropConfidence } from '$lib/stitch/autoCrop';
+	import type { CropInsets } from '$lib/stitch/geometry';
 
 	interface OverlayContext {
 		image: ImageAsset;
@@ -118,6 +124,25 @@
 	let error = $state<IntakeError | null>(null);
 	let objectUrl = $state<string | null>(null);
 	let fittedImageId: string | null = null;
+
+	interface CropReviewState {
+		file: File;
+		image: HTMLImageElement;
+		widthPx: number;
+		heightPx: number;
+		mimeType: string;
+		topPx: number;
+		bottomPx: number;
+		confidence: CropConfidence;
+	}
+
+	/** A pending autocrop proposal, awaiting the user's confirm-or-override decision. */
+	let cropReview = $state<CropReviewState | null>(null);
+	let cropReviewError = $state<string | null>(null);
+	let cropReviewApplying = $state(false);
+	let cropReviewPreviewUrl = $state<string | null>(null);
+	let cropReviewApplyButton = $state<HTMLButtonElement | null>(null);
+	let cropReviewFocusRestore: HTMLElement | null = null;
 	let appliedFocusKey: string | null = null;
 	/**
 	 * True for the brief window a `focusRequest` jump is animating, so
@@ -192,15 +217,37 @@
 		onPlacement(coordinates, { altKey: event.altKey });
 	}
 
-	async function handleFileChange(event: Event): Promise<void> {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = '';
-		if (!file) return;
+	$effect(() => {
+		if (!cropReview) {
+			cropReviewPreviewUrl = null;
+			return;
+		}
+		const url = URL.createObjectURL(cropReview.file);
+		cropReviewPreviewUrl = url;
+		return () => URL.revokeObjectURL(url);
+	});
+
+	$effect(() => {
+		if (!cropReview) return;
+		void tick().then(() => cropReviewApplyButton?.focus());
+	});
+
+	/**
+	 * `preDecoded` lets a caller that has already decoded `file` (crop
+	 * detection, or the original image reused by "Upload without cropping")
+	 * skip paying for a second browser decode of the exact same bytes.
+	 */
+	async function runIntake(file: File, preDecoded?: DecodedImage): Promise<void> {
 		loading = true;
 		error = null;
 		try {
-			const result = await intakeImageFile({ editor, role, file, decode, confirmDiscard });
+			const result = await intakeImageFile({
+				editor,
+				role,
+				file,
+				decode: preDecoded ? async () => preDecoded : decode,
+				confirmDiscard
+			});
 			if (result.ok) {
 				if (result.status !== 'cancelled') onDomainChanged?.(role);
 			} else {
@@ -211,6 +258,123 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	/** Rounds and bounds a manually-edited crop field to a sane pixel range. */
+	function clampCropField(value: number, heightPx: number): number {
+		if (!Number.isFinite(value)) return 0;
+		return Math.max(0, Math.min(Math.round(value), Math.max(0, heightPx - 1)));
+	}
+
+	function handleCropTopInput(event: Event): void {
+		if (!cropReview) return;
+		const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
+		cropReview.topPx = clampCropField(value, cropReview.heightPx);
+	}
+
+	function handleCropBottomInput(event: Event): void {
+		if (!cropReview) return;
+		const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
+		cropReview.bottomPx = clampCropField(value, cropReview.heightPx);
+	}
+
+	async function applyCropReview(): Promise<void> {
+		if (!cropReview) return;
+		const review = cropReview;
+		cropReviewApplying = true;
+		cropReviewError = null;
+		try {
+			const insets: CropInsets = {
+				topPx: review.topPx,
+				rightPx: 0,
+				bottomPx: review.bottomPx,
+				leftPx: 0
+			};
+			const blob = await renderCroppedImage(
+				review.image,
+				review.widthPx,
+				review.heightPx,
+				insets,
+				review.mimeType
+			);
+			const croppedFile = new File([blob], review.file.name, { type: review.mimeType });
+			closeCropReview();
+			await runIntake(croppedFile);
+		} catch (err) {
+			cropReviewApplying = false;
+			cropReviewError = err instanceof Error ? err.message : 'Could not crop the image.';
+		}
+	}
+
+	async function skipCropReview(): Promise<void> {
+		// Guards against Escape (routed here by `dialogKeyboard`, which bypasses
+		// the "Upload without cropping" button's own `disabled`) racing an
+		// in-flight "Apply crop": both paths end in `runIntake`, and running them
+		// concurrently would leave the pane's final image nondeterministic.
+		if (!cropReview || cropReviewApplying) return;
+		const review = cropReview;
+		closeCropReview();
+		await runIntake(review.file, { image: review.image, widthPx: review.widthPx, heightPx: review.heightPx });
+	}
+
+	/** Clears the review state and restores focus to whatever triggered it, mirroring the app's other confirmation dialogs. */
+	function closeCropReview(): void {
+		cropReview = null;
+		cropReviewError = null;
+		cropReviewApplying = false;
+		const target = cropReviewFocusRestore?.isConnected ? cropReviewFocusRestore : null;
+		cropReviewFocusRestore = null;
+		if (target) void tick().then(() => target.focus());
+	}
+
+	async function handleFileChange(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+
+		let decoded: DecodedImage | null = null;
+		if (isSupportedMimeType(file.type)) {
+			loading = true;
+			error = null;
+			try {
+				decoded = await decode(file);
+			} catch {
+				decoded = null;
+			}
+			if (decoded) {
+				// Detection is a best-effort convenience on top of the ordinary upload,
+				// never a gate on it: a canvas/analysis failure here (unavailable 2D
+				// context, an oversized raster) must fall through to the normal,
+				// uncropped intake below rather than breaking the upload outright.
+				let proposal: ReturnType<typeof detectSingleImageCrop> | null = null;
+				try {
+					proposal = detectSingleImageCrop(decoded.image);
+				} catch {
+					proposal = null;
+				}
+				if (proposal?.insets && (proposal.insets.topPx > 0 || proposal.insets.bottomPx > 0)) {
+					cropReviewFocusRestore =
+						document.activeElement instanceof HTMLElement ? document.activeElement : null;
+					cropReview = {
+						file,
+						image: decoded.image,
+						widthPx: decoded.widthPx,
+						heightPx: decoded.heightPx,
+						mimeType: file.type,
+						topPx: proposal.insets.topPx,
+						bottomPx: proposal.insets.bottomPx,
+						confidence: proposal.confidence
+					};
+					loading = false;
+					return;
+				}
+			}
+			loading = false;
+		}
+		// `decoded` (when present) is this exact `file`'s already-decoded image,
+		// reused so the ordinary no-crop-proposed path never decodes it twice.
+		await runIntake(file, decoded ?? undefined);
 	}
 </script>
 
@@ -346,6 +510,90 @@
 	/>
 </section>
 
+{#if cropReview}
+	<div class="dialog-backdrop">
+		<div
+			class="dialog crop-dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Crop screenshot chrome?"
+			data-testid="crop-review-dialog"
+			use:dialogKeyboard={() => skipCropReview()}
+		>
+			<h2>Crop screenshot chrome?</h2>
+			<p>
+				ChainSpot detected a status bar and/or navigation bar at the top and bottom of this image.
+				{#if cropReview.confidence === 'low'}
+					Confidence is low, so check the preview before applying.
+				{/if}
+				Adjust the amounts below, or upload the image as-is.
+			</p>
+			{#if cropReviewPreviewUrl}
+				<div class="crop-preview" data-testid="crop-review-preview">
+					<img src={cropReviewPreviewUrl} alt="" />
+					<div
+						class="crop-band crop-band-top"
+						style={`height:${Math.min(100, (cropReview.topPx / cropReview.heightPx) * 100)}%`}
+					></div>
+					<div
+						class="crop-band crop-band-bottom"
+						style={`height:${Math.min(100, (cropReview.bottomPx / cropReview.heightPx) * 100)}%`}
+					></div>
+				</div>
+			{/if}
+			<div class="crop-fields">
+				<label>
+					<span>Top (px)</span>
+					<input
+						type="number"
+						min="0"
+						max={cropReview.heightPx - 1}
+						step="1"
+						data-testid="crop-review-top"
+						value={cropReview.topPx}
+						oninput={handleCropTopInput}
+					/>
+				</label>
+				<label>
+					<span>Bottom (px)</span>
+					<input
+						type="number"
+						min="0"
+						max={cropReview.heightPx - 1}
+						step="1"
+						data-testid="crop-review-bottom"
+						value={cropReview.bottomPx}
+						oninput={handleCropBottomInput}
+					/>
+				</label>
+			</div>
+			{#if cropReviewError}
+				<p class="error" role="alert">{cropReviewError}</p>
+			{/if}
+			<div class="dialog-actions">
+				<button
+					type="button"
+					data-testid="crop-review-skip"
+					disabled={cropReviewApplying}
+					onclick={skipCropReview}
+				>
+					Upload without cropping
+				</button>
+				<button
+					type="button"
+					class="primary"
+					data-testid="crop-review-apply"
+					bind:this={cropReviewApplyButton}
+					disabled={cropReviewApplying}
+					onclick={applyCropReview}
+				>
+					{cropReviewApplying ? 'Cropping…' : 'Apply crop'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.editor-pane {
 		display: flex;
@@ -476,6 +724,122 @@
 		background: #450a0a;
 		color: #fecaca;
 		font-size: 0.85rem;
+	}
+
+	.dialog-backdrop {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.6);
+		z-index: 50;
+	}
+
+	.dialog {
+		max-width: 28rem;
+		padding: 1rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #1e1e24;
+		color: #e4e4e7;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		max-height: 90vh;
+		overflow-y: auto;
+	}
+
+	.dialog h2 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.dialog p {
+		margin: 0;
+		font-size: 0.85rem;
+		color: #a1a1aa;
+		line-height: 1.5;
+	}
+
+	.crop-dialog {
+		max-width: 24rem;
+	}
+
+	.crop-preview {
+		position: relative;
+		align-self: center;
+		display: inline-block;
+		max-width: 100%;
+		border: 1px solid #34343a;
+		border-radius: 6px;
+		overflow: hidden;
+		line-height: 0;
+	}
+
+	.crop-preview img {
+		display: block;
+		width: auto;
+		height: auto;
+		max-width: 100%;
+		max-height: 40vh;
+	}
+
+	.crop-band {
+		position: absolute;
+		left: 0;
+		right: 0;
+		background: repeating-linear-gradient(
+			135deg,
+			rgba(0, 0, 0, 0.65),
+			rgba(0, 0, 0, 0.65) 6px,
+			rgba(0, 0, 0, 0.45) 6px,
+			rgba(0, 0, 0, 0.45) 12px
+		);
+		pointer-events: none;
+	}
+
+	.crop-band-top {
+		top: 0;
+	}
+
+	.crop-band-bottom {
+		bottom: 0;
+	}
+
+	.crop-fields {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.crop-fields label {
+		flex: 1 1 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		font-size: 0.8rem;
+		color: #d4d4d8;
+	}
+
+	.crop-fields input {
+		min-height: 2.25rem;
+		border: 1px solid #52525b;
+		border-radius: 5px;
+		background: #27272a;
+		color: #f4f4f5;
+		padding: 0.3rem 0.5rem;
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+	}
+
+	.dialog-actions button.primary {
+		border-color: #2563eb;
+		background: #2563eb;
+		color: #fff;
 	}
 
 	.file-input {

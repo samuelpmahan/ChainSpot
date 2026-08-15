@@ -533,3 +533,64 @@ export function proposeCrop(
 ): CropInsets | null {
 	return proposeCropDetailed(rasters, options).insets;
 }
+
+export interface SingleImageCropProposal {
+	/** The proposed top/bottom-only crop, or null when there's no chrome band evidence. */
+	readonly insets: CropInsets | null;
+	readonly confidence: CropConfidence;
+}
+
+/**
+ * A single freshly uploaded image (annotate-course / annotate-round) has no
+ * sibling tile to reach cross-tile agreement with, so this reuses only the
+ * per-image entropy vertical-band detector above (`usePerImageEntropyVerticalCrop`
+ * / `analyzeVerticalEntropy`) — the one part of the crop proposal that was
+ * already evidence from a single raster, not cross-tile consensus. Left/right
+ * insets are never proposed here: nothing in this module infers a per-image
+ * horizontal chrome band, and inventing one would be an unjustified crop.
+ * Returns a proposal only, never a mutation; the caller must present it for
+ * an explicit user decision, exactly like `proposeCrop`.
+ */
+export function proposeSingleImageCrop(
+	raster: AnalysisRaster,
+	options?: CropProposalOptions
+): SingleImageCropProposal {
+	if (!usePerImageEntropyVerticalCrop([raster])) {
+		return { insets: null, confidence: 'absent' };
+	}
+
+	const bounds = analyzeVerticalEntropy(raster);
+	const maxInsetFraction = options?.maxInsetFraction ?? MAX_INSET_FRACTION;
+	const margin = options?.marginPx ?? 0;
+	const maxInset = Math.floor(raster.heightPx * raster.scale * maxInsetFraction);
+
+	const insets: { topPx: number; bottomPx: number } = { topPx: 0, bottomPx: 0 };
+	let anyProposed = false;
+	let anyWeak = false;
+
+	for (const side of ['topPx', 'bottomPx'] as const) {
+		const detected = side === 'topPx' ? bounds.topPx : bounds.bottomPx;
+		if (detected === null) {
+			anyWeak = true;
+			continue;
+		}
+		const clamped = Math.max(0, Math.min(detected, maxInset));
+		if (clamped < MIN_ORIGINAL_BAND_PX) {
+			anyWeak = true;
+			continue;
+		}
+		const margined = Math.min(clamped + margin, maxInset);
+		insets[side] = margined;
+		anyProposed = true;
+		if (margined !== detected) anyWeak = true;
+	}
+
+	if (!anyProposed) {
+		return { insets: null, confidence: anyWeak ? 'low' : 'absent' };
+	}
+
+	return {
+		insets: { topPx: insets.topPx, rightPx: 0, bottomPx: insets.bottomPx, leftPx: 0 },
+		confidence: anyWeak ? 'low' : 'high'
+	};
+}

@@ -3,10 +3,66 @@ import {
 	DEFAULT_CROP_SAFETY_MARGIN_PX,
 	MAX_INSET_FRACTION,
 	MIN_ORIGINAL_BAND_PX,
-	proposeCrop
+	proposeCrop,
+	proposeSingleImageCrop
 } from '../../src/lib/stitch/autoCrop';
 import { buildGrayRaster, TILE_H } from '../helpers/smartMap';
 import type { AnalysisRaster } from '../../src/lib/stitch/analysis';
+
+/**
+ * A synthetic "phone screenshot" raster: uniform (zero-entropy) bands of
+ * `chromeDepth` rows at the top and bottom, and a full-range, per-pixel-varying
+ * (high-entropy) region in between, standing in for real map content. Sized to
+ * satisfy the per-image entropy detector's real-capture gate (height >= 1000,
+ * width >= 500, height > width, scale <= 1.01 — see `usePerImageEntropyVerticalCrop`).
+ */
+function buildScreenshotRaster(
+	widthPx: number,
+	heightPx: number,
+	chromeDepth: number,
+	options?: { scale?: number }
+): AnalysisRaster {
+	const gray = new Uint8Array(widthPx * heightPx);
+	for (let y = 0; y < heightPx; y += 1) {
+		const inChrome = y < chromeDepth || y >= heightPx - chromeDepth;
+		for (let x = 0; x < widthPx; x += 1) {
+			gray[y * widthPx + x] = inChrome ? 40 : (x * 37 + y * 91) % 256;
+		}
+	}
+	return { widthPx, heightPx, gray, scale: options?.scale ?? 1 };
+}
+
+describe('single-image vertical crop proposal (annotate-course / annotate-round uploads)', () => {
+	test('proposes a top/bottom-only crop matching the uniform chrome bands of a qualifying phone screenshot', () => {
+		const raster = buildScreenshotRaster(600, 1200, 100);
+		const proposal = proposeSingleImageCrop(raster);
+		expect(proposal).toEqual({
+			insets: { topPx: 100, rightPx: 0, bottomPx: 100, leftPx: 0 },
+			confidence: 'high'
+		});
+	});
+
+	test('never proposes a crop for a landscape image, even with the same chrome pattern', () => {
+		const raster = buildScreenshotRaster(1200, 600, 100);
+		const proposal = proposeSingleImageCrop(raster);
+		expect(proposal.insets).toBeNull();
+		expect(proposal.confidence).toBe('absent');
+	});
+
+	test('never proposes a crop for a portrait image below the real-capture size gate', () => {
+		const raster = buildScreenshotRaster(400, 900, 100);
+		const proposal = proposeSingleImageCrop(raster);
+		expect(proposal.insets).toBeNull();
+		expect(proposal.confidence).toBe('absent');
+	});
+
+	test('never proposes a crop for a downscaled analysis raster (scale > 1.01)', () => {
+		const raster = buildScreenshotRaster(600, 1200, 100, { scale: 1.5 });
+		const proposal = proposeSingleImageCrop(raster);
+		expect(proposal.insets).toBeNull();
+		expect(proposal.confidence).toBe('absent');
+	});
+});
 
 const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
 
