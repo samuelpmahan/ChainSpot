@@ -144,6 +144,22 @@ export const LOCAL_SNAP_CROP_FEATURE_MULTIPLE = 4;
 export const LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE = 0.5;
 
 /**
+ * Hard ceiling on how far a snap may move the marker from the user's click,
+ * in source-image pixels, regardless of `uiScalePx`. The footprint-relative
+ * radius above is deliberately generous (it shares `TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE`
+ * with the detector's own cropping/sizing needs, not with this feature's own
+ * product intent), and `uiScalePx` legitimately grows with a capture's
+ * resolution/DPI or can be inflated by a bad number-badge match — either way,
+ * this is a "local" correction feature for a user's own slightly-imprecise
+ * click, not a long-range re-detection. Without this cap, a real high-res
+ * capture (or a miscalibrated badge match) can let the footprint-relative
+ * radius reach hundreds of pixels, silently relocating a marker far past
+ * where the user clicked. This value is the actual accepted radius whenever
+ * it is smaller than the footprint-relative one.
+ */
+export const LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX = 24;
+
+/**
  * A candidate must score at least this well to be trusted. Matches
  * `basketTemplateDetection.ts`'s own `DEFAULT_MIN_SCORE` floor used for
  * full-course basket detection; applied uniformly to tee-pad candidates too
@@ -270,10 +286,11 @@ function basketCropCandidates(
  * the one relevant existing detector against that crop, and offset its best
  * candidate back into `raster`'s own source-image coordinate space. The
  * result is accepted only when that candidate both clears
- * `LOCAL_SNAP_MIN_SCORE` and lies within
- * `LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE` expected feature footprints of
- * `clickPx` -- a real nearby feature, not just the least-bad thing the
- * detector could find inside an arbitrary window.
+ * `LOCAL_SNAP_MIN_SCORE` and lies within the SMALLER of
+ * `LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE` expected feature footprints and
+ * `LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX` of `clickPx` -- a real nearby feature
+ * close enough to be an obvious correction of the user's own click, not just
+ * the least-bad thing the detector could find inside an arbitrary window.
  */
 export function localFeatureSnap(
 	kind: LocalSnapKind,
@@ -289,7 +306,10 @@ export function localFeatureSnap(
 	if (footprintPx === null || !(footprintPx > 0)) return null;
 
 	const cropSideSourcePx = footprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE;
-	const snapRadiusPx = footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE;
+	const snapRadiusPx = Math.min(
+		footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
+		LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
+	);
 	const bounds = computeCropBounds(raster, clickPx, cropSideSourcePx);
 	if (!bounds) return null;
 

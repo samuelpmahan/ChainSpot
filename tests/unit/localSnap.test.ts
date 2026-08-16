@@ -3,6 +3,7 @@ import {
 	localFeatureSnap,
 	LOCAL_SNAP_CROP_FEATURE_MULTIPLE,
 	LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
+	LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX,
 	LOCAL_SNAP_MIN_SCORE,
 	TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE
 } from '../../src/lib/cv/localSnap';
@@ -227,6 +228,63 @@ describe('localFeatureSnap — tee', () => {
 			localFeatureSnap('tee', cv as unknown as LocalSnapCv, raster, clickPx, TEE_CALIBRATION)
 		).not.toThrow();
 		expect(localFeatureSnap('tee', cv as unknown as LocalSnapCv, raster, clickPx, TEE_CALIBRATION)).toBeNull();
+	});
+
+	describe('absolute radius cap (real-capture uiScalePx can make the footprint-relative radius huge)', () => {
+		// A real higher-resolution capture legitimately produces a uiScalePx > 1.
+		// At uiScalePx=3 the footprint-relative radius alone would be
+		// 26*3*0.5 = 39px -- this block proves LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
+		// (24px) governs instead, matching the feature's actual product intent
+		// (a small correction of the user's own click, not a long-range
+		// re-detection). The candidate rectangle is scaled up 3x linearly / 9x
+		// in area from TEE_PASSING_RECT to keep clearing detectGrayCenterCandidates'
+		// own scale-proportional geometry gates at this uiScalePx, isolating the
+		// radius cap as the only thing under test.
+		const HIGH_UI_SCALE_PX = asUiScalePx(3);
+		const HIGH_SCALE_CALIBRATION: LocalSnapCalibration = { uiScalePx: HIGH_UI_SCALE_PX };
+		const HIGH_SCALE_FOOTPRINT_PX = TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * HIGH_UI_SCALE_PX; // 78
+		const HIGH_SCALE_CROP_SIDE_PX = HIGH_SCALE_FOOTPRINT_PX * LOCAL_SNAP_CROP_FEATURE_MULTIPLE; // 312
+		const HIGH_SCALE_FOOTPRINT_RADIUS_PX = HIGH_SCALE_FOOTPRINT_PX * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE; // 39
+		const SCALED_PASSING_RECT = { size: { width: 48, height: 27 }, area: 1170 };
+
+		it('sanity: the footprint-relative radius really would exceed the absolute cap at this scale', () => {
+			expect(HIGH_SCALE_FOOTPRINT_RADIUS_PX).toBeGreaterThan(LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX);
+		});
+
+		it('rejects a candidate inside the footprint-relative radius but outside the absolute cap', () => {
+			const raster = teeRaster(1000, 1000);
+			const clickPx = { xPx: 500, yPx: 500 };
+			// 30px from the click: inside the 39px footprint-relative radius,
+			// but past the 24px absolute cap.
+			const cropHalfPx = HIGH_SCALE_CROP_SIDE_PX / 2;
+			const originXPx = Math.floor(clickPx.xPx - cropHalfPx);
+			const originYPx = Math.floor(clickPx.yPx - cropHalfPx);
+			const localCenter = { x: clickPx.xPx + 30 - originXPx, y: clickPx.yPx - originYPx };
+			const cv = fakeTeeCv(localCenter, SCALED_PASSING_RECT.size, SCALED_PASSING_RECT.area);
+
+			const result = localFeatureSnap('tee', cv as unknown as LocalSnapCv, raster, clickPx, HIGH_SCALE_CALIBRATION);
+
+			expect(result).toBeNull();
+		});
+
+		it('still accepts a candidate inside the absolute cap at the same elevated uiScalePx', () => {
+			const raster = teeRaster(1000, 1000);
+			const clickPx = { xPx: 500, yPx: 500 };
+			// 15px from the click: inside both the footprint-relative radius and
+			// the 24px absolute cap.
+			const cropHalfPx = HIGH_SCALE_CROP_SIDE_PX / 2;
+			const originXPx = Math.floor(clickPx.xPx - cropHalfPx);
+			const originYPx = Math.floor(clickPx.yPx - cropHalfPx);
+			const localCenter = { x: clickPx.xPx + 15 - originXPx, y: clickPx.yPx - originYPx };
+			const cv = fakeTeeCv(localCenter, SCALED_PASSING_RECT.size, SCALED_PASSING_RECT.area);
+
+			const result = localFeatureSnap('tee', cv as unknown as LocalSnapCv, raster, clickPx, HIGH_SCALE_CALIBRATION);
+
+			expect(result).not.toBeNull();
+			expect(Math.hypot(result!.xPx - clickPx.xPx, result!.yPx - clickPx.yPx)).toBeLessThanOrEqual(
+				LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
+			);
+		});
 	});
 });
 
