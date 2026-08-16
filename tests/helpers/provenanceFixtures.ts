@@ -12,6 +12,7 @@
  */
 import {
 	applySourceTransform,
+	AUTO_SOURCE_CAPTURE_ORIGIN,
 	buildSourceTransform,
 	sealCompositeProvenance
 } from '../../src/lib/domain/provenance';
@@ -20,6 +21,7 @@ import type {
 	CompositingPolicy,
 	DraftComposite,
 	SourceCapture,
+	SourceCaptureOrigin,
 	SourceCropRect,
 	SourceRasterPoint,
 	SourceTransform
@@ -87,6 +89,8 @@ export interface SourceCaptureFixtureParams {
 	readonly fileName?: string;
 	readonly mimeType?: string;
 	readonly sha256?: string;
+	/** Defaults to fully-automatic — none of this test suite's fixtures exercise manual correction (that's Agent C's scope). */
+	readonly origin?: SourceCaptureOrigin;
 }
 
 /** Builds one `SourceCapture`, deriving `coveragePolygon` from `transform(crop)` exactly the way `assertCoherentProvenance` requires -- a fixture that doesn't compute this itself would be checking nothing. */
@@ -100,6 +104,7 @@ export function sourceCaptureFixture(params: SourceCaptureFixtureParams): Source
 		sha256: params.sha256 ?? fakeSha256(params.sourceId),
 		crop: params.crop,
 		transform: params.transform,
+		origin: params.origin ?? AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: cropCorners(params.crop).map((corner) => applySourceTransform(corner, params.transform)),
 		paintOrder: params.paintOrder
 	};
