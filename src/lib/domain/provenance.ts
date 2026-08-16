@@ -178,6 +178,25 @@ export type ResamplingMethod = 'none' | 'nearest' | 'bilinear';
 export type Sha256Hex = string;
 
 /**
+ * Whether a value was produced by automatic detection or overridden by a
+ * user in "Adjust manually" mode. Tracked per-property on `SourceCapture`
+ * (not one blanket per-capture flag) because a user can correct only the
+ * crop, only the placement, or both independently — CHSPT-49's data-quality
+ * intent (a CV corpus consumer needs to know exactly which properties are
+ * algorithm output vs. human-verified/corrected) requires that distinction
+ * to survive, not just "this capture was touched somehow."
+ */
+export type ProvenanceOrigin = 'auto' | 'manual';
+
+export interface SourceCaptureOrigin {
+	readonly crop: ProvenanceOrigin;
+	readonly transform: ProvenanceOrigin;
+}
+
+/** The common case: nothing in this capture was manually overridden. */
+export const AUTO_SOURCE_CAPTURE_ORIGIN: SourceCaptureOrigin = { crop: 'auto', transform: 'auto' };
+
+/**
  * One capture's full lineage: which original file, what part of it was used,
  * and where that part landed in the composite. `sourceId` is always the
  * `ImageAsset.id` of the *original, pre-crop, pre-stitch* upload — provenance
@@ -194,6 +213,8 @@ export interface SourceCapture {
 	readonly sha256: Sha256Hex;
 	readonly crop: SourceCropRect;
 	readonly transform: SourceTransform;
+	/** Whether `crop` and `transform` (independently) came from automatic detection or a user's manual correction. Use `AUTO_SOURCE_CAPTURE_ORIGIN` for the common all-automatic case. */
+	readonly origin: SourceCaptureOrigin;
 	/**
 	 * `transform` applied to `crop`'s four corners, in composite pixels, in
 	 * order [top-left, top-right, bottom-right, bottom-left] of the crop rect

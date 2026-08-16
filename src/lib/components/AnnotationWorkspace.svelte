@@ -4158,7 +4158,7 @@
 								{sidebarBanner.manual ? 'Done' : 'Close'}
 							</button>
 						{:else}
-							<span>Hole {sidebarBanner.holeNumber} is confirmed.</span>
+							<span>Hole {sidebarBanner.holeNumber} confirmed. Add bends anytime if the fairway isn't straight.</span>
 							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
 								+ Add Bend(s)
 							</button>
