@@ -171,7 +171,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(6);
+		expect(doc.schemaVersion).toBe(7);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -388,7 +388,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(6);
+		expect(CURRENT_SCHEMA_VERSION).toBe(7);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -1051,6 +1051,59 @@ describe('provenance migration and validation (schema v5 -> v6)', () => {
 			images: [sourceAsset({ sha256: 'a'.repeat(64), provenance: incoherent }), targetAsset()]
 		});
 		expectSerializeError(state, 'provenance', 'provenance.incoherent');
+	});
+});
+
+describe('rotationDeg migration and validation (schema v6 -> v7)', () => {
+	it('migrates v1-v6 documents (none of which have rotationDeg) to absent (0deg)', () => {
+		for (const version of [1, 2, 3, 4, 5, 6]) {
+			const doc = plainDoc(buildState());
+			doc.schemaVersion = version;
+			const parsed = expectDocumentOk(doc);
+			expect(parsed.images[0].rotationDeg).toBeUndefined();
+			expect(parsed.images[1].rotationDeg).toBeUndefined();
+		}
+	});
+
+	it('round-trips a present target rotation through serialize and parse', () => {
+		const state = buildState({ images: [sourceAsset(), targetAsset({ rotationDeg: 32.5 })] });
+		const doc = docFromState(state);
+		expect(doc.images[1].rotationDeg).toBe(32.5);
+
+		const parsed = expectParsedState(state);
+		expect(parsed.images[1].rotationDeg).toBe(32.5);
+	});
+
+	it('omits rotationDeg from the serialized document when absent, and normalizes an explicit null or 0 the same way', () => {
+		const withoutRotation = docFromState(buildState());
+		expect('rotationDeg' in withoutRotation.images[1]).toBe(false);
+
+		const withNull = plainDoc(buildState());
+		(withNull.images as Array<Record<string, unknown>>)[1].rotationDeg = null;
+		expect(expectDocumentOk(withNull).images[1].rotationDeg).toBeUndefined();
+
+		const withZero = plainDoc(buildState());
+		(withZero.images as Array<Record<string, unknown>>)[1].rotationDeg = 0;
+		expect(expectDocumentOk(withZero).images[1].rotationDeg).toBeUndefined();
+	});
+
+	it('rejects a non-zero rotationDeg present on a source-overview image', () => {
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[0].rotationDeg = 12;
+		expectError(doc, 'rotation', 'rotation.role-invalid', 'images[0].rotationDeg');
+	});
+
+	it('tolerates an explicit rotationDeg of 0 on a source-overview image (0 normalizes to absent before the role check)', () => {
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[0].rotationDeg = 0;
+		const parsed = expectDocumentOk(doc);
+		expect(parsed.images[0].rotationDeg).toBeUndefined();
+	});
+
+	it('rejects a non-finite or non-number rotationDeg', () => {
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[1].rotationDeg = 'north';
+		expectError(doc, 'provenance', 'provenance.number.invalid', 'images[1].rotationDeg');
 	});
 });
 

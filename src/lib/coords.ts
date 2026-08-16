@@ -19,6 +19,16 @@
  *
  * Round-trip guarantee: `screenToImage(imageToScreen(p, t), t)` returns `p` within
  * `ROUND_TRIP_TOLERANCE` original-image pixels for the supported scale range.
+ *
+ * Manual target rotation (CHSPT-44): the clean target image may additionally carry a
+ * `targetRotationDeg` pose (`ImageAsset.rotationDeg`), a display transform rotated about
+ * the image's own center — never a resampled bitmap, never touching original-image-pixel
+ * coordinates. `imageToScreenRotated`/`screenToImageRotated` compose that rotation with the
+ * plain pan/zoom `ViewTransformState` for the one pane (`target-basemap`) that has a
+ * non-zero rotation; `imageToScreen`/`screenToImage` remain the unrotated identity case
+ * (equivalent to calling the rotated variants with `rotationDeg = 0`) so every other caller
+ * is unaffected. Positive degrees rotate clockwise on screen, matching Konva's
+ * `Node.rotation()` and SVG's `rotate()` in this same y-down pixel space.
  */
 
 import type { PointCoordinates, ViewTransformState } from './domain/project';
@@ -105,6 +115,73 @@ export function screenToImage(
 		xPx: (point.x - transform.panX) / transform.zoom,
 		yPx: (point.y - transform.panY) / transform.zoom
 	};
+}
+
+/** Wraps an arbitrary rotation angle into `(-180, 180]` degrees, so repeated fine-tuning never drifts to an ever-growing raw value. */
+export function normalizeRotationDeg(degrees: number): number {
+	if (!Number.isFinite(degrees)) {
+		throw new Error(`normalizeRotationDeg: degrees must be a finite number, got ${degrees}`);
+	}
+	const wrapped = ((degrees + 180) % 360 + 360) % 360 - 180;
+	// Canonicalize -180 to 180 so the wrap is one-sided, matching the half-open `(-180, 180]` doc above.
+	return wrapped === -180 ? 180 : wrapped;
+}
+
+/**
+ * Rotates `point` about `center` by `degrees`, clockwise for a positive angle (this
+ * module's y-down screen/image convention). The pure primitive both the interactive
+ * screen<->image conversions below and `holeGraphics.ts`'s rotated crop framing share,
+ * so there is exactly one rotation-about-a-point formula in the codebase.
+ */
+export function rotatePointAroundCenter(
+	point: ImageSpacePoint,
+	center: ImageSpacePoint,
+	degrees: number
+): ImageSpacePoint {
+	if (!Number.isFinite(degrees)) {
+		throw new Error(`rotatePointAroundCenter: degrees must be a finite number, got ${degrees}`);
+	}
+	if (degrees === 0) return { xPx: point.xPx, yPx: point.yPx };
+	const radians = (degrees * Math.PI) / 180;
+	const cos = Math.cos(radians);
+	const sin = Math.sin(radians);
+	const dx = point.xPx - center.xPx;
+	const dy = point.yPx - center.yPx;
+	return {
+		xPx: dx * cos - dy * sin + center.xPx,
+		yPx: dx * sin + dy * cos + center.yPx
+	};
+}
+
+/**
+ * `imageToScreen` composed with a manual rotation about `center` (image-space), applied
+ * before pan/zoom — the target pane's pose transform (CHSPT-44). Identical to
+ * `imageToScreen` when `rotationDeg` is 0.
+ */
+export function imageToScreenRotated(
+	point: ImageSpacePoint,
+	transform: ViewTransformState,
+	rotationDeg: number,
+	center: ImageSpacePoint
+): ScreenSpacePoint {
+	if (rotationDeg === 0) return imageToScreen(point, transform);
+	return imageToScreen(rotatePointAroundCenter(point, center, rotationDeg), transform);
+}
+
+/**
+ * Inverse of `imageToScreenRotated`: unwinds pan/zoom, then the manual rotation about
+ * `center`, back to original (unrotated) image pixels — the space every stored
+ * annotation/correspondence coordinate lives in. Identical to `screenToImage` when
+ * `rotationDeg` is 0.
+ */
+export function screenToImageRotated(
+	point: ScreenSpacePoint,
+	transform: ViewTransformState,
+	rotationDeg: number,
+	center: ImageSpacePoint
+): ImageSpacePoint {
+	if (rotationDeg === 0) return screenToImage(point, transform);
+	return rotatePointAroundCenter(screenToImage(point, transform), center, -rotationDeg);
 }
 
 export function toNormalizedCoordinates(

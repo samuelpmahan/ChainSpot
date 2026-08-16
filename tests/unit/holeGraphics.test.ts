@@ -7,6 +7,7 @@ import {
 } from '../../src/lib/holeGraphics';
 import type { HoleFramingOptions, HoleGraphicRenderEnv } from '../../src/lib/holeGraphics';
 import { deriveCorridorBand, deriveCorridorCenterline } from '../../src/lib/corridor';
+import { rotatePointAroundCenter } from '../../src/lib/coords';
 import type { AnnotatedHole, SourcePoint } from '../../src/lib/domain/annotatedRound';
 import type { SerializableTransform } from '../../src/lib/alignment/types';
 import { DEFAULT_GRAPHIC_STYLE } from '../../src/lib/graphics/style';
@@ -161,6 +162,92 @@ describe('planHoleGraphic', () => {
 	});
 });
 
+describe('planHoleGraphic target rotation (CHSPT-44)', () => {
+	test('defaults targetRotationDeg to 0 and leaves every feature point unrotated', () => {
+		const hole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			shots: [],
+			tee: { xPx: 500, yPx: 500 },
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
+		expect(plan!.targetRotationDeg).toBe(0);
+	});
+
+	test('a rotated target never rotates the stored feature points — only the crop framing changes', () => {
+		const hole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			shots: [],
+			tee: { xPx: 500, yPx: 500 },
+			basket: { xPx: 700, yPx: 500 },
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
+		const unrotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 0);
+		const rotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 40);
+		expect(rotated!.tee).toEqual(unrotated!.tee);
+		expect(rotated!.basket).toEqual(unrotated!.basket);
+		expect(rotated!.targetRotationDeg).toBe(40);
+	});
+
+	test('a 180-degree rotation reflects the crop framing through the image center', () => {
+		// A single point near the top-left corner, far from the image center (500, 500).
+		const hole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			shots: [],
+			tee: { xPx: 50, yPx: 50 },
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
+		const unrotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 0)!;
+		const rotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 180)!;
+		// 180 degrees about (500, 500) maps (50, 50) to (950, 950); the 40px minimum
+		// padding is unaffected by rotation, and a rectangle centered on its own
+		// centroid maps back onto itself under a 180-degree turn, so the clamp bounds
+		// stay the plain [0, 1000] x [0, 1000] box either way.
+		expect(unrotated.crop).toEqual({ xPx: 10, yPx: 10, widthPx: 80, heightPx: 80 });
+		expect(rotated.crop).toEqual({ xPx: 910, yPx: 910, widthPx: 80, heightPx: 80 });
+	});
+
+	test('clamps the rotated crop to the rotated image footprint, never outside where the raster actually paints', () => {
+		// Near the bottom-right corner of a 200x100 image: padding alone would push
+		// the raw (unclamped) crop well outside the rotated raster's own footprint.
+		const hole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			shots: [],
+			tee: { xPx: 198, yPx: 98 },
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
+		const rotated = planHoleGraphic(hole, IDENTITY, 200, 100, undefined, [], 45)!;
+		const center = { xPx: 100, yPx: 50 };
+		const corners = [
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 200, yPx: 0 },
+			{ xPx: 200, yPx: 100 },
+			{ xPx: 0, yPx: 100 }
+		].map((corner) => rotatePointAroundCenter(corner, center, 45));
+		const bounds = {
+			minX: Math.min(...corners.map((c) => c.xPx)),
+			maxX: Math.max(...corners.map((c) => c.xPx)),
+			minY: Math.min(...corners.map((c) => c.yPx)),
+			maxY: Math.max(...corners.map((c) => c.yPx))
+		};
+		expect(rotated.crop.xPx).toBeGreaterThanOrEqual(bounds.minX - 1e-6);
+		expect(rotated.crop.yPx).toBeGreaterThanOrEqual(bounds.minY - 1e-6);
+		expect(rotated.crop.xPx + rotated.crop.widthPx).toBeLessThanOrEqual(bounds.maxX + 1e-6);
+		expect(rotated.crop.yPx + rotated.crop.heightPx).toBeLessThanOrEqual(bounds.maxY + 1e-6);
+		// The clamp must actually have engaged on the bottom edge — this hole's
+		// padded footprint alone extends past the rotated image's own bounding box.
+		expect(rotated.crop.yPx + rotated.crop.heightPx).toBeCloseTo(bounds.maxY, 6);
+	});
+});
+
 describe('buildHoleGraphicMarkup', () => {
 	function planFor(hole: AnnotatedHole): ReturnType<typeof planHoleGraphic> {
 		return planHoleGraphic(hole, IDENTITY, 1000, 1000);
@@ -227,6 +314,47 @@ describe('buildHoleGraphicMarkup', () => {
 		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [{ xPx: 5, yPx: 5 }])!;
 		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target', DEFAULT_GRAPHIC_STYLE);
 		expect(markup).not.toContain(DEFAULT_GRAPHIC_STYLE.walkingPathColor);
+	});
+
+	test('emits no rotate transform at the default 0-degree rotation (byte-identical to before CHSPT-44)', () => {
+		const plan = planFor({ id: 'h1', number: 1, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 })!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
+		expect(markup).not.toContain('<g transform="rotate');
+	});
+
+	test('wraps the raster and overlay geometry in a shared rotate transform about the target image center', () => {
+		const hole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			shots: [],
+			tee: { xPx: 10, yPx: 10 },
+			basket: { xPx: 60, yPx: 40 },
+			corridorBends: [],
+			corridorWidthPx: 60
+		};
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 25)!;
+		expect(plan.targetRotationDeg).toBe(25);
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
+
+		expect(markup).toContain('<g transform="rotate(25 500 500)">');
+		// Both the raster and the tee marker sit inside that one shared group.
+		const groupOpenIndex = markup.indexOf('<g transform="rotate(25 500 500)">');
+		const groupCloseIndex = markup.indexOf('</g>');
+		const imageIndex = markup.indexOf('<image');
+		const teeMarkerIndex = markup.indexOf(`cx="${plan.tee!.xPx}"`);
+		expect(imageIndex).toBeGreaterThan(groupOpenIndex);
+		expect(imageIndex).toBeLessThan(groupCloseIndex);
+		expect(teeMarkerIndex).toBeGreaterThan(groupOpenIndex);
+		expect(teeMarkerIndex).toBeLessThan(groupCloseIndex);
+	});
+
+	test('keeps the info card outside the rotated group so it always reads upright', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 4, shots: [], tee: { xPx: 10, yPx: 10 }, corridorBends: [], corridorWidthPx: 60 };
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 25)!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:http://example/target');
+		const groupCloseIndex = markup.indexOf('</g>');
+		const cardIndex = markup.indexOf('Hole 4');
+		expect(cardIndex).toBeGreaterThan(groupCloseIndex);
 	});
 });
 

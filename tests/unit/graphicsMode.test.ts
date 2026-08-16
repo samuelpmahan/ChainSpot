@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { GraphicsMode } from '../../src/lib/graphics/graphicsMode.svelte';
 import type { GraphicsModeInputs } from '../../src/lib/graphics/graphicsMode.svelte';
 import type { HoleGraphicPlan } from '../../src/lib/holeGraphics';
+import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
+import type { SerializableTransform } from '../../src/lib/alignment/types';
 import { naipImageGeoReference } from '../../src/lib/elevationProfile';
 import type { GeoRasterReference } from '../../src/lib/elevationProfile';
 
@@ -23,6 +25,7 @@ function fakePlan(overrides: Partial<HoleGraphicPlan> = {}): HoleGraphicPlan {
 		crop: { xPx: 0, yPx: 0, widthPx: 100, heightPx: 100 },
 		targetWidthPx: 100,
 		targetHeightPx: 100,
+		targetRotationDeg: 0,
 		...overrides
 	};
 }
@@ -36,6 +39,7 @@ function fakeInputs(overrides: Partial<GraphicsModeInputs> = {}): GraphicsModeIn
 		feetPerPixel: () => undefined,
 		walkingPath: () => undefined,
 		geoReference: () => null,
+		targetRotationDeg: () => 0,
 		...overrides
 	};
 }
@@ -84,5 +88,52 @@ describe('GraphicsMode elevation-profile gating', () => {
 		expect(mode.elevationBuilding.size).toBe(0);
 		expect(mode.elevationErrors.get(fakePlan().holeId)).toMatch(/elevation lookup failed/i);
 		expect(mode.elevationStats.size).toBe(0);
+	});
+});
+
+describe('GraphicsMode.plans (CHSPT-44 rotation wiring)', () => {
+	const IDENTITY: SerializableTransform = {
+		model: 'similarity',
+		coefficients: [1, 0, 0, 1, 0, 0],
+		isInvertible: true,
+		determinant: 1,
+		orientation: 1,
+		majorAxisScale: 1,
+		minorAxisScale: 1,
+		anisotropy: 1,
+		shear: 0
+	};
+	const hole: AnnotatedHole = {
+		id: 'h1',
+		number: 1,
+		tee: { xPx: 10, yPx: 10 },
+		basket: { xPx: 90, yPx: 10 },
+		shots: [],
+		corridorBends: [],
+		corridorWidthPx: 20
+	};
+
+	test('threads targetRotationDeg from inputs onto every derived plan', () => {
+		const mode = new GraphicsMode(
+			fakeInputs({
+				holes: () => [hole],
+				transform: () => IDENTITY,
+				targetSize: () => ({ widthPx: 200, heightPx: 200 }),
+				targetRotationDeg: () => 30
+			})
+		);
+		expect(mode.plans).toHaveLength(1);
+		expect(mode.plans[0].targetRotationDeg).toBe(30);
+	});
+
+	test('defaults to unrotated (0deg) plans, matching pre-CHSPT-44 behavior', () => {
+		const mode = new GraphicsMode(
+			fakeInputs({
+				holes: () => [hole],
+				transform: () => IDENTITY,
+				targetSize: () => ({ widthPx: 200, heightPx: 200 })
+			})
+		);
+		expect(mode.plans[0].targetRotationDeg).toBe(0);
 	});
 });

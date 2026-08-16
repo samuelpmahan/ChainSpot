@@ -41,6 +41,8 @@ export interface GraphicsModeInputs {
 	transform(): SerializableTransform | null;
 	/** The clean target image's own pixel dimensions, or null before it's loaded. */
 	targetSize(): GraphicsModeTargetSize | null;
+	/** Manual clean-target rotation (CHSPT-44), in degrees about the target image's own center; 0 for the default north-up case. */
+	targetRotationDeg(): number;
 	/** The target image's blob URL, reused directly as the SVG `<image href>`, or null. */
 	targetImageHref(): string | null;
 	/** Feet-per-pixel for the current target image, only when it has a known ground scale. */
@@ -98,6 +100,7 @@ export class GraphicsMode {
 		const target = this.#inputs.targetSize();
 		if (!transform || !target) return [];
 		const walkingPath = this.#inputs.walkingPath() ?? [];
+		const targetRotationDeg = this.#inputs.targetRotationDeg();
 		const result: HoleGraphicPlan[] = [];
 		for (const hole of this.#inputs.holes()) {
 			const plan = planHoleGraphic(
@@ -106,7 +109,8 @@ export class GraphicsMode {
 				target.widthPx,
 				target.heightPx,
 				DEFAULT_HOLE_FRAMING,
-				walkingPath
+				walkingPath,
+				targetRotationDeg
 			);
 			if (plan) result.push(plan);
 		}

@@ -60,6 +60,17 @@ export interface ImageAsset {
 	 * "no ambiguity between undefined and empty" convention `walkingPath` already uses.
 	 */
 	provenance?: CompositeProvenance | null;
+	/**
+	 * Manual clean-target rotation about the image's own center, in degrees (CHSPT-44:
+	 * DEMO-ALIGN). Only meaningful on a `target-basemap` image; always absent on
+	 * `source-overview`. A display/pose transform, never a resampled bitmap — the raster
+	 * bytes and every stored `ImagePoint`/hole coordinate stay in original, unrotated
+	 * target-image pixels regardless of this value. Absent and `0` both mean "no
+	 * rotation" and normalize to the same absent representation on schema read/write
+	 * (see `projectSchema.ts`), the same convention `provenance` and `walkingPath` use
+	 * for their own defaults.
+	 */
+	rotationDeg?: number | null;
 }
 
 export interface ImagePoint {

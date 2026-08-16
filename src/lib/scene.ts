@@ -179,8 +179,16 @@ export interface PaneScene {
 	readonly controlPointGroup: Konva.Group;
 	/** Swaps the raster content without touching the view transform. */
 	setImage(image: HTMLImageElement, widthPx: number, heightPx: number): void;
-	/** Applies the authoritative plain view transform to all image-space view groups. */
-	applyTransform(transform: ViewTransformState): void;
+	/**
+	 * Applies the authoritative plain view transform to all image-space view groups,
+	 * composed with an optional manual rotation (CHSPT-44) about the current raster
+	 * image's own center. `rotationDeg` defaults to 0 (no rotation, today's exact
+	 * behavior); a caller with no rotated pose never needs to pass it. Rotating a group
+	 * carries every one of its children — raster, ghost-course overlay, and
+	 * correspondence markers alike — rigidly together, so overlay geometry never needs
+	 * separate rotation math.
+	 */
+	applyTransform(transform: ViewTransformState, rotationDeg?: number): void;
 	/** Replaces the transient marker scene objects from plain image-space marker data. */
 	setMarkers(markers: readonly MarkerSceneData[]): void;
 	/**
@@ -246,6 +254,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 	let imageNode: Konva.Image | null = null;
 	let markerZoom = 1;
+	/** Current raster's own pixel dimensions, tracked so `applyTransform` can rotate every view group about its center without the caller re-supplying it every frame. */
+	let imageDims: { widthPx: number; heightPx: number } | null = null;
 
 	function createMarker(marker: MarkerSceneData): Konva.Group {
 		const spec = markerVisualSpec(marker);
@@ -439,20 +449,35 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			node.image(image);
 			node.width(widthPx);
 			node.height(heightPx);
+			imageDims = { widthPx, heightPx };
 			rasterGroup.visible(true);
 			rasterLayer.batchDraw();
 		},
 
-		applyTransform(transform) {
+		applyTransform(transform, rotationDeg = 0) {
 			markerZoom = transform.zoom;
-			rasterGroup.position({ x: transform.panX, y: transform.panY });
-			rasterGroup.scale({ x: transform.zoom, y: transform.zoom });
-			ghostCourseGroup.position({ x: transform.panX, y: transform.panY });
-			ghostCourseGroup.scale({ x: transform.zoom, y: transform.zoom });
-			controlPointGroup.position({ x: transform.panX, y: transform.panY });
-			controlPointGroup.scale({ x: transform.zoom, y: transform.zoom });
+			// Pivot at the raster's own center in image-space, then scale/pan exactly as
+			// the unrotated case did — see the interface doc and `coords.ts`'s
+			// `imageToScreenRotated` for the shared "rotate about center, then pan/zoom"
+			// formula this mirrors. No raster yet (dims unknown) falls back to (0, 0),
+			// same as an unrotated pivot at the group origin.
+			const centerX = imageDims ? imageDims.widthPx / 2 : 0;
+			const centerY = imageDims ? imageDims.heightPx / 2 : 0;
+			const position = {
+				x: transform.panX + transform.zoom * centerX,
+				y: transform.panY + transform.zoom * centerY
+			};
+			for (const group of [rasterGroup, ghostCourseGroup, controlPointGroup]) {
+				group.offset({ x: centerX, y: centerY });
+				group.position(position);
+				group.scale({ x: transform.zoom, y: transform.zoom });
+				group.rotation(rotationDeg);
+			}
 			for (const marker of controlPointGroup.getChildren()) {
 				marker.scale(markerVisualScale(markerZoom));
+				// Counter-rotate each marker's own symbol/ordinal so it stays upright while
+				// its position still rotates rigidly with the parent group (CHSPT-44).
+				marker.rotation(-rotationDeg);
 			}
 			rasterLayer.batchDraw();
 			ghostCourseLayer.batchDraw();

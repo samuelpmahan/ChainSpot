@@ -7,7 +7,7 @@
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
 	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
-	import { pointInBounds } from '$lib/coords';
+	import { normalizeRotationDeg, pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
 	import type { PointSelection } from '$lib/pointSelection';
@@ -228,6 +228,51 @@
 	}
 
 	/**
+	 * Manual clean-target rotation (CHSPT-44), about the target image's own center.
+	 * Transient display state, kept LIVE (updated continuously as the rotation
+	 * control is dragged/typed) so the Konva overlay in the target pane, the
+	 * hole-graphics preview list, and eventual PNG/zip export are always driven by
+	 * the exact same value — one source of truth for "point transfer, overlays,
+	 * correspondence display, and final export" per the ticket's geometry contract.
+	 * Only committed to durable state (`editor.setTargetRotation`, undoable) once a
+	 * gesture ends, so a slider drag never floods undo history — the same "transient
+	 * preview during a drag, one commit at the end" shape `ImagePane`'s own marker
+	 * drag already uses.
+	 */
+	let targetRotationDraft = $state(0);
+	/** The target image whose rotation `targetRotationDraft` currently tracks, so a newly chosen/replaced target resets the draft instead of inheriting a stale angle. */
+	let targetRotationImageId: string | null = null;
+
+	/** Keeps the live draft in sync with the committed value whenever the target image identity changes (loaded, replaced, or cleared) — never on the draft's own commits, which keep the same image id. */
+	$effect(() => {
+		const image = targetImage();
+		if (!image) {
+			targetRotationImageId = null;
+			targetRotationDraft = 0;
+			return;
+		}
+		if (image.id !== targetRotationImageId) {
+			targetRotationImageId = image.id;
+			targetRotationDraft = image.rotationDeg ?? 0;
+		}
+	});
+
+	/** Live updates while the rotation control is being dragged/typed; never touches durable state. */
+	function handleTargetRotationInput(rotationDeg: number): void {
+		if (!Number.isFinite(rotationDeg)) return;
+		targetRotationDraft = normalizeRotationDeg(rotationDeg);
+	}
+
+	/** Commits the rotation gesture's final value to durable, undoable state. */
+	function handleTargetRotationCommit(rotationDeg: number): void {
+		if (!Number.isFinite(rotationDeg) || !targetImage()) return;
+		const normalized = normalizeRotationDeg(rotationDeg);
+		targetRotationDraft = normalized;
+		editor.setTargetRotation(normalized);
+		refresh();
+	}
+
+	/**
 	 * The graphics/export mode (style selection, per-hole plans, PNG/zip
 	 * export state) lives behind this module boundary — see
 	 * `graphicsMode.svelte.ts` for why. It reads alignment/annotation/NAIP
@@ -241,7 +286,8 @@
 		targetImageHref,
 		feetPerPixel: holeGraphicFeetPerPixel,
 		walkingPath: () => currentWalkingPath(),
-		geoReference: () => targetGeoReference()
+		geoReference: () => targetGeoReference(),
+		targetRotationDeg: () => targetRotationDraft
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -2074,6 +2120,9 @@
 			{markersVisible}
 			ghostCourse={graphicsMode.plans}
 			ghostCourseVisible={ghostCoursePreviewVisible}
+			rotationDeg={targetRotationDraft}
+			onRotationInput={handleTargetRotationInput}
+			onRotationCommit={handleTargetRotationCommit}
 			{decode}
 			confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
 			onDomainChanged={onDomainChanged}

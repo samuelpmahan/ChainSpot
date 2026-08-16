@@ -6,9 +6,13 @@ import {
 	fitViewTransform,
 	identityViewTransform,
 	imageToScreen,
+	imageToScreenRotated,
+	normalizeRotationDeg,
 	normalizedConsistentWithPixels,
 	pointInBounds,
+	rotatePointAroundCenter,
 	screenToImage,
+	screenToImageRotated,
 	toNormalizedCoordinates
 } from '../../src/lib/coords';
 import type { ImageSpacePoint, ViewTransformState } from '../../src/lib/coords';
@@ -302,5 +306,91 @@ describe('device-pixel-ratio independence', () => {
 		const identity = identityViewTransform();
 		expect(identity).toEqual({ zoom: 1, panX: 0, panY: 0 });
 		expect(screenToImage({ x: 5, y: 7 }, identity)).toEqual({ xPx: 5, yPx: 7 });
+	});
+});
+
+describe('normalizeRotationDeg', () => {
+	it('leaves values already inside (-180, 180] unchanged', () => {
+		expect(normalizeRotationDeg(0)).toBe(0);
+		expect(normalizeRotationDeg(45.5)).toBe(45.5);
+		expect(normalizeRotationDeg(-179.9)).toBeCloseTo(-179.9, 9);
+		expect(normalizeRotationDeg(180)).toBe(180);
+	});
+
+	it('wraps values outside the range to an equivalent angle', () => {
+		expect(normalizeRotationDeg(360)).toBe(0);
+		expect(normalizeRotationDeg(400)).toBeCloseTo(40, 9);
+		expect(normalizeRotationDeg(-400)).toBeCloseTo(-40, 9);
+		expect(normalizeRotationDeg(181)).toBeCloseTo(-179, 9);
+		expect(normalizeRotationDeg(-181)).toBeCloseTo(179, 9);
+	});
+
+	it('rejects non-finite input', () => {
+		expect(() => normalizeRotationDeg(NaN)).toThrow(/finite/);
+		expect(() => normalizeRotationDeg(Infinity)).toThrow(/finite/);
+	});
+});
+
+describe('rotatePointAroundCenter', () => {
+	const center = { xPx: 50, yPx: 50 };
+
+	it('is the identity at 0 degrees', () => {
+		const point = { xPx: 70, yPx: 30 };
+		expect(rotatePointAroundCenter(point, center, 0)).toEqual(point);
+	});
+
+	it('leaves the center point fixed at any angle', () => {
+		expect(rotatePointAroundCenter(center, center, 37)).toEqual(center);
+	});
+
+	it('rotates a point 90 degrees clockwise in this y-down space', () => {
+		// "right of center" rotates to "below center" under a clockwise turn.
+		const right = { xPx: 100, yPx: 50 };
+		const rotated = rotatePointAroundCenter(right, center, 90);
+		expect(rotated.xPx).toBeCloseTo(50, 9);
+		expect(rotated.yPx).toBeCloseTo(100, 9);
+	});
+
+	it('composes 180 degrees as the point reflected through the center', () => {
+		const point = { xPx: 80, yPx: 20 };
+		const rotated = rotatePointAroundCenter(point, center, 180);
+		expect(rotated.xPx).toBeCloseTo(20, 9);
+		expect(rotated.yPx).toBeCloseTo(80, 9);
+	});
+});
+
+describe('imageToScreenRotated / screenToImageRotated', () => {
+	const center = { xPx: 100, yPx: 80 };
+	const transform: ViewTransformState = { zoom: 1.6, panX: -30, panY: 12 };
+
+	it('matches the unrotated conversion at rotationDeg 0', () => {
+		const point = { xPx: 42, yPx: 17 };
+		expect(imageToScreenRotated(point, transform, 0, center)).toEqual(imageToScreen(point, transform));
+		const screen = imageToScreen(point, transform);
+		expect(screenToImageRotated(screen, transform, 0, center)).toEqual(screenToImage(screen, transform));
+	});
+
+	it('keeps the rotation pivot fixed on screen at the pan/zoom-mapped center', () => {
+		const screen = imageToScreenRotated(center, transform, 37, center);
+		expect(screen.x).toBeCloseTo(imageToScreen(center, transform).x, 9);
+		expect(screen.y).toBeCloseTo(imageToScreen(center, transform).y, 9);
+	});
+
+	it('round-trips representative points at representative rotations', () => {
+		const points: ImageSpacePoint[] = [
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 200, yPx: 160 },
+			{ xPx: 33.5, yPx: 91.25 },
+			center
+		];
+		const rotations = [0, 15, 90, 179.5, -45, -170];
+		for (const rotationDeg of rotations) {
+			for (const point of points) {
+				const screen = imageToScreenRotated(point, transform, rotationDeg, center);
+				const back = screenToImageRotated(screen, transform, rotationDeg, center);
+				expect(back.xPx).toBeCloseTo(point.xPx, 6);
+				expect(back.yPx).toBeCloseTo(point.yPx, 6);
+			}
+		}
 	});
 });
