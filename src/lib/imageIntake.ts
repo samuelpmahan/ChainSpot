@@ -37,6 +37,7 @@
 import { createImageAsset, findImageByRole } from './domain/project';
 import type { ImageAsset, ImageRole } from './domain/project';
 import type { ProjectEditor } from './domain/editor';
+import type { CompositeProvenance } from './domain/provenance';
 
 export type ImageOrientation = 'portrait' | 'landscape' | 'square';
 
@@ -191,6 +192,22 @@ export interface IntakeImageFileOptions {
 	 * stored as the asset manifest `sha256`.
 	 */
 	hash?: HashBytes;
+	/**
+	 * CHSPT-49/55: how `file`'s exact pixels were derived from original capture(s) via
+	 * AutoCrop/AutoStitch (Stitch Map -> Annotate Course handoff), attached to the
+	 * resulting `ImageAsset.provenance` after the normal assign/replace mutation. Only
+	 * valid for `role: 'source-overview'` — additive and optional, so every existing call
+	 * site (a plain user file upload) is completely unaffected by omitting it.
+	 */
+	provenance?: CompositeProvenance | null;
+	/**
+	 * The original, unmodified bytes of every capture `provenance.sources` references,
+	 * keyed by `SourceCapture.sourceId`, registered in the editor's asset registry right
+	 * after `provenance` is attached (see `ProjectEditor.setSourceCaptureBytes`) so they
+	 * are never discarded and persistence can archive them on the next save. Ignored when
+	 * `provenance` is omitted.
+	 */
+	sourceCaptures?: ReadonlyMap<string, Uint8Array>;
 }
 
 export type IntakeStatus =
@@ -232,8 +249,16 @@ export async function intakeImageFile(options: IntakeImageFileOptions): Promise<
 		decode = decodeImageFile,
 		confirmDiscard = () => false,
 		createAssetId = () => globalThis.crypto.randomUUID(),
-		hash = sha256Hex
+		hash = sha256Hex,
+		provenance,
+		sourceCaptures
 	} = options;
+
+	if (provenance !== undefined && provenance !== null && role !== 'source-overview') {
+		throw new Error(
+			`intakeImageFile: provenance may only be attached to a 'source-overview' image, got role '${role}'`
+		);
+	}
 
 	if (!isSupportedMimeType(file.type)) {
 		return {
@@ -302,13 +327,23 @@ export async function intakeImageFile(options: IntakeImageFileOptions): Promise<
 		widthPx,
 		heightPx,
 		sha256,
-		bundlePath: bundlePathFor(role, file.type)
+		bundlePath: bundlePathFor(role, file.type),
+		provenance
 	});
+
+	/** Attaches `sourceCaptures` (see `IntakeImageFileOptions`) once `asset` is live in `editor.state`, after which its `provenance` makes each capture id reachable (see `ProjectEditor.setSourceCaptureBytes`). No-op when `provenance`/`sourceCaptures` were not supplied. */
+	function attachSourceCaptures(): void {
+		if (!sourceCaptures) return;
+		for (const [sourceId, sourceBytes] of sourceCaptures) {
+			editor.setSourceCaptureBytes(sourceId, sourceBytes);
+		}
+	}
 
 	const current = findImageByRole(editor.state.images, role);
 	if (!current) {
 		editor.assignImage({ role, asset, bytes });
 		editor.setDecodedResource(asset.id, decoded.image);
+		attachSourceCaptures();
 		return { ok: true, status: 'assigned', asset };
 	}
 
@@ -337,6 +372,7 @@ export async function intakeImageFile(options: IntakeImageFileOptions): Promise<
 		retainPoints: affectedCount === 0 && sameDimensions
 	});
 	editor.setDecodedResource(asset.id, decoded.image);
+	attachSourceCaptures();
 	return {
 		ok: true,
 		status: affectedCount > 0 || !sameDimensions ? 'replaced-discarded' : 'replaced-retained',

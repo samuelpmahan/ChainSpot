@@ -47,7 +47,15 @@ export async function importHandoffImage(
 	const { editor, handoff, role, decode, confirmDiscard } = options;
 	try {
 		const file = new File([handoff.blob], handoff.fileName, { type: 'image/png' });
-		const result = await intakeImageFile({ editor, role, file, decode, confirmDiscard });
+		const result = await intakeImageFile({
+			editor,
+			role,
+			file,
+			decode,
+			confirmDiscard,
+			provenance: handoff.provenance,
+			sourceCaptures: handoff.sourceCaptures
+		});
 		if (!result.ok) return { status: 'error', message: result.error.message };
 		if (result.status === 'cancelled') return { status: 'cancelled' };
 		return { status: 'imported' };
