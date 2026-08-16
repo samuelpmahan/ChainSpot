@@ -179,10 +179,10 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		route: 'stitch-map',
 		lede: `Four real UDisc screenshots of ${DASHS_TRACK.courseName}, phone chrome and all, are loaded into the real Stitch Map in no particular order and with no position in their file names.`,
 		actions: [
-			'When the shared crop proposal appears, click the bright "Apply Crop" button to trim the phone status bar and UDisc chrome from all four captures. If you leave it open, this demo applies it after about 20 seconds.',
-			'Read the status line: it names which capture landed in which corner and how confident the inference was.',
-			'Nudge a tile with the arrow keys, or press Snap, to see that every automatic decision is reported with its confidence and stays fully correctable.',
-			'When the arrangement reads as connected, choose "Use as UDisc source" to carry the stitched PNG forward.'
+			'Watch the four captures crop, arrange, and stitch themselves automatically — no crop approval or "assemble" click required.',
+			'Read the status line: it names how many captures were stitched and how confident the automatic result was.',
+			'If a result ever needs a closer look, click "Adjust manually" to nudge a tile with the arrow keys or press Snap — every automatic decision stays fully correctable, it just no longer blocks you by default.',
+			'When the result looks right, choose "Continue to Annotate Course" to carry the stitched map forward.'
 		],
 		mechanism:
 			'Chrome cropping, position, and overlap are all inferred from pixel content in a Web Worker using OpenCV template matching — nothing here is a filename lookup. The export is a native-resolution PNG of the union of the four cropped tiles, no resampling, no upload.',

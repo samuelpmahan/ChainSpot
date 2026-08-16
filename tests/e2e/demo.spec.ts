@@ -53,23 +53,23 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	await expect(page.getByTestId('demo-guide')).toBeVisible();
 	await expect(page.getByTestId('demo-step-position')).toHaveText('Step 1 of 6');
 
-	// The arrangement is produced by the product's own inference over the supplied
-	// pixels. The assertion is deliberately on the outcome that matters to a
-	// visitor — every slot filled from a distinct capture, and an arrangement the
-	// product itself calls exportable — not on which corner each file lands in.
-	// Corner labelling is the product's judgement on real, heavily overlapping
-	// captures; pinning it here would make this a smart-import regression test
-	// wearing a demo's clothes. (This dataset's placement has not previously been
-	// exercised through this pipeline in this repo's test suite — see
+	// The arrangement is produced by the product's own inference over the
+	// supplied pixels, and — CHSPT-56's auto-first redesign — lands directly
+	// on an assembled result with no forced approval click. The assertion is
+	// deliberately on the outcome that matters to a visitor — every capture
+	// distinct, and a result the product itself calls ready to continue —
+	// not on which corner each file lands in. Corner labelling is the
+	// product's judgement on real, heavily overlapping captures; pinning it
+	// here would make this a smart-import regression test wearing a demo's
+	// clothes. (This dataset's placement has not previously been exercised
+	// through this pipeline in this repo's test suite — see
 	// docs/demo-walkthrough.md's "What building the demo found".)
-	await expect(page.getByTestId('smart-import-assignment')).toBeVisible({ timeout: 60000 });
-	const assigned = await Promise.all(
-		['upper-left', 'upper-right', 'lower-left', 'lower-right'].map((slot) =>
-			page.getByTestId(`smart-import-slot-${slot}`).innerText()
-		)
-	);
+	await expect(page.getByTestId('composite-image')).toBeVisible({ timeout: 60000 });
+	await expect(page.getByTestId('continue-to-annotate')).toBeEnabled();
+	await page.getByTestId('adjust-manually').click();
+	const assigned = await page.getByTestId('manual-capture-list').locator('li').allInnerTexts();
 	expect(new Set(assigned).size).toBe(4);
-	await expect(page.getByTestId('stitch-readiness')).toContainText('Export is ready');
+	await expect(page.getByTestId('stitch-readiness')).toContainText('valid');
 });
 
 test('the round-annotation step imports its sample source automatically and can be exited without resetting the app', async ({

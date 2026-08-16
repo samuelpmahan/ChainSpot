@@ -284,26 +284,41 @@ test('create-graphics: pane height is ≥65% of viewport height', async ({ page 
 	expect(source.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
 });
 
-test('stitch-map: alignment workspace is ≥55% of viewport width', async ({ page }) => {
+/**
+ * CHSPT-56 auto-first redesign: the crop-preview/alignment-workspace split
+ * this budget originally measured no longer exists as separate always-on
+ * views — both live inside `Adjust manually`'s single Konva stage
+ * (`stage-workspace`), reachable from the result screen. Reaching it still
+ * avoids CV/smart-import (this file's own stated intent): a single-capture
+ * (N=1) import only ever runs `autoCrop.ts`'s pure-JS entropy detector, never
+ * `cvMatch`/the smart-stitch worker's OpenCV — see `pipelineStub.ts`'s
+ * `runSingle`.
+ */
+async function openStitchMapManualStage(page: Page): Promise<void> {
 	await gotoApp(page, '/stitch-map');
-	const workspace = await boxOf(page, '[data-testid="alignment-workspace"]');
+	await page.getByTestId('smart-import-input').setInputFiles(fixturePath('tiny.png'));
+	await expect(page.getByTestId('composite-image')).toBeVisible();
+	await page.getByTestId('adjust-manually').click();
+	await expect(page.getByTestId('stage-workspace')).toBeVisible();
+}
+
+test('stitch-map: the manual-correction stage is ≥55% of viewport width', async ({ page }) => {
+	await openStitchMapManualStage(page);
+	const workspace = await boxOf(page, '[data-testid="stage-workspace"]');
 	// Measured 1100px (85.9%) at audit time — docs/13-inch-pass.md row 14.
 	expect(workspace.width).toBeGreaterThanOrEqual(VIEWPORT.width * 0.55);
 });
 
 // Fixed by Ticket A: crop preview was a fixed 280px = 39.2% of height and the
 // alignment workspace a fixed 440px = 61.8%. Both are now viewport-relative
-// clamps (`round(66vh, 1px)`), bounded so they never exceed one screen.
-test(
-	'stitch-map: crop preview and alignment workspace are ≥65% of viewport height',
-	async ({ page }) => {
-		await gotoApp(page, '/stitch-map');
-		const crop = await boxOf(page, '[data-testid="crop-viewport"]');
-		const workspace = await boxOf(page, '[data-testid="alignment-workspace"]');
-		expect(crop.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
-		expect(workspace.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
-	}
-);
+// clamps (`round(66vh, 1px)`), bounded so they never exceed one screen. Both
+// tabs of the manual-correction surface share the same `stage-workspace`
+// element now, so one measurement covers both.
+test('stitch-map: the manual-correction stage is ≥65% of viewport height', async ({ page }) => {
+	await openStitchMapManualStage(page);
+	const workspace = await boxOf(page, '[data-testid="stage-workspace"]');
+	expect(workspace.height).toBeGreaterThanOrEqual(VIEWPORT.height * 0.65);
+});
 
 // ---------------------------------------------------------------------------
 // Budget 3 — no mid-task scroll traps: the controls the current step needs.
