@@ -3,6 +3,8 @@ import { createImageAsset, createProjectState } from '../../src/lib/domain/proje
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import type { AssetResource, AddPairOptions } from '../../src/lib/domain/editor';
 import type { ProjectState } from '../../src/lib/domain/project';
+import { applySourceTransform, AUTO_SOURCE_CAPTURE_ORIGIN, identitySourceTransform } from '../../src/lib/domain/provenance';
+import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
 
@@ -933,5 +935,128 @@ describe('runtime asset reachability', () => {
 		editor.setDecodedResource('image-source', decoded);
 		expect(editor.getAssetResource('image-source')?.decoded).toBe(decoded);
 		expect(() => editor.setDecodedResource('missing', decoded)).toThrow(/registered/);
+	});
+});
+
+describe('source-capture bytes (CHSPT-49 provenance)', () => {
+	/** A minimal, coherent single-source provenance referencing `sourceId`. */
+	function provenanceOf(sourceId: string, finalRasterSha256 = 'a'.repeat(64)): CompositeProvenance {
+		const transform = identitySourceTransform();
+		const crop: SourceCropRect = { xPx: 0, yPx: 0, widthPx: 100, heightPx: 200 };
+		const source: SourceCapture = {
+			sourceId,
+			fileName: `${sourceId}.png`,
+			mimeType: 'image/png',
+			widthPx: 100,
+			heightPx: 200,
+			sha256: 'b'.repeat(64),
+			crop,
+			transform,
+			origin: AUTO_SOURCE_CAPTURE_ORIGIN,
+			coveragePolygon: [
+				{ xPx: crop.xPx, yPx: crop.yPx },
+				{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },
+				{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx + crop.heightPx },
+				{ xPx: crop.xPx, yPx: crop.yPx + crop.heightPx }
+			].map((corner) => applySourceTransform(corner, transform)),
+			paintOrder: 0
+		};
+		return {
+			schemaVersion: 1,
+			renderVersion: 'chainspot-stitch-v1',
+			outputWidthPx: 100,
+			outputHeightPx: 200,
+			compositingPolicy: 'single-source-v1',
+			resampling: 'none',
+			sources: [source],
+			overlaps: [],
+			finalRasterSha256
+		};
+	}
+
+	function sourceAssetWithProvenance(id: string, sourceId: string): ReturnType<typeof createImageAsset> {
+		return createImageAsset({
+			id,
+			role: 'source-overview',
+			fileName: `${id}.png`,
+			mimeType: 'image/png',
+			widthPx: 100,
+			heightPx: 200,
+			provenance: provenanceOf(sourceId)
+		});
+	}
+
+	it('registers source-capture bytes reachable through getAssetResource once the referencing image is live', () => {
+		const editor = makeEditor();
+		editor.replaceImage({
+			role: 'source-overview',
+			asset: sourceAssetWithProvenance('image-source-with-provenance', 'capture-1'),
+			bytes: new Uint8Array([9])
+		});
+		const captureBytes = new Uint8Array([1, 2, 3, 4]);
+		editor.setSourceCaptureBytes('capture-1', captureBytes);
+		expect(editor.getAssetResource('capture-1')?.bytes).toEqual(captureBytes);
+		expect(editor.getAssetResource('capture-1')?.decoded).toBeNull();
+	});
+
+	it('is immediately dropped when registered for a sourceId no current/undo/redo image provenance references', () => {
+		const editor = makeEditor();
+		editor.setSourceCaptureBytes('orphan-capture', new Uint8Array([1]));
+		expect(editor.getAssetResource('orphan-capture')).toBeUndefined();
+	});
+
+	it('stays reachable across undo/redo alongside the image whose provenance references it, and releases on divergence', () => {
+		const editor = makeEditor();
+		editor.replaceImage({
+			role: 'source-overview',
+			asset: sourceAssetWithProvenance('image-source-with-provenance', 'capture-1'),
+			bytes: new Uint8Array([9])
+		});
+		editor.setSourceCaptureBytes('capture-1', new Uint8Array([1, 2, 3]));
+		expect(editor.getAssetResource('capture-1')).toBeDefined();
+
+		editor.undo();
+		// The provenance-carrying image is gone from current state, but still reachable
+		// from the redo stack, so its source capture must still be retained too.
+		expect(editor.getAssetResource('capture-1')).toBeDefined();
+
+		editor.redo();
+		expect(editor.getAssetResource('capture-1')).toBeDefined();
+
+		editor.undo();
+		editor.renameProject('Divergent'); // clears the redo stack that still referenced capture-1
+		expect(editor.getAssetResource('capture-1')).toBeUndefined();
+	});
+
+	it('releases source-capture bytes once a differently-provenanced replacement makes them unreachable', () => {
+		const editor = makeEditor();
+		editor.replaceImage({
+			role: 'source-overview',
+			asset: sourceAssetWithProvenance('image-source-a', 'capture-a'),
+			bytes: new Uint8Array([1])
+		});
+		editor.setSourceCaptureBytes('capture-a', new Uint8Array([1, 1, 1]));
+		expect(editor.getAssetResource('capture-a')).toBeDefined();
+
+		editor.replaceImage({
+			role: 'source-overview',
+			asset: sourceAssetWithProvenance('image-source-b', 'capture-b'),
+			bytes: new Uint8Array([2])
+		});
+		editor.setSourceCaptureBytes('capture-b', new Uint8Array([2, 2, 2]));
+		// capture-a is still reachable: image-source-a is still on the undo stack.
+		expect(editor.getAssetResource('capture-a')).toBeDefined();
+		expect(editor.getAssetResource('capture-b')).toBeDefined();
+
+		editor.undo();
+		editor.undo();
+		editor.renameProject('Divergent'); // drops both replacements from history
+		expect(editor.getAssetResource('capture-a')).toBeUndefined();
+		expect(editor.getAssetResource('capture-b')).toBeUndefined();
+	});
+
+	it('rejects empty bytes the same way image asset registration does', () => {
+		const editor = makeEditor();
+		expect(() => editor.setSourceCaptureBytes('capture-1', new Uint8Array())).toThrow(/non-empty/);
 	});
 });

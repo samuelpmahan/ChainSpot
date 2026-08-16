@@ -5,20 +5,41 @@
  * persistence dependency):
  *
  *   <project>.chainspot.zip
- *   ├── project.json                 (schema v1; P0-010 serialize/parse only)
- *   └── images/<role>-original.<ext> (exact original bytes, stable manifest paths)
+ *   ├── project.json                     (schema v6; P0-010 serialize/parse only)
+ *   ├── images/<role>-original.<ext>     (exact original bytes, stable manifest paths)
+ *   └── images/sources/<sourceId>.<ext>  (CHSPT-49: original pre-crop/pre-stitch capture
+ *                                         bytes a `source-overview` image's `provenance`
+ *                                         references — one entry per `SourceCapture`,
+ *                                         present only when that image carries
+ *                                         `provenance`)
  *
  * Export (`saveProject`/`createProjectBundle`): `serializeProjectState` (P0-010) is the
  * only JSON path. The two current images' exact original bytes are read from the
  * `ProjectEditor` transient asset registry, re-hashed with native Web Crypto SHA-256,
  * and written so the manifest hash always equals the archived bytes. Download uses
- * native Blob/object-URL/temporary-anchor mechanics with an injectable boundary.
+ * native Blob/object-URL/temporary-anchor mechanics with an injectable boundary. When the
+ * `source-overview` image carries `provenance`, every referenced source capture whose
+ * bytes are registered in the asset registry (see `ProjectEditor.setSourceCaptureBytes`)
+ * is archived the same way (hash-verified against `SourceCapture.sha256`, a mismatch
+ * fails the save loudly — CHSPT-49 forbids ever silently persisting bytes that
+ * contradict the lineage record describing them); a capture whose bytes are NOT
+ * registered degrades gracefully (the two live images still save) and is reported back
+ * via `sourceCaptureIssues` rather than silently omitted or failing the whole save.
  *
  * Import (`readProjectBundle`): native File APIs -> `fflate` unzip -> P0-010 parse ->
  * path/entry/hash validation -> decode through the existing injected decode boundary
  * (PNG/JPEG, intrinsic dimensions exact) -> atomic replacement through a fresh
  * `ProjectEditor` with `markSaved`. Every non-repair failure leaves the live project,
- * images, bytes, history, dirty state, selection, and pending state unchanged.
+ * images, bytes, history, dirty state, selection, and pending state unchanged. When the
+ * opened `source-overview` image carries `provenance`, each referenced source capture is
+ * hash-verified and — on a clean (non-repair) open — its bytes are attached to the
+ * returned assets so a later save can re-archive them; a missing or hash-mismatched
+ * capture never blocks the open (unlike a missing *live* image) but is always reported
+ * via `sourceCaptureIssues`, never silently treated as though lineage were intact. Source
+ * captures are not restored on an open that already needs live-image repair — CHSPT-55
+ * deliberately keeps that combination out of scope (no new repair-flow UI for source
+ * captures); resolving the live-image repair first, then re-saving and re-opening, picks
+ * them back up.
  *
  * Repair (`readProjectBundle` -> `resolveRepairWithBytes`/`resolveRepairWithFile`/
  * `resolveRepairWithArchivedBytes`): a missing or hash-mismatched bundled image never
@@ -46,6 +67,7 @@ import type { ProjectDocumentV4, ProjectSchemaError } from './projectSchema';
 import {
 	bundlePathFor,
 	decodeImageFile,
+	IMAGE_EXTENSION_BY_MIME,
 	isSupportedMimeType,
 	isValidSha256Hex,
 	readFileBytes,
@@ -129,6 +151,61 @@ export function isSafeBundlePath(path: unknown): path is string {
 	return true;
 }
 
+/**
+ * Safe bundle path for an original source-capture file: non-empty name directly under
+ * `images/sources/`, with the same traversal/absolute/backslash/NUL/nested-directory
+ * exclusions as `isSafeBundlePath` — one directory level deeper, since captures live in
+ * their own subdirectory rather than directly under `images/` (so the two live images and
+ * an arbitrary number of source captures can never collide on a bundle path).
+ */
+export function isSafeSourceCaptureBundlePath(path: unknown): path is string {
+	if (typeof path !== 'string' || path.length === 0) return false;
+	if (!path.startsWith('images/sources/')) return false;
+	const name = path.slice('images/sources/'.length);
+	if (name.length === 0) return false;
+	if (path.includes('..')) return false;
+	if (path.includes('\\')) return false;
+	if (path.includes('\0')) return false;
+	if (path.startsWith('/')) return false;
+	if (name.includes('/')) return false;
+	return true;
+}
+
+/**
+ * The `images/sources/` bundle path for one original capture, derived from its
+ * `SourceCapture.sourceId` and `mimeType` — the same extension-derivation rule
+ * `bundlePathFor` uses for the two live images. Throws for an unsupported MIME type or a
+ * `sourceId` that would not produce a safe path (for example one containing `/`); both
+ * are treated as "this capture's bytes cannot be archived/located" by callers, degrading
+ * gracefully rather than failing the whole save/open.
+ */
+export function sourceCaptureBundlePath(sourceId: string, mimeType: string): string {
+	const extension = IMAGE_EXTENSION_BY_MIME[mimeType.toLowerCase()];
+	if (!extension) {
+		throw new Error(`sourceCaptureBundlePath: unsupported image MIME type '${mimeType}'`);
+	}
+	const path = `images/sources/${sourceId}.${extension}`;
+	if (!isSafeSourceCaptureBundlePath(path)) {
+		throw new Error(`sourceCaptureBundlePath: sourceId ${JSON.stringify(sourceId)} does not produce a safe bundle path`);
+	}
+	return path;
+}
+
+/**
+ * One `SourceCapture` whose original bytes could not be archived (on save) or restored
+ * (on open) — a degraded-but-non-blocking lineage signal (CHSPT-49): the two live images
+ * still save/open normally, but reconstruction from this capture is not possible until
+ * it is restored. `reason: 'hash-mismatch'` is only ever produced on open (a save-time
+ * mismatch between registered bytes and the recorded hash is a harder, save-failing
+ * contradiction — see `createProjectBundle`).
+ */
+export interface SourceCaptureIssue {
+	readonly sourceId: string;
+	readonly path: string;
+	readonly reason: 'missing' | 'hash-mismatch';
+	readonly expectedHash: Sha256Hex;
+}
+
 /** Conservative project-name-derived base for a bundle filename, with a stable fallback. */
 export function sanitizeFileNameBase(name: string): string {
 	const cleaned = name
@@ -161,6 +238,18 @@ export interface ExportBundle {
 	readonly zipBytes: Uint8Array;
 	/** Exact plain `ProjectState` snapshot captured when the save started. */
 	readonly savedState: ProjectState;
+	/**
+	 * Original source-capture files actually archived at `images/sources/<sourceId>.<ext>`
+	 * (empty when the `source-overview` image carries no `provenance`).
+	 */
+	readonly sourceCaptures: ExportImageFile[];
+	/**
+	 * Source captures `provenance` references whose bytes were NOT available in the
+	 * editor's asset registry and so could not be archived (degrades gracefully — the
+	 * save still succeeds; see module doc). Always empty when the `source-overview`
+	 * image carries no `provenance`.
+	 */
+	readonly sourceCaptureIssues: readonly SourceCaptureIssue[];
 }
 
 export type CreateProjectBundleResult =
@@ -237,10 +326,69 @@ export async function createProjectBundle(
 		files[path] = resource.bytes;
 	}
 
+	// CHSPT-49: archive every original source capture the `source-overview` image's
+	// provenance references, so the exact annotated raster stays reconstructible from
+	// original bytes alone even after this save. A capture whose bytes were never
+	// registered (see `ProjectEditor.setSourceCaptureBytes`) degrades gracefully — the
+	// two live images above still save — and is reported via `sourceCaptureIssues`
+	// rather than silently dropped; bytes that ARE registered but contradict the
+	// recorded hash fail the save loudly (never silently archived as if authoritative).
+	const sourceCaptures: ExportImageFile[] = [];
+	const sourceCaptureIssues: SourceCaptureIssue[] = [];
+	const sourceManifest = document.images.find((image) => image.role === 'source-overview');
+	if (sourceManifest?.provenance) {
+		for (const source of sourceManifest.provenance.sources) {
+			let path: string;
+			try {
+				path = sourceCaptureBundlePath(source.sourceId, source.mimeType);
+			} catch {
+				sourceCaptureIssues.push({
+					sourceId: source.sourceId,
+					path: `images/sources/${source.sourceId}`,
+					reason: 'missing',
+					expectedHash: source.sha256
+				});
+				continue;
+			}
+			if (paths.has(path)) {
+				return { ok: false, error: error('export-failure', `Could not save the project: duplicate bundle path '${path}'.`) };
+			}
+			const resource = editor.getAssetResource(source.sourceId);
+			if (!resource) {
+				sourceCaptureIssues.push({ sourceId: source.sourceId, path, reason: 'missing', expectedHash: source.sha256 });
+				continue;
+			}
+			let sourceSha256: Sha256Hex;
+			try {
+				sourceSha256 = await hash(resource.bytes);
+			} catch (caught) {
+				return {
+					ok: false,
+					error: error(
+						'export-failure',
+						`Could not save the project: hashing source capture '${source.sourceId}' failed: ${messageOf(caught)}`
+					)
+				};
+			}
+			if (sourceSha256 !== source.sha256) {
+				return {
+					ok: false,
+					error: error(
+						'export-failure',
+						`Could not save the project: source capture '${source.sourceId}' (${source.fileName}) bytes do not match the recorded SHA-256.`
+					)
+				};
+			}
+			paths.add(path);
+			sourceCaptures.push({ path, bytes: resource.bytes, sha256: sourceSha256 });
+			files[path] = resource.bytes;
+		}
+	}
+
 	const text = JSON.stringify(document);
 	files[PROJECT_JSON_PATH] = strToU8(text);
 	const zipBytes = zipSync(files, { level: 6 });
-	return { ok: true, bundle: { document, text, images, zipBytes, savedState } };
+	return { ok: true, bundle: { document, text, images, zipBytes, savedState, sourceCaptures, sourceCaptureIssues } };
 }
 
 export type DownloadBlob = (blob: Blob, fileName: string) => void;
@@ -267,7 +415,13 @@ export interface SaveProjectOptions extends CreateProjectBundleOptions {
 }
 
 export type SaveProjectResult =
-	| { ok: true; fileName: string; savedState: ProjectState }
+	| {
+			ok: true;
+			fileName: string;
+			savedState: ProjectState;
+			/** See `ExportBundle.sourceCaptureIssues` — a non-blocking degraded-lineage signal, never silently absorbed. */
+			sourceCaptureIssues: readonly SourceCaptureIssue[];
+	  }
 	| { ok: false; error: PersistenceError };
 
 /**
@@ -297,7 +451,12 @@ export async function saveProject(
 			)
 		};
 	}
-	return { ok: true, fileName, savedState: created.bundle.savedState };
+	return {
+		ok: true,
+		fileName,
+		savedState: created.bundle.savedState,
+		sourceCaptureIssues: created.bundle.sourceCaptureIssues
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +481,18 @@ export interface RepairCandidate {
 }
 
 export type OpenResult =
-	| { ok: true; state: ProjectState; assets: ReadonlyMap<string, AssetResource> }
+	| {
+			ok: true;
+			state: ProjectState;
+			assets: ReadonlyMap<string, AssetResource>;
+			/**
+			 * See module doc / `SourceCaptureIssue`: always empty unless the `source-overview`
+			 * image carries `provenance` AND a referenced capture's bytes could not be
+			 * restored. Never populated when this open needed live-image repair first (see
+			 * module doc) — that combination is deliberately out of scope.
+			 */
+			sourceCaptureIssues: readonly SourceCaptureIssue[];
+	  }
 	| { ok: false; kind: 'repair'; candidate: RepairCandidate }
 	| { ok: false; kind: 'failure'; error: PersistenceError };
 
@@ -439,7 +609,29 @@ export async function readProjectBundle(
 		};
 	}
 
-	const allowedEntries = new Set<string>([PROJECT_JSON_PATH, ...pathOwners.keys()]);
+	// CHSPT-49: an `images/sources/<sourceId>.<ext>` entry for each source the
+	// `source-overview` image's `provenance` references is expected content, not an
+	// unaccounted-for extra entry — computed here (before the extra-entries check) purely
+	// from the parsed provenance, independent of which entries the archive actually has.
+	const sourceOverviewImage = state.images.find((image) => image.role === 'source-overview');
+	const expectedSourceCapturePaths = new Map<string, string>();
+	if (sourceOverviewImage?.provenance) {
+		for (const source of sourceOverviewImage.provenance.sources) {
+			try {
+				expectedSourceCapturePaths.set(source.sourceId, sourceCaptureBundlePath(source.sourceId, source.mimeType));
+			} catch {
+				// Unresolvable path (e.g. an exotic mimeType) — this capture simply cannot be
+				// located in the archive; handled as a 'missing' sourceCaptureIssue below, not
+				// as an allowed/extra-entry concern.
+			}
+		}
+	}
+
+	const allowedEntries = new Set<string>([
+		PROJECT_JSON_PATH,
+		...pathOwners.keys(),
+		...expectedSourceCapturePaths.values()
+	]);
 	const extraEntries = Object.keys(entries).filter((key) => !allowedEntries.has(key));
 	if (extraEntries.length > 0) {
 		const listed = extraEntries.slice(0, 5).join(', ');
@@ -499,7 +691,48 @@ export async function readProjectBundle(
 		}
 		assets.set(image.id, { bytes, decoded });
 	}
-	return { ok: true, state, assets };
+
+	// CHSPT-49: verify and restore original source captures on this clean (non-repair)
+	// open only — see module doc for why a live-image repair skips this. A missing or
+	// hash-mismatched capture degrades gracefully (this open still succeeds) but is
+	// always reported, never silently treated as though lineage were intact.
+	const sourceCaptureIssues: SourceCaptureIssue[] = [];
+	if (sourceOverviewImage?.provenance) {
+		for (const source of sourceOverviewImage.provenance.sources) {
+			const path = expectedSourceCapturePaths.get(source.sourceId);
+			if (!path) {
+				sourceCaptureIssues.push({
+					sourceId: source.sourceId,
+					path: `images/sources/${source.sourceId}`,
+					reason: 'missing',
+					expectedHash: source.sha256
+				});
+				continue;
+			}
+			const entry = entries[path];
+			if (!entry) {
+				sourceCaptureIssues.push({ sourceId: source.sourceId, path, reason: 'missing', expectedHash: source.sha256 });
+				continue;
+			}
+			let actualHash: Sha256Hex;
+			try {
+				actualHash = await hash(entry);
+			} catch {
+				return {
+					ok: false,
+					kind: 'failure',
+					error: error('read-bytes', `Could not hash source capture '${source.sourceId}' bytes in the archive.`)
+				};
+			}
+			if (actualHash !== source.sha256) {
+				sourceCaptureIssues.push({ sourceId: source.sourceId, path, reason: 'hash-mismatch', expectedHash: source.sha256 });
+				continue;
+			}
+			assets.set(source.sourceId, { bytes: entry, decoded: null });
+		}
+	}
+
+	return { ok: true, state, assets, sourceCaptureIssues };
 }
 
 // ---------------------------------------------------------------------------

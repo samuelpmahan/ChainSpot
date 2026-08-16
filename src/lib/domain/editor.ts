@@ -42,6 +42,16 @@
  * referenced by the current state, the undo stack, or the redo stack. Unreferenced
  * entries are released after every history-affecting change. This is not a media
  * repository or cache framework.
+ *
+ * The same registry also holds original source-capture bytes for a `source-overview`
+ * image's `CompositeProvenance.sources` (CHSPT-49: original captures must never be
+ * discarded once a stitched/cropped composite replaces them). These are registered via
+ * `setSourceCaptureBytes`, keyed by `SourceCapture.sourceId` rather than an
+ * `ImageAsset.id` — `reconcileAssets` treats a `sourceId` still named by any
+ * current/undo/redo image's `provenance.sources` as reachable, exactly like an image id,
+ * so a source capture's bytes are released only once no reachable snapshot's provenance
+ * still references it (for example after every snapshot referencing that composite has
+ * been pruned from history).
  */
 
 import { pointInBounds } from '../coords';
@@ -218,6 +228,21 @@ export class ProjectEditor {
 			throw new Error(`setDecodedResource: no asset registered for '${imageId}'`);
 		}
 		resource.decoded = decoded;
+	}
+
+	/**
+	 * Registers the original, unmodified bytes of one `CompositeProvenance` source
+	 * capture (see class doc) so they are never discarded once a `source-overview`
+	 * image's provenance references them — regardless of whether that image was just
+	 * assigned/replaced or was restored from a save. `decoded` is always `null`: source
+	 * captures are held for provenance/persistence only, never displayed, so no decoded
+	 * resource is needed. No history entry: this is asset-registry bookkeeping, not a
+	 * durable-state mutation.
+	 */
+	setSourceCaptureBytes(sourceId: string, bytes: Uint8Array): void {
+		assertBytes(bytes, 'setSourceCaptureBytes');
+		this.#assets.set(sourceId, { bytes: Uint8Array.from(bytes), decoded: null });
+		this.reconcileAssets();
 	}
 
 	renameProject(name: string): void {
@@ -657,13 +682,20 @@ export class ProjectEditor {
 
 	private reconcileAssets(): void {
 		const reachable = new Set<string>();
-		for (const image of this.#state.images) reachable.add(image.id);
-		for (const snapshot of this.#undoStack) {
-			for (const image of snapshot.images) reachable.add(image.id);
-		}
-		for (const snapshot of this.#redoStack) {
-			for (const image of snapshot.images) reachable.add(image.id);
-		}
+		const addSnapshot = (snapshot: ProjectState): void => {
+			for (const image of snapshot.images) {
+				reachable.add(image.id);
+				// A source-capture id (see `setSourceCaptureBytes`) is reachable exactly
+				// when some current/undo/redo image's provenance still names it — never an
+				// `ImageAsset.id` in `images` itself, so it needs this separate walk.
+				if (image.provenance) {
+					for (const source of image.provenance.sources) reachable.add(source.sourceId);
+				}
+			}
+		};
+		addSnapshot(this.#state);
+		for (const snapshot of this.#undoStack) addSnapshot(snapshot);
+		for (const snapshot of this.#redoStack) addSnapshot(snapshot);
 		for (const id of this.#assets.keys()) {
 			if (!reachable.has(id)) this.#assets.delete(id);
 		}

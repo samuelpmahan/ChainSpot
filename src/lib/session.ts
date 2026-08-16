@@ -29,6 +29,7 @@
 import type { ProjectEditor } from './domain/editor';
 import type { ImageRole, HoleNumberBadgeAnchor } from './domain/project';
 import type { AnnotatedRound } from './domain/annotatedRound';
+import type { CompositeProvenance } from './domain/provenance';
 import type { LabeledPoint } from './courseSignature';
 
 export type { LabeledPoint };
@@ -107,6 +108,21 @@ export interface PendingHandoff {
 	readonly fileName: string;
 	readonly targetRole: ImageRole;
 	readonly destination: PendingHandoffDestination;
+	/**
+	 * CHSPT-49/55: how `blob`'s exact pixels were derived from original capture(s) via
+	 * AutoCrop/AutoStitch, carried across this handoff so it can land on the resulting
+	 * `ImageAsset.provenance` (see `imageIntake.ts`'s `intakeImageFile`). Present only for
+	 * a `source-overview` handoff — Stitch Map never produces a `target-basemap`.
+	 */
+	readonly provenance?: CompositeProvenance | null;
+	/**
+	 * The original, unmodified bytes of every capture `provenance.sources` references,
+	 * keyed by `SourceCapture.sourceId`, so the receiving stage can register them (see
+	 * `ProjectEditor.setSourceCaptureBytes`) and a later save can archive them (CHSPT-49:
+	 * original captures must never be discarded once a composite replaces them). Absent
+	 * when `provenance` is absent.
+	 */
+	readonly sourceCaptures?: ReadonlyMap<string, Uint8Array>;
 }
 
 let pendingHandoff: PendingHandoff | null = null;
