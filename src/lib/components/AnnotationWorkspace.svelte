@@ -154,6 +154,21 @@
 	type RadialAction = PointKind | 'delete';
 
 	const MARKER_HIT_RADIUS_PX = 12;
+	/**
+	 * A hole-number badge's click target. A fixed, UI-owned screen-space
+	 * constant -- deliberately NOT derived from the CV candidate's own
+	 * detected `widthPx`/`heightPx`. The previous formula
+	 * (`Math.max(MARKER_HIT_RADIUS_PX, (Math.max(candidate.widthPx,
+	 * candidate.heightPx) / 2) * view.zoom + 10)`) let CV-side geometry --
+	 * tuned for detection accuracy, never for touch-target size -- silently
+	 * determine how big an on-canvas interaction target was. CV internals
+	 * must never leak into interaction sizing; the two are unrelated
+	 * concerns tuned for unrelated goals.
+	 * TODO: placeholder pending a real accessibility pass (target size,
+	 * keyboard reachability -- see docs/13-inch-pass.md item 3). Do not
+	 * re-derive this from CV candidate geometry again.
+	 */
+	const BADGE_HIT_RADIUS_PX = 18;
 
 	type AnnotationMarkerKind = PointKind;
 
@@ -1361,11 +1376,7 @@
 			if (candidate.label === undefined) continue;
 			const screen = imageToScreen({ xPx: candidate.xPx, yPx: candidate.yPx }, view);
 			const distance = Math.hypot(pointer.x - screen.x, pointer.y - screen.y);
-			const radius = Math.max(
-				MARKER_HIT_RADIUS_PX,
-				(Math.max(candidate.widthPx, candidate.heightPx) / 2) * view.zoom + 10
-			);
-			if (distance > radius || distance >= closestDistance) continue;
+			if (distance > BADGE_HIT_RADIUS_PX || distance >= closestDistance) continue;
 			closestDistance = distance;
 			closestLabel = candidate.label;
 		}
