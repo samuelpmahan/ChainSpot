@@ -31,17 +31,17 @@
 	} from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
 	import { MAX_AUTO_ARRANGE_TILES } from '$lib/stitch/autoLayout';
-	import { disposeSmartStitchWorker, warmSmartStitchWorker } from '$lib/stitch/smartImport';
+	import {
+		disposeSmartStitchWorker,
+		renderPipelineComposite,
+		runStitchPipeline,
+		warmSmartStitchWorker
+	} from '$lib/stitch/smartImport';
 	import { DEFAULT_MAX_ANALYSIS_DIM, toAnalysisRaster } from '$lib/stitch/analysis';
 	import type { AnalysisRaster } from '$lib/stitch/analysis';
 	import { loadCv, snapAlign, warmMatchTemplate } from '$lib/stitch/cvMatch';
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
 	import { stitchedFileName } from '$lib/stitch/render';
-	// TODO(orchestrator): swap for the real Agent B `runStitchPipeline` /
-	// `renderPipelineComposite` from `$lib/stitch/pipelineResult` once landed —
-	// see `pipelineStub.ts`'s module doc. The locked *types* below already come
-	// from `pipelineResult.ts`; only the implementing functions are temporary.
-	import { runStitchPipeline, renderPipelineComposite } from '$lib/stitch/pipelineStub';
 	import type {
 		DraftSourceCapture,
 		StitchConfidence,
@@ -529,14 +529,44 @@
 	 * exact decoded images `commitPipelineSuccess` already produced (no
 	 * second decode). `crop` is read back from the FIRST source's own crop
 	 * rect: every source in a pipeline-produced draft shares an identical
-	 * crop rect by construction (see `pipelineStub.ts`), so this is exact,
+	 * crop rect by construction (see `stitchPipeline.ts`), so this is exact,
 	 * not an approximation.
 	 */
+	/**
+	 * Builds the legacy `TileNeighbors` adjacency from the pipeline's OWN
+	 * discovered overlap graph (`DraftComposite.overlaps`, a `SourceOverlapEdge[]`
+	 * keyed by `sourceId`) rather than `gridNeighbors`' assumed-rectangular-grid
+	 * placeholder. This matters because `assignN`/`poseGraph.ts` orders slots in
+	 * seed-then-tree-growth order, not spatial position — `gridNeighbors` applied
+	 * to those slot names produces adjacency that has nothing to do with which
+	 * tiles actually overlap, which silently fed Snap the wrong neighbor raster
+	 * to align against for any non-trivial (non-`gridNeighbors`-shaped) topology.
+	 */
+	function neighborsFromOverlaps(
+		overlaps: readonly { readonly a: string; readonly b: string }[],
+		slotBySourceId: ReadonlyMap<string, TileSlot>,
+		slots: readonly TileSlot[]
+	): TileNeighbors {
+		const neighbors: Record<TileSlot, TileSlot[]> = {};
+		for (const slot of slots) neighbors[slot] = [];
+		for (const edge of overlaps) {
+			const slotA = slotBySourceId.get(edge.a);
+			const slotB = slotBySourceId.get(edge.b);
+			if (!slotA || !slotB) continue;
+			if (!neighbors[slotA].includes(slotB)) neighbors[slotA].push(slotB);
+			if (!neighbors[slotB].includes(slotA)) neighbors[slotB].push(slotA);
+		}
+		return neighbors;
+	}
+
 	function seedManualFromPipeline(
 		success: StitchPipelineSuccess,
 		images: ReadonlyMap<string, HTMLImageElement>
 	): void {
 		const slots = success.sources.map((_, index) => `tile-${index}`);
+		const slotBySourceId = new Map<string, TileSlot>(
+			success.sources.map((source, index) => [source.sourceId, slots[index]])
+		);
 		const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
 		const nextPlacements: Partial<Record<TileSlot, TilePlacement>> = {};
 		success.sources.forEach((source: DraftSourceCapture, index) => {
@@ -558,7 +588,10 @@
 			};
 		});
 		activeSlots = slots;
-		tileNeighbors = gridNeighbors(slots);
+		tileNeighbors =
+			slots.length > 1
+				? neighborsFromOverlaps(success.draft.overlaps, slotBySourceId, slots)
+				: gridNeighbors(slots);
 		everActiveSlots = new Set(slots);
 		tiles = nextTiles;
 		tileErrors = {};

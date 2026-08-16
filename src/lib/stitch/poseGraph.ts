@@ -93,14 +93,17 @@ export const AFFINE_ESCALATION_MAX_SCORE = 0.9;
  */
 export const INCOHERENT_MIN_EDGE_SCORE = 0.2;
 /**
- * Multiple qualifying pose estimates for one tile (its tree edge plus any
- * fusion candidates) must place its corners within this fraction of the
- * tile's own largest dimension of each other, or the disagreement is treated
- * as unreconcilable rather than averaged away. 5% mirrors the spirit of this
- * codebase's other tile-fraction tolerances (e.g. `autoCrop.ts`'s
+ * A fusion candidate for one tile must place its corners within this
+ * fraction of the tile's own largest dimension of the TREE-derived position
+ * (checked candidate-by-candidate, never pooled against its siblings), or it
+ * is discarded as an outlier rather than averaged in. 5% mirrors the spirit
+ * of this codebase's other tile-fraction tolerances (e.g. `autoCrop.ts`'s
  * `MAX_INSET_FRACTION`), sized to catch a genuine second-placement
- * contradiction while easily tolerating ordinary sub-pixel measurement
- * noise between independent matches of the same real overlap.
+ * contradiction while easily tolerating ordinary measurement noise between
+ * independent matches of the same real overlap. This is a per-candidate
+ * filter, not a batch-rejection trigger — see the fusion loop's own doc
+ * comment for why an individual disagreeing candidate must never abstain the
+ * whole capture set.
  */
 export const POSE_FUSION_MAX_DISAGREEMENT_FRACTION = 0.05;
 /** Same fusion-worthiness bar `autoLayout.ts` uses; see that module's own doc comment for the reasoning (kept identical here, not re-derived). */
@@ -580,10 +583,35 @@ export async function buildPoseGraph(rasters: readonly AnalysisRaster[]): Promis
 	// been escalated past translation: fusing a coarse translation-only
 	// candidate into an already-rotated placement is not evidence of the
 	// same family and is not attempted here (see the module doc comment).
+	//
+	// Fusion is corroborating evidence ONLY — never a rejection trigger. A
+	// disagreeing candidate is discarded, not treated as proof the whole
+	// capture set is incoherent: `FUSION_MIN_SCORE` (0.85) was calibrated
+	// against real map captures to exclude spurious correlation, but a
+	// same-content-family synthetic test scene (or any capture set with
+	// enough repeated structure) can still produce an individual high-scoring
+	// coarse match — most often a diagonal, non-adjacent pair — that is
+	// simply wrong despite clearing that bar. `autoLayout.ts`'s own original
+	// fusion design already establishes the right response to that:
+	// "a spurious match must never be allowed to drag [a tile] away from a
+	// correct position" — i.e. trust the tree (which went through full
+	// escalation/refinement and its own `INCOHERENT_MIN_EDGE_SCORE` check)
+	// and drop the outlier, exactly as a genuinely non-overlapping pair
+	// scoring above threshold was handled before. Each candidate is checked
+	// AGAINST THE TREE POSITION INDIVIDUALLY (not pooled with its siblings)
+	// so one bad candidate can never poison an otherwise-agreeing group, and
+	// only the tree edges' own `INCOHERENT_MIN_EDGE_SCORE` check (already
+	// applied above, before this loop runs) can abstain the whole batch —
+	// that is the one case this module treats as a genuinely incoherent
+	// cycle, not "optional evidence didn't happen to agree."
 	for (let k = 1; k < visitOrder.length; k += 1) {
 		const child = visitOrder[k];
 		const childTransform = transforms.get(child)!;
 		if (childTransform.model !== 'translation') continue;
+
+		const raster = rasters[child];
+		const tileSpanPx = Math.max(raster.widthPx, raster.heightPx) * raster.scale;
+		const disagreementLimitPx = tileSpanPx * POSE_FUSION_MAX_DISAGREEMENT_FRACTION;
 
 		const implied: Affine6Coefficients[] = [childTransform.coefficients];
 		const fusionEdges: PoseEdge[] = [];
@@ -593,11 +621,32 @@ export async function buildPoseGraph(rasters: readonly AnalysisRaster[]): Promis
 			if (otherTransform.model !== 'translation') continue;
 			const candidate = await coarseFor(other, child);
 			if (candidate.score < FUSION_MIN_SCORE) continue;
+			// Refine before comparing this candidate's POSITION against the
+			// tree's: `coarseFor` only ever runs the coarse pass (see its own
+			// doc comment), whose localization error the coarse-to-fine design
+			// elsewhere in this file (`escalatedPose`) treats as real, not
+			// sub-pixel. The score gate above intentionally stays
+			// coarse-scored (unchanged from `autoLayout.ts`'s own fusion
+			// gate); only the position used for comparison/averaging is
+			// refined.
+			const refinedMatch = await matchTranslation(
+				rasters[candidate.aIndex],
+				rasters[candidate.bIndex],
+				candidate.orientation,
+				{ mode: 'refine' }
+			);
 			const forward = candidate.aIndex === other;
 			const relative: Affine6Coefficients = forward
-				? [1, 0, 0, 1, candidate.dxPx, candidate.dyPx]
-				: [1, 0, 0, 1, -candidate.dxPx, -candidate.dyPx];
+				? [1, 0, 0, 1, refinedMatch.dxPx, refinedMatch.dyPx]
+				: [1, 0, 0, 1, -refinedMatch.dxPx, -refinedMatch.dyPx];
 			const absolute = composeAffine6(otherTransform.coefficients, relative);
+			// Compare THIS candidate alone against the tree's own position;
+			// an outlier is dropped here, never pooled into `implied` where it
+			// could either poison a disagreement check against its siblings or
+			// get silently averaged in despite being wrong.
+			if (maxCornerDisagreement([childTransform.coefficients, absolute], raster) > disagreementLimitPx) {
+				continue;
+			}
 			implied.push(absolute);
 			fusionEdges.push({
 				parent: other,
@@ -609,17 +658,6 @@ export async function buildPoseGraph(rasters: readonly AnalysisRaster[]): Promis
 			});
 		}
 		if (fusionEdges.length === 0) continue;
-
-		const raster = rasters[child];
-		const tileSpanPx = Math.max(raster.widthPx, raster.heightPx) * raster.scale;
-		const disagreementPx = maxCornerDisagreement(implied, raster);
-		if (disagreementPx > tileSpanPx * POSE_FUSION_MAX_DISAGREEMENT_FRACTION) {
-			return {
-				ok: false,
-				reason: 'incoherent',
-				message: `Capture ${child} has multiple independent placements that disagree by ${disagreementPx.toFixed(1)}px, more than the ${(POSE_FUSION_MAX_DISAGREEMENT_FRACTION * 100).toFixed(0)}% of its own size this pipeline treats as reconcilable — the overlap evidence is contradictory.`
-			};
-		}
 
 		const averaged = averageCoefficients(implied);
 		transforms.set(child, buildSourceTransform('translation', averaged));
