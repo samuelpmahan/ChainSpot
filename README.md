@@ -128,3 +128,13 @@ npm run build
 The baseline is a current Chromium-based desktop browser with Node.js 22+ and npm. The workflow is local-only: the browser reads local PNGs and the portable `.chainspot.zip` bundle, with no backend or network service. The bundle contains `project.json`, `images/source-original.png`, and `images/target-original.png`; original-pixel coordinates are authoritative, while normalized coordinates are derived for display.
 
 Phase 0 creates editable correspondences only. It does not estimate alignment, warp or blend images, analyze imagery, extract overlays, upload to a backend, call map APIs, or export production graphics. A pending half-pair is transient and is never silently saved: finish it or explicitly cancel it in the save dialog.
+
+## Branching strategy
+
+**`main`** — Trusted production integration branch. Product, demo, and validated CV changes land here. Current demo work stays on `main`; split a dedicated demo branch only when protecting demo stability is worth the extra ceremony.
+
+**`experiment/cv-geometry-scale`** — Tee/object candidate-generation experiments: geometry priors, scale behavior, Heritage/NorthPark falsifiers, appearance-vs-geometry ordering, absolute vs relative windows, and related cross-course probes. Experiments may be applied, combined, or discarded without implying promotion to `main`.
+
+**`experiment/cv-ribbon-tracing`** — Ribbon transparency, segmentation, prefill geometry, badge/basket occluder bridging, continuity, tracing, and bend extraction. Partial success is useful when failures remain bounded and auditable; only validated behavior promotes to `main`.
+
+**Optional experiment patches** — CoNoCo, SAM, and other orthogonal filters/utilities stay independently applicable to either experiment branch. They are composable evaluation inputs, not merge commitments.
