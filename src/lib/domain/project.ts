@@ -24,6 +24,8 @@
  * P0-010 persistence work and wraps this state.
  */
 
+import type { CompositeProvenance } from './provenance';
+
 export type ImageRole = 'source-overview' | 'target-basemap';
 
 export const IMAGE_ROLES: readonly ImageRole[] = ['source-overview', 'target-basemap'];
@@ -48,6 +50,16 @@ export interface ImageAsset {
 	heightPx: number;
 	sha256: string | null;
 	bundlePath: string | null;
+	/**
+	 * How this image's exact pixels were derived from original capture(s) (CHSPT-49/55).
+	 * Non-null only for a `source-overview` image that went through AutoCrop/AutoStitch;
+	 * always absent on `target-basemap` (never composited by that pipeline) and on a
+	 * `source-overview` image that was uploaded directly with no stitch pipeline run.
+	 * `null` and absent (omitted key) both mean "no provenance" and are normalized to the
+	 * same absent representation on schema read/write (see `projectSchema.ts`), the same
+	 * "no ambiguity between undefined and empty" convention `walkingPath` already uses.
+	 */
+	provenance?: CompositeProvenance | null;
 }
 
 export interface ImagePoint {
@@ -172,6 +184,8 @@ export interface CreateImageAssetOptions {
 	heightPx: number;
 	sha256?: string | null;
 	bundlePath?: string | null;
+	/** Omitted (the default) leaves the asset with no `provenance` key at all; `null` normalizes to the same absent state. */
+	provenance?: CompositeProvenance | null;
 	id?: string;
 	createId?: () => string;
 }
@@ -220,7 +234,8 @@ export function createImageAsset(options: CreateImageAssetOptions): ImageAsset {
 		widthPx,
 		heightPx,
 		sha256,
-		bundlePath
+		bundlePath,
+		provenance
 	} = options;
 	return {
 		id: id ?? createId(),
@@ -230,7 +245,13 @@ export function createImageAsset(options: CreateImageAssetOptions): ImageAsset {
 		widthPx,
 		heightPx,
 		sha256: sha256 ?? null,
-		bundlePath: bundlePath ?? null
+		bundlePath: bundlePath ?? null,
+		// `provenance` stays entirely absent (no key) unless explicitly supplied with a
+		// real value — an omitted or explicit-`null` option both normalize to "no key",
+		// the one-representation-of-absent rule this field's own doc describes. A caller
+		// that never mentions it (every existing call site) sees no behavior change,
+		// matching the additive-only requirement for this field.
+		...(provenance != null ? { provenance } : {})
 	};
 }
 

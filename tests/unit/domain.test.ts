@@ -118,6 +118,51 @@ describe('image assets', () => {
 		expect(asset.bundlePath).toBe('images/source-original.png');
 	});
 
+	it('carries an explicit provenance through, and normalizes an omitted or null provenance to no key at all', () => {
+		const provenance = {
+			schemaVersion: 1 as const,
+			renderVersion: 'chainspot-stitch-v1',
+			outputWidthPx: 100,
+			outputHeightPx: 100,
+			compositingPolicy: 'single-source-v1' as const,
+			resampling: 'none' as const,
+			sources: [],
+			overlaps: [],
+			finalRasterSha256: 'a'.repeat(64)
+		};
+		const withProvenance = createImageAsset({
+			createId: () => 'image-source',
+			role: 'source-overview',
+			fileName: 'udisc-overview.png',
+			mimeType: 'image/png',
+			widthPx: 1179,
+			heightPx: 2556,
+			provenance
+		});
+		expect(withProvenance.provenance).toBe(provenance);
+
+		const withoutProvenance = createImageAsset({
+			createId: () => 'image-source',
+			role: 'source-overview',
+			fileName: 'udisc-overview.png',
+			mimeType: 'image/png',
+			widthPx: 1179,
+			heightPx: 2556
+		});
+		expect('provenance' in withoutProvenance).toBe(false);
+
+		const withNullProvenance = createImageAsset({
+			createId: () => 'image-source',
+			role: 'source-overview',
+			fileName: 'udisc-overview.png',
+			mimeType: 'image/png',
+			widthPx: 1179,
+			heightPx: 2556,
+			provenance: null
+		});
+		expect('provenance' in withNullProvenance).toBe(false);
+	});
+
 	it('recognizes exactly the two image roles', () => {
 		for (const role of IMAGE_ROLES) {
 			expect(isImageRole(role)).toBe(true);

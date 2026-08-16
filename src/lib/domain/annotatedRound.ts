@@ -13,9 +13,18 @@
  * appear on these types. A future annotation-review ticket may track
  * provisional-vs-confirmed state internally while the user is still
  * reviewing; that state must never be carried into this artifact.
+ *
+ * `CompositeProvenance` (CHSPT-49/55) is the one exception carried across this
+ * boundary, and it does not violate the rule above: it is a fact about how the
+ * source raster's pixels were derived (which capture(s), what crop/transform),
+ * not a CV proposal about a course feature, and it carries no confidence score
+ * of its own to confuse with `HoleNumberBadgeAnchor.confidence` (which stays
+ * forbidden here, same as before).
  */
 
 import { pointInBounds } from '../coords';
+import { assertCoherentProvenance } from './provenance';
+import type { CompositeProvenance } from './provenance';
 import type { AnnotatedHole, ImageAsset, OrderedShot, SourcePoint } from './project';
 
 /**
@@ -39,6 +48,8 @@ export interface AnnotatedSourceImage {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly blob: Blob;
+	/** See `ImageAsset.provenance` — carried across the Done boundary as a derivation fact, not a CV proposal (see module doc). */
+	readonly provenance?: CompositeProvenance | null;
 }
 
 export interface AnnotatedRound {
@@ -101,6 +112,15 @@ export function createAnnotatedRound(options: CreateAnnotatedRoundOptions): Anno
 	assertPositiveDimensions(sourceImage);
 	const { widthPx, heightPx } = sourceImage;
 
+	// `assertCoherentProvenance` throws `ProvenanceCoherenceError` (a plain `Error`
+	// subclass) on any internal contradiction; this function's own contract is to throw
+	// on a malformed artifact, so the error is allowed to propagate as-is rather than
+	// being wrapped. This is the Done-boundary crossing check the CHSPT-55 contract
+	// requires ("validate at every boundary provenance crosses: save, open, handoff").
+	if (sourceImage.provenance) {
+		assertCoherentProvenance(sourceImage.provenance);
+	}
+
 	for (const hole of holes) {
 		if (hole.tee) {
 			assertPointInBounds(hole.tee, widthPx, heightPx, `createAnnotatedRound: hole ${hole.number} tee`);
@@ -160,6 +180,7 @@ export function annotatedSourceImageFromAsset(
 		mimeType: asset.mimeType,
 		widthPx: asset.widthPx,
 		heightPx: asset.heightPx,
-		blob: new Blob([bytes as BufferSource], { type: asset.mimeType })
+		blob: new Blob([bytes as BufferSource], { type: asset.mimeType }),
+		...(asset.provenance != null ? { provenance: asset.provenance } : {})
 	};
 }
