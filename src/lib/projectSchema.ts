@@ -110,7 +110,7 @@
  * document definition.
  */
 
-import { pointInBounds, toNormalizedCoordinates } from './coords';
+import { normalizeRotationDeg, pointInBounds, toNormalizedCoordinates } from './coords';
 import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type {
 	AnnotatedHole,
@@ -712,9 +712,16 @@ function readImageProvenance(
 /**
  * Reads the optional per-image `rotationDeg` (v7+). Absent/`null`/`0` all normalize to
  * fully absent (no key at all), the same "one representation of absent" rule
- * `readImageProvenance` uses for its own field. Only a `target-basemap` image may carry
- * one; a `source-overview` manifest with a present, non-zero `rotationDeg` is a
- * structured failure rather than a silently ignored field.
+ * `readImageProvenance` uses for its own field. A non-zero value is normalized into
+ * `(-180, 180]` (`coords.ts`'s `normalizeRotationDeg`) exactly like `editor.ts`'s
+ * `setTargetRotation`, so a hand-edited or externally-produced document (e.g.
+ * `rotationDeg: 400` or `360`) can never desync the stored value from the single
+ * canonical range every other write path already enforces — 360 collapses back to
+ * the same "absent" as 0, and out-of-range values land in-range at their equivalent
+ * angle instead of leaking past the rotation UI's own `[-180, 180]` slider bounds.
+ * Only a `target-basemap` image may carry one; a `source-overview` manifest with a
+ * present, non-zero `rotationDeg` is a structured failure rather than a silently
+ * ignored field.
  */
 function readImageRotation(input: unknown, path: string, role: ImageRole): number | undefined {
 	if (input === undefined || input === null) return undefined;
@@ -726,7 +733,7 @@ function readImageRotation(input: unknown, path: string, role: ImageRole): numbe
 			`${path} must be a finite number, got ${describeValue(input)}`
 		);
 	}
-	const degrees = input;
+	const degrees = normalizeRotationDeg(input);
 	if (degrees === 0) return undefined;
 	if (role !== 'target-basemap') {
 		throw failure(

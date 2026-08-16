@@ -337,6 +337,51 @@ describe('two-pane scene workspace', () => {
 	});
 });
 
+describe('target rotation draft sync (CHSPT-44)', () => {
+	it('resyncs the live rotation draft on undo/redo, not just when the target image is swapped', async () => {
+		const editor = makeEditor();
+		await editorInject(editor, 'source-overview', 's.png', 'image/png', 2, 3);
+		await editorInject(editor, 'target-basemap', 't.png', 'image/png', 300, 400);
+		const { component, host } = mountPage(editor, decodeOf(2, 3));
+		await flush();
+
+		const rotationNumber = host.querySelector<HTMLInputElement>('[data-testid="target-rotation-number"]');
+		if (!rotationNumber) throw new Error('missing target-rotation-number input');
+		const rotationValue = () => host.querySelector('[data-testid="target-rotation-value"]')?.textContent;
+
+		rotationNumber.value = '30';
+		rotationNumber.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+		expect(editor.state.images.find((image) => image.role === 'target-basemap')?.rotationDeg).toBe(30);
+		expect(rotationValue()).toBe('30.0°');
+
+		rotationNumber.value = '45';
+		rotationNumber.dispatchEvent(new Event('change', { bubbles: true }));
+		await flush();
+		expect(rotationValue()).toBe('45.0°');
+
+		// Undo the 45deg commit: the domain reverts to 30deg on the SAME image id,
+		// so an id-keyed resync (the bug this guards) would never notice and the
+		// draft — which drives the pane's rotation math and hole-graphics export —
+		// would keep rendering/exporting at the stale 45deg.
+		editor.undo();
+		await (component as unknown as { refresh: () => void }).refresh();
+		await flush();
+		expect(editor.state.images.find((image) => image.role === 'target-basemap')?.rotationDeg).toBe(30);
+		expect(rotationValue()).toBe('30.0°');
+		expect(rotationNumber.value).toBe('30');
+
+		editor.redo();
+		await (component as unknown as { refresh: () => void }).refresh();
+		await flush();
+		expect(editor.state.images.find((image) => image.role === 'target-basemap')?.rotationDeg).toBe(45);
+		expect(rotationValue()).toBe('45.0°');
+
+		unmount(component);
+		host.remove();
+	});
+});
+
 async function seedBothWithPair(editor: ProjectEditor): Promise<void> {
 	await editorInject(editor, 'source-overview', 's.png', 'image/png', 2, 3);
 	await editorInject(editor, 'target-basemap', 't.png', 'image/png', 300, 400);

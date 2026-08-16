@@ -1105,6 +1105,20 @@ describe('rotationDeg migration and validation (schema v6 -> v7)', () => {
 		(doc.images as Array<Record<string, unknown>>)[1].rotationDeg = 'north';
 		expectError(doc, 'rotation', 'rotation.number.invalid', 'images[1].rotationDeg');
 	});
+
+	it('normalizes an out-of-range rotationDeg into (-180, 180] on load, matching editor.ts setTargetRotation', () => {
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[1].rotationDeg = 400;
+		const parsed = expectDocumentOk(doc);
+		expect(parsed.images[1].rotationDeg).toBeCloseTo(40, 9);
+	});
+
+	it('normalizes a 360deg rotationDeg to absent, same as 0', () => {
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[1].rotationDeg = 360;
+		const parsed = expectDocumentOk(doc);
+		expect(parsed.images[1].rotationDeg).toBeUndefined();
+	});
 });
 
 describe('serializer validation of domain state', () => {

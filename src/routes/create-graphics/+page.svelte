@@ -240,21 +240,25 @@
 	 * drag already uses.
 	 */
 	let targetRotationDraft = $state(0);
-	/** The target image whose rotation `targetRotationDraft` currently tracks, so a newly chosen/replaced target resets the draft instead of inheriting a stale angle. */
-	let targetRotationImageId: string | null = null;
 
-	/** Keeps the live draft in sync with the committed value whenever the target image identity changes (loaded, replaced, or cleared) — never on the draft's own commits, which keep the same image id. */
+	/**
+	 * Keeps the live draft in sync with the committed value on every `refresh()`
+	 * (new/replaced target, and — just as importantly — undo/redo of a rotation
+	 * commit, which changes `rotationDeg` on the SAME image id). An earlier version
+	 * of this effect only resynced when the target image's `id` changed, on the
+	 * theory that it only needed to catch a swapped target; that missed undo/redo
+	 * of `editor.setTargetRotation` entirely, since undo reverts `rotationDeg`
+	 * in place without touching the image's `id` — leaving the pane's rotation
+	 * math, click-to-image-space inversion, and hole-graphics export silently
+	 * pinned to the stale, no-longer-committed angle. Resyncing unconditionally
+	 * is safe: nothing calls `refresh()` during a live drag/typing gesture (see
+	 * `handleTargetRotationInput`), so this never fights an in-progress edit —
+	 * exactly the same "always re-derive from state" contract `syncNameDraft`/
+	 * `syncInspectorDraft` already follow.
+	 */
 	$effect(() => {
 		const image = targetImage();
-		if (!image) {
-			targetRotationImageId = null;
-			targetRotationDraft = 0;
-			return;
-		}
-		if (image.id !== targetRotationImageId) {
-			targetRotationImageId = image.id;
-			targetRotationDraft = image.rotationDeg ?? 0;
-		}
+		targetRotationDraft = image?.rotationDeg ?? 0;
 	});
 
 	/** Live updates while the rotation control is being dragged/typed; never touches durable state. */
