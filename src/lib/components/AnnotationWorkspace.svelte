@@ -50,6 +50,7 @@
 	import { KEYBOARD_PAN_STEP_PX, KEYBOARD_ZOOM_STEP_FACTOR } from '$lib/navigation';
 	import { isEditableTarget } from '$lib/pointSelection';
 	import { dialogKeyboard, isModalOpen } from '$lib/focusManagement';
+	import { historyShortcut } from '$lib/pointListShortcuts';
 	import {
 		addHole,
 		addHoleWithNumber,
@@ -463,12 +464,25 @@
 		readonly confirmedPieces: Set<string>;
 		readonly autoProposedBendHoleIds: Set<string>;
 		readonly manualBendHoleId: string | null;
+		readonly lastManualBendByHoleId: Map<string, SourcePoint>;
+		readonly eagerBendAnchorByHoleId: Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>;
+		readonly eagerBendAttemptSignature: Map<string, string>;
 		readonly bendPhaseDone: boolean;
 		readonly mapGeometryEdited: boolean;
 		readonly view: ViewTransformState | null;
 	}
 
-	const workflowUndoStack: WorkflowSnapshot[] = [];
+	/**
+	 * Conventional `past[] <- current -> future[]` workflow history (CHSPT-55).
+	 * `captureWorkflowSnapshot()` pushes onto `workflowPast` before every
+	 * mutating action and clears `workflowFuture` (a fresh edit invalidates any
+	 * pending redo trail, standard undo/redo semantics). Ctrl-Z pops
+	 * `workflowPast`, pushes the state it's about to overwrite onto
+	 * `workflowFuture`, then restores the popped snapshot; Ctrl-Shift-Z/Ctrl-Y
+	 * are the exact inverse. See `performWorkflowUndo`/`performWorkflowRedo`.
+	 */
+	let workflowPast: WorkflowSnapshot[] = [];
+	let workflowFuture: WorkflowSnapshot[] = [];
 	const WORKFLOW_UNDO_LIMIT = 100;
 
 	function viewportController(): ViewportController | null {
@@ -688,15 +702,44 @@
 	 * transient page-local UI state, same convention as `confirmedPieces`.
 	 */
 	let autoProposedBendHoleIds = $state<ReadonlySet<string>>(new Set());
-	/** tee/basket position `autoProposedBendHoleIds`' eager bends were computed from, for the cancel-on-drag distance check. Plain (non-reactive) bookkeeping, mirrors `autoDetectedSourceId`'s once-per-image guard convention. */
-	const eagerBendAnchorByHoleId = new Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>();
-	/** holeId -> tee/basket signature already attempted (or currently scheduled/in-flight) by the eager trigger, so it does not re-fire for a position it has already tried. Plain bookkeeping, not rendered. */
-	const eagerBendAttemptSignature = new Map<string, string>();
+	/**
+	 * tee/basket position `autoProposedBendHoleIds`' eager bends were computed
+	 * from, for the cancel-on-drag distance check. Plain (non-reactive)
+	 * bookkeeping, mirrors `autoDetectedSourceId`'s once-per-image guard
+	 * convention. `let`, not `const` (CHSPT-57 review): this must be part of
+	 * `WorkflowSnapshot` like `lastManualBendByHoleId` — without it, an undo
+	 * that restores `autoProposedBendHoleIds` to include a hole again could
+	 * leave this map holding a STALE anchor from a since-cancelled/re-run
+	 * attempt, and the cancel-on-drag `$effect` below would compare the
+	 * restored tee/basket against that stale anchor and immediately
+	 * re-cancel the bends the undo just brought back.
+	 */
+	let eagerBendAnchorByHoleId = new Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>();
+	/** holeId -> tee/basket signature already attempted (or currently scheduled/in-flight) by the eager trigger, so it does not re-fire for a position it has already tried. Plain bookkeeping, not rendered. `let` for the same undo/redo-fidelity reason as `eagerBendAnchorByHoleId` above. */
+	let eagerBendAttemptSignature = new Map<string, string>();
 	/** Per-hole debounce timer for the eager trigger, so a mid-drag flurry of tee/basket updates schedules one attempt at the settled position, not one per intermediate frame. */
 	const eagerBendDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const EAGER_BEND_DEBOUNCE_MS = 400;
 	/** Source px: a tee/basket nudge within this distance of the anchor keeps the eager bend as-is ("looks like magical bend detection that just needs a little fine tuning"); beyond it, the proposal is stale and gets discarded. */
 	const EAGER_BEND_CANCEL_DISTANCE_PX = 6;
+
+	/**
+	 * The exact drop point of the most recent MANUAL bend add per hole (CHSPT-55
+	 * X-bend fix) — set at the two places a bend is actually created by the
+	 * user (the radial menu's "bend" action, and an empty-map click on the
+	 * BENDS step; see both call sites' `lastManualBendByHoleId.set`). `corridorBends`
+	 * carries no id/source tag and is re-sorted by geometric position on every
+	 * add/move (`sortBendsByPosition` in `holeAnnotation.ts`), so array order
+	 * alone can't answer "which bend did the user just add" — this is a
+	 * position to positionally re-find that bend by (`rejectCurrentStepProposal`'s
+	 * priority 2), independent of where it lands in the sorted array. Never
+	 * part of `AnnotatedHole`/`SourcePoint` itself, same provenance rule as
+	 * `autoProposedBendHoleIds`; purely transient page-local UI state, but
+	 * still part of `WorkflowSnapshot` so undo/redo restores it faithfully.
+	 */
+	let lastManualBendByHoleId = new Map<string, SourcePoint>();
+	/** Source px tolerance for re-finding `lastManualBendByHoleId`'s remembered point in a hole's current (possibly re-sorted) `corridorBends` — a manual add's stored coordinates are never transformed, so an exact match is expected; a little slack only guards against float formatting, not a real position change. A miss (nothing within tolerance — e.g. that bend was already removed some other way) means the entry is stale, so callers fall through to the next priority instead of matching the wrong bend. */
+	const BEND_MATCH_EPSILON_PX = 0.5;
 	let previewHoles = $state<AnnotatedHole[] | null>(null);
 	let visibleHoles = $derived(previewHoles ?? holes);
 	let previewWalkingPath = $state<SourcePoint[] | null>(null);
@@ -1019,6 +1062,28 @@
 		if (!autoProposedBendHoleIds.has(holeId)) return;
 		autoProposedBendHoleIds = new Set([...autoProposedBendHoleIds].filter((id) => id !== holeId));
 		eagerBendAnchorByHoleId.delete(holeId);
+	}
+
+	/**
+	 * `rejectCurrentStepProposal`'s priority-2 lookup: `bends` is re-sorted by
+	 * geometric position on every add/move (`sortBendsByPosition` in
+	 * `holeAnnotation.ts`), so `lastManualBendByHoleId`'s remembered drop point
+	 * has to be re-found by position, not by index. Returns -1 (a stale/miss)
+	 * when nothing in `bends` is within `epsilonPx` of `point` — e.g. that bend
+	 * was already removed some other way — so the caller falls through to the
+	 * next priority instead of matching the wrong bend.
+	 */
+	function findNearestBendIndex(bends: readonly SourcePoint[], point: SourcePoint, epsilonPx: number): number {
+		let bestIndex = -1;
+		let bestDistancePx = Infinity;
+		for (const [index, bend] of bends.entries()) {
+			const distancePx = Math.hypot(bend.xPx - point.xPx, bend.yPx - point.yPx);
+			if (distancePx < bestDistancePx) {
+				bestDistancePx = distancePx;
+				bestIndex = index;
+			}
+		}
+		return bestDistancePx <= epsilonPx ? bestIndex : -1;
 	}
 
 	/** The eager proposal is stale (tee/basket moved beyond tolerance since it was computed): discard it and free the hole up for a fresh attempt once it settles at the new position. */
@@ -1392,18 +1457,30 @@
 		if (isModalOpen()) return;
 		if (isShortcutEditableTarget(event.target)) return;
 
-		if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+		if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+			// Widened to admit Shift (Ctrl-Shift-Z redo) alongside the plain
+			// Ctrl-combos below, which stay explicitly shift-guarded so e.g.
+			// Ctrl-Shift-S/O still fall through here and get swallowed as before.
 			const modifierKey = event.key.toLowerCase();
-			if (modifierKey === 's') {
+			if (!event.shiftKey && modifierKey === 's') {
 				event.preventDefault();
 				if (!saving && !event.repeat) handleSave();
-			} else if (modifierKey === 'o') {
+			} else if (!event.shiftKey && modifierKey === 'o') {
 				event.preventDefault();
 				if (!openLoading && !event.repeat) openDraftInput?.click();
-			} else if (modifierKey === 'z' && annotationMode === 'map') {
-				// Repeat allowed: holding Ctrl-Z steps back through workflow history.
-				event.preventDefault();
-				performWorkflowUndo();
+			} else if (annotationMode === 'map') {
+				// historyShortcut (see `$lib/pointListShortcuts`) owns the exact
+				// Ctrl/Cmd-Z, Ctrl/Cmd-Shift-Z, Ctrl-Y (not Cmd-Y) key detection —
+				// reused as-is rather than hand-rolling it a second time here.
+				// Repeat allowed: holding the combo steps through workflow history.
+				const shortcut = historyShortcut(event);
+				if (shortcut === 'undo') {
+					event.preventDefault();
+					performWorkflowUndo();
+				} else if (shortcut === 'redo') {
+					event.preventDefault();
+					performWorkflowRedo();
+				}
 			}
 			return;
 		}
@@ -1792,46 +1869,51 @@
 		return reviewStep;
 	});
 
-	/**
-	 * Captures one workflow-undo step (see `WorkflowSnapshot`). Called by every
-	 * mutating workflow entry point BEFORE it changes anything, so Ctrl-Z
-	 * restores the exact pre-action state — including the camera, so undoing a
-	 * Tab advancement also returns the view to where it was. Map mode only:
-	 * Round mode never exposes this undo surface.
-	 */
-	function captureWorkflowSnapshot(): void {
-		if (annotationMode !== 'map') return;
+	/** Builds a `WorkflowSnapshot` of the state as it stands RIGHT NOW — shared by `captureWorkflowSnapshot` (pushing the pre-action state) and by undo/redo (pushing the state they're about to overwrite onto the other stack). */
+	function snapshotCurrentWorkflowState(): WorkflowSnapshot {
 		const controller = viewportController();
-		workflowUndoStack.push({
+		return {
 			holes: $state.snapshot(holes) as AnnotatedHole[],
 			activeHoleId,
 			reviewStep,
 			confirmedPieces: new Set(confirmedPieces),
 			autoProposedBendHoleIds: new Set(autoProposedBendHoleIds),
 			manualBendHoleId,
+			lastManualBendByHoleId: new Map(lastManualBendByHoleId),
+			eagerBendAnchorByHoleId: new Map(eagerBendAnchorByHoleId),
+			eagerBendAttemptSignature: new Map(eagerBendAttemptSignature),
 			bendPhaseDone,
 			mapGeometryEdited,
 			view: controller ? { ...controller.view } : null
-		});
-		if (workflowUndoStack.length > WORKFLOW_UNDO_LIMIT) workflowUndoStack.shift();
+		};
 	}
 
 	/**
-	 * Ctrl-Z: reverses the previous user/workflow action — placements, moves,
-	 * removals, rejections, corridor-width changes, Tab advancements (incl. an
-	 * accidental double-Tab, one press per step), active hole/step changes —
-	 * and restores the associated camera position/zoom. Distinct from `X`,
-	 * which rejects a proposal and is itself undoable here.
+	 * Captures one workflow-undo step (see `WorkflowSnapshot`). Called by every
+	 * mutating workflow entry point BEFORE it changes anything, so Ctrl-Z
+	 * restores the exact pre-action state — including the camera, so undoing a
+	 * Tab advancement also returns the view to where it was. Map mode only:
+	 * Round mode never exposes this undo surface. A fresh mutation invalidates
+	 * any pending redo trail, standard undo/redo semantics.
 	 */
-	function performWorkflowUndo(): void {
-		const snapshot = workflowUndoStack.pop();
-		if (!snapshot) return;
+	function captureWorkflowSnapshot(): void {
+		if (annotationMode !== 'map') return;
+		workflowPast.push(snapshotCurrentWorkflowState());
+		if (workflowPast.length > WORKFLOW_UNDO_LIMIT) workflowPast.shift();
+		workflowFuture.length = 0;
+	}
+
+	/** Restores every field a `WorkflowSnapshot` covers, plus the transient UI state (drags, menus, pending focus) that must never survive on top of a restored step — shared by undo and redo. */
+	function restoreWorkflowSnapshot(snapshot: WorkflowSnapshot): void {
 		holes = snapshot.holes;
 		activeHoleId = snapshot.activeHoleId;
 		reviewStep = snapshot.reviewStep;
 		confirmedPieces = new Set(snapshot.confirmedPieces);
 		autoProposedBendHoleIds = new Set(snapshot.autoProposedBendHoleIds);
 		manualBendHoleId = snapshot.manualBendHoleId;
+		lastManualBendByHoleId = new Map(snapshot.lastManualBendByHoleId);
+		eagerBendAnchorByHoleId = new Map(snapshot.eagerBendAnchorByHoleId);
+		eagerBendAttemptSignature = new Map(snapshot.eagerBendAttemptSignature);
 		bendPhaseDone = snapshot.bendPhaseDone;
 		mapGeometryEdited = snapshot.mapGeometryEdited;
 		previewHoles = null;
@@ -1839,11 +1921,37 @@
 		markerChip = null;
 		radialMenu = null;
 		// A pending focus-request pan must not replay on top of the restored
-		// camera, and the one-shot initial badge focus is forfeited by any undo.
+		// camera, and the one-shot initial badge focus is forfeited by any undo/redo.
 		sidebarFocusRequest = null;
 		initialBadgeFocusPending = false;
 		const controller = viewportController();
 		if (snapshot.view && controller) controller.view = { ...snapshot.view };
+	}
+
+	/**
+	 * Ctrl-Z: reverses the previous user/workflow action — placements, moves,
+	 * removals, rejections, corridor-width changes, Tab advancements (incl. an
+	 * accidental double-Tab, one press per step), active hole/step changes —
+	 * and restores the associated camera position/zoom. Distinct from `X`,
+	 * which rejects a proposal and is itself undoable here. The state it
+	 * overwrites is pushed onto `workflowFuture` first, so Ctrl-Shift-Z/Ctrl-Y
+	 * can redo it.
+	 */
+	function performWorkflowUndo(): void {
+		const snapshot = workflowPast.pop();
+		if (!snapshot) return;
+		workflowFuture.push(snapshotCurrentWorkflowState());
+		if (workflowFuture.length > WORKFLOW_UNDO_LIMIT) workflowFuture.shift();
+		restoreWorkflowSnapshot(snapshot);
+	}
+
+	/** Ctrl-Shift-Z / Ctrl-Y: the exact inverse of `performWorkflowUndo` — pops `workflowFuture`, pushes the state it's about to overwrite onto `workflowPast`, and restores the popped snapshot. */
+	function performWorkflowRedo(): void {
+		const snapshot = workflowFuture.pop();
+		if (!snapshot) return;
+		workflowPast.push(snapshotCurrentWorkflowState());
+		if (workflowPast.length > WORKFLOW_UNDO_LIMIT) workflowPast.shift();
+		restoreWorkflowSnapshot(snapshot);
 	}
 
 	/**
@@ -1884,11 +1992,16 @@
 
 	/**
 	 * X: reject the current step's obvious proposal — not a historical undo.
-	 * Priority: the hovered current-step object first (bends are the only
-	 * step with more than one candidate), then the single obvious proposal
-	 * (the step's tee/basket; a hole's eager auto-proposed bends as one unit;
-	 * otherwise the most recent bend). Rejections are themselves one Ctrl-Z
-	 * step.
+	 * On the BENDS step, priority is: (1) the hovered bend, so a bad bend
+	 * under the cursor needs no selection click; (2) the most recently
+	 * manually-added bend (`lastManualBendByHoleId`), so an explicit "I just
+	 * added this one" always wins regardless of where it landed after
+	 * `sortBendsByPosition` re-sorted the array (CHSPT-55 — `corridorBends`
+	 * carries no id/source, so array position alone can't answer "which bend
+	 * did the user just touch"); (3) a hole's eager auto-proposed bends as one
+	 * unit, but only while that proposal is still untouched
+	 * (`autoProposedBendHoleIds`); (4) otherwise the most recent bend.
+	 * Rejections are themselves one Ctrl-Z step.
 	 */
 	function rejectCurrentStepProposal(): void {
 		const hole = activeHole();
@@ -1906,7 +2019,7 @@
 			return;
 		}
 		if (hole.corridorBends.length === 0) return;
-		// Hovered bend wins, so a bad bend under the cursor needs no selection click.
+		// Priority 1: the hovered bend wins outright, no selection click needed.
 		const controller = viewportController();
 		if (lastPointerScreen && controller) {
 			const hit = pointHitAt(lastPointerScreen, controller.view);
@@ -1920,13 +2033,27 @@
 			}
 		}
 		captureWorkflowSnapshot();
-		if (autoProposedBendHoleIds.has(hole.id)) {
-			// The eager auto-detection proposal is one unit: reject it whole.
-			// promoteEagerBends first keeps the attempt-signature guard intact so
-			// the detector doesn't immediately re-propose the same bends.
+		// Priority 2: the most recently manually-added bend, re-found by
+		// position (see `findNearestBendIndex`) since the array's own order is
+		// purely geometric, not insertion order.
+		const trackedPoint = lastManualBendByHoleId.get(hole.id);
+		const trackedIndex = trackedPoint
+			? findNearestBendIndex(hole.corridorBends, trackedPoint, BEND_MATCH_EPSILON_PX)
+			: -1;
+		if (trackedIndex !== -1) {
+			promoteEagerBends(hole.id);
+			holes = removeCorridorBend(holes, hole.id, trackedIndex);
+			lastManualBendByHoleId.delete(hole.id);
+		} else if (autoProposedBendHoleIds.has(hole.id)) {
+			// Priority 3: the eager auto-detection proposal is one unit, still
+			// untouched — reject it whole. promoteEagerBends first keeps the
+			// attempt-signature guard intact so the detector doesn't immediately
+			// re-propose the same bends.
 			promoteEagerBends(hole.id);
 			holes = clearBends(holes, hole.id);
 		} else {
+			// Priority 4: no hover, no tracked manual bend, no untouched auto
+			// proposal — fall back to the most recent bend.
 			promoteEagerBends(hole.id);
 			holes = removeLastBend(holes, hole.id);
 		}
@@ -2494,7 +2621,12 @@
 			// Only 'bend' (map mode) or 'shot' (round mode) ever reach here now —
 			// tee/basket creation is intercepted earlier by `handleAnnotationPlacement`
 			// into the sidebar-driven placing flow, see `radialMenuActions`.
-			if (action === 'bend') promoteEagerBends(menu.holeId);
+			if (action === 'bend') {
+				promoteEagerBends(menu.holeId);
+				// CHSPT-55: remember this manual add's exact drop point so X's
+				// priority-2 can find it again after the array's geometric re-sort.
+				lastManualBendByHoleId.set(menu.holeId, menu.at);
+			}
 			holes = placeByMode(holes, menu.holeId, action, menu.at);
 			if (isMapGeometryKind(action)) markMapGeometryEdited();
 		}
@@ -2742,6 +2874,9 @@
 				// wedges stay reachable.
 				captureWorkflowSnapshot();
 				promoteEagerBends(activeHoleId);
+				// CHSPT-55: remember this manual add's exact drop point so X's
+				// priority-2 can find it again after the array's geometric re-sort.
+				lastManualBendByHoleId.set(activeHoleId, coordinates);
 				holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
 				markMapGeometryEdited();
 				vibrate(8);
@@ -2769,6 +2904,9 @@
 		mapGeometryEdited = false;
 		bendPhaseDone = false;
 		manualBendHoleId = null;
+		lastManualBendByHoleId = new Map();
+		eagerBendAnchorByHoleId = new Map();
+		eagerBendAttemptSignature = new Map();
 		radialMenu = null;
 		markerChip = null;
 		sidebarFocusRequest = null;
@@ -2778,7 +2916,8 @@
 		courseDetection = null;
 		confirmedPieces = new Set();
 		reviewStep = 'tee';
-		workflowUndoStack.length = 0;
+		workflowPast = [];
+		workflowFuture = [];
 		widthFeedback = null;
 		initialBadgeFocusPending = false;
 		latestShadowRun = null;
@@ -3138,6 +3277,9 @@
 			holes = next.state.holes;
 			activeHoleId = null;
 			manualBendHoleId = null;
+			lastManualBendByHoleId = new Map();
+			eagerBendAnchorByHoleId = new Map();
+			eagerBendAttemptSignature = new Map();
 			previewHoles = null;
 			radialMenu = null;
 			markerChip = null;
@@ -3146,7 +3288,8 @@
 			savedCourseToMemory = false;
 			confirmedPieces = new Set();
 			reviewStep = 'tee';
-			workflowUndoStack.length = 0;
+			workflowPast = [];
+			workflowFuture = [];
 			widthFeedback = null;
 			initialBadgeFocusPending = false;
 			reviewStartedSourceId = null;
@@ -4158,7 +4301,7 @@
 								{sidebarBanner.manual ? 'Done' : 'Close'}
 							</button>
 						{:else}
-							<span>Hole {sidebarBanner.holeNumber} is confirmed.</span>
+							<span>Hole {sidebarBanner.holeNumber} confirmed. Add bends anytime if the fairway isn't straight.</span>
 							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
 								+ Add Bend(s)
 							</button>

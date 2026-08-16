@@ -10,6 +10,8 @@ import {
 	SUPPORTED_MIME_TYPES
 } from '../../src/lib/imageIntake';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
+import { applySourceTransform, AUTO_SOURCE_CAPTURE_ORIGIN, identitySourceTransform } from '../../src/lib/domain/provenance';
+import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
 
@@ -606,5 +608,131 @@ describe('temporary resource cleanup', () => {
 		editor.renameProject('divergent edit');
 		expect(editor.getAssetResource(secondId)).toBeUndefined();
 		expect(editor.getAssetResource(firstId)?.decoded).toBeTruthy();
+	});
+});
+
+describe('provenance and source-capture attachment (CHSPT-49/55)', () => {
+	/** A minimal, coherent single-source provenance referencing `sourceId`. */
+	function provenanceOf(sourceId: string): CompositeProvenance {
+		const transform = identitySourceTransform();
+		const crop: SourceCropRect = { xPx: 0, yPx: 0, widthPx: 2, heightPx: 3 };
+		const source: SourceCapture = {
+			sourceId,
+			fileName: `${sourceId}.png`,
+			mimeType: 'image/png',
+			widthPx: 2,
+			heightPx: 3,
+			sha256: 'b'.repeat(64),
+			crop,
+			transform,
+			origin: AUTO_SOURCE_CAPTURE_ORIGIN,
+			coveragePolygon: [
+				{ xPx: crop.xPx, yPx: crop.yPx },
+				{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },
+				{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx + crop.heightPx },
+				{ xPx: crop.xPx, yPx: crop.yPx + crop.heightPx }
+			].map((corner) => applySourceTransform(corner, transform)),
+			paintOrder: 0
+		};
+		return {
+			schemaVersion: 1,
+			renderVersion: 'chainspot-stitch-v1',
+			outputWidthPx: 2,
+			outputHeightPx: 3,
+			compositingPolicy: 'single-source-v1',
+			resampling: 'none',
+			sources: [source],
+			overlaps: [],
+			finalRasterSha256: 'a'.repeat(64)
+		};
+	}
+
+	it('attaches provenance to the resulting asset on first assignment', async () => {
+		const editor = makeEmptyEditor();
+		const provenance = provenanceOf('capture-1');
+		const result = await intakeImageFile({
+			editor,
+			role: 'source-overview',
+			file: fileOf('s.png', 'image/png'),
+			decode: decodeOf(2, 3),
+			createAssetId: nextId,
+			provenance
+		});
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.asset.provenance).toEqual(provenance);
+		expect(editor.state.images[0].provenance).toEqual(provenance);
+	});
+
+	it('registers accompanying source-capture bytes reachable through the editor after assignment', async () => {
+		const editor = makeEmptyEditor();
+		const provenance = provenanceOf('capture-1');
+		const captureBytes = new Uint8Array([9, 9, 9, 9]);
+		const result = await intakeImageFile({
+			editor,
+			role: 'source-overview',
+			file: fileOf('s.png', 'image/png'),
+			decode: decodeOf(2, 3),
+			createAssetId: nextId,
+			provenance,
+			sourceCaptures: new Map([['capture-1', captureBytes]])
+		});
+		expect(result.ok).toBe(true);
+		expect(editor.getAssetResource('capture-1')?.bytes).toEqual(captureBytes);
+		expect(editor.getAssetResource('capture-1')?.decoded).toBeNull();
+	});
+
+	it('attaches provenance and source-capture bytes on a replacement too', async () => {
+		const editor = makeEmptyEditor();
+		await intakeImageFile({
+			editor,
+			role: 'source-overview',
+			file: fileOf('s.png', 'image/png'),
+			decode: decodeOf(2, 3),
+			createAssetId: nextId
+		});
+		const provenance = provenanceOf('capture-2');
+		const result = await intakeImageFile({
+			editor,
+			role: 'source-overview',
+			file: fileOf('s-v2.png', 'image/png'),
+			decode: decodeOf(2, 3),
+			createAssetId: nextId,
+			provenance,
+			sourceCaptures: new Map([['capture-2', new Uint8Array([1, 2])]])
+		});
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.asset.provenance).toEqual(provenance);
+		expect(editor.getAssetResource('capture-2')).toBeDefined();
+	});
+
+	it('leaves the asset with no provenance key when the option is omitted (additive, no behavior change)', async () => {
+		const editor = makeEmptyEditor();
+		const result = await intakeImageFile({
+			editor,
+			role: 'source-overview',
+			file: fileOf('s.png', 'image/png'),
+			decode: decodeOf(2, 3),
+			createAssetId: nextId
+		});
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect('provenance' in result.asset).toBe(false);
+	});
+
+	it('rejects provenance attached to a target-basemap image', async () => {
+		const editor = makeEmptyEditor();
+		await expect(
+			intakeImageFile({
+				editor,
+				role: 'target-basemap',
+				file: fileOf('t.png', 'image/png'),
+				decode: decodeOf(5, 4),
+				createAssetId: nextId,
+				provenance: provenanceOf('capture-1')
+			})
+		).rejects.toThrow(/source-overview/);
+		expect(editor.state.images).toEqual([]);
 	});
 });

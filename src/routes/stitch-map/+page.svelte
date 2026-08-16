@@ -2,13 +2,12 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import Konva from 'konva';
-	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
-	import { dialogKeyboard } from '$lib/focusManagement';
 	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import type { ViewportFitTarget } from '$lib/viewport.svelte';
-	import { decodeImageFile, isSupportedMimeType } from '$lib/imageIntake';
+	import { decodeImageFile, isSupportedMimeType, readFileBytes, sha256Hex } from '$lib/imageIntake';
 	import { isEditableTarget } from '$lib/pointSelection';
 	import { canvas2dAvailable } from '$lib/scene';
 	import {
@@ -31,28 +30,34 @@
 		TileSlot
 	} from '$lib/stitch/geometry';
 	import { TileDecodeCoordinator, guardedDecode } from '$lib/stitch/tileIntake';
-	import { smartImportFiles } from '$lib/stitch/smartImport';
 	import { MAX_AUTO_ARRANGE_TILES } from '$lib/stitch/autoLayout';
-	import { categoryLabel } from '$lib/stitch/diagnostics';
-	import type { LayoutDiagnostic } from '$lib/stitch/diagnostics';
-	import { requiresReplaceDecision } from '$lib/stitch/rerunGuard';
-	import { demoTour } from '$lib/demo/tour.svelte';
 	import {
-		smartImportViaWorker,
 		disposeSmartStitchWorker,
+		renderPipelineComposite,
+		runStitchPipeline,
 		warmSmartStitchWorker
 	} from '$lib/stitch/smartImport';
 	import { DEFAULT_MAX_ANALYSIS_DIM, toAnalysisRaster } from '$lib/stitch/analysis';
 	import type { AnalysisRaster } from '$lib/stitch/analysis';
 	import { loadCv, snapAlign, warmMatchTemplate } from '$lib/stitch/cvMatch';
 	import type { SnapNeighbor } from '$lib/stitch/cvMatch';
-	import { renderStitchedPng, stitchedFileName } from '$lib/stitch/render';
+	import { stitchedFileName } from '$lib/stitch/render';
+	import type {
+		DraftSourceCapture,
+		StitchConfidence,
+		StitchPipelineSuccess
+	} from '$lib/stitch/pipelineResult';
+	import { buildManualDraftComposite, badgeFlashPercent } from '$lib/stitch/pipelineUiHelpers';
+	import type { CompositeProvenance, Sha256Hex } from '$lib/domain/provenance';
+	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
 		getPendingHandoff,
 		setPendingHandoff,
 		subscribePendingStitchCaptures,
 		takePendingStitchCaptures
 	} from '$lib/session';
+	import type { PendingHandoff } from '$lib/session';
 	import type { ImageRole } from '$lib/domain/project';
 	import type { ImageSpacePoint, ScreenSpacePoint } from '$lib/coords';
 
@@ -62,6 +67,8 @@
 		widthPx: number;
 		heightPx: number;
 		image: HTMLImageElement;
+		/** The original capture, retained so the manual-correction surface can rebuild a `DraftComposite` (hash, re-render) without a second file picker round trip. */
+		file: File;
 	}
 
 	/** A slot's display label is its 1-based position in the current session, not its stable id. */
@@ -79,8 +86,8 @@
 		leftPx: 'Left'
 	};
 
-	/** Reserved coordinator key guarding one whole smart-import batch (P1-001). */
-	const SMART_IMPORT_BATCH = '__smart-import__';
+	/** Reserved coordinator key guarding one whole import batch (auto pipeline, or the manual per-slot grid). */
+	const SMART_IMPORT_BATCH = '__stitch-import__';
 
 	/** Session tiles: transient browser resources only, never durable project state. */
 	let tiles = $state<Partial<Record<TileSlot, StitchTile>>>({});
@@ -88,7 +95,7 @@
 	/** Per-slot decode generations: stale in-flight decodes never publish results. */
 	const decodeCoordinator = new TileDecodeCoordinator();
 
-	/** Authoritative committed crop; drafts may be invalid without touching it. Shared by every tile — see the design note on the review-phase guides below. */
+	/** Authoritative committed shared crop for the manual-correction surface; drafts may be invalid without touching it. */
 	let crop = $state<CropInsets>({ ...ZERO_CROP });
 	let cropDraft = $state<{ topPx: string; rightPx: string; bottomPx: string; leftPx: string }>({
 		topPx: '0',
@@ -99,12 +106,12 @@
 	let cropInputs = $state<Partial<Record<CropInsetField, HTMLInputElement | null>>>({});
 
 	/**
-	 * The session's active slots: four fresh, empty ids by default, or however
-	 * many tiles a successful smart import inferred (see `runSmartImport`), or
-	 * one more than that after "+ Add capture". `tileNeighbors` is the
-	 * expected-overlap adjacency for those slots — a placeholder grid before any
-	 * arrangement has run, or the real inferred topology afterward. The first
-	 * slot in `activeSlots` is always the anchor (immovable, at (0, 0)).
+	 * The session's active slots for the IMPORT grid and the manual-correction
+	 * surface alike: four fresh, empty ids by default, or however many sources
+	 * the pipeline placed (see `seedManualFromPipeline`), or one more than that
+	 * after "+ Add capture". `tileNeighbors` is the placeholder grid adjacency
+	 * Snap searches against; the first slot in `activeSlots` is always the
+	 * anchor (immovable, at (0, 0)).
 	 */
 	const INITIAL_SLOTS: readonly TileSlot[] = defaultSlotOrder(4);
 	let activeSlots = $state<TileSlot[]>([...INITIAL_SLOTS]);
@@ -125,21 +132,13 @@
 	let previewOpacity = $state(0.6);
 	let stageWorkspace = $state<HTMLDivElement | null>(null);
 
-	/**
-	 * One persistent viewport/stage shared by every non-import phase (P2:
-	 * single-viewport redesign) — the review filmstrip, the assembling
-	 * transition, the assembled mosaic, and export all render into the same
-	 * Konva scene; tiles are repositioned/resized/cropped in place, never
-	 * unmounted and rebuilt as a different component. Import stays plain HTML
-	 * (see the template) since it is fundamentally a file-picker grid, not a
-	 * scene with real geometry to preserve continuity for.
-	 */
+	/** One persistent viewport/stage for the manual-correction surface only (the result screen shows the rendered composite as a plain image, not a live scene). */
 	let stageVp = new ViewportController();
 	let stage = $state<Konva.Stage | null>(null);
 	let layer = $state<Konva.Layer | null>(null);
-	/** Live tile groups so a drag preview moves the image and its highlight together, and so a phase transition can tween the existing node instead of rebuilding it. */
+	/** Live tile groups so a drag preview moves the image and its highlight together, and so a tab switch can tween the existing node instead of rebuilding it. */
 	let tileNodes = new Map<TileSlot, Konva.Group>();
-	/** Live review-phase crop guide nodes, per tile, so a drag moves them without a full rebuild. */
+	/** Live crop-guide nodes, per tile, for the manual surface's Crop tab. */
 	let cropGuideTop = new Map<TileSlot, Konva.Rect>();
 	let cropGuideBottom = new Map<TileSlot, Konva.Rect>();
 	/** True only between a crop-guide dragstart and dragend (Konva-native drag). */
@@ -162,57 +161,89 @@
 	let exportError = $state<string | null>(null);
 	let rendering = $state(false);
 
-	/** P1-002 1b: Snap is now async (backed by `cvMatch`'s matcher); busy while a call is in flight. */
+	/** Snap is async (backed by `cvMatch`'s matcher); busy while a call is in flight. */
 	let snapBusy = $state(false);
 
-	/** P1-001 smart-import state: transient, never durable. */
-	let smartImportBusy = $state(false);
-	let smartImportError = $state<string | null>(null);
-	let smartImportSummary = $state<Partial<Record<TileSlot, string>> | null>(null);
-	let cropProposal = $state<CropInsets | null>(null);
+	/** Import/pipeline state: transient, never durable. */
+	let pipelineError = $state<string | null>(null);
 	/**
 	 * Adds a small safety margin to the auto-proposed crop so a borderline
 	 * chrome pixel (or per-capture-unique status-bar content, e.g. the device
 	 * clock) never survives into the shared crop — on by default, since a
 	 * slightly deeper crop is far cheaper than a stitch corrupted by leftover
-	 * chrome. Decided before import runs, since it affects the analysis itself,
-	 * not just how the proposal is displayed afterward.
+	 * chrome. Decided before import runs, since it affects the pipeline itself,
+	 * not just how a proposal is displayed afterward.
 	 */
 	let addCropMargin = $state(true);
 
-	/** P1-002 hardening state: transient diagnostic/confirmation state only. */
-	let smartImportDiagnostic = $state<LayoutDiagnostic | null>(null);
-	let cropProposalConfidence = $state<'high' | 'low' | 'absent' | null>(null);
-	/** The automatic result's committed placements; a re-run over manual edits must confirm. */
-	let lastAutoPlacements: Partial<Record<TileSlot, TilePlacement>> | null = null;
-	let pendingReplaceConfirm = $state(false);
-	let pendingSmartImportFiles: File[] | null = null;
-	/** Replace-dialog focus management follows the established P0 pattern. */
-	let replaceCancelButton = $state<HTMLButtonElement | null>(null);
-	let replaceFocusRestore: HTMLElement | null = null;
+	// ---------------------------------------------------------------------
+	// Phase state machine (CHSPT-56 auto-first redesign)
+	//
+	// Three phases, not five: `import` (gather one or more captures — the
+	// SAME entry point for N=1 AutoCrop-only and N>1 AutoCrop+AutoStitch),
+	// `processing` (the pipeline's own async call is actually in flight — no
+	// artificial timer), `result` (the assembled composite, shown
+	// immediately whether `confidence` is `'auto'` or `'review'`). There is
+	// no mandatory approval gate between them: a successful pipeline call
+	// always lands on `result` on its own.
+	// ---------------------------------------------------------------------
 
-	const CROP_CONFIDENCE_LABELS: Record<'high' | 'low' | 'absent', string> = {
-		high: 'high — every screenshot agrees on the shared edge bands',
-		low: 'low — edge evidence is partial or conflicts; inspect before applying',
-		absent: 'none — no shared outer band could be confirmed'
-	};
+	type Phase = 'import' | 'processing' | 'result';
+	let phase = $state<Phase>('import');
 
-	/** The guided demo gives visitors time to notice the proposal before continuing. */
-	const DEMO_CROP_AUTO_APPLY_DELAY_MS = 20_000;
+	/** The last successful pipeline result — the draft/sources the manual-correction surface is seeded from and the badge flash's coordinate space refers back to. */
+	let pipelineSuccess = $state<StitchPipelineSuccess | null>(null);
+	let resultBlob = $state<Blob | null>(null);
+	let resultImageUrl = $state<string | null>(null);
+	let resultProvenance = $state<CompositeProvenance | null>(null);
+	let resultConfidence = $state<StitchConfidence | null>(null);
+	let resultWarnings = $state<readonly string[]>([]);
+	/** `resultProvenance.sources[].sourceId` -> the original File it came from, for the handoff's `sourceCaptures` bytes and for hashing on a manual re-render. Kept in sync with `resultProvenance` (auto result or a manually applied one). */
+	let resultSourceFiles = new Map<string, File>();
 
-	$effect(() => {
-		const proposal = cropProposal;
-		const isDemoCropStep = demoTour.active && demoTour.step.id === 'stitch';
-		if (!proposal || !isDemoCropStep || phase !== 'review') return;
+	/**
+	 * Per-property manual-edit tracking for `domain/provenance.ts`'s
+	 * `SourceCaptureOrigin` (CHSPT-49/55): the crop is one value shared by
+	 * every source, so touching it (numeric fields or the drag guides) marks
+	 * `origin.crop` `'manual'` for every source at once; a tile's placement
+	 * (drag/nudge/numeric/Snap) is independent per slot. Both reset to
+	 * untouched whenever a fresh pipeline result is seeded — see
+	 * `seedManualFromPipeline`.
+	 */
+	let manualCropTouched = $state(false);
+	let manualTransformTouchedSlots = $state<Set<TileSlot>>(new Set());
 
-		const timer = setTimeout(() => {
-			if (cropProposal !== proposal || !demoTour.active || demoTour.step.id !== 'stitch') return;
-			applyCropProposal();
-			statusMessage = 'Suggested crop applied automatically after 20 seconds.';
-		}, DEMO_CROP_AUTO_APPLY_DELAY_MS);
+	/**
+	 * `Adjust manually` — the one control that exposes the full existing
+	 * correction surface (crop guides/numeric crop, tile drag/nudge, tile
+	 * selection, opacity, Snap, crop-margin/advanced controls). Always
+	 * available once a result exists; auto-opened (never silently skipped)
+	 * when `confidence === 'review'` so a weak result visibly flags/opens
+	 * correction instead of just sitting there looking fine.
+	 */
+	let manualOpen = $state(false);
+	let manualView = $state<'crop' | 'placement'>('placement');
 
-		return () => clearTimeout(timer);
-	});
+	interface BadgeAnchor {
+		readonly holeNumber: number;
+		readonly xPx: number;
+		readonly yPx: number;
+		readonly widthPx: number;
+		readonly heightPx: number;
+	}
+	/** Best-effort hole-number badge anchors for the result screen's flash, in COMPOSITE pixel space — the same space `resultProvenance.outputWidthPx/heightPx` describes. Never gates `Continue to Annotate Course`. */
+	let badgeAnchors = $state<BadgeAnchor[]>([]);
+	let badgeFlashKey = $state(0);
+	/** Guards a slower detection pass from overwriting a newer composite's (empty, until its own pass lands) badge set. */
+	let badgeDetectionGeneration = 0;
+
+	/** Lazy main-thread OpenCV/Snap warm-up: fired once, only when the user actually opens the manual-correction surface (or, transitively, clicks Snap) — never merely because the page mounted or an auto result appeared. */
+	let cvWarmed = false;
+	function ensureCvWarm(): void {
+		if (cvWarmed) return;
+		cvWarmed = true;
+		void loadCv().then((cv) => warmMatchTemplate(cv));
+	}
 
 	const required = $derived(sessionDimensions(tiles, activeSlots));
 	const croppedValidation = $derived(
@@ -222,7 +253,29 @@
 		readiness(tiles, crop, placements, required, activeSlots, tileNeighbors)
 	);
 	const invalidCropFields = $derived(computeInvalidCropFields());
-	const canExport = $derived(report.ready && !rendering && invalidCropFields.length === 0);
+	/** Gates "Apply adjustments" in the manual surface — the arrangement must be internally valid before it can be re-rendered. */
+	const manualReady = $derived(report.ready && !rendering && invalidCropFields.length === 0);
+	/**
+	 * Whether the user has actually changed anything this manual session
+	 * (CHSPT-57 review finding #3): without this, "Apply adjustments" was
+	 * enabled the instant the panel opened on an already-valid seeded
+	 * arrangement, so a stray click could silently re-render — and, for any
+	 * rotated/scaled source, FLATTEN — a result the user never touched.
+	 */
+	const manualDirty = $derived(manualCropTouched || manualTransformTouchedSlots.size > 0);
+	/**
+	 * `buildManualDraftComposite` (`pipelineUiHelpers.ts`) can only ever
+	 * produce translation-only transforms — the legacy drag/nudge/numeric
+	 * surface has no rotate handle. Applying manual adjustments to a result
+	 * that AutoStitch placed with genuine rotation/scale (see
+	 * `domain/provenance.ts`'s translation -> similarity -> affine escalation)
+	 * therefore straightens every such capture back to a plain offset. That is
+	 * an accepted limitation of this surface, not a bug to silently hide — see
+	 * the warning shown alongside "Apply adjustments" below.
+	 */
+	const manualHasRotatedSource = $derived(
+		(pipelineSuccess?.draft.sources ?? []).some((source) => source.transform.model !== 'translation')
+	);
 	/**
 	 * Snap assist availability: a selected, loaded movable tile with a valid
 	 * shared crop and at least one loaded expected neighbor to match against,
@@ -236,35 +289,9 @@
 		return expectedNeighbors(slot, tileNeighbors).some((neighbor) => Boolean(tiles[neighbor]));
 	});
 
-	// ---------------------------------------------------------------------
-	// Phase state machine (P2 single-viewport redesign)
-	// ---------------------------------------------------------------------
-
-	type Phase = 'import' | 'review' | 'assembling' | 'assembled' | 'export';
-	let phase = $state<Phase>('import');
-	let finetuneOpen = $state(false);
-	let assemblingTimer: ReturnType<typeof setTimeout> | null = null;
-
-	const PROGRESS_LABELS = ['Import', 'Review', 'Assemble', 'Export'] as const;
-	const PROGRESS_INDEX: Record<Phase, number> = {
-		import: 0,
-		review: 1,
-		assembling: 2,
-		assembled: 2,
-		export: 3
-	};
-
-	function prefersReducedMotion(): boolean {
-		return (
-			typeof window !== 'undefined' &&
-			typeof window.matchMedia === 'function' &&
-			window.matchMedia('(prefers-reduced-motion: reduce)').matches
-		);
-	}
-
-	/** All currently-active slots hold a decoded, dimension-matching tile — the gate for leaving Import. */
+	/** All currently-active slots hold a decoded, dimension-matching tile — the gate for the per-slot grid's own auto-trigger. */
 	const importComplete = $derived(
-		activeSlots.length >= 2 && activeSlots.every((slot) => tiles[slot] !== undefined)
+		activeSlots.length > 0 && activeSlots.every((slot) => tiles[slot] !== undefined)
 	);
 
 	function addSlot(): void {
@@ -276,72 +303,11 @@
 
 	function setPhase(next: Phase): void {
 		phase = next;
-		if (next === 'export') {
-			finetuneOpen = false;
-		}
-		if (next === 'assembled') {
-			statusMessage = `Stitched from ${activeSlots.length} capture${activeSlots.length === 1 ? '' : 's'}.`;
-		}
-		if (next === 'assembling') {
-			finetuneOpen = false;
-			if (assemblingTimer) clearTimeout(assemblingTimer);
-			const durationMs = prefersReducedMotion()
-				? 60
-				: Math.min(2400, 90 * activeSlots.length + 900);
-			assemblingTimer = setTimeout(() => {
-				assemblingTimer = null;
-				if (phase === 'assembling') setPhase('assembled');
-			}, durationMs);
-		}
-	}
-
-	function advance(): void {
-		if (phase === 'import') {
-			if (!importComplete) return;
-			setPhase('review');
-		} else if (phase === 'review') {
-			if (!croppedValidation?.ok) return;
-			setPhase('assembling');
-		} else if (phase === 'assembled') {
-			setPhase('export');
-		}
-	}
-
-	function goBack(): void {
-		if (assemblingTimer) {
-			clearTimeout(assemblingTimer);
-			assemblingTimer = null;
-		}
-		if (phase === 'review') setPhase('import');
-		else if (phase === 'assembling' || phase === 'assembled') setPhase('review');
-		else if (phase === 'export') setPhase('assembled');
-	}
-
-	function primaryButtonLabel(): string {
-		switch (phase) {
-			case 'import':
-				return 'Review crop →';
-			case 'review':
-				return 'Approve crop & assemble →';
-			case 'assembling':
-				return 'Assembling…';
-			case 'assembled':
-				return 'Continue to export →';
-			case 'export':
-				return '';
-		}
-	}
-
-	function primaryButtonDisabled(): boolean {
-		if (phase === 'import') return !importComplete;
-		if (phase === 'review') return !croppedValidation?.ok;
-		if (phase === 'assembling') return true;
-		return false;
 	}
 
 	// ---------------------------------------------------------------------
 
-	/** The union of all loaded cropped tile rectangles; the assembled/export fit target. */
+	/** The union of all loaded cropped tile rectangles; the manual placement tab's fit target. */
 	function assembledFitTarget(): ViewportFitTarget | null {
 		const validation = croppedValidation;
 		if (!validation?.ok) return null;
@@ -353,7 +319,7 @@
 		return { xPx: union.xPx, yPx: union.yPx, widthPx: union.widthPx, heightPx: union.heightPx };
 	}
 
-	/** Filmstrip layout for the review phase, in original (uncropped) tile pixels: one row, left to right. */
+	/** Filmstrip layout for the manual surface's Crop tab, in original (uncropped) tile pixels: one row, left to right. */
 	function filmstripPlacements(): Partial<Record<TileSlot, TilePlacement>> {
 		if (!required) return {};
 		const gap = Math.max(8, Math.round(required.widthPx * 0.08));
@@ -486,165 +452,292 @@
 		}
 		tiles = {
 			...tiles,
-			[slot]: { fileName: file.name, mimeType: file.type, widthPx, heightPx, image }
+			[slot]: { fileName: file.name, mimeType: file.type, widthPx, heightPx, image, file }
 		};
 		const cleared = { ...tileErrors };
 		delete cleared[slot];
 		tileErrors = cleared;
 		statusMessage = `${slotLabel(slot)} loaded (${widthPx} x ${heightPx}).`;
+		// Filling the last active slot is itself the "done" signal for the grid
+		// path, exactly like the bulk picker below — no extra click needed.
+		if (activeSlots.every((candidate) => tiles[candidate] !== undefined)) {
+			const files = activeSlots.map((candidate) => tiles[candidate]!.file);
+			void runImport(files);
+		}
 	}
 
 	function handleSmartImportFiles(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		const files = Array.from(input.files ?? []);
 		input.value = '';
-		requestSmartImport(files);
+		if (files.length === 0) return;
+		void runImport(files);
 	}
 
 	/**
-	 * Requests a bulk import (P1-001), gated by P1-002's re-run protection: when
-	 * the current placements were manually refined away from the last automatic
-	 * result, the user must explicitly confirm replacing the arrangement before
-	 * anything is recomputed or overwritten.
+	 * The ONE unified import entry point (CHSPT-55 item 1): calls
+	 * `runStitchPipeline` regardless of count — N=1 gets AutoCrop only, N>1
+	 * gets AutoCrop+AutoStitch, same call, same phases from here on. Replaces
+	 * the old `files.length < 2` rejection and the mandatory review/assemble
+	 * ceremony: a successful call renders immediately and lands on `result`
+	 * with no forced approval click. `processing` is real async work (the
+	 * pipeline call itself), never a `setTimeout` standing in for it.
 	 */
-	function requestSmartImport(files: File[]): void {
-		if (files.length < 2) {
-			statusMessage = `Import screenshots requires at least two files; received ${files.length}. The current session is unchanged.`;
-			return;
-		}
-		if (requiresReplaceDecision(placements, lastAutoPlacements)) {
-			pendingSmartImportFiles = files;
-			replaceFocusRestore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-			pendingReplaceConfirm = true;
-			return;
-		}
-		void runSmartImport(files);
-	}
-
-	function settleReplaceConfirm(accept: boolean): void {
-		const files = pendingSmartImportFiles;
-		pendingSmartImportFiles = null;
-		pendingReplaceConfirm = false;
-		const target = replaceFocusRestore?.isConnected ? replaceFocusRestore : null;
-		replaceFocusRestore = null;
-		if (target) void tick().then(() => target.focus());
-		if (!accept || !files) return;
-		void runSmartImport(files);
-	}
-
-	$effect(() => {
-		if (!pendingReplaceConfirm) return;
-		void tick().then(() => replaceCancelButton?.focus());
-	});
-
-	/**
-	 * One local-only bulk import (P1-001, hardened in P1-002; generalized to
-	 * any N >= 2 screenshots). Decodes and analyzes N screenshots in any order,
-	 * then commits the inferred arrangement, tiles, placements, confidence, and
-	 * the summary as one coherent session replacement so a failure never
-	 * damages the current valid session. A newer selection/reset/unmount
-	 * invalidates the batch; a stale result publishes nothing. The computed
-	 * placements always commit, even when the diagnostic flags a `review`
-	 * warning: the automatic arrangement is the best evidence available and is
-	 * never discarded in favor of a neutral manual layout, so a warning is
-	 * guidance for review, not a reason to withhold correct output.
-	 */
-	async function runSmartImport(files: File[]): Promise<void> {
+	async function runImport(files: File[]): Promise<void> {
+		if (files.length === 0) return;
 		const generation = decodeCoordinator.begin(SMART_IMPORT_BATCH);
-		if (files.length < 2) {
-			statusMessage = `Import screenshots requires at least two files; received ${files.length}. The current session is unchanged.`;
-			return;
-		}
-		smartImportError = null;
-		smartImportBusy = true;
-		statusMessage = `Analyzing ${files.length} screenshots…`;
+		pipelineError = null;
+		exportError = null;
+		setPhase('processing');
 		try {
-			const result = await smartImportViaWorker(files, {
-				isCurrent: () => decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation),
-				applyCropMargin: addCropMargin
-			});
-			if (!result.ok) {
-				if ('stale' in result) return;
-				if (result.kind === 'wrong-count') {
-					statusMessage = `Import screenshots supports two to ${MAX_AUTO_ARRANGE_TILES} files; received ${result.count}. The current session is unchanged.`;
-					return;
-				}
-				smartImportError = result.message;
-				statusMessage = `Smart import rejected "${result.fileName}"; the current session is unchanged.`;
+			const outcome = await runStitchPipeline(files, { applyCropMargin: addCropMargin });
+			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
+			if (!outcome.ok) {
+				pipelineError = outcome.failure.message;
+				setPhase('import');
 				return;
 			}
-			const slots = result.order;
-			const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
-			const nextSummary: Partial<Record<TileSlot, string>> = {};
-			for (const slot of slots) {
-				const fileIndex = result.assignment[slot];
-				if (fileIndex === undefined) continue;
-				const tile = result.tiles[fileIndex];
-				nextTiles[slot] = {
-					fileName: tile.fileName,
-					mimeType: tile.mimeType,
-					widthPx: tile.widthPx,
-					heightPx: tile.heightPx,
-					image: tile.image
-				};
-				nextSummary[slot] = tile.fileName;
-			}
-			// The computed placements always commit — the automatic arrangement is
-			// the best evidence available and is never discarded in favor of a
-			// neutral manual layout, even when the diagnostic flags a warning.
-			const nextPlacements = result.placements;
-			// One coherent session replacement, not staggered slot mutations.
-			activeSlots = [...slots];
-			tileNeighbors = result.neighbors;
-			for (const slot of slots) everActiveSlots.add(slot);
-			tiles = nextTiles;
-			tileErrors = {};
-			placements = nextPlacements;
-			placementsInitialized = true;
-			lastAutoPlacements = snapshotPlacements(nextPlacements);
-			selectedSlot = null;
-			positionDraft = { xPx: '', yPx: '' };
-			exportError = null;
-			smartImportSummary = nextSummary;
-			smartImportDiagnostic = result.diagnostic;
-			cropProposal = result.cropProposal;
-			cropProposalConfidence = result.crop.confidence;
-			const order = slots.map((slot) => `${slotLabel(slot)}: ${nextSummary[slot]}`).join(', ');
-			const label = categoryLabel(result.diagnostic.category);
-			const warnings = result.diagnostic.warnings;
-			statusMessage = `Smart import complete. Inferred order — ${order}. Confidence: ${label}.${
-				warnings.length > 0 ? ` ${warnings.join(' ')}` : ''
-			} Manual correction remains available.`;
-			// A successful import is itself the "done" signal — advance straight to
-			// Review instead of making the user click through a step that only
-			// ever leads one place. Guarded to the import phase so a demo-capture
-			// handoff arriving late can never yank a user back out of Review/Export.
-			if (phase === 'import') setPhase('review');
-		} finally {
-			smartImportBusy = false;
+			await commitPipelineSuccess(outcome.result);
+			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
+		} catch (error) {
+			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
+			pipelineError =
+				error instanceof Error ? error.message : 'Could not process the selected screenshots.';
+			setPhase('import');
 		}
 	}
 
-	/** Copies a placement map so later manual edits can never alias the snapshot. */
-	function snapshotPlacements(
-		source: Partial<Record<TileSlot, TilePlacement>>
-	): Partial<Record<TileSlot, TilePlacement>> {
-		return Object.fromEntries(
-			(Object.keys(source) as TileSlot[]).map((slot) => [slot, { ...source[slot] }])
-		) as Partial<Record<TileSlot, TilePlacement>>;
+	/**
+	 * Renders a successful pipeline result, publishes it as the assembled
+	 * result, seeds the manual-correction surface from the same draft/images
+	 * (so `Adjust manually` needs no further decode step), and — only when
+	 * `confidence === 'review'` — opens that surface automatically so a weak
+	 * result visibly flags itself rather than looking indistinguishable from
+	 * a confident one. Badge detection is fired off afterward, fully
+	 * fire-and-forget.
+	 */
+	async function commitPipelineSuccess(success: StitchPipelineSuccess): Promise<void> {
+		const images = new Map<string, HTMLImageElement>();
+		for (const source of success.sources) {
+			const decoded = await decodeImageFile(source.file);
+			images.set(source.sourceId, decoded.image);
+		}
+		const { blob, provenance } = await renderPipelineComposite(success.draft, images);
+		pipelineSuccess = success;
+		if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
+		resultBlob = blob;
+		resultImageUrl = URL.createObjectURL(blob);
+		resultProvenance = provenance;
+		resultConfidence = success.confidence;
+		resultWarnings = success.warnings;
+		resultSourceFiles = new Map(success.sources.map((source) => [source.sourceId, source.file]));
+		seedManualFromPipeline(success, images);
+		manualOpen = success.confidence === 'review';
+		badgeAnchors = [];
+		setPhase('result');
+		const countText = `${success.sources.length} capture${success.sources.length === 1 ? '' : 's'}`;
+		statusMessage =
+			success.confidence === 'auto'
+				? `Stitched from ${countText}.`
+				: `Stitched from ${countText}. Review recommended — see Adjust manually.`;
+		void runBadgeDetection(blob, provenance.outputWidthPx, provenance.outputHeightPx);
 	}
 
-	function applyCropProposal(): void {
-		if (!cropProposal) return;
-		crop = { ...cropProposal };
+	/**
+	 * Seeds the legacy shared-crop/per-tile-placement editing model — the
+	 * SAME model `Adjust manually`'s crop guides, drag/nudge, and Snap
+	 * already operate on — from a pipeline result's sources, reusing the
+	 * exact decoded images `commitPipelineSuccess` already produced (no
+	 * second decode). `crop` is read back from the FIRST source's own crop
+	 * rect: every source in a pipeline-produced draft shares an identical
+	 * crop rect by construction (see `stitchPipeline.ts`), so this is exact,
+	 * not an approximation.
+	 */
+	/**
+	 * Builds the legacy `TileNeighbors` adjacency from the pipeline's OWN
+	 * discovered overlap graph (`DraftComposite.overlaps`, a `SourceOverlapEdge[]`
+	 * keyed by `sourceId`) rather than `gridNeighbors`' assumed-rectangular-grid
+	 * placeholder. This matters because `assignN`/`poseGraph.ts` orders slots in
+	 * seed-then-tree-growth order, not spatial position — `gridNeighbors` applied
+	 * to those slot names produces adjacency that has nothing to do with which
+	 * tiles actually overlap, which silently fed Snap the wrong neighbor raster
+	 * to align against for any non-trivial (non-`gridNeighbors`-shaped) topology.
+	 */
+	function neighborsFromOverlaps(
+		overlaps: readonly { readonly a: string; readonly b: string }[],
+		slotBySourceId: ReadonlyMap<string, TileSlot>,
+		slots: readonly TileSlot[]
+	): TileNeighbors {
+		const neighbors: Record<TileSlot, TileSlot[]> = {};
+		for (const slot of slots) neighbors[slot] = [];
+		for (const edge of overlaps) {
+			const slotA = slotBySourceId.get(edge.a);
+			const slotB = slotBySourceId.get(edge.b);
+			if (!slotA || !slotB) continue;
+			if (!neighbors[slotA].includes(slotB)) neighbors[slotA].push(slotB);
+			if (!neighbors[slotB].includes(slotA)) neighbors[slotB].push(slotA);
+		}
+		return neighbors;
+	}
+
+	function seedManualFromPipeline(
+		success: StitchPipelineSuccess,
+		images: ReadonlyMap<string, HTMLImageElement>
+	): void {
+		const slots = success.sources.map((_, index) => `tile-${index}`);
+		const slotBySourceId = new Map<string, TileSlot>(
+			success.sources.map((source, index) => [source.sourceId, slots[index]])
+		);
+		const nextTiles: Partial<Record<TileSlot, StitchTile>> = {};
+		const nextPlacements: Partial<Record<TileSlot, TilePlacement>> = {};
+		success.sources.forEach((source: DraftSourceCapture, index) => {
+			const slot = slots[index];
+			const image = images.get(source.sourceId);
+			if (!image) return;
+			nextTiles[slot] = {
+				fileName: source.fileName,
+				mimeType: source.mimeType,
+				widthPx: source.widthPx,
+				heightPx: source.heightPx,
+				image,
+				file: source.file
+			};
+			nextPlacements[slot] = {
+				xPx: Math.round(source.transform.coefficients[4]),
+				yPx: Math.round(source.transform.coefficients[5]),
+				visible: true
+			};
+		});
+		activeSlots = slots;
+		tileNeighbors =
+			slots.length > 1
+				? neighborsFromOverlaps(success.draft.overlaps, slotBySourceId, slots)
+				: gridNeighbors(slots);
+		everActiveSlots = new Set(slots);
+		tiles = nextTiles;
+		tileErrors = {};
+		placements = nextPlacements;
+		placementsInitialized = true;
+		selectedSlot = null;
+		const first = success.sources[0];
+		crop = first
+			? {
+					topPx: first.crop.yPx,
+					leftPx: first.crop.xPx,
+					rightPx: Math.max(0, first.widthPx - first.crop.xPx - first.crop.widthPx),
+					bottomPx: Math.max(0, first.heightPx - first.crop.yPx - first.crop.heightPx)
+				}
+			: { ...ZERO_CROP };
 		syncCropDraft(true);
-		cropProposal = null;
-		statusMessage = 'Suggested crop applied. Edit or reset it with the existing crop controls.';
+		syncPositionDraft(true);
+		manualView = 'placement';
+		// A fresh pipeline result is entirely automatic until the user actually
+		// edits something in this new session.
+		manualCropTouched = false;
+		manualTransformTouchedSlots = new Set();
 	}
 
-	function rejectCropProposal(): void {
-		cropProposal = null;
-		statusMessage = 'Suggested crop declined; the full images are kept.';
+	/** Hashes every active slot's original capture bytes, for the manual `DraftComposite`'s required `sha256` field. */
+	async function computeHashesBySlot(): Promise<Map<TileSlot, Sha256Hex>> {
+		const entries = await Promise.all(
+			activeSlots
+				.filter((slot) => tiles[slot])
+				.map(async (slot) => {
+					const bytes = await readFileBytes(tiles[slot]!.file);
+					const hash = await sha256Hex(bytes);
+					return [slot, hash] as const;
+				})
+		);
+		return new Map(entries);
+	}
+
+	/**
+	 * Re-renders the manual-correction surface's current shared-crop/
+	 * placement state through the SAME `renderPipelineComposite` the
+	 * automatic result used — auto and manual share one rendering path, per
+	 * `pipelineResult.ts`'s locked contract. Replaces the visible result and
+	 * re-fires (fire-and-forget) badge detection against the new composite.
+	 * A user-applied manual arrangement is treated as resolved: `confidence`
+	 * resets to `'auto'` and every automatic warning is cleared, since a
+	 * human just confirmed the placement directly.
+	 */
+	async function applyManualAdjustments(): Promise<void> {
+		if (!manualReady || !manualDirty) return;
+		exportError = null;
+		rendering = true;
+		try {
+			const hashesBySlot = await computeHashesBySlot();
+			const draft = buildManualDraftComposite({
+				slots: activeSlots,
+				tiles,
+				placements,
+				crop,
+				hashesBySlot,
+				cropTouched: manualCropTouched,
+				transformTouchedSlots: manualTransformTouchedSlots
+			});
+			if (!draft) {
+				throw new Error('Could not build a composite from the current arrangement.');
+			}
+			const sourcesMap = new Map<string, HTMLImageElement>();
+			for (const slot of activeSlots) {
+				const tile = tiles[slot];
+				if (tile) sourcesMap.set(slot, tile.image);
+			}
+			const { blob, provenance } = await renderPipelineComposite(draft, sourcesMap);
+			if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
+			resultBlob = blob;
+			resultImageUrl = URL.createObjectURL(blob);
+			resultProvenance = provenance;
+			resultConfidence = 'auto';
+			resultWarnings = [];
+			resultSourceFiles = new Map(
+				activeSlots.filter((slot) => tiles[slot]).map((slot) => [slot, tiles[slot]!.file])
+			);
+			manualOpen = false;
+			badgeAnchors = [];
+			statusMessage = 'Manual adjustments applied to the stitched result.';
+			void runBadgeDetection(blob, provenance.outputWidthPx, provenance.outputHeightPx);
+		} catch (error) {
+			exportError =
+				error instanceof Error ? error.message : 'Could not render the adjusted composite.';
+		} finally {
+			rendering = false;
+		}
+	}
+
+	/**
+	 * Best-effort hole-number-badge detection against the assembled
+	 * composite, reusing the existing production worker request
+	 * (`basketDetection.worker.ts`'s `'detect-course'` kind, via
+	 * `detectCourseCandidates`) — never the CV internals directly. Explicitly
+	 * NOT a correctness gate: a missing/empty/failed detection never blocks
+	 * or delays anything on the result screen, it just means no flash. Fired
+	 * with the composite's own `widthPx`/`heightPx`, so every returned
+	 * anchor already lands in composite pixel space — the same space the
+	 * assembled result image is displayed in.
+	 */
+	async function runBadgeDetection(blob: Blob, widthPx: number, heightPx: number): Promise<void> {
+		const generation = (badgeDetectionGeneration += 1);
+		try {
+			const bytes = new Uint8Array(await blob.arrayBuffer());
+			const course = await detectCourseCandidates(bytes, blob.type || 'image/png', widthPx, heightPx);
+			if (generation !== badgeDetectionGeneration) return; // superseded by a newer composite
+			const labeled = course.numberDetection.candidates.filter(
+				(candidate): candidate is typeof candidate & { label: number } => candidate.label !== undefined
+			);
+			badgeAnchors = labeled.map((candidate) => ({
+				holeNumber: candidate.label,
+				xPx: candidate.xPx,
+				yPx: candidate.yPx,
+				widthPx: candidate.widthPx,
+				heightPx: candidate.heightPx
+			}));
+			badgeFlashKey += 1;
+		} catch {
+			// Fire-and-forget: swallow errors, never surface them, never block
+			// Continue to Annotate Course.
+		}
 	}
 
 	function handleRemove(slot: TileSlot): void {
@@ -661,12 +754,12 @@
 			selectedSlot = null;
 			syncPositionDraft(true);
 		}
-		if (!activeSlots.some((candidate) => tiles[candidate])) resetSession();
+		if (!activeSlots.some((candidate) => tiles[candidate])) resetToImport();
 		statusMessage = `${slotLabel(slot)} removed.`;
 	}
 
-	function resetSession(): void {
-		// No in-flight decode or smart-import batch may publish into the cleared
+	function resetToImport(): void {
+		// No in-flight decode or import batch may publish into the cleared
 		// session; every slot ever active this session is invalidated, not just
 		// the current active set, in case a prior (possibly larger) session left
 		// a stale generation behind.
@@ -675,6 +768,8 @@
 		activeSlots = [...defaultSlotOrder(4)];
 		tileNeighbors = gridNeighbors(activeSlots);
 		everActiveSlots = new Set(activeSlots);
+		tiles = {};
+		tileErrors = {};
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
 		placements = initialPlacements(activeSlots, 1, 1);
@@ -683,23 +778,26 @@
 		positionDraft = { xPx: '', yPx: '' };
 		previewOpacity = 0.6;
 		exportError = null;
-		smartImportBusy = false;
-		smartImportError = null;
-		smartImportSummary = null;
-		cropProposal = null;
-		smartImportDiagnostic = null;
-		cropProposalConfidence = null;
-		lastAutoPlacements = null;
-		pendingReplaceConfirm = false;
-		pendingSmartImportFiles = null;
-		replaceFocusRestore = null;
-		finetuneOpen = false;
-		if (assemblingTimer) {
-			clearTimeout(assemblingTimer);
-			assemblingTimer = null;
-		}
+		pipelineError = null;
+		pipelineSuccess = null;
+		if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
+		resultImageUrl = null;
+		resultBlob = null;
+		resultProvenance = null;
+		resultConfidence = null;
+		resultWarnings = [];
+		resultSourceFiles = new Map();
+		manualCropTouched = false;
+		manualTransformTouchedSlots = new Set();
+		manualOpen = false;
+		manualView = 'placement';
+		badgeAnchors = [];
+		// A reset is a session boundary exactly like the decode-coordinator
+		// invalidation above: any badge detection still in flight for the
+		// cleared session must never publish into whatever comes next.
+		badgeDetectionGeneration += 1;
 		phase = 'import';
-		statusMessage = 'All screenshots cleared. The session and its crop and arrangement were reset.';
+		statusMessage = 'All screenshots cleared. Ready for a new import.';
 	}
 
 	function handleCropInput(field: CropInsetField, event: Event): void {
@@ -715,35 +813,25 @@
 		const value = parseInt(raw, 10);
 		crop = { ...crop, [field]: value };
 		syncCropDraft(true);
+		manualCropTouched = true;
 	}
 
 	function resetCrop(): void {
 		crop = { ...ZERO_CROP };
 		syncCropDraft(true);
+		manualCropTouched = true;
 		statusMessage = 'Shared crop reset.';
 	}
 
 	// ---------------------------------------------------------------------
 	// Crop-line close-up preview: a small per-tile magnified strip centered on
 	// the exact boundary pixel, with a marker line at the cut itself. At the
-	// review filmstrip's normal zoom a 1-2px chrome misread is invisible, and
+	// manual surface's normal zoom a 1-2px chrome misread is invisible, and
 	// getting that line wrong crops either real map content or leaves a sliver
 	// of chrome in the stitched output — this exists so a user can actually
 	// see the pixel the crop commits to, on every tile, before trusting it.
 	// ---------------------------------------------------------------------
 
-	/**
-	 * Original-pixel size of the magnified region drawn into each strip: a
-	 * small, fixed number of individual pixel ROWS above and below the cut,
-	 * each rendered as its own large, gridlined block — not a continuously
-	 * scaled image, where a multi-pixel-wide marker line can itself obscure
-	 * the exact row it's supposed to indicate. Narrow on purpose (horizontal
-	 * content doesn't help judge a horizontal crop line) and tall on purpose
-	 * (more rows of real context), so all four captures' strips for both
-	 * edges fit on screen at once without scrolling. The one row that's kept
-	 * is outlined in green — the only unambiguous answer to "which row does
-	 * this commit to."
-	 */
 	const CROP_ZOOM_SOURCE_WIDTH_PX = 24;
 	const CROP_ZOOM_ROWS_ABOVE = 8;
 	const CROP_ZOOM_ROWS_BELOW = 8;
@@ -777,15 +865,8 @@
 		ctx.clearRect(0, 0, width, height);
 		ctx.drawImage(image, srcX, srcY, srcW, srcH, 0, 0, width, height);
 
-		// `boundaryY` is the row index where state changes going downward: for
-		// the top edge, everything before it is cropped and it is itself the
-		// first kept row; for the bottom edge, everything before it is kept and
-		// it is itself the first cropped row.
 		const boundaryCanvasY = (boundaryY - srcY) * CROP_ZOOM_SCALE;
 
-		// Shade the side that actually gets cut away — "kept vs. discarded" reads
-		// at a glance; a bare line does not, especially on real chrome that
-		// doesn't have a hard color edge (translucent status bars, gradients).
 		ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
 		if (edge === 'top') {
 			ctx.fillRect(0, 0, width, boundaryCanvasY);
@@ -793,8 +874,6 @@
 			ctx.fillRect(0, boundaryCanvasY, width, height - boundaryCanvasY);
 		}
 
-		// A gridline between every individual source pixel row, so rows can be
-		// counted rather than estimated.
 		ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
 		ctx.lineWidth = 1;
 		for (let row = 0; row <= srcH; row += 1) {
@@ -805,17 +884,11 @@
 			ctx.stroke();
 		}
 
-		// The one row that's kept, outlined in green — the single unambiguous
-		// answer to "which row does this commit to." Whichever side `edge`
-		// puts it on flips which canvas position gets the outline.
 		const keptRowY = edge === 'top' ? boundaryCanvasY : boundaryCanvasY - CROP_ZOOM_SCALE;
 		ctx.lineWidth = 2;
 		ctx.strokeStyle = '#4ade80';
 		ctx.strokeRect(1, keptRowY + 1, width - 2, CROP_ZOOM_SCALE - 2);
 
-		// The cut itself: a crisp 1px line exactly on the row boundary — never
-		// more than 1 canvas pixel, so it can never read as covering a row of
-		// real content.
 		ctx.strokeStyle = '#facc15';
 		ctx.lineWidth = 1;
 		ctx.beginPath();
@@ -843,6 +916,7 @@
 	function updateCropDrag(field: CropInsetField, value: number): void {
 		crop = { ...crop, [field]: value };
 		syncCropDraft(false);
+		manualCropTouched = true;
 	}
 
 	function endCropDrag(): void {
@@ -854,6 +928,10 @@
 		if (slot === anchorSlot || !tiles[slot] || !placement) return;
 		placements = { ...placements, [slot]: { ...placement, xPx, yPx } };
 		syncPositionDraft(true);
+		// The one mutation point drag/nudge/numeric input/Snap all share (see
+		// their own doc comments) — marking `slot`'s transform manual here
+		// covers every one of them without special-casing each caller.
+		manualTransformTouchedSlots = new Set(manualTransformTouchedSlots).add(slot);
 	}
 
 	function selectSlot(slot: TileSlot | null): void {
@@ -892,7 +970,7 @@
 	function handleStageKeyDown(event: KeyboardEvent): void {
 		if (event.target !== event.currentTarget) return;
 		if (isEditableTarget(event.target)) return;
-		if (phase !== 'assembled') return;
+		if (manualView !== 'placement') return;
 		const slot = selectedSlot;
 		const placement = slot ? placements[slot] : undefined;
 		if (!slot || slot === anchorSlot || !placement) return;
@@ -942,17 +1020,17 @@
 		if (!validation?.ok) return;
 		placements = initialPlacements(activeSlots, validation.widthPx, validation.heightPx);
 		syncPositionDraft(true);
+		// Every movable tile's placement just changed away from wherever it was.
+		manualTransformTouchedSlots = new Set([...manualTransformTouchedSlots, ...movableSlots]);
 		statusMessage = 'Arrangement reset to the 25% overlap layout.';
 	}
 
 	/**
 	 * Builds one Snap raster from a tile's current crop interior, at the
-	 * standard full-resolution matcher raster size (P1-002 1b): Snap's old
-	 * 512px-capped raster was the root of a real quantization/directional
-	 * tie-break bug (see `cvMatch.ts`'s module doc comment). The same shared
-	 * insets apply to every tile, so relative geometry is unchanged and Snap
-	 * matches what is actually visible, not hidden chrome; a ZERO_CROP session
-	 * uses the full frame automatically.
+	 * standard full-resolution matcher raster size. The same shared insets
+	 * apply to every tile, so relative geometry is unchanged and Snap matches
+	 * what is actually visible, not hidden chrome; a ZERO_CROP session uses
+	 * the full frame automatically.
 	 */
 	function buildSnapRaster(
 		tile: StitchTile,
@@ -967,21 +1045,16 @@
 	}
 
 	/**
-	 * Manual-correction "Snap" assist (P1-002 1b): once the selected tile is
-	 * roughly in place (drag/nudge, or the automatic reconciled placement), a
-	 * bounded local search locks it to the best nearby offset against its
-	 * loaded expected neighbor(s) — a tile with two neighbors is snapped to the
-	 * single position that best satisfies both at once. Backed by `cvMatch.ts`'s
-	 * proven `matchTemplate` matcher (`snapAlign`/`matchTranslationNear`), the
-	 * same one that does the automatic layout assignment — no separate scoring
-	 * function. Async because the matcher is; `snapBusy` disables the
-	 * control for the duration so a click gets feedback instead of an apparent
-	 * no-op. Commits through `updatePlacement` — the one mutation point
-	 * drag/nudge/numeric input already use — so position-draft sync and the
-	 * re-run guard's replace-confirmation diff pick it up with no
-	 * special-casing.
+	 * Manual-correction "Snap" assist: once the selected tile is roughly in
+	 * place (drag/nudge, or the automatic result's placement), a bounded
+	 * local search locks it to the best nearby offset against its loaded
+	 * expected neighbor(s). Backed by `cvMatch.ts`'s `matchTemplate` matcher.
+	 * Async because the matcher is; `snapBusy` disables the control for the
+	 * duration. Commits through `updatePlacement` — the one mutation point
+	 * drag/nudge/numeric input already use.
 	 */
 	async function snapSelectedTile(): Promise<void> {
+		ensureCvWarm();
 		const slot = selectedSlot;
 		if (!slot || !movableSlots.includes(slot)) return;
 		const tile = tiles[slot];
@@ -1024,13 +1097,11 @@
 	/**
 	 * Alignment gesture arbitration (shared viewport claim): a pointer that begins
 	 * inside the currently selected, visible, movable tile claims the gesture for
-	 * tile movement — even when other tiles cover the point. Everything else is
-	 * left to the viewport (background pan) or click selection. Only active in
-	 * the assembled phase — review's crop guides and import's plain HTML have
-	 * their own claim paths.
+	 * tile movement — even when other tiles cover the point. Only active in the
+	 * manual surface's Position tab.
 	 */
 	function claimAlignmentPointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
-		if (phase !== 'assembled') return false;
+		if (manualView !== 'placement') return false;
 		const slot = selectedSlot;
 		const validation = croppedValidation;
 		if (!slot || slot === anchorSlot || !validation?.ok) return false;
@@ -1144,13 +1215,13 @@
 	}
 
 	/**
-	 * Click selection in the assembled view: selects a movable tile only when
-	 * the point lies inside exactly one visible tile — the anchored tile
-	 * participates in ambiguity even though it can never be selected. Hidden
-	 * tiles are never selectable.
+	 * Click selection in the manual surface's Position tab: selects a movable
+	 * tile only when the point lies inside exactly one visible tile — the
+	 * anchored tile participates in ambiguity even though it can never be
+	 * selected. Hidden tiles are never selectable.
 	 */
 	function onStageClick(pointer: ScreenSpacePoint): void {
-		if (phase !== 'assembled') return;
+		if (manualView !== 'placement') return;
 		const validation = croppedValidation;
 		if (!validation?.ok) return;
 		const image = stageVp.toImage(pointer);
@@ -1162,9 +1233,9 @@
 		if (hits.length === 1 && hits[0] !== anchorSlot) selectSlot(hits[0]);
 	}
 
-	/** Crop-guide claim (review phase only): only Konva guide nodes claim; everything else pans. */
+	/** Crop-guide claim (manual surface's Crop tab only): only Konva guide nodes claim; everything else pans. */
 	function claimCropGuidePointer(pointer: ScreenSpacePoint): boolean {
-		if (phase !== 'review') return false;
+		if (manualView !== 'crop') return false;
 		const activeStage = stage;
 		if (!activeStage) return false;
 		const hit = activeStage.getIntersection(pointer);
@@ -1173,36 +1244,49 @@
 	}
 
 	function claimStagePointer(pointer: ScreenSpacePoint, event: PointerEvent): boolean {
-		if (phase === 'review') return claimCropGuidePointer(pointer);
-		if (phase === 'assembled') return claimAlignmentPointer(pointer, event);
+		if (manualView === 'crop') return claimCropGuidePointer(pointer);
+		if (manualView === 'placement') return claimAlignmentPointer(pointer, event);
 		return false;
 	}
 
 	function handleDownload(): void {
-		if (!canExport) return;
-		void runDownload();
+		if (!resultBlob) return;
+		const url = URL.createObjectURL(resultBlob);
+		const anchor = document.createElement('a');
+		anchor.href = url;
+		anchor.download = resultFileName();
+		document.body.appendChild(anchor);
+		anchor.click();
+		anchor.remove();
+		URL.revokeObjectURL(url);
+		statusMessage = 'Stitched PNG downloaded.';
 	}
 
-	async function runDownload(): Promise<void> {
-		exportError = null;
-		rendering = true;
-		let url: string | null = null;
-		try {
-			const blob = await renderStitchedPng(exportTiles(), crop);
-			url = URL.createObjectURL(blob);
-			const anchor = document.createElement('a');
-			anchor.href = url;
-			anchor.download = stitchedFileName(exportTiles());
-			document.body.appendChild(anchor);
-			anchor.click();
-			anchor.remove();
-			statusMessage = 'Stitched PNG downloaded.';
-		} catch (error) {
-			exportError = error instanceof Error ? error.message : 'Could not export the stitched PNG.';
-		} finally {
-			if (url) URL.revokeObjectURL(url);
-			rendering = false;
-		}
+	function resultFileName(): string {
+		return stitchedFileName(pipelineSuccess?.sources ?? []);
+	}
+
+	/**
+	 * The original, unmodified bytes of every capture `resultProvenance.sources`
+	 * references, keyed by `sourceId` — `PendingHandoff.sourceCaptures`'s exact
+	 * shape (CHSPT-49: original captures must never be discarded once a
+	 * composite replaces them). `resultSourceFiles` is kept in sync with
+	 * whichever draft actually produced `resultProvenance` (the automatic
+	 * result, or a manually applied one — see `commitPipelineSuccess` /
+	 * `applyManualAdjustments`).
+	 */
+	async function buildSourceCapturesMap(): Promise<ReadonlyMap<string, Uint8Array> | undefined> {
+		const provenance = resultProvenance;
+		if (!provenance) return undefined;
+		const entries = await Promise.all(
+			provenance.sources.map(async (source) => {
+				const file = resultSourceFiles.get(source.sourceId);
+				if (!file) return null;
+				return [source.sourceId, await readFileBytes(file)] as const;
+			})
+		);
+		const resolved = entries.filter((entry): entry is readonly [string, Uint8Array] => entry !== null);
+		return resolved.length > 0 ? new Map(resolved) : undefined;
 	}
 
 	function handoffDestination(role: ImageRole): string {
@@ -1214,7 +1298,7 @@
 	}
 
 	function handleUseAs(role: ImageRole): void {
-		if (!canExport) return;
+		if (!resultBlob) return;
 		const existing = getPendingHandoff();
 		if (existing) {
 			statusMessage = `A stitched image is already awaiting import in ${handoffDestinationName(existing.targetRole)}. Import or dismiss it before creating another handoff.`;
@@ -1223,61 +1307,43 @@
 		void runHandoff(role);
 	}
 
+	/**
+	 * CHSPT-55 item 8: reuses the existing `setPendingHandoff` mechanism
+	 * (`session.ts`, already used by "Use as UDisc source"/"Use as clean
+	 * target"), extended with this result's `CompositeProvenance` and the
+	 * original capture bytes it references (`sourceCaptures`) — both fields
+	 * Agent A's `PendingHandoff` extension (CHSPT-49/55) already carries.
+	 * `provenance`/`sourceCaptures` are only meaningful for a
+	 * `source-overview` handoff (Stitch Map never produces a
+	 * `target-basemap`), matching that field's own doc comment.
+	 */
 	async function runHandoff(role: ImageRole): Promise<void> {
+		if (!resultBlob) return;
 		exportError = null;
 		rendering = true;
 		try {
-			const blob = await renderStitchedPng(exportTiles(), crop);
-			setPendingHandoff({
-				blob,
-				fileName: stitchedFileName(exportTiles()),
+			const isSourceOverview = role === 'source-overview';
+			const handoff: PendingHandoff = {
+				blob: resultBlob,
+				fileName: resultFileName(),
 				targetRole: role,
-				destination: role === 'source-overview' ? 'annotate-course' : 'create-graphics'
-			});
+				destination: isSourceOverview ? 'annotate-course' : 'create-graphics',
+				provenance: isSourceOverview ? (resultProvenance ?? undefined) : undefined,
+				sourceCaptures: isSourceOverview ? await buildSourceCapturesMap() : undefined
+			};
+			setPendingHandoff(handoff);
 			statusMessage = `Stitched image handed to ${handoffDestinationName(role)}.`;
 			await goto(handoffDestination(role));
 		} catch (error) {
-			exportError = error instanceof Error ? error.message : 'Could not render the stitched image.';
+			exportError = error instanceof Error ? error.message : 'Could not hand off the stitched image.';
 		} finally {
 			rendering = false;
 		}
 	}
 
-	function exportTiles(): Array<{
-		slot: TileSlot;
-		fileName: string;
-		image: HTMLImageElement;
-		widthPx: number;
-		heightPx: number;
-		placement: TilePlacement;
-	}> {
-		const tilesForExport: Array<{
-			slot: TileSlot;
-			fileName: string;
-			image: HTMLImageElement;
-			widthPx: number;
-			heightPx: number;
-			placement: TilePlacement;
-		}> = [];
-		for (const slot of activeSlots) {
-			const tile = tiles[slot];
-			const placement = placements[slot];
-			if (!tile || !placement) continue;
-			tilesForExport.push({
-				slot,
-				fileName: tile.fileName,
-				image: tile.image,
-				widthPx: tile.widthPx,
-				heightPx: tile.heightPx,
-				placement
-			});
-		}
-		return tilesForExport;
-	}
-
 	function readinessText(): string {
 		if (report.ready) {
-			return 'All screenshots, the shared crop, and tile overlap are valid. Export is ready.';
+			return 'All screenshots, the shared crop, and tile overlap are valid.';
 		}
 		const reasons: string[] = [];
 		if (report.missing.length > 0) {
@@ -1291,14 +1357,13 @@
 			);
 		}
 		if (invalidCropFields.length > 0) reasons.push('The crop fields contain invalid values.');
-		return `Not ready to export: ${reasons.join('; ')}.`;
+		return `Not ready to apply: ${reasons.join('; ')}.`;
 	}
 
 	// ---------------------------------------------------------------------
-	// Unified Konva scene (P2 single-viewport redesign)
+	// Unified Konva scene for the manual-correction surface only
 	// ---------------------------------------------------------------------
 
-	/** Per-tile crop-guide geometry in stage px, for the review phase (top/bottom only — see the template note). */
 	function reviewGuideY(field: 'topPx' | 'bottomPx', tileTopScreenY: number, tileHeightScreenPx: number): number {
 		if (!required) return tileTopScreenY;
 		const scale = tileHeightScreenPx / required.heightPx;
@@ -1389,21 +1454,21 @@
 	}
 
 	/**
-	 * Renders the current phase's static layout into the persistent Konva
-	 * scene. Instant (no tween) — phase-to-phase motion is handled separately
-	 * by `animateAssembling` so a transition is never interrupted by an
-	 * unrelated re-render.
+	 * Renders the manual surface's current tab into the persistent Konva
+	 * scene. Instant (no tween) — tab-to-tab motion is handled separately by
+	 * `animateAssembling` so a transition is never interrupted by an
+	 * unrelated re-render. A no-op whenever the manual surface isn't open.
 	 */
 	function renderStage(): void {
 		const activeStage = stage;
 		const activeLayer = layer;
-		if (!activeStage || !activeLayer || phase === 'import') return;
+		if (!activeStage || !activeLayer || !manualOpen) return;
 		activeLayer.destroyChildren();
 		tileNodes.clear();
 		cropGuideTop.clear();
 		cropGuideBottom.clear();
 
-		if (phase === 'review') {
+		if (manualView === 'crop') {
 			if (!required) {
 				activeLayer.batchDraw();
 				return;
@@ -1459,7 +1524,7 @@
 			return;
 		}
 
-		// assembling / assembled / export: real computed placements, cropped.
+		// Position tab: real computed placements, cropped.
 		const validation = croppedValidation;
 		if (!validation?.ok) {
 			activeLayer.batchDraw();
@@ -1482,11 +1547,11 @@
 					width: validation.widthPx * view.zoom,
 					height: validation.heightPx * view.zoom,
 					crop: { x: crop.leftPx, y: crop.topPx, width: validation.widthPx, height: validation.heightPx },
-					opacity: phase === 'export' ? 0.85 : slot === selectedSlot ? previewOpacity : 1,
+					opacity: slot === selectedSlot ? previewOpacity : 1,
 					listening: false
 				})
 			);
-			if (slot === selectedSlot && phase === 'assembled') {
+			if (slot === selectedSlot) {
 				group.add(
 					new Konva.Rect({
 						width: validation.widthPx * view.zoom,
@@ -1504,12 +1569,10 @@
 	}
 
 	/**
-	 * The pile → filmstrip → assemble choreography's one real animated moment:
-	 * tweens every tile node from its just-rendered review (filmstrip)
-	 * position/size to its real computed placement. The crop itself swaps
-	 * instantly at the start (not itself tweened — see the module note above
-	 * `renderStage`) while position and size animate, which is what actually
-	 * reads as "the mosaic assembling."
+	 * The Crop-tab -> Position-tab transition's one animated moment: tweens
+	 * every tile node from its just-rendered filmstrip position/size to its
+	 * real computed placement. Respects `prefers-reduced-motion` (a near-zero
+	 * duration, never skipped outright — the end state must still commit).
 	 */
 	function animateAssembling(): void {
 		const activeLayer = layer;
@@ -1551,16 +1614,19 @@
 		});
 	}
 
-	let lastRenderedPhase: Phase | null = null;
+	let lastRenderedManualView: 'crop' | 'placement' | null = null;
 
 	$effect(() => {
-		const current = phase;
-		if (current === lastRenderedPhase) return;
-		const previous = lastRenderedPhase;
-		lastRenderedPhase = current;
-		if (current === 'import') return;
+		if (!manualOpen) {
+			lastRenderedManualView = null;
+			return;
+		}
+		const current = manualView;
+		if (current === lastRenderedManualView) return;
+		const previous = lastRenderedManualView;
+		lastRenderedManualView = current;
 		untrack(() => {
-			if (current === 'assembling' && previous === 'review') {
+			if (current === 'placement' && previous === 'crop') {
 				renderStage(); // ensure the filmstrip nodes exist as the animation's starting point
 				animateAssembling();
 			} else {
@@ -1577,28 +1643,42 @@
 		stage.add(layer);
 	});
 
+	// Tears the scene down when the manual surface closes, so reopening it
+	// rebuilds cleanly against a fresh container rather than a stale one.
+	$effect(() => {
+		if (manualOpen) return;
+		untrack(() => {
+			if (!stage) return;
+			stage.destroy();
+			stage = null;
+			layer = null;
+			tileNodes.clear();
+			cropGuideTop.clear();
+			cropGuideBottom.clear();
+		});
+	});
+
 	$effect(() => {
 		stage?.size(stageVp.size);
 	});
 
-	// The fit target follows whichever layout the current phase actually shows.
+	// The fit target follows whichever tab the manual surface currently shows.
 	$effect(() => {
 		void tiles;
 		void placements;
 		void crop;
 		void activeSlots;
-		const current = phase;
+		const open = manualOpen;
+		const view = manualView;
 		untrack(() => {
-			if (current === 'review') stageVp.setFitTarget(filmstripFitTarget());
-			else if (current === 'assembled' || current === 'export' || current === 'assembling') {
-				stageVp.setFitTarget(assembledFitTarget());
-			}
+			if (!open) return;
+			if (view === 'crop') stageVp.setFitTarget(filmstripFitTarget());
+			else if (view === 'placement') stageVp.setFitTarget(assembledFitTarget());
 		});
 	});
 
 	// Rebuild the scene when the session, crop, or view changes (but never
-	// mid-drag, and never for the phase's own entry animation — that already
-	// rendered the correct end state via the phase-change effect above).
+	// mid-drag).
 	$effect(() => {
 		void tiles;
 		void crop;
@@ -1608,7 +1688,7 @@
 		void stageVp.view;
 		void stageVp.size;
 		untrack(() => {
-			if (phase === 'import' || phase === 'assembling') return;
+			if (!manualOpen) return;
 			if (!tileDrag && !cropDragActive) renderStage();
 		});
 	});
@@ -1620,38 +1700,38 @@
 			placements = initialPlacements(activeSlots, validation.widthPx, validation.heightPx);
 			placementsInitialized = true;
 			syncPositionDraft(true);
-			statusMessage = 'All screenshots loaded. Initial 25% overlap layout created.';
 		}
 	});
 
+	// Lazy main-thread OpenCV/Snap warm-up: only when the manual-correction
+	// surface is actually opened (see `ensureCvWarm`) — never merely because
+	// the page mounted or an auto result appeared.
+	$effect(() => {
+		if (manualOpen) ensureCvWarm();
+	});
+
 	/**
-	 * Eager OpenCV warm-up (P1-002 1b, extended 1c), deliberately simple: fire
-	 * off both loads on mount, non-blocking, and let each cache its own promise
-	 * for later real use (`loadCv()` on the main thread for Snap;
-	 * `warmSmartStitchWorker()` constructs the worker so its own module-scope
-	 * `loadCv()` call fires there too). Two independent ~15MB loads, one per
-	 * thread — not sharing one instance between realms is intentional (see
-	 * `cvMatch.ts`'s module doc comment and the roadmap's P1-002 1b notes), not
-	 * an oversight. Neither call is awaited: nothing here blocks rendering, and
-	 * a real Snap or smart-import call later simply awaits the by-then-likely-
-	 * already-resolved cached promise instead of paying the cold-load cost
-	 * itself.
+	 * Eager worker-side warm-up (unchanged by CHSPT-56): fires once on mount,
+	 * non-blocking, constructing the smart-stitch worker so its own
+	 * module-scope `loadCv()` call starts the WORKER-thread OpenCV WASM load
+	 * immediately — the real `runStitchPipeline`/Snap calls later simply await
+	 * the by-then-likely-already-resolved cached promise. Deliberately kept
+	 * eager (only the MAIN-THREAD OpenCV/Snap path above is lazy) since
+	 * worker-side CV staying warm is a requirement, not a bug.
 	 */
 	$effect(() => {
-		void loadCv().then((cv) => warmMatchTemplate(cv));
 		warmSmartStitchWorker();
 	});
 
 	onMount(() => {
 		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
-		// and navigates here. They enter through requestSmartImport — the exact
-		// entry point the "Import screenshots" file input uses — so the
-		// arrangement a visitor watches appear is computed by the product now,
-		// never supplied by the demo. Re-run protection still applies: a session
-		// already refined by hand asks before it is replaced.
+		// and navigates here. They enter through the SAME unified `runImport`
+		// entry point the "Import screenshots" file input uses, so the result a
+		// visitor watches appear is computed by the product now, never supplied
+		// by the demo.
 		const claimCaptures = (): void => {
 			const captures = takePendingStitchCaptures();
-			if (captures) requestSmartImport(captures);
+			if (captures && captures.length > 0) void runImport(captures);
 		};
 		claimCaptures();
 		// Captures deposited while this page is already mounted — the rail arming
@@ -1661,12 +1741,12 @@
 	});
 
 	onDestroy(() => {
-		// An in-flight smart-import batch must never publish after unmount, and
-		// the page no longer owns the smart-stitch worker once it is gone.
+		// An in-flight import batch must never publish after unmount, and the
+		// page no longer owns the smart-stitch worker once it is gone.
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		disposeSmartStitchWorker();
 		endTileDrag();
-		if (assemblingTimer) clearTimeout(assemblingTimer);
+		if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
 		stage?.destroy();
 		stage = null;
 		layer = null;
@@ -1677,7 +1757,7 @@
 	<title>Stitch Map | ChainSpot</title>
 </svelte:head>
 
-<main>
+<main data-testid="stitch-map">
 	{#if exportError}
 		<p class="error" data-testid="stitch-error" role="alert">{exportError}</p>
 	{/if}
@@ -1685,47 +1765,38 @@
 	<h2>Stitch Map</h2>
 
 	<div class="stage-card">
-		<div class="stage-progress">
-			{#each PROGRESS_LABELS as label, i (label)}
-				{#if i > 0}
-					<div class="prog-line" class:done={i <= PROGRESS_INDEX[phase]}></div>
-				{/if}
-				<div
-					class="prog-step"
-					class:done={i < PROGRESS_INDEX[phase]}
-					class:current={i === PROGRESS_INDEX[phase]}
-				>
-					<span class="prog-dot">{i < PROGRESS_INDEX[phase] ? '✓' : i + 1}</span>{label}
-				</div>
-			{/each}
+		<div class="stage-progress" data-testid="stage-progress">
+			<span class="prog-step" class:current={phase === 'import'} class:done={phase !== 'import'}>
+				<span class="prog-dot">{phase === 'import' ? '1' : '✓'}</span>Import
+			</span>
+			<div class="prog-line" class:done={phase !== 'import'}></div>
+			<span class="prog-step" class:current={phase === 'result'}>
+				<span class="prog-dot">2</span>Result
+			</span>
 		</div>
 
 		<div class="stage-context">
 			{#if phase === 'import'}
 				<span
-					>Add two or more overlapping screenshots. ChainSpot infers their arrangement, places
-					them, and may suggest a shared crop.</span
+					>Add one or more overlapping screenshots. ChainSpot crops (and, with more than one,
+					stitches) them automatically — no approval click needed.</span
 				>
 				<span class="badge">{activeSlots.filter((slot) => tiles[slot]).length} added</span>
-			{:else if phase === 'review'}
-				<span>Drag a line to nudge the shared crop, or use the numeric fields below.</span>
-				{#if smartImportDiagnostic}
-					<span class="badge" class:strong={smartImportDiagnostic.category === 'ok'}
-						>{categoryLabel(smartImportDiagnostic.category)}</span
-					>
-				{/if}
-			{:else if phase === 'assembling'}
+			{:else if phase === 'processing'}
 				<span>Cropping and stitching…</span>
 				<span class="badge strong">● working</span>
-			{:else if phase === 'assembled'}
-				<span>Stitched from {activeSlots.length} capture{activeSlots.length === 1 ? '' : 's'}.</span>
-				{#if smartImportDiagnostic}
-					<span class="badge" class:strong={smartImportDiagnostic.category === 'ok'}
-						>{categoryLabel(smartImportDiagnostic.category)}</span
-					>
+			{:else if phase === 'result'}
+				<span
+					>Stitched from {pipelineSuccess?.sources.length ?? 0} capture{(pipelineSuccess?.sources
+						.length ?? 0) === 1
+						? ''
+						: 's'}.</span
+				>
+				{#if resultConfidence}
+					<span class="badge" class:strong={resultConfidence === 'auto'}>
+						{resultConfidence === 'auto' ? 'high confidence' : 'review recommended'}
+					</span>
 				{/if}
-			{:else if phase === 'export'}
-				<span>Choose where the stitched map goes next.</span>
 			{/if}
 		</div>
 
@@ -1734,8 +1805,10 @@
 				<section class="smart-import-section" aria-labelledby="smart-import-heading">
 					<h3 id="smart-import-heading">Import screenshots</h3>
 					<p class="section-note">
-						Select two or more overlapping screenshots in any order. The existing controls remain
-						available for correction.
+						Select one or more overlapping screenshots, in any order — up to {MAX_AUTO_ARRANGE_TILES}
+						at once. A single screenshot is cropped automatically; two or more are also stitched
+						together. The existing controls below remain available for a manual capture-by-capture
+						session too.
 					</p>
 					<div class="smart-import-row">
 						<label class="file-label">
@@ -1746,53 +1819,19 @@
 								accept="image/png,image/jpeg"
 								multiple
 								data-testid="smart-import-input"
-								disabled={smartImportBusy}
 								onchange={handleSmartImportFiles}
 							/>
 						</label>
-						{#if smartImportBusy}
-							<span class="status" role="status">Analyzing…</span>
-						{/if}
 					</div>
 					<label
 						class="crop-margin-toggle"
 						title="AutoStitch may be unreliable without Add margin. If you have it disabled and your stitch doesn't align, try enabling Add margin."
 					>
 						<input type="checkbox" bind:checked={addCropMargin} data-testid="crop-margin-toggle" />
-						Add margin — trim a couple extra pixels of the suggested crop for safety
+						Add margin — trim a couple extra pixels of the automatic crop for safety
 					</label>
-					{#if smartImportError}
-						<p class="error" data-testid="smart-import-error" role="alert">{smartImportError}</p>
-					{/if}
-					{#if smartImportSummary}
-						<ul
-							class="smart-assignment"
-							data-testid="smart-import-assignment"
-							aria-label="Inferred screenshot order"
-						>
-							{#each activeSlots as slot (slot)}
-								<li>
-									<span class="assignment-label">{slotLabel(slot)}:</span>
-									<span data-testid={`smart-import-slot-${slot}`}>{smartImportSummary[slot]}</span>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-					{#if smartImportDiagnostic}
-						<p class="smart-confidence" data-testid="smart-import-confidence" role="status">
-							Automatic arrangement confidence: {categoryLabel(smartImportDiagnostic.category)}.
-						</p>
-						{#if smartImportDiagnostic.warnings.length > 0}
-							<ul
-								class="smart-warnings"
-								data-testid="smart-import-warnings"
-								aria-label="Automatic arrangement warnings"
-							>
-								{#each smartImportDiagnostic.warnings as warning, index (warning)}
-									<li data-testid={`smart-import-warning-${index}`}>{warning}</li>
-								{/each}
-							</ul>
-						{/if}
+					{#if pipelineError}
+						<p class="error" data-testid="smart-import-error" role="alert">{pipelineError}</p>
 					{/if}
 				</section>
 
@@ -1816,387 +1855,379 @@
 					</div>
 				</section>
 			</div>
-		{:else}
-			<div class="stage-canvas" data-phase={phase}>
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-				<div
-					class="stage-workspace"
-					data-testid="stage-workspace"
-					bind:this={stageWorkspace}
-					tabindex="0"
-					role="group"
-					aria-label="Stitch stage"
-					data-stitch-nudge-scope
-					onkeydown={handleStageKeyDown}
-				>
-					<ImageViewport
-						controller={stageVp}
-						testid="stage-viewport"
-						claimPointer={claimStagePointer}
-						onViewportClick={onStageClick}
-						onClaimedPointerCancel={handleTileDragCancel}
+		{:else if phase === 'processing'}
+			<div class="processing-panel" data-testid="stitch-processing">
+				<div class="spinner" aria-hidden="true"></div>
+				<p role="status">Cropping and stitching your screenshots…</p>
+			</div>
+		{:else if phase === 'result'}
+			<div class="result-panel">
+				{#if resultConfidence === 'review'}
+					<div class="confidence-banner" data-testid="confidence-review" role="status">
+						<strong>Review recommended.</strong>
+						{#if resultWarnings.length > 0}
+							<span>{resultWarnings.join(' ')}</span>
+						{:else}
+							<span>The automatic result may need a closer look.</span>
+						{/if}
+						{#if !manualOpen}
+							<button type="button" onclick={() => (manualOpen = true)}>Adjust manually</button>
+						{/if}
+					</div>
+				{/if}
+
+				{#if resultImageUrl && resultProvenance}
+					<div
+						class="composite-wrapper"
+						style:aspect-ratio={`${resultProvenance.outputWidthPx} / ${resultProvenance.outputHeightPx}`}
+						data-testid="composite-wrapper"
 					>
-						{#snippet content()}{/snippet}
-					</ImageViewport>
+						<img class="composite-image" src={resultImageUrl} alt="Assembled stitched map" data-testid="composite-image" />
+						{#key badgeFlashKey}
+							{#each badgeAnchors as anchor, index (anchor.holeNumber + '-' + index)}
+								{@const pos = badgeFlashPercent(anchor, resultProvenance.outputWidthPx, resultProvenance.outputHeightPx)}
+								<div
+									class="badge-flash"
+									class:reduced-motion={prefersReducedMotion()}
+									style:left={`${pos.leftPct}%`}
+									style:top={`${pos.topPct}%`}
+									style:animation-delay={prefersReducedMotion() ? '0ms' : `${Math.min(index, 8) * 70}ms`}
+									data-testid="badge-flash"
+									data-hole-number={anchor.holeNumber}
+								></div>
+							{/each}
+						{/key}
+					</div>
+				{/if}
+
+				<div class="result-actions">
+					<button
+						type="button"
+						class="btn primary"
+						data-testid="continue-to-annotate"
+						disabled={!resultBlob || rendering}
+						onclick={() => handleUseAs('source-overview')}
+					>
+						Continue to Annotate Course →
+					</button>
+					<button
+						type="button"
+						class="btn"
+						data-testid="use-as-target"
+						disabled={!resultBlob || rendering}
+						onclick={() => handleUseAs('target-basemap')}
+					>
+						Send to Create Graphics
+					</button>
+					<button
+						type="button"
+						class="btn ghost"
+						data-testid="download-stitched"
+						disabled={!resultBlob || rendering}
+						onclick={handleDownload}
+					>
+						Download PNG
+					</button>
+					<button
+						type="button"
+						class="btn ghost"
+						data-testid="adjust-manually"
+						aria-pressed={manualOpen}
+						onclick={() => (manualOpen = !manualOpen)}
+					>
+						{manualOpen ? 'Hide manual adjustment' : 'Adjust manually'}
+					</button>
+					<button type="button" class="btn ghost" data-testid="start-new-map" onclick={resetToImport}>
+						↻ Start a new map
+					</button>
+					{#if rendering}
+						<span class="status" role="status">Rendering…</span>
+					{/if}
 				</div>
 
-				{#snippet cropZoomRow(topPx: number, bottomPx: number)}
-					<div class="crop-zoom-block">
-						<p class="crop-zoom-legend">
-							Each row is one real pixel. <span class="crop-zoom-swatch kept"></span> first row kept.
-						</p>
-						<div class="crop-zoom-edge">
-							<span class="crop-zoom-label">Top edge — {topPx}px</span>
-							<div class="crop-zoom-strip">
-								{#each activeSlots as slot (slot)}
-									{@const tile = tiles[slot]}
-									{#if tile}
-										<div class="crop-zoom-tile">
-											<canvas
-												use:cropZoom={{
-													image: tile.image,
-													imageWidthPx: tile.widthPx,
-													imageHeightPx: tile.heightPx,
-													boundaryY: topPx,
-													edge: 'top'
-												}}
-											></canvas>
-											<span>{slotLabel(slot)}</span>
-										</div>
-									{/if}
-								{/each}
-							</div>
+				{#if manualOpen}
+					<div class="manual-surface" data-testid="manual-surface">
+						<div class="manual-tabs">
+							<button
+								type="button"
+								class="manual-tab"
+								class:active={manualView === 'crop'}
+								data-testid="manual-tab-crop"
+								onclick={() => (manualView = 'crop')}
+							>
+								Crop
+							</button>
+							<button
+								type="button"
+								class="manual-tab"
+								class:active={manualView === 'placement'}
+								data-testid="manual-tab-placement"
+								onclick={() => (manualView = 'placement')}
+							>
+								Position
+							</button>
 						</div>
-						<div class="crop-zoom-edge">
-							<span class="crop-zoom-label">Bottom edge — {bottomPx}px</span>
-							<div class="crop-zoom-strip">
-								{#each activeSlots as slot (slot)}
-									{@const tile = tiles[slot]}
-									{#if tile}
-										<div class="crop-zoom-tile">
-											<canvas
-												use:cropZoom={{
-													image: tile.image,
-													imageWidthPx: tile.widthPx,
-													imageHeightPx: tile.heightPx,
-													boundaryY: tile.heightPx - bottomPx,
-													edge: 'bottom'
-												}}
-											></canvas>
-											<span>{slotLabel(slot)}</span>
-										</div>
-									{/if}
-								{/each}
-							</div>
-						</div>
-					</div>
-				{/snippet}
 
-				{#if phase === 'review'}
-					{#if !cropProposal}
-						<div class="crop-fields-overlay">
-							<div class="crop-fields-row">
-								{#each CROP_FIELDS as field (field)}
-									<label class="crop-field">
-										<span>{CROP_FIELD_LABELS[field]}</span>
+						<div class="stage-canvas" data-manual-view={manualView}>
+							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+							<div
+								class="stage-workspace"
+								data-testid="stage-workspace"
+								bind:this={stageWorkspace}
+								tabindex="0"
+								role="group"
+								aria-label="Stitch stage"
+								data-stitch-nudge-scope
+								onkeydown={handleStageKeyDown}
+							>
+								<ImageViewport
+									controller={stageVp}
+									testid="stage-viewport"
+									claimPointer={claimStagePointer}
+									onViewportClick={onStageClick}
+									onClaimedPointerCancel={handleTileDragCancel}
+								>
+									{#snippet content()}{/snippet}
+								</ImageViewport>
+							</div>
+
+							{#snippet cropZoomRow(topPx: number, bottomPx: number)}
+								<div class="crop-zoom-block">
+									<p class="crop-zoom-legend">
+										Each row is one real pixel. <span class="crop-zoom-swatch kept"></span> first row kept.
+									</p>
+									<div class="crop-zoom-edge">
+										<span class="crop-zoom-label">Top edge — {topPx}px</span>
+										<div class="crop-zoom-strip">
+											{#each activeSlots as slot (slot)}
+												{@const tile = tiles[slot]}
+												{#if tile}
+													<div class="crop-zoom-tile">
+														<canvas
+															use:cropZoom={{
+																image: tile.image,
+																imageWidthPx: tile.widthPx,
+																imageHeightPx: tile.heightPx,
+																boundaryY: topPx,
+																edge: 'top'
+															}}
+														></canvas>
+														<span>{slotLabel(slot)}</span>
+													</div>
+												{/if}
+											{/each}
+										</div>
+									</div>
+									<div class="crop-zoom-edge">
+										<span class="crop-zoom-label">Bottom edge — {bottomPx}px</span>
+										<div class="crop-zoom-strip">
+											{#each activeSlots as slot (slot)}
+												{@const tile = tiles[slot]}
+												{#if tile}
+													<div class="crop-zoom-tile">
+														<canvas
+															use:cropZoom={{
+																image: tile.image,
+																imageWidthPx: tile.widthPx,
+																imageHeightPx: tile.heightPx,
+																boundaryY: tile.heightPx - bottomPx,
+																edge: 'bottom'
+															}}
+														></canvas>
+														<span>{slotLabel(slot)}</span>
+													</div>
+												{/if}
+											{/each}
+										</div>
+									</div>
+								</div>
+							{/snippet}
+
+							{#if manualView === 'crop'}
+								<div class="crop-fields-overlay">
+									<div class="crop-fields-row">
+										{#each CROP_FIELDS as field (field)}
+											<label class="crop-field">
+												<span>{CROP_FIELD_LABELS[field]}</span>
+												<input
+													type="text"
+													inputmode="numeric"
+													autocomplete="off"
+													data-testid={`crop-${field}`}
+													bind:this={cropInputs[field]}
+													value={cropDraft[field]}
+													aria-invalid={invalidCropFields.includes(field) ? 'true' : undefined}
+													oninput={(event) => handleCropInput(field, event)}
+													onchange={() => commitCrop(field)}
+												/>
+											</label>
+										{/each}
+										<button type="button" data-testid="crop-reset" onclick={resetCrop}>Reset crop</button>
+										<button type="button" data-testid="crop-fit" onclick={() => stageVp.fit()}>Fit</button>
+									</div>
+									<p class="crop-zoom-hint">
+										Close-up at the exact crop line, per screenshot — check every one before applying.
+									</p>
+									{@render cropZoomRow(crop.topPx, crop.bottomPx)}
+								</div>
+							{/if}
+						</div>
+
+						{#if manualView === 'placement'}
+							<div class="tool-block">
+								<h3>Selected tile</h3>
+								<div class="segmented">
+									{#each movableSlots as slot (slot)}
+										<button
+											type="button"
+											class="tile-select"
+											class:sel={selectedSlot === slot}
+											data-testid={`tile-select-${slot}`}
+											aria-pressed={selectedSlot === slot}
+											disabled={!tiles[slot]}
+											onclick={() => selectSlot(slot)}
+										>
+											{slotLabel(slot)}
+										</button>
+									{/each}
+								</div>
+							</div>
+							<div class="tool-block">
+								<h3>Position</h3>
+								<div class="field-row">
+									<label class="field">
+										<span>X</span>
 										<input
 											type="text"
 											inputmode="numeric"
 											autocomplete="off"
-											data-testid={`crop-${field}`}
-											bind:this={cropInputs[field]}
-											value={cropDraft[field]}
-											aria-invalid={invalidCropFields.includes(field) ? 'true' : undefined}
-											oninput={(event) => handleCropInput(field, event)}
-											onchange={() => commitCrop(field)}
+											data-testid="tile-position-x"
+											bind:this={xPositionInput}
+											value={positionDraft.xPx}
+											disabled={!selectedSlot}
+											oninput={(event) => handlePositionInput('xPx', event)}
+											onchange={() => commitPosition('xPx')}
 										/>
 									</label>
-								{/each}
-								<button type="button" data-testid="crop-reset" onclick={resetCrop}>Reset crop</button>
-								<button type="button" data-testid="crop-fit" onclick={() => stageVp.fit()}>Fit</button>
+									<label class="field">
+										<span>Y</span>
+										<input
+											type="text"
+											inputmode="numeric"
+											autocomplete="off"
+											data-testid="tile-position-y"
+											bind:this={yPositionInput}
+											value={positionDraft.yPx}
+											disabled={!selectedSlot}
+											oninput={(event) => handlePositionInput('yPx', event)}
+											onchange={() => commitPosition('yPx')}
+										/>
+									</label>
+								</div>
+								<label class="opacity-field">
+									<span>Selected tile opacity (preview)</span>
+									<input
+										type="range"
+										min="0.15"
+										max="1"
+										step="0.05"
+										data-testid="tile-opacity"
+										bind:value={previewOpacity}
+										disabled={!selectedSlot}
+									/>
+								</label>
 							</div>
-							<p class="crop-zoom-hint">
-								Close-up at the exact crop line, per screenshot — check every one before advancing.
-							</p>
-							{@render cropZoomRow(crop.topPx, crop.bottomPx)}
-						</div>
-					{/if}
-					{#if cropProposal}
-						<div class="crop-proposal" data-testid="crop-proposal" role="status">
-							<h4>Apply suggested crop?</h4>
-							<p>
-								Suggested shared crop:
-								<span data-testid="crop-proposal-insets">
-									top {cropProposal.topPx}px, right {cropProposal.rightPx}px, bottom
-									{cropProposal.bottomPx}px, left {cropProposal.leftPx}px
-								</span>
-								{#if addCropMargin}
-									<span class="crop-margin-note">(includes the safety margin)</span>
+							<div class="tool-block">
+								<h3>Actions</h3>
+								<div class="field-row">
+									<button
+										type="button"
+										class="btn primary small"
+										data-testid="snap-tile"
+										disabled={!snapAvailable}
+										onclick={() => void snapSelectedTile()}
+									>
+										Snap
+									</button>
+									<button
+										type="button"
+										class="btn ghost small"
+										data-testid="reset-arrangement"
+										disabled={!activeSlots.some((slot) => tiles[slot])}
+										onclick={resetArrangement}
+									>
+										Reset
+									</button>
+									<button
+										type="button"
+										class="btn ghost small"
+										disabled={!selectedSlot}
+										onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
+									>
+										{visibilityToggleLabel()}
+									</button>
+									{#if snapBusy}
+										<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
+									{/if}
+								</div>
+							</div>
+						{/if}
+
+						<div class="tool-block">
+							<h3>Automatic result summary</h3>
+							<p class="section-note" data-testid="manual-summary">
+								{pipelineSuccess?.sources.length ?? 0} capture{(pipelineSuccess?.sources.length ?? 0) === 1
+									? ''
+									: 's'}, confidence: {resultConfidence === 'auto' ? 'high' : 'review recommended'}.
+								{#if pipelineSuccess && pipelineSuccess.warnings.length > 0}
+									{pipelineSuccess.warnings.join(' ')}
 								{/if}
 							</p>
-							<p class="crop-zoom-hint">
-								Verify the line lands on chrome, not map content, on every screenshot — a 1-2px
-								miss here is invisible at normal zoom but ruins the stitch.
+							<ul class="smart-assignment" data-testid="manual-capture-list" aria-label="Capture order">
+								{#each activeSlots as slot (slot)}
+									{#if tiles[slot]}
+										<li>
+											<span class="assignment-label">{slotLabel(slot)}:</span>
+											<span data-testid={`manual-capture-${slot}`}>{tiles[slot]?.fileName}</span>
+										</li>
+									{/if}
+								{/each}
+							</ul>
+						</div>
+
+						<p class="stage-readiness" data-testid="stitch-readiness" role="status">{readinessText()}</p>
+
+						{#if manualHasRotatedSource}
+							<p class="manual-rotation-warning" data-testid="manual-rotation-warning" role="status">
+								One or more of these captures was auto-aligned with rotation. Manual adjustments can
+								only reposition tiles, so applying them will straighten that rotation out. Only apply
+								if you want to replace the automatic alignment.
 							</p>
-							{@render cropZoomRow(cropProposal.topPx, cropProposal.bottomPx)}
-							{#if cropProposalConfidence}
-								<p class="crop-confidence" data-testid="crop-confidence">
-									Crop suggestion confidence: {CROP_CONFIDENCE_LABELS[cropProposalConfidence]}.
-								</p>
-							{/if}
-							<div class="proposal-actions">
-								<button
-									type="button"
-									class="apply-crop-button"
-									data-testid="apply-suggested-crop"
-									onclick={applyCropProposal}
-								>
-									Apply Crop
-								</button>
-								<button type="button" data-testid="keep-full-images" onclick={rejectCropProposal}>
-									Keep full images
-								</button>
-							</div>
-						</div>
-					{/if}
-				{/if}
-
-				<div class="finetune-drawer" class:open={finetuneOpen}>
-					<button
-						type="button"
-						class="drawer-close"
-						onclick={() => (finetuneOpen = false)}
-						aria-label="Close fine-tune drawer"
-					>
-						Close ✕
-					</button>
-					<div class="tool-block">
-						<h3>Selected tile</h3>
-						<div class="segmented">
-							{#each movableSlots as slot (slot)}
-								<button
-									type="button"
-									class="tile-select"
-									class:sel={selectedSlot === slot}
-									data-testid={`tile-select-${slot}`}
-									aria-pressed={selectedSlot === slot}
-									disabled={!tiles[slot]}
-									onclick={() => selectSlot(slot)}
-								>
-									{slotLabel(slot)}
-								</button>
-							{/each}
-						</div>
-					</div>
-					<div class="tool-block">
-						<h3>Position</h3>
-						<div class="field-row">
-							<label class="field">
-								<span>X</span>
-								<input
-									type="text"
-									inputmode="numeric"
-									autocomplete="off"
-									data-testid="tile-position-x"
-									bind:this={xPositionInput}
-									value={positionDraft.xPx}
-									disabled={!selectedSlot}
-									oninput={(event) => handlePositionInput('xPx', event)}
-									onchange={() => commitPosition('xPx')}
-								/>
-							</label>
-							<label class="field">
-								<span>Y</span>
-								<input
-									type="text"
-									inputmode="numeric"
-									autocomplete="off"
-									data-testid="tile-position-y"
-									bind:this={yPositionInput}
-									value={positionDraft.yPx}
-									disabled={!selectedSlot}
-									oninput={(event) => handlePositionInput('yPx', event)}
-									onchange={() => commitPosition('yPx')}
-								/>
-							</label>
-						</div>
-						<label class="opacity-field">
-							<span>Selected tile opacity (preview)</span>
-							<input
-								type="range"
-								min="0.15"
-								max="1"
-								step="0.05"
-								data-testid="tile-opacity"
-								bind:value={previewOpacity}
-								disabled={!selectedSlot}
-							/>
-						</label>
-					</div>
-					<div class="tool-block">
-						<h3>Actions</h3>
-						<div class="field-row">
-							<button
-								type="button"
-								class="btn primary small"
-								data-testid="snap-tile"
-								disabled={!snapAvailable}
-								onclick={() => void snapSelectedTile()}
-							>
-								Snap
-							</button>
-							<button
-								type="button"
-								class="btn ghost small"
-								data-testid="reset-arrangement"
-								disabled={!activeSlots.some((slot) => tiles[slot])}
-								onclick={resetArrangement}
-							>
-								Reset
-							</button>
-							<button
-								type="button"
-								class="btn ghost small"
-								disabled={!selectedSlot}
-								onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
-							>
-								{visibilityToggleLabel()}
-							</button>
-							{#if snapBusy}
-								<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
-							{/if}
-						</div>
-					</div>
-				</div>
-
-				{#if phase === 'export'}
-					<div class="export-panel open">
-						<h3>Export</h3>
-						<p class="sub">
-							All {activeSlots.length} capture{activeSlots.length === 1 ? '' : 's'}, the shared
-							crop, and tile overlap are valid.
-						</p>
-						<div class="export-card primary">
-							<h4>Download stitched PNG</h4>
-							<p>Full-resolution stitched map, no annotations.</p>
-							<button
-								type="button"
-								class="btn primary small"
-								data-testid="download-stitched"
-								disabled={!canExport}
-								onclick={handleDownload}
-							>
-								Download PNG
-							</button>
-						</div>
-						<div class="export-card">
-							<h4>Use as UDisc source</h4>
-							<p>Carry it into Annotate Course as the UDisc reference image.</p>
-							<button
-								type="button"
-								class="btn small"
-								data-testid="use-as-source"
-								disabled={!canExport}
-								onclick={() => handleUseAs('source-overview')}
-							>
-								Send to Annotate Course
-							</button>
-						</div>
-						<div class="export-card">
-							<h4>Use as clean target</h4>
-							<p>Carry it into Create Graphics as an unmarked base.</p>
-							<button
-								type="button"
-								class="btn small"
-								data-testid="use-as-target"
-								disabled={!canExport}
-								onclick={() => handleUseAs('target-basemap')}
-							>
-								Send to Create Graphics
-							</button>
-						</div>
-						{#if rendering}
-							<span class="status" role="status">Rendering…</span>
 						{/if}
-						<button type="button" class="btn ghost small" style="margin-top:auto;" onclick={resetSession}>
-							↻ Start a new map
-						</button>
+
+						<div class="manual-actions">
+							<button type="button" class="btn ghost" data-testid="close-manual-adjustments" onclick={() => (manualOpen = false)}>
+								Close
+							</button>
+							<button
+								type="button"
+								class="btn primary"
+								data-testid="apply-manual-adjustments"
+								disabled={!manualReady || !manualDirty}
+								onclick={() => void applyManualAdjustments()}
+							>
+								Apply adjustments
+							</button>
+						</div>
 					</div>
 				{/if}
-
 			</div>
-			<p class="preview-note">
-				Preview-only: hiding a tile, changing opacity, zooming, or panning never changes the
-				exported PNG.
-			</p>
-			<p class="stage-readiness" data-testid="stitch-readiness" role="status">{readinessText()}</p>
 		{/if}
-
-		<div class="stage-actions">
-			<button
-				type="button"
-				class="btn ghost"
-				data-testid="back-button"
-				style:visibility={phase === 'import' ? 'hidden' : 'visible'}
-				onclick={goBack}
-			>
-				← Back
-			</button>
-			<button
-				type="button"
-				class="finetune-link"
-				style:visibility={phase === 'assembled' ? 'visible' : 'hidden'}
-				onclick={() => (finetuneOpen = !finetuneOpen)}
-			>
-				Looks a little off? Fine-tune manually
-			</button>
-			{#if phase !== 'export'}
-				<button
-					type="button"
-					class="btn primary"
-					data-testid="primary-advance"
-					disabled={primaryButtonDisabled()}
-					onclick={advance}
-				>
-					{primaryButtonLabel()}
-				</button>
-			{/if}
-		</div>
 	</div>
 
 	{#if statusMessage}
-		<p role="status">{statusMessage}</p>
-	{/if}
-
-	{#if pendingReplaceConfirm}
-		<div class="modal-backdrop" role="presentation">
-			<div
-				class="modal"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="replace-confirm-title"
-				use:dialogKeyboard={() => settleReplaceConfirm(false)}
-			>
-				<h3 id="replace-confirm-title">Replace current arrangement?</h3>
-				<p>
-					You've manually adjusted the current arrangement. Importing new screenshots will
-					recompute the arrangement from scratch and discard your manual changes.
-				</p>
-				<div class="modal-actions">
-					<button
-						type="button"
-						bind:this={replaceCancelButton}
-						onclick={() => settleReplaceConfirm(false)}
-					>
-						Cancel
-					</button>
-					<button type="button" onclick={() => settleReplaceConfirm(true)}>
-						Replace arrangement
-					</button>
-				</div>
-			</div>
-		</div>
+		<p role="status" data-testid="stitch-status">{statusMessage}</p>
 	{/if}
 </main>
 
@@ -2225,8 +2256,7 @@
 		color: #f4f4f5;
 	}
 
-	.section-note,
-	.preview-note {
+	.section-note {
 		margin: 0;
 		font-size: 0.9rem;
 		color: #a1a1aa;
@@ -2371,11 +2401,6 @@
 		accent-color: #fbbf24;
 	}
 
-	.crop-margin-note {
-		color: #71717a;
-		font-size: 0.75rem;
-	}
-
 	.file-label {
 		display: inline-flex;
 		align-items: center;
@@ -2416,19 +2441,6 @@
 		margin-right: 0.35rem;
 	}
 
-	.smart-confidence {
-		margin: 0;
-		font-size: 0.85rem;
-		color: #a1a1aa;
-	}
-
-	.smart-warnings {
-		margin: 0;
-		padding-left: 1.1rem;
-		font-size: 0.8rem;
-		color: #fbbf24;
-	}
-
 	.tile-section h3 {
 		margin-bottom: 0.75rem;
 	}
@@ -2457,15 +2469,199 @@
 		border-color: #52525b;
 	}
 
-	/* ---- persistent canvas (review / assembling / assembled / export) ---- */
+	/* ---- processing phase ---- */
+	.processing-panel {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
+		padding: 3rem 1.25rem;
+		min-height: 220px;
+	}
+
+	.spinner {
+		width: 2.25rem;
+		height: 2.25rem;
+		border-radius: 50%;
+		border: 3px solid #3f3f46;
+		border-top-color: #fbbf24;
+		animation: stitch-spin 0.9s linear infinite;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.spinner {
+			animation-duration: 2.4s;
+		}
+	}
+
+	@keyframes stitch-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	/* ---- result phase ---- */
+	.result-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		padding: 1.25rem;
+	}
+
+	.confidence-banner {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		padding: 0.7rem 0.9rem;
+		border-radius: 8px;
+		background: #2a2008;
+		border: 1px solid #7c5e0f;
+		color: #fde68a;
+		font-size: 0.85rem;
+	}
+
+	.confidence-banner button {
+		margin-left: auto;
+		font-size: 0.75rem;
+		padding: 0.35rem 0.6rem;
+		border-radius: 6px;
+		border: 1px solid #7c5e0f;
+		background: #3a2c0b;
+		color: #fde68a;
+		cursor: pointer;
+	}
+
+	.composite-wrapper {
+		position: relative;
+		width: 100%;
+		max-height: 65vh;
+		overflow: hidden;
+		border-radius: 10px;
+		border: 1px solid #27272a;
+		background: #0e0e10;
+	}
+
+	.composite-image {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	.badge-flash {
+		position: absolute;
+		width: 22px;
+		height: 22px;
+		margin-left: -11px;
+		margin-top: -11px;
+		border-radius: 50%;
+		border: 2px solid #4ade80;
+		box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+		pointer-events: none;
+		animation: badge-pulse 1.1s ease-out 1;
+	}
+
+	.badge-flash.reduced-motion {
+		animation: none;
+		box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.35);
+	}
+
+	@keyframes badge-pulse {
+		0% {
+			transform: scale(0.6);
+			opacity: 0;
+			box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+		}
+		30% {
+			opacity: 1;
+		}
+		100% {
+			transform: scale(1);
+			opacity: 0.9;
+			box-shadow: 0 0 0 10px rgba(74, 222, 128, 0);
+		}
+	}
+
+	.result-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.btn {
+		font-size: 0.8rem;
+		padding: 0.5rem 0.85rem;
+		border-radius: 6px;
+		border: 1px solid #3f3f46;
+		background: #27272a;
+		color: #e4e4e7;
+		cursor: pointer;
+	}
+
+	.btn.ghost {
+		background: transparent;
+		color: #a1a1aa;
+	}
+
+	.btn.primary {
+		background: #fbbf24;
+		border-color: #fbbf24;
+		color: #241804;
+		font-weight: 650;
+	}
+
+	.btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.btn.small {
+		font-size: 0.7rem;
+		padding: 0.3rem 0.55rem;
+	}
+
+	/* ---- manual-correction surface ---- */
+	.manual-surface {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		border: 1px solid #3f3f46;
+		border-radius: 10px;
+		padding: 1rem;
+		background: #18181b;
+	}
+
+	.manual-tabs {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.manual-tab {
+		font-size: 0.8rem;
+		padding: 0.4rem 0.8rem;
+		border-radius: 6px;
+		border: 1px solid #3f3f46;
+		background: #27272a;
+		color: #a1a1aa;
+		cursor: pointer;
+	}
+
+	.manual-tab.active {
+		border-color: #fbbf24;
+		color: #f4f4f5;
+	}
+
 	.stage-canvas {
 		position: relative;
 		width: 100%;
 		aspect-ratio: 16 / 9;
-		min-height: 320px;
+		min-height: 280px;
 		max-height: 70vh;
 		background: #0e0e10;
 		overflow: hidden;
+		border-radius: 8px;
 	}
 
 	.stage-workspace {
@@ -2601,86 +2797,6 @@
 		color: #a1a1aa;
 	}
 
-	.crop-proposal {
-		position: absolute;
-		top: 12px;
-		left: 12px;
-		right: 12px;
-		z-index: 6;
-		max-height: calc(100% - 24px);
-		overflow-y: auto;
-		padding: 0.85rem 1rem;
-		border-radius: 8px;
-		background: #0f2320;
-		border: 1px solid #2e5c48;
-		font-size: 0.8rem;
-	}
-
-	.crop-proposal h4 {
-		margin: 0 0 0.4rem;
-		font-size: 0.9rem;
-	}
-
-	.crop-proposal p {
-		margin: 0 0 0.4rem;
-		color: #a1a1aa;
-	}
-
-	.crop-proposal .crop-zoom-block {
-		margin-bottom: 0.5rem;
-	}
-
-	.proposal-actions {
-		display: flex;
-		gap: 0.5rem;
-		margin-top: 0.5rem;
-	}
-
-	.apply-crop-button {
-		background: #2dd4bf;
-		color: #04211f;
-		border: none;
-		font-weight: 600;
-	}
-
-	.proposal-actions button {
-		font-size: 0.75rem;
-		padding: 0.4rem 0.7rem;
-		border-radius: 6px;
-		border: 1px solid #3f3f46;
-		background: #27272a;
-		color: #e4e4e7;
-		cursor: pointer;
-	}
-
-	/* ---- fine-tune drawer (bottom sheet) ---- */
-	.finetune-drawer {
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: #18181b;
-		border-top: 1px solid #3f3f46;
-		transform: translateY(100%);
-		transition: transform 0.4s cubic-bezier(0.4, 0.7, 0.25, 1);
-		padding: 1rem 1.25rem;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 1.5rem;
-		z-index: 7;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.finetune-drawer,
-		.export-panel {
-			transition-duration: 0.01ms;
-		}
-	}
-
-	.finetune-drawer.open {
-		transform: translateY(0);
-	}
-
 	.tool-block h3 {
 		margin: 0 0 0.5rem;
 		font-size: 0.7rem;
@@ -2749,182 +2865,21 @@
 		margin-top: 0.6rem;
 	}
 
-	.drawer-close {
-		position: absolute;
-		top: 0.5rem;
-		right: 0.75rem;
-		background: none;
-		border: none;
-		color: #71717a;
-		cursor: pointer;
-		font-size: 0.75rem;
-	}
-
-	.btn {
-		font-size: 0.75rem;
-		padding: 0.4rem 0.7rem;
-		border-radius: 6px;
-		border: 1px solid #3f3f46;
-		background: #27272a;
-		color: #e4e4e7;
-		cursor: pointer;
-	}
-
-	.btn.ghost {
-		background: transparent;
-		color: #a1a1aa;
-	}
-
-	.btn.primary {
-		background: #fbbf24;
-		border-color: #fbbf24;
-		color: #241804;
-		font-weight: 650;
-	}
-
-	.btn:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-
-	.btn.small {
-		font-size: 0.7rem;
-		padding: 0.3rem 0.55rem;
-	}
-
-	/* ---- export drawer (right slide-in) ---- */
-	.export-panel {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		width: min(100%, 320px);
-		background: #18181b;
-		border-left: 1px solid #3f3f46;
-		transform: translateX(100%);
-		transition: transform 0.5s cubic-bezier(0.4, 0.7, 0.25, 1);
-		padding: 1.1rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		z-index: 8;
-		overflow-y: auto;
-	}
-
-	.export-panel.open {
-		transform: translateX(0);
-	}
-
-	.export-panel .sub {
-		margin: 0 0 0.4rem;
-		font-size: 0.75rem;
-		color: #a1a1aa;
-	}
-
-	.export-card {
-		border: 1px solid #3f3f46;
-		border-radius: 8px;
-		padding: 0.75rem;
-		background: #0e0e10;
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-	}
-
-	.export-card.primary {
-		border-color: #fbbf24;
-		background: #1b1608;
-	}
-
-	.export-card h4 {
-		margin: 0;
-		font-size: 0.8rem;
-	}
-
-	.export-card p {
-		margin: 0;
-		font-size: 0.7rem;
-		color: #a1a1aa;
-		line-height: 1.4;
-	}
-
-	.preview-note {
-		margin: 0.75rem 1.25rem 0;
-		font-size: 0.7rem;
-	}
-
 	.stage-readiness {
-		margin: 0.35rem 1.25rem 0;
+		margin: 0;
 		font-size: 0.7rem;
 		color: #a1a1aa;
 	}
 
-	/* ---- bottom action bar ---- */
-	.stage-actions {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-		padding: 0.9rem 1.25rem;
-		border-top: 1px solid #27272a;
+	.manual-rotation-warning {
+		margin: 0;
+		font-size: 0.7rem;
+		color: #fbbf24;
 	}
 
-	.finetune-link {
-		font-size: 0.8rem;
-		color: #a1a1aa;
-		background: none;
-		border: none;
-		cursor: pointer;
-		text-decoration: underline;
-		text-underline-offset: 3px;
-	}
-
-	.finetune-link:hover {
-		color: #e4e4e7;
-	}
-
-	/* ---- replace-confirmation modal ---- */
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 20;
-	}
-
-	.modal {
-		background: #18181b;
-		border: 1px solid #3f3f46;
-		border-radius: 10px;
-		padding: 1.25rem;
-		max-width: 26rem;
-	}
-
-	.modal h3 {
-		margin: 0 0 0.6rem;
-	}
-
-	.modal p {
-		margin: 0 0 1rem;
-		font-size: 0.85rem;
-		color: #a1a1aa;
-	}
-
-	.modal-actions {
+	.manual-actions {
 		display: flex;
 		justify-content: flex-end;
 		gap: 0.5rem;
-	}
-
-	.modal-actions button {
-		font-size: 0.8rem;
-		padding: 0.4rem 0.8rem;
-		border-radius: 6px;
-		border: 1px solid #3f3f46;
-		background: #27272a;
-		color: #e4e4e7;
-		cursor: pointer;
 	}
 </style>

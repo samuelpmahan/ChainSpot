@@ -2,19 +2,24 @@
  * Canonical transform application, inverse, and derived-value math shared by
  * both alignment models. Preview and persistence code must consume these
  * functions rather than reimplementing the formulas.
+ *
+ * The underlying six-coefficient math is `src/lib/geometry/affine6.ts`,
+ * shared with the CHSPT-55 source-provenance/stitch feature
+ * (`domain/provenance.ts`) so both features apply/invert/derive from one
+ * tested implementation. This module's own public API and behavior are
+ * unchanged by that extraction — it only re-expresses `SerializableTransform`
+ * in terms of the shared primitives.
  */
 
+import { applyAffine6, deriveAffine6Values, invertAffine6 } from '../geometry/affine6';
+import type { Affine6DerivedValues } from '../geometry/affine6';
 import type { AlignmentPoint, SerializableTransform } from './types';
 
-/** Determinant threshold below which a 2x2 linear part is treated as singular. */
-export const DETERMINANT_TOLERANCE = 1e-12;
+/** Determinant threshold below which a 2x2 linear part is treated as singular. Re-exported from `geometry/affine6.ts` for existing callers. */
+export { DETERMINANT_TOLERANCE } from '../geometry/affine6';
 
 export function applyTransform(point: AlignmentPoint, transform: SerializableTransform): AlignmentPoint {
-	const [a, b, c, d, e, f] = transform.coefficients;
-	return {
-		xPx: a * point.xPx + c * point.yPx + e,
-		yPx: b * point.xPx + d * point.yPx + f
-	};
+	return applyAffine6(point, transform.coefficients);
 }
 
 export function transformPoints(
@@ -30,20 +35,8 @@ export function transformPoints(
  * `[d -b -c a (c*f - d*e) (b*e - a*f)] / det`.
  */
 export function invertTransform(transform: SerializableTransform): SerializableTransform | null {
-	const [a, b, c, d, e, f] = transform.coefficients;
-	const determinant = a * d - b * c;
-	if (!Number.isFinite(determinant) || Math.abs(determinant) < DETERMINANT_TOLERANCE) {
-		return null;
-	}
-	const invDet = 1 / determinant;
-	const coefficients: [number, number, number, number, number, number] = [
-		d * invDet,
-		-b * invDet,
-		-c * invDet,
-		a * invDet,
-		(c * f - d * e) * invDet,
-		(b * e - a * f) * invDet
-	];
+	const coefficients = invertAffine6(transform.coefficients);
+	if (!coefficients) return null;
 	return {
 		model: transform.model,
 		coefficients,
@@ -51,48 +44,14 @@ export function invertTransform(transform: SerializableTransform): SerializableT
 	};
 }
 
-export interface DerivedTransformValues {
-	readonly isInvertible: boolean;
-	readonly determinant: number;
-	readonly orientation: number;
-	readonly majorAxisScale: number;
-	readonly minorAxisScale: number;
-	readonly anisotropy: number;
-	readonly shear: number;
-}
+export type DerivedTransformValues = Affine6DerivedValues;
 
 /**
  * Derived values for the linear part with rows [a b; c d] (i.e. columns
- * (a, b) and (c, d)):
- *
- * - determinant/orientation: det = a*d - b*c; orientation is its sign;
- * - axis scales: the two singular values, computed in closed form from
- *   trace(A^T A) = a^2 + b^2 + c^2 + d^2 and det^2;
- * - anisotropy: minor/major ratio in [0, 1] (1 for similarity);
- * - shear: |u.v| / (sigma1*sigma2), the cotangent of the angle between the
- *   mapped axes (0 for similarity, large for strongly sheared maps).
+ * (a, b) and (c, d)): determinant/orientation, the two singular-value axis
+ * scales, anisotropy, and shear. See `geometry/affine6.ts`'s
+ * `deriveAffine6Values` for the full derivation.
  */
 export function deriveTransformValues(a: number, b: number, c: number, d: number): DerivedTransformValues {
-	const finite =
-		Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(d);
-	const determinant = a * d - b * c;
-	const isInvertible = finite && Math.abs(determinant) >= DETERMINANT_TOLERANCE;
-	const orientation = finite ? Math.sign(determinant) : 0;
-	const trace = a * a + b * b + c * c + d * d;
-	const discriminant = Math.max(trace * trace - 4 * determinant * determinant, 0);
-	const sqrtDiscriminant = Math.sqrt(discriminant);
-	const majorAxisScale = Math.sqrt((trace + sqrtDiscriminant) / 2);
-	const minorAxisScale = Math.sqrt(Math.max((trace - sqrtDiscriminant) / 2, 0));
-	const scaleProduct = majorAxisScale * minorAxisScale;
-	const anisotropy = scaleProduct > 0 ? minorAxisScale / majorAxisScale : 0;
-	const shear = scaleProduct > 0 ? Math.abs(a * c + b * d) / scaleProduct : 0;
-	return {
-		isInvertible,
-		determinant,
-		orientation,
-		majorAxisScale,
-		minorAxisScale,
-		anisotropy,
-		shear
-	};
+	return deriveAffine6Values(a, b, c, d);
 }

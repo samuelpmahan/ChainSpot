@@ -18,6 +18,18 @@
  *
  * Analysis never touches the network: decode, rasters, and matching are all
  * local browser resources that become unreachable once the batch settles.
+ *
+ * CHSPT-55/56: this module's own exports (`smartImportFiles`/
+ * `smartImportViaWorker`/`SmartImportResult`'s `{xPx,yPx,visible}`
+ * `TilePlacement`s) are the LEGACY translation-only path today's Stitch Map
+ * UI and `smartStitch.worker.ts` still depend on — kept exactly as-is here,
+ * unchanged, since the ordinary 2x2 axis-aligned case regression guarantee
+ * runs through this exact code. `runStitchPipeline`/`renderPipelineComposite`
+ * (`pipelineResult.ts`'s locked boundary with the new auto-first UI) are
+ * implemented in `stitchPipeline.ts`/`renderComposite.ts` and re-exported
+ * below, rather than folded into this file, so the two paths — one still
+ * `TilePlacement`-shaped, one `DraftComposite`/`SourceTransform`-shaped —
+ * never entangle.
  */
 import { isSupportedMimeType, decodeImageFile } from '../imageIntake';
 import type { DecodedImage, DecodeImageFile } from '../imageIntake';
@@ -532,3 +544,12 @@ function analyzeInWorker(
 		);
 	});
 }
+
+// ---------------------------------------------------------------------------
+// CHSPT-55/56: `pipelineResult.ts`'s locked boundary with the auto-first
+// Stitch Map UI. See this module's own doc comment for why the
+// implementation lives in `stitchPipeline.ts`/`renderComposite.ts` rather
+// than here.
+// ---------------------------------------------------------------------------
+export { runStitchPipeline, renderPipelineComposite } from './stitchPipeline';
+export type { StitchPipelineOptions, PipelineRenderEnv, RgbaBuffer } from './stitchPipeline';

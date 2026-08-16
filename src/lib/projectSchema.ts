@@ -45,6 +45,27 @@
  * are the same state and must have exactly one representation. An empty array is
  * likewise normalized to `undefined` on both read and write.
  *
+ * v5 -> v6: adds optional `provenance` on an image manifest (`ImageAsset.provenance`,
+ * CHSPT-49/55's `CompositeProvenance` from `domain/provenance.ts`) — how a
+ * `source-overview` image's exact pixels were derived from original capture(s) via
+ * AutoCrop/AutoStitch. Absent on v1-v5 documents (and on every `target-basemap` image,
+ * and on a `source-overview` image uploaded directly with no stitch pipeline run), which
+ * migrate to absent — the same "one representation of absent" rule `walkingPath` already
+ * uses: a `null` manifest value normalizes to the same absent state as an omitted key, on
+ * both read and write. A present `provenance` is validated with
+ * `assertCoherentProvenance` (structural self-consistency: coverage polygons match
+ * `transform(crop)`, `paintOrder` is a permutation, overlap edges reference known
+ * sources) and cross-checked against the owning image's own `sha256` (`assertCoherent-
+ * Provenance` deliberately does not do this cross-check itself — see its own doc — so
+ * this module does it at the point where it actually has both values). Either violation
+ * is a structured `provenance` category `ProjectSchemaError`, never a silent drop: CHSPT-
+ * 49 requires failing loudly on contradictory lineage. The transform's redundant derived
+ * fields (`isInvertible`/`determinant`/`orientation`/axis scales/`shear`) are never
+ * trusted from the document — they are always recomputed from `model` + `coefficients`
+ * via `buildSourceTransform`, the same shared `geometry/affine6.ts` math that produced
+ * them in the first place, so a hand-edited or foreign document can never smuggle in a
+ * self-inconsistent transform.
+ *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
  * are only checked (never trusted) on load. A present finite normalized value that does
@@ -94,12 +115,32 @@ import type {
 	ViewTransformState
 } from './domain/project';
 import { IMAGE_ROLES } from './domain/project';
+import {
+	assertCoherentProvenance,
+	buildSourceTransform,
+	CURRENT_PROVENANCE_SCHEMA_VERSION,
+	ProvenanceCoherenceError
+} from './domain/provenance';
+import type {
+	CompositeProvenance,
+	CompositingPolicy,
+	OverlapKind,
+	ProvenanceOrigin,
+	ResamplingMethod,
+	SourceCapture,
+	SourceCaptureOrigin,
+	SourceCropRect,
+	SourceOverlapEdge,
+	SourceTransform,
+	SourceTransformModel
+} from './domain/provenance';
+import type { Affine6Coefficients } from './geometry/affine6';
 
 /** The schema version written by this build. */
-export const CURRENT_SCHEMA_VERSION = 5 as const;
+export const CURRENT_SCHEMA_VERSION = 6 as const;
 
 /** Every version this build can read; older ones are migrated forward on parse. */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -128,7 +169,7 @@ export interface NumberBadgeAnchorDoc {
 }
 
 export interface ProjectDocumentV4 {
-	schemaVersion: 5;
+	schemaVersion: 6;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
@@ -152,7 +193,8 @@ export type ProjectSchemaErrorCategory =
 	| 'normalized'
 	| 'hole'
 	| 'badge'
-	| 'view';
+	| 'view'
+	| 'provenance';
 
 export interface ProjectSchemaError {
 	category: ProjectSchemaErrorCategory;
@@ -373,6 +415,287 @@ function readProject(input: unknown): ProjectMetadata {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// CompositeProvenance (v6+)
+// ---------------------------------------------------------------------------
+
+function readFiniteNumber(input: unknown, path: string): number {
+	if (typeof input !== 'number' || !Number.isFinite(input)) {
+		throw failure(
+			'provenance',
+			'provenance.number.invalid',
+			path,
+			`${path} must be a finite number, got ${describeValue(input)}`
+		);
+	}
+	return input;
+}
+
+function readNonNegativeInteger(input: unknown, path: string): number {
+	if (typeof input !== 'number' || !Number.isInteger(input) || input < 0) {
+		throw failure(
+			'provenance',
+			'provenance.integer.invalid',
+			path,
+			`${path} must be a non-negative integer, got ${describeValue(input)}`
+		);
+	}
+	return input;
+}
+
+const PROVENANCE_TRANSFORM_MODELS: readonly SourceTransformModel[] = ['translation', 'similarity', 'affine'];
+const PROVENANCE_COMPOSITING_POLICIES: readonly CompositingPolicy[] = [
+	'single-source-v1',
+	'stitch-ascending-bottom-right-v1'
+];
+const PROVENANCE_RESAMPLING_METHODS: readonly ResamplingMethod[] = ['none', 'nearest', 'bilinear'];
+const PROVENANCE_OVERLAP_KINDS: readonly OverlapKind[] = ['placement-edge', 'fusion-edge'];
+const PROVENANCE_ORIGIN_VALUES: readonly ProvenanceOrigin[] = ['auto', 'manual'];
+
+function readAffine6Coefficients(input: unknown, path: string): Affine6Coefficients {
+	if (!Array.isArray(input) || input.length !== 6) {
+		throw failure(
+			'provenance',
+			'provenance.transform.coefficients.invalid',
+			path,
+			`${path} must be an array of exactly 6 finite numbers, got ${describeValue(input)}`
+		);
+	}
+	const values = input.map((value, index) => readFiniteNumber(value, `${path}[${index}]`));
+	return values as unknown as Affine6Coefficients;
+}
+
+/**
+ * Reads `model` + `coefficients` and rebuilds the full `SourceTransform` via the shared
+ * `buildSourceTransform` (same as `domain/provenance.ts`'s own constructors) — the
+ * redundant derived fields (`isInvertible`/`determinant`/`orientation`/axis scales/
+ * `shear`) on the document are never trusted; they are always recomputed from the two
+ * ground-truth fields (see the v5->v6 migration note in the module doc above).
+ */
+function readSourceTransform(input: unknown, path: string): SourceTransform {
+	const object = readObject(input, path, 'source transform');
+	if (!PROVENANCE_TRANSFORM_MODELS.includes(object.model as SourceTransformModel)) {
+		throw failure(
+			'provenance',
+			'provenance.transform.model.invalid',
+			`${path}.model`,
+			`${path}.model must be one of ${PROVENANCE_TRANSFORM_MODELS.join(', ')}, got ${describeValue(object.model)}`
+		);
+	}
+	const coefficients = readAffine6Coefficients(object.coefficients, `${path}.coefficients`);
+	return buildSourceTransform(object.model as SourceTransformModel, coefficients);
+}
+
+function readSourceCropRect(input: unknown, path: string): SourceCropRect {
+	const object = readObject(input, path, 'source crop rect');
+	return {
+		xPx: readFiniteNumber(object.xPx, `${path}.xPx`),
+		yPx: readFiniteNumber(object.yPx, `${path}.yPx`),
+		widthPx: readFiniteNumber(object.widthPx, `${path}.widthPx`),
+		heightPx: readFiniteNumber(object.heightPx, `${path}.heightPx`)
+	};
+}
+
+function readCompositePoint(input: unknown, path: string): { xPx: number; yPx: number } {
+	const object = readObject(input, path, 'composite point');
+	return {
+		xPx: readFiniteNumber(object.xPx, `${path}.xPx`),
+		yPx: readFiniteNumber(object.yPx, `${path}.yPx`)
+	};
+}
+
+function readCoveragePolygon(input: unknown, path: string): SourceCapture['coveragePolygon'] {
+	if (!Array.isArray(input)) {
+		throw failure('provenance', 'provenance.coveragePolygon.invalid', path, `${path} must be an array`);
+	}
+	return input.map((point, index) => readCompositePoint(point, `${path}[${index}]`));
+}
+
+function readProvenanceOrigin(input: unknown, path: string): ProvenanceOrigin {
+	if (!PROVENANCE_ORIGIN_VALUES.includes(input as ProvenanceOrigin)) {
+		throw failure(
+			'provenance',
+			'provenance.origin.invalid',
+			path,
+			`${path} must be one of ${PROVENANCE_ORIGIN_VALUES.join(', ')}, got ${describeValue(input)}`
+		);
+	}
+	return input as ProvenanceOrigin;
+}
+
+/**
+ * `origin` differentiates automatic detection from a user's manual
+ * correction, per-property (crop vs. transform independently) — see
+ * `domain/provenance.ts`'s `SourceCaptureOrigin` doc comment. Required on
+ * every `SourceCapture` in schema v6 (this field was part of v6 from its
+ * introduction in this same bundle; there is no pre-existing v6 document
+ * without it to migrate).
+ */
+function readSourceCaptureOrigin(input: unknown, path: string): SourceCaptureOrigin {
+	const object = readObject(input, path, 'source capture origin');
+	return {
+		crop: readProvenanceOrigin(object.crop, `${path}.crop`),
+		transform: readProvenanceOrigin(object.transform, `${path}.transform`)
+	};
+}
+
+function readSourceCapture(input: unknown, path: string): SourceCapture {
+	const object = readObject(input, path, 'source capture');
+	return {
+		sourceId: readNonEmptyString(object.sourceId, `${path}.sourceId`),
+		fileName: readString(object.fileName, `${path}.fileName`),
+		mimeType: readString(object.mimeType, `${path}.mimeType`),
+		widthPx: readPositiveInt(object.widthPx, `${path}.widthPx`),
+		heightPx: readPositiveInt(object.heightPx, `${path}.heightPx`),
+		sha256: readNonEmptyString(object.sha256, `${path}.sha256`),
+		crop: readSourceCropRect(object.crop, `${path}.crop`),
+		transform: readSourceTransform(object.transform, `${path}.transform`),
+		origin: readSourceCaptureOrigin(object.origin, `${path}.origin`),
+		coveragePolygon: readCoveragePolygon(object.coveragePolygon, `${path}.coveragePolygon`),
+		paintOrder: readNonNegativeInteger(object.paintOrder, `${path}.paintOrder`)
+	};
+}
+
+function readOverlapEdge(input: unknown, path: string): SourceOverlapEdge {
+	const object = readObject(input, path, 'source overlap edge');
+	if (!PROVENANCE_OVERLAP_KINDS.includes(object.kind as OverlapKind)) {
+		throw failure(
+			'provenance',
+			'provenance.overlap.kind.invalid',
+			`${path}.kind`,
+			`${path}.kind must be one of ${PROVENANCE_OVERLAP_KINDS.join(', ')}, got ${describeValue(object.kind)}`
+		);
+	}
+	return {
+		a: readNonEmptyString(object.a, `${path}.a`),
+		b: readNonEmptyString(object.b, `${path}.b`),
+		kind: object.kind as OverlapKind,
+		score: readFiniteNumber(object.score, `${path}.score`)
+	};
+}
+
+function readProvenanceSchemaVersion(input: unknown, path: string): CompositeProvenance['schemaVersion'] {
+	if (input !== CURRENT_PROVENANCE_SCHEMA_VERSION) {
+		throw failure(
+			'provenance',
+			'provenance.schemaVersion.unsupported',
+			path,
+			`${path} must be ${CURRENT_PROVENANCE_SCHEMA_VERSION}, got ${describeValue(input)}`
+		);
+	}
+	return input;
+}
+
+function readCompositingPolicy(input: unknown, path: string): CompositingPolicy {
+	if (!PROVENANCE_COMPOSITING_POLICIES.includes(input as CompositingPolicy)) {
+		throw failure(
+			'provenance',
+			'provenance.compositingPolicy.invalid',
+			path,
+			`${path} must be one of ${PROVENANCE_COMPOSITING_POLICIES.join(', ')}, got ${describeValue(input)}`
+		);
+	}
+	return input as CompositingPolicy;
+}
+
+function readResamplingMethod(input: unknown, path: string): ResamplingMethod {
+	if (!PROVENANCE_RESAMPLING_METHODS.includes(input as ResamplingMethod)) {
+		throw failure(
+			'provenance',
+			'provenance.resampling.invalid',
+			path,
+			`${path} must be one of ${PROVENANCE_RESAMPLING_METHODS.join(', ')}, got ${describeValue(input)}`
+		);
+	}
+	return input as ResamplingMethod;
+}
+
+/**
+ * Reads and validates one image's `CompositeProvenance`: structural fields, then
+ * `assertCoherentProvenance` (coverage polygons match `transform(crop)`, `paintOrder` is
+ * a permutation, overlap edges reference known sources — see its own doc for the full
+ * list), then the one cross-check `assertCoherentProvenance` deliberately leaves to its
+ * callers — `finalRasterSha256` must equal the owning image's own `sha256` once both are
+ * present, so a save/open can never end up with a provenance record silently describing
+ * different bytes than the image it is attached to. Every violation is a structured
+ * `provenance`-category `ProjectSchemaError`; CHSPT-49 requires failing loudly on
+ * contradictory lineage, never silently dropping or coercing it.
+ */
+function readCompositeProvenance(input: unknown, path: string, imageSha256: string | null): CompositeProvenance {
+	const object = readObject(input, path, 'composite provenance');
+	if (!Array.isArray(object.sources)) {
+		throw failure(
+			'provenance',
+			'provenance.sources.invalid',
+			`${path}.sources`,
+			`${path}.sources must be an array`
+		);
+	}
+	if (!Array.isArray(object.overlaps)) {
+		throw failure(
+			'provenance',
+			'provenance.overlaps.invalid',
+			`${path}.overlaps`,
+			`${path}.overlaps must be an array`
+		);
+	}
+	const provenance: CompositeProvenance = {
+		schemaVersion: readProvenanceSchemaVersion(object.schemaVersion, `${path}.schemaVersion`),
+		renderVersion: readNonEmptyString(object.renderVersion, `${path}.renderVersion`),
+		outputWidthPx: readFiniteNumber(object.outputWidthPx, `${path}.outputWidthPx`),
+		outputHeightPx: readFiniteNumber(object.outputHeightPx, `${path}.outputHeightPx`),
+		compositingPolicy: readCompositingPolicy(object.compositingPolicy, `${path}.compositingPolicy`),
+		resampling: readResamplingMethod(object.resampling, `${path}.resampling`),
+		sources: object.sources.map((source, index) => readSourceCapture(source, `${path}.sources[${index}]`)),
+		overlaps: object.overlaps.map((edge, index) => readOverlapEdge(edge, `${path}.overlaps[${index}]`)),
+		finalRasterSha256: readNonEmptyString(object.finalRasterSha256, `${path}.finalRasterSha256`)
+	};
+	try {
+		assertCoherentProvenance(provenance);
+	} catch (caught) {
+		if (caught instanceof ProvenanceCoherenceError) {
+			throw failure('provenance', 'provenance.incoherent', path, caught.message);
+		}
+		throw caught;
+	}
+	if (imageSha256 !== null && imageSha256 !== provenance.finalRasterSha256) {
+		throw failure(
+			'provenance',
+			'provenance.hash-mismatch',
+			`${path}.finalRasterSha256`,
+			`${path}.finalRasterSha256 (${provenance.finalRasterSha256}) does not match the owning image's sha256 (${imageSha256})`
+		);
+	}
+	return provenance;
+}
+
+/**
+ * Reads the optional per-image `provenance` (v6+). Absent/`null` normalizes to fully
+ * absent (no key at all) on every version, including a v6 document whose image never
+ * went through AutoCrop/AutoStitch — the same "one representation of absent" rule
+ * `readWalkingPath` uses for its own field. Only a `source-overview` image may carry
+ * one; a `target-basemap` manifest with a present `provenance` is a structured failure
+ * rather than a silently ignored field, since quietly dropping it could hide a real
+ * upstream bug that put it there.
+ */
+function readImageProvenance(
+	input: unknown,
+	path: string,
+	role: ImageRole,
+	imageSha256: string | null
+): CompositeProvenance | undefined {
+	if (input === undefined || input === null) return undefined;
+	if (role !== 'source-overview') {
+		throw failure(
+			'provenance',
+			'provenance.role-invalid',
+			path,
+			`${path} may only be present on a 'source-overview' image, found on a '${role}' image`
+		);
+	}
+	return readCompositeProvenance(input, path, imageSha256);
+}
+
 function readImages(input: unknown): ImageAsset[] {
 	if (!Array.isArray(input)) {
 		throw failure('required-type', 'required.missing', 'images', 'images must be an array');
@@ -383,6 +706,8 @@ function readImages(input: unknown): ImageAsset[] {
 	for (let index = 0; index < input.length; index++) {
 		const object = readObject(input[index], `images[${index}]`, 'image manifest');
 		const role = readRole(object.role, `images[${index}].role`);
+		const sha256 = readStringOrNull(object.sha256, `images[${index}].sha256`);
+		const provenance = readImageProvenance(object.provenance, `images[${index}].provenance`, role, sha256);
 		const image: ImageAsset = {
 			id: readNonEmptyString(object.id, `images[${index}].id`),
 			role,
@@ -390,8 +715,9 @@ function readImages(input: unknown): ImageAsset[] {
 			mimeType: readString(object.mimeType, `images[${index}].mimeType`),
 			widthPx: readPositiveInt(object.widthPx, `images[${index}].widthPx`),
 			heightPx: readPositiveInt(object.heightPx, `images[${index}].heightPx`),
-			sha256: readStringOrNull(object.sha256, `images[${index}].sha256`),
-			bundlePath: readStringOrNull(object.bundlePath, `images[${index}].bundlePath`)
+			sha256,
+			bundlePath: readStringOrNull(object.bundlePath, `images[${index}].bundlePath`),
+			...(provenance !== undefined ? { provenance } : {})
 		};
 		if (role === 'source-overview') sourceCount++;
 		else targetCount++;
@@ -956,11 +1282,65 @@ function buildPoint(
 }
 
 /**
+ * Rebuilds a `SourceTransform` field-by-field for the document (never spread), matching
+ * the rest of this module's "unknown properties cannot survive a round trip" rule. The
+ * derived fields are re-emitted from the in-memory value as-is (unlike the reader, which
+ * recomputes them via `buildSourceTransform` instead of trusting the document) because by
+ * this point `validateState`/parsing has already guaranteed every in-memory
+ * `SourceTransform` came from `buildSourceTransform` in the first place.
+ */
+function buildSourceTransformDoc(transform: SourceTransform): SourceTransform {
+	return {
+		model: transform.model,
+		coefficients: [...transform.coefficients] as Affine6Coefficients,
+		isInvertible: transform.isInvertible,
+		determinant: transform.determinant,
+		orientation: transform.orientation,
+		majorAxisScale: transform.majorAxisScale,
+		minorAxisScale: transform.minorAxisScale,
+		anisotropy: transform.anisotropy,
+		shear: transform.shear
+	};
+}
+
+function buildSourceCaptureDoc(source: SourceCapture): SourceCapture {
+	return {
+		sourceId: source.sourceId,
+		fileName: source.fileName,
+		mimeType: source.mimeType,
+		widthPx: source.widthPx,
+		heightPx: source.heightPx,
+		sha256: source.sha256,
+		crop: { xPx: source.crop.xPx, yPx: source.crop.yPx, widthPx: source.crop.widthPx, heightPx: source.crop.heightPx },
+		transform: buildSourceTransformDoc(source.transform),
+		origin: { crop: source.origin.crop, transform: source.origin.transform },
+		coveragePolygon: source.coveragePolygon.map((point) => ({ xPx: point.xPx, yPx: point.yPx })),
+		paintOrder: source.paintOrder
+	};
+}
+
+function buildProvenanceDoc(provenance: CompositeProvenance): CompositeProvenance {
+	return {
+		schemaVersion: provenance.schemaVersion,
+		renderVersion: provenance.renderVersion,
+		outputWidthPx: provenance.outputWidthPx,
+		outputHeightPx: provenance.outputHeightPx,
+		compositingPolicy: provenance.compositingPolicy,
+		resampling: provenance.resampling,
+		sources: provenance.sources.map(buildSourceCaptureDoc),
+		overlaps: provenance.overlaps.map((edge) => ({ a: edge.a, b: edge.b, kind: edge.kind, score: edge.score })),
+		finalRasterSha256: provenance.finalRasterSha256
+	};
+}
+
+/**
  * Validates durable `ProjectState` and throws a structured `ProjectSchemaError` on any
  * invalid domain value (non-finite or out-of-bounds coordinates, missing image role,
  * duplicate/colliding ids, invalid dimensions, incomplete/wrong references, invalid view
  * state). This prevalidation guarantees a serialized document can never contain a
- * non-finite value that would be silently stringified as JSON `null`.
+ * non-finite value that would be silently stringified as JSON `null`. `readImages` (part
+ * of that validation) also runs `assertCoherentProvenance` and the `finalRasterSha256`
+ * cross-check on any `provenance` present, so an incoherent one can never reach `write`.
  */
 function validateState(state: ProjectState): void {
 	const project = readProject(state.project);
@@ -1019,7 +1399,10 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV4 {
 			widthPx: image.widthPx,
 			heightPx: image.heightPx,
 			sha256: image.sha256,
-			bundlePath: image.bundlePath
+			bundlePath: image.bundlePath,
+			// `null` and absent both normalize to "no key" — see the v5->v6 migration note
+			// in the module doc for why (mirrors walkingPath's empty-array normalization).
+			...(image.provenance != null ? { provenance: buildProvenanceDoc(image.provenance) } : {})
 		})),
 		controlPointPairs: state.controlPointPairs.map((pair) => ({
 			id: pair.id,
