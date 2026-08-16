@@ -251,6 +251,16 @@
 	let yInput = $state<HTMLInputElement | null>(null);
 	/** Transient marker-overlay visibility; rendering only, never durable state. */
 	let markersVisible = $state(true);
+	/**
+	 * Transient live registration-preview overlay visibility (P1-006). A
+	 * dedicated toggle rather than piggybacking on `markersVisible`: the ghost
+	 * course and the correspondence markers answer different questions ("does
+	 * the whole course line up?" vs. "where exactly are my control points?")
+	 * and a user comparing registration quality may want the ghost course
+	 * without the marker clutter, or vice versa. Rendering only, never durable
+	 * state.
+	 */
+	let ghostCoursePreviewVisible = $state(true);
 	let pendingDiscard = $state<{
 		role: ImageRole;
 		count: number;
@@ -608,6 +618,11 @@
 				markersVisible = !markersVisible;
 				return;
 			}
+			if (key === 'g') {
+				event.preventDefault();
+				ghostCoursePreviewVisible = !ghostCoursePreviewVisible;
+				return;
+			}
 		}
 
 		if (
@@ -880,6 +895,7 @@
 		correspondenceError = null;
 		clearPointSelection();
 		markersVisible = true;
+		ghostCoursePreviewVisible = true;
 		repairCandidate = null;
 		repairError = null;
 		pendingRepairDiscard = null;
@@ -1949,6 +1965,19 @@
 		</button>
 		<button
 			type="button"
+			class="marker-toggle"
+			data-testid="toggle-ghost-course"
+			aria-pressed={ghostCoursePreviewVisible}
+			onclick={() => (ghostCoursePreviewVisible = !ghostCoursePreviewVisible)}
+			title={ghostCoursePreviewVisible
+				? 'Hide the live transformed-course preview on the target pane (G)'
+				: 'Show the live transformed-course preview on the target pane (G)'}
+			aria-keyshortcuts="G"
+		>
+			{ghostCoursePreviewVisible ? 'Hide course preview (G)' : 'Show course preview (G)'}
+		</button>
+		<button
+			type="button"
 			class="persistence-button"
 			data-testid="save-project"
 			bind:this={saveProjectButton}
@@ -2043,6 +2072,8 @@
 			correctionEnabled={correspondence.mode === 'neutral'}
 			{selection}
 			{markersVisible}
+			ghostCourse={graphicsMode.plans}
+			ghostCourseVisible={ghostCoursePreviewVisible}
 			{decode}
 			confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
 			onDomainChanged={onDomainChanged}

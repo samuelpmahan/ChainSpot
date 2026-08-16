@@ -1,21 +1,27 @@
 /**
  * ChainSpot pane scene composition (P0-005, P0-006).
  *
- * Establishes exactly the active Phase 0 scene responsibilities per pane:
+ * Establishes the active scene responsibilities per pane:
  * - `rasterLayer`: the decoded original rendered at the plain view transform;
+ * - `ghostCourseLayer`: a non-interactive live preview of the transformed
+ *   course geometry (P1-006, live registration preview), sitting above the
+ *   raster but below the control points so correspondence markers stay on
+ *   top and clearly clickable;
  * - `controlPointLayer`: image-space control-point markers (P0-007+);
  * - `interactionLayer`: reserved for pointer interaction content (P0-007+).
  *
- * No future registration-preview or extracted-overlay layers are created. Konva nodes
- * exist only here and never enter durable project state; the raster image is the
- * transient decoded browser image registered by the domain asset registry.
+ * Konva nodes exist only here and never enter durable project state; the raster
+ * image is the transient decoded browser image registered by the domain asset
+ * registry, and ghost-course geometry is purely derived from the current
+ * alignment transform — never written back into any domain state.
  *
  * View transform boundary (P0-006): a single plain `ViewTransformState` is the
  * authoritative transient view state for the pane. `applyTransform` is the only place
  * that view state reaches Konva and it applies the identical transform to every
- * image-space view group: the raster group and the control-point group (exposed as
- * `controlPointGroup` for P0-007 markers, which stay anchored in image space under
- * the same transform). The interaction layer is screen-space and is not transformed.
+ * image-space view group: the raster group, the ghost-course group, and the
+ * control-point group (exposed as `controlPointGroup` for P0-007 markers), all of
+ * which stay anchored in image space under the same transform. The interaction
+ * layer is screen-space and is not transformed.
  *
  * Rendering never resets navigation: `setImage` only swaps the raster content, and
  * stage dimensions change only through `setStageSize`.
@@ -108,6 +114,47 @@ export interface MarkerHitResult {
 	readonly kind: 'pending' | 'complete';
 }
 
+/** A target-image-space point, structurally identical to `holeGraphics.ts`'s `TargetPoint`. */
+export interface GhostPoint {
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+/**
+ * One hole's already-transformed geometry for the live registration-preview
+ * overlay (P1-006). Deliberately narrow and structurally compatible with
+ * `holeGraphics.ts`'s `HoleGraphicPlan` (callers pass a `HoleGraphicPlan[]`
+ * straight through) rather than importing that richer, export-focused type —
+ * this module only ever draws points, it never crops or frames.
+ */
+export interface GhostCourseHole {
+	readonly holeId: string;
+	readonly number: number;
+	readonly tee: GhostPoint | null;
+	readonly basket: GhostPoint | null;
+	readonly bends: readonly GhostPoint[];
+	/** Closed polygon; null when the hole has no complete tee-to-basket band to derive. */
+	readonly corridorBand: readonly GhostPoint[] | null;
+	/** [tee, ...bends, basket] with absent endpoints filtered out. */
+	readonly centerline: readonly GhostPoint[];
+}
+
+/**
+ * Ghost-course visual constants. Deliberately translucent and desaturated
+ * relative to `markerVisualSpec`'s correspondence-marker palette (opaque
+ * blue/amber/slate) so the two overlays stay visually distinct at a glance:
+ * this is a background reference, not an interactive control.
+ */
+const GHOST_CORRIDOR_FILL = 'rgba(56, 189, 248, 0.14)';
+const GHOST_CORRIDOR_STROKE = 'rgba(56, 189, 248, 0.55)';
+const GHOST_CENTERLINE_STROKE = 'rgba(226, 232, 240, 0.55)';
+const GHOST_TEE_FILL = 'rgba(74, 222, 128, 0.6)';
+const GHOST_BASKET_FILL = 'rgba(248, 113, 113, 0.6)';
+const GHOST_BEND_FILL = 'rgba(226, 232, 240, 0.55)';
+const GHOST_LABEL_FILL = 'rgba(255, 255, 255, 0.75)';
+const GHOST_TEE_BASKET_RADIUS = 7;
+const GHOST_BEND_RADIUS = 4;
+
 /**
  * Net scale applied to each marker group so its visual size stays screen-constant
  * in CSS pixels at every supported zoom level. The group sits inside the
@@ -122,6 +169,7 @@ export function markerVisualScale(zoom: number): { x: number; y: number } {
 
 export interface PaneScene {
 	readonly rasterLayer: Konva.Layer;
+	readonly ghostCourseLayer: Konva.Layer;
 	readonly controlPointLayer: Konva.Layer;
 	readonly interactionLayer: Konva.Layer;
 	/**
@@ -141,6 +189,16 @@ export interface PaneScene {
 	 * and correction keep working while the overlay is hidden.
 	 */
 	setMarkersVisible(visible: boolean): void;
+	/**
+	 * Replaces the live registration-preview scene objects from already-
+	 * target-space hole geometry (P1-006). Every node is non-listening — the
+	 * overlay never participates in `markerHitAt` or pointer claiming, so it can
+	 * never interfere with correspondence placement/editing regardless of
+	 * visibility or z-order.
+	 */
+	setGhostCourse(holes: readonly GhostCourseHole[]): void;
+	/** Transient ghost-course overlay visibility; rendering-only, same contract as `setMarkersVisible`. */
+	setGhostCourseVisible(visible: boolean): void;
 	setStageSize(width: number, height: number): void;
 	/**
 	 * True when the stage has a shape at `pointer` belonging to the control-point
@@ -171,14 +229,18 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 	});
 
 	const rasterLayer = new Konva.Layer({ name: 'rasterImageLayer' });
+	const ghostCourseLayer = new Konva.Layer({ name: 'ghostCourseLayer', listening: false });
 	const controlPointLayer = new Konva.Layer({ name: 'controlPointLayer' });
 	const interactionLayer = new Konva.Layer({ name: 'interactionLayer' });
 	stage.add(rasterLayer);
+	stage.add(ghostCourseLayer);
 	stage.add(controlPointLayer);
 	stage.add(interactionLayer);
 
 	const rasterGroup = new Konva.Group({ name: 'rasterViewGroup' });
 	rasterLayer.add(rasterGroup);
+	const ghostCourseGroup = new Konva.Group({ name: 'ghostCourseViewGroup', listening: false });
+	ghostCourseLayer.add(ghostCourseGroup);
 	const controlPointGroup = new Konva.Group({ name: 'controlPointViewGroup' });
 	controlPointLayer.add(controlPointGroup);
 
@@ -253,6 +315,110 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 		return group;
 	}
 
+	function pointsToFlat(points: readonly GhostPoint[]): number[] {
+		const flat: number[] = [];
+		for (const point of points) flat.push(point.xPx, point.yPx);
+		return flat;
+	}
+
+	/**
+	 * One hole's ghost geometry. Every node is `listening: false` and the parent
+	 * layer is itself non-listening, so the overlay is unreachable from
+	 * `stage.getIntersection` (the same mechanism `markerHitAt` relies on) at
+	 * every layer of the stack — pointer-transparency holds regardless of paint
+	 * order or visibility.
+	 */
+	function createGhostHole(hole: GhostCourseHole): Konva.Group {
+		const group = new Konva.Group({ name: 'ghostHole', listening: false });
+
+		if (hole.corridorBand && hole.corridorBand.length >= 3) {
+			group.add(
+				new Konva.Line({
+					name: 'ghostCorridorBand',
+					points: pointsToFlat(hole.corridorBand),
+					closed: true,
+					fill: GHOST_CORRIDOR_FILL,
+					stroke: GHOST_CORRIDOR_STROKE,
+					strokeWidth: 2,
+					strokeScaleEnabled: false,
+					listening: false
+				})
+			);
+		}
+
+		if (hole.centerline.length >= 2) {
+			group.add(
+				new Konva.Line({
+					name: 'ghostCenterline',
+					points: pointsToFlat(hole.centerline),
+					stroke: GHOST_CENTERLINE_STROKE,
+					strokeWidth: 1.5,
+					dash: [8, 5],
+					strokeScaleEnabled: false,
+					listening: false
+				})
+			);
+		}
+
+		for (const bend of hole.bends) {
+			group.add(
+				new Konva.Circle({
+					name: 'ghostBend',
+					x: bend.xPx,
+					y: bend.yPx,
+					radius: GHOST_BEND_RADIUS,
+					fill: GHOST_BEND_FILL,
+					listening: false
+				})
+			);
+		}
+
+		if (hole.tee) {
+			group.add(
+				new Konva.Circle({
+					name: 'ghostTee',
+					x: hole.tee.xPx,
+					y: hole.tee.yPx,
+					radius: GHOST_TEE_BASKET_RADIUS,
+					fill: GHOST_TEE_FILL,
+					listening: false
+				})
+			);
+		}
+
+		if (hole.basket) {
+			group.add(
+				new Konva.Circle({
+					name: 'ghostBasket',
+					x: hole.basket.xPx,
+					y: hole.basket.yPx,
+					radius: GHOST_TEE_BASKET_RADIUS,
+					fill: GHOST_BASKET_FILL,
+					listening: false
+				})
+			);
+		}
+
+		const labelAnchor = hole.tee ?? hole.basket ?? hole.centerline[0] ?? null;
+		if (labelAnchor) {
+			group.add(
+				new Konva.Text({
+					name: 'ghostHoleNumber',
+					text: String(hole.number),
+					x: labelAnchor.xPx + GHOST_TEE_BASKET_RADIUS + 4,
+					y: labelAnchor.yPx - GHOST_TEE_BASKET_RADIUS - 14,
+					fontFamily: 'system-ui, sans-serif',
+					fontSize: 14,
+					fontStyle: 'bold',
+					fill: GHOST_LABEL_FILL,
+					listening: false
+				})
+			);
+		}
+
+		return group;
+	}
+
 	function ensureImageNode(): Konva.Image {
 		if (!imageNode) {
 			imageNode = new Konva.Image({ image: undefined as unknown as HTMLImageElement });
@@ -263,6 +429,7 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 	return {
 		rasterLayer,
+		ghostCourseLayer,
 		controlPointLayer,
 		interactionLayer,
 		controlPointGroup,
@@ -280,12 +447,15 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			markerZoom = transform.zoom;
 			rasterGroup.position({ x: transform.panX, y: transform.panY });
 			rasterGroup.scale({ x: transform.zoom, y: transform.zoom });
+			ghostCourseGroup.position({ x: transform.panX, y: transform.panY });
+			ghostCourseGroup.scale({ x: transform.zoom, y: transform.zoom });
 			controlPointGroup.position({ x: transform.panX, y: transform.panY });
 			controlPointGroup.scale({ x: transform.zoom, y: transform.zoom });
 			for (const marker of controlPointGroup.getChildren()) {
 				marker.scale(markerVisualScale(markerZoom));
 			}
 			rasterLayer.batchDraw();
+			ghostCourseLayer.batchDraw();
 			controlPointLayer.batchDraw();
 		},
 
@@ -300,10 +470,22 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			controlPointLayer.batchDraw();
 		},
 
+		setGhostCourse(holes) {
+			ghostCourseGroup.destroyChildren();
+			for (const hole of holes) ghostCourseGroup.add(createGhostHole(hole));
+			ghostCourseLayer.batchDraw();
+		},
+
+		setGhostCourseVisible(visible) {
+			ghostCourseLayer.visible(visible);
+			ghostCourseLayer.batchDraw();
+		},
+
 		setStageSize(width, height) {
 			stage.width(width);
 			stage.height(height);
 			rasterLayer.batchDraw();
+			ghostCourseLayer.batchDraw();
 			controlPointLayer.batchDraw();
 			interactionLayer.batchDraw();
 		},
@@ -336,8 +518,10 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			// image is undefined.
 			imageNode?.image(undefined);
 			rasterGroup.visible(false);
+			ghostCourseGroup.destroyChildren();
 			controlPointGroup.destroyChildren();
 			rasterLayer.batchDraw();
+			ghostCourseLayer.batchDraw();
 			controlPointLayer.batchDraw();
 		},
 
