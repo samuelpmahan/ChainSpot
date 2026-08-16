@@ -1,4 +1,4 @@
-name: CHSPT-48 one-shot hotfix
+name: CHSPT-48 one-shot regression tests
 
 on:
   push:
@@ -10,42 +10,184 @@ permissions:
   contents: write
 
 jobs:
-  hotfix:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Apply minimal guided-review interaction hotfix
+      - name: Update GuidedReview regression coverage
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('src/lib/components/AnnotationWorkspace.svelte')
+          path = Path('tests/unit/annotateCourseKeyboardReview.test.ts')
           text = path.read_text()
+          start_marker = "describe('Tab-driven review order', () => {"
+          end_marker = "describe('X — reject the current step\\'s obvious proposal', () => {"
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = r'''describe('Tab-driven review order', () => {
+\tit('Tab alone advances TEE → BASKET → BENDS → next hole; clicks edit the current step without advancing', async () => {
+\t\tconst editor = makeEditor();
+\t\tconst { component, host } = mountPage(editor, decodeOf(200, 200));
+\t\tmounted = { editor, component, host };
+\t\tawait loadImage(host);
 
-          old_claim = """\t\tif (marker) {\n\t\t\tannotationDrag = {\n"""
-          new_claim = """\t\tif (marker) {\n\t\t\t// Annotation owns the entire gesture once an existing point wins hit-testing.\n\t\t\t// Capture this pointer on the viewport so move/up cannot disappear when the\n\t\t\t// drag leaves the pane or crosses another rendered element. This is local to\n\t\t\t// AnnotationWorkspace, so ImageViewport's Konva-compatible generic claim\n\t\t\t// contract remains unchanged for its other consumers.\n\t\t\ttry {\n\t\t\t\tviewportController()?.container?.setPointerCapture(event.pointerId);\n\t\t\t} catch {\n\t\t\t\t// Best-effort: browsers may reject capture for an already-released pointer.\n\t\t\t}\n\t\t\tannotationDrag = {\n"""
-          if old_claim not in text:
-              raise SystemExit('claimAnnotationPointer anchor not found')
-          text = text.replace(old_claim, new_claim, 1)
+\t\t// No hole is active until review starts (no detection runs in jsdom).
+\t\texpect(host.querySelector('[data-testid="review-step-indicator"]')).toBeNull();
 
-          old_advance = """\t\t\t// A fresh placement is the answer to this step's question — advance so\n\t\t\t// the next click asks for the next piece, no return trip to the\n\t\t\t// sidebar (and no Tab required after a manual placement).\n\t\t\treviewStep = kind === 'tee' ? 'basket' : 'bends';\n\t\t\treturn;\n"""
-          new_advance = """\t\t\t// Placement never advances GuidedReview. The user may keep clicking or\n\t\t\t// drag any marker until they explicitly accept this step with Tab.\n\t\t\treturn;\n"""
-          if old_advance not in text:
-              raise SystemExit('placeReviewPiece auto-advance anchor not found')
-          text = text.replace(old_advance, new_advance, 1)
+\t\tpressKey('Tab');
+\t\tawait flush();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 
-          path.write_text(text)
+\t\t// Empty clicks place/re-place the current step, but NEVER advance it.
+\t\tconst teeAt = screenPointFor(host, 40, 40);
+\t\tdispatchClick(host, teeAt.x, teeAt.y);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\tconst teeReplacement = screenPointFor(host, 70, 40);
+\t\tdispatchClick(host, teeReplacement.x, teeReplacement.y);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('70');
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\tpressKey('Tab');
+\t\tawait flush();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+\t\tconst basketAt = screenPointFor(host, 100, 100);
+\t\tdispatchClick(host, basketAt.x, basketAt.y);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+\t\tpressKey('Tab');
+\t\tawait flush();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
+
+\t\tconst bendAt = screenPointFor(host, 80, 130);
+\t\tdispatchClick(host, bendAt.x, bendAt.y);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
+
+\t\tpressKey('Tab');
+\t\tawait flush();
+\t\texpect(stepIndicator(host)).toBe('HOLE 2 · TEE');
+\t});
+
+\tit('Tab accepts an existing proposed piece without moving it; Shift+Tab is swallowed without advancing', async () => {
+\t\tconst editor = makeEditorWithSourceImage(200, 200);
+\t\teditor.setHoles([
+\t\t\t{
+\t\t\t\tid: 'hole-1',
+\t\t\t\tnumber: 1,
+\t\t\t\ttee: { xPx: 40, yPx: 40 },
+\t\t\t\tbasket: { xPx: 100, yPx: 100 },
+\t\t\t\tshots: [],
+\t\t\t\tcorridorBends: [],
+\t\t\t\tcorridorWidthPx: 60
+\t\t\t}
+\t\t]);
+\t\tconst { component, host } = mountPage(editor, decodeOf(200, 200));
+\t\tmounted = { editor, component, host };
+\t\tsetGeometry(host);
+\t\tawait flush();
+
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+\t\tconst shiftTab = pressKey('Tab', { shiftKey: true });
+\t\tawait flush();
+\t\texpect(shiftTab.defaultPrevented).toBe(true);
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\tconst plainTab = pressKey('Tab');
+\t\tawait flush();
+\t\texpect(plainTab.defaultPrevented).toBe(true);
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+\t\texpect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('40');
+\t});
+
+\tit('an existing marker always wins over GuidedReview: while reviewing H1 TEE/BASKET, H2 points remain freely draggable', async () => {
+\t\tconst editor = makeEditorWithSourceImage(200, 200);
+\t\teditor.setHoles([
+\t\t\t{
+\t\t\t\tid: 'hole-1',
+\t\t\t\tnumber: 1,
+\t\t\t\ttee: { xPx: 40, yPx: 40 },
+\t\t\t\tbasket: { xPx: 90, yPx: 100 },
+\t\t\t\tshots: [],
+\t\t\t\tcorridorBends: [],
+\t\t\t\tcorridorWidthPx: 60
+\t\t\t},
+\t\t\t{
+\t\t\t\tid: 'hole-2',
+\t\t\t\tnumber: 2,
+\t\t\t\ttee: { xPx: 140, yPx: 40 },
+\t\t\t\tbasket: { xPx: 150, yPx: 120 },
+\t\t\t\tshots: [],
+\t\t\t\tcorridorBends: [],
+\t\t\t\tcorridorWidthPx: 60
+\t\t\t}
+\t\t]);
+\t\tconst { component, host } = mountPage(editor, decodeOf(200, 200));
+\t\tmounted = { editor, component, host };
+\t\tsetGeometry(host);
+\t\tawait flush();
+
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\t// Drag H2's tee even though GuidedReview is asking about H1's tee.
+\t\tconst h2TeeFrom = screenPointFor(host, 140, 40);
+\t\tconst h2TeeTo = screenPointFor(host, 165, 60);
+\t\tdispatchDrag(host, h2TeeFrom, h2TeeTo);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="tee-marker-2"]')?.getAttribute('cx')).toBe('165');
+\t\texpect(host.querySelector('[data-testid="tee-marker-2"]')?.getAttribute('cy')).toBe('60');
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\t// Empty space still belongs to the current GuidedReview step: replace H1 tee.
+\t\tconst h1Replacement = screenPointFor(host, 20, 25);
+\t\tdispatchClick(host, h1Replacement.x, h1Replacement.y);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('20');
+\t\texpect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cy')).toBe('25');
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+\t\tpressKey('Tab');
+\t\tawait flush();
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+\t\t// Same rule on the next step: an H2 basket drag wins over H1 basket placement.
+\t\tconst h2BasketFrom = screenPointFor(host, 150, 120);
+\t\tconst h2BasketTo = screenPointFor(host, 170, 145);
+\t\tdispatchDrag(host, h2BasketFrom, h2BasketTo);
+\t\tawait flush();
+\t\texpect(host.querySelector('[data-testid="basket-marker-2"]')?.getAttribute('cx')).toBe('170');
+\t\texpect(host.querySelector('[data-testid="basket-marker-2"]')?.getAttribute('cy')).toBe('145');
+\t\texpect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+\t});
+});
+
+'''
+          path.write_text(text[:start] + replacement + text[end:])
           PY
           git diff --check
-          git diff -- src/lib/components/AnnotationWorkspace.svelte
-      - name: Commit hotfix to main
+          git diff -- tests/unit/annotateCourseKeyboardReview.test.ts
+      - name: Install dependencies
+        run: npm ci
+      - name: Run targeted regression suite
+        run: npx vitest run tests/unit/annotateCourseKeyboardReview.test.ts
+      - name: Run Svelte/type checks
+        run: npm run check
+      - name: Commit tests to main
         shell: bash
         run: |
-          git config user.name "ChainSpot Hotfix"
+          git config user.name "ChainSpot Tests"
           git config user.email "actions@users.noreply.github.com"
-          git add src/lib/components/AnnotationWorkspace.svelte
-          git commit -m "CHSPT-48 hotfix: restore guided point interactions"
+          git add tests/unit/annotateCourseKeyboardReview.test.ts
+          git commit -m "CHSPT-48 regression: pin GuidedReview interaction contract"
           git push origin HEAD:main
