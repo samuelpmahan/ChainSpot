@@ -2666,6 +2666,16 @@
 		if (!sourceImage()) return false;
 		const marker = pointHitAt(pointer, view);
 		if (marker) {
+			// Annotation owns the entire gesture once an existing point wins hit-testing.
+			// Capture this pointer on the viewport so move/up cannot disappear when the
+			// drag leaves the pane or crosses another rendered element. This is local to
+			// AnnotationWorkspace, so ImageViewport's Konva-compatible generic claim
+			// contract remains unchanged for its other consumers.
+			try {
+				viewportController()?.container?.setPointerCapture(event.pointerId);
+			} catch {
+				// Best-effort: browsers may reject capture for an already-released pointer.
+			}
 			annotationDrag = {
 				marker,
 				start: { ...pointer },
@@ -2826,10 +2836,8 @@
 				snapRef ? { deferForSnap: snapRef } : {}
 			);
 			vibrate(8);
-			// A fresh placement is the answer to this step's question — advance so
-			// the next click asks for the next piece, no return trip to the
-			// sidebar (and no Tab required after a manual placement).
-			reviewStep = kind === 'tee' ? 'basket' : 'bends';
+			// Placement never advances GuidedReview. The user may keep clicking or
+			// drag any marker until they explicitly accept this step with Tab.
 			return;
 		}
 		// The step's piece already exists (a CV proposal, or an earlier
