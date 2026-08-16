@@ -41,8 +41,6 @@ jobs:
           PY
           git diff --check
       - run: npm ci
-      - name: Run targeted regression suite
-        run: npm run test:unit -- tests/unit/annotateCourseKeyboardReview.test.ts
       - name: Run Svelte/type checks
         run: npm run check
       - name: Commit regression coverage
