@@ -11,6 +11,7 @@ tickets/
 Phase1Tickets/
 tests/fixtures/smart-import-large/
 artifacts/cv-runs/
+scripts/cv-probes/ribbon-mass-results-ts/
 __pycache__/
 *.pyc
 .claude/
