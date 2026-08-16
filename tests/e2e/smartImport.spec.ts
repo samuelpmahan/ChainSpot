@@ -4,9 +4,10 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 /**
- * P1-001 browser case: one complete smart-import workflow from unordered
- * multi-select through crop decision, editable arrangement, native export, and
- * no external request. Uses the committed deterministic smart-import fixtures.
+ * CHSPT-55/56 auto-first browser case: one complete import from unordered
+ * multi-select straight through an assembled, already-cropped result, manual
+ * correction, native export, and no external request. Uses the committed
+ * deterministic smart-import fixtures.
  */
 const FIXTURES = join(process.cwd(), 'tests', 'fixtures', 'smart-import');
 
@@ -26,11 +27,14 @@ async function gotoApp(page: Page): Promise<string> {
 	return new URL(page.url()).origin;
 }
 
-test('smart four-tile import: unordered select, inferred roles, crop decision, manual edit, native export, no network', async ({
+test('smart four-tile import: unordered select, automatic arrangement + crop already applied, manual edit, native export, no network', async ({
 	page
 }) => {
-	// Extended from Playwright's 30s default: see the timing note below on the
-	// first smart-import assertion for why.
+	// Extended from Playwright's 30s default: this is the smart-stitch worker's
+	// first real `cv.matchTemplate` call in its lifetime, which pays a
+	// one-time WASM JIT/lazy-compile tax on top of whatever the eager
+	// `warmSmartStitchWorker()` call already covers (measured 10-12s locally,
+	// more under concurrent e2e-worker CPU contention).
 	test.setTimeout(90000);
 	const serverOrigin = await gotoApp(page);
 
@@ -44,55 +48,56 @@ test('smart four-tile import: unordered select, inferred roles, crop decision, m
 	// must not determine the inferred roles.
 	await page.getByTestId('smart-import-input').setInputFiles(FILES);
 
-	// Analysis completes and the inferred assignment is reported as visible
-	// text. Extended from Playwright's 5s default: this is the worker's first
-	// real `cv.matchTemplate` call in its lifetime (via `assignFour`), which
-	// pays a one-time WASM JIT/lazy-compile tax on top of whatever the eager
-	// `loadCv()` warm-up in `smartStitch.worker.ts` already covers (measured
-	// 10-12s locally, more under concurrent e2e-worker CPU contention). See
-	// the equivalent Snap-assist timing note in stitchMap.spec.ts.
-	await expect(page.getByTestId('smart-import-assignment')).toBeVisible({ timeout: 60000 });
-	await expect(page.getByTestId('smart-import-slot-upper-left')).toHaveText('smart-ul.png');
-	await expect(page.getByTestId('smart-import-slot-upper-right')).toHaveText('smart-ur.png');
-	await expect(page.getByTestId('smart-import-slot-lower-left')).toHaveText('smart-ll.png');
-	await expect(page.getByTestId('smart-import-slot-lower-right')).toHaveText('smart-lr.png');
+	// No approval click stands between selection and an assembled result.
+	await expect(page.getByTestId('composite-image')).toBeVisible({ timeout: 60000 });
+	await expect(page.getByTestId('continue-to-annotate')).toBeEnabled();
 
-	// The inferred arrangement satisfies the connected-overlap readiness rule.
-	await expect(page.getByTestId('stitch-readiness')).toContainText('ready');
+	// High-confidence automatic arrangements proceed with no review flag.
+	await expect(page.getByTestId('confidence-review')).toHaveCount(0);
 
-	// The crop proposal shows exact inset values and is not applied silently.
-	const proposal = page.getByTestId('crop-proposal');
-	await expect(proposal).toBeVisible();
-	await expect(page.getByTestId('crop-proposal-insets')).toContainText('top 4px');
-	await expect(page.getByTestId('crop-proposal-insets')).toContainText('bottom 3px');
-	await expect(page.getByTestId('crop-topPx')).toHaveValue('0');
+	// The shared crop the pipeline detected (this fixture's known top 4px /
+	// bottom 3px chrome band, plus the default +2px safety margin per side)
+	// is already applied — not merely proposed — visible once the
+	// manual-correction surface is opened.
+	await page.getByTestId('adjust-manually').click();
+	await page.getByTestId('manual-tab-crop').click();
+	await expect(page.getByTestId('crop-topPx')).toHaveValue('6');
+	await expect(page.getByTestId('crop-bottomPx')).toHaveValue('5');
 
-	// Apply the suggested crop through the explicit action.
-	await page.getByTestId('apply-suggested-crop').click();
-	await expect(page.getByTestId('crop-topPx')).toHaveValue('4');
-	await expect(page.getByTestId('crop-bottomPx')).toHaveValue('3');
-	await expect(page.getByTestId('crop-proposal')).toBeHidden();
+	// The automatic result summary lists all four captures, order-independent
+	// of upload order.
+	await expect(page.getByTestId('manual-capture-list').locator('li')).toHaveCount(4);
 
-	// Manual correction controls remain available after import: select the
-	// upper-right tile and nudge it by one pixel.
-	await page.getByTestId('tile-select-upper-right').click();
-	await expect(page.getByTestId('tile-position-x')).toHaveValue('150');
+	// Manual correction controls remain available after import: select a
+	// movable tile and nudge it by one pixel.
+	await page.getByTestId('manual-tab-placement').click();
+	await page.getByTestId('tile-select-tile-1').click();
+	const startX = Number(await page.getByTestId('tile-position-x').inputValue());
 	await page.keyboard.press('ArrowRight');
-	await expect(page.getByTestId('tile-position-x')).toHaveValue('151');
+	await expect(page.getByTestId('tile-position-x')).toHaveValue(String(startX + 1));
+	await page.getByTestId('tile-position-x').fill(String(startX));
+	await page.getByTestId('tile-position-x').blur();
 
-	// Native-resolution export uses the cropped dimensions and inferred placements.
+	await page.getByTestId('apply-manual-adjustments').click();
+	await expect(page.getByTestId('manual-surface')).toHaveCount(0);
+
+	// Native-resolution export uses the cropped dimensions and inferred
+	// placements: cropped size is 200x189 (top 6, bottom 5); ground-truth
+	// placements (0,0), (150,0), (0,150), (150,150) span x 0..350, y 0..339.
 	await expect(page.getByTestId('download-stitched')).toBeEnabled();
 	const downloadPromise = page.waitForEvent('download');
 	await page.getByTestId('download-stitched').click();
 	const download = await downloadPromise;
-	expect(download.suggestedFilename()).toBe('smart-ul-stitched.png');
+	// The filename is derived from whichever capture `assignN` chose as the
+	// anchor — an internal ordering detail this file does not pin (see
+	// `stitchMap.spec.ts`'s note on the same point) — so only the naming
+	// convention itself is asserted, not a specific fixture's name.
+	expect(download.suggestedFilename()).toMatch(/^smart-(ll|ur|lr|ul)-stitched\.png$/);
 	const stream = await download.createReadStream();
 	const chunks: Buffer[] = [];
 	for await (const chunk of stream) chunks.push(chunk);
 	const png = Buffer.concat(chunks);
 
-	// Cropped size is 200x193 (top 4, bottom 3); placements (0,0), (151,0),
-	// (0,150), (151,150) span x 0..351 and y 0..343.
 	const dims = await page.evaluate(async (data) => {
 		const blob = new Blob([new Uint8Array(data)], { type: 'image/png' });
 		const url = URL.createObjectURL(blob);
@@ -105,7 +110,7 @@ test('smart four-tile import: unordered select, inferred roles, crop decision, m
 			URL.revokeObjectURL(url);
 		}
 	}, [...png]);
-	expect(dims).toEqual({ width: 351, height: 343 });
+	expect(dims).toEqual({ width: 350, height: 339 });
 
 	expect(externalRequests).toEqual([]);
 });
