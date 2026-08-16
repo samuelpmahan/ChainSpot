@@ -28,6 +28,8 @@ import {
 	saveProject
 } from '../../src/lib/persistence';
 import type { PersistenceErrorKind, RepairCandidate, RepairResolutionResult } from '../../src/lib/persistence';
+import { applySourceTransform, identitySourceTransform } from '../../src/lib/domain/provenance';
+import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
 
@@ -111,6 +113,91 @@ async function loadedEditor(opts: { hash?: (bytes: Uint8Array) => Promise<string
 async function baseDoc(): Promise<Record<string, unknown>> {
 	const { editor } = await loadedEditor();
 	return JSON.parse(JSON.stringify(serializeProjectState(editor.state))) as Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// CHSPT-49 source-capture provenance fixtures
+// ---------------------------------------------------------------------------
+
+const SOURCE_CAPTURE_BYTES = new Uint8Array([21, 22, 23, 24, 25, 26, 27, 28]);
+
+/** A minimal, coherent single-source provenance fixture whose sha256 defaults to `SOURCE_CAPTURE_BYTES`'s real hash. */
+async function provenanceFixture(options: {
+	finalRasterSha256: string;
+	sourceId?: string;
+	captureSha256?: string;
+}): Promise<CompositeProvenance> {
+	const sourceId = options.sourceId ?? 'capture-1';
+	const captureSha256 = options.captureSha256 ?? (await sha256Hex(SOURCE_CAPTURE_BYTES));
+	const transform = identitySourceTransform();
+	const crop: SourceCropRect = { xPx: 0, yPx: 0, widthPx: 2, heightPx: 3 };
+	const source: SourceCapture = {
+		sourceId,
+		fileName: `${sourceId}.jpg`,
+		mimeType: 'image/jpeg',
+		widthPx: 2,
+		heightPx: 3,
+		sha256: captureSha256,
+		crop,
+		transform,
+		coveragePolygon: [
+			{ xPx: crop.xPx, yPx: crop.yPx },
+			{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },
+			{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx + crop.heightPx },
+			{ xPx: crop.xPx, yPx: crop.yPx + crop.heightPx }
+		].map((corner) => applySourceTransform(corner, transform)),
+		paintOrder: 0
+	};
+	return {
+		schemaVersion: 1,
+		renderVersion: 'chainspot-stitch-v1',
+		outputWidthPx: 2,
+		outputHeightPx: 3,
+		compositingPolicy: 'single-source-v1',
+		resampling: 'none',
+		sources: [source],
+		overlaps: [],
+		finalRasterSha256: options.finalRasterSha256
+	};
+}
+
+/** A `loadedEditor`-shaped fixture whose source-overview image carries provenance referencing `capture-1`. */
+async function loadedEditorWithProvenance(
+	options: { attachCaptureBytes?: boolean } = {}
+): Promise<{ editor: ProjectEditor; src: Uint8Array; tgt: Uint8Array; provenance: CompositeProvenance }> {
+	const attachCaptureBytes = options.attachCaptureBytes ?? true;
+	const editor = new ProjectEditor({
+		state: createProjectState({ createId: () => 'project-1', now: NOW }),
+		createId: nextId,
+		now: NOW
+	});
+	const provenance = await provenanceFixture({ finalRasterSha256: await sha256Hex(SRC) });
+	const source = await intakeImageFile({
+		editor,
+		role: 'source-overview',
+		file: fileOf('udisc.png', 'image/png', SRC),
+		decode: decodeOf(2, 3),
+		createAssetId: nextId,
+		hash: sha256Hex,
+		provenance,
+		sourceCaptures: attachCaptureBytes
+			? new Map([[provenance.sources[0].sourceId, SOURCE_CAPTURE_BYTES]])
+			: undefined
+	});
+	const target = await intakeImageFile({
+		editor,
+		role: 'target-basemap',
+		file: fileOf('map.jpg', 'image/jpeg', TGT),
+		decode: decodeOf(5, 4),
+		createAssetId: nextId,
+		hash: sha256Hex
+	});
+	if (!source.ok || !target.ok) throw new Error('seed intake failed');
+	editor.addPair({
+		sourceCoordinates: { xPx: 1, yPx: 1 },
+		targetCoordinates: { xPx: 2, yPx: 2 }
+	});
+	return { editor, src: SRC, tgt: TGT, provenance };
 }
 
 /** Zips a project document with image bytes (default bytes when not supplied) and extras. */
@@ -1155,5 +1242,208 @@ describe('writer/import hash metadata consistency (B/D)', () => {
 			await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex })
 		);
 		expect(candidate.issues[0].reason).toBe('hash-mismatch');
+	});
+});
+
+describe('CHSPT-49 source-capture provenance persistence (F)', () => {
+	describe('save', () => {
+		it('archives a registered source capture at images/sources/<sourceId>.<ext>, hash-verified', async () => {
+			const { editor, provenance } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+
+			expect(created.bundle.sourceCaptureIssues).toEqual([]);
+			expect(created.bundle.sourceCaptures).toHaveLength(1);
+			expect(created.bundle.sourceCaptures[0].path).toBe('images/sources/capture-1.jpg');
+			expect(created.bundle.sourceCaptures[0].sha256).toBe(await sha256Hex(SOURCE_CAPTURE_BYTES));
+
+			const entries = unzipSync(created.bundle.zipBytes);
+			expect(Object.keys(entries).sort()).toEqual([
+				'images/source-original.png',
+				'images/sources/capture-1.jpg',
+				'images/target-original.jpg',
+				'project.json'
+			]);
+			expect([...entries['images/sources/capture-1.jpg']]).toEqual([...SOURCE_CAPTURE_BYTES]);
+
+			const parsed = parseProjectJson(created.bundle.text);
+			expect(parsed.ok).toBe(true);
+			if (!parsed.ok) return;
+			expect(parsed.state.images[0].provenance).toEqual(provenance);
+		});
+
+		it('degrades gracefully (still succeeds) and reports a missing sourceCaptureIssue when capture bytes were never registered', async () => {
+			const { editor } = await loadedEditorWithProvenance({ attachCaptureBytes: false });
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+
+			expect(created.bundle.sourceCaptures).toEqual([]);
+			expect(created.bundle.sourceCaptureIssues).toEqual([
+				{ sourceId: 'capture-1', path: 'images/sources/capture-1.jpg', reason: 'missing', expectedHash: await sha256Hex(SOURCE_CAPTURE_BYTES) }
+			]);
+			// The two live images still save normally despite the degraded lineage signal.
+			const entries = unzipSync(created.bundle.zipBytes);
+			expect(Object.keys(entries).sort()).toEqual([
+				'images/source-original.png',
+				'images/target-original.jpg',
+				'project.json'
+			]);
+		});
+
+		it('fails the save loudly when registered capture bytes contradict the recorded hash', async () => {
+			const { editor } = await loadedEditorWithProvenance();
+			// Bytes ARE registered, but they no longer match what provenance claims about them.
+			editor.setSourceCaptureBytes('capture-1', new Uint8Array([0, 0, 0]));
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(false);
+			if (created.ok) return;
+			expect(created.error.kind).toBe('export-failure');
+			expect(created.error.message).toMatch(/capture-1/);
+		});
+
+		it('surfaces sourceCaptureIssues through saveProject as well', async () => {
+			const { editor } = await loadedEditorWithProvenance({ attachCaptureBytes: false });
+			const result = await saveProject(editor, { download: () => undefined });
+			expect(result.ok).toBe(true);
+			if (!result.ok) return;
+			expect(result.sourceCaptureIssues).toHaveLength(1);
+			expect(result.sourceCaptureIssues[0].reason).toBe('missing');
+		});
+	});
+
+	describe('open', () => {
+		it('round-trips provenance and restores hash-verified source-capture bytes on a clean open', async () => {
+			const { editor, provenance } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+
+			const opened = await readProjectBundle(fileFrom(created.bundle.zipBytes), {
+				decode: loadedDecode(),
+				hash: sha256Hex
+			});
+			expect(opened.ok).toBe(true);
+			if (!opened.ok) return;
+
+			expect(opened.state.images[0].provenance).toEqual(provenance);
+			expect(opened.sourceCaptureIssues).toEqual([]);
+			expect([...(opened.assets.get('capture-1') as AssetResource).bytes]).toEqual([...SOURCE_CAPTURE_BYTES]);
+			expect(opened.assets.get('capture-1')?.decoded).toBeNull();
+
+			// The restored bytes survive into a fresh editor and can be re-saved (never
+			// discarded merely by opening and re-saving the project).
+			const reopened = new ProjectEditor({ state: opened.state, assets: opened.assets, now: NOW });
+			const resaved = await createProjectBundle(reopened);
+			expect(resaved.ok).toBe(true);
+			if (!resaved.ok) return;
+			expect(resaved.bundle.sourceCaptureIssues).toEqual([]);
+			expect(resaved.bundle.sourceCaptures).toHaveLength(1);
+		});
+
+		it('degrades gracefully (still opens) and reports a missing sourceCaptureIssue when the sources/ file is absent from the archive', async () => {
+			const { editor } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+			const entries = unzipSync(created.bundle.zipBytes);
+			delete entries['images/sources/capture-1.jpg'];
+			const strippedBytes = zipSync(entries, { level: 6 });
+
+			const opened = await readProjectBundle(fileFrom(strippedBytes), { decode: loadedDecode(), hash: sha256Hex });
+			expect(opened.ok).toBe(true);
+			if (!opened.ok) return;
+			expect(opened.state.images[0].provenance).toBeDefined();
+			expect(opened.sourceCaptureIssues).toEqual([
+				{
+					sourceId: 'capture-1',
+					path: 'images/sources/capture-1.jpg',
+					reason: 'missing',
+					expectedHash: await sha256Hex(SOURCE_CAPTURE_BYTES)
+				}
+			]);
+			expect(opened.assets.has('capture-1')).toBe(false);
+			// The two live images still open normally.
+			expect([...(opened.assets.get(opened.state.images[0].id) as AssetResource).bytes]).toEqual([...SRC]);
+		});
+
+		it('degrades gracefully (still opens) and reports a hash-mismatch sourceCaptureIssue when the sources/ file bytes were altered', async () => {
+			const { editor } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+			const entries = unzipSync(created.bundle.zipBytes);
+			entries['images/sources/capture-1.jpg'] = new Uint8Array([1, 1, 1]);
+			const tamperedBytes = zipSync(entries, { level: 6 });
+
+			const opened = await readProjectBundle(fileFrom(tamperedBytes), { decode: loadedDecode(), hash: sha256Hex });
+			expect(opened.ok).toBe(true);
+			if (!opened.ok) return;
+			expect(opened.sourceCaptureIssues).toEqual([
+				{
+					sourceId: 'capture-1',
+					path: 'images/sources/capture-1.jpg',
+					reason: 'hash-mismatch',
+					expectedHash: await sha256Hex(SOURCE_CAPTURE_BYTES)
+				}
+			]);
+			expect(opened.assets.has('capture-1')).toBe(false);
+		});
+
+		it('still rejects a truly unexpected extra entry even though images/sources/ paths are otherwise allowed', async () => {
+			const { editor } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+			const entries = unzipSync(created.bundle.zipBytes);
+			entries['images/sources/not-a-real-capture.png'] = new Uint8Array([1, 2, 3]);
+			const bytes = zipSync(entries, { level: 6 });
+
+			const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			expect(result.kind).toBe('failure');
+			if (result.kind !== 'failure') return;
+			expect(result.error.kind).toBe('extra-entries');
+		});
+
+		it('a project with no provenance opens exactly as before, with an empty sourceCaptureIssues', async () => {
+			const { editor } = await loadedEditor();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+			expect(created.bundle.sourceCaptures).toEqual([]);
+			expect(created.bundle.sourceCaptureIssues).toEqual([]);
+
+			const opened = await readProjectBundle(fileFrom(created.bundle.zipBytes), {
+				decode: loadedDecode(),
+				hash: sha256Hex
+			});
+			expect(opened.ok).toBe(true);
+			if (!opened.ok) return;
+			expect(opened.sourceCaptureIssues).toEqual([]);
+			expect(opened.state.images[0].provenance).toBeUndefined();
+		});
+
+		it('does not restore source captures when the same open also needs live-image repair (documented, bounded scope)', async () => {
+			const { editor } = await loadedEditorWithProvenance();
+			const created = await createProjectBundle(editor);
+			expect(created.ok).toBe(true);
+			if (!created.ok) return;
+			const entries = unzipSync(created.bundle.zipBytes);
+			// Drop the source-overview live image itself so this open needs repair.
+			delete entries['images/source-original.png'];
+			const bytes = zipSync(entries, { level: 6 });
+
+			const result = await readProjectBundle(fileFrom(bytes), { decode: loadedDecode(), hash: sha256Hex });
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			expect(result.kind).toBe('repair');
+			if (result.kind !== 'repair') return;
+			// The repair candidate is still produced correctly (provenance present on the
+			// parsed state); source-capture restoration is simply out of scope for this path.
+			expect(result.candidate.state.images.find((image) => image.role === 'source-overview')?.provenance).toBeDefined();
+		});
 	});
 });
