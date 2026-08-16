@@ -1103,7 +1103,7 @@ describe('rotationDeg migration and validation (schema v6 -> v7)', () => {
 	it('rejects a non-finite or non-number rotationDeg', () => {
 		const doc = plainDoc(buildState());
 		(doc.images as Array<Record<string, unknown>>)[1].rotationDeg = 'north';
-		expectError(doc, 'provenance', 'provenance.number.invalid', 'images[1].rotationDeg');
+		expectError(doc, 'rotation', 'rotation.number.invalid', 'images[1].rotationDeg');
 	});
 });
 

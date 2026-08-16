@@ -479,6 +479,15 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 				// its position still rotates rigidly with the parent group (CHSPT-44).
 				marker.rotation(-rotationDeg);
 			}
+			for (const holeGroup of ghostCourseGroup.getChildren()) {
+				// The hole-number label is the only ghost-course element whose readability
+				// depends on orientation (basket/tee dots and the centerline path look and
+				// behave identically rotated); counter-rotate it in place so it stays
+				// upright, mirroring the marker-ordinal treatment above (CHSPT-44).
+				if (!(holeGroup instanceof Konva.Group)) continue;
+				const label = holeGroup.findOne('.ghostHoleNumber');
+				if (label) label.rotation(-rotationDeg);
+			}
 			rasterLayer.batchDraw();
 			ghostCourseLayer.batchDraw();
 			controlPointLayer.batchDraw();

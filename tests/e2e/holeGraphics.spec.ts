@@ -169,6 +169,28 @@ async function setTargetRotation(page: Page, degrees: number): Promise<void> {
 	await page.keyboard.press('Tab'); // blur to fire the commit (onchange)
 }
 
+/**
+ * Adds a hole via the current sidebar-driven flow (the 'n' shortcut), unlike
+ * `placePoint`/`hole-add` above which target the pre-split radial-menu UI —
+ * see the file-level comment. Only used by the rotated-target test below,
+ * which needs nothing beyond a plain tee+basket hole (no bend, no shot, no
+ * Map/Round switch), so it does not inherit the larger redesign the older
+ * test above still needs.
+ */
+async function addHole(page: Page): Promise<void> {
+	await page.keyboard.press('n');
+	await expect(page.getByTestId('placement-banner')).toBeVisible();
+}
+
+/** Clicks an image-space point directly on the source-overview pane — today's empty-space placement for a hole's missing tee/basket (no radial menu involved). */
+async function clickSourceImagePoint(page: Page, xPx: number, yPx: number): Promise<void> {
+	const geometry = await paneGeometry(page, 'source-overview');
+	const view = await viewState(page, 'source-overview');
+	const local = imagePoint(view, xPx, yPx);
+	const screen = panePoint(geometry, local.x, local.y);
+	await page.mouse.click(screen.x, screen.y);
+}
+
 /** Same as `createPair`, but the target click accounts for the pane's current manual rotation (CHSPT-44) — the target pixel itself is still specified in ORIGINAL, unrotated image coordinates. */
 async function createPairOnRotatedTarget(
 	page: Page,
@@ -177,19 +199,26 @@ async function createPairOnRotatedTarget(
 	targetRotationDeg: number,
 	targetCenter: { xPx: number; yPx: number }
 ): Promise<void> {
+	const rotatedTargetPoint = rotateAboutCenter(targetPoint, targetCenter, targetRotationDeg);
+	await page.getByTestId('add-correspondence').click();
+	// Geometry/view are re-read fresh right before each click, not captured once up
+	// front: `add-correspondence` (and the rotation controls above the panes) can
+	// shift the page's scroll position, so a snapshot taken before those actions
+	// can point at stale, no-longer-on-screen pane coordinates by the time the
+	// click actually fires.
 	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
 	const sourceGeometry = await paneGeometry(page, 'source-overview');
-	const targetGeometry = await paneGeometry(page, 'target-basemap');
 	const sourceView = await viewState(page, 'source-overview');
-	const targetView = await viewState(page, 'target-basemap');
-	const rotatedTargetPoint = rotateAboutCenter(targetPoint, targetCenter, targetRotationDeg);
 	const sourceLocal = imagePoint(sourceView, sourcePoint.xPx, sourcePoint.yPx);
-	const targetLocal = imagePoint(targetView, rotatedTargetPoint.xPx, rotatedTargetPoint.yPx);
-	await page.getByTestId('add-correspondence').click();
 	const sourceScreen = panePoint(sourceGeometry, sourceLocal.x, sourceLocal.y);
-	const targetScreen = panePoint(targetGeometry, targetLocal.x, targetLocal.y);
 	await page.mouse.click(sourceScreen.x, sourceScreen.y);
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-target');
+
+	await page.getByTestId('pane-scene-target-basemap').scrollIntoViewIfNeeded();
+	const targetGeometry = await paneGeometry(page, 'target-basemap');
+	const targetView = await viewState(page, 'target-basemap');
+	const targetLocal = imagePoint(targetView, rotatedTargetPoint.xPx, rotatedTargetPoint.yPx);
+	const targetScreen = panePoint(targetGeometry, targetLocal.x, targetLocal.y);
 	await page.mouse.click(targetScreen.x, targetScreen.y);
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
 }
@@ -290,18 +319,13 @@ test('clean hole construction with a rotated clean target', async ({ page }) => 
 		buffer: pngPayload(800, 600, 80, 120, 60)
 	});
 	await page.waitForSelector('[data-testid="hole-annotation"]');
-	await page.getByTestId('hole-add').click();
-	const frame = page.getByTestId('annotation-frame');
-	await frame.scrollIntoViewIfNeeded();
-	await page.waitForFunction(() => {
-		const img = document.querySelector('.annotation-image');
-		return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0;
-	});
-	const box = await frame.boundingBox();
-	if (!box) throw new Error('annotation frame has no bounding box');
-
-	await placePoint(page, box.x + 50, box.y + 50, 'tee');
-	await placePoint(page, box.x + 400, box.y + 300, 'basket');
+	await addHole(page);
+	await clickSourceImagePoint(page, 50, 50);
+	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
+	await clickSourceImagePoint(page, 400, 300);
+	await expect(page.getByTestId('basket-marker-1')).toBeVisible();
+	await expect(page.getByTestId('approve-hole-button')).toBeVisible();
+	await page.keyboard.press('Enter');
 
 	await page.getByTestId('annotate-done').click();
 	await page.waitForURL('**/create-graphics');

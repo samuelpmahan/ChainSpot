@@ -718,7 +718,15 @@ function readImageProvenance(
  */
 function readImageRotation(input: unknown, path: string, role: ImageRole): number | undefined {
 	if (input === undefined || input === null) return undefined;
-	const degrees = readFiniteNumber(input, path);
+	if (typeof input !== 'number' || !Number.isFinite(input)) {
+		throw failure(
+			'rotation',
+			'rotation.number.invalid',
+			path,
+			`${path} must be a finite number, got ${describeValue(input)}`
+		);
+	}
+	const degrees = input;
 	if (degrees === 0) return undefined;
 	if (role !== 'target-basemap') {
 		throw failure(
