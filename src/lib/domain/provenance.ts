@@ -177,6 +177,22 @@ export type ResamplingMethod = 'none' | 'nearest' | 'bilinear';
 /** Lowercase 64-hex SHA-256, matching `imageIntake.ts`'s `Sha256Hex`. Re-declared structurally here so this module has no dependency on the intake layer. */
 export type Sha256Hex = string;
 
+/** Whether a `SourceCapture` property was set automatically or by a user's manual correction. */
+export type ProvenanceOrigin = 'auto' | 'manual';
+
+/**
+ * Per-property provenance origin: `crop` and `transform` are tracked
+ * independently since a user can correct one without the other (e.g.
+ * nudging a placement by hand while the automatic crop stands unchanged).
+ */
+export interface SourceCaptureOrigin {
+	readonly crop: ProvenanceOrigin;
+	readonly transform: ProvenanceOrigin;
+}
+
+/** The origin every fully-automatic pipeline result (AutoCrop/AutoStitch, no manual correction) uses. */
+export const AUTO_SOURCE_CAPTURE_ORIGIN: SourceCaptureOrigin = { crop: 'auto', transform: 'auto' };
+
 /**
  * One capture's full lineage: which original file, what part of it was used,
  * and where that part landed in the composite. `sourceId` is always the
@@ -194,6 +210,8 @@ export interface SourceCapture {
 	readonly sha256: Sha256Hex;
 	readonly crop: SourceCropRect;
 	readonly transform: SourceTransform;
+	/** Whether `crop`/`transform` were set automatically or by a manual correction; tracked per-property. */
+	readonly origin: SourceCaptureOrigin;
 	/**
 	 * `transform` applied to `crop`'s four corners, in composite pixels, in
 	 * order [top-left, top-right, bottom-right, bottom-left] of the crop rect

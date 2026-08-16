@@ -229,7 +229,7 @@ const MIN_COARSE_SHORT_EDGE_PX = 100;
  * considered (not just `a`) since `downsampleRaster` is applied to both and
  * the template is cut from whichever is smaller.
  */
-function coarseDownsampleFactor(a: AnalysisRaster, b: AnalysisRaster): number {
+export function coarseDownsampleFactor(a: AnalysisRaster, b: AnalysisRaster): number {
 	const shortEdgePx = Math.min(a.widthPx, a.heightPx, b.widthPx, b.heightPx);
 	return Math.max(
 		1,
@@ -309,7 +309,7 @@ function downsampleRaster(raster: AnalysisRaster, factor: number): AnalysisRaste
 	return { widthPx, heightPx, gray, scale: raster.scale * factor };
 }
 
-interface TemplateGeometry {
+export interface TemplateGeometry {
 	readonly tw: number;
 	readonly th: number;
 	readonly tx: number;
@@ -322,9 +322,12 @@ interface TemplateGeometry {
  * and `MAX_CROSS_DRIFT_FRACTION` promise (see those constants for the
  * reasoning). This is computed fresh for whatever resolution `raster` is at,
  * so the same guarantee holds whether it's called on the full-resolution tile
- * or a downsampled one for the coarse pass.
+ * or a downsampled one for the coarse pass. Exported (CHSPT-50) so
+ * `poseGraph.ts`'s rotation/affine escalation can anchor its own searches to
+ * the exact same expected-overlap region the base translation matcher uses,
+ * instead of re-deriving a second, potentially-drifting definition of it.
  */
-function templateGeometry(raster: AnalysisRaster, orientation: PairOrientation): TemplateGeometry {
+export function templateGeometry(raster: AnalysisRaster, orientation: PairOrientation): TemplateGeometry {
 	const horizontal = orientation === 'left-right';
 	const primaryDim = horizontal ? raster.widthPx : raster.heightPx;
 	const crossDim = horizontal ? raster.heightPx : raster.widthPx;
@@ -577,6 +580,299 @@ export async function matchTranslation(
 		runnerUpScore: coarse.runnerUpScore,
 		overlapFraction
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Rotation/affine-aware escalation primitives (CHSPT-50)
+// ---------------------------------------------------------------------------
+//
+// `matchTranslation` above is unchanged and remains the first, by far the
+// most common, estimate for every pair. The two functions below are only
+// ever invoked by `poseGraph.ts`'s escalation logic, and only for the
+// handful of edges an arrangement actually places whose translation-only
+// refine score came back weak — never for the full O(N^2) coarse pass. They
+// give `poseGraph.ts` the two primitives it needs to go beyond translation:
+// a rotation-swept template search (`matchSimilarity`), and a small local
+// point-correspondence search (`matchPointNear`) it feeds into
+// `alignment/affine.ts`'s `estimateAffine` for the affine tier.
+
+/**
+ * Angle step for `matchSimilarity`'s rotation sweep, in degrees, covering the
+ * full 0-360 range (a real capture-to-capture rotation, unlike the tee-pad
+ * glyph `teePadOrientation.ts` sweeps, is not symmetric under 180-degree
+ * flip). 6 degrees over 360 is 60 candidate angles; each is one small-template
+ * `matchTemplate` call against the coarse-downsampled search raster (the same
+ * raster `coarsePass` already builds), so the total cost is the same order as
+ * `coarsePass` itself times ~60 rather than a second full-resolution search.
+ * This is deliberately a single coarse pass with no angle-refinement tier:
+ * `poseGraph.ts` only calls this once translation has already failed on an
+ * edge, so a modest angular precision loss relative to translation's own
+ * fine refine is an acceptable trade — the ticket's own guidance is that a
+ * coarse angle-sweep is a reasonable, testable escalation, and any residual
+ * error here is exactly the kind of still-weak fit that triggers the affine
+ * tier's independent per-point correspondences next.
+ */
+const SIMILARITY_SWEEP_STEP_DEG = 6;
+
+export interface SimilarityMatch {
+	/** Rotation of `b`'s content relative to `a`, in degrees. */
+	readonly angleDeg: number;
+	/** `matchTemplate`'s own correlation peak for the winning angle, [-1, 1]. */
+	readonly score: number;
+	/** The expected-overlap template's center, in `b`'s own original-image px. */
+	readonly centerBPx: { readonly xPx: number; readonly yPx: number };
+	/** Where that center matched in `a`, in `a`'s own original-image px. */
+	readonly centerAPx: { readonly xPx: number; readonly yPx: number };
+}
+
+/**
+ * Builds a template the same size as `geom` by sampling `raster` rotated by
+ * `angleDeg` about `geom`'s own center (nearest-neighbour; this is match
+ * *analysis*, never the final deterministic render, so browser-resampling
+ * guarantees do not apply here — see `domain/provenance.ts`'s module doc for
+ * where that constraint actually binds). Samples landing outside `raster`
+ * are filled with the in-bounds samples' own mean, so a rotated corner that
+ * falls off the edge contributes a neutral value instead of an artificial
+ * high-contrast edge into the correlation.
+ */
+function rotatedTemplateMat(
+	cv: CvModule,
+	raster: AnalysisRaster,
+	geom: TemplateGeometry,
+	angleDeg: number
+): CvMat {
+	const radians = (angleDeg * Math.PI) / 180;
+	const cosT = Math.cos(radians);
+	const sinT = Math.sin(radians);
+	const centerX = geom.tx + geom.tw / 2;
+	const centerY = geom.ty + geom.th / 2;
+	const values = new Int16Array(geom.tw * geom.th).fill(-1);
+	let sum = 0;
+	let count = 0;
+	for (let y = 0; y < geom.th; y += 1) {
+		for (let x = 0; x < geom.tw; x += 1) {
+			const ox = x - geom.tw / 2;
+			const oy = y - geom.th / 2;
+			// Sample at R(-angleDeg) of the output offset: the rotated template's
+			// pixel at offset w equals the source's pixel at offset R(-angle)*w
+			// (see poseGraph.ts's `similarityCoefficientsFrom` for the matching
+			// forward-transform convention this must stay consistent with).
+			const sxi = Math.round(centerX + cosT * ox + sinT * oy);
+			const syi = Math.round(centerY - sinT * ox + cosT * oy);
+			if (sxi >= 0 && syi >= 0 && sxi < raster.widthPx && syi < raster.heightPx) {
+				const value = raster.gray[syi * raster.widthPx + sxi];
+				values[y * geom.tw + x] = value;
+				sum += value;
+				count += 1;
+			}
+		}
+	}
+	const fill = count > 0 ? Math.round(sum / count) : 128;
+	const gray = new Uint8Array(values.length);
+	for (let i = 0; i < values.length; i += 1) {
+		gray[i] = values[i] < 0 ? fill : values[i];
+	}
+	const mat = new cv.Mat(geom.th, geom.tw, cv.CV_8UC1);
+	mat.data.set(gray);
+	return mat;
+}
+
+/**
+ * Fraction of `raster`'s shorter dimension `centeredTemplateGeometry` cuts a
+ * template to. `templateGeometry` above deliberately anchors its template to
+ * `b`'s near EDGE, sized to guarantee a translation search range — a correct
+ * choice under the translation assumption (two axis-aligned tiles overlap
+ * along a shared edge), but wrong once that assumption is exactly what's
+ * being escalated past: once `b` may be rotated, its raster-space "near
+ * edge" no longer reliably corresponds to the geometric overlap region with
+ * `a` at all. A CENTERED template sidesteps that assumption entirely — a
+ * pair with genuine overlap (which is the only reason escalation ran in the
+ * first place; see `poseGraph.ts`'s `ROTATION_ESCALATION_MAX_SCORE`) shares
+ * content somewhere near each tile's own middle regardless of which
+ * direction it's rotated.
+ *
+ * SIZED FOR REACH, same defect class `matchTranslation`'s own module doc
+ * warns about ("the search space excluded the correct answer"): `matchTemplate`
+ * can only place a template's TOP-LEFT at positions where the whole template
+ * still fits inside the search image, so a template's CENTER can only ever
+ * land within `tw/2 .. imageWidth - tw/2` of that image — a template that is
+ * too LARGE a fraction of the tile silently makes a real, still-overlapping
+ * neighbor's true center-to-center offset unreachable, exactly like an
+ * undersized translation template would. For two same-size tiles whose
+ * centers are up to `MAX_REACH_FRACTION` of a tile's dimension apart (in
+ * EITHER direction, since a similarity edge's true offset direction is
+ * unknown a priori — unlike translation's edge-anchored search, there is no
+ * "primary axis" here to spend the whole budget on), the template must
+ * satisfy `imageWidth - tw >= 2 * MAX_REACH_FRACTION * imageWidth`, i.e.
+ * `tw <= (1 - 2*MAX_REACH_FRACTION) * imageWidth`. 0.2 sizes the template at
+ * the equality bound for `MAX_REACH_FRACTION = 0.4`: comfortably past
+ * `matchTranslation`'s own 25%-of-tile `MAX_CROSS_DRIFT_FRACTION` guarantee
+ * and past the 35%-of-tile-dimension center offset this module's own tests
+ * exercise, while still leaving a large enough template to carry a real
+ * correlation signal (confirmed empirically against this module's rotated
+ * synthetic fixtures — see `tests/unit/poseGraph.test.ts`).
+ */
+const CENTERED_TEMPLATE_FRACTION = 0.2;
+
+/** A centered, orientation-agnostic template — see `CENTERED_TEMPLATE_FRACTION`'s doc for why this replaces `templateGeometry` once escalation is underway. */
+export function centeredTemplateGeometry(raster: AnalysisRaster): TemplateGeometry {
+	const extent = Math.max(
+		MIN_TEMPLATE_EXTENT_PX,
+		Math.round(Math.min(raster.widthPx, raster.heightPx) * CENTERED_TEMPLATE_FRACTION)
+	);
+	const tw = Math.min(extent, raster.widthPx);
+	const th = Math.min(extent, raster.heightPx);
+	return {
+		tw,
+		th,
+		tx: Math.round((raster.widthPx - tw) / 2),
+		ty: Math.round((raster.heightPx - th) / 2)
+	};
+}
+
+/**
+ * Coarse rotation-swept template search: a centered template (see
+ * `centeredTemplateGeometry`) cut from `b`, tried at every
+ * `SIMILARITY_SWEEP_STEP_DEG` angle against `a`'s coarse-downsampled raster,
+ * keeping whichever angle's `matchTemplate` peak is highest. Adapted from
+ * `autoAnnotation/teePadOrientation.ts`'s `sweepPadOrientation` (rotation-
+ * swept synthetic-pad NCC) from one rotated glyph to one rotated tile-pair
+ * template. Returns null only when the template cannot fit the coarse
+ * search raster at all (degenerate/too-small rasters).
+ */
+export async function matchSimilarity(a: AnalysisRaster, b: AnalysisRaster): Promise<SimilarityMatch | null> {
+	const cv = await loadCv();
+	const factor = coarseDownsampleFactor(a, b);
+	const aC = downsampleRaster(a, factor);
+	const bC = downsampleRaster(b, factor);
+	const geom = centeredTemplateGeometry(bC);
+	if (geom.tw > aC.widthPx || geom.th > aC.heightPx || geom.tw <= 0 || geom.th <= 0) return null;
+
+	const aMat = toMat(cv, aC);
+	let best: { angleDeg: number; score: number; xPx: number; yPx: number } | null = null;
+	try {
+		for (let angleDeg = 0; angleDeg < 360; angleDeg += SIMILARITY_SWEEP_STEP_DEG) {
+			const templateMat = rotatedTemplateMat(cv, bC, geom, angleDeg);
+			let result: CvMat | null = null;
+			try {
+				result = new cv.Mat();
+				cv.matchTemplate(aMat, templateMat, result, cv.TM_CCOEFF_NORMED);
+				const found = cv.minMaxLoc(result);
+				if (!best || found.maxVal > best.score) {
+					best = { angleDeg, score: found.maxVal, xPx: found.maxLoc.x, yPx: found.maxLoc.y };
+				}
+			} finally {
+				templateMat.delete();
+				result?.delete();
+			}
+		}
+	} finally {
+		aMat.delete();
+	}
+	if (!best) return null;
+
+	return {
+		angleDeg: best.angleDeg,
+		score: best.score,
+		centerBPx: {
+			xPx: (geom.tx + geom.tw / 2) * bC.scale,
+			yPx: (geom.ty + geom.th / 2) * bC.scale
+		},
+		centerAPx: {
+			xPx: (best.xPx + geom.tw / 2) * aC.scale,
+			yPx: (best.yPx + geom.th / 2) * aC.scale
+		}
+	};
+}
+
+/** Half-size, in original-image px, of the small anchor patch `matchPointNear` cuts from `b` for one affine-tier correspondence. */
+export const AFFINE_PATCH_HALF_SIZE_PX = 20;
+/**
+ * Local search radius, in original-image px, `matchPointNear` searches in
+ * `a` around its predicted location. The prediction comes from the
+ * similarity tier's rigid-rotation-only estimate (`poseGraph.ts`'s
+ * `tryAffineEscalation`), which is exactly what independent axis scale (the
+ * evidence this tier exists to recover) throws off — the further the true
+ * scale differs from 1, the further an anchor point away from the template
+ * center is predicted from its true location, so this radius must be
+ * generous rather than tight. 90px comfortably covers a real scale
+ * mismatch (e.g. ~40% on a template with a ~65px half-extent from center;
+ * see `affineAnchorPoints`) without growing large enough to risk the local
+ * search locking onto an unrelated repeated feature.
+ */
+export const AFFINE_PATCH_SEARCH_RADIUS_PX = 90;
+
+export interface PointMatch {
+	readonly score: number;
+	/** Matched location in `a`'s own original-image px. */
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
+/**
+ * One affine-tier point correspondence: locates a small patch centered at
+ * `bPointPx` (in `b`'s original-image px) within a local window of `a`
+ * centered at `predictedAPointPx` (a seed from the similarity tier, or the
+ * plain translation candidate when even similarity found nothing usable).
+ * Returns null when the patch or search window cannot fit the rasters at
+ * all. This is the "point correspondence" half of the affine tier —
+ * `poseGraph.ts` calls this at three non-collinear anchor points and fits
+ * the results with `alignment/affine.ts`'s `estimateAffine`, reusing that
+ * module's closed-form solver rather than re-deriving one here.
+ */
+export async function matchPointNear(
+	a: AnalysisRaster,
+	b: AnalysisRaster,
+	bPointPx: { readonly xPx: number; readonly yPx: number },
+	predictedAPointPx: { readonly xPx: number; readonly yPx: number },
+	patchHalfSizePx: number = AFFINE_PATCH_HALF_SIZE_PX,
+	searchRadiusPx: number = AFFINE_PATCH_SEARCH_RADIUS_PX
+): Promise<PointMatch | null> {
+	const cv = await loadCv();
+	const bx = Math.round(bPointPx.xPx / b.scale);
+	const by = Math.round(bPointPx.yPx / b.scale);
+	const halfB = Math.max(2, Math.round(patchHalfSizePx / b.scale));
+	const tw = halfB * 2 + 1;
+	const th = halfB * 2 + 1;
+	const tx = bx - halfB;
+	const ty = by - halfB;
+	if (tx < 0 || ty < 0 || tx + tw > b.widthPx || ty + th > b.heightPx) return null;
+
+	const bMat = toMat(cv, b);
+	const aMat = toMat(cv, a);
+	let template: CvMat | null = null;
+	let searchRoi: CvMat | null = null;
+	let result: CvMat | null = null;
+	try {
+		template = bMat.roi(new cv.Rect(tx, ty, tw, th));
+
+		const ax = Math.round(predictedAPointPx.xPx / a.scale);
+		const ay = Math.round(predictedAPointPx.yPx / a.scale);
+		const marginPx = Math.max(1, Math.round(searchRadiusPx / a.scale));
+		const windowW = Math.min(tw + 2 * marginPx, a.widthPx);
+		const windowH = Math.min(th + 2 * marginPx, a.heightPx);
+		if (windowW < tw || windowH < th) return null;
+		let xStart = Math.round(ax - halfB - marginPx);
+		let yStart = Math.round(ay - halfB - marginPx);
+		xStart = Math.max(0, Math.min(xStart, a.widthPx - windowW));
+		yStart = Math.max(0, Math.min(yStart, a.heightPx - windowH));
+
+		searchRoi = aMat.roi(new cv.Rect(xStart, yStart, windowW, windowH));
+		result = new cv.Mat();
+		cv.matchTemplate(searchRoi, template, result, cv.TM_CCOEFF_NORMED);
+		const best = cv.minMaxLoc(result);
+		return {
+			score: best.maxVal,
+			xPx: (xStart + best.maxLoc.x + halfB) * a.scale,
+			yPx: (yStart + best.maxLoc.y + halfB) * a.scale
+		};
+	} finally {
+		template?.delete();
+		searchRoi?.delete();
+		result?.delete();
+		aMat.delete();
+		bMat.delete();
+	}
 }
 
 /**

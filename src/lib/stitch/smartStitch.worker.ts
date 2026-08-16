@@ -20,6 +20,16 @@
  * All analysis modules here are pure (no DOM, no canvas of their own), so the
  * results are deterministic given the same decoded pixels — identical to the
  * inline analysis path unit tests exercise.
+ *
+ * CHSPT-50/55: `{ kind: 'pose-graph' }` on the request runs `poseGraph.ts`'s
+ * generalized translation/similarity/affine overlap-graph analysis
+ * (`buildPoseGraph`) on this same worker thread instead of the legacy
+ * translation-only `assignN`, replying with a JSON-safe `PoseGraphWorkerReply`
+ * (raster-index-keyed, same shape `buildPoseGraph` returns in-process, with
+ * its `Map` flattened to a plain record for `postMessage`). The eager
+ * `loadCv()`/`warmMatchTemplate` warm-up above is unchanged and shared by
+ * both request kinds — this worker's CV readiness does not depend on which
+ * kind of request arrives first.
  */
 import { assignN } from './autoLayout';
 import type { AutoLayout } from './autoLayout';
@@ -32,6 +42,9 @@ import type { AnalysisRaster, RasterRegion } from './analysis';
 import { matcherRegionFromCrop } from './cropGate';
 import { loadCv, warmMatchTemplate } from './cvMatch';
 import type { TileNeighbors, TileSlot } from './geometry';
+import { buildPoseGraph } from './poseGraph';
+import type { PoseEdge } from './poseGraph';
+import type { SourceTransform } from '../domain/provenance';
 
 // Eager warm-up (P1-002 1b, extended 1c): a worker is constructed once and
 // reused for the life of the tab (see `smartImport.ts`'s `smartStitchWorker`
@@ -55,6 +68,14 @@ interface WorkerRequest {
 	readonly bitmaps: readonly ImageBitmap[];
 	/** See `SmartImportOptions.applyCropMargin` in smartImport.ts. */
 	readonly applyCropMargin?: boolean;
+	/**
+	 * `'pose-graph'` (CHSPT-50/55): runs `poseGraph.ts`'s generalized
+	 * translation/similarity/affine overlap-graph analysis off this same
+	 * worker thread instead of the legacy translation-only `assignN`.
+	 * Omitted/any other value keeps today's `assignN` behavior unchanged —
+	 * existing callers (`smartImportViaWorker`) are untouched by this field.
+	 */
+	readonly kind?: 'pose-graph';
 }
 
 interface WorkerReply {
@@ -103,9 +124,83 @@ function rasterFromBitmap(bitmap: ImageBitmap, maxDim: number, region?: RasterRe
 	};
 }
 
-self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-	const { token, bitmaps, applyCropMargin = true } = event.data;
+/**
+ * JSON-safe form of `poseGraph.ts`'s `PoseGraphResult`: `transforms` (a `Map`
+ * in-process) becomes a plain index-keyed record so it survives
+ * `postMessage`'s structured clone. Raster-index-keyed throughout, same as
+ * `PoseGraphResult` itself — `stitchPipeline.ts`'s caller maps indices to
+ * `sourceId`s once it has them, exactly as the in-process path does.
+ */
+interface PoseGraphWorkerReply {
+	readonly ok: boolean;
+	readonly token: string;
+	readonly kind: 'pose-graph';
+	readonly message?: string;
+	readonly duplicate?: DuplicateRasterPair;
+	readonly reason?: 'incoherent';
+	readonly order?: readonly number[];
+	readonly transforms?: Readonly<Record<number, SourceTransform>>;
+	readonly edges?: readonly PoseEdge[];
+	readonly placementEdges?: readonly PoseEdge[];
+	readonly cropProposal?: ReturnType<typeof proposeCropDetailed>['insets'];
+	readonly crop?: { readonly proposal: ReturnType<typeof proposeCropDetailed>['insets']; readonly confidence: 'high' | 'low' | 'absent' };
+}
+
+async function handlePoseGraphRequest(token: string, bitmaps: readonly ImageBitmap[], applyCropMargin: boolean): Promise<void> {
 	try {
+		const cropRasters = bitmaps.map((bitmap) => rasterFromBitmap(bitmap, DEFAULT_CROP_ANALYSIS_MAX_DIM));
+		const crop = proposeCropDetailed(cropRasters, {
+			marginPx: applyCropMargin ? DEFAULT_CROP_SAFETY_MARGIN_PX : 0
+		});
+		const matcher = bitmaps.map((bitmap) => {
+			const region = matcherRegionFromCrop(crop, bitmap.width, bitmap.height);
+			return rasterFromBitmap(bitmap, DEFAULT_MAX_ANALYSIS_DIM, region ?? undefined);
+		});
+		const duplicate = findDuplicateRasters(matcher);
+		if (duplicate) {
+			const reply: PoseGraphWorkerReply = { ok: false, token, kind: 'pose-graph', duplicate };
+			(self as unknown as Worker).postMessage(reply);
+			return;
+		}
+
+		const pose = await buildPoseGraph(matcher);
+		if (!pose.ok) {
+			const reply: PoseGraphWorkerReply = { ok: false, token, kind: 'pose-graph', reason: pose.reason, message: pose.message };
+			(self as unknown as Worker).postMessage(reply);
+			return;
+		}
+
+		const reply: PoseGraphWorkerReply = {
+			ok: true,
+			token,
+			kind: 'pose-graph',
+			order: pose.order,
+			transforms: Object.fromEntries(pose.transforms),
+			edges: pose.edges,
+			placementEdges: pose.placementEdges,
+			cropProposal: crop.insets,
+			crop: { proposal: crop.insets, confidence: crop.confidence }
+		};
+		(self as unknown as Worker).postMessage(reply);
+	} catch (error) {
+		const reply: PoseGraphWorkerReply = {
+			ok: false,
+			token,
+			kind: 'pose-graph',
+			message: error instanceof Error ? error.message : String(error)
+		};
+		(self as unknown as Worker).postMessage(reply);
+	}
+}
+
+self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+	const { token, bitmaps, applyCropMargin = true, kind } = event.data;
+	try {
+		if (kind === 'pose-graph') {
+			await handlePoseGraphRequest(token, bitmaps, applyCropMargin);
+			return;
+		}
+
 		// Crop evidence is computed first, from the full frame, so a confidently
 		// defensible shared crop can trim the matcher rasters to their interior
 		// content before pairwise scoring — see `matcherRegionFromCrop`.
