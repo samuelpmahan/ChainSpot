@@ -271,6 +271,22 @@ export interface CompositeProvenance {
 	readonly finalRasterSha256: Sha256Hex;
 }
 
+/**
+ * Everything about a composite except the hash of its own rendered bytes —
+ * which cannot exist until rendering actually happens (`finalRasterSha256`
+ * is necessarily a chicken-and-egg field). Pipeline code computes a
+ * `DraftComposite` first (placements/transforms/crops are fully determined
+ * without touching a canvas), renders from it, hashes the result, and only
+ * then calls `sealCompositeProvenance` to produce the real
+ * `CompositeProvenance` that gets attached to an `ImageAsset` or handed off.
+ * A `DraftComposite` must never be persisted or handed off on its own.
+ */
+export type DraftComposite = Omit<CompositeProvenance, 'finalRasterSha256'>;
+
+export function sealCompositeProvenance(draft: DraftComposite, finalRasterSha256: Sha256Hex): CompositeProvenance {
+	return { ...draft, finalRasterSha256 };
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
