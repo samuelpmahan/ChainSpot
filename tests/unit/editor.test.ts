@@ -486,6 +486,74 @@ describe('image replacement', () => {
 	});
 });
 
+describe('target rotation (CHSPT-44)', () => {
+	it('sets and reads back the target image rotation', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(30);
+		const target = editor.state.images.find((image) => image.role === 'target-basemap');
+		expect(target?.rotationDeg).toBe(30);
+	});
+
+	it('normalizes an out-of-range angle into (-180, 180]', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(400);
+		const target = editor.state.images.find((image) => image.role === 'target-basemap');
+		expect(target?.rotationDeg).toBeCloseTo(40, 9);
+	});
+
+	it('omits rotationDeg entirely (rather than storing 0) when rotation returns to north', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(30);
+		editor.setTargetRotation(0);
+		const target = editor.state.images.find((image) => image.role === 'target-basemap');
+		expect(target?.rotationDeg).toBeUndefined();
+		expect('rotationDeg' in target!).toBe(false);
+	});
+
+	it('is undoable, one history step per call, exactly like any other durable mutation', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(15);
+		editor.setTargetRotation(30);
+		expect(editor.canUndo).toBe(true);
+		editor.undo();
+		expect(editor.state.images.find((image) => image.role === 'target-basemap')?.rotationDeg).toBe(15);
+		editor.undo();
+		expect(editor.state.images.find((image) => image.role === 'target-basemap')?.rotationDeg).toBeUndefined();
+	});
+
+	it('is a no-op (no history entry) when set to the value it already has', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(20);
+		expect(editor.canUndo).toBe(true);
+		editor.undo();
+		expect(editor.canUndo).toBe(false);
+		editor.setTargetRotation(0);
+		expect(editor.canUndo).toBe(false);
+	});
+
+	it('rejects a non-finite angle', () => {
+		const editor = makeEditor();
+		expect(() => editor.setTargetRotation(Number.NaN)).toThrow(/finite/);
+	});
+
+	it('requires the target-basemap image to be loaded first', () => {
+		const editor = makeEmptyEditor();
+		expect(() => editor.setTargetRotation(10)).toThrow(/target-basemap/);
+	});
+
+	it('resets to unrotated when the target image is replaced, the same "fresh asset" reset provenance already gets', () => {
+		const editor = makeEditor();
+		editor.setTargetRotation(30);
+		editor.replaceImage({
+			role: 'target-basemap',
+			asset: targetAsset('image-target-2'),
+			bytes: new Uint8Array([7])
+		});
+		const target = editor.state.images.find((image) => image.role === 'target-basemap');
+		expect(target?.rotationDeg).toBeUndefined();
+	});
+});
+
 describe('history semantics', () => {
 	it('clears redo after a divergent edit', () => {
 		const editor = makeEditor();

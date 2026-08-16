@@ -145,6 +145,84 @@ async function createPair(
 	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
 }
 
+/**
+ * Rotates (dx, dy) clockwise by `deg` in this y-down pixel space — mirrors
+ * `coords.ts`'s `rotatePointAroundCenter` exactly, so a target point clicked
+ * through a rotated pane (CHSPT-44) still resolves to the intended
+ * ORIGINAL, unrotated target-image pixel.
+ */
+function rotateAboutCenter(
+	point: { xPx: number; yPx: number },
+	center: { xPx: number; yPx: number },
+	deg: number
+): { xPx: number; yPx: number } {
+	const rad = (deg * Math.PI) / 180;
+	const cos = Math.cos(rad);
+	const sin = Math.sin(rad);
+	const dx = point.xPx - center.xPx;
+	const dy = point.yPx - center.yPx;
+	return { xPx: dx * cos - dy * sin + center.xPx, yPx: dx * sin + dy * cos + center.yPx };
+}
+
+async function setTargetRotation(page: Page, degrees: number): Promise<void> {
+	await page.getByTestId('target-rotation-number').fill(String(degrees));
+	await page.keyboard.press('Tab'); // blur to fire the commit (onchange)
+}
+
+/**
+ * Adds a hole via the current sidebar-driven flow (the 'n' shortcut), unlike
+ * `placePoint`/`hole-add` above which target the pre-split radial-menu UI —
+ * see the file-level comment. Only used by the rotated-target test below,
+ * which needs nothing beyond a plain tee+basket hole (no bend, no shot, no
+ * Map/Round switch), so it does not inherit the larger redesign the older
+ * test above still needs.
+ */
+async function addHole(page: Page): Promise<void> {
+	await page.keyboard.press('n');
+	await expect(page.getByTestId('placement-banner')).toBeVisible();
+}
+
+/** Clicks an image-space point directly on the source-overview pane — today's empty-space placement for a hole's missing tee/basket (no radial menu involved). */
+async function clickSourceImagePoint(page: Page, xPx: number, yPx: number): Promise<void> {
+	const geometry = await paneGeometry(page, 'source-overview');
+	const view = await viewState(page, 'source-overview');
+	const local = imagePoint(view, xPx, yPx);
+	const screen = panePoint(geometry, local.x, local.y);
+	await page.mouse.click(screen.x, screen.y);
+}
+
+/** Same as `createPair`, but the target click accounts for the pane's current manual rotation (CHSPT-44) — the target pixel itself is still specified in ORIGINAL, unrotated image coordinates. */
+async function createPairOnRotatedTarget(
+	page: Page,
+	sourcePoint: { xPx: number; yPx: number },
+	targetPoint: { xPx: number; yPx: number },
+	targetRotationDeg: number,
+	targetCenter: { xPx: number; yPx: number }
+): Promise<void> {
+	const rotatedTargetPoint = rotateAboutCenter(targetPoint, targetCenter, targetRotationDeg);
+	await page.getByTestId('add-correspondence').click();
+	// Geometry/view are re-read fresh right before each click, not captured once up
+	// front: `add-correspondence` (and the rotation controls above the panes) can
+	// shift the page's scroll position, so a snapshot taken before those actions
+	// can point at stale, no-longer-on-screen pane coordinates by the time the
+	// click actually fires.
+	await page.getByTestId('pane-scene-source-overview').scrollIntoViewIfNeeded();
+	const sourceGeometry = await paneGeometry(page, 'source-overview');
+	const sourceView = await viewState(page, 'source-overview');
+	const sourceLocal = imagePoint(sourceView, sourcePoint.xPx, sourcePoint.yPx);
+	const sourceScreen = panePoint(sourceGeometry, sourceLocal.x, sourceLocal.y);
+	await page.mouse.click(sourceScreen.x, sourceScreen.y);
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'add-target');
+
+	await page.getByTestId('pane-scene-target-basemap').scrollIntoViewIfNeeded();
+	const targetGeometry = await paneGeometry(page, 'target-basemap');
+	const targetView = await viewState(page, 'target-basemap');
+	const targetLocal = imagePoint(targetView, rotatedTargetPoint.xPx, rotatedTargetPoint.yPx);
+	const targetScreen = panePoint(targetGeometry, targetLocal.x, targetLocal.y);
+	await page.mouse.click(targetScreen.x, targetScreen.y);
+	await expect(page.getByTestId('app-shell')).toHaveAttribute('data-correspondence-mode', 'neutral');
+}
+
 test('clean hole construction: annotate a hole, align, build and download the resulting clean graphic', async ({
 	page
 }) => {
@@ -222,4 +300,87 @@ test('clean hole construction: annotate a hole, align, build and download the re
 	await page.getByTestId('download-all-hole-graphics').click();
 	const zipDownload = await zipDownloadPromise;
 	expect(zipDownload.suggestedFilename()).toBe('hole-graphics.zip');
+});
+
+/**
+ * CHSPT-44 (DEMO-ALIGN): a rotated clean target still produces correctly
+ * transferred geometry and a correctly exported graphic. Rotating the target
+ * (per the ticket's UX flow) happens right after it's loaded and before
+ * correspondence pairs are created; the transferred tee/basket geometry and
+ * the exported PNG must both reflect that same rotation.
+ */
+test('clean hole construction with a rotated clean target', async ({ page }) => {
+	// 1. Annotate Course: a minimal tee+basket hole is enough to exercise transfer.
+	await page.goto('/annotate-course');
+	await page.waitForFunction(() => document.documentElement.dataset.appReady === 'true');
+	await page.getByTestId('pane-input-source-overview').setInputFiles({
+		name: 'course.png',
+		mimeType: 'image/png',
+		buffer: pngPayload(800, 600, 80, 120, 60)
+	});
+	await page.waitForSelector('[data-testid="hole-annotation"]');
+	await addHole(page);
+	await clickSourceImagePoint(page, 50, 50);
+	await expect(page.getByTestId('tee-marker-1')).toBeVisible();
+	await clickSourceImagePoint(page, 400, 300);
+	await expect(page.getByTestId('basket-marker-1')).toBeVisible();
+	await expect(page.getByTestId('approve-hole-button')).toBeVisible();
+	await page.keyboard.press('Enter');
+
+	await page.getByTestId('annotate-done').click();
+	await page.waitForURL('**/create-graphics');
+
+	// 2. Load the clean target, then rotate it (per the ticket's UX flow: rotate
+	// right after choosing/fetching the target, before creating correspondence
+	// pairs) using the precise numeric entry, not just the coarse slider.
+	await expect(page.getByTestId('pane-filename-source-overview')).toHaveText('course.png');
+	await page.getByTestId('pane-input-target-basemap').setInputFiles({
+		name: 'clean.png',
+		mimeType: 'image/png',
+		buffer: pngPayload(1000, 800, 60, 90, 40)
+	});
+
+	const ROTATION_DEG = 30;
+	const TARGET_CENTER = { xPx: 500, yPx: 400 }; // half of the 1000x800 target
+	await setTargetRotation(page, ROTATION_DEG);
+	await expect(page.getByTestId('target-rotation-value')).toHaveText('30.0°');
+
+	// 3. Create pairs by clicking the ROTATED on-screen position for each target
+	// point — this exercises click-to-image-space inversion on a rotated pane,
+	// not just the display side.
+	await createPairOnRotatedTarget(page, { xPx: 50, yPx: 50 }, { xPx: 400, yPx: 350 }, ROTATION_DEG, TARGET_CENTER);
+	await createPairOnRotatedTarget(page, { xPx: 700, yPx: 500 }, { xPx: 600, yPx: 450 }, ROTATION_DEG, TARGET_CENTER);
+	await expect(page.getByTestId('alignment-summary')).toContainText('similarity transform from 2 pairs');
+
+	// 4. The hole's live preview wraps the raster and every transferred point in
+	// one shared SVG rotate() transform around the target image's own center —
+	// point transfer, overlays, and the preview all consuming the same rotation.
+	await page.getByTestId('hole-graphics').scrollIntoViewIfNeeded();
+	await page.waitForSelector('[data-testid="hole-graphic-preview-1"]');
+	const rotateTransform = await page.evaluate(() => {
+		const group = document.querySelector('[data-testid="hole-graphic-preview-1"] svg > g');
+		return group?.getAttribute('transform') ?? null;
+	});
+	expect(rotateTransform).toBe(`rotate(${ROTATION_DEG} ${TARGET_CENTER.xPx} ${TARGET_CENTER.yPx})`);
+
+	// 5. Export still succeeds and rasterizes the same rotated markup.
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByTestId('hole-graphic-download-1').click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toBe('hole-1.png');
+	const stream = await download.createReadStream();
+	const chunks: Buffer[] = [];
+	for await (const chunk of stream) chunks.push(chunk);
+	const bytes = Buffer.concat(chunks);
+	expect(bytes.length).toBeGreaterThan(0);
+	expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); // PNG signature
+
+	// 6. "0deg / Reset north" restores the unrotated default — existing north-up
+	// workflows are unaffected once rotation returns to 0.
+	await page.getByTestId('target-rotation-reset').click();
+	await expect(page.getByTestId('target-rotation-value')).toHaveText('0.0°');
+	const unrotatedGroup = await page.evaluate(
+		() => document.querySelector('[data-testid="hole-graphic-preview-1"] svg > g[transform^="rotate"]') !== null
+	);
+	expect(unrotatedGroup).toBe(false);
 });

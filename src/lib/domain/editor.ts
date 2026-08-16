@@ -54,7 +54,7 @@
  * been pruned from history).
  */
 
-import { pointInBounds } from '../coords';
+import { normalizeRotationDeg, pointInBounds } from '../coords';
 import {
 	createControlPointPair,
 	createProjectState,
@@ -402,6 +402,42 @@ export class ProjectEditor {
 		const after = {
 			...before,
 			walkingPath: normalized ? cloneValue(normalized as SourcePoint[]) : undefined
+		};
+		this.commit(before, after);
+	}
+
+	/**
+	 * Sets the clean target image's manual rotation pose (CHSPT-44), normalized into
+	 * `(-180, 180]` so repeated fine-tuning never drifts to an ever-growing raw value.
+	 * One history step per call — callers driving a continuous control (a rotation
+	 * slider) must keep the live value as local/transient display state during the
+	 * gesture and call this once at the end, the same "one drag, one commit" shape
+	 * `movePoint` uses for marker drags. Normalizing to exactly `0` clears the field
+	 * (omitted, not stored as `0`) so a project that never rotates its target stays
+	 * byte-identical to one built before this field existed.
+	 */
+	setTargetRotation(rotationDeg: number): void {
+		if (!Number.isFinite(rotationDeg)) {
+			throw new Error(
+				`setTargetRotation: rotationDeg must be a finite number, got ${JSON.stringify(rotationDeg)}`
+			);
+		}
+		const target = findImageByRole(this.#state.images, 'target-basemap');
+		if (!target) {
+			throw new Error('setTargetRotation: the target-basemap image must be loaded before setting rotation');
+		}
+		const normalized = normalizeRotationDeg(rotationDeg);
+		const current = target.rotationDeg ?? 0;
+		if (current === normalized) return;
+
+		const before = this.#state;
+		const after = {
+			...before,
+			images: before.images.map((image) =>
+				image.id === target.id
+					? { ...image, rotationDeg: normalized === 0 ? undefined : normalized }
+					: image
+			)
 		};
 		this.commit(before, after);
 	}

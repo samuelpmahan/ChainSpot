@@ -8,7 +8,14 @@
 	import type { ImageAsset } from '$lib/domain/project';
 	import type { ControlPointPair } from '$lib/domain/project';
 	import type { ProjectEditor } from '$lib/domain/editor';
-	import { clampPointToImageBounds, imageToScreen, pointInBounds, screenToImage } from '$lib/coords';
+	import {
+		clampPointToImageBounds,
+		imageToScreen,
+		imageToScreenRotated,
+		pointInBounds,
+		screenToImage,
+		screenToImageRotated
+	} from '$lib/coords';
 	import type { PendingPlacement } from '$lib/correspondenceState';
 	import {
 		MAGNIFIER_SIZE,
@@ -60,6 +67,17 @@
 		ghostCourse?: readonly GhostCourseHole[];
 		/** Transient ghost-course overlay visibility; rendering only, never domain state. */
 		ghostCourseVisible?: boolean;
+		/**
+		 * Manual clean-target rotation about the image center, in degrees (CHSPT-44).
+		 * Only rendered/applied for the `target-basemap` pane; ignored for
+		 * `source-overview`. May be a live, uncommitted draft value while the caller's
+		 * rotation control is mid-gesture — see `onRotationInput`/`onRotationCommit`.
+		 */
+		rotationDeg?: number;
+		/** Fires continuously while the caller's rotation control is being dragged/typed; never touches durable state. */
+		onRotationInput?: (rotationDeg: number) => void;
+		/** Fires once a rotation gesture ends (release, blur, or Reset); the caller commits this to durable state. */
+		onRotationCommit?: (rotationDeg: number) => void;
 		decode?: DecodeImageFile;
 		confirmDiscard?: (affectedPairCount: number) => boolean | Promise<boolean>;
 		onDomainChanged?: (role: ImageRole) => void;
@@ -81,6 +99,9 @@
 		markersVisible = true,
 		ghostCourse = [],
 		ghostCourseVisible = true,
+		rotationDeg = 0,
+		onRotationInput,
+		onRotationCommit,
 		decode = decodeImageFile,
 		confirmDiscard,
 		onDomainChanged,
@@ -88,6 +109,9 @@
 		onPointSelect,
 		onPointMove
 	}: Props = $props();
+
+	/** True only for the pane that actually renders/applies a rotated pose (CHSPT-44); `source-overview` never rotates regardless of what `rotationDeg` is passed. */
+	let rotationActive = $derived(role === 'target-basemap' && rotationDeg !== 0);
 
 	let vp = new ViewportController();
 
@@ -144,6 +168,36 @@
 	function currentImage(): ImageAsset | null {
 		void refresh;
 		return findImageByRole(editor.state.images, role) ?? null;
+	}
+
+	/** Image-space center used as the manual-rotation pivot; only meaningful while `rotationActive`. */
+	function rotationCenter(image: ImageAsset): { xPx: number; yPx: number } {
+		return { xPx: image.widthPx / 2, yPx: image.heightPx / 2 };
+	}
+
+	/**
+	 * `screenToImage`, rotation-aware (CHSPT-44): inverts the manual target-pose
+	 * rotation before the plain pan/zoom inversion, so a click/drag on a rotated
+	 * clean-target pane still resolves to the correct ORIGINAL (unrotated) image
+	 * pixel — the space every stored coordinate lives in. Identical to
+	 * `screenToImage` whenever `rotationActive` is false. `transform` defaults to
+	 * the live viewport but accepts a gesture's frozen snapshot, matching every
+	 * existing call site's own convention.
+	 */
+	function toImageSpace(
+		pointer: ScreenSpacePoint,
+		transform: ViewTransformState = vp.view
+	): { xPx: number; yPx: number } {
+		const image = currentImage();
+		if (!image || !rotationActive) return screenToImage(pointer, transform);
+		return screenToImageRotated(pointer, transform, rotationDeg, rotationCenter(image));
+	}
+
+	/** Inverse of `toImageSpace`, for positioning screen-space UI (the magnifier) at an image-space anchor. */
+	function toScreenSpace(point: { xPx: number; yPx: number }): ScreenSpacePoint {
+		const image = currentImage();
+		if (!image || !rotationActive) return imageToScreen(point, vp.view);
+		return imageToScreenRotated(point, vp.view, rotationDeg, rotationCenter(image));
 	}
 
 	function currentDecoded(): HTMLImageElement | null {
@@ -277,7 +331,7 @@
 			pairId: gesture.markerHit.pairId,
 			side: gesture.markerHit.side,
 			coordinates: clampPointToImageBounds(
-				screenToImage(pointer, gesture.transform),
+				toImageSpace(pointer, gesture.transform),
 				image.widthPx,
 				image.heightPx
 			)
@@ -299,7 +353,7 @@
 		const releaseCoordinates =
 			image && activeGesture.markerHit.kind === 'complete'
 				? clampPointToImageBounds(
-						screenToImage(pointer, activeGesture.transform),
+						toImageSpace(pointer, activeGesture.transform),
 						image.widthPx,
 						image.heightPx
 					)
@@ -347,7 +401,7 @@
 		if (!placementEnabled || !onPlacement) return;
 		const image = currentImage();
 		if (!image) return;
-		const coordinates = screenToImage(pointer, vp.view);
+		const coordinates = toImageSpace(pointer);
 		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) {
 			interactionError = 'Click inside the original image bounds.';
 			return;
@@ -367,7 +421,7 @@
 			return;
 		}
 		const pointer = vp.pointerIn(event);
-		const coordinates = screenToImage(pointer, vp.view);
+		const coordinates = toImageSpace(pointer);
 		if (!pointInBounds(coordinates, image.widthPx, image.heightPx)) {
 			hoverMagnifier = null;
 			return;
@@ -413,7 +467,7 @@
 			selectionMagnifier = null;
 			return;
 		}
-		const screen = imageToScreen(anchor, vp.view);
+		const screen = toScreenSpace(anchor);
 		selectionMagnifier = {
 			xPx: anchor.xPx,
 			yPx: anchor.yPx,
@@ -488,9 +542,9 @@
 		}
 	});
 
-	/** Applies the authoritative viewport transform to the Konva scene. */
+	/** Applies the authoritative viewport transform to the Konva scene, composed with the manual target-pose rotation (CHSPT-44) when this is the rotated pane. */
 	$effect(() => {
-		scene?.applyTransform(vp.view);
+		scene?.applyTransform(vp.view, role === 'target-basemap' ? rotationDeg : 0);
 	});
 
 	/** Keeps the Konva stage sized to the viewport content box. */
@@ -508,7 +562,23 @@
 			scene?.setMarkers(markers);
 		}
 		scene?.setGhostCourseVisible(ghostCourseVisible);
-		const ghostCourseJson = JSON.stringify(ghostCourse);
+		// Fingerprint only the fields `createGhostHole` (scene.ts) actually reads. The
+		// caller may pass a `HoleGraphicPlan[]` here (it structurally satisfies
+		// `GhostCourseHole[]`), whose `crop`/`targetRotationDeg`/other export-only fields
+		// change on every tick of a rotation-slider drag (CHSPT-44) without the rendered
+		// ghost-course geometry itself changing at all — stringifying the whole object
+		// would rebuild every Konva ghost-course node on every such tick for no reason.
+		const ghostCourseJson = JSON.stringify(
+			ghostCourse.map(({ holeId, number, tee, basket, bends, corridorBand, centerline }) => ({
+				holeId,
+				number,
+				tee,
+				basket,
+				bends,
+				corridorBand,
+				centerline
+			}))
+		);
 		if (ghostCourseJson !== lastGhostCourseJson) {
 			lastGhostCourseJson = ghostCourseJson;
 			scene?.setGhostCourse(ghostCourse);
@@ -640,6 +710,52 @@
 		</button>
 	</div>
 
+	{#if role === 'target-basemap'}
+		<!-- Manual clean-target rotation (CHSPT-44): rotate the target image about its own
+		     center to roughly match the UDisc source's orientation before/while reviewing
+		     transferred course geometry. Arbitrary-angle, never limited to 90deg steps. -->
+		<div class="rotation-controls" data-testid="target-rotation-controls">
+			<label class="rotation-slider-label" for="target-rotation-slider">Rotation</label>
+			<input
+				id="target-rotation-slider"
+				class="rotation-slider"
+				type="range"
+				min="-180"
+				max="180"
+				step="0.5"
+				value={rotationDeg}
+				disabled={!currentImage()}
+				data-testid="target-rotation-slider"
+				oninput={(event) =>
+					onRotationInput?.(Number((event.currentTarget as HTMLInputElement).value))}
+				onchange={(event) =>
+					onRotationCommit?.(Number((event.currentTarget as HTMLInputElement).value))}
+				aria-label="Rotate the clean target image, in degrees"
+			/>
+			<input
+				class="rotation-number"
+				type="number"
+				step="0.1"
+				value={Math.round(rotationDeg * 10) / 10}
+				disabled={!currentImage()}
+				data-testid="target-rotation-number"
+				onchange={(event) =>
+					onRotationCommit?.(Number((event.currentTarget as HTMLInputElement).value))}
+				aria-label="Rotation in degrees, precise entry"
+			/>
+			<span class="rotation-value" data-testid="target-rotation-value">{rotationDeg.toFixed(1)}&deg;</span>
+			<button
+				type="button"
+				class="nav-button"
+				data-testid="target-rotation-reset"
+				disabled={!currentImage() || rotationDeg === 0}
+				onclick={() => onRotationCommit?.(0)}
+			>
+				0&deg; / Reset north
+			</button>
+		</div>
+	{/if}
+
 	{#if error && errorText()}
 		<p class="error" data-testid={`pane-error-${role}`} role="alert">{errorText()}</p>
 	{/if}
@@ -749,6 +865,40 @@
 	.nav-button:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;
+	}
+
+	.rotation-controls {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+	}
+
+	.rotation-slider-label {
+		opacity: 0.8;
+	}
+
+	.rotation-slider {
+		flex: 1 1 120px;
+		min-width: 100px;
+	}
+
+	.rotation-number {
+		width: 4.5rem;
+		min-height: 2.25rem;
+		padding: 0.2rem 0.4rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background-color: #27272a;
+		color: #e4e4e7;
+	}
+
+	.rotation-value {
+		min-width: 3.5rem;
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		opacity: 0.8;
 	}
 
 	.placeholder {

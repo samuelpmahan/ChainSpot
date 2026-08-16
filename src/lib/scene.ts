@@ -179,8 +179,16 @@ export interface PaneScene {
 	readonly controlPointGroup: Konva.Group;
 	/** Swaps the raster content without touching the view transform. */
 	setImage(image: HTMLImageElement, widthPx: number, heightPx: number): void;
-	/** Applies the authoritative plain view transform to all image-space view groups. */
-	applyTransform(transform: ViewTransformState): void;
+	/**
+	 * Applies the authoritative plain view transform to all image-space view groups,
+	 * composed with an optional manual rotation (CHSPT-44) about the current raster
+	 * image's own center. `rotationDeg` defaults to 0 (no rotation, today's exact
+	 * behavior); a caller with no rotated pose never needs to pass it. Rotating a group
+	 * carries every one of its children — raster, ghost-course overlay, and
+	 * correspondence markers alike — rigidly together, so overlay geometry never needs
+	 * separate rotation math.
+	 */
+	applyTransform(transform: ViewTransformState, rotationDeg?: number): void;
 	/** Replaces the transient marker scene objects from plain image-space marker data. */
 	setMarkers(markers: readonly MarkerSceneData[]): void;
 	/**
@@ -246,6 +254,17 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 	let imageNode: Konva.Image | null = null;
 	let markerZoom = 1;
+	/**
+	 * Current manual target-pose rotation (CHSPT-44), captured the same way `markerZoom`
+	 * already is, so a marker/ghost-label node built AFTER a rotation is active (e.g.
+	 * `setMarkers`/`setGhostCourse` destroy-and-rebuild in response to a new
+	 * correspondence pair or an edited hole, independently of `applyTransform`) starts
+	 * counter-rotated immediately instead of rendering tilted until the next unrelated
+	 * `applyTransform` call happens to sweep through and fix it.
+	 */
+	let currentRotationDeg = 0;
+	/** Current raster's own pixel dimensions, tracked so `applyTransform` can rotate every view group about its center without the caller re-supplying it every frame. */
+	let imageDims: { widthPx: number; heightPx: number } | null = null;
 
 	function createMarker(marker: MarkerSceneData): Konva.Group {
 		const spec = markerVisualSpec(marker);
@@ -257,7 +276,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			kind: marker.kind,
 			x: marker.xPx,
 			y: marker.yPx,
-			scale: markerVisualScale(markerZoom)
+			scale: markerVisualScale(markerZoom),
+			rotation: -currentRotationDeg
 		});
 		const hitTarget = new Konva.Circle({
 			name: 'markerHitTarget',
@@ -411,7 +431,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 					fontSize: 14,
 					fontStyle: 'bold',
 					fill: GHOST_LABEL_FILL,
-					listening: false
+					listening: false,
+					rotation: -currentRotationDeg
 				})
 			);
 		}
@@ -439,20 +460,45 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			node.image(image);
 			node.width(widthPx);
 			node.height(heightPx);
+			imageDims = { widthPx, heightPx };
 			rasterGroup.visible(true);
 			rasterLayer.batchDraw();
 		},
 
-		applyTransform(transform) {
+		applyTransform(transform, rotationDeg = 0) {
 			markerZoom = transform.zoom;
-			rasterGroup.position({ x: transform.panX, y: transform.panY });
-			rasterGroup.scale({ x: transform.zoom, y: transform.zoom });
-			ghostCourseGroup.position({ x: transform.panX, y: transform.panY });
-			ghostCourseGroup.scale({ x: transform.zoom, y: transform.zoom });
-			controlPointGroup.position({ x: transform.panX, y: transform.panY });
-			controlPointGroup.scale({ x: transform.zoom, y: transform.zoom });
+			currentRotationDeg = rotationDeg;
+			// Pivot at the raster's own center in image-space, then scale/pan exactly as
+			// the unrotated case did — see the interface doc and `coords.ts`'s
+			// `imageToScreenRotated` for the shared "rotate about center, then pan/zoom"
+			// formula this mirrors. No raster yet (dims unknown) falls back to (0, 0),
+			// same as an unrotated pivot at the group origin.
+			const centerX = imageDims ? imageDims.widthPx / 2 : 0;
+			const centerY = imageDims ? imageDims.heightPx / 2 : 0;
+			const position = {
+				x: transform.panX + transform.zoom * centerX,
+				y: transform.panY + transform.zoom * centerY
+			};
+			for (const group of [rasterGroup, ghostCourseGroup, controlPointGroup]) {
+				group.offset({ x: centerX, y: centerY });
+				group.position(position);
+				group.scale({ x: transform.zoom, y: transform.zoom });
+				group.rotation(rotationDeg);
+			}
 			for (const marker of controlPointGroup.getChildren()) {
 				marker.scale(markerVisualScale(markerZoom));
+				// Counter-rotate each marker's own symbol/ordinal so it stays upright while
+				// its position still rotates rigidly with the parent group (CHSPT-44).
+				marker.rotation(-rotationDeg);
+			}
+			for (const holeGroup of ghostCourseGroup.getChildren()) {
+				// The hole-number label is the only ghost-course element whose readability
+				// depends on orientation (basket/tee dots and the centerline path look and
+				// behave identically rotated); counter-rotate it in place so it stays
+				// upright, mirroring the marker-ordinal treatment above (CHSPT-44).
+				if (!(holeGroup instanceof Konva.Group)) continue;
+				const label = holeGroup.findOne('.ghostHoleNumber');
+				if (label) label.rotation(-rotationDeg);
 			}
 			rasterLayer.batchDraw();
 			ghostCourseLayer.batchDraw();

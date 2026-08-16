@@ -7,7 +7,7 @@
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
 	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
-	import { pointInBounds } from '$lib/coords';
+	import { normalizeRotationDeg, pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
 	import type { PointSelection } from '$lib/pointSelection';
@@ -228,6 +228,55 @@
 	}
 
 	/**
+	 * Manual clean-target rotation (CHSPT-44), about the target image's own center.
+	 * Transient display state, kept LIVE (updated continuously as the rotation
+	 * control is dragged/typed) so the Konva overlay in the target pane, the
+	 * hole-graphics preview list, and eventual PNG/zip export are always driven by
+	 * the exact same value — one source of truth for "point transfer, overlays,
+	 * correspondence display, and final export" per the ticket's geometry contract.
+	 * Only committed to durable state (`editor.setTargetRotation`, undoable) once a
+	 * gesture ends, so a slider drag never floods undo history — the same "transient
+	 * preview during a drag, one commit at the end" shape `ImagePane`'s own marker
+	 * drag already uses.
+	 */
+	let targetRotationDraft = $state(0);
+
+	/**
+	 * Keeps the live draft in sync with the committed value on every `refresh()`
+	 * (new/replaced target, and — just as importantly — undo/redo of a rotation
+	 * commit, which changes `rotationDeg` on the SAME image id). An earlier version
+	 * of this effect only resynced when the target image's `id` changed, on the
+	 * theory that it only needed to catch a swapped target; that missed undo/redo
+	 * of `editor.setTargetRotation` entirely, since undo reverts `rotationDeg`
+	 * in place without touching the image's `id` — leaving the pane's rotation
+	 * math, click-to-image-space inversion, and hole-graphics export silently
+	 * pinned to the stale, no-longer-committed angle. Resyncing unconditionally
+	 * is safe: nothing calls `refresh()` during a live drag/typing gesture (see
+	 * `handleTargetRotationInput`), so this never fights an in-progress edit —
+	 * exactly the same "always re-derive from state" contract `syncNameDraft`/
+	 * `syncInspectorDraft` already follow.
+	 */
+	$effect(() => {
+		const image = targetImage();
+		targetRotationDraft = image?.rotationDeg ?? 0;
+	});
+
+	/** Live updates while the rotation control is being dragged/typed; never touches durable state. */
+	function handleTargetRotationInput(rotationDeg: number): void {
+		if (!Number.isFinite(rotationDeg)) return;
+		targetRotationDraft = normalizeRotationDeg(rotationDeg);
+	}
+
+	/** Commits the rotation gesture's final value to durable, undoable state. */
+	function handleTargetRotationCommit(rotationDeg: number): void {
+		if (!Number.isFinite(rotationDeg) || !targetImage()) return;
+		const normalized = normalizeRotationDeg(rotationDeg);
+		targetRotationDraft = normalized;
+		editor.setTargetRotation(normalized);
+		refresh();
+	}
+
+	/**
 	 * The graphics/export mode (style selection, per-hole plans, PNG/zip
 	 * export state) lives behind this module boundary — see
 	 * `graphicsMode.svelte.ts` for why. It reads alignment/annotation/NAIP
@@ -241,7 +290,8 @@
 		targetImageHref,
 		feetPerPixel: holeGraphicFeetPerPixel,
 		walkingPath: () => currentWalkingPath(),
-		geoReference: () => targetGeoReference()
+		geoReference: () => targetGeoReference(),
+		targetRotationDeg: () => targetRotationDraft
 	});
 
 	let selection = $state<PointSelection | null>(null);
@@ -2074,6 +2124,9 @@
 			{markersVisible}
 			ghostCourse={graphicsMode.plans}
 			ghostCourseVisible={ghostCoursePreviewVisible}
+			rotationDeg={targetRotationDraft}
+			onRotationInput={handleTargetRotationInput}
+			onRotationCommit={handleTargetRotationCommit}
 			{decode}
 			confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
 			onDomainChanged={onDomainChanged}

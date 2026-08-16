@@ -66,6 +66,18 @@
  * them in the first place, so a hand-edited or foreign document can never smuggle in a
  * self-inconsistent transform.
  *
+ * v6 -> v7: adds optional `rotationDeg` on an image manifest (`ImageAsset.rotationDeg`,
+ * CHSPT-44's manual clean-target rotation pose) — a display/pose transform rotated about
+ * the image's own center, never a resampled bitmap and never touching any stored
+ * `ImagePoint`/hole coordinate, which stay in original, unrotated target-image pixels
+ * regardless of this value. Absent on v1-v6 documents, which migrate to absent (0°) — the
+ * same "one representation of absent" rule `walkingPath`/`provenance` already use: a `0`
+ * or `null` manifest value normalizes to the same absent state as an omitted key, on both
+ * read and write, so an unrotated project's document stays byte-identical to one built
+ * before this field existed. Only a `target-basemap` image may carry one; a
+ * `source-overview` manifest with a present `rotationDeg` is a structured `rotation`
+ * category failure, the same role-guard `provenance` uses in the other direction.
+ *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
  * are only checked (never trusted) on load. A present finite normalized value that does
@@ -98,7 +110,7 @@
  * document definition.
  */
 
-import { pointInBounds, toNormalizedCoordinates } from './coords';
+import { normalizeRotationDeg, pointInBounds, toNormalizedCoordinates } from './coords';
 import { DEFAULT_CORRIDOR_WIDTH_PX } from './corridor';
 import type {
 	AnnotatedHole,
@@ -137,10 +149,10 @@ import type {
 import type { Affine6Coefficients } from './geometry/affine6';
 
 /** The schema version written by this build. */
-export const CURRENT_SCHEMA_VERSION = 6 as const;
+export const CURRENT_SCHEMA_VERSION = 7 as const;
 
 /** Every version this build can read; older ones are migrated forward on parse. */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -169,7 +181,7 @@ export interface NumberBadgeAnchorDoc {
 }
 
 export interface ProjectDocumentV4 {
-	schemaVersion: 6;
+	schemaVersion: 7;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
@@ -194,7 +206,8 @@ export type ProjectSchemaErrorCategory =
 	| 'hole'
 	| 'badge'
 	| 'view'
-	| 'provenance';
+	| 'provenance'
+	| 'rotation';
 
 export interface ProjectSchemaError {
 	category: ProjectSchemaErrorCategory;
@@ -696,6 +709,43 @@ function readImageProvenance(
 	return readCompositeProvenance(input, path, imageSha256);
 }
 
+/**
+ * Reads the optional per-image `rotationDeg` (v7+). Absent/`null`/`0` all normalize to
+ * fully absent (no key at all), the same "one representation of absent" rule
+ * `readImageProvenance` uses for its own field. A non-zero value is normalized into
+ * `(-180, 180]` (`coords.ts`'s `normalizeRotationDeg`) exactly like `editor.ts`'s
+ * `setTargetRotation`, so a hand-edited or externally-produced document (e.g.
+ * `rotationDeg: 400` or `360`) can never desync the stored value from the single
+ * canonical range every other write path already enforces — 360 collapses back to
+ * the same "absent" as 0, and out-of-range values land in-range at their equivalent
+ * angle instead of leaking past the rotation UI's own `[-180, 180]` slider bounds.
+ * Only a `target-basemap` image may carry one; a `source-overview` manifest with a
+ * present, non-zero `rotationDeg` is a structured failure rather than a silently
+ * ignored field.
+ */
+function readImageRotation(input: unknown, path: string, role: ImageRole): number | undefined {
+	if (input === undefined || input === null) return undefined;
+	if (typeof input !== 'number' || !Number.isFinite(input)) {
+		throw failure(
+			'rotation',
+			'rotation.number.invalid',
+			path,
+			`${path} must be a finite number, got ${describeValue(input)}`
+		);
+	}
+	const degrees = normalizeRotationDeg(input);
+	if (degrees === 0) return undefined;
+	if (role !== 'target-basemap') {
+		throw failure(
+			'rotation',
+			'rotation.role-invalid',
+			path,
+			`${path} may only be present on a 'target-basemap' image, found on a '${role}' image`
+		);
+	}
+	return degrees;
+}
+
 function readImages(input: unknown): ImageAsset[] {
 	if (!Array.isArray(input)) {
 		throw failure('required-type', 'required.missing', 'images', 'images must be an array');
@@ -708,6 +758,7 @@ function readImages(input: unknown): ImageAsset[] {
 		const role = readRole(object.role, `images[${index}].role`);
 		const sha256 = readStringOrNull(object.sha256, `images[${index}].sha256`);
 		const provenance = readImageProvenance(object.provenance, `images[${index}].provenance`, role, sha256);
+		const rotationDeg = readImageRotation(object.rotationDeg, `images[${index}].rotationDeg`, role);
 		const image: ImageAsset = {
 			id: readNonEmptyString(object.id, `images[${index}].id`),
 			role,
@@ -717,7 +768,8 @@ function readImages(input: unknown): ImageAsset[] {
 			heightPx: readPositiveInt(object.heightPx, `images[${index}].heightPx`),
 			sha256,
 			bundlePath: readStringOrNull(object.bundlePath, `images[${index}].bundlePath`),
-			...(provenance !== undefined ? { provenance } : {})
+			...(provenance !== undefined ? { provenance } : {}),
+			...(rotationDeg !== undefined ? { rotationDeg } : {})
 		};
 		if (role === 'source-overview') sourceCount++;
 		else targetCount++;
@@ -1402,7 +1454,11 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV4 {
 			bundlePath: image.bundlePath,
 			// `null` and absent both normalize to "no key" — see the v5->v6 migration note
 			// in the module doc for why (mirrors walkingPath's empty-array normalization).
-			...(image.provenance != null ? { provenance: buildProvenanceDoc(image.provenance) } : {})
+			...(image.provenance != null ? { provenance: buildProvenanceDoc(image.provenance) } : {}),
+			// `null`/`0`/absent all normalize to "no key" — see the v6->v7 migration note.
+			...(image.rotationDeg != null && image.rotationDeg !== 0
+				? { rotationDeg: image.rotationDeg }
+				: {})
 		})),
 		controlPointPairs: state.controlPointPairs.map((pair) => ({
 			id: pair.id,

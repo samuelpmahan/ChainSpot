@@ -18,6 +18,7 @@ function planFor(overrides: Partial<HoleGraphicPlan>): HoleGraphicPlan {
 		crop: CROP,
 		targetWidthPx: 400,
 		targetHeightPx: 400,
+		targetRotationDeg: 0,
 		...overrides
 	};
 }
