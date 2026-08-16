@@ -256,6 +256,27 @@
 	/** Gates "Apply adjustments" in the manual surface — the arrangement must be internally valid before it can be re-rendered. */
 	const manualReady = $derived(report.ready && !rendering && invalidCropFields.length === 0);
 	/**
+	 * Whether the user has actually changed anything this manual session
+	 * (CHSPT-57 review finding #3): without this, "Apply adjustments" was
+	 * enabled the instant the panel opened on an already-valid seeded
+	 * arrangement, so a stray click could silently re-render — and, for any
+	 * rotated/scaled source, FLATTEN — a result the user never touched.
+	 */
+	const manualDirty = $derived(manualCropTouched || manualTransformTouchedSlots.size > 0);
+	/**
+	 * `buildManualDraftComposite` (`pipelineUiHelpers.ts`) can only ever
+	 * produce translation-only transforms — the legacy drag/nudge/numeric
+	 * surface has no rotate handle. Applying manual adjustments to a result
+	 * that AutoStitch placed with genuine rotation/scale (see
+	 * `domain/provenance.ts`'s translation -> similarity -> affine escalation)
+	 * therefore straightens every such capture back to a plain offset. That is
+	 * an accepted limitation of this surface, not a bug to silently hide — see
+	 * the warning shown alongside "Apply adjustments" below.
+	 */
+	const manualHasRotatedSource = $derived(
+		(pipelineSuccess?.draft.sources ?? []).some((source) => source.transform.model !== 'translation')
+	);
+	/**
 	 * Snap assist availability: a selected, loaded movable tile with a valid
 	 * shared crop and at least one loaded expected neighbor to match against,
 	 * and no Snap call already in flight.
@@ -641,7 +662,7 @@
 	 * human just confirmed the placement directly.
 	 */
 	async function applyManualAdjustments(): Promise<void> {
-		if (!manualReady) return;
+		if (!manualReady || !manualDirty) return;
 		exportError = null;
 		rendering = true;
 		try {
@@ -2177,6 +2198,14 @@
 
 						<p class="stage-readiness" data-testid="stitch-readiness" role="status">{readinessText()}</p>
 
+						{#if manualHasRotatedSource}
+							<p class="manual-rotation-warning" data-testid="manual-rotation-warning" role="status">
+								One or more of these captures was auto-aligned with rotation. Manual adjustments can
+								only reposition tiles, so applying them will straighten that rotation out. Only apply
+								if you want to replace the automatic alignment.
+							</p>
+						{/if}
+
 						<div class="manual-actions">
 							<button type="button" class="btn ghost" data-testid="close-manual-adjustments" onclick={() => (manualOpen = false)}>
 								Close
@@ -2185,7 +2214,7 @@
 								type="button"
 								class="btn primary"
 								data-testid="apply-manual-adjustments"
-								disabled={!manualReady}
+								disabled={!manualReady || !manualDirty}
 								onclick={() => void applyManualAdjustments()}
 							>
 								Apply adjustments
@@ -2840,6 +2869,12 @@
 		margin: 0;
 		font-size: 0.7rem;
 		color: #a1a1aa;
+	}
+
+	.manual-rotation-warning {
+		margin: 0;
+		font-size: 0.7rem;
+		color: #fbbf24;
 	}
 
 	.manual-actions {
