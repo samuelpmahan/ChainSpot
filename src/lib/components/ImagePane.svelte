@@ -562,7 +562,23 @@
 			scene?.setMarkers(markers);
 		}
 		scene?.setGhostCourseVisible(ghostCourseVisible);
-		const ghostCourseJson = JSON.stringify(ghostCourse);
+		// Fingerprint only the fields `createGhostHole` (scene.ts) actually reads. The
+		// caller may pass a `HoleGraphicPlan[]` here (it structurally satisfies
+		// `GhostCourseHole[]`), whose `crop`/`targetRotationDeg`/other export-only fields
+		// change on every tick of a rotation-slider drag (CHSPT-44) without the rendered
+		// ghost-course geometry itself changing at all — stringifying the whole object
+		// would rebuild every Konva ghost-course node on every such tick for no reason.
+		const ghostCourseJson = JSON.stringify(
+			ghostCourse.map(({ holeId, number, tee, basket, bends, corridorBand, centerline }) => ({
+				holeId,
+				number,
+				tee,
+				basket,
+				bends,
+				corridorBand,
+				centerline
+			}))
+		);
 		if (ghostCourseJson !== lastGhostCourseJson) {
 			lastGhostCourseJson = ghostCourseJson;
 			scene?.setGhostCourse(ghostCourse);

@@ -254,6 +254,15 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 	let imageNode: Konva.Image | null = null;
 	let markerZoom = 1;
+	/**
+	 * Current manual target-pose rotation (CHSPT-44), captured the same way `markerZoom`
+	 * already is, so a marker/ghost-label node built AFTER a rotation is active (e.g.
+	 * `setMarkers`/`setGhostCourse` destroy-and-rebuild in response to a new
+	 * correspondence pair or an edited hole, independently of `applyTransform`) starts
+	 * counter-rotated immediately instead of rendering tilted until the next unrelated
+	 * `applyTransform` call happens to sweep through and fix it.
+	 */
+	let currentRotationDeg = 0;
 	/** Current raster's own pixel dimensions, tracked so `applyTransform` can rotate every view group about its center without the caller re-supplying it every frame. */
 	let imageDims: { widthPx: number; heightPx: number } | null = null;
 
@@ -267,7 +276,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 			kind: marker.kind,
 			x: marker.xPx,
 			y: marker.yPx,
-			scale: markerVisualScale(markerZoom)
+			scale: markerVisualScale(markerZoom),
+			rotation: -currentRotationDeg
 		});
 		const hitTarget = new Konva.Circle({
 			name: 'markerHitTarget',
@@ -421,7 +431,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 					fontSize: 14,
 					fontStyle: 'bold',
 					fill: GHOST_LABEL_FILL,
-					listening: false
+					listening: false,
+					rotation: -currentRotationDeg
 				})
 			);
 		}
@@ -456,6 +467,7 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 		applyTransform(transform, rotationDeg = 0) {
 			markerZoom = transform.zoom;
+			currentRotationDeg = rotationDeg;
 			// Pivot at the raster's own center in image-space, then scale/pan exactly as
 			// the unrotated case did — see the interface doc and `coords.ts`'s
 			// `imageToScreenRotated` for the shared "rotate about center, then pan/zoom"
