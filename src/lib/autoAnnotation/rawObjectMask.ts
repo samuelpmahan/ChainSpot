@@ -253,6 +253,73 @@ function sortComponents(components: readonly MaskComponent[]): MaskComponent[] {
 	);
 }
 
+/**
+ * A real tee pad's bright rectangular frame surrounds a genuinely grey
+ * rubber/concrete interior. Nothing upstream actually checks for that grey
+ * interior: the `fill` gate (`component.fill` between 0.12 and 0.55, in
+ * `detectRawObjectMask`) only requires that a chunk of the bounding box NOT
+ * be part of the bright mask -- it accepts "not bright" at face value without
+ * ever checking what that non-bright majority actually looks like. A large,
+ * uniformly bright surface with irregular edges (a rooftop, a sunlit stretch
+ * of pavement) can fragment into a similarly hollow-looking bright component
+ * purely from occlusion/shadow noise at its boundary, without ever containing
+ * a genuine grey pad interior anywhere inside it -- exactly the false
+ * positive this rejects (a Heritage Park rooftop, auto-applied as hole 1's
+ * tee 500+ px from the real one, live-tested against the real course image).
+ *
+ * The grey band itself is `teePadDetection.ts`'s own proven
+ * `GRAY_CENTER_DEFAULT_*` constants (value 148-168, saturation < 18, widened
+ * by that module's own adaptive margins) -- reused rather than reinvented,
+ * since that module already empirically tuned this exact color against real
+ * UDisc tee-pad interiors. A wider "just not bright, not dark" band was tried
+ * first and rejected: it isn't a real detector against the actual false
+ * positive (a real Heritage Park rooftop crop scores 34.6% under a wide
+ * "not bright, not dark" band purely from shadow/pavement in the same
+ * connected component, vs. 0.2% under this narrow one). The bar for "has a
+ * grey interior" is deliberately low (a small fraction of the bounding box,
+ * not a majority) -- this is a sanity check against "no grey at all", not a
+ * positive detector; genuine tee-pad candidates with a thin grey sliver still
+ * pass easily.
+ */
+const GREY_INTERIOR_VALUE_MIN = 142; // GRAY_CENTER_DEFAULT_VALUE_MIN(148) - ADAPTIVE_GRAY_CENTER_VALUE_MARGIN(6)
+const GREY_INTERIOR_VALUE_MAX = 174; // GRAY_CENTER_DEFAULT_VALUE_MAX(168) + ADAPTIVE_GRAY_CENTER_VALUE_MARGIN(6)
+const GREY_INTERIOR_SATURATION_MAX = 21; // GRAY_CENTER_DEFAULT_SATURATION_MAX(18) + ADAPTIVE_GRAY_CENTER_SATURATION_MARGIN(3)
+const MIN_GREY_INTERIOR_FRACTION = 0.05;
+
+/** The bounding-box subset `hasGreyInterior` needs -- deliberately narrower than the full (private) `MaskComponent`, so it stays directly testable without constructing one. */
+export interface GreyInteriorBounds {
+	readonly minX: number;
+	readonly minY: number;
+	readonly maxX: number;
+	readonly maxY: number;
+}
+
+export function hasGreyInterior(raster: RawObjectMaskRaster, bounds: GreyInteriorBounds): boolean {
+	const { rgba, widthPx: width } = raster;
+	let sampled = 0;
+	let grey = 0;
+	for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+		for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+			const offset = (y * width + x) * 4;
+			const r = rgba[offset];
+			const g = rgba[offset + 1];
+			const b = rgba[offset + 2];
+			const max = r > g ? (r > b ? r : b) : g > b ? g : b;
+			const min = r < g ? (r < b ? r : b) : g < b ? g : b;
+			const saturation = max === 0 ? 0 : Math.round(((max - min) * 255) / max);
+			sampled += 1;
+			if (
+				max >= GREY_INTERIOR_VALUE_MIN &&
+				max <= GREY_INTERIOR_VALUE_MAX &&
+				saturation < GREY_INTERIOR_SATURATION_MAX
+			) {
+				grey += 1;
+			}
+		}
+	}
+	return sampled > 0 && grey / sampled >= MIN_GREY_INTERIOR_FRACTION;
+}
+
 export function detectRawObjectMask(raster: RawObjectMaskRaster): RawObjectMaskResult {
 	const { rgba, widthPx: width, heightPx: height } = raster;
 	if (
@@ -339,6 +406,14 @@ export function detectRawObjectMask(raster: RawObjectMaskRaster): RawObjectMaskR
 				component.fill <= 0.55
 			);
 		});
+
+		// The fill gate above only requires that most of the bounding box NOT be
+		// part of the bright mask -- it never checks what that non-bright
+		// majority actually is. Reject candidates with no genuine grey pad
+		// interior at all (see hasGreyInterior's doc comment): a big uniformly
+		// bright surface (rooftop, sunlit pavement) can satisfy every geometry
+		// gate above through boundary/occlusion noise alone.
+		teeComponents = teeComponents.filter((component) => hasGreyInterior(raster, component));
 
 		teeComponents = teeComponents.filter((component) =>
 			passesTeeAppearanceCheck(raster, {
