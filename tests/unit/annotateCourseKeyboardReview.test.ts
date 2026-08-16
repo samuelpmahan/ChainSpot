@@ -203,7 +203,7 @@ afterEach(() => {
 });
 
 describe('Tab-driven review order', () => {
-	it('a first Tab starts review at Hole 1 · TEE; clicks place the step piece and advance; Tab from BENDS moves to the next hole at TEE', async () => {
+	it('Tab alone advances TEE → BASKET → BENDS → next hole; clicks edit the current step without advancing', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -215,104 +215,134 @@ describe('Tab-driven review order', () => {
 		pressKey('Tab');
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
-		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Tee');
 
-		// Tee-step empty click places the tee and advances to BASKET.
+		// Empty clicks place/re-place the current step, but NEVER advance it.
 		const teeAt = screenPointFor(host, 40, 40);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+		const teeReplacement = screenPointFor(host, 70, 40);
+		dispatchClick(host, teeReplacement.x, teeReplacement.y);
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('70');
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+		pressKey('Tab');
+		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
 
-		// Basket-step empty click places the basket and advances to BENDS.
-		const basketAt = screenPointFor(host, 80, 80);
+		const basketAt = screenPointFor(host, 100, 100);
 		dispatchClick(host, basketAt.x, basketAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+		pressKey('Tab');
+		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
 
-		// Bends-step empty click adds a corridor bend.
-		const bendAt = screenPointFor(host, 30, 90);
+		const bendAt = screenPointFor(host, 80, 130);
 		dispatchClick(host, bendAt.x, bendAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
 
-		// Tab from BENDS completes the hole (confirmed) and enters Hole 2 at TEE.
 		pressKey('Tab');
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 2 · TEE');
-		expect(host.querySelector('[data-testid="sidebar-section-4"]')?.textContent).toContain('1');
 	});
 
-	it('Tab accepts an existing proposed piece without moving it, and Shift+Tab is swallowed without advancing', async () => {
-		const editor = makeEditor();
+	it('Tab accepts an existing proposed piece without moving it; Shift+Tab is swallowed without advancing', async () => {
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([
+			{
+				id: 'hole-1',
+				number: 1,
+				tee: { xPx: 40, yPx: 40 },
+				basket: { xPx: 100, yPx: 100 },
+				shots: [],
+				corridorBends: [],
+				corridorWidthPx: 60
+			}
+		]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		pressKey('Tab');
+		setGeometry(host);
 		await flush();
-		const teeAt = screenPointFor(host, 40, 40);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		// Back to TEE via a fresh review entry: Tab twice to BENDS, then re-enter.
-		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
 
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 		const shiftTab = pressKey('Tab', { shiftKey: true });
 		await flush();
-		// Swallowed (workspace owns keyboard input) but no advancement.
 		expect(shiftTab.defaultPrevented).toBe(true);
-		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 
 		const plainTab = pressKey('Tab');
 		await flush();
 		expect(plainTab.defaultPrevented).toBe(true);
-		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
-		// The tee is untouched and now confirmed-pending state is per-piece;
-		// accepting steps never moved geometry.
-		const marker = host.querySelector('[data-testid="tee-marker-1"]');
-		expect(marker?.getAttribute('cx')).toBe('40');
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('40');
 	});
 
-	it('a tee-step empty-map click over an existing tee proposal re-places it instead of adding a bend', async () => {
-		const editor = makeEditor();
+	it('an existing marker always wins over GuidedReview: while reviewing H1 TEE/BASKET, H2 points remain freely draggable', async () => {
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([
+			{
+				id: 'hole-1',
+				number: 1,
+				tee: { xPx: 40, yPx: 40 },
+				basket: { xPx: 90, yPx: 100 },
+				shots: [],
+				corridorBends: [],
+				corridorWidthPx: 60
+			},
+			{
+				id: 'hole-2',
+				number: 2,
+				tee: { xPx: 140, yPx: 40 },
+				basket: { xPx: 150, yPx: 120 },
+				shots: [],
+				corridorBends: [],
+				corridorWidthPx: 60
+			}
+		]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
+		setGeometry(host);
+		await flush();
 
-		// Place hole 1 fully, approve it, then re-enter review with Tab: the
-		// guided pass wraps to the earliest unconfirmed hole — hole 2 — while
-		// hole 1 stays reachable by sidebar click at its derived (bends) step.
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+		// Drag H2's tee even though GuidedReview is asking about H1's tee.
+		const h2TeeFrom = screenPointFor(host, 140, 40);
+		const h2TeeTo = screenPointFor(host, 165, 60);
+		dispatchDrag(host, h2TeeFrom, h2TeeTo);
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-2"]')?.getAttribute('cx')).toBe('165');
+		expect(host.querySelector('[data-testid="tee-marker-2"]')?.getAttribute('cy')).toBe('60');
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+		// Empty space still belongs to the current GuidedReview step: replace H1 tee.
+		const h1Replacement = screenPointFor(host, 20, 25);
+		dispatchClick(host, h1Replacement.x, h1Replacement.y);
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('20');
+		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cy')).toBe('25');
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
 		pressKey('Tab');
 		await flush();
-		const teeAt = screenPointFor(host, 40, 40);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		const basketAt = screenPointFor(host, 80, 80);
-		dispatchClick(host, basketAt.x, basketAt.y);
-		await flush();
-		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
 
-		// Tab completes hole 1 and enters hole 2 at TEE. An empty click at
-		// hole 2's TEE step places hole 2's tee, never hole 1 geometry.
-		pressKey('Tab');
+		// Same rule on the next step: an H2 basket drag wins over H1 basket placement.
+		const h2BasketFrom = screenPointFor(host, 150, 120);
+		const h2BasketTo = screenPointFor(host, 170, 145);
+		dispatchDrag(host, h2BasketFrom, h2BasketTo);
 		await flush();
-		expect(stepIndicator(host)).toBe('HOLE 2 · TEE');
-		const tee2At = screenPointFor(host, 120, 40);
-		dispatchClick(host, tee2At.x, tee2At.y);
-		await flush();
-		expect(host.querySelector('[data-testid="tee-marker-2"]')).not.toBeNull();
-		expect(stepIndicator(host)).toBe('HOLE 2 · BASKET');
-
-		// Re-place while still on a piece step: another empty click MOVES the
-		// step's piece once it exists — go back to TEE via Ctrl-Z twice
-		// (placement, then entry) is historical; instead verify replace on
-		// basket: place it, sidebar back to hole 2 keeps bends step, so use a
-		// fresh hole: hole 2's basket placed twice.
-		const basketFirst = screenPointFor(host, 150, 60);
-		dispatchClick(host, basketFirst.x, basketFirst.y);
-		await flush();
-		expect(stepIndicator(host)).toBe('HOLE 2 · BENDS');
+		expect(host.querySelector('[data-testid="basket-marker-2"]')?.getAttribute('cx')).toBe('170');
+		expect(host.querySelector('[data-testid="basket-marker-2"]')?.getAttribute('cy')).toBe('145');
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
 	});
 });
 
