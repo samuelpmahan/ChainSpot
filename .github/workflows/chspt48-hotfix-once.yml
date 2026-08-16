@@ -16,6 +16,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
       - name: Update GuidedReview regression coverage
         shell: bash
         run: |
@@ -36,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run targeted regression suite
-        run: npx vitest run tests/unit/annotateCourseKeyboardReview.test.ts
+        run: npm run test:unit -- tests/unit/annotateCourseKeyboardReview.test.ts
       - name: Run Svelte/type checks
         run: npm run check
       - name: Commit tests to main
