@@ -1,0 +1,51 @@
+name: CHSPT-48 one-shot hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/chspt48-hotfix-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply minimal guided-review interaction hotfix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/components/AnnotationWorkspace.svelte')
+          text = path.read_text()
+
+          old_claim = """\t\tif (marker) {\n\t\t\tannotationDrag = {\n"""
+          new_claim = """\t\tif (marker) {\n\t\t\t// Annotation owns the entire gesture once an existing point wins hit-testing.\n\t\t\t// Capture this pointer on the viewport so move/up cannot disappear when the\n\t\t\t// drag leaves the pane or crosses another rendered element. This is local to\n\t\t\t// AnnotationWorkspace, so ImageViewport's Konva-compatible generic claim\n\t\t\t// contract remains unchanged for its other consumers.\n\t\t\ttry {\n\t\t\t\tviewportController()?.container?.setPointerCapture(event.pointerId);\n\t\t\t} catch {\n\t\t\t\t// Best-effort: browsers may reject capture for an already-released pointer.\n\t\t\t}\n\t\t\tannotationDrag = {\n"""
+          if old_claim not in text:
+              raise SystemExit('claimAnnotationPointer anchor not found')
+          text = text.replace(old_claim, new_claim, 1)
+
+          old_advance = """\t\t\t// A fresh placement is the answer to this step's question — advance so\n\t\t\t// the next click asks for the next piece, no return trip to the\n\t\t\t// sidebar (and no Tab required after a manual placement).\n\t\t\treviewStep = kind === 'tee' ? 'basket' : 'bends';\n\t\t\treturn;\n"""
+          new_advance = """\t\t\t// Placement never advances GuidedReview. The user may keep clicking or\n\t\t\t// drag any marker until they explicitly accept this step with Tab.\n\t\t\treturn;\n"""
+          if old_advance not in text:
+              raise SystemExit('placeReviewPiece auto-advance anchor not found')
+          text = text.replace(old_advance, new_advance, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/lib/components/AnnotationWorkspace.svelte
+      - name: Commit hotfix to main
+        shell: bash
+        run: |
+          git config user.name "ChainSpot Hotfix"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/components/AnnotationWorkspace.svelte
+          git commit -m "CHSPT-48 hotfix: restore guided point interactions"
+          git push origin HEAD:main
