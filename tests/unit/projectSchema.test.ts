@@ -13,6 +13,15 @@ import type {
 	ProjectSchemaError,
 	ProjectSchemaErrorCategory
 } from '../../src/lib/projectSchema';
+import {
+	applySourceTransform,
+	buildSourceTransform,
+	CURRENT_PROVENANCE_SCHEMA_VERSION,
+	CURRENT_RENDER_VERSION,
+	identitySourceTransform,
+	translationSourceTransform
+} from '../../src/lib/domain/provenance';
+import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const FIXED_TIMESTAMP = '2026-08-02T00:00:00.000Z';
 
@@ -161,7 +170,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(5);
+		expect(doc.schemaVersion).toBe(6);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -359,12 +368,12 @@ describe('schema version validation', () => {
 
 	it('classifies a newer unsupported version before any other validation', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 6;
+		doc.schemaVersion = CURRENT_SCHEMA_VERSION + 1;
 		doc.project = undefined;
 		doc.images = 'not-an-array';
 		const error = expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 		expect(error.message).toContain('newer');
-		expect(error.message).toContain('6');
+		expect(error.message).toContain(String(CURRENT_SCHEMA_VERSION + 1));
 	});
 
 	it('rejects older or otherwise unknown numeric versions', () => {
@@ -378,7 +387,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(5);
+		expect(CURRENT_SCHEMA_VERSION).toBe(6);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -779,9 +788,9 @@ describe('numberBadges migration and validation (schema v3 -> v4)', () => {
 		}
 	});
 
-	it('still rejects schemaVersion 6 as unsupported, even though numberBadges exists', () => {
+	it('still rejects a newer schemaVersion as unsupported, even though numberBadges exists', () => {
 		const doc = plainDoc(buildState());
-		doc.schemaVersion = 6;
+		doc.schemaVersion = CURRENT_SCHEMA_VERSION + 1;
 		expectError(doc, 'unsupported-version', 'schema.version.unsupported', 'schemaVersion');
 	});
 });
@@ -855,6 +864,189 @@ describe('walkingPath migration and validation (schema v4 -> v5)', () => {
 	it('serializer throws a structured error for an invalid walkingPath point', () => {
 		const state = buildState({ walkingPath: [{ xPx: Number.NaN, yPx: 1 }] });
 		expectSerializeError(state, 'coordinate', 'coordinate.non-finite');
+	});
+});
+
+/** Coverage polygon corners in the module's documented order: [TL, TR, BR, BL]. */
+function provenanceCoveragePolygonOf(crop: SourceCropRect, transform: ReturnType<typeof identitySourceTransform>) {
+	const corners = [
+		{ xPx: crop.xPx, yPx: crop.yPx },
+		{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },
+		{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx + crop.heightPx },
+		{ xPx: crop.xPx, yPx: crop.yPx + crop.heightPx }
+	];
+	return corners.map((corner) => applySourceTransform(corner, transform));
+}
+
+/** N=1, no crop, identity transform — the "identity" case CHSPT-49 requires coverage for. */
+function identityProvenanceFixture(finalRasterSha256: string): CompositeProvenance {
+	const transform = identitySourceTransform();
+	const crop: SourceCropRect = { xPx: 0, yPx: 0, widthPx: 1179, heightPx: 2556 };
+	const source: SourceCapture = {
+		sourceId: 'capture-1',
+		fileName: 'udisc-overview.png',
+		mimeType: 'image/png',
+		widthPx: 1179,
+		heightPx: 2556,
+		sha256: 'd'.repeat(64),
+		crop,
+		transform,
+		coveragePolygon: provenanceCoveragePolygonOf(crop, transform),
+		paintOrder: 0
+	};
+	return {
+		schemaVersion: CURRENT_PROVENANCE_SCHEMA_VERSION,
+		renderVersion: CURRENT_RENDER_VERSION,
+		outputWidthPx: 1179,
+		outputHeightPx: 2556,
+		compositingPolicy: 'single-source-v1',
+		resampling: 'none',
+		sources: [source],
+		overlaps: [],
+		finalRasterSha256
+	};
+}
+
+/** N=2, a rotated + a cropped-and-translated capture — fabricated directly from the locked types, no real estimator needed. */
+function rotatedMultiSourceProvenanceFixture(finalRasterSha256: string): CompositeProvenance {
+	const identityTransform = identitySourceTransform();
+	const cropA: SourceCropRect = { xPx: 10, yPx: 20, widthPx: 400, heightPx: 300 };
+	const sourceA: SourceCapture = {
+		sourceId: 'capture-a',
+		fileName: 'udisc-a.jpg',
+		mimeType: 'image/jpeg',
+		widthPx: 420,
+		heightPx: 320,
+		sha256: 'e'.repeat(64),
+		crop: cropA,
+		transform: identityTransform,
+		coveragePolygon: provenanceCoveragePolygonOf(cropA, identityTransform),
+		paintOrder: 1
+	};
+	// A 90-degree rotation (similarity: scale 1, no shear) placed to the right of A.
+	const rotatedTransform = buildSourceTransform('similarity', [0, 1, -1, 0, 400, 50]);
+	const cropB: SourceCropRect = { xPx: 0, yPx: 0, widthPx: 200, heightPx: 250 };
+	const sourceB: SourceCapture = {
+		sourceId: 'capture-b',
+		fileName: 'udisc-b.png',
+		mimeType: 'image/png',
+		widthPx: 200,
+		heightPx: 250,
+		sha256: 'f'.repeat(64),
+		crop: cropB,
+		transform: rotatedTransform,
+		coveragePolygon: provenanceCoveragePolygonOf(cropB, rotatedTransform),
+		paintOrder: 0
+	};
+	return {
+		schemaVersion: CURRENT_PROVENANCE_SCHEMA_VERSION,
+		renderVersion: CURRENT_RENDER_VERSION,
+		outputWidthPx: 650,
+		outputHeightPx: 320,
+		compositingPolicy: 'stitch-ascending-bottom-right-v1',
+		resampling: 'bilinear',
+		sources: [sourceA, sourceB],
+		overlaps: [{ a: 'capture-a', b: 'capture-b', kind: 'fusion-edge', score: 0.42 }],
+		finalRasterSha256
+	};
+}
+
+describe('provenance migration and validation (schema v5 -> v6)', () => {
+	it('migrates v1-v5 documents (none of which have provenance) to absent', () => {
+		for (const version of [1, 2, 3, 4, 5]) {
+			const doc = plainDoc(buildState());
+			doc.schemaVersion = version;
+			const parsed = expectDocumentOk(doc);
+			expect(parsed.images[0].provenance).toBeUndefined();
+			expect(parsed.images[1].provenance).toBeUndefined();
+		}
+	});
+
+	it('round-trips the identity case (no crop, no transform) through parse and serialize without drift', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const state = buildState({ images: [sourceAsset({ sha256: 'a'.repeat(64), provenance }), targetAsset()] });
+		const doc = docFromState(state);
+		expect(doc.images[0].provenance).toEqual(provenance);
+
+		const parsed = expectParsedState(state);
+		expect(parsed.images[0].provenance).toEqual(provenance);
+	});
+
+	it('round-trips a fabricated multi-source, rotated composite without drift', () => {
+		const provenance = rotatedMultiSourceProvenanceFixture('b'.repeat(64));
+		const state = buildState({ images: [sourceAsset({ sha256: 'b'.repeat(64), provenance }), targetAsset()] });
+		const doc = docFromState(state);
+		expect(doc.images[0].provenance).toEqual(provenance);
+
+		const parsed = expectParsedState(state);
+		expect(parsed.images[0].provenance).toEqual(provenance);
+		expect(parsed.images[0].provenance?.sources).toHaveLength(2);
+		expect(parsed.images[0].provenance?.sources[1].transform.model).toBe('similarity');
+	});
+
+	it('omits provenance from the serialized document when absent, and normalizes an explicit null the same way', () => {
+		const withoutProvenance = docFromState(buildState());
+		expect('provenance' in withoutProvenance.images[0]).toBe(false);
+
+		const withNull = plainDoc(buildState());
+		(withNull.images as Array<Record<string, unknown>>)[0].provenance = null;
+		const parsed = expectDocumentOk(withNull);
+		expect(parsed.images[0].provenance).toBeUndefined();
+	});
+
+	it('rejects provenance present on a target-basemap image', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[1].provenance = provenance;
+		expectError(doc, 'provenance', 'provenance.role-invalid', 'images[1].provenance');
+	});
+
+	it('rejects a finalRasterSha256 that does not match the owning image sha256', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[0].sha256 = 'z'.repeat(64);
+		(doc.images as Array<Record<string, unknown>>)[0].provenance = provenance;
+		expectError(doc, 'provenance', 'provenance.hash-mismatch');
+	});
+
+	it('rejects structurally incoherent provenance (assertCoherentProvenance) as a structured provenance error', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const incoherent: CompositeProvenance = {
+			...provenance,
+			overlaps: [{ a: 'capture-1', b: 'unknown-source', kind: 'placement-edge', score: 0.5 }]
+		};
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[0].sha256 = 'a'.repeat(64);
+		(doc.images as Array<Record<string, unknown>>)[0].provenance = incoherent;
+		expectError(doc, 'provenance', 'provenance.incoherent');
+	});
+
+	it('recomputes transform derived fields from model + coefficients rather than trusting the document', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const doc = plainDoc(buildState());
+		(doc.images as Array<Record<string, unknown>>)[0].sha256 = 'a'.repeat(64);
+		const tamperedProvenance = JSON.parse(JSON.stringify(provenance)) as Record<string, unknown>;
+		const tamperedSource = (tamperedProvenance.sources as Array<Record<string, unknown>>)[0];
+		const tamperedTransform = tamperedSource.transform as Record<string, unknown>;
+		// A deliberately wrong stored derived value; the reader must recompute it from
+		// model + coefficients rather than trust this.
+		tamperedTransform.determinant = 999;
+		(doc.images as Array<Record<string, unknown>>)[0].provenance = tamperedProvenance;
+
+		const parsed = expectDocumentOk(doc);
+		expect(parsed.images[0].provenance?.sources[0].transform.determinant).toBe(1);
+	});
+
+	it('serializer throws a structured provenance error for invalid domain state', () => {
+		const provenance = identityProvenanceFixture('a'.repeat(64));
+		const incoherent: CompositeProvenance = {
+			...provenance,
+			sources: provenance.sources.map((source) => ({ ...source, paintOrder: 5 }))
+		};
+		const state = buildState({
+			images: [sourceAsset({ sha256: 'a'.repeat(64), provenance: incoherent }), targetAsset()]
+		});
+		expectSerializeError(state, 'provenance', 'provenance.incoherent');
 	});
 });
 
