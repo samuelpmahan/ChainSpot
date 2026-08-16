@@ -3,6 +3,7 @@ import { reconstructProvenance } from '../../src/lib/domain/provenanceReconstruc
 import type { ReconstructRenderComposite } from '../../src/lib/domain/provenanceReconstruct';
 import {
 	applySourceTransform,
+	AUTO_SOURCE_CAPTURE_ORIGIN,
 	CURRENT_PROVENANCE_SCHEMA_VERSION,
 	CURRENT_RENDER_VERSION,
 	identitySourceTransform,
@@ -36,6 +37,7 @@ async function singleSourceDraft(sha256: string): Promise<DraftComposite> {
 		sha256,
 		crop,
 		transform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: coveragePolygonOf(crop, transform),
 		paintOrder: 0
 	};

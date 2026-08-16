@@ -28,7 +28,7 @@ import {
 	saveProject
 } from '../../src/lib/persistence';
 import type { PersistenceErrorKind, RepairCandidate, RepairResolutionResult } from '../../src/lib/persistence';
-import { applySourceTransform, identitySourceTransform } from '../../src/lib/domain/provenance';
+import { applySourceTransform, AUTO_SOURCE_CAPTURE_ORIGIN, identitySourceTransform } from '../../src/lib/domain/provenance';
 import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
@@ -140,6 +140,7 @@ async function provenanceFixture(options: {
 		sha256: captureSha256,
 		crop,
 		transform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: [
 			{ xPx: crop.xPx, yPx: crop.yPx },
 			{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },

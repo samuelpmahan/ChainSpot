@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	applySourceTransform,
 	assertCoherentProvenance,
+	AUTO_SOURCE_CAPTURE_ORIGIN,
 	CURRENT_PROVENANCE_SCHEMA_VERSION,
 	CURRENT_RENDER_VERSION,
 	identitySourceTransform,
@@ -53,6 +54,7 @@ function buildCapture(overrides: {
 		sha256: overrides.sha256,
 		crop,
 		transform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: coveragePolygonOf(crop, transform),
 		paintOrder: overrides.paintOrder
 	};

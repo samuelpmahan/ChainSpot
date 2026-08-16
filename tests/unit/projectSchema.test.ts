@@ -15,6 +15,7 @@ import type {
 } from '../../src/lib/projectSchema';
 import {
 	applySourceTransform,
+	AUTO_SOURCE_CAPTURE_ORIGIN,
 	buildSourceTransform,
 	CURRENT_PROVENANCE_SCHEMA_VERSION,
 	CURRENT_RENDER_VERSION,
@@ -891,6 +892,7 @@ function identityProvenanceFixture(finalRasterSha256: string): CompositeProvenan
 		sha256: 'd'.repeat(64),
 		crop,
 		transform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: provenanceCoveragePolygonOf(crop, transform),
 		paintOrder: 0
 	};
@@ -920,6 +922,7 @@ function rotatedMultiSourceProvenanceFixture(finalRasterSha256: string): Composi
 		sha256: 'e'.repeat(64),
 		crop: cropA,
 		transform: identityTransform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: provenanceCoveragePolygonOf(cropA, identityTransform),
 		paintOrder: 1
 	};
@@ -935,6 +938,7 @@ function rotatedMultiSourceProvenanceFixture(finalRasterSha256: string): Composi
 		sha256: 'f'.repeat(64),
 		crop: cropB,
 		transform: rotatedTransform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: provenanceCoveragePolygonOf(cropB, rotatedTransform),
 		paintOrder: 0
 	};

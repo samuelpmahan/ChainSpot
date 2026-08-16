@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { annotatedSourceImageFromAsset, createAnnotatedRound } from '../../src/lib/domain/annotatedRound';
 import type { AnnotatedSourceImage } from '../../src/lib/domain/annotatedRound';
 import { createImageAsset } from '../../src/lib/domain/project';
-import { applySourceTransform, identitySourceTransform } from '../../src/lib/domain/provenance';
+import { applySourceTransform, AUTO_SOURCE_CAPTURE_ORIGIN, identitySourceTransform } from '../../src/lib/domain/provenance';
 import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 /** A minimal, coherent single-source provenance fixture. */
@@ -18,6 +18,7 @@ function provenanceFixture(overrides: Partial<CompositeProvenance> = {}): Compos
 		sha256: 'b'.repeat(64),
 		crop,
 		transform,
+		origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 		coveragePolygon: [
 			{ xPx: crop.xPx, yPx: crop.yPx },
 			{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },

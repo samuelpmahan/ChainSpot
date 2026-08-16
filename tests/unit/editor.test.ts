@@ -3,7 +3,7 @@ import { createImageAsset, createProjectState } from '../../src/lib/domain/proje
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import type { AssetResource, AddPairOptions } from '../../src/lib/domain/editor';
 import type { ProjectState } from '../../src/lib/domain/project';
-import { applySourceTransform, identitySourceTransform } from '../../src/lib/domain/provenance';
+import { applySourceTransform, AUTO_SOURCE_CAPTURE_ORIGIN, identitySourceTransform } from '../../src/lib/domain/provenance';
 import type { CompositeProvenance, SourceCapture, SourceCropRect } from '../../src/lib/domain/provenance';
 
 const NOW = () => new Date('2026-08-02T00:00:00.000Z');
@@ -952,6 +952,7 @@ describe('source-capture bytes (CHSPT-49 provenance)', () => {
 			sha256: 'b'.repeat(64),
 			crop,
 			transform,
+			origin: AUTO_SOURCE_CAPTURE_ORIGIN,
 			coveragePolygon: [
 				{ xPx: crop.xPx, yPx: crop.yPx },
 				{ xPx: crop.xPx + crop.widthPx, yPx: crop.yPx },

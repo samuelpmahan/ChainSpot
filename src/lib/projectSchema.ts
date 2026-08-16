@@ -125,8 +125,10 @@ import type {
 	CompositeProvenance,
 	CompositingPolicy,
 	OverlapKind,
+	ProvenanceOrigin,
 	ResamplingMethod,
 	SourceCapture,
+	SourceCaptureOrigin,
 	SourceCropRect,
 	SourceOverlapEdge,
 	SourceTransform,
@@ -448,6 +450,7 @@ const PROVENANCE_COMPOSITING_POLICIES: readonly CompositingPolicy[] = [
 ];
 const PROVENANCE_RESAMPLING_METHODS: readonly ResamplingMethod[] = ['none', 'nearest', 'bilinear'];
 const PROVENANCE_OVERLAP_KINDS: readonly OverlapKind[] = ['placement-edge', 'fusion-edge'];
+const PROVENANCE_ORIGIN_VALUES: readonly ProvenanceOrigin[] = ['auto', 'manual'];
 
 function readAffine6Coefficients(input: unknown, path: string): Affine6Coefficients {
 	if (!Array.isArray(input) || input.length !== 6) {
@@ -508,6 +511,34 @@ function readCoveragePolygon(input: unknown, path: string): SourceCapture['cover
 	return input.map((point, index) => readCompositePoint(point, `${path}[${index}]`));
 }
 
+function readProvenanceOrigin(input: unknown, path: string): ProvenanceOrigin {
+	if (!PROVENANCE_ORIGIN_VALUES.includes(input as ProvenanceOrigin)) {
+		throw failure(
+			'provenance',
+			'provenance.origin.invalid',
+			path,
+			`${path} must be one of ${PROVENANCE_ORIGIN_VALUES.join(', ')}, got ${describeValue(input)}`
+		);
+	}
+	return input as ProvenanceOrigin;
+}
+
+/**
+ * `origin` differentiates automatic detection from a user's manual
+ * correction, per-property (crop vs. transform independently) — see
+ * `domain/provenance.ts`'s `SourceCaptureOrigin` doc comment. Required on
+ * every `SourceCapture` in schema v6 (this field was part of v6 from its
+ * introduction in this same bundle; there is no pre-existing v6 document
+ * without it to migrate).
+ */
+function readSourceCaptureOrigin(input: unknown, path: string): SourceCaptureOrigin {
+	const object = readObject(input, path, 'source capture origin');
+	return {
+		crop: readProvenanceOrigin(object.crop, `${path}.crop`),
+		transform: readProvenanceOrigin(object.transform, `${path}.transform`)
+	};
+}
+
 function readSourceCapture(input: unknown, path: string): SourceCapture {
 	const object = readObject(input, path, 'source capture');
 	return {
@@ -519,6 +550,7 @@ function readSourceCapture(input: unknown, path: string): SourceCapture {
 		sha256: readNonEmptyString(object.sha256, `${path}.sha256`),
 		crop: readSourceCropRect(object.crop, `${path}.crop`),
 		transform: readSourceTransform(object.transform, `${path}.transform`),
+		origin: readSourceCaptureOrigin(object.origin, `${path}.origin`),
 		coveragePolygon: readCoveragePolygon(object.coveragePolygon, `${path}.coveragePolygon`),
 		paintOrder: readNonNegativeInteger(object.paintOrder, `${path}.paintOrder`)
 	};
@@ -1281,6 +1313,7 @@ function buildSourceCaptureDoc(source: SourceCapture): SourceCapture {
 		sha256: source.sha256,
 		crop: { xPx: source.crop.xPx, yPx: source.crop.yPx, widthPx: source.crop.widthPx, heightPx: source.crop.heightPx },
 		transform: buildSourceTransformDoc(source.transform),
+		origin: { crop: source.origin.crop, transform: source.origin.transform },
 		coveragePolygon: source.coveragePolygon.map((point) => ({ xPx: point.xPx, yPx: point.yPx })),
 		paintOrder: source.paintOrder
 	};
