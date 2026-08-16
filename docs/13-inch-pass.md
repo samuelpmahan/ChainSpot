@@ -475,6 +475,14 @@ labels behind it, and do not delete the hole bar until the canvas path actually 
    - The badge hit radius (`:744-747`,
      `max(MARKER_HIT_RADIUS_PX, (max(w,h)/2) * zoom + 10)`) is already generous; leave
      it alone unless measurement says otherwise.
+     **Update, measured:** live testing found the generous radius does have a real cost —
+     a hole's own badge sits close enough to its own tee that the badge claim was
+     silently swallowing nearby placement/correction clicks meant for that hole. Fixed
+     narrowly in `claimAnnotationPointer` (`AnnotationWorkspace.svelte`): the radius
+     itself is untouched (switching *between* holes from a distance keeps the full
+     generous target), but a badge no longer claims the pointer when it belongs to the
+     hole that's already active — re-selecting the current hole is a no-op there anyway,
+     so the click falls through to placement instead.
 4. **Demote the hole bar to what the owner intended.** Keep the 18-tab grid as
    completion status and a fallback selector — it must remain usable and accessible, and
    it is the only path when badges are unlabeled (see the dependency above). Do not make

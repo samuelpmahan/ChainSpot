@@ -2084,8 +2084,16 @@
 			void event;
 			return true;
 		}
+		// The badge hit radius is deliberately generous (see docs/13-inch-pass.md)
+		// for SWITCHING between holes from a distance — but claiming it for the
+		// hole that's already active is worse than useless: selecting the
+		// current hole again is a no-op, and it silently swallows a nearby
+		// placement/correction click on that same hole (a badge often sits close
+		// to its own tee). Skip the claim in that one case and let the click
+		// fall through to placement/background handling instead; every other
+		// hole's badge keeps its full generous radius.
 		const numberLabel = numberCandidateHitAt(pointer, view);
-		if (numberLabel !== null) {
+		if (numberLabel !== null && numberLabel !== activeHole()?.number) {
 			numberSelectDrag = { label: numberLabel, start: { ...pointer }, dragging: false };
 			void event;
 			return true;
