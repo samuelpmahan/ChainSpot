@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import ImageEditorPane from '$lib/components/ImageEditorPane.svelte';
@@ -46,6 +46,8 @@
 	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { clickSlopPx } from '$lib/viewport.svelte';
+	import type { ViewportController } from '$lib/viewport.svelte';
+	import { KEYBOARD_PAN_STEP_PX, KEYBOARD_ZOOM_STEP_FACTOR } from '$lib/navigation';
 	import { isEditableTarget } from '$lib/pointSelection';
 	import { dialogKeyboard, isModalOpen } from '$lib/focusManagement';
 	import {
@@ -267,6 +269,10 @@
 
 	onDestroy(() => {
 		stopCourseDetectionProgress();
+		if (widthFeedbackTimer !== null) {
+			clearTimeout(widthFeedbackTimer);
+			widthFeedbackTimer = null;
+		}
 		if (annotationNavRegistration !== null) {
 			unregisterAnnotationNav(annotationNavRegistration);
 			annotationNavRegistration = null;
@@ -393,6 +399,97 @@
 	function openRadialMenu(state: RadialMenuState): void {
 		if (!radialMenuEnabled && state.hitMarker === null) return;
 		radialMenu = state;
+	}
+
+	// --- Keyboard-first correction workflow (Map mode) -----------------------
+	//
+	// The hole-number badge is the anchor: it identifies the hole, it is the
+	// trusted navigation target (easier to detect than tee/basket geometry and
+	// guaranteed to lie on the hole path), and every camera move in this flow
+	// centers a badge — never a predicted tee or basket. Per hole the review
+	// order is TEE → BASKET → BENDS → next hole's TEE, driven by Tab. The
+	// current step decides what an empty-map click places; X rejects the
+	// step's obvious proposal; Ctrl-Z reverses workflow history (annotation +
+	// workflow + camera state together); WASD/Q/E drive the camera; 1–6 nudge
+	// the course-wide corridor width. Left hand on the keyboard, right hand on
+	// the mouse — no trips to sidebar buttons during normal review.
+
+	/** The per-hole review step. `bends` doubles as the completed/revisit state. */
+	type ReviewStep = 'tee' | 'basket' | 'bends';
+
+	let reviewStep = $state<ReviewStep>('tee');
+	/** The mounted `ImageEditorPane`, for direct camera control (`getViewportController`). */
+	let editorPane = $state<{ getViewportController: () => ViewportController } | null>(null);
+	/** Once-per-image guard for the session-start "activate Hole 1" setup. */
+	let reviewStartedSourceId: string | null = null;
+	/**
+	 * True between session start and the one automatic camera move this flow
+	 * ever makes: centering Hole 1's badge at the initial review zoom, as soon
+	 * as detection delivers that badge. Cleared by any explicit hole
+	 * navigation so a late-arriving badge never yanks the camera away from
+	 * work the user already started. After this, zoom is entirely the user's.
+	 */
+	let initialBadgeFocusPending = $state(false);
+	/** The one automatic zoom of the session (fit-zoom multiplier for Hole 1's badge close-up). */
+	const INITIAL_REVIEW_ZOOM_MULTIPLIER = 2.5;
+
+	/** Temporary on-map corridor-width feedback (`WIDTH 60 → 63`), so 1–6 need no sidebar glance. `from` is the width before the current burst of keypresses. */
+	let widthFeedback = $state<{ from: number; to: number } | null>(null);
+	let widthFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+	const WIDTH_FEEDBACK_MS = 1200;
+	/** Keyboard corridor-width deltas: 1/2/3 shrink by 5/3/1, 4/5/6 grow by 1/3/5. */
+	const CORRIDOR_WIDTH_KEY_DELTAS: Record<string, number> = {
+		'1': -5,
+		'2': -3,
+		'3': -1,
+		'4': 1,
+		'5': 3,
+		'6': 5
+	};
+
+	/**
+	 * One workflow-undo step: the full annotation + workflow + camera state a
+	 * single user action can touch, captured before that action mutates
+	 * anything. Deliberately separate from `ProjectEditor`'s own snapshot
+	 * history (which only covers durable `ProjectState`): Ctrl-Z here must
+	 * also restore the active hole, the review step, per-piece confirmation,
+	 * and the viewport — none of which are (or should be) durable domain
+	 * state.
+	 */
+	interface WorkflowSnapshot {
+		readonly holes: AnnotatedHole[];
+		readonly activeHoleId: string | null;
+		readonly reviewStep: ReviewStep;
+		readonly confirmedPieces: Set<string>;
+		readonly autoProposedBendHoleIds: Set<string>;
+		readonly manualBendHoleId: string | null;
+		readonly bendPhaseDone: boolean;
+		readonly mapGeometryEdited: boolean;
+		readonly view: ViewTransformState | null;
+	}
+
+	const workflowUndoStack: WorkflowSnapshot[] = [];
+	const WORKFLOW_UNDO_LIMIT = 100;
+
+	function viewportController(): ViewportController | null {
+		return editorPane?.getViewportController() ?? null;
+	}
+
+	/**
+	 * Last pointer position inside the viewport, in viewport-local CSS px —
+	 * lets `X` honor its "hovered current-step object first" priority without
+	 * a selection click. Plain (non-reactive) bookkeeping; null whenever the
+	 * pointer is outside the viewport.
+	 */
+	let lastPointerScreen: ScreenSpacePoint | null = null;
+
+	function trackReviewPointer(event: PointerEvent): void {
+		const controller = viewportController();
+		if (!controller?.container || !controller.containsPoint(event)) {
+			lastPointerScreen = null;
+			return;
+		}
+		lastPointerScreen = controller.pointerIn(event);
 	}
 
 	// --- Ribbon-mass shadow overlay (see `ribbonMassShadowOverlay.ts` and
@@ -1186,6 +1283,54 @@
 	});
 
 	/**
+	 * Session start for the keyboard-first review flow: once Hole 1 exists in
+	 * the draft (or detection has anchored its badge), it becomes the active
+	 * hole with the current step at TEE, so Tab/click review begins
+	 * immediately. Once per source image, and deliberately NOT before there
+	 * is anything to review — a purely hand-annotated session (no detection)
+	 * starts its first hole via the sidebar or a first Tab press instead of
+	 * getting a phantom empty Hole 1 written into the draft.
+	 */
+	$effect(() => {
+		void refreshCount;
+		if (annotationMode !== 'map') return;
+		const image = sourceImage();
+		if (!image || reviewStartedSourceId === image.id) return;
+		const holeOne = holes.find((hole) => hole.number === 1);
+		const badgeOne = numberBadges.find((badge) => badge.number === 1);
+		if (!holeOne && !badgeOne) return;
+		reviewStartedSourceId = image.id;
+		initialBadgeFocusPending = true;
+		untrack(() => {
+			const hole = activateHoleByNumber(1);
+			if (hole) reviewStep = 'tee';
+		});
+	});
+
+	/**
+	 * The one automatic camera setup of a session: when detection delivers
+	 * Hole 1's number badge and the user hasn't navigated anywhere yet,
+	 * center that badge at a useful review zoom. Every later camera change is
+	 * either the user's own (wheel/WASD/Q/E) or a zoom-preserving badge pan.
+	 */
+	$effect(() => {
+		if (annotationMode !== 'map' || !initialBadgeFocusPending) return;
+		const badge = numberBadges.find((candidate) => candidate.number === 1);
+		if (!badge) return;
+		initialBadgeFocusPending = false;
+		untrack(() => {
+			const active = activeHole();
+			if (!active || active.number !== 1) return;
+			sidebarFocusTick += 1;
+			sidebarFocusRequest = {
+				key: `review-start:${sidebarFocusTick}`,
+				point: { xPx: badge.xPx, yPx: badge.yPx },
+				zoomMultiplier: INITIAL_REVIEW_ZOOM_MULTIPLIER
+			};
+		});
+	});
+
+	/**
 	 * Mirrors the local hole-annotation draft into the `ProjectEditor`'s
 	 * durable `ProjectState` on every change, so Save (and the retained
 	 * cross-navigation session) always reflect the latest hand-placed
@@ -1255,13 +1400,22 @@
 			} else if (modifierKey === 'o') {
 				event.preventDefault();
 				if (!openLoading && !event.repeat) openDraftInput?.click();
+			} else if (modifierKey === 'z' && annotationMode === 'map') {
+				// Repeat allowed: holding Ctrl-Z steps back through workflow history.
+				event.preventDefault();
+				performWorkflowUndo();
 			}
 			return;
 		}
+		// Review keys run before the blanket repeat guard so held WASD/Q/E keep
+		// panning/zooming; Tab/X gate their own repeats internally.
+		if (handleReviewKey(event)) return;
 		if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
 
 		const key = event.key.toLowerCase();
-		if (key === 'a' || key === 'n') {
+		// 'a' belongs to the WASD camera in Map mode (consumed above); it stays
+		// an add-hole alias only in Round mode.
+		if ((key === 'a' && annotationMode === 'round') || key === 'n') {
 			if (nextHoleNumber(holes) === null) return;
 			event.preventDefault();
 			handleAddHole();
@@ -1288,6 +1442,7 @@
 
 	function handleRemoveLastBend(): void {
 		if (!activeHoleId) return;
+		captureWorkflowSnapshot();
 		promoteEagerBends(activeHoleId);
 		holes = removeLastBend(holes, activeHoleId);
 		markMapGeometryEdited();
@@ -1295,6 +1450,7 @@
 
 	function handleClearBends(): void {
 		if (!activeHoleId) return;
+		captureWorkflowSnapshot();
 		promoteEagerBends(activeHoleId);
 		holes = clearBends(holes, activeHoleId);
 		markMapGeometryEdited();
@@ -1316,6 +1472,7 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const corridorWidthPx = Number(input.value);
 		if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) return;
+		captureWorkflowSnapshot();
 		holes = setAllCorridorWidths(holes, corridorWidthPx);
 		markMapGeometryEdited();
 	}
@@ -1408,6 +1565,7 @@
 	/** The chip's "reassign to hole N" action, and the shortcut to reassign straight to whichever hole the sidebar currently has active. */
 	function reassignFromChip(toHoleId: string): void {
 		if (!markerChip) return;
+		captureWorkflowSnapshot();
 		reassignHolePiece(markerChip.holeId, toHoleId, markerChip.kind);
 		vibrate(8);
 		closeMarkerChip();
@@ -1429,8 +1587,24 @@
 	/** The chip's "not a real tee/basket" delete action. */
 	function deleteFromChip(): void {
 		if (!markerChip) return;
+		captureWorkflowSnapshot();
 		deleteHolePiece(markerChip.holeId, markerChip.kind);
 		closeMarkerChip();
+	}
+
+	/**
+	 * The step a hole enters at when activated by a targeted correction
+	 * (sidebar click, badge tap, chip reassignment): derived from what's
+	 * missing, so those paths behave exactly as they always have — a hole
+	 * missing its tee asks for the tee, one missing its basket asks for the
+	 * basket, a complete hole is in bends/revisit mode. The guided Tab flow
+	 * (`enterHoleForReview`) deliberately overrides this to always start at
+	 * TEE, since its job is reviewing every proposed piece in order.
+	 */
+	function derivedStepFor(hole: AnnotatedHole): ReviewStep {
+		if (!hole.tee) return 'tee';
+		if (!hole.basket) return 'basket';
+		return 'bends';
 	}
 
 	/** Activates a numbered hole, creating it in numeric order when the draft does not have it yet. */
@@ -1438,6 +1612,7 @@
 		let target = holes.find((hole) => hole.number === number);
 		if (target) {
 			activeHoleId = target.id;
+			reviewStep = derivedStepFor(target);
 			return target;
 		}
 		const inheritedWidthPx = currentCorridorWidthPx();
@@ -1446,11 +1621,14 @@
 		if (!target) return null;
 		holes = setCorridorWidth(nextHoles, target.id, inheritedWidthPx);
 		activeHoleId = target.id;
+		reviewStep = derivedStepFor(target);
 		return target;
 	}
 
 	/** Selects the hole matching a tapped map number, creating it first if it doesn't exist yet. */
 	function selectOrCreateHoleByNumber(number: number): void {
+		captureWorkflowSnapshot();
+		initialBadgeFocusPending = false;
 		if (!activateHoleByNumber(number)) return;
 		vibrate(8);
 	}
@@ -1565,6 +1743,8 @@
 	 * Re-clicking the same hole recenters its badge (fresh key each time).
 	 */
 	function onHoleBoxClick(number: number): void {
+		captureWorkflowSnapshot();
+		initialBadgeFocusPending = false;
 		const hole = activateHoleByNumber(number);
 		if (!hole) return;
 		sidebarFocusTick += 1;
@@ -1574,6 +1754,270 @@
 			: null;
 		markerChip = null;
 		radialMenu = null;
+	}
+
+	/**
+	 * The guided Tab flow's hole entry: activates the hole, forces the review
+	 * step back to TEE (the per-hole order is always TEE → BASKET → BENDS,
+	 * regardless of what CV already proposed), and smoothly pans the hole's
+	 * badge to center — preserving the user's current zoom. Never navigates to
+	 * a predicted tee or basket, and never auto-zooms: the only automatic zoom
+	 * of a session is the initial Hole 1 close-up.
+	 */
+	function enterHoleForReview(number: number): void {
+		initialBadgeFocusPending = false;
+		const hole = activateHoleByNumber(number);
+		if (!hole) return;
+		reviewStep = 'tee';
+		sidebarFocusTick += 1;
+		const point = holeFocusPoint(hole);
+		sidebarFocusRequest = point
+			? { key: `${hole.id}:${sidebarFocusTick}`, point, zoomMultiplier: null }
+			: null;
+		markerChip = null;
+		radialMenu = null;
+	}
+
+	/**
+	 * The step the map currently acts under. The two bend-focused banner modes
+	 * (a manual "+ Add Bend(s)" session, and the guided all-18-confirmed bends
+	 * phase) override the per-hole step, exactly as they already override
+	 * click placement — so the indicator, empty-map clicks, Tab, and X all
+	 * agree on what "the current step" is.
+	 */
+	let effectiveReviewStep = $derived.by((): ReviewStep => {
+		if (annotationMode !== 'map' || !activeHoleId) return reviewStep;
+		if (manualBendHoleId === activeHoleId) return 'bends';
+		if (allHolesConfirmed && !bendPhaseDone) return 'bends';
+		return reviewStep;
+	});
+
+	/**
+	 * Captures one workflow-undo step (see `WorkflowSnapshot`). Called by every
+	 * mutating workflow entry point BEFORE it changes anything, so Ctrl-Z
+	 * restores the exact pre-action state — including the camera, so undoing a
+	 * Tab advancement also returns the view to where it was. Map mode only:
+	 * Round mode never exposes this undo surface.
+	 */
+	function captureWorkflowSnapshot(): void {
+		if (annotationMode !== 'map') return;
+		const controller = viewportController();
+		workflowUndoStack.push({
+			holes: $state.snapshot(holes) as AnnotatedHole[],
+			activeHoleId,
+			reviewStep,
+			confirmedPieces: new Set(confirmedPieces),
+			autoProposedBendHoleIds: new Set(autoProposedBendHoleIds),
+			manualBendHoleId,
+			bendPhaseDone,
+			mapGeometryEdited,
+			view: controller ? { ...controller.view } : null
+		});
+		if (workflowUndoStack.length > WORKFLOW_UNDO_LIMIT) workflowUndoStack.shift();
+	}
+
+	/**
+	 * Ctrl-Z: reverses the previous user/workflow action — placements, moves,
+	 * removals, rejections, corridor-width changes, Tab advancements (incl. an
+	 * accidental double-Tab, one press per step), active hole/step changes —
+	 * and restores the associated camera position/zoom. Distinct from `X`,
+	 * which rejects a proposal and is itself undoable here.
+	 */
+	function performWorkflowUndo(): void {
+		const snapshot = workflowUndoStack.pop();
+		if (!snapshot) return;
+		holes = snapshot.holes;
+		activeHoleId = snapshot.activeHoleId;
+		reviewStep = snapshot.reviewStep;
+		confirmedPieces = new Set(snapshot.confirmedPieces);
+		autoProposedBendHoleIds = new Set(snapshot.autoProposedBendHoleIds);
+		manualBendHoleId = snapshot.manualBendHoleId;
+		bendPhaseDone = snapshot.bendPhaseDone;
+		mapGeometryEdited = snapshot.mapGeometryEdited;
+		previewHoles = null;
+		annotationDrag = null;
+		markerChip = null;
+		radialMenu = null;
+		// A pending focus-request pan must not replay on top of the restored
+		// camera, and the one-shot initial badge focus is forfeited by any undo.
+		sidebarFocusRequest = null;
+		initialBadgeFocusPending = false;
+		const controller = viewportController();
+		if (snapshot.view && controller) controller.view = { ...snapshot.view };
+	}
+
+	/**
+	 * Tab: accept the current step and advance. TEE → BASKET → BENDS within a
+	 * hole; on BENDS the hole is completed (both pieces confirmed and logged
+	 * via the existing approve path when present) and review moves to the next
+	 * hole's TEE, centering that hole's badge at the current zoom.
+	 */
+	function advanceReviewStep(): void {
+		const hole = activeHole();
+		if (!hole) {
+			captureWorkflowSnapshot();
+			const start = nextGuidedHoleNumber(0) ?? 1;
+			enterHoleForReview(start);
+			return;
+		}
+		captureWorkflowSnapshot();
+		if (effectiveReviewStep === 'tee') {
+			// Accepting the proposed tee marks it reviewed; a missing tee is an
+			// explicit "this hole's tee isn't visible yet", advanced past freely.
+			if (hole.tee) setPieceConfirmed(hole.id, 'tee', true);
+			reviewStep = 'basket';
+			return;
+		}
+		if (effectiveReviewStep === 'basket') {
+			if (hole.basket) setPieceConfirmed(hole.id, 'basket', true);
+			reviewStep = 'bends';
+			return;
+		}
+		// BENDS: Tab completes the hole. approveHolePieces is the existing
+		// confirm+log+promote path and no-ops when a piece is still missing.
+		if (hole.tee && hole.basket) approveHolePieces(hole.id);
+		vibrate(8);
+		const next = nextGuidedHoleNumber(hole.number) ?? nextGuidedHoleNumber(0);
+		if (next !== null && next !== hole.number) enterHoleForReview(next);
+		else exitSidebarFocus();
+	}
+
+	/**
+	 * X: reject the current step's obvious proposal — not a historical undo.
+	 * Priority: the hovered current-step object first (bends are the only
+	 * step with more than one candidate), then the single obvious proposal
+	 * (the step's tee/basket; a hole's eager auto-proposed bends as one unit;
+	 * otherwise the most recent bend). Rejections are themselves one Ctrl-Z
+	 * step.
+	 */
+	function rejectCurrentStepProposal(): void {
+		const hole = activeHole();
+		if (!hole) return;
+		if (effectiveReviewStep === 'tee' || effectiveReviewStep === 'basket') {
+			const kind = effectiveReviewStep;
+			const point = kind === 'tee' ? hole.tee : hole.basket;
+			if (!point) return;
+			captureWorkflowSnapshot();
+			deleteHolePiece(hole.id, kind);
+			// 'skip' is the correction log's reject-with-no-replacement action;
+			// a follow-up corrective click logs its own 'place'.
+			logCorrection(kind, hole.number, 'skip', null);
+			vibrate(8);
+			return;
+		}
+		if (hole.corridorBends.length === 0) return;
+		// Hovered bend wins, so a bad bend under the cursor needs no selection click.
+		const controller = viewportController();
+		if (lastPointerScreen && controller) {
+			const hit = pointHitAt(lastPointerScreen, controller.view);
+			if (hit && hit.kind === 'bend' && hit.holeId === hole.id && hit.index !== undefined) {
+				captureWorkflowSnapshot();
+				promoteEagerBends(hole.id);
+				holes = removeCorridorBend(holes, hole.id, hit.index);
+				markMapGeometryEdited();
+				vibrate(8);
+				return;
+			}
+		}
+		captureWorkflowSnapshot();
+		if (autoProposedBendHoleIds.has(hole.id)) {
+			// The eager auto-detection proposal is one unit: reject it whole.
+			// promoteEagerBends first keeps the attempt-signature guard intact so
+			// the detector doesn't immediately re-propose the same bends.
+			promoteEagerBends(hole.id);
+			holes = clearBends(holes, hole.id);
+		} else {
+			promoteEagerBends(hole.id);
+			holes = removeLastBend(holes, hole.id);
+		}
+		markMapGeometryEdited();
+		vibrate(8);
+	}
+
+	/**
+	 * 1–6: course-level corridor-width calibration from the keyboard, applied
+	 * globally via the existing course-wide behavior (`setAllCorridorWidths`,
+	 * same as the header input). Feedback renders on the map itself. A burst
+	 * of presses coalesces into one Ctrl-Z step (captured only when no
+	 * feedback is currently showing) and one `WIDTH before → after` readout.
+	 */
+	function adjustCorridorWidthBy(delta: number): void {
+		if (holes.length === 0) return;
+		// Baseline: the active hole's width, else the first hole's — never the
+		// bare default, which could misread an already-calibrated course.
+		const before = activeHole()?.corridorWidthPx ?? holes[0].corridorWidthPx;
+		const after = Math.max(1, Math.round(before + delta));
+		if (after === before) return;
+		if (!widthFeedback) captureWorkflowSnapshot();
+		holes = setAllCorridorWidths(holes, after);
+		markMapGeometryEdited();
+		widthFeedback = { from: widthFeedback?.from ?? before, to: after };
+		if (widthFeedbackTimer !== null) clearTimeout(widthFeedbackTimer);
+		widthFeedbackTimer = setTimeout(() => {
+			widthFeedback = null;
+			widthFeedbackTimer = null;
+		}, WIDTH_FEEDBACK_MS);
+	}
+
+	/**
+	 * Map-mode review keys. Returns true when the key was consumed. Camera
+	 * keys (WASD pan, Q/E zoom) honor key repeat for held-key movement; Tab
+	 * and X act once per press. Manual zoom persists between holes, geometry
+	 * edits never move the camera, and nothing here ever auto-zooms.
+	 */
+	function handleReviewKey(event: KeyboardEvent): boolean {
+		if (annotationMode !== 'map') return false;
+		// Until a course map is loaded there is nothing to review — leave the
+		// keyboard alone so Tab still reaches "Choose image" and the draft bar.
+		if (!sourceImage()) return false;
+		if (radialMenu || markerChip) return false;
+		if (event.ctrlKey || event.metaKey || event.altKey) return false;
+		if (event.key === 'Tab') {
+			// The workspace owns keyboard input during review: swallow the
+			// browser's focus traversal in both directions, advance on plain Tab.
+			event.preventDefault();
+			if (!event.repeat && !event.shiftKey) advanceReviewStep();
+			return true;
+		}
+		const key = event.key.toLowerCase();
+		const controller = viewportController();
+		const panStep = KEYBOARD_PAN_STEP_PX;
+		switch (key) {
+			case 'w':
+				event.preventDefault();
+				controller?.panBy(0, panStep);
+				return true;
+			case 's':
+				event.preventDefault();
+				controller?.panBy(0, -panStep);
+				return true;
+			case 'a':
+				event.preventDefault();
+				controller?.panBy(panStep, 0);
+				return true;
+			case 'd':
+				event.preventDefault();
+				controller?.panBy(-panStep, 0);
+				return true;
+			case 'q':
+				event.preventDefault();
+				if (controller?.fitTarget) controller.zoomAtCenter(KEYBOARD_ZOOM_STEP_FACTOR);
+				return true;
+			case 'e':
+				event.preventDefault();
+				if (controller?.fitTarget) controller.zoomAtCenter(1 / KEYBOARD_ZOOM_STEP_FACTOR);
+				return true;
+			case 'x':
+				event.preventDefault();
+				if (!event.repeat) rejectCurrentStepProposal();
+				return true;
+		}
+		if (!event.shiftKey && key in CORRIDOR_WIDTH_KEY_DELTAS) {
+			event.preventDefault();
+			adjustCorridorWidthBy(CORRIDOR_WIDTH_KEY_DELTAS[key]);
+			return true;
+		}
+		return false;
 	}
 
 	/** Clears sidebar focus — the placing/approve banner's Cancel/Close action. Cannot force the camera back out (the pane exposes no such API to the page); the user can still use the pane's own "Fit image" control. */
@@ -1588,19 +2032,21 @@
 		| { kind: 'bends'; holeNumber: number; manual: boolean }
 		| { kind: 'confirmed'; holeNumber: number };
 
-	/** Derived purely from the active hole's own section — see requirement 3/4: which piece a placing click will create, or the Approve prompt, follows automatically from hole state. Map mode only; Round mode's own hole selection has nothing to do with tee/basket sections. */
+	/** Derived from the active hole's current review step (which the sidebar's targeted-correction entry seeds from hole state, so mouse-only flows read exactly as before). Map mode only; Round mode's own hole selection has nothing to do with tee/basket sections. */
 	let sidebarBanner = $derived.by((): SidebarBanner | null => {
 		if (annotationMode !== 'map' || !activeHoleId) return null;
 		const hole = holes.find((candidate) => candidate.id === activeHoleId);
 		if (!hole) return null;
-		const section = sectionOfHole(hole);
-		if (section <= 2) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
-		// A manual "+ Add Bend(s)" click wins over the hole's own section — it
-		// must be reachable mid-review (section 3) or after approval (section
-		// 4/"confirmed") alike, not just during the guided all-18 bends phase.
+		// A manual "+ Add Bend(s)" click wins over the hole's own step — it
+		// must be reachable mid-review or after approval alike, not just during
+		// the guided all-18 bends phase.
 		if (manualBendHoleId === activeHoleId) return { kind: 'bends', holeNumber: hole.number, manual: true };
-		if (section === 3) return { kind: 'approve', holeNumber: hole.number };
 		if (allHolesConfirmed && !bendPhaseDone) return { kind: 'bends', holeNumber: hole.number, manual: false };
+		if (reviewStep === 'tee') return { kind: 'placing', holeNumber: hole.number, piece: 'Tee' };
+		if (reviewStep === 'basket') return { kind: 'placing', holeNumber: hole.number, piece: 'Basket' };
+		const section = sectionOfHole(hole);
+		if (section === 3) return { kind: 'approve', holeNumber: hole.number };
+		if (section <= 2) return { kind: 'placing', holeNumber: hole.number, piece: hole.tee ? 'Basket' : 'Tee' };
 		return { kind: 'confirmed', holeNumber: hole.number };
 	});
 
@@ -1618,6 +2064,7 @@
 		if (!activeHoleId) return;
 		const approvedHole = holes.find((hole) => hole.id === activeHoleId);
 		if (!approvedHole) return;
+		captureWorkflowSnapshot();
 		approveHolePieces(activeHoleId);
 		vibrate(8);
 		const nextNumber = nextGuidedHoleNumber(approvedHole.number);
@@ -1880,7 +2327,7 @@
 	/**
 	 * Snap-to-detection (design points 1/2/3/5): fires a short local
 	 * object-finding pass around a tee/basket point that has *already* been
-	 * placed at the raw click coordinates by the caller (`placeNextPiece`'s
+	 * placed at the raw click coordinates by the caller (`placeReviewPiece`'s
 	 * first-time placement of a hole's tee or basket) — this never blocks
 	 * that raw placement, it only settles the marker onto a detected feature
 	 * later if one is confidently found nearby (optimistic placement: a
@@ -1974,7 +2421,7 @@
 	 * see `commitAnnotationPointerUp`), otherwise the wedges the current
 	 * mode's activity allows. Map mode's empty-space menu offers only `bend`
 	 * now — tee/basket creation goes through the sidebar-driven placing flow
-	 * (`placeNextPiece`) before this menu is ever reached, see
+	 * (`placeReviewPiece`) before this menu is ever reached, see
 	 * `handleAnnotationPlacement`. Round mode is untouched: shot with a hole
 	 * active, walk always (the walk path needs no hole).
 	 */
@@ -2029,6 +2476,7 @@
 	function chooseRadialAction(menu: RadialMenuState, action: RadialAction): void {
 		if (radialMenu !== menu) return;
 		radialMenu = null;
+		captureWorkflowSnapshot();
 		if (action === 'delete') {
 			const marker = menu.hitMarker;
 			if (marker) {
@@ -2178,6 +2626,7 @@
 			image.widthPx,
 			image.heightPx
 		);
+		captureWorkflowSnapshot();
 		if (drag.marker.kind === 'walk') {
 			walkingPath =
 				drag.marker.index !== undefined ? moveWalkPoint(walkingPath, drag.marker.index, point) : walkingPath;
@@ -2193,7 +2642,7 @@
 			// already-placed tee/basket: CV isn't perfect, and re-running it on every
 			// manual reposition risked silently pulling the marker back to the same
 			// wrong detection the user had just corrected away from. It only ever
-			// runs once, on a hole's very first raw placement — see `placeNextPiece`.
+			// runs once, on a hole's very first raw placement — see `placeReviewPiece`.
 			if ((drag.marker.kind === 'tee' || drag.marker.kind === 'basket') && draggedHoleNumber !== undefined) {
 				const dragDistancePx = originalPoint
 					? Math.hypot(point.xPx - originalPoint.xPx, point.yPx - originalPoint.yPx)
@@ -2226,23 +2675,39 @@
 	 * `handleAnnotationPlacement` for an empty-map click and from
 	 * `onHoleBoxClick` when a section 1-3 hole is already fully in view.
 	 */
-	function placeNextPiece(holeId: string, point: SourcePoint, altKey: boolean): void {
-		const hole = holes.find((candidate) => candidate.id === holeId);
+	function placeReviewPiece(kind: 'tee' | 'basket', point: SourcePoint, altKey: boolean): void {
+		const hole = activeHole();
 		if (!hole) return;
-		const kind: 'tee' | 'basket' = hole.tee ? 'basket' : 'tee';
-		holes = placeByMode(holes, holeId, kind, point);
+		const existing = kind === 'tee' ? hole.tee : hole.basket;
+		if (!existing) {
+			holes = placeByMode(holes, hole.id, kind, point);
+			markMapGeometryEdited();
+			const snapRef = applyLocalSnap(kind, hole.id, point, altKey);
+			// A from-scratch manual placement, recorded for the correction log.
+			// Deferred while a snap pass is in flight so the event records the
+			// post-snap final coordinate with the raw drop preserved separately.
+			logCorrection(
+				kind,
+				hole.number,
+				'place',
+				{ xPx: point.xPx, yPx: point.yPx },
+				snapRef ? { deferForSnap: snapRef } : {}
+			);
+			vibrate(8);
+			// A fresh placement is the answer to this step's question — advance so
+			// the next click asks for the next piece, no return trip to the
+			// sidebar (and no Tab required after a manual placement).
+			reviewStep = kind === 'tee' ? 'basket' : 'bends';
+			return;
+		}
+		// The step's piece already exists (a CV proposal, or an earlier
+		// placement): an empty-map click on this step re-places it at the
+		// clicked point. The step does not advance — the user is correcting,
+		// and accepts with Tab when satisfied.
+		holes = kind === 'tee' ? moveTee(holes, hole.id, point) : moveBasket(holes, hole.id, point);
+		setPieceConfirmed(hole.id, kind, false);
 		markMapGeometryEdited();
-		const snapRef = applyLocalSnap(kind, holeId, point, altKey);
-		// A from-scratch manual placement, recorded for the correction log.
-		// Deferred while a snap pass is in flight so the event records the
-		// post-snap final coordinate with the raw drop preserved separately.
-		logCorrection(
-			kind,
-			hole.number,
-			'place',
-			{ xPx: point.xPx, yPx: point.yPx },
-			snapRef ? { deferForSnap: snapRef } : {}
-		);
+		logCorrection(kind, hole.number, 'replace', { xPx: point.xPx, yPx: point.yPx });
 		vibrate(8);
 	}
 
@@ -2250,11 +2715,10 @@
 	 * Opens the empty-space placement menu/flow. In round mode this works even
 	 * with no hole active — the menu then offers only `walk`, since the walk
 	 * path is round-level rather than per-hole. In map mode a hole must be
-	 * active; if it's still missing a tee or basket (sections 1-2), the click
-	 * places that piece directly through the sidebar's placing flow instead of
-	 * opening a menu at all. Once both endpoints exist (section 3/4), any
-	 * empty-map click places a bend directly (the guided flow) unless the radial
-	 * menu is enabled. Round mode opens a shots/walk radial menu.
+	 * active and the CURRENT REVIEW STEP decides what the click places: the
+	 * step's tee/basket (placed fresh, or re-placed over a bad proposal), or —
+	 * on the BENDS step — a corridor bend, unless the radial menu is enabled.
+	 * Round mode opens a shots/walk radial menu.
 	 */
 	function handleAnnotationPlacement(
 		coordinates: { xPx: number; yPx: number },
@@ -2263,24 +2727,24 @@
 		if (annotationMode === 'map') {
 			if (!activeHoleId) return;
 			const hole = activeHole();
-			if (hole && sectionOfHole(hole) <= 2) {
-				placeNextPiece(activeHoleId, coordinates, options.altKey ?? false);
+			if (hole && (effectiveReviewStep === 'tee' || effectiveReviewStep === 'basket')) {
+				// The current step decides what an empty-map click places: the
+				// step's piece, placed fresh or re-placed over a bad proposal.
+				captureWorkflowSnapshot();
+				placeReviewPiece(effectiveReviewStep, coordinates, options.altKey ?? false);
 				return;
 			}
 			if (hole && !radialMenuEnabled) {
-				// Once both tee and basket exist (section >= 3), any empty-map click
-				// places a corridor bend directly — the natural guided flow. This
-				// works whether the hole is under initial review (section 3) or
-				// already approved (section 4), and regardless of how tee/basket
-				// were placed (CV, manual, or mixed). The radial menu, when enabled,
-				// still wins so its delete/bend wedges stay reachable.
-				const section = sectionOfHole(hole);
-				if (section >= 3) {
-					promoteEagerBends(activeHoleId);
-					holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
-					markMapGeometryEdited();
-					vibrate(8);
-				}
+				// BENDS step: any empty-map click adds a corridor bend directly —
+				// the natural guided flow, whether the hole is under initial
+				// review, already approved, or in a manual/guided bends session.
+				// The radial menu, when enabled, still wins so its delete/bend
+				// wedges stay reachable.
+				captureWorkflowSnapshot();
+				promoteEagerBends(activeHoleId);
+				holes = placeByMode(holes, activeHoleId, 'bend', coordinates);
+				markMapGeometryEdited();
+				vibrate(8);
 				return;
 			}
 		}
@@ -2313,6 +2777,10 @@
 		courseDetectionError = null;
 		courseDetection = null;
 		confirmedPieces = new Set();
+		reviewStep = 'tee';
+		workflowUndoStack.length = 0;
+		widthFeedback = null;
+		initialBadgeFocusPending = false;
 		latestShadowRun = null;
 		activeShadowRun = null;
 		shadowOverlayRender = null;
@@ -2677,6 +3145,11 @@
 			savingCourseToMemory = false;
 			savedCourseToMemory = false;
 			confirmedPieces = new Set();
+			reviewStep = 'tee';
+			workflowUndoStack.length = 0;
+			widthFeedback = null;
+			initialBadgeFocusPending = false;
+			reviewStartedSourceId = null;
 			courseDetection = null;
 			autoDetectedSourceId = null;
 			prewarmedSourceId = null;
@@ -2863,9 +3336,12 @@
 			? subscribePendingHandoff(readPendingHandoff)
 			: () => {};
 		window.addEventListener('keydown', handleAnnotationKeyDown);
+		// Hover tracking for X's "hovered current-step object first" priority.
+		window.addEventListener('pointermove', trackReviewPointer);
 		return () => {
 			unsubscribe();
 			window.removeEventListener('keydown', handleAnnotationKeyDown);
+			window.removeEventListener('pointermove', trackReviewPointer);
 		};
 	});
 
@@ -3078,6 +3554,7 @@
 
 	<div class="hole-annotation" class:diagnostics-collapsed={!diagnosticsRailExpanded} data-testid="hole-annotation">
 		<ImageEditorPane
+			bind:this={editorPane}
 			title="UDisc source"
 			role="source-overview"
 			{editor}
@@ -3115,7 +3592,7 @@
 					<div class="tool-section">
 						<h2>Edit hole {hole.number}</h2>
 						{#if annotationMode === 'map'}
-							<p class="empty-copy">Click empty map space to place a bend; click an existing point to delete it.</p>
+							<p class="empty-copy">Empty-map clicks follow the current step (HOLE · TEE/BASKET/BENDS). Tab accepts and advances; X rejects; Ctrl-Z undoes.</p>
 						{:else}
 							<p class="empty-copy">Click empty map space to place a shot or a walk-path vertex; click an existing point to delete it.</p>
 						{/if}
@@ -3537,6 +4014,28 @@
 							data-testid="walk-vertex-{index}"
 						/>
 					{/each}
+					{#if annotationMode === 'map' && activeHole()}
+						{@const activeBadge = numberBadges.find(
+							(candidate) => candidate.number === activeHole()!.number
+						)}
+						{#if activeBadge}
+							<!-- Active-hole badge highlight: stays lit through Tee, Basket,
+							     and Bends, with a brief activation pulse on hole entry
+							     (keyed on the active hole). Purely visual — the SVG overlay
+							     is pointer-events: none, and the active hole's badge is
+							     already pointer-transparent in `claimAnnotationPointer` so
+							     it never blocks clicks on geometry underneath. -->
+							{#key activeHoleId}
+								<circle
+									cx={activeBadge.xPx}
+									cy={activeBadge.yPx}
+									r={16 / zoom}
+									class="active-badge-ring"
+									data-testid="active-badge-ring"
+								/>
+							{/key}
+						{/if}
+					{/if}
 					{#if courseDetection}
 						{#each courseDetection.grammar.holes as proposal (proposal.number)}
 							{#if proposal.numberBadge && proposal.tee}
@@ -3598,6 +4097,25 @@
 			{/snippet}
 
 			{#snippet popover({ view, paneSize })}
+				{#if annotationMode === 'map' && activeHole()}
+					<!-- Current-step indicator: the keyboard flow's one always-visible
+					     state readout. The current step determines what an empty-map
+					     click places. -->
+					<div class="review-step-indicator" data-testid="review-step-indicator" role="status">
+						HOLE {activeHole()!.number} · {effectiveReviewStep === 'tee'
+							? 'TEE'
+							: effectiveReviewStep === 'basket'
+								? 'BASKET'
+								: 'BENDS'}
+					</div>
+				{/if}
+				{#if widthFeedback}
+					<!-- Temporary on-map corridor-width feedback for the 1–6 keys, so
+					     the result is visible without looking at the sidebar input. -->
+					<div class="width-feedback" data-testid="corridor-width-feedback" role="status">
+						WIDTH {widthFeedback.from} → {widthFeedback.to}
+					</div>
+				{/if}
 				<div class="course-detection-overlay">
 					{#if courseDetectionRunning}
 						<p
@@ -3615,10 +4133,10 @@
 				{#if sidebarBanner}
 					<div class="placement-banner" class:approve={sidebarBanner.kind === 'approve'} data-testid="placement-banner" role="status">
 						{#if sidebarBanner.kind === 'placing'}
-							<span><strong>Placing Hole {sidebarBanner.holeNumber} — {sidebarBanner.piece}.</strong> Click empty map to place. Click any existing marker to fix it.</span>
+							<span><strong>Placing Hole {sidebarBanner.holeNumber} — {sidebarBanner.piece}.</strong> Click empty map to place, drag to adjust. Tab accepts · X rejects.</span>
 							<button type="button" class="banner-close" data-testid="placement-banner-cancel" onclick={exitSidebarFocus}>Cancel</button>
 						{:else if sidebarBanner.kind === 'approve'}
-							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Click the map to add bends, or drag either marker to adjust.</span>
+							<span><strong>Reviewing Hole {sidebarBanner.holeNumber}.</strong> Click the map to add bends, or drag either marker to adjust. Tab completes the hole.</span>
 							<button type="button" class="banner-action" data-testid="add-bend-button" onclick={startManualBends}>
 								+ Add Bend(s)
 							</button>
@@ -4112,10 +4630,41 @@
 		cursor: pointer;
 	}
 
+	/* Active hole's badge: a strong steady highlight that draws the eye and
+	   persists through the Tee/Basket/Bends steps. */
 	.number-candidate-marker.selected-hole rect {
-		fill: rgb(59 130 246 / 22%);
-		stroke: #60a5fa;
+		fill: rgb(251 191 36 / 24%);
+		stroke: #fbbf24;
 		stroke-width: 3;
+		filter: drop-shadow(0 0 5px rgb(251 191 36 / 85%));
+	}
+
+	/* Badge-anchor ring for the active hole — the keyboard flow's "you are
+	   here". Brief activation pulse on hole entry, then a steady glow. */
+	.active-badge-ring {
+		fill: none;
+		stroke: #fbbf24;
+		stroke-width: 3;
+		vector-effect: non-scaling-stroke;
+		filter: drop-shadow(0 0 6px rgb(251 191 36 / 90%));
+		animation: badge-activate 500ms ease-out;
+	}
+
+	@keyframes badge-activate {
+		from {
+			stroke-width: 9;
+			opacity: 0.35;
+		}
+		to {
+			stroke-width: 3;
+			opacity: 1;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.active-badge-ring {
+			animation: none;
+		}
 	}
 
 	.number-candidate-label {
@@ -4954,6 +5503,46 @@
 	 * live here now, wrapping onto a second line on narrow panes rather than
 	 * spilling a separate floating control over the map.
 	 */
+	/* Keyboard-review state readouts: the current-step indicator (bottom-left,
+	   always visible while a hole is active) and the transient corridor-width
+	   feedback (centered). Both are display-only. */
+	.review-step-indicator {
+		position: absolute;
+		left: 0.75rem;
+		bottom: 0.75rem;
+		z-index: 26;
+		padding: 0.4rem 0.7rem;
+		border: 1px solid #52525b;
+		border-radius: 8px;
+		background: #18181bf2;
+		box-shadow: 0 6px 16px rgb(0 0 0 / 45%);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.85rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		color: #fbbf24;
+		pointer-events: none;
+	}
+
+	.width-feedback {
+		position: absolute;
+		left: 50%;
+		top: 40%;
+		transform: translate(-50%, -50%);
+		z-index: 27;
+		padding: 0.5rem 0.9rem;
+		border: 1px solid #52525b;
+		border-radius: 8px;
+		background: #18181bf2;
+		box-shadow: 0 10px 26px rgb(0 0 0 / 50%);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 1rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		color: #f4f4f5;
+		pointer-events: none;
+	}
+
 	.placement-banner {
 		position: absolute;
 		top: 0.85rem;

@@ -339,6 +339,17 @@
 		if (target) void tick().then(() => target.focus());
 	}
 
+	/**
+	 * Hands the pane's own `ViewportController` to the mounting page. Added for
+	 * Annotate Course's keyboard-first review flow, which needs to drive the
+	 * camera directly (WASD pan, Q/E zoom, undo-restored view) rather than only
+	 * through one-shot `focusRequest`s. The controller is created once per pane
+	 * instance and never replaced, so callers may hold the reference.
+	 */
+	export function getViewportController(): ViewportController {
+		return vp;
+	}
+
 	async function handleFileChange(event: Event): Promise<void> {
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
