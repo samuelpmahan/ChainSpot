@@ -26,7 +26,7 @@
 	} from '$lib/imageIntake';
 	import type { DecodeImageFile } from '$lib/imageIntake';
 	import { canvas2dAvailable, createPaneScene } from '$lib/scene';
-	import type { MarkerHitResult, MarkerSceneData } from '$lib/scene';
+	import type { GhostCourseHole, MarkerHitResult, MarkerSceneData } from '$lib/scene';
 	import type { PaneScene } from '$lib/scene';
 	import type { PointSelection } from '$lib/pointSelection';
 	import { selectionMatches } from '$lib/pointSelection';
@@ -50,6 +50,16 @@
 		selection?: PointSelection | null;
 		/** Transient marker-overlay visibility; rendering only, never domain state. */
 		markersVisible?: boolean;
+		/**
+		 * Live registration-preview geometry (P1-006): the confirmed course,
+		 * already projected into this pane's image space by the caller. Empty by
+		 * default — only the target/NAIP pane is ever given a non-empty array;
+		 * the source pane's own annotations are untouched, authoritative truth
+		 * and never re-rendered here.
+		 */
+		ghostCourse?: readonly GhostCourseHole[];
+		/** Transient ghost-course overlay visibility; rendering only, never domain state. */
+		ghostCourseVisible?: boolean;
 		decode?: DecodeImageFile;
 		confirmDiscard?: (affectedPairCount: number) => boolean | Promise<boolean>;
 		onDomainChanged?: (role: ImageRole) => void;
@@ -69,6 +79,8 @@
 		correctionEnabled = false,
 		selection = null,
 		markersVisible = true,
+		ghostCourse = [],
+		ghostCourseVisible = true,
 		decode = decodeImageFile,
 		confirmDiscard,
 		onDomainChanged,
@@ -94,6 +106,8 @@
 	 * frame stale while a click is in flight.
 	 */
 	let lastMarkersJson: string | null = null;
+	/** Same rebuild-only-on-change guard as `lastMarkersJson`, for the ghost-course overlay. */
+	let lastGhostCourseJson: string | null = null;
 	/** Guards one-time hover-listener setup inside the refresh-reactive effect. */
 	let setupDone = false;
 	let interactionError = $state<string | null>(null);
@@ -493,6 +507,12 @@
 			lastMarkersJson = markersJson;
 			scene?.setMarkers(markers);
 		}
+		scene?.setGhostCourseVisible(ghostCourseVisible);
+		const ghostCourseJson = JSON.stringify(ghostCourse);
+		if (ghostCourseJson !== lastGhostCourseJson) {
+			lastGhostCourseJson = ghostCourseJson;
+			scene?.setGhostCourse(ghostCourse);
+		}
 		const image = currentImage();
 		const decoded = currentDecoded();
 		if (image && decoded) {
@@ -501,6 +521,7 @@
 			if (lastImageId !== image.id) {
 				lastImageId = image.id;
 				lastMarkersJson = null;
+				lastGhostCourseJson = null;
 				scene?.setImage(decoded, image.widthPx, image.heightPx);
 				vp.setFitTarget({ xPx: 0, yPx: 0, widthPx: image.widthPx, heightPx: image.heightPx });
 				vp.fit();
@@ -508,6 +529,7 @@
 		} else if (!image) {
 			lastImageId = null;
 			lastMarkersJson = null;
+			lastGhostCourseJson = null;
 			scene?.clearImage();
 			vp.setFitTarget(null);
 		}
@@ -559,6 +581,7 @@
 	data-testid={`pane-${role}`}
 	aria-labelledby={`pane-heading-${role}`}
 	aria-describedby={error || interactionError ? `${error ? `pane-error-${role}` : ''} ${interactionError ? `pane-interaction-error-${role}` : ''}`.trim() : undefined}
+	data-ghost-course-count={ghostCourseVisible ? ghostCourse.length : 0}
 >
 	<header class="pane-header">
 		<h2 id={`pane-heading-${role}`}>{title}</h2>

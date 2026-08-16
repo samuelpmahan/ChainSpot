@@ -14,6 +14,7 @@ const NOW = () => new Date('2026-08-03T00:00:00.000Z');
 
 const sceneMock = vi.hoisted(() => ({
 	rasterLayer: {},
+	ghostCourseLayer: {},
 	controlPointLayer: {},
 	interactionLayer: {},
 	controlPointGroup: {},
@@ -21,6 +22,8 @@ const sceneMock = vi.hoisted(() => ({
 	applyTransform: vi.fn(),
 	setMarkers: vi.fn(),
 	setMarkersVisible: vi.fn(),
+	setGhostCourse: vi.fn(),
+	setGhostCourseVisible: vi.fn(),
 	setStageSize: vi.fn(),
 	markerHitAt: vi.fn(() => ({ pairId: 'pair-1', side: 'source', kind: 'complete' })),
 	clearImage: vi.fn(),

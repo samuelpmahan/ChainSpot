@@ -11,9 +11,11 @@ import {
 	upsertCourse
 } from '../../src/lib/courseLibrary';
 import type { CourseLibraryEntry, CourseLibraryHole, CourseLibraryStore } from '../../src/lib/courseLibrary';
-import type { LabeledPoint } from '../../src/lib/courseSignature';
+import type { LabeledPoint, SignatureMatchResult } from '../../src/lib/courseSignature';
 import { matchSignatures } from '../../src/lib/courseSignature';
 import type { AnnotatedHole } from '../../src/lib/domain/project';
+import type { SerializableTransform } from '../../src/lib/alignment/types';
+import { planHoleGraphic } from '../../src/lib/holeGraphics';
 
 const NOW = () => new Date('2026-08-10T00:00:00.000Z');
 const LATER = () => new Date('2026-08-10T01:00:00.000Z');
@@ -409,6 +411,69 @@ describe('applyLibraryEntry', () => {
 		expect(hole.tee!.xPx).toBeCloseTo(expectedTee.xPx, 1);
 		expect(hole.tee!.yPx).toBeCloseTo(expectedTee.yPx, 1);
 		expect(hole.corridorWidthPx).toBeCloseTo(120, 0); // scaled by the recovered ~2x transform
+	});
+
+	it("scales corridorWidthPx consistently with the live registration preview's direct corridor-band projection under a pure similarity transform", () => {
+		// Course Memory's own corridor-width scale (`widthScale`, courseLibrary.ts)
+		// averages the two axis scales because it must persist one scalar
+		// `corridorWidthPx`. The live registration preview (P1-006) instead reuses
+		// `holeGraphics.ts`'s `planHoleGraphic`, which never scales a scalar width at
+		// all -- it derives the corridor band in source space and transforms every
+		// boundary vertex directly. For a pure similarity transform (uniform scale,
+		// no shear) the two approaches must still agree exactly.
+		const libraryHole: CourseLibraryHole = {
+			number: 1,
+			tee: { xPx: 0, yPx: 0 },
+			basket: { xPx: 100, yPx: 0 },
+			corridorBends: [],
+			corridorWidthPx: 20
+		};
+		const entry = libraryEntry([libraryHole]);
+
+		const scale = 3;
+		const theta = (40 * Math.PI) / 180;
+		const cosT = Math.cos(theta);
+		const sinT = Math.sin(theta);
+		const transform: SerializableTransform = {
+			model: 'similarity',
+			coefficients: [scale * cosT, scale * sinT, -scale * sinT, scale * cosT, 250, 175],
+			isInvertible: true,
+			determinant: scale * scale,
+			orientation: 1,
+			majorAxisScale: scale,
+			minorAxisScale: scale,
+			anisotropy: 1,
+			shear: 0
+		};
+		const match: SignatureMatchResult = {
+			matched: true,
+			transform,
+			normalizedRms: 0,
+			confidence: 1,
+			usedHoleNumbers: [1],
+			droppedHoleNumbers: [],
+			model: 'similarity'
+		};
+
+		const [appliedHole] = applyLibraryEntry(entry, match, []);
+		expect(appliedHole.corridorWidthPx).toBeCloseTo(20 * scale, 6);
+
+		const annotatedHole: AnnotatedHole = {
+			id: 'h1',
+			number: 1,
+			tee: libraryHole.tee,
+			basket: libraryHole.basket,
+			shots: [],
+			corridorBends: [],
+			corridorWidthPx: libraryHole.corridorWidthPx
+		};
+		const plan = planHoleGraphic(annotatedHole, transform, 2000, 2000);
+		const band = plan!.corridorBand!;
+		// A single-segment corridor's band is [teeLeft, basketLeft, basketRight, teeRight].
+		const bandWidthAtTee = Math.hypot(band[0].xPx - band[3].xPx, band[0].yPx - band[3].yPx);
+		const bandWidthAtBasket = Math.hypot(band[1].xPx - band[2].xPx, band[1].yPx - band[2].yPx);
+		expect(bandWidthAtTee).toBeCloseTo(appliedHole.corridorWidthPx, 6);
+		expect(bandWidthAtBasket).toBeCloseTo(appliedHole.corridorWidthPx, 6);
 	});
 
 	it('is a no-op copy when the match is not confident', () => {
