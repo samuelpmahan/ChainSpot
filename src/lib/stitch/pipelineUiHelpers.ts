@@ -116,7 +116,19 @@ export function buildManualDraftComposite(inputs: ManualDraftInputs): DraftCompo
 	const corners = cropCornersOf(cropRect);
 
 	const sources: SourceCapture[] = placed.map(({ slot, tile, placement }) => {
-		const transform = translationSourceTransform(placement.xPx + dxPx, placement.yPx + dyPx);
+		// `transform` must map the FULL source raster (domain/provenance.ts's
+		// module doc) into composite space, but `placement.xPx/yPx` is where
+		// the CROPPED tile's top-left lands — the full raster's own origin
+		// sits `crop.leftPx`/`crop.topPx` further up-left of that. Matches
+		// stitchPipeline.ts's N=1 formula (`translationSourceTransform(-crop.xPx, -crop.yPx)`,
+		// the same subtraction with placement/dxPx both zero there). Omitting
+		// this offset placed every source `(crop.leftPx, crop.topPx)` too far
+		// right/down, corrupting the composite whenever the shared crop is
+		// non-zero (CHSPT-57 review finding #1).
+		const transform = translationSourceTransform(
+			placement.xPx - inputs.crop.leftPx + dxPx,
+			placement.yPx - inputs.crop.topPx + dyPx
+		);
 		const origin: SourceCaptureOrigin = {
 			crop: inputs.cropTouched ? 'manual' : 'auto',
 			transform: inputs.transformTouchedSlots.has(slot) ? 'manual' : 'auto'

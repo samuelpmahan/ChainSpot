@@ -771,6 +771,10 @@
 		manualOpen = false;
 		manualView = 'placement';
 		badgeAnchors = [];
+		// A reset is a session boundary exactly like the decode-coordinator
+		// invalidation above: any badge detection still in flight for the
+		// cleared session must never publish into whatever comes next.
+		badgeDetectionGeneration += 1;
 		phase = 'import';
 		statusMessage = 'All screenshots cleared. Ready for a new import.';
 	}

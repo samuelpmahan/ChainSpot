@@ -91,6 +91,36 @@ describe('buildManualDraftComposite', () => {
 		]);
 	});
 
+	test('a non-zero shared crop is subtracted from the transform, so the source raster origin — not the crop corner — lands correctly in composite space (CHSPT-57 regression)', () => {
+		// A 100x100 tile cropped by 20px top/left: the cropped 80x80 region is
+		// the entire output. The full source raster's own origin (0,0) must
+		// map to (-20,-20) in composite space so the CROP's corner (20,20)
+		// lands at the true composite origin (0,0) — not the source raster's
+		// own (0,0), which would leave the output showing a blank margin and
+		// clip real content off the far edge.
+		const crop: CropInsets = { topPx: 20, rightPx: 0, bottomPx: 0, leftPx: 20 };
+		const draft = buildManualDraftComposite({
+			slots: ['tile-0'],
+			tiles: { 'tile-0': TILE },
+			placements: { 'tile-0': { xPx: 0, yPx: 0, visible: true } },
+			crop,
+			hashesBySlot: new Map(),
+			cropTouched: false,
+			transformTouchedSlots: new Set()
+		});
+		expect(draft).not.toBeNull();
+		expect(draft!.outputWidthPx).toBe(80);
+		expect(draft!.outputHeightPx).toBe(80);
+		const source = draft!.sources[0];
+		expect(source.transform.coefficients).toEqual([1, 0, 0, 1, -20, -20]);
+		expect(source.coveragePolygon).toEqual([
+			{ xPx: 0, yPx: 0 },
+			{ xPx: 80, yPx: 0 },
+			{ xPx: 80, yPx: 80 },
+			{ xPx: 0, yPx: 80 }
+		]);
+	});
+
 	test('translates every tile transform by the union origin, orders paint ascending bottom-right, and uses supplied hashes', () => {
 		const slots: TileSlot[] = ['tile-0', 'tile-1'];
 		const placements: Partial<Record<TileSlot, TilePlacement>> = {

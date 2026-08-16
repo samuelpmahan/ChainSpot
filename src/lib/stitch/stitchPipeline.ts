@@ -253,8 +253,15 @@ async function buildMultiSourcePipeline(
 	}
 
 	const rasters: AnalysisRaster[] = [];
+	// Recorded per tile so `pose`'s transforms (computed entirely in
+	// region-trimmed raster coordinates whenever the shared crop is
+	// high-confidence — see the correction below) can be converted back to
+	// full-source-raster coordinates before anything downstream treats them
+	// as such.
+	const matcherRegionOffsets: Array<{ readonly xPx: number; readonly yPx: number } | null> = [];
 	for (let i = 0; i < decoded.length; i += 1) {
 		const region = matcherRegionFromCrop(crop, decoded[i].widthPx, decoded[i].heightPx);
+		matcherRegionOffsets.push(region ? { xPx: region.x, yPx: region.y } : null);
 		try {
 			rasters.push(buildRaster(decoded[i].image, region ?? undefined));
 		} catch {
@@ -285,13 +292,46 @@ async function buildMultiSourcePipeline(
 	const cropRect = cropRectFrom(crop?.insets ?? null, decoded[0].widthPx, decoded[0].heightPx);
 	const corners = cropCorners(cropRect);
 
+	// `pose.transforms` were estimated entirely from `rasters`, which are
+	// region-trimmed (by `matcherRegionOffsets[index]`) whenever the shared
+	// crop reached 'high' confidence (`matcherRegionFromCrop`). For a pure
+	// translation this offset cancels exactly (a constant shift subtracted
+	// from every raster does not change any pair's RELATIVE translation —
+	// `cropGate.ts`'s own module doc), so `pose.transforms` was directly
+	// usable as a full-source-raster transform for translation-only capture
+	// sets, which is why this was invisible in the ordinary 2x2 regression
+	// case. It is NOT correct once a transform carries rotation/scale: for
+	// `S = full-source-raster point`, `R = S - t` (t = the shared region
+	// offset), a region-space transform `T_R(x) = A*x + b` composed with the
+	// full-source-raster crop corners must instead be
+	// `T_S(S) = A*S + [b + (I - A)*t]` (derived by substituting `R = S - t`
+	// into `T_R(R) = A*(S - t) + b` and solving for the equivalent transform
+	// of `S` directly) — i.e. only the TRANSLATION component needs a
+	// correction term; the linear part (rotation/scale) is unaffected by a
+	// shared coordinate-origin shift. CHSPT-57 review: this correction was
+	// previously missing, silently misplacing any tile whose pose escalated
+	// past translation whenever the shared crop was high-confidence.
+	const correctedTransforms = new Map<number, SourceTransform>();
+	for (const index of pose.order) {
+		const raw = pose.transforms.get(index)!;
+		const offset = matcherRegionOffsets[index];
+		if (!offset || (offset.xPx === 0 && offset.yPx === 0)) {
+			correctedTransforms.set(index, raw);
+			continue;
+		}
+		const [a, b, c, d, e, f] = raw.coefficients;
+		const correctedE = e + offset.xPx - (a * offset.xPx + c * offset.yPx);
+		const correctedF = f + offset.yPx - (b * offset.xPx + d * offset.yPx);
+		correctedTransforms.set(index, buildSourceTransform(raw.model, [a, b, c, d, correctedE, correctedF]));
+	}
+
 	// Raw (anchor-relative) coverage polygons, to find the union bounds that
 	// become the output's (0,0) origin — generalizes `geometry.ts`'s
 	// `unionBounds`/`translatedOrigin` from axis-aligned tile rects to
 	// arbitrary (possibly rotated) coverage polygons.
 	const rawPolygons = new Map<number, readonly CompositePoint[]>();
 	for (const index of pose.order) {
-		const transform = pose.transforms.get(index)!;
+		const transform = correctedTransforms.get(index)!;
 		rawPolygons.set(index, corners.map((corner) => applySourceTransform(corner, transform)));
 	}
 	let minX = Infinity;
@@ -315,8 +355,8 @@ async function buildMultiSourcePipeline(
 	const finalTransforms = new Map<number, SourceTransform>();
 	const finalPolygons = new Map<number, readonly CompositePoint[]>();
 	for (const index of pose.order) {
-		const raw = pose.transforms.get(index)!;
-		const transform = buildSourceTransform(raw.model, composeAffine6(shiftCoefficients, raw.coefficients));
+		const corrected = correctedTransforms.get(index)!;
+		const transform = buildSourceTransform(corrected.model, composeAffine6(shiftCoefficients, corrected.coefficients));
 		finalTransforms.set(index, transform);
 		finalPolygons.set(index, corners.map((corner) => applySourceTransform(corner, transform)));
 	}

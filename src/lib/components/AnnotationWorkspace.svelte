@@ -465,6 +465,8 @@
 		readonly autoProposedBendHoleIds: Set<string>;
 		readonly manualBendHoleId: string | null;
 		readonly lastManualBendByHoleId: Map<string, SourcePoint>;
+		readonly eagerBendAnchorByHoleId: Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>;
+		readonly eagerBendAttemptSignature: Map<string, string>;
 		readonly bendPhaseDone: boolean;
 		readonly mapGeometryEdited: boolean;
 		readonly view: ViewTransformState | null;
@@ -700,10 +702,21 @@
 	 * transient page-local UI state, same convention as `confirmedPieces`.
 	 */
 	let autoProposedBendHoleIds = $state<ReadonlySet<string>>(new Set());
-	/** tee/basket position `autoProposedBendHoleIds`' eager bends were computed from, for the cancel-on-drag distance check. Plain (non-reactive) bookkeeping, mirrors `autoDetectedSourceId`'s once-per-image guard convention. */
-	const eagerBendAnchorByHoleId = new Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>();
-	/** holeId -> tee/basket signature already attempted (or currently scheduled/in-flight) by the eager trigger, so it does not re-fire for a position it has already tried. Plain bookkeeping, not rendered. */
-	const eagerBendAttemptSignature = new Map<string, string>();
+	/**
+	 * tee/basket position `autoProposedBendHoleIds`' eager bends were computed
+	 * from, for the cancel-on-drag distance check. Plain (non-reactive)
+	 * bookkeeping, mirrors `autoDetectedSourceId`'s once-per-image guard
+	 * convention. `let`, not `const` (CHSPT-57 review): this must be part of
+	 * `WorkflowSnapshot` like `lastManualBendByHoleId` — without it, an undo
+	 * that restores `autoProposedBendHoleIds` to include a hole again could
+	 * leave this map holding a STALE anchor from a since-cancelled/re-run
+	 * attempt, and the cancel-on-drag `$effect` below would compare the
+	 * restored tee/basket against that stale anchor and immediately
+	 * re-cancel the bends the undo just brought back.
+	 */
+	let eagerBendAnchorByHoleId = new Map<string, { readonly tee: SourcePoint; readonly basket: SourcePoint }>();
+	/** holeId -> tee/basket signature already attempted (or currently scheduled/in-flight) by the eager trigger, so it does not re-fire for a position it has already tried. Plain bookkeeping, not rendered. `let` for the same undo/redo-fidelity reason as `eagerBendAnchorByHoleId` above. */
+	let eagerBendAttemptSignature = new Map<string, string>();
 	/** Per-hole debounce timer for the eager trigger, so a mid-drag flurry of tee/basket updates schedules one attempt at the settled position, not one per intermediate frame. */
 	const eagerBendDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const EAGER_BEND_DEBOUNCE_MS = 400;
@@ -1867,6 +1880,8 @@
 			autoProposedBendHoleIds: new Set(autoProposedBendHoleIds),
 			manualBendHoleId,
 			lastManualBendByHoleId: new Map(lastManualBendByHoleId),
+			eagerBendAnchorByHoleId: new Map(eagerBendAnchorByHoleId),
+			eagerBendAttemptSignature: new Map(eagerBendAttemptSignature),
 			bendPhaseDone,
 			mapGeometryEdited,
 			view: controller ? { ...controller.view } : null
@@ -1897,6 +1912,8 @@
 		autoProposedBendHoleIds = new Set(snapshot.autoProposedBendHoleIds);
 		manualBendHoleId = snapshot.manualBendHoleId;
 		lastManualBendByHoleId = new Map(snapshot.lastManualBendByHoleId);
+		eagerBendAnchorByHoleId = new Map(snapshot.eagerBendAnchorByHoleId);
+		eagerBendAttemptSignature = new Map(snapshot.eagerBendAttemptSignature);
 		bendPhaseDone = snapshot.bendPhaseDone;
 		mapGeometryEdited = snapshot.mapGeometryEdited;
 		previewHoles = null;
@@ -2888,6 +2905,8 @@
 		bendPhaseDone = false;
 		manualBendHoleId = null;
 		lastManualBendByHoleId = new Map();
+		eagerBendAnchorByHoleId = new Map();
+		eagerBendAttemptSignature = new Map();
 		radialMenu = null;
 		markerChip = null;
 		sidebarFocusRequest = null;
@@ -3259,6 +3278,8 @@
 			activeHoleId = null;
 			manualBendHoleId = null;
 			lastManualBendByHoleId = new Map();
+			eagerBendAnchorByHoleId = new Map();
+			eagerBendAttemptSignature = new Map();
 			previewHoles = null;
 			radialMenu = null;
 			markerChip = null;
