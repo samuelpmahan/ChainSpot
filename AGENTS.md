@@ -35,6 +35,9 @@ The non-negotiables you will find defined there:
 - Then: implementation → implementer Review Brief → fresh independent review → merge prep
   (delete `.task`, update `CHANGELOG-dev.md`) → staging deployment → manual acceptance →
   merge to `main` → production.
+- Any external write — a push, a Linear issue/comment/doc, a GitHub comment, a deploy —
+  requires showing the user the verbatim content first and getting explicit approval.
+  The document defines the full rule.
 
 ## Long-running tasks
 
