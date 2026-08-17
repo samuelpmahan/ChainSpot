@@ -12,6 +12,15 @@
  * an identity copy at 1:1 scale. grayscaleRaster's MAX_ANALYSIS_DIM resize
  * path is dead code on this branch and is not exercised.
  *
+ * NOTE -- unlike `scripts/toph-run.ts` / `scripts/toph-tune.ts`, this harness
+ * does NOT reproduce ChainSpot's intake autocrop (their `autocropLikeIntake`
+ * helper). It decodes whatever raster it's given as-is. Feeding it a raw,
+ * un-autocropped image whose annotation truth was made in the POST-autocrop
+ * frame (e.g. `chainspot-corpus` Heritage/Lenard/TowneLake) will silently
+ * produce large (~400-530px) per-hole coordinate errors -- a frame mismatch,
+ * not a real detection/pipeline failure. DashsTrack needs no autocrop, so it
+ * is unaffected and safe to feed in directly.
+ *
  * Usage: npx tsx pancake-harness.ts <path-to-chainspot.zip> <projectRoot>
  */
 import { createServer } from 'node:http';

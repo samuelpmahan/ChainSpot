@@ -32,7 +32,9 @@ export function buildPancakeDisplayGrammar(
 				(
 					assignment
 				): assignment is typeof assignment & { readonly assignedBasketIndex: number } =>
-					(assignment.status === 'p4Locked' || assignment.status === 'lowParAssigned') &&
+					(assignment.status === 'p4Locked' ||
+						assignment.status === 'zeroBendLocked' ||
+						assignment.status === 'lowParAssigned') &&
 					assignment.assignedBasketIndex !== null
 			)
 			.map((assignment) => [assignment.holeNumber, assignment])
