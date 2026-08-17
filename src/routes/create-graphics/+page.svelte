@@ -2125,10 +2125,13 @@
 		{/if}
 	</section>
 
-	{#if thrownRound}
+	{#if thrownRound && annotatedRound}
 		<!-- CHSPT-65: visibility only — the thrown-round source lives in its own
 		     session slot and never enters an image role here; registering its
-		     graphics onto the clean target is a follow-up ticket. -->
+		     graphics onto the clean target is a follow-up ticket. Gated on the
+		     annotated course being present: the note claims the round rides
+		     "with this course", so the direct-upload path (no course) must not
+		     surface a leftover slot as if it belonged to it. -->
 		<section class="thrown-round-note" data-testid="thrown-round-note" aria-live="polite">
 			<p>
 				Thrown-round image “{thrownRound.fileName}” is riding along with this course. Mapping its

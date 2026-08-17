@@ -295,9 +295,37 @@ export interface ThrownRoundSource {
 
 let thrownRoundSource: ThrownRoundSource | null = null;
 
-/** Replaces any previously kept thrown-round source — the roles clean-vs-thrown stay distinct, but within the thrown role the newest keep wins. */
+/**
+ * Workflow-scoping for the slot above. A thrown round is meaningful for
+ * exactly one course workflow; without a boundary, a round kept in workflow A
+ * and never consumed would silently present itself as workflow B's input —
+ * stale state indistinguishable from valid preserved state.
+ *
+ * The boundary is "a new course source image lands in Annotate Course"
+ * (`markCourseSourceIntake`, called from that route's three intake paths:
+ * pane replace, stitch handoff import, draft open). The rule:
+ *
+ *  - a freshly kept round is UNATTACHED; the first course intake after it
+ *    attaches it to that course (this is the normal Stitch Map -> keep ->
+ *    Annotate Course order, and also covers keeping the round after the
+ *    course already arrived — the keep resets attachment, the round rides
+ *    with the current course);
+ *  - a second course intake while a round is still ATTACHED means a new
+ *    workflow started without a new thrown round: the old round is stale and
+ *    is cleared rather than presented as the new course's input.
+ *
+ * Ordinary navigation (Annotate Course <-> Stitch Map <-> Create Graphics
+ * round trips) never touches this — only an actual source intake does. The
+ * deliberate conservative edge: re-importing a corrected course source
+ * mid-workflow counts as a fresh intake and drops an attached round (the user
+ * re-keeps it); erring toward dropping is safer than mislabeling.
+ */
+let thrownRoundAttachedToCourse = false;
+
+/** Replaces any previously kept thrown-round source — the roles clean-vs-thrown stay distinct, but within the thrown role the newest keep wins. The new round is unattached: it belongs to the next course intake. */
 export function setThrownRoundSource(source: ThrownRoundSource): void {
 	thrownRoundSource = source;
+	thrownRoundAttachedToCourse = false;
 }
 
 export function getThrownRoundSource(): ThrownRoundSource | null {
@@ -306,6 +334,23 @@ export function getThrownRoundSource(): ThrownRoundSource | null {
 
 export function clearThrownRoundSource(): void {
 	thrownRoundSource = null;
+	thrownRoundAttachedToCourse = false;
+}
+
+/**
+ * Announces that a new course source image landed in Annotate Course. See
+ * `thrownRoundAttachedToCourse` above for the full lifecycle rule: first
+ * intake attaches the pending round to that course; a further intake while
+ * still attached clears it as stale. No-op with nothing kept.
+ */
+export function markCourseSourceIntake(): void {
+	if (!thrownRoundSource) return;
+	if (thrownRoundAttachedToCourse) {
+		thrownRoundSource = null;
+		thrownRoundAttachedToCourse = false;
+		return;
+	}
+	thrownRoundAttachedToCourse = true;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ import {
 	consumePendingHandoff,
 	getPendingHandoff,
 	getThrownRoundSource,
+	markCourseSourceIntake,
 	setPendingHandoff,
 	setPendingAnnotatedRound,
 	setThrownRoundSource,
@@ -144,6 +145,35 @@ describe('thrown-round session slot (CHSPT-65)', () => {
 		clearThrownRoundSource();
 		expect(getPendingHandoff()).toBeNull();
 	});
+
+	it('is scoped to one course workflow: the first course intake attaches it, a second clears it as stale', () => {
+		// Workflow A: keep round-A, then its clean course lands in Annotate
+		// Course (intake #1) — the round attaches and survives.
+		setThrownRoundSource({ blob: thrownBlob(), fileName: 'round-a.png' });
+		markCourseSourceIntake();
+		expect(getThrownRoundSource()?.fileName).toBe('round-a.png');
+
+		// Workflow B: a new course lands (intake #2) with NO new thrown round
+		// kept — round-A is stale leftover state and must not present itself as
+		// workflow B's input.
+		markCourseSourceIntake();
+		expect(getThrownRoundSource()).toBeNull();
+
+		// And a further intake with nothing kept stays a no-op.
+		markCourseSourceIntake();
+		expect(getThrownRoundSource()).toBeNull();
+	});
+
+	it('re-keeping between course intakes re-scopes the round to the next workflow', () => {
+		setThrownRoundSource({ blob: thrownBlob(), fileName: 'round-a.png' });
+		markCourseSourceIntake();
+		// Same-workflow keep AFTER the course already arrived (order swapped):
+		// the fresh keep detaches, so the next intake attaches instead of
+		// clearing.
+		setThrownRoundSource({ blob: thrownBlob(), fileName: 'round-b.png' });
+		markCourseSourceIntake();
+		expect(getThrownRoundSource()?.fileName).toBe('round-b.png');
+	});
 });
 
 describe('Create Graphics: Fetch Clean Target ordering (CHSPT-65)', () => {
@@ -180,27 +210,30 @@ describe('Create Graphics: Fetch Clean Target ordering (CHSPT-65)', () => {
 });
 
 describe('Create Graphics: thrown-round note (CHSPT-65)', () => {
-	it('shows the note from the session slot without consuming it', async () => {
-		setThrownRoundSource({ blob: thrownBlob(), fileName: 'thrown-round.png' });
+	// Ordering note: this test must run BEFORE any test that imports an
+	// AnnotatedRound — the active-round session slot has no clear API (it
+	// deliberately survives route round trips), so a prior import in this file
+	// would leak an active course into this mount and legitimately render the
+	// note.
+	it('renders no note for a direct-upload arrival (no annotated course), even with a leftover slot', async () => {
+		// The note claims the round rides "with this course" — with no course
+		// present, a leftover slot must not masquerade as this workflow's input.
+		setThrownRoundSource({ blob: thrownBlob(), fileName: 'stale-round.png' });
 		const { component, host } = mountParticipating();
 		await flush();
 
-		const note = host.querySelector('[data-testid="thrown-round-note"]');
-		expect(note).not.toBeNull();
-		expect(note?.textContent).toContain('thrown-round.png');
-		// Mounting read the slot; it did not take it — the source must remain
-		// available for the follow-up registration ticket.
-		expect(getThrownRoundSource()?.fileName).toBe('thrown-round.png');
+		expect(host.querySelector('[data-testid="thrown-round-note"]')).toBeNull();
 
 		unmount(component);
 		host.remove();
 	});
 
-	it('does not alter or replace the course-source registration input when present', async () => {
+	it('shows the note when the annotated course arrives alongside it, without consuming the slot or touching the course source', async () => {
 		// Both the thrown round and a pending AnnotatedRound arrive together —
-		// the fresh-course flow. The source pane must receive the AnnotatedRound
-		// image, never the thrown-round image, and the thrown round must remain
-		// in its slot untouched.
+		// the fresh-course flow. The note renders (visible confirmation the
+		// round was carried through), the source pane receives the
+		// AnnotatedRound image — never the thrown-round image — and the slot
+		// remains available for the follow-up registration ticket.
 		setThrownRoundSource({ blob: thrownBlob(), fileName: 'thrown-round.png' });
 		setPendingAnnotatedRound(
 			createAnnotatedRound({
@@ -216,9 +249,13 @@ describe('Create Graphics: thrown-round note (CHSPT-65)', () => {
 		const { component, host } = mountParticipating();
 		await flush();
 
+		const note = host.querySelector('[data-testid="thrown-round-note"]');
+		expect(note).not.toBeNull();
+		expect(note?.textContent).toContain('thrown-round.png');
 		expect(
 			host.querySelector('[data-testid="pane-filename-source-overview"]')?.textContent
 		).toBe('udisc-course.png');
+		// Mounting read the slot; it did not take it.
 		expect(getThrownRoundSource()?.fileName).toBe('thrown-round.png');
 
 		unmount(component);

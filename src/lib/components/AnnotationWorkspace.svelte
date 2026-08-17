@@ -24,6 +24,7 @@
 		consumePendingHandoff,
 		getPendingHandoff,
 		subscribePendingHandoff,
+		markCourseSourceIntake,
 		setPendingAnnotatedRound,
 		setPendingCourseBadges
 	} from '$lib/session';
@@ -1795,7 +1796,33 @@
 		return buckets;
 	});
 
-	let allHolesConfirmed = $derived(sidebarSections[4].length === courseLength);
+	/**
+	 * CHSPT-65 guard against a contradictory short-course completion: true when
+	 * any standard hole ABOVE `limit` (but within the 1-18 grid scope) carries
+	 * a user-confirmed tee or basket. Confirmed pieces only, deliberately:
+	 * unconfirmed CV proposals routinely exist for holes 10-18 on a 9-hole
+	 * course and are noise, not contradiction. Holes past 18 stay out of scope
+	 * exactly as they always were for completion.
+	 */
+	function confirmedHolesBeyond(limit: number): boolean {
+		return holes.some(
+			(hole) =>
+				hole.number > limit &&
+				hole.number <= 18 &&
+				(isPieceConfirmed(hole.id, 'tee') || isPieceConfirmed(hole.id, 'basket'))
+		);
+	}
+
+	/**
+	 * Completion additionally requires no confirmed work beyond the configured
+	 * length — "All 9 holes confirmed" must never render while a confirmed hole
+	 * 10+ exists (the exported artifact carries ALL holes; see `handleDone`).
+	 * For an 18-hole course the beyond-range is empty, so this preserves the
+	 * pre-CHSPT-65 behavior exactly.
+	 */
+	let allHolesConfirmed = $derived(
+		sidebarSections[4].length === courseLength && !confirmedHolesBeyond(courseLength)
+	);
 
 	/**
 	 * The guided flow's final step: once all 18 tees/baskets are confirmed the
@@ -2907,11 +2934,25 @@
 	}
 
 	/**
+	 * CHSPT-65: announces a course-source intake to the thrown-round lifecycle
+	 * (see `markCourseSourceIntake` in `$lib/session.ts` — first intake after a
+	 * keep attaches the round to this course; a further intake clears it as
+	 * stale). Course workflows only: gated to map mode, and to
+	 * session-participating instances so injected-editor unit tests never touch
+	 * the module-level slot. Called from all three paths a new course source
+	 * can land through: pane replace, stitch handoff import, draft open.
+	 */
+	function announceCourseSourceIntake(): void {
+		if (participatesInSession && annotationMode === 'map') markCourseSourceIntake();
+	}
+
+	/**
 	 * A replaced source image invalidates every existing hole's coordinates —
 	 * they're pixel positions into a specific raster, not portable to a
 	 * different one — so annotation state resets along with the domain refresh.
 	 */
 	function handleSourceDomainChanged(): void {
+		announceCourseSourceIntake();
 		refresh();
 		holes = [];
 		walkingPath = [];
@@ -3182,6 +3223,7 @@
 			if (result.status === 'cancelled') return;
 			consumePendingHandoff();
 			pendingHandoff = null;
+			announceCourseSourceIntake();
 			refresh();
 		} finally {
 			importingHandoff = false;
@@ -3319,6 +3361,7 @@
 			prewarmedSourceId = null;
 			saveError = null;
 			activityMessage = `Opened draft "${result.image.fileName}".`;
+			announceCourseSourceIntake();
 			refresh();
 		} catch (error) {
 			openError = error instanceof Error ? error.message : 'Could not open the draft.';
@@ -3776,12 +3819,15 @@
 						<div class="course-length-row" data-testid="course-length-row" role="group" aria-label="Course length">
 							<span class="course-length-label">Holes</span>
 							{#each [9, 18] as const as length (length)}
+								{@const blocked = length < courseLength && confirmedHolesBeyond(length)}
 								<button
 									type="button"
 									class="course-length-choice"
 									class:active={courseLength === length}
 									aria-pressed={courseLength === length}
 									data-testid="course-length-{length}"
+									disabled={blocked}
+									title={blocked ? `Holes above ${length} already have confirmed placements` : undefined}
 									onclick={() => (courseLength = length)}
 								>
 									{length}
