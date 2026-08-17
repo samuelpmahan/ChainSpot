@@ -67,7 +67,10 @@ export interface LocalSnapTrace {
 	/** Present on live worker traces; optional for older/offline callers. */
 	readonly kind?: LandmarkKind;
 	readonly attempted: boolean;
+	/** Local detector accepted a candidate. This is not yet proof the marker settled. */
 	readonly accepted: boolean;
+	/** Actual async settle result; `not-instrumented` when only the worker outcome is known. */
+	readonly settled?: ObservableBoolean;
 	readonly rejectReason?: LocalSnapRejectReason;
 	readonly clickPx: { readonly xPx: number; readonly yPx: number };
 	readonly snappedPoint?: { readonly xPx: number; readonly yPx: number };
@@ -153,7 +156,7 @@ export function summarizeLandmarkFunnel(traces: readonly LandmarkTrace[]): reado
 	const assigned = counted(traces.map((trace) => trace.assignedHoleCorrect ?? 'not-instrumented'));
 	const recommended = counted(traces.map((trace) => trace.recommendation.emitted));
 	const surfaced = counted(traces.map((trace) => trace.surface.surfaced));
-	const snapped = counted(traces.map((trace) => trace.snap ? trace.snap.accepted : 'not-instrumented'));
+	const snapped = counted(traces.map((trace) => trace.snap?.settled ?? 'not-instrumented'));
 	const semantic = counted(traces.map((trace) => trace.groundTruth?.userCorrect ?? 'not-instrumented'));
 	return [
 		{ ...detected, name: 'detected', definition: 'A raw detector emitted/owned a hypothesis for this hole/object, or truth matching proved one existed.' },
@@ -161,7 +164,7 @@ export function summarizeLandmarkFunnel(traces: readonly LandmarkTrace[]): reado
 		{ ...assigned, name: 'correctly-assigned', definition: 'The selected candidate belongs to the numbered hole under the declared ground-truth tolerance.' },
 		{ ...recommended, name: 'recommended', definition: 'The course pipeline emitted a tee/basket endpoint for this numbered hole.' },
 		{ ...surfaced, name: 'surfaced', definition: 'The recommendation was actually observed at the CV-to-authoritative-state acceptance boundary.' },
-		{ ...snapped, name: 'snapped', definition: 'A local-snap attempt was accepted and settled to a detected point.' },
+		{ ...snapped, name: 'snapped', definition: 'The asynchronous local-snap result actually settled into authoritative annotation state; worker acceptance alone does not count.' },
 		{ ...semantic, name: 'semantically-correct', definition: 'The final user-visible point is within the declared semantic-anchor tolerance.' }
 	];
 }
