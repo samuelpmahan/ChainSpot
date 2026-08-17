@@ -124,3 +124,8 @@ export function resetCvFunnelRuntime(): void {
 	localSnaps.length = 0;
 	sequence = 0;
 }
+
+// BroadcastChannel does not replay messages sent before a listener exists.
+// The detector worker imports this module before its first local-snap request,
+// so eager initialization ensures it hears surfaced full-course evidence.
+runtimeChannel();
