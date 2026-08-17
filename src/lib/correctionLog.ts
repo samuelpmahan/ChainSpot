@@ -220,6 +220,7 @@ export class IndexedDbCorrectionLogStore implements CorrectionLogStore {
 		} finally {
 			db.close();
 		}
+	}
 }
 
 let defaultStore: CorrectionLogStore | null = null;
