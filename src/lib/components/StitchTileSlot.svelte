@@ -9,6 +9,15 @@
 		error: string | null;
 		onFile: (file: File) => void;
 		onRemove: () => void;
+		/**
+		 * CHSPT-65: offered by Stitch Map so a round screenshot imported
+		 * TOGETHER with the clean-map tiles can be manually set aside as the
+		 * thrown-round input instead of being stitched into the clean
+		 * composite. Optional — the button only renders when the host wires it.
+		 * Which tile is the thrown round is entirely the user's choice here;
+		 * automatic purple-path classification is a separate ticket.
+		 */
+		onMarkThrownRound?: () => void;
 	}
 
 	let {
@@ -18,7 +27,8 @@
 		dimensions,
 		error,
 		onFile,
-		onRemove
+		onRemove,
+		onMarkThrownRound
 	}: Props = $props();
 
 	function handleChange(event: Event): void {
@@ -48,6 +58,17 @@
 			<button type="button" data-testid={`tile-remove-${slot}`} onclick={onRemove}>
 				Remove
 			</button>
+			{#if onMarkThrownRound}
+				<button
+					type="button"
+					class="thrown-round-button"
+					data-testid={`tile-thrown-round-${slot}`}
+					title="Set this screenshot aside as the thrown round — it will not be stitched into the clean map"
+					onclick={onMarkThrownRound}
+				>
+					Thrown round
+				</button>
+			{/if}
 		</div>
 	{:else}
 		<label class="file-label load-label">
@@ -96,6 +117,17 @@
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
+		flex-wrap: wrap;
+	}
+
+	.thrown-round-button {
+		padding: 0.3rem 0.7rem;
+		border: 1px solid #4c1d95;
+		border-radius: 4px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 
 	.file-label {
