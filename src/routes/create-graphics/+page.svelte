@@ -87,6 +87,7 @@
 	import type { GeoRasterReference } from '$lib/elevationProfile';
 	import PlayedRoundRegistration from '$lib/components/PlayedRoundRegistration.svelte';
 	import PlayedRoundProposalReview from '$lib/components/PlayedRoundProposalReview.svelte';
+	import { discardShotsById } from '$lib/playedRoundReview';
 	import type { UsablePlayedRoundRegistration } from '$lib/playedRoundContract';
 	import type { RegistrationProofPoint } from '$lib/scene';
 
@@ -376,6 +377,17 @@
 	let playedRoundRegistrationOpen = $state(false);
 	let playedRoundRegistrationConfirmed = $state<UsablePlayedRoundRegistration | null>(null);
 	let registrationProofPoints = $state<readonly RegistrationProofPoint[]>([]);
+	/** Session-only lineage for detector proposals accepted from the current registration. */
+	let everAcceptedDetectorShotIds = $state<string[]>([]);
+	let activeAcceptedDetectorShotIds = $derived.by(() => {
+		void refreshCount;
+		const activeIds = new Set(currentHoles().flatMap((hole) => hole.shots.map((shot) => shot.id)));
+		return everAcceptedDetectorShotIds.filter((id) => activeIds.has(id));
+	});
+	let acceptedShotsRequireRegistrationReview = $state(false);
+	let observedRegistrationInputs = $state(false);
+	let observedPlayedRound = $state.raw<ThrownRoundSource | null>(null);
+	let observedCleanSourceId = $state<string | null>(null);
 
 	/**
 	 * Default *preview/reference* radius for the aerial pull: 300m, matching the
@@ -487,21 +499,65 @@
 		registrationProofPoints = [];
 	}
 
-	function confirmPlayedRoundRegistration(registration: UsablePlayedRoundRegistration): void {
+	function confirmPlayedRoundRegistration(registration: UsablePlayedRoundRegistration): boolean {
+		if (acceptedShotsRequireRegistrationReview) return false;
 		playedRoundRegistrationConfirmed = registration;
 		activityMessage = 'Played-round registration confirmed for extraction. Corrections remain available.';
+		return true;
 	}
 
 	function invalidatePlayedRoundRegistration(): void {
 		playedRoundRegistrationConfirmed = null;
+		if (activeAcceptedDetectorShotIds.length > 0) acceptedShotsRequireRegistrationReview = true;
 		activityMessage = 'Played-round registration changed; review and confirm the corrected fit.';
 	}
 
 	function updatePlayedRoundHoles(holes: readonly AnnotatedHole[]): void {
 		editor.setHoles(holes);
+		const retainedIds = new Set(holes.flatMap((hole) => hole.shots.map((shot) => shot.id)));
+		if (!everAcceptedDetectorShotIds.some((id) => retainedIds.has(id))) {
+			acceptedShotsRequireRegistrationReview = false;
+		}
 		refreshCount += 1;
 		activityMessage = 'Played-round throw review updated the editable round.';
 	}
+
+	function recordAcceptedDetectorShot(shotId: string): void {
+		if (!everAcceptedDetectorShotIds.includes(shotId)) everAcceptedDetectorShotIds = [...everAcceptedDetectorShotIds, shotId];
+	}
+
+	function discardAcceptedDetectorShots(): void {
+		if (activeAcceptedDetectorShotIds.length === 0) return;
+		const discarded = new Set(activeAcceptedDetectorShotIds);
+		const holes = discardShotsById(currentHoles(), discarded);
+		editor.setHoles(holes);
+		acceptedShotsRequireRegistrationReview = false;
+		refreshCount += 1;
+		activityMessage = 'Detector-derived throws from the old registration were discarded. Confirm the corrected fit to detect again.';
+	}
+
+	$effect(() => {
+		const nextPlayedRound = thrownRound;
+		const nextCleanSourceId = sourceImage()?.id ?? null;
+		if (
+			observedRegistrationInputs &&
+			(observedPlayedRound !== nextPlayedRound || observedCleanSourceId !== nextCleanSourceId)
+		) {
+			playedRoundRegistrationConfirmed = null;
+			registrationProofPoints = [];
+			if (activeAcceptedDetectorShotIds.length > 0) acceptedShotsRequireRegistrationReview = true;
+			activityMessage = 'A registration image changed; the previous fit was invalidated.';
+		}
+		observedRegistrationInputs = true;
+		observedPlayedRound = nextPlayedRound;
+		observedCleanSourceId = nextCleanSourceId;
+	});
+
+	$effect(() => {
+		if (!playedRoundRegistrationConfirmed && activeAcceptedDetectorShotIds.length > 0) {
+			acceptedShotsRequireRegistrationReview = true;
+		}
+	});
 
 	function canAddCorrespondence(): boolean {
 		void refreshCount;
@@ -888,6 +944,13 @@
 	}
 
 	function onDomainChanged(role: ImageRole): void {
+		if (role === 'source-overview') {
+			invalidatePlayedRoundRegistration();
+			if (activeAcceptedDetectorShotIds.length === 0) {
+				everAcceptedDetectorShotIds = [];
+				acceptedShotsRequireRegistrationReview = false;
+			}
+		}
 		// A successful assignment/replacement invalidates any pending placement identity,
 		// including same-dimension replacements. Failed/cancelled intake never calls here.
 		if (correspondence.mode !== 'neutral') {
@@ -1003,6 +1066,11 @@
 		const next = new ProjectEditor({ state, assets });
 		next.markSaved();
 		editor = next;
+		playedRoundRegistrationConfirmed = null;
+		playedRoundRegistrationOpen = false;
+		registrationProofPoints = [];
+		everAcceptedDetectorShotIds = [];
+		acceptedShotsRequireRegistrationReview = false;
 		correspondence = createCorrespondenceState();
 		correspondenceError = null;
 		clearPointSelection();
@@ -2186,6 +2254,8 @@
 				cleanSource={sourceImage()!}
 				cleanSourceResource={editor.getAssetResource(sourceImage()!.id)!}
 				cleanToTarget={alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null}
+				{decode}
+				confirmationBlockedReason={acceptedShotsRequireRegistrationReview ? 'Discard detector-derived throws from the previous registration before confirming this corrected fit.' : null}
 				onClose={closePlayedRoundRegistration}
 				onConfirm={confirmPlayedRoundRegistration}
 				onInvalidate={invalidatePlayedRoundRegistration}
@@ -2194,11 +2264,22 @@
 		</div>
 	{/if}
 
+	{#if acceptedShotsRequireRegistrationReview}
+		<section class="registration-review-warning" data-testid="accepted-shots-registration-review" role="alert">
+			<p>
+				{activeAcceptedDetectorShotIds.length} detector-derived throw{activeAcceptedDetectorShotIds.length === 1 ? '' : 's'} use the previous registration. Discard them before confirming the corrected fit; manually created throws are preserved.
+			</p>
+			<button type="button" data-testid="discard-stale-detector-shots" onclick={discardAcceptedDetectorShots}>Discard detector throws and continue</button>
+		</section>
+	{/if}
+
 	{#if playedRoundRegistrationConfirmed}
 		<PlayedRoundProposalReview
 			registration={playedRoundRegistrationConfirmed}
 			holes={currentHoles()}
+			cleanImageBounds={{ widthPx: sourceImage()!.widthPx, heightPx: sourceImage()!.heightPx }}
 			onHolesChange={updatePlayedRoundHoles}
+			onShotAccepted={recordAcceptedDetectorShot}
 		/>
 	{/if}
 

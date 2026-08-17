@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPlayedRoundProposals, acceptPlayedRoundProposal, isUsablePlayedRoundRegistration } from '../../src/lib/playedRoundReview';
+import { createPlayedRoundProposals, acceptPlayedRoundProposal, discardShotsById, isUsablePlayedRoundRegistration, proposalCoordinateError, proposalInsertionIndex } from '../../src/lib/playedRoundReview';
 import type { LandingMarkerCandidate } from '../../src/lib/autoAnnotation/landingDropletDetection';
 import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 import type { UsablePlayedRoundRegistration } from '../../src/lib/playedRoundContract';
@@ -42,6 +42,43 @@ describe('played round proposal seam', () => {
 			...registration,
 			playedToClean: { ...registration.playedToClean, isInvertible: false, determinant: 0 }
 		})).toBe(false);
+	});
+
+	it('keeps rounded-coordinate collisions unique and deterministic', () => {
+		const candidates = [candidate(1.0004, 2.0004), candidate(1.00049, 2.00049)];
+		const first = createPlayedRoundProposals(candidates, registration, []);
+		const second = createPlayedRoundProposals(candidates, registration, []);
+		expect(new Set(first.map((proposal) => proposal.id)).size).toBe(2);
+		expect(first.map((proposal) => proposal.id)).toEqual(second.map((proposal) => proposal.id));
+	});
+
+	it('computes untouched append order from current authoritative state', () => {
+		expect(proposalInsertionIndex(null, 0)).toBe(0);
+		expect(proposalInsertionIndex(null, 1)).toBe(1);
+		expect(proposalInsertionIndex(null, 3)).toBe(3);
+		expect(proposalInsertionIndex(1, 3)).toBe(0);
+		expect(proposalInsertionIndex(4, 3)).toBe(3);
+	});
+
+	it('rejects non-finite and out-of-clean-image reviewed coordinates', () => {
+		const bounds = { widthPx: 100, heightPx: 80 };
+		expect(proposalCoordinateError({ xPx: 99.9, yPx: 79.9 }, bounds)).toBeNull();
+		expect(proposalCoordinateError({ xPx: -1, yPx: 20 }, bounds)).toContain('inside the clean course');
+		expect(proposalCoordinateError({ xPx: 10, yPx: 80 }, bounds)).toContain('inside the clean course');
+		expect(proposalCoordinateError({ xPx: Number.NaN, yPx: 20 }, bounds)).toContain('finite');
+	});
+
+	it('discards only session-tracked detector accepts', () => {
+		const holes = [{
+			...hole('h1', 1, { xPx: 0, yPx: 20 }, { xPx: 100, yPx: 20 }),
+			shots: [
+				{ id: 'manual', landing: { xPx: 10, yPx: 20 } },
+				{ id: 'detected-a', landing: { xPx: 20, yPx: 20 } },
+				{ id: 'detected-b', landing: { xPx: 30, yPx: 20 } }
+			]
+		}];
+		const discarded = discardShotsById(holes, new Set(['detected-a', 'detected-b']));
+		expect(discarded[0].shots.map((shot) => shot.id)).toEqual(['manual']);
 	});
 
 	it('allows wrong assignment correction before acceptance and strips proposal evidence', () => {

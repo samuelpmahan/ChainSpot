@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
 	import ImagePane from '$lib/components/ImagePane.svelte';
 	import PointPairList from '$lib/components/PointPairList.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
@@ -38,10 +38,11 @@
 		cleanSourceResource: AssetResource;
 		cleanToTarget: SerializableTransform | null;
 		decode?: DecodeImageFile;
-		onConfirm?: (registration: UsablePlayedRoundRegistration) => void;
+		onConfirm?: (registration: UsablePlayedRoundRegistration) => boolean | void;
 		onInvalidate?: () => void;
 		onClose?: () => void;
 		onProofPoints?: (points: readonly { id: string; xPx: number; yPx: number }[]) => void;
+		confirmationBlockedReason?: string | null;
 	}
 
 	let {
@@ -53,7 +54,8 @@
 		onConfirm,
 		onInvalidate,
 		onClose,
-		onProofPoints
+		onProofPoints,
+		confirmationBlockedReason = null
 	}: Props = $props();
 
 	const PLAYED_ROLE = 'source-overview' as const;
@@ -72,6 +74,7 @@
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
 	let confirmed = $state(false);
+	let initializationGeneration = 0;
 
 	function invalidateConfirmation(): void {
 		if (!confirmed) return;
@@ -139,6 +142,7 @@
 		if (warnings.some((warning) => warning.severity === 'high')) return 'Not ready: resolve the high-severity registration warning.';
 		if (result.metrics.maxDistance > MAX_RESIDUAL_PX)
 			return `Review needed: worst landmark residual is ${result.metrics.maxDistance.toFixed(1)}px.`;
+		if (confirmationBlockedReason) return confirmationBlockedReason;
 		return confirmed ? 'Registration confirmed; corrections remain available.' : 'Ready to review and confirm.';
 	});
 
@@ -281,58 +285,87 @@
 	});
 
 	function confirm(): void {
-		if (!registrationEditor || !result || !('transform' in result) || warnings.some((warning) => warning.severity === 'high')) return;
+		if (!registrationEditor || !result || !('transform' in result) || warnings.some((warning) => warning.severity === 'high') || confirmationBlockedReason) return;
 		const source = playedRound;
 		const clean = cleanImage();
 		if (!clean) return;
+		const accepted = onConfirm?.({ source, cleanImageId: clean.id, playedToClean: result.transform });
+		if (accepted === false) return;
 		confirmed = true;
-		onConfirm?.({ source, cleanImageId: clean.id, playedToClean: result.transform });
 	}
 
-	onMount(() => {
+	$effect(() => {
+		// Track only the two image identities. Closing and reopening the hidden
+		// registration surface keeps the same editor, while replacing either image
+		// rebuilds it. A target-preview transform only updates proof points.
+		const round = playedRound;
+		const cleanImageId = cleanSource.id;
+		const cleanAsset = untrack(() => cleanSource);
+		const cleanResource = untrack(() => cleanSourceResource);
+		const decodeInput = untrack(() => decode);
+		const generation = ++initializationGeneration;
 		let cancelled = false;
+		const isCurrent = (): boolean => !cancelled && generation === initializationGeneration;
+		untrack(() => {
+			if (confirmed) onInvalidate?.();
+			registrationEditor = null;
+			registrationImages = [];
+			refresh = 0;
+			loading = true;
+			error = null;
+			model = 'similarity';
+			correspondence = createCorrespondenceState();
+			correspondenceError = null;
+			selection = null;
+			inspectorDraft = { x: '', y: '' };
+			pointError = null;
+			confirmed = false;
+		});
 		void (async () => {
 			try {
-				const playedFile = new File([playedRound.blob], playedRound.fileName, {
-					type: playedRound.blob.type || 'image/png'
+				const playedFile = new File([round.blob], round.fileName, {
+					type: round.blob.type || 'image/png'
 				});
 				const [playedDecoded] = await Promise.all([
-					decode(playedFile),
-					Promise.resolve(cleanSourceResource.decoded)
+					decodeInput(playedFile),
+					Promise.resolve(cleanResource.decoded)
 				]);
-				if (cancelled) return;
-				if (!(cleanSourceResource.decoded instanceof HTMLImageElement)) {
+				if (!isCurrent()) return;
+				if (!(cleanResource.decoded instanceof HTMLImageElement)) {
 					throw new Error('The clean course image is not decoded yet.');
 				}
 				const state = createProjectState({ name: 'Played round registration' });
 				const editor = new ProjectEditor({ state });
 				const played = createImageAsset({
 					role: PLAYED_ROLE,
-					fileName: playedRound.fileName,
-					mimeType: playedRound.blob.type || 'image/png',
+					fileName: round.fileName,
+					mimeType: round.blob.type || 'image/png',
 					widthPx: playedDecoded.widthPx,
 					heightPx: playedDecoded.heightPx,
 					bundlePath: null
 				});
 				const clean = createImageAsset({
 					role: CLEAN_ROLE,
-					id: cleanSource.id,
-					fileName: cleanSource.fileName,
-					mimeType: cleanSource.mimeType,
-					widthPx: cleanSource.widthPx,
-					heightPx: cleanSource.heightPx,
+					id: cleanImageId,
+					fileName: cleanAsset.fileName,
+					mimeType: cleanAsset.mimeType,
+					widthPx: cleanAsset.widthPx,
+					heightPx: cleanAsset.heightPx,
 					bundlePath: null
 				});
-				const playedBytes = new Uint8Array(await playedRound.blob.arrayBuffer());
+				const playedBytes = new Uint8Array(await round.blob.arrayBuffer());
+				if (!isCurrent()) return;
 				editor.assignImage({ role: PLAYED_ROLE, asset: played, bytes: playedBytes });
-				editor.assignImage({ role: CLEAN_ROLE, asset: clean, bytes: cleanSourceResource.bytes });
+				editor.assignImage({ role: CLEAN_ROLE, asset: clean, bytes: cleanResource.bytes });
 				editor.setDecodedResource(played.id, playedDecoded.image);
-				editor.setDecodedResource(clean.id, cleanSourceResource.decoded);
-				registrationEditor = editor;
-				registrationImages = editor.state.images;
-				loading = false;
+				editor.setDecodedResource(clean.id, cleanResource.decoded);
+				if (isCurrent()) {
+					registrationEditor = editor;
+					registrationImages = editor.state.images;
+					loading = false;
+				}
 			} catch (caught) {
-				if (!cancelled) {
+				if (isCurrent()) {
 					loading = false;
 					error = caught instanceof Error ? caught.message : 'Could not load the played-round image.';
 				}
@@ -401,7 +434,7 @@
 		{/if}
 
 		<div class="actions">
-			<button type="button" class="confirm" data-testid="played-round-confirm" disabled={!result || !('transform' in result) || warnings.some((warning) => warning.severity === 'high') || (result && 'transform' in result && result.metrics.maxDistance > MAX_RESIDUAL_PX)} onclick={confirm}>{confirmed ? 'Registration confirmed' : 'Confirm registration'}</button>
+			<button type="button" class="confirm" data-testid="played-round-confirm" disabled={!result || !('transform' in result) || warnings.some((warning) => warning.severity === 'high') || (result && 'transform' in result && result.metrics.maxDistance > MAX_RESIDUAL_PX) || Boolean(confirmationBlockedReason)} onclick={confirm}>{confirmed ? 'Registration confirmed' : 'Confirm registration'}</button>
 			{#if confirmed}<span data-testid="played-round-confirmed">Confirmed handoff is ready for extraction; corrections remain available.</span>{/if}
 		</div>
 	{/if}

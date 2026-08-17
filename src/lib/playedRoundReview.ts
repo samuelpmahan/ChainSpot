@@ -24,6 +24,50 @@ export interface PlayedRoundProposalOptions {
 	readonly maxSuggestionDistancePx?: number;
 }
 
+export interface CleanImageBounds {
+	readonly widthPx: number;
+	readonly heightPx: number;
+}
+
+/** Human-readable review validation; ProjectEditor remains the final domain guard. */
+export function proposalCoordinateError(
+	point: SourcePoint,
+	bounds: CleanImageBounds
+): string | null {
+	if (!Number.isFinite(point.xPx) || !Number.isFinite(point.yPx)) {
+		return 'Enter finite X and Y coordinates before accepting this throw.';
+	}
+	if (
+		point.xPx < 0 ||
+		point.yPx < 0 ||
+		point.xPx >= bounds.widthPx ||
+		point.yPx >= bounds.heightPx
+	) {
+		return `Landing must stay inside the clean course (${bounds.widthPx} × ${bounds.heightPx}px).`;
+	}
+	return null;
+}
+
+/** Converts the one-based review control into a zero-based insertion index. */
+export function proposalInsertionIndex(
+	explicitOneBasedOrder: number | null,
+	currentAuthoritativeShotCount: number
+): number {
+	if (explicitOneBasedOrder === null) return currentAuthoritativeShotCount;
+	return explicitOneBasedOrder - 1;
+}
+
+/** Removes only session-tracked detector accepts; ordinary manual shots survive. */
+export function discardShotsById(
+	holes: readonly AnnotatedHole[],
+	shotIds: ReadonlySet<string>
+): AnnotatedHole[] {
+	return holes.map((hole) => ({
+		...hole,
+		shots: hole.shots.filter((shot) => !shotIds.has(shot.id))
+	}));
+}
+
 function distanceToSegment(point: SourcePoint, start: SourcePoint, end: SourcePoint): number {
 	const dx = end.xPx - start.xPx;
 	const dy = end.yPx - start.yPx;
@@ -69,11 +113,14 @@ export function createPlayedRoundProposals(
 	holes: readonly AnnotatedHole[],
 	options: PlayedRoundProposalOptions = {}
 ): PlayedRoundProposal[] {
-	return candidates.map((candidate) => {
+	return candidates.map((candidate, index) => {
 		const cleanPoint = applyTransform({ xPx: candidate.xPx, yPx: candidate.yPx }, registration.playedToClean);
 		const suggestedHole = suggestHole(cleanPoint, holes, options.maxSuggestionDistancePx);
 		return {
-			id: `landing-${candidate.kind}-${candidate.xPx.toFixed(3)}-${candidate.yPx.toFixed(3)}`,
+			// Detector order is not chronology, but it is deterministic for the same
+			// result. The ordinal prevents distinct or duplicate candidates from
+			// colliding after the readable coordinates are rounded for the ID.
+			id: `landing-${candidate.kind}-${candidate.xPx.toFixed(3)}-${candidate.yPx.toFixed(3)}-${index}`,
 			kind: 'landing',
 			playedPoint: acceptCandidate(candidate),
 			cleanPoint: acceptCandidate(cleanPoint),
