@@ -5,6 +5,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
+	import StitchAlignmentReview from '$lib/components/StitchAlignmentReview.svelte';
 	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import type { ViewportFitTarget } from '$lib/viewport.svelte';
 	import { decodeImageFile, isSupportedMimeType, readFileBytes, sha256Hex } from '$lib/imageIntake';
@@ -47,8 +48,8 @@
 		StitchConfidence,
 		StitchPipelineSuccess
 	} from '$lib/stitch/pipelineResult';
-	import { buildManualDraftComposite, badgeFlashPercent } from '$lib/stitch/pipelineUiHelpers';
-	import type { CompositeProvenance, Sha256Hex } from '$lib/domain/provenance';
+	import { buildManualDraftComposite } from '$lib/stitch/pipelineUiHelpers';
+	import type { CompositeProvenance, DraftComposite, Sha256Hex } from '$lib/domain/provenance';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
@@ -236,7 +237,6 @@
 	}
 	/** Best-effort hole-number badge anchors for the result screen's flash, in COMPOSITE pixel space — the same space `resultProvenance.outputWidthPx/heightPx` describes. Never gates `Continue to Annotate Course`. */
 	let badgeAnchors = $state<BadgeAnchor[]>([]);
-	let badgeFlashKey = $state(0);
 	/** Guards a slower detection pass from overwriting a newer composite's (empty, until its own pass lands) badge set. */
 	let badgeDetectionGeneration = 0;
 
@@ -789,12 +789,43 @@
 				widthPx: candidate.widthPx,
 				heightPx: candidate.heightPx
 			}));
-			badgeFlashKey += 1;
 		} catch {
 			// Fire-and-forget: swallow errors, never surface them, never block
 			// Continue to Annotate Course.
 		}
 	}
+
+
+/** Publish a correction from the maximized alignment-review surface. */
+async function handleAlignmentAdjusted(result: {
+	readonly draft: DraftComposite;
+	readonly blob: Blob;
+	readonly provenance: CompositeProvenance;
+}): Promise<void> {
+	if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
+	resultBlob = result.blob;
+	resultImageUrl = URL.createObjectURL(result.blob);
+	resultProvenance = result.provenance;
+	resultConfidence = 'auto';
+	resultWarnings = [];
+	manualOpen = false;
+	if (pipelineSuccess) {
+		const adjustedById = new Map(result.draft.sources.map((source) => [source.sourceId, source]));
+		pipelineSuccess = {
+			...pipelineSuccess,
+			confidence: 'auto',
+			warnings: [],
+			draft: result.draft,
+			sources: pipelineSuccess.sources.map((source) => {
+				const adjusted = adjustedById.get(source.sourceId);
+				return adjusted ? { ...adjusted, file: source.file } : source;
+			})
+		};
+	}
+	badgeAnchors = [];
+	statusMessage = 'Stitch adjustment applied.';
+	void runBadgeDetection(result.blob, result.provenance.outputWidthPx, result.provenance.outputHeightPx);
+}
 
 	function handleRemove(slot: TileSlot): void {
 		// Any in-flight decode for this slot must never publish its result.
@@ -1910,14 +1941,14 @@
 	<title>Stitch Map | ChainSpot</title>
 </svelte:head>
 
-<main data-testid="stitch-map">
+<main data-testid="stitch-map" class:result-mode={phase === 'result'}>
 	{#if exportError}
 		<p class="error" data-testid="stitch-error" role="alert">{exportError}</p>
 	{/if}
 
 	<h2>Stitch Map</h2>
 
-	<div class="stage-card">
+	<div class="stage-card" class:result-stage={phase === 'result'}>
 		<div class="stage-progress" data-testid="stage-progress">
 			<span class="prog-step" class:current={phase === 'import'} class:done={phase !== 'import'}>
 				<span class="prog-dot">{phase === 'import' ? '1' : '✓'}</span>Import
@@ -2070,64 +2101,43 @@
 				<div class="spinner" aria-hidden="true"></div>
 				<p role="status">Cropping and stitching your screenshots…</p>
 			</div>
-		{:else if phase === 'result'}
-			<div class="result-panel">
-				{#if resultConfidence === 'review'}
-					<div class="confidence-banner" data-testid="confidence-review" role="status">
-						<strong>Review recommended.</strong>
-						{#if resultWarnings.length > 0}
-							<span>{resultWarnings.join(' ')}</span>
-						{:else}
-							<span>The automatic result may need a closer look.</span>
-						{/if}
-						{#if !manualOpen}
-							<button type="button" onclick={() => (manualOpen = true)}>Adjust manually</button>
-						{/if}
-					</div>
-				{/if}
 
-				{#if resultImageUrl && resultProvenance}
-					<div
-						class="composite-wrapper"
-						style:aspect-ratio={`${resultProvenance.outputWidthPx} / ${resultProvenance.outputHeightPx}`}
-						data-testid="composite-wrapper"
-					>
-						<img class="composite-image" src={resultImageUrl} alt="Assembled stitched map" data-testid="composite-image" />
-						{#key badgeFlashKey}
-							{#each badgeAnchors as anchor, index (anchor.holeNumber + '-' + index)}
-								{@const pos = badgeFlashPercent(anchor, resultProvenance.outputWidthPx, resultProvenance.outputHeightPx)}
-								<div
-									class="badge-flash"
-									class:reduced-motion={prefersReducedMotion()}
-									style:left={`${pos.leftPct}%`}
-									style:top={`${pos.topPct}%`}
-									style:animation-delay={prefersReducedMotion() ? '0ms' : `${Math.min(index, 8) * 70}ms`}
-									data-testid="badge-flash"
-									data-hole-number={anchor.holeNumber}
-								></div>
-							{/each}
-						{/key}
-					</div>
-				{/if}
+{:else if phase === 'result'}
+	{#if resultImageUrl && resultProvenance && pipelineSuccess}
+		<div class="alignment-result-panel">
+			<StitchAlignmentReview
+				success={pipelineSuccess}
+				imageUrl={resultImageUrl}
+				provenance={resultProvenance}
+				{badgeAnchors}
+				busy={rendering}
+				onAccept={() => handleUseAs('source-overview')}
+				onAdjusted={handleAlignmentAdjusted}
+			/>
 
-				{#if resultProvenance && resultProvenance.sources.length > 1}
-					<!-- CHSPT-65: bulk-import escape hatch — when the thrown-round
-					     screenshot was imported together with the clean tiles, pick it
-					     out here; the clean map re-stitches without it. (A
-					     single-capture result uses "Keep as thrown round" below.) -->
+			<details class="result-more" data-testid="result-more">
+				<summary data-testid="result-more-toggle">More actions</summary>
+				<div class="result-more-actions">
+					<button type="button" class="btn" data-testid="use-as-target" disabled={!resultBlob || rendering} onclick={() => handleUseAs('target-basemap')}>
+						Send to Create Graphics
+					</button>
+					<button type="button" class="btn" data-testid="keep-as-thrown-round" disabled={!resultBlob || rendering} onclick={handleKeepAsThrownRound}>
+						Keep as thrown round
+					</button>
+					<button type="button" class="btn ghost" data-testid="download-stitched" disabled={!resultBlob || rendering} onclick={handleDownload}>
+						Download PNG
+					</button>
+					<button type="button" class="btn ghost" data-testid="start-new-map" onclick={resetToImport}>↻ Start a new map</button>
+				</div>
+
+				{#if resultProvenance.sources.length > 1}
 					<div class="result-sources" data-testid="result-sources">
-						<span class="result-sources-hint">Is one of these the thrown round? Pick it out and the clean map re-stitches without it:</span>
+						<span class="result-sources-hint">Set aside a thrown-round capture if one was included by mistake:</span>
 						<ul>
 							{#each resultProvenance.sources as source (source.sourceId)}
 								<li>
 									<span class="result-source-name">{source.fileName}</span>
-									<button
-										type="button"
-										class="thrown-round-pick"
-										data-testid="result-source-thrown-{source.sourceId}"
-										disabled={rendering}
-										onclick={() => void handleMarkResultSourceAsThrownRound(source.sourceId)}
-									>
+									<button type="button" class="thrown-round-pick" data-testid="result-source-thrown-{source.sourceId}" disabled={rendering} onclick={() => void handleMarkResultSourceAsThrownRound(source.sourceId)}>
 										Thrown round
 									</button>
 								</li>
@@ -2135,339 +2145,9 @@
 						</ul>
 					</div>
 				{/if}
-
-				<div class="result-actions">
-					<button
-						type="button"
-						class="btn primary"
-						data-testid="continue-to-annotate"
-						disabled={!resultBlob || rendering}
-						onclick={() => handleUseAs('source-overview')}
-					>
-						Continue to Annotate Course →
-					</button>
-					<button
-						type="button"
-						class="btn"
-						data-testid="use-as-target"
-						disabled={!resultBlob || rendering}
-						onclick={() => handleUseAs('target-basemap')}
-					>
-						Send to Create Graphics
-					</button>
-					<button
-						type="button"
-						class="btn"
-						data-testid="keep-as-thrown-round"
-						disabled={!resultBlob || rendering}
-						onclick={handleKeepAsThrownRound}
-					>
-						Keep as thrown round
-					</button>
-					<button
-						type="button"
-						class="btn ghost"
-						data-testid="download-stitched"
-						disabled={!resultBlob || rendering}
-						onclick={handleDownload}
-					>
-						Download PNG
-					</button>
-					<button
-						type="button"
-						class="btn ghost"
-						data-testid="adjust-manually"
-						aria-pressed={manualOpen}
-						onclick={() => (manualOpen = !manualOpen)}
-					>
-						{manualOpen ? 'Hide manual adjustment' : 'Adjust manually'}
-					</button>
-					<button type="button" class="btn ghost" data-testid="start-new-map" onclick={resetToImport}>
-						↻ Start a new map
-					</button>
-					{#if rendering}
-						<span class="status" role="status">Rendering…</span>
-					{/if}
-				</div>
-
-				{#if manualOpen}
-					<div class="manual-surface" data-testid="manual-surface">
-						<div class="manual-tabs">
-							<button
-								type="button"
-								class="manual-tab"
-								class:active={manualView === 'crop'}
-								data-testid="manual-tab-crop"
-								onclick={() => (manualView = 'crop')}
-							>
-								Crop
-							</button>
-							<button
-								type="button"
-								class="manual-tab"
-								class:active={manualView === 'placement'}
-								data-testid="manual-tab-placement"
-								onclick={() => (manualView = 'placement')}
-							>
-								Position
-							</button>
-						</div>
-
-						<div class="stage-canvas" data-manual-view={manualView}>
-							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-							<div
-								class="stage-workspace"
-								data-testid="stage-workspace"
-								bind:this={stageWorkspace}
-								tabindex="0"
-								role="group"
-								aria-label="Stitch stage"
-								data-stitch-nudge-scope
-								onkeydown={handleStageKeyDown}
-							>
-								<ImageViewport
-									controller={stageVp}
-									testid="stage-viewport"
-									claimPointer={claimStagePointer}
-									onViewportClick={onStageClick}
-									onClaimedPointerCancel={handleTileDragCancel}
-								>
-									{#snippet content()}{/snippet}
-								</ImageViewport>
-							</div>
-
-							{#snippet cropZoomRow(topPx: number, bottomPx: number)}
-								<div class="crop-zoom-block">
-									<p class="crop-zoom-legend">
-										Each row is one real pixel. <span class="crop-zoom-swatch kept"></span> first row kept.
-									</p>
-									<div class="crop-zoom-edge">
-										<span class="crop-zoom-label">Top edge — {topPx}px</span>
-										<div class="crop-zoom-strip">
-											{#each activeSlots as slot (slot)}
-												{@const tile = tiles[slot]}
-												{#if tile}
-													<div class="crop-zoom-tile">
-														<canvas
-															use:cropZoom={{
-																image: tile.image,
-																imageWidthPx: tile.widthPx,
-																imageHeightPx: tile.heightPx,
-																boundaryY: topPx,
-																edge: 'top'
-															}}
-														></canvas>
-														<span>{slotLabel(slot)}</span>
-													</div>
-												{/if}
-											{/each}
-										</div>
-									</div>
-									<div class="crop-zoom-edge">
-										<span class="crop-zoom-label">Bottom edge — {bottomPx}px</span>
-										<div class="crop-zoom-strip">
-											{#each activeSlots as slot (slot)}
-												{@const tile = tiles[slot]}
-												{#if tile}
-													<div class="crop-zoom-tile">
-														<canvas
-															use:cropZoom={{
-																image: tile.image,
-																imageWidthPx: tile.widthPx,
-																imageHeightPx: tile.heightPx,
-																boundaryY: tile.heightPx - bottomPx,
-																edge: 'bottom'
-															}}
-														></canvas>
-														<span>{slotLabel(slot)}</span>
-													</div>
-												{/if}
-											{/each}
-										</div>
-									</div>
-								</div>
-							{/snippet}
-
-							{#if manualView === 'crop'}
-								<div class="crop-fields-overlay">
-									<div class="crop-fields-row">
-										{#each CROP_FIELDS as field (field)}
-											<label class="crop-field">
-												<span>{CROP_FIELD_LABELS[field]}</span>
-												<input
-													type="text"
-													inputmode="numeric"
-													autocomplete="off"
-													data-testid={`crop-${field}`}
-													bind:this={cropInputs[field]}
-													value={cropDraft[field]}
-													aria-invalid={invalidCropFields.includes(field) ? 'true' : undefined}
-													oninput={(event) => handleCropInput(field, event)}
-													onchange={() => commitCrop(field)}
-												/>
-											</label>
-										{/each}
-										<button type="button" data-testid="crop-reset" onclick={resetCrop}>Reset crop</button>
-										<button type="button" data-testid="crop-fit" onclick={() => stageVp.fit()}>Fit</button>
-									</div>
-									<p class="crop-zoom-hint">
-										Close-up at the exact crop line, per screenshot — check every one before applying.
-									</p>
-									{@render cropZoomRow(crop.topPx, crop.bottomPx)}
-								</div>
-							{/if}
-						</div>
-
-						{#if manualView === 'placement'}
-							<div class="tool-block">
-								<h3>Selected tile</h3>
-								<div class="segmented">
-									{#each movableSlots as slot (slot)}
-										<button
-											type="button"
-											class="tile-select"
-											class:sel={selectedSlot === slot}
-											data-testid={`tile-select-${slot}`}
-											aria-pressed={selectedSlot === slot}
-											disabled={!tiles[slot]}
-											onclick={() => selectSlot(slot)}
-										>
-											{slotLabel(slot)}
-										</button>
-									{/each}
-								</div>
-							</div>
-							<div class="tool-block">
-								<h3>Position</h3>
-								<div class="field-row">
-									<label class="field">
-										<span>X</span>
-										<input
-											type="text"
-											inputmode="numeric"
-											autocomplete="off"
-											data-testid="tile-position-x"
-											bind:this={xPositionInput}
-											value={positionDraft.xPx}
-											disabled={!selectedSlot}
-											oninput={(event) => handlePositionInput('xPx', event)}
-											onchange={() => commitPosition('xPx')}
-										/>
-									</label>
-									<label class="field">
-										<span>Y</span>
-										<input
-											type="text"
-											inputmode="numeric"
-											autocomplete="off"
-											data-testid="tile-position-y"
-											bind:this={yPositionInput}
-											value={positionDraft.yPx}
-											disabled={!selectedSlot}
-											oninput={(event) => handlePositionInput('yPx', event)}
-											onchange={() => commitPosition('yPx')}
-										/>
-									</label>
-								</div>
-								<label class="opacity-field">
-									<span>Selected tile opacity (preview)</span>
-									<input
-										type="range"
-										min="0.15"
-										max="1"
-										step="0.05"
-										data-testid="tile-opacity"
-										bind:value={previewOpacity}
-										disabled={!selectedSlot}
-									/>
-								</label>
-							</div>
-							<div class="tool-block">
-								<h3>Actions</h3>
-								<div class="field-row">
-									<button
-										type="button"
-										class="btn primary small"
-										data-testid="snap-tile"
-										disabled={!snapAvailable}
-										onclick={() => void snapSelectedTile()}
-									>
-										Snap
-									</button>
-									<button
-										type="button"
-										class="btn ghost small"
-										data-testid="reset-arrangement"
-										disabled={!activeSlots.some((slot) => tiles[slot])}
-										onclick={resetArrangement}
-									>
-										Reset
-									</button>
-									<button
-										type="button"
-										class="btn ghost small"
-										disabled={!selectedSlot}
-										onclick={() => selectedSlot && toggleTileVisible(selectedSlot)}
-									>
-										{visibilityToggleLabel()}
-									</button>
-									{#if snapBusy}
-										<span class="status" role="status" data-testid="snap-busy">Snapping…</span>
-									{/if}
-								</div>
-							</div>
-						{/if}
-
-						<div class="tool-block">
-							<h3>Automatic result summary</h3>
-							<p class="section-note" data-testid="manual-summary">
-								{pipelineSuccess?.sources.length ?? 0} capture{(pipelineSuccess?.sources.length ?? 0) === 1
-									? ''
-									: 's'}, confidence: {resultConfidence === 'auto' ? 'high' : 'review recommended'}.
-								{#if pipelineSuccess && pipelineSuccess.warnings.length > 0}
-									{pipelineSuccess.warnings.join(' ')}
-								{/if}
-							</p>
-							<ul class="smart-assignment" data-testid="manual-capture-list" aria-label="Capture order">
-								{#each activeSlots as slot (slot)}
-									{#if tiles[slot]}
-										<li>
-											<span class="assignment-label">{slotLabel(slot)}:</span>
-											<span data-testid={`manual-capture-${slot}`}>{tiles[slot]?.fileName}</span>
-										</li>
-									{/if}
-								{/each}
-							</ul>
-						</div>
-
-						<p class="stage-readiness" data-testid="stitch-readiness" role="status">{readinessText()}</p>
-
-						{#if manualHasRotatedSource}
-							<p class="manual-rotation-warning" data-testid="manual-rotation-warning" role="status">
-								One or more of these captures was auto-aligned with rotation. Manual adjustments can
-								only reposition tiles, so applying them will straighten that rotation out. Only apply
-								if you want to replace the automatic alignment.
-							</p>
-						{/if}
-
-						<div class="manual-actions">
-							<button type="button" class="btn ghost" data-testid="close-manual-adjustments" onclick={() => (manualOpen = false)}>
-								Close
-							</button>
-							<button
-								type="button"
-								class="btn primary"
-								data-testid="apply-manual-adjustments"
-								disabled={!manualReady || !manualDirty}
-								onclick={() => void applyManualAdjustments()}
-							>
-								Apply adjustments
-							</button>
-						</div>
-					</div>
-				{/if}
-			</div>
+			</details>
+		</div>
+	{/if}
 		{/if}
 	</div>
 
@@ -2488,6 +2168,52 @@
 		max-width: 1100px;
 		margin: 0 auto;
 	}
+
+
+main.result-mode {
+	max-width: none;
+	padding: 0.35rem;
+	gap: 0.35rem;
+}
+main.result-mode > h2 { display: none; }
+.stage-card.result-stage {
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	overflow: visible;
+}
+.stage-card.result-stage .stage-progress,
+.stage-card.result-stage .stage-context { display: none; }
+.alignment-result-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	width: 100%;
+}
+.result-more {
+	align-self: flex-end;
+	position: relative;
+	z-index: 10;
+	margin-right: 0.4rem;
+	font-size: 0.78rem;
+	color: #a1a1aa;
+}
+.result-more > summary { cursor: pointer; user-select: none; }
+.result-more[open] {
+	padding: 0.45rem;
+	border: 1px solid #3f3f46;
+	border-radius: 8px;
+	background: #18181b;
+}
+.result-more-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-top: 0.45rem;
+}
 
 	h2 {
 		margin: 0;

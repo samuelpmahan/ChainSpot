@@ -4,10 +4,10 @@ import { ZERO_CROP } from '../../src/lib/stitch/geometry';
 import type { CropInsets, TilePlacement, TileSlot } from '../../src/lib/stitch/geometry';
 
 describe('badgeFlashPercent', () => {
-	test('maps an anchor box to the percentage position of its center', () => {
+	test('uses xPx/yPx directly as the physical badge center', () => {
 		expect(badgeFlashPercent({ xPx: 100, yPx: 200, widthPx: 40, heightPx: 20 }, 1000, 500)).toEqual({
-			leftPct: 12, // (100 + 20) / 1000 * 100
-			topPct: 42 // (200 + 10) / 500 * 100
+			leftPct: 10, // 100 / 1000 * 100
+			topPct: 40 // 200 / 500 * 100
 		});
 	});
 

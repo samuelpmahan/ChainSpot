@@ -188,8 +188,8 @@ export function badgeFlashPercent(
 	outputWidthPx: number,
 	outputHeightPx: number
 ): BadgeFlashPercent {
-	const centerXPx = anchor.xPx + anchor.widthPx / 2;
-	const centerYPx = anchor.yPx + anchor.heightPx / 2;
+	const centerXPx = anchor.xPx;
+	const centerYPx = anchor.yPx;
 	return {
 		leftPct: outputWidthPx > 0 ? (centerXPx / outputWidthPx) * 100 : 0,
 		topPct: outputHeightPx > 0 ? (centerYPx / outputHeightPx) * 100 : 0
