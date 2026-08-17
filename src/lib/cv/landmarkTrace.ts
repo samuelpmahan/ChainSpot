@@ -42,7 +42,7 @@ export interface LandmarkRecommendationTrace {
 }
 
 export interface LandmarkSurfaceTrace {
-	/** Whether the recommendation passes the browser's numeric auto-apply gate. */
+	/** Whether the recommendation passes the browser's auto-apply policy. */
 	readonly eligible: ObservableBoolean;
 	readonly threshold?: number;
 	readonly thresholdScore?: LandmarkScore;
@@ -64,6 +64,8 @@ export type LocalSnapRejectReason =
 	| 'marker-changed';
 
 export interface LocalSnapTrace {
+	/** Present on live worker traces; optional for older/offline callers. */
+	readonly kind?: LandmarkKind;
 	readonly attempted: boolean;
 	readonly accepted: boolean;
 	readonly rejectReason?: LocalSnapRejectReason;
@@ -75,6 +77,7 @@ export interface LocalSnapTrace {
 	readonly snapRadiusPx?: number;
 	readonly featureFootprintPx?: number;
 	readonly calibrationSource?: string;
+	readonly knownRecommendationCandidateIndex?: number;
 	readonly knownRecommendationDistancePx?: number;
 	readonly knownRecommendationInRadius?: boolean;
 }
@@ -151,15 +154,13 @@ export function summarizeLandmarkFunnel(traces: readonly LandmarkTrace[]): reado
 	const recommended = counted(traces.map((trace) => trace.recommendation.emitted));
 	const surfaced = counted(traces.map((trace) => trace.surface.surfaced));
 	const snapped = counted(traces.map((trace) => trace.snap ? trace.snap.accepted : 'not-instrumented'));
-	const semantic = counted(
-		traces.map((trace) => trace.groundTruth?.userCorrect ?? 'not-instrumented')
-	);
+	const semantic = counted(traces.map((trace) => trace.groundTruth?.userCorrect ?? 'not-instrumented'));
 	return [
 		{ ...detected, name: 'detected', definition: 'A raw detector emitted/owned a hypothesis for this hole/object, or truth matching proved one existed.' },
 		{ ...candidatePresent, name: 'candidate-present', definition: 'At least one retained candidate is observable for this hole/object.' },
 		{ ...assigned, name: 'correctly-assigned', definition: 'The selected candidate belongs to the numbered hole under the declared ground-truth tolerance.' },
 		{ ...recommended, name: 'recommended', definition: 'The course pipeline emitted a tee/basket endpoint for this numbered hole.' },
-		{ ...surfaced, name: 'surfaced', definition: 'The recommendation was actually observed in authoritative/UI annotation state.' },
+		{ ...surfaced, name: 'surfaced', definition: 'The recommendation was actually observed at the CV-to-authoritative-state acceptance boundary.' },
 		{ ...snapped, name: 'snapped', definition: 'A local-snap attempt was accepted and settled to a detected point.' },
 		{ ...semantic, name: 'semantically-correct', definition: 'The final user-visible point is within the declared semantic-anchor tolerance.' }
 	];
