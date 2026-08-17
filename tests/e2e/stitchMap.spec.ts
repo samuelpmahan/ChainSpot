@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 async function gotoApp(page: Page, route: string): Promise<string> {
 	await page.goto(route);
@@ -48,33 +48,6 @@ async function importFixtureSet(page: Page): Promise<void> {
 	await expect(page.getByTestId('composite-image')).toBeVisible({ timeout: 60000 });
 }
 
-interface ViewTransform {
-	zoom: number;
-	panX: number;
-	panY: number;
-}
-
-async function viewOf(viewport: Locator): Promise<ViewTransform> {
-	return {
-		zoom: Number(await viewport.getAttribute('data-view-zoom')),
-		panX: Number(await viewport.getAttribute('data-view-pan-x')),
-		panY: Number(await viewport.getAttribute('data-view-pan-y'))
-	};
-}
-
-async function atImagePoint(
-	viewport: Locator,
-	box: { x: number; y: number },
-	view: ViewTransform,
-	xPx: number,
-	yPx: number
-): Promise<{ x: number; y: number }> {
-	return {
-		x: box.x + view.panX + xPx * view.zoom,
-		y: box.y + view.panY + yPx * view.zoom
-	};
-}
-
 async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
 	await page.mouse.move(from.x, from.y);
 	await page.mouse.down();
@@ -82,7 +55,7 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 	await page.mouse.up();
 }
 
-test('auto-first workflow: unordered grid import lands directly on an assembled result, manual correction (crop, drag, nudge, Snap, visibility) still works, and download/handoff are native', async ({
+test('auto-first workflow: unordered grid import lands directly on an assembled result, alignment-review correction (drag, reset) still works, and download/handoff are native', async ({
 	page
 }) => {
 	// See the timing note on `importFixtureSet` for why this needs headroom
@@ -98,99 +71,45 @@ test('auto-first workflow: unordered grid import lands directly on an assembled 
 		if (url.origin !== serverOrigin) externalRequests.push(request.url());
 	});
 
-	await expect(page.getByTestId('adjust-manually')).toHaveCount(0);
+	await expect(page.getByTestId('alignment-review')).toHaveCount(0);
 
 	await importFixtureSet(page);
 
 	// No forced approval click: the result is already the assembled composite,
 	// and the shared crop the auto pipeline detected (plus its default +2px
-	// safety margin per side) is already applied — not just proposed.
-	await expect(page.getByTestId('continue-to-annotate')).toBeEnabled();
+	// safety margin per side) is already applied — not just proposed. The
+	// Yes/No review HUD (StitchAlignmentReview, CHSPT-40) offers the same
+	// "continue" affordance the old `continue-to-annotate` button used to be;
+	// the rest (download, send-to-Create-Graphics) live under "More actions".
+	await expect(page.getByTestId('alignment-yes')).toBeEnabled();
+	await page.getByTestId('result-more-toggle').click();
 	await expect(page.getByTestId('download-stitched')).toBeEnabled();
 	await expect(page.getByTestId('use-as-target')).toBeEnabled();
 
-	await page.getByTestId('adjust-manually').click();
-	await page.getByTestId('manual-tab-crop').click();
-	await expect(page.getByTestId('crop-topPx')).toHaveValue('6');
-	await expect(page.getByTestId('crop-bottomPx')).toHaveValue('5');
+	// Enter correction mode ("No, let me fix it") and drag one source's
+	// outline — the replacement for the old per-tile x/y placement editor.
+	await page.getByTestId('alignment-no').click();
+	const outline = page.getByTestId('source-outline-1');
+	await outline.scrollIntoViewIfNeeded();
+	const box = await outline.boundingBox();
+	if (!box) throw new Error('source outline has no bounds');
+	const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	await drag(page, center, { x: center.x + 24, y: center.y + 10 });
+	// A real translation re-renders the composite through the same
+	// `renderPipelineComposite` path CHSPT-72's `handleAlignmentAdjusted`
+	// consumes.
+	await expect(page.getByTestId('stitch-status')).toContainText('Stitch adjustment applied.');
 
-	// Manual crop editing remains fully capable.
-	await page.getByTestId('crop-topPx').fill('7');
-	await page.getByTestId('crop-topPx').blur();
-	await expect(page.getByTestId('crop-topPx')).toHaveValue('7');
-	await page.getByTestId('crop-topPx').fill('6');
-	await page.getByTestId('crop-topPx').blur();
-
-	await page.getByTestId('manual-tab-placement').click();
-	const stageViewport = page.getByTestId('stage-viewport');
-
-	// Which `tile-N` id the arrangement assigned to which corner is an
-	// `assignN` internal detail — read the movable tile's own automatic
-	// starting position rather than assuming one, and use it as the baseline
-	// every perturb/restore below measures against.
-	await page.getByTestId('tile-select-tile-1').click();
-	const baselineX = Number(await page.getByTestId('tile-position-x').inputValue());
-	const baselineY = Number(await page.getByTestId('tile-position-y').inputValue());
-
-	// Keyboard nudge: 1px, and Shift 10px.
-	await page.keyboard.press('ArrowRight');
-	await expect(page.getByTestId('tile-position-x')).toHaveValue(String(baselineX + 1));
-	await page.keyboard.press('Shift+ArrowLeft');
-	await expect(page.getByTestId('tile-position-x')).toHaveValue(String(baselineX - 9));
-
-	// Exact integer fields commit; fractional/empty input reverts.
-	await page.getByTestId('tile-position-x').fill(String(baselineX + 12));
-	await page.getByTestId('tile-position-x').blur();
-	await expect(page.getByTestId('tile-position-x')).toHaveValue(String(baselineX + 12));
-	await page.getByTestId('tile-position-y').fill(String(baselineY + 9));
-	await page.getByTestId('tile-position-y').blur();
-
-	// Snap assist locks the deliberately displaced tile back onto its real
-	// neighbor match — close to wherever it started, not a hardcoded corner.
-	await expect(page.getByTestId('snap-tile')).toBeEnabled();
-	await page.getByTestId('snap-tile').click();
-	// First Snap call in the page's lifetime pays the same one-time
-	// WASM JIT/lazy-compile tax as the smart-import worker call above, on the
-	// MAIN thread this time (the lazily-warmed `loadCv()` — see
-	// `ensureCvWarm` — only covers module parse/instantiate, not this).
-	await expect(page.getByTestId('snap-tile')).toBeEnabled({ timeout: 60000 });
-	expect(
-		Math.abs(Number(await page.getByTestId('tile-position-x').inputValue()) - baselineX)
-	).toBeLessThanOrEqual(2);
-	expect(
-		Math.abs(Number(await page.getByTestId('tile-position-y').inputValue()) - baselineY)
-	).toBeLessThanOrEqual(2);
-
-	// Drag: pointer-driven placement still works on the same shared viewport.
-	// The grab point is well inside the tile (not at an edge/corner, which a
-	// screen<->image rounding step could otherwise land just outside). Box
-	// and view are both re-measured immediately before use — an intervening
-	// `stageWorkspace.focus()` call (see `selectSlot`) can scroll the page,
-	// so a box measured earlier in the test is not safe to reuse here.
-	await stageViewport.scrollIntoViewIfNeeded();
-	const stageBox = await stageViewport.boundingBox();
-	if (!stageBox) throw new Error('stage viewport has no bounds');
-	const beforeDrag = await viewOf(stageViewport);
-	const dragStart = await atImagePoint(stageViewport, stageBox, beforeDrag, baselineX + 50, baselineY + 50);
-	// The move must clear the shared click-vs-drag slop threshold (4px for a
-	// mouse pointer) in SCREEN pixels, not image pixels — at this fixture's
-	// zoom (~1.5x, much lower than the tiny solid-color fixtures this pattern
-	// was inherited from), a couple of image pixels of movement does not.
-	await drag(page, dragStart, { x: dragStart.x + beforeDrag.zoom * 20, y: dragStart.y });
-	await expect(page.getByTestId('tile-position-x')).not.toHaveValue(String(baselineX));
-	// Restore the baseline for a deterministic export check.
-	await page.getByTestId('tile-position-x').fill(String(baselineX));
-	await page.getByTestId('tile-position-x').blur();
-	await page.getByTestId('tile-position-y').fill(String(baselineY));
-	await page.getByTestId('tile-position-y').blur();
-
-	await expect(page.getByTestId('apply-manual-adjustments')).toBeEnabled();
-	await page.getByTestId('apply-manual-adjustments').click();
-	await expect(page.getByTestId('manual-surface')).toHaveCount(0);
-	await expect(page.getByTestId('composite-image')).toBeVisible();
+	// Reset all restores every source to its auto-arranged position —
+	// required for the deterministic export check below.
+	await page.getByTestId('alignment-reset-all').click();
+	await expect(page.getByTestId('stitch-status')).toContainText('Stitch adjustment applied.');
+	await page.getByTestId('alignment-apply').click();
+	await expect(page.getByTestId('alignment-yes')).toBeVisible();
 
 	// Native-resolution export: cropped 200x189 tiles (crop top 6 / bottom 5)
-	// at ground truth (0,0)/(150,0)/(0,150)/(150,150) span x 0..350, y 0..339.
+	// at ground truth (0,0)/(150,0)/(0,150)/(150,150) span x 0..350, y 0..339 —
+	// valid only because Reset all put every source back at its auto position.
 	const downloadPromise = page.waitForEvent('download');
 	await page.getByTestId('download-stitched').click();
 	const download = await downloadPromise;
@@ -212,17 +131,6 @@ test('auto-first workflow: unordered grid import lands directly on an assembled 
 	}, [...png]);
 	expect(dims).toEqual({ width: 350, height: 339 });
 
-	// Visibility toggle (preview-only) and Reset arrangement, exercised last
-	// since both change on-screen placements and would otherwise perturb the
-	// deterministic export just checked above.
-	await page.getByTestId('adjust-manually').click();
-	await page.getByTestId('tile-select-tile-1').click();
-	const hideButton = page.getByRole('button', { name: /Hide Capture \d \(preview\)/ });
-	await hideButton.click();
-	await expect(page.getByRole('button', { name: /Show Capture \d \(preview\)/ })).toBeVisible();
-	await page.getByTestId('reset-arrangement').click();
-	await expect(page.getByTestId('stitch-readiness')).toContainText('valid');
-
 	expect(externalRequests).toEqual([]);
 });
 
@@ -232,7 +140,7 @@ test('handoff: a safe arrival (no existing source image or holes) auto-imports t
 	test.setTimeout(90000);
 	await gotoApp(page, '/stitch-map');
 	await importFixtureSet(page);
-	await page.getByTestId('continue-to-annotate').click();
+	await page.getByTestId('alignment-yes').click();
 	await expect(page).toHaveURL(/\/annotate-course$/);
 
 	// A fresh Annotate Course session has no source image and no holes yet, so
@@ -247,7 +155,7 @@ test('handoff: a pending handoff blocks a second one until dismissed, and a targ
 	test.setTimeout(120000);
 	await gotoApp(page, '/stitch-map');
 	await importFixtureSet(page);
-	await page.getByTestId('continue-to-annotate').click();
+	await page.getByTestId('alignment-yes').click();
 	await expect(page).toHaveURL(/\/annotate-course$/);
 	await expect(page.getByTestId('annotation-workspace')).toHaveAttribute('data-source-loaded', 'true');
 
@@ -255,7 +163,7 @@ test('handoff: a pending handoff blocks a second one until dismissed, and a targ
 	// auto-import — the banner returns.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await importFixtureSet(page);
-	await page.getByTestId('continue-to-annotate').click();
+	await page.getByTestId('alignment-yes').click();
 	await expect(page).toHaveURL(/\/annotate-course$/);
 	const sourceBanner = page.getByTestId('pending-handoff');
 	await expect(sourceBanner).toBeVisible();
@@ -265,6 +173,7 @@ test('handoff: a pending handoff blocks a second one until dismissed, and a targ
 	// A target-role handoff lands directly on Create Graphics.
 	await page.getByRole('link', { name: 'Stitch Map' }).click();
 	await importFixtureSet(page);
+	await page.getByTestId('result-more-toggle').click();
 	await page.getByTestId('use-as-target').click();
 	await expect(page).toHaveURL(/\/create-graphics$/);
 	const targetBanner = page.getByTestId('pending-handoff');
