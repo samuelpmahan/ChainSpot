@@ -74,6 +74,47 @@ stack, and carry a repeatable corpus-gate harness.
   active-default *behavior* (this is the point of W2) but zero new required
   params.
 
+## Detection vs. association — do not conflate
+
+This port has two structurally different kinds of "18/18" and they must never
+be reported, or reasoned about, as one number:
+
+- **Detection/localization recall** (`scripts/toph-tune.ts`, the "corpus
+  table"): for each ground-truth tee/basket POINT, is there SOME emitted P1
+  object within tolerance anywhere in the image? It does not look at hole
+  numbers at all. It cannot tell "hole 3's tee and hole 5's tee got swapped"
+  from "both correct" — both look like 2/2 detected. This metric lives
+  entirely inside P1 (`rawObjectMask.ts`) and is therefore, by construction,
+  **blind to P3/P6** — it can sanity-check that W3 didn't accidentally touch
+  P1, but it can never prove or disprove W3's actual behavior.
+- **Association/assignment correctness** (`scripts/pancake-harness.ts`,
+  matched by hole NUMBER against the annotation truth): does hole N's
+  FULL-PIPELINE (P1→P6) assigned tee/basket land within tolerance of hole N's
+  own truth point? This is the only metric that can validate P3–P6 changes,
+  including W3's shortcut, because it's the only one that checks the pairing
+  is attached to the right hole, not just present somewhere.
+
+**Known tooling gap (found during lead verification, not a regression):**
+`pancake-harness.ts` does not reproduce ChainSpot's intake autocrop the way
+`toph-run.ts`/`toph-tune.ts` do (`autocropLikeIntake`). Feeding Heritage,
+Lenard, or TowneLake's raw un-autocropped images directly into
+`pancake-harness.ts` produces ~400–530px per-hole errors — a frame-offset
+artifact, not a real detection/association failure (confirmed by the lead:
+DashsTrack needs no autocrop and is unaffected; the other three do and are
+not usable with this harness as-is). Per-hole association verification in
+this ticket is therefore intentionally scoped to **DashsTrack only**, which
+is exactly what the ticket's own acceptance criteria already say — do not
+read "corpus table 58/72 tees" as if it were an association claim about all
+four courses, and do not have W4 attempt full-pipeline per-hole checks on
+Heritage/Lenard/TowneLake without first fixing this gap (out of scope here;
+note it in the corpus-gate README as a known limitation instead of silently
+producing, or silently avoiding, misleading numbers).
+
+When reporting verification results anywhere (Review Brief,
+`CHANGELOG-dev.md`, worker reports back to the lead), state these two
+numbers under clearly separate labels — never merge them into one blanket
+"18/18 verified" claim.
+
 ## Acceptance
 
 - `npx tsx scripts/toph-tune.ts <imagesDir> <corpus>/dev/Annotated` →
