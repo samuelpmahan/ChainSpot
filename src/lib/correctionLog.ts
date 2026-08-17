@@ -5,44 +5,40 @@
  * against a CV proposal in Annotate Course, so ordinary usage becomes
  * reusable truth data over time instead of requiring a separate hand-
  * labeling effort. Entirely local (IndexedDB) and kept out of
- * `project.json`/the `.chainspot.zip` bundle — per the "Done" boundary in
- * `docs/cv-clean-course-pipeline.md:129,156`, CV provenance never crosses
- * into the authoritative course file, and this log is CV provenance by
- * definition (confidence, detector, gate reasoning).
- *
- * Storage: its own IndexedDB database, not a new object store inside
- * `courseLibrary.ts`'s `chainspot-course-library` database — same overall
- * pattern (narrow injectable store interface, one store, keyPath-only
- * lookup) but a separate database, since bumping Course Memory's schema
- * version to host an unrelated, differently-lifecycled store would couple
- * two concerns that don't otherwise share anything.
+ * `project.json`/the `.chainspot.zip` bundle.
  */
 import type { CourseGrammarFailureKind, CourseGrammarResult } from './autoAnnotation/courseGrammar';
 
 export type CorrectionEndpoint = 'tee' | 'basket';
 
-/**
- * The detectors a `CorrectionEvent` can attribute a proposal to.
- * `'grayt-stage2'` names GRayT's cross-validated tee-recovery chain
- * (`scripts/cv-probes/`), which is not wired into the live app yet — kept
- * in the union so the field is ready the day that lands, not fabricated
- * before then. `'courseGrammar-hungarian'` is what Annotate Round's live
- * pipeline actually runs today.
- */
 export type CorrectionDetector =
 	| 'grayt-stage2'
 	| 'courseGrammar-hungarian'
+	| 'pancake-p5'
+	| 'pancake-p6'
 	| 'tee-bootstrap'
 	| 'number-badge'
 	| 'none';
 
 export type CorrectionGateDecision = 'auto-accepted' | 'flagged-for-review' | 'no-candidate';
 
+export interface CorrectionStageScore {
+	readonly name: string;
+	readonly value: number;
+	readonly higherIsBetter?: boolean;
+}
+
 export interface CorrectionPriorProposal {
 	readonly xPx: number;
 	readonly yPx: number;
-	/** 0..1, source detector's own scale. */
-	readonly confidence: number;
+	/**
+	 * Real normalized 0..1 source confidence only. Optional because current
+	 * Pancake P5/P6 do not produce one; their named native score is stored in
+	 * `score` instead of copying the UI eligibility sentinel here.
+	 */
+	readonly confidence?: number;
+	/** Exact native stage score when confidence is unavailable/non-comparable. */
+	readonly score?: CorrectionStageScore;
 	readonly detector: CorrectionDetector;
 	readonly gateDecision: CorrectionGateDecision;
 	/** Only present when `gateDecision !== 'auto-accepted'`. */
@@ -79,10 +75,7 @@ export interface CorrectionEvent {
 		/**
 		 * The user's raw drop coordinate, present when snap-to-detection
 		 * (`applyLocalSnap`) settled the marker somewhere else afterward — in
-		 * that case `finalValue` is the post-snap coordinate. Recorded
-		 * separately because a snapped "correction" is still influenced by
-		 * existing CV geometry: final reviewed geometry is review-approved,
-		 * not independent truth.
+		 * that case `finalValue` is the post-snap coordinate.
 		 */
 		readonly rawDropPx?: { readonly xPx: number; readonly yPx: number };
 	};
@@ -96,13 +89,17 @@ const WEAK_OR_AMBIGUOUS_KINDS: readonly CourseGrammarFailureKind[] = [
 	'basket-polarity-conflict'
 ];
 
+interface RuntimeProposalMetadata {
+	readonly confidenceSemantics?: 'ui-eligibility-sentinel';
+	readonly selectionScore?: CorrectionStageScore;
+}
+
 /**
- * Maps courseGrammar's own Hungarian-assignment output — the only detector
- * actually wired into Annotate Round's live pipeline today — to a
- * `CorrectionPriorProposal` for one hole/endpoint. Returns null when the
- * grammar proposed nothing there at all, matching the schema's own
- * null-means-nothing-proposed rule rather than fabricating a zero-confidence
- * placeholder.
+ * Maps the live grammar output to correction provenance. Legacy grammar keeps
+ * its real normalized detector confidence. Pancake's display adapter carries
+ * an explicit `confidenceSemantics=ui-eligibility-sentinel`; in that case the
+ * sentinel is deliberately NOT persisted as confidence and the real P5/P6
+ * native score is stored with its name/direction instead.
  */
 export function deriveProposalFromGrammar(
 	grammar: CourseGrammarResult | null,
@@ -112,14 +109,17 @@ export function deriveProposalFromGrammar(
 	const hole = grammar?.holes.find((candidate) => candidate.number === holeNumber);
 	const assignment = endpoint === 'tee' ? hole?.tee : hole?.basket;
 	if (!hole || !assignment) return null;
+	const metadata = assignment as typeof assignment & RuntimeProposalMetadata;
+	const pancake = metadata.confidenceSemantics === 'ui-eligibility-sentinel';
 	const failure = hole.failures.find(
 		(candidate) => candidate.candidateKind === endpoint && WEAK_OR_AMBIGUOUS_KINDS.includes(candidate.kind)
 	);
 	return {
 		xPx: assignment.xPx,
 		yPx: assignment.yPx,
-		confidence: assignment.detectorConfidence,
-		detector: 'courseGrammar-hungarian',
+		...(pancake ? {} : { confidence: assignment.detectorConfidence }),
+		...(metadata.selectionScore ? { score: metadata.selectionScore } : {}),
+		detector: pancake ? (endpoint === 'tee' ? 'pancake-p5' : 'pancake-p6') : 'courseGrammar-hungarian',
 		gateDecision: failure ? 'flagged-for-review' : 'auto-accepted',
 		...(failure ? { reason: failure.kind } : {})
 	};
@@ -180,7 +180,6 @@ function promisifyTransaction(transaction: IDBTransaction): Promise<void> {
 	});
 }
 
-/** The one real `CorrectionLogStore`: one IndexedDB database, one object store, keyPath `eventId`, append-only. */
 export class IndexedDbCorrectionLogStore implements CorrectionLogStore {
 	readonly #factory: IDBFactory;
 
@@ -226,13 +225,11 @@ export class IndexedDbCorrectionLogStore implements CorrectionLogStore {
 
 let defaultStore: CorrectionLogStore | null = null;
 
-/** One shared `IndexedDbCorrectionLogStore` for the whole app, constructed lazily — mirrors `courseLibrary.ts`'s `getDefaultCourseLibraryStore`. */
 export function getDefaultCorrectionLogStore(): CorrectionLogStore {
 	defaultStore ??= new IndexedDbCorrectionLogStore();
 	return defaultStore;
 }
 
-/** Plain JSON export of a correction-event set — the "export corrections" action; no sync/upload, just a file. */
 export function correctionEventsToExportBlob(events: readonly CorrectionEvent[]): Blob {
 	return new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
 }

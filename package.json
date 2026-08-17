@@ -15,6 +15,7 @@
     "validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
     "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
     "detect:course": "tsx scripts/detect-course.ts",
+    "audit:cv-funnel": "tsx scripts/audit-cv-funnel.ts",
     "verify:course-detection": "tsx scripts/verify-course-detection.ts",
     "benchmark:active-review": "node --experimental-strip-types scripts/benchmark-active-review.ts",
     "benchmark:course-corpus": "tsx scripts/benchmark-course-corpus.ts",
