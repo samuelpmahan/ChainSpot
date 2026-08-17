@@ -52,8 +52,11 @@
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
+		clearThrownRoundSource,
 		getPendingHandoff,
+		getThrownRoundSource,
 		setPendingHandoff,
+		setThrownRoundSource,
 		subscribePendingStitchCaptures,
 		takePendingStitchCaptures
 	} from '$lib/session';
@@ -466,12 +469,65 @@
 		}
 	}
 
+	/**
+	 * CHSPT-65: files picked through the bulk importer, held BEFORE any
+	 * crop/stitch runs while the user answers which (if any) is the thrown
+	 * round. Each entry carries an object URL for its thumbnail; URLs are
+	 * revoked when the prompt resolves, cancels, or the page unmounts. Only
+	 * the user-facing file input routes through this — the demo inbox keeps
+	 * its direct `runImport` path (a guided demo must never stall on a
+	 * question), and the per-slot grid keeps its per-tile buttons.
+	 */
+	let pendingImport = $state<{ file: File; url: string }[] | null>(null);
+
+	function clearPendingImport(): void {
+		if (pendingImport) for (const item of pendingImport) URL.revokeObjectURL(item.url);
+		pendingImport = null;
+	}
+
 	function handleSmartImportFiles(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		const files = Array.from(input.files ?? []);
 		input.value = '';
 		if (files.length === 0) return;
-		void runImport(files);
+		// Ask about the thrown round BEFORE attempting any crop/stitch — a
+		// round screenshot mixed into the batch must never be composited into
+		// the clean map. The prompt shows a thumbnail of each capture.
+		clearPendingImport();
+		pendingImport = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
+	}
+
+	/**
+	 * Resolves the pre-import prompt. `index` picks that capture as the thrown
+	 * round (raw file into the session slot, remaining captures stitch the
+	 * clean map); `null` means no thrown round in this batch — stitch them all
+	 * exactly as the importer always did.
+	 */
+	function handlePreImportChoice(index: number | null): void {
+		const pending = pendingImport;
+		if (!pending) return;
+		const files = pending.map((item) => item.file);
+		clearPendingImport();
+		if (index === null) {
+			void runImport(files);
+			return;
+		}
+		const chosen = files[index];
+		if (!chosen) return;
+		const replacing = getThrownRoundSource() !== null;
+		setThrownRoundSource({ blob: chosen, fileName: chosen.name });
+		heldThrownRound = { fileName: chosen.name };
+		const remaining = files.filter((_, candidate) => candidate !== index);
+		if (remaining.length === 0) {
+			statusMessage = `“${chosen.name}” set aside as the thrown round${replacing ? ', replacing the previous one' : ''}. Import the clean course screenshots next.`;
+			return;
+		}
+		void runImport(remaining);
+	}
+
+	function handlePreImportCancel(): void {
+		clearPendingImport();
+		statusMessage = 'Import cancelled. Nothing was stitched.';
 	}
 
 	/**
@@ -1341,6 +1397,98 @@
 		}
 	}
 
+	/**
+	 * CHSPT-65: page-local mirror of the session's thrown-round slot, kept so
+	 * the held-round indicator is reactive (the session module is plain
+	 * variables). Synced on mount and by every handler that writes the slot.
+	 */
+	let heldThrownRound = $state<{ fileName: string } | null>(null);
+
+	/**
+	 * CHSPT-65: keeps the current result as the *thrown-round* source — the
+	 * played-round screenshot with UDisc's purple throw/walk graphics — in its
+	 * own session slot (`setThrownRoundSource`), semantically distinct from the
+	 * clean course/map source that travels via `setPendingHandoff`. The slot is
+	 * long-lived and never enters any image-intake path, so keeping a thrown
+	 * round neither blocks nor replaces a clean-source handoff (and vice
+	 * versa). After keeping, the page resets to Import so the user can bring in
+	 * the clean course screenshots next; the kept image itself is safe in the
+	 * session slot. Which image is "thrown" is the user's explicit choice —
+	 * automatic purple-path classification is a separate ticket.
+	 */
+	function handleKeepAsThrownRound(): void {
+		if (!resultBlob) return;
+		const replacing = getThrownRoundSource() !== null;
+		const fileName = resultFileName();
+		setThrownRoundSource({
+			blob: resultBlob,
+			fileName,
+			provenance: resultProvenance ?? undefined
+		});
+		heldThrownRound = { fileName };
+		resetToImport();
+		statusMessage = replacing
+			? 'Thrown-round image replaced. It will ride along into Create Graphics. Import the clean course screenshots next.'
+			: 'Thrown-round image kept. It will ride along into Create Graphics. Import the clean course screenshots next.';
+	}
+
+	/**
+	 * CHSPT-65: manual per-tile selector for a round screenshot imported
+	 * TOGETHER with the clean-map tiles. The tile's ORIGINAL file bytes go
+	 * into the thrown-round session slot (no crop, no stitch — nothing has
+	 * been derived from it yet) and the tile leaves the stitch layout via the
+	 * existing removal path, so the clean composite is built without it. This
+	 * and "Keep as thrown round" on the result write the same slot; within
+	 * the thrown role the newest choice wins.
+	 */
+	function handleMarkTileAsThrownRound(slot: TileSlot): void {
+		const tile = tiles[slot];
+		if (!tile) return;
+		const replacing = getThrownRoundSource() !== null;
+		setThrownRoundSource({ blob: tile.file, fileName: tile.fileName });
+		heldThrownRound = { fileName: tile.fileName };
+		handleRemove(slot);
+		statusMessage = replacing
+			? `“${tile.fileName}” is now the thrown round (replacing the previous one). It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`
+			: `“${tile.fileName}” set aside as the thrown round. It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`;
+	}
+
+	/** CHSPT-65: the indicator's explicit discard — the only production clear besides the workflow-staleness lifecycle in session.ts. */
+	function handleClearThrownRound(): void {
+		clearThrownRoundSource();
+		heldThrownRound = null;
+		statusMessage = 'Thrown-round image discarded.';
+	}
+
+	/**
+	 * CHSPT-65: manual selector for the bulk Smart Import path. Round + clean
+	 * tiles imported in ONE batch land directly on the stitched result with
+	 * the round already composited in — the per-tile button in the Import
+	 * grid is never seen. This picks one ORIGINAL capture out of the result:
+	 * its raw file goes to the thrown-round slot, and the clean map is
+	 * re-stitched from the remaining captures through the exact same
+	 * `runImport` pipeline (whose completion overwrites `statusMessage`, so
+	 * this sets its own message after awaiting it). With no remaining
+	 * captures the page returns to Import instead.
+	 */
+	async function handleMarkResultSourceAsThrownRound(sourceId: string): Promise<void> {
+		const source = resultProvenance?.sources.find((candidate) => candidate.sourceId === sourceId);
+		const file = resultSourceFiles.get(sourceId);
+		if (!source || !file || rendering) return;
+		setThrownRoundSource({ blob: file, fileName: source.fileName });
+		heldThrownRound = { fileName: source.fileName };
+		const remaining = [...resultSourceFiles.entries()]
+			.filter(([id]) => id !== sourceId)
+			.map(([, remainingFile]) => remainingFile);
+		if (remaining.length === 0) {
+			resetToImport();
+			statusMessage = `“${source.fileName}” set aside as the thrown round. Import the clean course screenshots next.`;
+			return;
+		}
+		await runImport(remaining);
+		statusMessage = `“${source.fileName}” set aside as the thrown round. Clean map re-stitched from the remaining ${remaining.length} screenshot${remaining.length === 1 ? '' : 's'}.`;
+	}
+
 	function readinessText(): string {
 		if (report.ready) {
 			return 'All screenshots, the shared crop, and tile overlap are valid.';
@@ -1724,6 +1872,10 @@
 	});
 
 	onMount(() => {
+		// CHSPT-65: a thrown round kept earlier this session (e.g. before a
+		// round trip to another route) surfaces in the indicator immediately.
+		const existingThrownRound = getThrownRoundSource();
+		heldThrownRound = existingThrownRound ? { fileName: existingThrownRound.fileName } : null;
 		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
 		// and navigates here. They enter through the SAME unified `runImport`
 		// entry point the "Import screenshots" file input uses, so the result a
@@ -1746,6 +1898,7 @@
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		disposeSmartStitchWorker();
 		endTileDrag();
+		clearPendingImport();
 		if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
 		stage?.destroy();
 		stage = null;
@@ -1775,6 +1928,18 @@
 			</span>
 		</div>
 
+		{#if heldThrownRound}
+			<!-- CHSPT-65: visible confirmation of which image is set aside as the
+			     thrown round (kept from a result, or marked per-tile), with the
+			     one explicit discard the workflow offers. -->
+			<div class="thrown-round-held" data-testid="thrown-round-held" role="status">
+				<span>Thrown round: <strong>{heldThrownRound.fileName}</strong> — rides along into Create Graphics.</span>
+				<button type="button" data-testid="thrown-round-discard" onclick={handleClearThrownRound}>
+					Discard
+				</button>
+			</div>
+		{/if}
+
 		<div class="stage-context">
 			{#if phase === 'import'}
 				<span
@@ -1801,6 +1966,49 @@
 		</div>
 
 		{#if phase === 'import'}
+			{#if pendingImport}
+				<!-- CHSPT-65: asked BEFORE any crop/stitch — a thrown-round
+				     screenshot mixed into the batch must never reach the clean
+				     composite. One thumbnail per selected capture. -->
+				<div class="pre-import-prompt" data-testid="pre-import-prompt">
+					<h3>Before stitching — is one of these the thrown round?</h3>
+					<p class="section-note">
+						The thrown round (the screenshot with the purple round path) is set aside for Create
+						Graphics and kept out of the clean map. Pick it here, or stitch everything as clean.
+					</p>
+					<ul class="pre-import-grid">
+						{#each pendingImport as item, index (item.url)}
+							<li class="pre-import-item">
+								<img class="pre-import-thumb" src={item.url} alt={item.file.name} />
+								<span class="pre-import-name">{item.file.name}</span>
+								<button
+									type="button"
+									class="thrown-round-pick"
+									data-testid="pre-import-thrown-{index}"
+									onclick={() => handlePreImportChoice(index)}
+								>
+									Thrown round
+								</button>
+							</li>
+						{/each}
+					</ul>
+					<div class="pre-import-actions">
+						<button
+							type="button"
+							class="btn primary"
+							data-testid="pre-import-none"
+							onclick={() => handlePreImportChoice(null)}
+						>
+							{pendingImport.length === 1
+								? 'No thrown round — crop it as the clean map'
+								: `No thrown round — stitch all ${pendingImport.length}`}
+						</button>
+						<button type="button" class="btn ghost" data-testid="pre-import-cancel" onclick={handlePreImportCancel}>
+							Cancel import
+						</button>
+					</div>
+				</div>
+			{:else}
 			<div class="import-panel">
 				<section class="smart-import-section" aria-labelledby="smart-import-heading">
 					<h3 id="smart-import-heading">Import screenshots</h3>
@@ -1847,6 +2055,7 @@
 								error={tileErrors[slot] ?? null}
 								onFile={(file) => handleSlotFile(slot, file)}
 								onRemove={() => handleRemove(slot)}
+								onMarkThrownRound={() => handleMarkTileAsThrownRound(slot)}
 							/>
 						{/each}
 						<button type="button" class="add-tile" data-testid="add-capture" onclick={addSlot}>
@@ -1855,6 +2064,7 @@
 					</div>
 				</section>
 			</div>
+			{/if}
 		{:else if phase === 'processing'}
 			<div class="processing-panel" data-testid="stitch-processing">
 				<div class="spinner" aria-hidden="true"></div>
@@ -1900,6 +2110,32 @@
 					</div>
 				{/if}
 
+				{#if resultProvenance && resultProvenance.sources.length > 1}
+					<!-- CHSPT-65: bulk-import escape hatch — when the thrown-round
+					     screenshot was imported together with the clean tiles, pick it
+					     out here; the clean map re-stitches without it. (A
+					     single-capture result uses "Keep as thrown round" below.) -->
+					<div class="result-sources" data-testid="result-sources">
+						<span class="result-sources-hint">Is one of these the thrown round? Pick it out and the clean map re-stitches without it:</span>
+						<ul>
+							{#each resultProvenance.sources as source (source.sourceId)}
+								<li>
+									<span class="result-source-name">{source.fileName}</span>
+									<button
+										type="button"
+										class="thrown-round-pick"
+										data-testid="result-source-thrown-{source.sourceId}"
+										disabled={rendering}
+										onclick={() => void handleMarkResultSourceAsThrownRound(source.sourceId)}
+									>
+										Thrown round
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+
 				<div class="result-actions">
 					<button
 						type="button"
@@ -1918,6 +2154,15 @@
 						onclick={() => handleUseAs('target-basemap')}
 					>
 						Send to Create Graphics
+					</button>
+					<button
+						type="button"
+						class="btn"
+						data-testid="keep-as-thrown-round"
+						disabled={!resultBlob || rendering}
+						onclick={handleKeepAsThrownRound}
+					>
+						Keep as thrown round
 					</button>
 					<button
 						type="button"
@@ -2280,6 +2525,128 @@
 		background: #18181b;
 		overflow: hidden;
 		margin: 0 auto;
+	}
+
+	.pre-import-prompt {
+		display: flex;
+		flex-direction: column;
+		gap: 0.7rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid #4c1d95;
+		border-radius: 8px;
+		background-color: #1e1e24;
+	}
+
+	.pre-import-prompt h3 {
+		margin: 0;
+		font-size: 1rem;
+		color: #f4f4f5;
+	}
+
+	.pre-import-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.8rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.pre-import-item {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.35rem;
+		width: 160px;
+	}
+
+	.pre-import-thumb {
+		width: 160px;
+		height: 120px;
+		object-fit: cover;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #101014;
+	}
+
+	.pre-import-name {
+		max-width: 160px;
+		font-size: 0.75rem;
+		color: #a1a1aa;
+		overflow-wrap: anywhere;
+		text-align: center;
+	}
+
+	.pre-import-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		align-items: center;
+	}
+
+	.result-sources {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		padding: 0.55rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background-color: #1e1e24;
+		font-size: 0.82rem;
+		color: #a1a1aa;
+	}
+
+	.result-sources ul {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.result-sources li {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.result-source-name {
+		color: #e4e4e7;
+		overflow-wrap: anywhere;
+	}
+
+	.thrown-round-pick {
+		padding: 0.2rem 0.55rem;
+		border: 1px solid #4c1d95;
+		border-radius: 4px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.78rem;
+		cursor: pointer;
+	}
+
+	.thrown-round-held {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-top: 0.6rem;
+		padding: 0.45rem 0.8rem;
+		border: 1px solid #4c1d95;
+		border-radius: 6px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.85rem;
+	}
+
+	.thrown-round-held button {
+		padding: 0.2rem 0.6rem;
+		border: 1px solid #6d28d9;
+		border-radius: 4px;
+		background: transparent;
+		color: #ddd6fe;
+		cursor: pointer;
 	}
 
 	.stage-progress {

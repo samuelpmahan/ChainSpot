@@ -674,6 +674,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 				p5AssignedTees: p5SparseAssignment.assignedTees,
 				p5UnresolvedTees: p5SparseAssignment.unresolvedTees,
 				p6LockedByP4: p6LowParBasketAssignment.lockedByP4,
+				p6LockedByZeroBend: p6LowParBasketAssignment.lockedByZeroBend,
 				p6AssignedByLowPar: p6LowParBasketAssignment.assignedByLowPar,
 				p6Unresolved: p6LowParBasketAssignment.unresolved,
 				basketAnchorScaleEvaluations: 0,

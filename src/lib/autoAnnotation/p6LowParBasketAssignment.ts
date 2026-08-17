@@ -21,6 +21,7 @@ import type { RawMaskBasket, RawMaskTee } from './rawObjectMask';
 import type { P5SparseAssignmentResult, P5TeeAssignment } from './p5SparseAssignment';
 import { DEFAULT_RIBBON_MASS_PARAMS, nearestComponentLabel, nearestKeptDistancePx } from './ribbonMass';
 import type { RibbonMassParams, RibbonMassSegmentation } from './ribbonMass';
+import { evaluateZeroBendBadgeOnChord } from './zeroBendChord';
 
 export const P6_DISALLOWED_COST = 1_000_000;
 export const LOW_PAR_HIGHER_IS_BETTER = true;
@@ -57,8 +58,8 @@ export interface P6BasketCandidate {
 	readonly rankWithinHole: number;
 }
 
-export type P6BasketAssignmentStatus = 'p4Locked' | 'lowParAssigned' | 'unresolved';
-export type P6BasketAssignmentReason = 'p4Locked' | 'lowPar' | 'noValidAssignment';
+export type P6BasketAssignmentStatus = 'p4Locked' | 'zeroBendLocked' | 'lowParAssigned' | 'unresolved';
+export type P6BasketAssignmentReason = 'p4Locked' | 'zeroBendLocked' | 'lowPar' | 'noValidAssignment';
 
 export interface P6BasketAssignment {
 	readonly holeNumber: number;
@@ -80,6 +81,7 @@ export interface P6LowParBasketAssignmentSnapshot {
 	readonly assignments: readonly P6BasketAssignment[];
 	readonly candidates: readonly P6BasketCandidate[];
 	readonly lockedByP4: number;
+	readonly lockedByZeroBend: number;
 	readonly assignedByLowPar: number;
 	readonly unresolved: number;
 	readonly duplicateBaskets: readonly number[];
@@ -295,6 +297,62 @@ function p5AssignmentByHole(p5: P5SparseAssignmentResult): Map<number, P5TeeAssi
 	);
 }
 
+/**
+ * Pancake 6's pre-ribbon-evidence 0-bend badge-on-chord shortcut: a lock
+ * pass parallel to and computed alongside `p4Locks`, BEFORE `evidenceGrid`/
+ * `scoreLowParBasketCandidate` is ever built or called for any hole.
+ *
+ * For each hole with a P5-assigned tee and a P2-labeled badge that is NOT
+ * already locked by P4, checks every basket not already excluded (by a P4
+ * lock or by another hole's own zero-bend lock in `alreadyLockedBasketIndexes`)
+ * with `evaluateZeroBendBadgeOnChord`. Exactly one on-chord basket locks the
+ * hole to that basket -- same treatment as a P4 lock: excluded from the
+ * Hungarian solve entirely, bypassing ribbon evidence for that hole. Zero or
+ * more than one qualifying basket is ambiguity, which this shortcut never
+ * resolves; the hole falls through unchanged to the existing ribbon-evidence
+ * LowPar path.
+ *
+ * Pure aside from its inputs: exported standalone so the lock-selection
+ * behavior (exactly one candidate locks; zero or multiple candidates don't)
+ * can be unit-tested directly, without constructing a CorridorBendRaster or
+ * running real ribbon segmentation.
+ */
+export function computeZeroBendLocks(
+	tees: readonly RawMaskTee[],
+	baskets: readonly RawMaskBasket[],
+	badges: readonly P2LabeledBadge[],
+	p5: P5SparseAssignmentResult,
+	alreadyLockedHoleNumbers: ReadonlySet<number>,
+	alreadyLockedBasketIndexes: ReadonlySet<number>
+): Map<number, number> {
+	const p5ByHole = p5AssignmentByHole(p5);
+	const badgesByHole = new Map(badges.map((badge) => [badge.holeNumber, badge]));
+	const holeNumbers = Array.from(new Set([...badgesByHole.keys(), ...p5ByHole.keys()])).sort((a, b) => a - b);
+
+	const zeroBendLocks = new Map<number, number>();
+	for (const holeNumber of holeNumbers) {
+		if (alreadyLockedHoleNumbers.has(holeNumber)) continue;
+		const assignment = p5ByHole.get(holeNumber);
+		const tee = assignment ? tees[assignment.teeIndex] : undefined;
+		const badge = badgesByHole.get(holeNumber);
+		if (!tee || !badge) continue;
+
+		const onChordBasketIndexes: number[] = [];
+		for (let basketIndex = 0; basketIndex < baskets.length; basketIndex += 1) {
+			if (alreadyLockedBasketIndexes.has(basketIndex)) continue;
+			const basket = baskets[basketIndex];
+			const evaluation = evaluateZeroBendBadgeOnChord(
+				{ xPx: tee.xPx, yPx: tee.yPx },
+				{ xPx: basket.centerXPx, yPx: basket.centerYPx },
+				{ xPx: badge.xPx, yPx: badge.yPx }
+			);
+			if (evaluation.onChord) onChordBasketIndexes.push(basketIndex);
+		}
+		if (onChordBasketIndexes.length === 1) zeroBendLocks.set(holeNumber, onChordBasketIndexes[0]);
+	}
+	return zeroBendLocks;
+}
+
 function forwardGateForBasket(
 	tee: SourcePoint,
 	badge: SourcePoint,
@@ -355,7 +413,19 @@ function deriveP6LowParBasketAssignmentSnapshot(
 	for (const hole of p4.holes) {
 		if (isHardP4BasketLock(hole, sharedComponents)) p4Locks.set(hole.holeNumber, hole.basketIndexes[0]);
 	}
-	const lockedBasketIndexes = new Set(p4Locks.values());
+	// 0-bend badge-on-chord shortcut (see computeZeroBendLocks doc comment):
+	// computed alongside p4Locks, before evidenceGrid/scoreLowParBasketCandidate
+	// exist for any hole. p4Locks always wins -- holes/baskets it already
+	// claimed are excluded here and never reconsidered.
+	const zeroBendLocks = computeZeroBendLocks(
+		tees,
+		baskets,
+		badges,
+		p5,
+		new Set(p4Locks.keys()),
+		new Set(p4Locks.values())
+	);
+	const lockedBasketIndexes = new Set([...p4Locks.values(), ...zeroBendLocks.values()]);
 	const unlockedBasketIndexes = baskets
 		.map((_, basketIndex) => basketIndex)
 		.filter((basketIndex) => !lockedBasketIndexes.has(basketIndex));
@@ -383,7 +453,7 @@ function deriveP6LowParBasketAssignmentSnapshot(
 	let candidatesAfterGate = 0;
 	let gateFallbackHoles = 0;
 	for (const holeNumber of holeNumbers) {
-		if (p4Locks.has(holeNumber)) continue;
+		if (p4Locks.has(holeNumber) || zeroBendLocks.has(holeNumber)) continue;
 		const assignment = p5ByHole.get(holeNumber);
 		const tee = assignment ? tees[assignment.teeIndex] : undefined;
 		const badge = badgesByHole.get(holeNumber);
@@ -429,7 +499,9 @@ function deriveP6LowParBasketAssignmentSnapshot(
 		if (gateFallbackUsed) gateFallbackHoles += 1;
 	}
 
-	const solveRows = holeNumbers.filter((holeNumber) => !p4Locks.has(holeNumber) && candidatesByHole.has(holeNumber));
+	const solveRows = holeNumbers.filter(
+		(holeNumber) => !p4Locks.has(holeNumber) && !zeroBendLocks.has(holeNumber) && candidatesByHole.has(holeNumber)
+	);
 	const columnCount = Math.max(solveRows.length, unlockedBasketIndexes.length);
 	const columns: readonly (number | null)[] = [
 		...unlockedBasketIndexes,
@@ -484,6 +556,11 @@ function deriveP6LowParBasketAssignmentSnapshot(
 		owners.push(holeNumber);
 		ownersByBasket.set(basketIndex, owners);
 	}
+	for (const [holeNumber, basketIndex] of zeroBendLocks) {
+		const owners = ownersByBasket.get(basketIndex) ?? [];
+		owners.push(holeNumber);
+		ownersByBasket.set(basketIndex, owners);
+	}
 	for (const [holeNumber, assignment] of assignedByHole) {
 		const owners = ownersByBasket.get(assignment.basketIndex) ?? [];
 		owners.push(holeNumber);
@@ -500,6 +577,7 @@ function deriveP6LowParBasketAssignmentSnapshot(
 	const assignments = holeNumbers.map((holeNumber): P6BasketAssignment => {
 		const p4Hole = p4ByHole.get(holeNumber);
 		const p4BasketIndex = p4Locks.get(holeNumber) ?? null;
+		const zeroBendBasketIndex = zeroBendLocks.get(holeNumber) ?? null;
 		const p5Assignment = p5ByHole.get(holeNumber);
 		const lowParAssignment = assignedByHole.get(holeNumber);
 		const gateStats = gateStatsByHole.get(holeNumber);
@@ -518,6 +596,23 @@ function deriveP6LowParBasketAssignmentSnapshot(
 				assignmentReason: 'p4Locked',
 				lowParScore: null,
 				status: 'p4Locked'
+			};
+		}
+		if (zeroBendBasketIndex !== null && !duplicateRows.has(holeNumber)) {
+			return {
+				holeNumber,
+				teeIndex: p5Assignment?.teeIndex ?? null,
+				p4BasketStatus: p4Hole?.status ?? 'unresolved',
+				p4BasketIndex,
+				candidateBasketCount: 0,
+				candidatesBeforeGate: 0,
+				candidatesAfterGate: 0,
+				gateFallbackUsed: false,
+				assignedBasketIndex: zeroBendBasketIndex,
+				assignedForwardAngleDeg: null,
+				assignmentReason: 'zeroBendLocked',
+				lowParScore: null,
+				status: 'zeroBendLocked'
 			};
 		}
 		if (lowParAssignment && !duplicateRows.has(holeNumber)) {
@@ -558,6 +653,7 @@ function deriveP6LowParBasketAssignmentSnapshot(
 		assignments,
 		candidates: Array.from(candidatesByHole.values()).flat(),
 		lockedByP4: assignments.filter((assignment) => assignment.status === 'p4Locked').length,
+		lockedByZeroBend: assignments.filter((assignment) => assignment.status === 'zeroBendLocked').length,
 		assignedByLowPar: assignments.filter((assignment) => assignment.status === 'lowParAssigned').length,
 		unresolved: assignments.filter((assignment) => assignment.status === 'unresolved').length,
 		duplicateBaskets,
