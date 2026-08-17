@@ -19,6 +19,8 @@ import {
 	removeLastBend,
 	removeLastShot,
 	removeShot,
+	reassignShot,
+	reorderShot,
 	removeTee,
 	setAllCorridorWidths,
 	setBasket,
@@ -221,6 +223,38 @@ describe('moveShot', () => {
 		expect(result[0].shots).toEqual([
 			{ id: 'shot-1', landing: { xPx: 1, yPx: 2 } },
 			{ id: 'shot-2', landing: { xPx: 30, yPx: 40 } }
+		]);
+	});
+});
+
+describe('reorderShot / reassignShot', () => {
+	it('reorders by stable id while preserving landing values', () => {
+		const holes: AnnotatedHole[] = [emptyHole('a', 1, {
+			shots: [
+				{ id: 'first', landing: { xPx: 1, yPx: 1 } },
+				{ id: 'second', landing: { xPx: 2, yPx: 2 } },
+				{ id: 'third', landing: { xPx: 3, yPx: 3 } }
+			]
+		})];
+		const result = reorderShot(holes, 'a', 'third', 0);
+		expect(result[0].shots).toEqual([
+			{ id: 'third', landing: { xPx: 3, yPx: 3 } },
+			{ id: 'first', landing: { xPx: 1, yPx: 1 } },
+			{ id: 'second', landing: { xPx: 2, yPx: 2 } }
+		]);
+		expect(holes[0].shots[0].id).toBe('first');
+	});
+
+	it('reassigns one shot across holes without creating a new id', () => {
+		const holes: AnnotatedHole[] = [
+			emptyHole('a', 1, { shots: [{ id: 'stable', landing: { xPx: 10, yPx: 20 } }] }),
+			emptyHole('b', 2, { shots: [{ id: 'existing', landing: { xPx: 30, yPx: 40 } }] })
+		];
+		const result = reassignShot(holes, 'a', 'b', 'stable', 0);
+		expect(result.find((hole) => hole.id === 'a')?.shots).toEqual([]);
+		expect(result.find((hole) => hole.id === 'b')?.shots).toEqual([
+			{ id: 'stable', landing: { xPx: 10, yPx: 20 } },
+			{ id: 'existing', landing: { xPx: 30, yPx: 40 } }
 		]);
 	});
 });

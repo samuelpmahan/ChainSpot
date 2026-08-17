@@ -71,7 +71,9 @@
 		removeShot,
 		removeTee,
 		setAllCorridorWidths,
-		setCorridorWidth
+		setCorridorWidth,
+		reassignShot,
+		reorderShot
 	} from '$lib/holeAnnotation';
 	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
@@ -1516,6 +1518,24 @@
 	function handleRemoveLastShot(): void {
 		if (!activeHoleId) return;
 		holes = removeLastShot(holes, activeHoleId);
+	}
+
+	function handleReorderShot(shotId: string, delta: -1 | 1): void {
+		if (!activeHoleId) return;
+		const hole = holes.find((candidate) => candidate.id === activeHoleId);
+		if (!hole) return;
+		const currentIndex = hole.shots.findIndex((shot) => shot.id === shotId);
+		if (currentIndex < 0) return;
+		captureWorkflowSnapshot();
+		holes = reorderShot(holes, activeHoleId, shotId, currentIndex + delta);
+	}
+
+	function handleReassignShot(event: Event, fromHoleId: string, shotId: string): void {
+		const toHoleId = (event.currentTarget as HTMLSelectElement).value;
+		if (!toHoleId || toHoleId === fromHoleId) return;
+		captureWorkflowSnapshot();
+		holes = reassignShot(holes, fromHoleId, toHoleId, shotId);
+		activeHoleId = toHoleId;
 	}
 
 	function handleRemoveLastBend(): void {
@@ -3827,6 +3847,31 @@
 							<button type="button" data-testid="remove-last-bend" disabled={hole.corridorBends.length === 0} onclick={handleRemoveLastBend}>Undo bend</button>
 							<button type="button" data-testid="clear-bends" disabled={hole.corridorBends.length === 0} onclick={handleClearBends}>Clear bends</button>
 						</div>
+						{#if annotationMode === 'round' && hole.shots.length > 0}
+							<div class="shot-review" data-testid="shot-review">
+								<h3>Review shot order</h3>
+								<p class="empty-copy">Drag a landing to edit its position. Use the arrows for explicit order, or move a shot to another hole.</p>
+								<ol class="shot-order-list" data-testid="shot-order-list">
+									{#each hole.shots as shot, index (shot.id)}
+										<li data-testid="shot-row-{shot.id}">
+											<span class="shot-order-label">Shot {index + 1}</span>
+											<div class="shot-order-actions">
+												<button type="button" data-testid="shot-move-up-{shot.id}" disabled={index === 0} aria-label="Move shot up" onclick={() => handleReorderShot(shot.id, -1)}>↑</button>
+												<button type="button" data-testid="shot-move-down-{shot.id}" disabled={index === hole.shots.length - 1} aria-label="Move shot down" onclick={() => handleReorderShot(shot.id, 1)}>↓</button>
+												{#if holes.length > 1}
+													<select data-testid="shot-reassign-{shot.id}" aria-label="Assign shot to hole" value={hole.id} onchange={(event) => handleReassignShot(event, hole.id, shot.id)}>
+														<option value={hole.id}>Hole {hole.number}</option>
+														{#each holes.filter((candidate) => candidate.id !== hole.id) as targetHole (targetHole.id)}
+															<option value={targetHole.id}>Hole {targetHole.number}</option>
+														{/each}
+													</select>
+												{/if}
+											</div>
+										</li>
+									{/each}
+								</ol>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
@@ -5014,6 +5059,65 @@
 	.edit-actions {
 		display: grid;
 		gap: 0.35rem;
+	}
+
+	.shot-review {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		padding-top: 0.35rem;
+	}
+
+	.shot-review h3 {
+		margin: 0;
+		font-size: 0.76rem;
+		color: #d4d4d8;
+	}
+
+	.shot-order-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.shot-order-list li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.35rem;
+		padding: 0.25rem 0.35rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		font-size: 0.75rem;
+	}
+
+	.shot-order-label {
+		min-width: 3.4rem;
+		color: #e4e4e7;
+	}
+
+	.shot-order-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.shot-order-actions button {
+		min-height: 1.9rem;
+		padding: 0.15rem 0.45rem;
+	}
+
+	.shot-order-actions select {
+		min-height: 1.9rem;
+		max-width: 7rem;
+		border: 1px solid #52525b;
+		border-radius: 4px;
+		background: #18181b;
+		color: #f4f4f5;
+		font: inherit;
 	}
 
 	.apply-button {
