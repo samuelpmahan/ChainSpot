@@ -85,6 +85,9 @@
 	import { GraphicsMode } from '$lib/graphics/graphicsMode.svelte';
 	import { naipImageGeoReference } from '$lib/elevationProfile';
 	import type { GeoRasterReference } from '$lib/elevationProfile';
+	import PlayedRoundRegistration from '$lib/components/PlayedRoundRegistration.svelte';
+	import type { UsablePlayedRoundRegistration } from '$lib/playedRoundContract';
+	import type { RegistrationProofPoint } from '$lib/scene';
 
 	interface Props {
 		editor?: ProjectEditor;
@@ -369,6 +372,9 @@
 	 * as a note so the user can see it survived the workflow.
 	 */
 	let thrownRound = $state<ThrownRoundSource | null>(null);
+	let playedRoundRegistrationOpen = $state(false);
+	let playedRoundRegistrationConfirmed = $state<UsablePlayedRoundRegistration | null>(null);
+	let registrationProofPoints = $state<readonly RegistrationProofPoint[]>([]);
 
 	/**
 	 * Default *preview/reference* radius for the aerial pull: 300m, matching the
@@ -467,6 +473,22 @@
 	function targetImage(): ImageAsset | null {
 		void refreshCount;
 		return findImageByRole(editor.state.images, 'target-basemap') ?? null;
+	}
+
+	function openPlayedRoundRegistration(): void {
+		if (!thrownRound || !sourceImage() || !editor.getAssetResource(sourceImage()!.id)) return;
+		playedRoundRegistrationOpen = true;
+		registrationProofPoints = [];
+	}
+
+	function closePlayedRoundRegistration(): void {
+		playedRoundRegistrationOpen = false;
+		registrationProofPoints = [];
+	}
+
+	function confirmPlayedRoundRegistration(registration: UsablePlayedRoundRegistration): void {
+		playedRoundRegistrationConfirmed = registration;
+		activityMessage = 'Played-round registration confirmed for extraction. Corrections remain available.';
 	}
 
 	function canAddCorrespondence(): boolean {
@@ -2127,17 +2149,34 @@
 
 	{#if thrownRound && annotatedRound}
 		<!-- CHSPT-65: visibility only — the thrown-round source lives in its own
-		     session slot and never enters an image role here; registering its
-		     graphics onto the clean target is a follow-up ticket. Gated on the
+		     session slot and never replaces an image role here; registration is
+		     a separate played → clean-course handoff. Gated on the
 		     annotated course being present: the note claims the round rides
 		     "with this course", so the direct-upload path (no course) must not
 		     surface a leftover slot as if it belonged to it. -->
 		<section class="thrown-round-note" data-testid="thrown-round-note" aria-live="polite">
 			<p>
-				Thrown-round image “{thrownRound.fileName}” is riding along with this course. Mapping its
-				round graphics onto the clean target comes in a later step.
+				Thrown-round image “{thrownRound.fileName}” is riding along with this course. Register its
+				pixels against the clean UDisc course, then review the composed clean-course → target proof.
 			</p>
+			{#if !playedRoundRegistrationOpen}
+				<button type="button" data-testid="open-played-round-registration" onclick={openPlayedRoundRegistration}>
+					{playedRoundRegistrationConfirmed ? 'Review played-round registration' : 'Register played round'}
+				</button>
+			{/if}
 		</section>
+	{/if}
+
+	{#if playedRoundRegistrationOpen && thrownRound && sourceImage()}
+		<PlayedRoundRegistration
+			playedRound={thrownRound}
+			cleanSource={sourceImage()!}
+			cleanSourceResource={editor.getAssetResource(sourceImage()!.id)!}
+			cleanToTarget={alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null}
+			onClose={closePlayedRoundRegistration}
+			onConfirm={confirmPlayedRoundRegistration}
+			onProofPoints={(points) => (registrationProofPoints = points)}
+		/>
 	{/if}
 
 	{#if cleanTargetFirst()}
@@ -2179,6 +2218,7 @@
 			{markersVisible}
 			ghostCourse={graphicsMode.plans}
 			ghostCourseVisible={ghostCoursePreviewVisible}
+			registrationProofPoints={registrationProofPoints}
 			rotationDeg={targetRotationDraft}
 			onRotationInput={handleTargetRotationInput}
 			onRotationCommit={handleTargetRotationCommit}

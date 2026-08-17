@@ -139,6 +139,13 @@ export interface GhostCourseHole {
 	readonly centerline: readonly GhostPoint[];
 }
 
+/** Non-interactive proof points for the played-round -> clean-target chain. */
+export interface RegistrationProofPoint {
+	readonly id: string;
+	readonly xPx: number;
+	readonly yPx: number;
+}
+
 /**
  * Ghost-course visual constants. Deliberately translucent and desaturated
  * relative to `markerVisualSpec`'s correspondence-marker palette (opaque
@@ -207,6 +214,8 @@ export interface PaneScene {
 	setGhostCourse(holes: readonly GhostCourseHole[]): void;
 	/** Transient ghost-course overlay visibility; rendering-only, same contract as `setMarkersVisible`. */
 	setGhostCourseVisible(visible: boolean): void;
+	/** Replaces the transient composed-registration proof points. */
+	setRegistrationProofPoints(points: readonly RegistrationProofPoint[]): void;
 	setStageSize(width: number, height: number): void;
 	/**
 	 * True when the stage has a shape at `pointer` belonging to the control-point
@@ -249,6 +258,8 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 	rasterLayer.add(rasterGroup);
 	const ghostCourseGroup = new Konva.Group({ name: 'ghostCourseViewGroup', listening: false });
 	ghostCourseLayer.add(ghostCourseGroup);
+	const registrationProofGroup = new Konva.Group({ name: 'registrationProofGroup', listening: false });
+	ghostCourseLayer.add(registrationProofGroup);
 	const controlPointGroup = new Konva.Group({ name: 'controlPointViewGroup' });
 	controlPointLayer.add(controlPointGroup);
 
@@ -479,7 +490,7 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 				x: transform.panX + transform.zoom * centerX,
 				y: transform.panY + transform.zoom * centerY
 			};
-			for (const group of [rasterGroup, ghostCourseGroup, controlPointGroup]) {
+			for (const group of [rasterGroup, ghostCourseGroup, controlPointGroup, registrationProofGroup]) {
 				group.offset({ x: centerX, y: centerY });
 				group.position(position);
 				group.scale({ x: transform.zoom, y: transform.zoom });
@@ -524,6 +535,25 @@ export function createPaneScene(container: HTMLDivElement): PaneScene {
 
 		setGhostCourseVisible(visible) {
 			ghostCourseLayer.visible(visible);
+			ghostCourseLayer.batchDraw();
+		},
+		setRegistrationProofPoints(points) {
+			registrationProofGroup.destroyChildren();
+			for (const point of points) {
+				registrationProofGroup.add(
+					new Konva.Circle({
+						name: 'registrationProofPoint',
+						x: point.xPx,
+						y: point.yPx,
+						radius: 9,
+						fill: 'rgba(192, 132, 252, 0.28)',
+						stroke: '#d8b4fe',
+						strokeWidth: 2,
+						strokeScaleEnabled: false,
+						listening: false
+					})
+				);
+			}
 			ghostCourseLayer.batchDraw();
 		},
 

@@ -33,7 +33,7 @@
 	} from '$lib/imageIntake';
 	import type { DecodeImageFile } from '$lib/imageIntake';
 	import { canvas2dAvailable, createPaneScene } from '$lib/scene';
-	import type { GhostCourseHole, MarkerHitResult, MarkerSceneData } from '$lib/scene';
+	import type { GhostCourseHole, MarkerHitResult, MarkerSceneData, RegistrationProofPoint } from '$lib/scene';
 	import type { PaneScene } from '$lib/scene';
 	import type { PointSelection } from '$lib/pointSelection';
 	import { selectionMatches } from '$lib/pointSelection';
@@ -67,6 +67,8 @@
 		ghostCourse?: readonly GhostCourseHole[];
 		/** Transient ghost-course overlay visibility; rendering only, never domain state. */
 		ghostCourseVisible?: boolean;
+		/** Composed played-round registration proof points, target-pane only. */
+		registrationProofPoints?: readonly RegistrationProofPoint[];
 		/**
 		 * Manual clean-target rotation about the image center, in degrees (CHSPT-44).
 		 * Only rendered/applied for the `target-basemap` pane; ignored for
@@ -74,6 +76,8 @@
 		 * rotation control is mid-gesture — see `onRotationInput`/`onRotationCommit`.
 		 */
 		rotationDeg?: number;
+		/** Allows a target-role pane to be reused as a clean-course surface without exposing target-pose controls. */
+		showRotationControls?: boolean;
 		/** Fires continuously while the caller's rotation control is being dragged/typed; never touches durable state. */
 		onRotationInput?: (rotationDeg: number) => void;
 		/** Fires once a rotation gesture ends (release, blur, or Reset); the caller commits this to durable state. */
@@ -99,7 +103,9 @@
 		markersVisible = true,
 		ghostCourse = [],
 		ghostCourseVisible = true,
+		registrationProofPoints = [],
 		rotationDeg = 0,
+		showRotationControls = true,
 		onRotationInput,
 		onRotationCommit,
 		decode = decodeImageFile,
@@ -562,6 +568,7 @@
 			scene?.setMarkers(markers);
 		}
 		scene?.setGhostCourseVisible(ghostCourseVisible);
+			scene?.setRegistrationProofPoints?.(role === 'target-basemap' ? registrationProofPoints : []);
 		// Fingerprint only the fields `createGhostHole` (scene.ts) actually reads. The
 		// caller may pass a `HoleGraphicPlan[]` here (it structurally satisfies
 		// `GhostCourseHole[]`), whose `crop`/`targetRotationDeg`/other export-only fields
@@ -710,7 +717,7 @@
 		</button>
 	</div>
 
-	{#if role === 'target-basemap'}
+	{#if role === 'target-basemap' && showRotationControls}
 		<!-- Manual clean-target rotation (CHSPT-44): rotate the target image about its own
 		     center to roughly match the UDisc source's orientation before/while reviewing
 		     transferred course geometry. Arbitrary-angle, never limited to 90deg steps. -->
