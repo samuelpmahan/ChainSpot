@@ -11,9 +11,20 @@ import type { RawObjectMaskResult } from './rawObjectMask';
 const PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1);
 
 /**
- * Adapts the pancake ownership outputs into the existing grammar/result shape
- * consumed by Annotate Course. This is a display adapter only: P5/P6 have
- * already completed their ownership decisions before this function runs.
+ * Compatibility value consumed by Annotate Course's legacy `confidence >=
+ * threshold` auto-apply branch. P5/P6 do NOT produce a normalized confidence;
+ * their real scores are respectively axis-error cost and LowPar score. Never
+ * report this value as detector confidence. The funnel trace reads P5/P6's
+ * real scores and labels this only as UI eligibility.
+ */
+export const PANCAKE_UI_ELIGIBILITY_SENTINEL = 1;
+
+/**
+ * Adapts Pancake ownership outputs into the older CourseGrammarResult shape
+ * consumed by Annotate Course. P5/P6 have already made their ownership
+ * decisions. Extra runtime-only `landmarkKind`/footprint fields travel only
+ * as far as `acceptCandidate()`, where they record the exact user-surface
+ * event and are then discarded from authoritative domain state.
  */
 export function buildPancakeDisplayGrammar(
 	rawMaskObjects: RawObjectMaskResult,
@@ -29,9 +40,7 @@ export function buildPancakeDisplayGrammar(
 	const p6ByHole = new Map(
 		p6.assignments
 			.filter(
-				(
-					assignment
-				): assignment is typeof assignment & { readonly assignedBasketIndex: number } =>
+				(assignment): assignment is typeof assignment & { readonly assignedBasketIndex: number } =>
 					(assignment.status === 'p4Locked' ||
 						assignment.status === 'zeroBendLocked' ||
 						assignment.status === 'lowParAssigned') &&
@@ -56,41 +65,24 @@ export function buildPancakeDisplayGrammar(
 		const p6Assignment = p6ByHole.get(holeNumber);
 		const badgeEntry = badgeByHole.get(holeNumber);
 		const tee = p5Assignment ? rawMaskObjects.tees[p5Assignment.teeIndex] : undefined;
-		const basket = p6Assignment
-			? rawMaskObjects.baskets[p6Assignment.assignedBasketIndex]
-			: undefined;
+		const basket = p6Assignment ? rawMaskObjects.baskets[p6Assignment.assignedBasketIndex] : undefined;
 		const holeFailures: CourseGrammarFailure[] = [];
 
-		if (badgeEntry) {
-			assignedBadgeIndexes.add(badgeEntry.candidateIndex);
-		} else {
-			holeFailures.push({
-				kind: 'missing-number-badge',
-				severity: 'error',
-				holeNumber,
-				message: `Hole ${holeNumber} has no P2-labeled number badge.`
-			});
-		}
-		if (tee && p5Assignment) {
-			assignedTeeIndexes.add(p5Assignment.teeIndex);
-		} else {
-			holeFailures.push({
-				kind: 'missing-tee',
-				severity: 'error',
-				holeNumber,
-				message: `Hole ${holeNumber} has no assigned P5 tee.`
-			});
-		}
-		if (basket && p6Assignment) {
-			assignedBasketIndexes.add(p6Assignment.assignedBasketIndex);
-		} else {
-			holeFailures.push({
-				kind: 'missing-basket',
-				severity: 'error',
-				holeNumber,
-				message: `Hole ${holeNumber} has no assigned P6 basket.`
-			});
-		}
+		if (badgeEntry) assignedBadgeIndexes.add(badgeEntry.candidateIndex);
+		else holeFailures.push({
+			kind: 'missing-number-badge', severity: 'error', holeNumber,
+			message: `Hole ${holeNumber} has no P2-labeled number badge.`
+		});
+		if (tee && p5Assignment) assignedTeeIndexes.add(p5Assignment.teeIndex);
+		else holeFailures.push({
+			kind: 'missing-tee', severity: 'error', holeNumber,
+			message: `Hole ${holeNumber} has no assigned P5 tee.`
+		});
+		if (basket && p6Assignment) assignedBasketIndexes.add(p6Assignment.assignedBasketIndex);
+		else holeFailures.push({
+			kind: 'missing-basket', severity: 'error', holeNumber,
+			message: `Hole ${holeNumber} has no assigned P6 basket.`
+		});
 
 		const badgeConfidence = badgeEntry?.candidate.glyphScore ?? badgeEntry?.candidate.score ?? 0;
 		const numberBadge = badgeEntry
@@ -102,25 +94,36 @@ export function buildPancakeDisplayGrammar(
 					cost: 1 - badgeConfidence
 				}
 			: undefined;
+
 		const teeAssignment = tee && p5Assignment
 			? {
 					candidateIndex: p5Assignment.teeIndex,
 					xPx: tee.xPx,
 					yPx: tee.yPx,
-					detectorConfidence: 1,
-					confidence: 1,
-					distancePx: p5Assignment.assignedAxisErrorPx ?? 0
+					// Legacy compatibility fields; see PANCAKE_UI_ELIGIBILITY_SENTINEL.
+					detectorConfidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
+					confidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
+					distancePx: p5Assignment.assignedAxisErrorPx ?? 0,
+					// Runtime-only funnel evidence; acceptCandidate strips these.
+					landmarkKind: 'tee' as const,
+					widthPx: tee.widthPx,
+					heightPx: tee.heightPx
 				}
 			: undefined;
+
 		const basketAssignment = basket && p6Assignment
 			? {
 					candidateIndex: p6Assignment.assignedBasketIndex,
 					xPx: basket.xPx,
 					yPx: basket.yPx,
-					detectorConfidence: 1,
-					confidence: 1,
+					// Legacy compatibility fields; P6's real score is `lowParScore`.
+					detectorConfidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
+					confidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
 					distancePx: 0,
-					cost: 0
+					cost: 0,
+					landmarkKind: 'basket' as const,
+					widthPx: basket.widthPx,
+					heightPx: basket.heightPx
 				}
 			: undefined;
 
@@ -131,7 +134,8 @@ export function buildPancakeDisplayGrammar(
 			...(numberBadge ? { numberBadge } : {}),
 			...(teeAssignment ? { tee: teeAssignment } : {}),
 			...(basketAssignment ? { basket: basketAssignment } : {}),
-			confidence: complete ? 1 : 0,
+			// Compatibility readiness sentinel, not a calibrated pipeline score.
+			confidence: complete ? PANCAKE_UI_ELIGIBILITY_SENTINEL : 0,
 			status: complete ? 'ready' : 'incomplete',
 			failures: holeFailures
 		};
