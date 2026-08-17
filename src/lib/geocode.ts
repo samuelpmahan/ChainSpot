@@ -19,11 +19,21 @@
  * Same typed-result convention as `src/lib/naip.ts`: failures are returned, not thrown.
  */
 
-import type { GeoPoint } from './naip';
+import type { GeoBoundingBox, GeoPoint } from './naip';
 
 /** One geocoding match: a human-readable place name plus its coordinate. */
 export interface GeoSearchMatch extends GeoPoint {
 	displayName: string;
+	/**
+	 * The provider's bounding box for the place, when it supplied one (CHSPT-68).
+	 * Arrives in the SAME response as the match itself — Nominatim's
+	 * `boundingbox` field, Places' `viewport` — never via an extra request.
+	 * Optional and best-effort: for point-only features providers return a
+	 * degenerate box or none at all, so consumers must treat absence (and
+	 * tiny boxes — see `fetchGeometryFromViewport` in `naipCoverage.ts`) as
+	 * "size unknown".
+	 */
+	viewport?: GeoBoundingBox;
 }
 
 const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
@@ -68,6 +78,24 @@ interface NominatimResult {
 	lat: string;
 	lon: string;
 	display_name: string;
+	/** `[minLat, maxLat, minLon, maxLon]` as strings, per Nominatim's JSON formats. */
+	boundingbox?: unknown;
+}
+
+/**
+ * Parses Nominatim's `boundingbox` array defensively: exactly four finite
+ * numeric strings, min not exceeding max on both axes. Anything else yields
+ * `undefined` — a malformed box must never fail an otherwise-good match.
+ */
+function parseNominatimBoundingBox(value: unknown): GeoBoundingBox | undefined {
+	if (!Array.isArray(value) || value.length !== 4) return undefined;
+	const numbers = value.map((entry) =>
+		typeof entry === 'string' || typeof entry === 'number' ? Number(entry) : Number.NaN
+	);
+	if (numbers.some((entry) => !Number.isFinite(entry))) return undefined;
+	const [minLat, maxLat, minLon, maxLon] = numbers;
+	if (minLat > maxLat || minLon > maxLon) return undefined;
+	return { minLat, maxLat, minLon, maxLon };
 }
 
 function isNominatimResult(value: unknown): value is NominatimResult {
@@ -121,11 +149,15 @@ export async function searchPlace(
 		};
 	}
 
-	const matches: GeoSearchMatch[] = results.map((result) => ({
-		displayName: result.display_name,
-		lat: Number(result.lat),
-		lon: Number(result.lon)
-	}));
+	const matches: GeoSearchMatch[] = results.map((result) => {
+		const viewport = parseNominatimBoundingBox(result.boundingbox);
+		return {
+			displayName: result.display_name,
+			lat: Number(result.lat),
+			lon: Number(result.lon),
+			...(viewport ? { viewport } : {})
+		};
+	});
 
 	return { ok: true, matches };
 }

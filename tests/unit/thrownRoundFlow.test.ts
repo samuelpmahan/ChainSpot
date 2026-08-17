@@ -181,33 +181,36 @@ describe('thrown-round session slot (CHSPT-65)', () => {
 	});
 });
 
-describe('Create Graphics: Fetch Clean Target ordering (CHSPT-65)', () => {
-	it('renders the NAIP fetch section above the panes when holes exist with no committed clean target', async () => {
+describe('Create Graphics: Fetch Clean Target lives in the Clean target pane (CHSPT-68)', () => {
+	it('renders no standalone naip-fetch section in either position; the pane invitation is the front door', async () => {
 		const { component, host } = mountInjected(makeEditor([HOLE]));
 		await flush();
 
-		const naip = host.querySelector('[data-testid="naip-fetch"]');
-		const panes = host.querySelector('section.panes');
-		expect(naip).not.toBeNull();
-		expect(panes).not.toBeNull();
-		// Exactly one instance — the snippet renders in one position or the other.
-		expect(host.querySelectorAll('[data-testid="naip-fetch"]')).toHaveLength(1);
-		expect(precedes(naip as Element, panes as Element)).toBe(true);
+		// CHSPT-68 dissolved the section (and CHSPT-65's above-the-panes
+		// placement of it) into the Clean target pane.
+		expect(host.querySelector('[data-testid="naip-fetch"]')).toBeNull();
+		const invite = host.querySelector('[data-testid="clean-target-invite"]');
+		expect(invite).not.toBeNull();
+		const stack = host.querySelector('[data-testid="target-pane-stack"]');
+		expect(stack?.contains(invite)).toBe(true);
+		// The source pane is NOT covered by any of the flow's overlays.
+		const sourcePane = host.querySelector('[data-testid="pane-source-overview"]');
+		expect(sourcePane).not.toBeNull();
+		expect(stack?.contains(sourcePane)).toBe(false);
 
 		unmount(component);
 		host.remove();
 	});
 
-	it('keeps the existing order (panes first) for the direct-upload entry with no annotation', async () => {
+	it('keeps the invitation (not a section) for the direct-upload entry with no annotation, upload affordance intact', async () => {
 		const { component, host } = mountInjected(makeEditor());
 		await flush();
 
-		const naip = host.querySelector('[data-testid="naip-fetch"]');
-		const panes = host.querySelector('section.panes');
-		expect(naip).not.toBeNull();
-		expect(panes).not.toBeNull();
-		expect(host.querySelectorAll('[data-testid="naip-fetch"]')).toHaveLength(1);
-		expect(precedes(panes as Element, naip as Element)).toBe(true);
+		expect(host.querySelector('[data-testid="naip-fetch"]')).toBeNull();
+		expect(host.querySelector('[data-testid="clean-target-invite"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="open-location-search"]')).not.toBeNull();
+		// Direct upload is untouched: the pane's own chooser stays reachable.
+		expect(host.querySelector('[data-testid="pane-choose-target-basemap"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();

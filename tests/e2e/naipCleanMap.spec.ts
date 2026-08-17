@@ -97,27 +97,41 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 		await route.fulfill({ status: 200, contentType: 'image/png', body: tilePng });
 	});
 
-	// 1. Search by course name alone — city/state is optional precisely for courses
-	// whose town the user doesn't know off-hand.
+	// 1. CHSPT-68: the search lives in a modal over the Clean target pane. Search
+	// by course name alone — city/state is optional precisely for courses whose
+	// town the user doesn't know off-hand.
+	await page.getByTestId('open-location-search').click();
+	await expect(page.getByTestId('location-modal')).toBeVisible();
 	await page.getByTestId('geocode-park-name').fill("Dash's Track");
 	await page.getByTestId('geocode-search-button').click();
 	await expect(page.getByTestId('geocode-results')).toBeVisible();
 	expect(lastNominatimQuery).toBe("Dash's Track");
-	await page.getByTestId('geocode-result-0').click();
-	await expect(page.getByTestId('naip-lat')).toHaveValue('33.1255198');
-	await expect(page.getByTestId('naip-lon')).toHaveValue('-96.8610387');
 
-	// 2. Fetch the reference preview at the default 300m radius.
-	await expect(page.getByTestId('naip-radius')).toHaveValue('300');
-	await page.getByTestId('naip-fetch-button').click();
+	// 2. Picking the (boxless) result closes the modal and fetches the aerial at
+	// the default 300m radius immediately — the in-pane preview is the confirm step.
+	await page.getByTestId('geocode-result-0').click();
+	await expect(page.getByTestId('location-modal')).toBeHidden();
 	await expect(page.getByTestId('naip-preview')).toBeVisible();
 	expect(naipRequestCount).toBe(1);
 
-	// 3. The default coverage box (90% of the 1800m preview) plans a 3x3, 9-tile grid.
-	await expect(page.getByTestId('naip-grid-plan')).toContainText('3 x 3 tiles');
+	// 3. "Pick a different spot" reopens the modal; the advanced entry refetches
+	// the same coordinate at a wider 900m radius (the picked lat/lon survived).
+	await page.getByTestId('naip-change-location').click();
+	await expect(page.getByTestId('location-modal')).toBeVisible();
+	await page.locator('[data-testid="naip-manual-entry"] > summary').click();
+	await expect(page.getByTestId('naip-lat')).toHaveValue('33.1255198');
+	await page.getByTestId('naip-radius').fill('900');
+	await page.getByTestId('naip-fetch-button').click();
+	await expect(page.getByTestId('naip-preview')).toBeVisible();
+	expect(naipRequestCount).toBe(2);
+
+	// 4. The preview's advanced disclosure hosts the coverage box; the default
+	// box (90% of the 1800m preview) plans a 3x3, 9-part grid.
+	await page.locator('[data-testid="naip-advanced"] > summary').click();
+	await expect(page.getByTestId('naip-grid-plan')).toContainText('3 x 3 parts');
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('9 images');
 
-	// 4. Dragging the southeast handle inward shrinks the box and the plan recomputes
+	// 5. Dragging the southeast handle inward shrinks the box and the plan recomputes
 	// live, with no fetch involved — pure geometry.
 	const seHandle = page.getByTestId('naip-box-handle-se');
 	await seHandle.scrollIntoViewIfNeeded();
@@ -129,16 +143,16 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 	await page.mouse.down();
 	await page.mouse.move(startX - 200, startY - 200, { steps: 10 });
 	await page.mouse.up();
-	await expect(page.getByTestId('naip-grid-plan')).toContainText('2 x 2 tiles');
+	await expect(page.getByTestId('naip-grid-plan')).toContainText('2 x 2 parts');
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('4 images');
 
-	// 5. Fetching the grid pulls exactly the planned tile count (not the original 9)
+	// 6. Fetching the grid pulls exactly the planned tile count (not the original 9)
 	// and assembles one mosaic preview.
 	await page.getByTestId('naip-grid-fetch-button').click();
 	await expect(page.getByTestId('naip-grid-preview')).toBeVisible({ timeout: 15000 });
-	expect(naipRequestCount).toBe(5); // 1 overview + 4 grid tiles
+	expect(naipRequestCount).toBe(6); // 300m overview + 900m overview + 4 grid tiles
 
-	// 6. Committing routes through the normal intake path, same as a manual upload.
+	// 7. Committing routes through the normal intake path, same as a manual upload.
 	await page.getByTestId('naip-grid-use').click();
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('naip-tile-grid.png');
 	await expect(page.getByTestId('naip-preview')).toBeHidden();
@@ -150,7 +164,7 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 	);
 });
 
-test('NAIP clean-map pipeline: "Use this preview as-is" commits the single reference image without tiling', async ({
+test('NAIP clean-map pipeline: manual coordinates behind the modal advanced toggle commit the single reference image', async ({
 	page
 }) => {
 	await gotoApp(page);
@@ -159,9 +173,14 @@ test('NAIP clean-map pipeline: "Use this preview as-is" commits the single refer
 		await route.fulfill({ status: 200, contentType: 'image/png', body: pngPayload(2048, 2048) });
 	});
 
+	// Manual coordinates stay reachable, behind the modal's advanced disclosure.
+	await page.getByTestId('open-location-search').click();
+	await page.locator('[data-testid="naip-manual-entry"] > summary').click();
 	await page.getByTestId('naip-lat').fill('33.1255198');
 	await page.getByTestId('naip-lon').fill('-96.8610387');
+	await expect(page.getByTestId('naip-radius')).toHaveValue('300');
 	await page.getByTestId('naip-fetch-button').click();
+	await expect(page.getByTestId('location-modal')).toBeHidden();
 	await expect(page.getByTestId('naip-preview')).toBeVisible();
 
 	await page.getByTestId('naip-use').click();

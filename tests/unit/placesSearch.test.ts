@@ -41,7 +41,9 @@ describe('searchPlacesText', () => {
 		const headers = capturedInit?.headers as Record<string, string>;
 		expect(headers['Content-Type']).toBe('application/json');
 		expect(headers['X-Goog-Api-Key']).toBe('test-key-123');
-		expect(headers['X-Goog-FieldMask']).toBe('places.displayName,places.formattedAddress,places.location');
+		expect(headers['X-Goog-FieldMask']).toBe(
+			'places.displayName,places.formattedAddress,places.location,places.viewport'
+		);
 		expect(JSON.parse(String(capturedInit?.body))).toEqual({
 			textQuery: "Dash's Track, Frisco, TX",
 			regionCode: 'us',
@@ -82,6 +84,52 @@ describe('searchPlacesText', () => {
 			lat: 34.0,
 			lon: -97.0
 		});
+	});
+
+	test('carries a well-formed viewport through to the match and drops malformed ones (CHSPT-68)', async () => {
+		const okFetch: FetchLike = async () =>
+			new Response(
+				JSON.stringify({
+					places: [
+						{
+							displayName: { text: 'Boxed Course' },
+							location: { latitude: 33.1255, longitude: -96.861 },
+							viewport: {
+								low: { latitude: 33.12, longitude: -96.87 },
+								high: { latitude: 33.13, longitude: -96.85 }
+							}
+						},
+						{
+							displayName: { text: 'Inverted Box Course' },
+							location: { latitude: 34.0, longitude: -97.0 },
+							viewport: {
+								low: { latitude: 34.2, longitude: -97.0 },
+								high: { latitude: 34.1, longitude: -96.9 }
+							}
+						},
+						{
+							displayName: { text: 'Malformed Box Course' },
+							location: { latitude: 35.0, longitude: -98.0 },
+							viewport: { low: { latitude: '35' }, high: null }
+						}
+					]
+				}),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			);
+
+		const result = await searchPlacesText('Boxed Course', 'key', { fetch: okFetch });
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.matches[0].viewport).toEqual({
+			minLat: 33.12,
+			maxLat: 33.13,
+			minLon: -96.87,
+			maxLon: -96.85
+		});
+		// A bad box never fails the match itself.
+		expect(result.matches[1].viewport).toBeUndefined();
+		expect(result.matches[1].lat).toBe(34.0);
+		expect(result.matches[2].viewport).toBeUndefined();
 	});
 
 	test('reports a network failure as a typed result instead of throwing', async () => {
