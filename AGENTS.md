@@ -17,61 +17,24 @@ Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No back
 - Before making changes, inspect `git status --short` and preserve unrelated user changes.
 - Try not to run E2E tests or tests involving browser control for now unless they are the highest-value proof for the task. This is still a build-out and the user frequently performs manual browser acceptance. Never substitute unit/type checks for a browser interaction that they cannot prove.
 
-## Task creation, review, staging, and merge
+## Task workflow — defer to Linear
 
-The canonical product/process definition lives in Linear: **Development Task Creation, Review & Merge Workflow**. These repo rules are the operational mirror. If they drift, update `AGENTS.md` to match Linear rather than inventing a third workflow.
+The single canonical workflow definition lives in Linear: **ChainSpot Development Workflow**
+(https://linear.app/chainspot/document/chainspot-development-workflow-fe350a97c5b9).
+Read it before starting any task. This file deliberately does not mirror it; if the two ever
+appear to disagree, the Linear document wins and this pointer gets fixed.
 
-### Artifact ownership
+The non-negotiables you will find defined there:
 
-- **Linear ticket** — permanent product intent: problem, desired behavior, scope/non-goals, acceptance criteria, known repros/fixtures.
-- **`.task/<LINEAR-ID>.md`** — branch-only implementation contract and implementer Proof Plan. It must not accumulate on `main`.
-- **Implementer Review Brief** — short factual handoff for an independent reviewer. Put it in the PR or Linear discussion, not another committed Markdown file.
-- **`CHANGELOG-dev.md`** — rolling record of what actually landed and how it was verified. During pre-version development, condense/reset it every few days as useful; Git history preserves prior contents. Once releases matter, promote useful entries into `CHANGELOG.md` and reset the dev log.
-- **Code/tests/permanent docs** — durable system truth.
-
-Rule: Linear says what we wanted; `.task` says what the agent was authorized to do; the Review Brief says what the implementer changed and tried to prove; `CHANGELOG-dev.md` says what landed; executable code/tests/docs say how the system really works.
-
-### Task start
-
-For a normal implementation task:
-
-1. Create/read the Linear ticket first.
-2. Create a branch from the intended base, normally current `main`; prefer Linear's generated branch name.
-3. Before production-code changes, commit `.task/<LINEAR-ID>.md` as the task-definition commit.
-4. The task file must state Goal, Required behavior, Non-goals, Known context, Acceptance, and a **Proof Plan** section.
-5. Before implementation, the implementer fills the Proof Plan in roughly 3–5 bullets: highest-value invariant, key regression test, whether browser/manual proof is required, nearby regression risk, and important automated-test limitations.
-6. If repo reality materially contradicts the task, report the conflict instead of silently redesigning the task.
-
-### Implementation and review
-
-- Stay inside authorized scope unless the task definition becomes invalid.
-- Durable discoveries belong in existing permanent docs, not in `.task`.
-- After implementation, provide a short **Review Brief** containing: Changed, Proof attempted, Highest-risk assumptions, and Please independently verify.
-- The implementer's own correctness explanation is not an independent correctness verdict.
-- A fresh reviewer must read the Linear ticket, `.task`, diff/tests, and Review Brief, then independently judge both implementation correctness and whether the proposed proof actually proves the behavior.
-- Reproduce the highest-risk behavior where practical. Give extra scrutiny to browser interaction, coordinate transforms, cross-route handoffs, state synchronization, timing, and other integrated behavior that isolated tests can miss.
-- Accepted review findings return to the implementation/review loop before merge prep.
-
-### Merge prep
-
-Once review findings are resolved, a merge-prep pass must:
-
-1. update permanent docs only if durable knowledge changed;
-2. create or append `CHANGELOG-dev.md` with the behavior that actually landed and the verification/review result;
-3. delete `.task/<LINEAR-ID>.md`;
-4. run the appropriate verification for the reviewed branch;
-5. make no new feature changes during merge prep.
-
-`.task/` should be empty on a merge-ready branch unless multiple already-reviewed tasks are intentionally being merged together. The deleted task definition remains available in Git history.
-
-### Staging and manual acceptance
-
-- Production repo: `samuelpmahan/ChainSpot`; production deploys only from `main`.
-- Staging repo: `samuelpmahan/ChainSpot-staging`.
-- Preferred gate: `implementation -> fresh review -> merge prep -> staging -> manual acceptance -> merge main -> production`.
-- Build the exact reviewed/merge-prep ChainSpot SHA and publish that build to `ChainSpot-staging`. Staging represents the one change/set currently awaiting manual acceptance, not a permanent parallel development branch.
-- A staging failure returns to the same Linear task unless required scope materially changes. Fix, re-review as appropriate, then redeploy the new reviewed SHA.
-- Merge the manually accepted SHA, or a mechanically rebased equivalent with no behavior changes. Do not make behavior changes between staging acceptance and production merge.
+- Linear ticket first; then a branch **from the intended base** — normally current `main`,
+  with the document defining how the base is chosen for work that depends on an unmerged
+  branch, and why `staging/*` accumulation branches are never a base. Prefer Linear's
+  generated branch name.
+- The first task-specific commit is `.task/<LINEAR-ID>.md` (task definition + implementer
+  Proof Plan before any production code).
+- Then: implementation → implementer Review Brief → fresh independent review → merge prep
+  (delete `.task`, update `CHANGELOG-dev.md`) → staging deployment → manual acceptance →
+  merge to `main` → production.
 
 ## Long-running tasks
 
