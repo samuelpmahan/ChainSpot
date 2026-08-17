@@ -6,7 +6,7 @@
     "cliVersion": "1.18.18",
     "provider": "opencode-go",
     "status": "active",
-    "measuredGoCostEquivalentUsd": 0.458052971,
+    "measuredGoCostEquivalentUsd": 0.546454971,
     "usageConsumedPercent": "not exposed by CLI",
     "notes": [
       "OpenCode Go is distinct from OpenCode Zen; its namespace is opencode-go/*.",
@@ -147,6 +147,43 @@
         "additionalReworkCostUsd": 0.055216,
         "finalResult": "accepted after Qwen reissued a corrected review",
         "notes": "The continued Qwen session explicitly withdrew both misconceptions, replaced the synthetic experiment with acquisition of labeled real captures, and moved renderer forensics out of the played-round extractor until direct compositing evidence exists."
+      },
+      {
+        "taskId": "CQ-CHSPT70-FRESH-QWEN38",
+        "leadOwner": "Sol",
+        "model": "opencode-go/qwen3.8-max",
+        "roleTaskClass": "fresh code review of the CHSPT-70 vision candidate",
+        "approximateContextTokensObserved": 23351,
+        "goUsageCostUsd": 0.088402,
+        "wallClockSeconds": 441,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 2,
+        "defectsFoundByReviewer": [
+          "upstream endpoint failures prevented an independent code read",
+          "final report repeated the earlier collision concern after explicitly admitting it could not inspect the corrected code"
+        ],
+        "reworkRounds": 1,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "rejected as a code review; retained only as a risk checklist",
+        "notes": "The review correctly refused to fabricate line evidence, but could not evaluate the corrected candidate. Sol and an independent Codex reviewer later confirmed and fixed the collision, provenance, and evidence issues."
+      },
+      {
+        "taskId": "CQ-PRESTAGING-FINAL-QWEN38",
+        "leadOwner": "Sol",
+        "model": "opencode-go/qwen3.8-max",
+        "roleTaskClass": "adversarial review of the assembled prestaging/demo branch",
+        "approximateContextTokensObserved": 0,
+        "goUsageCostUsd": 0,
+        "wallClockSeconds": 220,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 0,
+        "defectsFoundByReviewer": [
+          "all three correctly scoped attempts failed before repository inspection with upstream endpoint unavailable"
+        ],
+        "reworkRounds": 2,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "rejected for provider availability; no code verdict produced",
+        "notes": "One additional continuation attempt was discarded because the old session remained bound to the superseded vision worktree. Two fresh sessions used prestaging/demo and both failed upstream before reading code."
       }
     ],
     "infrastructureChecks": [
@@ -170,7 +207,7 @@
   },
   "codexBudgetGuard": {
     "requestedMaximumPercent": 50,
-    "additionalSubagentsSpawnedAfterGuard": 0,
+    "additionalSubagentsSpawnedAfterGuard": 1,
     "activeAgentsAtRecordTime": 1
   },
   "derivedMetrics": {
@@ -182,7 +219,7 @@
       "opencode-go/gpt-5.6-luna-high": 3,
       "opencode-go/glm-5.2": 2,
       "opencode-go/deepseek-v4-flash": 4,
-      "opencode-go/qwen3.8-max": 3,
+      "opencode-go/qwen3.8-max": 2.5,
       "opencode/deepseek-v4-flash-free": 2,
       "opencode/mimo-v2.5-free": 1
     }
@@ -225,7 +262,7 @@
       "Small code-in-prompt diagnosis: DeepSeek V4 Flash Free beat MiMo-V2.5 Free on correctness despite higher latency.",
       "Do not route broad repository archaeology to the tested free DeepSeek or MiMo loops until their read-loop non-completion is controlled.",
       "DeepSeek regional consent is now enabled; use it in the next controlled CV-reproduction comparison.",
-      "Qwen 3.8 Max is useful for text-only CV architecture synthesis and corrected both reviewer-identified assumptions cleanly in-session, but budget for expert concept review and one correction round."
+      "Qwen 3.8 Max is useful for text-only CV architecture synthesis and corrected both reviewer-identified assumptions cleanly in-session, but its repository-review value was erased here by repeated endpoint failures; do not make it the sole release reviewer until availability improves."
     ]
   }
 }
