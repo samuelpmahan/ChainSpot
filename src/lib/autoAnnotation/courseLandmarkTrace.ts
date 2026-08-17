@@ -167,8 +167,7 @@ function basketHistory(detection: CourseDetectionResult, holeNumber: number, fin
 		});
 	}
 
-	// `originalP6` is the pre-forward-gate comparison, not P6.1. Preserve that
-	// separately when it emitted an assignment so a later gate repair is visible.
+	// `originalP6` is the pre-forward-gate comparison, not P6.1.
 	const ungated = detection.p6LowParBasketAssignment?.originalP6?.assignments.find((entry) => entry.holeNumber === holeNumber);
 	if (ungated?.assignedBasketIndex !== null && ungated?.assignedBasketIndex !== undefined) {
 		const stageScore = score('p6.lowParScore', ungated.lowParScore, true);
@@ -179,9 +178,8 @@ function basketHistory(detection: CourseDetectionResult, holeNumber: number, fin
 		});
 	}
 
-	// P6.2 does not retain a full copy of gated P6.1, but every applied swap
-	// diagnostic records exactly which two baskets P6.1 owned before the swap.
-	// Reconstruct that state losslessly rather than mislabeling originalP6.
+	// P6.2 doesn't retain the complete gated P6.1 snapshot, but every applied
+	// swap diagnostic records exactly which baskets P6.1 owned beforehand.
 	const appliedSwap = detection.p6LowParBasketAssignment?.swapAdjudication?.pairs.find(
 		(pair) => pair.swapApplied && (pair.holeA === holeNumber || pair.holeB === holeNumber)
 	);
@@ -215,7 +213,8 @@ function earliestFailure(trace: Omit<LandmarkTrace, 'failureStage'>): string | u
 	if (trace.assignedHoleCorrect === false) return 'assignment';
 	if (trace.surface.eligible === false) return 'ui-gating';
 	if (trace.surface.surfaced === false) return 'ui-surface';
-	if (trace.snap?.attempted && !trace.snap.accepted) return 'local-snap';
+	if (trace.snap?.attempted && !trace.snap.accepted) return 'local-snap-detection';
+	if (trace.snap?.settled === false) return 'local-snap-settle';
 	if (trace.groundTruth?.userCorrect === false) return 'semantic-anchor';
 	return undefined;
 }
@@ -250,9 +249,8 @@ export function buildCourseLandmarkTraces(
 				: [];
 			const realSelectionScore = selectedCandidate?.score ?? [...history].reverse().find((step) => step.score)?.score;
 
-			// Legacy grammar emits a real normalized ownership confidence. Pancake
-			// currently uses `confidence: 1` only as a display-adapter eligibility
-			// sentinel. Never expose that sentinel as detector confidence here.
+			// Legacy grammar emits real normalized ownership confidence. Pancake's
+			// compatibility `1` is an eligibility sentinel, never a metric.
 			const legacyThresholdScore = !pancake && selected ? score('grammar.confidence', selected.confidence, true) : undefined;
 			const eligible: ObservableBoolean = !selected
 				? 'not-instrumented'
@@ -287,7 +285,7 @@ export function buildCourseLandmarkTraces(
 							...(legacyThresholdScore ? { thresholdScore: legacyThresholdScore } : {}),
 							...(eligible === false ? { reason: 'below-auto-apply-threshold' } : {})
 						}),
-					surfaced: 'not-instrumented'
+					surfaced: eligible === false ? false : 'not-instrumented'
 				},
 				semanticAnchor: semanticAnchorFor(kind).id,
 				...(gt ? { groundTruth: gt } : {})
@@ -311,7 +309,6 @@ export function mergeCorrectionEventsIntoLandmarkTraces(
 		if (!event) return trace;
 		const raw = event.interactionMeta?.rawDropPx;
 		const finalValue = event.finalValue;
-		const snapped = Boolean(raw && finalValue && (raw.xPx !== finalValue.xPx || raw.yPx !== finalValue.yPx));
 		const nextGroundTruth = trace.groundTruth && finalValue
 			? (() => {
 				const finalErrorPx = distance(finalValue, trace.groundTruth!);
@@ -319,20 +316,23 @@ export function mergeCorrectionEventsIntoLandmarkTraces(
 			})()
 			: trace.groundTruth;
 		const { failureStage: _oldFailureStage, ...withoutOldFailure } = trace;
+		const observedSurface =
+			event.userAction === 'confirm' || event.userAction === 'move' || event.userAction === 'replace'
+				? true
+				: event.userAction === 'place'
+					? false
+					: trace.surface.surfaced;
 		const partial: Omit<LandmarkTrace, 'failureStage'> = {
 			...withoutOldFailure,
-			surface: {
-				...trace.surface,
-				// confirm/move/replace necessarily interacted with an existing proposal;
-				// plain place is manual recovery and does not prove the proposal surfaced.
-				surfaced: event.priorProposal !== null && event.userAction !== 'place'
-			},
+			surface: { ...trace.surface, surfaced: observedSurface },
 			...(raw ? {
 				snap: {
+					...(trace.snap ?? {}),
 					attempted: true,
-					accepted: snapped,
+					accepted: true,
+					settled: true,
 					clickPx: raw,
-					...(snapped && finalValue ? { snappedPoint: finalValue } : {})
+					...(finalValue ? { snappedPoint: finalValue } : {})
 				}
 			} : {}),
 			...(nextGroundTruth ? { groundTruth: nextGroundTruth } : {})
