@@ -116,6 +116,15 @@ interface Config {
  */
 const CONFIGS: Config[] = [
 	{ label: 'default', tuning: {} },
+	{
+		label: 'historical',
+		tuning: {
+			basketPoolExcludeInsideBadgeMarginFrac: null,
+			teeAreaVsBasketMin: 0.09,
+			basketPoolFillMin: 0.4,
+			teeMinDimBadgeHeightFrac: 0.45
+		}
+	},
 	{ label: 'badgeExcl', tuning: { basketPoolExcludeInsideBadgeMarginFrac: 0.08 } },
 	{ label: 'teeArea.07', tuning: { teeAreaVsBasketMin: 0.07 } },
 	{ label: 'teeArea.06', tuning: { teeAreaVsBasketMin: 0.06 } },
@@ -214,7 +223,8 @@ function main() {
 		`\ndefaults: teeAreaVsBasketMin=${RAW_MASK_TUNING_DEFAULTS.teeAreaVsBasketMin}, ` +
 			`basketPoolFillMin=${RAW_MASK_TUNING_DEFAULTS.basketPoolFillMin}, ` +
 			`basketPoolAspectMin=${RAW_MASK_TUNING_DEFAULTS.basketPoolAspectMin}, ` +
-			`badge exclusion off`
+			`teeMinDimBadgeHeightFrac=${RAW_MASK_TUNING_DEFAULTS.teeMinDimBadgeHeightFrac}, ` +
+			`basketPoolExcludeInsideBadgeMarginFrac=${RAW_MASK_TUNING_DEFAULTS.basketPoolExcludeInsideBadgeMarginFrac}`
 	);
 }
 
