@@ -8,6 +8,7 @@ import type {
 	LandmarkTraceCandidate,
 	ObservableBoolean
 } from '../cv/landmarkTrace';
+import { semanticAnchorFor } from '../cv/semanticAnchors';
 import type { CourseDetectionResult } from './basketDetection';
 
 export interface CourseLandmarkTruth {
@@ -50,18 +51,12 @@ function groundTruth(
 	if (!expected) return undefined;
 	if (!selected) return { ...expected, tolerancePx };
 	const assignmentErrorPx = distance(selected, expected);
-	return {
-		...expected,
-		tolerancePx,
-		assignmentErrorPx,
-		assignmentCorrect: assignmentErrorPx <= tolerancePx
-	};
+	return { ...expected, tolerancePx, assignmentErrorPx, assignmentCorrect: assignmentErrorPx <= tolerancePx };
 }
 
 function pancakeTeeCandidates(detection: CourseDetectionResult, holeNumber: number): LandmarkTraceCandidate[] {
 	const raw = detection.rawMaskObjects?.tees ?? [];
-	const diagnostics = detection.p3Ownership?.teeDiagnostics ?? [];
-	return diagnostics
+	return (detection.p3Ownership?.teeDiagnostics ?? [])
 		.flatMap((diagnostic) => {
 			const evidence = diagnostic.candidateBadgeEvidence.find((entry) => entry.holeNumber === holeNumber);
 			const candidate = raw[diagnostic.teeIndex];
@@ -76,8 +71,9 @@ function pancakeTeeCandidates(detection: CourseDetectionResult, holeNumber: numb
 			yPx: candidate.yPx,
 			widthPx: candidate.widthPx,
 			heightPx: candidate.heightPx,
-			// P1 computes an appearance NCC gate but does not currently retain the
-			// score on RawMaskTee. Do not manufacture a replacement here.
+			// P1 computes an appearance NCC gate but does not currently retain that
+			// numeric score on RawMaskTee. Keep it explicitly absent rather than
+			// inventing a confidence from geometry.
 			rank: index + 1,
 			rankStage: 'p3.badge-axis-error',
 			retained: true
@@ -170,23 +166,44 @@ function basketHistory(detection: CourseDetectionResult, holeNumber: number, fin
 			score: { name: 'p3.basketAxisErrorPx', value: p3.basketAxisErrorPx, higherIsBetter: false }
 		});
 	}
-	const original = detection.p6LowParBasketAssignment?.originalP6?.assignments.find((entry) => entry.holeNumber === holeNumber);
-	if (original?.assignedBasketIndex !== null && original?.assignedBasketIndex !== undefined) {
-		const stageScore = score('p6.lowParScore', original.lowParScore, true);
+
+	// `originalP6` is the pre-forward-gate comparison, not P6.1. Preserve that
+	// separately when it emitted an assignment so a later gate repair is visible.
+	const ungated = detection.p6LowParBasketAssignment?.originalP6?.assignments.find((entry) => entry.holeNumber === holeNumber);
+	if (ungated?.assignedBasketIndex !== null && ungated?.assignedBasketIndex !== undefined) {
+		const stageScore = score('p6.lowParScore', ungated.lowParScore, true);
 		result.push({
-			stage: 'p6.1', candidateId: id('basket', original.assignedBasketIndex), candidateIndex: original.assignedBasketIndex,
-			holeNumber, reason: original.assignmentReason,
+			stage: 'p6.0-ungated', candidateId: id('basket', ungated.assignedBasketIndex), candidateIndex: ungated.assignedBasketIndex,
+			holeNumber, reason: ungated.assignmentReason,
 			...(stageScore ? { score: stageScore } : {})
 		});
 	}
-	const final = detection.p6LowParBasketAssignment?.assignments.find((entry) => entry.holeNumber === holeNumber);
-	if (final?.assignedBasketIndex !== null && final?.assignedBasketIndex !== undefined) {
-		const stageScore = score('p6.lowParScore', final.lowParScore, true);
+
+	// P6.2 does not retain a full copy of gated P6.1, but every applied swap
+	// diagnostic records exactly which two baskets P6.1 owned before the swap.
+	// Reconstruct that state losslessly rather than mislabeling originalP6.
+	const appliedSwap = detection.p6LowParBasketAssignment?.swapAdjudication?.pairs.find(
+		(pair) => pair.swapApplied && (pair.holeA === holeNumber || pair.holeB === holeNumber)
+	);
+	const preSwapBasketIndex = appliedSwap
+		? appliedSwap.holeA === holeNumber ? appliedSwap.basketX : appliedSwap.basketY
+		: finalBasketIndex;
+	const preSwapCandidate = detection.p6LowParBasketAssignment?.candidates.find(
+		(candidate) => candidate.holeNumber === holeNumber && candidate.basketIndex === preSwapBasketIndex
+	);
+	const finalAssignment = detection.p6LowParBasketAssignment?.assignments.find((entry) => entry.holeNumber === holeNumber);
+	const preSwapScore = score('p6.lowParScore', preSwapCandidate?.lowParScore ?? finalAssignment?.lowParScore, true);
+	result.push({
+		stage: 'p6.1', candidateId: id('basket', preSwapBasketIndex), candidateIndex: preSwapBasketIndex,
+		holeNumber, reason: finalAssignment?.assignmentReason ?? 'assigned',
+		...(preSwapScore ? { score: preSwapScore } : {})
+	});
+	if (preSwapBasketIndex !== finalBasketIndex) {
+		const finalScore = score('p6.lowParScore', finalAssignment?.lowParScore, true);
 		result.push({
-			stage: original ? 'p6.2-final' : 'p6',
-			candidateId: id('basket', final.assignedBasketIndex), candidateIndex: final.assignedBasketIndex,
-			holeNumber, reason: final.assignmentReason,
-			...(stageScore ? { score: stageScore } : {})
+			stage: 'p6.2-final', candidateId: id('basket', finalBasketIndex), candidateIndex: finalBasketIndex,
+			holeNumber, reason: 'ribbon-swap-adjudication',
+			...(finalScore ? { score: finalScore } : {})
 		});
 	}
 	return result;
@@ -209,6 +226,7 @@ export function buildCourseLandmarkTraces(
 ): readonly LandmarkTrace[] {
 	const threshold = options.autoApplyThreshold ?? DEFAULT_AUTO_APPLY_THRESHOLD;
 	const tolerancePx = options.tolerancePx ?? 0;
+	const pancake = detection.rawMaskObjects !== undefined;
 	const traces: LandmarkTrace[] = [];
 	for (const proposal of detection.grammar.holes) {
 		for (const kind of ['tee', 'basket'] as const) {
@@ -216,7 +234,7 @@ export function buildCourseLandmarkTraces(
 			const selected = assignment
 				? { candidateIndex: assignment.candidateIndex, xPx: assignment.xPx, yPx: assignment.yPx, confidence: assignment.confidence }
 				: undefined;
-			const candidates = detection.rawMaskObjects
+			const candidates = pancake
 				? kind === 'tee' ? pancakeTeeCandidates(detection, proposal.number) : pancakeBasketCandidates(detection, proposal.number)
 				: legacyCandidates(detection, proposal.number, kind);
 			const gt = options.truth && tolerancePx > 0
@@ -227,16 +245,28 @@ export function buildCourseLandmarkTraces(
 				? candidates.some((candidate) => distance(candidate, gt) <= gt.tolerancePx)
 				: candidates.length > 0 ? true : 'not-instrumented';
 			const selectedCandidate = selected ? candidates.find((candidate) => candidate.rawIndex === selected.candidateIndex) : undefined;
-			const thresholdScore = selected ? score('grammar.confidence', selected.confidence, true) : undefined;
-			const eligible: ObservableBoolean = thresholdScore ? thresholdScore.value >= threshold : 'not-instrumented';
+			const history = selected
+				? kind === 'tee' ? teeHistory(detection, selected.candidateIndex) : basketHistory(detection, proposal.number, selected.candidateIndex)
+				: [];
+			const realSelectionScore = selectedCandidate?.score ?? [...history].reverse().find((step) => step.score)?.score;
+
+			// Legacy grammar emits a real normalized ownership confidence. Pancake
+			// currently uses `confidence: 1` only as a display-adapter eligibility
+			// sentinel. Never expose that sentinel as detector confidence here.
+			const legacyThresholdScore = !pancake && selected ? score('grammar.confidence', selected.confidence, true) : undefined;
+			const eligible: ObservableBoolean = !selected
+				? 'not-instrumented'
+				: pancake
+					? true
+					: legacyThresholdScore
+						? legacyThresholdScore.value >= threshold
+						: 'not-instrumented';
 			const partial: Omit<LandmarkTrace, 'failureStage'> = {
 				holeNumber: proposal.number,
 				kind,
 				detected,
 				candidates,
-				assignmentHistory: selected
-					? kind === 'tee' ? teeHistory(detection, selected.candidateIndex) : basketHistory(detection, proposal.number, selected.candidateIndex)
-					: [],
+				assignmentHistory: history,
 				...(selected ? { assignedCandidateId: id(kind, selected.candidateIndex), assignedCandidateIndex: selected.candidateIndex } : {}),
 				assignedHoleCorrect: assignmentCorrect,
 				recommendation: selected
@@ -245,19 +275,21 @@ export function buildCourseLandmarkTraces(
 						candidateId: id(kind, selected.candidateIndex),
 						candidateIndex: selected.candidateIndex,
 						point: { xPx: selected.xPx, yPx: selected.yPx },
-						...(selectedCandidate?.score ? { score: selectedCandidate.score } : thresholdScore ? { score: thresholdScore } : {})
+						...(realSelectionScore ? { score: realSelectionScore } : {})
 					}
 					: { emitted: false },
 				surface: {
 					eligible,
-					threshold,
-					...(thresholdScore ? { thresholdScore } : {}),
-					...(eligible === false ? { reason: 'below-auto-apply-threshold' } : {}),
+					...(pancake
+						? { reason: selected ? 'pancake-display-adapter-forces-assigned-endpoints-eligible' : 'no-recommendation' }
+						: {
+							threshold,
+							...(legacyThresholdScore ? { thresholdScore: legacyThresholdScore } : {}),
+							...(eligible === false ? { reason: 'below-auto-apply-threshold' } : {})
+						}),
 					surfaced: 'not-instrumented'
 				},
-				semanticAnchor: kind === 'basket'
-					? 'basket-stem-base (raw mask x=bbox center, y=maxY)'
-					: 'tee component centroid; downstream launch-point semantic contract is not explicit',
+				semanticAnchor: semanticAnchorFor(kind).id,
 				...(gt ? { groundTruth: gt } : {})
 			};
 			const failureStage = earliestFailure(partial);
@@ -286,8 +318,9 @@ export function mergeCorrectionEventsIntoLandmarkTraces(
 				return { ...trace.groundTruth!, finalErrorPx, userCorrect: finalErrorPx <= trace.groundTruth!.tolerancePx };
 			})()
 			: trace.groundTruth;
+		const { failureStage: _oldFailureStage, ...withoutOldFailure } = trace;
 		const partial: Omit<LandmarkTrace, 'failureStage'> = {
-			...trace,
+			...withoutOldFailure,
 			surface: {
 				...trace.surface,
 				// confirm/move/replace necessarily interacted with an existing proposal;
