@@ -26,6 +26,9 @@ Turn the already-demonstrated landing-droplet detector into correctable played-r
 - Current Map Round supports append, move, and remove, but lacks explicit shot reorder and shot-to-hole reassignment.
 - The existing detector does not infer holes or order. Any automatic suggestion must remain correctable review state.
 - Current `main` is `4da01fba601a250e2fd4e7b8683c9fdd6bf0401b`.
+- This corrective candidate intentionally starts from unmerged `integration/demo@fd8b57f`; the proposal review UI and the reproduced state-integrity failures exist only on that integrated base.
+- Browser review reproduced detection-time default-order snapshots inserting later accepts ahead of prior authoritative shots, and out-of-bounds reviewed coordinates reaching `ProjectEditor.setHoles` as uncaught domain errors.
+- Rounded-coordinate proposal IDs can collide for distinct detector candidates. IDs must remain deterministic for the same detector result while also being unique within one proposal batch.
 
 ## Acceptance
 
@@ -42,3 +45,6 @@ Turn the already-demonstrated landing-droplet detector into correctable played-r
 - Add browser coverage that starts with a wrong assignment/order, corrects both, and proves Create Graphics consumes the corrected sequence.
 - Re-run focused persistence, annotated-round receipt, hole-graphics ordering, and Map Round interaction coverage.
 - Keep detection confidence/provenance out of accepted `AnnotatedRound`; test that conversion boundary directly.
+- Prove each untouched order draft appends against the authoritative shot count at acceptance time, while an operator-edited order is honored even after earlier proposals are accepted.
+- Prove non-finite and out-of-clean-image coordinates disable acceptance with actionable inline feedback, and catch any downstream domain rejection without losing the proposal.
+- Prove distinct candidates with the same rounded coordinates receive collision-safe IDs that are stable across repeated conversion of the same ordered detector output.

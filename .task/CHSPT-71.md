@@ -26,6 +26,9 @@ Give an operator a trustworthy, correctable workflow for registering the held pl
 - The new transform direction is played-round pixels to clean-course pixels. Target proof composes that result with the existing clean-course to target transform.
 - Existing `ImageViewport`, pair management, alignment estimators, residual validation, and ghost-course preview are the preferred interaction primitives.
 - Current `main` is `4da01fba601a250e2fd4e7b8683c9fdd6bf0401b`.
+- This corrective candidate intentionally starts from unmerged `integration/demo@fd8b57f`; the reproduced failures cross the Gate 1/Gate 2 integration seam and cannot be repaired or proven from `main` alone.
+- Browser review reproduced a mounted-component lifecycle defect: replacing either registration input can leave the old decoded image, pairs, and confirmation state alive behind the newly displayed parent image.
+- Detector-derived accepted shots contain no registration provenance by design. Until reprojection lineage exists, a changed registration must require an explicit operator decision before a new fit can drive extraction.
 
 ## Acceptance
 
@@ -42,3 +45,5 @@ Give an operator a trustworthy, correctable workflow for registering the held pl
 - Re-run existing correspondence, alignment, target-rotation, CHSPT-65 handoff, and registration-preview coverage at focused scope.
 - Inspect the running UI at a realistic desktop viewport; unit/type checks cannot prove pointer usability or preview legibility.
 - Record any reload/persistence limitation explicitly; do not imply session retention is durable save/open persistence.
+- Reproduce input replacement while registration is closed, then prove the next open remounts both surfaces and invalidates the old confirmation before exposing the replacement.
+- Accept detector proposals, change the registration, and prove reconfirmation cannot silently coexist with throws mapped by the obsolete transform; the MVP flow must explicitly discard those session-tracked detector throws or leave extraction blocked.
