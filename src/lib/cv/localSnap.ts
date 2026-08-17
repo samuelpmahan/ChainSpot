@@ -6,8 +6,8 @@
  * `localFeatureSnapDetailed` records the first stage that rejected the click,
  * the candidate population, the real detector score, and the calibration
  * evidence used. `localFeatureSnap` remains the compatibility wrapper used by
- * the staged worker, and emits the same structured trace to DevTools so a
- * failed live snap no longer disappears as an unexplained null.
+ * the staged worker and publishes the structured outcome to the funnel
+ * runtime channel.
  */
 
 import {
@@ -29,6 +29,7 @@ import type {
 	BasketRaster,
 	BasketTemplateRaster
 } from '../autoAnnotation/basketTemplateDetection';
+import { nearestSurfacedRecommendation, recordLocalSnapTrace } from './funnelRuntime';
 import type { LandmarkScore, LocalSnapRejectReason, LocalSnapTrace } from './landmarkTrace';
 
 export type LocalSnapKind = 'tee' | 'basket';
@@ -86,12 +87,12 @@ export const LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE = 0.5;
 export const LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX = 24;
 export const LOCAL_SNAP_MIN_SCORE = 0.5;
 /**
- * Tee sprite/pad footprint is not reliably proportional to UDisc badge UI
- * scale across the corpus. Full-course production already moved to a
- * world-normalized tee detector for this reason. Local snap remains a tiny
- * click-centered search, so the least invasive correction is a small scale
- * bank around the badge-derived baseline rather than pretending one UiScale
- * predicts every rendered pad. Radius and score gates stay unchanged.
+ * Tee footprint is not reliably proportional to badge UI scale across the
+ * corpus. Full-course production already moved to world-normalized tee
+ * reasoning. Local snap remains a tiny click-centered search, so use a small
+ * scale bank around the badge-derived baseline rather than pretending one UI
+ * scale predicts every rendered pad. The 24px movement ceiling still bounds
+ * what the user can be moved to.
  */
 export const LOCAL_TEE_SNAP_SCALE_FACTORS = [0.75, 1, 1.5, 2, 2.5] as const;
 const MIN_CROP_SIDE_PX = 4;
@@ -110,6 +111,25 @@ function finitePositive(value: number | undefined): value is number {
 
 function defaultTeeFootprint(uiScalePx: UiScalePx): number {
 	return TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * uiScalePx;
+}
+
+function withRuntimeRecommendation(
+	kind: LocalSnapKind,
+	clickPx: LocalSnapPoint,
+	calibration: LocalSnapCalibration
+): LocalSnapCalibration {
+	if (calibration.knownRecommendation) return calibration;
+	const surfaced = nearestSurfacedRecommendation(kind, clickPx);
+	if (!surfaced) return calibration;
+	const dimensions = [surfaced.widthPx, surfaced.heightPx].filter(finitePositive);
+	const featureFootprintPx = dimensions.length > 0 ? Math.max(...dimensions) : undefined;
+	return {
+		...calibration,
+		knownRecommendation: {
+			point: { xPx: surfaced.xPx, yPx: surfaced.yPx },
+			...(featureFootprintPx === undefined ? {} : { featureFootprintPx })
+		}
+	};
 }
 
 function featureFootprintSourcePx(kind: LocalSnapKind, calibration: LocalSnapCalibration): number | null {
@@ -242,11 +262,8 @@ function teeCropCandidates(
 	const measuredFootprint = calibration.knownRecommendation?.featureFootprintPx;
 	if (finitePositive(measuredFootprint)) {
 		const measuredScale = measuredFootprint / TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE;
-		const nearestBankScale = Math.min(
-			...LOCAL_TEE_SNAP_SCALE_FACTORS.map((factor) => calibration.uiScalePx * factor)
-		);
 		const deltaFromBaseline = Math.abs(measuredScale / calibration.uiScalePx - 1);
-		if (deltaFromBaseline > TEE_SCALE_EVIDENCE_MIN_DELTA && Number.isFinite(nearestBankScale)) {
+		if (deltaFromBaseline > TEE_SCALE_EVIDENCE_MIN_DELTA) {
 			const evidenceScale = asUiScalePx(measuredScale, 'Full-course tee-footprint snap scale');
 			addDistinctCandidates(
 				candidates,
@@ -302,7 +319,8 @@ export function localFeatureSnapDetailed(
 		return rejected(clickPx, 'invalid-click');
 	}
 	if (!(calibration.uiScalePx > 0)) return rejected(clickPx, 'invalid-calibration');
-	const geometry = deriveLocalSnapSearchGeometry(kind, clickPx, calibration);
+	const effectiveCalibration = withRuntimeRecommendation(kind, clickPx, calibration);
+	const geometry = deriveLocalSnapSearchGeometry(kind, clickPx, effectiveCalibration);
 	if (!geometry) return rejected(clickPx, 'no-footprint');
 	const common: Partial<LocalSnapTrace> = {
 		featureFootprintPx: geometry.featureFootprintPx,
@@ -323,8 +341,8 @@ export function localFeatureSnapDetailed(
 	const originXPx = bounds.x0 * raster.sourceScale;
 	const originYPx = bounds.y0 * raster.sourceScale;
 	const candidates = kind === 'tee'
-		? teeCropCandidates(cv, raster, bounds, calibration)
-		: basketCropCandidates(cv, raster, bounds, calibration);
+		? teeCropCandidates(cv, raster, bounds, effectiveCalibration)
+		: basketCropCandidates(cv, raster, bounds, effectiveCalibration);
 	if (!candidates || candidates.length === 0) {
 		return rejected(clickPx, 'no-candidate', { ...common, candidateCount: 0, inRadiusCandidateCount: 0 });
 	}
@@ -377,8 +395,9 @@ export function localFeatureSnapDetailed(
 
 /**
  * Compatibility wrapper used by the staged worker. It deliberately keeps the
- * existing point|null API while making every attempt observable as one
- * structured console object, including exact rejection reason.
+ * existing point|null API while publishing every attempt as one structured
+ * funnel object. The BroadcastChannel crosses the worker/main-thread boundary
+ * without changing the existing request/reply protocol.
  */
 export function localFeatureSnap(
 	kind: LocalSnapKind,
@@ -388,6 +407,7 @@ export function localFeatureSnap(
 	calibration: LocalSnapCalibration
 ): LocalSnapPoint | null {
 	const outcome = localFeatureSnapDetailed(kind, cv, raster, clickPx, calibration);
+	recordLocalSnapTrace(outcome.trace);
 	console.info('[ChainSpot CV local-snap]', outcome.trace);
 	return outcome.point;
 }
