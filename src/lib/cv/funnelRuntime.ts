@@ -49,8 +49,6 @@ function runtimeChannel(): BroadcastChannel | null {
 	try {
 		channel = new BroadcastChannel(CHANNEL_NAME);
 		channel.onmessage = (event: MessageEvent<FunnelMessage>) => receive(event.data);
-		// Node's BroadcastChannel can keep Vitest alive. Browsers simply do not
-		// expose unref, so this remains a no-op there.
 		(channel as BroadcastChannel & { unref?: () => void }).unref?.();
 	} catch {
 		channel = null;
@@ -66,10 +64,6 @@ function publish(message: FunnelMessage): void {
 	}
 }
 
-/**
- * Called only at the CV->domain acceptance boundary. The observation stays in
- * this diagnostics module; `AnnotatedHole` still receives only `{xPx,yPx}`.
- */
 export function recordSurfacedCandidate(input: Omit<SurfacedCandidateObservation, 'sequence' | 'observedAtMs'>): SurfacedCandidateObservation {
 	const observation: SurfacedCandidateObservation = {
 		...input,
@@ -91,7 +85,6 @@ function inferSnapKind(trace: LocalSnapTrace): LandmarkKind | undefined {
 	return undefined;
 }
 
-/** Called by the detector worker after every local-snap attempt. */
 export function recordLocalSnapTrace(trace: LocalSnapTrace): void {
 	const kind = inferSnapKind(trace);
 	const observed = kind && !trace.kind ? { ...trace, kind } : trace;
@@ -100,11 +93,6 @@ export function recordLocalSnapTrace(trace: LocalSnapTrace): void {
 	publish({ type: 'local-snap', trace: observed });
 }
 
-/**
- * Full-course recommendation evidence available to a later local snap. This
- * never directly moves a marker; it can only provide measured footprint and
- * comparison distance to the local detector.
- */
 export function nearestSurfacedRecommendation(
 	kind: LandmarkKind,
 	clickPx: { readonly xPx: number; readonly yPx: number }
@@ -127,7 +115,6 @@ export interface CvFunnelRuntimeSnapshot {
 	readonly localSnaps: readonly LocalSnapTrace[];
 }
 
-/** Returns copies so console/test consumers cannot mutate runtime state. */
 export function getCvFunnelRuntimeSnapshot(): CvFunnelRuntimeSnapshot {
 	runtimeChannel();
 	return { surfacedCandidates: [...surfaced], localSnaps: [...localSnaps] };
@@ -145,18 +132,19 @@ export interface ChainSpotCvFunnelConsole {
 	readonly reset: () => void;
 }
 
+type ChainSpotConsoleRoot = Record<string, unknown> & {
+	cvFunnel?: ChainSpotCvFunnelConsole;
+};
+
 /**
- * Console-only diagnostics surface. Example:
+ * Console-only diagnostics surface:
  *   chainspot.cvFunnel.snapshot()
  *   chainspot.cvFunnel.json()
- * This is intentionally not product UI and carries no authoritative state.
  */
 function exposeConsoleHook(): void {
 	if (typeof window === 'undefined') return;
-	const root = window as typeof window & {
-		chainspot?: Record<string, unknown> & { cvFunnel?: ChainSpotCvFunnelConsole };
-	};
-	const current = root.chainspot ?? {};
+	const root = window as typeof window & { chainspot?: ChainSpotConsoleRoot };
+	const current: ChainSpotConsoleRoot = root.chainspot ?? {};
 	current.cvFunnel = {
 		snapshot: getCvFunnelRuntimeSnapshot,
 		json: () => JSON.stringify(getCvFunnelRuntimeSnapshot(), null, 2),
@@ -165,8 +153,5 @@ function exposeConsoleHook(): void {
 	root.chainspot = current;
 }
 
-// BroadcastChannel does not replay messages sent before a listener exists.
-// The detector worker imports this module before its first local-snap request,
-// so eager initialization ensures it hears surfaced full-course evidence.
 runtimeChannel();
 exposeConsoleHook();
