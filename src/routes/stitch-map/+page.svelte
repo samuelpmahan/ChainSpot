@@ -52,6 +52,7 @@
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
+		clearThrownRoundSource,
 		getPendingHandoff,
 		getThrownRoundSource,
 		setPendingHandoff,
@@ -1344,6 +1345,13 @@
 	}
 
 	/**
+	 * CHSPT-65: page-local mirror of the session's thrown-round slot, kept so
+	 * the held-round indicator is reactive (the session module is plain
+	 * variables). Synced on mount and by every handler that writes the slot.
+	 */
+	let heldThrownRound = $state<{ fileName: string } | null>(null);
+
+	/**
 	 * CHSPT-65: keeps the current result as the *thrown-round* source — the
 	 * played-round screenshot with UDisc's purple throw/walk graphics — in its
 	 * own session slot (`setThrownRoundSource`), semantically distinct from the
@@ -1358,15 +1366,74 @@
 	function handleKeepAsThrownRound(): void {
 		if (!resultBlob) return;
 		const replacing = getThrownRoundSource() !== null;
+		const fileName = resultFileName();
 		setThrownRoundSource({
 			blob: resultBlob,
-			fileName: resultFileName(),
+			fileName,
 			provenance: resultProvenance ?? undefined
 		});
+		heldThrownRound = { fileName };
 		resetToImport();
 		statusMessage = replacing
 			? 'Thrown-round image replaced. It will ride along into Create Graphics. Import the clean course screenshots next.'
 			: 'Thrown-round image kept. It will ride along into Create Graphics. Import the clean course screenshots next.';
+	}
+
+	/**
+	 * CHSPT-65: manual per-tile selector for a round screenshot imported
+	 * TOGETHER with the clean-map tiles. The tile's ORIGINAL file bytes go
+	 * into the thrown-round session slot (no crop, no stitch — nothing has
+	 * been derived from it yet) and the tile leaves the stitch layout via the
+	 * existing removal path, so the clean composite is built without it. This
+	 * and "Keep as thrown round" on the result write the same slot; within
+	 * the thrown role the newest choice wins.
+	 */
+	function handleMarkTileAsThrownRound(slot: TileSlot): void {
+		const tile = tiles[slot];
+		if (!tile) return;
+		const replacing = getThrownRoundSource() !== null;
+		setThrownRoundSource({ blob: tile.file, fileName: tile.fileName });
+		heldThrownRound = { fileName: tile.fileName };
+		handleRemove(slot);
+		statusMessage = replacing
+			? `“${tile.fileName}” is now the thrown round (replacing the previous one). It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`
+			: `“${tile.fileName}” set aside as the thrown round. It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`;
+	}
+
+	/** CHSPT-65: the indicator's explicit discard — the only production clear besides the workflow-staleness lifecycle in session.ts. */
+	function handleClearThrownRound(): void {
+		clearThrownRoundSource();
+		heldThrownRound = null;
+		statusMessage = 'Thrown-round image discarded.';
+	}
+
+	/**
+	 * CHSPT-65: manual selector for the bulk Smart Import path. Round + clean
+	 * tiles imported in ONE batch land directly on the stitched result with
+	 * the round already composited in — the per-tile button in the Import
+	 * grid is never seen. This picks one ORIGINAL capture out of the result:
+	 * its raw file goes to the thrown-round slot, and the clean map is
+	 * re-stitched from the remaining captures through the exact same
+	 * `runImport` pipeline (whose completion overwrites `statusMessage`, so
+	 * this sets its own message after awaiting it). With no remaining
+	 * captures the page returns to Import instead.
+	 */
+	async function handleMarkResultSourceAsThrownRound(sourceId: string): Promise<void> {
+		const source = resultProvenance?.sources.find((candidate) => candidate.sourceId === sourceId);
+		const file = resultSourceFiles.get(sourceId);
+		if (!source || !file || rendering) return;
+		setThrownRoundSource({ blob: file, fileName: source.fileName });
+		heldThrownRound = { fileName: source.fileName };
+		const remaining = [...resultSourceFiles.entries()]
+			.filter(([id]) => id !== sourceId)
+			.map(([, remainingFile]) => remainingFile);
+		if (remaining.length === 0) {
+			resetToImport();
+			statusMessage = `“${source.fileName}” set aside as the thrown round. Import the clean course screenshots next.`;
+			return;
+		}
+		await runImport(remaining);
+		statusMessage = `“${source.fileName}” set aside as the thrown round. Clean map re-stitched from the remaining ${remaining.length} screenshot${remaining.length === 1 ? '' : 's'}.`;
 	}
 
 	function readinessText(): string {
@@ -1752,6 +1819,10 @@
 	});
 
 	onMount(() => {
+		// CHSPT-65: a thrown round kept earlier this session (e.g. before a
+		// round trip to another route) surfaces in the indicator immediately.
+		const existingThrownRound = getThrownRoundSource();
+		heldThrownRound = existingThrownRound ? { fileName: existingThrownRound.fileName } : null;
 		// The guided demo (/demo) drops real UDisc captures into a one-shot inbox
 		// and navigates here. They enter through the SAME unified `runImport`
 		// entry point the "Import screenshots" file input uses, so the result a
@@ -1802,6 +1873,18 @@
 				<span class="prog-dot">2</span>Result
 			</span>
 		</div>
+
+		{#if heldThrownRound}
+			<!-- CHSPT-65: visible confirmation of which image is set aside as the
+			     thrown round (kept from a result, or marked per-tile), with the
+			     one explicit discard the workflow offers. -->
+			<div class="thrown-round-held" data-testid="thrown-round-held" role="status">
+				<span>Thrown round: <strong>{heldThrownRound.fileName}</strong> — rides along into Create Graphics.</span>
+				<button type="button" data-testid="thrown-round-discard" onclick={handleClearThrownRound}>
+					Discard
+				</button>
+			</div>
+		{/if}
 
 		<div class="stage-context">
 			{#if phase === 'import'}
@@ -1875,6 +1958,7 @@
 								error={tileErrors[slot] ?? null}
 								onFile={(file) => handleSlotFile(slot, file)}
 								onRemove={() => handleRemove(slot)}
+								onMarkThrownRound={() => handleMarkTileAsThrownRound(slot)}
 							/>
 						{/each}
 						<button type="button" class="add-tile" data-testid="add-capture" onclick={addSlot}>
@@ -1925,6 +2009,32 @@
 								></div>
 							{/each}
 						{/key}
+					</div>
+				{/if}
+
+				{#if resultProvenance && resultProvenance.sources.length > 1}
+					<!-- CHSPT-65: bulk-import escape hatch — when the thrown-round
+					     screenshot was imported together with the clean tiles, pick it
+					     out here; the clean map re-stitches without it. (A
+					     single-capture result uses "Keep as thrown round" below.) -->
+					<div class="result-sources" data-testid="result-sources">
+						<span class="result-sources-hint">Is one of these the thrown round? Pick it out and the clean map re-stitches without it:</span>
+						<ul>
+							{#each resultProvenance.sources as source (source.sourceId)}
+								<li>
+									<span class="result-source-name">{source.fileName}</span>
+									<button
+										type="button"
+										class="thrown-round-pick"
+										data-testid="result-source-thrown-{source.sourceId}"
+										disabled={rendering}
+										onclick={() => void handleMarkResultSourceAsThrownRound(source.sourceId)}
+									>
+										Thrown round
+									</button>
+								</li>
+							{/each}
+						</ul>
 					</div>
 				{/if}
 
@@ -2317,6 +2427,71 @@
 		background: #18181b;
 		overflow: hidden;
 		margin: 0 auto;
+	}
+
+	.result-sources {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		padding: 0.55rem 0.8rem;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background-color: #1e1e24;
+		font-size: 0.82rem;
+		color: #a1a1aa;
+	}
+
+	.result-sources ul {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.result-sources li {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.result-source-name {
+		color: #e4e4e7;
+		overflow-wrap: anywhere;
+	}
+
+	.thrown-round-pick {
+		padding: 0.2rem 0.55rem;
+		border: 1px solid #4c1d95;
+		border-radius: 4px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.78rem;
+		cursor: pointer;
+	}
+
+	.thrown-round-held {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-top: 0.6rem;
+		padding: 0.45rem 0.8rem;
+		border: 1px solid #4c1d95;
+		border-radius: 6px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.85rem;
+	}
+
+	.thrown-round-held button {
+		padding: 0.2rem 0.6rem;
+		border: 1px solid #6d28d9;
+		border-radius: 4px;
+		background: transparent;
+		color: #ddd6fe;
+		cursor: pointer;
 	}
 
 	.stage-progress {
