@@ -53,7 +53,9 @@
 	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
 		getPendingHandoff,
+		getThrownRoundSource,
 		setPendingHandoff,
+		setThrownRoundSource,
 		subscribePendingStitchCaptures,
 		takePendingStitchCaptures
 	} from '$lib/session';
@@ -1341,6 +1343,32 @@
 		}
 	}
 
+	/**
+	 * CHSPT-65: keeps the current result as the *thrown-round* source — the
+	 * played-round screenshot with UDisc's purple throw/walk graphics — in its
+	 * own session slot (`setThrownRoundSource`), semantically distinct from the
+	 * clean course/map source that travels via `setPendingHandoff`. The slot is
+	 * long-lived and never enters any image-intake path, so keeping a thrown
+	 * round neither blocks nor replaces a clean-source handoff (and vice
+	 * versa). After keeping, the page resets to Import so the user can bring in
+	 * the clean course screenshots next; the kept image itself is safe in the
+	 * session slot. Which image is "thrown" is the user's explicit choice —
+	 * automatic purple-path classification is a separate ticket.
+	 */
+	function handleKeepAsThrownRound(): void {
+		if (!resultBlob) return;
+		const replacing = getThrownRoundSource() !== null;
+		setThrownRoundSource({
+			blob: resultBlob,
+			fileName: resultFileName(),
+			provenance: resultProvenance ?? undefined
+		});
+		resetToImport();
+		statusMessage = replacing
+			? 'Thrown-round image replaced. It will ride along into Create Graphics. Import the clean course screenshots next.'
+			: 'Thrown-round image kept. It will ride along into Create Graphics. Import the clean course screenshots next.';
+	}
+
 	function readinessText(): string {
 		if (report.ready) {
 			return 'All screenshots, the shared crop, and tile overlap are valid.';
@@ -1918,6 +1946,15 @@
 						onclick={() => handleUseAs('target-basemap')}
 					>
 						Send to Create Graphics
+					</button>
+					<button
+						type="button"
+						class="btn"
+						data-testid="keep-as-thrown-round"
+						disabled={!resultBlob || rendering}
+						onclick={handleKeepAsThrownRound}
+					>
+						Keep as thrown round
 					</button>
 					<button
 						type="button"

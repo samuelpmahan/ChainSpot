@@ -4,7 +4,7 @@
  * `stitch/handoff.ts`, plus Course Memory's `courseBadgeSession.ts` and the
  * guided demo's `demo/stageInbox.ts`).
  *
- * One module, five independent mechanisms, all carrying state across
+ * One module, six independent mechanisms, all carrying state across
  * client-side SPA route changes so it survives navigation but never a full
  * page reload (nothing here is persisted to storage, IndexedDB, or the
  * server):
@@ -20,8 +20,11 @@
  * - **Pending course badges** (`setPendingCourseBadges` / …) — Course
  *   Memory's badge/basket anchors, which ride separately from
  *   `AnnotatedRound` because that artifact can never carry them.
+ * - **Thrown-round source** (`setThrownRoundSource` / …) — the played-round
+ *   image kept on Stitch Map as a semantic input distinct from the clean
+ *   course source, surviving through Annotate Course into Create Graphics.
  *
- * Vocabulary is uniform across all four: `pending*` names a one-shot
+ * Vocabulary is uniform across all of these: `pending*` names a one-shot
  * crossing slot (set by the sender, read-and-cleared by the receiver);
  * `retain`/`take` names the editor-retention pair; `active` (used only by
  * the AnnotatedRound slot) names the longer-lived slot described below.
@@ -261,6 +264,48 @@ export function setActiveAnnotatedRound(round: AnnotatedRound): void {
 
 export function getActiveAnnotatedRound(): AnnotatedRound | null {
 	return activeAnnotatedRound;
+}
+
+// ---------------------------------------------------------------------------
+// Thrown-round source (CHSPT-65)
+// ---------------------------------------------------------------------------
+
+/**
+ * The played-round screenshot (the one carrying UDisc's purple throw/walk
+ * graphics), preserved as its own semantic input from Stitch Map all the way
+ * into Create Graphics. It is deliberately NOT a `PendingHandoff`: the
+ * pending-handoff slot is a one-shot crossing consumed by a destination's
+ * image intake, and the thrown-round image must never enter the
+ * `source-overview`/`target-basemap` intake path — that is exactly the silent
+ * role substitution CHSPT-65 forbids. This slot is `active`-style instead
+ * (like `activeAnnotatedRound`): set once on Stitch Map, readable but never
+ * auto-consumed, surviving Stitch Map -> Annotate Course -> Create Graphics
+ * and any further SPA round trips until a replacement, an explicit clear, or
+ * a full page reload.
+ *
+ * Registration of these graphics onto the clean target is a follow-up ticket;
+ * nothing here decodes or transforms the blob.
+ */
+export interface ThrownRoundSource {
+	readonly blob: Blob;
+	readonly fileName: string;
+	/** Same derivation-fact contract as `PendingHandoff.provenance`, when the image came out of AutoCrop/AutoStitch. */
+	readonly provenance?: CompositeProvenance | null;
+}
+
+let thrownRoundSource: ThrownRoundSource | null = null;
+
+/** Replaces any previously kept thrown-round source — the roles clean-vs-thrown stay distinct, but within the thrown role the newest keep wins. */
+export function setThrownRoundSource(source: ThrownRoundSource): void {
+	thrownRoundSource = source;
+}
+
+export function getThrownRoundSource(): ThrownRoundSource | null {
+	return thrownRoundSource;
+}
+
+export function clearThrownRoundSource(): void {
+	thrownRoundSource = null;
 }
 
 // ---------------------------------------------------------------------------

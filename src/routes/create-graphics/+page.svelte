@@ -35,6 +35,7 @@
 	import {
 		consumePendingHandoff,
 		getPendingHandoff,
+		getThrownRoundSource,
 		retainEditor,
 		takeRetainedEditor,
 		consumePendingAnnotatedRound,
@@ -44,7 +45,7 @@
 		consumePendingCourseBadges,
 		getPendingCourseBadges
 	} from '$lib/session';
-	import type { PendingHandoff } from '$lib/session';
+	import type { PendingHandoff, ThrownRoundSource } from '$lib/session';
 	import { importHandoffImage } from '$lib/handoffImport';
 	import {
 		bboxFromCenter,
@@ -360,6 +361,16 @@
 	let annotatedRoundError = $state<string | null>(null);
 
 	/**
+	 * CHSPT-65: the thrown-round source kept on Stitch Map, read (never
+	 * consumed) from its own session slot on mount. Deliberately never fed into
+	 * `intakeImageFile` or any image role — it is a third semantic input
+	 * alongside the UDisc source and the clean target, held for the follow-up
+	 * ticket that registers its graphics onto the clean target. Surfaced only
+	 * as a note so the user can see it survived the workflow.
+	 */
+	let thrownRound = $state<ThrownRoundSource | null>(null);
+
+	/**
 	 * Default *preview/reference* radius for the aerial pull: 300m, matching the
 	 * first-pass search radius the guided demo teaches users to try.
 	 */
@@ -461,6 +472,23 @@
 	function canAddCorrespondence(): boolean {
 		void refreshCount;
 		return sourceImage() !== null && targetImage() !== null;
+	}
+
+	/**
+	 * CHSPT-65: whether the Fetch Clean Target section should render ABOVE the
+	 * correspondence panes. True exactly when the project already carries a
+	 * completed/partial course annotation (holes in durable state — the
+	 * annotate-course arrival, and equally a reopened bundle) but no clean
+	 * target has been committed yet: correspondence placement is impossible
+	 * then, so establishing the target is the first meaningful interaction.
+	 * Derived from durable project state rather than a session flag so it
+	 * needs no session participation and reverts to the standard layout the
+	 * moment a target is committed. The direct-upload entry (no holes, no
+	 * AnnotatedRound) keeps today's order untouched.
+	 */
+	function cleanTargetFirst(): boolean {
+		void refreshCount;
+		return editor.state.holes.length > 0 && targetImage() === null;
 	}
 
 	function currentPairs(): readonly ControlPointPair[] {
@@ -1765,6 +1793,11 @@
 			if (activeRound) annotatedRound = activeRound;
 		}
 
+		// CHSPT-65: a read, not a take — the slot stays live across further SPA
+		// round trips (e.g. Create Graphics <-> Stitch Map) until the follow-up
+		// registration ticket consumes it or the page fully reloads.
+		thrownRound = participatesInSession ? getThrownRoundSource() : null;
+
 		window.addEventListener('keydown', handleGlobalKeyDown);
 		return () => window.removeEventListener('keydown', handleGlobalKeyDown);
 	});
@@ -2092,6 +2125,25 @@
 		{/if}
 	</section>
 
+	{#if thrownRound}
+		<!-- CHSPT-65: visibility only — the thrown-round source lives in its own
+		     session slot and never enters an image role here; registering its
+		     graphics onto the clean target is a follow-up ticket. -->
+		<section class="thrown-round-note" data-testid="thrown-round-note" aria-live="polite">
+			<p>
+				Thrown-round image “{thrownRound.fileName}” is riding along with this course. Mapping its
+				round graphics onto the clean target comes in a later step.
+			</p>
+		</section>
+	{/if}
+
+	{#if cleanTargetFirst()}
+		<!-- CHSPT-65: arriving with an annotated course but no committed clean
+		     target, fetching the target is the first meaningful interaction —
+		     the same section as below, just rendered ahead of the panes. -->
+		{@render naipFetchSection()}
+	{/if}
+
 	<section class="panes">
 		<ImagePane
 			title="UDisc source"
@@ -2136,6 +2188,7 @@
 		/>
 	</section>
 
+	{#snippet naipFetchSection()}
 	<section
 		class="naip-fetch"
 		data-testid="naip-fetch"
@@ -2425,6 +2478,11 @@
 			{/if}
 		{/if}
 	</section>
+	{/snippet}
+
+	{#if !cleanTargetFirst()}
+		{@render naipFetchSection()}
+	{/if}
 
 	<!--
 		Diagnostics and pair counts live BELOW the panes on purpose: the section grows as
@@ -2926,6 +2984,19 @@
 		align-items: center;
 		gap: 1rem;
 		flex-wrap: wrap;
+	}
+
+	.thrown-round-note {
+		padding: 0.5rem 0.8rem;
+		border: 1px solid #4c1d95;
+		border-radius: 6px;
+		background-color: #2e1065;
+		color: #ddd6fe;
+		font-size: 0.85rem;
+	}
+
+	.thrown-round-note p {
+		margin: 0;
 	}
 
 	.handoff-banner {

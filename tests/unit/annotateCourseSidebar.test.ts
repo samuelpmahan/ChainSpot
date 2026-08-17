@@ -9,12 +9,25 @@
  * save/map-round gating.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
+
+// CHSPT-65: the completion panel's "Continue to Create Graphics" action
+// navigates via the same `handleDone` the header uses, so this file now mocks
+// $app/navigation (pattern taken from annotateCoursePage.test.ts — vi.mock is
+// hoisted, hence vi.hoisted for the mock function itself).
+const { mockGoto } = vi.hoisted(() => ({ mockGoto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: mockGoto }));
+
 import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
 import { createProjectState } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
+import {
+	consumePendingAnnotatedRound,
+	consumePendingCourseBadges,
+	getPendingAnnotatedRound
+} from '../../src/lib/session';
 
 const NOW = () => new Date('2026-08-13T00:00:00.000Z');
 
@@ -136,6 +149,9 @@ afterEach(() => {
 		mounted.host.remove();
 		mounted = null;
 	}
+	consumePendingAnnotatedRound();
+	consumePendingCourseBadges();
+	mockGoto.mockClear();
 });
 
 describe('sidebar hole grid — sections derive from real hole state', () => {
@@ -912,9 +928,105 @@ describe('completion panel', () => {
 		const uploadButton = host.querySelector<HTMLButtonElement>('[data-testid="map-round-from-course"]');
 		expect(uploadButton?.disabled).toBe(true);
 
+		// CHSPT-65: the direct continuation to Create Graphics is offered
+		// alongside (not instead of) the Map Round path, and is NOT gated on
+		// the explicit save-to-memory action — handleDone does its own
+		// best-effort library write.
+		const continueButton = host.querySelector<HTMLButtonElement>(
+			'[data-testid="continue-to-create-graphics"]'
+		);
+		expect(continueButton).not.toBeNull();
+		expect(continueButton?.disabled).toBe(false);
+
 		host.querySelector<HTMLButtonElement>('[data-testid="save-course-to-memory"]')?.click();
 		await flush();
 
 		expect(host.querySelector<HTMLButtonElement>('[data-testid="map-round-from-course"]')?.disabled).toBe(false);
+	});
+
+	it('CHSPT-65: "Continue to Create Graphics" publishes the AnnotatedRound and navigates, bypassing Map Round', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+
+		for (let number = 1; number <= 18; number += 1) {
+			sidebarHoleButton(host, number).click();
+			await flush();
+			const col = ((number - 1) % 6) * 30 + 10;
+			const row = Math.floor((number - 1) / 6) * 30 + 10;
+			const tee = screenPointFor(host, col, row);
+			dispatchClick(host, tee.x, tee.y);
+			await flush();
+			const basket = screenPointFor(host, col + 10, row);
+			dispatchClick(host, basket.x, basket.y);
+			await flush();
+			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+			await flush();
+		}
+		host.querySelector<HTMLButtonElement>('[data-testid="finish-bends"]')?.click();
+		await flush();
+
+		expect(getPendingAnnotatedRound()).toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="continue-to-create-graphics"]')?.click();
+		await flush();
+
+		// Same handleDone pipeline the header Done uses: the artifact is in the
+		// pending session slot, carrying all 18 fully-placed holes, and the
+		// navigation went straight to Create Graphics — never through
+		// /map-round.
+		const pending = getPendingAnnotatedRound();
+		expect(pending).not.toBeNull();
+		expect(pending?.holes).toHaveLength(18);
+		expect(pending?.sourceImage.fileName).toBe('course.png');
+		expect(mockGoto).toHaveBeenCalledTimes(1);
+		expect(mockGoto).toHaveBeenCalledWith('/create-graphics');
+	});
+
+	it('CHSPT-65: a 9-hole course completes at 9/9 and offers the same continuation — 18/18 is not the only completion state', async () => {
+		const editor = makeEditor();
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		await loadImage(host);
+
+		host.querySelector<HTMLButtonElement>('[data-testid="course-length-9"]')?.click();
+		await flush();
+
+		// The grid now scopes to holes 1-9; hole 10 has no button at all.
+		expect(host.querySelector('[data-testid="sidebar-hole-9"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="sidebar-hole-10"]')).toBeNull();
+
+		for (let number = 1; number <= 9; number += 1) {
+			sidebarHoleButton(host, number).click();
+			await flush();
+			const col = ((number - 1) % 6) * 30 + 10;
+			const row = Math.floor((number - 1) / 6) * 30 + 10;
+			const tee = screenPointFor(host, col, row);
+			dispatchClick(host, tee.x, tee.y);
+			await flush();
+			const basket = screenPointFor(host, col + 10, row);
+			dispatchClick(host, basket.x, basket.y);
+			await flush();
+			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+			await flush();
+		}
+
+		// Completion still routes through the guided bends phase, exactly as at 18.
+		expect(host.querySelector('[data-testid="bend-phase-panel"]')).not.toBeNull();
+		host.querySelector<HTMLButtonElement>('[data-testid="finish-bends"]')?.click();
+		await flush();
+
+		const panel = host.querySelector('[data-testid="course-complete-panel"]');
+		expect(panel).not.toBeNull();
+		expect(panel?.textContent).toContain('All 9 holes');
+
+		host.querySelector<HTMLButtonElement>('[data-testid="continue-to-create-graphics"]')?.click();
+		await flush();
+
+		const pending = getPendingAnnotatedRound();
+		expect(pending).not.toBeNull();
+		expect(pending?.holes).toHaveLength(9);
+		expect(mockGoto).toHaveBeenCalledWith('/create-graphics');
 	});
 });
