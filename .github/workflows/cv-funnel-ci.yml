@@ -19,3 +19,13 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:unit
+      - name: Package audit checkout
+        if: always()
+        run: tar --exclude=.git --exclude=node_modules -czf /tmp/chainspot-audit-checkout.tgz .
+      - name: Upload audit checkout
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chainspot-audit-checkout
+          path: /tmp/chainspot-audit-checkout.tgz
+          retention-days: 1
