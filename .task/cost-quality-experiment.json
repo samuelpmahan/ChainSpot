@@ -1,18 +1,187 @@
 {
-  "recordedAt": "2026-08-17T04:22:00-05:00",
+  "recordedAt": "2026-08-17T09:04:00-05:00",
   "scope": "ChainSpot Gates 1-2 MVP push",
   "opencodeGo": {
     "weeklyAllowanceAvailableAtStartPercent": 100,
-    "usageConsumedPercent": 0,
     "cliVersion": "1.18.18",
-    "status": "blocked-before-execution",
-    "blocker": "No OpenCode Go credential was installed in the local CLI. No pasted or exposed secret was used.",
-    "meaningfulExecutorAssignments": []
+    "provider": "opencode-go",
+    "status": "active",
+    "measuredGoCostEquivalentUsd": 0.190186631,
+    "usageConsumedPercent": "not exposed by CLI",
+    "notes": [
+      "OpenCode Go is distinct from OpenCode Zen; its namespace is opencode-go/*.",
+      "Concurrent CLI runs produced a local database lock, so benchmarks run sequentially.",
+      "DeepSeek V4 Go requires explicit China-hosting opt-in before execution.",
+      "Qwen Max endpoints returned transient 503 responses; Qwen 3.8 Max succeeded on retry."
+    ],
+    "meaningfulExecutorAssignments": [
+      {
+        "taskId": "CQ-BUGDIAG-BROAD-DSFREE",
+        "leadOwner": "Sol",
+        "model": "opencode/deepseek-v4-flash-free",
+        "roleTaskClass": "bounded TypeScript/Svelte diagnosis with repository reads",
+        "approximateContextTokensObserved": 90496,
+        "goUsageCostUsd": 0,
+        "wallClockSeconds": 210,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 0,
+        "defectsFoundByReviewer": ["never returned a diagnosis after repeated repository-read steps"],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "rejected"
+      },
+      {
+        "taskId": "CQ-BUGDIAG-BROAD-MIMOFREE",
+        "leadOwner": "Sol",
+        "model": "opencode/mimo-v2.5-free",
+        "roleTaskClass": "same bounded TypeScript/Svelte diagnosis with repository reads",
+        "approximateContextTokensObserved": 66660,
+        "goUsageCostUsd": 0,
+        "wallClockSeconds": 90,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 0,
+        "defectsFoundByReviewer": ["never returned a diagnosis after repository-read steps"],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "rejected"
+      },
+      {
+        "taskId": "CQ-BUGDIAG-MICRO-DSFREE",
+        "leadOwner": "Sol",
+        "model": "opencode/deepseek-v4-flash-free",
+        "roleTaskClass": "code-in-prompt TypeScript semantic bug diagnosis",
+        "approximateContextTokensObserved": 10937,
+        "goUsageCostUsd": 0,
+        "wallClockSeconds": 22.5,
+        "firstAttemptUsable": true,
+        "reviewerQualityScore": 4,
+        "defectsFoundByReviewer": [],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "accepted",
+        "notes": "Correctly identified silent proposal loss on stale hole assignment and proposed a valid minimal failure signal."
+      },
+      {
+        "taskId": "CQ-BUGDIAG-MICRO-MIMOFREE",
+        "leadOwner": "Sol",
+        "model": "opencode/mimo-v2.5-free",
+        "roleTaskClass": "identical code-in-prompt TypeScript semantic bug diagnosis",
+        "approximateContextTokensObserved": 10606,
+        "goUsageCostUsd": 0,
+        "wallClockSeconds": 16.9,
+        "firstAttemptUsable": true,
+        "reviewerQualityScore": 2,
+        "defectsFoundByReviewer": ["proposed holes.has(holeId), invalid for the array-shaped input"],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "accepted as diagnosis, rejected as patch"
+      },
+      {
+        "taskId": "CQ-BUGDIAG-BROAD-LUNA-HIGH",
+        "leadOwner": "Sol",
+        "model": "opencode-go/gpt-5.6-luna",
+        "variant": "high",
+        "roleTaskClass": "bounded TypeScript/Svelte diagnosis with repository reads",
+        "approximateContextTokensObserved": 45354,
+        "goUsageCostUsd": 0.00901145,
+        "wallClockSeconds": 108,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 3,
+        "defectsFoundByReviewer": ["first run exited after tool calls without a final report"],
+        "reworkRounds": 1,
+        "additionalReworkCostUsd": 0.00315926,
+        "finalResult": "accepted after one report-only rework",
+        "notes": "All three findings were confirmed: deferred overlaps are count-only, unassigned proposals default to a hole, and duplicate default orders can reverse chronology."
+      },
+      {
+        "taskId": "CQ-BUGDIAG-BROAD-GLM52",
+        "leadOwner": "Sol",
+        "model": "opencode-go/glm-5.2",
+        "roleTaskClass": "identical bounded TypeScript/Svelte diagnosis with repository reads",
+        "approximateContextTokensObserved": 38930,
+        "goUsageCostUsd": 0.06894592,
+        "wallClockSeconds": 90,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 0,
+        "defectsFoundByReviewer": ["never returned a diagnosis after repository-read steps"],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "rejected",
+        "notes": "Cost about 7.6 times Luna's accepted broad review while producing no final report."
+      },
+      {
+        "taskId": "CQ-BUGDIAG-BROAD-DEEPSEEK-GO",
+        "leadOwner": "Sol",
+        "model": "opencode-go/deepseek-v4-flash",
+        "roleTaskClass": "identical bounded TypeScript/Svelte diagnosis with repository reads",
+        "approximateContextTokensObserved": 116404,
+        "goUsageCostUsd": 0.039508316,
+        "wallClockSeconds": 220.1,
+        "firstAttemptUsable": true,
+        "reviewerQualityScore": 4,
+        "defectsFoundByReviewer": [],
+        "reworkRounds": 0,
+        "additionalReworkCostUsd": 0,
+        "finalResult": "accepted first pass",
+        "notes": "Found three independently confirmed defects, including the deepest result: stale registration can survive clean-source/project replacement and write throws through an old transform."
+      },
+      {
+        "taskId": "CQ-CV-ARCH-QWEN38",
+        "leadOwner": "Sol",
+        "model": "opencode-go/qwen3.8-max",
+        "roleTaskClass": "text-only CV pipeline architecture critique grounded in current Linear definitions",
+        "approximateContextTokensObserved": 19507,
+        "goUsageCostUsd": 0.06999,
+        "wallClockSeconds": 180.4,
+        "firstAttemptUsable": false,
+        "reviewerQualityScore": 2,
+        "defectsFoundByReviewer": [
+          "conflated the C1/C2 10m/20m course-circle prior with C1/C2 landing-droplet glyph classes",
+          "assumed a repository synthetic fixture generator that the evidence brief did not establish"
+        ],
+        "reworkRounds": 1,
+        "additionalReworkCostUsd": 0.06999,
+        "finalResult": "accepted as architecture input with reviewer corrections",
+        "notes": "Strong seam-integrity, error-budget, manual-recovery, and renderer-deferral recommendations; first Qwen 3.8 endpoint attempt failed with a retryable 503 at zero measured cost."
+      }
+    ],
+    "infrastructureChecks": [
+      {
+        "taskId": "CQ-AUTH-SMOKE-LUNA-HIGH",
+        "model": "opencode-go/gpt-5.6-luna",
+        "result": "accepted",
+        "wallClockSeconds": 7.7,
+        "costUsd": 0.000909485,
+        "reviewerQualityScore": 4
+      },
+      {
+        "taskId": "CQ-AUTH-SMOKE-DEEPSEEK-GO",
+        "model": "opencode-go/deepseek-v4-flash",
+        "result": "accepted after regional-hosting opt-in",
+        "wallClockSeconds": 5.4,
+        "costUsd": 0.00182146,
+        "reviewerQualityScore": 4
+      }
+    ]
   },
   "codexBudgetGuard": {
     "requestedMaximumPercent": 50,
     "additionalSubagentsSpawnedAfterGuard": 0,
     "activeAgentsAtRecordTime": 1
+  },
+  "derivedMetrics": {
+    "acceptedMeaningfulTasks": 5,
+    "firstPassAcceptableMeaningfulTasks": 3,
+    "reworkRateAmongAcceptedMeaningfulTasks": 0.4,
+    "paidCostPerAcceptedLunaTaskUsd": 0.00901145,
+    "averageQualityByModel": {
+      "opencode-go/gpt-5.6-luna-high": 3,
+      "opencode-go/glm-5.2": 0,
+      "opencode-go/deepseek-v4-flash": 4,
+      "opencode-go/qwen3.8-max": 2,
+      "opencode/deepseek-v4-flash-free": 2,
+      "opencode/mimo-v2.5-free": 1
+    }
   },
   "leadReviewObservations": [
     {
@@ -44,8 +213,15 @@
     }
   ],
   "routingPolicy": {
-    "status": "insufficient OpenCode Go measurements",
-    "recommendations": [],
-    "note": "Do not infer a model routing policy until authenticated controlled comparisons produce measured ChainSpot results."
+    "status": "provisional",
+    "recommendations": [
+      "Repository-scale TypeScript/Svelte diagnosis: DeepSeek V4 Flash Go is the current winner; allow roughly four minutes for its deeper first-pass review.",
+      "Luna-high is faster to inspect but required a report-only rework; force a no-more-tools finalization step if routed this task class.",
+      "Do not route this task class to GLM-5.2: its rejected attempt cost roughly 7.6 times Luna's accepted result.",
+      "Small code-in-prompt diagnosis: DeepSeek V4 Flash Free beat MiMo-V2.5 Free on correctness despite higher latency.",
+      "Do not route broad repository archaeology to the tested free DeepSeek or MiMo loops until their read-loop non-completion is controlled.",
+      "DeepSeek regional consent is now enabled; use it in the next controlled CV-reproduction comparison.",
+      "Qwen 3.8 Max is useful for text-only CV architecture synthesis, but its renderer/semantic conclusions require expert review for concept conflation and invented fixture assumptions."
+    ]
   }
 }
