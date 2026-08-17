@@ -45,13 +45,14 @@ import type {
 } from './cvCalibration';
 import { localFeatureSnap } from '../cv/localSnap';
 import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
-import { detectRawObjectMask } from './rawObjectMask';
+import { detectRawObjectMask, RAW_MASK_HISTORICAL_DEFAULTS } from './rawObjectMask';
 import { deriveP3Ownership } from './rawObjectOwnership';
 import { deriveP4RibbonOwnership } from './p4RibbonOwnership';
 import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from './ribbonMass';
 import { deriveP5SparseAssignment } from './p5SparseAssignment';
 import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
 import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
+import type { VisionFlags } from './visionFlags';
 
 const MAX_ANALYSIS_DIM = 4096;
 // TEMP DEV ONLY: benchmark Pancake 1-3 without paying for legacy ownership CV.
@@ -78,6 +79,7 @@ interface CourseDetectionRequest {
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
+	readonly visionFlags?: VisionFlags;
 }
 
 interface BasketPrewarmRequest {
@@ -493,6 +495,14 @@ function reportCourseProgress(
 }
 
 async function detectCourse(request: CourseDetectionRequest) {
+	// The main thread snapshots flags at request creation. Never consult
+	// storage/global state here: one worker request must remain internally stable.
+	const visionFlags: VisionFlags = Object.freeze({
+		zeroBendShortcutEnabled: request.visionFlags?.zeroBendShortcutEnabled ?? true,
+		zeroBendMaxDistancePx: request.visionFlags?.zeroBendMaxDistancePx === 4 ? 4 : 3,
+		p1Profile: request.visionFlags?.p1Profile === 'historical' ? 'historical' : 'tuned'
+	});
+	const p1Tuning = visionFlags.p1Profile === 'historical' ? RAW_MASK_HISTORICAL_DEFAULTS : undefined;
 	const startedAt = performance.now();
 	const runtimeCachedAtStart = runtimePromise !== null;
 	const templatePackCachedAtStart = templatePackPromise !== null;
@@ -514,7 +524,11 @@ async function detectCourse(request: CourseDetectionRequest) {
 		const fullRasterMs = performance.now() - fullRasterStartedAt;
 
 		const p1MaskStartedAt = performance.now();
-		const rawMaskObjects = detectRawObjectMask({ rgba: full.rgba, widthPx: full.width, heightPx: full.height });
+		const rawMaskObjects = detectRawObjectMask(
+			{ rgba: full.rgba, widthPx: full.width, heightPx: full.height },
+			undefined,
+			p1Tuning
+		);
 		const p1MaskMs = performance.now() - p1MaskStartedAt;
 
 		const p2BadgeLabelStartedAt = performance.now();
@@ -552,7 +566,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 		const p3Ownership = deriveP3Ownership(
 			rawMaskObjects.tees,
 			p2LabeledBadges,
-			rawMaskObjects.baskets
+			rawMaskObjects.baskets,
+			visionFlags
 		);
 		const p3Ms = performance.now() - p3StartedAt;
 
@@ -606,7 +621,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p2LabeledBadges,
 			p5SparseAssignment,
 			p4RibbonOwnership,
-			ribbonSegmentation
+			ribbonSegmentation,
+			visionFlags
 		);
 		const p6Ms = performance.now() - p6StartedAt;
 
@@ -708,7 +724,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p4RibbonOwnership,
 			p5SparseAssignment,
 			p6LowParBasketAssignment,
-			performance: performanceReport
+			performance: performanceReport,
+			visionFlags
 		};
 	}
 
@@ -803,7 +820,11 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const full = fullResolutionRaster(request.bitmap);
 	const teeRasterMs = performance.now() - teeRasterStartedAt;
 	const p1MaskStartedAt = performance.now();
-	const rawMaskObjects = detectRawObjectMask({ rgba: full.rgba, widthPx: full.width, heightPx: full.height });
+	const rawMaskObjects = detectRawObjectMask(
+		{ rgba: full.rgba, widthPx: full.width, heightPx: full.height },
+		undefined,
+		p1Tuning
+	);
 	const p1MaskMs = performance.now() - p1MaskStartedAt;
 
 	const p2BadgeLabelStartedAt = performance.now();
@@ -841,7 +862,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const p3Ownership = deriveP3Ownership(
 		rawMaskObjects.tees,
 		p2LabeledBadges,
-		rawMaskObjects.baskets
+		rawMaskObjects.baskets,
+		visionFlags
 	);
 	const p3Ms = performance.now() - p3StartedAt;
 
@@ -1029,7 +1051,8 @@ async function detectCourse(request: CourseDetectionRequest) {
 		rawMaskObjects,
 		p2BadgeDetection,
 		p3Ownership,
-		performance: performanceReport
+		performance: performanceReport,
+		visionFlags
 	};
 }
 

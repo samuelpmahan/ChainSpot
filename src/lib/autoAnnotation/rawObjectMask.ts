@@ -200,6 +200,19 @@ export const RAW_MASK_TUNING_DEFAULTS: RawMaskTuning = Object.freeze({
 	teeAppearanceThreshold: 0.38
 });
 
+/**
+ * The pre-CHSPT-70 P1 constants, retained as an explicit comparison preset.
+ * It is intentionally not the production default and is only selected by
+ * the prestaging console flag.
+ */
+export const RAW_MASK_HISTORICAL_DEFAULTS: RawMaskTuning = Object.freeze({
+	...RAW_MASK_TUNING_DEFAULTS,
+	basketPoolFillMin: 0.4,
+	basketPoolExcludeInsideBadgeMarginFrac: null,
+	teeAreaVsBasketMin: 0.09,
+	teeMinDimBadgeHeightFrac: 0.45
+});
+
 function normalizeAxisDeg(value: number): number {
 	return ((value % 180) + 180) % 180;
 }

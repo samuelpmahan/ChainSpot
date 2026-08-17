@@ -22,6 +22,7 @@ import type { P5SparseAssignmentResult, P5TeeAssignment } from './p5SparseAssign
 import { DEFAULT_RIBBON_MASS_PARAMS, nearestComponentLabel, nearestKeptDistancePx } from './ribbonMass';
 import type { RibbonMassParams, RibbonMassSegmentation } from './ribbonMass';
 import { evaluateZeroBendBadgeOnChord } from './zeroBendChord';
+import type { ZeroBendMaxDistancePx } from './visionFlags';
 
 export const P6_DISALLOWED_COST = 1_000_000;
 export const LOW_PAR_HIGHER_IS_BETTER = true;
@@ -46,6 +47,13 @@ const LOW_PAR_MIN_SAMPLE_COUNT = 5;
 const LOW_PAR_BADGE_MASK_HALF_WIDTH_SRC_PX = 34;
 const LOW_PAR_BADGE_MASK_HALF_HEIGHT_SRC_PX = 24;
 export const P6_FORWARD_GATE_ANGLE_DEG = 80;
+
+export interface P6LowParOptions {
+	/** Prestaging-only switch for the badge-on-chord shortcut. */
+	readonly zeroBendShortcutEnabled?: boolean;
+	/** Prestaging comparison between the measured 3px and 4px thresholds. */
+	readonly zeroBendMaxDistancePx?: ZeroBendMaxDistancePx;
+}
 
 export interface P6BasketCandidate {
 	readonly holeNumber: number;
@@ -321,8 +329,10 @@ export function computeZeroBendLocks(
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
 	alreadyLockedHoleNumbers: ReadonlySet<number>,
-	alreadyLockedBasketIndexes: ReadonlySet<number>
+	alreadyLockedBasketIndexes: ReadonlySet<number>,
+	options: P6LowParOptions = {}
 ): Map<number, number> {
+	if (options.zeroBendShortcutEnabled === false) return new Map();
 	const p5ByHole = p5AssignmentByHole(p5);
 	const badgesByHole = new Map(badges.map((badge) => [badge.holeNumber, badge]));
 	const holeNumbers = Array.from(new Set([...badgesByHole.keys(), ...p5ByHole.keys()])).sort((a, b) => a - b);
@@ -343,7 +353,8 @@ export function computeZeroBendLocks(
 			const evaluation = evaluateZeroBendBadgeOnChord(
 				{ xPx: tee.xPx, yPx: tee.yPx },
 				{ xPx: basket.centerXPx, yPx: basket.centerYPx },
-				{ xPx: badge.xPx, yPx: badge.yPx }
+				{ xPx: badge.xPx, yPx: badge.yPx },
+				{ maxDistancePx: options.zeroBendMaxDistancePx }
 			);
 			if (evaluation.onChord) onChordBasketIndexes.push(basketIndex);
 		}
@@ -418,7 +429,8 @@ function deriveP6LowParBasketAssignmentSnapshot(
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
 	p4: P4RibbonOwnershipResult,
-	useForwardGate: boolean
+	useForwardGate: boolean,
+	options: P6LowParOptions
 ): P6LowParBasketAssignmentSnapshot {
 	const p4ByHole = p4HoleByNumber(p4);
 	const p5ByHole = p5AssignmentByHole(p5);
@@ -437,7 +449,8 @@ function deriveP6LowParBasketAssignmentSnapshot(
 		badges,
 		p5,
 		new Set(p4Locks.keys()),
-		new Set(p4Locks.values())
+		new Set(p4Locks.values()),
+		options
 	);
 	const lockedBasketIndexes = new Set([...p4Locks.values(), ...zeroBendLocks.values()]);
 	const unlockedBasketIndexes = baskets
@@ -983,10 +996,11 @@ export function deriveP6LowParBasketAssignment(
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
 	p4: P4RibbonOwnershipResult,
-	ribbonSegmentation: RibbonMassSegmentation
+	ribbonSegmentation: RibbonMassSegmentation,
+	options: P6LowParOptions = {}
 ): P6LowParBasketAssignmentResult {
-	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, false);
-	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, true);
+	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, false, options);
+	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, true, options);
 	const swapAdjudication = derive2x2SwapAdjudication(gatedP6, ribbonSegmentation, baskets, badges);
 	const adjudicatedP6 = applySwapAdjudication(gatedP6, swapAdjudication);
 	return {

@@ -24,6 +24,8 @@ import type { P3OwnershipResult } from './rawObjectOwnership';
 import type { P4RibbonOwnershipResult } from './p4RibbonOwnership';
 import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
+import { getVisionFlagsSnapshot } from './visionFlags';
+import type { VisionFlags } from './visionFlags';
 
 export type BasketCandidate = CalibratedBasketCandidate;
 
@@ -121,6 +123,8 @@ export interface CourseDetectionResult {
 	readonly p6LowParBasketAssignment?: P6LowParBasketAssignmentResult;
 	/** Present on production worker results; optional so existing test fixtures/mocks remain source-compatible. */
 	readonly performance?: CourseDetectionPerformance;
+	/** Exact immutable prestaging flag snapshot used by the worker for this result. */
+	readonly visionFlags?: VisionFlags;
 }
 
 export type { TeePadVariant, TeePadStageCounts, TeePadVariantResult } from './teePadDetection';
@@ -200,6 +204,7 @@ interface BasketDetectionRequest {
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
+	readonly visionFlags?: VisionFlags;
 }
 
 interface BasketPrewarmRequest {
@@ -405,7 +410,15 @@ export async function detectCourseCandidates(
 	const token = nextToken();
 	try {
 		const reply = await postToWorker(
-			{ kind: 'detect-course', token, basePath: base, bitmap, widthPx, heightPx },
+			{
+				kind: 'detect-course',
+				token,
+				basePath: base,
+				bitmap,
+				widthPx,
+				heightPx,
+				visionFlags: getVisionFlagsSnapshot()
+			},
 			[bitmap as unknown as Transferable],
 			onProgress
 		);

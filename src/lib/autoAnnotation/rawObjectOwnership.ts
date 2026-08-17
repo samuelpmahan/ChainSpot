@@ -14,6 +14,7 @@
 
 import type { RawMaskBasket, RawMaskTee } from './rawObjectMask';
 import { evaluateZeroBendBadgeOnChord } from './zeroBendChord';
+import type { ZeroBendMaxDistancePx } from './visionFlags';
 
 export interface P2LabeledBadge {
 	readonly holeNumber: number;
@@ -84,6 +85,11 @@ export interface P3OwnershipResult {
 	readonly teeConflictIndexes: readonly number[];
 	readonly straightBasketConflictHoleNumbers: readonly number[];
 	readonly teeDiagnostics: readonly P3TeeDiagnostic[];
+}
+
+export interface P3OwnershipOptions {
+	readonly zeroBendShortcutEnabled?: boolean;
+	readonly zeroBendMaxDistancePx?: ZeroBendMaxDistancePx;
 }
 
 const BADGE_AXIS_MARGIN_FRACTION = 0.18;
@@ -246,7 +252,8 @@ function candidateBadgeEvidence(
 export function deriveP3Ownership(
 	tees: readonly RawMaskTee[],
 	badges: readonly P2LabeledBadge[],
-	baskets: readonly RawMaskBasket[]
+	baskets: readonly RawMaskBasket[],
+	options: P3OwnershipOptions = {}
 ): P3OwnershipResult {
 	const teeBadgeHits: P3TeeBadgeHit[] = [];
 	const straightBasketHits: P3StraightBasketHit[] = [];
@@ -329,11 +336,14 @@ export function deriveP3Ownership(
 		if (basketResult.kind === 'hit') {
 			const basketHit = basketResult.hit;
 			const basketHitItem = basketHit.item;
-			const zeroBend = evaluateZeroBendBadgeOnChord(
-				{ xPx: tee.xPx, yPx: tee.yPx },
-				{ xPx: basketHitItem.centerXPx, yPx: basketHitItem.centerYPx },
-				{ xPx: badge.xPx, yPx: badge.yPx }
-			);
+			const zeroBend = options.zeroBendShortcutEnabled === false
+				? { onChord: false, distancePx: Number.POSITIVE_INFINITY }
+				: evaluateZeroBendBadgeOnChord(
+					{ xPx: tee.xPx, yPx: tee.yPx },
+					{ xPx: basketHitItem.centerXPx, yPx: basketHitItem.centerYPx },
+					{ xPx: badge.xPx, yPx: badge.yPx },
+					{ maxDistancePx: options.zeroBendMaxDistancePx }
+				);
 			straightBasketHits.push({
 				...teeBadge,
 				basketIndex: baskets.indexOf(basketHitItem),
