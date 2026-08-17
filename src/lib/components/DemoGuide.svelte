@@ -34,6 +34,7 @@
 	import { demoTour } from '$lib/demo/tour.svelte';
 	import BaselineGuide from './demo/BaselineGuide.svelte';
 	import CoachGuide from './demo/CoachGuide.svelte';
+	import { demoSettingsUi } from './demo/settingsState.svelte';
 	import type { GuideActions } from './demo/guideApi';
 	import MissionHud from './demo/MissionHud.svelte';
 	import SpotlightGuide from './demo/SpotlightGuide.svelte';
@@ -236,6 +237,10 @@
 		demoTour.exit();
 		arm.message = null;
 		arm.failed = false;
+		// The popover's open flag is module-level so it survives presentation
+		// swaps; without this reset it would also survive Exit demo and pop
+		// open unrequested on the next tour start.
+		demoSettingsUi.open = false;
 	}
 
 	const actions: GuideActions = {

@@ -5,7 +5,7 @@
  *
  * Purely a presentation grouping over `DEMO_STEPS`; it owns no state and adds
  * nothing to the tour machine. Phases must cover every step exactly once and
- * in script order (contiguously), which `demoGuidePhases.test.ts` pins, so a
+ * in script order (contiguously), which `demoGuidePresentation.test.ts` pins, so a
  * catalog change that reorders or adds steps fails loudly here instead of
  * rendering a silently wrong journey strip.
  */
