@@ -304,6 +304,24 @@
 		placementsInitialized = false;
 	}
 
+	/**
+	 * CHSPT-72: the release half of the tile-sourced thrown-round
+	 * reserve/release pair for callers with no single slot already being
+	 * vacated in the same action (unlike `handleMarkTileAsThrownRound`, which
+	 * reuses the slot `handleRemove` just freed). Reuses the first empty
+	 * active slot, or grows the grid via `addSlot()` if none is free.
+	 */
+	function restoreTileToPool(tile: StitchTile): void {
+		const emptySlot = activeSlots.find((candidate) => !tiles[candidate]);
+		if (emptySlot) {
+			tiles = { ...tiles, [emptySlot]: tile };
+			return;
+		}
+		addSlot();
+		const newSlot = activeSlots[activeSlots.length - 1];
+		tiles = { ...tiles, [newSlot]: tile };
+	}
+
 	function setPhase(next: Phase): void {
 		phase = next;
 	}
@@ -796,12 +814,19 @@
 		}
 	}
 
-	function handleRemove(slot: TileSlot): void {
+	/**
+	 * CHSPT-72: `replacement`, when given, lands in the same slot atomically
+	 * with the removal instead of as a separate follow-up write — the slot
+	 * is never observed empty in between, so the "no tiles left" check below
+	 * can't spuriously fire `resetToImport()` on a slot about to be refilled.
+	 */
+	function handleRemove(slot: TileSlot, replacement?: StitchTile): void {
 		// Any in-flight decode for this slot must never publish its result.
 		decodeCoordinator.invalidate(slot);
 		if (!tiles[slot]) return;
 		const next = { ...tiles };
-		delete next[slot];
+		if (replacement) next[slot] = replacement;
+		else delete next[slot];
 		tiles = next;
 		const cleared = { ...tileErrors };
 		delete cleared[slot];
@@ -811,7 +836,7 @@
 			syncPositionDraft(true);
 		}
 		if (!activeSlots.some((candidate) => tiles[candidate])) resetToImport();
-		statusMessage = `${slotLabel(slot)} removed.`;
+		if (!replacement) statusMessage = `${slotLabel(slot)} removed.`;
 	}
 
 	function resetToImport(): void {
@@ -1405,6 +1430,17 @@
 	let heldThrownRound = $state<{ fileName: string } | null>(null);
 
 	/**
+	 * CHSPT-72: the full tile behind `heldThrownRound`, set only when the
+	 * current thrown round was reserved from this page's tile grid
+	 * (`handleMarkTileAsThrownRound`) rather than from a composited result.
+	 * Lets a superseding pick or an explicit discard release it back into
+	 * `tiles` instead of dropping it. Not `$state` — nothing renders it
+	 * directly. Resets to `null` on every remount, same as the rest of
+	 * `tiles`: page tiles are transient browser resources, never durable.
+	 */
+	let heldThrownRoundTile: StitchTile | null = null;
+
+	/**
 	 * CHSPT-65: keeps the current result as the *thrown-round* source — the
 	 * played-round screenshot with UDisc's purple throw/walk graphics — in its
 	 * own session slot (`setThrownRoundSource`), semantically distinct from the
@@ -1426,6 +1462,10 @@
 			provenance: resultProvenance ?? undefined
 		});
 		heldThrownRound = { fileName };
+		// CHSPT-72: the held round is now result-sourced, not tile-sourced —
+		// any earlier tile-sourced reservation must stop being "releasable"
+		// so a later Discard can't resurrect it.
+		heldThrownRoundTile = null;
 		resetToImport();
 		statusMessage = replacing
 			? 'Thrown-round image replaced. It will ride along into Create Graphics. Import the clean course screenshots next.'
@@ -1445,11 +1485,18 @@
 		const tile = tiles[slot];
 		if (!tile) return;
 		const replacing = getThrownRoundSource() !== null;
+		// CHSPT-72: capture the tile behind any currently-held thrown round
+		// BEFORE it gets overwritten below, so it can be released into the
+		// slot `handleRemove` is about to free instead of being dropped.
+		const releasedTile = heldThrownRoundTile;
 		setThrownRoundSource({ blob: tile.file, fileName: tile.fileName });
 		heldThrownRound = { fileName: tile.fileName };
-		handleRemove(slot);
+		heldThrownRoundTile = tile;
+		handleRemove(slot, releasedTile ?? undefined);
 		statusMessage = replacing
-			? `“${tile.fileName}” is now the thrown round (replacing the previous one). It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`
+			? releasedTile
+				? `“${tile.fileName}” is now the thrown round (replacing the previous one). “${releasedTile.fileName}” is back in the stitching pool.`
+				: `“${tile.fileName}” is now the thrown round (replacing the previous one). It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`
 			: `“${tile.fileName}” set aside as the thrown round. It will ride along into Create Graphics; the remaining screenshots stitch the clean map.`;
 	}
 
@@ -1457,7 +1504,16 @@
 	function handleClearThrownRound(): void {
 		clearThrownRoundSource();
 		heldThrownRound = null;
-		statusMessage = 'Thrown-round image discarded.';
+		// CHSPT-72: a tile-sourced thrown round releases back into the pool
+		// instead of vanishing on discard.
+		const releasedTile = heldThrownRoundTile;
+		heldThrownRoundTile = null;
+		if (releasedTile) {
+			restoreTileToPool(releasedTile);
+			statusMessage = `Thrown-round image discarded; “${releasedTile.fileName}” is back in the stitching pool.`;
+		} else {
+			statusMessage = 'Thrown-round image discarded.';
+		}
 	}
 
 	/**
@@ -1477,6 +1533,11 @@
 		if (!source || !file || rendering) return;
 		setThrownRoundSource({ blob: file, fileName: source.fileName });
 		heldThrownRound = { fileName: source.fileName };
+		// CHSPT-72: this path never populates the tile grid to begin with
+		// (bulk import lands directly on the composited result), so there is
+		// no tile-sourced reservation to preserve — and any earlier one from a
+		// different session state must stop being "releasable" here too.
+		heldThrownRoundTile = null;
 		const remaining = [...resultSourceFiles.entries()]
 			.filter(([id]) => id !== sourceId)
 			.map(([, remainingFile]) => remainingFile);
