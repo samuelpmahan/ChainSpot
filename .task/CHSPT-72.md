@@ -11,8 +11,13 @@ in the stitching pool instead of being silently lost.
   thrown round is already held, restore it into the slot just vacated by the
   new pick instead of dropping it.
 - `handleClearThrownRound` (~line 1457): when the discarded thrown round is
-  tile-sourced, restore it into an empty active slot (adding one via the
-  existing `addSlot()` if none is free) instead of dropping it.
+  tile-sourced, restore it into an empty active slot if one exists instead
+  of dropping it. **Revised during independent review** (see Known context):
+  does NOT grow the grid via `addSlot()` when no slot is free — that path
+  was found to silently corrupt every other tile's already-committed
+  placement once a stitch has completed. When no empty slot exists, the
+  tile is not restored; the status message says so explicitly instead of
+  claiming a restore that didn't happen.
 
 ## Non-goals
 - Changing the single-slot "replace on set" design of
@@ -55,13 +60,28 @@ in the stitching pool instead of being silently lost.
   trip and then discarded on the far side has nothing tile-shaped to
   restore. That mirrors the existing session-persistence boundary and is not
   a regression.
+- **Found by independent review, fixed**: the banner's Discard is reachable
+  in ANY phase (it renders outside the phase conditionals), including
+  `result` after a full grid has already auto-stitched — at that point
+  every active slot is filled, so the original `restoreTileToPool`
+  fell back to `addSlot()`. `addSlot()` sets `placementsInitialized = false`,
+  which the placements `$effect` (~line 1844) treats as "recompute
+  everyone's layout from scratch" — silently replacing the real,
+  overlap-derived positions of the OTHER already-stitched tiles with a
+  naive default grid. Reproduced live with Playwright (positions of 3
+  unrelated tiles changed, plus a phantom 5th slot appeared) before the fix;
+  `restoreTileToPool` no longer calls `addSlot()` at all — it only ever
+  writes into a slot already empty, and reports failure otherwise.
 
 ## Acceptance
 - Mark tile A as thrown round, then mark tile B as thrown round instead:
   tile A's image reappears as an available slot in the grid, tile B is now
   the reserved thrown round.
 - Discarding a tile-sourced thrown round via the banner's Discard restores
-  that tile to the grid.
+  that tile to the grid when an empty slot is available; when the grid is
+  already fully stitched (no empty slot), discarding clears the thrown
+  round and says plainly that the tile could not be restored, without
+  corrupting the completed composite's tile placements.
 - `handleKeepAsThrownRound` and `handleMarkResultSourceAsThrownRound`
   behavior is unchanged.
 - `npm run check` passes; existing `thrownRoundFlow` unit suite still

@@ -308,18 +308,21 @@
 	 * CHSPT-72: the release half of the tile-sourced thrown-round
 	 * reserve/release pair for callers with no single slot already being
 	 * vacated in the same action (unlike `handleMarkTileAsThrownRound`, which
-	 * reuses the slot `handleRemove` just freed). Reuses the first empty
-	 * active slot, or grows the grid via `addSlot()` if none is free.
+	 * reuses the slot `handleRemove` just freed). Only reuses an existing
+	 * EMPTY active slot — deliberately does NOT grow the grid via
+	 * `addSlot()`. That helper's `placementsInitialized = false` reset is
+	 * harmless pre-stitch (nothing has a committed layout yet) but once a
+	 * stitch has completed it re-triggers the placements effect for every
+	 * active slot, silently reflowing the already-correct, overlap-derived
+	 * positions of the OTHER tiles into a naive default grid — a real tile
+	 * whose slot is currently empty is the only safe target. Returns whether
+	 * the tile was actually restored.
 	 */
-	function restoreTileToPool(tile: StitchTile): void {
+	function restoreTileToPool(tile: StitchTile): boolean {
 		const emptySlot = activeSlots.find((candidate) => !tiles[candidate]);
-		if (emptySlot) {
-			tiles = { ...tiles, [emptySlot]: tile };
-			return;
-		}
-		addSlot();
-		const newSlot = activeSlots[activeSlots.length - 1];
-		tiles = { ...tiles, [newSlot]: tile };
+		if (!emptySlot) return false;
+		tiles = { ...tiles, [emptySlot]: tile };
+		return true;
 	}
 
 	function setPhase(next: Phase): void {
@@ -1508,9 +1511,14 @@
 		// instead of vanishing on discard.
 		const releasedTile = heldThrownRoundTile;
 		heldThrownRoundTile = null;
-		if (releasedTile) {
-			restoreTileToPool(releasedTile);
+		if (releasedTile && restoreTileToPool(releasedTile)) {
 			statusMessage = `Thrown-round image discarded; “${releasedTile.fileName}” is back in the stitching pool.`;
+		} else if (releasedTile) {
+			// No empty slot to restore into — the grid already stitched a
+			// complete result. Say so rather than growing the grid, which
+			// would corrupt the other tiles' already-committed placements
+			// (see `restoreTileToPool`).
+			statusMessage = `Thrown-round image discarded. “${releasedTile.fileName}” can't be restored to this already-stitched session — re-import it if you need it in the clean map.`;
 		} else {
 			statusMessage = 'Thrown-round image discarded.';
 		}
