@@ -106,4 +106,30 @@ from both of its current positions.
 
 ## Proof Plan
 
-_To be completed by the implementing agent before production-code changes._
+- **Highest-value invariant — deterministic point-preserving re-fetch:** unit-test the
+  new pure module (`src/lib/naipCoverage.ts`): (a) a point remapped old→geo→new and back
+  round-trips exactly; (b) the expanded fetch geometry contains both the old bbox and
+  the course bounds, so every remapped pair lands in-bounds; (c) coverage detection
+  flags exactly the holes whose transformed points exit the target bounds. These would
+  fail first if the remap math or containment logic is wrong.
+- **Regression test for the per-fetch-shape ground-scale rule:** page-level unit tests
+  (injected editor/decoder, mocked fetch) assert the radius-fetch commit sets ground
+  scale + geo center/radius and the exact-area commit leaves them null — the test that
+  fails if the flow move accidentally collapses the fetch-shape distinction.
+- **Section removal + modal state machine:** page-level unit tests assert `naip-fetch`
+  renders in NEITHER position (holes-no-target and default layouts), that the modal
+  opens over the Clean target pane only, closes on Escape/dismiss with a usable pane
+  (upload + reopen-search present), and that the in-pane commit routes through
+  `intakeImageFile` (existing discard-confirmation dialog still reachable). Existing
+  geocode keyed/keyless and courseLocationCache suites are updated to the new
+  modal-hosted DOM, preserving their provider-gating and prefill assertions.
+- **Browser verification is required and claimed only from the browser:** unit tests
+  above prove wiring, not pointer/overlay behavior. Against the dev server, walk:
+  empty pane → modal search → in-pane preview (pan/zoom beside the visible source
+  pane) → single commit → normal correspondence pane; dismissal dead-end check;
+  coverage warning + re-fetch with placed points surviving at the correct landmarks.
+- **Known limitations of automated proof:** jsdom cannot render Konva rasters
+  (per AGENTS.md), so preview visuals, magnifier/overlay layering, and the modal's
+  visual containment to one pane are browser-only claims. Six AnnotationWorkspace
+  pointer-interaction suites are known-red in remote containers at clean HEAD and are
+  excluded from pass/fail judgment.
