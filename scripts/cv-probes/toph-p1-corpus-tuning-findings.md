@@ -12,11 +12,13 @@ vertical slice — implemented ChainSpot-side (`src/lib/toph/trace.ts` +
 - **Toph core** (`src/lib/toph/trace.ts`): the DESIGN.md slice `Trace` interface +
   frozen `NOOP`. Production imports only this; no recorder is reachable from `src/`.
 - **Instrumented P1** (`rawObjectMask.ts`): every gate is a named Toph check;
-  all thresholds moved to `RAW_MASK_TUNING_DEFAULTS` (defaults = the historical
-  constants; production callers pass nothing and behave identically). One new
-  opt-in structural option (`basketPoolExcludeInsideBadgeMarginFrac`, default
-  null = off) — see finding 2. Badge family is now computed before the basket
-  family (order-independent, both read disjoint inputs).
+  all thresholds moved to `RAW_MASK_TUNING_DEFAULTS`. The source experiment
+  began with historical constants, but CHSPT-70 W2 intentionally flipped the
+  no-argument production defaults to the tuned values; historical values
+  remain available through the named comparison preset. One new structural
+  option (`basketPoolExcludeInsideBadgeMarginFrac`) performs badge exclusion.
+  Badge family is now computed before the basket family (order-independent,
+  both read disjoint inputs).
 - **First-loss runner** (`scripts/toph-run.ts`): DESIGN.md's headline query —
   GT point → labelmap → lineage → first failed gate with measured value vs
   threshold. Reproduces production intake by running the real
@@ -29,8 +31,8 @@ vertical slice — implemented ChainSpot-side (`src/lib/toph/trace.ts` +
 
 | config | DashsTrack | Heritage | Lenard | TowneLake | totals |
 |---|---|---|---|---|---|
-| default | t18/18 b18/18 +0 | t0/18 b15/18 +0 | t0/18 b0/18 **+17FP** | t0/18 b18/18 +0 | t18/72 b51/72 **+17FP** |
-| tuned (`combo+md.30`) | t18/18 b18/18 +0 | t8/18 b15/18 +0 | t16/18 b16/18 +3 | t16/18 b18/18 +0 | **t58/72 b67/72 +3FP** |
+| historical | t18/18 b18/18 +0 | t0/18 b15/18 +0 | t0/18 b0/18 **+17FP** | t0/18 b18/18 +0 | t18/72 b51/72 **+17FP** |
+| tuned (active default) | t18/18 b18/18 +0 | t8/18 b15/18 +0 | t16/18 b16/18 +3 | t16/18 b18/18 +0 | **t58/72 b67/72 +3FP** |
 
 Tuned config: `basketPoolExcludeInsideBadgeMarginFrac: 0.08`,
 `teeAreaVsBasketMin: 0.06`, `basketPoolFillMin: 0.26`,
@@ -163,9 +165,10 @@ npx tsx scripts/toph-measure-zerobend.ts <imagesDir> <corpus>/dev/Annotated
 ```
 
 Validation at defaults: `npm run check` clean; grey-interior unit suite green;
-`pancake-harness` end-to-end on DashsTrack unchanged — and verified per hole,
+`pancake-harness` end-to-end on DashsTrack verified per hole,
 not just "ready": all 18 holes' proposed tee AND basket land 0.0–4.2px from
 that hole number's annotation truth (18/18 tees, 18/18 baskets correctly
-assigned; 3.7s wall). Production behavior is byte-identical when no trace and
-no tuning are passed, except the badge/basket family compute order (which is
-data-independent).
+assigned; 3.7s wall). The no-trace production call signature is unchanged and
+does not load the recorder, but its detector output is intentionally **not**
+byte-identical: callers that pass no tuning now receive the tuned active
+defaults. Pass the named historical preset only for controlled comparison.

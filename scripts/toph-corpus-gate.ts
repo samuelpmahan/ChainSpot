@@ -17,10 +17,10 @@
  *
  * Fetched files are cached under --cache-dir (default `.corpus-cache/` at
  * the repo root, git-ignored) so repeat runs skip the network fetch of any
- * file whose on-disk sha256 already matches the corpus's current LFS
- * pointer oid (images) or that already parses as JSON (annotations). A
- * cached file that fails that check is NOT used silently -- it is treated
- * as a cache miss and re-fetched+re-verified.
+ * file whose on-disk sha256 matches its LFS pointer. Every run resolves one
+ * immutable corpus commit, then fetches image pointers and annotation JSON
+ * from that same revision. Annotation JSON is re-fetched and content-compared,
+ * so a valid-but-stale cached truth cannot be paired with a current image.
  *
  * Usage:
  *   npx tsx scripts/toph-corpus-gate.ts [--cache-dir <dir>] [--with-association]
@@ -40,8 +40,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CORPUS_RAW_BASE = 'https://raw.githubusercontent.com/samuelpmahan/chainspot-corpus/main';
-const CORPUS_MEDIA_BASE = 'https://media.githubusercontent.com/media/samuelpmahan/chainspot-corpus/main';
+const CORPUS_REPOSITORY = 'samuelpmahan/chainspot-corpus';
+const CORPUS_COMMIT_API = `https://api.github.com/repos/${CORPUS_REPOSITORY}/commits/main`;
 const ASSOCIATION_TOLERANCE_PX = 26;
 
 // The 4 in-scope courses. AlexClark is deliberately excluded -- do not add
@@ -129,6 +129,28 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
 	return new Uint8Array(await res.arrayBuffer());
 }
 
+async function resolveCorpusRevision(): Promise<string> {
+	const res = await fetch(CORPUS_COMMIT_API, {
+		headers: { Accept: 'application/vnd.github+json' }
+	});
+	if (!res.ok) {
+		throw new Error(`corpus-gate: GET ${CORPUS_COMMIT_API} -> ${res.status} ${res.statusText}`);
+	}
+	const body = (await res.json()) as { sha?: unknown };
+	if (typeof body.sha !== 'string' || !/^[0-9a-f]{40}$/.test(body.sha)) {
+		throw new Error('corpus-gate: GitHub commit response did not contain a 40-character SHA');
+	}
+	return body.sha;
+}
+
+function corpusRawBase(revision: string): string {
+	return `https://raw.githubusercontent.com/${CORPUS_REPOSITORY}/${revision}`;
+}
+
+function corpusMediaBase(revision: string): string {
+	return `https://media.githubusercontent.com/media/${CORPUS_REPOSITORY}/${revision}`;
+}
+
 interface FetchOutcome {
 	path: string;
 	cacheHit: boolean;
@@ -141,10 +163,17 @@ interface FetchOutcome {
  * learn the current expected oid; the large media fetch is skipped whenever
  * a cached file's sha256 already matches it.
  */
-async function ensureImage(course: (typeof COURSES)[number], cacheDir: string): Promise<FetchOutcome> {
+async function ensureImage(
+	course: (typeof COURSES)[number],
+	cacheDir: string,
+	revision: string
+): Promise<FetchOutcome> {
 	const relPath = `dev/Annotated/${course.dir}/${course.image}`;
 	const destPath = join(cacheDir, relPath);
-	const pointer = parseLfsPointer(await fetchText(`${CORPUS_RAW_BASE}/${relPath}`), relPath);
+	const pointer = parseLfsPointer(
+		await fetchText(`${corpusRawBase(revision)}/${relPath}`),
+		relPath
+	);
 
 	if (existsSync(destPath)) {
 		const cachedSha = sha256Hex(readFileSync(destPath));
@@ -152,7 +181,7 @@ async function ensureImage(course: (typeof COURSES)[number], cacheDir: string): 
 		console.log(`  [cache stale] ${relPath}: on-disk sha256 ${cachedSha} != current LFS oid ${pointer.oid}, re-fetching`);
 	}
 
-	const bytes = await fetchBytes(`${CORPUS_MEDIA_BASE}/${relPath}`);
+	const bytes = await fetchBytes(`${corpusMediaBase(revision)}/${relPath}`);
 	if (pointer.size >= 0 && bytes.length !== pointer.size) {
 		throw new Error(
 			`corpus-gate: ${relPath} downloaded ${bytes.length} bytes but the LFS pointer declares size ${pointer.size} -- truncated/corrupted download, not using it`
@@ -170,29 +199,31 @@ async function ensureImage(course: (typeof COURSES)[number], cacheDir: string): 
 }
 
 /**
- * Fetches (or reuses) one plain-JSON annotation truth file -- not
- * LFS-tracked, so there is no oid to verify against; a cached copy is
- * reused only if it still parses as JSON (a truncated/corrupted cache file
- * fails that and is re-fetched, not used silently).
+ * Fetches one plain-JSON annotation truth file from the same immutable corpus
+ * revision used for the image pointer. A byte-identical cached copy is reused;
+ * a different but valid cached JSON is replaced. Parsing alone is not a
+ * freshness check.
  */
-async function ensureAnnotation(course: (typeof COURSES)[number], cacheDir: string): Promise<FetchOutcome> {
+async function ensureAnnotation(
+	course: (typeof COURSES)[number],
+	cacheDir: string,
+	revision: string
+): Promise<FetchOutcome> {
 	const relPath = `dev/Annotated/${course.dir}/${course.truth}`;
 	const destPath = join(cacheDir, relPath);
-
-	if (existsSync(destPath)) {
-		try {
-			JSON.parse(readFileSync(destPath, 'utf8'));
-			return { path: destPath, cacheHit: true };
-		} catch {
-			console.log(`  [cache stale] ${relPath}: cached file is not valid JSON, re-fetching`);
-		}
-	}
-
-	const text = await fetchText(`${CORPUS_RAW_BASE}/${relPath}`);
+	const text = await fetchText(`${corpusRawBase(revision)}/${relPath}`);
 	try {
 		JSON.parse(text);
 	} catch (error) {
 		throw new Error(`corpus-gate: ${relPath} did not return valid JSON: ${(error as Error).message}`);
+	}
+	if (existsSync(destPath) && readFileSync(destPath, 'utf8') === text) {
+		return { path: destPath, cacheHit: true };
+	}
+	if (existsSync(destPath)) {
+		console.log(
+			`  [cache stale] ${relPath}: cached truth differs from corpus ${revision.slice(0, 12)}, replacing`
+		);
 	}
 	mkdirSync(dirname(destPath), { recursive: true });
 	writeFileSync(destPath, text);
@@ -259,7 +290,18 @@ interface AssociationHoleProposal {
 }
 interface PancakeHarnessResult {
 	wallMs: number;
-	course: { grammar: { holes: AssociationHoleProposal[] } };
+	course: {
+		grammar: { holes: AssociationHoleProposal[] };
+		p6LowParBasketAssignment: {
+			lockedByZeroBend: number;
+			assignments: {
+				holeNumber: number;
+				status: string;
+				assignmentReason: string;
+				assignedBasketIndex: number | null;
+			}[];
+		};
+	};
 }
 
 /**
@@ -327,12 +369,36 @@ function runDashsTrackAssociationCheck(imagePath: string, truthPath: string): bo
 			` (wall ${parsed.wallMs}ms)`
 	);
 	for (const miss of misses) console.log(`    MISS ${miss}`);
-	return teeOk === teeTotal && basketOk === basketTotal;
+
+	const p6 = parsed.course.p6LowParBasketAssignment;
+	const zeroBendAssignments = p6.assignments.filter(
+		(assignment) => assignment.status === 'zeroBendLocked'
+	);
+	const soleZeroBendAssignment = zeroBendAssignments[0];
+	const dashZeroBendLockOk =
+		p6.lockedByZeroBend === 1 &&
+		zeroBendAssignments.length === 1 &&
+		soleZeroBendAssignment?.holeNumber === 16 &&
+		soleZeroBendAssignment.assignmentReason === 'zeroBendLocked' &&
+		soleZeroBendAssignment.assignedBasketIndex !== null;
+	console.log(
+		`  DashsTrack zero-bend status: ${dashZeroBendLockOk ? 'H16 zeroBendLocked (1/1)' : 'unexpected'} ` +
+			`(reported count ${p6.lockedByZeroBend})`
+	);
+	if (!dashZeroBendLockOk) {
+		console.log(
+			`    FAIL zero-bend assignments: ${JSON.stringify(zeroBendAssignments)}`
+		);
+	}
+
+	return teeOk === teeTotal && basketOk === basketTotal && dashZeroBendLockOk;
 }
 
 async function main() {
 	const { cacheDir, withAssociation } = parseArgs(process.argv.slice(2));
 	console.log(`corpus-gate: cache dir ${cacheDir}`);
+	const corpusRevision = await resolveCorpusRevision();
+	console.log(`corpus-gate: corpus revision ${corpusRevision}`);
 
 	const flatImagesDir = join(cacheDir, '_images-flat');
 	const annotatedDir = join(cacheDir, 'dev', 'Annotated');
@@ -342,7 +408,7 @@ async function main() {
 	let cacheHits = 0;
 	let freshFetches = 0;
 	for (const course of COURSES) {
-		const img = await ensureImage(course, cacheDir);
+		const img = await ensureImage(course, cacheDir, corpusRevision);
 		console.log(
 			`  ${course.name.padEnd(10)} image: ${img.cacheHit ? 'cache hit (sha256 verified)' : 'fetched + sha256 verified'} -> ${img.path}`
 		);
@@ -350,7 +416,7 @@ async function main() {
 		// toph-tune.ts wants one flat directory with all 4 images by filename.
 		copyFileSync(img.path, join(flatImagesDir, course.image));
 
-		const truth = await ensureAnnotation(course, cacheDir);
+		const truth = await ensureAnnotation(course, cacheDir, corpusRevision);
 		console.log(`  ${course.name.padEnd(10)} truth: ${truth.cacheHit ? 'cache hit' : 'fetched'} -> ${truth.path}`);
 		truth.cacheHit ? (cacheHits += 1) : (freshFetches += 1);
 	}

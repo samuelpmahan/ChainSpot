@@ -303,14 +303,12 @@ function p5AssignmentByHole(p5: P5SparseAssignmentResult): Map<number, P5TeeAssi
  * `scoreLowParBasketCandidate` is ever built or called for any hole.
  *
  * For each hole with a P5-assigned tee and a P2-labeled badge that is NOT
- * already locked by P4, checks every basket not already excluded (by a P4
- * lock or by another hole's own zero-bend lock in `alreadyLockedBasketIndexes`)
- * with `evaluateZeroBendBadgeOnChord`. Exactly one on-chord basket locks the
- * hole to that basket -- same treatment as a P4 lock: excluded from the
- * Hungarian solve entirely, bypassing ribbon evidence for that hole. Zero or
- * more than one qualifying basket is ambiguity, which this shortcut never
- * resolves; the hole falls through unchanged to the existing ribbon-evidence
- * LowPar path.
+ * already locked by P4, checks every basket not already excluded by P4 with
+ * `evaluateZeroBendBadgeOnChord`. Locks are accepted only for one-to-one
+ * edges: the hole has exactly one qualifying basket AND that basket qualifies
+ * for exactly one hole. Shared baskets and multi-basket holes are ambiguity,
+ * so every involved hole and basket falls through unchanged to the existing
+ * ribbon-evidence LowPar/Hungarian path.
  *
  * Pure aside from its inputs: exported standalone so the lock-selection
  * behavior (exactly one candidate locks; zero or multiple candidates don't)
@@ -329,7 +327,8 @@ export function computeZeroBendLocks(
 	const badgesByHole = new Map(badges.map((badge) => [badge.holeNumber, badge]));
 	const holeNumbers = Array.from(new Set([...badgesByHole.keys(), ...p5ByHole.keys()])).sort((a, b) => a - b);
 
-	const zeroBendLocks = new Map<number, number>();
+	const candidateBasketIndexesByHole = new Map<number, number[]>();
+	const candidateHoleCountByBasket = new Map<number, number>();
 	for (const holeNumber of holeNumbers) {
 		if (alreadyLockedHoleNumbers.has(holeNumber)) continue;
 		const assignment = p5ByHole.get(holeNumber);
@@ -348,7 +347,22 @@ export function computeZeroBendLocks(
 			);
 			if (evaluation.onChord) onChordBasketIndexes.push(basketIndex);
 		}
-		if (onChordBasketIndexes.length === 1) zeroBendLocks.set(holeNumber, onChordBasketIndexes[0]);
+		candidateBasketIndexesByHole.set(holeNumber, onChordBasketIndexes);
+		for (const basketIndex of onChordBasketIndexes) {
+			candidateHoleCountByBasket.set(
+				basketIndex,
+				(candidateHoleCountByBasket.get(basketIndex) ?? 0) + 1
+			);
+		}
+	}
+
+	const zeroBendLocks = new Map<number, number>();
+	for (const [holeNumber, basketIndexes] of candidateBasketIndexesByHole) {
+		if (basketIndexes.length !== 1) continue;
+		const basketIndex = basketIndexes[0];
+		if (candidateHoleCountByBasket.get(basketIndex) === 1) {
+			zeroBendLocks.set(holeNumber, basketIndex);
+		}
 	}
 	return zeroBendLocks;
 }

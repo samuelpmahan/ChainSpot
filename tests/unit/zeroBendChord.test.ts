@@ -188,6 +188,32 @@ describe('computeZeroBendLocks (P6 pure helper)', () => {
 		const locks = computeZeroBendLocks(P6_TEES, baskets, P6_BADGES, p5WithSingleTee(), new Set(), new Set([0]));
 		expect(locks.size).toBe(0);
 	});
+
+	it('does not lock a basket claimed by two otherwise-singleton holes', () => {
+		const tees: readonly RawMaskTee[] = [
+			{ xPx: 80, yPx: 55, orientationDeg: 0, widthPx: 6, heightPx: 6, areaPx: 36, fill: 1 },
+			{ xPx: 160, yPx: 55, orientationDeg: 0, widthPx: 6, heightPx: 6, areaPx: 36, fill: 1 }
+		];
+		const badges: readonly P2LabeledBadge[] = [
+			{ holeNumber: 1, glyphScore: 0.9, xPx: 100, yPx: 55, widthPx: 20, heightPx: 20 },
+			{ holeNumber: 2, glyphScore: 0.9, xPx: 140, yPx: 55, widthPx: 20, heightPx: 20 }
+		];
+		const baskets: readonly RawMaskBasket[] = [
+			{ xPx: 120, yPx: 55, centerXPx: 120, centerYPx: 55, widthPx: 8, heightPx: 8, areaPx: 64, fill: 1 }
+		];
+		const p5: P5SparseAssignmentResult = {
+			...p5WithSingleTee(),
+			assignments: [
+				{ ...p5WithSingleTee().assignments[0], teeIndex: 0, assignedHoleNumber: 1 },
+				{ ...p5WithSingleTee().assignments[0], teeIndex: 1, assignedHoleNumber: 2, candidateHoleNumbers: [2] }
+			],
+			assignedTees: 2
+		};
+
+		expect(computeZeroBendLocks(tees, baskets, badges, p5, new Set(), new Set())).toEqual(
+			new Map()
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -312,5 +338,53 @@ describe('deriveP6LowParBasketAssignment: zero-bend shortcut bypasses ribbon evi
 		const holeAssignment = p6Result.assignments.find((assignment) => assignment.holeNumber === 1);
 		expect(holeAssignment?.status).not.toBe('zeroBendLocked');
 		expect(p6Result.lockedByZeroBend).toBe(0);
+	});
+
+	it('keeps a cross-hole shared basket available to normal fallback instead of zero-locking it twice', () => {
+		const tees: readonly RawMaskTee[] = [
+			{ xPx: 80, yPx: 55, orientationDeg: 0, widthPx: 6, heightPx: 6, areaPx: 36, fill: 1 },
+			{ xPx: 160, yPx: 55, orientationDeg: 0, widthPx: 6, heightPx: 6, areaPx: 36, fill: 1 }
+		];
+		const badges: readonly P2LabeledBadge[] = [
+			{ holeNumber: 1, glyphScore: 0.9, xPx: 100, yPx: 55, widthPx: 20, heightPx: 20 },
+			{ holeNumber: 2, glyphScore: 0.9, xPx: 140, yPx: 55, widthPx: 20, heightPx: 20 }
+		];
+		const baskets: readonly RawMaskBasket[] = [
+			{ xPx: 120, yPx: 55, centerXPx: 120, centerYPx: 55, widthPx: 8, heightPx: 8, areaPx: 64, fill: 1 }
+		];
+		const p5: P5SparseAssignmentResult = {
+			...p5WithSingleTee(),
+			assignments: [
+				{ ...p5WithSingleTee().assignments[0], teeIndex: 0, assignedHoleNumber: 1 },
+				{ ...p5WithSingleTee().assignments[0], teeIndex: 1, assignedHoleNumber: 2, candidateHoleNumbers: [2] }
+			],
+			assignedTees: 2
+		};
+		const rawRaster = flatRaster(240, 110);
+		const raster: CorridorBendRaster = { ...rawRaster, originXPx: 0, originYPx: 0, scale: 1 };
+		const ribbonSegmentation = segmentRibbonMass(
+			rawRaster,
+			badges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
+			DEFAULT_RIBBON_MASS_PARAMS
+		);
+
+		const result = deriveP6LowParBasketAssignment(
+			raster,
+			tees,
+			baskets,
+			badges,
+			p5,
+			EMPTY_P4,
+			ribbonSegmentation
+		);
+
+		expect(result.lockedByZeroBend).toBe(0);
+		expect(result.assignments).toHaveLength(2);
+		expect(result.assignments.every((assignment) => assignment.status !== 'zeroBendLocked')).toBe(true);
+		expect(result.assignments.map((assignment) => assignment.candidateBasketCount)).toEqual([1, 1]);
+		expect(result.candidates.map((candidate) => [candidate.holeNumber, candidate.basketIndex])).toEqual([
+			[1, 0],
+			[2, 0]
+		]);
 	});
 });

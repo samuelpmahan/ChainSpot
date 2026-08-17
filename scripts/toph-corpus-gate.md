@@ -71,6 +71,9 @@ by hole `number`, at 26px tolerance. This is printed and gated as a
 the "detection gate" block above; the two are never combined into one
 pass/fail or one count. It exists only for DashsTrack, for the same
 autocrop-gap reason above.
+The same executable check also requires P6 to report exactly one zero-bend
+lock with hole 16 in `zeroBendLocked` status; final coordinates alone would
+not prove that the intended shortcut actually ran.
 
 ## sha256 verification
 
@@ -81,10 +84,10 @@ stub* (a few lines of text: `version …`, `oid sha256:<hex>`, `size <n>`),
 not the real image bytes. For each image, this script:
 
 1. Fetches the pointer stub from
-   `https://raw.githubusercontent.com/samuelpmahan/chainspot-corpus/main/<path>`
+   `https://raw.githubusercontent.com/samuelpmahan/chainspot-corpus/<resolved-commit>/<path>`
    and parses `oid sha256:<hex>` (and `size`) out of it.
 2. Fetches the real bytes from
-   `https://media.githubusercontent.com/media/samuelpmahan/chainspot-corpus/main/<path>`.
+   `https://media.githubusercontent.com/media/samuelpmahan/chainspot-corpus/<resolved-commit>/<path>`.
 3. Hashes the downloaded bytes with `node:crypto`'s `createHash('sha256')`
    and hard-fails with a clear error if the hash doesn't match the
    pointer's `oid` (or if the byte count doesn't match the pointer's
@@ -96,16 +99,17 @@ hard fail on a non-200 response or a body that doesn't parse as JSON.
 
 **Caching:** fetched files are cached under `--cache-dir` (default
 `.corpus-cache/`, git-ignored), mirroring the corpus repo's own
-`dev/Annotated/<Course>/<file>` layout. On a repeat run, the LFS pointer is
-still re-fetched every time (cheap, a few bytes of text) to learn the
-corpus's current `oid`, but the large media fetch is skipped whenever the
+`dev/Annotated/<Course>/<file>` layout. Every run first resolves
+`chainspot-corpus/main` to one immutable commit SHA; image pointers, media,
+and annotation truths are fetched from that same revision. The large media
+fetch is skipped whenever the
 cached file's own sha256 already matches it — so a warm cache is
 network-light, not network-free. A cached file that fails that check (wrong
 hash — e.g. corrupted on disk, or the corpus updated the file upstream) is
 never used as-is: it's treated as a cache miss, logged (`[cache stale]
-…re-fetching`), and re-fetched + re-verified. Annotation JSON caching works
-the same way minus the hash: a cached copy is reused only if it still parses
-as JSON.
+…re-fetching`), and re-fetched + re-verified. Annotation JSON is re-fetched
+from the pinned revision, parsed, and byte-compared. A valid but stale cached
+truth is replaced, preventing mixed image/truth provenance.
 
 ## AlexClark exclusion
 
