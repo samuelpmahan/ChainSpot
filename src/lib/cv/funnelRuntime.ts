@@ -49,6 +49,9 @@ function runtimeChannel(): BroadcastChannel | null {
 	try {
 		channel = new BroadcastChannel(CHANNEL_NAME);
 		channel.onmessage = (event: MessageEvent<FunnelMessage>) => receive(event.data);
+		// Node's BroadcastChannel can keep Vitest alive. Browsers simply do not
+		// expose unref, so this remains a no-op there.
+		(channel as BroadcastChannel & { unref?: () => void }).unref?.();
 	} catch {
 		channel = null;
 	}
@@ -79,11 +82,22 @@ export function recordSurfacedCandidate(input: Omit<SurfacedCandidateObservation
 	return observation;
 }
 
+function inferSnapKind(trace: LocalSnapTrace): LandmarkKind | undefined {
+	if (trace.kind) return trace.kind;
+	if (trace.calibrationSource?.includes('tee-')) return 'tee';
+	if (trace.calibrationSource === 'number-badge-template-scale') return 'basket';
+	if (trace.bestCandidateScore?.name.startsWith('tee.')) return 'tee';
+	if (trace.bestCandidateScore?.name.startsWith('basket.')) return 'basket';
+	return undefined;
+}
+
 /** Called by the detector worker after every local-snap attempt. */
 export function recordLocalSnapTrace(trace: LocalSnapTrace): void {
-	localSnaps.push(trace);
+	const kind = inferSnapKind(trace);
+	const observed = kind && !trace.kind ? { ...trace, kind } : trace;
+	localSnaps.push(observed);
 	trim(localSnaps);
-	publish({ type: 'local-snap', trace });
+	publish({ type: 'local-snap', trace: observed });
 }
 
 /**
