@@ -129,7 +129,7 @@ declare global {
 
 /** Install the `chainspot.flags.*` console API once in a browser runtime. */
 export function installVisionFlagConsole(): void {
-	if (typeof globalThis === 'undefined' || globalThis.chainspot?.flags) return;
+	if (typeof window === 'undefined' || globalThis.chainspot?.flags) return;
 	const api: ChainSpotVisionFlagsConsole = Object.freeze({
 		list: getVisionFlagsSnapshot,
 		set: setVisionFlag,

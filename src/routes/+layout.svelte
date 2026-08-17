@@ -4,6 +4,7 @@
 	import { base } from '$app/paths';
 	import DemoGuide from '$lib/components/DemoGuide.svelte';
 	import { annotationNavState, requestAnnotationDone } from '$lib/annotationNav.svelte';
+	import '$lib/autoAnnotation/visionFlags';
 
 	/**
 	 * Client-only marker set after hydration and event delegation are in place.
