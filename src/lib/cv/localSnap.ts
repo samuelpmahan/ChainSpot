@@ -1,55 +1,12 @@
 /**
- * "Snap-to-detection": when a user places a tee/basket marker for the first
- * time in Annotate Round's Map mode, a short LOCAL object-finding pass runs
- * around the click and the placement snaps to whatever real feature it finds
- * nearby. It never re-fires on a later manual drag of an already-placed
- * marker — see `AnnotationWorkspace.svelte`'s `commitAnnotationPointerUp` for
- * why (CV isn't perfect, and re-running it on every reposition risked
- * silently overriding a user's own correction).
+ * Pure local tee/basket snap detector. The browser places the user's click
+ * optimistically and this pass may settle it to a nearby feature.
  *
- * This module is the pure, environment-agnostic core -- modeled directly on
- * `teePadDetection.ts`/`basketTemplateDetection.ts`'s own boundary: it is
- * handed an already-decoded raster and the OpenCV instance that owns it, and
- * it does not load WASM, decode images, or touch editor state. That keeps it
- * trivially unit-testable with the same fake-`cv` pattern those modules'
- * tests already use (see `tests/unit/localSnap.test.ts`).
- *
- * The one thing this module owns that the full-course detectors don't need:
- * *cropping*. A full-course pass runs a detector over the whole analysis
- * raster because it doesn't know where the features are yet. A snap pass
- * already knows almost exactly where to look (the click), so it crops a
- * small window out of whatever raster it's given and runs the detector only
- * over that crop -- this is what keeps a snap pass "local" and fast rather
- * than repeating a full-course-sized search on every marker placement.
- *
- * Main-thread vs. worker (point 5 of the design): this module itself doesn't
- * decide -- it just needs a `cv` instance. The actual choice lives in the
- * caller. `$lib/components/AnnotationWorkspace.svelte` calls through the
- * *existing* `basketDetection.worker.ts` (a new `'local-snap'` request kind)
- * rather than loading a second OpenCV WASM instance on the main thread,
- * because:
- *
- *  - `loadCv()`'s own doc comments record a real measured swing of
- *    ~1s (browser-cached) to ~10-12s (cold/uncached) just to load and
- *    instantiate the WASM module once -- a cost this feature must never pay
- *    twice (once per thread) when the worker already owns a warm instance
- *    after "Detect course"/"Detect tees" has run, which is the normal Map
- *    mode workflow before a user is fine-placing individual markers.
- *  - Once warm, the detector work itself is cheap regardless of thread: a
- *    throwaway timing probe against this module's real detectors (not a fake
- *    `cv`) measured a 90x90 tee-pad crop at ~1.3ms/call and a realistic
- *    ~170x170 basket crop (matched-scale icon, not a degenerate flat
- *    template) at ~23ms/call, both on Node's real `@techstark/opencv-js`
- *    after a one-time ~400ms module load. A small crop is fast either way,
- *    exactly as the design anticipated.
- *  - What is *not* guaranteed fast is decoding the source image into an
- *    `ImageBitmap` to hand to the worker at all -- multi-megabyte course
- *    screenshots, and a cold worker on a session's very first placement
- *    (before any detection has warmed it) can plausibly exceed the ~100ms
- *    "feels instant" budget. So the wiring applies the raw click
- *    immediately (optimistic placement) and settles the marker to the
- *    snapped point only if/when the worker's reply arrives -- see that
- *    file's `requestLocalSnap`/`applyLocalSnapSettle` for the shipped path.
+ * The important contract is now explicit: a snap is not just point|null.
+ * `localFeatureSnapDetailed` records the first stage that rejected the click,
+ * the candidate population, the real detector score, and the calibration
+ * evidence used. `localFeatureSnap` remains the compatibility wrapper used by
+ * existing callers/tests.
  */
 
 import {
@@ -57,119 +14,74 @@ import {
 	deriveCanonicalUiScalePx
 } from '../autoAnnotation/cvCalibration';
 import type { BasketTemplateScale, UiScalePx } from '../autoAnnotation/cvCalibration';
-import { detectCalibratedTeePadCandidates } from '../autoAnnotation/cvCalibratedDetectors';
-import { detectBasketCandidatesAtTemplateScale } from '../autoAnnotation/cvCalibratedDetectors';
+import {
+	detectBasketCandidatesAtTemplateScale,
+	detectCalibratedTeePadCandidates
+} from '../autoAnnotation/cvCalibratedDetectors';
 import type {
 	CalibratedBasketCandidate,
 	CalibratedTeePadDetectionOptions
 } from '../autoAnnotation/cvCalibratedDetectors';
 import type { TeePadCandidate, TeePadCv, TeePadRaster } from '../autoAnnotation/teePadDetection';
-import type { BasketCv, BasketRaster, BasketTemplateRaster } from '../autoAnnotation/basketTemplateDetection';
+import type {
+	BasketCv,
+	BasketRaster,
+	BasketTemplateRaster
+} from '../autoAnnotation/basketTemplateDetection';
+import type { LandmarkScore, LocalSnapRejectReason, LocalSnapTrace } from './landmarkTrace';
 
 export type LocalSnapKind = 'tee' | 'basket';
 
-/** A source-image-pixel point; deliberately structural (matches `SourcePoint`/`Candidate`) so callers never need an import just to build one. */
 export interface LocalSnapPoint {
 	readonly xPx: number;
 	readonly yPx: number;
 }
 
-/** The narrow OpenCV surface either branch needs -- both are always required so one `cv` module value works for either `kind` without a caller-side union dance, mirroring `basketDetection.worker.ts`'s own combined `RuntimeCv`. */
 export type LocalSnapCv = TeePadCv & BasketCv;
 
-/**
- * A raster covering (at least) the crop region this pass will need. Coordinate
- * convention matches every other detector raster in this codebase: `rgba`/
- * `gray` are the whole raster's pixels row-major from `(0,0)`, and
- * `sourceScale` is source-image pixels per raster pixel (1 at full
- * resolution). `clickPx` is always in source-image pixels, independent of
- * this raster's own resolution.
- */
 export interface LocalSnapRaster {
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly sourceScale: number;
-	/** Required when `kind === 'tee'`. */
 	readonly rgba?: Uint8Array | Uint8ClampedArray;
-	/** Required when `kind === 'basket'`. */
 	readonly gray?: Uint8Array;
 }
 
-/**
- * Everything `localFeatureSnap` needs beyond the raster itself. `basket` is
- * optional at the type level because a `kind: 'tee'` call never touches it,
- * but it's required (checked at runtime, never thrown) for `kind: 'basket'`
- * -- exactly the "must be indistinguishable from no feature" contract: a
- * caller that hasn't calibrated a basket template yet gets `null`, not an
- * error.
- */
+export interface LocalSnapKnownRecommendation {
+	readonly point: LocalSnapPoint;
+	readonly holeNumber?: number;
+	/** Measured full-course candidate footprint, not a confidence. */
+	readonly featureFootprintPx?: number;
+	readonly score?: LandmarkScore;
+}
+
 export interface LocalSnapCalibration {
 	readonly uiScalePx: UiScalePx;
 	readonly basket?: {
 		readonly template: BasketTemplateRaster;
 		readonly templateScale: BasketTemplateScale;
 	};
+	/**
+	 * Optional full-course evidence for the same local feature family. For tees
+	 * this may widen the detector's geometry scale when the actual rendered pad
+	 * is larger than badge-derived UiScale predicts. Baseline detection always
+	 * still runs, so this cannot remove a candidate the old path found.
+	 */
+	readonly knownRecommendation?: LocalSnapKnownRecommendation;
 }
 
-/**
- * Upper bound on a tee pad's on-image footprint, in source-image pixels, at a
- * given `UiScalePx`. Mirrors `teePadDetection.ts`'s own widest accepted
- * candidate size: the `edge-loop` detector's major-axis ceiling is
- * `26 * scale`, where `scale` there is `options.uiScalePx / raster.sourceScale`
- * -- i.e. exactly `UiScalePx` once expressed in source-image pixels
- * (`sourceScale === 1`). Not imported directly since that constant is
- * `teePadDetection.ts`-local (deliberately: it's an internal detector-tuning
- * value, not part of that module's public contract), so it's restated here
- * with this comment as the enforced link between the two.
- */
+export interface LocalSnapOutcome {
+	readonly point: LocalSnapPoint | null;
+	readonly trace: LocalSnapTrace;
+}
+
 export const TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE = 26;
-
-/**
- * Local snap's crop window is a square this many times the expected
- * feature's footprint on a side, centered on the click: big enough that a
- * feature whose true center is a bit off from where the user actually
- * clicked is still fully inside it, small enough to keep the pass a
- * genuinely *local*, fast search rather than a full-course-sized one. See
- * this module's top-of-file doc comment for the measured timings this is
- * tuned against.
- */
 export const LOCAL_SNAP_CROP_FEATURE_MULTIPLE = 4;
-
-/**
- * A snap is only allowed when the detected feature center is within half of
- * the expected feature footprint from the user's click. The crop stays wider
- * than this guard so nearby false positives can be rejected instead of being
- * accepted merely because they were visible to the detector.
- */
 export const LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE = 0.5;
-
-/**
- * Hard ceiling on how far a snap may move the marker from the user's click,
- * in source-image pixels, regardless of `uiScalePx`. The footprint-relative
- * radius above is deliberately generous (it shares `TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE`
- * with the detector's own cropping/sizing needs, not with this feature's own
- * product intent), and `uiScalePx` legitimately grows with a capture's
- * resolution/DPI or can be inflated by a bad number-badge match — either way,
- * this is a "local" correction feature for a user's own slightly-imprecise
- * click, not a long-range re-detection. Without this cap, a real high-res
- * capture (or a miscalibrated badge match) can let the footprint-relative
- * radius reach hundreds of pixels, silently relocating a marker far past
- * where the user clicked. This value is the actual accepted radius whenever
- * it is smaller than the footprint-relative one.
- */
 export const LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX = 24;
-
-/**
- * A candidate must score at least this well to be trusted. Matches
- * `basketTemplateDetection.ts`'s own `DEFAULT_MIN_SCORE` floor used for
- * full-course basket detection; applied uniformly to tee-pad candidates too
- * since a local crop is a much smaller, cleaner search than a full-course
- * pass and shouldn't need a laxer bar to accept a real feature.
- */
 export const LOCAL_SNAP_MIN_SCORE = 0.5;
-
-/** Below this many pixels on a side, a crop can't meaningfully contain a feature; treated the same as a crop that missed the raster entirely. */
 const MIN_CROP_SIDE_PX = 4;
+const TEE_SCALE_EVIDENCE_MIN_DELTA = 0.05;
 
 interface CropBounds {
 	readonly x0: number;
@@ -178,24 +90,28 @@ interface CropBounds {
 	readonly heightPx: number;
 }
 
-/**
- * Re-derives the crop constants' interaction with a real course capture's
- * calibration in one place, so `localFeatureSnap`'s own body reads as the
- * three real steps (crop, detect, judge) rather than this arithmetic.
- */
+function finitePositive(value: number | undefined): value is number {
+	return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function defaultTeeFootprint(uiScalePx: UiScalePx): number {
+	return TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * uiScalePx;
+}
+
 function featureFootprintSourcePx(
 	kind: LocalSnapKind,
 	calibration: LocalSnapCalibration
 ): number | null {
 	if (kind === 'tee') {
-		return TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * calibration.uiScalePx;
+		const baseline = defaultTeeFootprint(calibration.uiScalePx);
+		const measured = calibration.knownRecommendation?.featureFootprintPx;
+		return finitePositive(measured) ? Math.max(baseline, measured) : baseline;
 	}
 	const basket = calibration.basket;
 	if (!basket) return null;
 	return Math.max(basket.template.widthPx, basket.template.heightPx) * basket.templateScale;
 }
 
-/** Intersects the requested crop window with the raster's own bounds; `null` when nothing usable is left (click off-raster, degenerate raster, etc.) -- this is the "empty crop" case `localFeatureSnap` treats as no feature found. */
 function computeCropBounds(
 	raster: Pick<LocalSnapRaster, 'widthPx' | 'heightPx' | 'sourceScale'>,
 	clickPx: LocalSnapPoint,
@@ -239,11 +155,15 @@ function cropGray(gray: Uint8Array, sourceWidthPx: number, bounds: CropBounds): 
 	return out;
 }
 
+function sameCandidate(a: TeePadCandidate, b: TeePadCandidate): boolean {
+	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx) <= 2;
+}
+
 function teeCropCandidates(
 	cv: LocalSnapCv,
 	raster: LocalSnapRaster,
 	bounds: CropBounds,
-	uiScalePx: UiScalePx
+	calibration: LocalSnapCalibration
 ): readonly TeePadCandidate[] | null {
 	if (!raster.rgba) return null;
 	const cropped: TeePadRaster = {
@@ -252,8 +172,22 @@ function teeCropCandidates(
 		heightPx: bounds.heightPx,
 		sourceScale: raster.sourceScale
 	};
-	const options: CalibratedTeePadDetectionOptions = { uiScalePx };
-	return detectCalibratedTeePadCandidates(cv, cropped, options);
+	const baselineOptions: CalibratedTeePadDetectionOptions = { uiScalePx: calibration.uiScalePx };
+	const baseline = detectCalibratedTeePadCandidates(cv, cropped, baselineOptions);
+
+	const measuredFootprint = calibration.knownRecommendation?.featureFootprintPx;
+	if (!finitePositive(measuredFootprint)) return baseline;
+	const measuredScale = measuredFootprint / TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE;
+	const ratio = measuredScale / calibration.uiScalePx;
+	if (!(ratio > 1 + TEE_SCALE_EVIDENCE_MIN_DELTA)) return baseline;
+
+	const evidenceScale = asUiScalePx(measuredScale, 'Full-course tee-footprint snap scale');
+	const evidence = detectCalibratedTeePadCandidates(cv, cropped, { uiScalePx: evidenceScale });
+	const merged = [...baseline];
+	for (const candidate of evidence) {
+		if (!merged.some((existing) => sameCandidate(existing, candidate))) merged.push(candidate);
+	}
+	return merged;
 }
 
 function basketCropCandidates(
@@ -275,23 +209,133 @@ function basketCropCandidates(
 	});
 }
 
+function rejected(
+	clickPx: LocalSnapPoint,
+	reason: LocalSnapRejectReason,
+	extra: Partial<LocalSnapTrace> = {}
+): LocalSnapOutcome {
+	return {
+		point: null,
+		trace: {
+			attempted: true,
+			accepted: false,
+			rejectReason: reason,
+			clickPx,
+			...extra
+		}
+	};
+}
+
+function scoreOf(candidate: { readonly score?: number }): number {
+	return candidate.score ?? -Infinity;
+}
+
 /**
- * Runs a short local object-finding pass around `clickPx` and returns the
- * snapped point, or `null` when nothing trustworthy was found -- a `null`
- * result is indistinguishable from "no feature exists here" and callers must
- * treat it exactly like that (place the raw click, no error, no retry).
- *
- * Mechanics: crop a window `LOCAL_SNAP_CROP_FEATURE_MULTIPLE`x the expected
- * feature footprint (derived from `calibration`) around `clickPx`, run only
- * the one relevant existing detector against that crop, and offset its best
- * candidate back into `raster`'s own source-image coordinate space. The
- * result is accepted only when that candidate both clears
- * `LOCAL_SNAP_MIN_SCORE` and lies within the SMALLER of
- * `LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE` expected feature footprints and
- * `LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX` of `clickPx` -- a real nearby feature
- * close enough to be an obvious correction of the user's own click, not just
- * the least-bad thing the detector could find inside an arbitrary window.
+ * Detailed local-snap pass. Failure is still a normal result, but it no
+ * longer collapses every cause into an uninspectable `null`.
  */
+export function localFeatureSnapDetailed(
+	kind: LocalSnapKind,
+	cv: LocalSnapCv,
+	raster: LocalSnapRaster,
+	clickPx: LocalSnapPoint,
+	calibration: LocalSnapCalibration
+): LocalSnapOutcome {
+	if (!Number.isFinite(clickPx.xPx) || !Number.isFinite(clickPx.yPx)) {
+		return rejected(clickPx, 'invalid-click');
+	}
+	if (!(calibration.uiScalePx > 0)) return rejected(clickPx, 'invalid-calibration');
+
+	const footprintPx = featureFootprintSourcePx(kind, calibration);
+	if (footprintPx === null || !(footprintPx > 0)) return rejected(clickPx, 'no-footprint');
+	const snapRadiusPx = Math.min(
+		footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
+		LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
+	);
+	const known = calibration.knownRecommendation;
+	const knownDistance = known ? Math.hypot(known.point.xPx - clickPx.xPx, known.point.yPx - clickPx.yPx) : undefined;
+	const common: Partial<LocalSnapTrace> = {
+		featureFootprintPx: footprintPx,
+		snapRadiusPx,
+		calibrationSource:
+			kind === 'tee' && finitePositive(known?.featureFootprintPx)
+				? 'number-badge-ui-scale+full-course-tee-footprint'
+				: 'number-badge-ui-scale',
+		...(knownDistance === undefined
+			? {}
+			: {
+				knownRecommendationDistancePx: knownDistance,
+				knownRecommendationInRadius: knownDistance <= snapRadiusPx
+			})
+	};
+
+	const bounds = computeCropBounds(
+		raster,
+		clickPx,
+		footprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE
+	);
+	if (!bounds) return rejected(clickPx, 'empty-crop', common);
+	if ((kind === 'tee' && !raster.rgba) || (kind === 'basket' && !raster.gray)) {
+		return rejected(clickPx, 'missing-raster-channel', common);
+	}
+
+	const originXPx = bounds.x0 * raster.sourceScale;
+	const originYPx = bounds.y0 * raster.sourceScale;
+	const candidates =
+		kind === 'tee'
+			? teeCropCandidates(cv, raster, bounds, calibration)
+			: basketCropCandidates(cv, raster, bounds, calibration);
+	if (!candidates || candidates.length === 0) {
+		return rejected(clickPx, 'no-candidate', { ...common, candidateCount: 0, inRadiusCandidateCount: 0 });
+	}
+
+	const inRadius = candidates
+		.map((candidate) => ({
+			xPx: originXPx + candidate.xPx,
+			yPx: originYPx + candidate.yPx,
+			score: scoreOf(candidate)
+		}))
+		.filter((candidate) => Math.hypot(candidate.xPx - clickPx.xPx, candidate.yPx - clickPx.yPx) <= snapRadiusPx)
+		.sort((left, right) => right.score - left.score);
+	if (inRadius.length === 0) {
+		return rejected(clickPx, 'outside-radius', {
+			...common,
+			candidateCount: candidates.length,
+			inRadiusCandidateCount: 0
+		});
+	}
+	const best = inRadius[0];
+	const bestCandidateScore: LandmarkScore = {
+		name: kind === 'basket' ? 'basket.templateNcc' : 'tee.detectorScore',
+		value: best.score,
+		higherIsBetter: true
+	};
+	if (best.score < LOCAL_SNAP_MIN_SCORE) {
+		return rejected(clickPx, 'below-score', {
+			...common,
+			candidateCount: candidates.length,
+			inRadiusCandidateCount: inRadius.length,
+			bestCandidateScore
+		});
+	}
+
+	const point = { xPx: best.xPx, yPx: best.yPx };
+	return {
+		point,
+		trace: {
+			attempted: true,
+			accepted: true,
+			clickPx,
+			snappedPoint: point,
+			candidateCount: candidates.length,
+			inRadiusCandidateCount: inRadius.length,
+			bestCandidateScore,
+			...common
+		}
+	};
+}
+
+/** Compatibility wrapper: existing UI behavior remains point-or-null. */
 export function localFeatureSnap(
 	kind: LocalSnapKind,
 	cv: LocalSnapCv,
@@ -299,56 +343,8 @@ export function localFeatureSnap(
 	clickPx: LocalSnapPoint,
 	calibration: LocalSnapCalibration
 ): LocalSnapPoint | null {
-	if (!Number.isFinite(clickPx.xPx) || !Number.isFinite(clickPx.yPx)) return null;
-	if (!(calibration.uiScalePx > 0)) return null;
-
-	const footprintPx = featureFootprintSourcePx(kind, calibration);
-	if (footprintPx === null || !(footprintPx > 0)) return null;
-
-	const cropSideSourcePx = footprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE;
-	const snapRadiusPx = Math.min(
-		footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
-		LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
-	);
-	const bounds = computeCropBounds(raster, clickPx, cropSideSourcePx);
-	if (!bounds) return null;
-
-	const originXPx = bounds.x0 * raster.sourceScale;
-	const originYPx = bounds.y0 * raster.sourceScale;
-
-	const candidates =
-		kind === 'tee'
-			? teeCropCandidates(cv, raster, bounds, calibration.uiScalePx)
-			: basketCropCandidates(cv, raster, bounds, calibration);
-	if (!candidates || candidates.length === 0) return null;
-
-	// Rank only candidates within the snap radius. The crop is deliberately
-	// wider than the accept radius (so nearby false positives are visible and
-	// can be *rejected*), which means a neighboring feature can outscore the
-	// one actually under the click; ranking the whole crop first and
-	// radius-testing the single winner turned those clicks into no-ops even
-	// though an acceptable in-radius candidate existed. Corpus profiling
-	// (samuelpmahan/toph, examples/chainspot-clicksnap-profile) measured that
-	// in every such rejection the in-radius runner-up was the real feature,
-	// and shipping this ranking moved corpus-wide snap rates from 0.778 to
-	// 0.838 (tee) and 0.796 to 0.968 (basket) with median accuracy unchanged.
-	let best: { xPx: number; yPx: number; score: number } | null = null;
-	for (const candidate of candidates) {
-		const score = candidate.score ?? -Infinity;
-		const xPx = originXPx + candidate.xPx;
-		const yPx = originYPx + candidate.yPx;
-		if (Math.hypot(xPx - clickPx.xPx, yPx - clickPx.yPx) > snapRadiusPx) continue;
-		if (!best || score > best.score) {
-			best = { xPx, yPx, score };
-		}
-	}
-	if (!best || best.score < LOCAL_SNAP_MIN_SCORE) return null;
-
-	return { xPx: best.xPx, yPx: best.yPx };
+	return localFeatureSnapDetailed(kind, cv, raster, clickPx, calibration).point;
 }
 
-// Re-exported so callers deriving a `LocalSnapCalibration` from a number-badge
-// anchor (the same one `handleDetectTees`/`detectCourse` already use) don't
-// need a second import path to reach the one canonical conversion.
 export { asUiScalePx, deriveCanonicalUiScalePx };
 export type { UiScalePx, BasketTemplateScale };
