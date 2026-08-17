@@ -29,7 +29,9 @@
  * a recording trace and get per-component first-loss attribution. Gate
  * thresholds are grouped in RAW_MASK_TUNING_DEFAULTS so offline sweeps can
  * override them without editing this module; production callers pass nothing
- * and get exactly the historical constants.
+ * and get the tuned 4-course-corpus defaults (see
+ * scripts/cv-probes/toph-p1-corpus-tuning-findings.md), not the pre-tuning
+ * historical constants.
  */
 
 import {
@@ -110,9 +112,12 @@ interface MaskComponent {
 }
 
 /**
- * Every numeric gate in the P1 pass, defaulting to the historical constants.
- * Grey-interior COLOR band is deliberately excluded (borrowed from
- * teePadDetection's proven constants); only its fraction floor is here.
+ * Every numeric gate in the P1 pass, defaulting to the tuned 4-course-corpus
+ * values in RAW_MASK_TUNING_DEFAULTS below (see
+ * scripts/cv-probes/toph-p1-corpus-tuning-findings.md), not the pre-tuning
+ * historical constants. Grey-interior COLOR band is deliberately excluded
+ * (borrowed from teePadDetection's proven constants); only its fraction
+ * floor is here.
  */
 export interface RawMaskTuning {
 	readonly brightValueMin: number;
