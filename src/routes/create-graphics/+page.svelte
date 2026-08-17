@@ -594,6 +594,13 @@
 				sha256,
 				bundlePath: bundlePathFor('target-basemap', file.type)
 			});
+			// Same courtesy every other target replacement extends via
+			// onDomainChanged: a half-created correspondence must not linger
+			// against an image that is about to be swapped out (review finding).
+			if (correspondence.mode !== 'neutral') {
+				correspondence = cancelCorrespondence(correspondence);
+				correspondenceError = null;
+			}
 			const previousRotation = target.rotationDeg ?? 0;
 			editor.replaceImage({ role: 'target-basemap', asset, bytes, retainPoints: true });
 			editor.setDecodedResource(asset.id, decoded.image);
@@ -2372,6 +2379,30 @@
 								Find my course
 							</button>
 							<p class="pane-invite-hint">…or upload your own image with “Choose image” below.</p>
+							{#if savedLocationNote}
+								<!-- Review finding (CHSPT-68): known state must SHORTEN the path.
+								     A recognized course surfaces right here with a one-click fetch —
+								     an explicit action, so the location cache still never auto-fetches
+								     imagery on its own. -->
+								<p class="saved-location-note" data-testid="saved-location-note">
+									{savedLocationNote}
+									<button
+										type="button"
+										data-testid="saved-location-dismiss"
+										onclick={() => (savedLocationNote = null)}
+									>
+										Dismiss
+									</button>
+								</p>
+								<button
+									type="button"
+									data-testid="saved-location-fetch"
+									disabled={naipLoading}
+									onclick={() => void handleNaipFetch()}
+								>
+									{naipLoading ? 'Fetching…' : 'Get this course’s aerial photo'}
+								</button>
+							{/if}
 							{#if naipLoading}
 								<p class="status" data-testid="naip-loading" role="status">Fetching aerial photo…</p>
 							{/if}
