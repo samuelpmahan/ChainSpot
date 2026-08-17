@@ -137,6 +137,5 @@ export function installVisionFlagConsole(): void {
 		help: visionFlagHelp
 	});
 	globalThis.chainspot = Object.freeze({ flags: api });
+	document.documentElement.dataset.chainspotFlagsReady = 'true';
 }
-
-installVisionFlagConsole();
