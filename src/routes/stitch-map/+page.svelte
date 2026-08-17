@@ -469,12 +469,65 @@
 		}
 	}
 
+	/**
+	 * CHSPT-65: files picked through the bulk importer, held BEFORE any
+	 * crop/stitch runs while the user answers which (if any) is the thrown
+	 * round. Each entry carries an object URL for its thumbnail; URLs are
+	 * revoked when the prompt resolves, cancels, or the page unmounts. Only
+	 * the user-facing file input routes through this — the demo inbox keeps
+	 * its direct `runImport` path (a guided demo must never stall on a
+	 * question), and the per-slot grid keeps its per-tile buttons.
+	 */
+	let pendingImport = $state<{ file: File; url: string }[] | null>(null);
+
+	function clearPendingImport(): void {
+		if (pendingImport) for (const item of pendingImport) URL.revokeObjectURL(item.url);
+		pendingImport = null;
+	}
+
 	function handleSmartImportFiles(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		const files = Array.from(input.files ?? []);
 		input.value = '';
 		if (files.length === 0) return;
-		void runImport(files);
+		// Ask about the thrown round BEFORE attempting any crop/stitch — a
+		// round screenshot mixed into the batch must never be composited into
+		// the clean map. The prompt shows a thumbnail of each capture.
+		clearPendingImport();
+		pendingImport = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
+	}
+
+	/**
+	 * Resolves the pre-import prompt. `index` picks that capture as the thrown
+	 * round (raw file into the session slot, remaining captures stitch the
+	 * clean map); `null` means no thrown round in this batch — stitch them all
+	 * exactly as the importer always did.
+	 */
+	function handlePreImportChoice(index: number | null): void {
+		const pending = pendingImport;
+		if (!pending) return;
+		const files = pending.map((item) => item.file);
+		clearPendingImport();
+		if (index === null) {
+			void runImport(files);
+			return;
+		}
+		const chosen = files[index];
+		if (!chosen) return;
+		const replacing = getThrownRoundSource() !== null;
+		setThrownRoundSource({ blob: chosen, fileName: chosen.name });
+		heldThrownRound = { fileName: chosen.name };
+		const remaining = files.filter((_, candidate) => candidate !== index);
+		if (remaining.length === 0) {
+			statusMessage = `“${chosen.name}” set aside as the thrown round${replacing ? ', replacing the previous one' : ''}. Import the clean course screenshots next.`;
+			return;
+		}
+		void runImport(remaining);
+	}
+
+	function handlePreImportCancel(): void {
+		clearPendingImport();
+		statusMessage = 'Import cancelled. Nothing was stitched.';
 	}
 
 	/**
@@ -1845,6 +1898,7 @@
 		decodeCoordinator.invalidate(SMART_IMPORT_BATCH);
 		disposeSmartStitchWorker();
 		endTileDrag();
+		clearPendingImport();
 		if (resultImageUrl) URL.revokeObjectURL(resultImageUrl);
 		stage?.destroy();
 		stage = null;
@@ -1912,6 +1966,49 @@
 		</div>
 
 		{#if phase === 'import'}
+			{#if pendingImport}
+				<!-- CHSPT-65: asked BEFORE any crop/stitch — a thrown-round
+				     screenshot mixed into the batch must never reach the clean
+				     composite. One thumbnail per selected capture. -->
+				<div class="pre-import-prompt" data-testid="pre-import-prompt">
+					<h3>Before stitching — is one of these the thrown round?</h3>
+					<p class="section-note">
+						The thrown round (the screenshot with the purple round path) is set aside for Create
+						Graphics and kept out of the clean map. Pick it here, or stitch everything as clean.
+					</p>
+					<ul class="pre-import-grid">
+						{#each pendingImport as item, index (item.url)}
+							<li class="pre-import-item">
+								<img class="pre-import-thumb" src={item.url} alt={item.file.name} />
+								<span class="pre-import-name">{item.file.name}</span>
+								<button
+									type="button"
+									class="thrown-round-pick"
+									data-testid="pre-import-thrown-{index}"
+									onclick={() => handlePreImportChoice(index)}
+								>
+									Thrown round
+								</button>
+							</li>
+						{/each}
+					</ul>
+					<div class="pre-import-actions">
+						<button
+							type="button"
+							class="btn primary"
+							data-testid="pre-import-none"
+							onclick={() => handlePreImportChoice(null)}
+						>
+							{pendingImport.length === 1
+								? 'No thrown round — crop it as the clean map'
+								: `No thrown round — stitch all ${pendingImport.length}`}
+						</button>
+						<button type="button" class="btn ghost" data-testid="pre-import-cancel" onclick={handlePreImportCancel}>
+							Cancel import
+						</button>
+					</div>
+				</div>
+			{:else}
 			<div class="import-panel">
 				<section class="smart-import-section" aria-labelledby="smart-import-heading">
 					<h3 id="smart-import-heading">Import screenshots</h3>
@@ -1967,6 +2064,7 @@
 					</div>
 				</section>
 			</div>
+			{/if}
 		{:else if phase === 'processing'}
 			<div class="processing-panel" data-testid="stitch-processing">
 				<div class="spinner" aria-hidden="true"></div>
@@ -2427,6 +2525,63 @@
 		background: #18181b;
 		overflow: hidden;
 		margin: 0 auto;
+	}
+
+	.pre-import-prompt {
+		display: flex;
+		flex-direction: column;
+		gap: 0.7rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid #4c1d95;
+		border-radius: 8px;
+		background-color: #1e1e24;
+	}
+
+	.pre-import-prompt h3 {
+		margin: 0;
+		font-size: 1rem;
+		color: #f4f4f5;
+	}
+
+	.pre-import-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.8rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.pre-import-item {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.35rem;
+		width: 160px;
+	}
+
+	.pre-import-thumb {
+		width: 160px;
+		height: 120px;
+		object-fit: cover;
+		border: 1px solid #3f3f46;
+		border-radius: 6px;
+		background: #101014;
+	}
+
+	.pre-import-name {
+		max-width: 160px;
+		font-size: 0.75rem;
+		color: #a1a1aa;
+		overflow-wrap: anywhere;
+		text-align: center;
+	}
+
+	.pre-import-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		align-items: center;
 	}
 
 	.result-sources {
