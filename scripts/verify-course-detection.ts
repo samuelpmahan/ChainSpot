@@ -22,6 +22,23 @@ interface GateArgs {
 	readonly minBasketScore?: number;
 }
 
+interface CountMetric {
+	readonly numerator: number;
+	readonly denominator: number;
+	readonly passed: boolean;
+	readonly definition: string;
+}
+
+interface AccuracyMetric {
+	readonly numerator: number;
+	readonly denominator: number;
+	readonly wrong: number;
+	readonly missing: number;
+	readonly tolerancePx: number;
+	readonly passed: boolean;
+	readonly definition: string;
+}
+
 interface GateImageResult {
 	readonly input: CourseCliResult['input'];
 	readonly outputDir: string;
@@ -33,9 +50,18 @@ interface GateImageResult {
 	readonly counts: CourseCliResult['counts'];
 	readonly gapFallback: CourseCliResult['gapFallback'];
 	readonly activeReview: CourseCliResult['activeReview'];
+	readonly metrics: {
+		readonly labeledBadges: CountMetric;
+		/** Inventory only: exactly this many basket candidates were emitted. */
+		readonly basketCandidateInventory: CountMetric;
+		readonly teeCorrectlyAssigned?: AccuracyMetric;
+		readonly basketCorrectlyAssigned?: AccuracyMetric;
+	};
 	readonly gate: {
-		readonly labeledBadges: number;
-		readonly baskets: number;
+		/** Backward-compatible inventory guard: detector cardinality, never correctness. */
+		readonly inventoryPassed: boolean;
+		/** null means this input has no ground truth and assignment was not scored. */
+		readonly assignmentPassed: boolean | null;
 		readonly passed: boolean;
 		readonly failures: readonly string[];
 	};
@@ -46,6 +72,15 @@ interface GateReport {
 	readonly candidateBudgets: {
 		readonly maxTeeCandidates: number;
 		readonly maxBasketCandidates: number;
+	};
+	readonly semantics: {
+		readonly detected: string;
+		readonly candidatePresent: string;
+		readonly correctlyAssigned: string;
+		readonly recommended: string;
+		readonly surfaced: string;
+		readonly snapped: string;
+		readonly semanticallyCorrect: string;
 	};
 	readonly passed: boolean;
 	readonly results: readonly GateImageResult[];
@@ -58,10 +93,14 @@ function usage(): string {
 		'With no positional paths, checks Downloads/clean-tile-4-stitched.png and',
 		'Downloads/IMG_5641 .jpg. Explicit paths replace those defaults.',
 		'',
+		'IMPORTANT: plain images have no endpoint ground truth. For those inputs',
+		'this command can gate detector inventory only; it will print assignment',
+		'as NOT SCORED rather than calling candidate counts "correct".',
+		'',
 		'Options:',
-		'  --out <directory>          Report and per-image overlays (default: /private/tmp/chainspot-course-detection-gate)',
+		'  --out <directory>          Report and per-image overlays',
 		'  --templates <directory>    CV template pack override',
-		'  --expected <count>         Required labeled badges and baskets (default: 18)',
+		'  --expected <count>         Expected labeled badge / basket-candidate inventory (default: 18)',
 		'  --max-tees <count>         Tee candidate budget (default: 64)',
 		'  --max-baskets <count>      Basket candidate budget (default: 64)',
 		'  --min-basket-score <0..1>  Basket NCC floor override',
@@ -81,7 +120,7 @@ function positiveInteger(value: string, option: string): number {
 	return parsed;
 }
 
-function score(value: string, option: string): number {
+function normalizedScore(value: string, option: string): number {
 	const parsed = Number(value);
 	if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new Error(`${option} must be between 0 and 1.`);
 	return parsed;
@@ -125,7 +164,7 @@ function parseArgs(argv: readonly string[]): GateArgs {
 				index += 1;
 				break;
 			case '--min-basket-score':
-				minBasketScore = score(requireValue(argv, index, argument), argument);
+				minBasketScore = normalizedScore(requireValue(argv, index, argument), argument);
 				index += 1;
 				break;
 			default:
@@ -136,17 +175,9 @@ function parseArgs(argv: readonly string[]): GateArgs {
 	const resolvedInputs = inputPaths.length === 0 ? [...DEFAULT_INPUTS] : inputPaths;
 	if (resolvedInputs.length !== 2) throw new Error(`Expected exactly two image paths, received ${resolvedInputs.length}.\n\n${usage()}`);
 	if (maxBasketCandidates <= expectedCount) {
-		throw new Error('--max-baskets must be greater than --expected so the gate cannot pass by truncating basket detections.');
+		throw new Error('--max-baskets must be greater than --expected so the inventory gate cannot pass by truncating basket detections.');
 	}
-	return {
-		inputPaths: resolvedInputs,
-		outputDir,
-		templateDir,
-		expectedCount,
-		maxTeeCandidates,
-		maxBasketCandidates,
-		minBasketScore
-	};
+	return { inputPaths: resolvedInputs, outputDir, templateDir, expectedCount, maxTeeCandidates, maxBasketCandidates, minBasketScore };
 }
 
 function safeSlug(path: string, index: number): string {
@@ -162,20 +193,81 @@ function runQuiet(args: CourseCliArgs): Promise<CourseCliResult> {
 	});
 }
 
-function evaluate(result: CourseCliResult, expectedCount: number): GateImageResult['gate'] {
+function countMetric(numerator: number, denominator: number, definition: string): CountMetric {
+	return { numerator, denominator, passed: numerator === denominator, definition };
+}
+
+function accuracyMetric(
+	evaluation: NonNullable<CourseCliResult['teeTruthEvaluation'] | CourseCliResult['basketTruthEvaluation']>,
+	definition: string
+): AccuracyMetric {
+	const denominator = evaluation.correctHoles.length + evaluation.wrongHoles.length + evaluation.missingHoles.length;
+	return {
+		numerator: evaluation.correctHoles.length,
+		denominator,
+		wrong: evaluation.wrongHoles.length,
+		missing: evaluation.missingHoles.length,
+		tolerancePx: evaluation.tolerancePx,
+		passed: denominator > 0 && evaluation.correctHoles.length === denominator,
+		definition
+	};
+}
+
+function evaluate(result: CourseCliResult, expectedCount: number): Pick<GateImageResult, 'metrics' | 'gate'> {
+	const labeledBadges = countMetric(
+		result.counts.labeledNumbers,
+		expectedCount,
+		'Located number-badge bodies that received a hole label. This is not tee/basket correctness.'
+	);
+	const basketCandidateInventory = countMetric(
+		result.counts.basketCandidates,
+		expectedCount,
+		'Basket candidates emitted by the detector. Candidate cardinality does not assert hole ownership or accuracy.'
+	);
+	const teeCorrectlyAssigned = result.teeTruthEvaluation
+		? accuracyMetric(
+			result.teeTruthEvaluation,
+			'For each truth tee Hole N, the tee selected by grammar for Hole N is within the reported pixel tolerance.'
+		)
+		: undefined;
+	const basketCorrectlyAssigned = result.basketTruthEvaluation
+		? accuracyMetric(
+			result.basketTruthEvaluation,
+			'For each truth basket Hole N, the basket selected by grammar for Hole N is within the reported pixel tolerance.'
+		)
+		: undefined;
+	const inventoryPassed = labeledBadges.passed && basketCandidateInventory.passed;
+	const scoredAssignments = [teeCorrectlyAssigned, basketCorrectlyAssigned].filter((metric): metric is AccuracyMetric => metric !== undefined);
+	const assignmentPassed = scoredAssignments.length === 0 ? null : scoredAssignments.every((metric) => metric.passed);
 	const failures: string[] = [];
-	if (result.counts.labeledNumbers !== expectedCount) {
-		failures.push(`labeled badges ${result.counts.labeledNumbers}/${expectedCount}`);
+	if (!labeledBadges.passed) failures.push(`labeled badge inventory ${labeledBadges.numerator}/${labeledBadges.denominator}`);
+	if (!basketCandidateInventory.passed) failures.push(`basket candidate inventory ${basketCandidateInventory.numerator}/${basketCandidateInventory.denominator}`);
+	if (teeCorrectlyAssigned && !teeCorrectlyAssigned.passed) {
+		failures.push(`correctly assigned tees ${teeCorrectlyAssigned.numerator}/${teeCorrectlyAssigned.denominator} @ <=${teeCorrectlyAssigned.tolerancePx.toFixed(2)}px`);
 	}
-	if (result.counts.basketCandidates !== expectedCount) {
-		failures.push(`baskets ${result.counts.basketCandidates}/${expectedCount}`);
+	if (basketCorrectlyAssigned && !basketCorrectlyAssigned.passed) {
+		failures.push(`correctly assigned baskets ${basketCorrectlyAssigned.numerator}/${basketCorrectlyAssigned.denominator} @ <=${basketCorrectlyAssigned.tolerancePx.toFixed(2)}px`);
 	}
 	return {
-		labeledBadges: result.counts.labeledNumbers,
-		baskets: result.counts.basketCandidates,
-		passed: failures.length === 0,
-		failures
+		metrics: {
+			labeledBadges,
+			basketCandidateInventory,
+			...(teeCorrectlyAssigned ? { teeCorrectlyAssigned } : {}),
+			...(basketCorrectlyAssigned ? { basketCorrectlyAssigned } : {})
+		},
+		gate: {
+			inventoryPassed,
+			assignmentPassed,
+			passed: inventoryPassed && assignmentPassed !== false,
+			failures
+		}
 	};
+}
+
+function metricText(metric: AccuracyMetric | undefined, label: string): string {
+	return metric
+		? `${label} ${metric.numerator}/${metric.denominator} @ <=${metric.tolerancePx.toFixed(2)}px`
+		: `${label} NOT SCORED (no endpoint ground truth)`;
 }
 
 async function main(): Promise<void> {
@@ -196,7 +288,7 @@ async function main(): Promise<void> {
 			maxBasketCandidates: args.maxBasketCandidates,
 			minBasketScore: args.minBasketScore
 		});
-		const gate = evaluate(result, args.expectedCount);
+		const evaluated = evaluate(result, args.expectedCount);
 		const imageResult: GateImageResult = {
 			input: result.input,
 			outputDir: imageOutputDir,
@@ -208,22 +300,33 @@ async function main(): Promise<void> {
 			counts: result.counts,
 			gapFallback: result.gapFallback,
 			activeReview: result.activeReview,
-			gate
+			...evaluated
 		};
 		results.push(imageResult);
-		const recommendation = result.activeReview.recommendation;
-		const nextReview =
-			recommendation.kind === 'candidate'
-				? `${recommendation.candidateKind}→hole ${recommendation.holeNumber} (${(recommendation.score as number).toFixed(2)}${recommendation.belowThreshold ? ', below-threshold' : ''})`
-				: `none (${recommendation.reason})`;
 		console.log(
-			`${gate.passed ? 'PASS' : 'FAIL'} ${basename(resolvedInput)} — badges ${gate.labeledBadges}/${args.expectedCount}, baskets ${gate.baskets}/${args.expectedCount}, tees ${result.counts.teeCandidates}, uiScale ${result.uiScalePx.toFixed(3)}, basketScale ${result.basketTemplateScale.toFixed(3)}, unassigned tee/basket ${result.activeReview.unassignedTees}/${result.activeReview.unassignedBaskets}, next-review ${nextReview}`
+			`${evaluated.gate.inventoryPassed ? 'INVENTORY PASS' : 'INVENTORY FAIL'} ${basename(resolvedInput)} — ` +
+			`labeled badges ${evaluated.metrics.labeledBadges.numerator}/${evaluated.metrics.labeledBadges.denominator}; ` +
+			`basket candidates ${evaluated.metrics.basketCandidateInventory.numerator} (expected inventory ${evaluated.metrics.basketCandidateInventory.denominator}); ` +
+			`tee candidates ${result.counts.teeCandidates}.`
+		);
+		console.log(
+			`  ${metricText(evaluated.metrics.teeCorrectlyAssigned, 'correctly-assigned tees')}; ` +
+			`${metricText(evaluated.metrics.basketCorrectlyAssigned, 'correctly-assigned baskets')}.`
 		);
 	}
 
 	const report: GateReport = {
 		expectedCount: args.expectedCount,
 		candidateBudgets: { maxTeeCandidates: args.maxTeeCandidates, maxBasketCandidates: args.maxBasketCandidates },
+		semantics: {
+			detected: 'A raw detector emitted an object hypothesis. Never implies hole identity or correctness.',
+			candidatePresent: 'At least one retained candidate exists for the object/hole under the scored fixture.',
+			correctlyAssigned: 'The candidate selected for Hole N matches Hole N ground truth within an explicit tolerance.',
+			recommended: 'The pipeline emitted an endpoint choice for Hole N.',
+			surfaced: 'That recommendation actually entered user-visible/authoritative annotation state.',
+			snapped: 'A local-snap attempt accepted and settled to a detected point.',
+			semanticallyCorrect: 'The final user-visible point matches the declared tee/basket semantic anchor within tolerance.'
+		},
 		passed: results.every((result) => result.gate.passed),
 		results
 	};
