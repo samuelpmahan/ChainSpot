@@ -27,15 +27,18 @@ function baseTrace(overrides: Partial<LandmarkTrace> = {}): LandmarkTrace {
 describe('summarizeLandmarkFunnel', () => {
 	it('never folds not-instrumented rows into a success or failure denominator', () => {
 		const metrics = summarizeLandmarkFunnel([
-			baseTrace({ surface: { eligible: true, surfaced: true }, snap: { attempted: true, accepted: true, clickPx: { xPx: 9, yPx: 9 } } }),
-			baseTrace({ holeNumber: 2, assignedHoleCorrect: false, surface: { eligible: false, surfaced: 'not-instrumented' } }),
+			baseTrace({
+				surface: { eligible: true, surfaced: true },
+				snap: { attempted: true, accepted: true, settled: true, clickPx: { xPx: 9, yPx: 9 } }
+			}),
+			baseTrace({ holeNumber: 2, assignedHoleCorrect: false, surface: { eligible: false, surfaced: false } }),
 			baseTrace({ holeNumber: 3, detected: 'not-instrumented', assignedHoleCorrect: 'not-instrumented', recommendation: { emitted: false }, surface: { eligible: 'not-instrumented', surfaced: 'not-instrumented' } })
 		]);
 
 		const assigned = metrics.find((metric) => metric.name === 'correctly-assigned')!;
 		expect(assigned).toMatchObject({ numerator: 1, denominator: 2, notInstrumented: 1 });
 		const surfaced = metrics.find((metric) => metric.name === 'surfaced')!;
-		expect(surfaced).toMatchObject({ numerator: 1, denominator: 1, notInstrumented: 2 });
+		expect(surfaced).toMatchObject({ numerator: 1, denominator: 2, notInstrumented: 1 });
 		const snapped = metrics.find((metric) => metric.name === 'snapped')!;
 		expect(snapped).toMatchObject({ numerator: 1, denominator: 1, notInstrumented: 2 });
 	});
@@ -101,18 +104,21 @@ function pancakeDetectionWithSwap(): CourseDetectionResult {
 }
 
 describe('buildCourseLandmarkTraces', () => {
-	it('keeps tee ownership stages distinct and basket candidates ranked by the real P6 score', () => {
+	it('keeps tee ownership stages distinct and basket P6.1→P6.2 history instead of reporting only final state', () => {
 		const traces = buildCourseLandmarkTraces(pancakeDetectionWithSwap());
 		const tee1 = traces.find((trace) => trace.holeNumber === 1 && trace.kind === 'tee')!;
-		expect(tee1.assignmentHistory.map((step) => step.stage)).toContain('p3');
-		expect(tee1.assignmentHistory.map((step) => step.stage)).toContain('p5');
+		expect(tee1.assignmentHistory.map((step) => step.stage)).toEqual(expect.arrayContaining(['p3', 'p5']));
 		const basket1 = traces.find((trace) => trace.holeNumber === 1 && trace.kind === 'basket')!;
 		expect(basket1.candidates[0]).toMatchObject({ rawIndex: 1, rank: 1, score: { name: 'p6.lowParScore', value: 0.7 } });
+		expect(basket1.assignmentHistory.filter((step) => step.stage.startsWith('p6')).map((step) => [step.stage, step.candidateIndex])).toEqual([
+			['p6.1', 0],
+			['p6.2-final', 1]
+		]);
 	});
 });
 
 describe('correction-log merge', () => {
-	it('marks a proposal as surfaced and a changed raw drop as an actually-settled snap', () => {
+	it('marks a rawDrop correction as an actually-settled snap, not merely worker acceptance', () => {
 		const trace = baseTrace({
 			groundTruth: { xPx: 12, yPx: 12, tolerancePx: 3, assignmentErrorPx: 2.8, assignmentCorrect: true }
 		});
@@ -130,7 +136,7 @@ describe('correction-log merge', () => {
 		};
 		const merged = mergeCorrectionEventsIntoLandmarkTraces([trace], [event])[0];
 		expect(merged.surface.surfaced).toBe(true);
-		expect(merged.snap).toMatchObject({ attempted: true, accepted: true });
+		expect(merged.snap).toMatchObject({ attempted: true, accepted: true, settled: true });
 		expect(merged.groundTruth).toMatchObject({ finalErrorPx: 0, userCorrect: true });
 	});
 });
