@@ -232,6 +232,50 @@ export function moveShot(
 	}));
 }
 
+/** Reorders one shot by stable id without changing its id or landing. */
+export function reorderShot(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	shotId: string,
+	toIndex: number
+): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		const fromIndex = hole.shots.findIndex((shot) => shot.id === shotId);
+		if (fromIndex < 0 || !Number.isInteger(toIndex) || hole.shots.length < 2) return hole;
+		const boundedIndex = Math.max(0, Math.min(toIndex, hole.shots.length - 1));
+		if (fromIndex === boundedIndex) return hole;
+		const shots = [...hole.shots];
+		const [shot] = shots.splice(fromIndex, 1);
+		shots.splice(boundedIndex, 0, shot);
+		return { ...hole, shots };
+	});
+}
+
+/** Moves one shot, preserving its stable id and landing, to another hole. */
+export function reassignShot(
+	holes: readonly AnnotatedHole[],
+	fromHoleId: string,
+	toHoleId: string,
+	shotId: string,
+	toIndex?: number
+): AnnotatedHole[] {
+	if (fromHoleId === toHoleId) return holes.slice();
+	const fromHole = holes.find((hole) => hole.id === fromHoleId);
+	const toHole = holes.find((hole) => hole.id === toHoleId);
+	const shot = fromHole?.shots.find((candidate) => candidate.id === shotId);
+	if (!fromHole || !toHole || !shot) return holes.slice();
+	const remaining = holes.map((hole) =>
+		hole.id === fromHoleId ? { ...hole, shots: hole.shots.filter((candidate) => candidate.id !== shotId) } : hole
+	);
+	return remaining.map((hole) => {
+		if (hole.id !== toHoleId) return hole;
+		const index = toIndex === undefined ? hole.shots.length : Math.max(0, Math.min(toIndex, hole.shots.length));
+		const shots = [...hole.shots];
+		shots.splice(index, 0, shot);
+		return { ...hole, shots };
+	});
+}
+
 export function addCorridorBend(holes: readonly AnnotatedHole[], holeId: string, point: SourcePoint): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => {
 		const newBends = [...hole.corridorBends, point];
