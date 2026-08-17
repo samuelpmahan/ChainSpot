@@ -100,7 +100,14 @@ export function estimateSimilarity(
 				sumSourceNorm2,
 		0
 	);
-	if (reflectionError < rotationError * REFLECTION_IMPROVEMENT_MARGIN) {
+	// Two correspondences define only one directed segment. A rotation+scale can
+	// always map that segment exactly, so two points cannot distinguish a true
+	// reflection from ordinary floating-point noise in the closed-form errors.
+	// Require a third observation before rejecting the fit as mirrored.
+	if (
+		completePairs.length >= 3 &&
+		reflectionError < rotationError * REFLECTION_IMPROVEMENT_MARGIN
+	) {
 		return failure(AlignmentFailureReason.REFLECTION_REQUIRED, completePairs.length);
 	}
 

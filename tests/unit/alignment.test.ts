@@ -272,6 +272,17 @@ describe('P1-003 Map Alignment Math', () => {
 			reason: AlignmentFailureReason.REFLECTION_REQUIRED
 		});
 
+		// Two nearly identical directed segments are always representable by a
+		// similarity transform. Tiny closed-form rounding differences must not be
+		// misclassified as evidence of a reflection.
+		const twoPointFit = estimateSimilarity({
+			pairs: [
+				pair('p1', 495.68, 508.18, 495.39, 507.4),
+				pair('p2', 1600.41, 1794.28, 1598.42, 1791.53)
+			]
+		});
+		expect(twoPointFit).toHaveProperty('transform');
+
 		// Inverting a singular transform returns null.
 		const singular: SerializableTransform = {
 			model: 'affine',

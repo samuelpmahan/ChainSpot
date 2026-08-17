@@ -491,6 +491,11 @@
 		activityMessage = 'Played-round registration confirmed for extraction. Corrections remain available.';
 	}
 
+	function invalidatePlayedRoundRegistration(): void {
+		playedRoundRegistrationConfirmed = null;
+		activityMessage = 'Played-round registration changed; review and confirm the corrected fit.';
+	}
+
 	function canAddCorrespondence(): boolean {
 		void refreshCount;
 		return sourceImage() !== null && targetImage() !== null;
@@ -2167,16 +2172,19 @@
 		</section>
 	{/if}
 
-	{#if playedRoundRegistrationOpen && thrownRound && sourceImage()}
-		<PlayedRoundRegistration
-			playedRound={thrownRound}
-			cleanSource={sourceImage()!}
-			cleanSourceResource={editor.getAssetResource(sourceImage()!.id)!}
-			cleanToTarget={alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null}
-			onClose={closePlayedRoundRegistration}
-			onConfirm={confirmPlayedRoundRegistration}
-			onProofPoints={(points) => (registrationProofPoints = points)}
-		/>
+	{#if thrownRound && sourceImage()}
+		<div hidden={!playedRoundRegistrationOpen}>
+			<PlayedRoundRegistration
+				playedRound={thrownRound}
+				cleanSource={sourceImage()!}
+				cleanSourceResource={editor.getAssetResource(sourceImage()!.id)!}
+				cleanToTarget={alignmentResult && 'transform' in alignmentResult ? alignmentResult.transform : null}
+				onClose={closePlayedRoundRegistration}
+				onConfirm={confirmPlayedRoundRegistration}
+				onInvalidate={invalidatePlayedRoundRegistration}
+				onProofPoints={(points) => (registrationProofPoints = points)}
+			/>
+		</div>
 	{/if}
 
 	{#if cleanTargetFirst()}

@@ -39,6 +39,7 @@
 		cleanToTarget: SerializableTransform | null;
 		decode?: DecodeImageFile;
 		onConfirm?: (registration: UsablePlayedRoundRegistration) => void;
+		onInvalidate?: () => void;
 		onClose?: () => void;
 		onProofPoints?: (points: readonly { id: string; xPx: number; yPx: number }[]) => void;
 	}
@@ -50,6 +51,7 @@
 		cleanToTarget,
 		decode = decodeImageFile,
 		onConfirm,
+		onInvalidate,
 		onClose,
 		onProofPoints
 	}: Props = $props();
@@ -70,6 +72,18 @@
 	let inspectorDraft = $state({ x: '', y: '' });
 	let pointError = $state<string | null>(null);
 	let confirmed = $state(false);
+
+	function invalidateConfirmation(): void {
+		if (!confirmed) return;
+		confirmed = false;
+		onInvalidate?.();
+	}
+
+	function selectModel(nextModel: AlignmentModel): void {
+		if (model === nextModel) return;
+		model = nextModel;
+		invalidateConfirmation();
+	}
 
 	function currentPairs(): readonly ControlPointPair[] {
 		void refresh;
@@ -180,6 +194,7 @@
 				sourceCoordinates: transition.completion.source.coordinates,
 				targetCoordinates: transition.completion.target.coordinates
 			});
+			invalidateConfirmation();
 			correspondence = completeCorrespondence(transition.state);
 			refresh += 1;
 		} catch (caught) {
@@ -198,6 +213,7 @@
 		}
 		try {
 			commitPointCorrection(registrationEditor, request.selection, request.coordinates);
+			invalidateConfirmation();
 			selection = request.selection;
 			pointError = null;
 			refresh += 1;
@@ -226,11 +242,13 @@
 
 	function togglePair(pairId: string): void {
 		registrationEditor?.setEnabled(pairId, !currentPairs().find((pair) => pair.id === pairId)?.enabled);
+		invalidateConfirmation();
 		refresh += 1;
 	}
 
 	function deletePair(pairId: string): void {
 		registrationEditor?.deletePair(pairId);
+		invalidateConfirmation();
 		if (selection?.pairId === pairId) selection = null;
 		refresh += 1;
 	}
@@ -347,8 +365,8 @@
 			{/if}
 			<fieldset>
 				<legend>Transform</legend>
-				<label><input type="radio" name="played-model" checked={model === 'similarity'} onchange={() => (model = 'similarity')} data-testid="played-model-similarity" /> Similarity (2+)</label>
-				<label><input type="radio" name="played-model" checked={model === 'affine'} onchange={() => (model = 'affine')} data-testid="played-model-affine" /> Affine (3+ non-collinear)</label>
+				<label><input type="radio" name="played-model" checked={model === 'similarity'} onchange={() => selectModel('similarity')} data-testid="played-model-similarity" /> Similarity (2+)</label>
+				<label><input type="radio" name="played-model" checked={model === 'affine'} onchange={() => selectModel('affine')} data-testid="played-model-affine" /> Affine (3+ non-collinear)</label>
 			</fieldset>
 		</div>
 
