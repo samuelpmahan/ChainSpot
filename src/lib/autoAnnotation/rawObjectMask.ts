@@ -137,7 +137,9 @@ export interface RawMaskTuning {
 	 * already applies. Rationale: the white hole-number digits inside badges
 	 * are pad-sized bright components that can outvote the real baskets in
 	 * size consensus (observed: Lenard, 17-digit impostor cluster vs 16 real
-	 * baskets). Null (the default) preserves the historical behavior exactly.
+	 * baskets). The tuned default (RAW_MASK_TUNING_DEFAULTS) is 0.08, not null;
+	 * passing null instead restores the historical (pre-tuning) behavior of
+	 * not excluding these components at all.
 	 */
 	readonly basketPoolExcludeInsideBadgeMarginFrac: number | null;
 	readonly basketClusterSizeRelTolerance: number;
