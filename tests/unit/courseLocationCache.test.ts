@@ -87,6 +87,14 @@ function inputValue(host: HTMLElement, testId: string): string | undefined {
 	return host.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)?.value;
 }
 
+/** CHSPT-68: the prefilled inputs and the saved-location note live in the location modal. */
+async function openLocationModal(host: HTMLElement): Promise<void> {
+	const open = host.querySelector<HTMLButtonElement>('[data-testid="open-location-search"]');
+	if (!open) throw new Error('missing open-location-search button');
+	open.click();
+	await flush();
+}
+
 afterEach(() => {
 	document.body.replaceChildren();
 	consumePendingAnnotatedRound();
@@ -131,6 +139,7 @@ describe('Course Library location cache — import-path prefill', () => {
 
 		const { host, component } = mountPage(decodeOf(SOURCE_SIZE, SOURCE_SIZE), store);
 		await flush();
+		await openLocationModal(host);
 
 		expect(inputValue(host, 'naip-lat')).toBe('33.1255');
 		expect(inputValue(host, 'naip-lon')).toBe('-96.861');
@@ -193,6 +202,7 @@ describe('Course Library location cache — import-path prefill', () => {
 		const defaultLat = '33.12551979622626';
 		const { host, component } = mountPage(decodeOf(SOURCE_SIZE, SOURCE_SIZE), store);
 		await flush();
+		await openLocationModal(host);
 
 		expect(host.querySelector('[data-testid="saved-location-note"]')).toBeNull();
 		expect(inputValue(host, 'naip-lat')).toBe(defaultLat);
