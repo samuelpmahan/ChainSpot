@@ -3,6 +3,20 @@
 One line per landed feature. Condensed/reset periodically; Git history keeps
 prior contents.
 
+## 2026-08-17 — CHSPT-72: release a superseded thrown round back into the pool
+
+- Stitch Map: picking a different tile as the thrown round releases the previously-reserved tile's image back into the grid instead of losing it
+- Stitch Map: discarding a tile-sourced thrown round (banner's Discard) restores it to the grid when a slot is free; if the grid has already fully stitched, discarding says plainly the tile can't be restored instead of silently corrupting the completed layout
+
+Verified: `npm run check`; `thrownRoundFlow` unit suite unaffected (unmodified, still green);
+ad hoc Playwright runs (not committed) covering the tile-to-tile swap, a mid-import Discard
+restore, and a post-stitch Discard (byte-identical tile placements before/after, no phantom
+slot). Independent review caught a real regression in the first pass — `restoreTileToPool`'s
+`addSlot()` fallback silently corrupted other tiles' already-committed placements when Discard
+fired after a completed stitch with no empty slot — fixed by dropping that fallback entirely;
+re-review confirmed the fix. Known non-blocker: `heldThrownRoundTile` can survive "Start a new
+map" into an unrelated later session; flagged as an optional follow-up, not fixed here.
+
 ## 2026-08-17 — CHSPT-70: Toph-attributed P1 corpus tuning + 0-bend prior
 
 - P1 (`rawObjectMask.ts`): every gate is now a named Toph trace check
