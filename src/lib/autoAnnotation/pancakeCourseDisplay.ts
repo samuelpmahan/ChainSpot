@@ -11,6 +11,20 @@ import type { RawObjectMaskResult } from './rawObjectMask';
 const PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1);
 
 /**
+ * P1 localizes the bright interior of UDisc's basket sprite and reports its
+ * bottom-most bright pixel. The semantic basket point used by course geometry
+ * is the sprite tip / common C1-C2 center, which sits at the bottom of the
+ * black outline instead. Native-pixel measurement on The Rec Hole 4 puts that
+ * point 4px below the bright component (`1434 -> 1438.04`), independently
+ * corroborated by joint C1/C2 circle fitting.
+ *
+ * Keep this correction at the display/domain boundary: P3-P6 ownership should
+ * continue using the raw detector coordinate they were tuned against, while
+ * user-visible annotation/corridor geometry gets the semantic point.
+ */
+export const BASKET_SPRITE_TIP_OFFSET_PX = 4;
+
+/**
  * Adapts the pancake ownership outputs into the existing grammar/result shape
  * consumed by Annotate Course. This is a display adapter only: P5/P6 have
  * already completed their ownership decisions before this function runs.
@@ -116,7 +130,7 @@ export function buildPancakeDisplayGrammar(
 			? {
 					candidateIndex: p6Assignment.assignedBasketIndex,
 					xPx: basket.xPx,
-					yPx: basket.yPx,
+					yPx: basket.yPx + BASKET_SPRITE_TIP_OFFSET_PX,
 					detectorConfidence: 1,
 					confidence: 1,
 					distancePx: 0,
