@@ -77,10 +77,10 @@ function mountInjected(editor: ProjectEditor): Mounted {
 }
 
 /** No injected editor: the page participates in the real module-level session. */
-function mountParticipating(): Mounted {
+function mountParticipating(decode: DecodeImageFile = decodeOf(200, 100)): Mounted {
 	const host = document.createElement('div');
 	document.body.appendChild(host);
-	const component = mount(Page, { target: host, props: { decode: decodeOf(200, 100) } });
+	const component = mount(Page, { target: host, props: { decode } });
 	return { component, host };
 }
 
@@ -93,6 +93,11 @@ async function flush(): Promise<void> {
 
 function thrownBlob(): Blob {
 	return new Blob([new Uint8Array([7, 7, 7])], { type: 'image/png' });
+}
+
+function setFileInput(input: HTMLInputElement, file: File): void {
+	Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+	input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 /** True when `first` precedes `second` in document order. */
@@ -253,7 +258,7 @@ describe('Create Graphics: thrown-round note (CHSPT-65)', () => {
 		expect(note).not.toBeNull();
 		expect(note?.textContent).toContain('thrown-round.png');
 		expect(
-			host.querySelector('[data-testid="pane-filename-source-overview"]')?.textContent
+			host.querySelector('section.panes [data-testid="pane-filename-source-overview"]')?.textContent
 		).toBe('udisc-course.png');
 		// Mounting read the slot; it did not take it.
 		expect(getThrownRoundSource()?.fileName).toBe('thrown-round.png');
@@ -267,6 +272,70 @@ describe('Create Graphics: thrown-round note (CHSPT-65)', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="thrown-round-note"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('rebuilds registration for a replaced clean source while preserving same-image close and reopen', async () => {
+		setThrownRoundSource({ blob: thrownBlob(), fileName: 'thrown-round.png' });
+		setPendingAnnotatedRound(
+			createAnnotatedRound({
+				sourceImage: {
+					fileName: 'course-v1.png',
+					mimeType: 'image/png',
+					widthPx: 200,
+					heightPx: 100,
+					blob: new Blob([new Uint8Array([1])], { type: 'image/png' })
+				}
+			})
+		);
+		const decodedNames: string[] = [];
+		const decode: DecodeImageFile = async (file) => {
+			decodedNames.push(file.name);
+			return { image: document.createElement('img'), widthPx: 200, heightPx: 100 };
+		};
+		const { component, host } = mountParticipating(decode);
+		await flush();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="open-played-round-registration"]')?.click();
+		await flush();
+		const registration = host.querySelector<HTMLElement>('[data-testid="played-round-registration"]');
+		expect(registration?.querySelector('[data-testid="played-round-registration-loading"]')).toBeNull();
+		expect(registration?.querySelector('[data-testid="pane-filename-target-basemap"]')?.textContent).toBe(
+			'course-v1.png'
+		);
+		expect(decodedNames).toContain('thrown-round.png');
+
+		registration?.querySelector<HTMLInputElement>('[data-testid="played-model-affine"]')?.click();
+		registration?.querySelector<HTMLButtonElement>('[data-testid="played-round-registration-close"]')?.click();
+		await flush();
+		host.querySelector<HTMLButtonElement>('[data-testid="open-played-round-registration"]')?.click();
+		await flush();
+		expect(
+			registration?.querySelector<HTMLInputElement>('[data-testid="played-model-affine"]')?.checked
+		).toBe(true);
+
+		registration?.querySelector<HTMLButtonElement>('[data-testid="played-round-registration-close"]')?.click();
+		const parentSourceInput = host.querySelector<HTMLInputElement>(
+			'section.panes [data-testid="pane-input-source-overview"]'
+		);
+		expect(parentSourceInput).not.toBeNull();
+		setFileInput(
+			parentSourceInput!,
+			new File([new Uint8Array([2])], 'course-v2.png', { type: 'image/png' })
+		);
+		await flush();
+
+		host.querySelector<HTMLButtonElement>('[data-testid="open-played-round-registration"]')?.click();
+		await flush();
+		expect(registration?.querySelector('[data-testid="played-round-registration-loading"]')).toBeNull();
+		expect(registration?.querySelector('[data-testid="pane-filename-target-basemap"]')?.textContent).toBe(
+			'course-v2.png'
+		);
+		expect(
+			registration?.querySelector<HTMLInputElement>('[data-testid="played-model-similarity"]')?.checked
+		).toBe(true);
 
 		unmount(component);
 		host.remove();
