@@ -499,6 +499,21 @@
 	let locationModalOpen = $state(false);
 	let courseSearchButton = $state<HTMLButtonElement | null>(null);
 	let geocodeParkNameField = $state<HTMLInputElement | null>(null);
+	let naipUseButton = $state<HTMLButtonElement | null>(null);
+
+	/**
+	 * When the in-pane preview appears, whatever triggered the fetch (the
+	 * invite's saved-location button, a modal result pick, the advanced fetch)
+	 * has been unmounted with its overlay — without this, a keyboard user's
+	 * focus silently falls back to <body> (review round 2). The commit button
+	 * is the preview's primary decision, so focus lands there.
+	 */
+	$effect(() => {
+		if (naipPreview) {
+			const target = naipUseButton;
+			void tick().then(() => target?.focus());
+		}
+	});
 
 	function openLocationModal(): void {
 		rememberFocus();
@@ -1534,6 +1549,10 @@
 	 */
 	function selectLocation(match: GeoSearchMatch): void {
 		naipError = null;
+		// A picked location supersedes the saved-location prefill: it overwrites
+		// the same lat/lon/radius inputs, so the note would otherwise keep
+		// claiming a course the inputs no longer point at (review round 2).
+		savedLocationNote = null;
 		const geometry = fetchGeometryFromViewport({ lat: match.lat, lon: match.lon }, match.viewport);
 		const apiKey = googleMapsApiKey();
 		if (!geometry.fromViewport && apiKey) {
@@ -2549,6 +2568,9 @@
 									data-testid="naip-fetch-button"
 									disabled={naipLoading}
 									onclick={() => {
+										// Fetching hand-entered coordinates likewise supersedes the
+										// saved-location prefill (see selectLocation).
+										savedLocationNote = null;
 										locationModalOpen = false;
 										restoreFocus(courseSearchButton);
 										void handleNaipFetch();
@@ -2578,6 +2600,7 @@
 							<button
 								type="button"
 								data-testid="naip-use"
+								bind:this={naipUseButton}
 								disabled={naipCommitting}
 								onclick={handleNaipConfirm}
 							>

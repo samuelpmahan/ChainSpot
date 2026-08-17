@@ -191,6 +191,78 @@ describe('Course Library location cache — import-path prefill', () => {
 		host.remove();
 	});
 
+	it('fetching a DIFFERENT location clears the saved-location note so it never lies about the inputs (review round 2)', async () => {
+		const store = fakeStore();
+		const badges = syntheticBadges(10);
+		const baskets = syntheticBaskets(10);
+		await upsertCourse(
+			store,
+			{ projectName: "Dash's Track", numberBadges: badges, baskets, holes: [] },
+			{ createId: () => 'course-1', now: NOW }
+		);
+		await attachCourseLocation(store, badges, baskets, { lat: 33.1255, lon: -96.861, radiusMeters: 900 });
+
+		const holes: AnnotatedHole[] = baskets.map((basket, i) => ({
+			id: `hole-${i}`,
+			number: basket.holeNumber,
+			shots: [],
+			basket: { xPx: basket.xPx, yPx: basket.yPx },
+			corridorBends: [],
+			corridorWidthPx: 40
+		}));
+		const round = createAnnotatedRound({
+			sourceImage: {
+				fileName: 'udisc-round.png',
+				mimeType: 'image/png',
+				widthPx: SOURCE_SIZE,
+				heightPx: SOURCE_SIZE,
+				blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+			},
+			holes
+		});
+		setPendingAnnotatedRound(round);
+		setPendingCourseBadges({
+			numberBadges: badges.map((badge) => ({ number: badge.holeNumber, xPx: badge.xPx, yPx: badge.yPx, confidence: 0.9 })),
+			baskets: []
+		});
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+					status: 200,
+					headers: { 'content-type': 'image/png' }
+				})
+			)
+		);
+
+		const { host, component } = mountPage(decodeOf(SOURCE_SIZE, SOURCE_SIZE), store);
+		await flush();
+		expect(host.querySelector('[data-testid="saved-location-note"]')).not.toBeNull();
+
+		// Fetch some OTHER spot via the modal's manual entry, then discard it.
+		await openLocationModal(host);
+		const latInput = host.querySelector<HTMLInputElement>('[data-testid="naip-lat"]');
+		if (!latInput) throw new Error('missing naip-lat input');
+		latInput.value = '40.0';
+		latInput.dispatchEvent(new Event('input', { bubbles: true }));
+		host.querySelector<HTMLButtonElement>('[data-testid="naip-fetch-button"]')?.click();
+		await flush();
+		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
+		host.querySelector<HTMLButtonElement>('[data-testid="naip-discard"]')?.click();
+		await flush();
+
+		// The invite is back, but the note must NOT resurface: the inputs no
+		// longer point at the saved course, and the one-click button would
+		// fetch the wrong place under the saved course's name.
+		expect(host.querySelector('[data-testid="clean-target-invite"]')).not.toBeNull();
+		expect(host.querySelector('[data-testid="saved-location-note"]')).toBeNull();
+		expect(host.querySelector('[data-testid="saved-location-fetch"]')).toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
 	it('shows no note and leaves the default coordinate untouched when no library entry matches', async () => {
 		const store = fakeStore();
 		const unrelatedBadges: LabeledPoint[] = Array.from({ length: 10 }, (_, i) => ({
