@@ -1549,16 +1549,18 @@
 	 */
 	function selectLocation(match: GeoSearchMatch): void {
 		naipError = null;
+		const geometry = fetchGeometryFromViewport({ lat: match.lat, lon: match.lon }, match.viewport);
+		const apiKey = googleMapsApiKey();
+		if (!geometry.fromViewport && apiKey) {
+			// Arming MapConfirm hasn't overwritten anything yet; the note (and
+			// its shortcut) must survive a Cancel there (review round 3).
+			mapConfirmState = { match, apiKey };
+			return;
+		}
 		// A picked location supersedes the saved-location prefill: it overwrites
 		// the same lat/lon/radius inputs, so the note would otherwise keep
 		// claiming a course the inputs no longer point at (review round 2).
 		savedLocationNote = null;
-		const geometry = fetchGeometryFromViewport({ lat: match.lat, lon: match.lon }, match.viewport);
-		const apiKey = googleMapsApiKey();
-		if (!geometry.fromViewport && apiKey) {
-			mapConfirmState = { match, apiKey };
-			return;
-		}
 		naipLatInput = String(geometry.center.lat);
 		naipLonInput = String(geometry.center.lon);
 		naipRadiusInput = String(Math.round(geometry.radiusMeters));
@@ -1584,6 +1586,9 @@
 	 * this on the exact same fetch path the manual button uses, radius included.
 	 */
 	function handleMapConfirmUse(point: GeoPoint): void {
+		// This IS the input-overwriting moment on the MapConfirm path (see
+		// selectLocation): the note stops being true here, not at pick time.
+		savedLocationNote = null;
 		naipLatInput = String(point.lat);
 		naipLonInput = String(point.lon);
 		naipError = null;
