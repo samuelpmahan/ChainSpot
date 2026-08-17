@@ -10,7 +10,7 @@
 import { applyTransform } from './alignment/transform';
 import { deriveCorridorCenterline } from './corridor';
 import type { AnnotatedHole, SourcePoint } from './domain/annotatedRound';
-import { addShot, reorderShot, reassignShot, moveShot } from './holeAnnotation';
+import { addShot } from './holeAnnotation';
 import type { CreateId } from './holeAnnotation';
 import { acceptCandidate } from './cv/types';
 import type { LandingMarkerCandidate } from './autoAnnotation/landingDropletDetection';
@@ -47,18 +47,19 @@ function distanceToHole(point: SourcePoint, hole: AnnotatedHole): number {
 function suggestHole(
 	point: SourcePoint,
 	holes: readonly AnnotatedHole[],
-	maxDistance: number
+	maxDistance: number | undefined
 ): AnnotatedHole | null {
 	let best: AnnotatedHole | null = null;
 	let bestDistance = Number.POSITIVE_INFINITY;
 	for (const hole of holes) {
 		const distance = distanceToHole(point, hole);
-		if (distance < bestDistance) {
+		const allowedDistance = maxDistance ?? hole.corridorWidthPx / 2;
+		if (distance <= allowedDistance && distance < bestDistance) {
 			best = hole;
 			bestDistance = distance;
 		}
 	}
-	return best && bestDistance <= maxDistance ? best : null;
+	return best;
 }
 
 /** Converts detector output into review-only proposals. */
@@ -68,20 +69,18 @@ export function createPlayedRoundProposals(
 	holes: readonly AnnotatedHole[],
 	options: PlayedRoundProposalOptions = {}
 ): PlayedRoundProposal[] {
-	const maxDistance = options.maxSuggestionDistancePx ?? Number.POSITIVE_INFINITY;
-	const suggestedCounts = new Map<string, number>();
-	return candidates.map((candidate, index) => {
+	return candidates.map((candidate) => {
 		const cleanPoint = applyTransform({ xPx: candidate.xPx, yPx: candidate.yPx }, registration.playedToClean);
-		const suggestedHole = suggestHole(cleanPoint, holes, maxDistance);
-		const count = suggestedHole ? (suggestedCounts.get(suggestedHole.id) ?? suggestedHole.shots.length) + 1 : 0;
-		if (suggestedHole) suggestedCounts.set(suggestedHole.id, count);
+		const suggestedHole = suggestHole(cleanPoint, holes, options.maxSuggestionDistancePx);
 		return {
-			id: `landing-${index + 1}`,
+			id: `landing-${candidate.kind}-${candidate.xPx.toFixed(3)}-${candidate.yPx.toFixed(3)}`,
 			kind: 'landing',
 			playedPoint: acceptCandidate(candidate),
 			cleanPoint: acceptCandidate(cleanPoint),
 			suggestedHoleId: suggestedHole?.id ?? null,
-			suggestedOrder: suggestedHole ? count : null,
+			// The detector sees pixels, not time. Ordering is established explicitly
+			// during review instead of inventing chronology from scan order.
+			suggestedOrder: null,
 			evidence: {
 				detector: 'landing-droplet-v1',
 				markerKind: candidate.kind,
@@ -101,16 +100,21 @@ export function acceptPlayedRoundProposal(
 	return addShot(holes, holeId, acceptCandidate(proposal.cleanPoint), createId);
 }
 
-/** Review reducers re-exported at this seam for route-local UI state. */
-export { moveShot, reorderShot, reassignShot };
-
 /** Explicit type guard for callers that need to reject malformed review input. */
 export function isUsablePlayedRoundRegistration(
 	registration: UsablePlayedRoundRegistration | null
 ): registration is UsablePlayedRoundRegistration {
 	if (!registration) return false;
 	const coefficients = registration.playedToClean.coefficients;
-	return Boolean(registration.cleanImageId) && coefficients.every(Number.isFinite);
+	return (
+		Boolean(registration.cleanImageId.trim()) &&
+		Boolean(registration.source.fileName.trim()) &&
+		registration.source.blob instanceof Blob &&
+		registration.playedToClean.isInvertible &&
+		Number.isFinite(registration.playedToClean.determinant) &&
+		Math.abs(registration.playedToClean.determinant) > Number.EPSILON &&
+		coefficients.every(Number.isFinite)
+	);
 }
 
 /** Useful for fixture tests and diagnostics without leaking review evidence. */

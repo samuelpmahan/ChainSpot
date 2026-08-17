@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPlayedRoundProposals, acceptPlayedRoundProposal } from '../../src/lib/playedRoundReview';
+import { createPlayedRoundProposals, acceptPlayedRoundProposal, isUsablePlayedRoundRegistration } from '../../src/lib/playedRoundReview';
 import type { LandingMarkerCandidate } from '../../src/lib/autoAnnotation/landingDropletDetection';
 import type { AnnotatedHole } from '../../src/lib/domain/annotatedRound';
 import type { UsablePlayedRoundRegistration } from '../../src/lib/playedRoundContract';
@@ -28,8 +28,20 @@ describe('played round proposal seam', () => {
 		const proposals = createPlayedRoundProposals([candidate(20, 0), candidate(50, 0)], registration, holes);
 		expect(proposals.map((proposal) => proposal.cleanPoint)).toEqual([{ xPx: 30, yPx: 20 }, { xPx: 60, yPx: 20 }]);
 		expect(proposals.map((proposal) => proposal.suggestedHoleId)).toEqual(['h1', 'h1']);
-		expect(proposals.map((proposal) => proposal.suggestedOrder)).toEqual([1, 2]);
+		expect(proposals.map((proposal) => proposal.suggestedOrder)).toEqual([null, null]);
 		expect(proposals[0].evidence).toEqual({ detector: 'landing-droplet-v1', markerKind: 'c1', glyphScore: 0.82 });
+	});
+
+	it('uses stable evidence ids and rejects singular registration input', () => {
+		const candidates = [candidate(20, 0)];
+		const first = createPlayedRoundProposals(candidates, registration, [hole('h1', 1, { xPx: 0, yPx: 20 }, { xPx: 100, yPx: 20 })]);
+		const second = createPlayedRoundProposals(candidates, registration, [hole('h1', 1, { xPx: 0, yPx: 20 }, { xPx: 100, yPx: 20 })]);
+		expect(first[0].id).toBe(second[0].id);
+		expect(isUsablePlayedRoundRegistration(registration)).toBe(true);
+		expect(isUsablePlayedRoundRegistration({
+			...registration,
+			playedToClean: { ...registration.playedToClean, isInvertible: false, determinant: 0 }
+		})).toBe(false);
 	});
 
 	it('allows wrong assignment correction before acceptance and strips proposal evidence', () => {

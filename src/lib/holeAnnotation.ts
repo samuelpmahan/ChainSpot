@@ -263,7 +263,13 @@ export function reassignShot(
 	const fromHole = holes.find((hole) => hole.id === fromHoleId);
 	const toHole = holes.find((hole) => hole.id === toHoleId);
 	const shot = fromHole?.shots.find((candidate) => candidate.id === shotId);
-	if (!fromHole || !toHole || !shot) return holes.slice();
+	if (
+		!fromHole ||
+		!toHole ||
+		!shot ||
+		toHole.shots.some((candidate) => candidate.id === shotId) ||
+		(toIndex !== undefined && !Number.isInteger(toIndex))
+	) return holes.slice();
 	const remaining = holes.map((hole) =>
 		hole.id === fromHoleId ? { ...hole, shots: hole.shots.filter((candidate) => candidate.id !== shotId) } : hole
 	);

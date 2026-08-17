@@ -59,6 +59,7 @@
 		clearBends,
 		moveBasket,
 		moveCorridorBend,
+		moveShot,
 		moveTee,
 		nextHoleNumber,
 		placeByMode,
@@ -70,9 +71,10 @@
 		removeShot,
 		removeTee,
 		setAllCorridorWidths,
-		setCorridorWidth
+		setCorridorWidth,
+		reassignShot,
+		reorderShot
 	} from '$lib/holeAnnotation';
-	import { moveShot, reassignShot, reorderShot } from '$lib/playedRoundReview';
 	import { getHoleBarIndicators, getHoleBarLabel } from '$lib/holeBar';
 	import type { HolePlacementMode } from '$lib/holeAnnotation';
 	import RadialMenu from '$lib/components/RadialMenu.svelte';
