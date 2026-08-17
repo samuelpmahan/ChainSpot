@@ -1,12 +1,12 @@
 {
-  "recordedAt": "2026-08-17T09:04:00-05:00",
+  "recordedAt": "2026-08-17T10:05:00-05:00",
   "scope": "ChainSpot Gates 1-2 MVP push",
   "opencodeGo": {
     "weeklyAllowanceAvailableAtStartPercent": 100,
     "cliVersion": "1.18.18",
     "provider": "opencode-go",
     "status": "active",
-    "measuredGoCostEquivalentUsd": 0.190186631,
+    "measuredGoCostEquivalentUsd": 0.458052971,
     "usageConsumedPercent": "not exposed by CLI",
     "notes": [
       "OpenCode Go is distinct from OpenCode Zen; its namespace is opencode-go/*.",
@@ -98,16 +98,20 @@
         "leadOwner": "Sol",
         "model": "opencode-go/glm-5.2",
         "roleTaskClass": "identical bounded TypeScript/Svelte diagnosis with repository reads",
-        "approximateContextTokensObserved": 38930,
-        "goUsageCostUsd": 0.06894592,
-        "wallClockSeconds": 90,
+        "approximateContextTokensObserved": 107593,
+        "goUsageCostUsd": 0.28159626,
+        "wallClockSeconds": 511,
         "firstAttemptUsable": false,
-        "reviewerQualityScore": 0,
-        "defectsFoundByReviewer": ["never returned a diagnosis after repository-read steps"],
-        "reworkRounds": 0,
-        "additionalReworkCostUsd": 0,
-        "finalResult": "rejected",
-        "notes": "Cost about 7.6 times Luna's accepted broad review while producing no final report."
+        "reviewerQualityScore": 2,
+        "defectsFoundByReviewer": [
+          "first attempt never returned a diagnosis after repository-read steps",
+          "retry correctly diagnosed stale proposal coordinates after re-registration and stale shot ordering",
+          "proposed order fix still inserted at index 1 in its own two-current-shots example instead of appending"
+        ],
+        "reworkRounds": 1,
+        "additionalReworkCostUsd": 0.21265034,
+        "finalResult": "accepted as diagnosis after retry; implementation advice requires correction",
+        "notes": "The retry consumed about 421 seconds in addition to the 90-second first attempt. It found two confirmed defects and one labeled collision risk, but remained about 7.1 times DeepSeek's cost with lower reviewer quality."
       },
       {
         "taskId": "CQ-BUGDIAG-BROAD-DEEPSEEK-GO",
@@ -130,19 +134,19 @@
         "leadOwner": "Sol",
         "model": "opencode-go/qwen3.8-max",
         "roleTaskClass": "text-only CV pipeline architecture critique grounded in current Linear definitions",
-        "approximateContextTokensObserved": 19507,
-        "goUsageCostUsd": 0.06999,
-        "wallClockSeconds": 180.4,
+        "approximateContextTokensObserved": 20239,
+        "goUsageCostUsd": 0.125206,
+        "wallClockSeconds": 365.1,
         "firstAttemptUsable": false,
-        "reviewerQualityScore": 2,
+        "reviewerQualityScore": 3,
         "defectsFoundByReviewer": [
           "conflated the C1/C2 10m/20m course-circle prior with C1/C2 landing-droplet glyph classes",
           "assumed a repository synthetic fixture generator that the evidence brief did not establish"
         ],
         "reworkRounds": 1,
-        "additionalReworkCostUsd": 0.06999,
-        "finalResult": "accepted as architecture input with reviewer corrections",
-        "notes": "Strong seam-integrity, error-budget, manual-recovery, and renderer-deferral recommendations; first Qwen 3.8 endpoint attempt failed with a retryable 503 at zero measured cost."
+        "additionalReworkCostUsd": 0.055216,
+        "finalResult": "accepted after Qwen reissued a corrected review",
+        "notes": "The continued Qwen session explicitly withdrew both misconceptions, replaced the synthetic experiment with acquisition of labeled real captures, and moved renderer forensics out of the played-round extractor until direct compositing evidence exists."
       }
     ],
     "infrastructureChecks": [
@@ -170,15 +174,15 @@
     "activeAgentsAtRecordTime": 1
   },
   "derivedMetrics": {
-    "acceptedMeaningfulTasks": 5,
+    "acceptedMeaningfulTasks": 6,
     "firstPassAcceptableMeaningfulTasks": 3,
-    "reworkRateAmongAcceptedMeaningfulTasks": 0.4,
+    "reworkRateAmongAcceptedMeaningfulTasks": 0.5,
     "paidCostPerAcceptedLunaTaskUsd": 0.00901145,
     "averageQualityByModel": {
       "opencode-go/gpt-5.6-luna-high": 3,
-      "opencode-go/glm-5.2": 0,
+      "opencode-go/glm-5.2": 2,
       "opencode-go/deepseek-v4-flash": 4,
-      "opencode-go/qwen3.8-max": 2,
+      "opencode-go/qwen3.8-max": 3,
       "opencode/deepseek-v4-flash-free": 2,
       "opencode/mimo-v2.5-free": 1
     }
@@ -217,11 +221,11 @@
     "recommendations": [
       "Repository-scale TypeScript/Svelte diagnosis: DeepSeek V4 Flash Go is the current winner; allow roughly four minutes for its deeper first-pass review.",
       "Luna-high is faster to inspect but required a report-only rework; force a no-more-tools finalization step if routed this task class.",
-      "Do not route this task class to GLM-5.2: its rejected attempt cost roughly 7.6 times Luna's accepted result.",
+      "Do not route repository-scale TypeScript/Svelte diagnosis to GLM-5.2 by default: after about 8.5 minutes and $0.28159626 it found two confirmed defects but supplied one invalid fix; DeepSeek scored higher at about one-seventh the cost.",
       "Small code-in-prompt diagnosis: DeepSeek V4 Flash Free beat MiMo-V2.5 Free on correctness despite higher latency.",
       "Do not route broad repository archaeology to the tested free DeepSeek or MiMo loops until their read-loop non-completion is controlled.",
       "DeepSeek regional consent is now enabled; use it in the next controlled CV-reproduction comparison.",
-      "Qwen 3.8 Max is useful for text-only CV architecture synthesis, but its renderer/semantic conclusions require expert review for concept conflation and invented fixture assumptions."
+      "Qwen 3.8 Max is useful for text-only CV architecture synthesis and corrected both reviewer-identified assumptions cleanly in-session, but budget for expert concept review and one correction round."
     ]
   }
 }
