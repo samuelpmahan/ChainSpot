@@ -322,17 +322,27 @@ export function localFeatureSnap(
 			: basketCropCandidates(cv, raster, bounds, calibration);
 	if (!candidates || candidates.length === 0) return null;
 
+	// Rank only candidates within the snap radius. The crop is deliberately
+	// wider than the accept radius (so nearby false positives are visible and
+	// can be *rejected*), which means a neighboring feature can outscore the
+	// one actually under the click; ranking the whole crop first and
+	// radius-testing the single winner turned those clicks into no-ops even
+	// though an acceptable in-radius candidate existed. Corpus profiling
+	// (samuelpmahan/toph, examples/chainspot-clicksnap-profile) measured that
+	// in every such rejection the in-radius runner-up was the real feature,
+	// and shipping this ranking moved corpus-wide snap rates from 0.778 to
+	// 0.838 (tee) and 0.796 to 0.968 (basket) with median accuracy unchanged.
 	let best: { xPx: number; yPx: number; score: number } | null = null;
 	for (const candidate of candidates) {
 		const score = candidate.score ?? -Infinity;
+		const xPx = originXPx + candidate.xPx;
+		const yPx = originYPx + candidate.yPx;
+		if (Math.hypot(xPx - clickPx.xPx, yPx - clickPx.yPx) > snapRadiusPx) continue;
 		if (!best || score > best.score) {
-			best = { xPx: originXPx + candidate.xPx, yPx: originYPx + candidate.yPx, score };
+			best = { xPx, yPx, score };
 		}
 	}
 	if (!best || best.score < LOCAL_SNAP_MIN_SCORE) return null;
-
-	const distancePx = Math.hypot(best.xPx - clickPx.xPx, best.yPx - clickPx.yPx);
-	if (distancePx > snapRadiusPx) return null;
 
 	return { xPx: best.xPx, yPx: best.yPx };
 }

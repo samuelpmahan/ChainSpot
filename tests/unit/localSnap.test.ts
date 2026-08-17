@@ -371,6 +371,33 @@ describe('localFeatureSnap — basket', () => {
 		expect(result).toBeNull();
 	});
 
+	it('prefers an in-radius candidate over a higher-scoring one outside the radius', () => {
+		const raster = basketRaster();
+		const clickPx = { xPx: 200, yPx: 200 };
+		// Same near-click peak geometry as the accept test above (lands ~on the
+		// click)…
+		const nearX = 82 - LOWEST_SAMPLE_TEMPLATE_WIDTH / 2;
+		const nearY = Math.round(82 - 0.96 * LOWEST_SAMPLE_TEMPLATE_HEIGHT);
+		// …plus the far-corner peak from the radius-reject test, scored higher.
+		// Ranking the whole crop first would pick the far peak and then fail its
+		// radius test; ranking within the radius must still snap to the near one.
+		const cv = fakeBasketCv(
+			[
+				{ x: nearX, y: nearY, score: 0.6 },
+				{ x: 138, y: 114, score: 0.95 }
+			],
+			165,
+			165
+		);
+
+		const result = localFeatureSnap('basket', cv as unknown as LocalSnapCv, raster, clickPx, BASKET_CALIBRATION);
+
+		expect(result).not.toBeNull();
+		expect(Math.hypot(result!.xPx - clickPx.xPx, result!.yPx - clickPx.yPx)).toBeLessThanOrEqual(
+			BASKET_SNAP_RADIUS_PX
+		);
+	});
+
 	it('returns null on an empty crop without ever calling the detector', () => {
 		const raster = basketRaster(10, 10);
 		const clickPx = { xPx: 5000, yPx: 5000 };
