@@ -112,6 +112,27 @@ export type DemoArming =
 	| { readonly kind: 'annotate-source' }
 	| { readonly kind: 'none' };
 
+/**
+ * The Spotlight presentation's anchor contract (CHSPT-73).
+ *
+ * A semantic name for one real product control or region a step asks the
+ * visitor to use. Product markup opts in by carrying
+ * `data-demo-anchor="<id>"` on the element; a step references the id via its
+ * `spotlight` field. The guide never holds route-specific DOM selectors —
+ * this union is the entire vocabulary, and both sides (the product attribute
+ * and the step metadata) must speak it.
+ *
+ * Anchors are best-effort by design: a target that is absent, hidden, or not
+ * yet rendered (the stitch alignment HUD only exists once a result is up)
+ * simply means the Spotlight guide renders without a ring. Nothing may ever
+ * gate on an anchor resolving.
+ */
+export type DemoAnchorId =
+	| 'stitch-alignment-review'
+	| 'annotation-done'
+	| 'map-round-import'
+	| 'graphics-location-search';
+
 export interface DemoStep {
 	readonly id: string;
 	readonly title: string;
@@ -125,6 +146,13 @@ export interface DemoStep {
 	readonly arming: DemoArming;
 	/** Defaults to `'default'` when absent — see `DemoStepKind`. */
 	readonly kind?: DemoStepKind;
+	/**
+	 * The real product control this step spotlights, when one control is the
+	 * step's clear next move. Absent when the step's work is spread across the
+	 * surface (the reload step's own CTA lives in the guide) — see
+	 * `DemoAnchorId` for the fallback contract.
+	 */
+	readonly spotlight?: DemoAnchorId;
 }
 
 const DASHS_TRACK_DIR = '/resources/demo/dashs-track';
@@ -186,7 +214,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		],
 		mechanism:
 			'Chrome cropping, position, and overlap are all inferred from pixel content in a Web Worker using OpenCV template matching — nothing here is a filename lookup. The export is a native-resolution PNG of the union of the four cropped tiles, no resampling, no upload.',
-		arming: { kind: 'stitch-captures' }
+		arming: { kind: 'stitch-captures' },
+		spotlight: 'stitch-alignment-review'
 	},
 	{
 		id: 'annotate-course',
@@ -203,7 +232,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		],
 		mechanism:
 			'Detection is calibrated OpenCV template and centerline matching running locally in your browser, and the status strip and staged reveal report its real stage boundaries as they happen — nothing is simulated for effect. The active review is deliberately split: confident geometry can be accepted together, while uncertain holes remain available for one-marker-at-a-time correction where overlaps or crowded areas defeat a safe automatic guess. Done saves the course geometry to Course Memory (IndexedDB) and hands the annotated round to Create Graphics in memory — nothing is uploaded.',
-		arming: { kind: 'none' }
+		arming: { kind: 'none' },
+		spotlight: 'annotation-done'
 	},
 	{
 		id: 'basemap-and-export',
@@ -218,7 +248,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		],
 		mechanism:
 			'Course search supplies a candidate place, and the aerial imagery is fetched live from the public imagery service straight from your browser with no ChainSpot server in the middle. A similarity or affine transform is estimated from your correspondence pairs, with per-pair residuals reported in original pixels. The exported bundle is a plain zip holding project.json and your original images, byte for byte, with SHA-256 hashes that must match on open.',
-		arming: { kind: 'none' }
+		arming: { kind: 'none' },
+		spotlight: 'graphics-location-search'
 	},
 	{
 		id: 'reload',
@@ -249,7 +280,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		],
 		mechanism:
 			"Course recognition matches this image's hole-badge and basket geometry against Course Memory's saved signature — a real geometric comparison, not a name lookup — and importing applies the saved tee/basket/bend positions without CV re-running on them. The droplets and path are pixels in the source image; you are annotating over what UDisc already drew, exactly as a real customer's played-round screenshot would look, chrome and all.",
-		arming: { kind: 'annotate-source' }
+		arming: { kind: 'annotate-source' },
+		spotlight: 'map-round-import'
 	},
 	{
 		id: 'export-round',
@@ -264,7 +296,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		],
 		mechanism:
 			'Nothing about the basemap fetch or correspondence estimate changed from step 3 — it is re-run live because nothing about a fresh page load is special-cased for the demo. The AnnotatedRound artifact now carries shots and a walking path alongside the course geometry, and the per-hole graphic renderer draws both.',
-		arming: { kind: 'none' }
+		arming: { kind: 'none' },
+		spotlight: 'graphics-location-search'
 	}
 ];
 

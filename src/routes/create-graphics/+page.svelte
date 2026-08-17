@@ -2540,6 +2540,7 @@
 							<button
 								type="button"
 								data-testid="open-location-search"
+								data-demo-anchor="graphics-location-search"
 								bind:this={courseSearchButton}
 								onclick={openLocationModal}
 							>
@@ -2920,6 +2921,7 @@
 					<button
 						type="button"
 						data-testid="open-location-search"
+						data-demo-anchor="graphics-location-search"
 						bind:this={courseSearchButton}
 						onclick={openLocationModal}
 					>

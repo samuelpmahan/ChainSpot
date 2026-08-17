@@ -453,6 +453,7 @@
 		style:left={`${hudPosition.xPx}px`}
 		style:top={`${hudPosition.yPx}px`}
 		data-testid="alignment-hud"
+		data-demo-anchor="stitch-alignment-review"
 	>
 		<button type="button" class="drag-handle" aria-label="Move alignment controls" onpointerdown={beginHudDrag}>⋮⋮</button>
 		{#if mode === 'review'}
