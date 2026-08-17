@@ -127,7 +127,7 @@ export interface CvFunnelRuntimeSnapshot {
 	readonly localSnaps: readonly LocalSnapTrace[];
 }
 
-/** Browser-console/test hook; returns a copy so callers cannot mutate runtime state. */
+/** Returns copies so console/test consumers cannot mutate runtime state. */
 export function getCvFunnelRuntimeSnapshot(): CvFunnelRuntimeSnapshot {
 	runtimeChannel();
 	return { surfacedCandidates: [...surfaced], localSnaps: [...localSnaps] };
@@ -139,7 +139,34 @@ export function resetCvFunnelRuntime(): void {
 	sequence = 0;
 }
 
+export interface ChainSpotCvFunnelConsole {
+	readonly snapshot: () => CvFunnelRuntimeSnapshot;
+	readonly json: () => string;
+	readonly reset: () => void;
+}
+
+/**
+ * Console-only diagnostics surface. Example:
+ *   chainspot.cvFunnel.snapshot()
+ *   chainspot.cvFunnel.json()
+ * This is intentionally not product UI and carries no authoritative state.
+ */
+function exposeConsoleHook(): void {
+	if (typeof window === 'undefined') return;
+	const root = window as typeof window & {
+		chainspot?: Record<string, unknown> & { cvFunnel?: ChainSpotCvFunnelConsole };
+	};
+	const current = root.chainspot ?? {};
+	current.cvFunnel = {
+		snapshot: getCvFunnelRuntimeSnapshot,
+		json: () => JSON.stringify(getCvFunnelRuntimeSnapshot(), null, 2),
+		reset: resetCvFunnelRuntime
+	};
+	root.chainspot = current;
+}
+
 // BroadcastChannel does not replay messages sent before a listener exists.
 // The detector worker imports this module before its first local-snap request,
 // so eager initialization ensures it hears surfaced full-course evidence.
 runtimeChannel();
+exposeConsoleHook();
