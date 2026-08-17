@@ -94,6 +94,9 @@ export function buildPancakeDisplayGrammar(
 				}
 			: undefined;
 
+		const p5Score = p5Assignment && typeof p5Assignment.assignedAxisErrorPx === 'number'
+			? { name: 'p5.assignedAxisErrorPx' as const, value: p5Assignment.assignedAxisErrorPx, higherIsBetter: false as const }
+			: undefined;
 		const teeAssignment = tee && p5Assignment
 			? {
 					candidateIndex: p5Assignment.teeIndex,
@@ -107,12 +110,13 @@ export function buildPancakeDisplayGrammar(
 					widthPx: tee.widthPx,
 					heightPx: tee.heightPx,
 					confidenceSemantics: 'ui-eligibility-sentinel' as const,
-					selectionScore: p5Assignment.assignedAxisErrorPx === null
-						? undefined
-						: { name: 'p5.assignedAxisErrorPx' as const, value: p5Assignment.assignedAxisErrorPx, higherIsBetter: false as const }
+					...(p5Score ? { selectionScore: p5Score } : {})
 				}
 			: undefined;
 
+		const p6Score = p6Assignment && typeof p6Assignment.lowParScore === 'number'
+			? { name: 'p6.lowParScore' as const, value: p6Assignment.lowParScore, higherIsBetter: true as const }
+			: undefined;
 		const basketAssignment = basket && p6Assignment
 			? {
 					candidateIndex: p6Assignment.assignedBasketIndex,
@@ -127,9 +131,7 @@ export function buildPancakeDisplayGrammar(
 					widthPx: basket.widthPx,
 					heightPx: basket.heightPx,
 					confidenceSemantics: 'ui-eligibility-sentinel' as const,
-					selectionScore: p6Assignment.lowParScore === null
-						? undefined
-						: { name: 'p6.lowParScore' as const, value: p6Assignment.lowParScore, higherIsBetter: true as const }
+					...(p6Score ? { selectionScore: p6Score } : {})
 				}
 			: undefined;
 
