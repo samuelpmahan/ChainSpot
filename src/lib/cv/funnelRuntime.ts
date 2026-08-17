@@ -132,25 +132,23 @@ export interface ChainSpotCvFunnelConsole {
 	readonly reset: () => void;
 }
 
-type ChainSpotConsoleRoot = Record<string, unknown> & {
-	cvFunnel?: ChainSpotCvFunnelConsole;
-};
-
 /**
- * Console-only diagnostics surface:
- *   chainspot.cvFunnel.snapshot()
- *   chainspot.cvFunnel.json()
+ * Console-only diagnostics surface. `chainspot` is already owned and frozen by
+ * the vision-flag console, so funnel diagnostics intentionally use a sibling
+ * global instead of mutating that object:
+ *   chainspotCvFunnel.snapshot()
+ *   chainspotCvFunnel.json()
  */
 function exposeConsoleHook(): void {
 	if (typeof window === 'undefined') return;
-	const root = window as typeof window & { chainspot?: ChainSpotConsoleRoot };
-	const current: ChainSpotConsoleRoot = root.chainspot ?? {};
-	current.cvFunnel = {
+	const diagnosticGlobal = globalThis as typeof globalThis & {
+		chainspotCvFunnel?: ChainSpotCvFunnelConsole;
+	};
+	diagnosticGlobal.chainspotCvFunnel = {
 		snapshot: getCvFunnelRuntimeSnapshot,
 		json: () => JSON.stringify(getCvFunnelRuntimeSnapshot(), null, 2),
 		reset: resetCvFunnelRuntime
 	};
-	root.chainspot = current;
 }
 
 runtimeChannel();
