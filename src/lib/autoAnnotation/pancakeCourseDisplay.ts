@@ -14,17 +14,16 @@ const PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1)
  * Compatibility value consumed by Annotate Course's legacy `confidence >=
  * threshold` auto-apply branch. P5/P6 do NOT produce a normalized confidence;
  * their real scores are respectively axis-error cost and LowPar score. Never
- * report this value as detector confidence. The funnel trace reads P5/P6's
- * real scores and labels this only as UI eligibility.
+ * report this value as detector confidence.
  */
 export const PANCAKE_UI_ELIGIBILITY_SENTINEL = 1;
 
 /**
  * Adapts Pancake ownership outputs into the older CourseGrammarResult shape
  * consumed by Annotate Course. P5/P6 have already made their ownership
- * decisions. Extra runtime-only `landmarkKind`/footprint fields travel only
- * as far as `acceptCandidate()`, where they record the exact user-surface
- * event and are then discarded from authoritative domain state.
+ * decisions. Extra runtime-only funnel fields are intentionally structural:
+ * they survive worker structured-clone, are consumed by diagnostics, and are
+ * discarded by `acceptCandidate()` before domain state.
  */
 export function buildPancakeDisplayGrammar(
 	rawMaskObjects: RawObjectMaskResult,
@@ -100,14 +99,17 @@ export function buildPancakeDisplayGrammar(
 					candidateIndex: p5Assignment.teeIndex,
 					xPx: tee.xPx,
 					yPx: tee.yPx,
-					// Legacy compatibility fields; see PANCAKE_UI_ELIGIBILITY_SENTINEL.
+					// Legacy UI compatibility only; see confidenceSemantics below.
 					detectorConfidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
 					confidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
 					distancePx: p5Assignment.assignedAxisErrorPx ?? 0,
-					// Runtime-only funnel evidence; acceptCandidate strips these.
 					landmarkKind: 'tee' as const,
 					widthPx: tee.widthPx,
-					heightPx: tee.heightPx
+					heightPx: tee.heightPx,
+					confidenceSemantics: 'ui-eligibility-sentinel' as const,
+					selectionScore: p5Assignment.assignedAxisErrorPx === null
+						? undefined
+						: { name: 'p5.assignedAxisErrorPx' as const, value: p5Assignment.assignedAxisErrorPx, higherIsBetter: false as const }
 				}
 			: undefined;
 
@@ -116,14 +118,18 @@ export function buildPancakeDisplayGrammar(
 					candidateIndex: p6Assignment.assignedBasketIndex,
 					xPx: basket.xPx,
 					yPx: basket.yPx,
-					// Legacy compatibility fields; P6's real score is `lowParScore`.
+					// Legacy UI compatibility only; see confidenceSemantics below.
 					detectorConfidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
 					confidence: PANCAKE_UI_ELIGIBILITY_SENTINEL,
 					distancePx: 0,
 					cost: 0,
 					landmarkKind: 'basket' as const,
 					widthPx: basket.widthPx,
-					heightPx: basket.heightPx
+					heightPx: basket.heightPx,
+					confidenceSemantics: 'ui-eligibility-sentinel' as const,
+					selectionScore: p6Assignment.lowParScore === null
+						? undefined
+						: { name: 'p6.lowParScore' as const, value: p6Assignment.lowParScore, higherIsBetter: true as const }
 				}
 			: undefined;
 
