@@ -38,6 +38,14 @@ from both of its current positions.
   APIs/permission ONLY — no scraping, no ToS violations. A written finding on the ticket
   is a complete outcome if access isn't sanctioned.
 - Plain-language labels; nothing assumes NAIP/mosaic/ground-scale vocabulary.
+- Provider bounding boxes size the fetch (user decision): Nominatim `boundingbox` and
+  Places `places.viewport` arrive in the same responses already made (no extra calls,
+  same billing SKU). A picked result with a real box fetches at box-derived
+  center/radius (max half-extent × 1.15, clamped [150 m, 1500 m]); a degenerate box
+  (< ~120 m across) falls back to the 300 m default. Keyed results with a
+  missing/degenerate box keep the `MapConfirm` midpoint step; results with a real box
+  skip it (the in-pane preview is the confirmation). "Powered by Google" attribution
+  stays on the map-less results list per Places display policy.
 
 ## Non-goals
 
