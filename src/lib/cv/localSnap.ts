@@ -2,11 +2,12 @@
  * Pure local tee/basket snap detector. The browser places the user's click
  * optimistically and this pass may settle it to a nearby feature.
  *
- * The important contract is now explicit: a snap is not just point|null.
+ * The important contract is explicit: a snap is not just point|null.
  * `localFeatureSnapDetailed` records the first stage that rejected the click,
  * the candidate population, the real detector score, and the calibration
  * evidence used. `localFeatureSnap` remains the compatibility wrapper used by
- * existing callers/tests.
+ * the staged worker, and emits the same structured trace to DevTools so a
+ * failed live snap no longer disappears as an unexplained null.
  */
 
 import {
@@ -61,12 +62,7 @@ export interface LocalSnapCalibration {
 		readonly template: BasketTemplateRaster;
 		readonly templateScale: BasketTemplateScale;
 	};
-	/**
-	 * Optional full-course evidence for the same local feature family. For tees
-	 * this may widen the detector's geometry scale when the actual rendered pad
-	 * is larger than badge-derived UiScale predicts. Baseline detection always
-	 * still runs, so this cannot remove a candidate the old path found.
-	 */
+	/** Optional full-course evidence for the same local feature family. */
 	readonly knownRecommendation?: LocalSnapKnownRecommendation;
 }
 
@@ -75,11 +71,29 @@ export interface LocalSnapOutcome {
 	readonly trace: LocalSnapTrace;
 }
 
+export interface LocalSnapSearchGeometry {
+	readonly featureFootprintPx: number;
+	readonly cropSidePx: number;
+	readonly snapRadiusPx: number;
+	readonly calibrationSource: string;
+	readonly knownRecommendationDistancePx?: number;
+	readonly knownRecommendationInRadius?: boolean;
+}
+
 export const TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE = 26;
 export const LOCAL_SNAP_CROP_FEATURE_MULTIPLE = 4;
 export const LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE = 0.5;
 export const LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX = 24;
 export const LOCAL_SNAP_MIN_SCORE = 0.5;
+/**
+ * Tee sprite/pad footprint is not reliably proportional to UDisc badge UI
+ * scale across the corpus. Full-course production already moved to a
+ * world-normalized tee detector for this reason. Local snap remains a tiny
+ * click-centered search, so the least invasive correction is a small scale
+ * bank around the badge-derived baseline rather than pretending one UiScale
+ * predicts every rendered pad. Radius and score gates stay unchanged.
+ */
+export const LOCAL_TEE_SNAP_SCALE_FACTORS = [0.75, 1, 1.5, 2, 2.5] as const;
 const MIN_CROP_SIDE_PX = 4;
 const TEE_SCALE_EVIDENCE_MIN_DELTA = 0.05;
 
@@ -98,18 +112,51 @@ function defaultTeeFootprint(uiScalePx: UiScalePx): number {
 	return TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE * uiScalePx;
 }
 
-function featureFootprintSourcePx(
-	kind: LocalSnapKind,
-	calibration: LocalSnapCalibration
-): number | null {
+function featureFootprintSourcePx(kind: LocalSnapKind, calibration: LocalSnapCalibration): number | null {
 	if (kind === 'tee') {
 		const baseline = defaultTeeFootprint(calibration.uiScalePx);
+		const bankMaximum = baseline * Math.max(...LOCAL_TEE_SNAP_SCALE_FACTORS);
 		const measured = calibration.knownRecommendation?.featureFootprintPx;
-		return finitePositive(measured) ? Math.max(baseline, measured) : baseline;
+		return finitePositive(measured) ? Math.max(bankMaximum, measured) : bankMaximum;
 	}
 	const basket = calibration.basket;
 	if (!basket) return null;
 	return Math.max(basket.template.widthPx, basket.template.heightPx) * basket.templateScale;
+}
+
+/** Pure search-geometry diagnostic used by tests/audit tooling without OpenCV. */
+export function deriveLocalSnapSearchGeometry(
+	kind: LocalSnapKind,
+	clickPx: LocalSnapPoint,
+	calibration: LocalSnapCalibration
+): LocalSnapSearchGeometry | null {
+	const featureFootprintPx = featureFootprintSourcePx(kind, calibration);
+	if (featureFootprintPx === null || !(featureFootprintPx > 0)) return null;
+	const snapRadiusPx = Math.min(
+		featureFootprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
+		LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
+	);
+	const known = calibration.knownRecommendation;
+	const knownDistance = known
+		? Math.hypot(known.point.xPx - clickPx.xPx, known.point.yPx - clickPx.yPx)
+		: undefined;
+	return {
+		featureFootprintPx,
+		cropSidePx: featureFootprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE,
+		snapRadiusPx,
+		calibrationSource:
+			kind === 'tee'
+				? finitePositive(known?.featureFootprintPx)
+					? 'number-badge-ui-scale+tee-multiscale+full-course-footprint'
+					: 'number-badge-ui-scale+tee-multiscale'
+				: 'number-badge-template-scale',
+		...(knownDistance === undefined
+			? {}
+			: {
+				knownRecommendationDistancePx: knownDistance,
+				knownRecommendationInRadius: knownDistance <= snapRadiusPx
+			})
+	};
 }
 
 function computeCropBounds(
@@ -159,6 +206,19 @@ function sameCandidate(a: TeePadCandidate, b: TeePadCandidate): boolean {
 	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx) <= 2;
 }
 
+function addDistinctCandidates(target: TeePadCandidate[], candidates: readonly TeePadCandidate[]): void {
+	for (const candidate of candidates) {
+		const duplicateIndex = target.findIndex((existing) => sameCandidate(existing, candidate));
+		if (duplicateIndex < 0) {
+			target.push(candidate);
+			continue;
+		}
+		const oldScore = target[duplicateIndex].score ?? -Infinity;
+		const newScore = candidate.score ?? -Infinity;
+		if (newScore > oldScore) target[duplicateIndex] = candidate;
+	}
+}
+
 function teeCropCandidates(
 	cv: LocalSnapCv,
 	raster: LocalSnapRaster,
@@ -172,22 +232,29 @@ function teeCropCandidates(
 		heightPx: bounds.heightPx,
 		sourceScale: raster.sourceScale
 	};
-	const baselineOptions: CalibratedTeePadDetectionOptions = { uiScalePx: calibration.uiScalePx };
-	const baseline = detectCalibratedTeePadCandidates(cv, cropped, baselineOptions);
+	const candidates: TeePadCandidate[] = [];
+	for (const factor of LOCAL_TEE_SNAP_SCALE_FACTORS) {
+		const scale = asUiScalePx(calibration.uiScalePx * factor, `Local tee snap scale x${factor}`);
+		const options: CalibratedTeePadDetectionOptions = { uiScalePx: scale };
+		addDistinctCandidates(candidates, detectCalibratedTeePadCandidates(cv, cropped, options));
+	}
 
 	const measuredFootprint = calibration.knownRecommendation?.featureFootprintPx;
-	if (!finitePositive(measuredFootprint)) return baseline;
-	const measuredScale = measuredFootprint / TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE;
-	const ratio = measuredScale / calibration.uiScalePx;
-	if (!(ratio > 1 + TEE_SCALE_EVIDENCE_MIN_DELTA)) return baseline;
-
-	const evidenceScale = asUiScalePx(measuredScale, 'Full-course tee-footprint snap scale');
-	const evidence = detectCalibratedTeePadCandidates(cv, cropped, { uiScalePx: evidenceScale });
-	const merged = [...baseline];
-	for (const candidate of evidence) {
-		if (!merged.some((existing) => sameCandidate(existing, candidate))) merged.push(candidate);
+	if (finitePositive(measuredFootprint)) {
+		const measuredScale = measuredFootprint / TEE_PAD_MAX_FOOTPRINT_UI_SCALE_MULTIPLE;
+		const nearestBankScale = Math.min(
+			...LOCAL_TEE_SNAP_SCALE_FACTORS.map((factor) => calibration.uiScalePx * factor)
+		);
+		const deltaFromBaseline = Math.abs(measuredScale / calibration.uiScalePx - 1);
+		if (deltaFromBaseline > TEE_SCALE_EVIDENCE_MIN_DELTA && Number.isFinite(nearestBankScale)) {
+			const evidenceScale = asUiScalePx(measuredScale, 'Full-course tee-footprint snap scale');
+			addDistinctCandidates(
+				candidates,
+				detectCalibratedTeePadCandidates(cv, cropped, { uiScalePx: evidenceScale })
+			);
+		}
 	}
-	return merged;
+	return candidates;
 }
 
 function basketCropCandidates(
@@ -216,13 +283,7 @@ function rejected(
 ): LocalSnapOutcome {
 	return {
 		point: null,
-		trace: {
-			attempted: true,
-			accepted: false,
-			rejectReason: reason,
-			clickPx,
-			...extra
-		}
+		trace: { attempted: true, accepted: false, rejectReason: reason, clickPx, ...extra }
 	};
 }
 
@@ -230,10 +291,6 @@ function scoreOf(candidate: { readonly score?: number }): number {
 	return candidate.score ?? -Infinity;
 }
 
-/**
- * Detailed local-snap pass. Failure is still a normal result, but it no
- * longer collapses every cause into an uninspectable `null`.
- */
 export function localFeatureSnapDetailed(
 	kind: LocalSnapKind,
 	cv: LocalSnapCv,
@@ -245,35 +302,19 @@ export function localFeatureSnapDetailed(
 		return rejected(clickPx, 'invalid-click');
 	}
 	if (!(calibration.uiScalePx > 0)) return rejected(clickPx, 'invalid-calibration');
-
-	const footprintPx = featureFootprintSourcePx(kind, calibration);
-	if (footprintPx === null || !(footprintPx > 0)) return rejected(clickPx, 'no-footprint');
-	const snapRadiusPx = Math.min(
-		footprintPx * LOCAL_SNAP_RADIUS_FEATURE_MULTIPLE,
-		LOCAL_SNAP_MAX_ABSOLUTE_RADIUS_PX
-	);
-	const known = calibration.knownRecommendation;
-	const knownDistance = known ? Math.hypot(known.point.xPx - clickPx.xPx, known.point.yPx - clickPx.yPx) : undefined;
+	const geometry = deriveLocalSnapSearchGeometry(kind, clickPx, calibration);
+	if (!geometry) return rejected(clickPx, 'no-footprint');
 	const common: Partial<LocalSnapTrace> = {
-		featureFootprintPx: footprintPx,
-		snapRadiusPx,
-		calibrationSource:
-			kind === 'tee' && finitePositive(known?.featureFootprintPx)
-				? 'number-badge-ui-scale+full-course-tee-footprint'
-				: 'number-badge-ui-scale',
-		...(knownDistance === undefined
-			? {}
-			: {
-				knownRecommendationDistancePx: knownDistance,
-				knownRecommendationInRadius: knownDistance <= snapRadiusPx
-			})
+		featureFootprintPx: geometry.featureFootprintPx,
+		snapRadiusPx: geometry.snapRadiusPx,
+		calibrationSource: geometry.calibrationSource,
+		...(geometry.knownRecommendationDistancePx === undefined ? {} : {
+			knownRecommendationDistancePx: geometry.knownRecommendationDistancePx,
+			knownRecommendationInRadius: geometry.knownRecommendationInRadius
+		})
 	};
 
-	const bounds = computeCropBounds(
-		raster,
-		clickPx,
-		footprintPx * LOCAL_SNAP_CROP_FEATURE_MULTIPLE
-	);
+	const bounds = computeCropBounds(raster, clickPx, geometry.cropSidePx);
 	if (!bounds) return rejected(clickPx, 'empty-crop', common);
 	if ((kind === 'tee' && !raster.rgba) || (kind === 'basket' && !raster.gray)) {
 		return rejected(clickPx, 'missing-raster-channel', common);
@@ -281,10 +322,9 @@ export function localFeatureSnapDetailed(
 
 	const originXPx = bounds.x0 * raster.sourceScale;
 	const originYPx = bounds.y0 * raster.sourceScale;
-	const candidates =
-		kind === 'tee'
-			? teeCropCandidates(cv, raster, bounds, calibration)
-			: basketCropCandidates(cv, raster, bounds, calibration);
+	const candidates = kind === 'tee'
+		? teeCropCandidates(cv, raster, bounds, calibration)
+		: basketCropCandidates(cv, raster, bounds, calibration);
 	if (!candidates || candidates.length === 0) {
 		return rejected(clickPx, 'no-candidate', { ...common, candidateCount: 0, inRadiusCandidateCount: 0 });
 	}
@@ -295,7 +335,7 @@ export function localFeatureSnapDetailed(
 			yPx: originYPx + candidate.yPx,
 			score: scoreOf(candidate)
 		}))
-		.filter((candidate) => Math.hypot(candidate.xPx - clickPx.xPx, candidate.yPx - clickPx.yPx) <= snapRadiusPx)
+		.filter((candidate) => Math.hypot(candidate.xPx - clickPx.xPx, candidate.yPx - clickPx.yPx) <= geometry.snapRadiusPx)
 		.sort((left, right) => right.score - left.score);
 	if (inRadius.length === 0) {
 		return rejected(clickPx, 'outside-radius', {
@@ -335,7 +375,11 @@ export function localFeatureSnapDetailed(
 	};
 }
 
-/** Compatibility wrapper: existing UI behavior remains point-or-null. */
+/**
+ * Compatibility wrapper used by the staged worker. It deliberately keeps the
+ * existing point|null API while making every attempt observable as one
+ * structured console object, including exact rejection reason.
+ */
 export function localFeatureSnap(
 	kind: LocalSnapKind,
 	cv: LocalSnapCv,
@@ -343,7 +387,9 @@ export function localFeatureSnap(
 	clickPx: LocalSnapPoint,
 	calibration: LocalSnapCalibration
 ): LocalSnapPoint | null {
-	return localFeatureSnapDetailed(kind, cv, raster, clickPx, calibration).point;
+	const outcome = localFeatureSnapDetailed(kind, cv, raster, clickPx, calibration);
+	console.info('[ChainSpot CV local-snap]', outcome.trace);
+	return outcome.point;
 }
 
 export { asUiScalePx, deriveCanonicalUiScalePx };
