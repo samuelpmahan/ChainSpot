@@ -1701,7 +1701,27 @@
 		const boxSize = Math.round(size * DEFAULT_BOX_FRACTION);
 		const offset = Math.round((size - boxSize) / 2);
 		boxRect = { x: offset, y: offset, width: boxSize, height: boxSize };
+		advancedPreviewImg = imgEl;
 		displayScale = imgEl.naturalWidth > 0 ? imgEl.clientWidth / imgEl.naturalWidth : 1;
+	}
+
+	/** The coverage-box img inside the preview's advanced disclosure (CHSPT-68). */
+	let advancedPreviewImg = $state<HTMLImageElement | null>(null);
+
+	/**
+	 * The coverage-box img now sits inside a closed-by-default `<details>`
+	 * (CHSPT-68): at `load` time it has no layout, so `initBoxRect` records a
+	 * zero display scale, which the drag handlers rightly ignore. Recompute the
+	 * scale once the disclosure actually opens and the img has real width.
+	 */
+	function handleAdvancedToggle(event: Event): void {
+		if (!(event.currentTarget as HTMLDetailsElement).open) return;
+		void tick().then(() => {
+			const img = advancedPreviewImg;
+			if (img?.isConnected && img.naturalWidth > 0 && img.clientWidth > 0) {
+				displayScale = img.clientWidth / img.naturalWidth;
+			}
+		});
 	}
 
 	/**
@@ -2563,7 +2583,7 @@
 					{#if naipError}
 						<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
 					{/if}
-					<details class="naip-advanced" data-testid="naip-advanced">
+					<details class="naip-advanced" data-testid="naip-advanced" ontoggle={handleAdvancedToggle}>
 						<summary>Advanced: exact area or more detail</summary>
 						<p class="naip-hint">
 							Drag a corner of the blue box to outline exactly the area you want, then

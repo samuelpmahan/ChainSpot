@@ -114,13 +114,24 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 	await expect(page.getByTestId('naip-preview')).toBeVisible();
 	expect(naipRequestCount).toBe(1);
 
-	// 3. The advanced disclosure hosts the coverage box; the default box (90% of
-	// the 1800m preview) plans a 3x3, 9-part grid.
+	// 3. "Pick a different spot" reopens the modal; the advanced entry refetches
+	// the same coordinate at a wider 900m radius (the picked lat/lon survived).
+	await page.getByTestId('naip-change-location').click();
+	await expect(page.getByTestId('location-modal')).toBeVisible();
+	await page.locator('[data-testid="naip-manual-entry"] > summary').click();
+	await expect(page.getByTestId('naip-lat')).toHaveValue('33.1255198');
+	await page.getByTestId('naip-radius').fill('900');
+	await page.getByTestId('naip-fetch-button').click();
+	await expect(page.getByTestId('naip-preview')).toBeVisible();
+	expect(naipRequestCount).toBe(2);
+
+	// 4. The preview's advanced disclosure hosts the coverage box; the default
+	// box (90% of the 1800m preview) plans a 3x3, 9-part grid.
 	await page.locator('[data-testid="naip-advanced"] > summary').click();
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('3 x 3 parts');
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('9 images');
 
-	// 4. Dragging the southeast handle inward shrinks the box and the plan recomputes
+	// 5. Dragging the southeast handle inward shrinks the box and the plan recomputes
 	// live, with no fetch involved — pure geometry.
 	const seHandle = page.getByTestId('naip-box-handle-se');
 	await seHandle.scrollIntoViewIfNeeded();
@@ -135,13 +146,13 @@ test('NAIP clean-map pipeline: search by name only, drag the coverage box, fetch
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('2 x 2 parts');
 	await expect(page.getByTestId('naip-grid-plan')).toContainText('4 images');
 
-	// 5. Fetching the grid pulls exactly the planned tile count (not the original 9)
+	// 6. Fetching the grid pulls exactly the planned tile count (not the original 9)
 	// and assembles one mosaic preview.
 	await page.getByTestId('naip-grid-fetch-button').click();
 	await expect(page.getByTestId('naip-grid-preview')).toBeVisible({ timeout: 15000 });
-	expect(naipRequestCount).toBe(5); // 1 overview + 4 grid tiles
+	expect(naipRequestCount).toBe(6); // 300m overview + 900m overview + 4 grid tiles
 
-	// 6. Committing routes through the normal intake path, same as a manual upload.
+	// 7. Committing routes through the normal intake path, same as a manual upload.
 	await page.getByTestId('naip-grid-use').click();
 	await expect(page.getByTestId('pane-filename-target-basemap')).toHaveText('naip-tile-grid.png');
 	await expect(page.getByTestId('naip-preview')).toBeHidden();
