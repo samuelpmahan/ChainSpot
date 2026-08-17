@@ -51,4 +51,47 @@ describe('searchPlace', () => {
 			});
 		}
 	});
+
+	test('parses a well-formed boundingbox into the match viewport and drops malformed ones (CHSPT-68)', async () => {
+		const okFetch: FetchLike = async () =>
+			new Response(
+				JSON.stringify([
+					{
+						lat: '34.9249',
+						lon: '-81.0251',
+						display_name: 'Boxed Park',
+						// Nominatim order: [minLat, maxLat, minLon, maxLon], as strings.
+						boundingbox: ['34.92', '34.93', '-81.03', '-81.02']
+					},
+					{
+						lat: '34.9',
+						lon: '-81.0',
+						display_name: 'Inverted Box Park',
+						boundingbox: ['34.95', '34.93', '-81.03', '-81.02']
+					},
+					{
+						lat: '34.8',
+						lon: '-81.1',
+						display_name: 'Malformed Box Park',
+						boundingbox: ['34.92', 'not-a-number', '-81.03']
+					},
+					{ lat: '34.7', lon: '-81.2', display_name: 'No Box Park' }
+				]),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			);
+		const result = await searchPlace('Boxed Park', { fetch: okFetch });
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.matches[0].viewport).toEqual({
+			minLat: 34.92,
+			maxLat: 34.93,
+			minLon: -81.03,
+			maxLon: -81.02
+		});
+		// A bad or missing box never fails the match itself.
+		expect(result.matches[1].viewport).toBeUndefined();
+		expect(result.matches[2].viewport).toBeUndefined();
+		expect(result.matches[3].viewport).toBeUndefined();
+		expect(result.matches[3].lat).toBe(34.7);
+	});
 });

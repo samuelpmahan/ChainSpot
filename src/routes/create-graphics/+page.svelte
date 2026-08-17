@@ -3,11 +3,17 @@
 	import ImagePane from '$lib/components/ImagePane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
 	import type { AssetResource } from '$lib/domain/editor';
-	import { findImageByRole } from '$lib/domain/project';
+	import { createImageAsset, findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
-	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
-	import { normalizeRotationDeg, pointInBounds } from '$lib/coords';
+	import {
+		bundlePathFor,
+		decodeImageFile,
+		intakeImageFile,
+		readFileBytes,
+		sha256Hex
+	} from '$lib/imageIntake';
+	import { clampPointToImageBounds, normalizeRotationDeg, pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
 	import type { PointSelection } from '$lib/pointSelection';
@@ -61,6 +67,14 @@
 	import { parseCoordinateInput, searchPlacesText } from '$lib/placesSearch';
 	import { googleMapsApiKey } from '$lib/googleMapsConfig';
 	import MapConfirm from '$lib/components/MapConfirm.svelte';
+	import AerialPreview from '$lib/components/AerialPreview.svelte';
+	import {
+		coverageGap,
+		expandedFetchGeometry,
+		fetchGeometryFromViewport,
+		remapNaipPixel
+	} from '$lib/naipCoverage';
+	import type { NaipFetchGeometry, PixelPoint } from '$lib/naipCoverage';
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
 	import type { PixelRect } from '$lib/naipGrid';
 	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
@@ -475,20 +489,161 @@
 	}
 
 	/**
-	 * CHSPT-65: whether the Fetch Clean Target section should render ABOVE the
-	 * correspondence panes. True exactly when the project already carries a
-	 * completed/partial course annotation (holes in durable state — the
-	 * annotate-course arrival, and equally a reopened bundle) but no clean
-	 * target has been committed yet: correspondence placement is impossible
-	 * then, so establishing the target is the first meaningful interaction.
-	 * Derived from durable project state rather than a session flag so it
-	 * needs no session participation and reverts to the standard layout the
-	 * moment a target is committed. The direct-upload entry (no holes, no
-	 * AnnotatedRound) keeps today's order untouched.
+	 * CHSPT-68: the location search lives in a dismissable modal over the
+	 * Clean target pane only (CHSPT-65's above-the-panes section placement is
+	 * gone with the section itself). Follows the page's existing dialog
+	 * conventions: `dialogKeyboard` for Escape/Tab, `isModalOpen()` already
+	 * pauses the global shortcuts, and focus is remembered/restored through
+	 * the same helpers the confirm dialogs use.
 	 */
-	function cleanTargetFirst(): boolean {
-		void refreshCount;
-		return editor.state.holes.length > 0 && targetImage() === null;
+	let locationModalOpen = $state(false);
+	let courseSearchButton = $state<HTMLButtonElement | null>(null);
+	let geocodeParkNameField = $state<HTMLInputElement | null>(null);
+	let naipUseButton = $state<HTMLButtonElement | null>(null);
+
+	/**
+	 * When the in-pane preview appears, whatever triggered the fetch (the
+	 * invite's saved-location button, a modal result pick, the advanced fetch)
+	 * has been unmounted with its overlay — without this, a keyboard user's
+	 * focus silently falls back to <body> (review round 2). The commit button
+	 * is the preview's primary decision, so focus lands there.
+	 */
+	$effect(() => {
+		if (naipPreview) {
+			const target = naipUseButton;
+			void tick().then(() => target?.focus());
+		}
+	});
+
+	function openLocationModal(): void {
+		rememberFocus();
+		locationModalOpen = true;
+		naipError = null;
+	}
+
+	function closeLocationModal(): void {
+		locationModalOpen = false;
+		mapConfirmState = null;
+		restoreFocus(courseSearchButton);
+	}
+
+	/** Initial modal focus goes to the course-name field, the modal's whole reason to exist. */
+	$effect(() => {
+		if (locationModalOpen) {
+			const field = geocodeParkNameField;
+			void tick().then(() => field?.focus());
+		}
+	});
+
+	/**
+	 * CHSPT-68 coverage check: once the alignment produces target-space course
+	 * geometry (`graphicsMode.plans`), verify all of it lands inside the
+	 * committed aerial. Derived and pure, like `diagnosticsView`; null while
+	 * there is nothing to check or everything fits.
+	 */
+	let coverageGapInfo = $derived.by(() => {
+		const target = targetImage();
+		if (!target) return null;
+		const plans = graphicsMode.plans;
+		if (plans.length === 0) return null;
+		const points: PixelPoint[] = [];
+		for (const plan of plans) {
+			if (plan.tee) points.push(plan.tee);
+			if (plan.basket) points.push(plan.basket);
+			points.push(...plan.bends, ...plan.centerline);
+			if (plan.corridorBand) points.push(...plan.corridorBand);
+		}
+		const gap = coverageGap(points, target.widthPx, target.heightPx);
+		return gap.outside ? gap : null;
+	});
+
+	let coverageRefetching = $state(false);
+	let coverageError = $state<string | null>(null);
+
+	/**
+	 * Point-preserving coverage re-fetch, possible only for the geo-referenced
+	 * radius fetch (retained center/radius). Deliberately NOT routed through
+	 * `intakeImageFile`: that path discards pairs on replacement, while here
+	 * the whole point is that both rasters have exactly known georeferences,
+	 * so every placed target point remaps deterministically
+	 * (`remapNaipPixel`) onto the new image. `expandedFetchGeometry` contains
+	 * the old raster's full extent, so remapped points are in-bounds by
+	 * construction (the clamp only swallows float dust). Costs stated, not
+	 * hidden: this lands as several undo steps (replace + one movePoint per
+	 * pair + rotation), and the manual rotation is re-applied because both
+	 * rasters are north-up.
+	 */
+	async function handleCoverageRefetch(): Promise<void> {
+		const gap = coverageGapInfo;
+		const target = targetImage();
+		const center = targetGeoCenter;
+		const radius = targetGeoRadiusMeters;
+		if (!gap?.bounds || !target || !center || radius === null || coverageRefetching) return;
+		coverageRefetching = true;
+		coverageError = null;
+		try {
+			const oldGeometry: NaipFetchGeometry = { center, radiusMeters: radius };
+			const expanded = expandedFetchGeometry(oldGeometry, gap.bounds);
+			const result = await fetchNaipImage(expanded.center, expanded.radiusMeters);
+			if (!result.ok) {
+				coverageError = result.error.message;
+				return;
+			}
+			const file = new File([result.blob], 'naip-aerial.png', { type: 'image/png' });
+			const decodeFn = decode ?? decodeImageFile;
+			const decoded = await decodeFn(file);
+			if (decoded.widthPx !== target.widthPx || decoded.heightPx !== target.heightPx) {
+				// retainPoints requires identical dimensions; refuse rather than lose points.
+				coverageError = 'The re-fetched aerial came back at unexpected dimensions. Nothing was changed.';
+				return;
+			}
+			const bytes = await readFileBytes(file);
+			const sha256 = await (hash ?? sha256Hex)(bytes);
+			const asset = createImageAsset({
+				id: globalThis.crypto.randomUUID(),
+				role: 'target-basemap',
+				fileName: file.name,
+				mimeType: file.type,
+				widthPx: decoded.widthPx,
+				heightPx: decoded.heightPx,
+				sha256,
+				bundlePath: bundlePathFor('target-basemap', file.type)
+			});
+			// Same courtesy every other target replacement extends via
+			// onDomainChanged: a half-created correspondence must not linger
+			// against an image that is about to be swapped out (review finding).
+			if (correspondence.mode !== 'neutral') {
+				correspondence = cancelCorrespondence(correspondence);
+				correspondenceError = null;
+			}
+			const previousRotation = target.rotationDeg ?? 0;
+			editor.replaceImage({ role: 'target-basemap', asset, bytes, retainPoints: true });
+			editor.setDecodedResource(asset.id, decoded.image);
+			for (const pair of editor.state.controlPointPairs) {
+				if (pair.target.imageId !== asset.id) continue;
+				const remapped = remapNaipPixel(oldGeometry, expanded, pair.target);
+				editor.movePoint(
+					pair.id,
+					'target',
+					clampPointToImageBounds(remapped, decoded.widthPx, decoded.heightPx)
+				);
+			}
+			if (previousRotation !== 0) editor.setTargetRotation(previousRotation);
+			// New geometry replaces the old under the same per-fetch-shape rule:
+			// this is still the radius-based center fetch, just wider. Not
+			// `onDomainChanged`, which exists for arbitrary replacements and
+			// would wipe exactly the geo state being carried forward.
+			targetGroundScaleMetersPerPixel = naipMetersPerPixel(expanded.radiusMeters, NAIP_EXPORT_SIZE_PX);
+			targetGeoCenter = expanded.center;
+			targetGeoRadiusMeters = expanded.radiusMeters;
+			refresh();
+			activityMessage =
+				'Fetched a wider aerial covering the whole course. Placed points moved with it.';
+		} catch (error) {
+			coverageError = error instanceof Error ? error.message : 'Could not re-fetch the aerial.';
+		} finally {
+			coverageRefetching = false;
+		}
 	}
 
 	function currentPairs(): readonly ControlPointPair[] {
@@ -1380,21 +1535,38 @@
 
 	/**
 	 * The one place a search result (or a parsed coordinate paste) becomes a
-	 * "selected location": keyless, it writes straight into the lat/lon inputs
-	 * exactly as before; keyed, it instead arms `mapConfirmState`, which is the
-	 * sole gate that mounts `MapConfirm` — the only place the Google Dynamic
-	 * Maps script tag is ever injected. An abandoned search therefore costs at
-	 * most one Places call and zero map loads.
+	 * "selected location" (CHSPT-68 flow):
+	 *
+	 * - A result carrying a REAL provider bounding box sizes the fetch from
+	 *   that box (`fetchGeometryFromViewport`) and goes straight to the
+	 *   in-pane aerial preview — the preview is the confirmation step now.
+	 * - A keyed result with a missing/degenerate box keeps the `MapConfirm`
+	 *   midpoint step, which remains the sole gate that mounts `MapConfirm` —
+	 *   the only place the Google Dynamic Maps script tag is ever injected.
+	 *   An abandoned search still costs at most one Places call and zero map
+	 *   loads.
+	 * - A keyless degenerate/missing box fetches at the default radius.
 	 */
 	function selectLocation(match: GeoSearchMatch): void {
 		naipError = null;
+		const geometry = fetchGeometryFromViewport({ lat: match.lat, lon: match.lon }, match.viewport);
 		const apiKey = googleMapsApiKey();
-		if (apiKey) {
+		if (!geometry.fromViewport && apiKey) {
+			// Arming MapConfirm hasn't overwritten anything yet; the note (and
+			// its shortcut) must survive a Cancel there (review round 3).
 			mapConfirmState = { match, apiKey };
-		} else {
-			naipLatInput = String(match.lat);
-			naipLonInput = String(match.lon);
+			return;
 		}
+		// A picked location supersedes the saved-location prefill: it overwrites
+		// the same lat/lon/radius inputs, so the note would otherwise keep
+		// claiming a course the inputs no longer point at (review round 2).
+		savedLocationNote = null;
+		naipLatInput = String(geometry.center.lat);
+		naipLonInput = String(geometry.center.lon);
+		naipRadiusInput = String(Math.round(geometry.radiusMeters));
+		locationModalOpen = false;
+		restoreFocus(courseSearchButton);
+		void handleNaipFetch();
 	}
 
 	function handleGeocodeSelect(index: number): void {
@@ -1414,10 +1586,16 @@
 	 * this on the exact same fetch path the manual button uses, radius included.
 	 */
 	function handleMapConfirmUse(point: GeoPoint): void {
+		// This IS the input-overwriting moment on the MapConfirm path (see
+		// selectLocation): the note stops being true here, not at pick time.
+		savedLocationNote = null;
 		naipLatInput = String(point.lat);
 		naipLonInput = String(point.lon);
 		naipError = null;
 		mapConfirmState = null;
+		// The preview takes over the pane; the modal's job is done (CHSPT-68).
+		locationModalOpen = false;
+		restoreFocus(courseSearchButton);
 		void handleNaipFetch();
 	}
 
@@ -1554,7 +1732,27 @@
 		const boxSize = Math.round(size * DEFAULT_BOX_FRACTION);
 		const offset = Math.round((size - boxSize) / 2);
 		boxRect = { x: offset, y: offset, width: boxSize, height: boxSize };
+		advancedPreviewImg = imgEl;
 		displayScale = imgEl.naturalWidth > 0 ? imgEl.clientWidth / imgEl.naturalWidth : 1;
+	}
+
+	/** The coverage-box img inside the preview's advanced disclosure (CHSPT-68). */
+	let advancedPreviewImg = $state<HTMLImageElement | null>(null);
+
+	/**
+	 * The coverage-box img now sits inside a closed-by-default `<details>`
+	 * (CHSPT-68): at `load` time it has no layout, so `initBoxRect` records a
+	 * zero display scale, which the drag handlers rightly ignore. Recompute the
+	 * scale once the disclosure actually opens and the img has real width.
+	 */
+	function handleAdvancedToggle(event: Event): void {
+		if (!(event.currentTarget as HTMLDetailsElement).open) return;
+		void tick().then(() => {
+			const img = advancedPreviewImg;
+			if (img?.isConnected && img.naturalWidth > 0 && img.clientWidth > 0) {
+				displayScale = img.clientWidth / img.naturalWidth;
+			}
+		});
 	}
 
 	/**
@@ -2140,13 +2338,6 @@
 		</section>
 	{/if}
 
-	{#if cleanTargetFirst()}
-		<!-- CHSPT-65: arriving with an annotated course but no committed clean
-		     target, fetching the target is the first meaningful interaction —
-		     the same section as below, just rendered ahead of the panes. -->
-		{@render naipFetchSection()}
-	{/if}
-
 	<section class="panes">
 		<ImagePane
 			title="UDisc source"
@@ -2166,326 +2357,472 @@
 			onPointSelect={handlePointSelect}
 			onPointMove={handlePointMove}
 		/>
-		<ImagePane
-			title="Clean target"
-			role="target-basemap"
-			{editor}
-			refresh={refreshCount}
-			pairs={currentPairs()}
-			pendingPlacement={correspondence.pendingPlacement}
-			placementEnabled={correspondence.mode !== 'neutral'}
-			correctionEnabled={correspondence.mode === 'neutral'}
-			{selection}
-			{markersVisible}
-			ghostCourse={graphicsMode.plans}
-			ghostCourseVisible={ghostCoursePreviewVisible}
-			rotationDeg={targetRotationDraft}
-			onRotationInput={handleTargetRotationInput}
-			onRotationCommit={handleTargetRotationCommit}
-			{decode}
-			confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
-			onDomainChanged={onDomainChanged}
-			onPlacement={handlePlacement}
-			onPointSelect={handlePointSelect}
-			onPointMove={handlePointMove}
-		/>
-	</section>
-
-	{#snippet naipFetchSection()}
-	<section
-		class="naip-fetch"
-		data-testid="naip-fetch"
-		aria-labelledby="naip-fetch-heading"
-	>
-		<h2 id="naip-fetch-heading">Fetch clean target from USGS NAIP</h2>
-		<p class="naip-hint">
-			Alternative to uploading a target image above: search for the course by
-			name, pick the matching location, then fetch a clean aerial map from the
-			public USGS NAIP imagery service. US coverage only — manual upload above
-			still works for other courses. City/state is optional — leave it blank if
-			you're not sure which nearby town the course is actually in; check each
-			result's full location below before picking one.
-		</p>
-
-		<div class="geocode-search">
-			<label>
-				<span>Course name</span>
-				<input
-					type="text"
-					data-testid="geocode-park-name"
-					bind:value={geocodeParkNameInput}
-					placeholder="e.g. Dash's Track"
-				/>
-			</label>
-			<label>
-				<span>City, State (optional)</span>
-				<input
-					type="text"
-					data-testid="geocode-city-state"
-					bind:value={geocodeCityStateInput}
-					placeholder="e.g. Frisco, TX"
-				/>
-			</label>
-			<button
-				type="button"
-				data-testid="geocode-search-button"
-				disabled={geocodeLoading}
-				onclick={handleGeocodeSearch}
-			>
-				{geocodeLoading ? 'Searching…' : 'Search'}
-			</button>
-		</div>
-		{#if geocodeError}
-			<p class="error" data-testid="geocode-error" role="alert">{geocodeError}</p>
-		{/if}
-		{#if geocodeMatches && geocodeMatches.length > 0}
-			<ul class="geocode-results" data-testid="geocode-results">
-				{#each geocodeMatches as match, index (match.displayName + index)}
-					<li>
-						<button
-							type="button"
-							class="geocode-result"
-							class:selected={geocodeSelectedIndex === index}
-							data-testid="geocode-result-{index}"
-							onclick={() => handleGeocodeSelect(index)}
-						>
-							{match.displayName}
-						</button>
-					</li>
-				{/each}
-			</ul>
-			{#if geocodeResultSource === 'places'}
-				<p class="geocode-attribution" data-testid="geocode-attribution">Powered by Google</p>
-			{:else}
-				<p class="geocode-attribution" data-testid="geocode-attribution">
-					Location search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
-						>OpenStreetMap</a
-					> contributors
-				</p>
-			{/if}
-		{/if}
-		{#if mapConfirmState}
-			<MapConfirm
-				apiKey={mapConfirmState.apiKey}
-				center={{ lat: mapConfirmState.match.lat, lon: mapConfirmState.match.lon }}
-				label={mapConfirmState.match.displayName}
-				onUse={handleMapConfirmUse}
-				onCancel={handleMapConfirmCancel}
+		<!-- CHSPT-68: the Clean target pane hosts the whole fetch flow — the
+		     empty-state invitation, the location modal, and the pre-commit
+		     aerial preview are overlays on THIS pane only, so the UDisc source
+		     stays visible beside them the whole time. -->
+		<div class="target-pane-stack" data-testid="target-pane-stack">
+			<ImagePane
+				title="Clean target"
+				role="target-basemap"
+				{editor}
+				refresh={refreshCount}
+				pairs={currentPairs()}
+				pendingPlacement={correspondence.pendingPlacement}
+				placementEnabled={correspondence.mode !== 'neutral'}
+				correctionEnabled={correspondence.mode === 'neutral'}
+				{selection}
+				{markersVisible}
+				ghostCourse={graphicsMode.plans}
+				ghostCourseVisible={ghostCoursePreviewVisible}
+				rotationDeg={targetRotationDraft}
+				onRotationInput={handleTargetRotationInput}
+				onRotationCommit={handleTargetRotationCommit}
+				{decode}
+				confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
+				onDomainChanged={onDomainChanged}
+				onPlacement={handlePlacement}
+				onPointSelect={handlePointSelect}
+				onPointMove={handlePointMove}
 			/>
-		{/if}
-		{#if geocodeSelectedIndex !== null && !mapConfirmState}
-			<p class="naip-selected-coords" data-testid="naip-selected-coords">
-				Selected: {naipLatInput}, {naipLonInput}
-			</p>
-		{/if}
-		{#if savedLocationNote}
-			<p class="saved-location-note" data-testid="saved-location-note">
-				{savedLocationNote}
-				<button type="button" data-testid="saved-location-dismiss" onclick={() => (savedLocationNote = null)}>
-					Dismiss
-				</button>
-			</p>
-		{/if}
 
-		<div class="naip-inputs">
-			<label>
-				<span>Radius (meters)</span>
-				<input type="text" inputmode="decimal" data-testid="naip-radius" bind:value={naipRadiusInput} />
-			</label>
-			<button
-				type="button"
-				data-testid="naip-fetch-button"
-				disabled={naipLoading}
-				onclick={handleNaipFetch}
-			>
-				{naipLoading ? 'Fetching…' : 'Fetch aerial map'}
-			</button>
-		</div>
-
-		<details class="naip-manual-entry" data-testid="naip-manual-entry" open>
-			<summary>Coordinates (editable)</summary>
-			<div class="naip-inputs">
-				<label>
-					<span>Latitude</span>
-					<input
-						type="text"
-						inputmode="decimal"
-						data-testid="naip-lat"
-						bind:value={naipLatInput}
-						placeholder="e.g. 44.9778"
-					/>
-				</label>
-				<label>
-					<span>Longitude</span>
-					<input
-						type="text"
-						inputmode="decimal"
-						data-testid="naip-lon"
-						bind:value={naipLonInput}
-						placeholder="e.g. -93.2650"
-					/>
-				</label>
-			</div>
-		</details>
-
-		{#if naipError}
-			<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
-		{/if}
-		{#if naipPreview}
-			<div class="naip-preview" data-testid="naip-preview">
-				<p class="naip-hint">
-					Drag a corner to size the area you want at full resolution, then fetch the
-					exact selected area or a larger tile grid for it below. "Use this preview
-					as-is" skips both options and commits this single reference image instead.
-				</p>
-				<div class="naip-overview-frame" data-testid="naip-overview-frame">
-					<img
-						class="naip-overview-image"
-						src={naipPreview.objectUrl}
-						alt="Fetched NAIP aerial preview, not yet used"
-						onload={(event) => initBoxRect(event.currentTarget as HTMLImageElement)}
-						onerror={handleNaipPreviewError}
-					/>
-					{#if boxRect}
-						<div
-							class="naip-box"
-							data-testid="naip-box"
-							style="left:{boxRect.x * displayScale}px; top:{boxRect.y *
-								displayScale}px; width:{boxRect.width * displayScale}px; height:{boxRect.height *
-								displayScale}px;"
-						>
-							{#each BOX_HANDLES as handle (handle)}
+			{#if !locationModalOpen && !naipPreview}
+				{#if !targetImage()}
+					<!-- Empty pane: the invitation is the front door of the fresh-course
+					     flow. pointer-events pass through everywhere except the card, so
+					     the pane's own "Choose image" upload stays fully usable. -->
+					<div class="pane-overlay pane-invite" data-testid="clean-target-invite">
+						<div class="pane-invite-card">
+							<p>Get a clean aerial photo of your course to line up against the UDisc map.</p>
+							<button
+								type="button"
+								data-testid="open-location-search"
+								bind:this={courseSearchButton}
+								onclick={openLocationModal}
+							>
+								Find my course
+							</button>
+							<p class="pane-invite-hint">…or upload your own image with “Choose image” below.</p>
+							{#if savedLocationNote}
+								<!-- Review finding (CHSPT-68): known state must SHORTEN the path.
+								     A recognized course surfaces right here with a one-click fetch —
+								     an explicit action, so the location cache still never auto-fetches
+								     imagery on its own. -->
+								<p class="saved-location-note" data-testid="saved-location-note">
+									{savedLocationNote}
+									<button
+										type="button"
+										data-testid="saved-location-dismiss"
+										onclick={() => (savedLocationNote = null)}
+									>
+										Dismiss
+									</button>
+								</p>
 								<button
 									type="button"
-									class="naip-box-handle naip-box-handle-{handle}"
-									data-testid="naip-box-handle-{handle}"
-									aria-label="Resize selected area ({handle})"
-									onpointerdown={(event) => handleBoxHandleDown(handle, event)}
-								></button>
-							{/each}
+									data-testid="saved-location-fetch"
+									disabled={naipLoading}
+									onclick={() => void handleNaipFetch()}
+								>
+									{naipLoading ? 'Fetching…' : 'Get this course’s aerial photo'}
+								</button>
+							{/if}
+							{#if naipLoading}
+								<p class="status" data-testid="naip-loading" role="status">Fetching aerial photo…</p>
+							{/if}
+							{#if naipError}
+								<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
+							{/if}
 						</div>
-					{/if}
-				</div>
-				<div class="naip-preview-actions">
-					<button
-						type="button"
-						data-testid="naip-use"
-						disabled={naipCommitting}
-						onclick={handleNaipConfirm}
-					>
-						{naipCommitting ? 'Using…' : 'Use this preview as-is'}
-					</button>
-					<button
-						type="button"
-						data-testid="naip-discard"
-						disabled={naipCommitting}
-						onclick={handleNaipDiscardPreview}
-					>
-						Discard, adjust radius
-					</button>
-				</div>
-			</div>
+					</div>
+				{/if}
+			{/if}
 
-			{#if gridPlanPreview}
-				<div class="naip-grid-plan" data-testid="naip-grid-plan">
-					<p>
-						Selected area: {Math.round(gridPlanPreview.widthMeters)}m x {Math.round(
-							gridPlanPreview.heightMeters
-						)}m &rarr; {gridPlanPreview.plan.rows} x {gridPlanPreview.plan.cols} tiles at {TILE_RADIUS_METERS}m
-						radius each ({gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} images).
-					</p>
-					<button
-						type="button"
-						data-testid="naip-grid-fetch-button"
-						disabled={gridLoading}
-						onclick={handleGridFetch}
+			{#if locationModalOpen}
+				<!-- Overlays only this pane (absolute within the stack), by design. -->
+				<div class="pane-modal-backdrop" data-testid="location-modal-backdrop">
+					<div
+						class="dialog pane-modal"
+						role="dialog"
+						aria-modal="true"
+						aria-label="Find your course"
+						data-testid="location-modal"
+						use:dialogKeyboard={closeLocationModal}
 					>
-						{gridLoading
-							? 'Fetching tiles…'
-							: `Fetch ${gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} full-resolution tiles`}
-					</button>
-					<button
-						type="button"
-						data-testid="naip-exact-fetch-button"
-						disabled={exactSelectionLoading}
-						onclick={handleExactSelectionFetch}
-					>
-						{exactSelectionLoading ? 'Fetching exact area…' : 'Fetch exact selected area'}
-					</button>
+						<h2>Find your course</h2>
+						<p class="naip-hint">
+							Search by course or park name and pick the right match — a free aerial
+							photo of that spot loads right here (US locations only). You can also
+							paste coordinates or a Google Maps link into the name field.
+						</p>
+						<div class="geocode-search">
+							<label>
+								<span>Course name</span>
+								<input
+									type="text"
+									data-testid="geocode-park-name"
+									bind:this={geocodeParkNameField}
+									bind:value={geocodeParkNameInput}
+									placeholder="e.g. Dash's Track"
+								/>
+							</label>
+							<label>
+								<span>City, State (optional)</span>
+								<input
+									type="text"
+									data-testid="geocode-city-state"
+									bind:value={geocodeCityStateInput}
+									placeholder="e.g. Frisco, TX"
+								/>
+							</label>
+							<button
+								type="button"
+								data-testid="geocode-search-button"
+								disabled={geocodeLoading}
+								onclick={handleGeocodeSearch}
+							>
+								{geocodeLoading ? 'Searching…' : 'Search'}
+							</button>
+						</div>
+						{#if geocodeError}
+							<p class="error" data-testid="geocode-error" role="alert">{geocodeError}</p>
+						{/if}
+						{#if geocodeMatches && geocodeMatches.length > 0}
+							<ul class="geocode-results" data-testid="geocode-results">
+								{#each geocodeMatches as match, index (match.displayName + index)}
+									<li>
+										<button
+											type="button"
+											class="geocode-result"
+											class:selected={geocodeSelectedIndex === index}
+											data-testid="geocode-result-{index}"
+											onclick={() => handleGeocodeSelect(index)}
+										>
+											{match.displayName}
+										</button>
+									</li>
+								{/each}
+							</ul>
+							{#if geocodeResultSource === 'places'}
+								<p class="geocode-attribution" data-testid="geocode-attribution">Powered by Google</p>
+							{:else}
+								<p class="geocode-attribution" data-testid="geocode-attribution">
+									Location search © <a
+										href="https://www.openstreetmap.org/copyright"
+										target="_blank"
+										rel="noreferrer">OpenStreetMap</a
+									> contributors
+								</p>
+							{/if}
+						{/if}
+						{#if mapConfirmState}
+							<MapConfirm
+								apiKey={mapConfirmState.apiKey}
+								center={{ lat: mapConfirmState.match.lat, lon: mapConfirmState.match.lon }}
+								label={mapConfirmState.match.displayName}
+								onUse={handleMapConfirmUse}
+								onCancel={handleMapConfirmCancel}
+							/>
+						{/if}
+						{#if savedLocationNote}
+							<p class="saved-location-note" data-testid="saved-location-note">
+								{savedLocationNote}
+								<button
+									type="button"
+									data-testid="saved-location-dismiss"
+									onclick={() => (savedLocationNote = null)}
+								>
+									Dismiss
+								</button>
+							</p>
+						{/if}
+						<details class="naip-manual-entry" data-testid="naip-manual-entry">
+							<summary>Advanced: exact coordinates</summary>
+							<div class="naip-inputs">
+								<label>
+									<span>Latitude</span>
+									<input
+										type="text"
+										inputmode="decimal"
+										data-testid="naip-lat"
+										bind:value={naipLatInput}
+										placeholder="e.g. 44.9778"
+									/>
+								</label>
+								<label>
+									<span>Longitude</span>
+									<input
+										type="text"
+										inputmode="decimal"
+										data-testid="naip-lon"
+										bind:value={naipLonInput}
+										placeholder="e.g. -93.2650"
+									/>
+								</label>
+								<label>
+									<span>Area radius (meters)</span>
+									<input
+										type="text"
+										inputmode="decimal"
+										data-testid="naip-radius"
+										bind:value={naipRadiusInput}
+									/>
+								</label>
+								<button
+									type="button"
+									data-testid="naip-fetch-button"
+									disabled={naipLoading}
+									onclick={() => {
+										// Fetching hand-entered coordinates likewise supersedes the
+										// saved-location prefill (see selectLocation).
+										savedLocationNote = null;
+										locationModalOpen = false;
+										restoreFocus(courseSearchButton);
+										void handleNaipFetch();
+									}}
+								>
+									{naipLoading ? 'Fetching…' : 'Fetch this spot'}
+								</button>
+							</div>
+						</details>
+						<div class="dialog-actions">
+							<button type="button" data-testid="location-modal-close" onclick={closeLocationModal}>
+								Close
+							</button>
+						</div>
+					</div>
 				</div>
 			{/if}
-			{#if gridError}
-				<p class="error" data-testid="naip-grid-error" role="alert">{gridError}</p>
-			{/if}
-			{#if exactSelectionError}
-				<p class="error" data-testid="naip-exact-error" role="alert">{exactSelectionError}</p>
-			{/if}
-			{#if exactSelectionPreview}
-				<div class="naip-preview" data-testid="naip-exact-preview">
-					<div>
-						<p class="naip-hint">Exact blue-box area, fetched without the 300 m tile-radius padding.</p>
-						<img
-							class="naip-preview-image"
-							src={exactSelectionPreview.objectUrl}
-							alt="Exact selected NAIP area, not yet used"
-							onerror={handleExactSelectionPreviewError}
+
+			{#if naipPreview}
+				<div class="pane-overlay pane-preview" data-testid="naip-preview">
+					<div class="pane-preview-header">
+						<p class="naip-hint">
+							Aerial preview — nothing saved yet. Pan and zoom to compare with the UDisc
+							map beside it.
+						</p>
+						<div class="naip-preview-actions">
+							<button
+								type="button"
+								data-testid="naip-use"
+								bind:this={naipUseButton}
+								disabled={naipCommitting}
+								onclick={handleNaipConfirm}
+							>
+								{naipCommitting ? 'Using…' : 'Use as clean target'}
+							</button>
+							<button
+								type="button"
+								data-testid="naip-discard"
+								disabled={naipCommitting}
+								onclick={handleNaipDiscardPreview}
+							>
+								Discard
+							</button>
+							<button
+								type="button"
+								data-testid="naip-change-location"
+								disabled={naipCommitting}
+								onclick={() => {
+									clearNaipPreview();
+									openLocationModal();
+								}}
+							>
+								Pick a different spot
+							</button>
+						</div>
+					</div>
+					<div class="pane-preview-viewport">
+						<AerialPreview
+							objectUrl={naipPreview.objectUrl}
+							alt="Fetched aerial preview, not yet used"
+							onDecodeError={handleNaipPreviewError}
 						/>
 					</div>
-					<div class="naip-preview-actions">
-						<button
-							type="button"
-							data-testid="naip-exact-use"
-							disabled={exactSelectionCommitting}
-							onclick={handleExactSelectionConfirm}
-						>
-							{exactSelectionCommitting ? 'Using…' : 'Use exact area as clean target'}
-						</button>
-						<button
-							type="button"
-							data-testid="naip-exact-discard"
-							disabled={exactSelectionCommitting}
-							onclick={handleExactSelectionDiscard}
-						>
-							Discard
-						</button>
-					</div>
+					{#if naipError}
+						<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
+					{/if}
+					<details class="naip-advanced" data-testid="naip-advanced" ontoggle={handleAdvancedToggle}>
+						<summary>Advanced: exact area or more detail</summary>
+						<p class="naip-hint">
+							Drag a corner of the blue box to outline exactly the area you want, then
+							fetch just that area, or a sharper multi-part image for it.
+						</p>
+						<div class="naip-overview-frame" data-testid="naip-overview-frame">
+							<img
+								class="naip-overview-image"
+								src={naipPreview.objectUrl}
+								alt="Fetched aerial preview with selectable area"
+								onload={(event) => initBoxRect(event.currentTarget as HTMLImageElement)}
+								onerror={handleNaipPreviewError}
+							/>
+							{#if boxRect}
+								<div
+									class="naip-box"
+									data-testid="naip-box"
+									style="left:{boxRect.x * displayScale}px; top:{boxRect.y *
+										displayScale}px; width:{boxRect.width * displayScale}px; height:{boxRect.height *
+										displayScale}px;"
+								>
+									{#each BOX_HANDLES as handle (handle)}
+										<button
+											type="button"
+											class="naip-box-handle naip-box-handle-{handle}"
+											data-testid="naip-box-handle-{handle}"
+											aria-label="Resize selected area ({handle})"
+											onpointerdown={(event) => handleBoxHandleDown(handle, event)}
+										></button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+						{#if gridPlanPreview}
+							<div class="naip-grid-plan" data-testid="naip-grid-plan">
+								<p>
+									Selected area: {Math.round(gridPlanPreview.widthMeters)}m x {Math.round(
+										gridPlanPreview.heightMeters
+									)}m &rarr; {gridPlanPreview.plan.rows} x {gridPlanPreview.plan.cols} parts ({gridPlanPreview
+										.plan.rows * gridPlanPreview.plan.cols} images).
+								</p>
+								<button
+									type="button"
+									data-testid="naip-exact-fetch-button"
+									disabled={exactSelectionLoading}
+									onclick={handleExactSelectionFetch}
+								>
+									{exactSelectionLoading ? 'Fetching selected area…' : 'Fetch just the selected area'}
+								</button>
+								<button
+									type="button"
+									data-testid="naip-grid-fetch-button"
+									disabled={gridLoading}
+									onclick={handleGridFetch}
+								>
+									{gridLoading
+										? 'Fetching sharper image…'
+										: `Fetch a sharper image (${gridPlanPreview.plan.rows * gridPlanPreview.plan.cols} parts)`}
+								</button>
+							</div>
+						{/if}
+						{#if gridError}
+							<p class="error" data-testid="naip-grid-error" role="alert">{gridError}</p>
+						{/if}
+						{#if exactSelectionError}
+							<p class="error" data-testid="naip-exact-error" role="alert">{exactSelectionError}</p>
+						{/if}
+						{#if exactSelectionPreview}
+							<div class="naip-subpreview" data-testid="naip-exact-preview">
+								<p class="naip-hint">The exact area inside the blue box.</p>
+								<img
+									class="naip-preview-image"
+									src={exactSelectionPreview.objectUrl}
+									alt="Exact selected area, not yet used"
+									onerror={handleExactSelectionPreviewError}
+								/>
+								<div class="naip-preview-actions">
+									<button
+										type="button"
+										data-testid="naip-exact-use"
+										disabled={exactSelectionCommitting}
+										onclick={handleExactSelectionConfirm}
+									>
+										{exactSelectionCommitting ? 'Using…' : 'Use this area as clean target'}
+									</button>
+									<button
+										type="button"
+										data-testid="naip-exact-discard"
+										disabled={exactSelectionCommitting}
+										onclick={handleExactSelectionDiscard}
+									>
+										Discard
+									</button>
+								</div>
+							</div>
+						{/if}
+						{#if gridPreview}
+							<div class="naip-subpreview" data-testid="naip-grid-preview">
+								<img
+									class="naip-preview-image"
+									src={gridPreview.objectUrl}
+									alt="Assembled sharper aerial, not yet used"
+									onerror={handleGridPreviewError}
+								/>
+								<div class="naip-preview-actions">
+									<button
+										type="button"
+										data-testid="naip-grid-use"
+										disabled={gridCommitting}
+										onclick={handleGridConfirm}
+									>
+										{gridCommitting ? 'Using…' : 'Use this image as clean target'}
+									</button>
+									<button
+										type="button"
+										data-testid="naip-grid-discard"
+										disabled={gridCommitting}
+										onclick={handleGridDiscardPreview}
+									>
+										Discard
+									</button>
+								</div>
+							</div>
+						{/if}
+					</details>
 				</div>
 			{/if}
-			{#if gridPreview}
-				<div class="naip-preview" data-testid="naip-grid-preview">
-					<img
-						class="naip-preview-image"
-						src={gridPreview.objectUrl}
-						alt="Assembled full-resolution NAIP tile grid, not yet used"
-						onerror={handleGridPreviewError}
-					/>
-					<div class="naip-preview-actions">
-						<button
-							type="button"
-							data-testid="naip-grid-use"
-							disabled={gridCommitting}
-							onclick={handleGridConfirm}
-						>
-							{gridCommitting ? 'Using…' : 'Use this image'}
-						</button>
-						<button
-							type="button"
-							data-testid="naip-grid-discard"
-							disabled={gridCommitting}
-							onclick={handleGridDiscardPreview}
-						>
-							Discard
-						</button>
-					</div>
-				</div>
-			{/if}
-		{/if}
-	</section>
-	{/snippet}
 
-	{#if !cleanTargetFirst()}
-		{@render naipFetchSection()}
-	{/if}
+			{#if targetImage() && !naipPreview && !locationModalOpen}
+				<!-- Re-fetch/replace stays reachable without a resurrected section. -->
+				<div class="target-refetch-row">
+					<button
+						type="button"
+						data-testid="open-location-search"
+						bind:this={courseSearchButton}
+						onclick={openLocationModal}
+					>
+						Fetch a different aerial…
+					</button>
+					{#if naipLoading}
+						<p class="status" data-testid="naip-loading" role="status">Fetching aerial photo…</p>
+					{/if}
+					{#if naipError}
+						<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
+					{/if}
+				</div>
+			{/if}
+
+			{#if coverageGapInfo}
+				<div class="coverage-warning" data-testid="coverage-warning" aria-live="polite">
+					<p>
+						Part of the course lands outside this aerial ({coverageGapInfo.outsideCount}
+						point{coverageGapInfo.outsideCount === 1 ? '' : 's'} beyond the edge).
+					</p>
+					{#if targetGeoCenter && targetGeoRadiusMeters !== null}
+						<button
+							type="button"
+							data-testid="coverage-refetch"
+							disabled={coverageRefetching}
+							onclick={handleCoverageRefetch}
+						>
+							{coverageRefetching ? 'Re-fetching…' : 'Re-fetch to cover the whole course'}
+						</button>
+						<p class="coverage-hint">Your placed points move with it automatically — nothing is lost.</p>
+					{:else}
+						<p class="coverage-hint">
+							This image doesn’t carry location info, so an automatic re-fetch isn’t
+							possible. Use “Fetch a different aerial…” for a wider photo (replacing the
+							image discards its placed points after a confirmation), or upload a larger
+							image.
+						</p>
+					{/if}
+					{#if coverageError}
+						<p class="error" data-testid="coverage-error" role="alert">{coverageError}</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	</section>
+
 
 	<!--
 		Diagnostics and pair counts live BELOW the panes on purpose: the section grows as
@@ -3354,19 +3691,153 @@
 		gap: 1rem;
 	}
 
-	.naip-fetch {
+	/* CHSPT-68: the Clean target pane hosts the fetch flow as overlays. The
+	   stack is the positioning context; every overlay insets to it, so nothing
+	   ever covers the UDisc source pane next door. */
+	.target-pane-stack {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-		padding: 0.75rem 1rem;
+		min-width: 0;
+	}
+
+	.pane-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 10;
+	}
+
+	/* The invitation passes pointer events through everywhere except its own
+	   card, so the pane's upload button below stays directly clickable. */
+	.pane-invite {
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		padding-top: 6rem;
+		pointer-events: none;
+	}
+
+	.pane-invite-card {
+		pointer-events: auto;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.6rem;
+		max-width: 22rem;
+		padding: 1rem 1.25rem;
+		border: 1px solid #3f3f46;
+		border-radius: 8px;
+		background: #1e1e24f2;
+		color: #e4e4e7;
+		font-size: 0.9rem;
+		text-align: center;
+	}
+
+	.pane-invite-card p {
+		margin: 0;
+	}
+
+	.pane-invite-hint {
+		font-size: 0.8rem;
+		opacity: 0.75;
+	}
+
+	.pane-modal-backdrop {
+		position: absolute;
+		inset: 0;
+		z-index: 20;
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		padding: 1.5rem 1rem;
+		background: rgb(0 0 0 / 60%);
+		overflow: auto;
+	}
+
+	.pane-modal {
+		max-width: 30rem;
+		width: 100%;
+		max-height: 100%;
+		overflow: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.pane-preview {
+		z-index: 15;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.6rem 0.75rem;
 		border: 1px solid #3f3f46;
 		border-radius: 6px;
 		background: #18181b;
+		overflow: auto;
 	}
 
-	.naip-fetch h2 {
-		font-size: 1rem;
+	.pane-preview-header {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.pane-preview-viewport {
+		flex: 1 1 auto;
+		min-height: 260px;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background: repeating-conic-gradient(#232329 0% 25%, #1a1a1e 0% 50%) 50% / 16px 16px;
+		overflow: hidden;
+	}
+
+	.naip-advanced summary,
+	.naip-manual-entry summary {
+		cursor: pointer;
+		font-size: 0.85rem;
+		opacity: 0.85;
+	}
+
+	.naip-advanced {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.naip-subpreview {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
+
+	.target-refetch-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+	}
+
+	.coverage-warning {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.4rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid #a16207;
+		border-radius: 6px;
+		background: #422006;
+		color: #fde68a;
+		font-size: 0.85rem;
+	}
+
+	.coverage-warning p {
 		margin: 0;
+	}
+
+	.coverage-hint {
+		opacity: 0.85;
 	}
 
 	.naip-hint {
@@ -3391,13 +3862,6 @@
 
 	.naip-inputs input {
 		width: 10rem;
-	}
-
-	.naip-preview {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-start;
-		gap: 0.75rem;
 	}
 
 	.naip-preview-image {
@@ -3540,11 +4004,6 @@
 		opacity: 0.7;
 	}
 
-	.naip-selected-coords {
-		margin: 0;
-		font-size: 0.85rem;
-	}
-
 	.saved-location-note {
 		display: flex;
 		align-items: center;
@@ -3561,10 +4020,6 @@
 		margin-left: auto;
 	}
 
-	.naip-manual-entry summary {
-		cursor: pointer;
-		font-size: 0.85rem;
-	}
 
 	.naip-manual-entry .naip-inputs {
 		margin-top: 0.5rem;

@@ -89,6 +89,14 @@ function placesResponse(): Response {
 }
 
 async function search(host: HTMLElement, query: string): Promise<void> {
+	// CHSPT-68: the search fields live in the location modal over the Clean
+	// target pane; open it first (idempotent — skipped if already open).
+	if (!host.querySelector('[data-testid="location-modal"]')) {
+		const open = host.querySelector<HTMLButtonElement>('[data-testid="open-location-search"]');
+		if (!open) throw new Error('missing open-location-search button');
+		open.click();
+		await flush();
+	}
 	const nameInput = host.querySelector<HTMLInputElement>('[data-testid="geocode-park-name"]');
 	if (!nameInput) throw new Error('missing geocode-park-name input');
 	nameInput.value = query;
@@ -216,9 +224,20 @@ describe('create-graphics geocode search — keyed', () => {
 		host.remove();
 	});
 
-	it('a script load failure surfaces an inline error and "use the coordinate anyway" still writes lat/lon', async () => {
+	it('a script load failure surfaces an inline error and "use the coordinate anyway" still fetches that spot', async () => {
 		setGoogleMapsApiKeyForTesting(TEST_KEY);
-		vi.stubGlobal('fetch', vi.fn(async () => placesResponse()));
+		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+			const href = String(url);
+			if (href.includes('places.googleapis.com')) return placesResponse();
+			if (href.includes('imagery.nationalmap.gov')) {
+				return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+					status: 200,
+					headers: { 'content-type': 'image/png' }
+				});
+			}
+			throw new Error(`unexpected fetch: ${href}`);
+		});
+		vi.stubGlobal('fetch', fetchSpy);
 
 		const { host, component } = mountPage();
 		await search(host, "Dash's Track");
@@ -241,9 +260,19 @@ describe('create-graphics geocode search — keyed', () => {
 		useButton?.click();
 		await flush();
 
+		// CHSPT-68: "use anyway" closes the modal and fetches the picked
+		// coordinate; the in-pane preview is the confirmation now.
 		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
-		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lat"]')?.value).toBe('33.1255');
-		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lon"]')?.value).toBe('-96.861');
+		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
+		const naipCall = fetchSpy.mock.calls
+			.map((call) => String(call[0]))
+			.find((href) => href.includes('imagery.nationalmap.gov'));
+		expect(naipCall).toBeDefined();
+		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
+		const [minLon, minLat, maxLon, maxLat] = (bboxParam as string).split(',').map(Number);
+		expect((minLat + maxLat) / 2).toBeCloseTo(33.1255, 6);
+		expect((minLon + maxLon) / 2).toBeCloseTo(-96.861, 6);
+		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
 
 		unmount(component);
 		host.remove();
@@ -285,9 +314,72 @@ describe('create-graphics geocode search — keyed', () => {
 		await flush();
 
 		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
-		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lat"]')?.value).toBe('33.1255');
-		expect(host.querySelector<HTMLInputElement>('[data-testid="naip-lon"]')?.value).toBe('-96.861');
-		expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes('imagery.nationalmap.gov'))).toBe(true);
+		// CHSPT-68: the modal closes with the confirm step; the fetch centers on
+		// the picked coordinate and the preview appears in the pane.
+		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
+		const naipCall = fetchSpy.mock.calls
+			.map((call) => String(call[0]))
+			.find((href) => href.includes('imagery.nationalmap.gov'));
+		expect(naipCall).toBeDefined();
+		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
+		const [minLon, minLat, maxLon, maxLat] = (bboxParam as string).split(',').map(Number);
+		expect((minLat + maxLat) / 2).toBeCloseTo(33.1255, 6);
+		expect((minLon + maxLon) / 2).toBeCloseTo(-96.861, 6);
+		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
+
+		unmount(component);
+		host.remove();
+	});
+
+	it('a keyed result WITH a real viewport skips MapConfirm and fetches from the box (CHSPT-68)', async () => {
+		setGoogleMapsApiKeyForTesting(TEST_KEY);
+		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+			const href = String(url);
+			if (href.includes('places.googleapis.com')) {
+				return new Response(
+					JSON.stringify({
+						places: [
+							{
+								displayName: { text: "Dash's Track" },
+								formattedAddress: 'Frisco, TX, USA',
+								location: { latitude: 33.1255, longitude: -96.861 },
+								viewport: {
+									low: { latitude: 33.1215, longitude: -96.866 },
+									high: { latitude: 33.1295, longitude: -96.856 }
+								}
+							}
+						]
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } }
+				);
+			}
+			if (href.includes('imagery.nationalmap.gov')) {
+				return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+					status: 200,
+					headers: { 'content-type': 'image/png' }
+				});
+			}
+			throw new Error(`unexpected fetch: ${href}`);
+		});
+		vi.stubGlobal('fetch', fetchSpy);
+
+		const { host, component } = mountPage();
+		await search(host, "Dash's Track");
+		host.querySelector<HTMLButtonElement>('[data-testid="geocode-result-0"]')?.click();
+		await flush();
+
+		// The box carries the size decision MapConfirm existed to contain, so the
+		// midpoint step is skipped and the in-pane preview is the confirmation.
+		expect(host.querySelector('[data-testid="map-confirm"]')).toBeNull();
+		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
+		const naipCall = fetchSpy.mock.calls
+			.map((call) => String(call[0]))
+			.find((href) => href.includes('imagery.nationalmap.gov'));
+		expect(naipCall).toBeDefined();
+		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
+		const [, minLat, , maxLat] = (bboxParam as string).split(',').map(Number);
+		// Viewport-derived radius, decisively larger than the 300m default.
+		expect(((maxLat - minLat) / 2) * 111_320).toBeGreaterThan(450);
 		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
 
 		unmount(component);
