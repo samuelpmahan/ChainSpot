@@ -28,13 +28,21 @@
  */
 import { GeocodeError } from './geocode';
 import type { GeoSearchMatch, GeocodeSearchResult } from './geocode';
+import type { GeoBoundingBox } from './naip';
 
 const PLACES_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText';
 
 /** Matches requested per search; mirrors `geocode.ts`'s `GEOCODE_RESULT_LIMIT` so both providers cap the picker list the same way. */
 export const PLACES_RESULT_LIMIT = 5;
 
-const PLACES_FIELD_MASK = 'places.displayName,places.formattedAddress,places.location';
+/**
+ * `places.viewport` (CHSPT-68) rides the same response and the same billing
+ * SKU tier as `places.location`, so requesting it adds zero calls and zero
+ * cost — it lets a picked result size the aerial fetch to the place instead
+ * of a guessed radius.
+ */
+const PLACES_FIELD_MASK =
+	'places.displayName,places.formattedAddress,places.location,places.viewport';
 
 export type FetchLike = typeof fetch;
 
@@ -52,10 +60,42 @@ export function buildPlacesSearchRequestBody(
 	return { textQuery: query, regionCode: 'us', pageSize };
 }
 
+interface PlacesApiLatLng {
+	readonly latitude: number;
+	readonly longitude: number;
+}
+
 interface PlacesApiPlace {
 	readonly displayName: { readonly text: string };
 	readonly formattedAddress?: string;
-	readonly location: { readonly latitude: number; readonly longitude: number };
+	readonly location: PlacesApiLatLng;
+	/** Places API (New) viewport: low = south-west corner, high = north-east corner. */
+	readonly viewport?: { readonly low?: unknown; readonly high?: unknown };
+}
+
+function isPlacesApiLatLng(value: unknown): value is PlacesApiLatLng {
+	if (typeof value !== 'object' || value === null) return false;
+	const record = value as Record<string, unknown>;
+	return typeof record.latitude === 'number' && typeof record.longitude === 'number';
+}
+
+/**
+ * Parses a place's optional `viewport` defensively into a `GeoBoundingBox`.
+ * Malformed or inverted corners yield `undefined` — a bad box must never fail
+ * an otherwise-good match (same rule as `geocode.ts`'s Nominatim parser).
+ */
+function parsePlacesViewport(place: PlacesApiPlace): GeoBoundingBox | undefined {
+	const viewport = place.viewport;
+	if (typeof viewport !== 'object' || viewport === null) return undefined;
+	const { low, high } = viewport;
+	if (!isPlacesApiLatLng(low) || !isPlacesApiLatLng(high)) return undefined;
+	if (low.latitude > high.latitude || low.longitude > high.longitude) return undefined;
+	return {
+		minLat: low.latitude,
+		maxLat: high.latitude,
+		minLon: low.longitude,
+		maxLon: high.longitude
+	};
 }
 
 function isPlacesApiPlace(value: unknown): value is PlacesApiPlace {
@@ -135,11 +175,17 @@ export async function searchPlacesText(
 		};
 	}
 
-	const matches: GeoSearchMatch[] = places.map((place) => ({
-		displayName: place.formattedAddress ? `${place.displayName.text}, ${place.formattedAddress}` : place.displayName.text,
-		lat: place.location.latitude,
-		lon: place.location.longitude
-	}));
+	const matches: GeoSearchMatch[] = places.map((place) => {
+		const viewport = parsePlacesViewport(place);
+		return {
+			displayName: place.formattedAddress
+				? `${place.displayName.text}, ${place.formattedAddress}`
+				: place.displayName.text,
+			lat: place.location.latitude,
+			lon: place.location.longitude,
+			...(viewport ? { viewport } : {})
+		};
+	});
 
 	return { ok: true, matches };
 }
