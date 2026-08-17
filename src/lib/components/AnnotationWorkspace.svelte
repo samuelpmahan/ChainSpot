@@ -3063,6 +3063,25 @@
 					xPx: proposal.basket!.xPx,
 					yPx: proposal.basket!.yPx
 				}));
+			// CHSPT-65: detection knows the course length better than the 18
+			// default. When every hole it found evidence for (a read number
+			// badge or an owned basket) falls in 1..9, this is a 9-hole
+			// course — follow it with the sidebar's Holes selector so the
+			// guided flow can actually complete at 9/9. One-directional and
+			// advisory: an empty/failed pass changes nothing, >9 evidence
+			// leaves the 18 default, the user can always switch back, and the
+			// same confirmed-work guard as the manual toggle applies.
+			const detectedHoleNumbers = [
+				...numberBadges.map((badge) => badge.number),
+				...labeledBaskets.map((basket) => basket.holeNumber)
+			];
+			if (
+				detectedHoleNumbers.length > 0 &&
+				Math.max(...detectedHoleNumbers) <= 9 &&
+				!confirmedHolesBeyond(9)
+			) {
+				courseLength = 9;
+			}
 			const assignedNumbers = result.numberDetection.candidates.filter(
 				(candidate) => candidate.label !== undefined
 			).length;
