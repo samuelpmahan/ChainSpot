@@ -13,6 +13,7 @@
  */
 
 import type { RawMaskBasket, RawMaskTee } from './rawObjectMask';
+import { evaluateZeroBendBadgeOnChord } from './zeroBendChord';
 
 export interface P2LabeledBadge {
 	readonly holeNumber: number;
@@ -39,6 +40,16 @@ export interface P3StraightBasketHit extends P3TeeBadgeHit {
 	readonly basketIndex: number;
 	readonly basketAxisErrorPx: number;
 	readonly badgeToBasketProjectionPx: number;
+	/**
+	 * Diagnostic-only: whether this hit's tee/basket/badge triple also
+	 * satisfies the 0-bend badge-on-chord structural prior (see
+	 * zeroBendChord.ts / toph-p1-corpus-tuning-findings.md). Does not affect
+	 * P3 control flow, status values, or which hits are pushed here -- purely
+	 * enriches diagnostics P3 already computes, mirroring
+	 * badgeAxisErrorPx/basketAxisErrorPx above.
+	 */
+	readonly zeroBendConfirmed: boolean;
+	readonly zeroBendDistancePx: number;
 }
 
 export type P3BadgeRayDirection = 'forward' | 'reverse';
@@ -317,11 +328,19 @@ export function deriveP3Ownership(
 		let basketAxisErrorPx: number | undefined;
 		if (basketResult.kind === 'hit') {
 			const basketHit = basketResult.hit;
+			const basketHitItem = basketHit.item;
+			const zeroBend = evaluateZeroBendBadgeOnChord(
+				{ xPx: tee.xPx, yPx: tee.yPx },
+				{ xPx: basketHitItem.centerXPx, yPx: basketHitItem.centerYPx },
+				{ xPx: badge.xPx, yPx: badge.yPx }
+			);
 			straightBasketHits.push({
 				...teeBadge,
-				basketIndex: baskets.indexOf(basketHit.item),
+				basketIndex: baskets.indexOf(basketHitItem),
 				basketAxisErrorPx: basketHit.projection.across,
-				badgeToBasketProjectionPx: basketHit.alongPx - teeToBadgeProjectionPx
+				badgeToBasketProjectionPx: basketHit.alongPx - teeToBadgeProjectionPx,
+				zeroBendConfirmed: zeroBend.onChord,
+				zeroBendDistancePx: zeroBend.distancePx
 			});
 			straightBasketStatus = 'hit';
 			basketIndex = baskets.indexOf(basketHit.item);

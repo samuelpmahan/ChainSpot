@@ -573,6 +573,7 @@ export async function detectCourseCandidates(
 			console.info('[ChainSpot P6 LowPar basket assignment]');
 			console.table({
 				lockedByP4: p6.lockedByP4,
+				lockedByZeroBend: p6.lockedByZeroBend,
 				assignedByLowPar: p6.assignedByLowPar,
 				unresolved: p6.unresolved,
 					duplicateBaskets: p6.duplicateBaskets.join('/') || null,
