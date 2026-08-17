@@ -96,18 +96,34 @@ N=2 — treat the tuned values as candidates to re-validate as the corpus grows
 
 ## New structural prior, measured: 0-bend badge-on-chord
 
-For every one of the 44 straight (0-corridor-bend) holes across all 4 courses,
-the hole's own badge center sits **0.1–2.1px** (median 0.5px, ≤0.06 badge
-heights) from the tee→basket chord, at t ≈ 0.51–0.52 — UDisc anchors the badge
-at the chord midpoint. Control: bent holes' badges sit 11–35px off-chord
-(0.3–1.0 badge heights). Zero overlap between populations; zero aliasing
-(nearest *other* badge ≥ 36px from any straight chord; DashsTrack
-hole-numbered check: 0/18 aliased, own badge beats nearest other by 2.4–150×
-even on bent holes). Shortcut this licenses: a (tee, basket, badge) triple with
-badge ≤ ~3px off-chord at t ∈ [0.4, 0.6] is a straight hole with its own badge,
-skipping ribbon evidence entirely; badge off-chord distance also grades
-bend-severity and still ranks ownership on bent holes. `scripts/toph-measure-zerobend.ts`
-reproduces the table.
+The source experiment originally summarized all 44 straight holes as having
+their own badge 0.1–2.1px from the tee→basket chord with no distance overlap
+against bent holes. Fresh port review did **not** reproduce that wording. The
+script measures the *nearest P1-emitted badge* for all four courses, not the
+hole-labeled badge except in its separate DashsTrack check. On the SHA-verified
+corpus, nearest-badge distance spans 0.0–3.7px for 44 straight holes and
+2.1–34.4px for 28 bent controls, so distance alone overlaps.
+
+This is not later corpus drift: all four images and annotations come from the
+corpus's initial/current commit `7a1fdac` (before source experiment `6785064`).
+The gate verified image LFS OIDs `e6616738` (DashsTrack), `fb77ea13`
+(Heritage), `27ad16bc` (Lenard), and `da2a0ccc` (TowneLake). The discrepancy
+is between the source summary and its own measurement semantics: the script
+always measured nearest emitted badges, then had labeled badge identity only
+for DashsTrack. DashsTrack H12 is the concrete falsifier: 3.7px to the nearest
+emitted badge and 3.6px to its labeled badge, both above the claimed 2.1px.
+
+The exact joint predicate remains useful and conservative: distance ≤3px at
+t ∈ [0.4,0.6] yields exactly one candidate for 43/44 straight holes, zero for
+one straight hole, no ambiguous straight holes, and no candidate for any of
+the 28 bent controls. A smallest comparison at 4px yields 44/44, 0 ambiguous,
+and 0/28 bent candidates in this truth-geometry proxy, but produces no change
+to DashsTrack's exact full-pipeline inputs or assignments (hole 16 remains the
+only zero-bend lock). Because the other three courses lack a valid autocropped
+full-pipeline association harness, production keeps the safer 3px abstention
+instead of retuning from one discrepancy. DashsTrack's labeled-badge check
+still reports zero aliasing. `scripts/toph-measure-zerobend.ts` prints both the
+active predicate and the 4px falsifying comparison.
 
 ## Verdicts on the DESIGN.md spike questions
 

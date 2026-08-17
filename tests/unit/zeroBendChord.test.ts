@@ -91,6 +91,15 @@ describe('evaluateZeroBendBadgeOnChord', () => {
 		expect(nearBasket.t).toBeCloseTo(0.9, 5);
 		expect(nearBasket.onChord).toBe(false);
 	});
+
+	it('rejects a degenerate zero-length tee-to-basket chord without producing NaN', () => {
+		const result = evaluateZeroBendBadgeOnChord(
+			{ xPx: 10, yPx: 20 },
+			{ xPx: 10, yPx: 20 },
+			{ xPx: 10, yPx: 20 }
+		);
+		expect(result).toEqual({ onChord: false, distancePx: 0, t: 0 });
+	});
 });
 
 // ---------------------------------------------------------------------------

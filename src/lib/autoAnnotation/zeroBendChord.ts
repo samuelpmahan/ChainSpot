@@ -1,16 +1,13 @@
 /**
  * Pure geometric predicate for the 0-bend badge-on-chord structural prior.
  *
- * Measured in `scripts/cv-probes/toph-p1-corpus-tuning-findings.md` ("New
- * structural prior, measured: 0-bend badge-on-chord"): for every one of the
- * 44 straight (0-corridor-bend) holes across the 4-course corpus, that
- * hole's OWN badge center sits 0.1-2.1px (median 0.5px) from the straight
- * line (chord) between its tee and its basket, at the chord's parametric
- * midpoint (t ~ 0.51 out of [0,1]) -- UDisc renders the hole-number badge
- * anchored at the tee->basket chord midpoint. Bent holes' badges sit
- * 11-35px off that same chord (badges are placed along the actual bent
- * corridor, not the straight-line chord). Zero overlap between the two
- * populations.
+ * The port reproduction in `scripts/toph-measure-zerobend.ts` found that the
+ * joint predicate matters: distance alone overlaps between straight and bent
+ * controls, but distance <=3px together with t in [0.4, 0.6] produced one
+ * candidate for 43/44 annotated straight holes and none for 28/28 bent holes.
+ * The remaining straight hole safely abstains. A 4px comparison recovered it
+ * in the truth-geometry proxy, but did not change the only valid full-pipeline
+ * association fixture (DashsTrack), so production conservatively keeps 3px.
  *
  * This file is pure geometry: no pancake-stack types, no imports from
  * rawObjectMask.ts / rawObjectOwnership.ts / p6LowParBasketAssignment.ts.
