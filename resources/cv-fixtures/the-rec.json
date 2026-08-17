@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "the-rec-2026-08-17",
+  "source": {
+    "fileName": "TheRec-R-stitched.png",
+    "widthPx": 2244,
+    "heightPx": 2212,
+    "sha256": "9d95dc6dccc07ab4d62353efdacf74bba95c315acd881d56403643356b351343",
+    "note": "Truth extracted from the user-supplied MorePreciseHole4Rec annotation bundle. Source pixels are intentionally not committed; supply the matching raster and verify this SHA before scoring. Hole 4 corridor/centerline geometry is outside this fixture's CV endpoint scope."
+  },
+  "semanticAnchors": {
+    "tee": "tee-component-centroid",
+    "basket": "basket-stem-base"
+  },
+  "holes": [
+    { "number": 1, "tee": { "xPx": 560.2596685082873, "yPx": 534.6574585635359 }, "basket": { "xPx": 1240.5, "yPx": 557 } },
+    { "number": 2, "tee": { "xPx": 1363.3648302650568, "yPx": 244.97852471851107 }, "basket": { "xPx": 1718, "yPx": 929.04 } },
+    { "number": 3, "tee": { "xPx": 1493.5496323529412, "yPx": 1153.3713235294117 }, "basket": { "xPx": 1992.5, "yPx": 1169 } },
+    { "number": 4, "tee": { "xPx": 1948.536400984293, "yPx": 1450.6081919294738 }, "basket": { "xPx": 1323.881521367661, "yPx": 1439.2259510321505 } },
+    { "number": 5, "tee": { "xPx": 1632.87624750499, "yPx": 1659.688622754491 }, "basket": { "xPx": 918.5, "yPx": 1837 } },
+    { "number": 6, "tee": { "xPx": 822.5927927927928, "yPx": 1670.5189189189189 }, "basket": { "xPx": 264.5, "yPx": 1921 } },
+    { "number": 7, "tee": { "xPx": 230.15162454873646, "yPx": 1680.7382671480145 }, "basket": { "xPx": 1172.5, "yPx": 1118 } },
+    { "number": 8, "tee": { "xPx": 1352.1347248576851, "yPx": 834.2314990512334 }, "basket": { "xPx": 637, "yPx": 1077 } },
+    { "number": 9, "tee": { "xPx": 352.65992647058823, "yPx": 1013.0459558823529 }, "basket": { "xPx": 311.5, "yPx": 352 } }
+  ]
+}
