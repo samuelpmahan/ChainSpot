@@ -24,6 +24,7 @@
 		consumePendingHandoff,
 		getPendingHandoff,
 		subscribePendingHandoff,
+		markCourseSourceIntake,
 		setPendingAnnotatedRound,
 		setPendingCourseBadges
 	} from '$lib/session';
@@ -1768,22 +1769,60 @@
 	let sidebarFocusRequest = $state<{ key: string; point: SourcePoint; zoomMultiplier?: number | null } | null>(null);
 
 	/**
-	 * The sidebar's per-hole "which section" bucketing for all 18 standard
-	 * holes (extra holes past 18, if any, aren't shown in the redesigned grid
-	 * — same 1-18 scope the old flat hole bar's main grid had). A hole with no
-	 * draft record yet is section 1: it has neither tee nor basket, exactly
-	 * like an empty `AnnotatedHole` would score.
+	 * CHSPT-65: how many holes this course has. The guided sidebar flow was
+	 * hard-coded to 18; a 9-hole course could then never reach the completion
+	 * state at all. This is deliberately a minimal 9-or-18 choice (the two
+	 * standard course lengths), transient UI state like the rest of the
+	 * sidebar's flow state — not persisted into `ProjectState`, reset with the
+	 * same source-image-replacement lifecycle. Arbitrary hole counts remain
+	 * future work.
+	 */
+	let courseLength = $state<9 | 18>(18);
+
+	/**
+	 * The sidebar's per-hole "which section" bucketing for the standard holes
+	 * of the configured course length (extra holes past it, if any, aren't
+	 * shown in the redesigned grid — same fixed-scope rule the old flat hole
+	 * bar's main grid had). A hole with no draft record yet is section 1: it
+	 * has neither tee nor basket, exactly like an empty `AnnotatedHole` would
+	 * score.
 	 */
 	let sidebarSections = $derived.by(() => {
 		const buckets: Record<1 | 2 | 3 | 4, number[]> = { 1: [], 2: [], 3: [], 4: [] };
-		for (let number = 1; number <= 18; number += 1) {
+		for (let number = 1; number <= courseLength; number += 1) {
 			const hole = holes.find((candidate) => candidate.number === number);
 			buckets[hole ? sectionOfHole(hole) : 1].push(number);
 		}
 		return buckets;
 	});
 
-	let allHolesConfirmed = $derived(sidebarSections[4].length === 18);
+	/**
+	 * CHSPT-65 guard against a contradictory short-course completion: true when
+	 * any standard hole ABOVE `limit` (but within the 1-18 grid scope) carries
+	 * a user-confirmed tee or basket. Confirmed pieces only, deliberately:
+	 * unconfirmed CV proposals routinely exist for holes 10-18 on a 9-hole
+	 * course and are noise, not contradiction. Holes past 18 stay out of scope
+	 * exactly as they always were for completion.
+	 */
+	function confirmedHolesBeyond(limit: number): boolean {
+		return holes.some(
+			(hole) =>
+				hole.number > limit &&
+				hole.number <= 18 &&
+				(isPieceConfirmed(hole.id, 'tee') || isPieceConfirmed(hole.id, 'basket'))
+		);
+	}
+
+	/**
+	 * Completion additionally requires no confirmed work beyond the configured
+	 * length — "All 9 holes confirmed" must never render while a confirmed hole
+	 * 10+ exists (the exported artifact carries ALL holes; see `handleDone`).
+	 * For an 18-hole course the beyond-range is empty, so this preserves the
+	 * pre-CHSPT-65 behavior exactly.
+	 */
+	let allHolesConfirmed = $derived(
+		sidebarSections[4].length === courseLength && !confirmedHolesBeyond(courseLength)
+	);
 
 	/**
 	 * The guided flow's final step: once all 18 tees/baskets are confirmed the
@@ -2177,9 +2216,9 @@
 		return { kind: 'confirmed', holeNumber: hole.number };
 	});
 
-	/** Finds the next hole in the guided 1–18 pass. Already-confirmed holes are skipped, but incomplete holes are still included so the flow never jumps over work just because it belongs to another sidebar section. */
+	/** Finds the next hole in the guided 1–N pass over the configured course length. Already-confirmed holes are skipped, but incomplete holes are still included so the flow never jumps over work just because it belongs to another sidebar section. */
 	function nextGuidedHoleNumber(afterNumber: number): number | null {
-		for (let number = Math.max(1, afterNumber + 1); number <= 18; number += 1) {
+		for (let number = Math.max(1, afterNumber + 1); number <= courseLength; number += 1) {
 			const hole = holes.find((candidate) => candidate.number === number);
 			if (!hole || sectionOfHole(hole) !== 4) return number;
 		}
@@ -2895,11 +2934,25 @@
 	}
 
 	/**
+	 * CHSPT-65: announces a course-source intake to the thrown-round lifecycle
+	 * (see `markCourseSourceIntake` in `$lib/session.ts` — first intake after a
+	 * keep attaches the round to this course; a further intake clears it as
+	 * stale). Course workflows only: gated to map mode, and to
+	 * session-participating instances so injected-editor unit tests never touch
+	 * the module-level slot. Called from all three paths a new course source
+	 * can land through: pane replace, stitch handoff import, draft open.
+	 */
+	function announceCourseSourceIntake(): void {
+		if (participatesInSession && annotationMode === 'map') markCourseSourceIntake();
+	}
+
+	/**
 	 * A replaced source image invalidates every existing hole's coordinates —
 	 * they're pixel positions into a specific raster, not portable to a
 	 * different one — so annotation state resets along with the domain refresh.
 	 */
 	function handleSourceDomainChanged(): void {
+		announceCourseSourceIntake();
 		refresh();
 		holes = [];
 		walkingPath = [];
@@ -2911,6 +2964,7 @@
 		importedLibraryEntryThisSession = false;
 		mapGeometryEdited = false;
 		bendPhaseDone = false;
+		courseLength = 18;
 		manualBendHoleId = null;
 		lastManualBendByHoleId = new Map();
 		eagerBendAnchorByHoleId = new Map();
@@ -3009,6 +3063,25 @@
 					xPx: proposal.basket!.xPx,
 					yPx: proposal.basket!.yPx
 				}));
+			// CHSPT-65: detection knows the course length better than the 18
+			// default. When every hole it found evidence for (a read number
+			// badge or an owned basket) falls in 1..9, this is a 9-hole
+			// course — follow it with the sidebar's Holes selector so the
+			// guided flow can actually complete at 9/9. One-directional and
+			// advisory: an empty/failed pass changes nothing, >9 evidence
+			// leaves the 18 default, the user can always switch back, and the
+			// same confirmed-work guard as the manual toggle applies.
+			const detectedHoleNumbers = [
+				...numberBadges.map((badge) => badge.number),
+				...labeledBaskets.map((basket) => basket.holeNumber)
+			];
+			if (
+				detectedHoleNumbers.length > 0 &&
+				Math.max(...detectedHoleNumbers) <= 9 &&
+				!confirmedHolesBeyond(9)
+			) {
+				courseLength = 9;
+			}
 			const assignedNumbers = result.numberDetection.candidates.filter(
 				(candidate) => candidate.label !== undefined
 			).length;
@@ -3169,6 +3242,7 @@
 			if (result.status === 'cancelled') return;
 			consumePendingHandoff();
 			pendingHandoff = null;
+			announceCourseSourceIntake();
 			refresh();
 		} finally {
 			importingHandoff = false;
@@ -3306,6 +3380,7 @@
 			prewarmedSourceId = null;
 			saveError = null;
 			activityMessage = `Opened draft "${result.image.fileName}".`;
+			announceCourseSourceIntake();
 			refresh();
 		} catch (error) {
 			openError = error instanceof Error ? error.message : 'Could not open the draft.';
@@ -3757,6 +3832,28 @@
 
 				{#if sourceImage() && annotationMode === 'map'}
 					<div class="tool-section hole-sidebar" data-testid="hole-sidebar">
+						<!-- CHSPT-65: minimal course-length choice (the two standard
+						     lengths) so a 9-hole course can actually reach the guided
+						     flow's completion state; arbitrary counts stay future work. -->
+						<div class="course-length-row" data-testid="course-length-row" role="group" aria-label="Course length">
+							<span class="course-length-label">Holes</span>
+							{#each [9, 18] as const as length (length)}
+								{@const blocked = length < courseLength && confirmedHolesBeyond(length)}
+								<button
+									type="button"
+									class="course-length-choice"
+									class:active={courseLength === length}
+									aria-pressed={courseLength === length}
+									data-testid="course-length-{length}"
+									disabled={blocked}
+									title={blocked ? `Holes above ${length} already have confirmed placements` : undefined}
+									onclick={() => (courseLength = length)}
+								>
+									{length}
+								</button>
+							{/each}
+						</div>
+
 						<div class="thresh-row">
 							<label for="min-usefulness-input">Min usefulness</label>
 							<input
@@ -3814,11 +3911,11 @@
 							<div class="done-panel bends-panel" data-testid="bend-phase-panel">
 								<h3>Mark corridor bends</h3>
 								<p>
-									All 18 tees and baskets are confirmed. Now walk the doglegs: pick a hole, then
+									All {courseLength} tees and baskets are confirmed. Now walk the doglegs: pick a hole, then
 									click the map wherever its fairway turns. Straight holes need nothing.
 								</p>
 								<div class="hole-grid">
-									{#each holes.filter((hole) => hole.number >= 1 && hole.number <= 18) as hole (hole.id)}
+									{#each holes.filter((hole) => hole.number >= 1 && hole.number <= courseLength) as hole (hole.id)}
 										<button
 											type="button"
 											class="hbox"
@@ -3850,7 +3947,7 @@
 						{:else if allHolesConfirmed}
 							<div class="done-panel" data-testid="course-complete-panel">
 								<h3>Course complete</h3>
-								<p>All 18 holes have confirmed tee and basket placements.</p>
+								<p>All {courseLength} holes have confirmed tee and basket placements.</p>
 								<div class="stack">
 									<button
 										type="button"
@@ -3870,6 +3967,22 @@
 										onclick={() => void handleUploadRoundFromCourse()}
 									>
 										Map a round on this course →
+									</button>
+									<!-- CHSPT-65: the fresh-course path continues straight to Create
+									     Graphics, bypassing (not replacing) Map Round. Reuses the exact
+									     header-Done pipeline: build the AnnotatedRound, publish the
+									     pending session artifact + course badges, best-effort Course
+									     Memory save, then navigate. Not gated on the explicit
+									     save-to-memory button above — handleDone performs its own
+									     best-effort library write. -->
+									<button
+										type="button"
+										class="upload-round-button"
+										data-testid="continue-to-create-graphics"
+										disabled={doneRunning}
+										onclick={() => void handleDone()}
+									>
+										Continue to Create Graphics →
 									</button>
 								</div>
 							</div>
@@ -5466,6 +5579,30 @@
 
 	.hole-sidebar {
 		gap: 0.7rem;
+	}
+
+	.course-length-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.72rem;
+		color: #a1a1aa;
+	}
+
+	.course-length-choice {
+		padding: 0.15rem 0.55rem;
+		border: 1px solid #3f3f46;
+		border-radius: 4px;
+		background: transparent;
+		color: #a1a1aa;
+		font-size: 0.72rem;
+		cursor: pointer;
+	}
+
+	.course-length-choice.active {
+		border-color: #22c55e;
+		background: #14532d;
+		color: #dcfce7;
 	}
 
 	.thresh-row {

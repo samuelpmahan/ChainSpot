@@ -4,7 +4,7 @@
  * `stitch/handoff.ts`, plus Course Memory's `courseBadgeSession.ts` and the
  * guided demo's `demo/stageInbox.ts`).
  *
- * One module, five independent mechanisms, all carrying state across
+ * One module, six independent mechanisms, all carrying state across
  * client-side SPA route changes so it survives navigation but never a full
  * page reload (nothing here is persisted to storage, IndexedDB, or the
  * server):
@@ -20,8 +20,11 @@
  * - **Pending course badges** (`setPendingCourseBadges` / …) — Course
  *   Memory's badge/basket anchors, which ride separately from
  *   `AnnotatedRound` because that artifact can never carry them.
+ * - **Thrown-round source** (`setThrownRoundSource` / …) — the played-round
+ *   image kept on Stitch Map as a semantic input distinct from the clean
+ *   course source, surviving through Annotate Course into Create Graphics.
  *
- * Vocabulary is uniform across all four: `pending*` names a one-shot
+ * Vocabulary is uniform across all of these: `pending*` names a one-shot
  * crossing slot (set by the sender, read-and-cleared by the receiver);
  * `retain`/`take` names the editor-retention pair; `active` (used only by
  * the AnnotatedRound slot) names the longer-lived slot described below.
@@ -261,6 +264,93 @@ export function setActiveAnnotatedRound(round: AnnotatedRound): void {
 
 export function getActiveAnnotatedRound(): AnnotatedRound | null {
 	return activeAnnotatedRound;
+}
+
+// ---------------------------------------------------------------------------
+// Thrown-round source (CHSPT-65)
+// ---------------------------------------------------------------------------
+
+/**
+ * The played-round screenshot (the one carrying UDisc's purple throw/walk
+ * graphics), preserved as its own semantic input from Stitch Map all the way
+ * into Create Graphics. It is deliberately NOT a `PendingHandoff`: the
+ * pending-handoff slot is a one-shot crossing consumed by a destination's
+ * image intake, and the thrown-round image must never enter the
+ * `source-overview`/`target-basemap` intake path — that is exactly the silent
+ * role substitution CHSPT-65 forbids. This slot is `active`-style instead
+ * (like `activeAnnotatedRound`): set once on Stitch Map, readable but never
+ * auto-consumed, surviving Stitch Map -> Annotate Course -> Create Graphics
+ * and any further SPA round trips until a replacement, an explicit clear, or
+ * a full page reload.
+ *
+ * Registration of these graphics onto the clean target is a follow-up ticket;
+ * nothing here decodes or transforms the blob.
+ */
+export interface ThrownRoundSource {
+	readonly blob: Blob;
+	readonly fileName: string;
+	/** Same derivation-fact contract as `PendingHandoff.provenance`, when the image came out of AutoCrop/AutoStitch. */
+	readonly provenance?: CompositeProvenance | null;
+}
+
+let thrownRoundSource: ThrownRoundSource | null = null;
+
+/**
+ * Workflow-scoping for the slot above. A thrown round is meaningful for
+ * exactly one course workflow; without a boundary, a round kept in workflow A
+ * and never consumed would silently present itself as workflow B's input —
+ * stale state indistinguishable from valid preserved state.
+ *
+ * The boundary is "a new course source image lands in Annotate Course"
+ * (`markCourseSourceIntake`, called from that route's three intake paths:
+ * pane replace, stitch handoff import, draft open). The rule:
+ *
+ *  - a freshly kept round is UNATTACHED; the first course intake after it
+ *    attaches it to that course (this is the normal Stitch Map -> keep ->
+ *    Annotate Course order, and also covers keeping the round after the
+ *    course already arrived — the keep resets attachment, the round rides
+ *    with the current course);
+ *  - a second course intake while a round is still ATTACHED means a new
+ *    workflow started without a new thrown round: the old round is stale and
+ *    is cleared rather than presented as the new course's input.
+ *
+ * Ordinary navigation (Annotate Course <-> Stitch Map <-> Create Graphics
+ * round trips) never touches this — only an actual source intake does. The
+ * deliberate conservative edge: re-importing a corrected course source
+ * mid-workflow counts as a fresh intake and drops an attached round (the user
+ * re-keeps it); erring toward dropping is safer than mislabeling.
+ */
+let thrownRoundAttachedToCourse = false;
+
+/** Replaces any previously kept thrown-round source — the roles clean-vs-thrown stay distinct, but within the thrown role the newest keep wins. The new round is unattached: it belongs to the next course intake. */
+export function setThrownRoundSource(source: ThrownRoundSource): void {
+	thrownRoundSource = source;
+	thrownRoundAttachedToCourse = false;
+}
+
+export function getThrownRoundSource(): ThrownRoundSource | null {
+	return thrownRoundSource;
+}
+
+export function clearThrownRoundSource(): void {
+	thrownRoundSource = null;
+	thrownRoundAttachedToCourse = false;
+}
+
+/**
+ * Announces that a new course source image landed in Annotate Course. See
+ * `thrownRoundAttachedToCourse` above for the full lifecycle rule: first
+ * intake attaches the pending round to that course; a further intake while
+ * still attached clears it as stale. No-op with nothing kept.
+ */
+export function markCourseSourceIntake(): void {
+	if (!thrownRoundSource) return;
+	if (thrownRoundAttachedToCourse) {
+		thrownRoundSource = null;
+		thrownRoundAttachedToCourse = false;
+		return;
+	}
+	thrownRoundAttachedToCourse = true;
 }
 
 // ---------------------------------------------------------------------------
