@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-08-17T04:22:00-05:00",
+  "scope": "ChainSpot Gates 1-2 MVP push",
+  "opencodeGo": {
+    "weeklyAllowanceAvailableAtStartPercent": 100,
+    "usageConsumedPercent": 0,
+    "cliVersion": "1.18.18",
+    "status": "blocked-before-execution",
+    "blocker": "No OpenCode Go credential was installed in the local CLI. No pasted or exposed secret was used.",
+    "meaningfulExecutorAssignments": []
+  },
+  "codexBudgetGuard": {
+    "requestedMaximumPercent": 50,
+    "additionalSubagentsSpawnedAfterGuard": 0,
+    "activeAgentsAtRecordTime": 1
+  },
+  "leadReviewObservations": [
+    {
+      "task": "CHSPT-71 played-round registration",
+      "lead": "Luna A",
+      "reviewerQualityScore": 2,
+      "firstAttemptUsable": true,
+      "defectsFoundBySol": [
+        "two-point similarity fit could be falsely rejected as reflection",
+        "closing registration discarded correction points",
+        "post-confirm edits left a stale confirmed transform"
+      ],
+      "reworkRounds": 1,
+      "finalResult": "accepted after browser-driven rework"
+    },
+    {
+      "task": "CHSPT-35 played-round extraction semantics",
+      "lead": "Luna B",
+      "reviewerQualityScore": 2,
+      "firstAttemptUsable": true,
+      "defectsFoundBySol": [
+        "runtime detector was not wired to the registered source",
+        "unbounded nearest-hole suggestion",
+        "detector scan order was presented as shot chronology",
+        "singular registration passed the type guard"
+      ],
+      "reworkRounds": 1,
+      "finalResult": "accepted after integration and browser-driven rework"
+    }
+  ],
+  "routingPolicy": {
+    "status": "insufficient OpenCode Go measurements",
+    "recommendations": [],
+    "note": "Do not infer a model routing policy until authenticated controlled comparisons produce measured ChainSpot results."
+  }
+}

@@ -52,6 +52,16 @@ describe('played round proposal seam', () => {
 		expect(Object.keys(accepted[1].shots[0])).toEqual(['id', 'landing']);
 	});
 
+	it('accepts a reviewed proposal at the operator-selected explicit order', () => {
+		const h1 = {
+			...hole('h1', 1, { xPx: 0, yPx: 20 }, { xPx: 100, yPx: 20 }),
+			shots: [{ id: 'existing', landing: { xPx: 80, yPx: 20 } }]
+		};
+		const [proposal] = createPlayedRoundProposals([candidate(20, 0)], registration, [h1]);
+		const accepted = acceptPlayedRoundProposal([h1], proposal, 'h1', () => 'detected', 0);
+		expect(accepted[0].shots.map((shot) => shot.id)).toEqual(['detected', 'existing']);
+	});
+
 	it('returns no assignment when the supplied geometry is outside the review distance', () => {
 		const proposals = createPlayedRoundProposals([candidate(20, 0)], registration, [hole('h1', 1, { xPx: 0, yPx: 200 }, { xPx: 100, yPx: 200 })], { maxSuggestionDistancePx: 10 });
 		expect(proposals[0].suggestedHoleId).toBeNull();

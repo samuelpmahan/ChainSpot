@@ -86,6 +86,7 @@
 	import { naipImageGeoReference } from '$lib/elevationProfile';
 	import type { GeoRasterReference } from '$lib/elevationProfile';
 	import PlayedRoundRegistration from '$lib/components/PlayedRoundRegistration.svelte';
+	import PlayedRoundProposalReview from '$lib/components/PlayedRoundProposalReview.svelte';
 	import type { UsablePlayedRoundRegistration } from '$lib/playedRoundContract';
 	import type { RegistrationProofPoint } from '$lib/scene';
 
@@ -494,6 +495,12 @@
 	function invalidatePlayedRoundRegistration(): void {
 		playedRoundRegistrationConfirmed = null;
 		activityMessage = 'Played-round registration changed; review and confirm the corrected fit.';
+	}
+
+	function updatePlayedRoundHoles(holes: readonly AnnotatedHole[]): void {
+		editor.setHoles(holes);
+		refreshCount += 1;
+		activityMessage = 'Played-round throw review updated the editable round.';
 	}
 
 	function canAddCorrespondence(): boolean {
@@ -2185,6 +2192,14 @@
 				onProofPoints={(points) => (registrationProofPoints = points)}
 			/>
 		</div>
+	{/if}
+
+	{#if playedRoundRegistrationConfirmed}
+		<PlayedRoundProposalReview
+			registration={playedRoundRegistrationConfirmed}
+			holes={currentHoles()}
+			onHolesChange={updatePlayedRoundHoles}
+		/>
 	{/if}
 
 	{#if cleanTargetFirst()}

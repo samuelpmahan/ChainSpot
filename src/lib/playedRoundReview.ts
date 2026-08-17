@@ -10,7 +10,7 @@
 import { applyTransform } from './alignment/transform';
 import { deriveCorridorCenterline } from './corridor';
 import type { AnnotatedHole, SourcePoint } from './domain/annotatedRound';
-import { addShot } from './holeAnnotation';
+import { addShot, reorderShot } from './holeAnnotation';
 import type { CreateId } from './holeAnnotation';
 import { acceptCandidate } from './cv/types';
 import type { LandingMarkerCandidate } from './autoAnnotation/landingDropletDetection';
@@ -95,9 +95,12 @@ export function acceptPlayedRoundProposal(
 	holes: readonly AnnotatedHole[],
 	proposal: PlayedRoundProposal,
 	holeId: string,
-	createId: CreateId
+	createId: CreateId,
+	toIndex?: number
 ): AnnotatedHole[] {
-	return addShot(holes, holeId, acceptCandidate(proposal.cleanPoint), createId);
+	const shotId = createId();
+	const accepted = addShot(holes, holeId, acceptCandidate(proposal.cleanPoint), () => shotId);
+	return toIndex === undefined ? accepted : reorderShot(accepted, holeId, shotId, toIndex);
 }
 
 /** Explicit type guard for callers that need to reject malformed review input. */
