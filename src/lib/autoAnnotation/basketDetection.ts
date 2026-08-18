@@ -4,7 +4,7 @@
  * The historical worker implementation lives unchanged in
  * `basketDetectionLegacy.ts`. This facade adds only the dependency-driven
  * source-prior seam: exact Stitch Map evidence can satisfy badge/basket inputs
- * without booting annotation OpenCV; anything incomplete or incoherent falls
+ * without awaiting annotation OpenCV; anything incomplete or incoherent falls
  * through to the existing worker unchanged.
  */
 export * from './basketDetectionLegacy';
@@ -15,10 +15,7 @@ import {
   type CourseDetectionProgress,
   type CourseDetectionResult
 } from './basketDetectionLegacy';
-import {
-  hasRenderedSourceLandmarkEvidence,
-  sourceLandmarkEvidenceForRaster
-} from './sourceLandmarkBridge';
+import { sourceLandmarkEvidenceForRaster } from './sourceLandmarkBridge';
 import {
   canUseSourcePriorCoursePath,
   detectCourseFromSourcePriors
@@ -31,13 +28,14 @@ function nowMs(): number {
     : Date.now();
 }
 
-/** Accurate name for the old basket-specific preload API. */
+/**
+ * Accurate name for the old basket-specific preload API. AnnotationWorkspace
+ * invokes this speculatively (`void ...`) and never awaits it before the
+ * source-prior path. Keep that warm-up behavior unchanged so an incomplete
+ * handoff does not regress historical fallback latency; a complete source
+ * handoff simply does not depend on the warm-up finishing.
+ */
 export function prewarmAnnotationVision(): Promise<void> {
-  // Do not eagerly put annotation CV back on the critical path while an exact
-  // Stitch Map evidence handoff is pending. The exact-byte lookup below still
-  // decides whether that evidence is usable; an incomplete handoff therefore
-  // only defers speculative warm-up, never changes correctness.
-  if (hasRenderedSourceLandmarkEvidence()) return Promise.resolve();
   return prewarmBasketDetectionLegacy();
 }
 
