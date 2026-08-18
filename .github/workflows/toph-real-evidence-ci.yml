@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/toph-real-evidence
+  pull_request:
 
 jobs:
   verify:
