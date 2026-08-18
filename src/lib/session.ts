@@ -354,6 +354,36 @@ export function markCourseSourceIntake(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Front-door auto-advance (single-page consolidated flow)
+// ---------------------------------------------------------------------------
+
+/**
+ * One-shot flag set by the front door (`/`) when it deposits captures for
+ * Stitch Map via `setPendingStitchCaptures`. Stitch Map consumes it when
+ * claiming those captures; a subsequent `'auto'`-confidence pipeline success
+ * then continues straight to Annotate Course with no "Continue" click. A
+ * `'review'`-confidence result ignores it and keeps the existing result
+ * screen with manual correction open — low confidence always gets review.
+ *
+ * Deliberately NOT set by the guided demo's inbox (a demo visitor should see
+ * the result screen) or by direct /stitch-map visits (a bookmarked user may
+ * want the result screen even on an auto result — e.g. to send the composite
+ * to `target-basemap` instead). Same lifetime as every other one-shot slot
+ * here: survives SPA navigation, cleared by consumption or a full reload.
+ */
+let frontDoorAutoAdvance = false;
+
+export function setFrontDoorAutoAdvance(): void {
+	frontDoorAutoAdvance = true;
+}
+
+export function consumeFrontDoorAutoAdvance(): boolean {
+	const value = frontDoorAutoAdvance;
+	frontDoorAutoAdvance = false;
+	return value;
+}
+
+// ---------------------------------------------------------------------------
 // Pending course badges (Course Memory)
 // ---------------------------------------------------------------------------
 
