@@ -6,6 +6,7 @@
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import StitchTileSlot from '$lib/components/StitchTileSlot.svelte';
 	import StitchAlignmentReview from '$lib/components/StitchAlignmentReview.svelte';
+	import ThrownRoundPrompt from '$lib/components/ThrownRoundPrompt.svelte';
 	import { clickSlopPx, ViewportController } from '$lib/viewport.svelte';
 	import type { ViewportFitTarget } from '$lib/viewport.svelte';
 	import { decodeImageFile, isSupportedMimeType, readFileBytes, sha256Hex } from '$lib/imageIntake';
@@ -54,6 +55,7 @@
 	import { detectCourseCandidates } from '$lib/autoAnnotation/basketDetection';
 	import {
 		clearThrownRoundSource,
+		consumeFrontDoorAutoAdvance,
 		getPendingHandoff,
 		getThrownRoundSource,
 		setPendingHandoff,
@@ -568,8 +570,15 @@
 		setPhase('processing');
 		try {
 			const outcome = await runStitchPipeline(files, { applyCropMargin: addCropMargin });
-			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
+			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) {
+				// A newer import superseded this one before it could commit — an
+				// armed flag tied to THIS run must never leak into whatever result
+				// the superseding run eventually publishes.
+				frontDoorAutoAdvanceArmed = false;
+				return;
+			}
 			if (!outcome.ok) {
+				frontDoorAutoAdvanceArmed = false;
 				pipelineError = outcome.failure.message;
 				setPhase('import');
 				return;
@@ -577,6 +586,7 @@
 			await commitPipelineSuccess(outcome.result);
 			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
 		} catch (error) {
+			frontDoorAutoAdvanceArmed = false;
 			if (!decodeCoordinator.isCurrent(SMART_IMPORT_BATCH, generation)) return;
 			pipelineError =
 				error instanceof Error ? error.message : 'Could not process the selected screenshots.';
@@ -618,6 +628,17 @@
 				? `Stitched from ${countText}.`
 				: `Stitched from ${countText}. Review recommended — see Adjust manually.`;
 		void runBadgeDetection(blob, provenance.outputWidthPx, provenance.outputHeightPx);
+		// CHSPT-front-door: a claim armed by the front door continues straight
+		// to Annotate Course with no "Continue" click, but only for an
+		// `'auto'`-confidence result — `'review'` always keeps today's result
+		// screen with manual correction already open (set above) so a weak
+		// result never slips past unseen. One-shot either way: consumed here
+		// regardless of confidence so a later manual import on this same
+		// mounted page never inherits it.
+		if (frontDoorAutoAdvanceArmed) {
+			frontDoorAutoAdvanceArmed = false;
+			if (success.confidence === 'auto') handleUseAs('source-overview');
+		}
 	}
 
 	/**
@@ -1971,6 +1992,20 @@ async function handleAlignmentAdjusted(result: {
 		warmSmartStitchWorker();
 	});
 
+	/**
+	 * One-shot, page-local mirror of `consumeFrontDoorAutoAdvance()` — armed
+	 * only inside `claimCaptures` below, immediately before that claim's
+	 * `runImport` call, and read back by `commitPipelineSuccess` once that
+	 * import lands. A page-local variable (not the session module) because the
+	 * arm/consume pairing must stay scoped to THIS claim's own pipeline run:
+	 * the front door never arms it for the guided demo's inbox or a direct
+	 * `/stitch-map` visit (neither ever calls `setFrontDoorAutoAdvance`), and a
+	 * manual import or per-slot fill on this same mounted page must never
+	 * inherit an armed flag left over from an earlier claim — see the clears
+	 * in `runImport`'s failure/stale-generation paths below.
+	 */
+	let frontDoorAutoAdvanceArmed = false;
+
 	onMount(() => {
 		// CHSPT-65: a thrown round kept earlier this session (e.g. before a
 		// round trip to another route) surfaces in the indicator immediately.
@@ -1983,7 +2018,15 @@ async function handleAlignmentAdjusted(result: {
 		// by the demo.
 		const claimCaptures = (): void => {
 			const captures = takePendingStitchCaptures();
-			if (captures && captures.length > 0) void runImport(captures);
+			if (captures && captures.length > 0) {
+				// Front-door claim: arm the one-shot auto-advance flag BEFORE
+				// `runImport` starts, so `commitPipelineSuccess` can see it once
+				// this pipeline run completes. `consumeFrontDoorAutoAdvance()`
+				// returns false for the guided demo's inbox and for captures
+				// deposited outside the front door — those never arm it.
+				frontDoorAutoAdvanceArmed = consumeFrontDoorAutoAdvance();
+				void runImport(captures);
+			}
 		};
 		claimCaptures();
 		// Captures deposited while this page is already mounted — the rail arming
@@ -2070,44 +2113,11 @@ async function handleAlignmentAdjusted(result: {
 				<!-- CHSPT-65: asked BEFORE any crop/stitch — a thrown-round
 				     screenshot mixed into the batch must never reach the clean
 				     composite. One thumbnail per selected capture. -->
-				<div class="pre-import-prompt" data-testid="pre-import-prompt">
-					<h3>Before stitching — is one of these the thrown round?</h3>
-					<p class="section-note">
-						The thrown round (the screenshot with the purple round path) is set aside for Create
-						Graphics and kept out of the clean map. Pick it here, or stitch everything as clean.
-					</p>
-					<ul class="pre-import-grid">
-						{#each pendingImport as item, index (item.url)}
-							<li class="pre-import-item">
-								<img class="pre-import-thumb" src={item.url} alt={item.file.name} />
-								<span class="pre-import-name">{item.file.name}</span>
-								<button
-									type="button"
-									class="thrown-round-pick"
-									data-testid="pre-import-thrown-{index}"
-									onclick={() => handlePreImportChoice(index)}
-								>
-									Thrown round
-								</button>
-							</li>
-						{/each}
-					</ul>
-					<div class="pre-import-actions">
-						<button
-							type="button"
-							class="btn primary"
-							data-testid="pre-import-none"
-							onclick={() => handlePreImportChoice(null)}
-						>
-							{pendingImport.length === 1
-								? 'No thrown round — crop it as the clean map'
-								: `No thrown round — stitch all ${pendingImport.length}`}
-						</button>
-						<button type="button" class="btn ghost" data-testid="pre-import-cancel" onclick={handlePreImportCancel}>
-							Cancel import
-						</button>
-					</div>
-				</div>
+				<ThrownRoundPrompt
+					items={pendingImport}
+					onChoose={handlePreImportChoice}
+					onCancel={handlePreImportCancel}
+				/>
 			{:else}
 			<div class="import-panel">
 				<section class="smart-import-section" aria-labelledby="smart-import-heading">
@@ -2320,63 +2330,6 @@ main.result-mode > h2 { display: none; }
 		background: #18181b;
 		overflow: hidden;
 		margin: 0 auto;
-	}
-
-	.pre-import-prompt {
-		display: flex;
-		flex-direction: column;
-		gap: 0.7rem;
-		padding: 0.9rem 1rem;
-		border: 1px solid #4c1d95;
-		border-radius: 8px;
-		background-color: #1e1e24;
-	}
-
-	.pre-import-prompt h3 {
-		margin: 0;
-		font-size: 1rem;
-		color: #f4f4f5;
-	}
-
-	.pre-import-grid {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.8rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.pre-import-item {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.35rem;
-		width: 160px;
-	}
-
-	.pre-import-thumb {
-		width: 160px;
-		height: 120px;
-		object-fit: cover;
-		border: 1px solid #3f3f46;
-		border-radius: 6px;
-		background: #101014;
-	}
-
-	.pre-import-name {
-		max-width: 160px;
-		font-size: 0.75rem;
-		color: #a1a1aa;
-		overflow-wrap: anywhere;
-		text-align: center;
-	}
-
-	.pre-import-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.6rem;
-		align-items: center;
 	}
 
 	.result-sources {
@@ -2765,13 +2718,6 @@ main.result-mode > h2 { display: none; }
 	.btn.ghost {
 		background: transparent;
 		color: #a1a1aa;
-	}
-
-	.btn.primary {
-		background: #fbbf24;
-		border-color: #fbbf24;
-		color: #241804;
-		font-weight: 650;
 	}
 
 	.btn:disabled {
