@@ -159,7 +159,7 @@ describe('tee bootstrap decision policy', () => {
 		expect(result.assignments).toHaveLength(0);
 	});
 
-	it('suppresses distant REVIEW rays outside the distance band learned from AUTO holes', () => {
+	it('keeps distant REVIEW rays even when AUTO holes establish a much shorter typical distance', () => {
 		const raster = blankRaster(320, 220);
 		const candidates: TeePadCandidate[] = [];
 		const badges: TeeBadgeAnchor[] = [];
@@ -170,13 +170,18 @@ describe('tee bootstrap decision policy', () => {
 			badges.push(badge(index + 1, 100, y));
 		}
 		// A weak pad-like structure points exactly at badge 5, but at more
-		// than twice the distance established by the four AUTO holes.
+		// than twice the distance established by the four AUTO holes. Distance
+		// is not a hard rejection signal: preserve the candidate for downstream
+		// scoring/pruning instead of deleting a legitimate long-hole hypothesis.
 		drawPad(raster, 40, 200, 30, 0);
 		candidates.push(candidate(40, 200, 20, 12, false));
 		badges.push(badge(5, 190, 200));
 
 		const result = assessTeeBootstrap(raster, candidates, badges);
-		expect(result.holes.find((hole) => hole.holeNumber === 5)?.decision).toBe('unresolved');
+		const hole = result.holes.find((candidateHole) => candidateHole.holeNumber === 5);
+		expect(hole?.decision).toBe('review');
+		expect(hole?.assignment?.candidate.xPx).toBe(40);
+		expect(hole?.assignment?.badgeRay?.distancePx).toBeGreaterThan(140);
 	});
 
 	it('suppresses AUTO when two badges are similarly compatible with the same axis', () => {
