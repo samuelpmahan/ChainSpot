@@ -1,0 +1,26 @@
+name: Toph real evidence CI
+
+on:
+  push:
+    branches:
+      - fix/toph-real-evidence
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Checkout Toph evidence viewer
+        run: git clone --depth 1 --branch claude/toph-viewer-usability-audit-4e2soi https://github.com/samuelpmahan/toph.git ../toph
+      - name: Install Toph
+        run: npm ci
+        working-directory: ../toph
+      - run: npm run check
+      - name: Prove real evidence on The Rec
+        run: npx tsx scripts/toph-real-evidence-proof.ts ../toph
