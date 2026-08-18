@@ -1,0 +1,79 @@
+name: Temporary MiddleOut integration verification
+
+on:
+  push:
+    branches:
+      - integration/middleout-prestaging-20260818
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply exact MiddleOut diagnostic UI patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/lib/components/AnnotationWorkspace.svelte')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "\tlet shadowOverlayEnabled = $state(false);\n\tlet shadowOverlayRender = $state<ShadowOverlayRender | null>(null);\n\t/** The run behind the current overlay — also the target of confuser annotations. */",
+                  "\tlet shadowOverlayEnabled = $state(false);\n\tlet shadowOverlayRender = $state<ShadowOverlayRender | null>(null);\n\t// --- MiddleOut ribbon-recovery diagnostic overlay (see middleOutRibbon.ts).\n\t// Display-only, never an input to any annotation behavior -- same rule as\n\t// the shadow overlay above. Data is already synchronously present on\n\t// `courseDetection.middleOut`, so this toggle needs no async refresh.\n\tlet middleOutOverlayEnabled = $state(false);\n\tfunction toggleMiddleOutOverlay(): void {\n\t\tmiddleOutOverlayEnabled = !middleOutOverlayEnabled;\n\t}\n\t/** The run behind the current overlay — also the target of confuser annotations. */"
+              ),
+              (
+                  "\t\t\t\t\t{/if}\n\t\t\t\t\t{#each visibleHoles as overlayHole (overlayHole.id)}\n\t\t\t\t\t\t{@const band = deriveCorridorBand(overlayHole)}",
+                  "\t\t\t\t\t{/if}\n\t\t\t\t\t{#if middleOutOverlayEnabled && courseDetection?.middleOut}\n\t\t\t\t\t\t<!-- MiddleOut ribbon recovery: thin centerline over the raster, not\n\t\t\t\t\t\t     a filled corridor -- this is CV evidence to inspect, not a\n\t\t\t\t\t\t     finished graphic. Never an input to any annotation behavior. -->\n\t\t\t\t\t\t{#each courseDetection.middleOut.holes as middleOutHole (middleOutHole.holeNumber)}\n\t\t\t\t\t\t\t<polyline\n\t\t\t\t\t\t\t\tpoints={middleOutHole.dense.map((point) => `${point.xPx},${point.yPx}`).join(' ')}\n\t\t\t\t\t\t\t\tclass=\"middleout-path\"\n\t\t\t\t\t\t\t\tdata-testid=\"middleout-path-{middleOutHole.holeNumber}\"\n\t\t\t\t\t\t\t><title>Hole {middleOutHole.holeNumber} primary</title></polyline>\n\t\t\t\t\t\t\t{#each middleOutHole.alternates as alternate, index (index)}\n\t\t\t\t\t\t\t\t<polyline\n\t\t\t\t\t\t\t\t\tpoints={alternate.dense.map((point) => `${point.xPx},${point.yPx}`).join(' ')}\n\t\t\t\t\t\t\t\t\tclass=\"middleout-alt\"\n\t\t\t\t\t\t\t\t\tclass:weak={!alternate.valid}\n\t\t\t\t\t\t\t\t\tdata-testid=\"middleout-alt-{middleOutHole.holeNumber}-{index}\"\n\t\t\t\t\t\t\t\t><title>Hole {middleOutHole.holeNumber} alt {alternate.endpoint} rank {alternate.rank}</title></polyline>\n\t\t\t\t\t\t\t{/each}\n\t\t\t\t\t\t{/each}\n\t\t\t\t\t{/if}\n\t\t\t\t\t{#each visibleHoles as overlayHole (overlayHole.id)}\n\t\t\t\t\t\t{@const band = deriveCorridorBand(overlayHole)}"
+              ),
+              (
+                  "\t\t\tShadow ribbon overlay\n\t\t</label>\n\t\t{#if shadowOverlayEnabled}",
+                  "\t\t\tShadow ribbon overlay\n\t\t</label>\n\t\t{#if courseDetection?.middleOut}\n\t\t\t<label class=\"dev-tools-toggle\" class:active={middleOutOverlayEnabled}>\n\t\t\t\t<input\n\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\tchecked={middleOutOverlayEnabled}\n\t\t\t\t\tonchange={toggleMiddleOutOverlay}\n\t\t\t\t\tdata-testid=\"middleout-overlay-toggle\"\n\t\t\t\t/>\n\t\t\t\tMiddleOut ribbons\n\t\t\t</label>\n\t\t\t{#if middleOutOverlayEnabled}\n\t\t\t\t<span class=\"middleout-legend\" data-testid=\"middleout-overlay-legend\">\n\t\t\t\t\t{courseDetection.middleOut.holes.length} of 18 holes recovered ·\n\t\t\t\t\tsupport field {courseDetection.middleOut.supportFieldMs.toFixed(0)}ms ·\n\t\t\t\t\tpaths {courseDetection.middleOut.pathsMs.toFixed(0)}ms\n\t\t\t\t</span>\n\t\t\t{/if}\n\t\t{/if}\n\t\t{#if shadowOverlayEnabled}"
+              ),
+              (
+                  "\t.shadow-overlay-legend .swatch.texture {\n\t\tbackground: rgb(96 165 250 / 70%);\n\t}\n\n\t.computer-sees-toggle {",
+                  "\t.shadow-overlay-legend .swatch.texture {\n\t\tbackground: rgb(96 165 250 / 70%);\n\t}\n\n\t.middleout-legend {\n\t\tdisplay: inline-flex;\n\t\talign-items: center;\n\t\tfont-size: 0.68rem;\n\t\tcolor: #a1a1aa;\n\t}\n\n\t/* Thin CV-evidence centerlines, not a filled corridor -- readable enough\n\t   to still inspect ribbon edges/roads/powerlines/C1-C2 rings underneath. */\n\t.middleout-path {\n\t\tfill: none;\n\t\tstroke: #fb923c;\n\t\tstroke-width: 3.5;\n\t\tstroke-linecap: round;\n\t\tstroke-linejoin: round;\n\t\tvector-effect: non-scaling-stroke;\n\t\topacity: 0.9;\n\t}\n\n\t.middleout-alt {\n\t\tfill: none;\n\t\tstroke: #fb923c;\n\t\tstroke-width: 2.5;\n\t\tstroke-linecap: round;\n\t\tstroke-linejoin: round;\n\t\tvector-effect: non-scaling-stroke;\n\t\topacity: 0.38;\n\t}\n\n\t/* Alternate the P6 candidate pool could not score (see capIconFalsePositives/lowParScore null). */\n\t.middleout-alt.weak {\n\t\topacity: 0.2;\n\t}\n\n\t.computer-sees-toggle {"
+              )
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one UI patch anchor, found {count}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+
+      - name: Verify patch shape
+        run: |
+          git diff --check
+          test "$(git diff --numstat -- src/lib/components/AnnotationWorkspace.svelte | awk '{print $1}')" = "80"
+          test "$(git diff --numstat -- src/lib/components/AnnotationWorkspace.svelte | awk '{print $2}')" = "0"
+
+      - run: npm ci
+      - name: Svelte and TypeScript checks
+        run: npm run check
+      - name: Auto-annotation unit tests
+        run: npm test -- --run src/lib/autoAnnotation
+      - name: Production build
+        run: npm run build
+
+      - name: Commit verified UI transplant
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/components/AnnotationWorkspace.svelte
+          git commit -m "Add MiddleOut diagnostic overlay to current Annotate Course"
+          git push origin HEAD:integration/middleout-prestaging-20260818
