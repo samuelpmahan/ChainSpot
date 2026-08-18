@@ -43,6 +43,7 @@ const EDGE_SPECS: readonly EdgeSpec[] = [
 
 const captureDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'resources', 'real-capture');
 const MATCH_TOLERANCE_PX = 4;
+const SEMANTIC_ACCEPTANCE_TOLERANCE_PX = 1;
 
 function nowMs(): number {
 	return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -248,9 +249,32 @@ describe.skipIf(!available())('semantic stitch real-capture benchmark', () => {
 				writeFileSync(join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
 			}
 
+			// Real-capture acceptance. These assertions intentionally avoid timing
+			// thresholds: timings are reported as evidence but runner speed is not a
+			// correctness property. The fixed fixture must, however, retain both
+			// semantic families across all four sources and solve every adjacent pair.
 			expect(batch.sources).toHaveLength(4);
-			expect(landmarkInventory.reduce((sum, source) => sum + source.total, 0)).toBeGreaterThan(0);
-			for (const row of rows) expect(row.cvMaxAxisErrorPx).toBeLessThanOrEqual(MATCH_TOLERANCE_PX);
+			expect(batch.scales.badge?.sourceSupport).toBe(4);
+			expect(batch.scales.basket?.sourceSupport).toBe(4);
+			expect(batch.scales.badge?.widthPx).toBeGreaterThanOrEqual(52);
+			expect(batch.scales.badge?.widthPx).toBeLessThanOrEqual(57);
+			expect(batch.scales.badge?.heightPx).toBeGreaterThanOrEqual(40);
+			expect(batch.scales.badge?.heightPx).toBeLessThanOrEqual(44);
+			expect(landmarkInventory.reduce((sum, source) => sum + source.badges, 0)).toBeGreaterThanOrEqual(20);
+			expect(landmarkInventory.reduce((sum, source) => sum + source.baskets, 0)).toBeGreaterThanOrEqual(20);
+			const overlapMisses = edgeDiagnostics.reduce(
+				(sum, edge) => sum + edge.aMissingInB + edge.bMissingInA,
+				0
+			);
+			expect(overlapMisses).toBeLessThanOrEqual(1);
+			for (const row of rows) {
+				expect(row.sharedTruthConsistentDetections).toBeGreaterThanOrEqual(2);
+				expect(row.semanticOk).toBe(true);
+				expect(row.semanticInliers).toBeGreaterThanOrEqual(2);
+				expect(row.semanticMaxAxisErrorPx).not.toBeNull();
+				expect(row.semanticMaxAxisErrorPx as number).toBeLessThanOrEqual(SEMANTIC_ACCEPTANCE_TOLERANCE_PX);
+				expect(row.cvMaxAxisErrorPx).toBeLessThanOrEqual(MATCH_TOLERANCE_PX);
+			}
 		},
 		120000
 	);
