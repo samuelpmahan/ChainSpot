@@ -52,8 +52,8 @@
 		<a
 			href="{base}/annotate-course"
 			class="nav-link"
-			class:active={page.url.pathname === `${base}/annotate-course` || page.url.pathname === `${base}/`}
-			aria-current={page.url.pathname === `${base}/annotate-course` || page.url.pathname === `${base}/` ? 'page' : undefined}
+			class:active={page.url.pathname === `${base}/annotate-course`}
+			aria-current={page.url.pathname === `${base}/annotate-course` ? 'page' : undefined}
 		>
 			Annotate Course
 		</a>
