@@ -1,48 +1,23 @@
 /**
- * ChainSpot Stitch Map pipeline renderer (CHSPT-50/55): paints a
- * `DraftComposite` (crop + transform + coveragePolygon + paintOrder per
- * source, from `stitchPipeline.ts`/`poseGraph.ts`) to raster bytes and seals
- * `CompositeProvenance`. This is `pipelineResult.ts`'s `renderPipelineComposite`
- * — the ONE function that touches pixels for both N=1 (AutoCrop only,
- * `compositingPolicy: 'single-source-v1'`) and N>1 (Stitch,
- * `'stitch-ascending-bottom-right-v1'`); see `stitchPipeline.ts` for how both
- * paths build the same `DraftComposite` shape and land here identically.
+ * Deterministic Stitch Map renderer (CHSPT-50/55) plus CHSPT-79's exact-byte
+ * source-landmark evidence registration.
  *
- * RESAMPLING (load-bearing; see `domain/provenance.ts`'s module doc in
- * full): a source whose `transform` is EXACTLY an integer pure translation
- * (`[1,0,0,1,e,f]`, `e`/`f` integers) is painted with a direct pixel copy —
- * the same "no resampling occurs" guarantee today's `render.ts` relies on.
- * Every other source (real rotation, non-uniform/non-integer scale, or
- * shear) is painted by `paintResampled` below: a hand-written, pure-
- * TypeScript nearest-neighbour sampler that inverse-maps each output pixel
- * back into the source's raster space via `invertSourceTransform` and reads
- * one source pixel per output pixel. Nearest-neighbour (`resampling:
- * 'nearest'`, never `'bilinear'`) is the deliberate choice here: bilinear
- * would blend multiple source pixels per output pixel, and while that math
- * is itself perfectly reproducible, it is meaningfully more code (edge
- * handling, weight computation) for a visual-quality gain that is out of
- * scope for CHSPT-50 — the requirement is determinism, not visual quality,
- * and nearest-neighbour is the simplest sampler that satisfies it exactly.
- * Both paths are pure integer/floating-point arithmetic over raw pixel
- * arrays with no browser API in the loop, so they reproduce bit-for-bit
- * across any environment running this same code — unlike a transformed
- * `drawImage`, which browsers do not guarantee that for.
- *
- * `compositeDraftPixels` (the actual per-pixel compositor) is a pure
- * function over already-extracted RGBA buffers with no DOM dependency, so
- * the determinism guarantee above is directly testable by calling it twice
- * with the same inputs and comparing bytes — no canvas/browser needed for
- * that test at all. `renderPipelineComposite` is the thin, DOM-touching
- * wrapper: it extracts each source's pixels via one straight, unscaled 1:1
- * `drawImage`+`getImageData` (an exact copy, not a resampling operation —
- * safe for the same reason pure-translation compositing is), runs the pure
- * compositor, encodes the result, and hashes the encoded bytes.
+ * Integer translations copy source pixels directly. Any other affine uses a
+ * hand-written nearest-neighbour inverse map. The encoded PNG is hashed and
+ * that hash seals provenance; source-landmark evidence is registered only
+ * after that seal, so Annotate can later require an exact raster-byte match.
  */
 import { applyAffine6 } from '../geometry/affine6';
 import type { Affine6Coefficients } from '../geometry/affine6';
 import { invertSourceTransform, sealCompositeProvenance } from '../domain/provenance';
-import type { CompositeProvenance, DraftComposite, SourceCapture, SourceTransform } from '../domain/provenance';
+import type {
+	CompositeProvenance,
+	DraftComposite,
+	SourceCapture,
+	SourceTransform
+} from '../domain/provenance';
 import { sha256Hex } from '../imageIntake';
+import { recordRenderedSourceLandmarkEvidence } from '../autoAnnotation/sourceLandmarkBridge';
 import { MAX_CANVAS_DIMENSION } from './render';
 import type { RenderPipelineComposite as RenderPipelineCompositeContract } from './pipelineResult';
 
@@ -59,12 +34,10 @@ export class PipelineRenderError extends Error {
 export interface RgbaBuffer {
 	readonly widthPx: number;
 	readonly heightPx: number;
-	/** RGBA, 4 bytes per pixel, row-major, top-left origin. */
 	readonly data: Uint8ClampedArray;
 }
 
 export interface PipelineRenderEnv {
-	/** Extracts `image`'s pixels at its own native `widthPx x heightPx`, via a straight unscaled 1:1 draw — an exact copy, never a resample. */
 	extractSourcePixels(image: HTMLImageElement, widthPx: number, heightPx: number): RgbaBuffer;
 	encode(pixels: RgbaBuffer): Promise<Blob>;
 }
@@ -76,7 +49,10 @@ export const defaultPipelineRenderEnv: PipelineRenderEnv = {
 		canvas.height = heightPx;
 		const context = canvas.getContext('2d');
 		if (!context) {
-			throw new PipelineRenderError('canvas', 'Could not allocate an offscreen canvas to read source pixels.');
+			throw new PipelineRenderError(
+				'canvas',
+				'Could not allocate an offscreen canvas to read source pixels.'
+			);
 		}
 		context.drawImage(image, 0, 0, widthPx, heightPx);
 		const imageData = context.getImageData(0, 0, widthPx, heightPx);
@@ -89,7 +65,12 @@ export const defaultPipelineRenderEnv: PipelineRenderEnv = {
 			canvas.height = pixels.heightPx;
 			const context = canvas.getContext('2d');
 			if (!context) {
-				reject(new PipelineRenderError('canvas', 'Could not allocate an offscreen canvas to encode the composite.'));
+				reject(
+					new PipelineRenderError(
+						'canvas',
+						'Could not allocate an offscreen canvas to encode the composite.'
+					)
+				);
 				return;
 			}
 			const imageData = context.createImageData(pixels.widthPx, pixels.heightPx);
@@ -103,14 +84,10 @@ export const defaultPipelineRenderEnv: PipelineRenderEnv = {
 	}
 };
 
-/**
- * True only for an EXACT integer pure translation — the one case safe to
- * paint with a direct pixel copy. Exported so `stitchPipeline.ts` can decide
- * `CompositeProvenance.resampling` ('none' vs 'nearest') with the identical
- * criterion this renderer actually paints with, rather than a second,
- * potentially-drifting copy of the same check.
- */
-export function integerTranslationOf(transform: SourceTransform): { dxPx: number; dyPx: number } | null {
+/** True only for an exact integer pure translation. */
+export function integerTranslationOf(
+	transform: SourceTransform
+): { dxPx: number; dyPx: number } | null {
 	const [a, b, c, d, e, f] = transform.coefficients;
 	if (a !== 1 || b !== 0 || c !== 0 || d !== 1) return null;
 	if (!Number.isInteger(e) || !Number.isInteger(f)) return null;
@@ -144,15 +121,6 @@ function paintIntegerTranslation(
 	}
 }
 
-/**
- * Hand-written nearest-neighbour resampler (see the module doc comment for
- * why nearest and why hand-written): for every output pixel inside this
- * source's `coveragePolygon` bounding box, inverse-maps the pixel center
- * back into the source's own raster space and copies the single nearest
- * source pixel — the standard destination-to-source direction for image
- * warps, chosen (over forward source-to-destination mapping) specifically
- * because it cannot leave unpainted gaps between adjacent output pixels.
- */
 function paintResampled(
 	output: Uint8ClampedArray,
 	outWidthPx: number,
@@ -163,7 +131,6 @@ function paintResampled(
 	const inverse = invertSourceTransform(source.transform);
 	if (!inverse) return;
 	const inverseCoefficients: Affine6Coefficients = inverse.coefficients;
-
 	let minX = Infinity;
 	let minY = Infinity;
 	let maxX = -Infinity;
@@ -182,9 +149,10 @@ function paintResampled(
 
 	for (let dstY = y0; dstY <= y1; dstY += 1) {
 		for (let dstX = x0; dstX <= x1; dstX += 1) {
-			// Sample at the pixel's own center — the standard nearest-neighbour
-			// convention, then floor to the containing source pixel index.
-			const mapped = applyAffine6({ xPx: dstX + 0.5, yPx: dstY + 0.5 }, inverseCoefficients);
+			const mapped = applyAffine6(
+				{ xPx: dstX + 0.5, yPx: dstY + 0.5 },
+				inverseCoefficients
+			);
 			const srcX = Math.floor(mapped.xPx);
 			const srcY = Math.floor(mapped.yPx);
 			if (
@@ -209,24 +177,11 @@ function paintResampled(
 	}
 }
 
-/**
- * Pure per-pixel compositor: no DOM, no canvas, deterministic given the same
- * inputs (the property the renderer determinism test exercises directly).
- * Paints `draft.sources` in ascending `paintOrder`, each via
- * `paintIntegerTranslation` (exact copy) when its `transform` is exactly an
- * integer pure translation, `paintResampled` (nearest-neighbour) otherwise.
- * Output starts fully transparent; a source with a hole in its own coverage
- * (should not occur for a coherent `DraftComposite`) simply leaves those
- * output pixels untouched rather than guessing a fill.
- */
 export function compositeDraftPixels(
 	draft: DraftComposite,
 	sourcePixels: ReadonlyMap<string, RgbaBuffer>
 ): RgbaBuffer {
-	const outWidthPx = draft.outputWidthPx;
-	const outHeightPx = draft.outputHeightPx;
-	const output = new Uint8ClampedArray(outWidthPx * outHeightPx * 4);
-
+	const output = new Uint8ClampedArray(draft.outputWidthPx * draft.outputHeightPx * 4);
 	const paintOrder = [...draft.sources].sort((a, b) => a.paintOrder - b.paintOrder);
 	for (const source of paintOrder) {
 		const pixels = sourcePixels.get(source.sourceId);
@@ -238,29 +193,31 @@ export function compositeDraftPixels(
 		}
 		const translation = integerTranslationOf(source.transform);
 		if (translation) {
-			paintIntegerTranslation(output, outWidthPx, outHeightPx, source.crop, pixels, translation.dxPx, translation.dyPx);
+			paintIntegerTranslation(
+				output,
+				draft.outputWidthPx,
+				draft.outputHeightPx,
+				source.crop,
+				pixels,
+				translation.dxPx,
+				translation.dyPx
+			);
 		} else {
-			paintResampled(output, outWidthPx, outHeightPx, source, pixels);
+			paintResampled(output, draft.outputWidthPx, draft.outputHeightPx, source, pixels);
 		}
 	}
-
-	return { widthPx: outWidthPx, heightPx: outHeightPx, data: output };
+	return { widthPx: draft.outputWidthPx, heightPx: draft.outputHeightPx, data: output };
 }
 
-/**
- * `pipelineResult.ts`'s `renderPipelineComposite`: extracts each source's
- * pixels (unscaled 1:1, exact), composites via `compositeDraftPixels`,
- * encodes, and hashes the encoded bytes to seal `CompositeProvenance`. `env`
- * is injectable for deterministic tests (mirroring `render.ts`'s own
- * `StitchRenderEnv` pattern); production code never passes it, defaulting
- * to the real canvas-backed implementation above.
- */
 export async function renderPipelineComposite(
 	draft: DraftComposite,
 	sources: ReadonlyMap<string, HTMLImageElement>,
 	env: PipelineRenderEnv = defaultPipelineRenderEnv
 ): Promise<{ readonly blob: Blob; readonly provenance: CompositeProvenance }> {
-	if (draft.outputWidthPx > MAX_CANVAS_DIMENSION || draft.outputHeightPx > MAX_CANVAS_DIMENSION) {
+	if (
+		draft.outputWidthPx > MAX_CANVAS_DIMENSION ||
+		draft.outputHeightPx > MAX_CANVAS_DIMENSION
+	) {
 		throw new PipelineRenderError(
 			'dimension',
 			`The composite output (${draft.outputWidthPx} x ${draft.outputHeightPx}) exceeds the browser's practical canvas limit of ${MAX_CANVAS_DIMENSION} x ${MAX_CANVAS_DIMENSION} pixels.`
@@ -276,19 +233,27 @@ export async function renderPipelineComposite(
 				`renderPipelineComposite: no image supplied for source '${source.sourceId}'`
 			);
 		}
-		pixelsBySource.set(source.sourceId, env.extractSourcePixels(image, source.widthPx, source.heightPx));
+		pixelsBySource.set(
+			source.sourceId,
+			env.extractSourcePixels(image, source.widthPx, source.heightPx)
+		);
 	}
 
 	const composite = compositeDraftPixels(draft, pixelsBySource);
 	const blob = await env.encode(composite);
 	const bytes = new Uint8Array(await blob.arrayBuffer());
 	const finalRasterSha256 = await sha256Hex(bytes);
-	return { blob, provenance: sealCompositeProvenance(draft, finalRasterSha256) };
+	const provenance = sealCompositeProvenance(draft, finalRasterSha256);
+	// Evidence registration is observational only. Failure must never make a
+	// previously renderable composite fail; exact-byte lookup will simply miss
+	// and Annotate retains the historical global path.
+	try {
+		recordRenderedSourceLandmarkEvidence(provenance);
+	} catch (error) {
+		console.warn('[ChainSpot handoff] source landmark evidence registration failed.', error);
+	}
+	return { blob, provenance };
 }
 
-// Compile-time-only check that `renderPipelineComposite` stays assignable to
-// `pipelineResult.ts`'s locked `RenderPipelineComposite` contract (its extra
-// `env` parameter is optional, so this is a widening, not a narrowing, of
-// that type). Never referenced at runtime.
 const _renderContractCheck: RenderPipelineCompositeContract = renderPipelineComposite;
 void _renderContractCheck;

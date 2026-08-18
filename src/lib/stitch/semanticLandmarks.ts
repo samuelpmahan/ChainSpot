@@ -65,6 +65,20 @@ export interface SemanticLandmarkBatchResult {
   readonly diagnostics: SemanticLandmarkDiagnostics;
 }
 
+/**
+ * The last successful batch in this browser realm. It is intentionally only
+ * a bootstrap hint for `sourceLandmarkBridge.ts`: the bridge accepts it only
+ * when every source id matches the provenance being rendered, then promotes
+ * the association to an exact source-SHA signature. This keeps manual
+ * transform rerenders connected to their original source observations while
+ * preventing a stale same-size image from inheriting them.
+ */
+let latestSemanticLandmarkBatch: SemanticLandmarkBatchResult | null = null;
+
+export function peekLatestSemanticLandmarkBatch(): SemanticLandmarkBatchResult | null {
+  return latestSemanticLandmarkBatch;
+}
+
 export interface SemanticLandmarkTuning {
   readonly brightValueMin: number;
   readonly brightSaturationMax: number;
@@ -336,7 +350,7 @@ export function detectSemanticLandmarkBatch(
   const scales: Partial<Record<SemanticLandmarkFamily, SemanticFamilyScale>> = {};
   if (badgeScale) scales.badge = badgeScale;
   if (basketScale) scales.basket = basketScale;
-  return {
+  const result: SemanticLandmarkBatchResult = {
     sources: bySource,
     scales,
     diagnostics: {
@@ -351,6 +365,8 @@ export function detectSemanticLandmarkBatch(
         basketShapePool.length === 0 ? 'no-shape-candidates' : acceptedBaskets.length === 0 ? 'insufficient-batch-consensus' : null
     }
   };
+  latestSemanticLandmarkBatch = result;
+  return result;
 }
 
 function pickGeometry(component: Component): SemanticLandmarkGeometry {
