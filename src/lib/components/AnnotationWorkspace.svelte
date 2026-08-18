@@ -94,6 +94,11 @@
 		CourseDetectionResult
 	} from '$lib/autoAnnotation/basketDetection';
 	import {
+		applyCourseVisionEvidence,
+		emptyCourseVisionEvidence
+	} from '$lib/autoAnnotation/courseVisionEvidenceStore';
+	import type { CourseVisionEvidenceSnapshot } from '$lib/autoAnnotation/courseVisionEvidenceStore';
+	import {
 		groundTruthMatchesImage,
 		IMG_5641_GROUND_TRUTH,
 		mergeCourseGroundTruth
@@ -794,6 +799,36 @@
 	/** The compact status-strip's current stage, mirrored from the worker's real progress messages (never simulated). */
 	let courseDetectionStage = $state<CourseDetectionProgressStage | null>(null);
 
+	/**
+	 * Progressive Course Vision evidence for the currently running (or just
+	 * finished) detect-course pass -- transient, retractable DISPLAY state
+	 * only. Reset at the start of every `handleDetectCourse` run and cleared
+	 * again once a real result lands via `applyDetectedPieces`. NEVER an
+	 * input to `holes`/`AnnotatedHole`/domain state: evidence =
+	 * transient/retractable visualization; completed CourseDetectionResult =
+	 * authoritative domain mutation.
+	 */
+	let courseVisionEvidence = $state<CourseVisionEvidenceSnapshot>(emptyCourseVisionEvidence());
+
+	/** Compact "N identified · N provisional" trailer for the live evidence trace, display-only. */
+	const courseVisionEvidenceCounts = $derived.by(() => {
+		let identified = 0;
+		let provisional = 0;
+		for (const entry of courseVisionEvidence.holes.values()) {
+			if (entry.state === 'provisional' || entry.state === 'locked' || entry.state === 'final') {
+				provisional += 1;
+			} else {
+				identified += 1;
+			}
+		}
+		return { identified, provisional };
+	});
+
+	/** Latest evidence trace line, for the compact live-status trailer. Null until evidence has arrived. */
+	const courseVisionEvidenceTraceLine = $derived(
+		courseVisionEvidence.log.length > 0 ? courseVisionEvidence.log[courseVisionEvidence.log.length - 1] : null
+	);
+
 	const DIAGNOSTICS_RAIL_STORAGE_KEY = 'chainspot.diagnosticsRail';
 
 	function readStoredDiagnosticsRailExpanded(): boolean {
@@ -1256,6 +1291,8 @@
 				return 'Finding tee pads…';
 			case 'grammar':
 				return 'Assembling course…';
+			case 'evidence':
+				return 'Understanding course…';
 			default:
 				return 'Preparing image for detection…';
 		}
@@ -3004,6 +3041,7 @@
 		savedCourseToMemory = false;
 		courseDetectionError = null;
 		courseDetection = null;
+		courseVisionEvidence = emptyCourseVisionEvidence();
 		confirmedPieces = new Set();
 		reviewStep = 'tee';
 		workflowPast = [];
@@ -3033,6 +3071,7 @@
 		courseDetectionRunning = true;
 		courseDetectionError = null;
 		courseDetectionStage = null;
+		courseVisionEvidence = emptyCourseVisionEvidence();
 		markerChip = null;
 		startCourseDetectionProgress();
 		try {
@@ -3044,6 +3083,9 @@
 				(progress) => {
 					courseDetectionStatus = progress.message;
 					courseDetectionStage = progress.stage;
+					if (progress.stage === 'evidence' && progress.evidence) {
+						courseVisionEvidence = applyCourseVisionEvidence(courseVisionEvidence, progress.evidence);
+					}
 				}
 			);
 			// The source image may have been replaced while this awaited: a result
@@ -3113,12 +3155,26 @@
 			const assignedNumbers = result.numberDetection.candidates.filter(
 				(candidate) => candidate.label !== undefined
 			).length;
-			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${result.tees.length} tees · ${result.baskets.length} baskets`;
+			// `result.tees`/`result.baskets` are hardcoded to `[]` on the active
+			// worker path -- `rawMaskObjects` (when present) carries the real
+			// counts. Fall back to the legacy fields for producers that still
+			// populate them directly.
+			const teeCount = result.rawMaskObjects?.tees.length ?? result.tees.length;
+			const basketCount = result.rawMaskObjects?.baskets.length ?? result.baskets.length;
+			courseDetectionStatus = `Complete · ${assignedNumbers} numbers · ${teeCount} tees · ${basketCount} baskets`;
+			console.info('[ChainSpot Course Vision timing]', {
+				...courseVisionEvidence.marks,
+				authoritativeResultMs: result.performance?.totalMs
+			});
+			// The awaited result is now authoritative; retire the transient
+			// evidence overlays so they never double-draw over real pieces.
+			courseVisionEvidence = emptyCourseVisionEvidence();
 			applyDetectedPieces({ skipExisting: true });
 			await recognizeCourse(detectedImageId, numberBadges, labeledBaskets);
 		} catch (error) {
 			if (sourceImage()?.id !== detectedImageId) return;
 			courseDetection = null;
+			courseVisionEvidence = emptyCourseVisionEvidence();
 			courseDetectionStatus = 'Detection failed';
 			courseDetectionError = error instanceof Error ? error.message : 'Course detection failed.';
 		} finally {
@@ -4105,6 +4161,13 @@
 								{courseDetectionStatus} · {courseDetectionElapsedSeconds}s
 							</p>
 						{/if}
+						{#if courseVisionEvidenceTraceLine}
+							<!-- Progressive Course Vision evidence trace: display-only, cleared
+							     the instant a real result lands (see `handleDetectCourse`). -->
+							<p class="diagnostics-live-status evidence-trace" data-testid="course-vision-evidence-trace" role="status">
+								{courseVisionEvidenceTraceLine} · {courseVisionEvidenceCounts.identified} identified · {courseVisionEvidenceCounts.provisional} provisional
+							</p>
+						{/if}
 						<ol
 							class="diagnostic-feature-list"
 							data-testid="diagnostics-live-list"
@@ -4232,6 +4295,87 @@
 								class="shadow-split-label"
 								text-anchor="middle">H{splitLine.holeNumber} split</text
 							>
+						{/each}
+					{/if}
+					{#if courseVisionEvidence.unassigned || courseVisionEvidence.holes.size > 0}
+						<!-- Progressive Course Vision evidence: transient, retractable
+						     DISPLAY ONLY. Cleared as soon as the awaited detection result
+						     lands (see `handleDetectCourse`), so this never coexists with
+						     real course pieces. Nothing here is styled as locked/final —
+						     `provisional`/`locked`/`final` evidence states all render at
+						     the same "strong but clearly not final" tier. -->
+						{#if courseVisionEvidence.unassigned}
+							{#each courseVisionEvidence.unassigned.tees ?? [] as landmark, index (index)}
+								<circle
+									cx={landmark.xPx}
+									cy={landmark.yPx}
+									r={4 / zoom}
+									class="evidence-candidate-marker evidence-candidate-tee"
+									data-testid="evidence-candidate-tee-{index}"
+								/>
+							{/each}
+							{#each courseVisionEvidence.unassigned.badges ?? [] as landmark, index (index)}
+								<circle
+									cx={landmark.xPx}
+									cy={landmark.yPx}
+									r={4 / zoom}
+									class="evidence-candidate-marker evidence-candidate-badge"
+									data-testid="evidence-candidate-badge-{index}"
+								/>
+							{/each}
+							{#each courseVisionEvidence.unassigned.baskets ?? [] as landmark, index (index)}
+								<circle
+									cx={landmark.xPx}
+									cy={landmark.yPx}
+									r={4 / zoom}
+									class="evidence-candidate-marker evidence-candidate-basket"
+									data-testid="evidence-candidate-basket-{index}"
+								/>
+							{/each}
+						{/if}
+						{#each [...courseVisionEvidence.holes.values()] as entry (entry.holeNumber)}
+							{@const strong = entry.state === 'provisional' || entry.state === 'locked' || entry.state === 'final'}
+							{@const labelPoint = entry.geometry?.basket ?? entry.geometry?.tee ?? entry.geometry?.badge}
+							{#if entry.geometry?.tee}
+								<circle
+									cx={entry.geometry.tee.xPx}
+									cy={entry.geometry.tee.yPx}
+									r={6 / zoom}
+									class="evidence-hole-marker"
+									class:evidence-strong={strong}
+									data-testid="evidence-tee-{entry.holeNumber}"
+								/>
+							{/if}
+							{#if entry.geometry?.badge}
+								<circle
+									cx={entry.geometry.badge.xPx}
+									cy={entry.geometry.badge.yPx}
+									r={6 / zoom}
+									class="evidence-hole-marker"
+									class:evidence-strong={strong}
+									data-testid="evidence-badge-{entry.holeNumber}"
+								/>
+							{/if}
+							{#if entry.geometry?.basket}
+								<circle
+									cx={entry.geometry.basket.xPx}
+									cy={entry.geometry.basket.yPx}
+									r={6 / zoom}
+									class="evidence-hole-marker"
+									class:evidence-strong={strong}
+									data-testid="evidence-basket-{entry.holeNumber}"
+								/>
+							{/if}
+							{#if labelPoint}
+								<text
+									x={labelPoint.xPx}
+									y={labelPoint.yPx - 14 / zoom}
+									text-anchor="middle"
+									class="evidence-hole-label"
+									class:evidence-strong={strong}
+									style={`font-size:${10 / zoom}px`}
+								>H{entry.holeNumber} · {entry.state === 'provisional' ? 'likely' : entry.state}</text>
+							{/if}
 						{/each}
 					{/if}
 					{#if middleOutOverlayEnabled && courseDetection?.middleOut}
@@ -5475,6 +5619,15 @@
 		line-height: 1.35;
 	}
 
+	/* Progressive Course Vision evidence trace -- one step quieter than the
+	   main status line above it; display-only, gone once a real result lands. */
+	.diagnostics-live-status.evidence-trace {
+		margin-top: 0.3rem;
+		color: #71717a;
+		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-size: 0.68rem;
+	}
+
 	.diagnostic-feature-list {
 		display: flex;
 		flex-direction: column;
@@ -6224,6 +6377,46 @@
 		align-items: center;
 		font-size: 0.68rem;
 		color: #a1a1aa;
+	}
+
+	/* Progressive Course Vision evidence -- transient, retractable DISPLAY
+	   ONLY, cleared the instant a real result lands. Deliberately faint and
+	   never styled like a locked/final piece, even for `provisional`/
+	   `locked`/`final` evidence states (`.evidence-strong` is still clearly
+	   tentative -- dashed halo, not a solid fill). */
+	.evidence-candidate-marker {
+		fill: rgb(148 163 184 / 30%);
+		stroke: #94a3b8;
+		stroke-width: 1;
+		vector-effect: non-scaling-stroke;
+		pointer-events: none;
+	}
+
+	.evidence-hole-marker {
+		fill: none;
+		stroke: #38bdf8;
+		stroke-width: 1.5;
+		stroke-dasharray: 3 3;
+		opacity: 0.55;
+		vector-effect: non-scaling-stroke;
+		pointer-events: none;
+	}
+
+	.evidence-hole-marker.evidence-strong {
+		stroke: #22d3ee;
+		stroke-width: 2;
+		opacity: 0.85;
+	}
+
+	.evidence-hole-label {
+		fill: #94a3b8;
+		opacity: 0.7;
+		pointer-events: none;
+	}
+
+	.evidence-hole-label.evidence-strong {
+		fill: #22d3ee;
+		opacity: 0.95;
 	}
 
 	/* Thin CV-evidence centerlines, not a filled corridor -- readable enough

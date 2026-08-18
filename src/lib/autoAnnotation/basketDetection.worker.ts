@@ -54,6 +54,14 @@ import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
 import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
 import { deriveMiddleOutDiagnostics, type MiddleOutCv } from './middleOutRibbon';
 import type { VisionFlags } from './visionFlags';
+import { classifyKnownBadgeBodiesPureTs } from './badgeGlyphClassifier';
+import {
+	COURSE_VISION_OPERATORS,
+	operatorLabel,
+	type CourseVisionEvidenceEvent,
+	type EvidenceHoleGeometry,
+	type EvidenceLandmark
+} from './courseVisionEvidence';
 
 const MAX_ANALYSIS_DIM = 4096;
 // TEMP DEV ONLY: benchmark Pancake 1-3 without paying for legacy ownership CV.
@@ -495,6 +503,35 @@ function reportCourseProgress(
 	});
 }
 
+/**
+ * Sibling to `reportCourseProgress` for progressive Course Vision evidence
+ * (stage `'evidence'`, see `courseVisionEvidence.ts`). A batch of events
+ * rides one postMessage. Never throws -- a failure here must never break
+ * detection, so this posts on a best-effort basis only.
+ */
+function reportCourseEvidence(
+	request: CourseDetectionRequest,
+	events: readonly CourseVisionEvidenceEvent[],
+	elapsedMs: number
+): void {
+	if (events.length === 0) return;
+	try {
+		(self as unknown as Worker).postMessage({
+			ok: true,
+			kind: 'progress',
+			token: request.token,
+			progress: {
+				stage: 'evidence',
+				message: `Course Vision evidence: ${events.length} update${events.length === 1 ? '' : 's'}`,
+				elapsedMs,
+				evidence: events
+			}
+		});
+	} catch (error) {
+		console.warn('[ChainSpot NuThing fast lane] evidence postMessage failed.', error);
+	}
+}
+
 async function detectCourse(request: CourseDetectionRequest) {
 	// The main thread snapshots flags at request creation. Never consult
 	// storage/global state here: one worker request must remain internally stable.
@@ -515,9 +552,16 @@ async function detectCourse(request: CourseDetectionRequest) {
 		'Loading OpenCV runtime and CV calibration manifest…',
 		elapsedMs()
 	);
-	const bootstrapStartedAt = performance.now();
-	const [cv, pack] = await Promise.all([loadRuntime(), loadTemplatePack()]);
-	const bootstrapMs = performance.now() - bootstrapStartedAt;
+	// NuThing fast lane: kick off bootstrap without blocking on it. Both loaders
+	// are module-scope memoized, so this is safe to call again below without
+	// duplicating work. The `.catch(() => {})` guards exist ONLY to suppress
+	// unhandled-rejection noise if the fast lane below fails before its own
+	// awaits reach these promises -- the real awaits later still surface errors.
+	const bootstrapKickoffAt = performance.now();
+	const runtimeReady = loadRuntime();
+	const packReady = loadTemplatePack();
+	runtimeReady.catch(() => {});
+	packReady.catch(() => {});
 
 	if (PANCAKE_STACK_ONLY) {
 		const fullRasterStartedAt = performance.now();
@@ -531,6 +575,159 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p1Tuning
 		);
 		const p1MaskMs = performance.now() - p1MaskStartedAt;
+		const bootstrapKickoffToP1CompleteMs = performance.now() - bootstrapKickoffAt;
+
+		// NuThing fast lane, step 2: emit a `candidate` batch for everything P1
+		// just localized, before any identity exists.
+		try {
+			const candidateLandmarks = (items: readonly { xPx: number; yPx: number; widthPx: number; heightPx: number }[]): readonly EvidenceLandmark[] =>
+				items.map((item) => ({ xPx: item.xPx, yPx: item.yPx, widthPx: item.widthPx, heightPx: item.heightPx }));
+			reportCourseEvidence(
+				request,
+				[
+					{
+						state: 'candidate',
+						channel: 'fast-lane',
+						producer: COURSE_VISION_OPERATORS.rawUiLandmarkLocalization,
+						landmarks: {
+							tees: candidateLandmarks(rawMaskObjects.tees),
+							badges: candidateLandmarks(rawMaskObjects.badges),
+							// RawMaskBasket's xPx/yPx is the display point (sprite
+							// bottom), distinct from centerXPx/centerYPx -- see
+							// rawObjectMask.ts.
+							baskets: candidateLandmarks(rawMaskObjects.baskets)
+						},
+						message: `${operatorLabel(COURSE_VISION_OPERATORS.rawUiLandmarkLocalization)} found ${rawMaskObjects.tees.length} tee, ${rawMaskObjects.badges.length} badge, ${rawMaskObjects.baskets.length} basket candidates`,
+						elapsedMs: elapsedMs()
+					}
+				],
+				elapsedMs()
+			);
+		} catch (error) {
+			console.warn('[ChainSpot NuThing fast lane] candidate evidence emission failed.', error);
+		}
+
+		// NuThing fast lane, steps 3-4: pure-TS badge identity + geometric
+		// ownership, run purely for early evidence. A failure here must never
+		// break detection -- the authoritative chain below is untouched by
+		// anything in this block.
+		let fastLaneTemplatePackReadyMs = 0;
+		let fastLanePureTsBadgeClassifyMs = 0;
+		let fastLanePureTsConfidentLabels = 0;
+		let fastLanePureTsAbstentions = 0;
+		let fastLaneP3Ms = 0;
+		let fastLaneOwnedHoles = 0;
+		let fastLaneProvisionalHoles = 0;
+		try {
+			const fastPack = await packReady;
+			fastLaneTemplatePackReadyMs = elapsedMs();
+
+			const pureTsStartedAt = performance.now();
+			const classifications = classifyKnownBadgeBodiesPureTs(
+				{ data: full.rgba, widthPx: full.width, heightPx: full.height },
+				fastPack.holeNumbers,
+				rawMaskObjects.badges
+			);
+			fastLanePureTsBadgeClassifyMs = performance.now() - pureTsStartedAt;
+
+			const confident = classifications.filter(
+				(classification): classification is typeof classification & { label: number } =>
+					classification.label !== undefined
+			);
+			fastLanePureTsConfidentLabels = confident.length;
+			fastLanePureTsAbstentions = classifications.length - confident.length;
+
+			const fastLaneLabeledBadges = confident.map((classification) => {
+				const badge = rawMaskObjects.badges[classification.badgeIndex];
+				return {
+					holeNumber: classification.label,
+					glyphScore: classification.bestScore,
+					xPx: badge.xPx,
+					yPx: badge.yPx,
+					widthPx: badge.widthPx,
+					heightPx: badge.heightPx
+				};
+			});
+
+			if (fastLaneLabeledBadges.length > 0) {
+				reportCourseEvidence(
+					request,
+					fastLaneLabeledBadges.map((badge) => ({
+						state: 'identified',
+						channel: 'fast-lane',
+						producer: COURSE_VISION_OPERATORS.pureTsBadgeGlyphIdentification,
+						holeNumber: badge.holeNumber,
+						geometry: {
+							badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx }
+						},
+						message: `${operatorLabel(COURSE_VISION_OPERATORS.pureTsBadgeGlyphIdentification)} resolved H${badge.holeNumber}`,
+						elapsedMs: elapsedMs()
+					})),
+					elapsedMs()
+				);
+
+				const p3StartedAt = performance.now();
+				const fastLaneP3Ownership = deriveP3Ownership(
+					rawMaskObjects.tees,
+					fastLaneLabeledBadges,
+					rawMaskObjects.baskets,
+					visionFlags
+				);
+				fastLaneP3Ms = performance.now() - p3StartedAt;
+				fastLaneOwnedHoles = fastLaneP3Ownership.teeBadgeHits.length;
+				fastLaneProvisionalHoles = fastLaneP3Ownership.straightBasketHits.length;
+
+				const badgeByHoleNumber = new Map(fastLaneLabeledBadges.map((badge) => [badge.holeNumber, badge]));
+				const ownedEvents: CourseVisionEvidenceEvent[] = fastLaneP3Ownership.teeBadgeHits.map((hit) => {
+					const tee = rawMaskObjects.tees[hit.teeIndex];
+					const badge = badgeByHoleNumber.get(hit.holeNumber);
+					const geometry: EvidenceHoleGeometry = {
+						tee: { xPx: tee.xPx, yPx: tee.yPx, widthPx: tee.widthPx, heightPx: tee.heightPx },
+						...(badge ? { badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx } } : {})
+					};
+					return {
+						state: 'owned',
+						channel: 'fast-lane',
+						producer: COURSE_VISION_OPERATORS.geometricOwnership,
+						holeNumber: hit.holeNumber,
+						geometry,
+						message: `${operatorLabel(COURSE_VISION_OPERATORS.geometricOwnership)} owns H${hit.holeNumber}`,
+						elapsedMs: elapsedMs()
+					};
+				});
+				const provisionalEvents: CourseVisionEvidenceEvent[] = fastLaneP3Ownership.straightBasketHits.map((hit) => {
+					const tee = rawMaskObjects.tees[hit.teeIndex];
+					const badge = badgeByHoleNumber.get(hit.holeNumber);
+					const basket = rawMaskObjects.baskets[hit.basketIndex];
+					const geometry: EvidenceHoleGeometry = {
+						tee: { xPx: tee.xPx, yPx: tee.yPx, widthPx: tee.widthPx, heightPx: tee.heightPx },
+						...(badge ? { badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx } } : {}),
+						basket: { xPx: basket.xPx, yPx: basket.yPx, widthPx: basket.widthPx, heightPx: basket.heightPx }
+					};
+					return {
+						state: 'provisional',
+						channel: 'fast-lane',
+						producer: COURSE_VISION_OPERATORS.geometricOwnership,
+						holeNumber: hit.holeNumber,
+						geometry,
+						message: `${operatorLabel(COURSE_VISION_OPERATORS.geometricOwnership)} found provisional straight evidence for H${hit.holeNumber}`,
+						elapsedMs: elapsedMs()
+					};
+				});
+				reportCourseEvidence(request, [...ownedEvents, ...provisionalEvents], elapsedMs());
+			}
+		} catch (error) {
+			console.warn('[ChainSpot NuThing fast lane] pure-TS badge identity/ownership failed.', error);
+		}
+
+		// Authoritative chain from here on: byte-identical calls, order, inputs,
+		// and return object to the pre-fast-lane version. `cv`/`pack` are
+		// awaited here (not kicked off again -- both loaders are memoized) so
+		// bootstrapMs keeps its old meaning: bootstrap kickoff until both are
+		// ready.
+		const [cv, pack] = await Promise.all([runtimeReady, packReady]);
+		const bootstrapMs = performance.now() - bootstrapKickoffAt;
+		const opencvReadyMs = elapsedMs();
 
 		const p2BadgeLabelStartedAt = performance.now();
 		const p2BadgeDetectionRaw = labelKnownHoleNumberBadges(
@@ -563,6 +760,26 @@ async function detectCourse(request: CourseDetectionRequest) {
 				heightPx: candidate.heightPx
 			}));
 
+		try {
+			reportCourseEvidence(
+				request,
+				p2LabeledBadges.map((badge) => ({
+					state: 'identified',
+					channel: 'authoritative',
+					producer: COURSE_VISION_OPERATORS.badgeGlyphIdentification,
+					holeNumber: badge.holeNumber,
+					geometry: {
+						badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx }
+					},
+					message: `${operatorLabel(COURSE_VISION_OPERATORS.badgeGlyphIdentification)} resolved H${badge.holeNumber}`,
+					elapsedMs: elapsedMs()
+				})),
+				elapsedMs()
+			);
+		} catch (error) {
+			console.warn('[ChainSpot Course Vision evidence] authoritative P2 evidence emission failed.', error);
+		}
+
 		const p3StartedAt = performance.now();
 		const p3Ownership = deriveP3Ownership(
 			rawMaskObjects.tees,
@@ -571,6 +788,49 @@ async function detectCourse(request: CourseDetectionRequest) {
 			visionFlags
 		);
 		const p3Ms = performance.now() - p3StartedAt;
+
+		try {
+			const authoritativeBadgeByHoleNumber = new Map(p2LabeledBadges.map((badge) => [badge.holeNumber, badge]));
+			const ownedEvents: CourseVisionEvidenceEvent[] = p3Ownership.teeBadgeHits.map((hit) => {
+				const tee = rawMaskObjects.tees[hit.teeIndex];
+				const badge = authoritativeBadgeByHoleNumber.get(hit.holeNumber);
+				const geometry: EvidenceHoleGeometry = {
+					tee: { xPx: tee.xPx, yPx: tee.yPx, widthPx: tee.widthPx, heightPx: tee.heightPx },
+					...(badge ? { badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx } } : {})
+				};
+				return {
+					state: 'owned',
+					channel: 'authoritative',
+					producer: COURSE_VISION_OPERATORS.geometricOwnership,
+					holeNumber: hit.holeNumber,
+					geometry,
+					message: `${operatorLabel(COURSE_VISION_OPERATORS.geometricOwnership)} owns H${hit.holeNumber}`,
+					elapsedMs: elapsedMs()
+				};
+			});
+			const provisionalEvents: CourseVisionEvidenceEvent[] = p3Ownership.straightBasketHits.map((hit) => {
+				const tee = rawMaskObjects.tees[hit.teeIndex];
+				const badge = authoritativeBadgeByHoleNumber.get(hit.holeNumber);
+				const basket = rawMaskObjects.baskets[hit.basketIndex];
+				const geometry: EvidenceHoleGeometry = {
+					tee: { xPx: tee.xPx, yPx: tee.yPx, widthPx: tee.widthPx, heightPx: tee.heightPx },
+					...(badge ? { badge: { xPx: badge.xPx, yPx: badge.yPx, widthPx: badge.widthPx, heightPx: badge.heightPx } } : {}),
+					basket: { xPx: basket.xPx, yPx: basket.yPx, widthPx: basket.widthPx, heightPx: basket.heightPx }
+				};
+				return {
+					state: 'provisional',
+					channel: 'authoritative',
+					producer: COURSE_VISION_OPERATORS.geometricOwnership,
+					holeNumber: hit.holeNumber,
+					geometry,
+					message: `${operatorLabel(COURSE_VISION_OPERATORS.geometricOwnership)} found provisional straight evidence for H${hit.holeNumber}`,
+					elapsedMs: elapsedMs()
+				};
+			});
+			reportCourseEvidence(request, [...ownedEvents, ...provisionalEvents], elapsedMs());
+		} catch (error) {
+			console.warn('[ChainSpot Course Vision evidence] authoritative P3 evidence emission failed.', error);
+		}
 
 		// Ribbon segmentation is the expensive shared input to both P4 and
 		// P6.2's ribbon-distance evidence. Run it exactly once here and pass
@@ -731,6 +991,17 @@ async function detectCourse(request: CourseDetectionRequest) {
 				numberTemplateScale,
 				basketTemplateScale,
 				basketTemplateScalePerNumberTemplateScale: basketTemplateScale / numberTemplateScale
+			},
+			fastLane: {
+				bootstrapKickoffToP1CompleteMs,
+				templatePackReadyMs: fastLaneTemplatePackReadyMs,
+				pureTsBadgeClassifyMs: fastLanePureTsBadgeClassifyMs,
+				pureTsConfidentLabels: fastLanePureTsConfidentLabels,
+				pureTsAbstentions: fastLanePureTsAbstentions,
+				fastLaneP3Ms,
+				fastLaneOwnedHoles,
+				fastLaneProvisionalHoles,
+				opencvReadyMs
 			}
 		};
 		const displayGrammar = buildPancakeDisplayGrammar(
@@ -739,6 +1010,36 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p5SparseAssignment,
 			p6LowParBasketAssignment
 		);
+
+		try {
+			reportCourseEvidence(
+				request,
+				displayGrammar.holes.flatMap((hole): CourseVisionEvidenceEvent[] => {
+					if (!hole.tee && !hole.basket) return [];
+					const geometry: EvidenceHoleGeometry = {
+						...(hole.numberBadge
+							? { badge: { xPx: hole.numberBadge.xPx, yPx: hole.numberBadge.yPx } }
+							: {}),
+						...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
+						...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
+					};
+					return [
+						{
+							state: 'final',
+							channel: 'authoritative',
+							producer: COURSE_VISION_OPERATORS.finalCourseGrammarMaterialization,
+							holeNumber: hole.number,
+							geometry,
+							message: `${operatorLabel(COURSE_VISION_OPERATORS.finalCourseGrammarMaterialization)} finalized H${hole.number}`,
+							elapsedMs: elapsedMs()
+						}
+					];
+				}),
+				elapsedMs()
+			);
+		} catch (error) {
+			console.warn('[ChainSpot Course Vision evidence] final evidence emission failed.', error);
+		}
 
 		return {
 			numberDetection: p2BadgeDetection,
@@ -756,6 +1057,14 @@ async function detectCourse(request: CourseDetectionRequest) {
 			visionFlags
 		};
 	}
+
+	// Dead code: PANCAKE_STACK_ONLY is a const `true` above, so this branch
+	// never runs. Kept compiling only -- not optimized -- per the NuThing fast
+	// lane migration; `cv`/`pack`/`bootstrapMs` used to come from a blocking
+	// `Promise.all` before the branch split above.
+	const bootstrapStartedAt = performance.now();
+	const [cv, pack] = await Promise.all([runtimeReady, packReady]);
+	const bootstrapMs = performance.now() - bootstrapStartedAt;
 
 	const analysisStartedAt = performance.now();
 	const analysis = grayscaleRaster(request.bitmap);
