@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ImageViewport from './ImageViewport.svelte';
+	import ImageEdgeLoadButtons from './ImageEdgeLoadButtons.svelte';
 	import { ViewportController, clickSlopPx } from '$lib/viewport.svelte';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { findImageByRole } from '$lib/domain/project';
@@ -37,6 +38,8 @@
 	import type { PaneScene } from '$lib/scene';
 	import type { PointSelection } from '$lib/pointSelection';
 	import { selectionMatches } from '$lib/pointSelection';
+	import { exposedLoadEdges } from '$lib/edgeLoadZones';
+	import type { EdgeDirection } from '$lib/edgeLoadZones';
 
 	type PointMoveRequest = {
 		selection: PointSelection;
@@ -78,6 +81,15 @@
 		rotationDeg?: number;
 		/** Allows a target-role pane to be reused as a clean-course surface without exposing target-pose controls. */
 		showRotationControls?: boolean;
+		/**
+		 * Enables the geo-aware "load beyond this edge" affordances. The generic
+		 * pane only detects which image edges the viewport exposed; the caller owns
+		 * the actual imagery request and only enables this for a geo-referenced target.
+		 */
+		edgeLoadEnabled?: boolean;
+		edgeLoadBusy?: boolean;
+		edgeLoadQueuedDirection?: EdgeDirection | null;
+		edgeLoadDelayMs?: number;
 		/** Fires continuously while the caller's rotation control is being dragged/typed; never touches durable state. */
 		onRotationInput?: (rotationDeg: number) => void;
 		/** Fires once a rotation gesture ends (release, blur, or Reset); the caller commits this to durable state. */
@@ -88,6 +100,7 @@
 		onPlacement?: (placement: { role: ImageRole; coordinates: { xPx: number; yPx: number } }) => void;
 		onPointSelect?: (selection: PointSelection) => void;
 		onPointMove?: (request: PointMoveRequest) => PointMoveResult;
+		onEdgeLoad?: (direction: EdgeDirection) => void;
 	}
 
 	let {
@@ -106,6 +119,10 @@
 		registrationProofPoints = [],
 		rotationDeg = 0,
 		showRotationControls = true,
+		edgeLoadEnabled = false,
+		edgeLoadBusy = false,
+		edgeLoadQueuedDirection = null,
+		edgeLoadDelayMs = 2000,
 		onRotationInput,
 		onRotationCommit,
 		decode = decodeImageFile,
@@ -113,7 +130,8 @@
 		onDomainChanged,
 		onPlacement,
 		onPointSelect,
-		onPointMove
+		onPointMove,
+		onEdgeLoad
 	}: Props = $props();
 
 	/** True only for the pane that actually renders/applies a rotated pose (CHSPT-44); `source-overview` never rotates regardless of what `rotationDeg` is passed. */
@@ -175,6 +193,29 @@
 		void refresh;
 		return findImageByRole(editor.state.images, role) ?? null;
 	}
+
+	/**
+	 * Edge controls are based on EXTRA checkerboard exposed beyond the normal
+	 * fitted view, not ordinary fit letterboxing. They are deliberately hidden
+	 * while the target is manually rotated: screen-down is not geographic south
+	 * then, so a cardinal request would be misleading.
+	 */
+	let edgeLoadDirections = $derived.by(() => {
+		void refresh;
+		void vp.view;
+		void vp.fitView;
+		void vp.size;
+		const image = currentImage();
+		if (!edgeLoadEnabled || !onEdgeLoad || !image || rotationActive) return [];
+		return exposedLoadEdges({
+			view: vp.view,
+			fitView: vp.fitView,
+			viewportWidthPx: vp.size.width,
+			viewportHeightPx: vp.size.height,
+			imageWidthPx: image.widthPx,
+			imageHeightPx: image.heightPx
+		});
+	});
 
 	/** Image-space center used as the manual-rotation pivot; only meaningful while `rotationActive`. */
 	function rotationCenter(image: ImageAsset): { xPx: number; yPx: number } {
@@ -568,7 +609,7 @@
 			scene?.setMarkers(markers);
 		}
 		scene?.setGhostCourseVisible(ghostCourseVisible);
-			scene?.setRegistrationProofPoints?.(role === 'target-basemap' ? registrationProofPoints : []);
+		scene?.setRegistrationProofPoints?.(role === 'target-basemap' ? registrationProofPoints : []);
 		// Fingerprint only the fields `createGhostHole` (scene.ts) actually reads. The
 		// caller may pass a `HoleGraphicPlan[]` here (it structurally satisfies
 		// `GhostCourseHole[]`), whose `crop`/`targetRotationDeg`/other export-only fields
@@ -687,6 +728,15 @@
 			bind:this={magnifierCanvas}
 			style="display: none; width: {MAGNIFIER_SIZE}px; height: {MAGNIFIER_SIZE}px"
 		></canvas>
+		{#if edgeLoadDirections.length > 0}
+			<ImageEdgeLoadButtons
+				directions={edgeLoadDirections}
+				queuedDirection={edgeLoadQueuedDirection}
+				queuedDelayMs={edgeLoadDelayMs}
+				busy={edgeLoadBusy}
+				onLoad={(direction) => onEdgeLoad?.(direction)}
+			/>
+		{/if}
 		{#if loading}
 			<p class="placeholder" data-testid={`pane-loading-${role}`} role="status">Loading image…</p>
 		{:else if !currentImage()}
