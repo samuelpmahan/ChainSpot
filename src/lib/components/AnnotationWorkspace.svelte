@@ -3694,6 +3694,7 @@
 				<button
 					type="button"
 					data-testid="handoff-import"
+					data-demo-anchor="map-round-import"
 					disabled={importingHandoff}
 					onclick={handleHandoffImport}
 				>

@@ -88,6 +88,7 @@
 					type="button"
 					class="global-done-button"
 					data-testid="annotate-done"
+					data-demo-anchor="annotation-done"
 					disabled={!annotationNavState.canFinish || annotationNavState.doneRunning}
 					onclick={requestAnnotationDone}
 					title="Finish annotating and move to Create Graphics"
