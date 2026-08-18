@@ -62,6 +62,45 @@ describe('poseGraph semantic-first integration', () => {
 		expect(result.placementEdges[0].model).toBe('translation');
 	});
 
+	test('arbitrary four-source layout keeps the existing all-pairs graph and verifies all six semantic edges locally', async () => {
+		const sources = [
+			translatedSource('a', 0, 0),
+			translatedSource('b', 260, -40),
+			translatedSource('c', -90, 310),
+			translatedSource('d', 340, 280)
+		];
+		const matchNear = vi.fn(async (
+			_a: AnalysisRaster,
+			_b: AnalysisRaster,
+			_orientation: 'left-right' | 'top-bottom',
+			startDxPx: number,
+			startDyPx: number
+		) => ({
+			dxPx: startDxPx,
+			dyPx: startDyPx,
+			score: 0.98,
+			runnerUpScore: -1,
+			overlapFraction: 0.5
+		}));
+		const result = await buildPoseGraph(sources.map(() => blankRaster()), {
+			semanticSources: sources,
+			semanticVerification: { matchNear, now: () => 0 }
+		});
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.transforms.size).toBe(4);
+		expect(result.placementEdges).toHaveLength(3);
+		expect(result.pairDiagnostics).toHaveLength(6);
+		expect(result.pairDiagnostics.every((probe) => probe.path === 'semantic-local-verify')).toBe(true);
+		expect(matchNear).toHaveBeenCalledTimes(6);
+		console.info('[semantic-pair-path-counts]', {
+			semanticLocalVerify: result.pairDiagnostics.filter((probe) => probe.path === 'semantic-local-verify').length,
+			semanticDisagreement: result.pairDiagnostics.filter((probe) => probe.path === 'semantic-disagreement').length,
+			globalFallback: result.pairDiagnostics.filter((probe) => probe.path === 'global-fallback').length
+		});
+	});
+
 	test('one shared landmark remains a hypothesis and the existing global matcher places the pair', async () => {
 		const noChrome = { chromeTop: 0, chromeBottom: 0 };
 		const rasters = [
