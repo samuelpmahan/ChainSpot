@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Pan/zoomable display of a fetched-but-not-yet-committed aerial image
+	 * Pan/zoomable and directionally expandable display of a fetched-but-not-yet-committed aerial image
 	 * (CHSPT-68). Reuses the exact viewport machinery the committed panes use
 	 * (`ViewportController` + `ImageViewport` + `createPaneScene`) so panning
 	 * the preview against the UDisc source next door feels identical to the
