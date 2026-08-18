@@ -25,6 +25,7 @@ import type { P4RibbonOwnershipResult } from './p4RibbonOwnership';
 import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
 import type { MiddleOutCourseResult } from './middleOutRibbon';
+import type { CourseVisionEvidenceEvent } from './courseVisionEvidence';
 import { getVisionFlagsSnapshot } from './visionFlags';
 import type { VisionFlags } from './visionFlags';
 
@@ -103,6 +104,18 @@ export interface CourseDetectionPerformance {
 		readonly basketTemplateScale: BasketTemplateScale;
 		readonly basketTemplateScalePerNumberTemplateScale: number;
 	};
+	/** NuThing fast-lane instrumentation. Absent/zeroed when the fast lane failed or has not run. */
+	readonly fastLane?: {
+		readonly bootstrapKickoffToP1CompleteMs: number;
+		readonly templatePackReadyMs: number; // from request start
+		readonly pureTsBadgeClassifyMs: number;
+		readonly pureTsConfidentLabels: number;
+		readonly pureTsAbstentions: number;
+		readonly fastLaneP3Ms: number;
+		readonly fastLaneOwnedHoles: number;
+		readonly fastLaneProvisionalHoles: number;
+		readonly opencvReadyMs: number; // from request start
+	};
 }
 
 export interface CourseDetectionResult {
@@ -164,13 +177,20 @@ export type CourseDetectionProgressStage =
 	| 'templates'
 	| 'numbers'
 	| 'tees'
-	| 'grammar';
+	| 'grammar'
+	| 'evidence';
 
 export interface CourseDetectionProgress {
 	readonly stage: CourseDetectionProgressStage;
 	readonly message: string;
 	/** Milliseconds elapsed since the detect-course request began. */
 	readonly elapsedMs?: number;
+	/**
+	 * Progressive Course Vision evidence riding the existing progress channel
+	 * (stage `'evidence'`). Display/trace only — see `courseVisionEvidence.ts`
+	 * for the contract; nothing here may mutate domain state.
+	 */
+	readonly evidence?: readonly CourseVisionEvidenceEvent[];
 }
 
 interface BasketWorkerSuccess {
