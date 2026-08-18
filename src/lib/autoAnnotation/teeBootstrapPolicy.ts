@@ -707,23 +707,6 @@ export function assessTeeBootstrap(
 
 	const assessments = candidates.flatMap((candidate, index) => assessCandidate(raster, candidate, index, badges, calibration));
 
-	// AUTO requires all three independent evidence families and has proven
-	// high precision on the labeled courses. Use those strong assignments to
-	// learn a robust course-level tee-to-badge distance band. REVIEW candidates
-	// with a measured ray far outside that band are not useful proposals; they
-	// are usually distant structures that happen to share the badge bearing.
-	// This is course-derived geometry, not a pixel/UI/per-hole constant.
-	const autoDistances = assessments
-		.filter((assessment) => assessment.decision === 'auto')
-		.map((assessment) => assessment.badgeRay?.distancePx)
-		.filter((distance): distance is number => Number.isFinite(distance))
-		.sort((a, b) => a - b);
-	const autoDistanceLow = autoDistances.length >= 4 ? percentile(autoDistances, 0.1) : undefined;
-	const autoDistanceHigh = autoDistances.length >= 4 ? percentile(autoDistances, 0.9) : undefined;
-	const reviewDistanceBand = autoDistanceLow !== undefined && autoDistanceHigh !== undefined
-		? { minimumPx: autoDistanceLow * 0.65, maximumPx: autoDistanceHigh * 1.35 }
-		: undefined;
-
 	const assignments: TeeBootstrapAssignment[] = [];
 	const usedCandidates = new Set<number>();
 	const holes: TeeBootstrapHoleResult[] = [];
@@ -733,7 +716,7 @@ export function assessTeeBootstrap(
 		// above) can only ever be awarded to whichever badge wins it first;
 		// `usedCandidates` keeps the same physical pad from being handed to a
 		// second hole once another badge has already claimed it.
-		let contenders = assessments
+		const contenders = assessments
 			.filter(
 				(assessment) =>
 					assessment.proposedHoleNumber === badge.holeNumber &&
@@ -741,21 +724,12 @@ export function assessTeeBootstrap(
 					!usedCandidates.has(assessment.candidateIndex)
 			)
 			.sort((a, b) => assessmentRank(b) - assessmentRank(a));
-		if (reviewDistanceBand) {
-			contenders = contenders.filter((assessment) => {
-				if (assessment.decision === 'auto' || !assessment.badgeRay) return true;
-				return assessment.badgeRay.distancePx >= reviewDistanceBand.minimumPx
-					&& assessment.badgeRay.distancePx <= reviewDistanceBand.maximumPx;
-			});
-		}
 		const winner = contenders[0];
 		if (!winner) {
 			holes.push({
 				holeNumber: badge.holeNumber,
 				decision: 'unresolved',
-				reasons: [reviewDistanceBand
-					? 'no tee candidate survives ownership plus the course-derived tee-to-badge distance band'
-					: 'no tee candidate has trustworthy ownership evidence for this badge']
+				reasons: ['no tee candidate has trustworthy ownership evidence for this badge']
 			});
 			continue;
 		}
