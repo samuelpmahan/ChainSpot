@@ -513,6 +513,14 @@
 	// annotation behavior.
 	let shadowOverlayEnabled = $state(false);
 	let shadowOverlayRender = $state<ShadowOverlayRender | null>(null);
+	// --- MiddleOut ribbon-recovery diagnostic overlay (see middleOutRibbon.ts).
+	// Display-only, never an input to any annotation behavior -- same rule as
+	// the shadow overlay above. Data is already synchronously present on
+	// `courseDetection.middleOut`, so this toggle needs no async refresh.
+	let middleOutOverlayEnabled = $state(false);
+	function toggleMiddleOutOverlay(): void {
+		middleOutOverlayEnabled = !middleOutOverlayEnabled;
+	}
 	/** The run behind the current overlay — also the target of confuser annotations. */
 	let activeShadowRun = $state<RibbonMassShadowRun | null>(null);
 	/** Centroid (source px) of the component a hovered annotation row points at. */
@@ -4181,6 +4189,26 @@
 							>
 						{/each}
 					{/if}
+					{#if middleOutOverlayEnabled && courseDetection?.middleOut}
+						<!-- MiddleOut ribbon recovery: thin centerline over the raster, not
+						     a filled corridor -- this is CV evidence to inspect, not a
+						     finished graphic. Never an input to any annotation behavior. -->
+						{#each courseDetection.middleOut.holes as middleOutHole (middleOutHole.holeNumber)}
+							<polyline
+								points={middleOutHole.dense.map((point) => `${point.xPx},${point.yPx}`).join(' ')}
+								class="middleout-path"
+								data-testid="middleout-path-{middleOutHole.holeNumber}"
+							><title>Hole {middleOutHole.holeNumber} primary</title></polyline>
+							{#each middleOutHole.alternates as alternate, index (index)}
+								<polyline
+									points={alternate.dense.map((point) => `${point.xPx},${point.yPx}`).join(' ')}
+									class="middleout-alt"
+									class:weak={!alternate.valid}
+									data-testid="middleout-alt-{middleOutHole.holeNumber}-{index}"
+								><title>Hole {middleOutHole.holeNumber} alt {alternate.endpoint} rank {alternate.rank}</title></polyline>
+							{/each}
+						{/each}
+					{/if}
 					{#each visibleHoles as overlayHole (overlayHole.id)}
 						{@const band = deriveCorridorBand(overlayHole)}
 						{#if band}
@@ -4575,6 +4603,24 @@
 			/>
 			Shadow ribbon overlay
 		</label>
+		{#if courseDetection?.middleOut}
+			<label class="dev-tools-toggle" class:active={middleOutOverlayEnabled}>
+				<input
+					type="checkbox"
+					checked={middleOutOverlayEnabled}
+					onchange={toggleMiddleOutOverlay}
+					data-testid="middleout-overlay-toggle"
+				/>
+				MiddleOut ribbons
+			</label>
+			{#if middleOutOverlayEnabled}
+				<span class="middleout-legend" data-testid="middleout-overlay-legend">
+					{courseDetection.middleOut.holes.length} of 18 holes recovered ·
+					support field {courseDetection.middleOut.supportFieldMs.toFixed(0)}ms ·
+					paths {courseDetection.middleOut.pathsMs.toFixed(0)}ms
+				</span>
+			{/if}
+		{/if}
 		{#if shadowOverlayEnabled}
 			{#if shadowOverlayRender}
 				<span class="shadow-overlay-legend" data-testid="shadow-overlay-legend">
@@ -6067,6 +6113,40 @@
 
 	.computer-sees-legend .swatch.texture {
 		background: rgb(96 165 250 / 70%);
+	}
+
+	.middleout-legend {
+		display: inline-flex;
+		align-items: center;
+		font-size: 0.68rem;
+		color: #a1a1aa;
+	}
+
+	/* Thin CV-evidence centerlines, not a filled corridor -- readable enough
+	   to still inspect ribbon edges/roads/powerlines/C1-C2 rings underneath. */
+	.middleout-path {
+		fill: none;
+		stroke: #fb923c;
+		stroke-width: 3.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		vector-effect: non-scaling-stroke;
+		opacity: 0.9;
+	}
+
+	.middleout-alt {
+		fill: none;
+		stroke: #fb923c;
+		stroke-width: 2.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		vector-effect: non-scaling-stroke;
+		opacity: 0.38;
+	}
+
+	/* Alternate the P6 candidate pool could not score (see capIconFalsePositives/lowParScore null). */
+	.middleout-alt.weak {
+		opacity: 0.2;
 	}
 
 	.shadow-highlight-ring {
