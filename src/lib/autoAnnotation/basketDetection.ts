@@ -24,6 +24,7 @@ import type { P3OwnershipResult } from './rawObjectOwnership';
 import type { P4RibbonOwnershipResult } from './p4RibbonOwnership';
 import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
+import type { MiddleOutCourseResult } from './middleOutRibbon';
 import { getVisionFlagsSnapshot } from './visionFlags';
 import type { VisionFlags } from './visionFlags';
 
@@ -121,6 +122,8 @@ export interface CourseDetectionResult {
 	readonly p5SparseAssignment?: P5SparseAssignmentResult;
 	/** Pancake-6 shadow result: local LowPar one-to-one basket assignment. */
 	readonly p6LowParBasketAssignment?: P6LowParBasketAssignmentResult;
+	/** MiddleOut diagnostic: recovered tee->badge->basket ribbons + translucent alternates, not part of course ownership. */
+	readonly middleOut?: MiddleOutCourseResult;
 	/** Present on production worker results; optional so existing test fixtures/mocks remain source-compatible. */
 	readonly performance?: CourseDetectionPerformance;
 	/** Exact immutable prestaging flag snapshot used by the worker for this result. */
@@ -664,6 +667,24 @@ export async function detectCourseCandidates(
 					}))
 				);
 			}
+		}
+		if (reply.course.middleOut) {
+			const middleOut = reply.course.middleOut;
+			console.info('[ChainSpot MiddleOut ribbon recovery]');
+			console.table({
+				holesRecovered: middleOut.holes.length,
+				supportFieldMs: middleOut.supportFieldMs,
+				pathsMs: middleOut.pathsMs
+			});
+			console.table(
+				middleOut.holes.map((hole) => ({
+					hole: hole.holeNumber,
+					meanSupport: hole.meanSupport,
+					pathLengthPx: hole.pathLengthPx,
+					lengthRatio: hole.lengthRatio,
+					alternates: hole.alternates.length
+				}))
+			);
 		}
 		return reply.course;
 	} catch (error) {
