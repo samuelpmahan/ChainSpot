@@ -268,17 +268,6 @@ const DEFAULT_ICON_CAP_MAX_SUPPORT = 0.55;
  * cross (matches the existing endpoint low-cost-disk intent) but no longer a
  * false attractor. Call this after `computePairedEdgeSupportField`, before
  * `buildSupportCost`. Mutates `field.support` in place.
- *
- * Not implemented here (validated but out of scope for this pass): a
- * bearing-biased partial waiver from the icon edge out to the basket's C1
- * ring radius, active only toward the incoming leg direction -- this is what
- * would stop a large near-basket low-cost zone from bleeding into a
- * neighboring hole's territory for close basket clusters (e.g. two baskets
- * whose C1 rings nearly touch). See
- * `scripts/cv-probes/middleout/basket_zone_experiment.py` for the validated
- * Python prototype (`route_leg_v2`, ring-radius detection via saturation-
- * channel radial profile) -- worth porting if cluster holes visibly
- * misroute during browser testing, not required for this icon-cap fix.
  */
 export function capIconFalsePositives(
 	field: SupportField,
@@ -386,8 +375,103 @@ export interface EndpointWaiveOptions {
 	readonly maxCost?: number;
 }
 
+export interface BasketTransitPolicyOptions {
+	/** Rendered basket sprite centers in source-image pixels. */
+	readonly basketCentersSrcPx: readonly Point[];
+	/** The basket sprite that is this leg's actual endpoint; never penalized. */
+	readonly exemptBasketCenterSrcPx?: Point;
+	/** Radius of the local sprite/confuser zone. Defaults to 38 source px. */
+	readonly spriteRadiusSrcPx?: number;
+	/** Maximum cross-track distance from the leg chord that still counts as a plausible crossing. Defaults to the sprite radius. */
+	readonly crossingHalfWidthSrcPx?: number;
+	/** Crossing must project into this fraction from each end of the leg. Defaults to 0.20, i.e. the interior 20-80%. */
+	readonly interiorFraction?: number;
+	/** Additive cost inside a non-transit basket zone. Defaults to +3; never makes the zone impassable. */
+	readonly distractorPenalty?: number;
+}
+
 const DEFAULT_ENDPOINT_RADIUS_PX = 6;
 const DEFAULT_ENDPOINT_MAX_COST = 1.4;
+const DEFAULT_BASKET_TRANSIT_RADIUS_SRC_PX = 38;
+const DEFAULT_BASKET_TRANSIT_INTERIOR_FRACTION = 0.2;
+const DEFAULT_BASKET_DISTRACTOR_PENALTY = 3;
+
+function pointDistance(a: Point, b: Point): number {
+	return Math.hypot(a.xPx - b.xPx, a.yPx - b.yPx);
+}
+
+/**
+ * Tee->badge->basket is a confidence shortcut here, not a path prior.
+ * The chord never attracts the route or penalizes ordinary off-chord pixels.
+ * It answers only one yes/no question for a basket sprite: does this basket
+ * plausibly sit in the interior of the current semantic leg, close enough
+ * that the real rendered ribbon may need to pass underneath/through it?
+ */
+export function basketIsPlausibleInteriorTransit(
+	basketCenter: Point,
+	start: Point,
+	goal: Point,
+	options?: Pick<BasketTransitPolicyOptions, 'spriteRadiusSrcPx' | 'crossingHalfWidthSrcPx' | 'interiorFraction'>
+): boolean {
+	const vx = goal.xPx - start.xPx;
+	const vy = goal.yPx - start.yPx;
+	const lengthSq = vx * vx + vy * vy;
+	if (lengthSq <= 1e-9) return false;
+
+	const interiorFraction = Math.max(
+		0,
+		Math.min(0.49, options?.interiorFraction ?? DEFAULT_BASKET_TRANSIT_INTERIOR_FRACTION)
+	);
+	const projection = ((basketCenter.xPx - start.xPx) * vx + (basketCenter.yPx - start.yPx) * vy) / lengthSq;
+	if (projection < interiorFraction || projection > 1 - interiorFraction) return false;
+
+	const qx = start.xPx + projection * vx;
+	const qy = start.yPx + projection * vy;
+	const crossingHalfWidth =
+		options?.crossingHalfWidthSrcPx ?? options?.spriteRadiusSrcPx ?? DEFAULT_BASKET_TRANSIT_RADIUS_SRC_PX;
+	return Math.hypot(basketCenter.xPx - qx, basketCenter.yPx - qy) <= crossingHalfWidth;
+}
+
+function applyBasketTransitPolicy(
+	local: Float32Array,
+	localWidth: number,
+	localHeight: number,
+	x0: number,
+	y0: number,
+	scale: number,
+	start: Point,
+	goal: Point,
+	options: BasketTransitPolicyOptions | undefined
+): void {
+	if (!options || options.basketCentersSrcPx.length === 0) return;
+	const radiusSrcPx = options.spriteRadiusSrcPx ?? DEFAULT_BASKET_TRANSIT_RADIUS_SRC_PX;
+	const radius = radiusSrcPx / scale;
+	const radiusSq = radius * radius;
+	const penalty = options.distractorPenalty ?? DEFAULT_BASKET_DISTRACTOR_PENALTY;
+	if (!(radius > 0) || !(penalty > 0)) return;
+
+	for (const center of options.basketCentersSrcPx) {
+		if (options.exemptBasketCenterSrcPx && pointDistance(center, options.exemptBasketCenterSrcPx) <= 0.5) continue;
+		if (basketIsPlausibleInteriorTransit(center, start, goal, options)) continue;
+
+		const cx = center.xPx / scale - x0;
+		const cy = center.yPx / scale - y0;
+		const minX = Math.max(0, Math.floor(cx - radius));
+		const maxX = Math.min(localWidth - 1, Math.ceil(cx + radius));
+		const minY = Math.max(0, Math.floor(cy - radius));
+		const maxY = Math.min(localHeight - 1, Math.ceil(cy + radius));
+		if (minX > maxX || minY > maxY) continue;
+
+		for (let y = minY; y <= maxY; y += 1) {
+			for (let x = minX; x <= maxX; x += 1) {
+				const dx = x - cx;
+				const dy = y - cy;
+				if (dx * dx + dy * dy > radiusSq) continue;
+				local[y * localWidth + x] += penalty;
+			}
+		}
+	}
+}
 
 function waiveEndpointCost(
 	local: Float32Array,
@@ -419,6 +503,7 @@ export interface RouteLegOptions {
 	readonly marginFraction?: number;
 	readonly startWaive?: EndpointWaiveOptions;
 	readonly goalWaive?: EndpointWaiveOptions;
+	readonly basketTransit?: BasketTransitPolicyOptions;
 }
 
 /**
@@ -428,15 +513,10 @@ export interface RouteLegOptions {
  * `route_through_array(..., fully_connected=True, geometric=True)`. Returns
  * source-space (x,y) coordinates, or null if no path exists.
  *
- * Cost here is `support` only. `bestWidthPx`/`bestOrientationDeg` (the
- * paired-edge argmax per pixel, see `computePairedEdgeSupportField`) are
- * deliberately NOT folded into this cost yet: a real UDisc ribbon likely
- * widens its measured footprint at a genuine bend, so a turn unsupported by
- * local width expansion is a plausible candidate for a soft cost penalty --
- * but what that penalty should look like needs to be measured against how
- * the renderer actually draws bends first, not guessed. Wiring in a specific
- * formula before that measurement would just be a different unvalidated
- * guess in place of this one.
+ * Cost here is paired-edge support plus optional route-local basket-confuser
+ * penalties. The semantic chord is never a continuous path prior: it is used
+ * only to decide whether a basket sprite is a plausible interior crossing.
+ * `bestWidthPx`/`bestOrientationDeg` remain diagnostics, not route costs.
  */
 export function routeLeg(
 	cost: Float32Array,
@@ -473,6 +553,8 @@ export function routeLeg(
 			local[dstRow + x] = cost[srcRow + x + x0];
 		}
 	}
+
+	applyBasketTransitPolicy(local, localWidth, localHeight, x0, y0, scale, start, goal, options?.basketTransit);
 
 	const clampCol = (value: number): number => Math.max(0, Math.min(localWidth - 1, Math.round(value) - x0));
 	const clampRow = (value: number): number => Math.max(0, Math.min(localHeight - 1, Math.round(value) - y0));
@@ -548,6 +630,8 @@ export interface MiddleOutPathOptions {
 	readonly teeWaive?: EndpointWaiveOptions;
 	readonly badgeWaive?: EndpointWaiveOptions;
 	readonly basketWaive?: EndpointWaiveOptions;
+	readonly basketTransit?: Omit<BasketTransitPolicyOptions, 'exemptBasketCenterSrcPx'>;
+	readonly basketEndpointSpriteCenter?: Point;
 }
 
 export interface MiddleOutPathResult {
@@ -571,14 +655,19 @@ export function recoverMiddleOutPath(
 	const badgeToTee = routeLeg(cost, width, height, scale, badge, tee, {
 		marginFraction: options?.marginFraction,
 		startWaive: options?.badgeWaive,
-		goalWaive: options?.teeWaive
+		goalWaive: options?.teeWaive,
+		basketTransit: options?.basketTransit
 	});
 	if (!badgeToTee) return null;
 
+	const basketTransit = options?.basketTransit
+		? { ...options.basketTransit, exemptBasketCenterSrcPx: options.basketEndpointSpriteCenter }
+		: undefined;
 	const badgeToBasket = routeLeg(cost, width, height, scale, badge, basket, {
 		marginFraction: options?.marginFraction,
 		startWaive: options?.badgeWaive,
-		goalWaive: options?.basketWaive
+		goalWaive: options?.basketWaive,
+		basketTransit
 	});
 	if (!badgeToBasket) return null;
 
@@ -698,8 +787,12 @@ export function deriveMiddleOutDiagnostics(
 	p6: P6LowParBasketAssignmentResult
 ): MiddleOutCourseResult {
 	const field = computePairedEdgeSupportField(cv, raster);
-	capIconFalsePositives(field, baskets.map(toBasketSpriteCenter));
+	const basketSpriteCenters = baskets.map(toBasketSpriteCenter);
+	capIconFalsePositives(field, basketSpriteCenters);
 	const cost = buildSupportCost(field.support);
+	const basketTransit: Omit<BasketTransitPolicyOptions, 'exemptBasketCenterSrcPx'> = {
+		basketCentersSrcPx: basketSpriteCenters
+	};
 	const support = (path: readonly Point[]) => meanSupportAlongPath(path, field.support, field.widthPx, field.heightPx, field.scale);
 
 	const teeAssignmentByHole = new Map(
@@ -731,7 +824,19 @@ export function deriveMiddleOutDiagnostics(
 		const teePoint = toTeePoint(tee);
 		const basketPoint = toBasketPoint(basket);
 
-		const primary = recoverMiddleOutPath(cost, field.widthPx, field.heightPx, field.scale, teePoint, badgePoint, basketPoint);
+		const primary = recoverMiddleOutPath(
+			cost,
+			field.widthPx,
+			field.heightPx,
+			field.scale,
+			teePoint,
+			badgePoint,
+			basketPoint,
+			{
+				basketTransit,
+				basketEndpointSpriteCenter: basketSpriteCenters[basketAssignment.assignedBasketIndex]
+			}
+		);
 		if (!primary) continue;
 
 		const alternates: MiddleOutAlternatePath[] = [];
@@ -743,7 +848,19 @@ export function deriveMiddleOutDiagnostics(
 		for (const candidate of basketAlternates) {
 			const altBasket = baskets[candidate.basketIndex];
 			if (!altBasket) continue;
-			const altPath = recoverMiddleOutPath(cost, field.widthPx, field.heightPx, field.scale, teePoint, badgePoint, toBasketPoint(altBasket));
+			const altPath = recoverMiddleOutPath(
+				cost,
+				field.widthPx,
+				field.heightPx,
+				field.scale,
+				teePoint,
+				badgePoint,
+				toBasketPoint(altBasket),
+				{
+					basketTransit,
+					basketEndpointSpriteCenter: basketSpriteCenters[candidate.basketIndex]
+				}
+			);
 			if (!altPath) continue;
 			alternates.push({
 				endpoint: 'basket',
@@ -761,7 +878,19 @@ export function deriveMiddleOutDiagnostics(
 		for (const [index, alt] of teeAlternates.entries()) {
 			const altTee = tees[alt.teeIndex];
 			if (!altTee) continue;
-			const altPath = recoverMiddleOutPath(cost, field.widthPx, field.heightPx, field.scale, toTeePoint(altTee), badgePoint, basketPoint);
+			const altPath = recoverMiddleOutPath(
+				cost,
+				field.widthPx,
+				field.heightPx,
+				field.scale,
+				toTeePoint(altTee),
+				badgePoint,
+				basketPoint,
+				{
+					basketTransit,
+					basketEndpointSpriteCenter: basketSpriteCenters[basketAssignment.assignedBasketIndex]
+				}
+			);
 			if (!altPath) continue;
 			alternates.push({
 				endpoint: 'tee',
