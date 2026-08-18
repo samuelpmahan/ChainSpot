@@ -162,3 +162,41 @@ exercises the whole thing without a browser.
   this seam end-to-end is not provable from this repo alone; that is proven
   on the Toph side against the same pinned contract and is out of scope for
   this Proof Plan.
+
+## Integration proof (final slice — Toph adapter, viewer, end-to-end)
+
+This section closes the "out of scope" item above: `createChainSpotReplayAdapter`
+(`scripts/toph-replay-adapter.ts`) drives Toph's real `openReplaySession`/
+`replay`/`grid`/`firstDivergentStage` machinery end-to-end.
+
+- [x] Adapter synthesizes a valid `TraceRun`: `firstDivergentStage(trace, trace)`
+  is `null` (self-comparison, verified via a standalone smoke script before
+  wiring into the proof script).
+- [x] `scripts/toph-replay-proof.ts` opens a session on `TheRec-stitched.png`,
+  runs `baseline()`, `replay(baseline, {'p6.swap.enabled': false})`, and
+  `grid(baseline, {'p6.swap.minRibbonImprovementPx': [0, 100, 300]})`, and
+  saves every `RunRecord` + a `PROOF.md` narrative to the scratchpad.
+- [x] `firstDivergentStage(baseline, swapOff)` resolves (via the manifest) to
+  `p6.swapAdjudication` — matches the expected stage exactly.
+- [x] `stagesEquivalentThrough` at `p6.lowParAssignment` is `null` (equivalent)
+  for the same pair, confirming the two runs only diverge where they should.
+- [x] Baseline final: hole7→basket3, hole8→basket4 (post-swap); swap-off final:
+  hole7→basket4, hole8→basket3 (pre-swap, gated P6.1 preserved) — matches the
+  documented ground truth.
+- [x] Grid: `minRibbonImprovementPx` 0 and 100 both swap (ribbonImprovementPx≈236
+  clears both), 300 does not.
+- [x] Manual-toggle ≡ one-point-grid: `grid(baseline, {'p6.swap.enabled':[false]})`
+  produces a run whose patch/effectiveConfig/summary match the manual
+  `replay()` child exactly, modulo `runId`/`createdAt`/wall-clock `wallMs`
+  (timing is intentionally excluded from the equivalence check — see
+  `docs/toph-replay.md`).
+- [x] Viewer screenshots (`scripts/toph-proof-shoot.ts`, Playwright against
+  `/opt/pw-browsers/chromium`) show real hole/basket entity overlays with
+  `assigned`/`reassigned` relate lines and the A/B panel's first-divergent-
+  stage readout — not an empty shell.
+- [x] `npm run check` 0 errors; CV/replay unit suites green; same 6
+  known-red UI pointer-test files as before, no new failures.
+
+See `docs/toph-replay.md` for how to launch the viewer, and
+`scripts/toph-replay-proof.ts`'s output (`PROOF.md` + per-run JSON) for the
+full run-by-run narrative.

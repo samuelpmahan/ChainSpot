@@ -20,6 +20,28 @@ config defaults/frozenness/schema-path validity, P6 forward-gate and swap-thresh
 fixtures), and the scorer. This is a ChainSpot-only slice of a larger cross-repo (Toph) contract; no
 Toph adapter/viewer code lands here.
 
+## 2026-08-18 — CHSPT-TOPH-REPLAY: Toph integration (adapter, viewer launcher, proof)
+
+- `scripts/lib/cvReplayCore.ts`: extracted `cv-replay-run.ts`'s image/template loading and
+  pipeline-execution machinery into importable `loadCvReplayContext`/`runCvReplayPipeline`; the CLI is
+  now a thin wrapper around it (behavior unchanged, verified byte-identical output)
+- `scripts/toph-replay-adapter.ts`: `createChainSpotReplayAdapter` — Toph `ReplayAdapter` implementation
+  that runs the real pipeline headlessly and synthesizes a Toph trace from `StageExecutionRecord`s and
+  P6's own gate/swap diagnostics (hole/basket/tee entities, P6.1 `assigned` and P6.2 `reassigned` relate
+  events, per-pair `gte(ribbonImprovementPx, minRibbonImprovementPx)` checks); no `@toph`/toph imports in
+  `src/lib` per the contract — synthesis happens only in this Node harness, after execution
+- `scripts/toph-viewer.ts`: CLI launcher for Toph's diagnostic viewer wired to the adapter (see
+  `docs/toph-replay.md`)
+- `scripts/toph-replay-proof.ts`: end-to-end proof driven through `openReplaySession`/`replay`/`grid`/
+  `firstDivergentStage` — confirms `p6.swap.enabled=false` diverges baseline exactly at
+  `p6.swapAdjudication`, the grid over `minRibbonImprovementPx=[0,100,300]` swaps at 0/100 and not at 300,
+  and a one-point grid toggle is equivalent to the same manual `replay()` call
+- Screenshots of the viewer driven via Playwright confirm real entity/relate overlays (not an empty
+  shell) and the A/B first-divergent-stage panel
+
+Verified: `npm run check` 0 errors; CV/replay unit suites green, same 6 known-red UI pointer files as
+before (no new failures). Production Svelte app untouched — this is a dev-tool surface only.
+
 ## 2026-08-17 — CHSPT-65: course + thrown-round inputs into Create Graphics
 
 - Stitch Map: import prompt with thumbnails — pick the thrown round BEFORE any crop/stitch
