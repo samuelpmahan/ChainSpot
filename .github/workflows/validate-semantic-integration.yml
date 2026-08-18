@@ -14,31 +14,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: npm
-
       - run: npm ci
-
       - name: TypeScript and Svelte checks
         run: npm run check
-
       - name: Focused semantic integration tests
-        run: >-
-          npx vitest run
-          tests/unit/semanticLandmarks.test.ts
-          tests/unit/semanticTranslation.test.ts
-          tests/unit/semanticPoseGraph.test.ts
-          tests/unit/semanticPoseVerification.test.ts
-          tests/unit/semanticPoseIntegration.test.ts
-          tests/unit/sourceLandmarkHandoff.test.ts
-          tests/unit/sourcePhysicalLandmarkHandoff.test.ts
-          tests/unit/sourceLandmarkReadiness.test.ts
-          tests/unit/annotationCriticalPath.test.ts
-          tests/unit/badgeGlyphClassifier.test.ts
-
+        shell: bash
+        run: |
+          npx vitest run \
+            tests/unit/semanticLandmarks.test.ts \
+            tests/unit/semanticTranslation.test.ts \
+            tests/unit/semanticPoseGraph.test.ts \
+            tests/unit/semanticPoseVerification.test.ts \
+            tests/unit/semanticPoseIntegration.test.ts \
+            tests/unit/sourceLandmarkHandoff.test.ts \
+            tests/unit/sourcePhysicalLandmarkHandoff.test.ts \
+            tests/unit/sourceLandmarkReadiness.test.ts \
+            tests/unit/annotationCriticalPath.test.ts \
+            tests/unit/badgeGlyphClassifier.test.ts 2>&1 | tee focused.log
+      - name: Report focused benchmark evidence
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const text = fs.existsSync('focused.log') ? fs.readFileSync('focused.log', 'utf8') : 'focused.log missing';
+            const needles = ['badge-glyph-native-benchmark', 'badge-glyph-scale-benchmark', 'semantic-pair-path-counts', 'Test Files', 'Tests  '];
+            const lines = text.split('\n');
+            const selected = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (needles.some((needle) => lines[i].includes(needle))) {
+                selected.push(lines.slice(Math.max(0, i - 3), Math.min(lines.length, i + 30)).join('\n'));
+              }
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Focused semantic evidence\n\n\`\`\`text\n${(selected.join('\n---\n') || text.slice(-30000)).slice(-50000)}\n\`\`\``
+            });
       - name: Unit tests
         id: unit
         shell: bash
@@ -49,7 +66,6 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           cat unit.log
           exit 0
-
       - name: Report unit-test evidence
         if: always()
         uses: actions/github-script@v7
@@ -59,14 +75,12 @@ jobs:
           script: |
             const fs = require('fs');
             const text = fs.existsSync('unit.log') ? fs.readFileSync('unit.log', 'utf8') : 'unit.log missing';
-            const needles = ['FAIL', 'AssertionError', 'badge-glyph-native-benchmark', 'badge-glyph-scale-benchmark', 'Test Files', 'Tests  '];
+            const needles = ['FAIL', 'AssertionError', 'Test Files', 'Tests  '];
             const lines = text.split('\n');
             const selected = [];
             for (let i = 0; i < lines.length; i++) {
               if (needles.some((needle) => lines[i].includes(needle))) {
-                const lo = Math.max(0, i - 12);
-                const hi = Math.min(lines.length, i + 40);
-                selected.push(lines.slice(lo, hi).join('\n'));
+                selected.push(lines.slice(Math.max(0, i - 6), Math.min(lines.length, i + 18)).join('\n'));
               }
             }
             const bodyText = (selected.length ? selected.join('\n\n---\n\n') : text.slice(-50000)).slice(-60000);
@@ -76,13 +90,11 @@ jobs:
               issue_number: context.issue.number,
               body: `Validation unit exit: ${process.env.UNIT_EXIT}\n\n\`\`\`text\n${bodyText.replace(/\`\`\`/g, '\`\`\\`')}\n\`\`\``
             });
-
       - name: Production build
         env:
           BASE_PATH: /ChainSpot
           PUBLIC_GOOGLE_MAPS_API_KEY: ''
         run: npm run build
-
       - name: Fail validation on unit failure
         if: steps.unit.outputs.exit_code != '0'
         run: exit 1
