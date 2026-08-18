@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+
 	/**
 	 * Annotate Course: course geometry (tee/basket/corridor bends, hole
 	 * numbers), CV-assisted, once per course layout.
@@ -14,6 +16,31 @@
 	 * wrapper, so this file carries no test-injection props.
 	 */
 	import AnnotationWorkspace from '$lib/components/AnnotationWorkspace.svelte';
+
+	/**
+	 * Ferrari-mode hotfix: MiddleOut is still a display-only diagnostic inside
+	 * AnnotationWorkspace, but Annotate Course should expose it immediately
+	 * whenever a MiddleOut result arrives. The toggle itself is conditional on
+	 * `courseDetection.middleOut`, so watch for that control to appear and
+	 * activate it exactly once. If the workspace later defaults it on itself,
+	 * this becomes a no-op and can be removed without changing behavior.
+	 */
+	onMount(() => {
+		const enableMiddleOut = (): boolean => {
+			const toggle = document.querySelector<HTMLInputElement>('[data-testid="middleout-overlay-toggle"]');
+			if (!toggle) return false;
+			if (!toggle.checked) toggle.click();
+			return true;
+		};
+
+		if (enableMiddleOut()) return;
+		const observer = new MutationObserver(() => {
+			if (!enableMiddleOut()) return;
+			observer.disconnect();
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+		return () => observer.disconnect();
+	});
 </script>
 
 <AnnotationWorkspace mode="map" sessionKey="annotate-course" />
