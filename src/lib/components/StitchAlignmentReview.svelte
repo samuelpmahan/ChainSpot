@@ -58,6 +58,17 @@
 	let sourceImages = $state<ReadonlyMap<string, HTMLImageElement>>(new Map());
 	let rendering = $state(false);
 	let plane = $state<HTMLDivElement | null>(null);
+	let viewportEl = $state<HTMLDivElement | null>(null);
+	/**
+	 * Fits the whole composite inside the viewport on both axes (the
+	 * pre-CHSPT-40 zoom-to-fit behavior). CSS alone can't do this here: every
+	 * child of `.alignment-plane` (the image, badge flashes, source outlines)
+	 * is `position: absolute`, so the plane has no in-flow content to size
+	 * itself from — an `aspect-ratio` + `max-width`/`max-height`-only box
+	 * collapses to zero in that case. Measured imperatively instead, same
+	 * pattern as `clampHud`/`clampWitnessDock` below.
+	 */
+	let planeSize = $state<{ widthPx: number; heightPx: number }>({ widthPx: 0, heightPx: 0 });
 	let loadGeneration = 0;
 	let sourceSignature = success.sources.map((source) => source.sourceId).join('|');
 
@@ -117,6 +128,22 @@
 		deriveBadgeAlignmentWitnesses(currentDraft, sharedBadgeObservations, 6)
 	);
 
+	/** Largest size satisfying `provenance`'s aspect ratio that still fits entirely inside the viewport's current box. */
+	function fitPlaneToViewport(): void {
+		if (!viewportEl) return;
+		const availWidthPx = viewportEl.clientWidth;
+		const availHeightPx = viewportEl.clientHeight;
+		if (availWidthPx <= 0 || availHeightPx <= 0) return;
+		const ratio = provenance.outputWidthPx / provenance.outputHeightPx;
+		let widthPx = availWidthPx;
+		let heightPx = widthPx / ratio;
+		if (heightPx > availHeightPx) {
+			heightPx = availHeightPx;
+			widthPx = heightPx * ratio;
+		}
+		planeSize = { widthPx: Math.round(widthPx), heightPx: Math.round(heightPx) };
+	}
+
 	function clampHud(): void {
 		if (typeof window === 'undefined' || !hud) return;
 		hudPosition = clampFloatingRect(
@@ -167,20 +194,41 @@
 		void loadSourceImages();
 	});
 
+	// Re-fit whenever the DISPLAYED composite's own dimensions change (Apply/
+	// Reset can shift `outputWidthPx`/`outputHeightPx` slightly) — deliberately
+	// keyed on `provenance` (what's actually on screen), not the in-progress
+	// `currentDraft`, matching `imageUrl`'s own update timing.
+	$effect(() => {
+		void provenance.outputWidthPx;
+		void provenance.outputHeightPx;
+		fitPlaneToViewport();
+	});
+
 	onMount(() => {
 		void loadSourceImages();
 		const handleResize = (): void => {
 			clampHud();
 			clampWitnessDock();
+			fitPlaneToViewport();
 		};
 		window.addEventListener('resize', handleResize);
+		// Catches container-size changes `resize` can't (e.g. the thrown-round
+		// banner or another fixed-height sibling appearing/disappearing above
+		// this component without the window itself resizing).
+		const resizeObserver =
+			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fitPlaneToViewport());
+		if (viewportEl) resizeObserver?.observe(viewportEl);
+		fitPlaneToViewport();
 		requestAnimationFrame(() => {
 			hudPosition = { xPx: Math.max(16, window.innerWidth - (hud?.offsetWidth ?? 180) - 20), yPx: 20 };
 			clampHud();
 			witnessPosition = { xPx: 16, yPx: Math.max(16, window.innerHeight - (witnessDock?.offsetHeight ?? 160) - 20) };
 			clampWitnessDock();
 		});
-		return () => window.removeEventListener('resize', handleResize);
+		return () => {
+			window.removeEventListener('resize', handleResize);
+			resizeObserver?.disconnect();
+		};
 	});
 
 	onDestroy(() => {
@@ -336,14 +384,14 @@
 		sourceDrag = { ...sourceDrag, deltaXImagePx: delta.xPx, deltaYImagePx: delta.yPx };
 	}
 
-	async function endSourceDrag(event: PointerEvent): Promise<void> {
+	function endSourceDrag(event: PointerEvent): void {
 		if (!sourceDrag || event.pointerId !== sourceDrag.pointerId) return;
 		const drag = sourceDrag;
 		sourceDrag = null;
 		const dx = Math.round(drag.deltaXImagePx);
 		const dy = Math.round(drag.deltaYImagePx);
 		if (dx === 0 && dy === 0) return;
-		await applyTranslation(drag.sourceId, dx, dy);
+		stageTranslation(drag.sourceId, dx, dy);
 	}
 
 	function cancelSourceDrag(event: PointerEvent): void {
@@ -351,25 +399,44 @@
 		sourceDrag = null;
 	}
 
-	async function applyTranslation(sourceId: string, dxPx: number, dyPx: number): Promise<void> {
+	/**
+	 * Cheap, synchronous, local-only: updates the outline's committed position
+	 * so it stays put after the pointer lifts. Deliberately does NOT touch the
+	 * displayed raster — `renderPipelineComposite` (full-resolution
+	 * getImageData extraction + a pure-JS nearest-neighbour composite of every
+	 * source + PNG encode + SHA-256 hash) plus the parent's badge/basket CV
+	 * re-detection are each too expensive to re-run per drag or per keyboard
+	 * nudge; that work now happens exactly once, in `applyCorrections`, when
+	 * the user explicitly says they're done.
+	 */
+	function stageTranslation(sourceId: string, dxPx: number, dyPx: number): void {
+		currentDraft = translateDraftSource(currentDraft, sourceId, { xPx: dxPx, yPx: dyPx });
+	}
+
+	function nudgeSelected(dxPx: number, dyPx: number): void {
+		if (!selectedSourceId) return;
+		stageTranslation(selectedSourceId, dxPx, dyPx);
+	}
+
+	/** The one-time commit point for every drag/nudge staged since entering correction mode. */
+	async function applyCorrections(): Promise<void> {
+		if (currentDraft === initialDraft) {
+			setReviewMode('review');
+			return;
+		}
 		if (rendering || busy || sourceImages.size === 0) return;
-		const nextDraft = translateDraftSource(currentDraft, sourceId, { xPx: dxPx, yPx: dyPx });
 		rendering = true;
 		try {
-			const rendered = await renderPipelineComposite(nextDraft, sourceImages);
-			currentDraft = nextDraft;
-			await onAdjusted({ draft: nextDraft, ...rendered });
+			const rendered = await renderPipelineComposite(currentDraft, sourceImages);
+			await onAdjusted({ draft: currentDraft, ...rendered });
+			setReviewMode('review');
 		} finally {
 			rendering = false;
 		}
 	}
 
-	async function nudgeSelected(dxPx: number, dyPx: number): Promise<void> {
-		if (!selectedSourceId) return;
-		await applyTranslation(selectedSourceId, dxPx, dyPx);
-	}
-
 	async function resetAll(): Promise<void> {
+		if (currentDraft === initialDraft) return;
 		if (rendering || busy || sourceImages.size === 0) return;
 		rendering = true;
 		try {
@@ -393,15 +460,17 @@
 		else if (event.key === 'ArrowDown') dy = amount;
 		else return;
 		event.preventDefault();
-		void nudgeSelected(dx, dy);
+		nudgeSelected(dx, dy);
 	}
 </script>
 
 <section class="alignment-review" data-testid="alignment-review" onkeydown={handleCorrectionKeydown}>
-	<div class="alignment-viewport" data-testid="alignment-viewport">
+	<div class="alignment-viewport" bind:this={viewportEl} data-testid="alignment-viewport">
 		<div
 			class="alignment-plane"
 			bind:this={plane}
+			style:width={planeSize.widthPx > 0 ? `${planeSize.widthPx}px` : '100%'}
+			style:height={planeSize.heightPx > 0 ? `${planeSize.heightPx}px` : undefined}
 			style:aspect-ratio={`${provenance.outputWidthPx} / ${provenance.outputHeightPx}`}
 			data-testid="alignment-plane"
 			data-output-width={provenance.outputWidthPx}
@@ -471,7 +540,7 @@
 				<button type="button" disabled={!selectedSourceId || rendering} onclick={() => void nudgeSelected(1, 0)}>→</button>
 			</div>
 			<button type="button" class="compact" data-testid="alignment-reset-all" disabled={rendering} onclick={() => void resetAll()}>Reset all</button>
-			<button type="button" class="apply" data-testid="alignment-apply" disabled={rendering} onclick={() => setReviewMode('review')}>Apply adjustments</button>
+			<button type="button" class="apply" data-testid="alignment-apply" disabled={rendering} onclick={() => void applyCorrections()}>Apply adjustments</button>
 		{/if}
 		{#if rendering}<span class="rendering" role="status">Rendering…</span>{/if}
 	</div>
@@ -506,11 +575,13 @@
 
 	.alignment-viewport {
 		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 100%;
 		height: calc(100dvh - 5.5rem);
 		min-height: 24rem;
-		overflow: auto;
-		overscroll-behavior: contain;
+		overflow: hidden;
 		background: #09090b;
 		border: 1px solid #27272a;
 		border-radius: 10px;
@@ -518,8 +589,14 @@
 
 	.alignment-plane {
 		position: relative;
-		width: 100%;
-		min-width: 100%;
+		/* Fit the WHOLE composite inside the viewport on both axes (like the
+		   pre-redesign zoom-to-fit behavior) instead of forcing full width and
+		   letting a tall/narrow course's own aspect ratio push the box taller
+		   than the container — that's what was forcing a vertical scrollbar. */
+		width: auto;
+		height: auto;
+		max-width: 100%;
+		max-height: 100%;
 		/* Never clip here: every image-space overlay resolves against this exact raster plane. */
 		overflow: visible;
 	}

@@ -95,13 +95,20 @@ test('auto-first workflow: unordered grid import lands directly on an assembled 
 	if (!box) throw new Error('source outline has no bounds');
 	const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 	await drag(page, center, { x: center.x + 24, y: center.y + 10 });
-	// A real translation re-renders the composite through the same
-	// `renderPipelineComposite` path CHSPT-72's `handleAlignmentAdjusted`
-	// consumes.
+	// The drag stages instantly and must NOT re-render the composite on its
+	// own — only an explicit Apply/Reset does that expensive work (perf fix:
+	// dragging used to trigger a full recomposite + encode + hash + badge
+	// re-detection per drag, which crawled for several seconds).
+	await expect(page.getByTestId('stitch-status')).not.toContainText('Stitch adjustment applied.');
+	await expect(page.getByTestId('alignment-apply')).toBeEnabled();
+
+	await page.getByTestId('alignment-apply').click();
 	await expect(page.getByTestId('stitch-status')).toContainText('Stitch adjustment applied.');
+	await expect(page.getByTestId('alignment-yes')).toBeVisible();
 
 	// Reset all restores every source to its auto-arranged position —
 	// required for the deterministic export check below.
+	await page.getByTestId('alignment-no').click();
 	await page.getByTestId('alignment-reset-all').click();
 	await expect(page.getByTestId('stitch-status')).toContainText('Stitch adjustment applied.');
 	await page.getByTestId('alignment-apply').click();
