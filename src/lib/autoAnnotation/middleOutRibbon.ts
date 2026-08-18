@@ -24,6 +24,7 @@ import type { P2LabeledBadge } from './rawObjectOwnership';
 import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6BasketCandidate, P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
 import type { CorridorBendRaster } from './corridorBendDetection';
+import { BASKET_SPRITE_TIP_OFFSET_PX } from './pancakeCourseDisplay';
 
 export type MiddleOutRaster = CorridorBendRaster;
 
@@ -663,8 +664,14 @@ export interface MiddleOutCourseResult {
 const MAX_ALTERNATES_PER_SIDE = 2;
 const MAX_ALTERNATES_PER_HOLE = 2;
 
-function toBasketPoint(basket: RawMaskBasket): Point {
+/** Pixel center of the rendered basket sprite; used only for sprite-support suppression. */
+function toBasketSpriteCenter(basket: RawMaskBasket): Point {
 	return { xPx: basket.centerXPx, yPx: basket.centerYPx };
+}
+
+/** Same semantic basket point published by `buildPancakeDisplayGrammar`. */
+function toBasketPoint(basket: RawMaskBasket): Point {
+	return { xPx: basket.xPx, yPx: basket.yPx + BASKET_SPRITE_TIP_OFFSET_PX };
 }
 
 function toTeePoint(tee: RawMaskTee): Point {
@@ -691,7 +698,7 @@ export function deriveMiddleOutDiagnostics(
 	p6: P6LowParBasketAssignmentResult
 ): MiddleOutCourseResult {
 	const field = computePairedEdgeSupportField(cv, raster);
-	capIconFalsePositives(field, baskets.map(toBasketPoint));
+	capIconFalsePositives(field, baskets.map(toBasketSpriteCenter));
 	const cost = buildSupportCost(field.support);
 	const support = (path: readonly Point[]) => meanSupportAlongPath(path, field.support, field.widthPx, field.heightPx, field.scale);
 
