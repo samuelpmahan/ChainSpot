@@ -1,0 +1,44 @@
+name: Semantic stitch acceptance
+
+on:
+  pull_request:
+    branches: [prestaging/demo]
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-stitch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: TypeScript and Svelte checks
+        run: npm run check
+      - name: Semantic stitch focused tests and real-capture benchmark
+        env:
+          SEMANTIC_STITCH_ARTIFACT_DIR: artifacts/semantic-stitch
+        run: |
+          npx vitest run \
+            tests/unit/semanticLandmarks.test.ts \
+            tests/unit/semanticTranslation.test.ts \
+            tests/unit/semanticPoseGraph.test.ts \
+            tests/unit/semanticPoseIntegration.test.ts \
+            tests/unit/poseGraph.test.ts \
+            tests/unit/semanticRealCaptureBenchmark.test.ts
+      - name: Production build
+        env:
+          BASE_PATH: /ChainSpot
+          PUBLIC_GOOGLE_MAPS_API_KEY: ''
+        run: npm run build
+      - name: Upload semantic stitch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-stitch-evidence
+          path: artifacts/semantic-stitch
+          if-no-files-found: warn

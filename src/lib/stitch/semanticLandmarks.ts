@@ -96,6 +96,9 @@ export interface SemanticLandmarkTuning {
   readonly badgePoolAspectMin: number;
   readonly badgePoolAspectMax: number;
   readonly badgePoolFillMin: number;
+  readonly badgeOutlineFillMin: number;
+  readonly badgeOutlineFillMax: number;
+  readonly badgeOutlineDarkInteriorMin: number;
   readonly familySizeRelTolerance: number;
   readonly familyAreaRelTolerance: number;
   readonly minBatchFamilySupport: number;
@@ -118,6 +121,14 @@ export const SEMANTIC_LANDMARK_DEFAULTS: SemanticLandmarkTuning = Object.freeze(
   badgePoolAspectMin: 1.15,
   badgePoolAspectMax: 1.75,
   badgePoolFillMin: 0.6,
+  // Current UDisc captures draw a thin white rounded frame around the dark
+  // number body. That outline remains one clean component even when a route
+  // or two-digit glyph fragments the dark interior, so prefer it when the
+  // batch repeats it across sources. The old dark-body path remains below as
+  // fallback for render variants without a separable white frame.
+  badgeOutlineFillMin: 0.08,
+  badgeOutlineFillMax: 0.35,
+  badgeOutlineDarkInteriorMin: 0.08,
   familySizeRelTolerance: 0.12,
   familyAreaRelTolerance: 0.22,
   minBatchFamilySupport: 2
@@ -256,6 +267,36 @@ function makeScale(family: SemanticLandmarkFamily, cluster: readonly Component[]
   };
 }
 
+function clusterHasBatchSupport(cluster: readonly Component[], sourceCount: number, tuning: SemanticLandmarkTuning): boolean {
+  if (cluster.length < tuning.minBatchFamilySupport) return false;
+  const requiredSourceSupport = sourceCount <= 1 ? 1 : 2;
+  return new Set(cluster.map((component) => component.sourceIndex)).size >= requiredSourceSupport;
+}
+
+function darkFractionInside(
+  component: Component,
+  raster: SemanticRaster,
+  darkValueMax: number
+): number {
+  let dark = 0;
+  let total = 0;
+  for (let y = component.minY; y <= component.maxY; y += 1) {
+    const row = y * raster.widthPx;
+    for (let x = component.minX; x <= component.maxX; x += 1) {
+      const offset = (row + x) * 4;
+      if (
+        Math.max(
+          raster.rgba[offset],
+          raster.rgba[offset + 1],
+          raster.rgba[offset + 2]
+        ) <= darkValueMax
+      ) dark += 1;
+      total += 1;
+    }
+  }
+  return total === 0 ? 0 : dark / total;
+}
+
 function centerFallsInsideBadge(component: Component, badges: readonly Component[], marginPx: number): boolean {
   return badges.some(
     (badge) =>
@@ -300,7 +341,7 @@ export function detectSemanticLandmarkBatch(
     darkComponents.push(...collectComponents(dark, width, height, sourceIndex));
   });
 
-  const badgeShapePool = darkComponents.filter((component) => {
+  const badgeBodyShapePool = darkComponents.filter((component) => {
     const aspect = component.widthPx / component.heightPx;
     return (
       component.areaPx >= tuning.badgePoolMinAreaPx &&
@@ -311,8 +352,32 @@ export function detectSemanticLandmarkBatch(
       component.fill >= tuning.badgePoolFillMin
     );
   });
-  const badgeCluster = familyCluster(badgeShapePool, tuning);
-  const acceptedBadges = badgeCluster.length >= tuning.minBatchFamilySupport ? badgeCluster : [];
+  const badgeOutlineShapePool = brightComponents.filter((component) => {
+    const aspect = component.widthPx / component.heightPx;
+    if (
+      component.areaPx < tuning.badgePoolMinAreaPx ||
+      component.widthPx < tuning.badgePoolMinWidthPx ||
+      component.heightPx < tuning.badgePoolMinHeightPx ||
+      aspect < tuning.badgePoolAspectMin ||
+      aspect > tuning.badgePoolAspectMax ||
+      component.fill < tuning.badgeOutlineFillMin ||
+      component.fill > tuning.badgeOutlineFillMax
+    ) return false;
+    const raster = rasters[component.sourceIndex];
+    return darkFractionInside(component, raster, tuning.darkValueMax) >= tuning.badgeOutlineDarkInteriorMin;
+  });
+
+  const badgeOutlineCluster = familyCluster(badgeOutlineShapePool, tuning);
+  const badgeBodyCluster = familyCluster(badgeBodyShapePool, tuning);
+  const acceptedBadgeOutline = clusterHasBatchSupport(badgeOutlineCluster, rasters.length, tuning)
+    ? badgeOutlineCluster
+    : [];
+  const acceptedBadgeBody = badgeBodyCluster.length >= tuning.minBatchFamilySupport ? badgeBodyCluster : [];
+  // Prefer the frame when it repeats across the batch. Its bounds are stable
+  // across one- and two-digit labels and are a better downstream glyph ROI.
+  // Fall back to the historical dark body for render variants without it.
+  const acceptedBadges = acceptedBadgeOutline.length > 0 ? acceptedBadgeOutline : acceptedBadgeBody;
+  const selectedBadgeShapePool = acceptedBadgeOutline.length > 0 ? badgeOutlineShapePool : badgeBodyShapePool;
   const badgeScale = acceptedBadges.length > 0 ? makeScale('badge', acceptedBadges) : undefined;
 
   const badgeExclusionMargin = badgeScale ? Math.max(2, badgeScale.heightPx * 0.08) : 0;
@@ -357,10 +422,14 @@ export function detectSemanticLandmarkBatch(
       elapsedMs: nowMs() - started,
       brightComponentCount: brightComponents.length,
       darkComponentCount: darkComponents.length,
-      badgeShapePoolCount: badgeShapePool.length,
+      badgeShapePoolCount: selectedBadgeShapePool.length,
       basketShapePoolCount: basketShapePool.length,
       badgeAbstention:
-        badgeShapePool.length === 0 ? 'no-shape-candidates' : acceptedBadges.length === 0 ? 'insufficient-batch-consensus' : null,
+        badgeOutlineShapePool.length === 0 && badgeBodyShapePool.length === 0
+          ? 'no-shape-candidates'
+          : acceptedBadges.length === 0
+            ? 'insufficient-batch-consensus'
+            : null,
       basketAbstention:
         basketShapePool.length === 0 ? 'no-shape-candidates' : acceptedBaskets.length === 0 ? 'insufficient-batch-consensus' : null
     }
