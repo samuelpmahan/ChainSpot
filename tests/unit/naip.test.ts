@@ -9,7 +9,7 @@ import {
 import type { FetchLike } from '../../src/lib/naip';
 
 describe('bboxFromCenter + buildNaipExportUrl', () => {
-	test('computes a centered WGS84 box (narrower in longitude away from the equator) and encodes it into the exportImage URL', () => {
+	test('computes a centered WGS84 box and encodes it into the browser-fetchable USGS imagery export URL', () => {
 		// A mid-latitude US course: at 45 degrees north, cos(45) ~ 0.707, so a degree
 		// of longitude covers fewer meters than a degree of latitude, and the box
 		// should be measurably wider in longitude-degrees than latitude-degrees for
@@ -23,9 +23,10 @@ describe('bboxFromCenter + buildNaipExportUrl', () => {
 
 		const url = new URL(buildNaipExportUrl(bbox));
 		expect(url.origin + url.pathname).toBe(
-			'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage'
+			'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export'
 		);
 		expect(url.searchParams.get('bboxSR')).toBe('4326');
+		expect(url.searchParams.get('imageSR')).toBe('4326');
 		expect(url.searchParams.get('size')).toBe(`${NAIP_EXPORT_SIZE_PX},${NAIP_EXPORT_SIZE_PX}`);
 		expect(url.searchParams.get('format')).toBe('png');
 		expect(url.searchParams.get('f')).toBe('image');
@@ -41,9 +42,6 @@ describe('fetchNaipImage', () => {
 		expect(networkResult.ok).toBe(false);
 		if (!networkResult.ok) expect(networkResult.error.kind).toBe('network');
 
-		// NAIP's exportImage returns a 200 JSON error body (not a non-2xx status) when
-		// there is no coverage at the requested location — content-type is the only
-		// reliable signal, which is exactly what this branch checks.
 		const jsonErrorFetch: FetchLike = async () =>
 			new Response(JSON.stringify({ error: { message: 'no imagery' } }), {
 				status: 200,
