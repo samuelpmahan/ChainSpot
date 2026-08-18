@@ -1,0 +1,62 @@
+{
+	"schemaVersion": 1,
+	"source": {
+		"fileName": "TheRec-stitched.png",
+		"widthPx": 2242,
+		"heightPx": 2215,
+		"sha256": "9cb55fdced21bb1b03d59f1569fc475f0893ffb485622383e7858dcfb405d34e"
+	},
+	"provenance": {
+		"description": "Stitched headlessly from resources/stitch-annotate/TheRec/TheRec-L.PNG + TheRec-R.PNG via the repo's smartImportFiles crop + renderStitchedPng math (not through the browser UI).",
+		"inputs": [
+			"resources/stitch-annotate/TheRec/TheRec-L.PNG",
+			"resources/stitch-annotate/TheRec/TheRec-R.PNG"
+		],
+		"note": "A previously-referenced historical artifact, 2244x2212px, sha256 9d95dc6d..., was produced by an earlier headless stitch attempt and was NOT bit-reproducible from a fresh run of the same stitch math. This file (2242x2215, sha256 above) supersedes that artifact as the canonical fixture for this task; do not resurrect the 2244x2212 file as truth."
+	},
+	"badges": {
+		"note": "Per-side visually-read badge-body-center truth exists at resources/stitch-annotate/TheRec/TheRec-{L,R}-number-golden.json, in each half's OWN pre-stitch coordinate space (coordinateSpace: source-image-px, 1290x2796 per side). Those coordinates are not directly usable against this stitched image without re-deriving the exact smartImportFiles crop + renderStitchedPng placement transform for this stitch, which was not re-derived as part of this task. They are referenced here rather than merged/transformed, to avoid asserting fabricated stitched-space truth.",
+		"perSideGoldenFiles": [
+			"resources/stitch-annotate/TheRec/TheRec-L-number-golden.json",
+			"resources/stitch-annotate/TheRec/TheRec-R-number-golden.json"
+		]
+	},
+	"observedBehavior": {
+		"disclaimer": "These are OBSERVED baseline facts from running the real Pancake pipeline (P1-P6.2, DEFAULT_CV_CONFIG) against this exact image in a prior investigation -- NOT independently verified basket ground truth. No independently-verified basket assignment ground truth exists yet for this fixture. Treat this section as a regression baseline (did the pipeline's output change?), not as a correctness oracle.",
+		"holeCount": 9,
+		"p6_1_gated": {
+			"description": "P6.1 (gated forward-gate Hungarian solve), before P6.2 swap adjudication.",
+			"hole7_assignedBasketIndex": 4,
+			"hole8_assignedBasketIndex": 3
+		},
+		"p6_2_swapAdjudication": {
+			"description": "P6.2 conservative local 2-hole/2-basket swap over the P6.1 gated result.",
+			"swapsApplied": 1,
+			"changedHoleNumbers": [7, 8],
+			"swappedPair": { "holeA": 7, "holeB": 8, "basketX": 4, "basketY": 3 },
+			"ribbonImprovementPx": 236.05427491115688
+		},
+		"finalAssignments": [
+			{ "holeNumber": 1, "teeIndex": 0, "assignedBasketIndex": 1 },
+			{ "holeNumber": 2, "teeIndex": null, "assignedBasketIndex": null, "status": "unresolved" },
+			{ "holeNumber": 3, "teeIndex": 3, "assignedBasketIndex": 5 },
+			{ "holeNumber": 4, "teeIndex": 4, "assignedBasketIndex": 6 },
+			{ "holeNumber": 5, "teeIndex": 5, "assignedBasketIndex": 7 },
+			{ "holeNumber": 6, "teeIndex": 6, "assignedBasketIndex": 8 },
+			{ "holeNumber": 7, "teeIndex": 7, "assignedBasketIndex": 3 },
+			{ "holeNumber": 8, "teeIndex": 1, "assignedBasketIndex": 4 },
+			{ "holeNumber": 9, "teeIndex": 2, "assignedBasketIndex": 0 }
+		],
+		"basketPositionsPx": [
+			{ "basketIndex": 0, "xPx": 311.5, "yPx": 322.5 },
+			{ "basketIndex": 1, "xPx": 1238.5, "yPx": 524.5 },
+			{ "basketIndex": 2, "xPx": 1716.5, "yPx": 893.5 },
+			{ "basketIndex": 3, "xPx": 637.5, "yPx": 1043.5 },
+			{ "basketIndex": 4, "xPx": 1170.5, "yPx": 1085.5 },
+			{ "basketIndex": 5, "xPx": 1990.5, "yPx": 1136.5 },
+			{ "basketIndex": 6, "xPx": 1321.5, "yPx": 1401.5 },
+			{ "basketIndex": 7, "xPx": 918.5, "yPx": 1807.5 },
+			{ "basketIndex": 8, "xPx": 264.5, "yPx": 1891.5 }
+		]
+	}
+}
