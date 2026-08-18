@@ -249,8 +249,9 @@ export function parseIncrementalAerialManifest(value: unknown): IncrementalAeria
 		typeof input.tileRadiusMeters !== 'number' ||
 		!Number.isFinite(input.tileRadiusMeters) ||
 		input.tileRadiusMeters <= 0 ||
+		typeof input.tileSizePx !== 'number' ||
 		!Number.isInteger(input.tileSizePx) ||
-		(input.tileSizePx ?? 0) <= 0 ||
+		input.tileSizePx <= 0 ||
 		!Array.isArray(input.tiles)
 	) {
 		return null;
