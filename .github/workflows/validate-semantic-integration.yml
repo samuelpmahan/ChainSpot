@@ -1,0 +1,33 @@
+name: Validate semantic stitch integration
+
+on:
+  pull_request:
+    branches: [prestaging/demo]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - run: npm ci
+
+      - name: TypeScript and Svelte checks
+        run: npm run check
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Production build
+        env:
+          BASE_PATH: /ChainSpot
+          PUBLIC_GOOGLE_MAPS_API_KEY: ''
+        run: npm run build
