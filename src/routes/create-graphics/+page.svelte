@@ -3,17 +3,11 @@
 	import ImagePane from '$lib/components/ImagePane.svelte';
 	import { ProjectEditor } from '$lib/domain/editor';
 	import type { AssetResource } from '$lib/domain/editor';
-	import { createImageAsset, findImageByRole } from '$lib/domain/project';
+	import { findImageByRole } from '$lib/domain/project';
 	import type { ImageAsset, ImageRole, ControlPointPair, ProjectState } from '$lib/domain/project';
 	import type { DecodeImageFile, HashBytes } from '$lib/imageIntake';
-	import {
-		bundlePathFor,
-		decodeImageFile,
-		intakeImageFile,
-		readFileBytes,
-		sha256Hex
-	} from '$lib/imageIntake';
-	import { clampPointToImageBounds, normalizeRotationDeg, pointInBounds } from '$lib/coords';
+	import { decodeImageFile, intakeImageFile } from '$lib/imageIntake';
+	import { normalizeRotationDeg, pointInBounds } from '$lib/coords';
 	import type { PointSide } from '$lib/domain/editor';
 	import { isEditableTarget, nudgeDelta } from '$lib/pointSelection';
 	import type { PointSelection } from '$lib/pointSelection';
@@ -71,10 +65,14 @@
 	import {
 		coverageGap,
 		expandedFetchGeometry,
-		fetchGeometryFromViewport,
-		remapNaipPixel
+		fetchGeometryFromViewport
 	} from '$lib/naipCoverage';
-	import type { NaipFetchGeometry, PixelPoint } from '$lib/naipCoverage';
+	import type { PixelPoint } from '$lib/naipCoverage';
+	import { expandedFetchGeometryToward } from '$lib/naipEdgeExpansion';
+	import type { EdgeDirection } from '$lib/edgeLoadZones';
+	import { IncrementingDebouncer } from '$lib/incrementingDebounce';
+	import type { IncrementingDebounceSnapshot } from '$lib/incrementingDebounce';
+	import { refetchGeoReferencedTarget } from '$lib/naipTargetRefetch';
 	import { geoBoxCenterAndSize, pixelRectToGeoBox, planTileGrid } from '$lib/naipGrid';
 	import type { PixelRect } from '$lib/naipGrid';
 	import { composeMosaic, fetchTileGrid } from '$lib/naipMosaic';
@@ -138,6 +136,7 @@
 
 	onDestroy(() => {
 		if (participatesInSession) retainEditor('create-graphics', editor);
+		edgeLoadDebouncer.cancel();
 		clearNaipPreview();
 		handleBoxHandleUp();
 	});
@@ -284,12 +283,14 @@
 	/** Live updates while the rotation control is being dragged/typed; never touches durable state. */
 	function handleTargetRotationInput(rotationDeg: number): void {
 		if (!Number.isFinite(rotationDeg)) return;
+		if (rotationDeg !== 0) edgeLoadDebouncer.cancel();
 		targetRotationDraft = normalizeRotationDeg(rotationDeg);
 	}
 
 	/** Commits the rotation gesture's final value to durable, undoable state. */
 	function handleTargetRotationCommit(rotationDeg: number): void {
 		if (!Number.isFinite(rotationDeg) || !targetImage()) return;
+		edgeLoadDebouncer.cancel();
 		const normalized = normalizeRotationDeg(rotationDeg);
 		targetRotationDraft = normalized;
 		editor.setTargetRotation(normalized);
@@ -409,6 +410,15 @@
 	 */
 	const DEFAULT_NAIP_RADIUS_METERS = 300;
 	/**
+	 * Repeated edge clicks are intentionally expensive for the user rather than
+	 * the imagery service: trailing debounce starts at 2s, rises 1s per extra
+	 * click to 5s, and returns to 2s only after 10s of quiet.
+	 */
+	const EDGE_LOAD_MIN_DEBOUNCE_MS = 2000;
+	const EDGE_LOAD_MAX_DEBOUNCE_MS = 5000;
+	const EDGE_LOAD_DEBOUNCE_STEP_MS = 1000;
+	const EDGE_LOAD_QUIET_RESET_MS = 10000;
+	/**
 	 * Fixed radius for every tile in the full-resolution grid: 300m frames one or two
 	 * disc-golf holes (typical hole lengths run roughly 60-250m) with margin on every
 	 * side, so each tile stays sharp instead of stretching thin over a huge area.
@@ -461,6 +471,8 @@
 	let geocodeError = $state<string | null>(null);
 	let geocodeMatches = $state<GeoSearchMatch[] | null>(null);
 	let geocodeSelectedIndex = $state<number | null>(null);
+	/** Provider bounds are useful framing hints, not a claim that the course is contained by them. */
+	let applyGeocodeBoundingBox = $state(true);
 	/** Which provider produced `geocodeMatches`, so the correct attribution renders (ODbL for Nominatim, Google's for Places). */
 	let geocodeResultSource = $state<'nominatim' | 'places' | null>(null);
 	/**
@@ -606,6 +618,7 @@
 	});
 
 	function openLocationModal(): void {
+		edgeLoadDebouncer.cancel();
 		rememberFocus();
 		locationModalOpen = true;
 		naipError = null;
@@ -649,91 +662,122 @@
 
 	let coverageRefetching = $state(false);
 	let coverageError = $state<string | null>(null);
+	let edgeLoadDebounceState = $state<IncrementingDebounceSnapshot<EdgeDirection>>({
+		pending: false,
+		delayMs: EDGE_LOAD_MIN_DEBOUNCE_MS,
+		value: null
+	});
+	const edgeLoadDebouncer = new IncrementingDebouncer<EdgeDirection>(
+		(direction) => void handleEdgeLoadNow(direction),
+		{
+			minDelayMs: EDGE_LOAD_MIN_DEBOUNCE_MS,
+			maxDelayMs: EDGE_LOAD_MAX_DEBOUNCE_MS,
+			stepMs: EDGE_LOAD_DEBOUNCE_STEP_MS,
+			quietResetMs: EDGE_LOAD_QUIET_RESET_MS,
+			onStateChange: (snapshot) => (edgeLoadDebounceState = snapshot)
+		}
+	);
 
 	/**
-	 * Point-preserving coverage re-fetch, possible only for the geo-referenced
-	 * radius fetch (retained center/radius). Deliberately NOT routed through
-	 * `intakeImageFile`: that path discards pairs on replacement, while here
-	 * the whole point is that both rasters have exactly known georeferences,
-	 * so every placed target point remaps deterministically
-	 * (`remapNaipPixel`) onto the new image. `expandedFetchGeometry` contains
-	 * the old raster's full extent, so remapped points are in-bounds by
-	 * construction (the clamp only swallows float dust). Costs stated, not
-	 * hidden: this lands as several undo steps (replace + one movePoint per
-	 * pair + rotation), and the manual rotation is re-applied because both
-	 * rasters are north-up.
+	 * One point-preserving replacement implementation for both automatic
+	 * whole-course recovery and user-directed edge loading. `refetchGeoReferencedTarget`
+	 * owns old-pixel → WGS84 → new-pixel remapping; this page owns transient UI
+	 * cancellation, retained geo metadata, and success/error copy.
 	 */
-	async function handleCoverageRefetch(): Promise<void> {
-		const gap = coverageGapInfo;
+	async function refetchExpandedTarget(
+		newGeometry: { center: GeoPoint; radiusMeters: number },
+		successMessage: string
+	): Promise<void> {
 		const target = targetImage();
 		const center = targetGeoCenter;
 		const radius = targetGeoRadiusMeters;
-		if (!gap?.bounds || !target || !center || radius === null || coverageRefetching) return;
+		if (!target || !center || radius === null || coverageRefetching) return;
 		coverageRefetching = true;
 		coverageError = null;
 		try {
-			const oldGeometry: NaipFetchGeometry = { center, radiusMeters: radius };
-			const expanded = expandedFetchGeometry(oldGeometry, gap.bounds);
-			const result = await fetchNaipImage(expanded.center, expanded.radiusMeters);
-			if (!result.ok) {
-				coverageError = result.error.message;
-				return;
-			}
-			const file = new File([result.blob], 'naip-aerial.png', { type: 'image/png' });
-			const decodeFn = decode ?? decodeImageFile;
-			const decoded = await decodeFn(file);
-			if (decoded.widthPx !== target.widthPx || decoded.heightPx !== target.heightPx) {
-				// retainPoints requires identical dimensions; refuse rather than lose points.
-				coverageError = 'The re-fetched aerial came back at unexpected dimensions. Nothing was changed.';
-				return;
-			}
-			const bytes = await readFileBytes(file);
-			const sha256 = await (hash ?? sha256Hex)(bytes);
-			const asset = createImageAsset({
-				id: globalThis.crypto.randomUUID(),
-				role: 'target-basemap',
-				fileName: file.name,
-				mimeType: file.type,
-				widthPx: decoded.widthPx,
-				heightPx: decoded.heightPx,
-				sha256,
-				bundlePath: bundlePathFor('target-basemap', file.type)
-			});
-			// Same courtesy every other target replacement extends via
-			// onDomainChanged: a half-created correspondence must not linger
-			// against an image that is about to be swapped out (review finding).
 			if (correspondence.mode !== 'neutral') {
 				correspondence = cancelCorrespondence(correspondence);
 				correspondenceError = null;
 			}
-			const previousRotation = target.rotationDeg ?? 0;
-			editor.replaceImage({ role: 'target-basemap', asset, bytes, retainPoints: true });
-			editor.setDecodedResource(asset.id, decoded.image);
-			for (const pair of editor.state.controlPointPairs) {
-				if (pair.target.imageId !== asset.id) continue;
-				const remapped = remapNaipPixel(oldGeometry, expanded, pair.target);
-				editor.movePoint(
-					pair.id,
-					'target',
-					clampPointToImageBounds(remapped, decoded.widthPx, decoded.heightPx)
-				);
+			const result = await refetchGeoReferencedTarget({
+				editor,
+				expectedTargetId: target.id,
+				oldGeometry: { center, radiusMeters: radius },
+				newGeometry,
+				decode,
+				hash
+			});
+			if (!result.ok) {
+				coverageError = result.message;
+				return;
 			}
-			if (previousRotation !== 0) editor.setTargetRotation(previousRotation);
-			// New geometry replaces the old under the same per-fetch-shape rule:
-			// this is still the radius-based center fetch, just wider. Not
-			// `onDomainChanged`, which exists for arbitrary replacements and
-			// would wipe exactly the geo state being carried forward.
-			targetGroundScaleMetersPerPixel = naipMetersPerPixel(expanded.radiusMeters, NAIP_EXPORT_SIZE_PX);
-			targetGeoCenter = expanded.center;
-			targetGeoRadiusMeters = expanded.radiusMeters;
+			targetGroundScaleMetersPerPixel = result.metersPerPixel;
+			targetGeoCenter = newGeometry.center;
+			targetGeoRadiusMeters = newGeometry.radiusMeters;
 			refresh();
-			activityMessage =
-				'Fetched a wider aerial covering the whole course. Placed points moved with it.';
-		} catch (error) {
-			coverageError = error instanceof Error ? error.message : 'Could not re-fetch the aerial.';
+			activityMessage = successMessage;
 		} finally {
 			coverageRefetching = false;
 		}
+	}
+
+	/** Existing automatic recovery: fit both old aerial and transformed course. */
+	async function handleCoverageRefetch(): Promise<void> {
+		const gap = coverageGapInfo;
+		const center = targetGeoCenter;
+		const radius = targetGeoRadiusMeters;
+		if (!gap?.bounds || !targetImage() || !center || radius === null || coverageRefetching) return;
+		edgeLoadDebouncer.cancel();
+		const oldGeometry = { center, radiusMeters: radius };
+		const expanded = expandedFetchGeometry(oldGeometry, gap.bounds);
+		await refetchExpandedTarget(
+			expanded,
+			'Fetched a wider aerial covering the whole course. Placed points moved with it.'
+		);
+	}
+
+	/**
+	 * Edge clicks never call NAIP directly. First click waits 2s; every extra
+	 * click in the same burst replaces the requested direction and increases the
+	 * trailing debounce by 1s, capped at 5s. Thus a click-spam burst yields one
+	 * request for the LAST direction, not a burst of provider calls or a giant
+	 * multi-direction expansion.
+	 */
+	function handleEdgeLoadRequest(direction: EdgeDirection): void {
+		if (
+			coverageRefetching ||
+			locationModalOpen ||
+			naipPreview ||
+			!targetImage() ||
+			!targetGeoCenter ||
+			targetGeoRadiusMeters === null
+		) {
+			return;
+		}
+		coverageError = null;
+		edgeLoadDebouncer.schedule(direction);
+		const queued = edgeLoadDebouncer.snapshot();
+		activityMessage = `More aerial imagery ${direction} queued (${Math.ceil(queued.delayMs / 1000)}s debounce).`;
+	}
+
+	async function handleEdgeLoadNow(direction: EdgeDirection): Promise<void> {
+		const center = targetGeoCenter;
+		const radius = targetGeoRadiusMeters;
+		if (
+			coverageRefetching ||
+			locationModalOpen ||
+			naipPreview ||
+			!targetImage() ||
+			!center ||
+			radius === null
+		) {
+			return;
+		}
+		const expanded = expandedFetchGeometryToward({ center, radiusMeters: radius }, direction);
+		await refetchExpandedTarget(
+			expanded,
+			`Loaded more aerial imagery ${direction}. Placed points moved with the expanded map.`
+		);
 	}
 
 	function currentPairs(): readonly ControlPointPair[] {
@@ -1115,6 +1159,7 @@
 		// A replaced target-basemap invalidates any known ground scale and geo-reference
 		// -- only the radius-based NAIP confirm path (handleNaipConfirm) sets them back.
 		if (role === 'target-basemap') {
+			edgeLoadDebouncer.cancel();
 			targetGroundScaleMetersPerPixel = null;
 			targetGeoCenter = null;
 			targetGeoRadiusMeters = null;
@@ -1221,6 +1266,7 @@
 		const next = new ProjectEditor({ state, assets });
 		next.markSaved();
 		editor = next;
+		edgeLoadDebouncer.cancel();
 		playedRoundRegistrationConfirmed = null;
 		playedRoundRegistrationOpen = false;
 		registrationProofPoints = [];
@@ -1637,23 +1683,24 @@
 
 	/**
 	 * The one place a search result (or a parsed coordinate paste) becomes a
-	 * "selected location" (CHSPT-68 flow):
+	 * selected location. Provider bounds are only an initial-framing hint:
 	 *
-	 * - A result carrying a REAL provider bounding box sizes the fetch from
-	 *   that box (`fetchGeometryFromViewport`) and goes straight to the
-	 *   in-pane aerial preview — the preview is the confirmation step now.
-	 * - A keyed result with a missing/degenerate box keeps the `MapConfirm`
-	 *   midpoint step, which remains the sole gate that mounts `MapConfirm` —
-	 *   the only place the Google Dynamic Maps script tag is ever injected.
-	 *   An abandoned search still costs at most one Places call and zero map
-	 *   loads.
-	 * - A keyless degenerate/missing box fetches at the default radius.
+	 * - With "Apply bounding box" checked, today's viewport sizing behavior is
+	 *   preserved. A real provider box sizes the radius fetch; a keyed result
+	 *   without a useful box still gets the MapConfirm midpoint step.
+	 * - With it unchecked, the selected result itself is the anchor. Its provider
+	 *   box is ignored, the normal 300m radius is used, and no MapConfirm detour
+	 *   is added. This supports proxy landmarks (e.g. the business across the
+	 *   street from an unmapped course); the user can then pan/load outward.
 	 */
 	function selectLocation(match: GeoSearchMatch): void {
 		naipError = null;
-		const geometry = fetchGeometryFromViewport({ lat: match.lat, lon: match.lon }, match.viewport);
+		const geometry = fetchGeometryFromViewport(
+			{ lat: match.lat, lon: match.lon },
+			applyGeocodeBoundingBox ? match.viewport : undefined
+		);
 		const apiKey = googleMapsApiKey();
-		if (!geometry.fromViewport && apiKey) {
+		if (applyGeocodeBoundingBox && !geometry.fromViewport && apiKey) {
 			// Arming MapConfirm hasn't overwritten anything yet; the note (and
 			// its shortcut) must survive a Cancel there (review round 3).
 			mapConfirmState = { match, apiKey };
@@ -2521,6 +2568,11 @@
 				rotationDeg={targetRotationDraft}
 				onRotationInput={handleTargetRotationInput}
 				onRotationCommit={handleTargetRotationCommit}
+				edgeLoadEnabled={targetGeoCenter !== null && targetGeoRadiusMeters !== null && !locationModalOpen && !naipPreview}
+				edgeLoadBusy={coverageRefetching}
+				edgeLoadQueuedDirection={edgeLoadDebounceState.pending ? edgeLoadDebounceState.value : null}
+				edgeLoadDelayMs={edgeLoadDebounceState.delayMs}
+				onEdgeLoad={handleEdgeLoadRequest}
 				{decode}
 				confirmDiscard={(count) => requestDiscardConfirmation('target-basemap', count)}
 				onDomainChanged={onDomainChanged}
@@ -2617,6 +2669,17 @@
 									bind:value={geocodeCityStateInput}
 									placeholder="e.g. Frisco, TX"
 								/>
+							</label>
+							<label
+								class="geocode-bbox-toggle"
+								title="Use the search provider's suggested place extent for the initial aerial. Turn this off when the search result is only a nearby landmark or starting point."
+							>
+								<input
+									type="checkbox"
+									data-testid="geocode-apply-bbox"
+									bind:checked={applyGeocodeBoundingBox}
+								/>
+								<span>Apply bounding box</span>
 							</label>
 							<button
 								type="button"
@@ -2930,6 +2993,9 @@
 					{/if}
 					{#if naipError}
 						<p class="error" data-testid="naip-error" role="alert">{naipError}</p>
+					{/if}
+					{#if coverageError && !coverageGapInfo}
+						<p class="error" data-testid="coverage-error" role="alert">{coverageError}</p>
 					{/if}
 				</div>
 			{/if}
@@ -4113,6 +4179,19 @@
 
 	.geocode-search input {
 		width: 12rem;
+	}
+
+	.geocode-search .geocode-bbox-toggle {
+		flex-direction: row;
+		align-items: center;
+		align-self: flex-end;
+		gap: 0.4rem;
+		min-height: 2.25rem;
+		white-space: nowrap;
+	}
+
+	.geocode-search .geocode-bbox-toggle input {
+		width: auto;
 	}
 
 	.geocode-results {
