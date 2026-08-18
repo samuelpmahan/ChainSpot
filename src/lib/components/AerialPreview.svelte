@@ -11,9 +11,12 @@
 	 */
 	import { onDestroy } from 'svelte';
 	import ImageViewport from './ImageViewport.svelte';
+	import ImageEdgeLoadButtons from './ImageEdgeLoadButtons.svelte';
 	import { ViewportController } from '$lib/viewport.svelte';
 	import { canvas2dAvailable, createPaneScene } from '$lib/scene';
 	import type { PaneScene } from '$lib/scene';
+	import { exposedLoadEdges } from '$lib/edgeLoadZones';
+	import type { EdgeDirection } from '$lib/edgeLoadZones';
 
 	interface Props {
 		/** Object URL of the preview image blob; owned (and revoked) by the caller. */
@@ -22,9 +25,21 @@
 		testid?: string;
 		/** Fires when the URL fails to decode — the caller clears the preview. */
 		onDecodeError?: () => void;
+		/** Enables load-more affordances once the user pans beyond a preview edge. */
+		edgeLoadEnabled?: boolean;
+		edgeLoadBusy?: boolean;
+		onEdgeLoad?: (direction: EdgeDirection) => void;
 	}
 
-	let { objectUrl, alt, testid = 'aerial-preview', onDecodeError }: Props = $props();
+	let {
+		objectUrl,
+		alt,
+		testid = 'aerial-preview',
+		onDecodeError,
+		edgeLoadEnabled = false,
+		edgeLoadBusy = false,
+		onEdgeLoad
+	}: Props = $props();
 
 	let vp = new ViewportController();
 	let scene: PaneScene | null = null;
@@ -36,6 +51,24 @@
 		if (canvasSupport === null) canvasSupport = canvas2dAvailable();
 		return canvasSupport;
 	}
+
+	/**
+	 * Same edge-exposure rule as the committed ImagePane, but available while
+	 * the aerial is still only a preview. This is the important lifecycle seam:
+	 * users can move/expand the candidate BEFORE accepting it as the clean target.
+	 */
+	let edgeLoadDirections = $derived.by(() => {
+		const target = vp.fitTarget;
+		if (!edgeLoadEnabled || !onEdgeLoad || !target) return [];
+		return exposedLoadEdges({
+			view: vp.view,
+			fitView: vp.fitView,
+			viewportWidthPx: vp.size.width,
+			viewportHeightPx: vp.size.height,
+			imageWidthPx: target.widthPx,
+			imageHeightPx: target.heightPx
+		});
+	});
 
 	/** Creates the Konva scene once the viewport container exists. */
 	$effect(() => {
@@ -88,6 +121,13 @@
 	>
 		{#snippet content()}{/snippet}
 	</ImageViewport>
+	{#if edgeLoadDirections.length > 0}
+		<ImageEdgeLoadButtons
+			directions={edgeLoadDirections}
+			busy={edgeLoadBusy}
+			onLoad={(direction) => onEdgeLoad?.(direction)}
+		/>
+	{/if}
 	<button
 		type="button"
 		class="fit-button"

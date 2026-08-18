@@ -1784,6 +1784,50 @@
 	}
 
 	/**
+	 * Expands the fetched-but-uncommitted aerial in the direction the user exposed.
+	 * Unlike the committed-target refetch path there are no control points to remap:
+	 * replace the preview blob + retained fetch geometry atomically, then keep the
+	 * user in the explicit review state. A stale in-flight result can never resurrect
+	 * a preview the user already discarded.
+	 */
+	async function handleNaipPreviewEdgeLoad(direction: EdgeDirection): Promise<void> {
+		const preview = naipPreview;
+		const center = naipPreviewCenter;
+		const radius = naipPreviewRadiusUsed;
+		if (!preview || !center || radius === null || naipLoading) return;
+
+		const expectedObjectUrl = preview.objectUrl;
+		const expanded = expandedFetchGeometryToward({ center, radiusMeters: radius }, direction);
+		naipLoading = true;
+		naipError = null;
+		try {
+			const result = await fetchNaipImage(expanded.center, expanded.radiusMeters);
+			if (!naipPreview || naipPreview.objectUrl !== expectedObjectUrl) return;
+			if (!result.ok) {
+				naipError = result.error.message;
+				return;
+			}
+
+			const nextObjectUrl = URL.createObjectURL(result.blob);
+			const previousObjectUrl = naipPreview.objectUrl;
+			clearGridPreview();
+			clearExactSelectionPreview();
+			boxRect = null;
+			displayScale = 1;
+			naipPreview = { blob: result.blob, objectUrl: nextObjectUrl };
+			naipPreviewCenter = expanded.center;
+			naipPreviewRadiusUsed = expanded.radiusMeters;
+			naipLatInput = String(expanded.center.lat);
+			naipLonInput = String(expanded.center.lon);
+			naipRadiusInput = String(Math.round(expanded.radiusMeters));
+			URL.revokeObjectURL(previousObjectUrl);
+			activityMessage = `Expanded aerial preview ${direction}. Nothing has been saved yet.`;
+		} finally {
+			naipLoading = false;
+		}
+	}
+
+	/**
 	 * Routes the confirmed NAIP preview through the exact same intake/replacement
 	 * path as a pane file upload (`intakeImageFile`), so point-discard confirmation,
 	 * asset manifest creation, undo/redo, and dirty state all apply identically to a
@@ -2842,6 +2886,9 @@
 						<AerialPreview
 							objectUrl={naipPreview.objectUrl}
 							alt="Fetched aerial preview, not yet used"
+							edgeLoadEnabled={naipPreviewCenter !== null && naipPreviewRadiusUsed !== null}
+							edgeLoadBusy={naipLoading}
+							onEdgeLoad={(direction) => void handleNaipPreviewEdgeLoad(direction)}
 							onDecodeError={handleNaipPreviewError}
 						/>
 					</div>
