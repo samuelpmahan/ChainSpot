@@ -67,7 +67,20 @@ export async function detectCourseCandidates(
         widthPx,
         heightPx,
         evidence,
-        getVisionFlagsSnapshot()
+        getVisionFlagsSnapshot(),
+        // Progressive Course Vision evidence rides the same onProgress channel
+        // both execution paths share, so the UI never needs to know which path
+        // ran. Display/trace only — never a domain mutation trigger.
+        (events) => {
+          if (events.length === 0) return;
+          const latest = events[events.length - 1];
+          onProgress?.({
+            stage: 'evidence',
+            message: latest.message,
+            elapsedMs: latest.elapsedMs,
+            evidence: events
+          });
+        }
       );
       console.info('[ChainSpot Annotate critical path]', {
         evidenceLookupMs,

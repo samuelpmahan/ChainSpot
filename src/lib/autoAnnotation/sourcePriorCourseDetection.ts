@@ -20,7 +20,7 @@ import { deriveP3Ownership } from './rawObjectOwnership';
 import { deriveP4RibbonOwnership } from './p4RibbonOwnership';
 import { deriveP5SparseAssignment } from './p5SparseAssignment';
 import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
-import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
+import { buildPancakeDisplayGrammar, BASKET_SPRITE_TIP_OFFSET_PX } from './pancakeCourseDisplay';
 import {
   detectRawObjectMask,
   RAW_MASK_HISTORICAL_DEFAULTS,
@@ -36,6 +36,11 @@ import type {
 } from './sourceLandmarkBridge';
 import type { FusedPhysicalLandmark } from './sourceLandmarkHandoff';
 import type { HoleNumberDetection } from './holeNumberDetection';
+import {
+  COURSE_VISION_OPERATORS,
+  type CourseVisionEvidenceListener,
+  type CourseVisionEvidenceEvent
+} from './courseVisionEvidence';
 
 export interface SourcePriorCoursePerformance {
   readonly path: 'source-prior-pure-ts';
@@ -235,9 +240,17 @@ export async function detectCourseFromSourcePriors(
   widthPx: number,
   heightPx: number,
   evidence: AnnotateSourceLandmarkEvidence & { readonly expectedHoleNumbers: readonly number[] },
-  visionFlags: VisionFlags
+  visionFlags: VisionFlags,
+  onEvidence?: CourseVisionEvidenceListener
 ): Promise<SourcePriorCourseDetectionResult> {
   const startedAt = nowMs();
+  const emit = (events: readonly CourseVisionEvidenceEvent[]): void => {
+    try {
+      onEvidence?.(events);
+    } catch {
+      // display-only; never break detection
+    }
+  };
   const decodeStartedAt = nowMs();
   const rgba = await decodeRgba(bytes, mimeType, widthPx, heightPx);
   const decodeRasterMs = nowMs() - decodeStartedAt;
@@ -276,6 +289,61 @@ export async function detectCourseFromSourcePriors(
   }));
   const sourcePriorMaterializeMs = nowMs() - materializeStartedAt;
 
+  // Emission Point 1: After source badges/baskets/identities materialized (before P3)
+  const emissionPoint1Events: CourseVisionEvidenceEvent[] = [];
+  const elapsedMs1 = nowMs() - startedAt;
+
+  // Candidate event with landmarks batch
+  emissionPoint1Events.push({
+    state: 'candidate',
+    channel: 'fast-lane',
+    producer: COURSE_VISION_OPERATORS.sourceLandmarkFusion,
+    landmarks: {
+      tees: rawMaskObjects.tees.map((tee) => ({
+        xPx: tee.xPx,
+        yPx: tee.yPx,
+        widthPx: tee.widthPx,
+        heightPx: tee.heightPx
+      })),
+      badges: sourceBadges.map((badge) => ({
+        xPx: badge.xPx,
+        yPx: badge.yPx,
+        widthPx: badge.widthPx,
+        heightPx: badge.heightPx
+      })),
+      baskets: sourceBaskets.map((basket) => ({
+        xPx: basket.xPx,
+        yPx: basket.yPx + BASKET_SPRITE_TIP_OFFSET_PX,
+        widthPx: basket.widthPx,
+        heightPx: basket.heightPx
+      }))
+    },
+    message: `Source Landmark Fusion supplied ${sourceBadges.length} badges + ${sourceBaskets.length} baskets; Raw UI Landmark Localization found ${rawMaskObjects.tees.length} tee candidates`,
+    elapsedMs: elapsedMs1
+  });
+
+  // Identified events: one per labeled badge
+  for (const badge of p2LabeledBadges) {
+    emissionPoint1Events.push({
+      state: 'identified',
+      channel: 'fast-lane',
+      producer: COURSE_VISION_OPERATORS.sourceLandmarkFusion,
+      holeNumber: badge.holeNumber,
+      geometry: {
+        badge: {
+          xPx: badge.xPx,
+          yPx: badge.yPx,
+          widthPx: badge.widthPx,
+          heightPx: badge.heightPx
+        }
+      },
+      message: `Source Landmark Fusion resolved H${badge.holeNumber} from propagated Stitch Map evidence`,
+      elapsedMs: elapsedMs1
+    });
+  }
+
+  emit(emissionPoint1Events);
+
   const p3StartedAt = nowMs();
   const p3Ownership = deriveP3Ownership(
     rawMaskObjects.tees,
@@ -284,6 +352,84 @@ export async function detectCourseFromSourcePriors(
     visionFlags
   );
   const p3Ms = nowMs() - p3StartedAt;
+
+  // Emission Point 2: After P3 ownership derivation
+  const emissionPoint2Events: CourseVisionEvidenceEvent[] = [];
+  const elapsedMs2 = nowMs() - startedAt;
+
+  // Build a map of holeNumber to badge for quick lookup
+  const badgesByHoleNumber = new Map(
+    p2LabeledBadges.map((badge) => [badge.holeNumber, badge])
+  );
+
+  // Owned events: one per teeBadgeHit
+  for (const hit of p3Ownership.teeBadgeHits) {
+    const tee = rawMaskObjects.tees[hit.teeIndex];
+    const badge = badgesByHoleNumber.get(hit.holeNumber);
+    if (tee && badge) {
+      emissionPoint2Events.push({
+        state: 'owned',
+        channel: 'fast-lane',
+        producer: COURSE_VISION_OPERATORS.geometricOwnership,
+        holeNumber: hit.holeNumber,
+        geometry: {
+          tee: {
+            xPx: tee.xPx,
+            yPx: tee.yPx,
+            widthPx: tee.widthPx,
+            heightPx: tee.heightPx
+          },
+          badge: {
+            xPx: badge.xPx,
+            yPx: badge.yPx,
+            widthPx: badge.widthPx,
+            heightPx: badge.heightPx
+          }
+        },
+        message: `Geometric Tee/Badge/Basket Ownership associated H${hit.holeNumber} tee and badge`,
+        elapsedMs: elapsedMs2
+      });
+    }
+  }
+
+  // Provisional events: one per straightBasketHit
+  for (const hit of p3Ownership.straightBasketHits) {
+    const tee = rawMaskObjects.tees[hit.teeIndex];
+    const badge = badgesByHoleNumber.get(hit.holeNumber);
+    const basket = rawMaskObjects.baskets[hit.basketIndex];
+    if (tee && badge && basket) {
+      emissionPoint2Events.push({
+        state: 'provisional',
+        channel: 'fast-lane',
+        producer: COURSE_VISION_OPERATORS.geometricOwnership,
+        holeNumber: hit.holeNumber,
+        geometry: {
+          tee: {
+            xPx: tee.xPx,
+            yPx: tee.yPx,
+            widthPx: tee.widthPx,
+            heightPx: tee.heightPx
+          },
+          badge: {
+            xPx: badge.xPx,
+            yPx: badge.yPx,
+            widthPx: badge.widthPx,
+            heightPx: badge.heightPx
+          },
+          basket: {
+            xPx: basket.xPx,
+            yPx: basket.yPx,
+            widthPx: basket.widthPx,
+            heightPx: basket.heightPx
+          }
+        },
+        message: `Geometric Tee/Badge/Basket Ownership found provisional straight evidence for H${hit.holeNumber}`,
+        elapsedMs: elapsedMs2
+      });
+    }
+  }
+
+  emit(emissionPoint2Events);
 
   const ribbonStartedAt = nowMs();
   const ribbonSegmentation = segmentRibbonMass(
@@ -342,6 +488,29 @@ export async function detectCourseFromSourcePriors(
     evidence.expectedHoleNumbers
   );
   const grammarMs = nowMs() - grammarStartedAt;
+
+  // Emission Point 3: After display grammar construction
+  const emissionPoint3Events: CourseVisionEvidenceEvent[] = [];
+  const elapsedMs3 = nowMs() - startedAt;
+
+  for (const hole of grammar.holes) {
+    const geometry = {
+      ...(hole.tee ? { tee: { xPx: hole.tee.xPx, yPx: hole.tee.yPx } } : {}),
+      ...(hole.basket ? { basket: { xPx: hole.basket.xPx, yPx: hole.basket.yPx } } : {})
+    };
+
+    emissionPoint3Events.push({
+      state: 'final',
+      channel: 'authoritative',
+      producer: COURSE_VISION_OPERATORS.finalCourseGrammarMaterialization,
+      holeNumber: hole.number,
+      ...(hole.tee || hole.basket ? { geometry } : {}),
+      message: `Basket Assignment and Reconciliation finalized H${hole.number}`,
+      elapsedMs: elapsedMs3
+    });
+  }
+
+  emit(emissionPoint3Events);
 
   const sourcePrior: SourcePriorCoursePerformance = {
     path: 'source-prior-pure-ts',
