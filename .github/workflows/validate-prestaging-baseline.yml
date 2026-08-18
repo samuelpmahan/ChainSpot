@@ -1,0 +1,60 @@
+name: Validate prestaging baseline
+
+on:
+  pull_request:
+    branches: [prestaging/demo]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: TypeScript and Svelte checks
+        run: npm run check
+      - name: Unit tests
+        id: unit
+        shell: bash
+        run: |
+          set +e
+          npm run test:unit > unit.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat unit.log
+          exit 0
+      - name: Report baseline failures
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          UNIT_EXIT: ${{ steps.unit.outputs.exit_code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const text = fs.existsSync('unit.log') ? fs.readFileSync('unit.log', 'utf8') : 'unit.log missing';
+            const lines = text.split('\n');
+            const selected = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].includes('FAIL') || lines[i].includes('AssertionError') || lines[i].includes('Test Files') || lines[i].includes('Tests  ')) {
+                selected.push(lines.slice(Math.max(0, i - 4), Math.min(lines.length, i + 12)).join('\n'));
+              }
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Baseline unit exit: ${process.env.UNIT_EXIT}\n\n\`\`\`text\n${(selected.join('\n---\n') || text.slice(-40000)).slice(-60000)}\n\`\`\``
+            });
+      - name: Production build
+        env:
+          BASE_PATH: /ChainSpot
+          PUBLIC_GOOGLE_MAPS_API_KEY: ''
+        run: npm run build
