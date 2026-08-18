@@ -47,11 +47,10 @@ import { localFeatureSnap } from '../cv/localSnap';
 import type { LocalSnapCalibration, LocalSnapKind, LocalSnapPoint, LocalSnapRaster } from '../cv/localSnap';
 import { detectRawObjectMask } from './rawObjectMask';
 import { deriveP3Ownership } from './rawObjectOwnership';
-import { deriveP4RibbonOwnership } from './p4RibbonOwnership';
-import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from './ribbonMass';
-import { deriveP5SparseAssignment } from './p5SparseAssignment';
-import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
-import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
+import { runPancakePipeline } from './cvPipeline';
+import type { PancakeInput } from './cvPipeline';
+import { DEFAULT_CV_CONFIG } from './cvConfig';
+import type { ChainSpotCvConfig } from './cvConfig';
 
 const MAX_ANALYSIS_DIM = 4096;
 // TEMP DEV ONLY: benchmark Pancake 1-3 without paying for legacy ownership CV.
@@ -78,6 +77,8 @@ interface CourseDetectionRequest {
 	readonly bitmap: ImageBitmap;
 	readonly widthPx: number;
 	readonly heightPx: number;
+	/** Optional counterfactual-replay configuration; defaults to production behavior. */
+	readonly cvConfig?: ChainSpotCvConfig;
 }
 
 interface BasketPrewarmRequest {
@@ -513,104 +514,30 @@ async function detectCourse(request: CourseDetectionRequest) {
 		const full = fullResolutionRaster(request.bitmap);
 		const fullRasterMs = performance.now() - fullRasterStartedAt;
 
-		const p1MaskStartedAt = performance.now();
-		const rawMaskObjects = detectRawObjectMask({ rgba: full.rgba, widthPx: full.width, heightPx: full.height });
-		const p1MaskMs = performance.now() - p1MaskStartedAt;
-
-		const p2BadgeLabelStartedAt = performance.now();
-		const p2BadgeDetectionRaw = labelKnownHoleNumberBadges(
+		const pancakeInput: PancakeInput = {
 			cv,
-			{ format: 'rgba', widthPx: full.width, heightPx: full.height, data: full.rgba },
-			pack.holeNumbers,
-			rawMaskObjects.badges
-		);
-		const p2BadgeDetection = {
-			...p2BadgeDetectionRaw,
-			anchor: p2BadgeDetectionRaw.anchor
-				? { ...p2BadgeDetectionRaw.anchor, scale: asNumberTemplateScale(p2BadgeDetectionRaw.anchor.scale) }
-				: null,
-			candidates: p2BadgeDetectionRaw.candidates.map((candidate) => ({
-				...candidate,
-				scale: asNumberTemplateScale(candidate.scale)
-			}))
+			holeNumberTemplates: pack.holeNumbers,
+			full: { rgba: full.rgba, widthPx: full.width, heightPx: full.height },
+			fullRasterMs
 		};
-		const p2BadgeLabelMs = performance.now() - p2BadgeLabelStartedAt;
-		const p2LabeledBadges = p2BadgeDetection.candidates
-			.filter((candidate): candidate is typeof candidate & { label: number; glyphScore: number } =>
-				candidate.label !== undefined && candidate.glyphScore !== undefined
-			)
-			.map((candidate) => ({
-				holeNumber: candidate.label,
-				glyphScore: candidate.glyphScore,
-				xPx: candidate.xPx,
-				yPx: candidate.yPx,
-				widthPx: candidate.widthPx,
-				heightPx: candidate.heightPx
-			}));
-
-		const p3StartedAt = performance.now();
-		const p3Ownership = deriveP3Ownership(
-			rawMaskObjects.tees,
-			p2LabeledBadges,
-			rawMaskObjects.baskets
-		);
-		const p3Ms = performance.now() - p3StartedAt;
-
-		// Ribbon segmentation is the expensive shared input to both P4 and
-		// P6.2's ribbon-distance evidence. Run it exactly once here and pass
-		// the same segmentation object to both — neither stage segments the
-		// raster itself. (P4.5's endpoint-bridge experiment was a negative
-		// result — see p4RibbonOwnership.ts — and no longer runs in this path.)
-		const ribbonSegmentationStartedAt = performance.now();
-		const ribbonSegmentation = segmentRibbonMass(
-			{ data: full.rgba, widthPx: full.width, heightPx: full.height, channels: 4 },
-			p2LabeledBadges.map((badge) => ({ xPx: badge.xPx, yPx: badge.yPx })),
-			DEFAULT_RIBBON_MASS_PARAMS
-		);
-		const ribbonSegmentationMs = performance.now() - ribbonSegmentationStartedAt;
-		// Structurally guaranteed by the single segmentRibbonMass call site above.
-		const ribbonSegmentationRuns = 1;
-
-		const p4StartedAt = performance.now();
-		const p4RibbonOwnership = deriveP4RibbonOwnership(
-			ribbonSegmentation,
-			rawMaskObjects.tees,
-			p2LabeledBadges,
-			rawMaskObjects.baskets,
-			p3Ownership
-		);
-		const p4Ms = performance.now() - p4StartedAt;
-
-		const p5StartedAt = performance.now();
-		const p5SparseAssignment = deriveP5SparseAssignment(
-			rawMaskObjects.tees,
+		const cvConfig = request.cvConfig ?? DEFAULT_CV_CONFIG;
+		const pipeline = await runPancakePipeline(pancakeInput, cvConfig);
+		const {
+			rawMaskObjects,
+			p2BadgeDetection,
 			p2LabeledBadges,
 			p3Ownership,
-			p4RibbonOwnership
-		);
-		const p5Ms = performance.now() - p5StartedAt;
-
-		const p6StartedAt = performance.now();
-		const p6LowParBasketAssignment = deriveP6LowParBasketAssignment(
-			{
-				data: full.rgba,
-				widthPx: full.width,
-				heightPx: full.height,
-				originXPx: 0,
-				originYPx: 0,
-				scale: 1,
-				channels: 4
-			},
-			rawMaskObjects.tees,
-			rawMaskObjects.baskets,
-			p2LabeledBadges,
-			p5SparseAssignment,
 			p4RibbonOwnership,
-			ribbonSegmentation
-		);
-		const p6Ms = performance.now() - p6StartedAt;
+			p5SparseAssignment,
+			p6LowParBasketAssignment,
+			grammar: displayGrammar,
+			timings
+		} = pipeline;
+		const { p1MaskMs, p2BadgeLabelMs, p3Ms, ribbonSegmentationMs, p4Ms, p5Ms, p6Ms } = timings;
+		// Structurally guaranteed by runPancakePipeline's single segmentRibbonMass call site.
+		const ribbonSegmentationRuns = 1;
 
-		const numberTemplateScale = p2BadgeDetection.anchor?.scale ?? asNumberTemplateScale(1);
+		const numberTemplateScale = asNumberTemplateScale(p2BadgeDetection.anchor?.scale ?? 1);
 		const basketTemplateScale = deriveBasketTemplateScale(numberTemplateScale, pack.manifest.calibration);
 		const performanceReport = {
 			totalMs: elapsedMs(),
@@ -689,12 +616,6 @@ async function detectCourse(request: CourseDetectionRequest) {
 				basketTemplateScalePerNumberTemplateScale: basketTemplateScale / numberTemplateScale
 			}
 		};
-		const displayGrammar = buildPancakeDisplayGrammar(
-			rawMaskObjects,
-			p2BadgeDetection,
-			p5SparseAssignment,
-			p6LowParBasketAssignment
-		);
 
 		return {
 			numberDetection: p2BadgeDetection,
