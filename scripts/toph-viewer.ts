@@ -1,6 +1,6 @@
 /**
  * CLI launcher for Toph's local counterfactual-replay diagnostic viewer,
- * wired to the Pancake CV pipeline via `createChainSpotReplayAdapter`.
+ * wired to the Pancake CV pipeline via the real-evidence replay adapter.
  *
  * Usage:
  *   npx tsx scripts/toph-viewer.ts --image resources/cv-fixtures/TheRec-stitched.png \
@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createChainSpotReplayAdapter } from './toph-replay-adapter';
+import { createChainSpotReplayAdapterWithEvidence } from './toph-replay-adapter-real-evidence';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
 		throw new Error(`Toph checkout not found at ${tophDir}. Pass --toph-dir, set TOPH_DIR, or check out the sibling repo.`);
 	}
 
-	const adapter = await createChainSpotReplayAdapter({
+	const adapter = await createChainSpotReplayAdapterWithEvidence({
 		imagePath: resolve(args.image),
 		projectRoot,
 		tophDir,
