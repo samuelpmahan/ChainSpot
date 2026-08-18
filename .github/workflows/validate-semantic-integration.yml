@@ -25,6 +25,20 @@ jobs:
       - name: TypeScript and Svelte checks
         run: npm run check
 
+      - name: Focused semantic integration tests
+        run: >-
+          npx vitest run
+          tests/unit/semanticLandmarks.test.ts
+          tests/unit/semanticTranslation.test.ts
+          tests/unit/semanticPoseGraph.test.ts
+          tests/unit/semanticPoseVerification.test.ts
+          tests/unit/semanticPoseIntegration.test.ts
+          tests/unit/sourceLandmarkHandoff.test.ts
+          tests/unit/sourcePhysicalLandmarkHandoff.test.ts
+          tests/unit/sourceLandmarkReadiness.test.ts
+          tests/unit/annotationCriticalPath.test.ts
+          tests/unit/badgeGlyphClassifier.test.ts
+
       - name: Unit tests
         id: unit
         shell: bash
@@ -45,13 +59,13 @@ jobs:
           script: |
             const fs = require('fs');
             const text = fs.existsSync('unit.log') ? fs.readFileSync('unit.log', 'utf8') : 'unit.log missing';
-            const needles = ['FAIL', 'AssertionError', 'badge-glyph-native-benchmark', 'Test Files', 'Tests  '];
+            const needles = ['FAIL', 'AssertionError', 'badge-glyph-native-benchmark', 'badge-glyph-scale-benchmark', 'Test Files', 'Tests  '];
             const lines = text.split('\n');
             const selected = [];
             for (let i = 0; i < lines.length; i++) {
               if (needles.some((needle) => lines[i].includes(needle))) {
                 const lo = Math.max(0, i - 12);
-                const hi = Math.min(lines.length, i + 30);
+                const hi = Math.min(lines.length, i + 40);
                 selected.push(lines.slice(lo, hi).join('\n'));
               }
             }
@@ -64,7 +78,6 @@ jobs:
             });
 
       - name: Production build
-        if: steps.unit.outputs.exit_code == '0'
         env:
           BASE_PATH: /ChainSpot
           PUBLIC_GOOGLE_MAPS_API_KEY: ''
