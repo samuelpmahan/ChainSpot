@@ -8,6 +8,7 @@
  */
 
 import type { SourcePoint } from '../domain/annotatedRound';
+import type { P6Config } from './cvConfig';
 import {
 	buildClassicCorridorEvidence,
 	DEFAULT_CLASSIC_CORRIDOR_EVIDENCE_PARAMS
@@ -298,7 +299,8 @@ function p5AssignmentByHole(p5: P5SparseAssignmentResult): Map<number, P5TeeAssi
 function forwardGateForBasket(
 	tee: SourcePoint,
 	badge: SourcePoint,
-	basket: RawMaskBasket
+	basket: RawMaskBasket,
+	forwardGateAngleDeg: number
 ): Pick<P6BasketCandidate, 'forwardProjectionPx' | 'forwardAngleDeg' | 'passedForwardGate'> {
 	const teeToBadgeX = badge.xPx - tee.xPx;
 	const teeToBadgeY = badge.yPx - tee.yPx;
@@ -314,7 +316,7 @@ function forwardGateForBasket(
 	return {
 		forwardProjectionPx,
 		forwardAngleDeg,
-		passedForwardGate: forwardProjectionPx > 0 && forwardAngleDeg <= P6_FORWARD_GATE_ANGLE_DEG
+		passedForwardGate: forwardProjectionPx > 0 && forwardAngleDeg <= forwardGateAngleDeg
 	};
 }
 
@@ -339,14 +341,15 @@ function sortCandidates(candidates: readonly P6BasketCandidate[]): P6BasketCandi
 		.map((candidate, index) => ({ ...candidate, rankWithinHole: index + 1 }));
 }
 
-function deriveP6LowParBasketAssignmentSnapshot(
+export function deriveP6LowParBasketAssignmentSnapshot(
 	raster: CorridorBendRaster,
 	tees: readonly RawMaskTee[],
 	baskets: readonly RawMaskBasket[],
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
 	p4: P4RibbonOwnershipResult,
-	useForwardGate: boolean
+	useForwardGate: boolean,
+	forwardGateAngleDeg: number = P6_FORWARD_GATE_ANGLE_DEG
 ): P6LowParBasketAssignmentSnapshot {
 	const p4ByHole = p4HoleByNumber(p4);
 	const p5ByHole = p5AssignmentByHole(p5);
@@ -406,7 +409,8 @@ function deriveP6LowParBasketAssignmentSnapshot(
 					...forwardGateForBasket(
 						{ xPx: tee.xPx, yPx: tee.yPx },
 						{ xPx: badge.xPx, yPx: badge.yPx },
-						basket
+						basket,
+						forwardGateAngleDeg
 					),
 					lowParScore,
 					valid: lowParScore !== null && Number.isFinite(lowParScore),
@@ -567,7 +571,7 @@ function deriveP6LowParBasketAssignmentSnapshot(
 			0
 		),
 		lowParHigherIsBetter: LOW_PAR_HIGHER_IS_BETTER,
-		forwardGateAngleDeg: useForwardGate ? P6_FORWARD_GATE_ANGLE_DEG : null,
+		forwardGateAngleDeg: useForwardGate ? forwardGateAngleDeg : null,
 		candidatesBeforeGate,
 		candidatesAfterGate,
 		gateFallbackHoles
@@ -676,7 +680,8 @@ function derive2x2SwapAdjudication(
 	segmentation: RibbonMassSegmentation,
 	baskets: readonly RawMaskBasket[],
 	badges: readonly P2LabeledBadge[],
-	ribbonParams: RibbonMassParams = DEFAULT_RIBBON_MASS_PARAMS
+	ribbonParams: RibbonMassParams = DEFAULT_RIBBON_MASS_PARAMS,
+	minRibbonImprovementPx: number = MIN_RIBBON_IMPROVEMENT_PX
 ): P6SwapAdjudicationResult {
 	const startedAt = performance.now();
 	const candidatePairs = findSwapCandidatePairs(gatedP6);
@@ -755,7 +760,7 @@ function derive2x2SwapAdjudication(
 			swappedRibbonCost !== null &&
 			swappedRibbonCost < currentRibbonCost &&
 			ribbonImprovementPx !== null &&
-			ribbonImprovementPx >= MIN_RIBBON_IMPROVEMENT_PX;
+			ribbonImprovementPx >= minRibbonImprovementPx;
 		return {
 			holeA,
 			holeB,
@@ -861,6 +866,97 @@ function applySwapAdjudication(
 	return { ...gatedP6, assignments, totalAssignmentCost };
 }
 
+/** Default P6 config: mirrors `DEFAULT_CV_CONFIG.p6` without importing `cvConfig.ts` (which itself imports the module constants below), avoiding a value-level circular import. */
+const DEFAULT_P6_CONFIG: P6Config = {
+	forwardGateAngleDeg: P6_FORWARD_GATE_ANGLE_DEG,
+	swap: { enabled: true, minRibbonImprovementPx: MIN_RIBBON_IMPROVEMENT_PX }
+};
+
+export interface P6GatedSnapshotPhase {
+	readonly originalP6: P6LowParBasketAssignmentSnapshot;
+	readonly gatedP6: P6LowParBasketAssignmentSnapshot;
+}
+
+/**
+ * Pancake 6.1 phase: derives both the ungated diagnostic snapshot and the
+ * real gated (forward-gate-applied) snapshot the solver acts on. Exported so
+ * `cvPipeline.ts` can time/observe this phase separately from P6.2's swap
+ * adjudication phase below.
+ */
+export function deriveP6GatedSnapshotPhase(
+	raster: CorridorBendRaster,
+	tees: readonly RawMaskTee[],
+	baskets: readonly RawMaskBasket[],
+	badges: readonly P2LabeledBadge[],
+	p5: P5SparseAssignmentResult,
+	p4: P4RibbonOwnershipResult,
+	p6Config: P6Config = DEFAULT_P6_CONFIG
+): P6GatedSnapshotPhase {
+	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(
+		raster,
+		tees,
+		baskets,
+		badges,
+		p5,
+		p4,
+		false,
+		p6Config.forwardGateAngleDeg
+	);
+	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(
+		raster,
+		tees,
+		baskets,
+		badges,
+		p5,
+		p4,
+		true,
+		p6Config.forwardGateAngleDeg
+	);
+	return { originalP6, gatedP6 };
+}
+
+export interface P6SwapPhaseResult {
+	readonly adjudicatedP6: P6LowParBasketAssignmentSnapshot;
+	readonly swapAdjudication: P6SwapAdjudicationResult;
+}
+
+const EMPTY_SWAP_ADJUDICATION: P6SwapAdjudicationResult = {
+	pairsConsidered: 0,
+	swapsApplied: 0,
+	changedHoleNumbers: [],
+	ms: 0,
+	pairs: []
+};
+
+/**
+ * Pancake 6.2 phase: local ribbon-evidence 2-hole/2-basket swap adjudication
+ * over the P6.1 gated snapshot. When `p6Config.swap.enabled` is false this
+ * is a pure no-op that returns the gated snapshot unchanged alongside an
+ * explicit empty `P6SwapAdjudicationResult` (never `undefined`), matching
+ * the shape callers already rely on when no swaps ran.
+ */
+export function deriveP6SwapPhase(
+	gatedP6: P6LowParBasketAssignmentSnapshot,
+	ribbonSegmentation: RibbonMassSegmentation,
+	baskets: readonly RawMaskBasket[],
+	badges: readonly P2LabeledBadge[],
+	p6Config: P6Config = DEFAULT_P6_CONFIG
+): P6SwapPhaseResult {
+	if (!p6Config.swap.enabled) {
+		return { adjudicatedP6: gatedP6, swapAdjudication: EMPTY_SWAP_ADJUDICATION };
+	}
+	const swapAdjudication = derive2x2SwapAdjudication(
+		gatedP6,
+		ribbonSegmentation,
+		baskets,
+		badges,
+		DEFAULT_RIBBON_MASS_PARAMS,
+		p6Config.swap.minRibbonImprovementPx
+	);
+	const adjudicatedP6 = applySwapAdjudication(gatedP6, swapAdjudication);
+	return { adjudicatedP6, swapAdjudication };
+}
+
 /**
  * `ribbonSegmentation` is the SAME segmentation P4 was derived from — built
  * once by the caller (see `basketDetection.worker.ts`) and passed down here
@@ -873,12 +969,11 @@ export function deriveP6LowParBasketAssignment(
 	badges: readonly P2LabeledBadge[],
 	p5: P5SparseAssignmentResult,
 	p4: P4RibbonOwnershipResult,
-	ribbonSegmentation: RibbonMassSegmentation
+	ribbonSegmentation: RibbonMassSegmentation,
+	p6Config: P6Config = DEFAULT_P6_CONFIG
 ): P6LowParBasketAssignmentResult {
-	const originalP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, false);
-	const gatedP6 = deriveP6LowParBasketAssignmentSnapshot(raster, tees, baskets, badges, p5, p4, true);
-	const swapAdjudication = derive2x2SwapAdjudication(gatedP6, ribbonSegmentation, baskets, badges);
-	const adjudicatedP6 = applySwapAdjudication(gatedP6, swapAdjudication);
+	const { originalP6, gatedP6 } = deriveP6GatedSnapshotPhase(raster, tees, baskets, badges, p5, p4, p6Config);
+	const { adjudicatedP6, swapAdjudication } = deriveP6SwapPhase(gatedP6, ribbonSegmentation, baskets, badges, p6Config);
 	return {
 		...adjudicatedP6,
 		originalP6,
