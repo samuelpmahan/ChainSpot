@@ -52,6 +52,7 @@ import { DEFAULT_RIBBON_MASS_PARAMS, segmentRibbonMass } from './ribbonMass';
 import { deriveP5SparseAssignment } from './p5SparseAssignment';
 import { deriveP6LowParBasketAssignment } from './p6LowParBasketAssignment';
 import { buildPancakeDisplayGrammar } from './pancakeCourseDisplay';
+import { deriveMiddleOutDiagnostics, type MiddleOutCv } from './middleOutRibbon';
 import type { VisionFlags } from './visionFlags';
 
 const MAX_ANALYSIS_DIM = 4096;
@@ -125,7 +126,7 @@ type BasketRequest =
 	| BasketPrewarmRequest
 	| TeeDetectionRequest
 	| LocalSnapRequest;
-type RuntimeCv = BasketCv & TeePadCv & HoleNumberCvModule;
+type RuntimeCv = BasketCv & TeePadCv & HoleNumberCvModule & MiddleOutCv;
 
 type AnalysisRaster = ReturnType<typeof grayscaleRaster>;
 
@@ -626,6 +627,31 @@ async function detectCourse(request: CourseDetectionRequest) {
 		);
 		const p6Ms = performance.now() - p6StartedAt;
 
+		const middleOutStartedAt = performance.now();
+		let middleOut: ReturnType<typeof deriveMiddleOutDiagnostics> | undefined;
+		try {
+			middleOut = deriveMiddleOutDiagnostics(
+				cv,
+				{
+					data: full.rgba,
+					widthPx: full.width,
+					heightPx: full.height,
+					originXPx: 0,
+					originYPx: 0,
+					scale: 1,
+					channels: 4
+				},
+				rawMaskObjects.tees,
+				rawMaskObjects.baskets,
+				p2LabeledBadges,
+				p5SparseAssignment,
+				p6LowParBasketAssignment
+			);
+		} catch (error) {
+			console.warn('[ChainSpot MiddleOut] diagnostic failed; preserving P1→P6 course detection.', error);
+		}
+		const middleOutMs = performance.now() - middleOutStartedAt;
+
 		const numberTemplateScale = p2BadgeDetection.anchor?.scale ?? asNumberTemplateScale(1);
 		const basketTemplateScale = deriveBasketTemplateScale(numberTemplateScale, pack.manifest.calibration);
 		const performanceReport = {
@@ -657,6 +683,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 				p4Ms,
 				p5Ms,
 				p6Ms,
+				middleOutMs,
 				teesMs: 0,
 				teeRasterMs: fullRasterMs,
 				teeDetectionMs: 0,
@@ -724,6 +751,7 @@ async function detectCourse(request: CourseDetectionRequest) {
 			p4RibbonOwnership,
 			p5SparseAssignment,
 			p6LowParBasketAssignment,
+			...(middleOut ? { middleOut } : {}),
 			performance: performanceReport,
 			visionFlags
 		};
