@@ -17,7 +17,7 @@ import {
   type BadgeGlyphClassification,
   type BadgeGlyphRaster
 } from './badgeGlyphClassifier';
-import type { KnownBadgeBody } from './holeNumberDetection';
+import type { HoleNumberCvModule, KnownBadgeBody } from './holeNumberDetection';
 
 export interface SourceBadgeIdentitySource {
   readonly sourceId: string;
@@ -90,10 +90,12 @@ export async function classifySemanticSourceBadges(
     }
 
     // Pure TS could not prove a unique label set. Escalate only the known
-    // ROIs, reusing the exact P2 glyph scorer/one-to-one assignment.
+    // ROIs, reusing the exact P2 glyph scorer/one-to-one assignment. Both
+    // cvMatch and P2 receive the same runtime object from cv/runtime; their
+    // local structural types simply describe different subsets of that object.
     const cvStartedAt = nowMs();
     cvPromise ??= loadCv();
-    const cv = await cvPromise;
+    const cv = (await cvPromise) as unknown as HoleNumberCvModule;
     const roi = classifyKnownBadgeBodiesWithOpenCv(cv, raster, pack.templates, bodies);
     roiOpenCvMs += nowMs() - cvStartedAt;
     roiOpenCvSourceCount += 1;
