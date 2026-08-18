@@ -1,0 +1,48 @@
+name: Temporary MiddleOut integration verification Node 22
+
+on:
+  pull_request:
+    branches:
+      - integration/middleout-prestaging-20260818
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/middleout-prestaging-20260818
+          fetch-depth: 0
+
+      - name: Apply exact candidate UI-only MiddleOut patch
+        run: |
+          git diff 894854a283b93df784e9d54a5267f1214a99a543 d2dd0595d7bd18671a13111c69d639d753aca253 -- src/lib/components/AnnotationWorkspace.svelte > /tmp/middleout-ui.patch
+          git apply --check /tmp/middleout-ui.patch
+          git apply /tmp/middleout-ui.patch
+          git diff --check
+          test "$(git diff --numstat -- src/lib/components/AnnotationWorkspace.svelte | awk '{print $1}')" = "80"
+          test "$(git diff --numstat -- src/lib/components/AnnotationWorkspace.svelte | awk '{print $2}')" = "0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: Svelte and TypeScript checks
+        run: npm run check
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Production build
+        run: npm run build
+
+      - name: Commit verified UI transplant
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/components/AnnotationWorkspace.svelte
+          git commit -m "Add MiddleOut diagnostic overlay to current Annotate Course"
+          git push origin HEAD:integration/middleout-prestaging-20260818
