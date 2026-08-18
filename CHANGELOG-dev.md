@@ -3,6 +3,23 @@
 One line per landed feature. Condensed/reset periodically; Git history keeps
 prior contents.
 
+## 2026-08-18 — CHSPT-TOPH-REPLAY: counterfactual CV-replay slice (ChainSpot side)
+
+- `cvConfig.ts`: `ChainSpotCvConfig` / `P6Config` config root + `CV_PARAM_SCHEMA`, deep-frozen `DEFAULT_CV_CONFIG` matching today's hidden P6 constants exactly (forwardGateAngleDeg 80, swap enabled/minRibbonImprovementPx 20)
+- P6: `deriveP6LowParBasketAssignment` (+ new `deriveP6GatedSnapshotPhase`/`deriveP6SwapPhase` exports) now take an optional `p6Config`; `swap.enabled=false` skips P6.2 with an explicit empty result
+- `cvPipeline.ts`: `runPancakePipeline` — Pancake P1 through final display grammar extracted from `basketDetection.worker.ts`'s `PANCAKE_STACK_ONLY` branch into an observable stage seam (`StageExecutionRecord` per stage); the worker now delegates to it and accepts an optional `cvConfig` on `detect-course`
+- `p6AssignmentScoring.ts`: scores a P6 result's assigned basket positions against supplied truth within a tolerance
+- `scripts/cv-replay-run.ts`: headless, config-driven CLI that runs the real pipeline against an image or `.chainspot.zip` and emits stage records, the full P6 result, and correctness scoring when truth is available
+- `scripts/lib/fakeBrowser.ts`: shared Node fake-browser plumbing, extracted out of `pancake-harness.ts` and reused by `cv-replay-run.ts`
+- `resources/cv-fixtures/`: `TheRec-stitched.png` (2242x2215, real 9-hole course) + `the-rec.json` observed-baseline manifest (no independent basket ground truth yet — explicitly labeled as such)
+- No production behavior change: `pancake-harness.ts` run against `AlexClarkSet.chainspot.zip` before/after this slice is byte-identical modulo timing fields
+
+Verified: `npm run check` 0 errors; `NODE_OPTIONS=--experimental-require-module npx vitest run` — only
+the same 44 pre-existing pointer-test failures in 6 UI files, zero new failures; new unit coverage for
+config defaults/frozenness/schema-path validity, P6 forward-gate and swap-threshold threading (synthetic
+fixtures), and the scorer. This is a ChainSpot-only slice of a larger cross-repo (Toph) contract; no
+Toph adapter/viewer code lands here.
+
 ## 2026-08-17 — CHSPT-65: course + thrown-round inputs into Create Graphics
 
 - Stitch Map: import prompt with thumbnails — pick the thrown round BEFORE any crop/stitch
