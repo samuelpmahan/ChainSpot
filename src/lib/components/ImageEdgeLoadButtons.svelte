@@ -62,81 +62,98 @@
 		pointer-events: none;
 	}
 
+	/*
+	 * The control reads as the neighboring aerial tile itself, not a tiny button:
+	 * a large, mostly-empty dashed square in the unloaded checkerboard with the
+	 * requested direction centered inside. It sits very close to the pane edge so
+	 * it visually feels almost attached to the currently loaded raster.
+	 */
 	.edge-load-button {
 		position: absolute;
-		width: 3.25rem;
-		height: 3.25rem;
+		width: clamp(8rem, 32%, 14rem);
+		aspect-ratio: 1;
 		padding: 0;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 0;
-		border: 1px dashed rgb(125 211 252 / 90%);
-		border-radius: 8px;
-		background: rgb(8 47 73 / 72%);
+		gap: 0.3rem;
+		border: 2px dashed rgb(125 211 252 / 88%);
+		border-radius: 10px;
+		background: rgb(8 47 73 / 18%);
 		color: #e0f2fe;
-		box-shadow: 0 0 0 1px rgb(56 189 248 / 18%), 0 0 18px rgb(56 189 248 / 48%);
+		box-shadow:
+			inset 0 0 36px rgb(56 189 248 / 10%),
+			0 0 0 1px rgb(56 189 248 / 12%);
 		font: inherit;
 		cursor: pointer;
 		pointer-events: auto;
+		transition:
+			background-color 120ms ease,
+			box-shadow 120ms ease,
+			border-color 120ms ease,
+			transform 120ms ease;
 	}
 
 	.edge-load-button:hover:not(:disabled),
 	.edge-load-button:focus-visible {
-		background: rgb(12 74 110 / 86%);
-		box-shadow: 0 0 0 2px rgb(56 189 248 / 30%), 0 0 24px rgb(56 189 248 / 72%);
+		border-color: rgb(186 230 253 / 100%);
+		background: rgb(12 74 110 / 34%);
+		box-shadow:
+			inset 0 0 48px rgb(56 189 248 / 16%),
+			0 0 24px rgb(56 189 248 / 34%);
 	}
 
 	.edge-load-button.queued {
 		border-style: solid;
-		background: rgb(7 89 133 / 86%);
+		background: rgb(7 89 133 / 40%);
 	}
 
 	.edge-load-button:disabled {
 		cursor: wait;
-		opacity: 0.62;
+		opacity: 0.58;
 	}
 
 	.arrow {
-		font-size: 1.55rem;
+		font-size: clamp(2.5rem, 8vw, 4rem);
 		line-height: 1;
-		font-weight: 700;
+		font-weight: 650;
+		text-shadow: 0 0 18px rgb(56 189 248 / 65%);
 	}
 
 	.delay {
-		font-size: 0.65rem;
+		font-size: 0.72rem;
 		line-height: 1;
 		font-variant-numeric: tabular-nums;
 		opacity: 0.9;
 	}
 
 	.edge-load-north {
-		top: 0.6rem;
+		top: 0.35rem;
 		left: 50%;
 		transform: translateX(-50%);
 	}
 
 	.edge-load-east {
-		right: 0.6rem;
+		right: 0.35rem;
 		top: 50%;
 		transform: translateY(-50%);
 	}
 
 	.edge-load-south {
-		bottom: 0.6rem;
+		bottom: 0.35rem;
 		left: 50%;
 		transform: translateX(-50%);
 	}
 
 	.edge-load-west {
-		left: 0.6rem;
+		left: 0.35rem;
 		top: 50%;
 		transform: translateY(-50%);
 	}
 
 	.edge-load-button:focus-visible {
 		outline: 3px solid #38bdf8;
-		outline-offset: 2px;
+		outline-offset: 3px;
 	}
 </style>
