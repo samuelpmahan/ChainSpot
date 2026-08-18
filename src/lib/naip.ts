@@ -1,11 +1,12 @@
 /**
  * ChainSpot NAIP aerial fetch (Phase 3a).
  *
- * Wraps the public USGS NAIP `exportImage` REST endpoint
- * (`imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer`) as an
+ * Wraps The National Map's public USGS Imagery Only `export` REST endpoint
+ * (`basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer`) as an
  * isolated, provider-specific module per the overarching plan's guidance to isolate
- * imagery acquisition behind a provider interface. Free, public-domain, CORS-enabled,
- * no API key.
+ * imagery acquisition behind a provider interface. The service is public USGS
+ * orthoimagery (predominantly NAIP in CONUS), requires no API key, and is suitable
+ * for direct browser fetches from the static GitHub Pages deployment.
  *
  * Two pure pieces (bbox math, URL construction) plus one network call. The fetch
  * reports failure as a typed result, never a thrown exception, following the same
@@ -30,11 +31,11 @@ export interface GeoBoundingBox {
 /** Meters per degree of latitude; treated as constant (adequate at course scale). */
 export const METERS_PER_DEGREE_LAT = 111_320;
 
-/** Default raster size (pixels per side) requested from `exportImage`. */
+/** Default raster size (pixels per side) requested from `export`. */
 export const NAIP_EXPORT_SIZE_PX = 2048;
 
 const NAIP_EXPORT_IMAGE_URL =
-	'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage';
+	'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export';
 
 /**
  * Computes a WGS84 bounding box centered on `center`, extending `radiusMeters` in
@@ -71,10 +72,12 @@ export function bboxFromCenter(center: GeoPoint, radiusMeters: number): GeoBound
 }
 
 /**
- * Builds the `exportImage` URL for a bounding box: WGS84 input (`bboxSR=4326`),
- * an explicit raster size, PNG, and `f=image` so the endpoint returns raw PNG bytes
- * directly rather than a JSON wrapper. A numeric size remains the square-output
- * shorthand used by the radius-based preview and tile workflows.
+ * Builds the USGS Imagery Only `export` URL for a bounding box: WGS84 input and
+ * output (`bboxSR=4326`, `imageSR=4326`), an explicit raster size, PNG, and
+ * `f=image` so the endpoint returns raw PNG bytes directly rather than a JSON
+ * wrapper. Keeping the output in WGS84 preserves the exact pixel↔geo contract used
+ * by `naipCoverage.ts`. A numeric size remains the square-output shorthand used by
+ * the radius-based preview and tile workflows.
  */
 export function buildNaipExportUrl(
 	bbox: GeoBoundingBox,
@@ -84,6 +87,7 @@ export function buildNaipExportUrl(
 	const params = new URLSearchParams({
 		bbox: `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`,
 		bboxSR: '4326',
+		imageSR: '4326',
 		size: `${size.widthPx},${size.heightPx}`,
 		format: 'png',
 		f: 'image'
@@ -107,11 +111,10 @@ export function offsetPoint(center: GeoPoint, dxMeters: number, dyMeters: number
 }
 
 /**
- * Ground resolution of a fetched `exportImage` raster: the request bbox spans exactly
+ * Ground resolution of a fetched `export` raster: the request bbox spans exactly
  * `2 * radiusMeters` on each side (by construction of `bboxFromCenter`, square at
- * course scale) and `exportImage` returns exactly `sizePx x sizePx` pixels for a
- * square bbox and a square requested size — no letterboxing, no resampling to a
- * different aspect. The scale is therefore exact, not estimated.
+ * course scale) and `export` returns exactly `sizePx x sizePx` pixels for a square
+ * bbox and square requested size. The scale is therefore exact, not estimated.
  */
 export function naipMetersPerPixel(radiusMeters: number, sizePx: number = NAIP_EXPORT_SIZE_PX): number {
 	if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
@@ -186,7 +189,7 @@ export async function fetchNaipBoundingBoxImage(
 			ok: false,
 			error: new NaipFetchError(
 				'network',
-				'Could not reach the USGS NAIP imagery service. Check your connection and try again.'
+				'Could not reach the USGS aerial imagery service. Check your connection and try again.'
 			)
 		};
 	}
@@ -196,7 +199,7 @@ export async function fetchNaipBoundingBoxImage(
 			ok: false,
 			error: new NaipFetchError(
 				'http-error',
-				`USGS NAIP imagery service returned an error (HTTP ${response.status}).`
+				`USGS aerial imagery service returned an error (HTTP ${response.status}).`
 			)
 		};
 	}
@@ -216,11 +219,9 @@ export async function fetchNaipBoundingBoxImage(
 }
 
 /**
- * Fetches the NAIP `exportImage` PNG for a center point and radius. Reports failure
- * as a typed result (network error, non-200 status, or a response whose
- * `Content-Type` isn't an image — NAIP's `exportImage` returns a JSON error body with
- * a 200 status for some invalid requests, e.g. no coverage at the location) rather
- * than throwing, so the UI can render a clear inline message.
+ * Fetches a USGS aerial PNG for a center point and radius. Reports failure as a
+ * typed result (network error, non-200 status, or a non-image response) rather than
+ * throwing, so the UI can render a clear inline message.
  */
 export async function fetchNaipImage(
 	center: GeoPoint,
