@@ -1,0 +1,85 @@
+name: One-shot clean target preview hotfix
+
+on:
+  push:
+    branches:
+      - prestaging/demo
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: prestaging/demo
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Patch preview-side edge expansion
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          preview_path = Path('src/lib/components/AerialPreview.svelte')
+          preview = preview_path.read_text()
+
+          old = """\timport ImageViewport from './ImageViewport.svelte';\n\timport { ViewportController } from '$lib/viewport.svelte';\n\timport { canvas2dAvailable, createPaneScene } from '$lib/scene';\n\timport type { PaneScene } from '$lib/scene';\n"""
+          new = """\timport ImageViewport from './ImageViewport.svelte';\n\timport ImageEdgeLoadButtons from './ImageEdgeLoadButtons.svelte';\n\timport { ViewportController } from '$lib/viewport.svelte';\n\timport { canvas2dAvailable, createPaneScene } from '$lib/scene';\n\timport type { PaneScene } from '$lib/scene';\n\timport { exposedLoadEdges } from '$lib/edgeLoadZones';\n\timport type { EdgeDirection } from '$lib/edgeLoadZones';\n"""
+          assert preview.count(old) == 1, 'AerialPreview import seam changed'
+          preview = preview.replace(old, new, 1)
+
+          old = """\t\t/** Fires when the URL fails to decode — the caller clears the preview. */\n\t\tonDecodeError?: () => void;\n\t}\n\n\tlet { objectUrl, alt, testid = 'aerial-preview', onDecodeError }: Props = $props();\n"""
+          new = """\t\t/** Fires when the URL fails to decode — the caller clears the preview. */\n\t\tonDecodeError?: () => void;\n\t\t/** Enables load-more affordances once the user pans beyond a preview edge. */\n\t\tedgeLoadEnabled?: boolean;\n\t\tedgeLoadBusy?: boolean;\n\t\tonEdgeLoad?: (direction: EdgeDirection) => void;\n\t}\n\n\tlet {\n\t\tobjectUrl,\n\t\talt,\n\t\ttestid = 'aerial-preview',\n\t\tonDecodeError,\n\t\tedgeLoadEnabled = false,\n\t\tedgeLoadBusy = false,\n\t\tonEdgeLoad\n\t}: Props = $props();\n"""
+          assert preview.count(old) == 1, 'AerialPreview props seam changed'
+          preview = preview.replace(old, new, 1)
+
+          marker = """\tfunction canvasAvailable(): boolean {\n\t\tif (canvasSupport === null) canvasSupport = canvas2dAvailable();\n\t\treturn canvasSupport;\n\t}\n"""
+          addition = marker + """\n\t/**\n\t * Same edge-exposure rule as the committed ImagePane, but available while\n\t * the aerial is still only a preview. This is the important lifecycle seam:\n\t * users can move/expand the candidate BEFORE accepting it as the clean target.\n\t */\n\tlet edgeLoadDirections = $derived.by(() => {\n\t\tconst target = vp.fitTarget;\n\t\tif (!edgeLoadEnabled || !onEdgeLoad || !target) return [];\n\t\treturn exposedLoadEdges({\n\t\t\tview: vp.view,\n\t\t\tfitView: vp.fitView,\n\t\t\tviewportWidthPx: vp.size.width,\n\t\t\tviewportHeightPx: vp.size.height,\n\t\t\timageWidthPx: target.widthPx,\n\t\t\timageHeightPx: target.heightPx\n\t\t});\n\t});\n"""
+          assert preview.count(marker) == 1, 'AerialPreview derived-state seam changed'
+          preview = preview.replace(marker, addition, 1)
+
+          old = """\t</ImageViewport>\n\t<button\n\t\ttype=\"button\"\n\t\tclass=\"fit-button\"\n"""
+          new = """\t</ImageViewport>\n\t{#if edgeLoadDirections.length > 0}\n\t\t<ImageEdgeLoadButtons\n\t\t\tdirections={edgeLoadDirections}\n\t\t\tbusy={edgeLoadBusy}\n\t\t\tonLoad={(direction) => onEdgeLoad?.(direction)}\n\t\t/>\n\t{/if}\n\t<button\n\t\ttype=\"button\"\n\t\tclass=\"fit-button\"\n"""
+          assert preview.count(old) == 1, 'AerialPreview template seam changed'
+          preview = preview.replace(old, new, 1)
+          preview_path.write_text(preview)
+
+          page_path = Path('src/routes/create-graphics/+page.svelte')
+          page = page_path.read_text()
+
+          marker = """\t/**\n\t * Routes the confirmed NAIP preview through the exact same intake/replacement\n\t * path as a pane file upload (`intakeImageFile`), so point-discard confirmation,\n\t * asset manifest creation, undo/redo, and dirty state all apply identically to a\n\t * manual upload.\n\t */\n\tasync function handleNaipConfirm(): Promise<void> {\n"""
+          addition = """\t/**\n\t * Expands the fetched-but-uncommitted aerial in the direction the user exposed.\n\t * Unlike the committed-target refetch path there are no control points to remap:\n\t * replace the preview blob + retained fetch geometry atomically, then keep the\n\t * user in the explicit review state. A stale in-flight result can never resurrect\n\t * a preview the user already discarded.\n\t */\n\tasync function handleNaipPreviewEdgeLoad(direction: EdgeDirection): Promise<void> {\n\t\tconst preview = naipPreview;\n\t\tconst center = naipPreviewCenter;\n\t\tconst radius = naipPreviewRadiusUsed;\n\t\tif (!preview || !center || radius === null || naipLoading) return;\n\n\t\tconst expectedObjectUrl = preview.objectUrl;\n\t\tconst expanded = expandedFetchGeometryToward({ center, radiusMeters: radius }, direction);\n\t\tnaipLoading = true;\n\t\tnaipError = null;\n\t\ttry {\n\t\t\tconst result = await fetchNaipImage(expanded.center, expanded.radiusMeters);\n\t\t\tif (!naipPreview || naipPreview.objectUrl !== expectedObjectUrl) return;\n\t\t\tif (!result.ok) {\n\t\t\t\tnaipError = result.error.message;\n\t\t\t\treturn;\n\t\t\t}\n\n\t\t\tconst nextObjectUrl = URL.createObjectURL(result.blob);\n\t\t\tconst previousObjectUrl = naipPreview.objectUrl;\n\t\t\tclearGridPreview();\n\t\t\tclearExactSelectionPreview();\n\t\t\tboxRect = null;\n\t\t\tdisplayScale = 1;\n\t\t\tnaipPreview = { blob: result.blob, objectUrl: nextObjectUrl };\n\t\t\tnaipPreviewCenter = expanded.center;\n\t\t\tnaipPreviewRadiusUsed = expanded.radiusMeters;\n\t\t\tnaipLatInput = String(expanded.center.lat);\n\t\t\tnaipLonInput = String(expanded.center.lon);\n\t\t\tnaipRadiusInput = String(Math.round(expanded.radiusMeters));\n\t\t\tURL.revokeObjectURL(previousObjectUrl);\n\t\t\tactivityMessage = `Expanded aerial preview ${direction}. Nothing has been saved yet.`;\n\t\t} finally {\n\t\t\tnaipLoading = false;\n\t\t}\n\t}\n\n""" + marker
+          assert page.count(marker) == 1, 'Create Graphics preview-handler seam changed'
+          page = page.replace(marker, addition, 1)
+
+          old = """\t\t\t\t\t\t<AerialPreview\n\t\t\t\t\t\t\tobjectUrl={naipPreview.objectUrl}\n\t\t\t\t\t\t\talt=\"Fetched aerial preview, not yet used\"\n\t\t\t\t\t\t\tonDecodeError={handleNaipPreviewError}\n\t\t\t\t\t\t/>\n"""
+          new = """\t\t\t\t\t\t<AerialPreview\n\t\t\t\t\t\t\tobjectUrl={naipPreview.objectUrl}\n\t\t\t\t\t\t\talt=\"Fetched aerial preview, not yet used\"\n\t\t\t\t\t\t\tedgeLoadEnabled={naipPreviewCenter !== null && naipPreviewRadiusUsed !== null}\n\t\t\t\t\t\t\tedgeLoadBusy={naipLoading}\n\t\t\t\t\t\t\tonEdgeLoad={(direction) => void handleNaipPreviewEdgeLoad(direction)}\n\t\t\t\t\t\t\tonDecodeError={handleNaipPreviewError}\n\t\t\t\t\t\t/>\n"""
+          assert page.count(old) == 1, 'Create Graphics AerialPreview seam changed'
+          page = page.replace(old, new, 1)
+          page_path.write_text(page)
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type and Svelte check
+        run: npm run check
+
+      - name: Commit hotfix and remove runner
+        shell: bash
+        run: |
+          git config user.name "ChainSpot Hotfix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/hotfix-preview-edge-expand.yml
+          git add src/lib/components/AerialPreview.svelte src/routes/create-graphics/+page.svelte
+          git commit -m "Hotfix: expand clean aerial before committing target"
+          git push origin HEAD:prestaging/demo
