@@ -25,6 +25,14 @@ function basket(data: Uint8ClampedArray, width: number, x: number, y: number): v
   rect(data, width, x + 7, y + 5, 6, 27, 245);
 }
 
+function outlinedBadge(data: Uint8ClampedArray, width: number, x: number, y: number): void {
+  rect(data, width, x, y, 54, 42, 245);
+  rect(data, width, x + 4, y + 4, 46, 34, 20);
+  // Disconnected bright digit: the real badge outline remains its own
+  // component while the dark body's fill changes with glyph identity.
+  rect(data, width, x + 24, y + 11, 6, 20, 245);
+}
+
 function populate(data: Uint8ClampedArray, width: number, origins: readonly [number, number][]): void {
   for (const [x, y] of origins) {
     rect(data, width, x, y, 48, 36, 20);
@@ -50,6 +58,27 @@ describe('semantic stitch landmarks', () => {
     expect(result.sources[1].landmarks.filter((x) => x.family === 'basket')).toHaveLength(1);
     expect(result.diagnostics.badgeAbstention).toBeNull();
     expect(result.diagnostics.basketAbstention).toBeNull();
+  });
+
+  test('prefers a repeated white badge frame with dark interior over unrelated dark-body clusters', () => {
+    const a = raster('a');
+    const b = raster('b');
+    outlinedBadge(a.data, 320, 30, 25);
+    outlinedBadge(a.data, 320, 30, 100);
+    outlinedBadge(b.data, 320, 170, 25);
+    outlinedBadge(b.data, 320, 170, 100);
+    // Repeated tiny dark impostors should not outvote the cross-source frame.
+    rect(a.data, 320, 250, 180, 15, 11, 20);
+    rect(b.data, 320, 275, 180, 15, 11, 20);
+
+    const result = detectSemanticLandmarkBatch([a.raster, b.raster]);
+    const badges = result.sources.flatMap((source) => source.landmarks.filter((landmark) => landmark.family === 'badge'));
+
+    expect(result.scales.badge?.widthPx).toBe(54);
+    expect(result.scales.badge?.heightPx).toBe(42);
+    expect(result.scales.badge?.sourceSupport).toBe(2);
+    expect(badges).toHaveLength(4);
+    expect(badges.every((badge) => badge.widthPx === 54 && badge.heightPx === 42)).toBe(true);
   });
 
   test('abstains instead of inventing a family when the whole batch has only one candidate', () => {
