@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import DemoGuide from '$lib/components/DemoGuide.svelte';
+	import WorkflowKeyboardAffordances from '$lib/components/WorkflowKeyboardAffordances.svelte';
 	import { annotationNavState, requestAnnotationDone } from '$lib/annotationNav.svelte';
 	import { installVisionFlagConsole } from '$lib/autoAnnotation/visionFlags';
 
@@ -109,6 +110,12 @@
 </header>
 
 {@render children()}
+
+<!--
+	Centralized keyboard affordances that delegate to each route's existing
+	buttons/state transitions instead of duplicating their business logic.
+-->
+<WorkflowKeyboardAffordances />
 
 <!--
 	The walkthrough rail lives in the layout, not in any one route, so a tour
