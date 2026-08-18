@@ -66,7 +66,7 @@ function resizeNearest(source: BadgeGlyphRaster, scale: number): BadgeGlyphRaste
 
 function classifyFixture(raster: BadgeGlyphRaster, expected: number) {
   const result = classifyKnownBadgeBodiesPureTs(raster, templates, [bodyOf(raster)])[0];
-  return { correct: result.label === expected, result };
+  return { correct: result.label === expected, expected, result };
 }
 
 describe('pure-TS known-badge glyph classifier', () => {
@@ -91,7 +91,7 @@ describe('pure-TS known-badge glyph classifier', () => {
     expect(outcomes.every((outcome) => outcome.result.abstention === null)).toBe(true);
   });
 
-  test('normalization preserves labels across representative source scaling', () => {
+  test('measures scaling sensitivity and never emits a confident wrong label', () => {
     const scales = [0.75, 1, 1.35, 1.75];
     const rows = scales.map((scale) => {
       const started = performance.now();
@@ -100,17 +100,26 @@ describe('pure-TS known-badge glyph classifier', () => {
       );
       const elapsedMs = performance.now() - started;
       const correct = outcomes.filter((outcome) => outcome.correct).length;
+      const wrong = outcomes.filter(
+        (outcome) => outcome.result.label !== undefined && outcome.result.label !== outcome.expected
+      );
+      const abstained = outcomes.filter((outcome) => outcome.result.label === undefined).length;
       return {
         scale,
         correct,
+        wrong: wrong.length,
+        abstained,
         accuracy: correct / templates.length,
+        coverage: (templates.length - abstained) / templates.length,
         elapsedMs,
         msPerBadge: elapsedMs / templates.length,
-        minimumMargin: Math.min(...outcomes.map((outcome) => outcome.result.ambiguityMargin))
+        minimumMargin: Math.min(...outcomes.map((outcome) => outcome.result.ambiguityMargin)),
+        wrongLabels: wrong.map((outcome) => ({ expected: outcome.expected, received: outcome.result.label }))
       };
     });
-    console.table(rows);
-    expect(rows.every((row) => row.correct === templates.length)).toBe(true);
+    console.info('[badge-glyph-scale-benchmark]', rows);
+    expect(rows.every((row) => row.wrong === 0)).toBe(true);
+    expect(rows.find((row) => row.scale === 1)?.correct).toBe(templates.length);
   });
 
   test('explicitly abstains on a localized body with no bright glyph', () => {
