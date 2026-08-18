@@ -1,12 +1,14 @@
 /**
- * Deterministic Stitch Map renderer (CHSPT-50/55) plus CHSPT-79's exact-byte
- * source-landmark evidence registration.
+ * Deterministic Stitch Map renderer (CHSPT-50/55) plus CHSPT-79/80's
+ * exact-byte source-landmark + source-glyph evidence registration.
  *
  * Integer translations copy source pixels directly. Any other affine uses a
- * hand-written nearest-neighbour inverse map. The encoded PNG is hashed and
- * that hash seals provenance; source-landmark evidence is registered only
- * after that seal, so Annotate can later require an exact raster-byte match.
+ * hand-written nearest-neighbour inverse map. Badge identity is classified on
+ * the already-localized UNWARPED source ROIs while those source pixels are in
+ * hand; encoding runs concurrently. The encoded PNG hash then seals both
+ * provenance and the evidence lookup key used by Annotate Course.
  */
+import { base } from '$app/paths';
 import { applyAffine6 } from '../geometry/affine6';
 import type { Affine6Coefficients } from '../geometry/affine6';
 import { invertSourceTransform, sealCompositeProvenance } from '../domain/provenance';
@@ -18,6 +20,8 @@ import type {
 } from '../domain/provenance';
 import { sha256Hex } from '../imageIntake';
 import { recordRenderedSourceLandmarkEvidence } from '../autoAnnotation/sourceLandmarkBridge';
+import { classifySemanticSourceBadges } from '../autoAnnotation/sourceBadgeIdentity';
+import { peekLatestSemanticLandmarkBatch } from './semanticLandmarks';
 import { MAX_CANVAS_DIMENSION } from './render';
 import type { RenderPipelineComposite as RenderPipelineCompositeContract } from './pipelineResult';
 
@@ -239,8 +243,21 @@ export async function renderPipelineComposite(
 		);
 	}
 
+	const semanticBatch = peekLatestSemanticLandmarkBatch();
+	const batchMatchesCurrentSources = Boolean(
+		semanticBatch &&
+		semanticBatch.sources.length === draft.sources.length &&
+		semanticBatch.sources.every((source, index) => source.sourceId === draft.sources[index].sourceId)
+	);
+	const badgeIdentityPromise = batchMatchesCurrentSources && semanticBatch
+		? classifySemanticSourceBadges(semanticBatch, pixelsBySource, base).catch((error) => {
+				console.warn('[ChainSpot handoff] source badge identity classification failed.', error);
+				return undefined;
+			})
+		: Promise.resolve(undefined);
+
 	const composite = compositeDraftPixels(draft, pixelsBySource);
-	const blob = await env.encode(composite);
+	const [blob, badgeIdentity] = await Promise.all([env.encode(composite), badgeIdentityPromise]);
 	const bytes = new Uint8Array(await blob.arrayBuffer());
 	const finalRasterSha256 = await sha256Hex(bytes);
 	const provenance = sealCompositeProvenance(draft, finalRasterSha256);
@@ -248,7 +265,7 @@ export async function renderPipelineComposite(
 	// previously renderable composite fail; exact-byte lookup will simply miss
 	// and Annotate retains the historical global path.
 	try {
-		recordRenderedSourceLandmarkEvidence(provenance);
+		recordRenderedSourceLandmarkEvidence(provenance, semanticBatch, badgeIdentity);
 	} catch (error) {
 		console.warn('[ChainSpot handoff] source landmark evidence registration failed.', error);
 	}

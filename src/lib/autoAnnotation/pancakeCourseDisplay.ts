@@ -8,7 +8,8 @@ import type { P5SparseAssignmentResult } from './p5SparseAssignment';
 import type { P6LowParBasketAssignmentResult } from './p6LowParBasketAssignment';
 import type { RawObjectMaskResult } from './rawObjectMask';
 
-const PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1);
+/** Historical worker default retained for behavior compatibility only. */
+const LEGACY_PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1);
 
 /**
  * P1 localizes the bright interior of UDisc's basket sprite and reports its
@@ -25,15 +26,17 @@ const PANCAKE_HOLE_NUMBERS = Array.from({ length: 18 }, (_, index) => index + 1)
 export const BASKET_SPRITE_TIP_OFFSET_PX = 4;
 
 /**
- * Adapts the pancake ownership outputs into the existing grammar/result shape
- * consumed by Annotate Course. This is a display adapter only: P5/P6 have
- * already completed their ownership decisions before this function runs.
+ * Adapts pancake ownership outputs into the existing grammar/result shape.
+ * Source-prior callers pass their explicit expected set, so >18-hole template
+ * vocabularies do not inherit the historical fixed display list. Existing
+ * worker callers omit it and retain their current 18-hole behavior exactly.
  */
 export function buildPancakeDisplayGrammar(
 	rawMaskObjects: RawObjectMaskResult,
 	p2BadgeDetection: HoleNumberDetection,
 	p5: P5SparseAssignmentResult,
-	p6: P6LowParBasketAssignmentResult
+	p6: P6LowParBasketAssignmentResult,
+	expectedHoleNumbers: readonly number[] = LEGACY_PANCAKE_HOLE_NUMBERS
 ): CourseGrammarResult {
 	const p5ByHole = new Map(
 		p5.assignments
@@ -65,7 +68,7 @@ export function buildPancakeDisplayGrammar(
 	const assignedBadgeIndexes = new Set<number>();
 	const assignedTeeIndexes = new Set<number>();
 	const assignedBasketIndexes = new Set<number>();
-	const holes: CourseHoleProposal[] = PANCAKE_HOLE_NUMBERS.map((holeNumber) => {
+	const holes: CourseHoleProposal[] = expectedHoleNumbers.map((holeNumber) => {
 		const p5Assignment = p5ByHole.get(holeNumber);
 		const p6Assignment = p6ByHole.get(holeNumber);
 		const badgeEntry = badgeByHole.get(holeNumber);
