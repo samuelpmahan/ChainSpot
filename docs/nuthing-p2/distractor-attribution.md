@@ -747,6 +747,34 @@ Lenard 18/18, TowneLake 18/18 — with rank1 65/72, rank≤3 71/72, on
 perfect endpoint recall.** Next honest test is the validation courses;
 every constant above is documented with its sweep.
 
+### h7 postscript: the tree line under the corridor (truth traced an edge)
+
+Review of the h7 field render identified three things, all now verified
+by cross-profile measurement (stations every 4 px, badge→basket; per
+station: flanked-contrast centerline at course W, raw width, north/south
+half brightness):
+
+1. **A tree line runs UNDER the corridor** (dark ground beneath the
+   α≈0.6-0.9 gray dims the composite): the corridor's south half is
+   22-46 gray dimmer through x 952-968, and the dim side FLIPS to north
+   at x≈970 as the tree line crosses — the corridor's apparent bright
+   band is thinned and pushed toward the un-dimmed edge.
+2. **Both the support field and the REGISTERED TRUTH followed the
+   thinned reading**: the registered 2-bend Z (944,695)→(962,674) rides
+   the corridor's NORTH EDGE; the flanked-contrast centerline runs
+   ~y 688-693 straight down the visible band's middle (matching the
+   reviewer's hand-drawn centerline), with a single real turn near the
+   basket (~(1114,693)) plus a small rise immediately after the badge —
+   whose left-side edge evidence appears immediately after the badge
+   and is easy to miss. The earlier Z-fit "found" the registered
+   segment because it optimizes over the SAME brightness-biased field.
+3. Assignment identity is unaffected (72/72 uses pair identity, not
+   centerline shape), but centerline/bend geometry products inherit the
+   bias. Fix direction (task #22): corridor support by local flanked
+   contrast at course W instead of absolute brightness — recovers full
+   width and true centerline over dark underlay; matters most for
+   wooded validation courses.
+
 ### Zone-stamp un-blend: end caps inside the circle
 
 Generalization of the sprite un-blend (`zone_stamp_unblend.py`): the
