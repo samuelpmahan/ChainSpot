@@ -1,0 +1,292 @@
+// Replay refinement over the cached tee×basket evidence matrix:
+// STRIP-COHERENCE (bacon) re-scoring.
+//
+// The baseline matrix (scripts/nuthing/pair-matrix.ts, see
+// docs/nuthing-p2/pair-matrix-baseline.md) showed that 46/53 strongest
+// false competitors are real endpoints of adjacent holes reached by riding
+// a NEIGHBORING ribbon or the basket-zone carpet — real support, wrong
+// strip. A ribbon is an elongated, oriented structure: a route that follows
+// its strip moves parallel to the field's best orientation; a route that
+// hops between adjacent parallel strips moves transverse to it while raw
+// support stays high. This replay re-scores every cached pair with
+// orientation-ALIGNED support samples
+//     s'_i = s_i * |cos(dir_i - bestTheta_i)|^p
+// and re-ranks. Nothing is re-detected and nothing is re-routed: inputs are
+// exactly the cached legs, support plane and theta plane — the replay
+// boundary working as designed.
+//
+// Usage: npx tsx scripts/nuthing/pair-matrix-replay.ts CACHE_DIR [--p N] [--window PX] [--render]
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { PNG } from 'pngjs';
+import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
+import { decodeRgbaBin } from './decode';
+
+interface CacheLeg {
+  endpointId: string;
+  geodesic: number | string;
+  path: number[];
+  reachable: boolean;
+}
+interface CachePair {
+  pairId: string;
+  teeId: string;
+  basketId: string;
+  worstWindowMean: number;
+  supportMean: number;
+}
+interface CacheBadge {
+  label: string;
+  cx: number;
+  cy: number;
+  legs: CacheLeg[];
+  pairs: CachePair[];
+}
+interface CacheJudgment {
+  hole: number;
+  trueTee: number;
+  trueBasket: number;
+  rankPrimary: number;
+}
+interface CacheCourse {
+  course: string;
+  viewport: { top: number; bottom: number };
+  field: { width: number; height: number; scale: number };
+  endpoints: {
+    tees: { id: string; x: number; y: number; onRing: boolean }[];
+    baskets: { id: string; x: number; y: number }[];
+  };
+  badges: CacheBadge[];
+  judgments: CacheJudgment[];
+}
+
+const COURSES = ['DashsTrack-full', 'HeritagePark-full', 'Lenard-full', 'TowneLake-full'];
+
+function main(): void {
+  const args = process.argv.slice(2);
+  const grab = (flag: string, dflt: number): number => {
+    const i = args.indexOf(flag);
+    return i >= 0 ? Number(args.splice(i, 2)[1]) : dflt;
+  };
+  const alignPow = grab('--p', 2);
+  const windowSrcPx = grab('--window', 90);
+  const scoreIdx = args.indexOf('--score');
+  // 'aligned' ranks by the aligned worst window alone; 'combo' multiplies it
+  // by the baseline (unaligned) worst window, so a pair must BOTH stay on
+  // one strip and never cross truly unsupported ground.
+  const scoreMode = scoreIdx >= 0 ? args.splice(scoreIdx, 2)[1] : 'aligned';
+  const renderIdx = args.indexOf('--render');
+  const render = renderIdx >= 0 ? (args.splice(renderIdx, 1), true) : false;
+  const [cacheDir] = args;
+  if (!cacheDir) {
+    console.error('Usage: tsx scripts/nuthing/pair-matrix-replay.ts CACHE_DIR [--p N] [--window PX] [--render]');
+    process.exit(1);
+  }
+
+  const grand = { n: 0, r1: 0, r3: 0, baseR1: 0, baseR3: 0 };
+  for (const nm of COURSES) {
+    const cache = JSON.parse(readFileSync(`${cacheDir}/${nm}.json`, 'utf8')) as CacheCourse;
+    const { width: w, height: h, scale } = cache.field;
+    const support = new Float32Array(readFileSync(`${cacheDir}/${nm}-field.bin`).buffer.slice(0));
+    const theta = new Float32Array(readFileSync(`${cacheDir}/${nm}-theta.bin`).buffer.slice(0));
+    const windowCells = Math.max(3, Math.round(windowSrcPx / scale));
+
+    // Aligned samples along one leg's cached path (badge-first order).
+    const alignedLeg = (leg: CacheLeg): Float32Array => {
+      const m = leg.path.length / 2;
+      const out = new Float32Array(m);
+      for (let i = 0; i < m; i++) {
+        const x = leg.path[i * 2];
+        const y = leg.path[i * 2 + 1];
+        const i0 = Math.max(0, i - 1);
+        const i1 = Math.min(m - 1, i + 1);
+        const dx = leg.path[i1 * 2] - leg.path[i0 * 2];
+        const dy = leg.path[i1 * 2 + 1] - leg.path[i0 * 2 + 1];
+        const len = Math.hypot(dx, dy);
+        const cell = y * w + x;
+        if (len < 1e-9) {
+          out[i] = support[cell];
+          continue;
+        }
+        const t = theta[cell];
+        // Ribbon runs along (cos t, sin t); alignment is |cos| of the angle
+        // between travel direction and the strip direction (mod pi).
+        const align = Math.abs((dx * Math.cos(t) + dy * Math.sin(t)) / len);
+        out[i] = support[cell] * Math.pow(align, alignPow);
+      }
+      return out;
+    };
+
+    interface Rescored {
+      teeId: string;
+      basketId: string;
+      alignedWorstWindow: number;
+      alignedMean: number;
+      score: number;
+    }
+    const rescoredByBadge = new Map<string, Rescored[]>();
+    for (const badge of cache.badges) {
+      const legAligned = new Map<string, Float32Array>();
+      for (const leg of badge.legs) {
+        if (leg.reachable) legAligned.set(leg.endpointId, alignedLeg(leg));
+      }
+      const rows: Rescored[] = [];
+      for (const pair of badge.pairs) {
+        const tl = legAligned.get(pair.teeId);
+        const bl = legAligned.get(pair.basketId);
+        if (!tl || !bl) {
+          rows.push({ teeId: pair.teeId, basketId: pair.basketId, alignedWorstWindow: 0, alignedMean: 0, score: 0 });
+          continue;
+        }
+        // tee→badge→basket: reverse tee leg, drop duplicated badge cell.
+        const count = tl.length + bl.length - 1;
+        const samples = new Float32Array(count);
+        for (let i = 0; i < tl.length; i++) samples[i] = tl[tl.length - 1 - i];
+        for (let i = 1; i < bl.length; i++) samples[tl.length + i - 1] = bl[i];
+        let sum = 0;
+        for (let i = 0; i < count; i++) sum += samples[i];
+        let worst = 1;
+        if (count <= windowCells) {
+          worst = sum / count;
+        } else {
+          let acc = 0;
+          for (let i = 0; i < windowCells; i++) acc += samples[i];
+          worst = acc / windowCells;
+          for (let i = windowCells; i < count; i++) {
+            acc += samples[i] - samples[i - windowCells];
+            const m = acc / windowCells;
+            if (m < worst) worst = m;
+          }
+        }
+        rows.push({
+          teeId: pair.teeId,
+          basketId: pair.basketId,
+          alignedWorstWindow: worst,
+          alignedMean: sum / count,
+          score:
+            scoreMode === 'combo'
+              ? worst * pair.worstWindowMean
+              : scoreMode === 'mean'
+                ? sum / count
+                : worst,
+        });
+      }
+      rescoredByBadge.set(badge.label, rows);
+    }
+
+    let n = 0;
+    let r1 = 0;
+    let r3 = 0;
+    let baseR1 = 0;
+    let baseR3 = 0;
+    const fails: string[] = [];
+    const rankByHole = new Map<number, number>();
+    for (const j of cache.judgments) {
+      if (j.rankPrimary < 1) continue;
+      const rows = rescoredByBadge.get(String(j.hole));
+      if (!rows) continue;
+      const order = rows
+        .map((_, i) => i)
+        .sort((a, b) => rows[b].score - rows[a].score || rows[b].alignedMean - rows[a].alignedMean);
+      const trueIdx = rows.findIndex(
+        (r) => r.teeId === `T${j.trueTee}` && r.basketId === `B${j.trueBasket}`,
+      );
+      const rank = order.indexOf(trueIdx) + 1;
+      rankByHole.set(j.hole, rank);
+      n++;
+      grand.n++;
+      if (rank === 1) {
+        r1++;
+        grand.r1++;
+      }
+      if (rank >= 1 && rank <= 3) {
+        r3++;
+        grand.r3++;
+      }
+      if (j.rankPrimary === 1) {
+        baseR1++;
+        grand.baseR1++;
+      }
+      if (j.rankPrimary <= 3) {
+        baseR3++;
+        grand.baseR3++;
+      }
+      if (rank > 3) {
+        const top = rows[order[0]];
+        fails.push(
+          `h${j.hole} rank${rank} (was ${j.rankPrimary}) top=${top.teeId}/${top.basketId} ` +
+            `ww=${top.alignedWorstWindow.toFixed(2)} true=${rows[trueIdx]?.alignedWorstWindow.toFixed(2)}`,
+        );
+      }
+    }
+    console.log(
+      `${nm}: aligned(p=${alignPow},win=${windowSrcPx}) rank1=${r1}/${n} rank<=3=${r3}/${n} ` +
+        `(baseline was ${baseR1}/${baseR3})` +
+        (fails.length ? `\n  ${fails.join('\n  ')}` : ''),
+    );
+
+    if (render) {
+      const fullImage = decodeRgbaBin(`/workspace/nuthing-work/traces-py/${nm}.rgba.bin`);
+      const image = cropRows(fullImage, detectMapViewport(fullImage));
+      const png = new PNG({ width: w, height: h });
+      for (let fy = 0; fy < h; fy++) {
+        for (let fx = 0; fx < w; fx++) {
+          let rr = 0;
+          let gg = 0;
+          let bb = 0;
+          let cnt = 0;
+          for (let dy = 0; dy < scale; dy++) {
+            const sy = fy * scale + dy;
+            if (sy >= image.height) continue;
+            for (let dx = 0; dx < scale; dx++) {
+              const sx = fx * scale + dx;
+              if (sx >= image.width) continue;
+              const p = (sy * image.width + sx) * 4;
+              rr += image.data[p];
+              gg += image.data[p + 1];
+              bb += image.data[p + 2];
+              cnt++;
+            }
+          }
+          const o = (fy * w + fx) * 4;
+          png.data[o] = cnt ? rr / cnt : 0;
+          png.data[o + 1] = cnt ? gg / cnt : 0;
+          png.data[o + 2] = cnt ? bb / cnt : 0;
+          png.data[o + 3] = 255;
+        }
+      }
+      const put = (fx: number, fy: number, r: number, g: number, b: number, rad = 0): void => {
+        for (let dy = -rad; dy <= rad; dy++) {
+          for (let dx = -rad; dx <= rad; dx++) {
+            const xx = fx + dx;
+            const yy = fy + dy;
+            if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+            const p = (yy * w + xx) * 4;
+            png.data[p] = r;
+            png.data[p + 1] = g;
+            png.data[p + 2] = b;
+          }
+        }
+      };
+      for (const j of cache.judgments) {
+        const rank = rankByHole.get(j.hole);
+        if (!rank) continue;
+        const badge = cache.badges.find((bb) => Number(bb.label) === j.hole);
+        if (!badge) continue;
+        const [r, g, b] = rank === 1 ? [0, 220, 0] : rank <= 3 ? [255, 220, 0] : [255, 60, 0];
+        for (const leg of badge.legs) {
+          if (leg.endpointId !== `T${j.trueTee}` && leg.endpointId !== `B${j.trueBasket}`) continue;
+          for (let i = 0; i < leg.path.length; i += 2) put(leg.path[i], leg.path[i + 1], r, g, b);
+        }
+        put(Math.round(badge.cx / scale), Math.round(badge.cy / scale), 255, 0, 0, 2);
+      }
+      writeFileSync(`${cacheDir}/${nm}-replay-aligned.png`, PNG.sync.write(png));
+    }
+  }
+  console.log(
+    `TOTAL aligned rank1=${grand.r1}/${grand.n} rank<=3=${grand.r3}/${grand.n} ` +
+      `(baseline worstWindow ${grand.baseR1}/${grand.baseR3})`,
+  );
+}
+
+main();

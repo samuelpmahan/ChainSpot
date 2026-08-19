@@ -114,13 +114,40 @@ long false detours — it is still geodesic cheapness, fails 17/61 outright,
 and is explicitly not the notion of pair evidence this architecture is
 built on.
 
-## Replay refinements this baseline motivates (in evidence order)
+## Replay refinement 1 — strip-coherence (RESULT)
 
-1. **Strip-coherence** (bacon): re-score pairs by support *aligned with the
-   direction of travel* (transverse-support hops stop counting), from
-   `-theta.bin` — no re-detection, no re-routing.
-2. **Basket-zone-aware**: attribute weak/false windows inside C2D/C2F rings
-   of non-endpoint baskets (the adjacent-basket carpet).
-3. **Walking-path-aware**: dashed walking paths as attributed distractors.
-4. **Sequence-aware and global assignment**: only after per-pair evidence
+`scripts/nuthing/pair-matrix-replay.ts`: re-scores every cached pair with
+orientation-aligned support samples `s'_i = s_i·|cos(dir_i − bestTheta_i)|²`
+and ranks by the aligned worst ~90 src-px window. Pure replay: no
+re-detection, no re-routing — inputs are the cached legs + the two cached
+planes.
+
+| course | n | baseline worstWindow r1/r≤3 | aligned r1/r≤3 |
+|---|---|---|---|
+| DashsTrack | 18 | 4 / 6 | 9 / 14 |
+| HeritagePark | 10 | 0 / 6 | 5 / 6 |
+| Lenard | 15 | 1 / 1 | 4 / 8 |
+| TowneLake | 18 | 3 / 7 | 11 / 17 |
+| **total** | **61** | **8 / 20** | **29 / 45** |
+
+One re-scoring, no new detection: rank-1 ×3.6, rank≤3 ×2.25 — confirming
+the diagnosed mechanism (false pairs ride *transversely between* strips;
+true pairs travel *along* one). Sweeps: p∈{1,2,4} × window∈{30..120} all
+land 24–30 / 36–45; p=2/window=90 chosen; multiplying in the unaligned
+worst window ("combo") does not beat aligned alone.
+
+Residual failures cluster on Lenard (residential clutter contributes 57 tee
+candidates — false tees on sidewalk/roof furniture that sit on genuinely
+oriented linear structures) and on specific holes whose true ribbon has a
+long weak stretch (Dashs h6/h13/h14, Lenard h3/h10, TowneLake h3). Those
+are the targets for the remaining replay layers.
+
+## Remaining replay layers (in evidence order)
+
+1. **Basket-zone-aware**: attribute weak/false windows inside C2D/C2F rings
+   of non-endpoint baskets (the adjacent-basket carpet); ring *riding* is
+   tangential and therefore aligned — strip-coherence does not catch it.
+2. **Walking-path-aware**: dashed walking paths as attributed distractors
+   (linear, oriented — also invisible to strip-coherence).
+3. **Sequence-aware and global assignment**: only after per-pair evidence
    is as honest as it can be, as replays over the cached matrix.
