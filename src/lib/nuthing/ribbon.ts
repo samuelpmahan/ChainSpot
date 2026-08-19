@@ -590,6 +590,18 @@ export interface EndpointComponentCandidate {
   radius: number;
   /** geodesic / euclidean field distance — ~1-2.2 along ribbon. */
   efficiency: number;
+  /** Render-identity classification (UDisc renders one fixed basket sprite
+   * and one tee-rectangle style at this capture scale, like the badges). */
+  kind: 'tee-rect' | 'basket-sprite' | 'other' | 'virtual';
+  /** True when the backtracked flood path from the badge reaches this icon
+   * without passing through any other icon: the hole's own endpoints are
+   * the FIRST icon outward along each leg; anything beyond a crossing is
+   * not. */
+  firstIcon?: boolean;
+  /** Source-px position where this candidate's flood path leaves the badge
+   * vicinity — two endpoints on the same ribbon branch share it. */
+  gateX?: number;
+  gateY?: number;
 }
 
 export interface EndpointComponentOptions {
@@ -637,7 +649,7 @@ export function scoreEndpointComponents(
     maxCandidates = 64,
   } = options;
   const { scale } = field;
-  const { dist, x0, y0, rw, rh, sx, sy } = floodFromSeed(
+  const { dist, prev, x0, y0, rw, rh, sx, sy } = floodFromSeed(
     field,
     cost,
     badgeCxSrc,
@@ -648,6 +660,10 @@ export function scoreEndpointComponents(
   );
 
   const rows: EndpointComponentCandidate[] = [];
+  const argmins: number[] = [];
+  /** Ancestor pixel where each candidate's flood path last exceeded the gate
+   * geodesic — two endpoints on the same ribbon branch share it. */
+  const gates: number[] = [];
   for (const c of components) {
     if (c.area < minArea || c.area > maxArea) continue;
     const radius = Math.hypot(c.cx - badgeCxSrc, c.cy - badgeCySrc);
@@ -659,18 +675,38 @@ export function scoreEndpointComponents(
     const by1 = Math.min(rh - 1, Math.ceil((c.bboxY + c.bboxH) / scale) + snapMarginField - y0);
     if (bx1 < bx0 || by1 < by0) continue;
     let g = Infinity;
+    let argmin = -1;
     for (let ly = by0; ly <= by1; ly++) {
       const row = ly * rw;
       for (let lx = bx0; lx <= bx1; lx++) {
         const d = dist[row + lx];
-        if (d < g) g = d;
+        if (d < g) {
+          g = d;
+          argmin = row + lx;
+        }
       }
     }
     if (!Number.isFinite(g) || g > maxGeodesic) continue;
     const euclidField = Math.max(1, Math.hypot(c.cx / scale - sx, c.cy / scale - sy));
     const efficiency = g / euclidField;
     if (efficiency > maxEfficiency) continue;
-    rows.push({ component: c, x: c.cx, y: c.cy, geodesic: g, radius, efficiency });
+    const isBasket =
+      c.bboxW >= 36 && c.bboxW <= 48 && c.bboxH >= 58 && c.bboxH <= 74 &&
+      c.area >= 1300 && c.area <= 2100 && c.fill >= 0.45;
+    const isTee =
+      !isBasket &&
+      c.bboxW >= 13 && c.bboxW <= 40 && c.bboxH >= 13 && c.bboxH <= 40 &&
+      c.area >= 100 && c.area <= 320 && c.fill >= 0.2 && c.fill <= 0.65;
+    rows.push({
+      component: c,
+      x: c.cx,
+      y: c.cy,
+      geodesic: g,
+      radius,
+      efficiency,
+      kind: isBasket ? 'basket-sprite' : isTee ? 'tee-rect' : 'other',
+    });
+    argmins.push(argmin);
   }
   // Virtual boundary termini: when the ribbon runs off the capture edge the
   // endpoint icon may be clipped out of existence; the flood terminus at the
@@ -702,33 +738,105 @@ export function scoreEndpointComponents(
       const euclidField = Math.max(1, radius / scale);
       const efficiency = b.d / euclidField;
       if (efficiency > maxEfficiency) continue;
-      rows.push({ component: null, x: gx, y: gy, geodesic: b.d, radius, efficiency });
+      rows.push({ component: null, x: gx, y: gy, geodesic: b.d, radius, efficiency, kind: 'virtual' });
+      argmins.push(b.ly * rw + b.lx);
+      // gate filled by the first-icon pass (kind 'virtual' participates).
     }
   }
 
-  // Middle-out pairing: the badge sits at the hole path's midpoint, so the
-  // true tee/basket endpoints have near-EQUAL along-ribbon geodesic
-  // distances (bent or straight). Rank the best-balanced, spatially-opposed
-  // pair first; farthest-first ranking would surface cross-course frontier
-  // components on densely connected layouts.
-  let bestPair: [number, number] | null = null;
-  let bestPairCost = Infinity;
-  for (let i = 0; i < rows.length; i++) {
-    for (let j = i + 1; j < rows.length; j++) {
-      const a = rows[i];
-      const b = rows[j];
-      if (a.geodesic < 20 || b.geodesic < 20) continue;
-      const sep = Math.hypot(a.x - b.x, a.y - b.y);
-      // Endpoints sit on opposite legs: separation comparable to the summed
-      // badge distances (a straight hole gives sep ~ ra+rb; allow bends).
-      if (sep < 0.6 * (a.radius + b.radius)) continue;
-      const balance = Math.abs(a.geodesic - b.geodesic) / Math.max(a.geodesic, b.geodesic);
-      const cost = balance + 0.15 * (a.efficiency + b.efficiency);
-      if (cost < bestPairCost) {
-        bestPairCost = cost;
-        bestPair = [i, j];
+  // First-icon analysis: paint each identity candidate's bbox into an ROI
+  // grid, then walk every identity candidate's backtracked flood path; a
+  // path that crosses another icon's bbox means this candidate lies beyond
+  // a nearer icon (a crossing continuation), so it is not the hole's own
+  // endpoint.
+  {
+    const iconGrid = new Int32Array(rw * rh).fill(-1);
+    for (let ri = 0; ri < rows.length; ri++) {
+      const c = rows[ri].component;
+      if (!c || rows[ri].kind === 'other') continue;
+      const bx0 = Math.max(0, Math.floor(c.bboxX / scale) - 1 - x0);
+      const bx1 = Math.min(rw - 1, Math.ceil((c.bboxX + c.bboxW) / scale) + 1 - x0);
+      const by0 = Math.max(0, Math.floor(c.bboxY / scale) - 1 - y0);
+      const by1 = Math.min(rh - 1, Math.ceil((c.bboxY + c.bboxH) / scale) + 1 - y0);
+      for (let ly = by0; ly <= by1; ly++) {
+        for (let lx = bx0; lx <= bx1; lx++) iconGrid[ly * rw + lx] = ri;
       }
     }
+    const GATE_GEO = 15;
+    for (let ri = 0; ri < rows.length; ri++) {
+      if (rows[ri].kind === 'other') continue;
+      let i = argmins[ri];
+      let passes = false;
+      let guard = 0;
+      let gate = argmins[ri];
+      while (i >= 0 && guard++ < rw * rh) {
+        const owner = iconGrid[i];
+        if (owner !== -1 && owner !== ri) passes = true;
+        if (dist[i] > GATE_GEO) gate = i;
+        i = prev[i];
+      }
+      rows[ri].firstIcon = !passes;
+      gates[ri] = gate;
+      rows[ri].gateX = (x0 + (gate % rw)) * scale;
+      rows[ri].gateY = (y0 + ((gate / rw) | 0)) * scale;
+    }
+  }
+
+  // Middle-out pairing, identity-first: UDisc renders one fixed basket
+  // sprite and one tee-rect style, so the true pair is (tee-rect,
+  // basket-sprite) with near-equal along-ribbon geodesic distances (the
+  // badge is the path midpoint). Tiers degrade gracefully when an icon is
+  // occluded/merged: (tee,basket) > (any,basket) > (tee,any) > generic.
+  // Badges are NOT reliably at the path midpoint (Heritage anchors them near
+  // the tee), so no balance prior. The true pair is the geodesically nearest
+  // (tee, basket) whose flood paths DIVERGE at the badge — the two legs
+  // leave along different ribbon branches, checked via each candidate's
+  // gate pixel (the path ancestor just beyond the seed vicinity).
+  const pairCost = (i: number, j: number): number => rows[i].geodesic + rows[j].geodesic;
+  const validPair = (i: number, j: number): boolean => {
+    const a = rows[i];
+    const b = rows[j];
+    if (Math.hypot(a.x - b.x, a.y - b.y) < 60) return false;
+    const ga = gates[i];
+    const gb = gates[j];
+    if (ga === undefined || gb === undefined) return true;
+    const gax = ga % rw;
+    const gay = (ga / rw) | 0;
+    const gbx = gb % rw;
+    const gby = (gb / rw) | 0;
+    const diverge = Math.hypot(gax - gbx, gay - gby) >= 4;
+    // Tiny holes: both endpoints within the gate radius have trivial gates.
+    return diverge || (a.geodesic <= 18 && b.geodesic <= 18);
+  };
+  const teeish = (c: EndpointComponentCandidate): boolean =>
+    c.kind === 'tee-rect' || c.kind === 'virtual';
+  const basketish = (c: EndpointComponentCandidate): boolean => c.kind === 'basket-sprite';
+  const first = (c: EndpointComponentCandidate): boolean => c.firstIcon === true;
+  const tiers: [(c: EndpointComponentCandidate) => boolean, (c: EndpointComponentCandidate) => boolean][] = [
+    [(c) => teeish(c) && first(c), (c) => basketish(c) && first(c)],
+    [(c) => teeish(c) && first(c), basketish],
+    [teeish, (c) => basketish(c) && first(c)],
+    [teeish, basketish],
+    [() => true, basketish],
+    [teeish, () => true],
+    [() => true, () => true],
+  ];
+  let bestPair: [number, number] | null = null;
+  let bestPairCost = Infinity;
+  for (const [teeOk, basketOk] of tiers) {
+    for (let i = 0; i < rows.length; i++) {
+      if (!teeOk(rows[i])) continue;
+      for (let j = 0; j < rows.length; j++) {
+        if (i === j || !basketOk(rows[j])) continue;
+        if (!validPair(i, j)) continue;
+        const cost = pairCost(i, j);
+        if (cost < bestPairCost) {
+          bestPairCost = cost;
+          bestPair = [i, j];
+        }
+      }
+    }
+    if (bestPair) break;
   }
   const ordered: EndpointComponentCandidate[] = [];
   if (bestPair) {
@@ -742,4 +850,85 @@ export function scoreEndpointComponents(
     ordered.slice(0, maxCandidates).map((r) => ({ value: r, score: -r.geodesic })),
     { primaryCount, theoreticalFloor: -Infinity, preRanked: true },
   );
+}
+
+export interface CourseEndpointAssignment {
+  /** Per input badge index: assigned tee/basket candidates (null when none). */
+  tee: (EndpointComponentCandidate | null)[];
+  basket: (EndpointComponentCandidate | null)[];
+}
+
+/**
+ * Course-level endpoint assignment. Per-badge nearest choices steal
+ * neighboring holes' icons at ribbon crossings; globally, every tee/basket
+ * icon belongs to exactly one hole and is geodesically nearest to its OWN
+ * badge, so a greedy ascending-geodesic assignment with 1:1 uniqueness
+ * resolves the theft. Baskets assign first (fixed sprite = strongest
+ * identity); each badge's tee must then leave the badge along a different
+ * ribbon branch than its basket (gate divergence).
+ */
+export function assignCourseEndpoints(
+  pools: CandidatePool<EndpointComponentCandidate>[],
+): CourseEndpointAssignment {
+  const n = pools.length;
+  const tee: (EndpointComponentCandidate | null)[] = new Array(n).fill(null);
+  const basket: (EndpointComponentCandidate | null)[] = new Array(n).fill(null);
+  const usedComponents = new Set<number>();
+
+  interface Entry {
+    badge: number;
+    cand: EndpointComponentCandidate;
+  }
+  const collect = (kinds: Set<string>): Entry[] => {
+    const entries: Entry[] = [];
+    for (let b = 0; b < n; b++) {
+      for (const c of pools[b].unculled) {
+        if (kinds.has(c.value.kind)) entries.push({ badge: b, cand: c.value });
+      }
+    }
+    entries.sort((p, q) => p.cand.geodesic - q.cand.geodesic);
+    return entries;
+  };
+
+  // Round 1: only first-icon baskets (a basket reached THROUGH another icon
+  // belongs to a different hole — e.g. badge N+1 reaching basket N through
+  // tee N+1). Round 2 relaxes for badges left empty (occlusions).
+  for (const requireFirst of [true, false]) {
+    for (const e of collect(new Set(['basket-sprite']))) {
+      if (requireFirst && e.cand.firstIcon !== true) continue;
+      if (basket[e.badge]) continue;
+      const label = e.cand.component?.label ?? -1;
+      if (usedComponents.has(label)) continue;
+      basket[e.badge] = e.cand;
+      usedComponents.add(label);
+    }
+  }
+
+  const diverges = (a: EndpointComponentCandidate, b: EndpointComponentCandidate): boolean => {
+    if (
+      a.gateX === undefined ||
+      a.gateY === undefined ||
+      b.gateX === undefined ||
+      b.gateY === undefined
+    ) {
+      return true;
+    }
+    if (a.geodesic <= 18 && b.geodesic <= 18) return true;
+    return Math.hypot(a.gateX - b.gateX, a.gateY - b.gateY) >= 16;
+  };
+
+  for (const requireFirst of [true, false]) {
+    for (const e of collect(new Set(['tee-rect', 'virtual']))) {
+      if (requireFirst && e.cand.firstIcon !== true) continue;
+      if (tee[e.badge]) continue;
+      const label = e.cand.component?.label ?? -1;
+      if (label !== -1 && usedComponents.has(label)) continue;
+      const myBasket = basket[e.badge];
+      if (myBasket && !diverges(e.cand, myBasket)) continue;
+      tee[e.badge] = e.cand;
+      if (label !== -1) usedComponents.add(label);
+    }
+  }
+
+  return { tee, basket };
 }
