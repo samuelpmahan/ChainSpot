@@ -294,8 +294,18 @@ function main(): void {
           x >= b.bboxX - 3 && x <= b.bboxX + b.bboxW + 3 &&
           y >= b.bboxY - 3 && y <= b.bboxY + b.bboxH + 3,
       );
+    // Ring-tier tees are excluded only from the badge PLATE INTERIOR (where
+    // hollow digit glyphs like 0/8 can pose as tee rings) — a real tee can
+    // stand at the badge frame's edge (measured: Heritage h15's ring tee
+    // sits 22px from its badge center and was swept by the full-box filter
+    // once badge 15 was recovered).
+    const insideBadgeInterior = (x: number, y: number): boolean =>
+      stage.badges.some(
+        (b) =>
+          Math.abs(x - b.cx) <= b.bboxW / 2 - 7 && Math.abs(y - b.cy) <= b.bboxH / 2 - 7,
+      );
     const sprites = matchBasketSprites(stage.brightMask, spriteTemplate);
-    const rings = detectTeeRings(stage.brightMask).filter((r) => !insideBadgePt(r.cx, r.cy));
+    const rings = detectTeeRings(stage.brightMask).filter((r) => !insideBadgeInterior(r.cx, r.cy));
     const badgeLabels = new Set(stage.badges.map((b) => b.label));
     const teeComponents = stage.brightComponents.filter(
       (c) => !badgeLabels.has(c.label) && !insideBadgePt(c.cx, c.cy),
@@ -321,6 +331,29 @@ function main(): void {
       angle: t.ring ? t.ring.angle : null,
       onRing: basketPoints.some((b) => Math.abs(Math.hypot(t.cx - b.x, t.cy - b.y) - 84) <= 12),
     }));
+    // Occluded-tee recoveries (scripts/cv-probes/occluded_tee_recovery*.py):
+    // pads hidden under basket sprites / badges that the render-identity
+    // detectors cannot see. Materialized as a resource in FULL-raster
+    // coordinates; merged as tier 'recovered' pool candidates (dedupe 14px).
+    try {
+      const recovered = JSON.parse(
+        readFileSync('resources/nuthing-p2/endpoints/recovered-tees.json', 'utf8'),
+      ) as Record<string, { xPx: number; yPx: number; score: number }[]>;
+      for (const r of recovered[nm] ?? []) {
+        const rx = r.xPx;
+        const ry = r.yPx - viewport.top;
+        if (teePoints.some((t) => Math.hypot(t.x - rx, t.y - ry) < 14)) continue;
+        teePoints.push({
+          x: rx,
+          y: ry,
+          tier: 'recovered',
+          angle: null,
+          onRing: basketPoints.some((b) => Math.abs(Math.hypot(rx - b.x, ry - b.y) - 84) <= 12),
+        });
+      }
+    } catch {
+      // resource absent: run without recoveries
+    }
     console.log(
       `${nm}: viewport[${viewport.top},${viewport.bottom}) field ${field.width}x${field.height} ` +
         `(${fieldMs.toFixed(0)}ms) tees=${teePoints.length} ` +

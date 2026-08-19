@@ -291,6 +291,8 @@ for nm in ['HeritagePark-full', 'DashsTrack-full', 'Lenard-full', 'TowneLake-ful
             hits.append((m[0][0], sc, m[0][1], area))
         else:
             fps.append((cx, cy, sc, area))
+    json.dump([{'x': float(k[1]), 'y': float(k[2]), 'score': float(k[0])} for k in kept],
+              open(f'{S}/{nm}-recovered-tees-v3.json', 'w'))
     print(f'{nm}: sig_ref={sig_ref:.0f} | pool-missing {missing} | kept {len(kept)}')
     for num, sc, d, area in hits:
         tag = 'RECOVERED-MISS' if num in missing else 'dup-of-detected'

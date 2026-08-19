@@ -288,6 +288,15 @@ function main(): void {
           if (basket && typeof basket.score === 'number') {
             score *= Math.min(1, Math.max(IDENT_FLOOR, (basket.score - 0.2) / 0.5));
           }
+          // Recovered-tier tees (occluded-tee recovery) are speculative pool
+          // members: they exist to serve holes whose real tee is hidden, and
+          // must not outbid detector-verified tees on healthy holes. Swept
+          // 0.5/0.7/0.85 on dev: 0.7 keeps every true recovery winning its
+          // own hole while stopping recovered FPs from poaching others.
+          const teeT = cache.endpoints.tees[Number(pair.teeId.slice(1))] as { tier?: string };
+          if (teeT && teeT.tier === 'recovered') {
+            score *= Number(process.env.RECOVERED_TEE_PRIOR ?? '0.7');
+          }
         }
         if (invariants) {
           const tee = cache.endpoints.tees[Number(pair.teeId.slice(1))];

@@ -665,6 +665,44 @@ fully supported end to end). Unwired: swap the plate detector into the
 badge stage of pair-matrix and re-run digit classification on the six
 recovered plates; badge-backed coverage rises accordingly.
 
+### Perfect recall wired end to end: 65/72 on the full dev set
+
+Per direction ("start at perfect badge recall and work upwards"), all
+three recovery layers are now wired into the measurement pipeline
+(pair-matrix-v4):
+
+1. **Badges**: dark-plate recovery in `runBadgeStage` — 18/18 labeled on
+   every course (was 66/72), digits all correct after excluding
+   large-component intrusions from plate-recovered glyph masks.
+2. **Tees**: occluded-tee recoveries materialized as
+   `resources/nuthing-p2/endpoints/recovered-tees.json` (full-raster
+   coords, provenance + scores) and merged into the pool as tier
+   'recovered'. Two collateral fixes were forced by measurement: the
+   badge-box tee exclusion now spares ring-tier candidates outside the
+   PLATE INTERIOR (recovering badge 15 had swept Heritage h15's real ring
+   tee, 22 px from the badge center — only hollow digit glyphs need the
+   exclusion), and recovered-tier tees carry a 0.7 assignment prior
+   (swept 0.5/0.7/0.85/1.0: at 1.0 a recovered FP poached DashsTrack h6;
+   at 0.5 Heritage's true recoveries lost their own holes; 0.7-0.85
+   plateau). Truth-blind FP filtering of the recovered pool was attempted
+   and failed honestly: the furniture veto misses the translucent map
+   label, and corridor-field support fires on rooftops too — the tier
+   prior is the correct mechanism, not pool censorship.
+3. **Baskets**: recall was already 18/18 everywhere; pool FPs remain
+   (e.g. a 0.48-score sprite lookalike on a Heritage rooftop, exposed
+   when tee-less holes grabbed garbage) — with tees complete they are no
+   longer selected; masked exact-match precision scoring stays available
+   as a follow-up if validation courses disagree.
+
+Endpoint recall is now 18/18 tees, baskets, and badges on all four dev
+courses, every one of the 72 holes is judged, and assignment lands
+**65/72 exact** (DashsTrack 18/18, TowneLake 18/18, Heritage 17/18 —
+h5/h6/h10/h15 all newly correct, only the h7 theft remains — Lenard
+12/18, its six wrongs the familiar north-cluster theft chains). The
+prior full-pipeline number, 57/63, silently excluded the nine hardest
+holes; 65/72 is the same exactness rate measured with nothing hidden.
+
+
 ### Zone-stamp un-blend: end caps inside the circle
 
 Generalization of the sprite un-blend (`zone_stamp_unblend.py`): the

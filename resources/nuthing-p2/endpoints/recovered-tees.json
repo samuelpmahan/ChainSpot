@@ -1,0 +1,63 @@
+{
+ "DashsTrack-full": [
+  {
+   "xPx": 939.5,
+   "yPx": 2043.0,
+   "score": 0.98,
+   "source": "occluded-tee-recovery-v2"
+  },
+  {
+   "xPx": 454.8,
+   "yPx": 894.0,
+   "score": 0.841,
+   "source": "occluded-tee-recovery-v2"
+  }
+ ],
+ "HeritagePark-full": [
+  {
+   "xPx": 1224.5,
+   "yPx": 649.1,
+   "score": 0.934,
+   "source": "occluded-tee-recovery-v3"
+  },
+  {
+   "xPx": 811.3,
+   "yPx": 1703.1,
+   "score": 0.911,
+   "source": "occluded-tee-recovery-v3"
+  },
+  {
+   "xPx": 1242.6,
+   "yPx": 649.3,
+   "score": 0.909,
+   "source": "occluded-tee-recovery-v3"
+  },
+  {
+   "xPx": 741.2,
+   "yPx": 1323.8,
+   "score": 0.841,
+   "source": "occluded-tee-recovery-v3"
+  },
+  {
+   "xPx": 725.1,
+   "yPx": 1574.0,
+   "score": 0.822,
+   "source": "occluded-tee-recovery-v3"
+  },
+  {
+   "xPx": 976.5,
+   "yPx": 1576.9,
+   "score": 0.952,
+   "source": "occluded-tee-recovery-v2"
+  }
+ ],
+ "Lenard-full": [
+  {
+   "xPx": 621.8,
+   "yPx": 2355.0,
+   "score": 0.821,
+   "source": "occluded-tee-recovery-v3"
+  }
+ ],
+ "TowneLake-full": []
+}
