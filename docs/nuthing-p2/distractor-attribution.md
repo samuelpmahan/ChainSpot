@@ -71,16 +71,61 @@ TRUE pair's weak windows (what suppressed the truth). Current wrong set:
 
 ## Results
 
-_Filled by the test script; every number ships with an annotated overlay._
+Produced by `scripts/nuthing/straight-hole-test.ts` (replay over the cached
+matrix); overlays `<cache>/<course>-straight-test.png` (blue = tee→basket
+chord, green = chord-clean route, orange = violating route) and
+`<course>-wrongs.png` (green = true route, red = chosen wrong route).
 
-### Straight-hole ray test
+### Straight-hole ray test — the invariant holds almost exactly
 
-TBD
+41 straight truth holes: ray angle (tee→badge vs tee→basket) **median
+0.5°, p90 0.9°, max 1.4°**. On a straight hole, tee, badge and basket are
+collinear to sub-degree precision — sharper even than the tee-axis
+invariant (max 1.4° vs 11.3°). No hole fails, so no badge/endpoint
+mislocalizations are hiding in the truth set.
 
 ### Straight-hole chord adherence + attribution
 
-TBD
+32/41 routes stay within a corridor half-width of the chord end to end.
+The 9 violations (max deviation 23–41 px, off-chord arcs 28–120 px):
 
-### Wrong-assignment classifications
+| violation | attribution at peak |
+|---|---|
+| Dashs h6, h17; Lenard h3, h10, h11, h13; TowneLake h3, h10 | **unknown/walking-path** (8) |
+| Lenard h14 | **basket-zone** (1) |
 
-TBD
+Visual confirmation (zooms): Lenard h10's route leaves the chord to ride
+the visible walking path; Lenard h14 detours through the neighboring
+basket's C2 zone. **The walking path is the dominant unhandled
+distractor**, exactly as the render-stack doc predicts — it is linear and
+oriented, so neither strip-coherence nor zone attribution touches it.
+
+### Wrong-assignment classifications (7 holes, final stack)
+
+Off-chord route composition (own-corridor cells excluded — a cell within
+22 px of the pair's own chord is on-hole by definition):
+
+| hole | wrong side | chosen route off-chord | true route off-chord | classification |
+|---|---|---|---|---|
+| Heritage h4 | basket | 5 cells, walking-path | 0 cells | adjacent-basket contention (both routes clean; chosen sprite 0.65 vs occluded true) |
+| Heritage h7 | tee | 86 cells: 22% basket-zone, 10% tee-glyph, 67% walking-path | 16 cells walking-path | true-evidence failure (true pair ranks 52) + furniture tee T32 |
+| Heritage h16 | basket | 25 cells: 60% basket-zone | 0 cells | C2D/C2F carpet into adjacent basket |
+| Lenard h3 | tee | 21 cells: 100% basket-zone | 19 cells: 63% basket-zone | dense basket-zone cluster distortion, component-tier tee |
+| Lenard h9 | basket | 44 cells: 82% walking-path | 0 cells | walking path to adjacent basket |
+| TowneLake h2 | basket | 109 cells: 70% walking-path | 0 cells | walking-path detour |
+| TowneLake h3 | basket | 54 cells: 100% walking-path | 14 cells walking-path | walking path |
+
+Tally over chosen wrong routes: walking-path implicated in 5/7,
+basket-zone 4/7, tee-glyph 1/7, badge 0/7.
+
+## What this buys (next layers, both derivable from cache)
+
+1. **Chord discipline**: a pair's own tee→basket chord is available at
+   inference (it IS the hypothesis). In 4/7 wrongs the true route has ZERO
+   off-chord cells while the chosen route detours 25–109. Before wiring:
+   measure off-chord arc for TRUE pairs on BENT holes (doglegs legitimately
+   leave the chord) to pick a shape that separates detour-around-distractor
+   from genuine bend.
+2. **Walking-path attribution**: the one distractor class with no handler.
+   Dash chains are detectable from the bright-component universe; their
+   support can be discounted like ring furniture.
