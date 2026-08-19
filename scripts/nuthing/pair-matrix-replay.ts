@@ -134,6 +134,19 @@ function main(): void {
   // real ~0.3-0.65, false positives cluster ~0.28-0.6 too — so this is a
   // soft weight, not a gate). It exists to stop uniqueness overflow from
   // parking wrong badges on low-score sprite false positives.
+  // Replay layer 8 — agreement-bearing bonus (--abearing): where the two
+  // independent approach instruments (backwalk, zone-stamp) agree within
+  // 20 deg (measured 84% precision at that gate), pairs whose basket
+  // receives its corridor FROM the badge direction get a bonus. Bonus-only:
+  // dogleg true pairs whose approach differs from the badge direction lose
+  // nothing. Built for the same-tee-wrong-basket rivalry, where the rival
+  // basket's own corridor arrives from a different hole's direction.
+  const abIdx = args.indexOf('--abearing');
+  const abearing = abIdx >= 0 ? (args.splice(abIdx, 1), true) : false;
+  const AB_W = Number(process.env.AB_W ?? '0.5');
+  const AB_SIGMA = Number(process.env.AB_SIGMA ?? '15');
+  const ZONE_DIR = process.env.ZONE_DIR ??
+    '/tmp/claude-0/-home-user-ChainSpot/f2944dcd-e5cd-51df-ba70-0228cccdd281/scratchpad';
   const identIdx = args.indexOf('--identity');
   const identity = identIdx >= 0 ? (args.splice(identIdx, 1), true) : false;
   const IDENT_FLOOR = grab('--ident-floor', 0.4);
@@ -160,6 +173,30 @@ function main(): void {
     const cache = JSON.parse(readFileSync(`${cacheDir}/${nm}.json`, 'utf8')) as CacheCourse;
     const { width: w, height: h, scale } = cache.field;
     const CORRIDOR_W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
+    const agreedBearing = new Map<string, number>();
+    if (abearing) {
+      try {
+        const bwj = JSON.parse(readFileSync(`${cacheDir}/${nm}-backwalk.json`, 'utf8')) as {
+          baskets: { id: string; approachBearingDeg: number | null }[];
+        };
+        const zj = JSON.parse(readFileSync(`${ZONE_DIR}/${nm}-zone-bearings-v4.json`, 'utf8')) as {
+          id: string; est: number;
+        }[];
+        const zmap = new Map(zj.map((r) => [r.id, r.est]));
+        for (const b of bwj.baskets) {
+          const z = zmap.get(b.id);
+          if (z === undefined || b.approachBearingDeg === null) continue;
+          let d = Math.abs(z - b.approachBearingDeg) % 360;
+          if (d > 180) d = 360 - d;
+          if (d > 20) continue;
+          const va = Math.cos((z * Math.PI) / 180) + Math.cos((b.approachBearingDeg * Math.PI) / 180);
+          const vb = Math.sin((z * Math.PI) / 180) + Math.sin((b.approachBearingDeg * Math.PI) / 180);
+          agreedBearing.set(b.id, (Math.atan2(vb, va) * 180) / Math.PI);
+        }
+      } catch {
+        // sidecars absent: layer inert
+      }
+    }
     const support = new Float32Array(readFileSync(`${cacheDir}/${nm}-field.bin`).buffer.slice(0));
     const theta = new Float32Array(readFileSync(`${cacheDir}/${nm}-theta.bin`).buffer.slice(0));
     const windowCells = Math.max(3, Math.round(windowSrcPx / scale));
@@ -442,6 +479,27 @@ function main(): void {
             }
           }
         }
+        if (abearing) {
+          const ab = agreedBearing.get(pair.basketId);
+          const basketAb = cache.endpoints.baskets[Number(pair.basketId.slice(1))];
+          const teeAb = cache.endpoints.tees[Number(pair.teeId.slice(1))];
+          if (ab !== undefined && basketAb && teeAb) {
+            // Only on STRAIGHT pairs (tee-badge-basket collinear < 2 deg):
+            // there basket->badge provably IS the approach direction; on
+            // doglegs the proxy is wrong and the bonus misfires (measured:
+            // unrestricted bonus churned rank1 65->64).
+            const dTB2 = Math.atan2(basketAb.y - teeAb.y, basketAb.x - teeAb.x);
+            const dBadge2 = Math.atan2(badge.cy - teeAb.y, badge.cx - teeAb.x);
+            let dc2 = Math.abs(dBadge2 - dTB2) % (2 * Math.PI);
+            if (dc2 > Math.PI) dc2 = 2 * Math.PI - dc2;
+            if ((dc2 * 180) / Math.PI < 2) {
+              const brg = (Math.atan2(badge.cy - basketAb.y, badge.cx - basketAb.x) * 180) / Math.PI;
+              let d = Math.abs(brg - ab) % 360;
+              if (d > 180) d = 360 - d;
+              score *= 1 + AB_W * Math.exp(-((d / AB_SIGMA) ** 2));
+            }
+          }
+        }
         if (simple) {
           const teeCells = legCellSet.get(pair.teeId);
           const basketLeg = badge.legs.find((l) => l.endpointId === pair.basketId);
@@ -521,6 +579,14 @@ function main(): void {
       );
       const rank = order.indexOf(trueIdx) + 1;
       rankByHole.set(j.hole, rank);
+      if (process.env.DEBUG_RANKS === '1' && rank > 1) {
+        const top = rows[order[0]];
+        const tr = rows[trueIdx];
+        console.log(
+          `  RANKDBG h${j.hole} rank${rank} true ${tr.teeId}/${tr.basketId} score=${tr.score.toFixed(4)} ` +
+            `vs top ${top.teeId}/${top.basketId} score=${top.score.toFixed(4)} ratio=${(tr.score / top.score).toFixed(3)}`,
+        );
+      }
       n++;
       grand.n++;
       if (rank === 1) {

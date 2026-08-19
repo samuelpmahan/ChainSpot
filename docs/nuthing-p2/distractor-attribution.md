@@ -763,6 +763,32 @@ Lenard 18/18, TowneLake 18/18 — with rank1 65/72, rank≤3 71/72, on
 perfect endpoint recall.** Next honest test is the validation courses;
 every constant above is documented with its sweep.
 
+### Can the seven non-rank-1 rows be tuned to rank 1? Measured: no.
+
+The seven rows the assignment layer currently rescues (Dashs h1/h4,
+Heritage h5/h7/h12/h18, Lenard h9; true-vs-rival score ratios
+0.71–0.97): five of seven are same-tee-WRONG-BASKET rivalries. Attempts,
+all from cache:
+- **Z-fit / salvage widening**: inert — these rows are not drowned
+  routes (worst-window above the salvage cut); the rival is simply
+  strong. The gate correctly refuses them.
+- **Agreement-bearing bonus** (--abearing, kept flag-gated OFF): boost
+  pairs whose basket→badge direction matches the zone∧backwalk agreed
+  bearing. Unrestricted: rank1 65→64 with churn (dogleg proxies misfire,
+  poisoned agreements boost rivals). Straightness-gated (collinear <2°
+  only) at four W×σ settings: rank1 63–64 AND assignment breaks
+  (72→63–67) — in dense clusters, straight FALSE pairs over real
+  parallel paint collect the same bonus.
+Conclusion (rhymes with the specialist-ceiling replication): the local
+per-row score family is saturated; every soft multiplier that helps
+these seven also arms their mirror-image false pairs. rank1 65 +
+assignment 72 is the equilibrium — the 1:1 uniqueness constraint IS the
+structure that resolves same-tee-wrong-basket rivalries, because the
+rival basket is claimed by its rightful hole. Raising rank1 further
+requires rival-conditioned evidence (e.g. the rival basket's own agreed
+approach pointing at its OWN badge as counter-evidence, bend-aware),
+which is new structure, not tuning.
+
 ### h7 postscript: the tree line under the corridor (truth traced an edge)
 
 Review of the h7 field render identified three things, all now verified
