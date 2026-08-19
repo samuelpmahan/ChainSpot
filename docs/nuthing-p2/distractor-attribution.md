@@ -582,3 +582,26 @@ additional pool FPs (three Heritage rooftop corners, one Lenard facade),
 all off-course furniture far from any truth tee; combined pool FP count
 6 across four courses, inert to assignment because no corridor terminates
 at them.
+
+**Replay node** (`tee_recovery_node.py` / `tee_recovery_rescore.py`): the
+evidence stage (instance stacking, alpha inversion, reconstruction,
+uniqueness filtering, occluder assembly) is frozen per course under
+`/workspace/nuthing-work/tee-recovery-node/`; all placement scoring,
+plateau analysis, and fit rendering re-derive from the snapshots
+(~20 s for three holes' full landscapes vs minutes per evidence rebuild).
+
+**h6's 11 px offset — diagnosed, not fixed.** The suspected mechanism
+(the 0.5 support band letting the border's inside count) is acquitted by
+measurement: evidence at the winning placement sits at median +0.2 px
+signed distance to the modeled ring centerline, 27 % inside. The real
+mechanism is a **slide-to-hide degeneracy**: coverage averages only
+non-excused ring points, so sliding the pad deeper under the occluder
+excuses its unsupported ring — truth-centered scores 0.60 (coverage
+0.35) vs 0.90 at the +11 px slide, a pure translation along the pad's
+long axis. Plateau-midpoint as an estimator was measured off the node
+and REJECTED (h6 10.2 px vs 11.0 — the score genuinely prefers the slid
+position, there is no flat plateau back to truth; h5 worsens 1.0→3.1).
+Remaining candidate fixes, unwired: report the degeneracy axis as a
+positional-uncertainty field (pairing treats the recovered tee as a
+short segment), or pin the slide with a reconstruction-based
+interior-color consistency term.
