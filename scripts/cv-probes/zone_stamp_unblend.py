@@ -19,7 +19,9 @@ import numpy as np
 import cv2
 
 S = '/tmp/claude-0/-home-user-ChainSpot/f2944dcd-e5cd-51df-ba70-0228cccdd281/scratchpad'
-CACHE = '/workspace/nuthing-work/pair-matrix-patched'
+import sys
+CACHE = sys.argv[1] if len(sys.argv) > 1 else '/workspace/nuthing-work/pair-matrix-patched'
+OUT_SUFFIX = sys.argv[2] if len(sys.argv) > 2 else ''
 NODE_DIR = '/workspace/nuthing-work/tee-recovery-node'
 REG = json.load(open('/home/user/ChainSpot/resources/nuthing-p2/registered-annotations.json'))
 DASHS = json.load(open('/workspace/chainspot-corpus/dev/DashsTrack/DashsTrack-full.annotation.json'))
@@ -168,7 +170,7 @@ if __name__ == '__main__':
             if e > 45:
                 cat += 1
             rows.append({'id': b['id'], 'hole': cand['num'], 'est': est, 'truth': tb, 'err': e})
-        json.dump(rows, open(f'{S}/{nm}-zone-bearings.json', 'w'))
+        json.dump(rows, open(f'{S}/{nm}-zone-bearings{OUT_SUFFIX}.json', 'w'))
         pooled_good += good
         pooled_cat += cat
         pooled_n += n
