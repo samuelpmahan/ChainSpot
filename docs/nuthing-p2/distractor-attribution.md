@@ -639,3 +639,33 @@ constraint** — a recovered pad must sit on a corridor start (centerline
 + start cap, fit from the lift map). It pins the slide degeneracy with
 render geometry instead of heuristics, and it would also kill the
 rooftop/logo FPs, none of which have a corridor terminating at them.
+
+### Zone-stamp un-blend: end caps inside the circle
+
+Generalization of the sprite un-blend (`zone_stamp_unblend.py`): the
+ENTIRE basket zone — sprite glyph, C1S/C2D rings, C1F/C2F fills — is one
+repeated render stamp, pixel-locked to the anchor. Stacking
+anchor-centered 220×220 windows across a course's baskets (robust
+median/MAD alpha) cancels the whole stamp at once. The un-blended LIFT
+maps show the corridor running straight through the zone — terminal cap
+included — in the region that has been the worst-measured part of every
+corridor and the reason the backwalk had to scan from r=35 outward.
+
+Bearing readout INSIDE the zone (mean lift in a W-wide band,
+r ∈ [W/2+4, 60], furniture-masked — neighboring baskets' sprites, badges
+and tees sit at varying offsets, are NOT cancelled by the stamp, and
+dominated the readout until masked): 41 good / 20 catastrophic on the 69
+reliable-truth baskets — statistical parity with the backwalk (41/22)
+from a fully independent mechanism. Two of the backwalk's worst
+failures read nearly clean here (Heritage h4: 168°→16°; Lenard h2:
+174°→22°).
+
+**The agreement gate is the real product.** When the two independent
+instruments agree within 20° (31/72 baskets): 26 good, 3 catastrophic —
+**84 % precision at 43 % coverage**, versus the backwalk's own
+confidence/margin which was ANTI-correlated with correctness on the
+target holes. When they disagree, both are coin flips — abstain. The
+three catastrophic agreements are cluster cases where both instruments
+lock onto the same real neighboring corridor: the locally-undecidable
+set again. This is the first calibrated, soft, per-basket approach
+signal fit for the pairing loop.
