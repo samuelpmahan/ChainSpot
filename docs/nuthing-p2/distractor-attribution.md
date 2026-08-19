@@ -519,6 +519,22 @@ errors concentrate exactly where local evidence provably cannot decide —
 the candidate-conditioned wiring is not just preferable but necessary for
 those.
 
+**Replication on the dev72 substrate** (complete badge/tee pools,
+corrected Lenard truth, v4 caches; same family, same seeded 30k search):
+the ceilings REPLICATE almost exactly — DashsTrack 16/18, Heritage
+10/17, Lenard 11/18, TowneLake 16/18 — while the oracle improved
+(Lenard 18/18). Better pools alone do not lift a formula-limited family;
+the original "formula limit, not tuning limit" reading was correct and
+is now a repeated measurement. Adding the one term the old family could
+not have had — agreement with the zone-stamp bearing (an independent
+instrument) — lifts each cluttered course by ~1 and cuts pooled
+catastrophic 15→10; using agreement as a raw gate with a naive fallback
+(zero parameters) is NOT better standalone (43/72), because the fallback
+inherits the coin-flip disagreement set. Conclusion for the CX lab:
+per-course overfitting is a stable, repeatable DIAGNOSTIC — the ceiling
+moves only when the family gains structure (new independent evidence or
+a decision hierarchy), never when the substrate or the tuner improves.
+
 
 ## Occluded-tee recovery — "the Heritage misses are partially covered boxes"
 
