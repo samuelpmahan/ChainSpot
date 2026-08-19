@@ -288,6 +288,38 @@ wrongs pair with a low-score FALSE sprite match (B18/B19-class ids) —
 uniqueness overflow lands on sprite false positives; folding the sprite
 match score into pair evidence is the obvious next layer.
 
+## Replay refinements 6–7 — theft-chain fix and identity evidence (RESULT)
+
+`--explain` (replay over the same cache) diagnosed all 13 remaining wrong
+assignments as **theft chains**: one badge whose false top pair outscores
+its true pair steals a neighbor's endpoint and the wrong claim dominoes
+(DashsTrack: h1→h2→h5→h7→h6, ending on a 0.59-score sprite false
+positive). The chains are globally suboptimal — fixing Dashs h1 costs 0.16
+locally but returns +0.57 in total — so the fix is a better optimizer, not
+another heuristic: greedy seed + local search with single-badge moves AND
+two-badge exchange moves, from three deterministic start orders, keeping
+the highest total. DashsTrack goes 13/18 → **18/18 exact**.
+
+`--identity` folds the cached basket matched-filter score in as a soft
+weight (floor 0.4; sweep-stable), stopping uniqueness overflow from
+parking badges on sprite false positives (TowneLake h5 → fixed).
+
+**Final stack** (`--zones --simple --invariants --identity --assign`):
+**exact 1:1 assignment 56/63 (89%)** — DashsTrack 18/18, Heritage 8/11,
+Lenard 14/16, TowneLake 16/18. Remaining 7: one true evidence failure
+(Heritage h7, true pair ranks 52nd) and six small-margin adjacent
+mispairings where the objective genuinely prefers the wrong sum by
+0.02–0.09.
+
+## The product: emitted assignments
+
+`--emit` writes the consumable artifact per course:
+`<cache>/<course>-assignments.json` — hole → tee/basket **full-frame**
+pixel coordinates with per-hole pair score, basket sprite score, candidate
+IDs and dev-truth verdict, plus the stack configuration that produced it —
+and `<course>-assigned.png` verification overlays (green=correct,
+red=wrong, gray=unjudged).
+
 ## Remaining work this matrix exposes
 
 1. **Walking-path-aware attribution** (dashed paths + diamond markers as

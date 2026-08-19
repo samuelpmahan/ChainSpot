@@ -119,6 +119,18 @@ function main(): void {
   //    0.45 ± 0.15 with σ=0.15.
   const invIdx = args.indexOf('--invariants');
   const invariants = invIdx >= 0 ? (args.splice(invIdx, 1), true) : false;
+  // Replay layer 6 — endpoint identity evidence: the basket detector's
+  // matched-filter score is cached per basket (clean sprite ~0.95+, occluded
+  // real ~0.3-0.65, false positives cluster ~0.28-0.6 too — so this is a
+  // soft weight, not a gate). It exists to stop uniqueness overflow from
+  // parking wrong badges on low-score sprite false positives.
+  const identIdx = args.indexOf('--identity');
+  const identity = identIdx >= 0 ? (args.splice(identIdx, 1), true) : false;
+  const IDENT_FLOOR = grab('--ident-floor', 0.4);
+  // --emit: write the consumable product — per-course hole→(tee, basket)
+  // assignments in FULL-FRAME pixel coordinates + a verification overlay.
+  const emitIdx = args.indexOf('--emit');
+  const emit = emitIdx >= 0 ? (args.splice(emitIdx, 1), true) : false;
   const ALIGN_SIGMA_DEG = 12;
   const FRAC_CENTER = 0.45;
   const FRAC_HALF_WIDTH = 0.15;
@@ -269,6 +281,14 @@ function main(): void {
             : scoreMode === 'mean'
               ? sum / count
               : worst;
+        if (identity) {
+          const basket = cache.endpoints.baskets[Number(pair.basketId.slice(1))] as {
+            score?: number;
+          };
+          if (basket && typeof basket.score === 'number') {
+            score *= Math.min(1, Math.max(IDENT_FLOOR, (basket.score - 0.2) / 0.5));
+          }
+        }
         if (invariants) {
           const tee = cache.endpoints.tees[Number(pair.teeId.slice(1))];
           const basket = cache.endpoints.baskets[Number(pair.basketId.slice(1))];
@@ -316,6 +336,8 @@ function main(): void {
       rescoredByBadge.set(badge.label, rows);
     }
 
+    let pristineBase: Buffer | null = null;
+    let assignedForOverlay: Map<string, Rescored | null> | null = null;
     let n = 0;
     let r1 = 0;
     let r3 = 0;
@@ -387,64 +409,269 @@ function main(): void {
         const rival = rows.find((r) => r.teeId !== top.teeId && r.basketId !== top.basketId);
         return top.score - (rival ? rival.score : 0);
       };
-      const seedOrder = [...labels].sort((a, b) => margin(b) - margin(a));
-      for (const l of seedOrder) {
-        let best: Rescored | null = null;
-        for (const row of rescoredByBadge.get(l)!) {
-          if (usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
-          if (!best || row.score > best.score) best = row;
-        }
-        if (!best) continue;
-        chosen.set(l, best);
-        usedTee.add(best.teeId);
-        usedBasket.add(best.basketId);
-      }
-      // 2-swap local search: try replacing any one badge's pair (freeing its
-      // endpoints) with its best feasible alternative; accept improvements.
-      let improved = true;
-      let guard = 0;
-      while (improved && guard++ < 50) {
-        improved = false;
-        for (const l of labels) {
-          const cur = chosen.get(l);
-          if (cur) {
-            usedTee.delete(cur.teeId);
-            usedBasket.delete(cur.basketId);
-          }
+      // Total-score maximization. Diagnosed from the cached evidence: wrong
+      // assignments come in THEFT CHAINS — one badge whose false top pair
+      // outscores its true pair steals a neighbor's endpoint and the wrong
+      // claim dominoes (Dashs h1→h2→h5→h7→h6, ending on a sprite false
+      // positive). The chain is globally suboptimal (fixing Dashs h1 costs
+      // 0.16 locally but returns +0.57 in total), so the fix is a better
+      // optimizer, not a better heuristic: greedy seed + local search with
+      // single-badge moves AND two-badge exchange moves, from several
+      // deterministic start orders, keeping the highest-total solution.
+      const solveFrom = (order: string[]): Map<string, Rescored | null> => {
+        const pick = new Map<string, Rescored | null>(labels.map((l) => [l, null]));
+        const tUsed = new Set<string>();
+        const bUsed = new Set<string>();
+        for (const l of order) {
           let best: Rescored | null = null;
           for (const row of rescoredByBadge.get(l)!) {
-            if (usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
+            if (tUsed.has(row.teeId) || bUsed.has(row.basketId)) continue;
             if (!best || row.score > best.score) best = row;
           }
-          if (best && (!cur || best.score > cur.score + 1e-12)) {
-            chosen.set(l, best);
-            improved = improved || !cur || best !== cur;
-          } else if (cur) {
-            chosen.set(l, cur);
+          if (!best) continue;
+          pick.set(l, best);
+          tUsed.add(best.teeId);
+          bUsed.add(best.basketId);
+        }
+        const K = 12;
+        const topRows = new Map(
+          labels.map((l) => [
+            l,
+            [...rescoredByBadge.get(l)!].sort((a, b) => b.score - a.score).slice(0, 60),
+          ]),
+        );
+        let improved = true;
+        let guard = 0;
+        while (improved && guard++ < 60) {
+          improved = false;
+          // Single-badge move.
+          for (const l of labels) {
+            const cur = pick.get(l);
+            if (cur) {
+              tUsed.delete(cur.teeId);
+              bUsed.delete(cur.basketId);
+            }
+            let best: Rescored | null = null;
+            for (const row of topRows.get(l)!) {
+              if (tUsed.has(row.teeId) || bUsed.has(row.basketId)) continue;
+              if (!best || row.score > best.score) best = row;
+            }
+            if (best && (!cur || best.score > cur.score + 1e-9)) {
+              pick.set(l, best);
+              improved = true;
+            } else if (cur) {
+              pick.set(l, cur);
+            }
+            const now = pick.get(l);
+            if (now) {
+              tUsed.add(now.teeId);
+              bUsed.add(now.basketId);
+            }
           }
-          const now = chosen.get(l);
-          if (now) {
-            usedTee.add(now.teeId);
-            usedBasket.add(now.basketId);
+          // Two-badge exchange: free both badges' endpoints, try top-K rows
+          // for each jointly, keep the best feasible combination.
+          for (let i = 0; i < labels.length; i++) {
+            for (let jdx = i + 1; jdx < labels.length; jdx++) {
+              const li = labels[i];
+              const lj = labels[jdx];
+              const ci = pick.get(li);
+              const cj = pick.get(lj);
+              const base = (ci?.score ?? 0) + (cj?.score ?? 0);
+              for (const c of [ci, cj]) {
+                if (c) {
+                  tUsed.delete(c.teeId);
+                  bUsed.delete(c.basketId);
+                }
+              }
+              let bestPair: [Rescored | null, Rescored | null] = [ci ?? null, cj ?? null];
+              let bestTotal = base;
+              const rowsI = topRows.get(li)!.slice(0, K);
+              const rowsJ = topRows.get(lj)!.slice(0, K);
+              for (const ri of rowsI) {
+                if (tUsed.has(ri.teeId) || bUsed.has(ri.basketId)) continue;
+                for (const rj of rowsJ) {
+                  if (rj.teeId === ri.teeId || rj.basketId === ri.basketId) continue;
+                  if (tUsed.has(rj.teeId) || bUsed.has(rj.basketId)) continue;
+                  const total = ri.score + rj.score;
+                  if (total > bestTotal + 1e-9) {
+                    bestTotal = total;
+                    bestPair = [ri, rj];
+                  }
+                }
+              }
+              if (bestPair[0] !== ci || bestPair[1] !== cj) improved = true;
+              pick.set(li, bestPair[0]);
+              pick.set(lj, bestPair[1]);
+              for (const c of bestPair) {
+                if (c) {
+                  tUsed.add(c.teeId);
+                  bUsed.add(c.basketId);
+                }
+              }
+            }
           }
+        }
+        return pick;
+      };
+      const total = (pick: Map<string, Rescored | null>): number =>
+        [...pick.values()].reduce((a, r) => a + (r?.score ?? 0), 0);
+      const marginOrder = [...labels].sort((a, b) => margin(b) - margin(a));
+      const starts: string[][] = [marginOrder, [...labels], [...labels].reverse()];
+      let bestPick = solveFrom(starts[0]);
+      for (const order of starts.slice(1)) {
+        const p = solveFrom(order);
+        if (total(p) > total(bestPick)) bestPick = p;
+      }
+      for (const [l, r] of bestPick) {
+        chosen.set(l, r);
+        if (r) {
+          usedTee.add(r.teeId);
+          usedBasket.add(r.basketId);
         }
       }
       let ok = 0;
       let judged = 0;
       const wrong: string[] = [];
+      const explain: string[] = [];
       for (const j of cache.judgments) {
         if (j.rankPrimary < 1) continue;
         judged++;
         const c = chosen.get(String(j.hole));
         if (c && c.teeId === `T${j.trueTee}` && c.basketId === `B${j.trueBasket}`) ok++;
-        else wrong.push(`h${j.hole}${c ? `->${c.teeId}/${c.basketId}` : '->none'}`);
+        else {
+          wrong.push(`h${j.hole}${c ? `->${c.teeId}/${c.basketId}` : '->none'}`);
+          // Explain from the same evidence the assignment used: where did the
+          // true pair rank for this badge, and who claimed its endpoints?
+          const rows = rescoredByBadge.get(String(j.hole))!;
+          const order = [...rows].sort((a, b) => b.score - a.score);
+          const trueRow = rows.find(
+            (r) => r.teeId === `T${j.trueTee}` && r.basketId === `B${j.trueBasket}`,
+          );
+          const trueRank = trueRow ? order.indexOf(trueRow) + 1 : -1;
+          const claimedBy = (id: string, kind: 'tee' | 'basket'): string => {
+            for (const [l, ch] of chosen) {
+              if (!ch) continue;
+              if ((kind === 'tee' ? ch.teeId : ch.basketId) === id) return `h${l}`;
+            }
+            return 'unclaimed';
+          };
+          const basketScore = cache.endpoints.baskets[Number((c?.basketId ?? 'B-1').slice(1))] as
+            | { score?: number }
+            | undefined;
+          explain.push(
+            `  h${j.hole}: truePair rank=${trueRank} score=${trueRow?.score.toFixed(3) ?? '-'} ` +
+              `chosen=${c ? `${c.teeId}/${c.basketId} score=${c.score.toFixed(3)}` : 'none'} ` +
+              `(chosen basket spriteScore=${basketScore?.score?.toFixed(2) ?? '?'}) | ` +
+              `trueTee T${j.trueTee} claimed by ${claimedBy(`T${j.trueTee}`, 'tee')}, ` +
+              `trueBasket B${j.trueBasket} claimed by ${claimedBy(`B${j.trueBasket}`, 'basket')}`,
+          );
+        }
       }
       console.log(
         `${nm}: ASSIGNED exact=${ok}/${judged}` + (wrong.length ? ` wrong: ${wrong.join(' ')}` : ''),
       );
+      if (explain.length) console.log(explain.join('\n'));
+
+      if (emit) {
+        const holes = [...chosen.entries()]
+          .filter(([, r]) => r)
+          .map(([label, r]) => {
+            const tee = cache.endpoints.tees[Number((r as Rescored).teeId.slice(1))];
+            const basket = cache.endpoints.baskets[Number((r as Rescored).basketId.slice(1))] as {
+              x: number;
+              y: number;
+              score?: number;
+            };
+            const j = cache.judgments.find((jj) => jj.hole === Number(label));
+            const verdict =
+              j && j.rankPrimary >= 1
+                ? (r as Rescored).teeId === `T${j.trueTee}` &&
+                  (r as Rescored).basketId === `B${j.trueBasket}`
+                  ? 'correct'
+                  : 'wrong'
+                : 'unjudged';
+            return {
+              hole: Number(label),
+              tee: { xPx: tee.x, yPx: tee.y + cache.viewport.top },
+              basket: { xPx: basket.x, yPx: basket.y + cache.viewport.top },
+              pairScore: (r as Rescored).score,
+              basketSpriteScore: basket.score ?? null,
+              teeId: (r as Rescored).teeId,
+              basketId: (r as Rescored).basketId,
+              devTruthVerdict: verdict,
+            };
+          })
+          .sort((a, b) => a.hole - b.hole);
+        writeFileSync(
+          `${cacheDir}/${nm}-assignments.json`,
+          JSON.stringify(
+            {
+              course: nm,
+              coordinateFrame: 'full capture frame (viewport.top added back)',
+              stack: { alignPow, windowSrcPx, zones, simple, invariants, identity, scoreMode },
+              holes,
+            },
+            null,
+            1,
+          ),
+        );
+        console.log(`${nm}: assignments -> ${cacheDir}/${nm}-assignments.json (${holes.length} holes)`);
+        assignedForOverlay = chosen;
+      }
       grand.assigned += ok;
       grand.assignedN += judged;
     }
+
+    // Verification overlay for the emitted assignment: drawn in the render
+    // block below (which owns the imagery base), gated on assignedForOverlay.
+    const drawAssignedOverlay = (base: Buffer): void => {
+      if (!assignedForOverlay) return;
+      {
+        {
+          // Chosen pair routes: green=correct vs dev truth, red=wrong,
+          // gray=unjudged; badges red dots.
+          const png2 = new PNG({ width: w, height: h });
+          base.copy(png2.data);
+          for (const [label, r] of assignedForOverlay) {
+            if (!r) continue;
+            const badge = cache.badges.find((bb) => bb.label === label);
+            if (!badge) continue;
+            const j = cache.judgments.find((jj) => jj.hole === Number(label));
+            const verdict =
+              j && j.rankPrimary >= 1
+                ? r.teeId === `T${j.trueTee}` && r.basketId === `B${j.trueBasket}`
+                  ? 'ok'
+                  : 'bad'
+                : 'na';
+            const [cr, cg, cb] =
+              verdict === 'ok' ? [0, 220, 0] : verdict === 'bad' ? [255, 40, 40] : [180, 180, 180];
+            for (const leg of badge.legs) {
+              if (leg.endpointId !== r.teeId && leg.endpointId !== r.basketId) continue;
+              for (let i = 0; i < leg.path.length; i += 2) {
+                const p = (leg.path[i + 1] * w + leg.path[i]) * 4;
+                png2.data[p] = cr;
+                png2.data[p + 1] = cg;
+                png2.data[p + 2] = cb;
+              }
+            }
+            const bx = Math.round(badge.cx / scale);
+            const by = Math.round(badge.cy / scale);
+            for (let dy = -2; dy <= 2; dy++) {
+              for (let dx = -2; dx <= 2; dx++) {
+                const xx = bx + dx;
+                const yy = by + dy;
+                if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+                const p = (yy * w + xx) * 4;
+                png2.data[p] = 255;
+                png2.data[p + 1] = 0;
+                png2.data[p + 2] = 0;
+              }
+            }
+          }
+          writeFileSync(`${cacheDir}/${nm}-assigned.png`, PNG.sync.write(png2));
+        }
+      }
+    };
 
     if (render) {
       const fullImage = decodeRgbaBin(`/workspace/nuthing-work/traces-py/${nm}.rgba.bin`);
@@ -490,6 +717,8 @@ function main(): void {
         }
       };
       const pristine = Buffer.from(png.data);
+      pristineBase = pristine;
+      drawAssignedOverlay(pristine);
       for (const j of cache.judgments) {
         const rank = rankByHole.get(j.hole);
         if (!rank) continue;
