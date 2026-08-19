@@ -61,6 +61,11 @@ import {
   collectTeePoints,
 } from '../../src/lib/nuthing/endpoints';
 import type { SpriteTemplate } from '../../src/lib/nuthing/endpoints';
+import {
+  patchBadgeOcclusion,
+  COURSE_CORRIDOR_WIDTH,
+  DEFAULT_CORRIDOR_WIDTH,
+} from '../../src/lib/nuthing/badgeOcclusion';
 import { buildSupportCost } from '../../src/lib/autoAnnotation/middleOutRibbon';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
@@ -232,6 +237,12 @@ function main(): void {
   const args = process.argv.slice(2);
   const courseIdx = args.indexOf('--course');
   const onlyCourse = courseIdx >= 0 ? args.splice(courseIdx, 2)[1] : null;
+  // Measurement variant: occlusion-aware badge patching (halo cap +
+  // one-sided edge evidence with the per-course corridor width). Changes
+  // the measured field, so it belongs in the measurement step and should
+  // be written to its own cache directory.
+  const patchIdx = args.indexOf('--patch-badges');
+  const patchBadges = patchIdx >= 0 ? (args.splice(patchIdx, 1), true) : false;
   const [outDir] = args;
   if (!outDir) {
     console.error('Usage: tsx scripts/nuthing/pair-matrix.ts OUT_DIR [--course NAME]');
@@ -265,6 +276,14 @@ function main(): void {
       orientations: FIELD_ORIENTATIONS,
       widthsSrc: FIELD_WIDTHS_SRC,
     });
+    if (patchBadges) {
+      const W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
+      const stats = patchBadgeOcclusion(field, image, stage.badges, W);
+      console.log(
+        `${nm}: badge-occlusion patch W=${W}: halo-capped ${stats.haloCells} cells, ` +
+          `one-sided boosted ${stats.patchedCells} cells`,
+      );
+    }
     const cost = buildSupportCost(field.support);
     const fieldMs = performance.now() - t0;
 

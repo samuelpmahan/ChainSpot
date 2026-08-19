@@ -184,6 +184,48 @@ rectangle + triangle bend wedges + semicircular caps):
    ground), and walking paths fail on width and cap geometry, not just
    color.
 
+## Badge crossings: the diagonal swerve, and the one-sided edge detector
+
+Reviewing what the router "sees" crossing badges (support-field crops at
+badge crossings on straight holes) confirmed the reported swerve: the badge
+is an opaque rounded rect ON TOP of the corridor, its black/white boundary
+produces strong edge pairs at every orientation (a bright halo in the
+support field), the true ribbon loses its edges under it — so the route
+enters on one ribbon-edge ridge, crosses the badge **corner-to-corner along
+its diagonal**, and exits on the opposite ridge.
+
+Both failures are fixable because the occluder is known (badge bboxes are
+detected precisely) and the corridor is a rectangle of one known width per
+course. **Corridor width confirmed as a per-course render constant**: the
+corpus annotations carry ONE `corridorWidthPx` per course (40/30/37/37,
+identical for all 18 holes), and FWHM paint measurement agrees
+(37/30/31/36 median). `src/lib/nuthing/badgeOcclusion.ts` applies two
+patches to the support plane at measurement time (`--patch-badges`):
+
+1. **Halo cap** — support within bbox+3 clamped to 0.5: a known occluder's
+   boundary is never ribbon evidence; passable, not attractive.
+2. **One-sided edge evidence** — for cells around the badge where exactly
+   one of the ±W/2 paired-sample sides falls inside a badge bbox, score
+   from the visible side alone: positive paint-lift polarity at distance
+   W/2 places the centerline without seeing the blocked edge. Score floor
+   0.5 (≈22 gray lift) — floors 0 and 0.65 both measured worse (an
+   unfloored boost manufactures badge crossings that wrong routes exploit;
+   0.65 starves it and assignment ties reshuffle).
+
+Results on the patched snapshot (full replay stack):
+
+| metric | unpatched | patched |
+|---|---|---|
+| straight-hole chord violations | 9 | 6 |
+| near-badge deviation p90 (straight holes) | 7.6 px | 5.9 px |
+| exact 1:1 assignment | 56/63 | **57/63** |
+| per course | 18/8/14/16 | **18**/9/12/**18** |
+
+DashsTrack and TowneLake are now perfect; Heritage 9/11. Honest cost:
+Lenard gives back two (12/16) — making badge areas crossable helps wrong
+routes too on the course whose margins are thinnest; its wrongs remain the
+walking-path/basket-zone cases from the classification above.
+
 ## What this buys (next layers, both derivable from cache)
 
 1. **Chord discipline**: a pair's own tee→basket chord is available at
