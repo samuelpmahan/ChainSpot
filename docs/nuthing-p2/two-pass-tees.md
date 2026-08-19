@@ -55,3 +55,31 @@ The 0.40 theoretical floor withholds 6326 of 8323 ranked candidates (76.0%) from
 FULL REPLAY did not surface any truth tee candidate that the 0.40 floor would have withheld: every matched annotated tee that had any matching candidate at all was found at or above the floor (PRIMARY or SECONDARY). No floor-falsification cases in this corpus.
 
 Every annotated tee had at least one candidate (of any partition) matching its bbox.
+
+## AlexClark re-examination (floor falsification found)
+
+The original exclusion of AlexClark-full from truth coverage conflated two
+different claims. Its annotation has no sha256, but its dimensions match the
+corpus raster exactly (1290x2086) and its coordinates land on P1 candidates
+within 8-12 px — the coordinate frame is evidently the corpus raster; what
+was actually wrong earlier was the badge-at-path-midpoint hypothesis, not
+the frame. Checking its 3 annotated holes against the full unculled pool:
+
+- Hole 2 tee: a candidate's bbox contains the annotated tee point (d=12.1px)
+  at rank 242/249 with score 0.000 — CULLED by the 0.40 floor. **Only FULL
+  REPLAY retains it.** This is a concrete floor-falsification case.
+- Holes 1 and 3 tees: no candidate bbox contains the tee at all (nearest
+  centroids 112px / 75px). These tees are not in the pool at any score —
+  they were lost upstream at the mask/component stage, beyond what the
+  unculled lever can recover.
+
+Root cause: AlexClark is one of the 13/15 images whose modal tee family
+degenerates to ~2px specks (see note above). With canon scale 60/2 = 30x,
+real tee-sized components project off the canonical square and score ~0,
+inverting the ranking (specks score up to 0.93; true tees 0.000).
+
+Corrected conclusion: the 0.40 floor is safe where modal-family discovery is
+healthy (DashsTrack: 18/18 PRIMARY, replay finds nothing extra), and unsafe
+exactly where it degenerates — there, true tees survive only in `unculled`,
+which is the diagnostic lever's purpose. n=3 annotated holes on AlexClark;
+treat as an existence proof, not a rate.
