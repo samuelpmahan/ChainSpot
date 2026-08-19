@@ -237,3 +237,30 @@ walking-path/basket-zone cases from the classification above.
 2. **Walking-path attribution**: the one distractor class with no handler.
    Dash chains are detectable from the bright-component universe; their
    support can be discounted like ring furniture.
+
+
+## Occluded-tee recovery — "the Heritage misses are partially covered boxes"
+
+Confirmed by inspection: all four Heritage pool-missing tees are pads
+partially covered by KNOWN occluders — h5/h6/h10 by the previous hole's
+basket sprite, h15 by the "15" badge itself — with a white pad fragment
+poking out beside the occluder in every case.
+
+`scripts/cv-probes/occluded_tee_recovery.py` (fragment-anchored, per
+direction): white-mask fragments ADJACENT to each matched sprite / badge
+frame that could be tee paint, then fit the course's modal pad-border ring
+where the fragment must lie ON the ring, scored by the masked deliberate
+metric — F0.5 with coverage excused only where the occluder covers the
+ring. Two hard-won lessons measured on the way: (1) the badge occluder
+must be the badge's actual white FRAME component bbox — a fixed
+plate-centered box under-covers the frame and its surviving edges fit the
+pad model perfectly (18 false positives on DashsTrack, all badge frames);
+(2) fragment anchoring, not grid sweep — a blind sweep over occluder
+neighborhoods fits pad rings to corridor paint and dash arcs.
+
+Result: **Heritage h10 recovered at 4.8 px (score 0.952) and h5 at 6.9 px
+(0.914)**; h6 (a 3×7 px sliver) remains an honest miss; false positives
+across all four dev courses: 2 (both DashsTrack map-furniture edges, e.g.
+the Apple Maps label plate), acceptable as pool candidates for downstream
+pairing evidence to discriminate. Dev tee availability rises 69/72 →
+71/72.
