@@ -118,3 +118,29 @@ whose digits read that hole number (`scripts/nuthing/register-annotations.ts`,
   ABSENT uses the bbox+3px containment rule on ~4px-residual registered
   coordinates; a few could be near-miss containment rather than true
   absence.)
+
+## Addendum 2: P1.5 middle-out endpoint discovery (post-report)
+
+With the parity constraint lifted, the degenerate tee side was replaced by
+badge-seeded middle-out ribbon endpoint discovery (src/lib/nuthing/ribbon.ts,
+docs/nuthing-p2/middle-out-dev.md): paired-edge ribbon evidence (ported from
+scripts/cv-probes/middleout/middleout.py) + geodesic flood from each badge,
+fused with the bright-component universe and ranked by the middle-out
+principle (badge = path midpoint => the true tee/basket pair has near-equal
+along-ribbon geodesic distances). Results:
+
+- Dev truth gate: 69/69 badge-backed truth holes across all five annotated
+  dev courses have both tee and basket in the endpoint pool, at 0.89-1.16s
+  total per image (badge stage ~100ms + digits ~3ms + field ~0.8s + all
+  floods ~0.25s) - under the 2s/image target that gated validation.
+- Validation (docs/nuthing-p2/middle-out-validation.md): all 18 rasters of
+  BeaverRanch-Gold, ColetoCreek, Seatac and FountainHills process at
+  0.92-1.45s; Fountain Hills digits read 58/58 through this live path;
+  every numeric badge receives an endpoint pair (no positional truth exists
+  there - pairing quality is audited qualitatively via overlay renders).
+- Caveats: gate tolerance 10px (the registered truth itself has ~4px
+  residuals); one Heritage tee icon is clipped at the capture edge and is
+  matched via its partial component; ribbon/cost knobs were tuned on the
+  dev truth (documented in the gate script), so validation courses are the
+  honest generalization check for localization the same way Fountain Hills
+  was for digits.
