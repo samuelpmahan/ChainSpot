@@ -605,3 +605,21 @@ Remaining candidate fixes, unwired: report the degeneracy axis as a
 positional-uncertainty field (pairing treats the recovered tee as a
 short segment), or pin the slide with a reconstruction-based
 interior-color consistency term.
+
+**Follow-up — the 11 px "miss" is mostly the truth's, not the fit's.**
+Interrogating the unpainted band west of the bbox (where a truth-centered
+pad's west border should be visible in the clear): it is dark ground
+(V median 94 vs typical ground 157) and an extended-window alpha model
+(bbox+8 px margin) measures alpha = 0.00 across the whole west margin —
+the sprite casts no out-of-bbox shadow, so there is nothing to un-blend
+and no paint to recover there. By the everything-is-rendered-UI axiom, a
+pad at the registered truth position would show its west border in the
+open; it does not, so the rendered pad must sit far enough east that the
+west border hides under the opaque glyph — i.e. at the fit's position.
+Calibration confirms: HeritagePark's registered truth sits a median
+8.0 px (p90 11.1, max 14.2) from pixel-verified detected tees, versus
+1.2/1.5 px on Lenard/TowneLake — an ~11 px offset is inside Heritage's
+normal registration noise. The slide-to-hide degeneracy is still a real,
+measured failure mode of the masked fit; on h6 it happens to slide toward
+the rendered pad. Heritage-based distance judgments elsewhere carry the
+same ~8 px truth noise (harmless under 18 px joins).
