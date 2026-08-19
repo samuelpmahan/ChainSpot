@@ -214,6 +214,43 @@ worst-windows 0.22–0.34 vs competitors 0.29–0.48), and uniqueness then
 *cascades* one wrong claim into neighbors. Lenard's evidence — not its
 assignment — is what still needs work.
 
+## Endpoint generation 2 — render-identity detectors (RESULT)
+
+"Super solid endpoints are most important." Contact sheets of all 72 dev
+truth tees and baskets (the digits playbook, applied to endpoints) showed:
+the basket is ONE fixed 42×66 bitmap (byte-identical in 60/66 clean
+detections — consensus template committed under
+`resources/nuthing-p2/endpoints/`), and the tee is the render stack's only
+small hollow glyph (thick white rect outline, rotated to the hole
+direction, two sizes). `src/lib/nuthing/endpoints.ts`:
+
+- **Baskets — matched filter** over the bright mask (`score = onFrac −
+  offFrac`, so solid white blobs score 0), coarse-to-fine, with
+  **matching-pursuit dedupe** (accept best, erase claimed pixels, re-score)
+  so shifted echoes collapse while genuinely overlapping neighbor sprites
+  survive. **Recall 72/72**, including every badge/sprite-occluded basket
+  the component family dropped; ~1.2s/course.
+- **Tees — enclosed-hole detection**: flood walls from dilation radii
+  0/1/2/3 but holes always measured on the RAW mask (closing fills small
+  holes); ring band verified on raw; hole elongation separates tee rects
+  from diamond path/ring markers (kept, tagged, for attribution); a
+  component-family fallback tier covers rings whose outline gap opens into
+  a C2D circle (structurally unclosable). **Recall 69/72**; the 3 misses
+  are Heritage tees fused into large white map-furniture blobs — missed by
+  every detector generation, documented. ~0.7s/course.
+
+Matrix + replay stack rebuilt on these endpoints (judged truth holes rise
+61 → 63 as Heritage h2/h12/h17 baskets and Lenard h9 enter):
+
+| cumulative (n=63) | r1 / r≤3 |
+|---|---|
+| baseline worstWindow | 7 / 18 |
+| full replay stack (aligned+zones+simple) | **35 / 51** |
+| global assignment exact | **41 / 63** |
+
+Heritage reaches 10/11 rank≤3. Lenard remains the evidence-limited course
+(9/16 rank≤3, assignment cascades to 6/16).
+
 ## Remaining work this matrix exposes
 
 1. **Walking-path-aware attribution** (dashed paths + diamond markers as

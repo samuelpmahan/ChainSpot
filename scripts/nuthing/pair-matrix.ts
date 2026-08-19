@@ -52,8 +52,15 @@ import { runBadgeStage } from '../../src/lib/nuthing/badgeStage';
 import { readCourseBadges } from '../../src/lib/nuthing/digits/readBadges';
 import { predictProbs } from '../../src/lib/nuthing/digits/logistic';
 import type { LogisticModel } from '../../src/lib/nuthing/digits/logistic';
-import { computeRibbonSupport, attributeBasketZones } from '../../src/lib/nuthing/ribbon';
+import { computeRibbonSupport } from '../../src/lib/nuthing/ribbon';
 import type { SupportField } from '../../src/lib/nuthing/ribbon';
+import {
+  prepareSpriteTemplate,
+  matchBasketSprites,
+  detectTeeRings,
+  collectTeePoints,
+} from '../../src/lib/nuthing/endpoints';
+import type { SpriteTemplate } from '../../src/lib/nuthing/endpoints';
 import { buildSupportCost } from '../../src/lib/autoAnnotation/middleOutRibbon';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
@@ -70,7 +77,6 @@ const SUPPORT_TAU = 0.5;
 // Weakest-window width in source px: a convincing ribbon has no ~45px
 // stretch of unsupported ground anywhere along it.
 const WORST_WINDOW_SRC_PX = 45;
-const TRUTH_TOL = 10;
 
 interface TruthHole {
   number: number;
@@ -232,6 +238,11 @@ function main(): void {
     process.exit(1);
   }
   mkdirSync(outDir, { recursive: true });
+  const spriteTemplate = prepareSpriteTemplate(
+    JSON.parse(
+      readFileSync('resources/nuthing-p2/endpoints/basket-sprite.json', 'utf8'),
+    ) as SpriteTemplate,
+  );
   const model = JSON.parse(
     readFileSync('resources/nuthing-p2/digits/models/logistic.json', 'utf8'),
   ) as LogisticModel;
@@ -257,46 +268,41 @@ function main(): void {
     const cost = buildSupportCost(field.support);
     const fieldMs = performance.now() - t0;
 
-    // --- Endpoint refinement -------------------------------------------------
-    const badgeLabels = new Set(stage.badges.map((b) => b.label));
-    const insideBadge = (c: (typeof stage.brightComponents)[number]): boolean =>
+    // --- Endpoints: render-identity detectors (src/lib/nuthing/endpoints) ----
+    const insideBadgePt = (x: number, y: number): boolean =>
       stage.badges.some(
         (b) =>
-          c.cx >= b.bboxX - 3 &&
-          c.cx <= b.bboxX + b.bboxW + 3 &&
-          c.cy >= b.bboxY - 3 &&
-          c.cy <= b.bboxY + b.bboxH + 3,
+          x >= b.bboxX - 3 && x <= b.bboxX + b.bboxW + 3 &&
+          y >= b.bboxY - 3 && y <= b.bboxY + b.bboxH + 3,
       );
-    const sprites = stage.brightComponents.filter(
-      (c) =>
-        c.bboxW >= 36 && c.bboxW <= 48 && c.bboxH >= 58 && c.bboxH <= 74 &&
-        c.area >= 1300 && c.area <= 2100 && c.fill >= 0.45,
+    const sprites = matchBasketSprites(stage.brightMask, spriteTemplate);
+    const rings = detectTeeRings(stage.brightMask).filter((r) => !insideBadgePt(r.cx, r.cy));
+    const badgeLabels = new Set(stage.badges.map((b) => b.label));
+    const teeComponents = stage.brightComponents.filter(
+      (c) => !badgeLabels.has(c.label) && !insideBadgePt(c.cx, c.cy),
     );
-    const zones = attributeBasketZones(stage.brightComponents, sprites);
-    const tees = stage.brightComponents.filter(
-      (c) =>
-        !badgeLabels.has(c.label) &&
-        !insideBadge(c) &&
-        !sprites.includes(c) &&
-        Math.min(c.bboxW, c.bboxH) >= 8 && Math.max(c.bboxW, c.bboxH) <= 42 &&
-        c.area >= 80 && c.area <= 350 && c.fill >= 0.2 && c.fill <= 0.85,
-    );
-    const onRingCount = tees.filter((c) => zones.dashLabels.has(c.label)).length;
-    // Basket endpoint: pole tip, BASKET_SPRITE_TIP_OFFSET_PX below the sprite.
-    const basketPoints = sprites.map((c) => ({
-      x: c.cx,
-      y: c.cy + c.bboxH / 2 + 4,
-      comp: c,
+    const teeCands = collectTeePoints(rings, teeComponents, sprites);
+    // Basket endpoint: pole tip (matched-filter sprite position + fixed offset).
+    const basketPoints = sprites.map((s) => ({
+      x: s.tipX,
+      y: s.tipY,
+      cx: s.cx,
+      cy: s.cy,
+      score: s.score,
     }));
-    const teePoints = tees.map((c) => ({
-      x: c.cx,
-      y: c.cy,
-      comp: c,
-      onRing: zones.dashLabels.has(c.label),
+    // onRing: tee standing on some basket's C2D dashed circle (radius ~84).
+    const teePoints = teeCands.map((t) => ({
+      x: t.cx,
+      y: t.cy,
+      tier: t.tier,
+      onRing: basketPoints.some((b) => Math.abs(Math.hypot(t.cx - b.x, t.cy - b.y) - 84) <= 12),
     }));
     console.log(
       `${nm}: viewport[${viewport.top},${viewport.bottom}) field ${field.width}x${field.height} ` +
-        `(${fieldMs.toFixed(0)}ms) tees=${teePoints.length} (${onRingCount} on a C2D ring) ` +
+        `(${fieldMs.toFixed(0)}ms) tees=${teePoints.length} ` +
+        `(${teePoints.filter((t) => t.tier === 'ring').length} ring / ` +
+        `${teePoints.filter((t) => t.tier === 'component').length} comp, ` +
+        `${teePoints.filter((t) => t.onRing).length} on a C2D ring) ` +
         `baskets=${basketPoints.length} badges=${readings.filter((r) => r.label).length} labeled`,
     );
 
@@ -464,17 +470,15 @@ function main(): void {
 
     // --- Truth matching + ranks ---------------------------------------------
     const truth = truthAll[nm];
+    // Truth matching: tee within 18px of a candidate center (registered truth
+    // carries ~4px residuals; one edge tee renders 14px off its annotation);
+    // basket within 16px of a matched sprite's pole tip.
     const matchTee = (p: [number, number]): number => {
       let best = -1;
-      let bestD = Infinity;
+      let bestD = 18;
       teePoints.forEach((tp, i) => {
-        const c = tp.comp;
-        const inside =
-          p[0] >= c.bboxX - TRUTH_TOL && p[0] <= c.bboxX + c.bboxW + TRUTH_TOL &&
-          p[1] >= c.bboxY - TRUTH_TOL && p[1] <= c.bboxY + c.bboxH + TRUTH_TOL;
-        if (!inside) return;
         const d = Math.hypot(tp.x - p[0], tp.y - p[1]);
-        if (d < bestD) {
+        if (d <= bestD) {
           bestD = d;
           best = i;
         }
@@ -483,15 +487,10 @@ function main(): void {
     };
     const matchBasket = (p: [number, number]): number => {
       let best = -1;
-      let bestD = Infinity;
+      let bestD = 16;
       basketPoints.forEach((bp, i) => {
-        const c = bp.comp;
-        const inside =
-          p[0] >= c.bboxX - TRUTH_TOL && p[0] <= c.bboxX + c.bboxW + TRUTH_TOL &&
-          p[1] >= c.bboxY - TRUTH_TOL && p[1] <= c.bboxY + c.bboxH + TRUTH_TOL;
-        if (!inside) return;
         const d = Math.hypot(bp.x - p[0], bp.y - p[1]);
-        if (d < bestD) {
+        if (d <= bestD) {
           bestD = d;
           best = i;
         }
@@ -692,16 +691,11 @@ function main(): void {
           },
           endpoints: {
             tees: teePoints.map((p, i) => ({
-              id: `T${i}`, x: p.x, y: p.y,
-              bbox: [p.comp.bboxX, p.comp.bboxY, p.comp.bboxW, p.comp.bboxH],
-              area: p.comp.area, fill: p.comp.fill, onRing: p.onRing,
+              id: `T${i}`, x: p.x, y: p.y, tier: p.tier, onRing: p.onRing,
             })),
             baskets: basketPoints.map((p, i) => ({
-              id: `B${i}`, x: p.x, y: p.y,
-              bbox: [p.comp.bboxX, p.comp.bboxY, p.comp.bboxW, p.comp.bboxH],
-              area: p.comp.area, fill: p.comp.fill,
+              id: `B${i}`, x: p.x, y: p.y, spriteCx: p.cx, spriteCy: p.cy, score: p.score,
             })),
-            onRingCount,
           },
           badges: matrices.map((m) => ({
             label: m.label, cx: m.badge.cx, cy: m.badge.cy, routeMs: Math.round(m.routeMs),
