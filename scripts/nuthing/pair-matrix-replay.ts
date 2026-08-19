@@ -77,6 +77,17 @@ function main(): void {
   const scoreMode = scoreIdx >= 0 ? args.splice(scoreIdx, 2)[1] : 'aligned';
   const renderIdx = args.indexOf('--render');
   const render = renderIdx >= 0 ? (args.splice(renderIdx, 1), true) : false;
+  // Replay layer 2 — basket-zone attribution: support that is attributable
+  // to a basket zone's own furniture (C2D dash ring at ~84 src px, C1S solid
+  // ring at ~44, sprite silhouette within ~35 of the sprite center) is
+  // discounted when the zone belongs to a basket that is NOT the pair's
+  // endpoint. Ring bands are discounted only where the local bestTheta runs
+  // TANGENTIALLY to the ring — a ribbon genuinely crossing a ring is radial
+  // there and keeps its support. Ring riding is tangential (aligned), which
+  // is exactly why strip-coherence alone cannot catch it.
+  const zonesIdx = args.indexOf('--zones');
+  const zones = zonesIdx >= 0 ? (args.splice(zonesIdx, 1), true) : false;
+  const ZONE_DISCOUNT = 0.4;
   const [cacheDir] = args;
   if (!cacheDir) {
     console.error('Usage: tsx scripts/nuthing/pair-matrix-replay.ts CACHE_DIR [--p N] [--window PX] [--render]');
@@ -91,8 +102,32 @@ function main(): void {
     const theta = new Float32Array(readFileSync(`${cacheDir}/${nm}-theta.bin`).buffer.slice(0));
     const windowCells = Math.max(3, Math.round(windowSrcPx / scale));
 
+    // Per-cell, per-basket zone-furniture attribution factor (computed once;
+    // exemption of the pair's own endpoint basket is applied per leg).
+    // zoneFactor[b][cell] = ZONE_DISCOUNT where cell's support is attributable
+    // to basket b's furniture, else 1.
+    const basketCenters = cache.endpoints.baskets.map((b) => ({ x: b.x, y: b.y }));
+    const zoneOf = (cell: number, basket: { x: number; y: number }): number => {
+      const cx = ((cell % w) + 0.5) * scale;
+      const cy = (Math.floor(cell / w) + 0.5) * scale;
+      const dx = cx - basket.x;
+      const dy = cy - basket.y;
+      const d = Math.hypot(dx, dy);
+      // Sprite silhouette: unconditional near-ceiling false positive.
+      if (d <= 35) return ZONE_DISCOUNT;
+      const onC2D = Math.abs(d - 84) <= 12;
+      const onC1S = Math.abs(d - 44) <= 8;
+      if (!onC2D && !onC1S) return 1;
+      // Tangency: ribbon direction (cos t, sin t) vs radial unit.
+      const t = theta[cell];
+      const radial = Math.abs((dx * Math.cos(t) + dy * Math.sin(t)) / Math.max(d, 1e-9));
+      return radial <= 0.5 ? ZONE_DISCOUNT : 1; // within 30° of tangential
+    };
+
     // Aligned samples along one leg's cached path (badge-first order).
-    const alignedLeg = (leg: CacheLeg): Float32Array => {
+    // exemptBasket: index of the pair's own endpoint basket (its zone is the
+    // leg's legitimate terminal approach), or -1.
+    const alignedLeg = (leg: CacheLeg, exemptBasket: number): Float32Array => {
       const m = leg.path.length / 2;
       const out = new Float32Array(m);
       for (let i = 0; i < m; i++) {
@@ -112,7 +147,18 @@ function main(): void {
         // Ribbon runs along (cos t, sin t); alignment is |cos| of the angle
         // between travel direction and the strip direction (mod pi).
         const align = Math.abs((dx * Math.cos(t) + dy * Math.sin(t)) / len);
-        out[i] = support[cell] * Math.pow(align, alignPow);
+        let s = support[cell] * Math.pow(align, alignPow);
+        if (zones) {
+          for (let b = 0; b < basketCenters.length; b++) {
+            if (b === exemptBasket) continue;
+            const f = zoneOf(cell, basketCenters[b]);
+            if (f < 1) {
+              s *= f;
+              break;
+            }
+          }
+        }
+        out[i] = s;
       }
       return out;
     };
@@ -126,9 +172,13 @@ function main(): void {
     }
     const rescoredByBadge = new Map<string, Rescored[]>();
     for (const badge of cache.badges) {
+      // Tee legs never get a zone exemption; each basket leg exempts only its
+      // own endpoint basket's zone.
       const legAligned = new Map<string, Float32Array>();
       for (const leg of badge.legs) {
-        if (leg.reachable) legAligned.set(leg.endpointId, alignedLeg(leg));
+        if (!leg.reachable) continue;
+        const exempt = leg.endpointId.startsWith('B') ? Number(leg.endpointId.slice(1)) : -1;
+        legAligned.set(leg.endpointId, alignedLeg(leg, exempt));
       }
       const rows: Rescored[] = [];
       for (const pair of badge.pairs) {
@@ -268,6 +318,7 @@ function main(): void {
           }
         }
       };
+      const pristine = Buffer.from(png.data);
       for (const j of cache.judgments) {
         const rank = rankByHole.get(j.hole);
         if (!rank) continue;
@@ -281,6 +332,31 @@ function main(): void {
         put(Math.round(badge.cx / scale), Math.round(badge.cy / scale), 255, 0, 0, 2);
       }
       writeFileSync(`${cacheDir}/${nm}-replay-aligned.png`, PNG.sync.write(png));
+      // Per-failure overlays: true pair (green) vs current top competitor (red).
+      for (const j of cache.judgments) {
+        const rank = rankByHole.get(j.hole);
+        if (!rank || rank <= 3) continue;
+        const badge = cache.badges.find((bb) => Number(bb.label) === j.hole);
+        const rows = rescoredByBadge.get(String(j.hole));
+        if (!badge || !rows) continue;
+        const top = [...rows].sort((a, b) => b.score - a.score)[0];
+        const fail = new PNG({ width: w, height: h });
+        pristine.copy(fail.data);
+        const draw = (teeId: string, basketId: string, r: number, g: number, b: number): void => {
+          for (const leg of badge.legs) {
+            if (leg.endpointId !== teeId && leg.endpointId !== basketId) continue;
+            for (let i = 0; i < leg.path.length; i += 2) {
+              const p = (leg.path[i + 1] * w + leg.path[i]) * 4;
+              fail.data[p] = r;
+              fail.data[p + 1] = g;
+              fail.data[p + 2] = b;
+            }
+          }
+        };
+        draw(top.teeId, top.basketId, 255, 40, 40);
+        draw(`T${j.trueTee}`, `B${j.trueBasket}`, 0, 220, 0);
+        writeFileSync(`${cacheDir}/${nm}-h${j.hole}-replay-fail.png`, PNG.sync.write(fail));
+      }
     }
   }
   console.log(

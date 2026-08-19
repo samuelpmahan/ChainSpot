@@ -142,12 +142,40 @@ oriented linear structures) and on specific holes whose true ribbon has a
 long weak stretch (Dashs h6/h13/h14, Lenard h3/h10, TowneLake h3). Those
 are the targets for the remaining replay layers.
 
+## Replay refinement 2 — basket-zone attribution (RESULT)
+
+`--zones`: support attributable to a FOREIGN basket's own furniture is
+discounted (×0.4) before the aligned scoring — sprite silhouette within
+35 src px of a sprite center unconditionally; C2D (84±12) and C1S (44±8)
+ring bands only where the local `bestTheta` runs tangentially to that ring
+(a ribbon genuinely crossing a ring is radial there and keeps its support).
+The pair's own endpoint basket is exempt — its zone is the leg's legitimate
+terminal approach. Ring *riding* is tangential, i.e. aligned, which is
+exactly why strip-coherence alone could not catch it.
+
+| course | n | aligned r1/r≤3 | + zones r1/r≤3 |
+|---|---|---|---|
+| DashsTrack | 18 | 9 / 14 | 9 / 16 |
+| HeritagePark | 10 | 5 / 6 | 7 / 9 |
+| Lenard | 15 | 4 / 8 | 5 / 8 |
+| TowneLake | 18 | 11 / 17 | 14 / 17 |
+| **total** | **61** | **29 / 45** | **35 / 50** |
+
+Cumulative: baseline 8/20 → +strip-coherence 29/45 → +zone attribution
+**35/50** of 61, all as replays over the same cached matrix.
+
+Residual failures (11), visually attributed via `-h<N>-replay-fail.png`:
+the dominant remaining mechanism is the **walking path**: false routes ride
+a dashed walking path to a rotated-diamond path marker that passes the tee
+family (Dashs h6→T9, Lenard h17→T45, Lenard h10→T2 …) — unowned false
+"tees" reached along real oriented linear render structure. Three more are
+rank-4 near-misses (Lenard h11/h13/h16); Dashs h14 and TowneLake h3 have
+true ribbons with long genuinely-weak stretches (true aligned ww ≤ 0.16).
+
 ## Remaining replay layers (in evidence order)
 
-1. **Basket-zone-aware**: attribute weak/false windows inside C2D/C2F rings
-   of non-endpoint baskets (the adjacent-basket carpet); ring *riding* is
-   tangential and therefore aligned — strip-coherence does not catch it.
-2. **Walking-path-aware**: dashed walking paths as attributed distractors
-   (linear, oriented — also invisible to strip-coherence).
-3. **Sequence-aware and global assignment**: only after per-pair evidence
+1. **Walking-path-aware**: dashed walking paths and their diamond markers
+   as attributed distractors (linear, oriented — invisible to
+   strip-coherence, outside basket zones).
+2. **Sequence-aware and global assignment**: only after per-pair evidence
    is as honest as it can be, as replays over the cached matrix.
