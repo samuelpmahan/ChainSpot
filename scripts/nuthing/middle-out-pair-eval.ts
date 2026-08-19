@@ -19,7 +19,9 @@ import {
   computeRibbonSupport,
   supportCost,
   scoreEndpointComponents,
-  assignCourseEndpoints,
+  assignCourseEndpointsChain,
+  attributeBasketZones,
+  suppressCircleCost,
 } from '../../src/lib/nuthing/ribbon';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
@@ -88,7 +90,25 @@ function main(): void {
     const field = computeRibbonSupport(image, { widthsSrc: RIBBON_WIDTHS });
     const cost = supportCost(field, COST_BOOST, COST_LOW_SUPPORT);
     const badgeLabels = new Set(stage.badges.map((b) => b.label));
-    const cands = stage.brightComponents.filter((c) => !badgeLabels.has(c.label));
+    // Candidate hygiene: badge digit glyphs mimic tee rectangles; C2D dashed
+    // rings are suppressed (orientation-gated) from the middle-out cost only.
+    const insideBadge = (c: (typeof stage.brightComponents)[number]): boolean =>
+      stage.badges.some(
+        (b) =>
+          c.cx >= b.bboxX - 3 &&
+          c.cx <= b.bboxX + b.bboxW + 3 &&
+          c.cy >= b.bboxY - 3 &&
+          c.cy <= b.bboxY + b.bboxH + 3,
+      );
+    const sprites = stage.brightComponents.filter(
+      (c) =>
+        c.bboxW >= 36 && c.bboxW <= 48 && c.bboxH >= 58 && c.bboxH <= 74 &&
+        c.area >= 1300 && c.area <= 2100 && c.fill >= 0.45,
+    );
+    suppressCircleCost(cost, field, attributeBasketZones(stage.brightComponents, sprites));
+    const cands = stage.brightComponents.filter(
+      (c) => !badgeLabels.has(c.label) && !insideBadge(c),
+    );
     const truth = truthAll[nm];
 
     // Overlay base: cropped imagery at field scale.
@@ -143,13 +163,25 @@ function main(): void {
 
     let cb = 0;
     let n = 0;
+    let recall = 0;
     const fails: string[] = [];
     const pools = readings.map((r) =>
       scoreEndpointComponents(field, cost, r.badge.cx, r.badge.cy, cands, {}),
     );
-    const assignment = assignCourseEndpoints(pools);
+    const chainInput = readings
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.label)
+      .map(({ r, i }) => ({
+        holeNumber: Number(r.label),
+        badgeX: r.badge.cx,
+        badgeY: r.badge.cy,
+        pool: pools[i],
+      }));
+    const chain = assignCourseEndpointsChain(chainInput);
+    const byNumber = new Map(chain.map((c) => [c.holeNumber, c]));
     readings.forEach((r, i) => {
-      const chosen = [assignment.tee[i], assignment.basket[i]].filter(
+      const a = r.label ? byNumber.get(Number(r.label)) : undefined;
+      const chosen = [a?.tee ?? null, a?.basket ?? null].filter(
         (c): c is NonNullable<typeof c> => c !== null,
       );
       for (const c of chosen) {
@@ -182,6 +214,18 @@ function main(): void {
       } else {
         fails.push(`h${r.label}(${th ? '' : 'T'}${bh ? '' : 'B'})`);
       }
+      // Pool recall: truth endpoints present anywhere in the badge's pool.
+      const inPool = (p: [number, number]): boolean =>
+        pools[i].unculled.some((c) => {
+          const comp = c.value.component;
+          return comp
+            ? p[0] >= comp.bboxX - TOL &&
+                p[0] <= comp.bboxX + comp.bboxW + TOL &&
+                p[1] >= comp.bboxY - TOL &&
+                p[1] <= comp.bboxY + comp.bboxH + TOL
+            : Math.hypot(c.value.x - p[0], c.value.y - p[1]) <= 30;
+        });
+      if (inPool(tee) && inPool(basket)) recall++;
     });
     for (const t of truth) {
       mark(t.tee[0], t.tee[1] - viewport.top, 0, 230, 0, 1);
@@ -189,7 +233,7 @@ function main(): void {
     }
     writeFileSync(`${outDir}/${nm}-pairs.png`, PNG.sync.write(png));
     console.log(
-      `${nm}: viewport[${viewport.top},${viewport.bottom}) primary both=${cb}/${n}` +
+      `${nm}: viewport[${viewport.top},${viewport.bottom}) pair=${cb}/${n} poolRecall=${recall}/${n}` +
         (fails.length ? ` fails: ${fails.join(' ')}` : ''),
     );
   }

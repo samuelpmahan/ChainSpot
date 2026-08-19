@@ -26,6 +26,8 @@ export interface SupportField {
   scale: number;
   /** Normalized [0,1] paired-edge ribbon evidence. */
   support: Float32Array;
+  /** Winning band orientation theta (radians in [0, pi)) per pixel. */
+  bestTheta: Float32Array;
 }
 
 export interface RibbonOptions {
@@ -252,6 +254,7 @@ export function computeRibbonSupport(image: RgbaImage, options: RibbonOptions = 
   const delta = Math.max(1, 4 / scale);
   const n = ew * eh;
   const best = new Float32Array(n);
+  const bestTheta = new Float32Array(n);
   const planeA = new Float32Array(n * 3);
   const planeB = new Float32Array(n * 3);
   const planeC = new Float32Array(n * 3);
@@ -283,7 +286,10 @@ export function computeRibbonSupport(image: RgbaImage, options: RibbonOptions = 
         let cosine = dot / (n1 * n2 + 1e-6);
         if (cosine > 1) cosine = 1;
         const score = (n1 < n2 ? n1 : n2) * cosine;
-        if (score > best[i]) best[i] = score;
+        if (score > best[i]) {
+          best[i] = score;
+          bestTheta[i] = theta;
+        }
       }
     }
   }
@@ -301,7 +307,7 @@ export function computeRibbonSupport(image: RgbaImage, options: RibbonOptions = 
     if (v > 1) v = 1;
     support[i] = Math.pow(v, 0.7);
   }
-  return { width: ew, height: eh, scale, support };
+  return { width: ew, height: eh, scale, support, bestTheta };
 }
 
 /**
@@ -859,76 +865,318 @@ export interface CourseEndpointAssignment {
 }
 
 /**
- * Course-level endpoint assignment. Per-badge nearest choices steal
- * neighboring holes' icons at ribbon crossings; globally, every tee/basket
- * icon belongs to exactly one hole and is geodesically nearest to its OWN
- * badge, so a greedy ascending-geodesic assignment with 1:1 uniqueness
- * resolves the theft. Baskets assign first (fixed sprite = strongest
- * identity); each badge's tee must then leave the badge along a different
- * ribbon branch than its basket (gate divergence).
+ * Course-level endpoint assignment, midpoint-first.
+ *
+ * The load-bearing invariant is the one validated by annotation
+ * registration on every dev course: a badge sits at (approximately) the
+ * midpoint of its hole's tee->basket span. Geodesic affinity alone cannot
+ * decide ownership (a neighbor's basket is often geodesically closer than
+ * your own, because dashed basket circles are support-rich highways), so
+ * the flood provides only the candidate pools and reachability; geometry
+ * decides: for each badge, (tee-ish, basket-sprite) pairs are scored by the
+ * distance from the badge to the pair's midpoint, and pairs are assigned
+ * globally in ascending residual order with 1:1 uniqueness on badges and
+ * on endpoint components. A relaxed second round (larger residual cap, for
+ * strongly bent holes whose chord midpoint drifts) fills leftovers.
  */
 export function assignCourseEndpoints(
   pools: CandidatePool<EndpointComponentCandidate>[],
+  badgeCenters: { x: number; y: number }[],
+  options: { residualCap?: number; relaxedCap?: number } = {},
 ): CourseEndpointAssignment {
+  const { residualCap = 220, relaxedCap = 400 } = options;
   const n = pools.length;
   const tee: (EndpointComponentCandidate | null)[] = new Array(n).fill(null);
   const basket: (EndpointComponentCandidate | null)[] = new Array(n).fill(null);
   const usedComponents = new Set<number>();
 
-  interface Entry {
+  interface Triple {
     badge: number;
-    cand: EndpointComponentCandidate;
+    t: EndpointComponentCandidate;
+    b: EndpointComponentCandidate;
+    residual: number;
   }
-  const collect = (kinds: Set<string>): Entry[] => {
-    const entries: Entry[] = [];
-    for (let b = 0; b < n; b++) {
-      for (const c of pools[b].unculled) {
-        if (kinds.has(c.value.kind)) entries.push({ badge: b, cand: c.value });
+  // Combined evidence cost per (badge, tee, basket) triple: the validated
+  // badge~midpoint geometry leads, ribbon-geodesic totals separate
+  // coincidental midpoints from on-ribbon endpoints, and first-icon /
+  // branch-divergence violations penalize crossings.
+  const triples: Triple[] = [];
+  const diverge = (a: EndpointComponentCandidate, b: EndpointComponentCandidate): boolean => {
+    if (a.gateX === undefined || b.gateX === undefined) return true;
+    if (a.geodesic <= 18 && b.geodesic <= 18) return true;
+    return Math.hypot((a.gateX ?? 0) - (b.gateX ?? 0), (a.gateY ?? 0) - (b.gateY ?? 0)) >= 16;
+  };
+  for (let i = 0; i < n; i++) {
+    const cands = pools[i].unculled;
+    const tees = cands.filter((c) => c.value.kind === 'tee-rect' || c.value.kind === 'virtual');
+    const baskets = cands.filter((c) => c.value.kind === 'basket-sprite');
+    for (const t of tees) {
+      for (const b of baskets) {
+        const mx = (t.value.x + b.value.x) / 2;
+        const my = (t.value.y + b.value.y) / 2;
+        const residual = Math.hypot(mx - badgeCenters[i].x, my - badgeCenters[i].y);
+        if (residual > relaxedCap) continue;
+        const cost =
+          residual +
+          0.5 * (t.value.geodesic + b.value.geodesic) +
+          (t.value.firstIcon === true ? 0 : 40) +
+          (b.value.firstIcon === true ? 0 : 40) +
+          (diverge(t.value, b.value) ? 0 : 80);
+        triples.push({ badge: i, t: t.value, b: b.value, residual: cost });
       }
     }
-    entries.sort((p, q) => p.cand.geodesic - q.cand.geodesic);
-    return entries;
-  };
+  }
+  triples.sort((a, b) => a.residual - b.residual);
 
-  // Round 1: only first-icon baskets (a basket reached THROUGH another icon
-  // belongs to a different hole — e.g. badge N+1 reaching basket N through
-  // tee N+1). Round 2 relaxes for badges left empty (occlusions).
-  for (const requireFirst of [true, false]) {
-    for (const e of collect(new Set(['basket-sprite']))) {
-      if (requireFirst && e.cand.firstIcon !== true) continue;
-      if (basket[e.badge]) continue;
-      const label = e.cand.component?.label ?? -1;
-      if (usedComponents.has(label)) continue;
-      basket[e.badge] = e.cand;
-      usedComponents.add(label);
+  for (const cap of [residualCap, relaxedCap]) {
+    for (const tr of triples) {
+      if (tr.residual > cap) continue;
+      if (tee[tr.badge] || basket[tr.badge]) continue;
+      const tLabel = tr.t.component?.label ?? -1;
+      const bLabel = tr.b.component?.label ?? -2;
+      if (tLabel !== -1 && usedComponents.has(tLabel)) continue;
+      if (usedComponents.has(bLabel)) continue;
+      tee[tr.badge] = tr.t;
+      basket[tr.badge] = tr.b;
+      if (tLabel !== -1) usedComponents.add(tLabel);
+      usedComponents.add(bLabel);
     }
   }
-
-  const diverges = (a: EndpointComponentCandidate, b: EndpointComponentCandidate): boolean => {
-    if (
-      a.gateX === undefined ||
-      a.gateY === undefined ||
-      b.gateX === undefined ||
-      b.gateY === undefined
-    ) {
-      return true;
-    }
-    if (a.geodesic <= 18 && b.geodesic <= 18) return true;
-    return Math.hypot(a.gateX - b.gateX, a.gateY - b.gateY) >= 16;
-  };
-
-  for (const requireFirst of [true, false]) {
-    for (const e of collect(new Set(['tee-rect', 'virtual']))) {
-      if (requireFirst && e.cand.firstIcon !== true) continue;
-      if (tee[e.badge]) continue;
-      const label = e.cand.component?.label ?? -1;
-      if (label !== -1 && usedComponents.has(label)) continue;
-      const myBasket = basket[e.badge];
-      if (myBasket && !diverges(e.cand, myBasket)) continue;
-      tee[e.badge] = e.cand;
-      if (label !== -1) usedComponents.add(label);
-    }
-  }
-
   return { tee, basket };
+}
+
+export interface BasketZoneAttribution {
+  /** Estimated circle centers (basket sprite center + pole-tip offset). */
+  centers: { x: number; y: number }[];
+  /** Component labels attributed to C2D dash segments. */
+  dashLabels: Set<number>;
+  /** Modal dash-ring radius in source px (null when no ring found). */
+  dashRadius: number | null;
+}
+
+/**
+ * Attribute the basket-zone C2D dashed-circle layer (see Linear doc
+ * "Basket-Zone Rendering Layers"): dashes are small bright components lying
+ * on a shared-radius ring around each basket's circle center. They are
+ * legitimate render evidence (used elsewhere for center refinement) but are
+ * known to distract middle-out routing — dash rings form support highways
+ * between adjacent holes, and diagonal dash bboxes mimic tee rectangles —
+ * so middle-out suppresses them from ITS OWN cost/candidate channel only.
+ */
+export function attributeBasketZones(
+  components: ComponentStats[],
+  basketSprites: ComponentStats[],
+): BasketZoneAttribution {
+  const centers = basketSprites.map((b) => ({
+    x: b.cx,
+    y: b.cy + b.bboxH / 2 + 4, // BASKET_SPRITE_TIP_OFFSET_PX below the pole
+  }));
+  if (centers.length === 0) return { centers, dashLabels: new Set(), dashRadius: null };
+  const small = components.filter(
+    (c) => c.area >= 20 && c.area <= 300 && c.bboxW <= 40 && c.bboxH <= 40,
+  );
+  // The render scale is fixed corpus-wide (the basket sprite is always
+  // ~42x66), so the circle radii are constants of the render stack: inner
+  // solid C1S ~44 src px, outer dashed C2D ~84 src px (Linear doc measured
+  // 43.6 / 83.9 on DashsTrack). The dashes themselves are translucent and
+  // mostly BELOW the bright-mask threshold — they appear in the support
+  // field, not as components — so attribution is geometric: any small
+  // bright component sitting ON the C2D ring (e.g. the rotated square
+  // markers) is ring furniture, not a hole endpoint.
+  const dashRadius = 84;
+  const dashLabels = new Set<number>();
+  for (const c of small) {
+    for (const ctr of centers) {
+      const d = Math.hypot(c.cx - ctr.x, c.cy - ctr.y);
+      if (Math.abs(d - dashRadius) <= 14) {
+        dashLabels.add(c.label);
+        break;
+      }
+    }
+  }
+  return { centers, dashLabels, dashRadius };
+}
+
+/**
+ * Middle-out-only suppression of the C2D ring: raise the flood cost inside
+ * the dash annulus so routes cannot ride circle boundaries tangentially
+ * between holes. The annulus is thin, so a real ribbon crossing it radially
+ * pays only a few boosted pixels. The support field itself is untouched —
+ * this mutates only the given middle-out cost array.
+ */
+export function suppressCircleCost(
+  cost: Float32Array,
+  field: SupportField,
+  zones: BasketZoneAttribution,
+  bandSrcPx = 10,
+  boost = 30,
+): void {
+  if (zones.dashRadius === null) return;
+  const { width: w, height: h, scale, support } = field;
+  const band = bandSrcPx / scale;
+  // C2D (outer dashed ring) ONLY — the inner solid circle stays untouched
+  // (walling it off severs the basket sprite from the flood entirely). Ring
+  // pixels are suppressed only where support is moderate (dash furniture);
+  // high-support pixels are genuine ribbon crossings and stay open as gates.
+  // Orientation-aware: a dash's paired-edge band runs TANGENTIALLY along
+  // the ring; a real ribbon crossing the ring is ~radial. Only tangential
+  // annulus pixels are walled; radial crossings stay open at any support.
+  const { bestTheta } = field;
+  {
+  const r = zones.dashRadius / scale;
+  for (const ctr of zones.centers) {
+    const cx = ctr.x / scale;
+    const cy = ctr.y / scale;
+    const lo = Math.max(0, Math.floor(cy - r - band));
+    const hi = Math.min(h - 1, Math.ceil(cy + r + band));
+    for (let y = lo; y <= hi; y++) {
+      const x0b = Math.max(0, Math.floor(cx - r - band));
+      const x1b = Math.min(w - 1, Math.ceil(cx + r + band));
+      for (let x = x0b; x <= x1b; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (Math.abs(d - r) <= band) {
+          const i = y * w + x;
+          // Band direction of a dash = tangent = radial angle + 90 deg.
+          const radial = Math.atan2(y - cy, x - cx);
+          const tangent = radial + Math.PI / 2;
+          let diff = Math.abs((((bestTheta[i] - tangent) % Math.PI) + Math.PI) % Math.PI);
+          if (diff > Math.PI / 2) diff = Math.PI - diff;
+          if (diff < Math.PI / 6 && cost[i] < boost) cost[i] = boost;
+        }
+      }
+    }
+  }
+  }
+}
+
+export interface ChainAssignmentInput {
+  /** Hole number from the badge's read digits. */
+  holeNumber: number;
+  badgeX: number;
+  badgeY: number;
+  pool: CandidatePool<EndpointComponentCandidate>;
+}
+
+export interface ChainAssignment {
+  holeNumber: number;
+  tee: EndpointComponentCandidate | null;
+  basket: EndpointComponentCandidate | null;
+}
+
+/**
+ * Chain dynamic program over digit-ordered holes.
+ *
+ * Local triple cost combines the validated evidence: badge~midpoint
+ * geometry, along-ribbon geodesic totals, first-icon and branch-divergence
+ * penalties. The transition exploits course flow — basket[N] lies within
+ * ~300px of tee[N+1] on every measured course (median ~100px) — so holes
+ * with contiguous digits are solved jointly by DP per contiguous run.
+ *
+ * Known limitation (see docs/nuthing-p2/middle-out-pairing.md): no
+ * cross-hole uniqueness — in dense clusters a component can serve two
+ * holes. Cheapest-claimant and regret-based banning were both measured
+ * WORSE than leaving duplicates (43 and 45 vs 49 of 66 on dev truth), so
+ * duplicates are reported rather than resolved for now.
+ */
+export function assignCourseEndpointsChain(
+  holes: ChainAssignmentInput[],
+  options: {
+    residualCap?: number;
+    topK?: number;
+    seqFreePx?: number;
+    seqWeight?: number;
+  } = {},
+): ChainAssignment[] {
+  const { residualCap = 400, topK = 40, seqFreePx = 300, seqWeight = 1.0 } = options;
+
+  interface Triple {
+    t: EndpointComponentCandidate;
+    b: EndpointComponentCandidate;
+    local: number;
+  }
+  const sorted = holes.slice().sort((a, b) => a.holeNumber - b.holeNumber);
+  const triplesByNumber = new Map<number, Triple[]>();
+  for (const hole of sorted) {
+    const cands = hole.pool.unculled;
+    const tees = cands.filter((c) => c.value.kind === 'tee-rect' || c.value.kind === 'virtual');
+    const baskets = cands.filter((c) => c.value.kind === 'basket-sprite');
+    const list: Triple[] = [];
+    for (const t of tees) {
+      for (const b of baskets) {
+        const mx = (t.value.x + b.value.x) / 2;
+        const my = (t.value.y + b.value.y) / 2;
+        const residual = Math.hypot(mx - hole.badgeX, my - hole.badgeY);
+        if (residual > residualCap) continue;
+        const diverge =
+          t.value.gateX === undefined || b.value.gateX === undefined
+            ? true
+            : t.value.geodesic <= 18 && b.value.geodesic <= 18
+              ? true
+              : Math.hypot(
+                  (t.value.gateX ?? 0) - (b.value.gateX ?? 0),
+                  (t.value.gateY ?? 0) - (b.value.gateY ?? 0),
+                ) >= 16;
+        const local =
+          residual +
+          0.5 * (t.value.geodesic + b.value.geodesic) +
+          (t.value.firstIcon === true ? 0 : 40) +
+          (b.value.firstIcon === true ? 0 : 40) +
+          (diverge ? 0 : 80);
+        list.push({ t: t.value, b: b.value, local });
+      }
+    }
+    list.sort((a, b) => a.local - b.local);
+    triplesByNumber.set(hole.holeNumber, list.slice(0, topK));
+  }
+
+  const chosen = new Map<number, Triple>();
+  const numbers = sorted.map((h) => h.holeNumber);
+  let i = 0;
+  while (i < numbers.length) {
+    let j = i;
+    while (j + 1 < numbers.length && numbers[j + 1] === numbers[j] + 1) j++;
+    const run = numbers.slice(i, j + 1);
+    let prev = (triplesByNumber.get(run[0]) ?? []).map((t) => ({ cost: t.local, back: -1 }));
+    const backs: number[][] = [];
+    for (let k = 1; k < run.length; k++) {
+      const cur = triplesByNumber.get(run[k]) ?? [];
+      const prevTriples = triplesByNumber.get(run[k - 1]) ?? [];
+      const row: { cost: number; back: number }[] = [];
+      for (let c = 0; c < cur.length; c++) {
+        let best = Infinity;
+        let bestP = -1;
+        for (let p = 0; p < prev.length; p++) {
+          const d = Math.hypot(
+            prevTriples[p].b.x - cur[c].t.x,
+            prevTriples[p].b.y - cur[c].t.y,
+          );
+          const v = prev[p].cost + seqWeight * Math.max(0, d - seqFreePx);
+          if (v < best) {
+            best = v;
+            bestP = p;
+          }
+        }
+        row.push({ cost: best + cur[c].local, back: bestP });
+      }
+      backs.push(row.map((r) => r.back));
+      prev = row;
+    }
+    if (prev.length > 0) {
+      let bi = 0;
+      for (let c = 1; c < prev.length; c++) if (prev[c].cost < prev[bi].cost) bi = c;
+      const picks: number[] = new Array(run.length);
+      picks[run.length - 1] = bi;
+      for (let k = run.length - 1; k > 0; k--) picks[k - 1] = backs[k - 1][picks[k]];
+      run.forEach((num, k) => {
+        const t = (triplesByNumber.get(num) ?? [])[picks[k]];
+        if (t) chosen.set(num, t);
+      });
+    }
+    i = j + 1;
+  }
+
+  return sorted.map((h) => {
+    const c = chosen.get(h.holeNumber);
+    return { holeNumber: h.holeNumber, tee: c?.t ?? null, basket: c?.b ?? null };
+  });
 }
