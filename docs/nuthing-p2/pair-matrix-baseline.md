@@ -251,6 +251,43 @@ Matrix + replay stack rebuilt on these endpoints (judged truth holes rise
 Heritage reaches 10/11 rank≤3. Lenard remains the evidence-limited course
 (9/16 rank≤3, assignment cascades to 6/16).
 
+## Replay refinement 5 — P3 domain invariants (RESULT)
+
+From NUTHING-P3 (`claude/nuthing-p3-endpoint-pairs-bsy3kb`): *"a teepad
+will point directly at its badge; a badge will ALWAYS be before any
+bend."* Both halves validated on dev truth in THIS pipeline's frame before
+use — including the orientation half P3 could not measure (it had no tee
+orientation source; our hollow-ring detector measures the tee's principal
+axis directly):
+
+- **Teepad points at its badge — confirmed, and it is the sharpest signal
+  in the pipeline**: for true (tee, badge), the ring long axis points at
+  the badge with median error **1.1°**, p90 2.65°, max 11.3° (n=59).
+  False badges: median 38°, p10 6.5°. The tee is a compass needle.
+- **Badge longitudinal position**: badge projects onto tee→basket at
+  0.19–0.54, median 0.51 (n=66) — independently matching P3's 0.17–0.54
+  (n=72) measured with a different badge detector.
+
+`--invariants` multiplies each pair's score by gaussian penalties in the
+alignment error (σ=12°, swept 4–30: 4 over-punishes the 11° tail, ≥16 is
+flat) and in the fraction excess outside 0.45±0.15 (σ=0.15). Assignment
+seeding also changed to margin order (most decisive badge claims first),
+which stops ambiguous badges from stealing confident badges' endpoints —
+raw-score greedy measured 44/63, margin-ordered 50/63.
+
+| cumulative (n=63) | r1 / r≤3 | assigned exact |
+|---|---|---|
+| baseline worstWindow | 7 / 18 | — |
+| + strip-coherence + zones + simple-path | 35 / 51 | 41 |
+| **+ invariants (+ margin-seeded assignment)** | **50 / 59** | **50** |
+
+Per course, exact: DashsTrack 13/18, Heritage 8/11, **Lenard 15/16** (was
+6/16 — the invariants crack exactly the parallel-fairway course where
+support evidence saturated), TowneLake 14/18. Several remaining assignment
+wrongs pair with a low-score FALSE sprite match (B18/B19-class ids) —
+uniqueness overflow lands on sprite false positives; folding the sprite
+match score into pair evidence is the obvious next layer.
+
 ## Remaining work this matrix exposes
 
 1. **Walking-path-aware attribution** (dashed paths + diamond markers as

@@ -53,7 +53,7 @@ interface CacheCourse {
   viewport: { top: number; bottom: number };
   field: { width: number; height: number; scale: number };
   endpoints: {
-    tees: { id: string; x: number; y: number; onRing: boolean }[];
+    tees: { id: string; x: number; y: number; onRing: boolean; angle?: number | null }[];
     baskets: { id: string; x: number; y: number }[];
   };
   badges: CacheBadge[];
@@ -106,6 +106,23 @@ function main(): void {
   // 2-swap local search. Reports exact-assignment accuracy per course.
   const assignIdx = args.indexOf('--assign');
   const assign = assignIdx >= 0 ? (args.splice(assignIdx, 1), true) : false;
+  // Replay layer 5 — P3 domain invariants ("a teepad points directly at its
+  // badge; a badge is always before any bend"), both validated on dev truth
+  // in THIS pipeline's frame before use:
+  //  * tee orientation: ring-tier tees carry the hole principal axis; for
+  //    true (tee, badge) the axis points at the badge with median error
+  //    1.1°, p90 2.65°, max 11.3° (n=59); false badges: median 38°, p10
+  //    6.5°. Penalty is gaussian in the angle error with σ=6°.
+  //  * badge longitudinal position: the badge projects onto tee→basket at
+  //    0.19–0.54 (median 0.51, n=66; matches NUTHING-P3's independent
+  //    0.17–0.54, n=72). Penalty is gaussian in the excess outside
+  //    0.45 ± 0.15 with σ=0.15.
+  const invIdx = args.indexOf('--invariants');
+  const invariants = invIdx >= 0 ? (args.splice(invIdx, 1), true) : false;
+  const ALIGN_SIGMA_DEG = 12;
+  const FRAC_CENTER = 0.45;
+  const FRAC_HALF_WIDTH = 0.15;
+  const FRAC_SIGMA = 0.15;
   const [cacheDir] = args;
   if (!cacheDir) {
     console.error('Usage: tsx scripts/nuthing/pair-matrix-replay.ts CACHE_DIR [--p N] [--window PX] [--render]');
@@ -252,6 +269,26 @@ function main(): void {
             : scoreMode === 'mean'
               ? sum / count
               : worst;
+        if (invariants) {
+          const tee = cache.endpoints.tees[Number(pair.teeId.slice(1))];
+          const basket = cache.endpoints.baskets[Number(pair.basketId.slice(1))];
+          if (tee && basket) {
+            if (tee.angle !== null && tee.angle !== undefined) {
+              const dir = Math.atan2(badge.cy - tee.y, badge.cx - tee.x);
+              let d = Math.abs((((tee.angle - dir) % Math.PI) + Math.PI) % Math.PI);
+              d = Math.min(d, Math.PI - d) * (180 / Math.PI);
+              score *= Math.exp(-((d / ALIGN_SIGMA_DEG) ** 2));
+            }
+            const vx = basket.x - tee.x;
+            const vy = basket.y - tee.y;
+            const vv = vx * vx + vy * vy;
+            if (vv > 1e-9) {
+              const frac = ((badge.cx - tee.x) * vx + (badge.cy - tee.y) * vy) / vv;
+              const excess = Math.max(0, Math.abs(frac - FRAC_CENTER) - FRAC_HALF_WIDTH);
+              score *= Math.exp(-((excess / FRAC_SIGMA) ** 2));
+            }
+          }
+        }
         if (simple) {
           const teeCells = legCellSet.get(pair.teeId);
           const basketLeg = badge.legs.find((l) => l.endpointId === pair.basketId);
@@ -335,19 +372,32 @@ function main(): void {
       // Raw scores compare across badges here; per-badge normalization was
       // tried and measured WORSE (38/61 vs 42/61 exact) — normalizing
       // inflates weak badges' false claims more than it calms strong ones.
+      // Seed order = per-badge decisiveness (margin between the badge's top
+      // pair and its best pair using a different tee AND basket): confident
+      // badges claim endpoints first, so an ambiguous badge cannot steal a
+      // confident badge's endpoint and start a cascade.
       const labels = [...rescoredByBadge.keys()];
       const chosen = new Map<string, Rescored | null>(labels.map((l) => [l, null]));
       const usedTee = new Set<string>();
       const usedBasket = new Set<string>();
-      // Greedy seed over all (badge, pair) by score.
-      const all: { label: string; row: Rescored }[] = [];
-      for (const l of labels) for (const row of rescoredByBadge.get(l)!) all.push({ label: l, row });
-      all.sort((a, b) => b.row.score - a.row.score);
-      for (const { label, row } of all) {
-        if (chosen.get(label) || usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
-        chosen.set(label, row);
-        usedTee.add(row.teeId);
-        usedBasket.add(row.basketId);
+      const margin = (l: string): number => {
+        const rows = [...rescoredByBadge.get(l)!].sort((a, b) => b.score - a.score);
+        const top = rows[0];
+        if (!top) return 0;
+        const rival = rows.find((r) => r.teeId !== top.teeId && r.basketId !== top.basketId);
+        return top.score - (rival ? rival.score : 0);
+      };
+      const seedOrder = [...labels].sort((a, b) => margin(b) - margin(a));
+      for (const l of seedOrder) {
+        let best: Rescored | null = null;
+        for (const row of rescoredByBadge.get(l)!) {
+          if (usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
+          if (!best || row.score > best.score) best = row;
+        }
+        if (!best) continue;
+        chosen.set(l, best);
+        usedTee.add(best.teeId);
+        usedBasket.add(best.basketId);
       }
       // 2-swap local search: try replacing any one badge's pair (freeing its
       // endpoints) with its best feasible alternative; accept improvements.

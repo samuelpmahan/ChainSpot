@@ -291,10 +291,15 @@ function main(): void {
       score: s.score,
     }));
     // onRing: tee standing on some basket's C2D dashed circle (radius ~84).
+    // angle: ring-tier tees carry the hole's principal-axis orientation —
+    // validated on dev truth to point at the hole's badge (median error
+    // 1.1°, p90 2.65°, n=59; false badges median 38°). Component-tier tees
+    // have no measured orientation (null).
     const teePoints = teeCands.map((t) => ({
       x: t.cx,
       y: t.cy,
       tier: t.tier,
+      angle: t.ring ? t.ring.angle : null,
       onRing: basketPoints.some((b) => Math.abs(Math.hypot(t.cx - b.x, t.cy - b.y) - 84) <= 12),
     }));
     console.log(
@@ -691,7 +696,7 @@ function main(): void {
           },
           endpoints: {
             tees: teePoints.map((p, i) => ({
-              id: `T${i}`, x: p.x, y: p.y, tier: p.tier, onRing: p.onRing,
+              id: `T${i}`, x: p.x, y: p.y, tier: p.tier, angle: p.angle, onRing: p.onRing,
             })),
             baskets: basketPoints.map((p, i) => ({
               id: `B${i}`, x: p.x, y: p.y, spriteCx: p.cx, spriteCy: p.cy, score: p.score,
