@@ -118,6 +118,43 @@ Off-chord route composition (own-corridor cells excluded — a cell within
 Tally over chosen wrong routes: walking-path implicated in 5/7,
 basket-zone 4/7, tee-glyph 1/7, badge 0/7.
 
+## Local alpha, learned from the strongest tee→badge segments
+
+The corridor is a semi-transparent overlay composited onto the basemap, and
+the strongest tee→badge segments are *guaranteed ribbon interior* (straight,
+pre-bend, ray ≤1.4°) — so they are labeled training data for the overlay's
+local compositing behavior, free. `scripts/nuthing/learn-local-alpha.ts` +
+`lift-signatures.ts`, measured on the 6 top-scoring correctly-assigned
+holes per course:
+
+- **A naive constant-blend fit (p_in = (1−α)·b + α·C) is confounded and
+  should not be trusted**: regressing inside pixels against outside pixels
+  gives α≈0.6–0.9, C≈gray — but the ground UNDER a corridor is mown
+  fairway, systematically brighter than the ground beside it, so the fit
+  attributes ground difference to overlay opacity. Documented as a negative
+  result.
+- **What is stable (cross-corridor profiles):** the corridor renders as a
+  smooth translucent whitening wash — a flat plateau with a sharp ~3 px
+  transition exactly at the annotated corridor width, and **no edge
+  stroke** (the paired-edge field fires on the transition itself).
+- **The operational "local alpha" is the lift signature** — brightness at a
+  cell minus the darker of two ±30 px perpendicular background samples
+  (control-corrected by the +12 baseline this min() introduces):
+
+| family (n) | corrected gray lift | plateau (L8/L0) |
+|---|---|---|
+| ribbon interior (788) | **+48** | 0.98 (broad) |
+| walking-path ride (123) | +17 | 1.23 |
+| C2F zone fill (3432) | −7 | — |
+| random ground (1078) | 0 (baseline) | 1.08 |
+
+The corridor's lift is ~3× the walking path's and ~flat across ±8 px —
+a per-cell evidence channel (five gray reads per cell) that separates true
+corridor from the walking path, the distractor class nothing upstream
+handles. Wiring it in is a *measurement extension* under the replay
+discipline: sample lift along every cached leg once, store it in the
+snapshot (format bump), then re-score as a replay layer.
+
 ## What this buys (next layers, both derivable from cache)
 
 1. **Chord discipline**: a pair's own tee→basket chord is available at
