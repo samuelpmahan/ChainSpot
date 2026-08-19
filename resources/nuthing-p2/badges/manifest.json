@@ -1,0 +1,7652 @@
+{
+ "generator": "scripts/nuthing/build-manifest.ts",
+ "associationRule": {
+  "description": "annotation hole path midpoint (tee + corridorBends + basket polyline) to nearest P1 badge center; accepted iff distance <= MAX_ASSOC_DIST, second-nearest margin >= MIN_MARGIN, and the badge is claimed by exactly one accepted hole. Conflicts/failures stay UNRESOLVED.",
+  "maxAssocDist": 120,
+  "minMargin": 60
+ },
+ "images": [
+  {
+   "image": "AlexClark-full",
+   "badges": 16,
+   "grounded": 16,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "DashsTrack-full",
+   "badges": 18,
+   "grounded": 18,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": 18
+  },
+  {
+   "image": "FountainHills-1",
+   "badges": 10,
+   "grounded": 0,
+   "unresolved": 0,
+   "heldOut": 10,
+   "annotatedHoles": null
+  },
+  {
+   "image": "FountainHills-2",
+   "badges": 13,
+   "grounded": 0,
+   "unresolved": 0,
+   "heldOut": 13,
+   "annotatedHoles": null
+  },
+  {
+   "image": "FountainHills-full",
+   "badges": 20,
+   "grounded": 0,
+   "unresolved": 0,
+   "heldOut": 20,
+   "annotatedHoles": null
+  },
+  {
+   "image": "FountainHills-lazy",
+   "badges": 16,
+   "grounded": 0,
+   "unresolved": 0,
+   "heldOut": 16,
+   "annotatedHoles": null
+  },
+  {
+   "image": "HeritagePark-full",
+   "badges": 14,
+   "grounded": 14,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-1",
+   "badges": 7,
+   "grounded": 7,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-2",
+   "badges": 7,
+   "grounded": 7,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-3",
+   "badges": 4,
+   "grounded": 4,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-4",
+   "badges": 6,
+   "grounded": 6,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-5",
+   "badges": 7,
+   "grounded": 7,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "Lenard-full",
+   "badges": 16,
+   "grounded": 16,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "NorthPark-full",
+   "badges": 16,
+   "grounded": 16,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  },
+  {
+   "image": "TowneLake-full",
+   "badges": 18,
+   "grounded": 18,
+   "unresolved": 0,
+   "heldOut": 0,
+   "annotatedHoles": null
+  }
+ ],
+ "badges": [
+  {
+   "id": "AlexClark-full#badge18",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 18,
+   "bbox": [
+    794,
+    86,
+    55,
+    42
+   ],
+   "center": [
+    820.3289760348584,
+    106.44880174291939
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5883116883116883,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge18-raw.png",
+    "interior": "crops/AlexClark-full-badge18-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge18-glyph.png",
+    "interiorBbox": [
+     797,
+     89,
+     48,
+     36
+    ],
+    "glyphPixelCount": 216
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge22",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 22,
+   "bbox": [
+    509,
+    140,
+    55,
+    42
+   ],
+   "center": [
+    535.3906581740977,
+    160.32059447983013
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5904761904761905,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge22-raw.png",
+    "interior": "crops/AlexClark-full-badge22-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge22-glyph.png",
+    "interiorBbox": [
+     512,
+     143,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": "12",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge25",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 25,
+   "bbox": [
+    799,
+    182,
+    56,
+    42
+   ],
+   "center": [
+    825.2263736263736,
+    202.54945054945054
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6126700680272109,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge25-raw.png",
+    "interior": "crops/AlexClark-full-badge25-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge25-glyph.png",
+    "interiorBbox": [
+     802,
+     185,
+     50,
+     36
+    ],
+    "glyphPixelCount": 235
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge29",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 29,
+   "bbox": [
+    659,
+    208,
+    55,
+    42
+   ],
+   "center": [
+    685.2307692307693,
+    228.54505494505494
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge29-raw.png",
+    "interior": "crops/AlexClark-full-badge29-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge29-glyph.png",
+    "interiorBbox": [
+     662,
+     211,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge40",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 40,
+   "bbox": [
+    470,
+    368,
+    54,
+    42
+   ],
+   "center": [
+    496.3477321814255,
+    388.39308855291574
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6327160493827161,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge40-raw.png",
+    "interior": "crops/AlexClark-full-badge40-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge40-glyph.png",
+    "interiorBbox": [
+     473,
+     371,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge47",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 47,
+   "bbox": [
+    384,
+    417,
+    57,
+    42
+   ],
+   "center": [
+    411.00631578947366,
+    437.4526315789474
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5831244778613199,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge47-raw.png",
+    "interior": "crops/AlexClark-full-badge47-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge47-glyph.png",
+    "interiorBbox": [
+     387,
+     420,
+     50,
+     36
+    ],
+    "glyphPixelCount": 244
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge53",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 53,
+   "bbox": [
+    363,
+    490,
+    54,
+    42
+   ],
+   "center": [
+    389.9145299145299,
+    510.64957264957263
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.63668430335097,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge53-raw.png",
+    "interior": "crops/AlexClark-full-badge53-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge53-glyph.png",
+    "interiorBbox": [
+     366,
+     493,
+     51,
+     39
+    ],
+    "glyphPixelCount": 168
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge66",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 66,
+   "bbox": [
+    622,
+    553,
+    55,
+    42
+   ],
+   "center": [
+    647.7013274336283,
+    573.3274336283185
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5865800865800865,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge66-raw.png",
+    "interior": "crops/AlexClark-full-badge66-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge66-glyph.png",
+    "interiorBbox": [
+     625,
+     556,
+     49,
+     36
+    ],
+    "glyphPixelCount": 246
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge128",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 128,
+   "bbox": [
+    463,
+    695,
+    54,
+    42
+   ],
+   "center": [
+    489.3905579399142,
+    715.6566523605151
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6309523809523809,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge128-raw.png",
+    "interior": "crops/AlexClark-full-badge128-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge128-glyph.png",
+    "interiorBbox": [
+     466,
+     698,
+     48,
+     36
+    ],
+    "glyphPixelCount": 171
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge134",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 134,
+   "bbox": [
+    549,
+    769,
+    54,
+    42
+   ],
+   "center": [
+    574.109375,
+    789.6383928571429
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6216931216931217,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge134-raw.png",
+    "interior": "crops/AlexClark-full-badge134-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge134-glyph.png",
+    "interiorBbox": [
+     552,
+     772,
+     48,
+     36
+    ],
+    "glyphPixelCount": 186
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge261",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 261,
+   "bbox": [
+    458,
+    1262,
+    54,
+    42
+   ],
+   "center": [
+    484.82947368421054,
+    1282.5978947368421
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6746031746031746,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge261-raw.png",
+    "interior": "crops/AlexClark-full-badge261-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge261-glyph.png",
+    "interiorBbox": [
+     461,
+     1265,
+     48,
+     36
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge271",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 271,
+   "bbox": [
+    532,
+    1325,
+    54,
+    42
+   ],
+   "center": [
+    558.2875536480686,
+    1345.5278969957083
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6512345679012346,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge271-raw.png",
+    "interior": "crops/AlexClark-full-badge271-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge271-glyph.png",
+    "interiorBbox": [
+     535,
+     1328,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge278",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 278,
+   "bbox": [
+    669,
+    1434,
+    54,
+    42
+   ],
+   "center": [
+    695.4341252699784,
+    1454.5529157667386
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6834215167548501,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge278-raw.png",
+    "interior": "crops/AlexClark-full-badge278-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge278-glyph.png",
+    "interiorBbox": [
+     672,
+     1437,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge314",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 314,
+   "bbox": [
+    553,
+    1759,
+    54,
+    42
+   ],
+   "center": [
+    579.5962343096235,
+    1779.428870292887
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6318342151675485,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge314-raw.png",
+    "interior": "crops/AlexClark-full-badge314-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge314-glyph.png",
+    "interiorBbox": [
+     556,
+     1762,
+     48,
+     36
+    ],
+    "glyphPixelCount": 164
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge318",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 318,
+   "bbox": [
+    300,
+    1862,
+    54,
+    42
+   ],
+   "center": [
+    326.3814655172414,
+    1882.4956896551723
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6499118165784833,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge318-raw.png",
+    "interior": "crops/AlexClark-full-badge318-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge318-glyph.png",
+    "interiorBbox": [
+     303,
+     1865,
+     48,
+     36
+    ],
+    "glyphPixelCount": 138
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "AlexClark-full#badge327",
+   "image": "AlexClark-full",
+   "imageRgbaSha256": "c04a42f57d8d4a4e61e2f29d5844b6898ab73def40698bcf3cc5c1dbf889f804",
+   "badgeLabel": 327,
+   "bbox": [
+    466,
+    1984,
+    54,
+    42
+   ],
+   "center": [
+    492.74200426439234,
+    2004.3944562899787
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6574074074074074,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/AlexClark-full-badge327-raw.png",
+    "interior": "crops/AlexClark-full-badge327-interior.png",
+    "glyphMask": "crops/AlexClark-full-badge327-glyph.png",
+    "interiorBbox": [
+     469,
+     1987,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge12",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 12,
+   "bbox": [
+    728,
+    428,
+    54,
+    42
+   ],
+   "center": [
+    754.4957264957264,
+    448.59188034188037
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6838624338624338,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge12-raw.png",
+    "interior": "crops/DashsTrack-full-badge12-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge12-glyph.png",
+    "interiorBbox": [
+     731,
+     431,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "96d12122-4bbc-4878-a5fa-fa727f90bb0c",
+    "holeNumber": 1,
+    "pathMidpoint": [
+     695.4302936381121,
+     460.41732582177156
+    ],
+    "distance": 60.237583944371735,
+    "secondDistance": 169.04825999561334,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge16",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 16,
+   "bbox": [
+    551,
+    561,
+    54,
+    42
+   ],
+   "center": [
+    577.4081196581196,
+    581.4465811965812
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6521164021164021,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge16-raw.png",
+    "interior": "crops/DashsTrack-full-badge16-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge16-glyph.png",
+    "interiorBbox": [
+     554,
+     564,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge21",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 21,
+   "bbox": [
+    580,
+    649,
+    54,
+    42
+   ],
+   "center": [
+    606.2113289760349,
+    669.4814814814815
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.650352733686067,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge21-raw.png",
+    "interior": "crops/DashsTrack-full-badge21-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge21-glyph.png",
+    "interiorBbox": [
+     583,
+     652,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "f5d2d6bc-77a2-456d-a427-b67d28c32d9b",
+    "holeNumber": 3,
+    "pathMidpoint": [
+     613.3749961853027,
+     671.6450038146972
+    ],
+    "distance": 7.483245069584607,
+    "secondDistance": 97.10495172707675,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge26",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 26,
+   "bbox": [
+    417,
+    723,
+    54,
+    42
+   ],
+   "center": [
+    443.6038961038961,
+    743.495670995671
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge26-raw.png",
+    "interior": "crops/DashsTrack-full-badge26-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge26-glyph.png",
+    "interiorBbox": [
+     420,
+     726,
+     48,
+     36
+    ],
+    "glyphPixelCount": 157
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "64b85ef5-043e-4709-97d6-e9973bd3c885",
+    "holeNumber": 4,
+    "pathMidpoint": [
+     448.41909179767356,
+     760.2693229358044
+    ],
+    "distance": 17.45111769996735,
+    "secondDistance": 114.49286280788633,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge31",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 31,
+   "bbox": [
+    835,
+    757,
+    55,
+    42
+   ],
+   "center": [
+    862.06852248394,
+    777.4625267665953
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5835497835497836,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge31-raw.png",
+    "interior": "crops/DashsTrack-full-badge31-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge31-glyph.png",
+    "interiorBbox": [
+     838,
+     760,
+     49,
+     36
+    ],
+    "glyphPixelCount": 247
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge37",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 37,
+   "bbox": [
+    524,
+    792,
+    54,
+    42
+   ],
+   "center": [
+    550.3108695652174,
+    812.4869565217391
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6402116402116402,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge37-raw.png",
+    "interior": "crops/DashsTrack-full-badge37-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge37-glyph.png",
+    "interiorBbox": [
+     527,
+     795,
+     48,
+     36
+    ],
+    "glyphPixelCount": 154
+   },
+   "label": "5",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge45",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 45,
+   "bbox": [
+    524,
+    864,
+    54,
+    42
+   ],
+   "center": [
+    550.552688172043,
+    884.6344086021505
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6327160493827161,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge45-raw.png",
+    "interior": "crops/DashsTrack-full-badge45-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge45-glyph.png",
+    "interiorBbox": [
+     527,
+     867,
+     48,
+     36
+    ],
+    "glyphPixelCount": 165
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "0dacfb97-e590-451b-a6ea-3154c51c3787",
+    "holeNumber": 6,
+    "pathMidpoint": [
+     557.3227272727272,
+     880.8509090909091
+    ],
+    "distance": 7.75553337794104,
+    "secondDistance": 68.72260297304004,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge50",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 50,
+   "bbox": [
+    938,
+    901,
+    54,
+    42
+   ],
+   "center": [
+    963.3476297968398,
+    921.530474040632
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.623015873015873,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge50-raw.png",
+    "interior": "crops/DashsTrack-full-badge50-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge50-glyph.png",
+    "interiorBbox": [
+     941,
+     904,
+     48,
+     36
+    ],
+    "glyphPixelCount": 186
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "e2f346ba-afd5-4f0a-a8d5-d2ee4edc77f0",
+    "holeNumber": 17,
+    "pathMidpoint": [
+     970.2481412639405,
+     916.5334572490706
+    ],
+    "distance": 8.51981427747905,
+    "secondDistance": 175.58633950132264,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge56",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 56,
+   "bbox": [
+    1113,
+    945,
+    55,
+    42
+   ],
+   "center": [
+    1138.891111111111,
+    965.4222222222222
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge56-raw.png",
+    "interior": "crops/DashsTrack-full-badge56-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge56-glyph.png",
+    "interiorBbox": [
+     1116,
+     948,
+     49,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "e889851d-c2a0-4696-b979-c01b15f8cf80",
+    "holeNumber": 16,
+    "pathMidpoint": [
+     1141.1470588235293,
+     969.8731617647059
+    ],
+    "distance": 4.990006301800576,
+    "secondDistance": 184.25431451828777,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge59",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 59,
+   "bbox": [
+    417,
+    962,
+    54,
+    42
+   ],
+   "center": [
+    443.41806722689074,
+    982.5819327731092
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6723985890652557,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge59-raw.png",
+    "interior": "crops/DashsTrack-full-badge59-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge59-glyph.png",
+    "interiorBbox": [
+     420,
+     965,
+     48,
+     36
+    ],
+    "glyphPixelCount": 106
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge64",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 64,
+   "bbox": [
+    434,
+    1047,
+    54,
+    42
+   ],
+   "center": [
+    460.7439824945295,
+    1067.5295404814005
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6344797178130511,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge64-raw.png",
+    "interior": "crops/DashsTrack-full-badge64-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge64-glyph.png",
+    "interiorBbox": [
+     437,
+     1050,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "76388e3f-3b60-42a7-8d68-ec8fbf254f46",
+    "holeNumber": 8,
+    "pathMidpoint": [
+     443.4632216747064,
+     1084.2862694530838
+    ],
+    "distance": 24.070992093023165,
+    "secondDistance": 101.70434670375593,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge71",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 71,
+   "bbox": [
+    879,
+    1256,
+    55,
+    42
+   ],
+   "center": [
+    905.036717062635,
+    1276.5572354211663
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5796536796536796,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge71-raw.png",
+    "interior": "crops/DashsTrack-full-badge71-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge71-glyph.png",
+    "interiorBbox": [
+     882,
+     1259,
+     48,
+     36
+    ],
+    "glyphPixelCount": 234
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "8b909bf6-4f0e-41da-ba86-200a2ce44d32",
+    "holeNumber": 15,
+    "pathMidpoint": [
+     933.1060946113913,
+     1212.9374238695834
+    ],
+    "distance": 69.53682749330414,
+    "secondDistance": 292.97194551524166,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge74",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 74,
+   "bbox": [
+    311,
+    1283,
+    54,
+    42
+   ],
+   "center": [
+    337.66013071895424,
+    1303.4575163398692
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge74-raw.png",
+    "interior": "crops/DashsTrack-full-badge74-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge74-glyph.png",
+    "interiorBbox": [
+     314,
+     1286,
+     48,
+     36
+    ],
+    "glyphPixelCount": 169
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "db0f4b50-5aca-4a05-a47a-943d5e3d473e",
+    "holeNumber": 9,
+    "pathMidpoint": [
+     339.3556603773585,
+     1296.0981132075472
+    ],
+    "distance": 7.552194071033968,
+    "secondDistance": 258.80246750077526,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge79",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 79,
+   "bbox": [
+    676,
+    1405,
+    56,
+    42
+   ],
+   "center": [
+    702.2227171492204,
+    1425.4766146993318
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6139455782312925,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge79-raw.png",
+    "interior": "crops/DashsTrack-full-badge79-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge79-glyph.png",
+    "interiorBbox": [
+     679,
+     1408,
+     50,
+     36
+    ],
+    "glyphPixelCount": 235
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "e97be734-ae08-4516-bf47-05313c14c9dc",
+    "holeNumber": 14,
+    "pathMidpoint": [
+     719.6416996920666,
+     1387.3322095557965
+    ],
+    "distance": 41.933478231386225,
+    "secondDistance": 209.08646520646295,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge94",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 94,
+   "bbox": [
+    545,
+    1514,
+    55,
+    42
+   ],
+   "center": [
+    571.0764192139738,
+    1534.4563318777293
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge94-raw.png",
+    "interior": "crops/DashsTrack-full-badge94-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge94-glyph.png",
+    "interiorBbox": [
+     548,
+     1517,
+     48,
+     36
+    ],
+    "glyphPixelCount": 216
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "0816c805-a3a9-4316-bc84-0e966c7c325e",
+    "holeNumber": 13,
+    "pathMidpoint": [
+     566.3958333333334,
+     1529.818181818182
+    ],
+    "distance": 6.589409697456217,
+    "secondDistance": 171.27785903598868,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge99",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 99,
+   "bbox": [
+    167,
+    1534,
+    57,
+    42
+   ],
+   "center": [
+    194.15384615384616,
+    1554.570512820513
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5827067669172933,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge99-raw.png",
+    "interior": "crops/DashsTrack-full-badge99-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge99-glyph.png",
+    "interiorBbox": [
+     170,
+     1537,
+     50,
+     36
+    ],
+    "glyphPixelCount": 244
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "fdb91168-3b91-456e-b042-8eff528dc166",
+    "holeNumber": 10,
+    "pathMidpoint": [
+     198.20419847328245,
+     1547.1030534351144
+    ],
+    "distance": 8.495192969211475,
+    "secondDistance": 200.72522881652765,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge107",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 107,
+   "bbox": [
+    348,
+    1623,
+    55,
+    42
+   ],
+   "center": [
+    374.34273318872016,
+    1643.362255965293
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5909090909090909,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge107-raw.png",
+    "interior": "crops/DashsTrack-full-badge107-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge107-glyph.png",
+    "interiorBbox": [
+     351,
+     1626,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "12",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "df3fb7a5-0d7e-497b-84e4-2a145f326ca2",
+    "holeNumber": 12,
+    "pathMidpoint": [
+     379.95,
+     1647.8411764705884
+    ],
+    "distance": 7.176501235674434,
+    "secondDistance": 207.89330792920958,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "DashsTrack-full#badge130",
+   "image": "DashsTrack-full",
+   "imageRgbaSha256": "46eb2f83fe80f6db6e3ecab8e7790b81ce10a3df36e009fa14ada54f6da1cfbc",
+   "badgeLabel": 130,
+   "bbox": [
+    214,
+    1797,
+    54,
+    42
+   ],
+   "center": [
+    240.5599128540305,
+    1817.5315904139434
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/DashsTrack-full-badge130-raw.png",
+    "interior": "crops/DashsTrack-full-badge130-interior.png",
+    "glyphMask": "crops/DashsTrack-full-badge130-glyph.png",
+    "interiorBbox": [
+     217,
+     1800,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "annotation-association",
+    "annotationFile": "dev/DashsTrack/DashsTrack-full.annotation.json",
+    "annotationSha256Verified": true,
+    "holeId": "6f1aea10-9c91-49eb-935f-1ae1c45abcdf",
+    "holeNumber": 11,
+    "pathMidpoint": [
+     233.86660079051381,
+     1816.715415019763
+    ],
+    "distance": 6.742890229989178,
+    "secondDistance": 223.1252149079588,
+    "rule": "path-midpoint nearest badge, d<=120, margin>=60, unique claim",
+    "manualReadAgrees": true
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "FountainHills-1#badge902",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 902,
+   "bbox": [
+    193,
+    1189,
+    54,
+    42
+   ],
+   "center": [
+    219.5741935483871,
+    1209.4881720430108
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6322751322751323,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge902-raw.png",
+    "interior": "crops/FountainHills-1-badge902-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge902-glyph.png",
+    "interiorBbox": [
+     196,
+     1192,
+     51,
+     39
+    ],
+    "glyphPixelCount": 169
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "9",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge938",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 938,
+   "bbox": [
+    550,
+    1220,
+    54,
+    42
+   ],
+   "center": [
+    576.3942731277533,
+    1240.579295154185
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6790123456790124,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge938-raw.png",
+    "interior": "crops/FountainHills-1-badge938-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge938-glyph.png",
+    "interiorBbox": [
+     553,
+     1220,
+     51,
+     39
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "7",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1020",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1020,
+   "bbox": [
+    377,
+    1314,
+    54,
+    42
+   ],
+   "center": [
+    403.5,
+    1334.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6380070546737213,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1020-raw.png",
+    "interior": "crops/FountainHills-1-badge1020-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1020-glyph.png",
+    "interiorBbox": [
+     377,
+     1317,
+     51,
+     39
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "8",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1137",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1137,
+   "bbox": [
+    815,
+    1476,
+    54,
+    42
+   ],
+   "center": [
+    841.5,
+    1496.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6393298059964727,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1137-raw.png",
+    "interior": "crops/FountainHills-1-badge1137-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1137-glyph.png",
+    "interiorBbox": [
+     818,
+     1476,
+     51,
+     39
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "6",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1216",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1216,
+   "bbox": [
+    902,
+    1756,
+    54,
+    42
+   ],
+   "center": [
+    928.5525727069352,
+    1776.4586129753916
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6521164021164021,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1216-raw.png",
+    "interior": "crops/FountainHills-1-badge1216-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1216-glyph.png",
+    "interiorBbox": [
+     905,
+     1759,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "3",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1243",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1243,
+   "bbox": [
+    733,
+    1862,
+    54,
+    42
+   ],
+   "center": [
+    759.5,
+    1882.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6547619047619048,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1243-raw.png",
+    "interior": "crops/FountainHills-1-badge1243-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1243-glyph.png",
+    "interiorBbox": [
+     733,
+     1863,
+     51,
+     38
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "2",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1266",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1266,
+   "bbox": [
+    985,
+    1950,
+    54,
+    46
+   ],
+   "center": [
+    1011.2854122621565,
+    1971.029598308668
+   ],
+   "aspect": 1.173913043478261,
+   "darkInteriorFraction": 0.5857487922705314,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1266-raw.png",
+    "interior": "crops/FountainHills-1-badge1266-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1266-glyph.png",
+    "interiorBbox": [
+     988,
+     1953,
+     48,
+     36
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "5",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1280",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1280,
+   "bbox": [
+    731,
+    2137,
+    54,
+    42
+   ],
+   "center": [
+    757.4488017429194,
+    2157.4596949891065
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.656084656084656,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1280-raw.png",
+    "interior": "crops/FountainHills-1-badge1280-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1280-glyph.png",
+    "interiorBbox": [
+     731,
+     2140,
+     54,
+     38
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "4",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1310",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1310,
+   "bbox": [
+    460,
+    2266,
+    54,
+    42
+   ],
+   "center": [
+    486.5,
+    2286.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6953262786596119,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1310-raw.png",
+    "interior": "crops/FountainHills-1-badge1310-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1310-glyph.png",
+    "interiorBbox": [
+     460,
+     2266,
+     54,
+     42
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "1",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-1#badge1509",
+   "image": "FountainHills-1",
+   "imageRgbaSha256": "522a64ea1a7f9d504f5dd626ed3b9ab5335f828a399d13879fb3782f16d6e414",
+   "badgeLabel": 1509,
+   "bbox": [
+    600,
+    2590,
+    60,
+    50
+   ],
+   "center": [
+    635.4894561598225,
+    2614.496115427303
+   ],
+   "aspect": 1.2,
+   "darkInteriorFraction": 0.6423333333333333,
+   "badgeFamilySize": 10,
+   "crops": {
+    "raw": "crops/FountainHills-1-badge1509-raw.png",
+    "interior": "crops/FountainHills-1-badge1509-interior.png",
+    "glyphMask": "crops/FountainHills-1-badge1509-glyph.png",
+    "interiorBbox": [
+     600,
+     2590,
+     60,
+     50
+    ],
+    "glyphPixelCount": 0
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": null,
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge381",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 381,
+   "bbox": [
+    222,
+    825,
+    55,
+    42
+   ],
+   "center": [
+    248.28728070175438,
+    845.4320175438596
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5909090909090909,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge381-raw.png",
+    "interior": "crops/FountainHills-2-badge381-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge381-glyph.png",
+    "interiorBbox": [
+     225,
+     828,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "12",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge503",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 503,
+   "bbox": [
+    143,
+    1044,
+    55,
+    42
+   ],
+   "center": [
+    169.33924611973393,
+    1064.4567627494457
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge503-raw.png",
+    "interior": "crops/FountainHills-2-badge503-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge503-glyph.png",
+    "interiorBbox": [
+     146,
+     1047,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "13",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge512",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 512,
+   "bbox": [
+    565,
+    1085,
+    54,
+    42
+   ],
+   "center": [
+    591.5,
+    1105.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6309523809523809,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge512-raw.png",
+    "interior": "crops/FountainHills-2-badge512-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge512-glyph.png",
+    "interiorBbox": [
+     568,
+     1088,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "11",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge532",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 532,
+   "bbox": [
+    760,
+    1194,
+    57,
+    42
+   ],
+   "center": [
+    787.1688034188035,
+    1214.6324786324785
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5856307435254804,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge532-raw.png",
+    "interior": "crops/FountainHills-2-badge532-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge532-glyph.png",
+    "interiorBbox": [
+     763,
+     1197,
+     50,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "10",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge541",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 541,
+   "bbox": [
+    1055,
+    1254,
+    54,
+    42
+   ],
+   "center": [
+    1081.6271551724137,
+    1274.4504310344828
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6335978835978836,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge541-raw.png",
+    "interior": "crops/FountainHills-2-badge541-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge541-glyph.png",
+    "interiorBbox": [
+     1058,
+     1257,
+     51,
+     39
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "9",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge555",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 555,
+   "bbox": [
+    175,
+    1322,
+    56,
+    42
+   ],
+   "center": [
+    201.0353200883002,
+    1342.381898454746
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6135204081632653,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge555-raw.png",
+    "interior": "crops/FountainHills-2-badge555-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge555-glyph.png",
+    "interiorBbox": [
+     178,
+     1325,
+     50,
+     36
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "14",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge562",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 562,
+   "bbox": [
+    1239,
+    1379,
+    51,
+    42
+   ],
+   "center": [
+    1259.2330623306234,
+    1399.368563685637
+   ],
+   "aspect": 1.2142857142857142,
+   "darkInteriorFraction": 0.673202614379085,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge562-raw.png",
+    "interior": "crops/FountainHills-2-badge562-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge562-glyph.png",
+    "interiorBbox": [
+     1239,
+     1382,
+     51,
+     39
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "8",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge567",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 567,
+   "bbox": [
+    201,
+    1470,
+    55,
+    42
+   ],
+   "center": [
+    227.23076923076923,
+    1490.4681318681319
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge567-raw.png",
+    "interior": "crops/FountainHills-2-badge567-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge567-glyph.png",
+    "interiorBbox": [
+     204,
+     1473,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "15",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge571",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 571,
+   "bbox": [
+    120,
+    1548,
+    55,
+    42
+   ],
+   "center": [
+    146.00454545454545,
+    1568.584090909091
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5883116883116883,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge571-raw.png",
+    "interior": "crops/FountainHills-2-badge571-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge571-glyph.png",
+    "interiorBbox": [
+     123,
+     1551,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "16",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge580",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 580,
+   "bbox": [
+    275,
+    1785,
+    54,
+    42
+   ],
+   "center": [
+    300.184331797235,
+    1805.421658986175
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6252204585537919,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge580-raw.png",
+    "interior": "crops/FountainHills-2-badge580-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge580-glyph.png",
+    "interiorBbox": [
+     275,
+     1788,
+     51,
+     39
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "17",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge591",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 591,
+   "bbox": [
+    125,
+    1937,
+    61,
+    42
+   ],
+   "center": [
+    154.59026369168356,
+    1957.5354969574037
+   ],
+   "aspect": 1.4523809523809523,
+   "darkInteriorFraction": 0.5921155347384855,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge591-raw.png",
+    "interior": "crops/FountainHills-2-badge591-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge591-glyph.png",
+    "interiorBbox": [
+     128,
+     1937,
+     58,
+     42
+    ],
+    "glyphPixelCount": 307
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "20",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge596",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 596,
+   "bbox": [
+    255,
+    2084,
+    55,
+    42
+   ],
+   "center": [
+    280.79910714285717,
+    2104.6696428571427
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5861471861471862,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge596-raw.png",
+    "interior": "crops/FountainHills-2-badge596-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge596-glyph.png",
+    "interiorBbox": [
+     258,
+     2087,
+     49,
+     36
+    ],
+    "glyphPixelCount": 242
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "19",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-2#badge599",
+   "image": "FountainHills-2",
+   "imageRgbaSha256": "81e1fe5a1968b153987b20e0ef7279ecd5f9ffbf15723e019a6180485bc11d1e",
+   "badgeLabel": 599,
+   "bbox": [
+    468,
+    2099,
+    55,
+    42
+   ],
+   "center": [
+    495.1085106382979,
+    2119.5659574468086
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5835497835497836,
+   "badgeFamilySize": 13,
+   "crops": {
+    "raw": "crops/FountainHills-2-badge599-raw.png",
+    "interior": "crops/FountainHills-2-badge599-interior.png",
+    "glyphMask": "crops/FountainHills-2-badge599-glyph.png",
+    "interiorBbox": [
+     471,
+     2102,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "18",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge117",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 117,
+   "bbox": [
+    944,
+    700,
+    55,
+    42
+   ],
+   "center": [
+    970.4866666666667,
+    720.6533333333333
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5887445887445888,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge117-raw.png",
+    "interior": "crops/FountainHills-full-badge117-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge117-glyph.png",
+    "interiorBbox": [
+     947,
+     703,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "13",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge119",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 119,
+   "bbox": [
+    1132,
+    710,
+    55,
+    42
+   ],
+   "center": [
+    1158.6835164835165,
+    730.5340659340659
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5917748917748917,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge119-raw.png",
+    "interior": "crops/FountainHills-full-badge119-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge119-glyph.png",
+    "interiorBbox": [
+     1135,
+     713,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "12",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge140",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 140,
+   "bbox": [
+    735,
+    789,
+    56,
+    42
+   ],
+   "center": [
+    760.9449339207049,
+    809.546255506608
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6118197278911565,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge140-raw.png",
+    "interior": "crops/FountainHills-full-badge140-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge140-glyph.png",
+    "interiorBbox": [
+     738,
+     792,
+     50,
+     36
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "14",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge144",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 144,
+   "bbox": [
+    548,
+    799,
+    55,
+    42
+   ],
+   "center": [
+    573.7914798206278,
+    819.5717488789238
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge144-raw.png",
+    "interior": "crops/FountainHills-full-badge144-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge144-glyph.png",
+    "interiorBbox": [
+     551,
+     802,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "16",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge152",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 152,
+   "bbox": [
+    627,
+    843,
+    55,
+    42
+   ],
+   "center": [
+    653.1776315789474,
+    863.4934210526316
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5796536796536796,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge152-raw.png",
+    "interior": "crops/FountainHills-full-badge152-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge152-glyph.png",
+    "interiorBbox": [
+     630,
+     846,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "15",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge159",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 159,
+   "bbox": [
+    246,
+    894,
+    61,
+    42
+   ],
+   "center": [
+    276.32,
+    914.74
+   ],
+   "aspect": 1.4523809523809523,
+   "darkInteriorFraction": 0.5843091334894613,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge159-raw.png",
+    "interior": "crops/FountainHills-full-badge159-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge159-glyph.png",
+    "interiorBbox": [
+     249,
+     897,
+     55,
+     36
+    ],
+    "glyphPixelCount": 307
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "20",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge164",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 164,
+   "bbox": [
+    401,
+    973,
+    54,
+    42
+   ],
+   "center": [
+    426.1986301369863,
+    993.5776255707763
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6216931216931217,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge164-raw.png",
+    "interior": "crops/FountainHills-full-badge164-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge164-glyph.png",
+    "interiorBbox": [
+     404,
+     976,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "17",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge167",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 167,
+   "bbox": [
+    164,
+    1026,
+    55,
+    42
+   ],
+   "center": [
+    189.89140271493213,
+    1046.4841628959275
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.587012987012987,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge167-raw.png",
+    "interior": "crops/FountainHills-full-badge167-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge167-glyph.png",
+    "interiorBbox": [
+     167,
+     1029,
+     49,
+     36
+    ],
+    "glyphPixelCount": 242
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "19",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge168",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 168,
+   "bbox": [
+    1009,
+    1036,
+    54,
+    42
+   ],
+   "center": [
+    1035.3505376344085,
+    1056.6086021505375
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6327160493827161,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge168-raw.png",
+    "interior": "crops/FountainHills-full-badge168-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge168-glyph.png",
+    "interiorBbox": [
+     1012,
+     1039,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "11",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge193",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 193,
+   "bbox": [
+    202,
+    1195,
+    55,
+    42
+   ],
+   "center": [
+    229.01694915254237,
+    1215.3495762711864
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5835497835497836,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge193-raw.png",
+    "interior": "crops/FountainHills-full-badge193-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge193-glyph.png",
+    "interiorBbox": [
+     205,
+     1198,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "18",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge196",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 196,
+   "bbox": [
+    969,
+    1212,
+    57,
+    42
+   ],
+   "center": [
+    996.2735042735043,
+    1232.4358974358975
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5885547201336675,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge196-raw.png",
+    "interior": "crops/FountainHills-full-badge196-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge196-glyph.png",
+    "interiorBbox": [
+     972,
+     1212,
+     54,
+     39
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "10",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge229",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 229,
+   "bbox": [
+    992,
+    1453,
+    54,
+    42
+   ],
+   "center": [
+    1018.5,
+    1473.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6375661375661376,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge229-raw.png",
+    "interior": "crops/FountainHills-full-badge229-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge229-glyph.png",
+    "interiorBbox": [
+     992,
+     1456,
+     51,
+     39
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "9",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge250",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 250,
+   "bbox": [
+    937,
+    1625,
+    54,
+    42
+   ],
+   "center": [
+    963.5,
+    1645.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6313932980599647,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge250-raw.png",
+    "interior": "crops/FountainHills-full-badge250-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge250-glyph.png",
+    "interiorBbox": [
+     940,
+     1628,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "8",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge284",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 284,
+   "bbox": [
+    1050,
+    1737,
+    54,
+    42
+   ],
+   "center": [
+    1076.5403050108932,
+    1757.5446623093683
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6790123456790124,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge284-raw.png",
+    "interior": "crops/FountainHills-full-badge284-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge284-glyph.png",
+    "interiorBbox": [
+     1050,
+     1740,
+     51,
+     39
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "7",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge311",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 311,
+   "bbox": [
+    219,
+    1908,
+    54,
+    42
+   ],
+   "center": [
+    245.5,
+    1928.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.685626102292769,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge311-raw.png",
+    "interior": "crops/FountainHills-full-badge311-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge311-glyph.png",
+    "interiorBbox": [
+     221,
+     1909,
+     50,
+     41
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "1",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge345",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 345,
+   "bbox": [
+    913,
+    2002,
+    54,
+    42
+   ],
+   "center": [
+    939.5,
+    2022.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6362433862433863,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge345-raw.png",
+    "interior": "crops/FountainHills-full-badge345-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge345-glyph.png",
+    "interiorBbox": [
+     916,
+     2005,
+     51,
+     39
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "6",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge360",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 360,
+   "bbox": [
+    595,
+    2026,
+    54,
+    42
+   ],
+   "center": [
+    621.4870689655172,
+    2046.5818965517242
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6521164021164021,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge360-raw.png",
+    "interior": "crops/FountainHills-full-badge360-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge360-glyph.png",
+    "interiorBbox": [
+     598,
+     2029,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "2",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge384",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 384,
+   "bbox": [
+    381,
+    2089,
+    54,
+    42
+   ],
+   "center": [
+    407.06131078224104,
+    2109.321353065539
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6538800705467372,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge384-raw.png",
+    "interior": "crops/FountainHills-full-badge384-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge384-glyph.png",
+    "interiorBbox": [
+     384,
+     2092,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "4",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge403",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 403,
+   "bbox": [
+    716,
+    2133,
+    54,
+    42
+   ],
+   "center": [
+    742.4602150537635,
+    2153.5440860215053
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6499118165784833,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge403-raw.png",
+    "interior": "crops/FountainHills-full-badge403-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge403-glyph.png",
+    "interiorBbox": [
+     719,
+     2136,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "3",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-full#badge475",
+   "image": "FountainHills-full",
+   "imageRgbaSha256": "81d3f9f9ed3767a9f5de68bf40621a5ed8d0c65d6e1b4ae90963fecb8b0f8a14",
+   "badgeLabel": 475,
+   "bbox": [
+    585,
+    2242,
+    54,
+    42
+   ],
+   "center": [
+    611.385775862069,
+    2262.497844827586
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6468253968253969,
+   "badgeFamilySize": 20,
+   "crops": {
+    "raw": "crops/FountainHills-full-badge475-raw.png",
+    "interior": "crops/FountainHills-full-badge475-interior.png",
+    "glyphMask": "crops/FountainHills-full-badge475-glyph.png",
+    "interiorBbox": [
+     585,
+     2245,
+     51,
+     39
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "5",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge483",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 483,
+   "bbox": [
+    339,
+    1052,
+    55,
+    42
+   ],
+   "center": [
+    365.3421633554084,
+    1072.4657836644592
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5926406926406926,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge483-raw.png",
+    "interior": "crops/FountainHills-lazy-badge483-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge483-glyph.png",
+    "interiorBbox": [
+     342,
+     1055,
+     52,
+     37
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "12",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge577",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 577,
+   "bbox": [
+    252,
+    1163,
+    55,
+    42
+   ],
+   "center": [
+    278.34437086092714,
+    1183.5452538631346
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge577-raw.png",
+    "interior": "crops/FountainHills-lazy-badge577-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge577-glyph.png",
+    "interiorBbox": [
+     255,
+     1166,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "13",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge672",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 672,
+   "bbox": [
+    487,
+    1266,
+    54,
+    42
+   ],
+   "center": [
+    513.3004291845493,
+    1286.6502145922748
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6327160493827161,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge672-raw.png",
+    "interior": "crops/FountainHills-lazy-badge672-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge672-glyph.png",
+    "interiorBbox": [
+     490,
+     1269,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "11",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge727",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 727,
+   "bbox": [
+    578,
+    1366,
+    57,
+    42
+   ],
+   "center": [
+    605.274678111588,
+    1386.5
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5873015873015873,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge727-raw.png",
+    "interior": "crops/FountainHills-lazy-badge727-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge727-glyph.png",
+    "interiorBbox": [
+     581,
+     1369,
+     54,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "10",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge738",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 738,
+   "bbox": [
+    205,
+    1420,
+    55,
+    42
+   ],
+   "center": [
+    231.28318584070797,
+    1440.5
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge738-raw.png",
+    "interior": "crops/FountainHills-lazy-badge738-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge738-glyph.png",
+    "interiorBbox": [
+     208,
+     1423,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "15",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge745",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 745,
+   "bbox": [
+    144,
+    1449,
+    55,
+    42
+   ],
+   "center": [
+    169.79545454545453,
+    1469.5
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge745-raw.png",
+    "interior": "crops/FountainHills-lazy-badge745-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge745-glyph.png",
+    "interiorBbox": [
+     147,
+     1452,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "16",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge777",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 777,
+   "bbox": [
+    937,
+    1541,
+    54,
+    42
+   ],
+   "center": [
+    963.236559139785,
+    1561.4709677419355
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6759259259259259,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge777-raw.png",
+    "interior": "crops/FountainHills-lazy-badge777-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge777-glyph.png",
+    "interiorBbox": [
+     940,
+     1541,
+     51,
+     42
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "7",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge787",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 787,
+   "bbox": [
+    819,
+    1562,
+    54,
+    42
+   ],
+   "center": [
+    845.3884120171674,
+    1582.4356223175967
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6340388007054674,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge787-raw.png",
+    "interior": "crops/FountainHills-lazy-badge787-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge787-glyph.png",
+    "interiorBbox": [
+     822,
+     1562,
+     49,
+     39
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "8",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge821",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 821,
+   "bbox": [
+    189,
+    1615,
+    54,
+    42
+   ],
+   "center": [
+    213.93258426966293,
+    1635.6876404494383
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6216931216931217,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge821-raw.png",
+    "interior": "crops/FountainHills-lazy-badge821-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge821-glyph.png",
+    "interiorBbox": [
+     192,
+     1618,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "17",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge893",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 893,
+   "bbox": [
+    120,
+    1783,
+    55,
+    42
+   ],
+   "center": [
+    145.68161434977577,
+    1803.439461883408
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5861471861471862,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge893-raw.png",
+    "interior": "crops/FountainHills-lazy-badge893-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge893-glyph.png",
+    "interiorBbox": [
+     123,
+     1786,
+     49,
+     36
+    ],
+    "glyphPixelCount": 242
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "19",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge902",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 902,
+   "bbox": [
+    240,
+    1831,
+    55,
+    42
+   ],
+   "center": [
+    267,
+    1851.5550847457628
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5835497835497836,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge902-raw.png",
+    "interior": "crops/FountainHills-lazy-badge902-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge902-glyph.png",
+    "interiorBbox": [
+     243,
+     1834,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "18",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge916",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 916,
+   "bbox": [
+    1038,
+    1916,
+    54,
+    42
+   ],
+   "center": [
+    1064.5,
+    1936.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6552028218694885,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge916-raw.png",
+    "interior": "crops/FountainHills-lazy-badge916-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge916-glyph.png",
+    "interiorBbox": [
+     1041,
+     1919,
+     51,
+     39
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "3",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge920",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 920,
+   "bbox": [
+    921,
+    1944,
+    54,
+    42
+   ],
+   "center": [
+    947.5,
+    1964.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6521164021164021,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge920-raw.png",
+    "interior": "crops/FountainHills-lazy-badge920-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge920-glyph.png",
+    "interiorBbox": [
+     924,
+     1947,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "2",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge949",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 949,
+   "bbox": [
+    1049,
+    2043,
+    54,
+    42
+   ],
+   "center": [
+    1075.5,
+    2063.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6397707231040565,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge949-raw.png",
+    "interior": "crops/FountainHills-lazy-badge949-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge949-glyph.png",
+    "interiorBbox": [
+     1052,
+     2046,
+     48,
+     36
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "5",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge980",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 980,
+   "bbox": [
+    868,
+    2103,
+    54,
+    42
+   ],
+   "center": [
+    894.57805907173,
+    2123.8734177215188
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge980-raw.png",
+    "interior": "crops/FountainHills-lazy-badge980-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge980-glyph.png",
+    "interiorBbox": [
+     871,
+     2106,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "4",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "FountainHills-lazy#badge1002",
+   "image": "FountainHills-lazy",
+   "imageRgbaSha256": "3271a28dd64ecba364eabd1396c91dd0241ab905d8a74b703800c707a54a6473",
+   "badgeLabel": 1002,
+   "bbox": [
+    688,
+    2126,
+    54,
+    42
+   ],
+   "center": [
+    714.6061946902655,
+    2146.579646017699
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6931216931216931,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/FountainHills-lazy-badge1002-raw.png",
+    "interior": "crops/FountainHills-lazy-badge1002-interior.png",
+    "glyphMask": "crops/FountainHills-lazy-badge1002-glyph.png",
+    "interiorBbox": [
+     688,
+     2126,
+     54,
+     42
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": null,
+   "labelProvenance": {
+    "reason": "NO_ANNOTATION"
+   },
+   "provenanceClass": "HELD_OUT",
+   "evalLabel": "1",
+   "evalLabelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   }
+  },
+  {
+   "id": "HeritagePark-full#badge571",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 571,
+   "bbox": [
+    888,
+    1113,
+    54,
+    42
+   ],
+   "center": [
+    914.3905579399142,
+    1133.733905579399
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6772486772486772,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge571-raw.png",
+    "interior": "crops/HeritagePark-full-badge571-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge571-glyph.png",
+    "interiorBbox": [
+     888,
+     1113,
+     51,
+     39
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge751",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 751,
+   "bbox": [
+    1020,
+    1230,
+    54,
+    42
+   ],
+   "center": [
+    1046.5,
+    1250.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6349206349206349,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge751-raw.png",
+    "interior": "crops/HeritagePark-full-badge751-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge751-glyph.png",
+    "interiorBbox": [
+     1023,
+     1233,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge754",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 754,
+   "bbox": [
+    703,
+    1233,
+    54,
+    42
+   ],
+   "center": [
+    729.4978260869565,
+    1253.5021739130434
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6335978835978836,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge754-raw.png",
+    "interior": "crops/HeritagePark-full-badge754-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge754-glyph.png",
+    "interiorBbox": [
+     703,
+     1236,
+     51,
+     39
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge821",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 821,
+   "bbox": [
+    841,
+    1307,
+    54,
+    42
+   ],
+   "center": [
+    868.1368421052632,
+    1327.3747368421052
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6309523809523809,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge821-raw.png",
+    "interior": "crops/HeritagePark-full-badge821-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge821-glyph.png",
+    "interiorBbox": [
+     844,
+     1310,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1037",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1037,
+   "bbox": [
+    938,
+    1469,
+    57,
+    42
+   ],
+   "center": [
+    965.3376344086022,
+    1489.4559139784947
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5944026733500418,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1037-raw.png",
+    "interior": "crops/HeritagePark-full-badge1037-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1037-glyph.png",
+    "interiorBbox": [
+     938,
+     1469,
+     57,
+     42
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1062",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1062,
+   "bbox": [
+    694,
+    1488,
+    54,
+    42
+   ],
+   "center": [
+    720.6071428571429,
+    1508.5111607142858
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6516754850088183,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1062-raw.png",
+    "interior": "crops/HeritagePark-full-badge1062-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1062-glyph.png",
+    "interiorBbox": [
+     694,
+     1488,
+     51,
+     42
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": "5",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1077",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1077,
+   "bbox": [
+    1048,
+    1502,
+    54,
+    42
+   ],
+   "center": [
+    1074.6334056399132,
+    1522.520607375271
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6349206349206349,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1077-raw.png",
+    "interior": "crops/HeritagePark-full-badge1077-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1077-glyph.png",
+    "interiorBbox": [
+     1051,
+     1505,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1301",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1301,
+   "bbox": [
+    692,
+    1753,
+    54,
+    42
+   ],
+   "center": [
+    718.3809523809524,
+    1773.5714285714287
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6565255731922398,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1301-raw.png",
+    "interior": "crops/HeritagePark-full-badge1301-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1301-glyph.png",
+    "interiorBbox": [
+     695,
+     1753,
+     51,
+     39
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1328",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1328,
+   "bbox": [
+    245,
+    1889,
+    55,
+    42
+   ],
+   "center": [
+    271.9017094017094,
+    1909.4273504273503
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5896103896103896,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1328-raw.png",
+    "interior": "crops/HeritagePark-full-badge1328-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1328-glyph.png",
+    "interiorBbox": [
+     245,
+     1892,
+     53,
+     39
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1335",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1335,
+   "bbox": [
+    986,
+    1911,
+    56,
+    42
+   ],
+   "center": [
+    1012.2229580573951,
+    1931.4701986754967
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6139455782312925,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1335-raw.png",
+    "interior": "crops/HeritagePark-full-badge1335-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1335-glyph.png",
+    "interiorBbox": [
+     989,
+     1911,
+     53,
+     39
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1346",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1346,
+   "bbox": [
+    618,
+    1951,
+    54,
+    42
+   ],
+   "center": [
+    644.6077586206897,
+    1971.489224137931
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.654320987654321,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1346-raw.png",
+    "interior": "crops/HeritagePark-full-badge1346-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1346-glyph.png",
+    "interiorBbox": [
+     618,
+     1954,
+     51,
+     39
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1362",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1362,
+   "bbox": [
+    918,
+    2001,
+    55,
+    42
+   ],
+   "center": [
+    944.046255506608,
+    2021.2466960352424
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1362-raw.png",
+    "interior": "crops/HeritagePark-full-badge1362-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1362-glyph.png",
+    "interiorBbox": [
+     921,
+     2004,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1371",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1371,
+   "bbox": [
+    63,
+    2020,
+    54,
+    42
+   ],
+   "center": [
+    89.44708423326134,
+    2040.537796976242
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6882716049382716,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1371-raw.png",
+    "interior": "crops/HeritagePark-full-badge1371-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1371-glyph.png",
+    "interiorBbox": [
+     66,
+     2023,
+     51,
+     39
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "HeritagePark-full#badge1376",
+   "image": "HeritagePark-full",
+   "imageRgbaSha256": "b3dcd536b305ed92763d42633706d2f4efafce6ea74a4f91f2a98c7a78619a04",
+   "badgeLabel": 1376,
+   "bbox": [
+    530,
+    2038,
+    54,
+    42
+   ],
+   "center": [
+    555.3469387755102,
+    2058.3832199546487
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6252204585537919,
+   "badgeFamilySize": 14,
+   "crops": {
+    "raw": "crops/HeritagePark-full-badge1376-raw.png",
+    "interior": "crops/HeritagePark-full-badge1376-interior.png",
+    "glyphMask": "crops/HeritagePark-full-badge1376-glyph.png",
+    "interiorBbox": [
+     533,
+     2041,
+     51,
+     39
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge170",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 170,
+   "bbox": [
+    879,
+    715,
+    54,
+    42
+   ],
+   "center": [
+    905.5565031982942,
+    735.5287846481876
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6825396825396826,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge170-raw.png",
+    "interior": "crops/Lenard-1-badge170-interior.png",
+    "glyphMask": "crops/Lenard-1-badge170-glyph.png",
+    "interiorBbox": [
+     882,
+     718,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge229",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 229,
+   "bbox": [
+    456,
+    971,
+    55,
+    42
+   ],
+   "center": [
+    482.13390928725704,
+    991.3930885529157
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge229-raw.png",
+    "interior": "crops/Lenard-1-badge229-interior.png",
+    "glyphMask": "crops/Lenard-1-badge229-glyph.png",
+    "interiorBbox": [
+     459,
+     974,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge265",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 265,
+   "bbox": [
+    1066,
+    1380,
+    55,
+    42
+   ],
+   "center": [
+    1093.1341719077568,
+    1400.5429769392033
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5844155844155844,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge265-raw.png",
+    "interior": "crops/Lenard-1-badge265-interior.png",
+    "glyphMask": "crops/Lenard-1-badge265-glyph.png",
+    "interiorBbox": [
+     1069,
+     1383,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge266",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 266,
+   "bbox": [
+    496,
+    1382,
+    56,
+    42
+   ],
+   "center": [
+    522.491304347826,
+    1402.6478260869565
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6135204081632653,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge266-raw.png",
+    "interior": "crops/Lenard-1-badge266-interior.png",
+    "glyphMask": "crops/Lenard-1-badge266-glyph.png",
+    "interiorBbox": [
+     499,
+     1385,
+     50,
+     36
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge275",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 275,
+   "bbox": [
+    828,
+    1556,
+    54,
+    42
+   ],
+   "center": [
+    853.5045454545455,
+    1576.5181818181818
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6234567901234568,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge275-raw.png",
+    "interior": "crops/Lenard-1-badge275-interior.png",
+    "glyphMask": "crops/Lenard-1-badge275-glyph.png",
+    "interiorBbox": [
+     831,
+     1559,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge281",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 281,
+   "bbox": [
+    664,
+    1632,
+    55,
+    42
+   ],
+   "center": [
+    689.8888888888889,
+    1652.5822222222223
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5883116883116883,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge281-raw.png",
+    "interior": "crops/Lenard-1-badge281-interior.png",
+    "glyphMask": "crops/Lenard-1-badge281-glyph.png",
+    "interiorBbox": [
+     667,
+     1635,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-1#badge316",
+   "image": "Lenard-1",
+   "imageRgbaSha256": "4fed88f3d298b544739a3bf532756d44413d292af0b4f34c627f04d152cbf45c",
+   "badgeLabel": 316,
+   "bbox": [
+    484,
+    2075,
+    55,
+    42
+   ],
+   "center": [
+    510.239651416122,
+    2095.5272331154683
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-1-badge316-raw.png",
+    "interior": "crops/Lenard-1-badge316-interior.png",
+    "glyphMask": "crops/Lenard-1-badge316-glyph.png",
+    "interiorBbox": [
+     487,
+     2078,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge158",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 158,
+   "bbox": [
+    744,
+    690,
+    54,
+    42
+   ],
+   "center": [
+    770.5,
+    710.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6860670194003528,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge158-raw.png",
+    "interior": "crops/Lenard-2-badge158-interior.png",
+    "glyphMask": "crops/Lenard-2-badge158-glyph.png",
+    "interiorBbox": [
+     747,
+     693,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge214",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 214,
+   "bbox": [
+    318,
+    948,
+    55,
+    42
+   ],
+   "center": [
+    344.437908496732,
+    968.3812636165577
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5887445887445888,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge214-raw.png",
+    "interior": "crops/Lenard-2-badge214-interior.png",
+    "glyphMask": "crops/Lenard-2-badge214-glyph.png",
+    "interiorBbox": [
+     321,
+     951,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge243",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 243,
+   "bbox": [
+    933,
+    1360,
+    55,
+    42
+   ],
+   "center": [
+    959.8496868475992,
+    1380.5427974947809
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5844155844155844,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge243-raw.png",
+    "interior": "crops/Lenard-2-badge243-interior.png",
+    "glyphMask": "crops/Lenard-2-badge243-glyph.png",
+    "interiorBbox": [
+     936,
+     1363,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge244",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 244,
+   "bbox": [
+    358,
+    1362,
+    56,
+    42
+   ],
+   "center": [
+    384.4913043478261,
+    1382.6478260869565
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6135204081632653,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge244-raw.png",
+    "interior": "crops/Lenard-2-badge244-interior.png",
+    "glyphMask": "crops/Lenard-2-badge244-glyph.png",
+    "interiorBbox": [
+     361,
+     1365,
+     50,
+     36
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge251",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 251,
+   "bbox": [
+    692,
+    1538,
+    54,
+    42
+   ],
+   "center": [
+    717.5045454545455,
+    1558.5181818181818
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6234567901234568,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge251-raw.png",
+    "interior": "crops/Lenard-2-badge251-interior.png",
+    "glyphMask": "crops/Lenard-2-badge251-glyph.png",
+    "interiorBbox": [
+     695,
+     1541,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge255",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 255,
+   "bbox": [
+    528,
+    1614,
+    55,
+    42
+   ],
+   "center": [
+    553.8888888888889,
+    1634.5822222222223
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5883116883116883,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge255-raw.png",
+    "interior": "crops/Lenard-2-badge255-interior.png",
+    "glyphMask": "crops/Lenard-2-badge255-glyph.png",
+    "interiorBbox": [
+     531,
+     1617,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-2#badge293",
+   "image": "Lenard-2",
+   "imageRgbaSha256": "3659157b9501899ff62dcc5216dcb058a6a50d31578e751dcb665c49b97da4ee",
+   "badgeLabel": 293,
+   "bbox": [
+    346,
+    2061,
+    55,
+    42
+   ],
+   "center": [
+    372.1978260869565,
+    2081.5717391304347
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-2-badge293-raw.png",
+    "interior": "crops/Lenard-2-badge293-interior.png",
+    "glyphMask": "crops/Lenard-2-badge293-glyph.png",
+    "interiorBbox": [
+     349,
+     2064,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-3#badge278",
+   "image": "Lenard-3",
+   "imageRgbaSha256": "910cb60cc584ecbaa655b4034564683b54dc8f97632365a9b618af5c6f2cb23c",
+   "badgeLabel": 278,
+   "bbox": [
+    143,
+    1001,
+    54,
+    42
+   ],
+   "center": [
+    169.43099787685776,
+    1021.47983014862
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6318342151675485,
+   "badgeFamilySize": 4,
+   "crops": {
+    "raw": "crops/Lenard-3-badge278-raw.png",
+    "interior": "crops/Lenard-3-badge278-interior.png",
+    "glyphMask": "crops/Lenard-3-badge278-glyph.png",
+    "interiorBbox": [
+     146,
+     1004,
+     48,
+     36
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-3#badge293",
+   "image": "Lenard-3",
+   "imageRgbaSha256": "910cb60cc584ecbaa655b4034564683b54dc8f97632365a9b618af5c6f2cb23c",
+   "badgeLabel": 293,
+   "bbox": [
+    473,
+    1075,
+    54,
+    42
+   ],
+   "center": [
+    499.4025423728813,
+    1095.5148305084747
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.671957671957672,
+   "badgeFamilySize": 4,
+   "crops": {
+    "raw": "crops/Lenard-3-badge293-raw.png",
+    "interior": "crops/Lenard-3-badge293-interior.png",
+    "glyphMask": "crops/Lenard-3-badge293-glyph.png",
+    "interiorBbox": [
+     476,
+     1078,
+     48,
+     36
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-3#badge331",
+   "image": "Lenard-3",
+   "imageRgbaSha256": "910cb60cc584ecbaa655b4034564683b54dc8f97632365a9b618af5c6f2cb23c",
+   "badgeLabel": 331,
+   "bbox": [
+    293,
+    1345,
+    54,
+    42
+   ],
+   "center": [
+    319.3902953586498,
+    1365.350210970464
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6313932980599647,
+   "badgeFamilySize": 4,
+   "crops": {
+    "raw": "crops/Lenard-3-badge331-raw.png",
+    "interior": "crops/Lenard-3-badge331-interior.png",
+    "glyphMask": "crops/Lenard-3-badge331-glyph.png",
+    "interiorBbox": [
+     296,
+     1348,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-3#badge453",
+   "image": "Lenard-3",
+   "imageRgbaSha256": "910cb60cc584ecbaa655b4034564683b54dc8f97632365a9b618af5c6f2cb23c",
+   "badgeLabel": 453,
+   "bbox": [
+    16,
+    1634,
+    54,
+    42
+   ],
+   "center": [
+    42.60337552742616,
+    1654.5696202531647
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6349206349206349,
+   "badgeFamilySize": 4,
+   "crops": {
+    "raw": "crops/Lenard-3-badge453-raw.png",
+    "interior": "crops/Lenard-3-badge453-interior.png",
+    "glyphMask": "crops/Lenard-3-badge453-glyph.png",
+    "interiorBbox": [
+     19,
+     1637,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge196",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 196,
+   "bbox": [
+    1008,
+    947,
+    54,
+    42
+   ],
+   "center": [
+    1034.6132478632478,
+    967.4978632478633
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge196-raw.png",
+    "interior": "crops/Lenard-4-badge196-interior.png",
+    "glyphMask": "crops/Lenard-4-badge196-glyph.png",
+    "interiorBbox": [
+     1011,
+     950,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge211",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 211,
+   "bbox": [
+    1050,
+    1097,
+    54,
+    42
+   ],
+   "center": [
+    1076.4494623655914,
+    1117.4602150537635
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6340388007054674,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge211-raw.png",
+    "interior": "crops/Lenard-4-badge211-interior.png",
+    "glyphMask": "crops/Lenard-4-badge211-glyph.png",
+    "interiorBbox": [
+     1053,
+     1100,
+     49,
+     39
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge244",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 244,
+   "bbox": [
+    697,
+    1324,
+    54,
+    42
+   ],
+   "center": [
+    723.4088983050848,
+    1344.656779661017
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6499118165784833,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge244-raw.png",
+    "interior": "crops/Lenard-4-badge244-interior.png",
+    "glyphMask": "crops/Lenard-4-badge244-glyph.png",
+    "interiorBbox": [
+     700,
+     1327,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge250",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 250,
+   "bbox": [
+    768,
+    1434,
+    55,
+    42
+   ],
+   "center": [
+    795.1210191082803,
+    1454.1868365180467
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5917748917748917,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge250-raw.png",
+    "interior": "crops/Lenard-4-badge250-interior.png",
+    "glyphMask": "crops/Lenard-4-badge250-glyph.png",
+    "interiorBbox": [
+     771,
+     1437,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": "12",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge324",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 324,
+   "bbox": [
+    590,
+    1912,
+    54,
+    42
+   ],
+   "center": [
+    616.5577342047931,
+    1932.5272331154683
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6538800705467372,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge324-raw.png",
+    "interior": "crops/Lenard-4-badge324-interior.png",
+    "glyphMask": "crops/Lenard-4-badge324-glyph.png",
+    "interiorBbox": [
+     593,
+     1915,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-4#badge418",
+   "image": "Lenard-4",
+   "imageRgbaSha256": "597ee6face1de6b925ee0b6e455a6ff6baec607397a6f154d327eada41164116",
+   "badgeLabel": 418,
+   "bbox": [
+    851,
+    2261,
+    54,
+    42
+   ],
+   "center": [
+    877.5565031982942,
+    2281.5287846481874
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6825396825396826,
+   "badgeFamilySize": 6,
+   "crops": {
+    "raw": "crops/Lenard-4-badge418-raw.png",
+    "interior": "crops/Lenard-4-badge418-interior.png",
+    "glyphMask": "crops/Lenard-4-badge418-glyph.png",
+    "interiorBbox": [
+     854,
+     2264,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge286",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 286,
+   "bbox": [
+    877,
+    867,
+    54,
+    42
+   ],
+   "center": [
+    903.4309978768578,
+    887.47983014862
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6318342151675485,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge286-raw.png",
+    "interior": "crops/Lenard-5-badge286-interior.png",
+    "glyphMask": "crops/Lenard-5-badge286-glyph.png",
+    "interiorBbox": [
+     880,
+     870,
+     48,
+     36
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge310",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 310,
+   "bbox": [
+    1207,
+    941,
+    54,
+    42
+   ],
+   "center": [
+    1233.4025423728813,
+    961.5148305084746
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.671957671957672,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge310-raw.png",
+    "interior": "crops/Lenard-5-badge310-interior.png",
+    "glyphMask": "crops/Lenard-5-badge310-glyph.png",
+    "interiorBbox": [
+     1210,
+     944,
+     48,
+     36
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge325",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 325,
+   "bbox": [
+    1027,
+    1211,
+    54,
+    42
+   ],
+   "center": [
+    1053.3431578947368,
+    1231.3915789473683
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6313932980599647,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge325-raw.png",
+    "interior": "crops/Lenard-5-badge325-interior.png",
+    "glyphMask": "crops/Lenard-5-badge325-glyph.png",
+    "interiorBbox": [
+     1030,
+     1214,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge382",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 382,
+   "bbox": [
+    751,
+    1500,
+    54,
+    42
+   ],
+   "center": [
+    777.5871369294606,
+    1520.6410788381743
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge382-raw.png",
+    "interior": "crops/Lenard-5-badge382-interior.png",
+    "glyphMask": "crops/Lenard-5-badge382-glyph.png",
+    "interiorBbox": [
+     754,
+     1503,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge465",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 465,
+   "bbox": [
+    519,
+    1853,
+    57,
+    42
+   ],
+   "center": [
+    545.9178947368421,
+    1873.6042105263157
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5839598997493735,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge465-raw.png",
+    "interior": "crops/Lenard-5-badge465-interior.png",
+    "glyphMask": "crops/Lenard-5-badge465-glyph.png",
+    "interiorBbox": [
+     522,
+     1856,
+     50,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge652",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 652,
+   "bbox": [
+    69,
+    2264,
+    54,
+    42
+   ],
+   "center": [
+    95.63752665245202,
+    2284.4712153518126
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge652-raw.png",
+    "interior": "crops/Lenard-5-badge652-interior.png",
+    "glyphMask": "crops/Lenard-5-badge652-glyph.png",
+    "interiorBbox": [
+     72,
+     2267,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-5#badge701",
+   "image": "Lenard-5",
+   "imageRgbaSha256": "4379abb30a5b0907aa0e1435b13e19eafe8fdd31ac57c9b8bdff4495a14fdc2a",
+   "badgeLabel": 701,
+   "bbox": [
+    111,
+    2414,
+    54,
+    42
+   ],
+   "center": [
+    137.44708423326134,
+    2434.4622030237583
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6340388007054674,
+   "badgeFamilySize": 7,
+   "crops": {
+    "raw": "crops/Lenard-5-badge701-raw.png",
+    "interior": "crops/Lenard-5-badge701-interior.png",
+    "glyphMask": "crops/Lenard-5-badge701-glyph.png",
+    "interiorBbox": [
+     114,
+     2417,
+     49,
+     39
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge136",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 136,
+   "bbox": [
+    833,
+    542,
+    54,
+    42
+   ],
+   "center": [
+    859.5085106382978,
+    562.4148936170212
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6335978835978836,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge136-raw.png",
+    "interior": "crops/Lenard-full-badge136-interior.png",
+    "glyphMask": "crops/Lenard-full-badge136-glyph.png",
+    "interiorBbox": [
+     836,
+     545,
+     48,
+     36
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge153",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 153,
+   "bbox": [
+    973,
+    579,
+    54,
+    42
+   ],
+   "center": [
+    999.4656964656965,
+    599.4511434511435
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.671957671957672,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge153-raw.png",
+    "interior": "crops/Lenard-full-badge153-interior.png",
+    "glyphMask": "crops/Lenard-full-badge153-glyph.png",
+    "interiorBbox": [
+     976,
+     582,
+     48,
+     36
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge178",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 178,
+   "bbox": [
+    891,
+    691,
+    54,
+    42
+   ],
+   "center": [
+    917.4853556485356,
+    711.428870292887
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6313932980599647,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge178-raw.png",
+    "interior": "crops/Lenard-full-badge178-interior.png",
+    "glyphMask": "crops/Lenard-full-badge178-glyph.png",
+    "interiorBbox": [
+     894,
+     694,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge218",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 218,
+   "bbox": [
+    768,
+    810,
+    54,
+    42
+   ],
+   "center": [
+    794.6965811965812,
+    830.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6349206349206349,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge218-raw.png",
+    "interior": "crops/Lenard-full-badge218-interior.png",
+    "glyphMask": "crops/Lenard-full-badge218-glyph.png",
+    "interiorBbox": [
+     771,
+     813,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge301",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 301,
+   "bbox": [
+    662,
+    958,
+    57,
+    42
+   ],
+   "center": [
+    689.3134328358209,
+    978.45842217484
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5856307435254804,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge301-raw.png",
+    "interior": "crops/Lenard-full-badge301-interior.png",
+    "glyphMask": "crops/Lenard-full-badge301-glyph.png",
+    "interiorBbox": [
+     665,
+     961,
+     50,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge466",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 466,
+   "bbox": [
+    463,
+    1126,
+    54,
+    42
+   ],
+   "center": [
+    489.28691983122366,
+    1146.2784810126582
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge466-raw.png",
+    "interior": "crops/Lenard-full-badge466-interior.png",
+    "glyphMask": "crops/Lenard-full-badge466-glyph.png",
+    "interiorBbox": [
+     466,
+     1129,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge514",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 514,
+   "bbox": [
+    479,
+    1191,
+    54,
+    42
+   ],
+   "center": [
+    505.20425531914896,
+    1211.2808510638297
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6309523809523809,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge514-raw.png",
+    "interior": "crops/Lenard-full-badge514-interior.png",
+    "glyphMask": "crops/Lenard-full-badge514-glyph.png",
+    "interiorBbox": [
+     482,
+     1194,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge556",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 556,
+   "bbox": [
+    324,
+    1282,
+    54,
+    42
+   ],
+   "center": [
+    350.7909482758621,
+    1302.6530172413793
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6516754850088183,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge556-raw.png",
+    "interior": "crops/Lenard-full-badge556-interior.png",
+    "glyphMask": "crops/Lenard-full-badge556-glyph.png",
+    "interiorBbox": [
+     327,
+     1285,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge701",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 701,
+   "bbox": [
+    268,
+    1532,
+    54,
+    42
+   ],
+   "center": [
+    294.8199152542373,
+    1552.5783898305085
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6538800705467372,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge701-raw.png",
+    "interior": "crops/Lenard-full-badge701-interior.png",
+    "glyphMask": "crops/Lenard-full-badge701-glyph.png",
+    "interiorBbox": [
+     271,
+     1535,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge769",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 769,
+   "bbox": [
+    374,
+    1685,
+    54,
+    42
+   ],
+   "center": [
+    400.22717622080677,
+    1705.4925690021232
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6843033509700176,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge769-raw.png",
+    "interior": "crops/Lenard-full-badge769-interior.png",
+    "glyphMask": "crops/Lenard-full-badge769-glyph.png",
+    "interiorBbox": [
+     377,
+     1688,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge809",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 809,
+   "bbox": [
+    187,
+    1789,
+    55,
+    42
+   ],
+   "center": [
+    213.24406047516197,
+    1809.3801295896328
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.587012987012987,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge809-raw.png",
+    "interior": "crops/Lenard-full-badge809-interior.png",
+    "glyphMask": "crops/Lenard-full-badge809-glyph.png",
+    "interiorBbox": [
+     190,
+     1792,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge866",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 866,
+   "bbox": [
+    197,
+    1966,
+    56,
+    42
+   ],
+   "center": [
+    223.4978354978355,
+    1986.5
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6135204081632653,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge866-raw.png",
+    "interior": "crops/Lenard-full-badge866-interior.png",
+    "glyphMask": "crops/Lenard-full-badge866-glyph.png",
+    "interiorBbox": [
+     200,
+     1969,
+     50,
+     36
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge871",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 871,
+   "bbox": [
+    443,
+    1975,
+    55,
+    42
+   ],
+   "center": [
+    469.8683651804671,
+    1995.4755838641188
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5835497835497836,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge871-raw.png",
+    "interior": "crops/Lenard-full-badge871-interior.png",
+    "glyphMask": "crops/Lenard-full-badge871-glyph.png",
+    "interiorBbox": [
+     446,
+     1978,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge892",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 892,
+   "bbox": [
+    338,
+    2047,
+    54,
+    42
+   ],
+   "center": [
+    363.0807174887892,
+    2067.269058295964
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6225749559082893,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge892-raw.png",
+    "interior": "crops/Lenard-full-badge892-interior.png",
+    "glyphMask": "crops/Lenard-full-badge892-glyph.png",
+    "interiorBbox": [
+     341,
+     2050,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge907",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 907,
+   "bbox": [
+    266,
+    2077,
+    55,
+    42
+   ],
+   "center": [
+    291.54505494505497,
+    2097.523076923077
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge907-raw.png",
+    "interior": "crops/Lenard-full-badge907-interior.png",
+    "glyphMask": "crops/Lenard-full-badge907-glyph.png",
+    "interiorBbox": [
+     269,
+     2080,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "Lenard-full#badge977",
+   "image": "Lenard-full",
+   "imageRgbaSha256": "c93a4c532da248a61e29e56bf86273e6eaee9151643bd681974a882928f50766",
+   "badgeLabel": 977,
+   "bbox": [
+    180,
+    2265,
+    55,
+    42
+   ],
+   "center": [
+    206.07112068965517,
+    2285.2758620689656
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5805194805194805,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/Lenard-full-badge977-raw.png",
+    "interior": "crops/Lenard-full-badge977-interior.png",
+    "glyphMask": "crops/Lenard-full-badge977-glyph.png",
+    "interiorBbox": [
+     183,
+     2268,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge264",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 264,
+   "bbox": [
+    748,
+    1065,
+    54,
+    42
+   ],
+   "center": [
+    774.339702760085,
+    1085.5435244161358
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge264-raw.png",
+    "interior": "crops/NorthPark-full-badge264-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge264-glyph.png",
+    "interiorBbox": [
+     751,
+     1068,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge280",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 280,
+   "bbox": [
+    191,
+    1135,
+    57,
+    42
+   ],
+   "center": [
+    218.07659574468084,
+    1155.5
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5839598997493735,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge280-raw.png",
+    "interior": "crops/NorthPark-full-badge280-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge280-glyph.png",
+    "interiorBbox": [
+     194,
+     1138,
+     50,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge288",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 288,
+   "bbox": [
+    496,
+    1167,
+    55,
+    42
+   ],
+   "center": [
+    522.3507625272331,
+    1187.4945533769064
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5909090909090909,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge288-raw.png",
+    "interior": "crops/NorthPark-full-badge288-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge288-glyph.png",
+    "interiorBbox": [
+     499,
+     1170,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": "12",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge299",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 299,
+   "bbox": [
+    194,
+    1202,
+    54,
+    42
+   ],
+   "center": [
+    220.5,
+    1222.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6344797178130511,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge299-raw.png",
+    "interior": "crops/NorthPark-full-badge299-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge299-glyph.png",
+    "interiorBbox": [
+     197,
+     1205,
+     48,
+     36
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge311",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 311,
+   "bbox": [
+    961,
+    1329,
+    54,
+    42
+   ],
+   "center": [
+    987.5,
+    1349.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6318342151675485,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge311-raw.png",
+    "interior": "crops/NorthPark-full-badge311-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge311-glyph.png",
+    "interiorBbox": [
+     964,
+     1332,
+     48,
+     36
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge317",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 317,
+   "bbox": [
+    674,
+    1377,
+    56,
+    42
+   ],
+   "center": [
+    700.1666666666666,
+    1397.5111111111112
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6152210884353742,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge317-raw.png",
+    "interior": "crops/NorthPark-full-badge317-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge317-glyph.png",
+    "interiorBbox": [
+     677,
+     1378,
+     53,
+     38
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge318",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 318,
+   "bbox": [
+    851,
+    1384,
+    55,
+    42
+   ],
+   "center": [
+    877.0891304347826,
+    1404.5
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge318-raw.png",
+    "interior": "crops/NorthPark-full-badge318-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge318-glyph.png",
+    "interiorBbox": [
+     854,
+     1387,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge331",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 331,
+   "bbox": [
+    650,
+    1446,
+    55,
+    42
+   ],
+   "center": [
+    676.3738938053098,
+    1466.5066371681417
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5813852813852813,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge331-raw.png",
+    "interior": "crops/NorthPark-full-badge331-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge331-glyph.png",
+    "interiorBbox": [
+     653,
+     1449,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge352",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 352,
+   "bbox": [
+    870,
+    1574,
+    55,
+    42
+   ],
+   "center": [
+    896.1603563474388,
+    1594.3853006681516
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5883116883116883,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge352-raw.png",
+    "interior": "crops/NorthPark-full-badge352-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge352-glyph.png",
+    "interiorBbox": [
+     873,
+     1577,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge368",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 368,
+   "bbox": [
+    923,
+    1654,
+    54,
+    42
+   ],
+   "center": [
+    948.2927927927927,
+    1674.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6225749559082893,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge368-raw.png",
+    "interior": "crops/NorthPark-full-badge368-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge368-glyph.png",
+    "interiorBbox": [
+     926,
+     1657,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge398",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 398,
+   "bbox": [
+    853,
+    1732,
+    55,
+    42
+   ],
+   "center": [
+    879.603813559322,
+    1752.6483050847457
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5844155844155844,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge398-raw.png",
+    "interior": "crops/NorthPark-full-badge398-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge398-glyph.png",
+    "interiorBbox": [
+     856,
+     1735,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge404",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 404,
+   "bbox": [
+    1048,
+    1779,
+    54,
+    42
+   ],
+   "center": [
+    1074.6077586206898,
+    1799.5668103448277
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6415343915343915,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge404-raw.png",
+    "interior": "crops/NorthPark-full-badge404-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge404-glyph.png",
+    "interiorBbox": [
+     1051,
+     1782,
+     48,
+     36
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": "5",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge411",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 411,
+   "bbox": [
+    1066,
+    1829,
+    54,
+    42
+   ],
+   "center": [
+    1092.4034334763949,
+    1849.4291845493563
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6556437389770723,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge411-raw.png",
+    "interior": "crops/NorthPark-full-badge411-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge411-glyph.png",
+    "interiorBbox": [
+     1069,
+     1832,
+     48,
+     36
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge449",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 449,
+   "bbox": [
+    1102,
+    1955,
+    54,
+    42
+   ],
+   "center": [
+    1128.352688172043,
+    1975.389247311828
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6499118165784833,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge449-raw.png",
+    "interior": "crops/NorthPark-full-badge449-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge449-glyph.png",
+    "interiorBbox": [
+     1105,
+     1958,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge454",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 454,
+   "bbox": [
+    609,
+    1992,
+    54,
+    42
+   ],
+   "center": [
+    635.4603854389721,
+    2012.543897216274
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6521164021164021,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge454-raw.png",
+    "interior": "crops/NorthPark-full-badge454-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge454-glyph.png",
+    "interiorBbox": [
+     612,
+     1995,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "NorthPark-full#badge460",
+   "image": "NorthPark-full",
+   "imageRgbaSha256": "70877c3ed1c0269161bf96db072040f4ba0106ba6a7a517f938df5b1c859ab60",
+   "badgeLabel": 460,
+   "bbox": [
+    590,
+    2060,
+    54,
+    42
+   ],
+   "center": [
+    616.5403050108932,
+    2080.544662309368
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6860670194003528,
+   "badgeFamilySize": 16,
+   "crops": {
+    "raw": "crops/NorthPark-full-badge460-raw.png",
+    "interior": "crops/NorthPark-full-badge460-interior.png",
+    "glyphMask": "crops/NorthPark-full-badge460-glyph.png",
+    "interiorBbox": [
+     593,
+     2063,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge128",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 128,
+   "bbox": [
+    679,
+    864,
+    54,
+    42
+   ],
+   "center": [
+    705.4042553191489,
+    884.4212765957446
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge128-raw.png",
+    "interior": "crops/TowneLake-full-badge128-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge128-glyph.png",
+    "interiorBbox": [
+     682,
+     867,
+     48,
+     36
+    ],
+    "glyphPixelCount": 170
+   },
+   "label": "9",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge172",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 172,
+   "bbox": [
+    595,
+    940,
+    57,
+    42
+   ],
+   "center": [
+    622.2093023255813,
+    960.3995771670191
+   ],
+   "aspect": 1.3571428571428572,
+   "darkInteriorFraction": 0.5847953216374269,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge172-raw.png",
+    "interior": "crops/TowneLake-full-badge172-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge172-glyph.png",
+    "interiorBbox": [
+     598,
+     943,
+     50,
+     36
+    ],
+    "glyphPixelCount": 245
+   },
+   "label": "10",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge204",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 204,
+   "bbox": [
+    785,
+    1098,
+    54,
+    42
+   ],
+   "center": [
+    811.482905982906,
+    1118.5726495726497
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6331569664902998,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge204-raw.png",
+    "interior": "crops/TowneLake-full-badge204-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge204-glyph.png",
+    "interiorBbox": [
+     788,
+     1101,
+     48,
+     36
+    ],
+    "glyphPixelCount": 172
+   },
+   "label": "8",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge208",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 208,
+   "bbox": [
+    669,
+    1121,
+    54,
+    42
+   ],
+   "center": [
+    695.695278969957,
+    1141.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6340388007054674,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge208-raw.png",
+    "interior": "crops/TowneLake-full-badge208-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge208-glyph.png",
+    "interiorBbox": [
+     669,
+     1124,
+     51,
+     39
+    ],
+    "glyphPixelCount": 173
+   },
+   "label": "11",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge291",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 291,
+   "bbox": [
+    543,
+    1434,
+    55,
+    42
+   ],
+   "center": [
+    569.2418300653595,
+    1454.4313725490197
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5909090909090909,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge291-raw.png",
+    "interior": "crops/TowneLake-full-badge291-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge291-glyph.png",
+    "interiorBbox": [
+     546,
+     1437,
+     48,
+     36
+    ],
+    "glyphPixelCount": 218
+   },
+   "label": "12",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge295",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 295,
+   "bbox": [
+    759,
+    1458,
+    54,
+    42
+   ],
+   "center": [
+    785.4666666666667,
+    1478.6129032258063
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.673721340388007,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge295-raw.png",
+    "interior": "crops/TowneLake-full-badge295-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge295-glyph.png",
+    "interiorBbox": [
+     762,
+     1461,
+     48,
+     36
+    ],
+    "glyphPixelCount": 109
+   },
+   "label": "7",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge299",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 299,
+   "bbox": [
+    1053,
+    1484,
+    54,
+    42
+   ],
+   "center": [
+    1079.4626865671642,
+    1504.6076759061834
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6843033509700176,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge299-raw.png",
+    "interior": "crops/TowneLake-full-badge299-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge299-glyph.png",
+    "interiorBbox": [
+     1056,
+     1487,
+     48,
+     36
+    ],
+    "glyphPixelCount": 78
+   },
+   "label": "1",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge325",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 325,
+   "bbox": [
+    232,
+    1565,
+    55,
+    42
+   ],
+   "center": [
+    258.08733624454146,
+    1585.5
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5878787878787879,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge325-raw.png",
+    "interior": "crops/TowneLake-full-badge325-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge325-glyph.png",
+    "interiorBbox": [
+     235,
+     1568,
+     48,
+     36
+    ],
+    "glyphPixelCount": 217
+   },
+   "label": "13",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge341",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 341,
+   "bbox": [
+    606,
+    1611,
+    54,
+    42
+   ],
+   "center": [
+    632.7047413793103,
+    1631.584051724138
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6335978835978836,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge341-raw.png",
+    "interior": "crops/TowneLake-full-badge341-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge341-glyph.png",
+    "interiorBbox": [
+     609,
+     1614,
+     48,
+     36
+    ],
+    "glyphPixelCount": 167
+   },
+   "label": "6",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge344",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 344,
+   "bbox": [
+    275,
+    1623,
+    56,
+    42
+   ],
+   "center": [
+    301.1378555798687,
+    1643.5579868708971
+   ],
+   "aspect": 1.3333333333333333,
+   "darkInteriorFraction": 0.6152210884353742,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge344-raw.png",
+    "interior": "crops/TowneLake-full-badge344-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge344-glyph.png",
+    "interiorBbox": [
+     275,
+     1623,
+     53,
+     39
+    ],
+    "glyphPixelCount": 236
+   },
+   "label": "14",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge349",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 349,
+   "bbox": [
+    721,
+    1698,
+    54,
+    42
+   ],
+   "center": [
+    747.5042918454935,
+    1718.5643776824033
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6415343915343915,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge349-raw.png",
+    "interior": "crops/TowneLake-full-badge349-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge349-glyph.png",
+    "interiorBbox": [
+     724,
+     1701,
+     48,
+     36
+    ],
+    "glyphPixelCount": 155
+   },
+   "label": "5",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge353",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 353,
+   "bbox": [
+    1033,
+    1758,
+    55,
+    42
+   ],
+   "center": [
+    1059.8471337579617,
+    1778.4564755838642
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5844155844155844,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge353-raw.png",
+    "interior": "crops/TowneLake-full-badge353-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge353-glyph.png",
+    "interiorBbox": [
+     1036,
+     1761,
+     49,
+     36
+    ],
+    "glyphPixelCount": 250
+   },
+   "label": "18",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge355",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 355,
+   "bbox": [
+    882,
+    1768,
+    54,
+    42
+   ],
+   "center": [
+    908.5,
+    1788.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6538800705467372,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge355-raw.png",
+    "interior": "crops/TowneLake-full-badge355-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge355-glyph.png",
+    "interiorBbox": [
+     885,
+     1771,
+     48,
+     36
+    ],
+    "glyphPixelCount": 140
+   },
+   "label": "2",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge360",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 360,
+   "bbox": [
+    261,
+    1833,
+    55,
+    42
+   ],
+   "center": [
+    287.27947598253274,
+    1853.5720524017468
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5796536796536796,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge360-raw.png",
+    "interior": "crops/TowneLake-full-badge360-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge360-glyph.png",
+    "interiorBbox": [
+     264,
+     1836,
+     48,
+     36
+    ],
+    "glyphPixelCount": 233
+   },
+   "label": "15",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge363",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 363,
+   "bbox": [
+    690,
+    1846,
+    54,
+    42
+   ],
+   "center": [
+    716.4580645161291,
+    1866.374193548387
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6613756613756614,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge363-raw.png",
+    "interior": "crops/TowneLake-full-badge363-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge363-glyph.png",
+    "interiorBbox": [
+     693,
+     1849,
+     51,
+     39
+    ],
+    "glyphPixelCount": 158
+   },
+   "label": "4",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge376",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 376,
+   "bbox": [
+    786,
+    2022,
+    54,
+    42
+   ],
+   "center": [
+    812.5,
+    2042.5
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6516754850088183,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge376-raw.png",
+    "interior": "crops/TowneLake-full-badge376-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge376-glyph.png",
+    "interiorBbox": [
+     789,
+     2025,
+     48,
+     36
+    ],
+    "glyphPixelCount": 139
+   },
+   "label": "3",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge389",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 389,
+   "bbox": [
+    419,
+    2158,
+    55,
+    42
+   ],
+   "center": [
+    444.5837004405286,
+    2178.6541850220265
+   ],
+   "aspect": 1.3095238095238095,
+   "darkInteriorFraction": 0.5874458874458874,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge389-raw.png",
+    "interior": "crops/TowneLake-full-badge389-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge389-glyph.png",
+    "interiorBbox": [
+     422,
+     2161,
+     49,
+     36
+    ],
+    "glyphPixelCount": 248
+   },
+   "label": "16",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  },
+  {
+   "id": "TowneLake-full#badge397",
+   "image": "TowneLake-full",
+   "imageRgbaSha256": "96c794f10e8bd8e20379d166ef09860acf6b3555a832c83cf6fd30dda7b4cced",
+   "badgeLabel": 397,
+   "bbox": [
+    905,
+    2179,
+    54,
+    42
+   ],
+   "center": [
+    929.9574944071588,
+    2199.5212527964204
+   ],
+   "aspect": 1.2857142857142858,
+   "darkInteriorFraction": 0.6216931216931217,
+   "badgeFamilySize": 18,
+   "crops": {
+    "raw": "crops/TowneLake-full-badge397-raw.png",
+    "interior": "crops/TowneLake-full-badge397-interior.png",
+    "glyphMask": "crops/TowneLake-full-badge397-glyph.png",
+    "interiorBbox": [
+     908,
+     2182,
+     48,
+     36
+    ],
+    "glyphPixelCount": 187
+   },
+   "label": "17",
+   "labelProvenance": {
+    "source": "manual-visual",
+    "reader": "manual visual read of raw badge crops by orchestrating agent (montage pages, indexed)",
+    "date": "2026-08-19"
+   },
+   "provenanceClass": "REAL_GROUNDED"
+  }
+ ]
+}

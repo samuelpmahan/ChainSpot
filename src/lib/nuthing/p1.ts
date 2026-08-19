@@ -89,7 +89,7 @@ function fbeta(precision: number, recall: number, beta = F_BETA): number {
   return ((1 + b2) * precision * recall) / (b2 * precision + recall);
 }
 
-interface CanonicalProjection {
+export interface CanonicalProjection {
   mask: Uint8Array;
   /** Foreground pixel indices in raster order (y * CANON_SIZE + x). */
   pixels: Int32Array;
@@ -99,7 +99,14 @@ interface CanonicalProjection {
   maxY: number;
 }
 
-function canonicalComponentMask(
+/**
+ * Project one component's pixels into the CANON_SIZE canonical square along
+ * its PCA major/minor axes, scaled so the modal tee major axis spans
+ * CANON_MAJOR_SPAN. Exported for reuse by downstream per-candidate tasks
+ * (e.g. scripts/nuthing/two-pass-tees.ts) that need the same canonical mask
+ * scoreTeeComponent() scores against.
+ */
+export function canonicalComponentMask(
   brightLabels: Int32Array,
   width: number,
   c: ComponentStats,
