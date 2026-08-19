@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
+import { COURSE_CORRIDOR_WIDTH, DEFAULT_CORRIDOR_WIDTH } from '../../src/lib/nuthing/badgeOcclusion';
 
 interface CacheLeg {
   endpointId: string;
@@ -88,6 +89,15 @@ function main(): void {
   const zonesIdx = args.indexOf('--zones');
   const zones = zonesIdx >= 0 ? (args.splice(zonesIdx, 1), true) : false;
   const ZONE_DISCOUNT = 0.4;
+  // Replay layer 7 — Z-fit rescue: model-based <=2-bend polyline scoring
+  // for pairs whose Dijkstra route detoured off the true corridor.
+  const zfitIdx = args.indexOf('--zfit');
+  const zfit = zfitIdx >= 0 ? (args.splice(zfitIdx, 1), true) : false;
+  const ZFIT_FACTOR = Number(process.env.ZFIT_FACTOR ?? '0.9');
+  const ZFIT_F1 = Number(process.env.ZFIT_F1 ?? '0.9');
+  const ZFIT_F2 = Number(process.env.ZFIT_F2 ?? '0.8');
+  const ZFIT_TOPK = Number(process.env.ZFIT_TOPK ?? '80');
+  const ZFIT_RESCUE_MAX = Number(process.env.ZFIT_RESCUE_MAX ?? '0.28');
   // Replay layer 3 — simple-path (canonical-form) discipline: in the form
   // tee→badge→basket the badge is an INTERIOR waypoint, so the pair's path
   // must pass THROUGH it. When a badge routes to a neighboring hole's
@@ -132,8 +142,12 @@ function main(): void {
   const emitIdx = args.indexOf('--emit');
   const emit = emitIdx >= 0 ? (args.splice(emitIdx, 1), true) : false;
   const ALIGN_SIGMA_DEG = 12;
-  const FRAC_CENTER = 0.45;
-  const FRAC_HALF_WIDTH = 0.15;
+  // Band recentered to the MEASURED badge-position range (0.17-0.54, n=72;
+  // the old 0.45 +- 0.15 punished low-frac holes asymmetrically - Heritage
+  // h7's badge sits at 0.165 of the chord and its true pair took a 0.44x
+  // penalty, drowning it below a straight-line rival).
+  const FRAC_CENTER = Number(process.env.FRAC_CENTER ?? '0.36');
+  const FRAC_HALF_WIDTH = Number(process.env.FRAC_HALF_WIDTH ?? '0.19');
   const FRAC_SIGMA = 0.15;
   const [cacheDir] = args;
   if (!cacheDir) {
@@ -145,6 +159,7 @@ function main(): void {
   for (const nm of COURSES) {
     const cache = JSON.parse(readFileSync(`${cacheDir}/${nm}.json`, 'utf8')) as CacheCourse;
     const { width: w, height: h, scale } = cache.field;
+    const CORRIDOR_W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
     const support = new Float32Array(readFileSync(`${cacheDir}/${nm}-field.bin`).buffer.slice(0));
     const theta = new Float32Array(readFileSync(`${cacheDir}/${nm}-theta.bin`).buffer.slice(0));
     const windowCells = Math.max(3, Math.round(windowSrcPx / scale));
@@ -217,6 +232,100 @@ function main(): void {
       alignedMean: number;
       score: number;
     }
+
+    // --- Z-fit rescue (--zfit): score a pair by the best explicit <=2-bend
+    // polyline tee -> p1 -> p2 -> basket, with the badge on segment 1
+    // (badge-before-bend invariant), bend angle <= 60 deg, connector length
+    // <= 3W, total length <= 1.4x chord. The corridor IS a polyline with
+    // round caps and wedge bends (render model), so when Dijkstra detours
+    // (Heritage h7's cancelling S: the router took a lower parallel band and
+    // the true pair sank to rank 55), the model-based fit recovers the
+    // score. Sampled with the identical aligned/zone machinery as routes.
+    const alignedSegment = (
+      x0: number, y0: number, x1: number, y1: number,
+      exemptBasket: number, out: number[],
+    ): void => {
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      const steps = Math.max(1, Math.round(len / scale));
+      const dx = (x1 - x0) / len;
+      const dy = (y1 - y0) / len;
+      for (let i = 1; i <= steps; i++) {
+        const px = x0 + (x1 - x0) * (i / steps);
+        const py = y0 + (y1 - y0) * (i / steps);
+        const cx = Math.min(w - 1, Math.max(0, Math.round(px / scale)));
+        const cy = Math.min(h - 1, Math.max(0, Math.round(py / scale)));
+        const cell = cy * w + cx;
+        const t = theta[cell];
+        const align = Math.abs(dx * Math.cos(t) + dy * Math.sin(t));
+        let s = support[cell] * Math.pow(align, alignPow);
+        if (zones) {
+          for (let b = 0; b < basketCenters.length; b++) {
+            if (b === exemptBasket) continue;
+            const f = zoneOf(cell, basketCenters[b]);
+            if (f < 1) {
+              s *= f;
+              break;
+            }
+          }
+        }
+        out.push(s);
+      }
+    };
+    const worstWindowOf = (samples: number[]): number => {
+      const count = samples.length;
+      if (count === 0) return 0;
+      let sum = 0;
+      for (const s of samples) sum += s;
+      if (count <= windowCells) return sum / count;
+      let acc = 0;
+      for (let i = 0; i < windowCells; i++) acc += samples[i];
+      let worst = acc / windowCells;
+      for (let i = windowCells; i < count; i++) {
+        acc += samples[i] - samples[i - windowCells];
+        const m = acc / windowCells;
+        if (m < worst) worst = m;
+      }
+      return worst;
+    };
+    const zfitWorst = (
+      tee: { x: number; y: number }, bc: { cx: number; cy: number },
+      basket: { x: number; y: number }, exemptBasket: number, Wc: number,
+    ): number => {
+      const dBx = bc.cx - tee.x;
+      const dBy = bc.cy - tee.y;
+      const dBadge = Math.hypot(dBx, dBy);
+      if (dBadge < 1e-6) return 0;
+      const u1x = dBx / dBadge;
+      const u1y = dBy / dBadge;
+      const chord = Math.hypot(basket.x - tee.x, basket.y - tee.y);
+      let best = 0;
+      for (let t1 = dBadge + 8; t1 <= Math.min(chord * 0.85, dBadge + 220); t1 += 14) {
+        const p1x = tee.x + u1x * t1;
+        const p1y = tee.y + u1y * t1;
+        for (const deltaDeg of [-60, -45, -30, -20, 0, 20, 30, 45, 60]) {
+          const d = (deltaDeg * Math.PI) / 180;
+          const u2x = u1x * Math.cos(d) - u1y * Math.sin(d);
+          const u2y = u1x * Math.sin(d) + u1y * Math.cos(d);
+          for (const L2 of deltaDeg === 0 ? [0] : [0.8 * Wc, 1.6 * Wc, 3 * Wc]) {
+            const p2x = p1x + u2x * L2;
+            const p2y = p1y + u2y * L2;
+            const tail = Math.hypot(basket.x - p2x, basket.y - p2y);
+            if (t1 + L2 + tail > 1.4 * chord) continue;
+            const samples: number[] = [];
+            alignedSegment(tee.x, tee.y, p1x, p1y, exemptBasket, samples);
+            if (L2 > 0) alignedSegment(p1x, p1y, p2x, p2y, exemptBasket, samples);
+            alignedSegment(p2x, p2y, basket.x, basket.y, exemptBasket, samples);
+            // Occam prior: each bend costs. A straight fit keeps full value,
+            // a single bend pays a little, the 2-bend Z pays more — honest
+            // Z-corridors clear the discount, shopped ones don't.
+            const bends = deltaDeg === 0 ? 0 : L2 > 0 ? 2 : 1;
+            const wv = worstWindowOf(samples) * (bends === 0 ? 1 : bends === 1 ? ZFIT_F1 : ZFIT_F2);
+            if (wv > best) best = wv;
+          }
+        }
+      }
+      return best;
+    };
     const rescoredByBadge = new Map<string, Rescored[]>();
     for (const badge of cache.badges) {
       // Tee legs never get a zone exemption; each basket leg exempts only its
@@ -315,6 +424,21 @@ function main(): void {
               const frac = ((badge.cx - tee.x) * vx + (badge.cy - tee.y) * vy) / vv;
               const excess = Math.max(0, Math.abs(frac - FRAC_CENTER) - FRAC_HALF_WIDTH);
               score *= Math.exp(-((excess / FRAC_SIGMA) ** 2));
+              // Perfect-line BONUS (never a penalty — dogleg true pairs have
+              // the badge legitimately off the chord): straight holes put
+              // tee, badge and basket collinear within ~1.4 deg (41/41
+              // measured); a wrong pairing that swaps in a neighboring
+              // basket breaks the line by several degrees. Reward exact
+              // collinearity so perfect tee->badge->basket lines outrank
+              // near-parallel cluster thefts.
+              const dTB = Math.atan2(vy, vx);
+              const dBadge = Math.atan2(badge.cy - tee.y, badge.cx - tee.x);
+              let dc = Math.abs(dBadge - dTB) % (2 * Math.PI);
+              if (dc > Math.PI) dc = 2 * Math.PI - dc;
+              const collinDeg = (dc * 180) / Math.PI;
+              const B = Number(process.env.COLLIN_BONUS ?? '0.6');
+              const SIG = Number(process.env.COLLIN_SIGMA ?? '2');
+              score *= 1 + B * Math.exp(-((collinDeg / SIG) ** 2));
             }
           }
         }
@@ -341,6 +465,37 @@ function main(): void {
           alignedMean: sum / count,
           score,
         });
+      }
+      if (zfit) {
+        // Rescue pass on the strongest rows: layers multiplied `worst` into
+        // `score`, so lifting worst -> max(worst, F * zfitWorst) rescales the
+        // score by the same layer product without re-running the layers.
+        const order = rows
+          .map((_, i) => i)
+          .sort((a, b) => rows[b].score - rows[a].score)
+          .slice(0, ZFIT_TOPK);
+        for (const i of order) {
+          const row = rows[i];
+          if (row.alignedWorstWindow <= 0 || row.score <= 0) continue;
+          // Salvage-only: rescue pairs whose ROUTE drowned them (Heritage
+          // h7's true pair: routed 0.13, Z-fit 0.33). Healthy routed scores
+          // get no boost — unconditional rescue measurably let neighboring
+          // false pairs (h4<->h12 basket swap) shop for 2-bend bridges.
+          if (row.alignedWorstWindow >= ZFIT_RESCUE_MAX) continue;
+          const tee = cache.endpoints.tees[Number(row.teeId.slice(1))];
+          const basket = cache.endpoints.baskets[Number(row.basketId.slice(1))];
+          if (!tee || !basket) continue;
+          // Rescue ONLY detoured routes: a direct route needs no polyline
+          // fit, and granting one lets false pairs shop for 2-bend
+          // interpretations they never routed (measured: unconditional
+          // rescue lifted ranks but cost 2 Heritage assignments).
+          const zw = zfitWorst(tee, badge, basket, Number(row.basketId.slice(1)), CORRIDOR_W) * ZFIT_FACTOR;
+          if (zw > row.alignedWorstWindow) {
+            const layerProduct = row.score / row.alignedWorstWindow;
+            row.alignedWorstWindow = zw;
+            row.score = zw * layerProduct;
+          }
+        }
       }
       rescoredByBadge.set(badge.label, rows);
     }

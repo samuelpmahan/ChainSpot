@@ -703,6 +703,50 @@ prior full-pipeline number, 57/63, silently excluded the nine hardest
 holes; 65/72 is the same exactness rate measured with nothing hidden.
 
 
+### 72/72: the collinearity bonus and the cancelling S
+
+Two directives closed the dev set.
+
+**Lenard — "prefer the perfect tee→badge→basket line more."** The
+invariants layer had the fraction and tee-orientation terms but never an
+explicit collinearity term, and every Lenard true pair is a ≤0.8° perfect
+line. Added as a BONUS, never a penalty (dogleg true pairs legitimately
+put the badge off the chord): score ×= 1 + B·exp(−(collinDeg/σ)²).
+Swept B×σ: at B=0.3–0.6, σ=2° all six Lenard wrongs flip at once with
+zero regression (71/72); at B≥1 or σ=4 the bonus starts bribing dogleg
+courses into fake straight lines and Heritage collapses. Defaults 0.6/2.
+
+**Heritage h7 — the cancelling S.** Truth: tee→badge east, a 28 px
+connector at −49° between bends (944,695)→(962,674), then east to the
+basket — two bends that cancel to a near-straight chord. The field render
+showed the router's badge→basket leg taking a parallel LOWER band of
+equal length (detour in position, not length — which killed a
+routed-length gate), sinking the true pair to rank 55. Two fixes, with
+measured attribution:
+
+- **Z-fit rescue (--zfit, flag-gated)**: score a drowned pair (routed
+  worst < 0.28 — salvage-only; unconditional rescue measurably let the
+  h4↔h12 false pairs shop for 2-bend bridges) by the best explicit
+  ≤2-bend polyline through the badge, bend ≤60°, connector ≤3W, length
+  ≤1.4× chord, per-bend Occam discount, sampled with the identical
+  aligned/zone machinery. It FOUND the thin connecting segment — best
+  fit bends at (949,696), jogs −60° for 24 px to (956,673), against
+  truth's (944,695)→(962,674) — and scored the true pair 0.330 vs the
+  straight rival's 0.150.
+- **Frac band recentered to the measurement**: the badge-position prior
+  was 0.45±0.15 while the measured range is 0.17–0.54 — h7's badge sits
+  at 0.165 of its chord, and the asymmetric band taxed the true pair
+  0.44×, which is what actually drowned it. Recentered to 0.36±0.19.
+
+Ablation: the frac recentering ALONE reaches 72/72; the Z-fit found the
+segment and is kept as a gated layer for validation courses where routes
+detour without a mis-centered prior to blame.
+
+**Final: ASSIGNED exact 72/72 — DashsTrack 18/18, HeritagePark 18/18,
+Lenard 18/18, TowneLake 18/18 — with rank1 65/72, rank≤3 71/72, on
+perfect endpoint recall.** Next honest test is the validation courses;
+every constant above is documented with its sweep.
+
 ### Zone-stamp un-blend: end caps inside the circle
 
 Generalization of the sprite un-blend (`zone_stamp_unblend.py`): the
