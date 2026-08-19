@@ -338,6 +338,31 @@ in-memory/caches = cropped.
 
 ---
 
+**CX-042. Rank-1 saturation: uniqueness is the resolving structure.**
+measurement / negative result.
+At dev72 the per-row score family leaves 7/72 true pairs below rank 1
+(ratios to their rival 0.71–0.97), five of seven same-tee-WRONG-BASKET
+rivalries — yet assignment is 72/72. Measured attempts to tune them to
+rank 1, all from cache: Z-fit/salvage widening is inert (the rows are
+not drowned; the rival is simply strong); an agreement-bearing bonus
+(--abearing, kept flag-gated OFF as a documented negative) churns rank1
+65→64 unrestricted and BREAKS assignment 72→63–67 when
+straightness-gated — in dense clusters, straight FALSE pairs over real
+parallel paint collect the identical bonus. Conclusion: every soft
+multiplier that helps these seven also arms their mirror-image false
+pairs; rank1 65 + assigned 72 is the EQUILIBRIUM of the local family.
+The 1:1 uniqueness constraint is not a patch over weak scores — it IS
+the structure that resolves same-tee-wrong-basket rivalries, because
+the rival basket is claimed by its rightful hole. Fragility budget:
+rank≤3 = 71/72 (the assignment never rescues from deep in the pool).
+Raising rank1 requires RIVAL-CONDITIONED evidence (e.g. the rival
+basket's own agreed approach pointing at its OWN badge as
+counter-evidence, bend-aware) — new structure, not tuning. Lab use:
+rank1-vs-assigned gap is a standing metric; a validation course where
+the gap widens signals the local family degrading before assignment
+accuracy does.
+
+
 ## E. Truth-quality findings (judge the judge)
 
 **CX-039. Heritage registration noise.** finding.
@@ -412,6 +437,21 @@ before acting (the h6 claim was verified, then extended).
 
 ---
 
+**CX-057. Overfit-ceiling replication.** methodology.
+The five-specialist experiment re-run on the dev72 substrate (complete
+badge/tee pools, corrected Lenard truth; SAME family, SAME seeded 30k
+search) replicates the original ceilings almost exactly (Dashs 16/18,
+Heritage 10/17, Lenard 11/18, TowneLake 16/18) while the oracle improved
+(Lenard 18/18). Better substrate does not lift a formula-limited family;
+adding one structurally new term (zone-stamp agreement) lifts each
+cluttered course ~1 and halves pooled catastrophic. Per-course
+overfitting is therefore a STABLE, REPEATABLE diagnostic: run it after
+any change — ceilings move only when the family gains structure (new
+independent evidence or a decision hierarchy), never when the substrate
+or tuner improves. Companion negative: agreement used as a raw gate with
+a naive fallback is WORSE standalone (43/72) — the gate needs a
+competent partner under it (see CX-033, CX-042).
+
 ## Open items seeded for the lab
 
 1. Contrast-based ribbon support field (task #22, CX-034) — validate on
@@ -421,6 +461,9 @@ before acting (the h6 claim was verified, then extended).
 3. Masked exact-match basket precision (CX-027).
 4. Candidate-conditioned approach scoring in assignment (CX-033's
    agreement signal as a soft term).
-5. Validation-course run (FountainHills hydrated, never consulted): the
+5. Rival-conditioned pairing evidence (CX-042): score a pair against
+   what its RIVAL's endpoints claim for themselves, bend-aware — the
+   measured path to rank1 beyond 65.
+6. Validation-course run (FountainHills hydrated, never consulted): the
    entire catalog above is dev-derived; every entry is a hypothesis
    there.
