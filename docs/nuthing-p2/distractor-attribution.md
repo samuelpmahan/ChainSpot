@@ -143,10 +143,17 @@ holes per course:
 
 | family (n) | corrected gray lift | plateau (L8/L0) |
 |---|---|---|
-| ribbon interior (788) | **+48** | 0.98 (broad) |
+| ribbon: tee→badge (788) | **+48** | 0.98 (broad) |
+| ribbon: badge→basket, straight holes, pre-zone (228) | **+33** | 1.06 (broad) |
 | walking-path ride (123) | +17 | 1.23 |
 | C2F zone fill (3432) | −7 | — |
 | random ground (1078) | 0 (baseline) | 1.08 |
+
+The badge→basket family (verified-straight holes only, cells within 95 px
+of the basket tip excluded so zone fill never contaminates it) confirms the
+signature is the overlay's, not the near-tee ground's: both halves of the
+hole lift 2–3× the walking path, with the far half a little lower —
+consistent with heavier canopy occlusion on basket approaches.
 
 The corridor's lift is ~3× the walking path's and ~flat across ±8 px —
 a per-cell evidence channel (five gray reads per cell) that separates true

@@ -18,7 +18,15 @@ const VIOL: Record<string, number[]> = {
 const med = (a: number[]): number => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] ?? 0; };
 interface Rec { L0: number[]; L8: number[]; g0: number[] }
 const fam: Record<string, Rec> = {
-  ribbon: { L0: [], L8: [], g0: [] }, walkpath: { L0: [], L8: [], g0: [] },
+  // ribbon split into the two guaranteed-interior segment families:
+  // tee->badge (always pre-bend) and badge->basket on verified-straight
+  // holes (collinear <=1.4 deg), the latter excluding the basket-zone
+  // approach (cells within 95px of the basket tip). Consistency between
+  // the two validates that the signature is the overlay's, not the
+  // near-tee ground's.
+  ribbonTeeBadge: { L0: [], L8: [], g0: [] },
+  ribbonBadgeBasket: { L0: [], L8: [], g0: [] },
+  walkpath: { L0: [], L8: [], g0: [] },
   zonefill: { L0: [], L8: [], g0: [] }, control: { L0: [], L8: [], g0: [] },
 };
 let seed = 12345;
@@ -56,6 +64,9 @@ for (const nm of Object.keys(COURSES)) {
     if (gg !== null && ga !== null && gb !== null) rec.g0.push(gg - (ga + gb) / 2);
   };
   // ribbon: centerline cells of strongest segments
+  const straightHoles = new Set(
+    annot.holes.filter((h: any) => !(h.corridorBends?.length)).map((h: any) => h.number),
+  );
   const strongest = asg.holes.filter((h: any) => h.devTruthVerdict === 'correct')
     .sort((a: any, b: any) => b.pairScore - a.pairScore).slice(0, 6);
   for (const h of strongest) {
@@ -65,7 +76,20 @@ for (const nm of Object.keys(COURSES)) {
     const dx = badge.cx - tee.x, dy = badge.cy - tee.y, len = Math.hypot(dx, dy);
     const ux = dx / len, uy = dy / len;
     for (let a = 16; a <= len - 16; a += 2)
-      addSample(fam.ribbon, tee.x + ux * a, tee.y + uy * a, -uy, ux);
+      addSample(fam.ribbonTeeBadge, tee.x + ux * a, tee.y + uy * a, -uy, ux);
+  }
+  // badge->basket on very good straight holes: correct-assigned, no bends;
+  // skip 16px after the badge and everything within 95px of the basket tip
+  // (C2D radius 84 + margin) so zone fill never contaminates the family.
+  for (const h of asg.holes.filter((x: any) => x.devTruthVerdict === 'correct' && straightHoles.has(x.hole))) {
+    const badge = cache.badges.find((b: any) => Number(b.label) === h.hole);
+    const bk = cache.endpoints.baskets[Number((h as any).basketId.slice(1))];
+    if (!badge || !bk) continue;
+    const dx = bk.x - badge.cx, dy = bk.y - badge.cy, len = Math.hypot(dx, dy);
+    if (len < 130) continue;
+    const ux = dx / len, uy = dy / len;
+    for (let a = 16; a <= len - 95; a += 2)
+      addSample(fam.ribbonBadgeBasket, badge.cx + ux * a, badge.cy + uy * a, -uy, ux);
   }
   // walkpath: off-chord violation cells
   for (const holeNum of VIOL[nm]) {
