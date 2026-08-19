@@ -11,7 +11,7 @@
  * card (glyph mask, per-digit bbox/mask/normalized raster, scores, margins).
  */
 
-import type { NuThingP1Result } from '../p1';
+import type { Mask } from '../raster';
 import type { ComponentStats } from '../components';
 import { extractBadgeGlyph } from './badgeGlyph';
 import type { BadgeGlyph } from './badgeGlyph';
@@ -49,9 +49,18 @@ export interface BadgeReading {
   confidence: number;
 }
 
+/** Minimal context readBadge needs — satisfied by NuThingP1Result and the
+ * fast BadgeStageResult alike. */
+export interface BadgeReadContext {
+  brightMask: Mask;
+  darkMask: Mask;
+  brightLabels: Int32Array;
+  badges: ComponentStats[];
+}
+
 export function readBadge(
   badge: ComponentStats,
-  result: NuThingP1Result,
+  result: BadgeReadContext,
   scorer: DigitScorer,
 ): BadgeReading {
   const glyph = extractBadgeGlyph(badge, result.brightMask, result.darkMask, result.brightLabels);
@@ -88,7 +97,7 @@ export function readBadge(
   };
 }
 
-/** Read every badge-family observation of a P1 result. */
-export function readCourseBadges(result: NuThingP1Result, scorer: DigitScorer): BadgeReading[] {
+/** Read every badge-family observation of a P1 (or badge-stage) result. */
+export function readCourseBadges(result: BadgeReadContext, scorer: DigitScorer): BadgeReading[] {
   return result.badges.map((badge) => readBadge(badge, result, scorer));
 }
