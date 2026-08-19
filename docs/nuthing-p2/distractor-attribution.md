@@ -640,6 +640,31 @@ constraint** — a recovered pad must sit on a corridor start (centerline
 render geometry instead of heuristics, and it would also kill the
 rooftop/logo FPs, none of which have a corridor terminating at them.
 
+### Badge recovery via dark plates: sprites were eating badges too
+
+Review of the Lenard bend question surfaced that h5/h12 have no badges in
+the pool at all — and the app view shows why: basket sprites sit directly
+on those badges' white frames, so the frame component merges with the
+sprite blob and the frame-keyed detector loses the badge ("baskets
+cross-contaminating badge traversal"). The render-model fix
+(`badge_plate_recovery.py`): detect the badge's DARK PLATE (near-black
+rounded rect ~48×36, fill ≥0.55, with 4-40 % white digit-glyph pixels in
+its interior) — a dark plate can never merge with anything white.
+
+Dev result: **exactly 18 plates per course, all four courses, zero false
+positives** — the frame detector's 66/72 becomes **72/72**. The six
+misses were Heritage 2/12/13/15 (Heritage was silently missing FOUR
+badges, not just Lenard's two) and Lenard 5/12; every recovered plate
+sits on exactly one hole's tee→basket ray at fraction 0.18-0.52 within
+7 px, so identities are unambiguous even before digit classification.
+Also corrects the Lenard record: h5/h12 were never bend candidates —
+they were badge-detection casualties; the whole course is straight
+(all 16 badge-present holes collinear ≤0.8°, chord violations all
+attributed to walking-path/basket-zone contamination, and h5/h12 chords
+fully supported end to end). Unwired: swap the plate detector into the
+badge stage of pair-matrix and re-run digit classification on the six
+recovered plates; badge-backed coverage rises accordingly.
+
 ### Zone-stamp un-blend: end caps inside the circle
 
 Generalization of the sprite un-blend (`zone_stamp_unblend.py`): the
