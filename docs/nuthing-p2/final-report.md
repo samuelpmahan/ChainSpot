@@ -96,3 +96,25 @@ and accuracy on truly out-of-distribution renders is established on n=4.
 7. **Untested regimes**: >2-digit labels (no 100+ hole courses), other
    device pixel ratios / app versions / fonts, rotated or heavily obscured
    badges. Labels 19 and 20 exist in the corpus and read correctly.
+
+## Addendum: annotation registration (post-report)
+
+The Heritage/Lenard/TowneLake annotations were successfully registered into
+the corpus raster frame after all (scale ~1.00, vertical crop dy = 418/429/
+530px) by fitting labeled correspondences — hole path midpoints ↔ badges
+whose digits read that hole number (`scripts/nuthing/register-annotations.ts`,
+`docs/nuthing-p2/annotation-registration.md`). Consequences:
+
+- **Label corroboration** rises from 14/188 to ~51/188 strictly two-channel
+  (leave-one-out refits, d<=40px + margin>=40px; Lenard 16/16, TowneLake
+  15/15, Heritage 6/14 under the strict gate), with **zero contradictions**
+  anywhere — no LOO-nearest badge ever reads a different number than its
+  hole.
+- **Tee truth coverage** on the three registered courses is the strongest
+  P1-tee falsification yet: registered tees are ABSENT from the ranked pool
+  for 14/18 (Heritage, +4 CULLED), 17/18 (Lenard, +1 CULLED) and 18/18
+  (TowneLake) holes. Outside DashsTrack the tee side of P1 effectively
+  loses everything, consistent with the degenerate modal family. (Caveat:
+  ABSENT uses the bbox+3px containment rule on ~4px-residual registered
+  coordinates; a few could be near-miss containment rather than true
+  absence.)

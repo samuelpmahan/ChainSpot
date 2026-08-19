@@ -1,0 +1,1635 @@
+{
+ "HeritagePark-full": {
+  "annotation": "dev/Heritage/HeritagePark-full.annotation.json",
+  "transform": {
+   "s": 1.0080335406612446,
+   "tx": -14.008436773477797,
+   "ty": 418.14410455052325
+  },
+  "correspondences": [
+   {
+    "hole": 1,
+    "residualPx": 40.999853981928624,
+    "inlier": true
+   },
+   {
+    "hole": 3,
+    "residualPx": 6.613543470616954,
+    "inlier": true
+   },
+   {
+    "hole": 4,
+    "residualPx": 60.404826563511556,
+    "inlier": true
+   },
+   {
+    "hole": 5,
+    "residualPx": 45.13846368206599,
+    "inlier": true
+   },
+   {
+    "hole": 6,
+    "residualPx": 8.70922070820704,
+    "inlier": true
+   },
+   {
+    "hole": 7,
+    "residualPx": 82.65257306751026,
+    "inlier": true
+   },
+   {
+    "hole": 8,
+    "residualPx": 53.29632902071249,
+    "inlier": true
+   },
+   {
+    "hole": 9,
+    "residualPx": 53.23496512055037,
+    "inlier": true
+   },
+   {
+    "hole": 10,
+    "residualPx": 26.985051072875805,
+    "inlier": true
+   },
+   {
+    "hole": 11,
+    "residualPx": 48.57906198060878,
+    "inlier": true
+   },
+   {
+    "hole": 14,
+    "residualPx": 14.20583310956784,
+    "inlier": true
+   },
+   {
+    "hole": 16,
+    "residualPx": 25.39414106748324,
+    "inlier": true
+   },
+   {
+    "hole": 17,
+    "residualPx": 4.219650360502511,
+    "inlier": true
+   },
+   {
+    "hole": 18,
+    "residualPx": 36.156971921170594,
+    "inlier": true
+   }
+  ],
+  "corroboration": [
+   {
+    "hole": 1,
+    "badgeLabel": 1371,
+    "manualRead": "1",
+    "looDistance": 53.782076678525684,
+    "looMargin": 126.226294136546,
+    "corroborated": false
+   },
+   {
+    "hole": 3,
+    "badgeLabel": 1346,
+    "manualRead": "3",
+    "looDistance": 7.123469496934757,
+    "looMargin": 120.54476948013398,
+    "corroborated": true
+   },
+   {
+    "hole": 4,
+    "badgeLabel": 1301,
+    "manualRead": "4",
+    "looDistance": 65.14212234049046,
+    "looMargin": 134.79591632325096,
+    "corroborated": false
+   },
+   {
+    "hole": 5,
+    "badgeLabel": 1062,
+    "manualRead": "5",
+    "looDistance": 49.42001376303835,
+    "looMargin": 157.54610209856492,
+    "corroborated": false
+   },
+   {
+    "hole": 6,
+    "badgeLabel": 754,
+    "manualRead": "6",
+    "looDistance": 9.43283214254869,
+    "looMargin": 156.75461765698412,
+    "corroborated": true
+   },
+   {
+    "hole": 7,
+    "badgeLabel": 571,
+    "manualRead": "7",
+    "looDistance": 96.7540197624424,
+    "looMargin": 65.84255990250034,
+    "corroborated": false
+   },
+   {
+    "hole": 8,
+    "badgeLabel": 751,
+    "manualRead": "8",
+    "looDistance": 59.98204290998329,
+    "looMargin": 124.83808691779704,
+    "corroborated": false
+   },
+   {
+    "hole": 9,
+    "badgeLabel": 1077,
+    "manualRead": "9",
+    "looDistance": 58.92825855127842,
+    "looMargin": 47.518849142030206,
+    "corroborated": false
+   },
+   {
+    "hole": 10,
+    "badgeLabel": 1037,
+    "manualRead": "10",
+    "looDistance": 29.260414862426483,
+    "looMargin": 103.21588469841014,
+    "corroborated": true
+   },
+   {
+    "hole": 11,
+    "badgeLabel": 821,
+    "manualRead": "11",
+    "looDistance": 54.30287243295455,
+    "looMargin": 110.81397215564564,
+    "corroborated": false
+   },
+   {
+    "hole": 14,
+    "badgeLabel": 1335,
+    "manualRead": "14",
+    "looDistance": 16.23783007122033,
+    "looMargin": 100.28666132901891,
+    "corroborated": true
+   },
+   {
+    "hole": 16,
+    "badgeLabel": 1362,
+    "manualRead": "16",
+    "looDistance": 27.34831964947914,
+    "looMargin": 109.75579634544239,
+    "corroborated": true
+   },
+   {
+    "hole": 17,
+    "badgeLabel": 1376,
+    "manualRead": "17",
+    "looDistance": 4.887112767698616,
+    "looMargin": 124.54660843188721,
+    "corroborated": true
+   },
+   {
+    "hole": 18,
+    "badgeLabel": 1328,
+    "manualRead": "18",
+    "looDistance": 44.348307119433244,
+    "looMargin": 143.3441778836809,
+    "corroborated": false
+   }
+  ],
+  "registeredHoles": [
+   {
+    "number": 1,
+    "tee": [
+     11.69641851338394,
+     2045.110239177772
+    ],
+    "basket": [
+     247.07225025778456,
+     2026.9656354458696
+    ],
+    "corridorBends": [
+     [
+      222.8405409683317,
+      2037.376184843188
+     ]
+    ]
+   },
+   {
+    "number": 2,
+    "tee": [
+     384.87043988058804,
+     1962.0482815798339
+    ],
+    "basket": [
+     542.4260776715292,
+     2010.8370987952896
+    ],
+    "corridorBends": [
+     [
+      475.2547540384397,
+      2009.168596730095
+     ]
+    ]
+   },
+   {
+    "number": 3,
+    "tee": [
+     571.1651083784877,
+     1966.4130609659762
+    ],
+    "basket": [
+     709.7596454212959,
+     1946.3229521929702
+    ],
+    "corridorBends": [
+     [
+      695.7948337580858,
+      1978.1226357996272
+     ]
+    ]
+   },
+   {
+    "number": 4,
+    "tee": [
+     699.7374746697434,
+     1826.0761837230957
+    ],
+    "basket": [
+     699.6793100146834,
+     1600.6077690877896
+    ],
+    "corridorBends": [
+     [
+      720.8807260041623,
+      1727.0831504262705
+     ],
+     [
+      714.3938379570563,
+      1644.869642044276
+     ]
+    ]
+   },
+   {
+    "number": 5,
+    "tee": [
+     720.035133518359,
+     1578.5519284978247
+    ],
+    "basket": [
+     743.5287690334476,
+     1357.6313644468032
+    ],
+    "corridorBends": [
+     [
+      708.2367555426066,
+      1437.5291444157547
+     ]
+    ]
+   },
+   {
+    "number": 6,
+    "tee": [
+     730.12806169654,
+     1323.4298329654684
+    ],
+    "basket": [
+     711.7757125026184,
+     1180.2174612904241
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 7,
+    "tee": [
+     863.6982153504762,
+     1139.3446667449712
+    ],
+    "basket": [
+     1131.1176654176961,
+     1118.7274153100884
+    ],
+    "corridorBends": [
+     [
+      944.1586778652866,
+      1123.5032755379857
+     ],
+     [
+      961.8462484463398,
+      1103.2819674896862
+     ]
+    ]
+   },
+   {
+    "number": 8,
+    "tee": [
+     1024.9058046088912,
+     1169.1265187998752
+    ],
+    "basket": [
+     1087.7722231692626,
+     1436.2983019600067
+    ],
+    "corridorBends": [
+     [
+      1058.0830159347472,
+      1321.883252353457
+     ]
+    ]
+   },
+   {
+    "number": 9,
+    "tee": [
+     1089.28428117094,
+     1476.075313165185
+    ],
+    "basket": [
+     986.9688691031381,
+     1633.8325545879843
+    ],
+    "corridorBends": [
+     [
+      1049.8518762566914,
+      1561.2476897467586
+     ],
+     [
+      995.5885190421138,
+      1580.634730348915
+     ]
+    ]
+   },
+   {
+    "number": 10,
+    "tee": [
+     971.8626910986308,
+     1575.6897617784796
+    ],
+    "basket": [
+     912.4461027028739,
+     1365.8527337920636
+    ],
+    "corridorBends": [
+     [
+      950.0479217554902,
+      1406.705388145478
+     ]
+    ]
+   },
+   {
+    "number": 11,
+    "tee": [
+     875.6315676133779,
+     1277.3414990856836
+    ],
+    "basket": [
+     824.6754690566777,
+     1463.474886216234
+    ],
+    "corridorBends": [
+     [
+      822.9281649102531,
+      1431.2288483943312
+     ]
+    ]
+   },
+   {
+    "number": 12,
+    "tee": [
+     790.4023286741954,
+     1580.9107937032688
+    ],
+    "basket": [
+     787.3782280522116,
+     1728.6280287517677
+    ],
+    "corridorBends": [
+     [
+      777.0871788986192,
+      1715.6994077321358
+     ]
+    ]
+   },
+   {
+    "number": 13,
+    "tee": [
+     821.651368434694,
+     1779.493401213534
+    ],
+    "basket": [
+     845.4233646080521,
+     1935.2925554127996
+    ],
+    "corridorBends": [
+     [
+      832.4949166424456,
+      1914.1417871822678
+     ]
+    ]
+   },
+   {
+    "number": 14,
+    "tee": [
+     951.9017413338672,
+     1917.363392188395
+    ],
+    "basket": [
+     1087.7722231692626,
+     1921.122113676439
+    ],
+    "corridorBends": [
+     [
+      1061.964077956929,
+      1948.176536510157
+     ]
+    ]
+   },
+   {
+    "number": 15,
+    "tee": [
+     1219.874544953584,
+     1947.8587379119165
+    ],
+    "basket": [
+     1082.2280386956256,
+     2040.0700714744657
+    ],
+    "corridorBends": [
+     [
+      1177.0138519001512,
+      1992.6725668442841
+     ],
+     [
+      1128.959638720855,
+      2006.2901636090446
+     ]
+    ]
+   },
+   {
+    "number": 16,
+    "tee": [
+     999.4653641271282,
+     1998.0028519325758
+    ],
+    "basket": [
+     846.3481901808944,
+     2020.917434201902
+    ],
+    "corridorBends": [
+     [
+      883.623248725616,
+      2046.6959505888503
+     ]
+    ]
+   },
+   {
+    "number": 17,
+    "tee": [
+     675.9905218091442,
+     2064.2628764503356
+    ],
+    "basket": [
+     427.90076114246637,
+     2057.4982109315706
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 18,
+    "tee": [
+     338.5621000114693,
+     1909.599312085313
+    ],
+    "basket": [
+     135.15622234524412,
+     1927.5589077035859
+    ],
+    "corridorBends": [
+     [
+      193.33523349775086,
+      1911.525199707271
+     ]
+    ]
+   }
+  ],
+  "teeCoverage": [
+   {
+    "hole": 1,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 2,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 3,
+    "partition": "CULLED",
+    "rank": 1032,
+    "score": 0.000001487046525677087
+   },
+   {
+    "hole": 4,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 5,
+    "partition": "CULLED",
+    "rank": 760,
+    "score": 0.0044545195790819895
+   },
+   {
+    "hole": 6,
+    "partition": "CULLED",
+    "rank": 993,
+    "score": 0.000012338992544263629
+   },
+   {
+    "hole": 7,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 8,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 9,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 10,
+    "partition": "CULLED",
+    "rank": 684,
+    "score": 0.02309820502323602
+   },
+   {
+    "hole": 11,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 12,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 13,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 14,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 15,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 16,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 17,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 18,
+    "partition": "ABSENT"
+   }
+  ]
+ },
+ "Lenard-full": {
+  "annotation": "dev/Lenard/Lenard-full.annotation.json",
+  "transform": {
+   "s": 1.0002015590034146,
+   "tx": -1.2646105288925469,
+   "ty": 428.6850381565595
+  },
+  "correspondences": [
+   {
+    "hole": 1,
+    "residualPx": 2.935757957187799,
+    "inlier": true
+   },
+   {
+    "hole": 2,
+    "residualPx": 3.477992007813707,
+    "inlier": true
+   },
+   {
+    "hole": 3,
+    "residualPx": 3.3211106297135493,
+    "inlier": true
+   },
+   {
+    "hole": 4,
+    "residualPx": 3.876875096466025,
+    "inlier": true
+   },
+   {
+    "hole": 6,
+    "residualPx": 4.306753003805075,
+    "inlier": true
+   },
+   {
+    "hole": 7,
+    "residualPx": 3.9982562621514317,
+    "inlier": true
+   },
+   {
+    "hole": 8,
+    "residualPx": 3.0793900403196504,
+    "inlier": true
+   },
+   {
+    "hole": 9,
+    "residualPx": 3.0124682031059207,
+    "inlier": true
+   },
+   {
+    "hole": 10,
+    "residualPx": 4.778232087183743,
+    "inlier": true
+   },
+   {
+    "hole": 11,
+    "residualPx": 3.528638027753633,
+    "inlier": true
+   },
+   {
+    "hole": 13,
+    "residualPx": 3.2961422754262224,
+    "inlier": true
+   },
+   {
+    "hole": 14,
+    "residualPx": 3.2874380130714225,
+    "inlier": true
+   },
+   {
+    "hole": 15,
+    "residualPx": 2.9688563107085866,
+    "inlier": true
+   },
+   {
+    "hole": 16,
+    "residualPx": 4.436303425800713,
+    "inlier": true
+   },
+   {
+    "hole": 17,
+    "residualPx": 3.284578417017885,
+    "inlier": true
+   },
+   {
+    "hole": 18,
+    "residualPx": 5.219220247574895,
+    "inlier": true
+   }
+  ],
+  "corroboration": [
+   {
+    "hole": 1,
+    "badgeLabel": 769,
+    "manualRead": "1",
+    "looDistance": 3.133929163419532,
+    "looMargin": 185.49312196694703,
+    "corroborated": true
+   },
+   {
+    "hole": 2,
+    "badgeLabel": 701,
+    "manualRead": "2",
+    "looDistance": 3.7443792102051066,
+    "looMargin": 180.8996933571322,
+    "corroborated": true
+   },
+   {
+    "hole": 3,
+    "badgeLabel": 556,
+    "manualRead": "3",
+    "looDistance": 3.544165012203138,
+    "looMargin": 178.7413880490478,
+    "corroborated": true
+   },
+   {
+    "hole": 4,
+    "badgeLabel": 466,
+    "manualRead": "4",
+    "looDistance": 4.162445108294145,
+    "looMargin": 60.522683183966016,
+    "corroborated": true
+   },
+   {
+    "hole": 6,
+    "badgeLabel": 136,
+    "manualRead": "6",
+    "looDistance": 4.691840440826835,
+    "looMargin": 144.6114819800665,
+    "corroborated": true
+   },
+   {
+    "hole": 7,
+    "badgeLabel": 153,
+    "manualRead": "7",
+    "looDistance": 4.609979368956938,
+    "looMargin": 130.67554295744586,
+    "corroborated": true
+   },
+   {
+    "hole": 8,
+    "badgeLabel": 178,
+    "manualRead": "8",
+    "looDistance": 3.4917699284073898,
+    "looMargin": 132.55568365740444,
+    "corroborated": true
+   },
+   {
+    "hole": 9,
+    "badgeLabel": 218,
+    "manualRead": "9",
+    "looDistance": 3.2947742976704206,
+    "looMargin": 165.06174412911616,
+    "corroborated": true
+   },
+   {
+    "hole": 10,
+    "badgeLabel": 301,
+    "manualRead": "10",
+    "looDistance": 5.311840322548855,
+    "looMargin": 171.03955829232268,
+    "corroborated": true
+   },
+   {
+    "hole": 11,
+    "badgeLabel": 514,
+    "manualRead": "11",
+    "looDistance": 3.7927334363783776,
+    "looMargin": 59.928010993195485,
+    "corroborated": true
+   },
+   {
+    "hole": 13,
+    "badgeLabel": 809,
+    "manualRead": "13",
+    "looDistance": 3.6539759198598847,
+    "looMargin": 176.94975525155095,
+    "corroborated": true
+   },
+   {
+    "hole": 14,
+    "badgeLabel": 866,
+    "manualRead": "14",
+    "looDistance": 3.730920135575128,
+    "looMargin": 129.36693215159215,
+    "corroborated": true
+   },
+   {
+    "hole": 15,
+    "badgeLabel": 977,
+    "manualRead": "15",
+    "looDistance": 3.5789078685203735,
+    "looMargin": 199.34164273349032,
+    "corroborated": true
+   },
+   {
+    "hole": 16,
+    "badgeLabel": 907,
+    "manualRead": "16",
+    "looDistance": 5.1073350120159615,
+    "looMargin": 74.3009973102906,
+    "corroborated": true
+   },
+   {
+    "hole": 17,
+    "badgeLabel": 892,
+    "manualRead": "17",
+    "looDistance": 3.7522455178667755,
+    "looMargin": 75.132328024799,
+    "corroborated": true
+   },
+   {
+    "hole": 18,
+    "badgeLabel": 871,
+    "manualRead": "18",
+    "looDistance": 5.871075138187763,
+    "looMargin": 118.05487285188049,
+    "corroborated": true
+   }
+  ],
+  "registeredHoles": [
+   {
+    "number": 1,
+    "tee": [
+     465.5794747668835,
+     1730.1973168097525
+    ],
+    "basket": [
+     339.80412109127184,
+     1683.978002768205
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 2,
+    "tee": [
+     258.5653795403528,
+     1621.7069433210072
+    ],
+    "basket": [
+     326.80150082422745,
+     1488.938698762539
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 3,
+    "tee": [
+     314.4523178501592,
+     1402.6313330451317
+    ],
+    "basket": [
+     384.5297931480205,
+     1208.7870020139048
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 4,
+    "tee": [
+     439.4830293298924,
+     1207.4066774085236
+    ],
+    "basket": [
+     533.8432235379341,
+     1090.85847827918
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 5,
+    "tee": [
+     601.1067860118462,
+     888.5277125393116
+    ],
+    "basket": [
+     765.8899852267264,
+     744.7887388639986
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 6,
+    "tee": [
+     733.4796148298801,
+     586.6976545296918
+    ],
+    "basket": [
+     976.9325141764468,
+     537.7470161502918
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 7,
+    "tee": [
+     863.0647419821969,
+     656.3688524549677
+    ],
+    "basket": [
+     1127.9629495859626,
+     543.7482255043122
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 8,
+    "tee": [
+     1032.6168084004619,
+     691.1032995944445
+    ],
+    "basket": [
+     808.3755782373437,
+     730.4621569000911
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 9,
+    "tee": [
+     894.2812453890863,
+     811.5891199246095
+    ],
+    "basket": [
+     701.0933924011399,
+     848.6885153661079
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 10,
+    "tee": [
+     801.6171861352775,
+     883.2366377455394
+    ],
+    "basket": [
+     582.0901461548194,
+     1065.5860811754897
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 11,
+    "tee": [
+     578.7547169617114,
+     1114.945288085788
+    ],
+    "basket": [
+     433.82306763759277,
+     1300.9008056698972
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 12,
+    "tee": [
+     405.04573519361867,
+     1262.517276614949
+    ],
+    "basket": [
+     354.42116399997946,
+     1431.7514433347642
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 13,
+    "tee": [
+     280.5921842197103,
+     1680.8373713991205
+    ],
+    "basket": [
+     148.76562332161964,
+     1931.9879813386915
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 14,
+    "tee": [
+     261.05296075723584,
+     1825.407680816761
+    ],
+    "basket": [
+     186.7732825637494,
+     2141.070115232765
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 15,
+    "tee": [
+     241.73842265428334,
+     2182.4495363411347
+    ],
+    "basket": [
+     174.77086385570843,
+     2384.0790860082348
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 16,
+    "tee": [
+     307.32805599821694,
+     2228.822190063532
+    ],
+    "basket": [
+     276.7914228740567,
+     1975.0366564381984
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 17,
+    "tee": [
+     352.5884280160194,
+     1911.9280993650873
+    ],
+    "basket": [
+     372.8107725383845,
+     2216.0852321580214
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 18,
+    "tee": [
+     437.01290417388776,
+     2106.6583200886953
+    ],
+    "basket": [
+     498.83616897281473,
+     1893.9803220965618
+    ],
+    "corridorBends": []
+   }
+  ],
+  "teeCoverage": [
+   {
+    "hole": 1,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 2,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 3,
+    "partition": "CULLED",
+    "rank": 478,
+    "score": 0.01293881411668838
+   },
+   {
+    "hole": 4,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 5,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 6,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 7,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 8,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 9,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 10,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 11,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 12,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 13,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 14,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 15,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 16,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 17,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 18,
+    "partition": "ABSENT"
+   }
+  ]
+ },
+ "TowneLake-full": {
+  "annotation": "dev/TowneLake/TowneLake-full.annotation.json",
+  "transform": {
+   "s": 1.0012069877853,
+   "tx": -1.8598178896002082,
+   "ty": 529.6048558003322
+  },
+  "correspondences": [
+   {
+    "hole": 1,
+    "residualPx": 4.034992969107104,
+    "inlier": true
+   },
+   {
+    "hole": 2,
+    "residualPx": 4.4984621508244365,
+    "inlier": true
+   },
+   {
+    "hole": 3,
+    "residualPx": 3.7139600199181086,
+    "inlier": true
+   },
+   {
+    "hole": 4,
+    "residualPx": 2.591403302421407,
+    "inlier": true
+   },
+   {
+    "hole": 5,
+    "residualPx": 3.2146995769876376,
+    "inlier": true
+   },
+   {
+    "hole": 6,
+    "residualPx": 3.7284693839155607,
+    "inlier": true
+   },
+   {
+    "hole": 7,
+    "residualPx": 53.981884750632474,
+    "inlier": false
+   },
+   {
+    "hole": 8,
+    "residualPx": 2.830808534874163,
+    "inlier": true
+   },
+   {
+    "hole": 9,
+    "residualPx": 2.1100031975719418,
+    "inlier": true
+   },
+   {
+    "hole": 10,
+    "residualPx": 5.398308250879555,
+    "inlier": true
+   },
+   {
+    "hole": 11,
+    "residualPx": 36.64573439072924,
+    "inlier": false
+   },
+   {
+    "hole": 12,
+    "residualPx": 3.687371578719628,
+    "inlier": true
+   },
+   {
+    "hole": 13,
+    "residualPx": 4.411602271577663,
+    "inlier": true
+   },
+   {
+    "hole": 14,
+    "residualPx": 2.837081025945413,
+    "inlier": true
+   },
+   {
+    "hole": 15,
+    "residualPx": 4.911534657003037,
+    "inlier": true
+   },
+   {
+    "hole": 16,
+    "residualPx": 34.83744232628839,
+    "inlier": false
+   },
+   {
+    "hole": 17,
+    "residualPx": 2.8335806667898917,
+    "inlier": true
+   },
+   {
+    "hole": 18,
+    "residualPx": 3.717340208648284,
+    "inlier": true
+   }
+  ],
+  "corroboration": [
+   {
+    "hole": 1,
+    "badgeLabel": 299,
+    "manualRead": "1",
+    "looDistance": 4.586296338265137,
+    "looMargin": 270.74734983036166,
+    "corroborated": true
+   },
+   {
+    "hole": 2,
+    "badgeLabel": 355,
+    "manualRead": "2",
+    "looDistance": 4.9128349610071504,
+    "looMargin": 147.6983504675518,
+    "corroborated": true
+   },
+   {
+    "hole": 3,
+    "badgeLabel": 376,
+    "manualRead": "3",
+    "looDistance": 3.9888247753488817,
+    "looMargin": 190.0228568275182,
+    "corroborated": true
+   },
+   {
+    "hole": 4,
+    "badgeLabel": 363,
+    "manualRead": "4",
+    "looDistance": 2.776668471211419,
+    "looMargin": 149.16069878373344,
+    "corroborated": true
+   },
+   {
+    "hole": 5,
+    "badgeLabel": 349,
+    "manualRead": "5",
+    "looDistance": 3.4550915606650827,
+    "looMargin": 141.51727525348053,
+    "corroborated": true
+   },
+   {
+    "hole": 6,
+    "badgeLabel": 341,
+    "manualRead": "6",
+    "looDistance": 4.001051867594905,
+    "looMargin": 140.03685287997058,
+    "corroborated": true
+   },
+   {
+    "hole": 8,
+    "badgeLabel": 204,
+    "manualRead": "8",
+    "looDistance": 3.3046436943063138,
+    "looMargin": 112.57610544794608,
+    "corroborated": true
+   },
+   {
+    "hole": 9,
+    "badgeLabel": 128,
+    "manualRead": "9",
+    "looDistance": 2.763129781752597,
+    "looMargin": 108.43457413187954,
+    "corroborated": true
+   },
+   {
+    "hole": 10,
+    "badgeLabel": 172,
+    "manualRead": "10",
+    "looDistance": 6.556038733576161,
+    "looMargin": 105.5029644542419,
+    "corroborated": true
+   },
+   {
+    "hole": 12,
+    "badgeLabel": 291,
+    "manualRead": "12",
+    "looDistance": 3.9512450940605626,
+    "looMargin": 185.9485483518628,
+    "corroborated": true
+   },
+   {
+    "hole": 13,
+    "badgeLabel": 325,
+    "manualRead": "13",
+    "looDistance": 5.0555776218574815,
+    "looMargin": 65.27072226765138,
+    "corroborated": true
+   },
+   {
+    "hole": 14,
+    "badgeLabel": 344,
+    "manualRead": "14",
+    "looDistance": 3.225125018555927,
+    "looMargin": 67.93032574776667,
+    "corroborated": true
+   },
+   {
+    "hole": 15,
+    "badgeLabel": 360,
+    "manualRead": "15",
+    "looDistance": 5.626937657266926,
+    "looMargin": 199.85742662149383,
+    "corroborated": true
+   },
+   {
+    "hole": 17,
+    "badgeLabel": 397,
+    "manualRead": "17",
+    "looDistance": 3.12748831721511,
+    "looMargin": 193.59906149024079,
+    "corroborated": true
+   },
+   {
+    "hole": 18,
+    "badgeLabel": 353,
+    "manualRead": "18",
+    "looDistance": 4.000450994241635,
+    "looMargin": 146.74049790924133,
+    "corroborated": true
+   }
+  ],
+  "registeredHoles": [
+   {
+    "number": 1,
+    "tee": [
+     1177.0614102275906,
+     1504.2798584093218
+    ],
+    "basket": [
+     989.9066020947279,
+     1504.271695290076
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 2,
+    "tee": [
+     911.741558464486,
+     1595.8902977916766
+    ],
+    "basket": [
+     903.231299068311,
+     1972.3441251989495
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 3,
+    "tee": [
+     933.9414015460808,
+     2066.091761708879
+    ],
+    "basket": [
+     698.4504188932165,
+     2018.1768104331702
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 4,
+    "tee": [
+     600.0712282424879,
+     1903.929213175921
+    ],
+    "basket": [
+     827.6957260003072,
+     1829.4086510542195
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 5,
+    "tee": [
+     748.5448194554822,
+     1801.1377302876633
+    ],
+    "basket": [
+     744.0393880104483,
+     1641.9458192298005
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 6,
+    "tee": [
+     604.0471058878147,
+     1739.357365195145
+    ],
+    "basket": [
+     656.9343800731273,
+     1529.810636597847
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 7,
+    "tee": [
+     758.0082848574536,
+     1553.1332703130442
+    ],
+    "basket": [
+     906.2349200316669,
+     1346.589757833137
+    ],
+    "corridorBends": [
+     [
+      812.4366599156293,
+      1408.8509571128131
+     ]
+    ]
+   },
+   {
+    "number": 8,
+    "tee": [
+     769.8262619855467,
+     1196.7375382965702
+    ],
+    "basket": [
+     850.1673287156901,
+     1045.2264545097619
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 9,
+    "tee": [
+     755.7535143506982,
+     988.0575370349417
+    ],
+    "basket": [
+     655.9331730853419,
+     784.9126376855837
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 10,
+    "tee": [
+     545.5501103206157,
+     881.278817898522
+    ],
+    "basket": [
+     691.9766246456127,
+     1031.2095566807675
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 11,
+    "tee": [
+     709.4719456049924,
+     1070.382676249436
+    ],
+    "basket": [
+     728.0200762058835,
+     1272.5004407370247
+    ],
+    "corridorBends": [
+     [
+      683.9704928322467,
+      1208.5454798224896
+     ]
+    ]
+   },
+   {
+    "number": 12,
+    "tee": [
+     695.0203024437155,
+     1358.8245160846532
+    ],
+    "basket": [
+     448.6833266137848,
+     1544.8287414146264
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 13,
+    "tee": [
+     387.2036777516658,
+     1578.0317684073066
+    ],
+    "basket": [
+     137.56776948662545,
+     1590.9821796493316
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 14,
+    "tee": [
+     183.0183446528056,
+     1666.6806543655293
+    ],
+    "basket": [
+     413.79058712490144,
+     1621.9553319352017
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 15,
+    "tee": [
+     373.9192610514593,
+     1710.1825876198216
+    ],
+    "basket": [
+     205.3900285819569,
+     1988.3634370035143
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 16,
+    "tee": [
+     307.8331224206395,
+     2242.6390526425466
+    ],
+    "basket": [
+     645.921103207489,
+     2148.596603328674
+    ],
+    "corridorBends": [
+     [
+      577.4296058777946,
+      2118.516487981461
+     ]
+    ]
+   },
+   {
+    "number": 17,
+    "tee": [
+     844.5066502124083,
+     2257.4570718892724
+    ],
+    "basket": [
+     1011.3616537491234,
+     2145.5529340858066
+    ],
+    "corridorBends": []
+   },
+   {
+    "number": 18,
+    "tee": [
+     1018.7529265360482,
+     1947.2845113279031
+    ],
+    "basket": [
+     1099.4678686742297,
+     1616.915644535168
+    ],
+    "corridorBends": []
+   }
+  ],
+  "teeCoverage": [
+   {
+    "hole": 1,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 2,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 3,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 4,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 5,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 6,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 7,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 8,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 9,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 10,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 11,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 12,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 13,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 14,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 15,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 16,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 17,
+    "partition": "ABSENT"
+   },
+   {
+    "hole": 18,
+    "partition": "ABSENT"
+   }
+  ]
+ }
+}
