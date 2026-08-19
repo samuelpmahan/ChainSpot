@@ -2,6 +2,26 @@
 
 Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No backend or runtime server. GitHub Actions is used for Pages deployment; do not assume a general-purpose test CI gate exists.
 
+## ChainSpot Lab / experimental CV mode
+
+When a task explicitly concerns **ChainSpot Lab**, **Replay Nodes**, experimental CI/CD, CV research, algorithm races, corpus measurement, or Toph evidence, read `docs/chainspot-lab/CONTRACT.md` before changing code.
+
+Lab work is deliberately different from normal product implementation:
+
+- The goal is accumulated evidence, not tuning one canonical algorithm in place.
+- Preserve competing implementations and race them over identical immutable upstream measurements.
+- Every meaningful measurement and decision boundary should be independently replayable, swappable, attributable, and measurable.
+- Prefer primitive measurements over prematurely thresholded booleans. Thresholds and policies belong in replayable decision nodes whenever practical.
+- Never overwrite historical evidence with a new "latest" result. Runs and node outputs are immutable/content-addressed; aliases and leaderboards may point at them.
+- A result without provenance, per-entity evidence/reasons, runtime/resource measurements, and exact input/implementation/parameter identity is an audit gap.
+- Attribution is first-class. Known rendered families such as badges, basket sprites, course graphics, and screen chrome should be represented as evidence/ownership rather than collapsed into generic false positives.
+- Branches introduce implementations. Experiment manifests compare implementations. Do not create one branch per threshold tune as the primary experiment record.
+- The first lab host is the user's Windows 11 HP OMEN 30L through Ubuntu 24.04 on WSL2. Discover actual resources at runtime; do not hard-code the machine profile into algorithms.
+- Run the fast research loop natively in WSL. Docker is for hermetic reproduction/scrutineering, not mandatory for every inner-loop experiment.
+- Large immutable evidence/cache data should live outside Git and, where configured, on the spacious HDD rather than the nearly-full Windows NVMe. Never assume a drive letter/mount path: `chainspot-lab doctor` must discover/report configuration.
+
+For lab-only research that does not modify/deploy product behavior, do not force the normal Linear production ticket/deploy ceremony unless the user asks to promote the result. Once a lab result is selected for production, return to the normal workflow below.
+
 ## Commands
 
 - `npm run check` — typecheck (runs `svelte-kit sync` first; required since tsconfig extends `.svelte-kit/tsconfig.json`)
@@ -19,25 +39,15 @@ Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No back
 
 ## Task workflow — defer to Linear
 
-The single canonical workflow definition lives in Linear: **ChainSpot Development Workflow**
-(https://linear.app/chainspot/document/chainspot-development-workflow-fe350a97c5b9).
-Read it before starting any task. This file deliberately does not mirror it; if the two ever
-appear to disagree, the Linear document wins and this pointer gets fixed.
+The single canonical workflow definition lives in Linear: **ChainSpot Development Workflow**.
+Read it before starting normal product implementation. This file deliberately does not mirror it; if the two ever appear to disagree, the Linear document wins and this pointer gets fixed.
 
 The non-negotiables you will find defined there:
 
-- Linear ticket first; then a branch **from the intended base** — normally current `main`,
-  with the document defining how the base is chosen for work that depends on an unmerged
-  branch, and why `staging/*` accumulation branches are never a base. Prefer Linear's
-  generated branch name.
-- The first task-specific commit is `.task/<LINEAR-ID>.md` (task definition + implementer
-  Proof Plan before any production code).
-- Then: implementation → implementer Review Brief → fresh independent review → merge prep
-  (delete `.task`, update `CHANGELOG-dev.md`) → staging deployment → manual acceptance →
-  merge to `main` → production.
-- Any external write — a push, a Linear issue/comment/doc, a GitHub comment, a deploy —
-  requires showing the user the verbatim content first and getting explicit approval.
-  The document defines the full rule.
+- Linear ticket first; then a branch **from the intended base** — normally current `main`, with the document defining how the base is chosen for work that depends on an unmerged branch, and why `staging/*` accumulation branches are never a base. Prefer Linear's generated branch name.
+- The first task-specific commit is `.task/<LINEAR-ID>.md` (task definition + implementer Proof Plan before any production code).
+- Then: implementation → implementer Review Brief → fresh independent review → merge prep (delete `.task`, update `CHANGELOG-dev.md`) → staging deployment → manual acceptance → merge to `main` → production.
+- Any external write — a push, a Linear issue/comment/doc, a GitHub comment, a deploy — requires showing the user the verbatim content first and getting explicit approval. The document defines the full rule.
 
 ## Long-running tasks
 
