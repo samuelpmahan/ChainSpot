@@ -83,3 +83,24 @@ healthy (DashsTrack: 18/18 PRIMARY, replay finds nothing extra), and unsafe
 exactly where it degenerates — there, true tees survive only in `unculled`,
 which is the diagnostic lever's purpose. n=3 annotated holes on AlexClark;
 treat as an existence proof, not a rate.
+
+## AlexClark deep dive (annotation numbering + straight-hole inference)
+
+The AC annotation's three holes are the course's only *bent* holes, numbered
+1..3 by the annotation tool — they are not course holes 1-3. Corridor
+centerline midpoints (mean of the schema's left/right boundary polylines)
+associate them to the badges reading 16 (d=93px, margin 73), 14 (d=87px,
+margin 1.4 — ambiguous), and 6 (d=33px, margin 220). The coordinate frame is
+therefore confirmed valid and the badge-at-path-midpoint model holds on AC;
+`hole.number` is annotation-internal here, which independently justifies the
+manifest's hard gate against using AC hole numbers as labels.
+
+Straight-hole inference: every unannotated hole is straight, so its tee and
+basket must sit symmetric about its badge (badge = path midpoint). Searching
+all bright-component pairs with pair-midpoint within 15px of a badge center
+(span 120-900px, area >= 15): 6 of 13 straight badges (7, 8, 9, 11, 16, 17)
+have such a pair; every ranked endpoint among them is CULLED at score
+0.000-0.147. The remaining 7 badges (4, 6, 10, 12, 13, 14, 15) have no
+symmetric pair — their endpoints are not in the candidate pool at any score
+(lost upstream at the mask/component stage, beyond FULL REPLAY's reach).
+Root cause as above: the degenerate 2px modal family inverts AC's ranking.
