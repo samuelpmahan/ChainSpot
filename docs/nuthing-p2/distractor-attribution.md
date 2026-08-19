@@ -127,16 +127,24 @@ local compositing behavior, free. `scripts/nuthing/learn-local-alpha.ts` +
 `lift-signatures.ts`, measured on the 6 top-scoring correctly-assigned
 holes per course:
 
-- **A naive constant-blend fit (p_in = (1−α)·b + α·C) is confounded and
-  should not be trusted**: regressing inside pixels against outside pixels
-  gives α≈0.6–0.9, C≈gray — but the ground UNDER a corridor is mown
-  fairway, systematically brighter than the ground beside it, so the fit
-  attributes ground difference to overlay opacity. Documented as a negative
-  result.
-- **What is stable (cross-corridor profiles):** the corridor renders as a
-  smooth translucent whitening wash — a flat plateau with a sharp ~3 px
-  transition exactly at the annotated corridor width, and **no edge
-  stroke** (the paired-edge field fires on the transition itself).
+- **CORRECTED (was wrongly attributed to "mown fairway"): the corridor is
+  rendered UI, not terrain.** Every element this pipeline identifies is a
+  drawn vector primitive: the hole path is **gray rectangles, with right
+  triangles appended to create bends, ending in perfect semicircles at
+  both ends** (round-capped thick polyline). Under that model the
+  edge-pair regression's answer — mostly-opaque gray paint, α≈0.6–0.9,
+  C≈[150,155,145] gray, per-course α 0.61–0.90 — is the straightforward
+  reading, and the earlier "ground under differs" objection was wrong.
+- **Cross-corridor profiles** match the paint model: flat plateau, sharp
+  ~3 px transition at the annotated corridor width, no edge stroke (the
+  paired-edge field fires on the transition itself).
+- **End-cap test (measured)**: radial lift profile behind truth tees on
+  straight correct holes shows corridor paint persisting behind the tee
+  and terminating at r≈0.8·(W/2), zero beyond — a semicircular cap whose
+  center sits ~0.2·(W/2) (~4–5 px) ahead of the annotated tee point (the
+  r≈0.35 bump is the tee glyph itself). Sideways the paint spans the full
+  annotated width at the tee, exactly what a slightly-advanced cap center
+  predicts (chord width 0.98·W there).
 - **The operational "local alpha" is the lift signature** — brightness at a
   cell minus the darker of two ±30 px perpendicular background samples
   (control-corrected by the +12 baseline this min() introduces):
@@ -161,6 +169,20 @@ corridor from the walking path, the distractor class nothing upstream
 handles. Wiring it in is a *measurement extension* under the replay
 discipline: sample lift along every cached leg once, store it in the
 snapshot (format bump), then re-score as a replay layer.
+
+**What the exact-primitive model unlocks** (the corridor is a capsule:
+rectangle + triangle bend wedges + semicircular caps):
+
+1. **Cap-center endpoint refinement**: fit a semicircle of radius W/2 to
+   the paint mask around each candidate endpoint; the fitted center is the
+   polyline endpoint to sub-pixel precision — and a candidate with no cap
+   is not a hole endpoint at all.
+2. **Capsule-footprint pair scoring**: a (tee, basket) hypothesis on a
+   straight hole predicts an EXACT paint footprint (capsule between the
+   two cap centers). Score = footprint/paint-mask agreement — wrong pairs
+   predict paint where there is none (their capsule crosses unpainted
+   ground), and walking paths fail on width and cap geometry, not just
+   color.
 
 ## What this buys (next layers, both derivable from cache)
 
