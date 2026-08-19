@@ -104,6 +104,61 @@ const OFFSET_FRACS = [-0.35, -0.15, 0, 0.15, 0.35]; // of corridor width W
 const THETA_STEP_DEG = 2;
 const MIN_CENTER_SAMPLES = 30;
 const MIN_FLANK_SAMPLES = 40;
+
+// ---- Little-clue features (semicircle cap, one-sidedness, teepad-on-ray) --
+// The corridor is a round-capped polyline that TERMINATES at the basket: a
+// perfect semicircular cap of radius W/2 whose center sits ~4-5px inside the
+// endpoint along the approach direction. Three render-model consequences,
+// each measured as its own weak feature (combined downstream, not argmaxed
+// individually):
+//   capEdge  — just inside the cap arc is corridor paint, just outside is
+//              background. Sampled on the BACK half of the cap (the sprite
+//              occludes most of the front); occluded samples dropped.
+//   oppLift  — a terminating corridor is one-sided: full-width band evidence
+//              along theta+180 beyond the cap radius means theta is either a
+//              passing corridor or the back-side BTD trap, not the approach.
+//   teeOnRay — the BTD walking path leaves the basket toward the NEXT hole's
+//              tee; a teepad sitting close along the ray is evidence AGAINST
+//              theta being the approach.
+//   fracPos/runLen — corridor paint is solid; BTD dashes and incidental
+//              clutter are intermittent. Per-radius lift persistence.
+const CAP_INSET = 4.5;
+const CAP_ARC_HALF_DEG = 110; // back arc: theta+180 +- this (sides of the cap included)
+const CAP_ARC_STEP_DEG = 6;
+const CAP_R_IN = 5; // sample this far inside the cap arc radius (W/2)
+const CAP_R_OUT = 6; // and this far outside
+const CAP_MIN_PAIRS = 4;
+// First cut used a 90px flanked-contrast window for the opposite side and it
+// was starved exactly where it matters: in cluttered zones the badge box /
+// rings occlude most of the near window, and the flanks of the opposite band
+// sit on unrelated renders. Persistence over occlusion-SKIPPED bins out to
+// 160px is the robust version (a trap direction has a real corridor behind
+// it for 100+px; a terminating one has nothing past the cap).
+const OPP_R1 = 160;
+const TEE_RAY_MAX_DIST = 200;
+const TEE_RAY_HALF_ANGLE_DEG = 25;
+const RUN_WEAK_LIFT = 4; // per-radius lift below this counts as a gap
+const RUN_WEAK_STOP = 3; // consecutive weak radius bins that end the run
+// BTD dashes lift ~+17 vs the corridor ribbon's ~+33 (lift-signatures
+// measurement): a persistence pass thresholded between them sees only
+// SOLID corridor, so the dashed walking path behind a true approach no
+// longer pollutes the one-sidedness clue.
+const SOLID_LIFT = 24;
+// Centerline paint boundary: walking BACKWARD from the anchor along
+// theta+180, the paint of a corridor that terminates here must stop within
+// ~W/2 (the cap arc); a passing corridor / back-side trap keeps paint going.
+// Uses a slimmer occluder set (tight ring bands) because neighbors' generous
+// ring-band exclusions were starving the probe in exactly the clustered
+// cases that need it.
+const BOUNDARY_MAX_PX = 70;
+const BOUNDARY_STEP_PX = 2;
+const BOUNDARY_PAINT_LIFT = 10;
+const BOUNDARY_GAP_SAMPLES = 6; // consecutive unpainted valid samples = boundary
+const RING_TOL_LOCAL = 3;
+const ROT_FLANK_DEG = 50; // clears the corridor's angular width for r >= ~18
+const ROT_ON_ARC_DEG = 6; // on-axis arc half-width for the center sample
+const PEAK_MIN_SEP_DEG = 20;
+const MAX_PEAKS = 8;
 const FIELD_R0 = 90; // support/theta trustworthy beyond here
 const FIELD_R1 = R1;
 const FIELD_WEIGHT = 40; // gray-equivalent weight on the [0,1] field term; swept 0-90, flat optimum 30-50
@@ -173,6 +228,45 @@ interface ScanResult {
   validCandidates: number;
 }
 
+// One angular peak of the base score landscape, with its little-clue
+// feature vector. The downstream combiner (hand-weighted or learned)
+// re-ranks these peaks; this script does not pick a winner from them.
+interface PeakFeatures {
+  thetaDeg: number;
+  colorLift: number;
+  fieldConf: number;
+  combinedBase: number; // colorLift + FIELD_WEIGHT * fieldConf (the old score)
+  oppLift: number; // band lift along theta+180 (cap radius .. OPP_R1); null->0
+  oppValid: boolean;
+  oppFracPos: number; // occlusion-tolerant persistence along theta+180
+  oppRunLenPx: number;
+  oppSolidFrac: number; // same, but only SOLID-corridor-level lift counts
+  boundaryBehindPx: number; // where centerline paint stops behind the anchor
+  boundaryValid: boolean;
+  capEdge: number; // inside-arc minus outside-arc gray at the cap boundary
+  capPairs: number; // non-occluded arc sample pairs the edge is based on
+  teeOnRay: number; // 1 - d/TEE_RAY_MAX_DIST for nearest tee inside the ray cone, else 0
+  fracPos: number; // fraction of radius bins with lift > RUN_WEAK_LIFT
+  runLenPx: number; // distance before RUN_WEAK_STOP consecutive weak bins
+  walkEndDistPx: number;
+  walkStoppedReason: WalkResult['stoppedReason'];
+  // Raw replay-node payload: per-radius centerline lift samples along theta
+  // (fwd) and theta+180 (bwd), occlusion-valid bins only, as [r, lift]
+  // rounded to 0.1. Every threshold/persistence/boundary parameter and any
+  // combiner can be re-derived from these downstream WITHOUT re-touching the
+  // images — the expensive boundary is the sampling, cached here.
+  fwdProfile: [number, number][];
+  bwdProfile: [number, number][];
+  // Rotated-flank (radially fair) variants: contrast at radius r is the
+  // small on-axis arc mean minus the mean at the SAME radius rotated
+  // +-ROT_FLANK_DEG around the anchor. The basket zone's fills are radially
+  // symmetric around the anchor, so they cancel exactly under rotation —
+  // perpendicular flanks do not cancel them, which washed out the boundary
+  // clue (good-peak paint "extended" ~48px behind every anchor).
+  fwdRadial: [number, number][];
+  bwdRadial: [number, number][];
+}
+
 interface WalkResult {
   points: [number, number][];
   endDistFromAnchorPx: number;
@@ -185,6 +279,7 @@ interface BasketOut {
   y: number;
   scan: ScanResult | null;
   walk: WalkResult | null;
+  peaks: PeakFeatures[];
 }
 
 function circMeanDiffDeg(a: number, b: number): number {
@@ -276,6 +371,23 @@ function main(): void {
     const occluded = (x: number, y: number): boolean =>
       inSpriteBBox(x, y) || inRingBand(x, y) || inBadgeBox(x, y) || inTeeBox(x, y);
 
+    // Slim variant for the near-anchor probes (cap edge, paint boundary):
+    // the generous ring-band tolerances exist to keep ring paint out of the
+    // long band statistics, but in basket clusters they blanket the whole
+    // cap neighborhood; the actual ring strokes are only a few px wide.
+    const inRingBandTight = (x: number, y: number): boolean => {
+      for (const b of baskets) {
+        const dx = x - b.x;
+        const dy = y - b.y;
+        if (Math.abs(dx) > RING2 + RING_TOL_LOCAL || Math.abs(dy) > RING2 + RING_TOL_LOCAL) continue;
+        const d = Math.hypot(dx, dy);
+        if (Math.abs(d - RING1) <= RING_TOL_LOCAL || Math.abs(d - RING2) <= RING_TOL_LOCAL) return true;
+      }
+      return false;
+    };
+    const occludedLocal = (x: number, y: number): boolean =>
+      inSpriteBBox(x, y) || inRingBandTight(x, y) || inBadgeBox(x, y) || inTeeBox(x, y);
+
     const fieldAt = (x: number, y: number): { s: number; t: number } | null => {
       const fx = Math.floor(x / scale);
       const fy = Math.floor(y / scale);
@@ -351,7 +463,272 @@ function main(): void {
       return n > 0 ? sum / n : 0;
     }
 
-    function scanBearing(anchorX: number, anchorY: number): ScanResult | null {
+    // Per-radius lift profile along theta: same samples as bandContrast, but
+    // binned by radius so persistence (solid corridor vs dashed/incidental
+    // paint) is measurable. Bins with no valid center or flank samples are
+    // skipped rather than counted as gaps — occlusion is not absence.
+    function bandProfile(
+      anchorX: number,
+      anchorY: number,
+      thetaRad: number,
+      r0: number,
+      r1: number,
+      liftThresh: number = RUN_WEAK_LIFT,
+    ): { fracPos: number; runLenPx: number; nBins: number } {
+      const ux = Math.cos(thetaRad);
+      const uy = Math.sin(thetaRad);
+      const nx = -uy;
+      const ny = ux;
+      let pos = 0;
+      let nBins = 0;
+      let weak = 0;
+      let runLenPx = r1 - r0;
+      let runEnded = false;
+      for (let r = r0; r <= r1; r += DR * 2) {
+        const cxr = anchorX + ux * r;
+        const cyr = anchorY + uy * r;
+        let cSum = 0;
+        let cN = 0;
+        let fSum = 0;
+        let fN = 0;
+        for (const f of OFFSET_FRACS) {
+          const off = f * W;
+          const px = cxr + nx * off;
+          const py = cyr + ny * off;
+          if (!occluded(px, py)) {
+            const g = gray(px, py);
+            if (g !== null) {
+              cSum += g;
+              cN++;
+            }
+          }
+          for (const side of [1, -1]) {
+            const fx2 = cxr + nx * (off + side * W);
+            const fy2 = cyr + ny * (off + side * W);
+            if (!occluded(fx2, fy2)) {
+              const g = gray(fx2, fy2);
+              if (g !== null) {
+                fSum += g;
+                fN++;
+              }
+            }
+          }
+        }
+        if (cN < 2 || fN < 2) continue;
+        nBins++;
+        const lift = cSum / cN - fSum / fN;
+        if (lift > liftThresh) {
+          pos++;
+          if (!runEnded) weak = 0;
+        } else if (!runEnded) {
+          weak++;
+          if (weak >= RUN_WEAK_STOP) {
+            runLenPx = Math.max(0, r - r0 - (RUN_WEAK_STOP - 1) * DR * 2);
+            runEnded = true;
+          }
+        }
+      }
+      return { fracPos: nBins > 0 ? pos / nBins : 0, runLenPx, nBins };
+    }
+
+    // Semicircle cap edge: paint just inside the cap arc, background just
+    // outside. Cap center sits CAP_INSET px inside the endpoint along theta;
+    // sampled on the back half-arc only (the sprite owns the front).
+    function capEdgeAt(
+      anchorX: number,
+      anchorY: number,
+      thetaRad: number,
+    ): { capEdge: number; capPairs: number } {
+      const capR = W / 2;
+      const cx = anchorX + Math.cos(thetaRad) * CAP_INSET;
+      const cy = anchorY + Math.sin(thetaRad) * CAP_INSET;
+      let sum = 0;
+      let pairs = 0;
+      for (let a = -CAP_ARC_HALF_DEG; a <= CAP_ARC_HALF_DEG; a += CAP_ARC_STEP_DEG) {
+        const phi = thetaRad + Math.PI + (a * Math.PI) / 180;
+        const dx = Math.cos(phi);
+        const dy = Math.sin(phi);
+        const ix = cx + dx * (capR - CAP_R_IN);
+        const iy = cy + dy * (capR - CAP_R_IN);
+        const ox = cx + dx * (capR + CAP_R_OUT);
+        const oy = cy + dy * (capR + CAP_R_OUT);
+        if (occludedLocal(ix, iy) || occludedLocal(ox, oy)) continue;
+        const gi = gray(ix, iy);
+        const go = gray(ox, oy);
+        if (gi === null || go === null) continue;
+        sum += gi - go;
+        pairs++;
+      }
+      return { capEdge: pairs >= CAP_MIN_PAIRS ? sum / pairs : 0, capPairs: pairs };
+    }
+
+    // Raw centerline lift profile: for each radius bin along dir, the
+    // W-wide center band mean minus the +-W flank means, occlusion-skipped
+    // (occludedLocal). This is the replay-node payload — persistence,
+    // solidity, and boundary features for ANY threshold derive from it.
+    function centerProfile(
+      anchorX: number,
+      anchorY: number,
+      dirRad: number,
+      r0: number,
+      r1: number,
+    ): [number, number][] {
+      const ux = Math.cos(dirRad);
+      const uy = Math.sin(dirRad);
+      const nx = -uy;
+      const ny = ux;
+      const out: [number, number][] = [];
+      for (let r = r0; r <= r1; r += DR * 2) {
+        const cxr = anchorX + ux * r;
+        const cyr = anchorY + uy * r;
+        let cSum = 0;
+        let cN = 0;
+        let fSum = 0;
+        let fN = 0;
+        for (const f of OFFSET_FRACS) {
+          const off = f * W;
+          const px = cxr + nx * off;
+          const py = cyr + ny * off;
+          if (!occludedLocal(px, py)) {
+            const g = gray(px, py);
+            if (g !== null) {
+              cSum += g;
+              cN++;
+            }
+          }
+          for (const side of [1, -1]) {
+            const fx2 = cxr + nx * (off + side * W);
+            const fy2 = cyr + ny * (off + side * W);
+            if (!occludedLocal(fx2, fy2)) {
+              const g = gray(fx2, fy2);
+              if (g !== null) {
+                fSum += g;
+                fN++;
+              }
+            }
+          }
+        }
+        if (cN < 2 || fN < 2) continue;
+        out.push([r, Math.round((cSum / cN - fSum / fN) * 10) / 10]);
+      }
+      return out;
+    }
+
+    // Radially fair lift profile: for each radius r along dir, the mean of a
+    // small on-axis arc minus the mean at the same radius rotated
+    // +-ROT_FLANK_DEG around the ANCHOR. Radial fields (zone fills) cancel;
+    // a corridor strip through the anchor survives.
+    function radialProfile(
+      anchorX: number,
+      anchorY: number,
+      dirRad: number,
+      r0: number,
+      r1: number,
+    ): [number, number][] {
+      const out: [number, number][] = [];
+      const arcOffsets = [-ROT_ON_ARC_DEG, 0, ROT_ON_ARC_DEG].map((d) => (d * Math.PI) / 180);
+      const flankOffsets = [-ROT_FLANK_DEG, ROT_FLANK_DEG].map((d) => (d * Math.PI) / 180);
+      for (let r = r0; r <= r1; r += DR * 2) {
+        let cSum = 0;
+        let cN = 0;
+        let fSum = 0;
+        let fN = 0;
+        for (const a of arcOffsets) {
+          const px = anchorX + Math.cos(dirRad + a) * r;
+          const py = anchorY + Math.sin(dirRad + a) * r;
+          if (occludedLocal(px, py)) continue;
+          const g = gray(px, py);
+          if (g !== null) {
+            cSum += g;
+            cN++;
+          }
+        }
+        for (const a of flankOffsets) {
+          for (const da of arcOffsets) {
+            const px = anchorX + Math.cos(dirRad + a + da) * r;
+            const py = anchorY + Math.sin(dirRad + a + da) * r;
+            if (occludedLocal(px, py)) continue;
+            const g = gray(px, py);
+            if (g !== null) {
+              fSum += g;
+              fN++;
+            }
+          }
+        }
+        if (cN < 1 || fN < 2) continue;
+        out.push([r, Math.round((cSum / cN - fSum / fN) * 10) / 10]);
+      }
+      return out;
+    }
+
+    // Where does centerline paint STOP behind the anchor? Walk r backward
+    // along theta+180; each valid sample is painted if the centerline gray
+    // beats the +-W flank mean by BOUNDARY_PAINT_LIFT. The boundary is the
+    // start of the first run of BOUNDARY_GAP_SAMPLES consecutive unpainted
+    // valid samples (12px — wider than a BTD dash gap). Occluded samples are
+    // skipped and count toward neither run nor gap.
+    function boundaryBehind(
+      anchorX: number,
+      anchorY: number,
+      thetaRad: number,
+    ): { boundaryBehindPx: number; boundaryValid: boolean } {
+      const bx = Math.cos(thetaRad + Math.PI);
+      const by = Math.sin(thetaRad + Math.PI);
+      const nx = -by;
+      const ny = bx;
+      let gap = 0;
+      let nValid = 0;
+      for (let r = 4; r <= BOUNDARY_MAX_PX; r += BOUNDARY_STEP_PX) {
+        const px = anchorX + bx * r;
+        const py = anchorY + by * r;
+        if (occludedLocal(px, py)) continue;
+        const gc = gray(px, py);
+        if (gc === null) continue;
+        let fSum = 0;
+        let fN = 0;
+        for (const side of [1, -1]) {
+          const fx2 = px + nx * side * W;
+          const fy2 = py + ny * side * W;
+          if (occludedLocal(fx2, fy2)) continue;
+          const g = gray(fx2, fy2);
+          if (g !== null) {
+            fSum += g;
+            fN++;
+          }
+        }
+        if (fN === 0) continue;
+        nValid++;
+        const painted = gc - fSum / fN > BOUNDARY_PAINT_LIFT;
+        if (painted) {
+          gap = 0;
+        } else {
+          gap++;
+          if (gap >= BOUNDARY_GAP_SAMPLES)
+            return {
+              boundaryBehindPx: r - (BOUNDARY_GAP_SAMPLES - 1) * BOUNDARY_STEP_PX,
+              boundaryValid: nValid >= BOUNDARY_GAP_SAMPLES * 2,
+            };
+        }
+      }
+      return { boundaryBehindPx: BOUNDARY_MAX_PX, boundaryValid: nValid >= BOUNDARY_GAP_SAMPLES * 2 };
+    }
+
+    function teeOnRayAt(anchorX: number, anchorY: number, thetaDeg: number): number {
+      let best = 0;
+      for (const t of cache.endpoints.tees) {
+        const d = Math.hypot(t.x - anchorX, t.y - anchorY);
+        if (d < 10 || d > TEE_RAY_MAX_DIST) continue;
+        const brg = (Math.atan2(t.y - anchorY, t.x - anchorX) * 180) / Math.PI;
+        if (circMeanDiffDeg(brg, thetaDeg) > TEE_RAY_HALF_ANGLE_DEG) continue;
+        best = Math.max(best, 1 - d / TEE_RAY_MAX_DIST);
+      }
+      return best;
+    }
+
+    function scanBearing(
+      anchorX: number,
+      anchorY: number,
+    ): { scan: ScanResult; scores: ThetaScore[] } | null {
       const scores: ThetaScore[] = [];
       for (let td = 0; td < 360; td += THETA_STEP_DEG) {
         const th = (td * Math.PI) / 180;
@@ -377,14 +754,64 @@ function main(): void {
         Math.min(1, 0.5 * Math.min(1, best.colorLift / COLOR_LIFT_REF) + 0.5 * Math.min(1, margin / MARGIN_REF)),
       );
       return {
-        approachBearingDeg: best.thetaDeg,
-        confidence,
-        colorLift: best.colorLift,
-        fieldConf: best.fieldConf,
-        combined: best.combined,
-        margin,
-        validCandidates: scores.length,
+        scan: {
+          approachBearingDeg: best.thetaDeg,
+          confidence,
+          colorLift: best.colorLift,
+          fieldConf: best.fieldConf,
+          combined: best.combined,
+          margin,
+          validCandidates: scores.length,
+        },
+        scores,
       };
+    }
+
+    // Angular local maxima of the base landscape (greedy, min separation),
+    // each dressed with the little-clue features and a walk.
+    function extractPeaks(anchorX: number, anchorY: number, scores: ThetaScore[]): PeakFeatures[] {
+      const peaks: ThetaScore[] = [];
+      for (const s of scores) {
+        // scores arrive sorted desc by combined
+        if (peaks.every((p) => circMeanDiffDeg(p.thetaDeg, s.thetaDeg) >= PEAK_MIN_SEP_DEG))
+          peaks.push(s);
+        if (peaks.length >= MAX_PEAKS) break;
+      }
+      const out: PeakFeatures[] = [];
+      for (const p of peaks) {
+        const th = (p.thetaDeg * Math.PI) / 180;
+        const opp = bandContrast(anchorX, anchorY, th + Math.PI, W / 2 + 6, OPP_R1, DR);
+        const oppProf = bandProfile(anchorX, anchorY, th + Math.PI, W / 2 + 6, OPP_R1);
+        const oppSolid = bandProfile(anchorX, anchorY, th + Math.PI, W / 2 + 6, OPP_R1, SOLID_LIFT);
+        const cap = capEdgeAt(anchorX, anchorY, th);
+        const prof = bandProfile(anchorX, anchorY, th, R0, R1);
+        const walk = walkFrom(anchorX, anchorY, p.thetaDeg);
+        out.push({
+          thetaDeg: p.thetaDeg,
+          colorLift: p.colorLift,
+          fieldConf: p.fieldConf,
+          combinedBase: p.combined,
+          oppLift: opp ? opp.colorLift : 0,
+          oppValid: !!opp && opp.nCenter >= 10,
+          oppFracPos: oppProf.nBins >= 8 ? oppProf.fracPos : 0,
+          oppRunLenPx: oppProf.nBins >= 8 ? oppProf.runLenPx : 0,
+          oppSolidFrac:
+            oppSolid.nBins >= 8 ? oppSolid.fracPos : 0,
+          ...boundaryBehind(anchorX, anchorY, th),
+          capEdge: cap.capEdge,
+          capPairs: cap.capPairs,
+          teeOnRay: teeOnRayAt(anchorX, anchorY, p.thetaDeg),
+          fracPos: prof.fracPos,
+          runLenPx: prof.runLenPx,
+          walkEndDistPx: walk.endDistFromAnchorPx,
+          walkStoppedReason: walk.stoppedReason,
+          fwdProfile: centerProfile(anchorX, anchorY, th, 4, R1),
+          bwdProfile: centerProfile(anchorX, anchorY, th + Math.PI, 4, 80),
+          fwdRadial: radialProfile(anchorX, anchorY, th, 8, 120),
+          bwdRadial: radialProfile(anchorX, anchorY, th + Math.PI, 8, 120),
+        });
+      }
+      return out;
     }
 
     function walkFrom(anchorX: number, anchorY: number, startThetaDeg: number): WalkResult {
@@ -434,9 +861,11 @@ function main(): void {
 
     const basketsOut: BasketOut[] = [];
     for (const b of baskets) {
-      const scan = scanBearing(b.x, b.y);
+      const res = scanBearing(b.x, b.y);
+      const scan = res?.scan ?? null;
       const walk = scan ? walkFrom(b.x, b.y, scan.approachBearingDeg) : null;
-      basketsOut.push({ id: b.id, x: b.x, y: b.y, scan, walk });
+      const peaks = res ? extractPeaks(b.x, b.y, res.scores) : [];
+      basketsOut.push({ id: b.id, x: b.x, y: b.y, scan, walk, peaks });
     }
 
     // ---- Validation against the 63-hole dev truth join ------------------
@@ -581,6 +1010,7 @@ function main(): void {
         walkPoints: b.walk?.points ?? null,
         walkEndDistFromAnchorPx: b.walk?.endDistFromAnchorPx ?? null,
         walkStoppedReason: b.walk?.stoppedReason ?? null,
+        peaks: b.peaks,
       })),
       validation,
     };

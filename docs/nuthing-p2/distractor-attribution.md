@@ -421,6 +421,59 @@ because those directions are never candidate badge directions. That would
 be a re-score of cached machinery, per the replay-node discipline; it is
 deliberately left unbuilt pending review.
 
+### Semicircle-aware rework: little-clue peaks + replay-node profiles
+
+Per direction ("make it semicircle aware... almost a small random forest of
+little clues"), the walker now emits its top-8 angular peaks per basket,
+each dressed with render-model clue features, plus RAW per-radius lift
+profiles so every downstream threshold/weight is grid-searchable from the
+sidecar without re-touching images (the replay node). Clues, with what
+measurement showed:
+
+- **Cap edge** (paint inside vs outside the semicircular cap arc, slim
+  local occluders): good-peak median +11.3 vs back-trap +2.1 — real but
+  weak; the sprite owns most of the cap and neighbors' rings eat samples in
+  exactly the clustered cases.
+- **One-sidedness** (paint along theta+180): polluted by the BTD walking
+  path, which legitimately leaves the basket roughly opposite many
+  approaches (good peaks' opposite-side persistence median 0.35). A
+  solid-only threshold (24 gray, between BTD's +17 and the ribbon's +33)
+  helps but does not gate.
+- **Perpendicular-flank paint boundary behind the anchor**: washed out by
+  the basket zone's radially symmetric fills — "paint" appears to extend
+  ~48px behind EVERY anchor (good 48px vs trap 68px). Dead end as designed.
+- **Rotated-flank (radially fair) profiles** — contrast at radius r against
+  the same radius rotated ±50° around the anchor, which cancels the zone
+  fills exactly: the strongest clue found. Forward persistence: good 0.73
+  vs back-trap 0.37. Sharper still, the trap signature is **no near-field
+  evidence**: trap peaks score near-0 in the first 60px and draw their
+  entire base score from a distant corridor crossing the ray (Heritage h4
+  trap: near 0.00 / far 1.00), while a true termination always has paint
+  immediately beyond the cap.
+- **Teepad-on-ray**: individually weak (importance ~0.04) but participates
+  in the Lenard h11 fix.
+
+Combiners, all judged LOCO (leave-one-course-out) on the 69
+reliable-truth baskets: base argmax 41 good / 22 catastrophic; additive
+weights, solid-opposite, boundary, and a depth-5 forest over the full clue
+set all land at parity (39–43 good / 22–27 cat). The one qualitative win
+is the multiplicative **near-field gate** (base score × near-radial
+fraction): it flips two of the six target holes to correct (Heritage h4
+168.5°→0.5°, Lenard h11 170.8°→3.2°) and its best fixed config reaches
+47 good / 16 cat descriptively — but LOCO instability and one regression
+(Lenard h7, where a broad walking path passes right through the anchor
+zone with genuine near-field paint) keep standalone argmax at parity.
+Cluster cases where two real corridors touch the same anchor are not
+locally decidable; Heritage h7's "miss" may partly be a registration
+artifact (the render shows corridor paint north of the basket where the
+registered polyline claims a western approach over grass).
+
+Conclusion unchanged and sharpened: don't wire an argmax. The peaks +
+clue features + raw radial profiles in the sidecar are the foundation for
+candidate-conditioned scoring inside the assignment loop, where the
+near-field gate and one-sidedness become per-candidate evidence rather
+than a winner-take-all bearing.
+
 
 ## Occluded-tee recovery — "the Heritage misses are partially covered boxes"
 
