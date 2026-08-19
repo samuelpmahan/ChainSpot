@@ -75,6 +75,11 @@ export class ImmutableObjectStore {
 		return this.validate(hash);
 	}
 
+	relativePath(hash: string): string {
+		this.objectDirectory(hash);
+		return join('objects', 'sha256', hash.slice(0, 2), hash.slice(2));
+	}
+
 	private putPayload(kind: string, encoding: ObjectEncoding, payload: Buffer): PutObjectResult {
 		if (kind.length === 0 || kind.trim() !== kind) {
 			throw new TypeError('Object kind must be non-empty and have no surrounding whitespace');

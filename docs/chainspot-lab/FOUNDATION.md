@@ -86,3 +86,25 @@ Large payloads live in the filesystem object store. SQLite contains identity,
 lineage, searchable metadata, metrics, and references. Objects are written to
 a temporary directory and atomically published under their SHA-256-derived
 path. Existing objects and cache-key mappings are never overwritten.
+
+## Step 2 ablations and viewport identity
+
+Course selection is data, not executor code. A named, repository-tracked
+ablation resolves the corpus-relative raster and truth paths, expected source
+digests, evidence role, and viewport implementation/parameters. The first
+ablation is `step2-dashstrack`; its SHA-verified annotation belongs to the full
+DashsTrack raster, so it selects explicit `0/0` top/bottom insets.
+
+Cropping remains a Replay Node. Explicit insets and the production entropy
+auto-crop have separate implementation IDs, while their parameters are part of
+the invocation key. A crop change therefore reuses `raster.decode` and
+invalidates only `viewport.crop` and its descendants.
+
+## Reusable operator services
+
+CLI handlers are adapters over typed services. `LabReadService` currently
+provides bounded `doctor` and `status` queries; execution lives in the separate
+`LabExecutionService`. Future `show`, evidence query, comparison, and Oracle-case
+reads belong in the same semantic read layer so a read-only MCP server can reuse
+them. The MCP surface must not expose arbitrary SQL, filesystem paths, or shell
+commands. Dispatch and Oracle writes remain separate, permissioned operations.

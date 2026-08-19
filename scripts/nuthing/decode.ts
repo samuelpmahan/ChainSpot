@@ -23,7 +23,13 @@ export function decodeRgbaBin(path: string): RgbaImage {
 export function decodeImageFile(path: string): RgbaImage {
   const lower = path.toLowerCase();
   if (lower.endsWith('.rgba.bin')) return decodeRgbaBin(path);
-  const buf = readFileSync(path);
+  return decodeImageBytes(readFileSync(path), path);
+}
+
+/** Decode an immutable source-raster payload without writing a temporary file. */
+export function decodeImageBytes(bytes: Uint8Array, fileName: string): RgbaImage {
+  const lower = fileName.toLowerCase();
+  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (lower.endsWith('.png')) {
     const png = PNG.sync.read(buf);
     return { width: png.width, height: png.height, data: new Uint8Array(png.data) };
@@ -32,5 +38,5 @@ export function decodeImageFile(path: string): RgbaImage {
     const decoded = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 2048 });
     return { width: decoded.width, height: decoded.height, data: decoded.data };
   }
-  throw new Error(`Unsupported raster type: ${path}`);
+  throw new Error(`Unsupported raster type: ${fileName}`);
 }

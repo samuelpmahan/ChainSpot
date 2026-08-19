@@ -23,14 +23,67 @@ export interface StartRunInput {
 	readonly hostSnapshot: unknown;
 }
 
+export interface RunNodeRecord {
+	readonly runId: string;
+	readonly nodeId: string;
+	readonly invocationKey: string;
+	readonly nodeType: string;
+	readonly implementationKey: string;
+	readonly inputHashes: readonly string[];
+	readonly outputHash?: string;
+	readonly status: 'completed' | 'failed';
+	readonly cacheStatus?: 'hit' | 'miss';
+	readonly runtimeMs: number;
+	readonly declaredResources: unknown;
+	readonly observedResources?: unknown;
+	readonly error?: unknown;
+}
+
+export interface LedgerRunNodeSummary {
+	readonly nodeId: string;
+	readonly nodeType: string;
+	readonly status: string;
+	readonly cacheStatus: string | null;
+	readonly runtimeMs: number | null;
+	readonly outputHash: string | null;
+	readonly error: unknown | null;
+}
+
+export interface LedgerRunSummary {
+	readonly runId: string;
+	readonly experimentHash: string;
+	readonly repoSha: string;
+	readonly status: string;
+	readonly startedAt: string;
+	readonly completedAt: string | null;
+	readonly resolvedManifestObjectHash: string;
+	readonly resolvedSuiteObjectHash: string;
+	readonly nodes: readonly LedgerRunNodeSummary[];
+}
+
+export interface LedgerStatusSummary {
+	readonly schemaVersion: number;
+	readonly counts: {
+		readonly experiments: number;
+		readonly runs: number;
+		readonly objects: number;
+		readonly cacheEntries: number;
+		readonly implementations: number;
+	};
+	readonly objectPayloadBytes: number;
+	readonly latestRuns: readonly LedgerRunSummary[];
+}
+
 export class LabLedger {
 	private readonly database: DatabaseSync;
 
-	constructor(path: string) {
-		mkdirSync(dirname(path), { recursive: true });
-		this.database = new DatabaseSync(path);
-		this.database.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
-		this.migrate();
+	constructor(path: string, options: { readonly readOnly?: boolean } = {}) {
+		if (!options.readOnly) mkdirSync(dirname(path), { recursive: true });
+		this.database = new DatabaseSync(path, { readOnly: options.readOnly ?? false });
+		this.database.exec(
+			options.readOnly ? 'PRAGMA foreign_keys = ON;' : 'PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;'
+		);
+		if (!options.readOnly) this.migrate();
 	}
 
 	close(): void {
@@ -100,6 +153,148 @@ export class LabLedger {
 			`)
 			.run(runId, input.experimentHash, input.repoSha, canonicalJson(input.hostSnapshot));
 		return runId;
+	}
+
+	recordRunNode(record: RunNodeRecord): void {
+		this.database.exec('BEGIN IMMEDIATE');
+		try {
+			this.database
+				.prepare(`
+					INSERT INTO run_nodes (
+						run_id, node_id, invocation_key, node_type, implementation_key,
+						output_hash, status, cache_status, runtime_ms,
+						declared_resources_json, observed_resources_json, error_json
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`)
+				.run(
+					record.runId,
+					record.nodeId,
+					record.invocationKey,
+					record.nodeType,
+					record.implementationKey,
+					record.outputHash ?? null,
+					record.status,
+					record.cacheStatus ?? null,
+					record.runtimeMs,
+					canonicalJson(record.declaredResources),
+					record.observedResources ? canonicalJson(record.observedResources) : null,
+					record.error ? canonicalJson(record.error) : null
+				);
+			const inputStatement = this.database.prepare(`
+				INSERT INTO node_inputs (run_id, node_id, input_order, input_hash)
+				VALUES (?, ?, ?, ?)
+			`);
+			for (const [index, inputHash] of record.inputHashes.entries()) {
+				inputStatement.run(record.runId, record.nodeId, index, inputHash);
+			}
+			this.database.exec('COMMIT');
+		} catch (error) {
+			this.database.exec('ROLLBACK');
+			throw error;
+		}
+	}
+
+	finishRun(runId: string, status: 'completed' | 'failed'): void {
+		const result = this.database
+			.prepare(`
+				UPDATE runs SET status = ?, completed_at = CURRENT_TIMESTAMP
+				WHERE run_id = ? AND status = 'running'
+			`)
+			.run(status, runId);
+		if (result.changes !== 1) throw new Error(`Run is not active: ${runId}`);
+	}
+
+	statusSummary(limit = 5): LedgerStatusSummary {
+		const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+		const count = (table: string): number => {
+			const allowed = new Set([
+				'experiments',
+				'runs',
+				'objects',
+				'cache_entries',
+				'implementations'
+			]);
+			if (!allowed.has(table)) throw new TypeError(`Unsupported status table: ${table}`);
+			return Number(
+				(this.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number })
+					.count
+			);
+		};
+		const schemaVersion = Number(
+			(
+				this.database.prepare('SELECT MAX(version) AS version FROM schema_versions').get() as {
+					version: number;
+				}
+			).version
+		);
+		const objectPayloadBytes = Number(
+			(
+				this.database.prepare('SELECT COALESCE(SUM(payload_bytes), 0) AS bytes FROM objects').get() as {
+					bytes: number;
+				}
+			).bytes
+		);
+		const runRows = this.database
+			.prepare(`
+				SELECT r.run_id, r.experiment_hash, r.repo_sha, r.status, r.started_at, r.completed_at,
+					e.resolved_manifest_object_hash, e.resolved_suite_object_hash
+				FROM runs r
+				JOIN experiments e ON e.experiment_hash = r.experiment_hash
+				ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?
+			`)
+			.all(boundedLimit) as Array<{
+			run_id: string;
+			experiment_hash: string;
+			repo_sha: string;
+			status: string;
+			started_at: string;
+			completed_at: string | null;
+			resolved_manifest_object_hash: string;
+			resolved_suite_object_hash: string;
+		}>;
+		const nodeStatement = this.database.prepare(`
+			SELECT node_id, node_type, status, cache_status, runtime_ms, output_hash, error_json
+			FROM run_nodes WHERE run_id = ? ORDER BY rowid
+		`);
+		const latestRuns = runRows.map((run): LedgerRunSummary => ({
+			runId: run.run_id,
+			experimentHash: run.experiment_hash,
+			repoSha: run.repo_sha,
+			status: run.status,
+			startedAt: run.started_at,
+			completedAt: run.completed_at,
+			resolvedManifestObjectHash: run.resolved_manifest_object_hash,
+			resolvedSuiteObjectHash: run.resolved_suite_object_hash,
+			nodes: (nodeStatement.all(run.run_id) as Array<{
+				node_id: string;
+				node_type: string;
+				status: string;
+				cache_status: string | null;
+				runtime_ms: number | null;
+				output_hash: string | null;
+				error_json: string | null;
+			}>).map((node) => ({
+				nodeId: node.node_id,
+				nodeType: node.node_type,
+				status: node.status,
+				cacheStatus: node.cache_status,
+				runtimeMs: node.runtime_ms,
+				outputHash: node.output_hash,
+				error: node.error_json ? (JSON.parse(node.error_json) as unknown) : null
+			}))
+		}));
+		return {
+			schemaVersion,
+			counts: {
+				experiments: count('experiments'),
+				runs: count('runs'),
+				objects: count('objects'),
+				cacheEntries: count('cache_entries'),
+				implementations: count('implementations')
+			},
+			objectPayloadBytes,
+			latestRuns
+		};
 	}
 
 	getCacheEntry(invocationKey: string): string | null {

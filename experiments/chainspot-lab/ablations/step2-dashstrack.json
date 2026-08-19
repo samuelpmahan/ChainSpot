@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "step2-dashstrack",
+  "experimentName": "step2-replay-mechanism",
+  "suite": {
+    "name": "step2-dashstrack-one-course",
+    "case": {
+      "id": "DashsTrack-full",
+      "course": "DashsTrack",
+      "raster": {
+        "relativePath": "dev/DashsTrack/DashsTrack-full.jpg",
+        "format": "jpeg",
+        "expectedSha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a"
+      },
+      "truth": {
+        "relativePath": "dev/DashsTrack/DashsTrack-full.annotation.json",
+        "expectedSha256": "8b861acd38ca07ddfdf123daf5e3ee5445b84dc137f043897e87b96a34721c85",
+        "evidenceRole": "calibration"
+      }
+    }
+  },
+  "viewport": {
+    "implementationId": "viewport.crop.explicit-insets-v1",
+    "parameters": {
+      "strategy": "explicit-insets",
+      "topInsetPx": 0,
+      "bottomInsetPx": 0
+    }
+  }
+}
