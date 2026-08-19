@@ -88,13 +88,31 @@ function main(): void {
   const zonesIdx = args.indexOf('--zones');
   const zones = zonesIdx >= 0 ? (args.splice(zonesIdx, 1), true) : false;
   const ZONE_DISCOUNT = 0.4;
+  // Replay layer 3 — simple-path (canonical-form) discipline: in the form
+  // tee→badge→basket the badge is an INTERIOR waypoint, so the pair's path
+  // must pass THROUGH it. When a badge routes to a neighboring hole's
+  // complete (tee, basket) pair, both legs leave the badge on the same
+  // transverse stub and ride the same foreign ribbon — the concatenated
+  // path doubles back over itself. Doubling is measured as the fraction of
+  // basket-leg cells (outside the badge waiver disk) also visited by the
+  // tee leg; measured on dev truth it is 0.00 for ALL 61 true pairs and up
+  // to 0.88 for strongest false competitors. Score ×= (1−overlap)².
+  const simpleIdx = args.indexOf('--simple');
+  const simple = simpleIdx >= 0 ? (args.splice(simpleIdx, 1), true) : false;
+  // Replay layer 4 — global assignment: each tee and each basket belongs to
+  // at most one hole. Applied LAST, over evidence the earlier layers made as
+  // honest as possible (never as primary pairing logic): pick one pair per
+  // badge maximizing total score under 1:1 uniqueness, via greedy seeding +
+  // 2-swap local search. Reports exact-assignment accuracy per course.
+  const assignIdx = args.indexOf('--assign');
+  const assign = assignIdx >= 0 ? (args.splice(assignIdx, 1), true) : false;
   const [cacheDir] = args;
   if (!cacheDir) {
     console.error('Usage: tsx scripts/nuthing/pair-matrix-replay.ts CACHE_DIR [--p N] [--window PX] [--render]');
     process.exit(1);
   }
 
-  const grand = { n: 0, r1: 0, r3: 0, baseR1: 0, baseR3: 0 };
+  const grand = { n: 0, r1: 0, r3: 0, baseR1: 0, baseR3: 0, assigned: 0, assignedN: 0 };
   for (const nm of COURSES) {
     const cache = JSON.parse(readFileSync(`${cacheDir}/${nm}.json`, 'utf8')) as CacheCourse;
     const { width: w, height: h, scale } = cache.field;
@@ -180,6 +198,26 @@ function main(): void {
         const exempt = leg.endpointId.startsWith('B') ? Number(leg.endpointId.slice(1)) : -1;
         legAligned.set(leg.endpointId, alignedLeg(leg, exempt));
       }
+      const bxCell = Math.round(badge.cx / scale);
+      const byCell = Math.round(badge.cy / scale);
+      const legCellSet = new Map<string, Set<number>>();
+      const legOutsideCount = new Map<string, number>();
+      if (simple) {
+        for (const leg of badge.legs) {
+          if (!leg.reachable) continue;
+          const set = new Set<number>();
+          let outside = 0;
+          for (let i = 0; i < leg.path.length; i += 2) {
+            const x = leg.path[i];
+            const y = leg.path[i + 1];
+            if (Math.hypot(x - bxCell, y - byCell) <= 8) continue;
+            set.add(y * w + x);
+            outside++;
+          }
+          legCellSet.set(leg.endpointId, set);
+          legOutsideCount.set(leg.endpointId, outside);
+        }
+      }
       const rows: Rescored[] = [];
       for (const pair of badge.pairs) {
         const tl = legAligned.get(pair.teeId);
@@ -208,17 +246,34 @@ function main(): void {
             if (m < worst) worst = m;
           }
         }
+        let score =
+          scoreMode === 'combo'
+            ? worst * pair.worstWindowMean
+            : scoreMode === 'mean'
+              ? sum / count
+              : worst;
+        if (simple) {
+          const teeCells = legCellSet.get(pair.teeId);
+          const basketLeg = badge.legs.find((l) => l.endpointId === pair.basketId);
+          const denom = legOutsideCount.get(pair.basketId) ?? 0;
+          if (teeCells && basketLeg && denom > 0) {
+            let shared = 0;
+            for (let i = 0; i < basketLeg.path.length; i += 2) {
+              const x = basketLeg.path[i];
+              const y = basketLeg.path[i + 1];
+              if (Math.hypot(x - bxCell, y - byCell) <= 8) continue;
+              if (teeCells.has(y * w + x)) shared++;
+            }
+            const overlap = shared / denom;
+            score *= (1 - overlap) * (1 - overlap);
+          }
+        }
         rows.push({
           teeId: pair.teeId,
           basketId: pair.basketId,
           alignedWorstWindow: worst,
           alignedMean: sum / count,
-          score:
-            scoreMode === 'combo'
-              ? worst * pair.worstWindowMean
-              : scoreMode === 'mean'
-                ? sum / count
-                : worst,
+          score,
         });
       }
       rescoredByBadge.set(badge.label, rows);
@@ -274,6 +329,72 @@ function main(): void {
         `(baseline was ${baseR1}/${baseR3})` +
         (fails.length ? `\n  ${fails.join('\n  ')}` : ''),
     );
+
+    if (assign) {
+      // One pair per badge, 1:1 on tees and baskets, maximize total score.
+      // Raw scores compare across badges here; per-badge normalization was
+      // tried and measured WORSE (38/61 vs 42/61 exact) — normalizing
+      // inflates weak badges' false claims more than it calms strong ones.
+      const labels = [...rescoredByBadge.keys()];
+      const chosen = new Map<string, Rescored | null>(labels.map((l) => [l, null]));
+      const usedTee = new Set<string>();
+      const usedBasket = new Set<string>();
+      // Greedy seed over all (badge, pair) by score.
+      const all: { label: string; row: Rescored }[] = [];
+      for (const l of labels) for (const row of rescoredByBadge.get(l)!) all.push({ label: l, row });
+      all.sort((a, b) => b.row.score - a.row.score);
+      for (const { label, row } of all) {
+        if (chosen.get(label) || usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
+        chosen.set(label, row);
+        usedTee.add(row.teeId);
+        usedBasket.add(row.basketId);
+      }
+      // 2-swap local search: try replacing any one badge's pair (freeing its
+      // endpoints) with its best feasible alternative; accept improvements.
+      let improved = true;
+      let guard = 0;
+      while (improved && guard++ < 50) {
+        improved = false;
+        for (const l of labels) {
+          const cur = chosen.get(l);
+          if (cur) {
+            usedTee.delete(cur.teeId);
+            usedBasket.delete(cur.basketId);
+          }
+          let best: Rescored | null = null;
+          for (const row of rescoredByBadge.get(l)!) {
+            if (usedTee.has(row.teeId) || usedBasket.has(row.basketId)) continue;
+            if (!best || row.score > best.score) best = row;
+          }
+          if (best && (!cur || best.score > cur.score + 1e-12)) {
+            chosen.set(l, best);
+            improved = improved || !cur || best !== cur;
+          } else if (cur) {
+            chosen.set(l, cur);
+          }
+          const now = chosen.get(l);
+          if (now) {
+            usedTee.add(now.teeId);
+            usedBasket.add(now.basketId);
+          }
+        }
+      }
+      let ok = 0;
+      let judged = 0;
+      const wrong: string[] = [];
+      for (const j of cache.judgments) {
+        if (j.rankPrimary < 1) continue;
+        judged++;
+        const c = chosen.get(String(j.hole));
+        if (c && c.teeId === `T${j.trueTee}` && c.basketId === `B${j.trueBasket}`) ok++;
+        else wrong.push(`h${j.hole}${c ? `->${c.teeId}/${c.basketId}` : '->none'}`);
+      }
+      console.log(
+        `${nm}: ASSIGNED exact=${ok}/${judged}` + (wrong.length ? ` wrong: ${wrong.join(' ')}` : ''),
+      );
+      grand.assigned += ok;
+      grand.assignedN += judged;
+    }
 
     if (render) {
       const fullImage = decodeRgbaBin(`/workspace/nuthing-work/traces-py/${nm}.rgba.bin`);
@@ -361,7 +482,8 @@ function main(): void {
   }
   console.log(
     `TOTAL aligned rank1=${grand.r1}/${grand.n} rank<=3=${grand.r3}/${grand.n} ` +
-      `(baseline worstWindow ${grand.baseR1}/${grand.baseR3})`,
+      `(baseline worstWindow ${grand.baseR1}/${grand.baseR3})` +
+      (grand.assignedN ? ` ASSIGNED exact=${grand.assigned}/${grand.assignedN}` : ''),
   );
 }
 

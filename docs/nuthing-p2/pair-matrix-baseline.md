@@ -172,10 +172,56 @@ family (Dashs h6→T9, Lenard h17→T45, Lenard h10→T2 …) — unowned false
 rank-4 near-misses (Lenard h11/h13/h16); Dashs h14 and TowneLake h3 have
 true ribbons with long genuinely-weak stretches (true aligned ww ≤ 0.16).
 
-## Remaining replay layers (in evidence order)
+## Replay refinement 3 — simple-path discipline (RESULT)
 
-1. **Walking-path-aware**: dashed walking paths and their diamond markers
-   as attributed distractors (linear, oriented — invisible to
-   strip-coherence, outside basket zones).
-2. **Sequence-aware and global assignment**: only after per-pair evidence
-   is as honest as it can be, as replays over the cached matrix.
+Re-examining the residuals showed most top competitors are *other holes'
+complete true pairs*: a badge routes to a neighbor hole's tee AND basket by
+riding that hole's ribbon, reached over a short transverse stub — so both
+legs leave the badge on the SAME stub and the concatenated tee→badge→basket
+path **doubles back over itself**. In the canonical form the badge is an
+interior waypoint; a doubled path is not "one continuous ribbon through the
+badge". Measured on dev truth: leg overlap (shared cells outside the badge
+waiver disk) is **0.00 for all 61 true pairs** and up to 0.88 for strongest
+false competitors — perfect separation where it fires. `--simple` scales
+each pair's score by `(1 − overlap)²`.
+
+| cumulative | r1 / r≤3 of 61 |
+|---|---|
+| baseline worstWindow | 8 / 20 |
+| + strip-coherence | 29 / 45 |
+| + basket-zone attribution | 35 / 50 |
+| + simple-path | **40 / 51** |
+
+## Replay refinement 4 — global assignment (RESULT)
+
+`--assign`: one pair per badge, 1:1 uniqueness on tees and baskets,
+maximizing total score (greedy seed + 2-swap local search). Applied last,
+as sanctioned — never as primary pairing logic. Exact-assignment accuracy
+(the actual pairing outcome, stricter than rank≤3):
+
+| course | exact |
+|---|---|
+| DashsTrack | 14/18 |
+| HeritagePark | 8/10 |
+| Lenard | 4/15 |
+| TowneLake | 16/18 |
+| **total** | **42/61** |
+
+Per-badge score normalization was tried and measured worse (38/61).
+Lenard is the honest outlier: its parallel residential fairways make
+adjacent mispairings score within noise of true pairs (true aligned
+worst-windows 0.22–0.34 vs competitors 0.29–0.48), and uniqueness then
+*cascades* one wrong claim into neighbors. Lenard's evidence — not its
+assignment — is what still needs work.
+
+## Remaining work this matrix exposes
+
+1. **Walking-path-aware attribution** (dashed paths + diamond markers as
+   discounted furniture) — several Lenard/Dashs competitors ride them.
+2. **Lenard-class evidence sharpening**: parallel-fairway courses need the
+   per-pair score to see corridor *identity* (e.g. continuity of the
+   specific strip), not just windowed aligned support.
+3. **Sequence-aware replay** (sanctioned, unexplored).
+4. Heritage endpoint recovery (4 tee + 3 basket detection misses are
+   excluded from the 61 — they are endpoint-detection failures, not
+   pairing failures).
