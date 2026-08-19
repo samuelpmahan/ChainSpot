@@ -545,3 +545,40 @@ across all four dev courses: 2 (both DashsTrack map-furniture edges, e.g.
 the Apple Maps label plate), acceptable as pool candidates for downstream
 pairing evidence to discriminate. Dev tee availability rises 69/72 →
 71/72.
+
+### v3: alpha-unblended sprites recover h6 — tee endpoints 72/72
+
+An external review of the recovery surfaced the correct diagnosis for h6:
+its tee sits almost entirely INSIDE its basket's 42×66 sprite bbox
+(truth center 0.9 px outside the bbox edge), and v2 marks that whole
+rectangle occluded — deleting the only surviving evidence before scoring.
+The render model says the bbox is not opaque: the sprite glyph covers
+~1746 of 2772 px, and much of its skirt is SEMI-transparent (soft
+shadow), so ground paint under it survives attenuated — h6's tee is
+invisible to the raw bright mask but present under the shadow.
+
+`occluded_tee_recovery_v3.py` inverts the alpha composite statistically
+from the course's N sprite instances (the sprite is constant; the ground
+varies): per-pixel alpha from cross-instance std against the always-
+transparent bbox corners, then Ghat = (V − alphaS)/(1 − alpha). Hard-won
+lessons, each measured: (1) reconstruction artifacts repeat at the same
+bbox-relative offset at every basket — a cross-instance UNIQUENESS filter
+per pixel plus a placement-level artifact-family filter (same offset at
+≥3 baskets) removed 58 repeated false placements on Heritage alone;
+(2) excusal must be support-aware — excuse a covered ring point only when
+NO evidence supports it, so reconstructed paint counts positively while
+unrecoverable shadow is still excused (a smaller occluder that "honestly"
+holds the ring to account crushed h5/h10 coverage); (3) search gating
+stays on the RECT bbox even though excusal uses the alpha mask (gating on
+the shrunken mask silently orphaned h5's fragment); (4) big bright
+components that are not known sprites/badges (rooftops, the map
+attribution) get a 25 px exclusion — with the sprite components
+themselves exempted, or the veto swallows every under-sprite recovery.
+
+Result: **h6 recovered at 11.1 px (score 0.841)** and h5 independently
+re-found at 6.8 px; union with v2 (which still supplies h10) recovers all
+three Heritage misses — **dev tee availability 71/72 → 72/72**. Cost: 4
+additional pool FPs (three Heritage rooftop corners, one Lenard facade),
+all off-course furniture far from any truth tee; combined pool FP count
+6 across four courses, inert to assignment because no corridor terminates
+at them.
