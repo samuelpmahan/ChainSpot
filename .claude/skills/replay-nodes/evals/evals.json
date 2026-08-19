@@ -1,0 +1,58 @@
+{
+ "skill_name": "replay-nodes",
+ "evals": [
+  {
+   "id": 0,
+   "name": "vendor-dedupe-retrofit",
+   "prompt": "In WORK_DIR there is vendors.csv and dedupe_pipeline.py \u2014 a vendor-deduplication pipeline. The fuzzy-matching pass takes ~15 seconds and re-runs every time I tweak anything downstream. Add replay nodes to this pipeline so I can iterate on the scoring/grouping without re-running the matching. Then demonstrate it: run the measurement once, then produce TWO interpretation variants replayed from the cache \u2014 (a) threshold 0.90 instead of 0.82, and (b) a rescoring that combines the cached ratio with token-set overlap of the names. Show me evidence the replays did not re-run the expensive matching, and a summary of how the duplicate groups changed between variants.",
+   "expected_output": "Pipeline split into a measurement step that writes a snapshot (pair scores with stable vendor IDs + params) and a replay path with two interpretation variants; replays demonstrably skip the O(n^2) match; per-variant delta reported.",
+   "files": [
+    "vendors.csv",
+    "dedupe_pipeline.py"
+   ],
+   "assertions": [
+    "A snapshot/cache file exists containing per-pair primitive evidence (pair scores keyed by stable vendor IDs), not just final duplicate groups",
+    "The measurement parameters/config are embedded in the snapshot itself (thresholds excluded, since threshold is interpretation; normalization/measurement params or a params block present)",
+    "The replay path is a separate invocation that loads the cache and never calls the expensive match function (verifiable from code structure: no call path from replay entry to difflib matching)",
+    "Both requested variants (threshold 0.90, ratio+token-set-overlap rescoring) were produced from the same cache, with outputs saved",
+    "A change summary between variants exists (group counts and/or which vendors moved)",
+    "Evidence that replay did not re-run matching is shown (replay timing well under measurement timing, or an explicit demonstration)"
+   ]
+  },
+  {
+   "id": 1,
+   "name": "log-anomalies-greenfield",
+   "prompt": "In WORK_DIR there is server.log (~200k request lines: 'epoch endpoint status latency_ms'). Build an anomaly report: find windows with bursts of 5xx errors and windows with latency spikes, per endpoint (this requires scanning and windowed stats over the whole log), then classify each anomalous window (severity + probable-cause bucket) and write anomaly-report.md. I'm going to iterate on the classification rules a lot, so add replay nodes as you go \u2014 I don't want to rescan the log each time. Demonstrate one iteration: after the first report, change the severity rules and regenerate the report from cache.",
+   "expected_output": "Greenfield pipeline built WITH a replay boundary from the start: log scan writes a windowed-stats snapshot; classification + report generation replay from it; second severity-rule variant regenerated without rescanning.",
+   "files": [
+    "server.log"
+   ],
+   "assertions": [
+    "A windowed-stats snapshot file exists containing primitive per-window per-endpoint measurements (counts/latency stats), not just the final anomaly labels",
+    "Classification + report generation is a separate replay step that reads the snapshot and never reads server.log",
+    "anomaly-report.md exists and detects the planted anomalies: a checkout 5xx burst near t=1700004000-1700004180, a search latency spike near t=1700009500-1700009700, and a cross-endpoint 500 burst near t=1700015000-1700015060",
+    "A second report with changed severity rules was regenerated from the cache (two report versions or a demonstrated re-run), without rescanning the log",
+    "The snapshot embeds its own scan parameters (window size, endpoints, etc.)",
+    "The change between rule versions is reported (which windows changed severity)"
+   ]
+  },
+  {
+   "id": 2,
+   "name": "sensor-cluster-retrofit",
+   "prompt": "In WORK_DIR there is readings.json (60 sensor streams) and cluster_pipeline.js, which cross-correlates every stream pair (slow) and then clusters. Restructure it with replay nodes: cache the expensive pairwise measurement once, make clustering variants replay from the cache as named toggles, and record for each replay what changed versus the previous variant (which streams moved clusters). Demonstrate with two clustering variants of your choice.",
+   "expected_output": "JS pipeline split at the correlation/clustering boundary; edge list cached with stream IDs + params; clustering variants as named toggles replaying from cache; per-replay change record (streams that moved clusters).",
+   "files": [
+    "readings.json",
+    "cluster_pipeline.js"
+   ],
+   "assertions": [
+    "A cached edge/correlation snapshot exists with stable stream IDs and per-pair primitives (r and lag per pair), plus embedded measurement params (MAX_LAG etc.)",
+    "Clustering variants are named toggles (flags/named configs) in a replay path that reads the cache and never calls the correlation function",
+    "Two clustering variants were actually run from the same cache with outputs saved",
+    "A per-replay change record exists naming which streams moved clusters between variants",
+    "The cached snapshot is not mutated by replays (replays write new outputs, cache preserved)",
+    "Replay runtime evidence shows it skips the expensive correlation (timing or structure)"
+   ]
+  }
+ ]
+}

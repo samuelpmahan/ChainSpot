@@ -15,4 +15,6 @@ artifacts/cv-runs/
 scripts/cv-probes/ribbon-mass-results-ts/
 __pycache__/
 *.pyc
-.claude/
+# Local agent state stays ignored, but repo-shared skills are tracked.
+.claude/*
+!.claude/skills/
