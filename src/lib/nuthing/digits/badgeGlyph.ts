@@ -22,7 +22,18 @@ export function extractBadgeGlyph(
   brightMask: Mask,
   darkMask: Mask,
   brightLabels: Int32Array,
+  brightComponents?: ComponentStats[],
 ): BadgeGlyph {
+  // Plate-recovered badges (label < 0, see badgeStage dark-plate recovery)
+  // have no frame component to exclude by identity — their frame is merged
+  // with a basket sprite, and that white can intrude into the interior
+  // bbox and segment as phantom digits. Digit glyphs are small components;
+  // anything large inside the interior is intruding frame/sprite paint.
+  const maxGlyphArea = 350;
+  const areaByLabel =
+    badge.label < 0 && brightComponents
+      ? new Map(brightComponents.map((c) => [c.label, c.area]))
+      : null;
   const width = brightMask.width;
   let ix0 = badge.bboxX + badge.bboxW;
   let iy0 = badge.bboxY + badge.bboxH;
@@ -53,6 +64,7 @@ export function extractBadgeGlyph(
     for (let x = 0; x < iw; x++) {
       const i = src + (ix0 + x);
       if (brightMask.data[i] && brightLabels[i] !== badge.label) {
+        if (areaByLabel && (areaByLabel.get(brightLabels[i]) ?? Infinity) > maxGlyphArea) continue;
         data[y * iw + x] = 1;
       }
     }

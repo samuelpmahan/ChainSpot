@@ -56,6 +56,8 @@ export interface BadgeReadContext {
   darkMask: Mask;
   brightLabels: Int32Array;
   badges: ComponentStats[];
+  /** Optional: enables large-component exclusion for plate-recovered badges. */
+  brightComponents?: ComponentStats[];
 }
 
 export function readBadge(
@@ -63,7 +65,13 @@ export function readBadge(
   result: BadgeReadContext,
   scorer: DigitScorer,
 ): BadgeReading {
-  const glyph = extractBadgeGlyph(badge, result.brightMask, result.darkMask, result.brightLabels);
+  const glyph = extractBadgeGlyph(
+    badge,
+    result.brightMask,
+    result.darkMask,
+    result.brightLabels,
+    result.brightComponents,
+  );
   const segmented = glyph.mask.width > 0 ? segmentDigits(glyph.mask) : { digits: [], notes: [] };
   const digits: DigitReading[] = [];
   for (const candidate of segmented.digits) {
