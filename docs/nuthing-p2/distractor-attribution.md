@@ -474,6 +474,51 @@ candidate-conditioned scoring inside the assignment loop, where the
 near-field gate and one-sidedness become per-candidate evidence rather
 than a winner-take-all bearing.
 
+### Five-specialist experiment: overfit each course, then compare
+
+Instrumented overfitting ("set up 5 copies... tune each to perfectly map
+one course. And compare"): four copies of the peak-ranker each tuned by
+30k-trial random search to its own course alone, plus a pooled fifth —
+all re-scored from the replay-node sidecars, judged on reliable-truth
+rows. Findings:
+
+- **Specialist ceilings expose a formula limit, not a tuning limit.**
+  Open courses saturate (DashsTrack 16/18 cat 0, TowneLake 16/18 cat 0)
+  but Heritage tops out at 10/17 and Lenard 11/16 even while overfitting,
+  against per-course oracles of 14/17 and 16/16. The linear clue-score
+  family cannot express what separates true from trap on those baskets no
+  matter the weights.
+- **The near-field gate is universal.** Every specialist independently
+  chose gate strength a in 0.19–0.42 (pooled 0.13) — none turned it off.
+  This is the one knob all five agree on.
+- **Cap edge and far-evidence are the course-dependent knobs.** Dashs
+  weights the cap 1.93, Heritage 1.25, TowneLake 0.97 — Lenard nearly
+  drops it (0.12): its dense suburban clutter corrupts cap arcs. Far
+  evidence flips SIGN: open TowneLake rewards it (+0.80) — long clean
+  corridors — while Dashs and Lenard penalize evidence that lives only
+  beyond 60px.
+- **Transfer is asymmetric along an open-vs-cluttered axis.** Everyone
+  scores 0.83–0.89 on Dashs/TowneLake regardless of tuning; nobody
+  exceeds 0.59/0.69 on Heritage/Lenard, including their own specialists.
+  Course difficulty, not parameterization, dominates.
+- **13 reliable baskets defeat all five specialists.** Of these, ~6 are
+  peak-extraction misses (no peak within 15° — oracle itself fails) and
+  the rest are ranking-impossible within the family — including Lenard h3
+  whose true peak sits at 0.2° error yet loses to a neighboring corridor
+  under every weighting tried. These are the provably locally-undecidable
+  set; only candidate-conditioned (non-local) information can settle them.
+- **Target six under the specialists:** Heritage h4, Heritage h7, Lenard
+  h9, h11 all land ≤5° (h7 is fixed by three of four FOREIGN specialists
+  too — a robust fix, not an overfit); Lenard h7 near-misses at 22.5°;
+  Lenard h3 stays at 152° under all five — the one locally hopeless
+  target.
+
+Net: a global config with the near-field gate is justified; cap weight
+plausibly wants to scale with course clutter; and the remaining pairing
+errors concentrate exactly where local evidence provably cannot decide —
+the candidate-conditioned wiring is not just preferable but necessary for
+those.
+
 
 ## Occluded-tee recovery — "the Heritage misses are partially covered boxes"
 
