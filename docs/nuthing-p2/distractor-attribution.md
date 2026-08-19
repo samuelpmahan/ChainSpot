@@ -238,6 +238,189 @@ walking-path/basket-zone cases from the classification above.
    Dash chains are detectable from the bright-component universe; their
    support can be discounted like ring furniture.
 
+## Basket backward-walk — does the basket zone testify to its own approach direction?
+
+Directive: "wrong (tee,basket) assignments are almost always wrong on the
+BASKET side" — figure out whether walking BACKWARD from a basket's precise
+endpoint can recover the corridor's approach direction reliably enough that
+a basket could reject pairs whose badge/tee do not lie along it.
+`scripts/nuthing/basket-backwalk.ts` (pure replay: reads only the cached
+pair matrix + support/theta planes; nothing re-detected, nothing re-routed,
+pairing untouched) measures this for every basket candidate in the cache and
+validates against the same 63-hole dev truth join used above. Method
+documented in the script header; summary:
+
+1. **Direction scan** (not a walk first — a scan): score every candidate
+   bearing theta (2° steps, full 360°) by **flanked-rectangle contrast** —
+   mean gray in a corridor-width-wide band from r0=35 (just outside the
+   sprite) to r1 minus the mean gray of two parallel flank bands one full
+   width away (cancels the zone fill's near-basket brightness lift, which
+   raises center and flank alike). Every sample first checks against known
+   occluders — any basket's sprite bbox, any basket's ring bands (44±8,
+   84±12, applied uniformly to the scored basket's OWN rings too, so
+   legitimately crossing them is neither rewarded nor punished), any
+   badge's box, any tee's box — and is dropped, not counted either way, if
+   inside one.
+2. **Field confirmation**: beyond r=90px the cached support/theta planes are
+   trustworthy, so a second signal — support weighted by how well the
+   field's own local best orientation aligns with theta (mod π) — is added
+   to the color score (same strip-coherence idea as
+   `pair-matrix-replay.ts`, reused for a ray instead of a route).
+3. **Walk**: from the winning bearing, a short local re-scan (±20° window,
+   capped turn rate) at each 4px step lets a centerline polyline bend with
+   the paint until evidence drops for two consecutive steps or ~150px is
+   covered. The walk is a confirmation/visualization aid; the reported
+   bearing comes from the scan, not the walk's final heading.
+
+### Two measured fixes before the numbers below were reachable
+
+Two render-stack facts, invisible until measured, dominated the design and
+are worth recording:
+
+- **Badge and tee boxes are not in the pair-matrix cache** (only centers).
+  Measured directly off the rendered pixels in all four courses (white pill
+  rim around the digit glyph / rect glyph edges): badges ≈24–26px half-width,
+  ≈20–21px half-height; tees ≈11–35px per axis. Fixed exclusion boxes
+  (badge 28×24, tee 20×20 half-extents) were used since no per-instance bbox
+  is cached. **Adding tee exclusion — not in the task's example occluder
+  list — was one of the two biggest single wins**: DashsTrack median
+  own-badge error 14.0° → 7.5°, discrimination 46.0% → 49.2%, holding
+  everything else fixed.
+- **The scan window has to run much further than "beyond the C2D ring"
+  (96px) suggests.** `r1` was swept 110→360px against the full 63-hole
+  truth join, holding everything else fixed: discrimination rises from 41%
+  at 110px to a 60–62% plateau across 200–230px, then falls back below 45%
+  by 320px as the window starts pulling in unrelated holes. The reason a
+  wider window helps is a basket-sprite geometry fact that generalizes to
+  *every* basket, not a one-off: the sprite is one fixed, unrotated 42×66
+  bitmap with the pole tip near its bottom, so it occludes only ~4px in one
+  screen direction but up to ~70px in the opposite one — a candidate bearing
+  that happens to point into the sprite's tall side starts with over half
+  of a 95px window pre-occluded before ring/badge exclusion even applies.
+  Worse, on short-to-medium holes (badge ≈ half the tee→basket distance,
+  per the established P3 invariant) **the basket's own badge sits inside a
+  130px window and its exclusion box eats exactly the outer arc the TRUE
+  bearing needed**, while nothing stops a false bearing from riding a
+  short, clean, nearby distractor corridor instead. Case study: DashsTrack
+  hole 4's basket (B17) has another basket (B16) 52px away and its own
+  badge 124px away; at r1=130 the true bearing (toward the badge, 275°)
+  survived only 12 samples (below the validity floor) while the false
+  bearing (84°, riding paint 7.3° off basket-island neighbor badge 7)
+  collected 49 samples at a real +39 gray lift — a genuine competing
+  corridor immediately adjacent, not a scoring bug. r1=200 was picked from
+  the middle of the measured plateau, not the extremes.
+
+### Results (63-hole dev truth join, pure replay)
+
+| course | n | own-badge err med | p90 | max | other-badge min-err med | discrimination |
+|---|---|---|---|---|---|---|
+| DashsTrack | 18 | 2.0° | 59.1° | 178.0° | 4.3° | 66.7% (12/18) |
+| HeritagePark | 11 | 47.4° | 104.9° | 172.8° | 3.8° | 45.5% (5/11) |
+| Lenard | 16 | 12.8° | 167.5° | 173.0° | 15.9° | 43.8% (7/16) |
+| TowneLake | 18 | 0.5° | 11.7° | 155.9° | 4.8° | 83.3% (15/18) |
+| **pooled** | **63** | **2.1°** | **152.5°** | **178.0°** | **8.2°** | **61.9% (39/63)** |
+
+"Discrimination" = fraction of truth baskets whose estimated bearing is
+closer to its own hole's badge than to every other badge in the course —
+the property pairing would actually need. Runtime: 8.2s total for all 93
+basket candidates across all four courses (~90ms/basket), well inside the
+"few seconds per basket" budget.
+
+**The distribution is sharply bimodal, not moderately noisy** — this is
+the honest headline. Of the 63 truth holes: 39 (62%) land within 8° (median
+2.1°, essentially the render's own precision — see the TowneLake overlay,
+nearly every ray is green), 3 more within 20°, and **12 (19%) are wrong by
+more than 100°** — DashsTrack h14/h18, HeritagePark h3/h4, Lenard
+h2/h3/h6/h10/h11/h14/h15, TowneLake h12. These are not the walk misjudging
+the true corridor's edge; it locked onto a *different, real* corridor
+belonging to a neighboring hole. Checked programmatically for all 12: every
+one has some other basket, tee, or (non-own) badge within 9–121px (the
+closest of the three types, per hole), and hand inspection of the worst case
+(DashsTrack hole 4, walked through in detail above) confirmed a second
+hole's corridor genuinely runs close enough to the anchor to out-score the
+true one within the same window that has to be wide enough to escape the
+zone. **This is the same distractor mechanism the forward pipeline already
+has (`pair-matrix-replay.ts`'s "46/53 strongest false competitors are real
+endpoints of adjacent holes... real support, wrong strip"), now shown to
+affect basket-local backward evidence too, not just full tee→basket
+routes.** Proximity to another endpoint is necessary but not sufficient to
+predict failure by itself (nearest-basket distance for the err≤15° half
+averages 184px vs. 159px for the err>15° half — a real but weak signal, not
+a clean discriminator on its own); the difference is ultimately in the
+corridor evidence itself. Visual confirmation: `DashsTrack-full-backwalk.png`
+at holes 4–8, a tight basket island, shows exactly this mix — some rays in
+the cluster land correctly (green), others alias onto the neighbor
+(red) — a course-level view backing the per-hole numbers, not a
+hole-by-hole re-verification of all 12.
+
+**What did NOT help, tried and measured:** weighting the field term by
+alignment-only (dropping low-alignment samples from the denominator, "V1")
+and a worst-sliding-window persistence score over the field ("V2") were
+both tested against the same 63-hole join at several window widths;
+neither beat the plain flanked-contrast-plus-mean-field design by more
+than ~1 point of discrimination, and both cost more compute for no
+reliable win. Kept the simpler design.
+
+### Assessment
+
+The signal is real and strong where the basket sits in open territory —
+TowneLake's 83% discrimination and 11.7° p90 show the method comfortably
+clears the "median ≤ 8°" target and would cleanly reject a wrong-basket
+pairing there. But pooled p90 (152.5°) and the 19% catastrophic-failure
+rate mean **this cannot be used alone, unfiltered, as a hard gate** —
+doing so would wrongly veto some correct pairs in exactly the dense
+clusters where the forward pipeline's basket-preference bug is worst,
+which is not obviously better than today. It should integrate (a task for
+later work, not this one) as a *soft* signal gated by its own reported
+`confidence`/`margin` (both written per basket in `<course>-backwalk.json`)
+— strong where isolated, silent/abstaining where clustered — rather than
+as a blanket bearing-agreement filter. The clustering failure mode is
+honestly the same one the whole NUTHING-P2 effort has been chasing
+(distractor corridors, not measurement noise), and this measurement adds
+evidence that it lives in the basket zone specifically, not just along
+open fairway.
+
+### Re-validation against bend-aware truth (joint review, pre-wiring)
+
+The self-validation above judged bearings against basket→own-badge. But the
+badge invariant says the badge is ALWAYS before any bend — so on dogleg
+holes basket→badge is NOT the final approach direction, and the subagent's
+truth is wrong in exactly the same way a naive walker would be. Re-joined
+all 72 baskets against basket→last corridor bend (falling back to
+basket→tee where the annotation records no bends; Lenard records none, so
+its dogleg rows carry line-quality truth): 43/72 within 15°, 7 between
+15–45°, **22/72 catastrophic (>45°, clustered at 130–175°)**. On
+near-straight holes the walk is superb (median 1.2°). Zoomed crops of the
+worst cases (scratchpad `backwalk-failures-zoom.png`) confirm every
+inspected catastrophic case is the walker exiting the basket along a
+*different real render* — the BTD walking path, the next hole's corridor,
+or a clustered neighbor's corridor, usually out the back (~180°).
+
+**Confidence/margin do not gate the failure mode.** Six catastrophic cases
+report confidence 1.00 with margins 25–36 (Lenard h2/h3/h10, Heritage
+h5/h7, DashsTrack h5). Keeping only margin ≥ 29 (top quartile) still
+retains a catastrophic case while discarding most good ones.
+
+**On the six currently-wrong assignment holes — the target set — the
+signal is anti-correlated with its own confidence:** wrong with high
+confidence on four (Heritage h4 168.5°@0.75, Heritage h7 82.9°@1.00,
+Lenard h3 152.2°@1.00, Lenard h11 170.8°@0.63) and right on two only at
+the lowest confidences in the dataset (Lenard h7 0.5°@0.37, Lenard h9
+4.5°@0.53) — below any gate that removes the bad ones. The misassigned
+holes are the dense clutter zones, which are precisely where the walker
+grabs a neighboring render.
+
+**Decision: NOT wired.** The confidence-weighted soft integration proposed
+above would actively push four of the six target holes harder toward the
+wrong badge. The salvageable idea is to invert the question: the walker's
+per-direction flanked-contrast measurement is real evidence, but its argmax
+is the trap. Scoring "corridor evidence leaving this basket toward
+candidate badge B" inside the assignment loop — comparing only across the
+row's candidate directions — removes the ~180° BTD/next-corridor trap,
+because those directions are never candidate badge directions. That would
+be a re-score of cached machinery, per the replay-node discipline; it is
+deliberately left unbuilt pending review.
+
 
 ## Occluded-tee recovery — "the Heritage misses are partially covered boxes"
 
