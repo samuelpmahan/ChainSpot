@@ -606,20 +606,36 @@ positional-uncertainty field (pairing treats the recovered tee as a
 short segment), or pin the slide with a reconstruction-based
 interior-color consistency term.
 
-**Follow-up — the 11 px "miss" is mostly the truth's, not the fit's.**
-Interrogating the unpainted band west of the bbox (where a truth-centered
-pad's west border should be visible in the clear): it is dark ground
-(V median 94 vs typical ground 157) and an extended-window alpha model
-(bbox+8 px margin) measures alpha = 0.00 across the whole west margin —
-the sprite casts no out-of-bbox shadow, so there is nothing to un-blend
-and no paint to recover there. By the everything-is-rendered-UI axiom, a
-pad at the registered truth position would show its west border in the
-open; it does not, so the rendered pad must sit far enough east that the
-west border hides under the opaque glyph — i.e. at the fit's position.
-Calibration confirms: HeritagePark's registered truth sits a median
-8.0 px (p90 11.1, max 14.2) from pixel-verified detected tees, versus
-1.2/1.5 px on Lenard/TowneLake — an ~11 px offset is inside Heritage's
-normal registration noise. The slide-to-hide degeneracy is still a real,
-measured failure mode of the masked fit; on h6 it happens to slide toward
-the rendered pad. Heritage-based distance judgments elsewhere carry the
-same ~8 px truth noise (harmless under 18 px joins).
+**Follow-up (CORRECTED) — the band west of the bbox is corridor paint,
+and it sides with the registered truth.** The first reading of that band
+("dark ground, V 94 vs ground 157") was a measurement error: the ground
+reference window itself overlapped the band. Against a clean reference
+(x 698-712), the band is +45 gray of LIFT over dark tree ground —
+h6's own hole-path corridor (the tee→badge segment runs due north,
+badge 6 at (729.5, 824.5)), visible only as a ≤W/2 sliver west of the
+sprite bbox, exactly as identified in review. The per-row profile
+resolves the whole column: badge-6 frame white (y 815-835), the
+corridor band (851-931, α≈0.5-consistent over dark ground), a
+transition, then full corridor gray 150-158 south of 959 (a second,
+heavier corridor structure approaching B11 from the south) — multiple
+overlapping renders, no single cap.
+
+The decisive number: the corridor's visible west edge sits at x≈716,
+putting the **corridor centerline at x≈731 — on the registered truth
+tee (x=730.1), not on the pad-fit (x=741)**. The tee is the corridor's
+start point, so the corridor centerline pins the pad's x: the
+slide-to-hide fit really did slide ~10 px off the pad, and the previous
+conclusion ("the truth is wrong, the fit is right") is retracted. The
+Heritage registration-noise calibration (median 8.0 px vs 1.2-1.5 px on
+Lenard/TowneLake) stands as context, but the strongest local evidence
+sides with truth on x; y remains soft (overlapping paint obscures the
+start-cap row). An un-blended gray-LIFT map (reconstruction judged
+against local ground, not a white threshold) shows the corridor interior
+continuing under the sprite — gray paint is recoverable there, not just
+white.
+
+Consequence for the recovery (unwired): add a **corridor-terminus
+constraint** — a recovered pad must sit on a corridor start (centerline
++ start cap, fit from the lift map). It pins the slide degeneracy with
+render geometry instead of heuristics, and it would also kill the
+rooftop/logo FPs, none of which have a corridor terminating at them.
