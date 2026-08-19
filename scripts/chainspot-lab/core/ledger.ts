@@ -204,6 +204,63 @@ export class LabLedger {
 		if (result.changes !== 1) throw new Error(`Run is not active: ${runId}`);
 	}
 
+	runSummary(runId: string): LedgerRunSummary | null {
+		const run = this.database
+			.prepare(`
+				SELECT r.run_id, r.experiment_hash, r.repo_sha, r.status, r.started_at, r.completed_at,
+					e.resolved_manifest_object_hash, e.resolved_suite_object_hash
+				FROM runs r
+				JOIN experiments e ON e.experiment_hash = r.experiment_hash
+				WHERE r.run_id = ?
+			`)
+			.get(runId) as
+			| {
+					run_id: string;
+					experiment_hash: string;
+					repo_sha: string;
+					status: string;
+					started_at: string;
+					completed_at: string | null;
+					resolved_manifest_object_hash: string;
+					resolved_suite_object_hash: string;
+			  }
+			| undefined;
+		if (!run) return null;
+		const nodes = this.database
+			.prepare(`
+				SELECT node_id, node_type, status, cache_status, runtime_ms, output_hash, error_json
+				FROM run_nodes WHERE run_id = ? ORDER BY rowid
+			`)
+			.all(runId) as Array<{
+				node_id: string;
+				node_type: string;
+				status: string;
+				cache_status: string | null;
+				runtime_ms: number | null;
+				output_hash: string | null;
+				error_json: string | null;
+			}>;
+		return {
+			runId: run.run_id,
+			experimentHash: run.experiment_hash,
+			repoSha: run.repo_sha,
+			status: run.status,
+			startedAt: run.started_at,
+			completedAt: run.completed_at,
+			resolvedManifestObjectHash: run.resolved_manifest_object_hash,
+			resolvedSuiteObjectHash: run.resolved_suite_object_hash,
+			nodes: nodes.map((node) => ({
+				nodeId: node.node_id,
+				nodeType: node.node_type,
+				status: node.status,
+				cacheStatus: node.cache_status,
+				runtimeMs: node.runtime_ms,
+				outputHash: node.output_hash,
+				error: node.error_json ? (JSON.parse(node.error_json) as unknown) : null
+			}))
+		};
+	}
+
 	statusSummary(limit = 5): LedgerStatusSummary {
 		const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
 		const count = (table: string): number => {
@@ -333,6 +390,40 @@ export class LabLedger {
 				VALUES (?, ?, ?)
 			`)
 			.run(entityKey(child), entityKey(parent), relation);
+	}
+
+	linkRunNodeEntity(runId: string, nodeId: string, ref: EntityRef): void {
+		this.database
+			.prepare(`
+				INSERT OR IGNORE INTO run_node_entities (run_id, node_id, entity_key)
+				VALUES (?, ?, ?)
+			`)
+			.run(runId, nodeId, entityKey(ref));
+	}
+
+	recordMetric(input: {
+		readonly runId: string;
+		readonly scopeType: string;
+		readonly scopeId: string;
+		readonly name: string;
+		readonly value: number;
+		readonly unit?: string;
+		readonly slice?: unknown;
+	}): void {
+		this.database
+			.prepare(`
+				INSERT INTO metrics (run_id, scope_type, scope_id, name, value, unit, slice_json)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`)
+			.run(
+				input.runId,
+				input.scopeType,
+				input.scopeId,
+				input.name,
+				input.value,
+				input.unit ?? null,
+				input.slice ? canonicalJson(input.slice) : null
+			);
 	}
 
 	recordImplementationCombination(combination: ResolvedImplementationCombination): void {

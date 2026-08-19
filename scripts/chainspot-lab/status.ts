@@ -17,6 +17,8 @@ export interface LabStatusReport {
 		readonly suiteName: string | null;
 		readonly caseId: string | null;
 		readonly course: string | null;
+		readonly caseIds: readonly string[];
+		readonly courses: readonly string[];
 		readonly metadataError: string | null;
 	}>>;
 }
@@ -39,6 +41,8 @@ export function collectStatusReport(config: LabConfig, latestRunLimit = 5): LabS
 		suiteName: string | null;
 		caseId: string | null;
 		course: string | null;
+		caseIds: readonly string[];
+		courses: readonly string[];
 		metadataError: string | null;
 	}> = {};
 	if (existsSync(config.ledgerPath)) {
@@ -48,7 +52,7 @@ export function collectStatusReport(config: LabConfig, latestRunLimit = 5): LabS
 		} finally {
 			connection.close();
 		}
-		const store = new ImmutableObjectStore(config.evidenceStore.path);
+		const store = new ImmutableObjectStore(config.evidenceStore.path, { readOnly: true });
 		for (const run of ledger.latestRuns) {
 			try {
 				const manifest = store.readJson<{ name?: string }>(run.resolvedManifestObjectHash);
@@ -56,12 +60,16 @@ export function collectStatusReport(config: LabConfig, latestRunLimit = 5): LabS
 					name?: string;
 					course?: string;
 					case?: { id?: string; course?: string };
+					cases?: readonly { id?: string; course?: string }[];
 				}>(run.resolvedSuiteObjectHash);
+				const cases = suite.cases ?? (suite.case ? [suite.case] : []);
 				runContexts[run.runId] = {
 					experimentName: manifest.name ?? null,
 					suiteName: suite.name ?? null,
 					caseId: suite.case?.id ?? null,
 					course: suite.case?.course ?? suite.course ?? null,
+					caseIds: cases.flatMap((entry) => entry.id ? [entry.id] : []),
+					courses: cases.flatMap((entry) => entry.course ? [entry.course] : []),
 					metadataError: null
 				};
 			} catch (error) {
@@ -70,6 +78,8 @@ export function collectStatusReport(config: LabConfig, latestRunLimit = 5): LabS
 					suiteName: null,
 					caseId: null,
 					course: null,
+					caseIds: [],
+					courses: [],
 					metadataError: error instanceof Error ? error.message : String(error)
 				};
 			}

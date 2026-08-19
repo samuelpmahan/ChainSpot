@@ -58,22 +58,26 @@ export interface StepTwoRunResult {
 	};
 }
 
-interface NodeDefinition<Parameters> {
+export type ReplayNodeOutput =
+	| { readonly encoding: 'binary'; readonly payload: Uint8Array }
+	| { readonly encoding: 'json'; readonly payload: unknown };
+
+export interface NodeDefinition<Parameters> {
 	readonly nodeId: string;
 	readonly implementation: RegisteredImplementation;
 	readonly outputSchemaVersion: number;
 	readonly parameters: Parameters;
 	readonly relevantEnvironment: unknown;
-	readonly execute: (inputs: readonly Buffer[], parameters: Parameters) => Buffer;
+	readonly execute: (inputs: readonly Buffer[], parameters: Parameters) => ReplayNodeOutput;
 }
 
-function packageVersion(name: string): string {
+export function packageVersion(name: string): string {
 	const require = createRequire(import.meta.url);
 	const path = require.resolve(`${name}/package.json`);
 	return (JSON.parse(readFileSync(path, 'utf8')) as { version: string }).version;
 }
 
-function repoSha(repoRoot: string): string {
+export function repoSha(repoRoot: string): string {
 	return execFileSync('git', ['rev-parse', 'HEAD'], {
 		cwd: repoRoot,
 		encoding: 'utf8',
@@ -87,11 +91,18 @@ function plainError(error: unknown): { name: string; message: string } {
 		: { name: 'Error', message: String(error) };
 }
 
-function registerImplementations(repoRoot: string): {
+export function registerImplementations(repoRoot: string): {
 	readonly registry: ImplementationRegistry;
 	readonly decode: RegisteredImplementation;
+	readonly decoders: ReadonlyMap<'jpeg' | 'png', RegisteredImplementation>;
 	readonly viewports: ReadonlyMap<string, RegisteredImplementation>;
 	readonly masks: RegisteredImplementation;
+	readonly components: RegisteredImplementation;
+	readonly badges: RegisteredImplementation;
+	readonly baskets: RegisteredImplementation;
+	readonly chromes: ReadonlyMap<string, RegisteredImplementation>;
+	readonly tees: RegisteredImplementation;
+	readonly endpointEvaluation: RegisteredImplementation;
 } {
 	const registry = new ImplementationRegistry(repoRoot);
 	const cpuOnly = (ramMiB: number): ResourceDeclaration => ({
@@ -111,6 +122,21 @@ function registerImplementations(repoRoot: string): {
 			'scripts/nuthing/decode.ts'
 		],
 		inputKinds: ['source.raster.jpeg.v1'],
+		outputKind: 'raster.rgba.v2',
+		resources: cpuOnly(256)
+	});
+	const decodePng = registry.register({
+		id: 'raster.decode.pngjs-v1',
+		version: '1.0.0',
+		nodeType: 'raster.decode',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/rasterDecode.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/rasterDecode.ts',
+			'scripts/chainspot-lab/nodes/rasterBinary.ts',
+			'scripts/nuthing/decode.ts'
+		],
+		inputKinds: ['source.raster.png.v1'],
 		outputKind: 'raster.rgba.v2',
 		resources: cpuOnly(256)
 	});
@@ -160,28 +186,175 @@ function registerImplementations(repoRoot: string): {
 		outputKind: 'raster.bright-dark-masks.v2',
 		resources: cpuOnly(128)
 	});
+	const identitySources = [
+		'scripts/chainspot-lab/core/identity.ts',
+		'scripts/chainspot-lab/core/hashing.ts',
+		'scripts/chainspot-lab/core/canonicalJson.ts'
+	];
+	const components = registry.register({
+		id: 'components.bright.nuthing-v1',
+		version: '1.0.0',
+		nodeType: 'components.bright',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/brightComponents.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/brightComponents.ts',
+			'scripts/chainspot-lab/nodes/rasterBinary.ts',
+			'src/lib/nuthing/components.ts',
+			...identitySources
+		],
+		inputKinds: ['raster.bright-dark-masks.v2'],
+		outputKind: 'components.bright.v1',
+		resources: cpuOnly(384)
+	});
+	const badges = registry.register({
+		id: 'badges.detect.nuthing-p15-v1',
+		version: '1.0.0',
+		nodeType: 'badges.detect',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/badgesDetect.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/badgesDetect.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts',
+			'scripts/chainspot-lab/nodes/rasterBinary.ts',
+			'src/lib/nuthing/badgeStage.ts',
+			'src/lib/nuthing/families.ts',
+			'src/lib/nuthing/p1.ts',
+			...identitySources
+		],
+		inputKinds: ['raster.bright-dark-masks.v2', 'components.bright.v1'],
+		outputKind: 'badges.detected.v1',
+		resources: cpuOnly(128)
+	});
+	const baskets = registry.register({
+		id: 'baskets.sprite-match.fixed-v1',
+		version: '1.0.0',
+		nodeType: 'baskets.sprite-match',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/basketsSpriteMatch.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/basketsSpriteMatch.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts',
+			'scripts/chainspot-lab/nodes/rasterBinary.ts',
+			'src/lib/nuthing/endpoints.ts',
+			...identitySources
+		],
+		inputKinds: [
+			'raster.bright-dark-masks.v2',
+			'components.bright.v1',
+			'baskets.sprite-template.v1'
+		],
+		outputKind: 'baskets.sprite-matches.v1',
+		resources: cpuOnly(512)
+	});
+	const chromeNone = registry.register({
+		id: 'chrome.none',
+		version: '1.0.0',
+		nodeType: 'chrome.attribute',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/chromeNone.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/chromeNone.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts'
+		],
+		inputKinds: ['components.bright.v1'],
+		outputKind: 'chrome.attribution.v1',
+		resources: cpuOnly(32)
+	});
+	const chromeScreen = registry.register({
+		id: 'chrome.screen-space-v1',
+		version: '1.0.0',
+		nodeType: 'chrome.attribute',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/chromeScreenSpace.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/chromeScreenSpace.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts',
+			'src/lib/nuthing/screenChrome.ts',
+			...identitySources
+		],
+		inputKinds: ['components.bright.v1'],
+		outputKind: 'chrome.attribution.v1',
+		resources: cpuOnly(64)
+	});
+	const tees = registry.register({
+		id: 'tees.candidates.nuthing-baseline-v1',
+		version: '1.0.0',
+		nodeType: 'tees.candidates',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/teesCandidates.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/teesCandidates.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts',
+			'scripts/chainspot-lab/nodes/rasterBinary.ts',
+			'src/lib/nuthing/endpoints.ts',
+			'src/lib/nuthing/screenChrome.ts',
+			...identitySources
+		],
+		inputKinds: [
+			'raster.bright-dark-masks.v2',
+			'components.bright.v1',
+			'badges.detected.v1',
+			'baskets.sprite-matches.v1',
+			'chrome.attribution.v1'
+		],
+		outputKind: 'tees.candidates.v1',
+		resources: cpuOnly(768)
+	});
+	const endpointEvaluation = registry.register({
+		id: 'endpoints.evaluate.dev-truth-v1',
+		version: '1.0.0',
+		nodeType: 'endpoints.evaluate',
+		language: 'typescript',
+		entrypoint: 'scripts/chainspot-lab/nodes/endpointEvaluate.ts',
+		sources: [
+			'scripts/chainspot-lab/nodes/endpointEvaluate.ts',
+			'scripts/chainspot-lab/nodes/endpointTypes.ts'
+		],
+		inputKinds: ['tees.candidates.v1', 'baskets.sprite-matches.v1', 'endpoints.truth.v1'],
+		outputKind: 'endpoints.evaluation.v1',
+		resources: cpuOnly(64)
+	});
 	return {
 		registry,
 		decode,
+		decoders: new Map([
+			['jpeg', decode],
+			['png', decodePng]
+		]),
 		viewports: new Map([
 			[explicitViewport.id, explicitViewport],
 			[automaticViewport.id, automaticViewport]
 		]),
-		masks
+		masks,
+		components,
+		badges,
+		baskets,
+		chromes: new Map([
+			[chromeNone.id, chromeNone],
+			[chromeScreen.id, chromeScreen]
+		]),
+		tees,
+		endpointEvaluation
 	};
 }
 
-function recordObject(ledger: LabLedger, store: ImmutableObjectStore, hash: string): void {
+export function recordObject(ledger: LabLedger, store: ImmutableObjectStore, hash: string): void {
 	ledger.recordObject(store.descriptor(hash), store.relativePath(hash));
 }
 
-function executeNode<Parameters>(
+export function executeNode<Parameters>(
 	ledger: LabLedger,
 	store: ImmutableObjectStore,
 	runId: string,
 	definition: NodeDefinition<Parameters>,
 	inputHashes: readonly string[]
 ): ReplayNodeExecutionSummary {
+	if (inputHashes.length !== definition.implementation.inputKinds.length) {
+		throw new TypeError(
+			`${definition.nodeId} declares ${definition.implementation.inputKinds.length} inputs, received ${inputHashes.length}`
+		);
+	}
 	for (const [index, hash] of inputHashes.entries()) {
 		const descriptor = store.descriptor(hash);
 		const expected = definition.implementation.inputKinds[index];
@@ -215,7 +388,10 @@ function executeNode<Parameters>(
 		} else {
 			const inputs = inputHashes.map((hash) => store.readBytes(hash));
 			const output = definition.execute(inputs, definition.parameters);
-			const stored = store.putBytes(definition.implementation.outputKind, output);
+			const stored =
+				output.encoding === 'binary'
+					? store.putBytes(definition.implementation.outputKind, output.payload)
+					: store.putJson(definition.implementation.outputKind, output.payload);
 			outputHash = stored.descriptor.hash;
 			recordObject(ledger, store, outputHash);
 			ledger.putCacheEntry(invocationKey, outputHash);
@@ -344,7 +520,10 @@ export function runStepTwoReplay(config: LabConfig, options: StepTwoRunOptions =
 				jpegJsVersion: packageVersion('jpeg-js'),
 				pngjsVersion: packageVersion('pngjs')
 			},
-			execute: (inputs, parameters) => runRasterDecode(inputs[0], parameters)
+			execute: (inputs, parameters) => ({
+				encoding: 'binary',
+				payload: runRasterDecode(inputs[0], parameters)
+			})
 		}, [source.descriptor.hash]);
 		const viewport = executeNode(ledger, store, runId, {
 			nodeId: 'viewport.crop',
@@ -352,10 +531,12 @@ export function runStepTwoReplay(config: LabConfig, options: StepTwoRunOptions =
 			outputSchemaVersion: 2,
 			parameters: viewportParameters,
 			relevantEnvironment: { nodeVersion },
-			execute: (inputs, parameters) =>
-				parameters.strategy === 'explicit-insets'
+			execute: (inputs, parameters) => ({
+				encoding: 'binary',
+				payload: parameters.strategy === 'explicit-insets'
 					? runExplicitInsetsViewport(inputs[0], parameters).bytes
 					: runProductionAutoViewport(inputs[0], parameters).bytes
+			})
 		}, [decode.outputHash]);
 		const masks = executeNode(ledger, store, runId, {
 			nodeId: 'mask.bright-dark',
@@ -363,7 +544,7 @@ export function runStepTwoReplay(config: LabConfig, options: StepTwoRunOptions =
 			outputSchemaVersion: 2,
 			parameters: maskParameters,
 			relevantEnvironment: { nodeVersion },
-			execute: (inputs) => runBrightDarkMasks(inputs[0])
+			execute: (inputs) => ({ encoding: 'binary', payload: runBrightDarkMasks(inputs[0]) })
 		}, [viewport.outputHash]);
 		ledger.finishRun(runId, 'completed');
 		const cropped = decodeRgbaRaster(store.readBytes(viewport.outputHash));

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "step3-endpoint-baseline",
+  "experimentName": "step3-baseline-endpoint-substrate",
+  "suite": {
+    "name": "dev-five-endpoints",
+    "evidenceRole": "calibration",
+    "referenceBaseline": {
+      "source": "docs/nuthing-p2/screen-chrome-attribution.md",
+      "rasterDecode": "historical OpenCV RGBA trace",
+      "cases": {
+        "AlexClark-full": { "raw": 34, "chromeSuppressed": 13, "free": 21, "teeRecall": 3 },
+        "DashsTrack-full": { "raw": 30, "chromeSuppressed": 11, "free": 19, "teeRecall": 18 },
+        "HeritagePark-full": { "raw": 54, "chromeSuppressed": 8, "free": 46, "teeRecall": 15 },
+        "Lenard-full": { "raw": 63, "chromeSuppressed": 7, "free": 56, "teeRecall": 18 },
+        "TowneLake-full": { "raw": 32, "chromeSuppressed": 3, "free": 29, "teeRecall": 18 }
+      }
+    },
+    "cases": [
+      {
+        "id": "AlexClark-full",
+        "course": "AlexClark",
+        "raster": {
+          "relativePath": "dev/AlexClark/AlexClark-full.jpg",
+          "format": "jpeg",
+          "expectedSha256": "e1b257382f0d459fd6b57366529c6fbb8bfeca9ca3ec580b48cc9959bbdfe976"
+        },
+        "truth": {
+          "source": "corpus-annotation",
+          "relativePath": "dev/AlexClark/AlexClark-full.annotation.json",
+          "expectedSha256": "8bcc919471f718e5222f0e2e4aaecb9901ef2d523d62d6f57e2c7631d91c7b84",
+          "holeNumbers": [1, 2, 3]
+        }
+      },
+      {
+        "id": "DashsTrack-full",
+        "course": "DashsTrack",
+        "raster": {
+          "relativePath": "dev/DashsTrack/DashsTrack-full.jpg",
+          "format": "jpeg",
+          "expectedSha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a"
+        },
+        "truth": {
+          "source": "corpus-annotation",
+          "relativePath": "dev/DashsTrack/DashsTrack-full.annotation.json",
+          "expectedSha256": "8b861acd38ca07ddfdf123daf5e3ee5445b84dc137f043897e87b96a34721c85"
+        }
+      },
+      {
+        "id": "HeritagePark-full",
+        "course": "Heritage",
+        "raster": {
+          "relativePath": "dev/Heritage/HeritagePark-full.png",
+          "format": "png",
+          "expectedSha256": "fb77ea132dd29136905088344ed35d170057dea2135e86b06f91e672bc4b2f7f"
+        },
+        "truth": {
+          "source": "registered-annotations",
+          "repoRelativePath": "resources/nuthing-p2/registered-annotations.json",
+          "expectedSha256": "d1fbad8f12cc37eabfef1d868031eb2527f59a261686d260f8dccda356787346",
+          "entryKey": "HeritagePark-full"
+        }
+      },
+      {
+        "id": "Lenard-full",
+        "course": "Lenard",
+        "raster": {
+          "relativePath": "dev/Lenard/Lenard-full.PNG",
+          "format": "png",
+          "expectedSha256": "27ad16bcf2c075316048ec39bc5035e0ebbe260bde32140466a3010f15d75834"
+        },
+        "truth": {
+          "source": "registered-annotations",
+          "repoRelativePath": "resources/nuthing-p2/registered-annotations.json",
+          "expectedSha256": "d1fbad8f12cc37eabfef1d868031eb2527f59a261686d260f8dccda356787346",
+          "entryKey": "Lenard-full"
+        }
+      },
+      {
+        "id": "TowneLake-full",
+        "course": "TowneLake",
+        "raster": {
+          "relativePath": "dev/TowneLake/TowneLake-full.png",
+          "format": "png",
+          "expectedSha256": "da2a0ccca4e017cfa9a31d59882903c51905e57b7b21d55b513d788dcf7c18ed"
+        },
+        "truth": {
+          "source": "registered-annotations",
+          "repoRelativePath": "resources/nuthing-p2/registered-annotations.json",
+          "expectedSha256": "d1fbad8f12cc37eabfef1d868031eb2527f59a261686d260f8dccda356787346",
+          "entryKey": "TowneLake-full"
+        }
+      }
+    ]
+  },
+  "viewport": {
+    "implementationId": "viewport.crop.production-entropy-v1",
+    "parameters": {
+      "strategy": "production-auto",
+      "topAdjustmentPx": 0,
+      "bottomAdjustmentPx": 0
+    }
+  },
+  "basketTemplate": {
+    "repoRelativePath": "resources/nuthing-p2/endpoints/basket-sprite.json",
+    "expectedSha256": "c2867340d477a5e2f88e83b78516fc89005004a4aa279b6b9bc86a6f98e3598f"
+  },
+  "chromeImplementationId": "chrome.screen-space-v1"
+}

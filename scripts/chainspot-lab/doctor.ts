@@ -9,6 +9,7 @@ import {
 	type ResolvedStepTwoAblation
 } from './ablation';
 import type { LabConfig } from './config';
+import { resolveStepThreeAblation, STEP_THREE_ABLATION_ID } from './step3Suite';
 
 export interface StorageSnapshot {
 	readonly requestedPath: string;
@@ -53,6 +54,9 @@ export interface DoctorReport {
 		readonly ablationError: string | null;
 		readonly selectedCase: string | null;
 		readonly selectedCourse: string | null;
+		readonly selectedCases: readonly string[];
+		readonly selectedCourses: readonly string[];
+		readonly rasters: readonly string[];
 	};
 	readonly compute: {
 		readonly cpuModel: string;
@@ -169,13 +173,29 @@ export function collectDoctorReport(
 		packageReadiness('tsx')
 	];
 	let ablation: ResolvedStepTwoAblation | null = null;
+	let ablationPath: string | null = null;
+	let rasterPaths: string[] = [];
+	let selectedCases: string[] = [];
+	let selectedCourses: string[] = [];
 	let ablationError: string | null = null;
 	try {
-		ablation = resolveStepTwoAblation(config, ablationId);
+		if (ablationId === STEP_THREE_ABLATION_ID) {
+			const stepThree = resolveStepThreeAblation(config);
+			ablationPath = stepThree.definitionPath;
+			rasterPaths = stepThree.cases.map((entry) => entry.rasterPath);
+			selectedCases = stepThree.cases.map((entry) => entry.id);
+			selectedCourses = stepThree.cases.map((entry) => entry.course);
+		} else {
+			ablation = resolveStepTwoAblation(config, ablationId);
+			ablationPath = ablation.definitionPath;
+			rasterPaths = [ablation.rasterPath];
+			selectedCases = [ablation.definition.suite.case.id];
+			selectedCourses = [ablation.definition.suite.case.course];
+		}
 	} catch (error) {
 		ablationError = error instanceof Error ? error.message : String(error);
 	}
-	const rasterPath = ablation?.rasterPath ?? '';
+	const rasterPath = rasterPaths[0] ?? '';
 	const report: DoctorReport = {
 		ready: false,
 		host: {
@@ -200,10 +220,13 @@ export function collectDoctorReport(
 			evidenceStoreSource: config.evidenceStore.source,
 			ledgerPath: config.ledgerPath,
 			ablationId,
-			ablationPath: ablation?.definitionPath ?? null,
+			ablationPath,
 			ablationError,
 			selectedCase: ablation?.definition.suite.case.id ?? null,
-			selectedCourse: ablation?.definition.suite.case.course ?? null
+			selectedCourse: selectedCourses[0] ?? null,
+			selectedCases,
+			selectedCourses,
+			rasters: rasterPaths
 		},
 		compute: {
 			cpuModel: cpus()[0]?.model ?? 'unknown',

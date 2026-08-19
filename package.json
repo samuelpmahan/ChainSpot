@@ -30,6 +30,7 @@
     "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
     "test:lab-foundation": "svelte-kit sync && NODE_OPTIONS=--experimental-require-module vitest run tests/unit/chainspotLabFoundation.test.ts",
 		"test:lab-replay": "svelte-kit sync && NODE_OPTIONS=--experimental-require-module vitest run tests/unit/chainspotLabReplay.test.ts",
+		"test:lab-endpoints": "svelte-kit sync && NODE_OPTIONS=--experimental-require-module vitest run tests/unit/chainspotLabEndpoints.test.ts",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:e2e"
   },

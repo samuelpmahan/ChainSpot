@@ -31,27 +31,36 @@ export interface BadgeStageResult {
   badgeCount: number;
 }
 
+/** Existing badge-family decision over already materialized mask/component evidence. */
+export function detectBadgeFamily(
+	width: number,
+	dark: Mask,
+	brightComponents: readonly ComponentStats[],
+): ComponentStats[] {
+	const badgeCandidates: ComponentStats[] = [];
+	for (const c of brightComponents) {
+		if (c.bboxH <= 0) continue;
+		const aspect = c.bboxW / c.bboxH;
+		if (aspect < BADGE_ASPECT_MIN || aspect > BADGE_ASPECT_MAX) continue;
+		let darkCount = 0;
+		for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
+			const row = y * width;
+			for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
+				if (dark.data[row + x]) darkCount++;
+			}
+		}
+		if (darkCount / (c.bboxW * c.bboxH) >= BADGE_DARK_INTERIOR_MIN) badgeCandidates.push(c);
+	}
+	const families = anchoredFamilies(badgeCandidates, BADGE_SIZE_TOL, bboxSizeDistance);
+	return families.length > 0 ? families[0] : [];
+}
+
 export function runBadgeStage(image: RgbaImage): BadgeStageResult {
   const { width, height } = image;
   const { bright, dark } = computeBrightDarkMasks(image);
   const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
 
-  const badgeCandidates: ComponentStats[] = [];
-  for (const c of brightComponents) {
-    if (c.bboxH <= 0) continue;
-    const aspect = c.bboxW / c.bboxH;
-    if (aspect < BADGE_ASPECT_MIN || aspect > BADGE_ASPECT_MAX) continue;
-    let darkCount = 0;
-    for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
-      const row = y * width;
-      for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
-        if (dark.data[row + x]) darkCount++;
-      }
-    }
-    if (darkCount / (c.bboxW * c.bboxH) >= BADGE_DARK_INTERIOR_MIN) badgeCandidates.push(c);
-  }
-  const families = anchoredFamilies(badgeCandidates, BADGE_SIZE_TOL, bboxSizeDistance);
-  const badges = families.length > 0 ? families[0] : [];
+	const badges = detectBadgeFamily(width, dark, brightComponents);
   return {
     width,
     height,

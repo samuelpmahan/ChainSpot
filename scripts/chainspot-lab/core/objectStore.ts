@@ -37,12 +37,14 @@ export class ImmutableObjectStore {
 	private readonly objectsRoot: string;
 	private readonly temporaryRoot: string;
 
-	constructor(root: string) {
+	constructor(root: string, options: { readonly readOnly?: boolean } = {}) {
 		this.root = root;
 		this.objectsRoot = join(root, 'objects', 'sha256');
 		this.temporaryRoot = join(root, 'objects', '.tmp');
-		mkdirSync(this.objectsRoot, { recursive: true });
-		mkdirSync(this.temporaryRoot, { recursive: true });
+		if (!options.readOnly) {
+			mkdirSync(this.objectsRoot, { recursive: true });
+			mkdirSync(this.temporaryRoot, { recursive: true });
+		}
 	}
 
 	putJson(kind: string, payload: unknown): PutObjectResult {
