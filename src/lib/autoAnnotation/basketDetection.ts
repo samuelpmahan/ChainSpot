@@ -51,6 +51,46 @@ export async function detectCourseCandidates(
   heightPx: number,
   onProgress?: (progress: CourseDetectionProgress) => void
 ): Promise<CourseDetectionResult> {
+  // Experimental NuThing render-identity lane (flag-gated; see visionFlags).
+  // Tried first when armed so demo/e2e runs exercise it even when a complete
+  // source-landmark handoff would otherwise claim the image; any failure
+  // falls through to the existing paths unchanged.
+  const flags = getVisionFlagsSnapshot();
+  if (flags.nuthingPairing) {
+    try {
+      const { detectCourseWithNuThing } = await import('./nuthingCourseDetection');
+      const startedAt = nowMs();
+      onProgress?.({
+        stage: 'numbers',
+        message: 'NuThing render-identity pairing…',
+        elapsedMs: 0
+      });
+      const result = await detectCourseWithNuThing(bytes, mimeType, widthPx, heightPx, {
+        geoScale: flags.nuthingGeoScale,
+        onEvidence: (events) => {
+          if (events.length === 0) return;
+          const latest = events[events.length - 1];
+          onProgress?.({
+            stage: 'evidence',
+            message: latest.message,
+            elapsedMs: nowMs() - startedAt,
+            evidence: events
+          });
+        }
+      });
+      console.info('[ChainSpot Annotate NuThing lane]', {
+        ...result.nuthing,
+        stages: result.nuthing.stages
+      });
+      return result;
+    } catch (error) {
+      console.warn(
+        '[ChainSpot Annotate] NuThing lane failed; preserving existing detection paths.',
+        error
+      );
+    }
+  }
+
   const lookupStartedAt = nowMs();
   const evidence = await sourceLandmarkEvidenceForRaster(bytes);
   const evidenceLookupMs = nowMs() - lookupStartedAt;

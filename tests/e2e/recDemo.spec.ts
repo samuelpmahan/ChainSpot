@@ -124,6 +124,23 @@ interface PaneView {
 	height: number;
 }
 
+/**
+ * Waits for the pane's fit-to-view to settle. The composite is ~22k px on a
+ * side, so any fitted zoom is well below 0.9; reading the transform at the
+ * initial zoom=1 samples pre-fit state and projects most endpoints outside
+ * the pane (measured: exactly that flake).
+ */
+async function waitForFittedView(page: Page): Promise<void> {
+	await page.waitForFunction(() => {
+		const element = document.querySelector<HTMLElement>(
+			'[data-testid="pane-scene-source-overview"]'
+		);
+		if (!element) return false;
+		const zoom = Number(element.dataset.viewZoom);
+		return zoom > 0 && zoom < 0.9;
+	});
+}
+
 async function paneView(page: Page): Promise<PaneView> {
 	return page.evaluate(() => {
 		const element = document.querySelector<HTMLElement>(
@@ -209,6 +226,136 @@ async function attachPatch(
 }
 
 test.describe('The Rec demo data integrity', () => {
+	test('NuThing lane: the app draft state reproduces the pipeline assignment and matches rendered pixels', async ({
+		page
+	}, testInfo) => {
+		test.skip(!HAVE_CAPTURES, `Rec captures not present under ${DEMO_DIR}`);
+		test.skip(
+			!existsSync(ASSIGNMENTS),
+			`assignments not present at ${ASSIGNMENTS} (run pair-matrix + replay on TheRec)`
+		);
+		test.setTimeout(300000);
+
+		// Arm the experimental NuThing producer lane + The Rec's capture
+		// calibration (2x dev zoom) before the app boots.
+		await page.addInitScript(() => {
+			localStorage.setItem(
+				'chainspot.vision.flags',
+				JSON.stringify({ nuthingPairing: true, nuthingGeoScale: 0.5 })
+			);
+		});
+
+		await gotoApp(page, '/stitch-map');
+		await importRecCaptures(page);
+		await page.getByTestId('alignment-yes').click();
+		await page.waitForURL('**/annotate-course');
+
+		// Detection auto-runs on arrival; the NuThing lane measures, scores,
+		// and assigns, then the workspace auto-applies the proposals. Pad 2's
+		// tee marker appearing IS the app's hidden state materializing.
+		await expect(page.getByTestId('tee-marker-2')).toBeVisible({ timeout: 120000 });
+		for (let hole = 1; hole <= 9; hole++) {
+			await expect(page.getByTestId(`tee-marker-${hole}`)).toBeVisible();
+			await expect(page.getByTestId(`basket-marker-${hole}`)).toBeVisible();
+		}
+
+		// The markers' cx/cy attributes are the draft holes' image-space
+		// coordinates — the ACTUAL hidden state, read from the app itself.
+		const draft = await page.evaluate(() => {
+			const holes: Record<number, { tee: [number, number]; basket: [number, number] }> = {};
+			for (let n = 1; n <= 9; n++) {
+				const tee = document.querySelector(`[data-testid="tee-marker-${n}"]`);
+				const basket = document.querySelector(`[data-testid="basket-marker-${n}"]`);
+				if (!tee || !basket) continue;
+				holes[n] = {
+					tee: [Number(tee.getAttribute('cx')), Number(tee.getAttribute('cy'))],
+					basket: [Number(basket.getAttribute('cx')), Number(basket.getAttribute('cy'))]
+				};
+			}
+			return holes;
+		});
+
+		const expectedHoles = (
+			JSON.parse(readFileSync(ASSIGNMENTS, 'utf8')) as { holes: AssignmentHole[] }
+		).holes;
+		const mismatches: string[] = [];
+		for (const hole of expectedHoles) {
+			const got = draft[hole.hole];
+			if (!got) {
+				mismatches.push(`h${hole.hole}: absent from app draft`);
+				continue;
+			}
+			const dTee = Math.hypot(got.tee[0] - hole.tee.xPx / GEO_SCALE, got.tee[1] - hole.tee.yPx / GEO_SCALE);
+			const dBasket = Math.hypot(
+				got.basket[0] - hole.basket.xPx / GEO_SCALE,
+				got.basket[1] - hole.basket.yPx / GEO_SCALE
+			);
+			if (dTee > 2 || dBasket > 2) {
+				mismatches.push(
+					`h${hole.hole}: app draft tee off ${dTee.toFixed(1)}px, basket off ${dBasket.toFixed(1)}px vs pipeline assignment`
+				);
+			}
+		}
+		expect(mismatches, mismatches.join('\n')).toEqual([]);
+
+		// Close the triangle: the app's own draft coordinates, projected
+		// through the pane transform, land on rendered features in a real
+		// screenshot — the same check as the assignments-file test, but now
+		// sourced from the ACTUAL hidden state. Applying detection focuses
+		// the first hole, so reset to the whole-course fit first.
+		await page.getByTestId('pane-fit-source-overview').click();
+		await waitForFittedView(page);
+		const view = await paneView(page);
+		const pane = page.getByTestId('pane-scene-source-overview');
+		const shot = PNG.sync.read(await pane.screenshot());
+		// What renders at a draft coordinate is the workspace's own marker
+		// (tee #22c55e green, basket #ef4444 red), drawn over the map feature
+		// — so the visible-state check samples for marker paint, not the
+		// underlying pad's white border (gate-2 already proves those same
+		// coordinates hit the pad pixels on the unmarked render).
+		const markerAt = (
+			cx: number,
+			cy: number,
+			radius: number,
+			kind: 'tee' | 'basket'
+		): number => {
+			let hits = 0;
+			for (let y = Math.max(0, Math.round(cy - radius)); y <= Math.min(shot.height - 1, Math.round(cy + radius)); y++) {
+				for (let x = Math.max(0, Math.round(cx - radius)); x <= Math.min(shot.width - 1, Math.round(cx + radius)); x++) {
+					if ((x - cx) ** 2 + (y - cy) ** 2 > radius * radius) continue;
+					const i = (y * shot.width + x) * 4;
+					const r = shot.data[i];
+					const g = shot.data[i + 1];
+					const b = shot.data[i + 2];
+					if (kind === 'tee' && g > 130 && g > r + 40 && g > b + 40) hits++;
+					if (kind === 'basket' && r > 150 && r > g + 60 && r > b + 60) hits++;
+				}
+			}
+			return hits;
+		};
+		const pixelFailures: string[] = [];
+		for (const [n, geometry] of Object.entries(draft)) {
+			for (const kind of ['tee', 'basket'] as const) {
+				const [ix, iy] = geometry[kind];
+				const sx = ix * view.zoom + view.panX + view.clientLeft;
+				const sy = iy * view.zoom + view.panY + view.clientTop;
+				const inPane = sx >= 0 && sy >= 0 && sx < shot.width && sy < shot.height;
+				if (!inPane) {
+					pixelFailures.push(`h${n} ${kind}: draft state projects outside the pane`);
+					continue;
+				}
+				const hits = markerAt(sx, sy, 9, kind);
+				await attachPatch(testInfo, shot, `draft-h${n}-${kind}.png`, sx, sy, 27);
+				if (hits < 4) {
+					pixelFailures.push(
+						`h${n} ${kind}: no ${kind}-marker paint within 9px of the projected draft coordinate (${hits} hits)`
+					);
+				}
+			}
+		}
+		expect(pixelFailures, pixelFailures.join('\n')).toEqual([]);
+	});
+
 	test('in-browser AutoCrop+AutoStitch reproduces the headless harness composite byte-for-byte', async ({
 		page
 	}) => {
@@ -248,13 +395,7 @@ test.describe('The Rec demo data integrity', () => {
 		await page.waitForURL('**/annotate-course');
 		const pane = page.getByTestId('pane-scene-source-overview');
 		await expect(pane).toBeVisible({ timeout: 60000 });
-		// Let the initial fit/render settle before reading the transform.
-		await page.waitForFunction(() => {
-			const el = document.querySelector<HTMLElement>(
-				'[data-testid="pane-scene-source-overview"]'
-			);
-			return el && Number(el.dataset.viewZoom) > 0;
-		});
+		await waitForFittedView(page);
 
 		const view = await paneView(page);
 		const shot = PNG.sync.read(await pane.screenshot());

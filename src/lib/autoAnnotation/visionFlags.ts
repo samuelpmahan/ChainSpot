@@ -16,12 +16,18 @@ export interface VisionFlags {
 	readonly zeroBendShortcutEnabled: boolean;
 	readonly zeroBendMaxDistancePx: ZeroBendMaxDistancePx;
 	readonly p1Profile: P1Profile;
+	/** Experimental NuThing render-identity producer lane (nuthingCourseDetection.ts). */
+	readonly nuthingPairing: boolean;
+	/** Capture calibration for the NuThing lane: geometry px per capture px (0.5 = 2x dev zoom). */
+	readonly nuthingGeoScale: number;
 }
 
 export const DEFAULT_VISION_FLAGS: VisionFlags = Object.freeze({
 	zeroBendShortcutEnabled: true,
 	zeroBendMaxDistancePx: 3,
-	p1Profile: 'tuned'
+	p1Profile: 'tuned',
+	nuthingPairing: false,
+	nuthingGeoScale: 1
 });
 
 export type VisionFlagKey = keyof VisionFlags;
@@ -30,6 +36,7 @@ export type VisionFlagValue = VisionFlags[VisionFlagKey];
 const FLAG_HELP = Object.freeze({
 	list: 'chainspot.flags.list() -> current persisted flags',
 	set: "chainspot.flags.set('zeroBendShortcutEnabled', false) or chainspot.flags.set('zeroBendMaxDistancePx', 4)",
+	nuthing: "chainspot.flags.set('nuthingPairing', true); chainspot.flags.set('nuthingGeoScale', 0.5) for 2x-zoom captures",
 	p1: "chainspot.flags.set('p1Profile', 'historical') or chainspot.flags.set('p1Profile', 'tuned')",
 	reset: 'chainspot.flags.reset() -> restore candidate defaults',
 	help: 'chainspot.flags.help() -> show this help'
@@ -56,6 +63,15 @@ function readPersisted(): Partial<VisionFlags> {
 				: {}),
 			...(value.p1Profile === 'tuned' || value.p1Profile === 'historical'
 				? { p1Profile: value.p1Profile }
+				: {}),
+			...(typeof value.nuthingPairing === 'boolean'
+				? { nuthingPairing: value.nuthingPairing }
+				: {}),
+			...(typeof value.nuthingGeoScale === 'number' &&
+			Number.isFinite(value.nuthingGeoScale) &&
+			value.nuthingGeoScale >= 0.2 &&
+			value.nuthingGeoScale <= 2
+				? { nuthingGeoScale: value.nuthingGeoScale }
 				: {})
 		};
 	} catch {
@@ -91,6 +107,15 @@ export function setVisionFlag<K extends VisionFlagKey>(key: K, value: VisionFlag
 	}
 	if (key === 'p1Profile' && value !== 'tuned' && value !== 'historical') {
 		throw new TypeError(`${key} must be tuned or historical`);
+	}
+	if (key === 'nuthingPairing' && typeof value !== 'boolean') {
+		throw new TypeError(`${key} must be true or false`);
+	}
+	if (
+		key === 'nuthingGeoScale' &&
+		(typeof value !== 'number' || !Number.isFinite(value) || value < 0.2 || value > 2)
+	) {
+		throw new TypeError(`${key} must be a number in [0.2, 2]`);
 	}
 	currentFlags = snapshot({ ...currentFlags, [key]: value });
 	persist(currentFlags);

@@ -538,7 +538,11 @@ async function detectCourse(request: CourseDetectionRequest) {
 	const visionFlags: VisionFlags = Object.freeze({
 		zeroBendShortcutEnabled: request.visionFlags?.zeroBendShortcutEnabled ?? true,
 		zeroBendMaxDistancePx: request.visionFlags?.zeroBendMaxDistancePx === 4 ? 4 : 3,
-		p1Profile: request.visionFlags?.p1Profile === 'historical' ? 'historical' : 'tuned'
+		p1Profile: request.visionFlags?.p1Profile === 'historical' ? 'historical' : 'tuned',
+		// The NuThing lane runs in the main-thread facade, never in this
+		// worker; carried only so the snapshot type stays whole.
+		nuthingPairing: request.visionFlags?.nuthingPairing ?? false,
+		nuthingGeoScale: request.visionFlags?.nuthingGeoScale ?? 1
 	});
 	const p1Tuning = visionFlags.p1Profile === 'historical' ? RAW_MASK_HISTORICAL_DEFAULTS : undefined;
 	const startedAt = performance.now();
