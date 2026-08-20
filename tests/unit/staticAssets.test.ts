@@ -38,6 +38,11 @@ const ALLOWLIST: readonly AllowlistEntry[] = [
 		path: 'resources/demo/dashs-track/',
 		reason:
 			'guided-demo course captures + README, lazily fetched by /demo arming (see src/lib/demo/assets.ts)'
+	},
+	{
+		path: 'resources/demo/the-rec/',
+		reason:
+			'guided-demo course captures + round overview + README, lazily fetched by /demo arming (see src/lib/demo/catalog.ts THE_REC)'
 	}
 ];
 
