@@ -362,6 +362,32 @@ rank1-vs-assigned gap is a standing metric; a validation course where
 the gap widens signals the local family degrading before assignment
 accuracy does.
 
+**CX-058. Screen-space vs geo-space furniture split.** render fact.
+Basket sprites and number badges are screen-space UI furniture: on The
+Rec, captured at 2x the dev map zoom, the sprite still measures exactly
+42x66 with glyph area 1743-1746 and badges read at native size, while
+every geographic element (C1S/C2D zone rings, corridor width, tee pads)
+doubles. Consequence: a capture at non-dev zoom is handled by a
+DUAL-SCALE run — badge+sprite stages on the native raster, everything
+geometric on a raster downscaled by the zoom ratio (where all dev-tuned
+geo constants apply unchanged), detections mapped between frames
+(`pair-matrix --native-raster/--geo-scale`). The zoom ratio itself is
+measurable from render identity alone: ring radius or corridor width vs
+the invariant 42x66 sprite.
+
+**CX-059. Tee fill floor is size/rotation-coupled.** corner case.
+A tee pad's bright component is its hollow white BORDER (fill = gray,
+below the bright threshold), so its fill fraction falls as the pad grows
+(border pixels scale with perimeter, bbox with area) and falls further
+under rotation (bbox inflates). The Rec's geometry raster: all four
+missed pads — and therefore all three wrong assignments — failed
+exactly one gate, fill floor 0.2 (measured 0.13-0.199); every other
+family bound passed. Floor lowered to 0.12: The Rec 9/9 assigned; dev
+re-measured, endpoint recall 72/72 and ASSIGNED exact 72/72 unchanged
+(rank1 65→64, within the CX-042 saturation picture). Lab use: fill-like
+gates on hollow-outline families must be checked against the largest
+and the rotated instances, not the population median.
+
 
 ## E. Truth-quality findings (judge the judge)
 

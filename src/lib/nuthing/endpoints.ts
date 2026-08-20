@@ -503,7 +503,13 @@ export function collectTeePoints(
     const maxDim = Math.max(c.bboxW, c.bboxH);
     if (minDim < 8 || maxDim > 42) continue;
     if (c.area < 80 || c.area > 350) continue;
-    if (c.fill < 0.2 || c.fill > 0.85) continue;
+    // Fill floor 0.12 (was 0.2): a tee pad's bright component is its hollow
+    // white border ring, whose fill fraction falls as the pad grows (border
+    // pixels scale with perimeter, bbox with area) and falls further when the
+    // pad is rotated (bbox inflates). Measured on The Rec's geometry raster:
+    // the four largest/rotated pads sit at fill 0.13-0.199 and every one was
+    // rejected by the 0.2 floor; dev pads measure 0.28-0.74 and are unmoved.
+    if (c.fill < 0.12 || c.fill > 0.85) continue;
     if (out.some((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < 12)) continue;
     if (diamonds.some((d) => Math.hypot(d.cx - c.cx, d.cy - c.cy) < 12)) continue;
     if (spriteCenters.some((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < 24)) continue;
