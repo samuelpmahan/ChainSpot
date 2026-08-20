@@ -74,6 +74,11 @@ function dispatchClick(host: HTMLElement, x: number, y: number, pointerId = 71):
 	window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: x, clientY: y }));
 }
 
+/** Placement never auto-advances GuidedReview (CHSPT-48 hotfix, 499ef3e) -- Tab accepts the step. */
+function pressTab(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+}
+
 /** Presses down, drags past click-slop, and releases at a new point — real drag, not a click. */
 function dispatchDrag(host: HTMLElement, from: { x: number; y: number }, to: { x: number; y: number }): void {
 	const element = scene(host);
@@ -135,8 +140,12 @@ describe('CHSPT-46: guide/corridor geometry reflects current points with no stal
 		const teeAt = screenPointFor(host, 20, 20);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basketAt = screenPointFor(host, 80, 80);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		const guideBefore = host.querySelector('line.guide');
@@ -164,8 +173,12 @@ describe('CHSPT-46: guide/corridor geometry reflects current points with no stal
 		const teeAt = screenPointFor(host, 20, 20);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basketAt = screenPointFor(host, 80, 80);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		const guideBefore = host.querySelector('line.guide');
@@ -193,8 +206,12 @@ describe('CHSPT-46: guide/corridor geometry reflects current points with no stal
 		const teeAt = screenPointFor(host, 10, 10);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basketAt = screenPointFor(host, 90, 90);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressTab();
 		await flush();
 		const bendAt = screenPointFor(host, 50, 10);
 		dispatchClick(host, bendAt.x, bendAt.y);
@@ -227,8 +244,12 @@ describe('CHSPT-46: guide/corridor geometry reflects current points with no stal
 		const teeAt = screenPointFor(host, 10, 10);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basketAt = screenPointFor(host, 90, 90);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		// Straight hole: centerline is just tee-to-basket, no bend yet.
@@ -255,8 +276,12 @@ describe('CHSPT-46: guide/corridor geometry reflects current points with no stal
 		const teeAt = screenPointFor(host, 10, 10);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basketAt = screenPointFor(host, 90, 90);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressTab();
 		await flush();
 		const bendAt = screenPointFor(host, 50, 10);
 		dispatchClick(host, bendAt.x, bendAt.y);
