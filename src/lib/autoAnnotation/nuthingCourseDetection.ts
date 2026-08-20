@@ -3,11 +3,12 @@
  *
  * Runs the NuThing P2 pipeline — screen-space badge/sprite staging, ribbon
  * support field, per-badge Dijkstra pair evidence (src/lib/nuthing/
- * coursePairing.ts), the frozen dev72 strip-coherence scoring stack, and the
- * 1:1 exchange assignment (src/lib/nuthing/pairScoring.ts) — as an
- * alternative producer behind the `nuthingPairing` vision flag. The exact
- * same modules back scripts/nuthing/pair-matrix*.ts, where the stack
- * measures 72/72 exact assignments on the dev corpus and 9/9 on The Rec.
+ * coursePairingLedger.ts), the frozen dev72 strip-coherence scoring stack,
+ * and the 1:1 exchange assignment (src/lib/nuthing/pairScoring.ts) — as an
+ * alternative producer behind the `nuthingPairing` vision flag. The frozen
+ * pair-matrix machinery remains the base measurement; the browser wrapper
+ * adds the render-ledger closures for signed one-edge ribbon evidence,
+ * runtime occluded tees, and narrow-linear/walking-path attribution.
  *
  * Dual-scale captures (CX-058): badges and basket sprites are screen-space
  * furniture, corridors/zones/tee pads are geographic. `geoScale` (geometry
@@ -35,7 +36,7 @@ import {
   type CourseVisionEvidenceListener,
   type CourseVisionOperatorRef
 } from './courseVisionEvidence';
-import { measureCoursePairs } from '../nuthing/coursePairing';
+import { measureCoursePairs } from '../nuthing/coursePairingLedger';
 import type { BadgeMatrix } from '../nuthing/coursePairing';
 import { rescoreCourse, assignPairs, DEV72_SCORING } from '../nuthing/pairScoring';
 import type { ScoringCourse } from '../nuthing/pairScoring';
@@ -81,6 +82,17 @@ export interface NuThingCoursePerformance {
     tees: number;
     baskets: number;
     assignedHoles: number;
+  }>;
+  readonly ledger: Readonly<{
+    straightCalibrationTriples: number;
+    calibrationSamples: number;
+    bucketCounts: readonly number[];
+    bucketMeanLift: readonly number[];
+    signedOccluderPatchedCells: number;
+    contrastGapPatchedCells: number;
+    consistencyDiscountedCells: number;
+    runtimeRecoveredTees: number;
+    rerouted: boolean;
   }>;
 }
 
@@ -462,7 +474,8 @@ export async function detectCourseWithNuThing(
       tees: measured.teePoints.length,
       baskets: measured.basketPoints.length,
       assignedHoles: holes.filter((h) => h.tee && h.basket).length
-    }
+    },
+    ledger: measured.ledgerStats
   };
 
   return {
