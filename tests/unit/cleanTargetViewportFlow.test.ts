@@ -75,7 +75,7 @@ function click(host: HTMLElement, testId: string): void {
 function stubNaipFetch(): ReturnType<typeof vi.fn> {
 	const fetchSpy = vi.fn(async (url: string | URL | Request) => {
 		const href = String(url);
-		if (!href.includes('imagery.nationalmap.gov')) throw new Error(`unexpected fetch: ${href}`);
+		if (!href.includes('basemap.nationalmap.gov')) throw new Error(`unexpected fetch: ${href}`);
 		return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 			status: 200,
 			headers: { 'content-type': 'image/png' }
@@ -240,7 +240,7 @@ describe('CHSPT-68 clean-target in-pane flow', () => {
 
 		// A wider fetch actually happened.
 		const newCalls = fetchSpy.mock.calls.slice(callsBefore).map((call) => String(call[0]));
-		expect(newCalls.some((href) => href.includes('imagery.nationalmap.gov'))).toBe(true);
+		expect(newCalls.some((href) => href.includes('basemap.nationalmap.gov'))).toBe(true);
 
 		// Pairs SURVIVED: same ids, same source coordinates, remapped targets.
 		const pairsAfter = editor.state.controlPointPairs;

@@ -139,7 +139,7 @@ describe('Course Library location cache — import-path prefill', () => {
 		});
 
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
-			expect(String(url)).toContain('imagery.nationalmap.gov');
+			expect(String(url)).toContain('basemap.nationalmap.gov');
 			return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 				status: 200,
 				headers: { 'content-type': 'image/png' }

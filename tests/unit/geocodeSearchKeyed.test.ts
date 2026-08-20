@@ -229,7 +229,7 @@ describe('create-graphics geocode search — keyed', () => {
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
 			const href = String(url);
 			if (href.includes('places.googleapis.com')) return placesResponse();
-			if (href.includes('imagery.nationalmap.gov')) {
+			if (href.includes('basemap.nationalmap.gov')) {
 				return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 					status: 200,
 					headers: { 'content-type': 'image/png' }
@@ -266,7 +266,7 @@ describe('create-graphics geocode search — keyed', () => {
 		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
 		const naipCall = fetchSpy.mock.calls
 			.map((call) => String(call[0]))
-			.find((href) => href.includes('imagery.nationalmap.gov'));
+			.find((href) => href.includes('basemap.nationalmap.gov'));
 		expect(naipCall).toBeDefined();
 		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
 		const [minLon, minLat, maxLon, maxLat] = (bboxParam as string).split(',').map(Number);
@@ -284,7 +284,7 @@ describe('create-graphics geocode search — keyed', () => {
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
 			const href = String(url);
 			if (href.includes('places.googleapis.com')) return placesResponse();
-			if (href.includes('imagery.nationalmap.gov')) {
+			if (href.includes('basemap.nationalmap.gov')) {
 				return new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png' } });
 			}
 			throw new Error(`unexpected fetch: ${href}`);
@@ -319,7 +319,7 @@ describe('create-graphics geocode search — keyed', () => {
 		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
 		const naipCall = fetchSpy.mock.calls
 			.map((call) => String(call[0]))
-			.find((href) => href.includes('imagery.nationalmap.gov'));
+			.find((href) => href.includes('basemap.nationalmap.gov'));
 		expect(naipCall).toBeDefined();
 		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
 		const [minLon, minLat, maxLon, maxLat] = (bboxParam as string).split(',').map(Number);
@@ -353,7 +353,7 @@ describe('create-graphics geocode search — keyed', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } }
 				);
 			}
-			if (href.includes('imagery.nationalmap.gov')) {
+			if (href.includes('basemap.nationalmap.gov')) {
 				return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 					status: 200,
 					headers: { 'content-type': 'image/png' }
@@ -374,7 +374,7 @@ describe('create-graphics geocode search — keyed', () => {
 		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
 		const naipCall = fetchSpy.mock.calls
 			.map((call) => String(call[0]))
-			.find((href) => href.includes('imagery.nationalmap.gov'));
+			.find((href) => href.includes('basemap.nationalmap.gov'));
 		expect(naipCall).toBeDefined();
 		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
 		const [, minLat, , maxLat] = (bboxParam as string).split(',').map(Number);

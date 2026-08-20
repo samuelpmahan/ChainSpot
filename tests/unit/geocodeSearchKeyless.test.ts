@@ -78,7 +78,7 @@ async function openLocationModal(host: HTMLElement): Promise<void> {
 	await flush();
 }
 
-/** A NAIP exportImage response fetch stub can hand back for the auto-fetch after a pick. */
+/** A NAIP export response fetch stub can hand back for the auto-fetch after a pick. */
 function naipPngResponse(): Response {
 	return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
 		status: 200,
@@ -148,7 +148,7 @@ describe('create-graphics geocode search — keyless', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } }
 				);
 			}
-			expect(href).toContain('imagery.nationalmap.gov');
+			expect(href).toContain('basemap.nationalmap.gov');
 			return naipPngResponse();
 		});
 		vi.stubGlobal('fetch', fetchSpy);
@@ -171,7 +171,7 @@ describe('create-graphics geocode search — keyless', () => {
 		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
 		const naipCall = fetchSpy.mock.calls
 			.map((call) => String(call[0]))
-			.find((href) => href.includes('imagery.nationalmap.gov'));
+			.find((href) => href.includes('basemap.nationalmap.gov'));
 		expect(naipCall).toBeDefined();
 		// bbox centered on the picked coordinate; boxless result = default 300m radius.
 		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
@@ -203,7 +203,7 @@ describe('create-graphics geocode search — keyless', () => {
 					{ status: 200, headers: { 'content-type': 'application/json' } }
 				);
 			}
-			expect(href).toContain('imagery.nationalmap.gov');
+			expect(href).toContain('basemap.nationalmap.gov');
 			return naipPngResponse();
 		});
 		vi.stubGlobal('fetch', fetchSpy);
@@ -221,7 +221,7 @@ describe('create-graphics geocode search — keyless', () => {
 
 		const naipCall = fetchSpy.mock.calls
 			.map((call) => String(call[0]))
-			.find((href) => href.includes('imagery.nationalmap.gov'));
+			.find((href) => href.includes('basemap.nationalmap.gov'));
 		expect(naipCall).toBeDefined();
 		const bboxParam = new URL(naipCall as string).searchParams.get('bbox');
 		const [minLon, minLat, maxLon, maxLat] = (bboxParam as string).split(',').map(Number);
@@ -242,7 +242,7 @@ describe('create-graphics geocode search — keyless', () => {
 
 	it('a pasted "lat, lon" coordinate skips geocoding entirely and fetches that spot directly', async () => {
 		const fetchSpy = vi.fn(async (url: string | URL | Request) => {
-			expect(String(url)).toContain('imagery.nationalmap.gov');
+			expect(String(url)).toContain('basemap.nationalmap.gov');
 			return naipPngResponse();
 		});
 		vi.stubGlobal('fetch', fetchSpy);
@@ -258,7 +258,7 @@ describe('create-graphics geocode search — keyless', () => {
 
 		// The only network contact is the aerial fetch itself — no geocoder call.
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
-		expect(String(fetchSpy.mock.calls[0][0])).toContain('imagery.nationalmap.gov');
+		expect(String(fetchSpy.mock.calls[0][0])).toContain('basemap.nationalmap.gov');
 		expect(host.querySelector('[data-testid="geocode-results"]')).toBeNull();
 		expect(host.querySelector('[data-testid="location-modal"]')).toBeNull();
 		expect(host.querySelector('[data-testid="naip-preview"]')).not.toBeNull();
