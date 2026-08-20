@@ -12,7 +12,7 @@ Experimental browser-lane closure pass. The frozen pair-matrix measurement and i
 | short RibbonExit between healthy spans | low-support cells may be raised only when healthy paired support exists before and after along the local ribbon direction and one flank agrees with the learned lift |
 | BTD walking path / narrow linear confusers | routing is frozen first; pair-scoring support is then mildly discounted where a strong linear ridge fails the corridor-width lift test |
 | normal tee | existing hollow-ring / component render-identity detector |
-| tee touching known badge/basket furniture | existing masked-NCC tee recovery runs locally around the known occluder and adds only high-score, physically-overlapping `recovered` tier candidates |
+| tee under basket sprite/skirt | existing masked-NCC tee recovery runs only around basket targets with no visible tee nearby; three pad sizes, tight ROI, high score gate, and physical overlap are required before adding a `recovered` tier candidate |
 | basket/C1/C2 zones | existing pairScoring foreign-zone attribution remains authoritative; the new linear discount skips the basket-zone neighborhood to avoid double-taxing it |
 
 ## Calibration contract
