@@ -389,22 +389,35 @@ gates on hollow-outline families must be checked against the largest
 and the rotated instances, not the population median.
 
 
-**CX-060. Route slack in wide corridors: routed shape is not corridor
-shape.** corner case, measured (TowneLake bend diagnosis, external
-session).
-A 37px corridor with a shallow real bend (6-8% detour) gives the
-support-cost Dijkstra (cost 1+4(1-s)^2) a plateau of near-equal in-corridor
-paths, so the routed leg does not hug the annotated bend vertex — on
-flagged holes (h11, h16) and an unflagged control (h7) identically.
-Measured routed-vs-truth aligned-support deltas: h16 +0.017 mean / +0.003
-worst-window (near-equal geometry), h11 +0.096/+0.079, h7 +0.067/+0.119;
-routed paths were LONGER and higher-support than truth — the cost model
-prefers aligned support over length. Assignment is untouched (18/18 held;
-endpoints and worst-window are plateau-insensitive). Consequence: any
-consumer of routed SHAPE (bend proposals, corridor geometry) must fit
-explicit polylines (Z-fit style, CX-037 machinery) rather than trust a
-routed leg; never derive corridorBends from a route. Lab use: the routed
-path is an evidence integral, not a geometry estimate.
+**CX-060. Bend-skipping routes ride false field ridges, not corridor
+slack.** corner case, measured — and CORRECTED once already (the lab
+working as intended: the first version of this entry codified an external
+session's conclusion, which re-measurement overturned).
+First (wrong) version: "wide corridor + shallow bend gives Dijkstra a
+plateau, so routes don't hug vertices; control h7 shows it identically."
+Re-measured with shape metrics instead of support deltas:
+- The bends are NOT shallow: TowneLake h11/h16/h7 vertices sit 38/47/40 px
+  perpendicular off the tee->basket chord (>2x the corridor half-width
+  18.5), vertex angles 132-144 deg. The 5-8% "detour" figure was a length
+  ratio — length is insensitive to lateral offset when the bend sits near
+  an end (t 0.59-0.83). Wrong metric produced the wrong adjective.
+- The control DOES hug its bend: h7's route deviates median 4px / max 14px
+  from the truth polyline and passes 10px from the vertex. h11/h16 deviate
+  up to 41-42px — outside the paint.
+- The cut regions are dark terrain with FALSE field support: h11's
+  off-corridor cells sample RGB~63-84 (forest) with support 0.85-1.00
+  (saturated); h16's sample 0.38-0.67. No other hole's corridor is nearby
+  (41-270px). The routes ride elongated contrast structure in the trees
+  that the paired-edge field scores as ribbon.
+Mechanism: the support-cost router deflects onto false ribbon ridges when
+they out-score a true corridor segment; assignment is untouched (worst-
+window over the whole route still favors true pairs) but routed SHAPE is
+corrupted exactly at bends. The precise identity of the false structure
+(tree lines / shadowed footpaths / zone-edge interactions) is the open
+discriminator — same family as CX-034/task #22 (contrast-keyed field).
+Standing rule unchanged: never derive corridorBends from a routed leg.
+Support-delta comparisons between routed and truth paths measure sampling
+alignment, NOT shape fidelity — use point-to-polyline deviation for shape.
 
 **CX-061. False "truth is wrong" from instrument absence-reads.**
 methodology, twice-reproduced (h6 this substrate; h16 in an external
