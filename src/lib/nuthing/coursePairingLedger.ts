@@ -50,6 +50,9 @@ const STRAIGHT_AXIS_MAX_DEG = 4;
 const STRAIGHT_RAY_MAX_DEG = 1.8;
 const STRAIGHT_FRAC_MIN = 0.16;
 const STRAIGHT_FRAC_MAX = 0.56;
+/** Calibration may use a straight triple only when its base routed pair is healthy. */
+const STRAIGHT_BASE_WORST_MIN = 0.28;
+const STRAIGHT_BASE_SUPPORTED_MIN = 0.55;
 const GAP_LOW_SUPPORT = 0.18;
 const GAP_HEALTHY_SUPPORT = 0.28;
 const GAP_MAX_LOOK_FIELD = 3;
@@ -181,6 +184,16 @@ function edgeScoresAt(
   return [edgeAgreement(model, lo, li), edgeAgreement(model, ro, ri)];
 }
 
+function basePairFor(
+  result: CoursePairingResult,
+  label: string,
+  teeIndex: number,
+  basketIndex: number,
+): PairEvidence | null {
+  const matrix = result.matrices.find((m) => m.label === label);
+  return matrix?.pairs.find((p) => p.teeId === `T${teeIndex}` && p.basketId === `B${basketIndex}`) ?? null;
+}
+
 function learnLiftModel(
   image: RgbaImage,
   result: CoursePairingResult,
@@ -218,6 +231,12 @@ function learnLiftModel(
         if (ray > maxRay) continue;
         const perp = Math.abs(dbx * vy - dby * vx) / Math.sqrt(ll);
         if (perp > Math.max(5, corridorWidthPx * 0.16)) continue;
+        const basePair = basePairFor(result, reading.label, ti, bi);
+        if (
+          !basePair ||
+          basePair.worstWindowMean < STRAIGHT_BASE_WORST_MIN ||
+          basePair.supportedFraction < STRAIGHT_BASE_SUPPORTED_MIN
+        ) continue;
         candidates.push({
           ti,
           bi,
@@ -509,9 +528,21 @@ function legFor(
   return { endpointId: id, geodesic: reachable ? dist[goal] : Infinity, path, reachable };
 }
 
+function endpointMeanSupport(leg: LegEvidence, field: SupportField): number {
+  const m = leg.path.length / 2;
+  const k = Math.min(3, m);
+  let total = 0;
+  for (let s = 0; s < k; s++) {
+    const j = (m - 1 - s) * 2;
+    total += field.support[leg.path[j + 1] * field.width + leg.path[j]];
+  }
+  return k ? total / k : 0;
+}
+
 function buildPair(
   courseName: string,
   label: string,
+  badge: { readonly cx: number; readonly cy: number },
   ti: number,
   bi: number,
   tl: LegEvidence,
@@ -585,9 +616,11 @@ function buildPair(
     }
   }
   const pathLengthPx = lengthCells * field.scale;
-  const straightDistancePx = Math.hypot(baskets[bi].x - tees[ti].x, baskets[bi].y - tees[ti].y);
-  const teeCell = clampCell(tees[ti].y / field.scale, field.height) * field.width + clampCell(tees[ti].x / field.scale, field.width);
-  const basketCell = clampCell(baskets[bi].y / field.scale, field.height) * field.width + clampCell(baskets[bi].x / field.scale, field.width);
+  // Preserve the frozen pair-matrix contract: this is the canonical
+  // tee→badge + badge→basket straight baseline, not the tee→basket chord.
+  const straightDistancePx =
+    Math.hypot(tees[ti].x - badge.cx, tees[ti].y - badge.cy) +
+    Math.hypot(baskets[bi].x - badge.cx, baskets[bi].y - badge.cy);
   return {
     pairId,
     teeId: `T${ti}`,
@@ -598,12 +631,12 @@ function buildPair(
     supportedFraction: supported / Math.max(samples.length, 1),
     worstWindowMean,
     weakSpanCount,
-    weakSpanLongestPx: weakSpanLongest * field.scale,
+    weakSpanLongestPx: Math.round(weakSpanLongest * field.scale),
     pathLengthPx,
     straightDistancePx,
-    efficiency: pathLengthPx / Math.max(straightDistancePx, 1e-6),
-    endpointSupportTee: field.support[teeCell],
-    endpointSupportBasket: field.support[basketCell],
+    efficiency: straightDistancePx > 0 ? pathLengthPx / straightDistancePx : 0,
+    endpointSupportTee: endpointMeanSupport(tl, field),
+    endpointSupportBasket: endpointMeanSupport(bl, field),
     failureReason: null,
   };
 }
@@ -642,7 +675,20 @@ function rebuildMatrices(
     const pairs: PairEvidence[] = [];
     for (let ti = 0; ti < teePoints.length; ti++) {
       for (let bi = 0; bi < basketPoints.length; bi++) {
-        pairs.push(buildPair(courseName, label, ti, bi, teeLegs[ti], basketLegs[bi], teePoints, basketPoints, result.field));
+        pairs.push(
+          buildPair(
+            courseName,
+            label,
+            { cx: reading.badge.cx, cy: reading.badge.cy },
+            ti,
+            bi,
+            teeLegs[ti],
+            basketLegs[bi],
+            teePoints,
+            basketPoints,
+            result.field,
+          ),
+        );
       }
     }
     const rankOrder = pairs
