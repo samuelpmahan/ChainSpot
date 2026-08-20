@@ -1,0 +1,22 @@
+{
+ "slug": "control-metric-must-define-failure",
+ "status": "proposed",
+ "author": "claude-mentor-session",
+ "date": "2026-08-20",
+ "substrate": "94cedf1",
+ "category": "methodology",
+ "claim": "A diagnosis control is only valid on the metric that defines the failure: for routed-SHAPE failures, point-to-polyline deviation discriminates (control h7 median 4px/max 14px vs failing h11/h16 max 41-42px) while aligned-support deltas do not (h7 +0.067/+0.119 overlaps h11 +0.096/+0.079), so a support-delta control 'confirms' false mechanisms for shape claims.",
+ "measurement": {
+  "command": "python3 probe: load pair-matrix-v6/TowneLake-full.json legs for holes 11/16/7, compute min point-to-segment distance from each routed cell (x*field.scale) to the registered truth polyline (y-viewport.top); compare vs the external session's support-delta table",
+  "numbers": "shape deviation median/p90/max px: h11 10/40/42, h16 10/33/41, h7 control 4/10/14; closest approach to bend vertex: 45/45/10px vs W/2=18.5; support deltas (non-discriminating): h11 +0.096/+0.079, h16 +0.017/+0.003, h7 +0.067/+0.119",
+  "firsthand": true
+ },
+ "control": "h7, TowneLake's other bent hole: hugs its bend on the shape metric (median 4px) while showing support deltas in the same range as the failing holes \u2014 the metric that separates failing from working cases is shape, not support",
+ "controlNa": "",
+ "frames": "truth: full-capture px minus viewport.top -> cropped px; routed legs: field cells x field.scale -> cropped px",
+ "risk": "Deviation thresholds are course-zoom-relative (W/2=18.5 at dev zoom); on a 2x capture the same slack doubles in px. Also assumes registered bend vertices are accurate to ~a few px (TowneLake registration quality 1.2-1.5px median on endpoints; bend vertices unaudited).",
+ "evidence": [
+  "docs/nuthing-p2/cx-catalog.md"
+ ],
+ "history": "Arose from correcting CX-060: an external session ran a control but compared on support deltas, so the control 'confirmed' a false one-mechanism story; the owner's one-line challenge forced the shape measurement that overturned it."
+}

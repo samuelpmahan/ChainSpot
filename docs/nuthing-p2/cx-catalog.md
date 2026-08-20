@@ -12,6 +12,17 @@ war stories), `pair-matrix-baseline.md` (results ledger).
 Entry format — **ID. Name** · category · claim · evidence · code · fixed
 · generalization risk (what a validation course could break).
 
+ADMISSION RULE (added after CX-060 was catalogued second-hand and
+overturned within hours): no entry enters this catalog directly. Findings
+are filed as proposals via `scripts/nuthing/cx_propose.py new` (validated:
+falsifiable system claim, first-hand measurement with a re-check command
+and numbers, control on the failure-defining metric or an explicit
+control-n/a reason, frames, risk) and receive a CX number only through
+`cx_propose.py accept --approved-by <human>`. Proposals, including
+rejected ones, live in `cx-proposals/` — a rejection with a reason is lab
+data, not a failure. Second-hand findings stay proposals until someone
+re-measures first-hand.
+
 ---
 
 ## A. Render-model facts (the physics everything rests on)
