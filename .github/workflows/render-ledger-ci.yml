@@ -1,9 +1,9 @@
 name: Render ledger branch CI
 
 on:
-  push:
+  pull_request:
     branches:
-      - hotfix/nuthing-render-ledger-closures
+      - claude/nuthing-p2-digit-recognition-zgs4lq
 
 jobs:
   validate:
