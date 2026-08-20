@@ -23,6 +23,7 @@ import type { FetchLike } from './assets';
 import { DEMO_DATASET } from './catalog';
 import type { DemoStep } from './catalog';
 import { setPendingStitchCaptures } from '../session';
+import { setVisionFlag } from '../autoAnnotation/visionFlags';
 
 export type ArmResult =
 	| { ok: true; message: string }
@@ -37,6 +38,15 @@ export async function armDemoStep(step: DemoStep, fetchImpl: FetchLike = fetch):
 	try {
 		switch (step.arming.kind) {
 			case 'stitch-captures': {
+				// The dataset knows its own capture calibration (The REC is shot at
+				// 2x the detection corpus's zoom); arming the walkthrough arms the
+				// matching detection lane so Annotate Course sees these captures
+				// the way the pipeline was measured. Persisted flags, so a
+				// mid-walkthrough reload keeps the calibration.
+				if (DEMO_DATASET.vision) {
+					setVisionFlag('nuthingPairing', DEMO_DATASET.vision.nuthingPairing);
+					setVisionFlag('nuthingGeoScale', DEMO_DATASET.vision.nuthingGeoScale);
+				}
 				const files = await fetchDemoFiles(DEMO_DATASET.captures, fetchImpl);
 				setPendingStitchCaptures(files);
 				return {

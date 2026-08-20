@@ -137,7 +137,21 @@ async function waitForFittedView(page: Page): Promise<void> {
 		);
 		if (!element) return false;
 		const zoom = Number(element.dataset.viewZoom);
-		return zoom > 0 && zoom < 0.9;
+		if (!(zoom > 0 && zoom < 0.9)) return false;
+		// The dataset publishes the fit TARGET immediately; the workspace's CSS
+		// transform animates toward it. Sample pixels only once the rendered
+		// matrix matches the published transform (measured: screenshots taken
+		// mid-flight put every marker at stale positions).
+		const frame = element.querySelector<HTMLElement>('[data-testid="annotation-frame"]');
+		if (!frame) return false;
+		const matrix = new DOMMatrixReadOnly(getComputedStyle(frame).transform);
+		const panX = Number(element.dataset.viewPanX);
+		const panY = Number(element.dataset.viewPanY);
+		return (
+			Math.abs(matrix.a - zoom) < 0.002 &&
+			Math.abs(matrix.e - panX) < 0.75 &&
+			Math.abs(matrix.f - panY) < 0.75
+		);
 	});
 }
 
@@ -308,6 +322,11 @@ test.describe('The Rec demo data integrity', () => {
 		const view = await paneView(page);
 		const pane = page.getByTestId('pane-scene-source-overview');
 		const shot = PNG.sync.read(await pane.screenshot());
+		if (process.env.REC_DEBUG_SHOT) {
+			const { writeFileSync } = await import('node:fs');
+			writeFileSync(process.env.REC_DEBUG_SHOT, PNG.sync.write(shot));
+			writeFileSync(process.env.REC_DEBUG_SHOT + '.json', JSON.stringify({ view, draft }, null, 1));
+		}
 		// What renders at a draft coordinate is the workspace's own marker
 		// (tee #22c55e green, basket #ef4444 red), drawn over the map feature
 		// — so the visible-state check samples for marker paint, not the

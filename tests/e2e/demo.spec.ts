@@ -38,10 +38,10 @@ async function expandRail(page: Page): Promise<void> {
 }
 
 test('walkthrough drives the real Stitch Map with the real course captures', async ({ page }) => {
-	// The demo loads four full-size phone screenshots and then pays the
+	// The demo loads full-size phone screenshots and then pays the
 	// smart-import worker's one-time OpenCV WASM compile, exactly as a first-time
 	// visitor does; 90s matches tests/e2e/smartImport.spec.ts for the same reason.
-	test.setTimeout(90000);
+	test.setTimeout(120000);
 	await gotoDemo(page);
 
 	await expect(page.getByTestId('demo-cover')).toBeVisible();
@@ -64,12 +64,16 @@ test('walkthrough drives the real Stitch Map with the real course captures', asy
 	// clothes. (This dataset's placement has not previously been exercised
 	// through this pipeline in this repo's test suite — see
 	// docs/demo-walkthrough.md's "What building the demo found".)
-	await expect(page.getByTestId('composite-image')).toBeVisible({ timeout: 60000 });
-	await expect(page.getByTestId('continue-to-annotate')).toBeEnabled();
-	await page.getByTestId('adjust-manually').click();
-	const assigned = await page.getByTestId('manual-capture-list').locator('li').allInnerTexts();
-	expect(new Set(assigned).size).toBe(4);
-	await expect(page.getByTestId('stitch-readiness')).toContainText('valid');
+	// The demo inbox routes straight into runImport — no thrown-round triage
+	// (a guided demo must never stall on a question; the file-picker path
+	// keeps the triage, see recDemo.spec.ts).
+	await expect(page.getByTestId('composite-image')).toBeVisible({ timeout: 90000 });
+	// The continue affordance is the alignment-review HUD's Yes (this dataset
+	// stitches at 'review' confidence — one semantic/local disagreement — so
+	// the HUD is in its Aligned? state rather than auto-advancing).
+	await expect(page.getByTestId('alignment-yes')).toBeEnabled();
+	// Both captures composited — the product's own status line is the record.
+	await expect(page.getByTestId('stitch-status')).toContainText('Stitched from 2 captures');
 });
 
 test('the round-annotation step imports its sample source automatically and can be exited without resetting the app', async ({

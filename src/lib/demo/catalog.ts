@@ -17,9 +17,9 @@
  *
  * Two rules keep the demo honest, and both are load-bearing:
  *
- * 1. **No synthetic inputs.** The map-creation dataset is four real UDisc
- *    screenshots of a real 18-hole course (see
- *    `static/resources/demo/dashs-track/README.md`). The capture files carry
+ * 1. **No synthetic inputs.** The map-creation dataset is real UDisc
+ *    screenshots of a real course (see
+ *    `static/resources/demo/the-rec/README.md`). The capture files carry
  *    no grid position in their names and are not in reading order, so Smart
  *    Import's inferred arrangement is a real inference from image content,
  *    not a filename lookup. The round-annotation input is a second, real
@@ -57,7 +57,7 @@ export interface DemoDataset {
 	readonly cityState: string;
 	/** How many holes the captures actually contain. */
 	readonly holeCount: number;
-	/** The four unordered 2×2 captures handed to Smart Import in step 1. */
+	/** The unordered captures handed to Smart Import in step 1. */
 	readonly captures: readonly DemoAsset[];
 	/**
 	 * A single screenshot of a *played* round of the same course — blue
@@ -71,6 +71,18 @@ export interface DemoDataset {
 	 * a file under `static/`, nothing else.
 	 */
 	readonly roundOverview: DemoAsset;
+	/**
+	 * Capture calibration for the experimental NuThing render-identity
+	 * detection lane (see `autoAnnotation/visionFlags.ts`). Datasets captured
+	 * at a different map zoom than the detection corpus carry their geometry
+	 * scale here (geometry px per capture px; 0.5 = captured at 2x the corpus
+	 * zoom) — swapping datasets stays a pure data change. Absent = leave the
+	 * visitor's vision flags untouched.
+	 */
+	readonly vision?: {
+		readonly nuthingPairing: boolean;
+		readonly nuthingGeoScale: number;
+	};
 }
 
 /** Which real route a step is performed on. */
@@ -96,8 +108,8 @@ export type DemoStepKind = 'default' | 'reload';
  * natural route-to-route path (Stitch Map's "Use as UDisc source", either
  * annotation route's "Done") is always still available.
  *
- * - `stitch-captures` drops the four captures into Stitch Map's Smart Import,
- *   the same entry point its "Import four screenshots" control uses.
+ * - `stitch-captures` drops the dataset's captures into Stitch Map's Smart
+ *   Import, the same entry point its "Import screenshots" control uses.
  * - `annotate-source` publishes `DEMO_DATASET.roundOverview` through the
  *   product's existing pending-handoff store (destined for `/map-round`), so
  *   Map Round shows its ordinary import banner and applies its ordinary
@@ -163,7 +175,45 @@ export const DASHS_TRACK: DemoDataset = {
 	}
 };
 
-export const DEMO_DATASET: DemoDataset = DASHS_TRACK;
+const THE_REC_DIR = '/resources/demo/the-rec';
+
+/**
+ * The demo course: a real 9-hole course whose played-round capture covers the
+ * FULL round (the Dash's Track thrown capture covers only 2 holes), so the
+ * Map Round step annotates a complete course instead of a fragment. Captured
+ * at 2x the detection corpus's map zoom — the `vision` calibration below is
+ * what the NuThing detection lane needs to run these captures (CX-058:
+ * sprites/badges are screen-space, corridors/zones/pads are geographic).
+ */
+export const THE_REC: DemoDataset = {
+	id: 'the-rec',
+	courseName: 'The REC',
+	cityState: 'McKinney, TX',
+	holeCount: 9,
+	captures: [
+		{
+			path: `${THE_REC_DIR}/rec-capture-1.png`,
+			fileName: 'rec-capture-1.png',
+			mimeType: 'image/png'
+		},
+		{
+			path: `${THE_REC_DIR}/rec-capture-2.png`,
+			fileName: 'rec-capture-2.png',
+			mimeType: 'image/png'
+		}
+	],
+	roundOverview: {
+		path: `${THE_REC_DIR}/rec-round-overview.png`,
+		fileName: 'rec-round-overview.png',
+		mimeType: 'image/png'
+	},
+	vision: {
+		nuthingPairing: true,
+		nuthingGeoScale: 0.5
+	}
+};
+
+export const DEMO_DATASET: DemoDataset = THE_REC;
 
 /**
  * The walkthrough script. Ordering mirrors the product's own story: build the
@@ -175,17 +225,17 @@ export const DEMO_DATASET: DemoDataset = DASHS_TRACK;
 export const DEMO_STEPS: readonly DemoStep[] = [
 	{
 		id: 'stitch',
-		title: 'Turn four phone screenshots into one high-detail map',
+		title: 'Turn phone screenshots into one high-detail map',
 		route: 'stitch-map',
-		lede: `Four real UDisc screenshots of ${DASHS_TRACK.courseName}, phone chrome and all, are loaded into the real Stitch Map in no particular order and with no position in their file names.`,
+		lede: `${DEMO_DATASET.captures.length} real UDisc screenshots of ${DEMO_DATASET.courseName}, phone chrome and all, are loaded into the real Stitch Map in no particular order and with no position in their file names.`,
 		actions: [
-			'Watch the four captures crop, arrange, and stitch themselves automatically — no crop approval or "assemble" click required.',
+			'Watch the captures crop, arrange, and stitch themselves automatically — no crop approval or "assemble" click required. (The demo inbox skips the thrown-round question a manual import would ask; these are the clean course captures, and the played round arrives later, in Map Round.)',
 			'Read the status line: it names how many captures were stitched and how confident the automatic result was.',
 			'If a result ever needs a closer look, click "Adjust manually" to nudge a tile with the arrow keys or press Snap — every automatic decision stays fully correctable, it just no longer blocks you by default.',
 			'When the result looks right, choose "Continue to Annotate Course" to carry the stitched map forward.'
 		],
 		mechanism:
-			'Chrome cropping, position, and overlap are all inferred from pixel content in a Web Worker using OpenCV template matching — nothing here is a filename lookup. The export is a native-resolution PNG of the union of the four cropped tiles, no resampling, no upload.',
+			'Chrome cropping, position, and overlap are all inferred from pixel content in a Web Worker using OpenCV template matching — nothing here is a filename lookup. The export is a native-resolution PNG of the union of the cropped tiles, no resampling, no upload.',
 		arming: { kind: 'stitch-captures' }
 	},
 	{
@@ -211,7 +261,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		route: 'create-graphics',
 		lede: 'Create Graphics needs a clean basemap with no UDisc overlay, aligned to what you just annotated, then exports per-hole graphics from the pair.',
 		actions: [
-			`Search "${DASHS_TRACK.cityState}" — "${DASHS_TRACK.courseName}" is UDisc's name for the course. Start with a 300m radius; you can adjust it after the first preview. Or type your own course instead and treat the query as a starting guess you can correct from the results list.`,
+			`Search "${DEMO_DATASET.cityState}" — "${DEMO_DATASET.courseName}" is UDisc's name for the course. Start with a 300m radius; you can adjust it after the first preview. Or type your own course instead and treat the query as a starting guess you can correct from the results list.`,
 			'Pick the match, keep the initial 300m radius, and fetch the aerial from live public imagery.',
 			'Use Add correspondence to click the same landmark in both panes — a tee pad corner, a path junction, a tree — spreading four or more pairs across the property.',
 			'Step through the holes, review each rendered graphic against the aerial, then save the project bundle.'
@@ -229,7 +279,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		actions: [
 			'Notice the basemap, the correspondences, and the exported graphics are all in this browser session only — nothing was ever sent anywhere.',
 			'Click "Reload the page" below. This is a real browser reload, not a page transition — every in-memory editor is gone afterward.',
-			`${DASHS_TRACK.courseName}'s course geometry is different: it was written to Course Memory (IndexedDB) the moment you pressed Done in step 2, and IndexedDB survives a reload.`
+			`${DEMO_DATASET.courseName}'s course geometry is different: it was written to Course Memory (IndexedDB) the moment you pressed Done in step 2, and IndexedDB survives a reload.`
 		],
 		mechanism:
 			"A full reload clears every module-level session slot this app keeps (`src/lib/session.ts`) and the guided tour's own in-memory position — by design, nothing here is meant to survive a reload except what's explicitly written to storage. Course Memory is the one thing that is: an IndexedDB record keyed to the course's geometry, written on Done, read back by course recognition on the next image you import.",
@@ -239,7 +289,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		id: 'map-round',
 		title: 'Annotate a round actually played on that course',
 		route: 'map-round',
-		lede: `A second, real capture of ${DASHS_TRACK.courseName} — this one played, with UDisc's own blue landing droplets and purple walking path already in the screenshot. Unlike the map tiles in step 1, this capture is handed over exactly as taken, full phone chrome included — the status bar, the course title bar, the hole/par banner, the bottom nav. This is Map Round: one round's throws and path, not course geometry.`,
+		lede: `A second, real capture of ${DEMO_DATASET.courseName} — this one played, with UDisc's own blue landing droplets and purple walking path already in the screenshot. Unlike the map tiles in step 1, this capture is handed over exactly as taken, full phone chrome included — the status bar, the course title bar, the hole/par banner, the bottom nav. This is Map Round: one round's throws and path, not course geometry.`,
 		actions: [
 			'Import the incoming image from the handoff banner. Nothing crops it first, so the phone chrome around the map is part of what you are looking at — that is expected for this capture, not a defect.',
 			'Watch for "Recognized course" — Course Memory found this course from the map you built earlier — and choose "Import saved holes" rather than re-annotating tee pads and baskets from scratch.',
@@ -258,7 +308,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
 		lede: 'The point of all of it: the same course map, reused for a specific round, exported as per-hole graphics that now show the throws and the walking path.',
 		actions: [
 			'Import the annotated round — its per-hole graphics now render the throws and the purple walking path over the aerial, not just the corridor.',
-			`The basemap is gone after the reload; search "${DASHS_TRACK.cityState}" again, pan/zoom to the course, and re-fetch it live, the same as step 3.`,
+			`The basemap is gone after the reload; search "${DEMO_DATASET.cityState}" again, pan/zoom to the course, and re-fetch it live, the same as step 3.`,
 			'Step through the holes and review each rendered graphic — throws, walking path, and corridor together — against the aerial.',
 			'Save the project bundle and reopen it to confirm it round-trips exactly.'
 		],
