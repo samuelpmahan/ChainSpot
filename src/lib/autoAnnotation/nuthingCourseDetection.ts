@@ -156,6 +156,11 @@ export async function detectCourseWithNuThing(
   const geometryFull = resampleToGeometryFrame(nativeFull, geoScale);
   const resampleMs = nowMs() - resampleStartedAt;
   const dualScale = geometryFull !== nativeFull;
+  // resampleToGeometryFrame treats |geoScale-1| < 2% as identity; every
+  // frame mapping below must use the scale that was ACTUALLY applied, or a
+  // geoScale of e.g. 0.99 shifts all emitted coordinates by ~1% (audit
+  // finding: nuthingGeoScale accepts any value in [0.2, 2]).
+  const appliedGeoScale = dualScale ? geoScale : 1;
 
   const geometryVp = detectMapViewport(geometryFull);
   const geometryImage = cropRows(geometryFull, geometryVp);
@@ -179,8 +184,8 @@ export async function detectCourseWithNuThing(
   const measureMs = nowMs() - measureStartedAt;
 
   // Geometry frame -> full capture frame (the raster the workspace displays).
-  const toNativeX = (x: number): number => x / geoScale;
-  const toNativeY = (y: number): number => (y + geometryVp.top) / geoScale;
+  const toNativeX = (x: number): number => x / appliedGeoScale;
+  const toNativeY = (y: number): number => (y + geometryVp.top) / appliedGeoScale;
 
   const labeledBadges = measured.readings.filter((r) => r.label);
   emit([
@@ -193,8 +198,8 @@ export async function detectCourseWithNuThing(
         badges: measured.badges.map((b) => ({
           xPx: toNativeX(b.cx),
           yPx: toNativeY(b.cy),
-          widthPx: b.bboxW / geoScale,
-          heightPx: b.bboxH / geoScale
+          widthPx: b.bboxW / appliedGeoScale,
+          heightPx: b.bboxH / appliedGeoScale
         })),
         baskets: measured.basketPoints.map((b) => ({ xPx: toNativeX(b.x), yPx: toNativeY(b.y) }))
       },
@@ -211,8 +216,8 @@ export async function detectCourseWithNuThing(
           badge: {
             xPx: toNativeX(r.badge.cx),
             yPx: toNativeY(r.badge.cy),
-            widthPx: r.badge.bboxW / geoScale,
-            heightPx: r.badge.bboxH / geoScale
+            widthPx: r.badge.bboxW / appliedGeoScale,
+            heightPx: r.badge.bboxH / appliedGeoScale
           }
         },
         message: `NuThing Render-Identity Measurement resolved H${r.label}`,
@@ -271,8 +276,8 @@ export async function detectCourseWithNuThing(
   const candidates = labeledBadges.map((r, index) => ({
     xPx: toNativeX(r.badge.cx),
     yPx: toNativeY(r.badge.cy),
-    widthPx: r.badge.bboxW / geoScale,
-    heightPx: r.badge.bboxH / geoScale,
+    widthPx: r.badge.bboxW / appliedGeoScale,
+    heightPx: r.badge.bboxH / appliedGeoScale,
     scale: 1,
     score: 1,
     badgeScore: 1,
@@ -317,17 +322,17 @@ export async function detectCourseWithNuThing(
       xPx: toNativeX(t.x),
       yPx: toNativeY(t.y),
       orientationDeg: t.angle === null ? 0 : (t.angle * 180) / Math.PI,
-      widthPx: 28 / geoScale,
-      heightPx: 20 / geoScale,
-      areaPx: (28 * 20) / (geoScale * geoScale),
+      widthPx: 28 / appliedGeoScale,
+      heightPx: 20 / appliedGeoScale,
+      areaPx: (28 * 20) / (appliedGeoScale * appliedGeoScale),
       fill: 0.5
     })),
     badges: measured.badges.map((b) => ({
       xPx: toNativeX(b.cx),
       yPx: toNativeY(b.cy),
-      widthPx: b.bboxW / geoScale,
-      heightPx: b.bboxH / geoScale,
-      areaPx: b.area / (geoScale * geoScale),
+      widthPx: b.bboxW / appliedGeoScale,
+      heightPx: b.bboxH / appliedGeoScale,
+      areaPx: b.area / (appliedGeoScale * appliedGeoScale),
       fill: b.fill
     })),
     baskets: measured.basketPoints.map((b) => ({
