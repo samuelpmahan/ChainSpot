@@ -582,7 +582,10 @@ export function proposeSingleImageCrop(
 		const margined = Math.min(clamped + margin, maxInset);
 		insets[side] = margined;
 		anyProposed = true;
-		if (margined !== detected) anyWeak = true;
+		// Compare the pre-margin clamp, not the margined inset: the margin is
+		// an intentional post-detection addition (see marginPx doc above), not
+		// evidence the detection itself was weak.
+		if (clamped !== detected) anyWeak = true;
 	}
 
 	if (!anyProposed) {

@@ -64,6 +64,36 @@ describe('single-image vertical crop proposal (annotate-course / annotate-round 
 	});
 });
 
+describe('single-image crop safety margin (marginPx option)', () => {
+	test('a clean, unclamped detection stays high confidence with the margin applied', () => {
+		const raster = buildScreenshotRaster(600, 1200, 100);
+		const proposal = proposeSingleImageCrop(raster, { marginPx: DEFAULT_CROP_SAFETY_MARGIN_PX });
+		expect(proposal.insets).toEqual({
+			topPx: 100 + DEFAULT_CROP_SAFETY_MARGIN_PX,
+			rightPx: 0,
+			bottomPx: 100 + DEFAULT_CROP_SAFETY_MARGIN_PX,
+			leftPx: 0
+		});
+		expect(proposal.confidence).toBe('high');
+	});
+
+	test('a detection the bounded-inset rule clamps stays low confidence with the margin applied', () => {
+		// chromeDepth 300 exceeds maxInset (floor(1200 * MAX_INSET_FRACTION) =
+		// 240), so the raw detection itself -- independent of the margin --
+		// gets clamped down to the bound.
+		const raster = buildScreenshotRaster(600, 1200, 300);
+		const maxInset = Math.floor(1200 * MAX_INSET_FRACTION);
+		const proposal = proposeSingleImageCrop(raster, { marginPx: DEFAULT_CROP_SAFETY_MARGIN_PX });
+		expect(proposal.insets).toEqual({
+			topPx: maxInset,
+			rightPx: 0,
+			bottomPx: maxInset,
+			leftPx: 0
+		});
+		expect(proposal.confidence).toBe('low');
+	});
+});
+
 const ALL_SLOTS = ['upper-left', 'upper-right', 'lower-left', 'lower-right'] as const;
 
 describe('P1-001 shared outer-band crop proposal (case 3)', () => {
