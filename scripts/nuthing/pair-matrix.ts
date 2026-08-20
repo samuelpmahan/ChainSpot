@@ -243,6 +243,21 @@ function main(): void {
   // be written to its own cache directory.
   const patchIdx = args.indexOf('--patch-badges');
   const patchBadges = patchIdx >= 0 ? (args.splice(patchIdx, 1), true) : false;
+  // Demo-course mode (no truth): adds NAME to the course table with an empty
+  // truth list, so the cache/emit side runs while all judgment sections
+  // degrade to no-ops. Raster still comes from traces-py/<NAME>.rgba.bin.
+  const demoIdx = args.indexOf('--demo-course');
+  const demoCourse = demoIdx >= 0 ? args.splice(demoIdx, 2)[1] : null;
+  // Dual-scale capture support: badges and basket sprites are screen-space
+  // furniture (fixed 42x66 sprite, fixed badge frame) while corridors, zones
+  // and tee pads are geographic. A capture at a different map zoom is handled
+  // by running the badge/sprite stages on the NATIVE raster and everything
+  // geometric on the course raster (native downscaled by --geo-scale), with
+  // the screen-space detections mapped into the geometry frame.
+  const nativeIdx = args.indexOf('--native-raster');
+  const nativeRasterPath = nativeIdx >= 0 ? args.splice(nativeIdx, 2)[1] : null;
+  const scaleIdx = args.indexOf('--geo-scale');
+  const geoScale = scaleIdx >= 0 ? Number(args.splice(scaleIdx, 2)[1]) : 0.5;
   const [outDir] = args;
   if (!outDir) {
     console.error('Usage: tsx scripts/nuthing/pair-matrix.ts OUT_DIR [--course NAME]');
@@ -258,6 +273,7 @@ function main(): void {
     readFileSync('resources/nuthing-p2/digits/models/logistic.json', 'utf8'),
   ) as LogisticModel;
   const truthAll = loadTruth();
+  if (demoCourse) truthAll[demoCourse] = [];
 
   const grand = { holes: 0, rank1: 0, rank3: 0 };
   for (const nm of Object.keys(truthAll)) {
@@ -267,10 +283,35 @@ function main(): void {
     const viewport = detectMapViewport(fullImage);
     const image = cropRows(fullImage, viewport);
     const stage = runBadgeStage(image);
-    const readings = readCourseBadges(stage, {
+    // Screen-space stage: badges + sprites detect on the native raster when
+    // one is supplied (dual-scale capture), else on the course raster.
+    let badgeStage = stage;
+    let mapX = (x: number): number => x;
+    let mapY = (y: number): number => y;
+    let sizeScale = 1;
+    if (nativeRasterPath) {
+      const nativeFull = decodeRgbaBin(nativeRasterPath);
+      const nativeVp = detectMapViewport(nativeFull);
+      badgeStage = runBadgeStage(cropRows(nativeFull, nativeVp));
+      sizeScale = geoScale;
+      mapX = (x) => x * geoScale;
+      mapY = (y) => (y + nativeVp.top) * geoScale - viewport.top;
+    }
+    const scaleComp = <T extends { cx: number; cy: number; bboxX: number; bboxY: number; bboxW: number; bboxH: number; area: number }>(c: T): T => ({
+      ...c,
+      cx: mapX(c.cx),
+      cy: mapY(c.cy),
+      bboxX: mapX(c.bboxX),
+      bboxY: mapY(c.bboxY),
+      bboxW: c.bboxW * sizeScale,
+      bboxH: c.bboxH * sizeScale,
+      area: c.area * sizeScale * sizeScale,
+    });
+    const badges = badgeStage.badges.map(scaleComp);
+    const readings = readCourseBadges(badgeStage, {
       name: 'logistic',
       scores: (m) => predictProbs(model, m),
-    });
+    }).map((r) => ({ ...r, badge: scaleComp(r.badge) }));
     const field: SupportField = computeRibbonSupport(image, {
       scale: FIELD_SCALE,
       orientations: FIELD_ORIENTATIONS,
@@ -278,7 +319,7 @@ function main(): void {
     });
     if (patchBadges) {
       const W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
-      const stats = patchBadgeOcclusion(field, image, stage.badges, W);
+      const stats = patchBadgeOcclusion(field, image, badges, W);
       console.log(
         `${nm}: badge-occlusion patch W=${W}: halo-capped ${stats.haloCells} cells, ` +
           `one-sided boosted ${stats.patchedCells} cells`,
@@ -289,7 +330,7 @@ function main(): void {
 
     // --- Endpoints: render-identity detectors (src/lib/nuthing/endpoints) ----
     const insideBadgePt = (x: number, y: number): boolean =>
-      stage.badges.some(
+      badges.some(
         (b) =>
           x >= b.bboxX - 3 && x <= b.bboxX + b.bboxW + 3 &&
           y >= b.bboxY - 3 && y <= b.bboxY + b.bboxH + 3,
@@ -300,11 +341,17 @@ function main(): void {
     // sits 22px from its badge center and was swept by the full-box filter
     // once badge 15 was recovered).
     const insideBadgeInterior = (x: number, y: number): boolean =>
-      stage.badges.some(
+      badges.some(
         (b) =>
           Math.abs(x - b.cx) <= b.bboxW / 2 - 7 && Math.abs(y - b.cy) <= b.bboxH / 2 - 7,
       );
-    const sprites = matchBasketSprites(stage.brightMask, spriteTemplate);
+    const sprites = matchBasketSprites(badgeStage.brightMask, spriteTemplate).map((s) => ({
+      ...s,
+      cx: mapX(s.cx),
+      cy: mapY(s.cy),
+      tipX: mapX(s.tipX),
+      tipY: mapY(s.tipY),
+    }));
     const rings = detectTeeRings(stage.brightMask).filter((r) => !insideBadgeInterior(r.cx, r.cy));
     const badgeLabels = new Set(stage.badges.map((b) => b.label));
     const teeComponents = stage.brightComponents.filter(

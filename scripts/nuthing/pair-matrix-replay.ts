@@ -61,7 +61,9 @@ interface CacheCourse {
   judgments: CacheJudgment[];
 }
 
-const COURSES = ['DashsTrack-full', 'HeritagePark-full', 'Lenard-full', 'TowneLake-full'];
+const COURSES = process.env.REPLAY_COURSES
+  ? process.env.REPLAY_COURSES.split(',')
+  : ['DashsTrack-full', 'HeritagePark-full', 'Lenard-full', 'TowneLake-full'];
 
 function main(): void {
   const args = process.argv.slice(2);

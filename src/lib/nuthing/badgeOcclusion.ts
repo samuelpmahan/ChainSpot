@@ -49,6 +49,10 @@ export const COURSE_CORRIDOR_WIDTH: Record<string, number> = {
   'HeritagePark-full': 30,
   'Lenard-full': 37,
   'TowneLake-full': 37,
+  // The Rec (demo, McKinney TX): captured at 2x the dev map zoom; widths are
+  // measured on the geometry raster (composite downscaled by the sprite-scale
+  // ratio), where perpendicular corridor crossings cluster at 30-38px.
+  'TheRec-full': 37,
 };
 export const DEFAULT_CORRIDOR_WIDTH = 37;
 
