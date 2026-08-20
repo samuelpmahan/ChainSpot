@@ -118,6 +118,11 @@ function screenPointFor(host: HTMLElement, imageX: number, imageY: number): { x:
 	return { x: imageX * zoom + panX, y: imageY * zoom + panY };
 }
 
+/** Placement never auto-advances GuidedReview (CHSPT-48 hotfix, 499ef3e) -- Tab accepts the step. */
+function pressTab(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+}
+
 /** Clicks the given action's button in the currently-open radial menu. */
 function clickAction(host: HTMLElement, action: string): void {
 	const button = host.querySelector<HTMLButtonElement>(`[data-testid="radial-action-${action}"]`);
@@ -172,8 +177,12 @@ async function setUpHoleWithImage(host: HTMLElement, editor: ProjectEditor): Pro
 	const tee = screenPointFor(host, 2, 2);
 	dispatchClick(host, tee.x, tee.y);
 	await flush();
+	pressTab();
+	await flush();
 	const basket = screenPointFor(host, 198, 2);
 	dispatchClick(host, basket.x, basket.y);
+	await flush();
+	pressTab();
 	await flush();
 }
 
@@ -455,8 +464,12 @@ describe('Annotation radial menu (Annotate Course / Map Round)', () => {
 		const hole2Tee = screenPointFor(host, 2, 198);
 		dispatchClick(host, hole2Tee.x, hole2Tee.y);
 		await flush();
+		pressTab();
+		await flush();
 		const hole2Basket = screenPointFor(host, 198, 198);
 		dispatchClick(host, hole2Basket.x, hole2Basket.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		const clickAt = screenPointFor(host, 30, 30);
