@@ -389,6 +389,38 @@ gates on hollow-outline families must be checked against the largest
 and the rotated instances, not the population median.
 
 
+**CX-060. Route slack in wide corridors: routed shape is not corridor
+shape.** corner case, measured (TowneLake bend diagnosis, external
+session).
+A 37px corridor with a shallow real bend (6-8% detour) gives the
+support-cost Dijkstra (cost 1+4(1-s)^2) a plateau of near-equal in-corridor
+paths, so the routed leg does not hug the annotated bend vertex — on
+flagged holes (h11, h16) and an unflagged control (h7) identically.
+Measured routed-vs-truth aligned-support deltas: h16 +0.017 mean / +0.003
+worst-window (near-equal geometry), h11 +0.096/+0.079, h7 +0.067/+0.119;
+routed paths were LONGER and higher-support than truth — the cost model
+prefers aligned support over length. Assignment is untouched (18/18 held;
+endpoints and worst-window are plateau-insensitive). Consequence: any
+consumer of routed SHAPE (bend proposals, corridor geometry) must fit
+explicit polylines (Z-fit style, CX-037 machinery) rather than trust a
+routed leg; never derive corridorBends from a route. Lab use: the routed
+path is an evidence integral, not a geometry estimate.
+
+**CX-061. False "truth is wrong" from instrument absence-reads.**
+methodology, twice-reproduced (h6 this substrate; h16 in an external
+Sonnet session).
+Two different models declared a truth annotation wrong from the same error
+shape: reading ABSENCE off a bad instrument (a ground-reference window
+contaminated by the band it measured; a heatmap auto-normalized to its own
+outlier max plus a badge plate occluding the corridor read as "no corridor
+here"). Both corrected the same way: point-sampling raw pixels and field
+values at the disputed location, checking for known occluders (CX-001/
+CX-007: badges draw over corridors as opaque ~48x36 plates), and comparing
+deltas against a control. Escalated bar for oracle disputes is codified in
+the gated-diagnosis skill (step 8b). Lab use: model-independent trap;
+process-level guard, not a model-quality issue.
+
+
 ## E. Truth-quality findings (judge the judge)
 
 **CX-039. Heritage registration noise.** finding.

@@ -84,7 +84,30 @@ conclusion. Check the instrument before the subject: a hollow-green test
 (asserting something already true, clicking an element that is null), a
 render with a frame offset, a screenshot taken mid-animation — all have
 produced false failures in this repo. Finding one is a success, not an
-anticlimax.
+anticlimax. Two named instrument traps, each of which has produced a false
+"truth is wrong" in this repo:
+
+- **Auto-normalized visualizations lie.** A heatmap scaled to its own
+  global max makes moderate values look dark next to one outlier. Never
+  conclude "absent/dark/unsupported" from a picture — sample the raw
+  values point-wise at the disputed location and report the numbers.
+- **When your computed numbers and your eyeballed picture disagree, the
+  numbers win.** If your own deltas already say "near-equal" and the
+  picture says "missing", the picture's rendering is the suspect, not the
+  data.
+
+## 8b. Claiming the oracle is wrong carries an escalated bar ⚠
+
+Declaring the ground truth / human annotation wrong is sometimes correct
+(truth files carry measured noise) — but it has been claimed falsely twice
+in this repo, by two different models, from the same shape of error:
+reading ABSENCE off a bad instrument. Before writing "truth is wrong":
+point-sample the raw pixels and the field at the exact disputed location;
+check for known occluders drawn OVER the evidence (badges are opaque
+plates that sit on corridors by design — dark pixels within ~30px of a
+badge center are the badge, not missing paint); and compare the disputed
+case's deltas against the control's — a near-zero routed-vs-truth gap is
+the signature of equally-real geometry, not of a mislocated annotation.
 
 ## 9. Hard stops for the oracle
 
