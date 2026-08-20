@@ -1,0 +1,65 @@
+name: Render ledger integration gate
+
+on:
+  push:
+    branches:
+      - hotfix/nuthing-render-ledger-closures
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout dev corpus
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run check
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install trace decoder dependencies
+        run: pip install --disable-pip-version-check numpy opencv-python-headless
+
+      - name: Prepare historical workspace paths
+        run: |
+          sudo mkdir -p /workspace/nuthing-work/traces-py
+          sudo ln -sfn "$GITHUB_WORKSPACE/chainspot-corpus" /workspace/chainspot-corpus
+          sudo chown -R "$USER":"$USER" /workspace/nuthing-work
+
+      - name: Decode four dev rasters to RGBA
+        run: |
+          python3 scripts/nuthing/p1_trace.py chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg /workspace/nuthing-work/traces-py --name DashsTrack-full
+          python3 scripts/nuthing/p1_trace.py chainspot-corpus/dev/Heritage/HeritagePark-full.png /workspace/nuthing-work/traces-py --name HeritagePark-full
+          python3 scripts/nuthing/p1_trace.py chainspot-corpus/dev/Lenard/Lenard-full.PNG /workspace/nuthing-work/traces-py --name Lenard-full
+          python3 scripts/nuthing/p1_trace.py chainspot-corpus/dev/TowneLake/TowneLake-full.png /workspace/nuthing-work/traces-py --name TowneLake-full
+
+      - name: Actual browser producer dev72 replay
+        run: npx tsx scripts/nuthing/browser-producer-dev-replay.ts /workspace/nuthing-work/traces-py "$GITHUB_WORKSPACE/chainspot-corpus"
