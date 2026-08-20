@@ -22,44 +22,20 @@ import { PNG } from 'pngjs';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
 import { COURSE_CORRIDOR_WIDTH, DEFAULT_CORRIDOR_WIDTH } from '../../src/lib/nuthing/badgeOcclusion';
+import { rescoreCourse, assignPairs } from '../../src/lib/nuthing/pairScoring';
+import type { Rescored, ScoringCourse } from '../../src/lib/nuthing/pairScoring';
 
-interface CacheLeg {
-  endpointId: string;
-  geodesic: number | string;
-  path: number[];
-  reachable: boolean;
-}
-interface CachePair {
-  pairId: string;
-  teeId: string;
-  basketId: string;
-  worstWindowMean: number;
-  supportMean: number;
-}
-interface CacheBadge {
-  label: string;
-  cx: number;
-  cy: number;
-  legs: CacheLeg[];
-  pairs: CachePair[];
-}
 interface CacheJudgment {
   hole: number;
   trueTee: number;
   trueBasket: number;
   rankPrimary: number;
 }
-interface CacheCourse {
+type CacheCourse = ScoringCourse & {
   course: string;
   viewport: { top: number; bottom: number };
-  field: { width: number; height: number; scale: number };
-  endpoints: {
-    tees: { id: string; x: number; y: number; onRing: boolean; angle?: number | null }[];
-    baskets: { id: string; x: number; y: number }[];
-  };
-  badges: CacheBadge[];
   judgments: CacheJudgment[];
-}
+};
 
 const COURSES = process.env.REPLAY_COURSES
   ? process.env.REPLAY_COURSES.split(',')
@@ -201,364 +177,29 @@ function main(): void {
     }
     const support = new Float32Array(readFileSync(`${cacheDir}/${nm}-field.bin`).buffer.slice(0));
     const theta = new Float32Array(readFileSync(`${cacheDir}/${nm}-theta.bin`).buffer.slice(0));
-    const windowCells = Math.max(3, Math.round(windowSrcPx / scale));
-
-    // Per-cell, per-basket zone-furniture attribution factor (computed once;
-    // exemption of the pair's own endpoint basket is applied per leg).
-    // zoneFactor[b][cell] = ZONE_DISCOUNT where cell's support is attributable
-    // to basket b's furniture, else 1.
-    const basketCenters = cache.endpoints.baskets.map((b) => ({ x: b.x, y: b.y }));
-    const zoneOf = (cell: number, basket: { x: number; y: number }): number => {
-      const cx = ((cell % w) + 0.5) * scale;
-      const cy = (Math.floor(cell / w) + 0.5) * scale;
-      const dx = cx - basket.x;
-      const dy = cy - basket.y;
-      const d = Math.hypot(dx, dy);
-      // Sprite silhouette: unconditional near-ceiling false positive.
-      if (d <= 35) return ZONE_DISCOUNT;
-      const onC2D = Math.abs(d - 84) <= 12;
-      const onC1S = Math.abs(d - 44) <= 8;
-      if (!onC2D && !onC1S) return 1;
-      // Tangency: ribbon direction (cos t, sin t) vs radial unit.
-      const t = theta[cell];
-      const radial = Math.abs((dx * Math.cos(t) + dy * Math.sin(t)) / Math.max(d, 1e-9));
-      return radial <= 0.5 ? ZONE_DISCOUNT : 1; // within 30° of tangential
-    };
-
-    // Aligned samples along one leg's cached path (badge-first order).
-    // exemptBasket: index of the pair's own endpoint basket (its zone is the
-    // leg's legitimate terminal approach), or -1.
-    const alignedLeg = (leg: CacheLeg, exemptBasket: number): Float32Array => {
-      const m = leg.path.length / 2;
-      const out = new Float32Array(m);
-      for (let i = 0; i < m; i++) {
-        const x = leg.path[i * 2];
-        const y = leg.path[i * 2 + 1];
-        const i0 = Math.max(0, i - 1);
-        const i1 = Math.min(m - 1, i + 1);
-        const dx = leg.path[i1 * 2] - leg.path[i0 * 2];
-        const dy = leg.path[i1 * 2 + 1] - leg.path[i0 * 2 + 1];
-        const len = Math.hypot(dx, dy);
-        const cell = y * w + x;
-        if (len < 1e-9) {
-          out[i] = support[cell];
-          continue;
-        }
-        const t = theta[cell];
-        // Ribbon runs along (cos t, sin t); alignment is |cos| of the angle
-        // between travel direction and the strip direction (mod pi).
-        const align = Math.abs((dx * Math.cos(t) + dy * Math.sin(t)) / len);
-        let s = support[cell] * Math.pow(align, alignPow);
-        if (zones) {
-          for (let b = 0; b < basketCenters.length; b++) {
-            if (b === exemptBasket) continue;
-            const f = zoneOf(cell, basketCenters[b]);
-            if (f < 1) {
-              s *= f;
-              break;
-            }
-          }
-        }
-        out[i] = s;
-      }
-      return out;
-    };
-
-    interface Rescored {
-      teeId: string;
-      basketId: string;
-      alignedWorstWindow: number;
-      alignedMean: number;
-      score: number;
-    }
-
-    // --- Z-fit rescue (--zfit): score a pair by the best explicit <=2-bend
-    // polyline tee -> p1 -> p2 -> basket, with the badge on segment 1
-    // (badge-before-bend invariant), bend angle <= 60 deg, connector length
-    // <= 3W, total length <= 1.4x chord. The corridor IS a polyline with
-    // round caps and wedge bends (render model), so when Dijkstra detours
-    // (Heritage h7's cancelling S: the router took a lower parallel band and
-    // the true pair sank to rank 55), the model-based fit recovers the
-    // score. Sampled with the identical aligned/zone machinery as routes.
-    const alignedSegment = (
-      x0: number, y0: number, x1: number, y1: number,
-      exemptBasket: number, out: number[],
-    ): void => {
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      const steps = Math.max(1, Math.round(len / scale));
-      const dx = (x1 - x0) / len;
-      const dy = (y1 - y0) / len;
-      for (let i = 1; i <= steps; i++) {
-        const px = x0 + (x1 - x0) * (i / steps);
-        const py = y0 + (y1 - y0) * (i / steps);
-        const cx = Math.min(w - 1, Math.max(0, Math.round(px / scale)));
-        const cy = Math.min(h - 1, Math.max(0, Math.round(py / scale)));
-        const cell = cy * w + cx;
-        const t = theta[cell];
-        const align = Math.abs(dx * Math.cos(t) + dy * Math.sin(t));
-        let s = support[cell] * Math.pow(align, alignPow);
-        if (zones) {
-          for (let b = 0; b < basketCenters.length; b++) {
-            if (b === exemptBasket) continue;
-            const f = zoneOf(cell, basketCenters[b]);
-            if (f < 1) {
-              s *= f;
-              break;
-            }
-          }
-        }
-        out.push(s);
-      }
-    };
-    const worstWindowOf = (samples: number[]): number => {
-      const count = samples.length;
-      if (count === 0) return 0;
-      let sum = 0;
-      for (const s of samples) sum += s;
-      if (count <= windowCells) return sum / count;
-      let acc = 0;
-      for (let i = 0; i < windowCells; i++) acc += samples[i];
-      let worst = acc / windowCells;
-      for (let i = windowCells; i < count; i++) {
-        acc += samples[i] - samples[i - windowCells];
-        const m = acc / windowCells;
-        if (m < worst) worst = m;
-      }
-      return worst;
-    };
-    const zfitWorst = (
-      tee: { x: number; y: number }, bc: { cx: number; cy: number },
-      basket: { x: number; y: number }, exemptBasket: number, Wc: number,
-    ): number => {
-      const dBx = bc.cx - tee.x;
-      const dBy = bc.cy - tee.y;
-      const dBadge = Math.hypot(dBx, dBy);
-      if (dBadge < 1e-6) return 0;
-      const u1x = dBx / dBadge;
-      const u1y = dBy / dBadge;
-      const chord = Math.hypot(basket.x - tee.x, basket.y - tee.y);
-      let best = 0;
-      for (let t1 = dBadge + 8; t1 <= Math.min(chord * 0.85, dBadge + 220); t1 += 14) {
-        const p1x = tee.x + u1x * t1;
-        const p1y = tee.y + u1y * t1;
-        for (const deltaDeg of [-60, -45, -30, -20, 0, 20, 30, 45, 60]) {
-          const d = (deltaDeg * Math.PI) / 180;
-          const u2x = u1x * Math.cos(d) - u1y * Math.sin(d);
-          const u2y = u1x * Math.sin(d) + u1y * Math.cos(d);
-          for (const L2 of deltaDeg === 0 ? [0] : [0.8 * Wc, 1.6 * Wc, 3 * Wc]) {
-            const p2x = p1x + u2x * L2;
-            const p2y = p1y + u2y * L2;
-            const tail = Math.hypot(basket.x - p2x, basket.y - p2y);
-            if (t1 + L2 + tail > 1.4 * chord) continue;
-            const samples: number[] = [];
-            alignedSegment(tee.x, tee.y, p1x, p1y, exemptBasket, samples);
-            if (L2 > 0) alignedSegment(p1x, p1y, p2x, p2y, exemptBasket, samples);
-            alignedSegment(p2x, p2y, basket.x, basket.y, exemptBasket, samples);
-            // Occam prior: each bend costs. A straight fit keeps full value,
-            // a single bend pays a little, the 2-bend Z pays more — honest
-            // Z-corridors clear the discount, shopped ones don't.
-            const bends = deltaDeg === 0 ? 0 : L2 > 0 ? 2 : 1;
-            const wv = worstWindowOf(samples) * (bends === 0 ? 1 : bends === 1 ? ZFIT_F1 : ZFIT_F2);
-            if (wv > best) best = wv;
-          }
-        }
-      }
-      return best;
-    };
-    const rescoredByBadge = new Map<string, Rescored[]>();
-    for (const badge of cache.badges) {
-      // Tee legs never get a zone exemption; each basket leg exempts only its
-      // own endpoint basket's zone.
-      const legAligned = new Map<string, Float32Array>();
-      for (const leg of badge.legs) {
-        if (!leg.reachable) continue;
-        const exempt = leg.endpointId.startsWith('B') ? Number(leg.endpointId.slice(1)) : -1;
-        legAligned.set(leg.endpointId, alignedLeg(leg, exempt));
-      }
-      const bxCell = Math.round(badge.cx / scale);
-      const byCell = Math.round(badge.cy / scale);
-      const legCellSet = new Map<string, Set<number>>();
-      const legOutsideCount = new Map<string, number>();
-      if (simple) {
-        for (const leg of badge.legs) {
-          if (!leg.reachable) continue;
-          const set = new Set<number>();
-          let outside = 0;
-          for (let i = 0; i < leg.path.length; i += 2) {
-            const x = leg.path[i];
-            const y = leg.path[i + 1];
-            if (Math.hypot(x - bxCell, y - byCell) <= 8) continue;
-            set.add(y * w + x);
-            outside++;
-          }
-          legCellSet.set(leg.endpointId, set);
-          legOutsideCount.set(leg.endpointId, outside);
-        }
-      }
-      const rows: Rescored[] = [];
-      for (const pair of badge.pairs) {
-        const tl = legAligned.get(pair.teeId);
-        const bl = legAligned.get(pair.basketId);
-        if (!tl || !bl) {
-          rows.push({ teeId: pair.teeId, basketId: pair.basketId, alignedWorstWindow: 0, alignedMean: 0, score: 0 });
-          continue;
-        }
-        // tee→badge→basket: reverse tee leg, drop duplicated badge cell.
-        const count = tl.length + bl.length - 1;
-        const samples = new Float32Array(count);
-        for (let i = 0; i < tl.length; i++) samples[i] = tl[tl.length - 1 - i];
-        for (let i = 1; i < bl.length; i++) samples[tl.length + i - 1] = bl[i];
-        let sum = 0;
-        for (let i = 0; i < count; i++) sum += samples[i];
-        let worst = 1;
-        if (count <= windowCells) {
-          worst = sum / count;
-        } else {
-          let acc = 0;
-          for (let i = 0; i < windowCells; i++) acc += samples[i];
-          worst = acc / windowCells;
-          for (let i = windowCells; i < count; i++) {
-            acc += samples[i] - samples[i - windowCells];
-            const m = acc / windowCells;
-            if (m < worst) worst = m;
-          }
-        }
-        let score =
-          scoreMode === 'combo'
-            ? worst * pair.worstWindowMean
-            : scoreMode === 'mean'
-              ? sum / count
-              : worst;
-        if (identity) {
-          const basket = cache.endpoints.baskets[Number(pair.basketId.slice(1))] as {
-            score?: number;
-          };
-          if (basket && typeof basket.score === 'number') {
-            score *= Math.min(1, Math.max(IDENT_FLOOR, (basket.score - 0.2) / 0.5));
-          }
-          // Recovered-tier tees (occluded-tee recovery) are speculative pool
-          // members: they exist to serve holes whose real tee is hidden, and
-          // must not outbid detector-verified tees on healthy holes. Swept
-          // 0.5/0.7/0.85 on dev: 0.7 keeps every true recovery winning its
-          // own hole while stopping recovered FPs from poaching others.
-          const teeT = cache.endpoints.tees[Number(pair.teeId.slice(1))] as { tier?: string };
-          if (teeT && teeT.tier === 'recovered') {
-            score *= Number(process.env.RECOVERED_TEE_PRIOR ?? '0.7');
-          }
-        }
-        if (invariants) {
-          const tee = cache.endpoints.tees[Number(pair.teeId.slice(1))];
-          const basket = cache.endpoints.baskets[Number(pair.basketId.slice(1))];
-          if (tee && basket) {
-            if (tee.angle !== null && tee.angle !== undefined) {
-              const dir = Math.atan2(badge.cy - tee.y, badge.cx - tee.x);
-              let d = Math.abs((((tee.angle - dir) % Math.PI) + Math.PI) % Math.PI);
-              d = Math.min(d, Math.PI - d) * (180 / Math.PI);
-              score *= Math.exp(-((d / ALIGN_SIGMA_DEG) ** 2));
-            }
-            const vx = basket.x - tee.x;
-            const vy = basket.y - tee.y;
-            const vv = vx * vx + vy * vy;
-            if (vv > 1e-9) {
-              const frac = ((badge.cx - tee.x) * vx + (badge.cy - tee.y) * vy) / vv;
-              const excess = Math.max(0, Math.abs(frac - FRAC_CENTER) - FRAC_HALF_WIDTH);
-              score *= Math.exp(-((excess / FRAC_SIGMA) ** 2));
-              // Perfect-line BONUS (never a penalty — dogleg true pairs have
-              // the badge legitimately off the chord): straight holes put
-              // tee, badge and basket collinear within ~1.4 deg (41/41
-              // measured); a wrong pairing that swaps in a neighboring
-              // basket breaks the line by several degrees. Reward exact
-              // collinearity so perfect tee->badge->basket lines outrank
-              // near-parallel cluster thefts.
-              const dTB = Math.atan2(vy, vx);
-              const dBadge = Math.atan2(badge.cy - tee.y, badge.cx - tee.x);
-              let dc = Math.abs(dBadge - dTB) % (2 * Math.PI);
-              if (dc > Math.PI) dc = 2 * Math.PI - dc;
-              const collinDeg = (dc * 180) / Math.PI;
-              const B = Number(process.env.COLLIN_BONUS ?? '0.6');
-              const SIG = Number(process.env.COLLIN_SIGMA ?? '2');
-              score *= 1 + B * Math.exp(-((collinDeg / SIG) ** 2));
-            }
-          }
-        }
-        if (abearing) {
-          const ab = agreedBearing.get(pair.basketId);
-          const basketAb = cache.endpoints.baskets[Number(pair.basketId.slice(1))];
-          const teeAb = cache.endpoints.tees[Number(pair.teeId.slice(1))];
-          if (ab !== undefined && basketAb && teeAb) {
-            // Only on STRAIGHT pairs (tee-badge-basket collinear < 2 deg):
-            // there basket->badge provably IS the approach direction; on
-            // doglegs the proxy is wrong and the bonus misfires (measured:
-            // unrestricted bonus churned rank1 65->64).
-            const dTB2 = Math.atan2(basketAb.y - teeAb.y, basketAb.x - teeAb.x);
-            const dBadge2 = Math.atan2(badge.cy - teeAb.y, badge.cx - teeAb.x);
-            let dc2 = Math.abs(dBadge2 - dTB2) % (2 * Math.PI);
-            if (dc2 > Math.PI) dc2 = 2 * Math.PI - dc2;
-            if ((dc2 * 180) / Math.PI < 2) {
-              const brg = (Math.atan2(badge.cy - basketAb.y, badge.cx - basketAb.x) * 180) / Math.PI;
-              let d = Math.abs(brg - ab) % 360;
-              if (d > 180) d = 360 - d;
-              score *= 1 + AB_W * Math.exp(-((d / AB_SIGMA) ** 2));
-            }
-          }
-        }
-        if (simple) {
-          const teeCells = legCellSet.get(pair.teeId);
-          const basketLeg = badge.legs.find((l) => l.endpointId === pair.basketId);
-          const denom = legOutsideCount.get(pair.basketId) ?? 0;
-          if (teeCells && basketLeg && denom > 0) {
-            let shared = 0;
-            for (let i = 0; i < basketLeg.path.length; i += 2) {
-              const x = basketLeg.path[i];
-              const y = basketLeg.path[i + 1];
-              if (Math.hypot(x - bxCell, y - byCell) <= 8) continue;
-              if (teeCells.has(y * w + x)) shared++;
-            }
-            const overlap = shared / denom;
-            score *= (1 - overlap) * (1 - overlap);
-          }
-        }
-        rows.push({
-          teeId: pair.teeId,
-          basketId: pair.basketId,
-          alignedWorstWindow: worst,
-          alignedMean: sum / count,
-          score,
-        });
-      }
-      if (zfit) {
-        // Rescue pass on the strongest rows: layers multiplied `worst` into
-        // `score`, so lifting worst -> max(worst, F * zfitWorst) rescales the
-        // score by the same layer product without re-running the layers.
-        const order = rows
-          .map((_, i) => i)
-          .sort((a, b) => rows[b].score - rows[a].score)
-          .slice(0, ZFIT_TOPK);
-        for (const i of order) {
-          const row = rows[i];
-          if (row.alignedWorstWindow <= 0 || row.score <= 0) continue;
-          // Salvage-only: rescue pairs whose ROUTE drowned them (Heritage
-          // h7's true pair: routed 0.13, Z-fit 0.33). Healthy routed scores
-          // get no boost — unconditional rescue measurably let neighboring
-          // false pairs (h4<->h12 basket swap) shop for 2-bend bridges.
-          if (row.alignedWorstWindow >= ZFIT_RESCUE_MAX) continue;
-          const tee = cache.endpoints.tees[Number(row.teeId.slice(1))];
-          const basket = cache.endpoints.baskets[Number(row.basketId.slice(1))];
-          if (!tee || !basket) continue;
-          // Rescue ONLY detoured routes: a direct route needs no polyline
-          // fit, and granting one lets false pairs shop for 2-bend
-          // interpretations they never routed (measured: unconditional
-          // rescue lifted ranks but cost 2 Heritage assignments).
-          const zw = zfitWorst(tee, badge, basket, Number(row.basketId.slice(1)), CORRIDOR_W) * ZFIT_FACTOR;
-          if (zw > row.alignedWorstWindow) {
-            const layerProduct = row.score / row.alignedWorstWindow;
-            row.alignedWorstWindow = zw;
-            row.score = zw * layerProduct;
-          }
-        }
-      }
-      rescoredByBadge.set(badge.label, rows);
-    }
+    const rescoredByBadge = rescoreCourse(cache, support, theta, {
+      alignPow,
+      windowSrcPx,
+      scoreMode,
+      zones,
+      simple,
+      invariants,
+      identity,
+      identFloor: IDENT_FLOOR,
+      recoveredTeePrior: Number(process.env.RECOVERED_TEE_PRIOR ?? '0.7'),
+      fracCenter: FRAC_CENTER,
+      fracHalfWidth: FRAC_HALF_WIDTH,
+      collinBonus: Number(process.env.COLLIN_BONUS ?? '0.6'),
+      collinSigma: Number(process.env.COLLIN_SIGMA ?? '2'),
+      zfit,
+      corridorWidthPx: CORRIDOR_W,
+      zfitFactor: ZFIT_FACTOR,
+      zfitF1: ZFIT_F1,
+      zfitF2: ZFIT_F2,
+      zfitTopK: ZFIT_TOPK,
+      zfitRescueMax: ZFIT_RESCUE_MAX,
+      ...(abearing ? { agreedBearing, abW: AB_W, abSigma: AB_SIGMA } : {}),
+    });
 
     let pristineBase: Buffer | null = null;
     let assignedForOverlay: Map<string, Rescored | null> | null = null;
@@ -634,126 +275,7 @@ function main(): void {
       const chosen = new Map<string, Rescored | null>(labels.map((l) => [l, null]));
       const usedTee = new Set<string>();
       const usedBasket = new Set<string>();
-      const margin = (l: string): number => {
-        const rows = [...rescoredByBadge.get(l)!].sort((a, b) => b.score - a.score);
-        const top = rows[0];
-        if (!top) return 0;
-        const rival = rows.find((r) => r.teeId !== top.teeId && r.basketId !== top.basketId);
-        return top.score - (rival ? rival.score : 0);
-      };
-      // Total-score maximization. Diagnosed from the cached evidence: wrong
-      // assignments come in THEFT CHAINS — one badge whose false top pair
-      // outscores its true pair steals a neighbor's endpoint and the wrong
-      // claim dominoes (Dashs h1→h2→h5→h7→h6, ending on a sprite false
-      // positive). The chain is globally suboptimal (fixing Dashs h1 costs
-      // 0.16 locally but returns +0.57 in total), so the fix is a better
-      // optimizer, not a better heuristic: greedy seed + local search with
-      // single-badge moves AND two-badge exchange moves, from several
-      // deterministic start orders, keeping the highest-total solution.
-      const solveFrom = (order: string[]): Map<string, Rescored | null> => {
-        const pick = new Map<string, Rescored | null>(labels.map((l) => [l, null]));
-        const tUsed = new Set<string>();
-        const bUsed = new Set<string>();
-        for (const l of order) {
-          let best: Rescored | null = null;
-          for (const row of rescoredByBadge.get(l)!) {
-            if (tUsed.has(row.teeId) || bUsed.has(row.basketId)) continue;
-            if (!best || row.score > best.score) best = row;
-          }
-          if (!best) continue;
-          pick.set(l, best);
-          tUsed.add(best.teeId);
-          bUsed.add(best.basketId);
-        }
-        const K = 12;
-        const topRows = new Map(
-          labels.map((l) => [
-            l,
-            [...rescoredByBadge.get(l)!].sort((a, b) => b.score - a.score).slice(0, 60),
-          ]),
-        );
-        let improved = true;
-        let guard = 0;
-        while (improved && guard++ < 60) {
-          improved = false;
-          // Single-badge move.
-          for (const l of labels) {
-            const cur = pick.get(l);
-            if (cur) {
-              tUsed.delete(cur.teeId);
-              bUsed.delete(cur.basketId);
-            }
-            let best: Rescored | null = null;
-            for (const row of topRows.get(l)!) {
-              if (tUsed.has(row.teeId) || bUsed.has(row.basketId)) continue;
-              if (!best || row.score > best.score) best = row;
-            }
-            if (best && (!cur || best.score > cur.score + 1e-9)) {
-              pick.set(l, best);
-              improved = true;
-            } else if (cur) {
-              pick.set(l, cur);
-            }
-            const now = pick.get(l);
-            if (now) {
-              tUsed.add(now.teeId);
-              bUsed.add(now.basketId);
-            }
-          }
-          // Two-badge exchange: free both badges' endpoints, try top-K rows
-          // for each jointly, keep the best feasible combination.
-          for (let i = 0; i < labels.length; i++) {
-            for (let jdx = i + 1; jdx < labels.length; jdx++) {
-              const li = labels[i];
-              const lj = labels[jdx];
-              const ci = pick.get(li);
-              const cj = pick.get(lj);
-              const base = (ci?.score ?? 0) + (cj?.score ?? 0);
-              for (const c of [ci, cj]) {
-                if (c) {
-                  tUsed.delete(c.teeId);
-                  bUsed.delete(c.basketId);
-                }
-              }
-              let bestPair: [Rescored | null, Rescored | null] = [ci ?? null, cj ?? null];
-              let bestTotal = base;
-              const rowsI = topRows.get(li)!.slice(0, K);
-              const rowsJ = topRows.get(lj)!.slice(0, K);
-              for (const ri of rowsI) {
-                if (tUsed.has(ri.teeId) || bUsed.has(ri.basketId)) continue;
-                for (const rj of rowsJ) {
-                  if (rj.teeId === ri.teeId || rj.basketId === ri.basketId) continue;
-                  if (tUsed.has(rj.teeId) || bUsed.has(rj.basketId)) continue;
-                  const total = ri.score + rj.score;
-                  if (total > bestTotal + 1e-9) {
-                    bestTotal = total;
-                    bestPair = [ri, rj];
-                  }
-                }
-              }
-              if (bestPair[0] !== ci || bestPair[1] !== cj) improved = true;
-              pick.set(li, bestPair[0]);
-              pick.set(lj, bestPair[1]);
-              for (const c of bestPair) {
-                if (c) {
-                  tUsed.add(c.teeId);
-                  bUsed.add(c.basketId);
-                }
-              }
-            }
-          }
-        }
-        return pick;
-      };
-      const total = (pick: Map<string, Rescored | null>): number =>
-        [...pick.values()].reduce((a, r) => a + (r?.score ?? 0), 0);
-      const marginOrder = [...labels].sort((a, b) => margin(b) - margin(a));
-      const starts: string[][] = [marginOrder, [...labels], [...labels].reverse()];
-      let bestPick = solveFrom(starts[0]);
-      for (const order of starts.slice(1)) {
-        const p = solveFrom(order);
-        if (total(p) > total(bestPick)) bestPick = p;
-      }
+      const bestPick = assignPairs(rescoredByBadge);
       for (const [l, r] of bestPick) {
         chosen.set(l, r);
         if (r) {

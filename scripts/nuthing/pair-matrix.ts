@@ -48,40 +48,26 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { PNG } from 'pngjs';
-import { runBadgeStage } from '../../src/lib/nuthing/badgeStage';
-import { readCourseBadges } from '../../src/lib/nuthing/digits/readBadges';
 import { predictProbs } from '../../src/lib/nuthing/digits/logistic';
 import type { LogisticModel } from '../../src/lib/nuthing/digits/logistic';
-import { computeRibbonSupport } from '../../src/lib/nuthing/ribbon';
-import type { SupportField } from '../../src/lib/nuthing/ribbon';
-import {
-  prepareSpriteTemplate,
-  matchBasketSprites,
-  detectTeeRings,
-  collectTeePoints,
-} from '../../src/lib/nuthing/endpoints';
+import { prepareSpriteTemplate } from '../../src/lib/nuthing/endpoints';
 import type { SpriteTemplate } from '../../src/lib/nuthing/endpoints';
 import {
-  patchBadgeOcclusion,
   COURSE_CORRIDOR_WIDTH,
   DEFAULT_CORRIDOR_WIDTH,
 } from '../../src/lib/nuthing/badgeOcclusion';
-import { buildSupportCost } from '../../src/lib/autoAnnotation/middleOutRibbon';
 import { detectMapViewport, cropRows } from '../../src/lib/nuthing/viewport';
 import { decodeRgbaBin } from './decode';
-
-// Known-good field/route parameters (middleout.py).
-const FIELD_SCALE = 3;
-const FIELD_ORIENTATIONS = 12;
-const FIELD_WIDTHS_SRC = [24, 32, 40, 48, 56, 64];
-const WAIVER_RADIUS_FIELD = 6;
-const WAIVER_MAX_COST = 1.4;
-// Support threshold for "supported" samples / weak spans (support is [0,1]
-// after the 99.5-pct + gamma normalization; ribbon interiors sit near 1).
-const SUPPORT_TAU = 0.5;
-// Weakest-window width in source px: a convincing ribbon has no ~45px
-// stretch of unsupported ground anywhere along it.
-const WORST_WINDOW_SRC_PX = 45;
+import {
+  measureCoursePairs,
+  FIELD_ORIENTATIONS,
+  FIELD_WIDTHS_SRC,
+  WORST_WINDOW_SRC_PX,
+  WAIVER_RADIUS_FIELD,
+  WAIVER_MAX_COST,
+  SUPPORT_TAU,
+} from '../../src/lib/nuthing/coursePairing';
+import type { BadgeMatrix, PairEvidence } from '../../src/lib/nuthing/coursePairing';
 
 interface TruthHole {
   number: number;
@@ -114,123 +100,6 @@ function loadTruth(): Record<string, TruthHole[]> {
     }));
   }
   return out;
-}
-
-// ---------------------------------------------------------------------------
-// Full-field single-source Dijkstra (known-good edge semantics: 8-connected,
-// edge weight 0.5*(c_u+c_v)*step, geometric steps) with prev backtracking.
-// Dial/bucket queue: edge weights are bounded by 0.5*(5+5)*sqrt2 ≈ 7.08.
-// ---------------------------------------------------------------------------
-const DX = [-1, 0, 1, -1, 1, -1, 0, 1];
-const DY = [-1, -1, -1, 0, 0, 1, 1, 1];
-const STEP = [Math.SQRT2, 1, Math.SQRT2, 1, 1, Math.SQRT2, 1, Math.SQRT2];
-const QUANTUM = 0.125;
-const RING = 64; // > maxEdge/QUANTUM + 1
-
-function dijkstraFrom(
-  cost: Float32Array,
-  w: number,
-  h: number,
-  seedX: number,
-  seedY: number,
-): { dist: Float64Array; prev: Int32Array } {
-  const n = w * h;
-  // Waiver disk at the source (badge glyph must not block its own legs).
-  const local = new Float32Array(cost);
-  const r = WAIVER_RADIUS_FIELD;
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      if (dx * dx + dy * dy > r * r) continue;
-      const x = seedX + dx;
-      const y = seedY + dy;
-      if (x < 0 || x >= w || y < 0 || y >= h) continue;
-      const i = y * w + x;
-      if (local[i] > WAIVER_MAX_COST) local[i] = WAIVER_MAX_COST;
-    }
-  }
-  const dist = new Float64Array(n).fill(Infinity);
-  const prev = new Int32Array(n).fill(-1);
-  const done = new Uint8Array(n);
-  const buckets: number[][] = Array.from({ length: RING }, () => []);
-  const seed = seedY * w + seedX;
-  dist[seed] = 0;
-  buckets[0].push(seed);
-  let pending = 1;
-  let cursor = 0;
-  while (pending > 0) {
-    const bucket = buckets[cursor % RING];
-    if (bucket.length === 0) {
-      cursor++;
-      continue;
-    }
-    const idx = bucket.pop() as number;
-    pending--;
-    if (done[idx]) continue;
-    // Stale entry (a cheaper copy was queued later in an earlier bucket).
-    if (Math.floor(dist[idx] / QUANTUM) > cursor) {
-      buckets[Math.floor(dist[idx] / QUANTUM) % RING].push(idx);
-      pending++;
-      continue;
-    }
-    done[idx] = 1;
-    const x = idx % w;
-    const y = (idx - x) / w;
-    const d = dist[idx];
-    for (let k = 0; k < 8; k++) {
-      const nx = x + DX[k];
-      const ny = y + DY[k];
-      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-      const ni = ny * w + nx;
-      if (done[ni]) continue;
-      const cand = d + 0.5 * (local[idx] + local[ni]) * STEP[k];
-      if (cand < dist[ni]) {
-        dist[ni] = cand;
-        prev[ni] = idx;
-        buckets[Math.floor(cand / QUANTUM) % RING].push(ni);
-        pending++;
-      }
-    }
-  }
-  return { dist, prev };
-}
-
-/** Backtracked field-cell path from a goal cell to the Dijkstra seed (seed-first order). */
-function backtrack(prev: Int32Array, goal: number): Int32Array {
-  const cells: number[] = [];
-  for (let c = goal; c >= 0; c = prev[c]) cells.push(c);
-  cells.reverse();
-  return Int32Array.from(cells);
-}
-
-interface LegEvidence {
-  /** 'T<i>' or 'B<i>' */
-  endpointId: string;
-  /** Accumulated Dijkstra cost badge→endpoint (goal-side waiver not applied). */
-  geodesic: number;
-  /** Field-cell path badge→endpoint, as [x0,y0,x1,y1,...] field coords. */
-  path: number[];
-  reachable: boolean;
-}
-
-interface PairEvidence {
-  pairId: string;
-  teeId: string;
-  basketId: string;
-  totalScore: number;
-  supportMean: number;
-  supportMin: number;
-  supportedFraction: number;
-  /** Minimum over ~45src-px sliding windows of mean support — the weakest
-   * stretch of the whole tee→badge→basket route. Primary ranking signal. */
-  worstWindowMean: number;
-  weakSpanCount: number;
-  weakSpanLongestPx: number;
-  pathLengthPx: number;
-  straightDistancePx: number;
-  efficiency: number;
-  endpointSupportTee: number;
-  endpointSupportBasket: number;
-  failureReason: string | null;
 }
 
 function main(): void {
@@ -282,125 +151,36 @@ function main(): void {
     const fullImage = decodeRgbaBin(`/workspace/nuthing-work/traces-py/${nm}.rgba.bin`);
     const viewport = detectMapViewport(fullImage);
     const image = cropRows(fullImage, viewport);
-    const stage = runBadgeStage(image);
-    // Screen-space stage: badges + sprites detect on the native raster when
-    // one is supplied (dual-scale capture), else on the course raster.
-    let badgeStage = stage;
-    let mapX = (x: number): number => x;
-    let mapY = (y: number): number => y;
-    let sizeScale = 1;
+    let nativeInput: { image: ReturnType<typeof cropRows>; viewportTop: number } | undefined;
     if (nativeRasterPath) {
       const nativeFull = decodeRgbaBin(nativeRasterPath);
       const nativeVp = detectMapViewport(nativeFull);
-      badgeStage = runBadgeStage(cropRows(nativeFull, nativeVp));
-      sizeScale = geoScale;
-      mapX = (x) => x * geoScale;
-      mapY = (y) => (y + nativeVp.top) * geoScale - viewport.top;
+      nativeInput = { image: cropRows(nativeFull, nativeVp), viewportTop: nativeVp.top };
     }
-    const scaleComp = <T extends { cx: number; cy: number; bboxX: number; bboxY: number; bboxW: number; bboxH: number; area: number }>(c: T): T => ({
-      ...c,
-      cx: mapX(c.cx),
-      cy: mapY(c.cy),
-      bboxX: mapX(c.bboxX),
-      bboxY: mapY(c.bboxY),
-      bboxW: c.bboxW * sizeScale,
-      bboxH: c.bboxH * sizeScale,
-      area: c.area * sizeScale * sizeScale,
-    });
-    const badges = badgeStage.badges.map(scaleComp);
-    const readings = readCourseBadges(badgeStage, {
-      name: 'logistic',
-      scores: (m) => predictProbs(model, m),
-    }).map((r) => ({ ...r, badge: scaleComp(r.badge) }));
-    const field: SupportField = computeRibbonSupport(image, {
-      scale: FIELD_SCALE,
-      orientations: FIELD_ORIENTATIONS,
-      widthsSrc: FIELD_WIDTHS_SRC,
-    });
-    if (patchBadges) {
-      const W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
-      const stats = patchBadgeOcclusion(field, image, badges, W);
-      console.log(
-        `${nm}: badge-occlusion patch W=${W}: halo-capped ${stats.haloCells} cells, ` +
-          `one-sided boosted ${stats.patchedCells} cells`,
-      );
-    }
-    const cost = buildSupportCost(field.support);
-    const fieldMs = performance.now() - t0;
-
-    // --- Endpoints: render-identity detectors (src/lib/nuthing/endpoints) ----
-    const insideBadgePt = (x: number, y: number): boolean =>
-      badges.some(
-        (b) =>
-          x >= b.bboxX - 3 && x <= b.bboxX + b.bboxW + 3 &&
-          y >= b.bboxY - 3 && y <= b.bboxY + b.bboxH + 3,
-      );
-    // Ring-tier tees are excluded only from the badge PLATE INTERIOR (where
-    // hollow digit glyphs like 0/8 can pose as tee rings) — a real tee can
-    // stand at the badge frame's edge (measured: Heritage h15's ring tee
-    // sits 22px from its badge center and was swept by the full-box filter
-    // once badge 15 was recovered).
-    const insideBadgeInterior = (x: number, y: number): boolean =>
-      badges.some(
-        (b) =>
-          Math.abs(x - b.cx) <= b.bboxW / 2 - 7 && Math.abs(y - b.cy) <= b.bboxH / 2 - 7,
-      );
-    const sprites = matchBasketSprites(badgeStage.brightMask, spriteTemplate).map((s) => ({
-      ...s,
-      cx: mapX(s.cx),
-      cy: mapY(s.cy),
-      tipX: mapX(s.tipX),
-      tipY: mapY(s.tipY),
-    }));
-    const rings = detectTeeRings(stage.brightMask).filter((r) => !insideBadgeInterior(r.cx, r.cy));
-    const badgeLabels = new Set(stage.badges.map((b) => b.label));
-    const teeComponents = stage.brightComponents.filter(
-      (c) => !badgeLabels.has(c.label) && !insideBadgePt(c.cx, c.cy),
-    );
-    const teeCands = collectTeePoints(rings, teeComponents, sprites);
-    // Basket endpoint: pole tip (matched-filter sprite position + fixed offset).
-    const basketPoints = sprites.map((s) => ({
-      x: s.tipX,
-      y: s.tipY,
-      cx: s.cx,
-      cy: s.cy,
-      score: s.score,
-    }));
-    // onRing: tee standing on some basket's C2D dashed circle (radius ~84).
-    // angle: ring-tier tees carry the hole's principal-axis orientation —
-    // validated on dev truth to point at the hole's badge (median error
-    // 1.1°, p90 2.65°, n=59; false badges median 38°). Component-tier tees
-    // have no measured orientation (null).
-    const teePoints = teeCands.map((t) => ({
-      x: t.cx,
-      y: t.cy,
-      tier: t.tier,
-      angle: t.ring ? t.ring.angle : null,
-      onRing: basketPoints.some((b) => Math.abs(Math.hypot(t.cx - b.x, t.cy - b.y) - 84) <= 12),
-    }));
-    // Occluded-tee recoveries (scripts/cv-probes/occluded_tee_recovery*.py):
-    // pads hidden under basket sprites / badges that the render-identity
-    // detectors cannot see. Materialized as a resource in FULL-raster
-    // coordinates; merged as tier 'recovered' pool candidates (dedupe 14px).
+    let recoveredForCourse: { xPx: number; yPx: number; score: number }[] = [];
     try {
       const recovered = JSON.parse(
         readFileSync('resources/nuthing-p2/endpoints/recovered-tees.json', 'utf8'),
       ) as Record<string, { xPx: number; yPx: number; score: number }[]>;
-      for (const r of recovered[nm] ?? []) {
-        const rx = r.xPx;
-        const ry = r.yPx - viewport.top;
-        if (teePoints.some((t) => Math.hypot(t.x - rx, t.y - ry) < 14)) continue;
-        teePoints.push({
-          x: rx,
-          y: ry,
-          tier: 'recovered',
-          angle: null,
-          onRing: basketPoints.some((b) => Math.abs(Math.hypot(rx - b.x, ry - b.y) - 84) <= 12),
-        });
-      }
+      recoveredForCourse = recovered[nm] ?? [];
     } catch {
       // resource absent: run without recoveries
     }
+    const W = COURSE_CORRIDOR_WIDTH[nm] ?? DEFAULT_CORRIDOR_WIDTH;
+    const measured = measureCoursePairs({
+      courseName: nm,
+      image,
+      viewportTop: viewport.top,
+      ...(nativeInput ? { native: nativeInput, geoScale } : {}),
+      corridorWidthPx: W,
+      patchBadges,
+      spriteTemplate,
+      digitScorer: { name: 'logistic', scores: (m) => predictProbs(model, m) },
+      recoveredTees: recoveredForCourse,
+      onLog: (message) => console.log(message),
+    });
+    const { field, readings, teePoints, basketPoints, matrices } = measured;
+    const fieldMs = performance.now() - t0;
     console.log(
       `${nm}: viewport[${viewport.top},${viewport.bottom}) field ${field.width}x${field.height} ` +
         `(${fieldMs.toFixed(0)}ms) tees=${teePoints.length} ` +
@@ -410,167 +190,6 @@ function main(): void {
         `baskets=${basketPoints.length} badges=${readings.filter((r) => r.label).length} labeled`,
     );
 
-    // --- Per-badge matrix ----------------------------------------------------
-    const clampCell = (v: number, hi: number): number => Math.max(0, Math.min(hi - 1, Math.round(v)));
-    const toCell = (x: number, y: number): number =>
-      clampCell(y / field.scale, field.height) * field.width + clampCell(x / field.scale, field.width);
-    const supportAt = (cell: number): number => field.support[cell];
-
-    interface BadgeMatrix {
-      label: string;
-      badge: { cx: number; cy: number };
-      routeMs: number;
-      legs: LegEvidence[];
-      pairs: PairEvidence[];
-      /** Pair indices sorted by primary score (worstWindowMean desc, supportMean tie-break). */
-      rankOrder: number[];
-    }
-    const matrices: BadgeMatrix[] = [];
-    const windowCells = Math.max(3, Math.round(WORST_WINDOW_SRC_PX / field.scale));
-
-    for (const r of readings) {
-      if (!r.label) continue;
-      const tR = performance.now();
-      const bx = clampCell(r.badge.cx / field.scale, field.width);
-      const by = clampCell(r.badge.cy / field.scale, field.height);
-      const { dist, prev } = dijkstraFrom(cost, field.width, field.height, bx, by);
-
-      const legFor = (id: string, x: number, y: number): LegEvidence => {
-        const goal = toCell(x, y);
-        const reachable = Number.isFinite(dist[goal]);
-        const cells = reachable ? backtrack(prev, goal) : new Int32Array(0);
-        const path: number[] = [];
-        for (const c of cells) path.push(c % field.width, (c - (c % field.width)) / field.width);
-        return { endpointId: id, geodesic: reachable ? dist[goal] : Infinity, path, reachable };
-      };
-      const teeLegs = teePoints.map((p, i) => legFor(`T${i}`, p.x, p.y));
-      const basketLegs = basketPoints.map((p, i) => legFor(`B${i}`, p.x, p.y));
-
-      const pairs: PairEvidence[] = [];
-      for (let ti = 0; ti < teeLegs.length; ti++) {
-        for (let bi = 0; bi < basketLegs.length; bi++) {
-          const tl = teeLegs[ti];
-          const bl = basketLegs[bi];
-          const pairId = `${nm}:h${r.label}:T${ti}:B${bi}`;
-          if (!tl.reachable || !bl.reachable) {
-            pairs.push({
-              pairId, teeId: `T${ti}`, basketId: `B${bi}`,
-              totalScore: Infinity, supportMean: 0, supportMin: 0, supportedFraction: 0,
-              worstWindowMean: 0, weakSpanCount: 0, weakSpanLongestPx: 0,
-              pathLengthPx: 0, straightDistancePx: 0, efficiency: 0,
-              endpointSupportTee: 0, endpointSupportBasket: 0,
-              failureReason: 'unreachable',
-            });
-            continue;
-          }
-          // Canonical form: tee→badge→basket = reverse(badge→tee) + badge→basket[1:]
-          const nT = tl.path.length / 2;
-          const nB = bl.path.length / 2;
-          const count = nT + nB - 1;
-          const samples = new Float32Array(count);
-          let lengthCells = 0;
-          let px = -1;
-          let py = -1;
-          for (let s = 0; s < count; s++) {
-            let x: number;
-            let y: number;
-            if (s < nT) {
-              const j = (nT - 1 - s) * 2; // tee-first
-              x = tl.path[j];
-              y = tl.path[j + 1];
-            } else {
-              const j = (s - nT + 1) * 2; // skip duplicated badge cell
-              x = bl.path[j];
-              y = bl.path[j + 1];
-            }
-            samples[s] = supportAt(y * field.width + x);
-            if (px >= 0) lengthCells += Math.hypot(x - px, y - py);
-            px = x;
-            py = y;
-          }
-          let sum = 0;
-          let min = 1;
-          let supported = 0;
-          for (let s = 0; s < count; s++) {
-            sum += samples[s];
-            if (samples[s] < min) min = samples[s];
-            if (samples[s] >= SUPPORT_TAU) supported++;
-          }
-          // Weak spans: maximal runs below tau.
-          let weakSpanCount = 0;
-          let weakSpanLongest = 0;
-          let run = 0;
-          for (let s = 0; s <= count; s++) {
-            if (s < count && samples[s] < SUPPORT_TAU) run++;
-            else {
-              if (run > 0) {
-                weakSpanCount++;
-                if (run > weakSpanLongest) weakSpanLongest = run;
-              }
-              run = 0;
-            }
-          }
-          // Weakest sliding window (mean support).
-          let worst = 1;
-          if (count <= windowCells) {
-            worst = sum / count;
-          } else {
-            let acc = 0;
-            for (let s = 0; s < windowCells; s++) acc += samples[s];
-            worst = acc / windowCells;
-            for (let s = windowCells; s < count; s++) {
-              acc += samples[s] - samples[s - windowCells];
-              const m = acc / windowCells;
-              if (m < worst) worst = m;
-            }
-          }
-          const straight =
-            Math.hypot(teePoints[ti].x - r.badge.cx, teePoints[ti].y - r.badge.cy) +
-            Math.hypot(basketPoints[bi].x - r.badge.cx, basketPoints[bi].y - r.badge.cy);
-          const endMean = (leg: LegEvidence): number => {
-            const m = leg.path.length / 2;
-            const k = Math.min(3, m);
-            let a = 0;
-            for (let s = 0; s < k; s++) {
-              const j = (m - 1 - s) * 2;
-              a += supportAt(leg.path[j + 1] * field.width + leg.path[j]);
-            }
-            return k ? a / k : 0;
-          };
-          pairs.push({
-            pairId, teeId: `T${ti}`, basketId: `B${bi}`,
-            totalScore: tl.geodesic + bl.geodesic,
-            supportMean: sum / count,
-            supportMin: min,
-            supportedFraction: supported / count,
-            worstWindowMean: worst,
-            weakSpanCount,
-            weakSpanLongestPx: Math.round(weakSpanLongest * field.scale),
-            pathLengthPx: lengthCells * field.scale,
-            straightDistancePx: straight,
-            efficiency: straight > 0 ? (lengthCells * field.scale) / straight : 0,
-            endpointSupportTee: endMean(tl),
-            endpointSupportBasket: endMean(bl),
-            failureReason: null,
-          });
-        }
-      }
-      const rankOrder = pairs
-        .map((_, i) => i)
-        .sort(
-          (a, b) =>
-            pairs[b].worstWindowMean - pairs[a].worstWindowMean ||
-            pairs[b].supportMean - pairs[a].supportMean,
-        );
-      matrices.push({
-        label: r.label,
-        badge: { cx: r.badge.cx, cy: r.badge.cy },
-        routeMs: performance.now() - tR,
-        legs: [...teeLegs, ...basketLegs],
-        pairs,
-        rankOrder,
-      });
-    }
 
     // --- Truth matching + ranks ---------------------------------------------
     const truth = truthAll[nm];
