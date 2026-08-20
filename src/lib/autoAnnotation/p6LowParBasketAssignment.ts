@@ -378,10 +378,16 @@ export function computeZeroBendLocks(
 	return zeroBendLocks;
 }
 
-function forwardGateForBasket(
+/**
+ * `basket` takes the same point the caller scores the candidate against
+ * (bbox center), not a `RawMaskBasket` -- a basket has more than one Y
+ * reference (see `rawObjectMask.ts`'s `yPx` vs `centerYPx`), and this gate
+ * must never be free to pick a different one than the ranking score did.
+ */
+export function forwardGateForBasket(
 	tee: SourcePoint,
 	badge: SourcePoint,
-	basket: RawMaskBasket
+	basket: SourcePoint
 ): Pick<P6BasketCandidate, 'forwardProjectionPx' | 'forwardAngleDeg' | 'passedForwardGate'> {
 	const teeToBadgeX = badge.xPx - tee.xPx;
 	const teeToBadgeY = badge.yPx - tee.yPx;
@@ -491,11 +497,12 @@ function deriveP6LowParBasketAssignmentSnapshot(
 		const rankedCandidates = sortCandidates(
 			unlockedBasketIndexes.map((basketIndex): P6BasketCandidate => {
 				const basket = baskets[basketIndex];
+				const basketPoint = { xPx: basket.centerXPx, yPx: basket.centerYPx };
 				const lowParScore = scoreLowParBasketCandidate(
 					evidenceGrid,
 					{ xPx: tee.xPx, yPx: tee.yPx },
 					{ xPx: badge.xPx, yPx: badge.yPx },
-					{ xPx: basket.centerXPx, yPx: basket.centerYPx }
+					basketPoint
 				);
 				return {
 					holeNumber,
@@ -503,7 +510,7 @@ function deriveP6LowParBasketAssignmentSnapshot(
 					...forwardGateForBasket(
 						{ xPx: tee.xPx, yPx: tee.yPx },
 						{ xPx: badge.xPx, yPx: badge.yPx },
-						basket
+						basketPoint
 					),
 					lowParScore,
 					valid: lowParScore !== null && Number.isFinite(lowParScore),
