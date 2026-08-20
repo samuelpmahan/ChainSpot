@@ -64,3 +64,43 @@ product at `/` is `<h1>Stitch Map</h1>`. No feature migration in this task.
 - Limitation: automated proof cannot show that quarantine judgment calls (what counted
   as "governance" vs "application") match intent — the file-by-file move list is
   reported for human review instead.
+
+## Slice 1 — single screenshot load & display
+
+User action: the user selects one screenshot file, and the app displays it with
+its native pixel dimensions.
+
+### Contract
+
+- `src/lib/image.ts` — plain TypeScript, no Svelte imports (service layer wrapping
+  the browser boundary):
+  - `interface LoadedImage { readonly file: File; readonly objectUrl: string;
+    readonly widthPx: number; readonly heightPx: number }` — immutable.
+  - `type LoadImageResult = { ok: true; image: LoadedImage }
+    | { ok: false; reason: 'not-a-decodable-image' }` — discriminated union;
+    expected failures are returned as values, not thrown.
+  - `async loadImageFromFile(file: File): Promise<LoadImageResult>` — decodes via
+    `createImageBitmap` to obtain native pixel dimensions (bitmap closed after
+    reading them); display URL via `URL.createObjectURL`.
+  - `releaseImage(image: LoadedImage): void` — revokes the object URL.
+- `src/routes/+page.svelte` owns the state: `image: LoadedImage | null` and
+  `error: string | null` as Svelte 5 `$state` runes. No store; the page is the
+  sole owner for now.
+- `<input type="file" accept="image/*">` with an `onchange` handler. On success
+  show `<name> — <w> × <h> px` and `<img src={objectUrl}>`; on failure show a
+  plain error paragraph and clear the image. No CSS at all (deliberate:
+  functionality and contracts first).
+- Replacing an image must `releaseImage()` the old one.
+- Race guard: a selection sequence counter, so a slow decode that completes after
+  a newer selection is dropped and its object URL released immediately.
+
+### Proof Plan (slice 1)
+
+- `npm run check` and `npm run build` stay green.
+- Manual, in `npm run dev`: select a real screenshot; the name/dimensions line and
+  the image render. Select a `.txt` file; the error paragraph shows and no image
+  remains.
+- Replacement + race behavior: select image A then image B; only B renders.
+  Optionally inspect devtools for revoked/leaked `blob:` URLs.
+- Limitation: the race guard's timing window is not deterministically provable by
+  hand; it is proven by code review of the sequence-counter logic in this slice.
