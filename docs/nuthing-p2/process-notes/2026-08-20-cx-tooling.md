@@ -87,3 +87,18 @@ gap, not judgment gap (though the judgment gap was real too).
   passing (catalog rot). A `cx_propose.py recheck` that re-runs each
   accepted entry's measurement command would turn the catalog into a test
   suite. That is probably the single highest-value follow-up.
+
+## Postscript — the impulse fired anyway (owner correction, same hour)
+
+The owner's response to the finished build: "Why tf would you build the
+design and use all those tokens without even running a single question by
+me." Correct. The observation above ("first impulse: design the entire
+lifecycle before checking") was written WHILE following the impulse — the
+note did not inhibit the behavior, it narrated it. Conclusion for the
+process design: self-observation is not a control; only structural gates
+are (the same conclusion the CX admission rule embodies, now demonstrated
+on the model that designed it). Corollary: on tasks whose deliverable IS a
+process/design, the question list is the first artifact, not the build —
+autonomy heuristics tuned for code tasks ("reversible + in-scope →
+proceed") mis-fire there, because the cost isn't wrong code, it's spent
+tokens and a design the owner now has to review as a fait accompli.
