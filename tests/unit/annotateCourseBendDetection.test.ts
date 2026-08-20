@@ -72,6 +72,18 @@ function dispatchClick(host: HTMLElement, x: number, y: number, pointerId = 71):
 	window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: x, clientY: y }));
 }
 
+/**
+ * Placement never auto-advances GuidedReview (499ef3e/contract A): Tab
+ * explicitly accepts Tee, then Basket, then Bends -- Tab-through IS the
+ * acceptance, so the completing (3rd) Tab is what `approve-hole-button`
+ * used to be for a manually-placed hole (that banner/button is
+ * CV-proposal-only now; see annotateCourseCompletionHandoff.test.ts for
+ * that path).
+ */
+function pressTab(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+}
+
 function view(host: HTMLElement): { zoom: number; panX: number; panY: number } {
 	const dataset = scene(host).dataset;
 	return { zoom: Number(dataset.viewZoom), panX: Number(dataset.viewPanX), panY: Number(dataset.viewPanY) };
@@ -113,14 +125,19 @@ function sidebarSection(host: HTMLElement, section: number): HTMLElement {
 	return el;
 }
 
+/** Places and Tab-accepts tee then basket, landing on the BENDS step (tee+basket already confirmed — see contract A). */
 async function placeHoleFully(host: HTMLElement, number: number): Promise<void> {
 	sidebarHoleButton(host, number).click();
 	await flush();
 	const tee = screenPointFor(host, 20, 20);
 	dispatchClick(host, tee.x, tee.y);
 	await flush();
+	pressTab();
+	await flush();
 	const basket = screenPointFor(host, 80, 80);
 	dispatchClick(host, basket.x, basket.y);
+	await flush();
+	pressTab();
 	await flush();
 }
 
@@ -142,9 +159,10 @@ describe('automatic corridor-bend detection on Approve', () => {
 		await loadImage(host);
 		await placeHoleFully(host, 1);
 
-		const approveButton = host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]');
-		expect(approveButton).not.toBeNull();
-		expect(() => approveButton?.click()).not.toThrow();
+		// The completing (3rd) Tab is the manual-placement equivalent of the
+		// old approve-hole-button click — it runs approveHolePieces, which
+		// schedules eager bend detection here (no bends yet).
+		expect(() => pressTab()).not.toThrow();
 		await flush();
 
 		// The hole still confirms normally — detection is best-effort and must
@@ -171,7 +189,9 @@ describe('automatic corridor-bend detection on Approve', () => {
 
 		host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-close"]')?.click();
 		await flush();
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		// The completing Tab: approveHolePieces must skip eager detection
+		// entirely now that the hole already has a manual bend.
+		pressTab();
 		await flush();
 
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -188,7 +208,7 @@ describe('automatic corridor-bend detection on Approve', () => {
 		await loadImage(host);
 		await placeHoleFully(host, 1);
 
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // completing Tab
 		await flush();
 
 		// Only one of 18 holes is confirmed — the course-wide guided-bends phase
@@ -213,14 +233,16 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		await loadImage(host);
 		await placeHoleFully(host, 1);
 
-		// No bends added yet — hole is in section 3 (both placed, neither confirmed).
+		// No bends added yet — tee+basket are already confirmed (section 4) the
+		// moment their own Tabs accept them (contract A); only the BENDS step
+		// remains to be Tab-accepted.
 		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 
-		// Approve the hole directly — approval is available immediately.
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		// Complete the hole directly — no bend placement required.
+		pressTab();
 		await flush();
 
-		// Hole is now confirmed (section 4) with no bends.
+		// Hole stays confirmed (section 4) with no bends.
 		expect(sidebarSection(host, 4).textContent).toContain('1');
 		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).toBeNull();
 	});
@@ -244,7 +266,7 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		expect(host.querySelector('[data-testid="bend-marker-1-1"]')).toBeNull();
 
 		// Approve the hole with one bend.
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // completing Tab
 		await flush();
 
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -282,7 +304,7 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		expect(host.querySelector('[data-testid="bend-marker-1-3"]')).toBeNull();
 
 		// Approve the hole with three bends.
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // completing Tab
 		await flush();
 
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -323,7 +345,7 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		// Bend should be deleted or the test shows that the menu didn't open
 		// (marker-clicking delete flow is orthogonal to this ticket's guided click).
 		// Either way, we can proceed to approval.
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // completing Tab
 		await flush();
 
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -344,8 +366,12 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		const tee = screenPointFor(host, 20, 20);
 		dispatchClick(host, tee.x, tee.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basket = screenPointFor(host, 80, 80);
 		dispatchClick(host, basket.x, basket.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		// Place a bend via map click (guided flow).
@@ -356,7 +382,7 @@ describe('guided bend placement flow (CHSPT-48)', () => {
 		expect(host.querySelector('[data-testid="bend-marker-1-0"]')).not.toBeNull();
 
 		// Approve.
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // completing Tab
 		await flush();
 
 		expect(sidebarSection(host, 4).textContent).toContain('1');
