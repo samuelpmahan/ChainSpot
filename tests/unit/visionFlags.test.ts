@@ -37,10 +37,15 @@ describe('prestaging vision flags', () => {
 		expect(setVisionFlag('zeroBendShortcutEnabled', false).zeroBendShortcutEnabled).toBe(false);
 		expect(setVisionFlag('zeroBendMaxDistancePx', 4).zeroBendMaxDistancePx).toBe(4);
 		expect(setVisionFlag('p1Profile', 'historical').p1Profile).toBe('historical');
+		// persist() always writes the full current snapshot (see visionFlags.ts
+		// module doc: callers send the complete flags object with each request),
+		// so untouched flags persist too, at their defaults.
 		expect(JSON.parse(storage.getItem(VISION_FLAGS_STORAGE_KEY) ?? '{}')).toEqual({
 			zeroBendShortcutEnabled: false,
 			zeroBendMaxDistancePx: 4,
-			p1Profile: 'historical'
+			p1Profile: 'historical',
+			nuthingPairing: DEFAULT_VISION_FLAGS.nuthingPairing,
+			nuthingGeoScale: DEFAULT_VISION_FLAGS.nuthingGeoScale
 		});
 	});
 
