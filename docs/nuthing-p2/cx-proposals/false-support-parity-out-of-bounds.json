@@ -1,0 +1,24 @@
+{
+ "slug": "false-support-parity-out-of-bounds",
+ "status": "proposed",
+ "author": "Fable (main session)",
+ "date": "2026-08-20",
+ "substrate": "f04473a",
+ "category": "edge-case",
+ "claim": "Routes leave the fairway not because the true corridor is starved but because impostor terrain (dark ground, bright bands, zone-furniture edges) earns paired-edge support at parity with or above real paint; the corner-cut then wins on cost.",
+ "measurement": {
+  "command": "python3 scripts/nuthing/diagnose-inbounds.py",
+  "numbers": "violations route-vs-truth support: h14D 0.48/0.43, h6D 0.70/0.45, h7H 0.50/0.42, h14H 0.76/0.67, h14L 0.78/0.49, h11T 0.86/0.53, h16T 0.49/0.47; controls maxDev 8.6-25.8px all under bound; zone-edge proximity violations 19-73% vs controls 0/0/0/69%",
+  "firsthand": true
+ },
+ "control": "Same measurements on 4 passing siblings (TowneLake h7, Heritage h4, Dashs h3, Lenard h13): none violate; Lenard h13 shows the same pull at sub-bound magnitude (dose-response)",
+ "controlNa": "",
+ "frames": "field cells x3 -> source px (viewport-cropped) -> +viewport.top -> full-capture; registered truth already full-capture (raw corpus annotations for Heritage/Lenard/TowneLake are NOT - using them yields uniform ~430px false violations)",
+ "risk": "Support-parity stats sampled along polylines at 2px steps with nearest-cell field lookup; W/2+8 bound choice affects which cases count as violations; Lenard truth has zero bends so its h14 may be truth-incomplete (M5 pending human verdict)",
+ "evidence": [
+  "docs/nuthing-p2/diagnosis-inbounds-72.md",
+  "/workspace/nuthing-work/dev90-overlays/violations-sheet.png",
+  "/workspace/nuthing-work/dev90-overlays/diagnosis-zooms.png"
+ ],
+ "history": ""
+}
