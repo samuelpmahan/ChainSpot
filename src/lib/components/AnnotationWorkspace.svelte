@@ -996,16 +996,16 @@
 		return kind === 'tee' || kind === 'basket' || kind === 'bend';
 	}
 
-	function pieceStatusKey(holeId: string, kind: 'tee' | 'basket'): string {
+	function pieceStatusKey(holeId: string, kind: 'tee' | 'basket' | 'bends'): string {
 		return `${holeId}:${kind}`;
 	}
 
-	function isPieceConfirmed(holeId: string, kind: 'tee' | 'basket'): boolean {
+	function isPieceConfirmed(holeId: string, kind: 'tee' | 'basket' | 'bends'): boolean {
 		return confirmedPieces.has(pieceStatusKey(holeId, kind));
 	}
 
 	/** Every mutation replaces the Set so `$state` sees a new reference — matches every other collection-valued state on this page (`activeReviewConfirmedCandidateIds`, `settlingMarkerKeys`). */
-	function setPieceConfirmed(holeId: string, kind: 'tee' | 'basket', confirmed: boolean): void {
+	function setPieceConfirmed(holeId: string, kind: 'tee' | 'basket' | 'bends', confirmed: boolean): void {
 		const key = pieceStatusKey(holeId, kind);
 		if (confirmed === confirmedPieces.has(key)) return;
 		const next = new Set(confirmedPieces);
@@ -1088,6 +1088,12 @@
 		if (!hole?.tee || !hole.basket) return;
 		setPieceConfirmed(holeId, 'tee', true);
 		setPieceConfirmed(holeId, 'basket', true);
+		// The one gesture that reaches here (Tab on BENDS, or the Approve
+		// button) is the explicit "this hole is done" acceptance for corridor
+		// bends too — a straight hole with zero bends is still a reviewed
+		// decision, not an unfinished one (owner report: the guided bends-pass
+		// tracker must not require a placed/moved bend to show accepted).
+		setPieceConfirmed(holeId, 'bends', true);
 		// The sidebar's Approve is the redesign's explicit "these points are
 		// right" gesture — the correction log's 'confirm' for both endpoints.
 		logCorrection('tee', hole.number, 'confirm', { xPx: hole.tee.xPx, yPx: hole.tee.yPx });
@@ -4034,7 +4040,10 @@
 										>
 											<span class="num">{hole.number}</span>
 											<span class="tb">
-												<span class={hole.corridorBends.length > 0 ? 'confirmed' : ''}>↯{hole.corridorBends.length || ''}</span>
+												<!-- 'bends' confirmation covers holes approved since this fix; corridorBends.length
+												     is kept as a fallback so a hole with real bends from BEFORE this fix (loaded
+												     project, no 'bends' key in confirmedPieces yet) still reads as accepted. -->
+												<span class={isPieceConfirmed(hole.id, 'bends') || hole.corridorBends.length > 0 ? 'confirmed' : ''}>↯{hole.corridorBends.length || ''}</span>
 											</span>
 										</button>
 									{/each}

@@ -210,6 +210,27 @@ describe('CHSPT-65 completion handoff — 9/9', () => {
 	});
 });
 
+describe('bends progress tracker (owner report: 3rd Tab / Approve must accept a zero-bend hole)', () => {
+	it('a hole approved with zero bend edits shows as bends-accepted in the guided bends panel', async () => {
+		mounted = mountWorkspace(makeEditor(9));
+		const { host } = mounted;
+		await flush();
+
+		click(host, 'course-length-9');
+		await flush();
+
+		// Every hole approved through the same one gesture (Tab on BENDS / the
+		// Approve button both call approveHolePieces) -- none has a placed or
+		// moved bend, matching the owner's "unless you placed/moved one" report.
+		await approveHoles(host, 9);
+
+		expect(host.querySelector('[data-testid="bend-phase-panel"]')).not.toBeNull();
+		const indicator = host.querySelector('[data-testid="bend-phase-hole-1"] .tb span');
+		expect(indicator).not.toBeNull();
+		expect(indicator?.className).toContain('confirmed');
+	});
+});
+
 describe('CHSPT-65 course-length contradiction guard', () => {
 	it('blocks selecting 9 holes once holes beyond 9 have confirmed placements', async () => {
 		mounted = mountWorkspace(makeEditor(18));
