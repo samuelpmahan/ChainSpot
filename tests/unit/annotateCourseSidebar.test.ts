@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import AnnotationWorkspace from '../../src/lib/components/AnnotationWorkspace.svelte';
 import { ProjectEditor } from '../../src/lib/domain/editor';
-import { createProjectState } from '../../src/lib/domain/project';
+import { createImageAsset, createProjectState } from '../../src/lib/domain/project';
+import type { AnnotatedHole } from '../../src/lib/domain/project';
 import type { DecodeImageFile } from '../../src/lib/imageIntake';
 
 const NOW = () => new Date('2026-08-13T00:00:00.000Z');
@@ -25,6 +26,38 @@ function decodeOf(widthPx: number, heightPx: number): DecodeImageFile {
 function makeEditor(): ProjectEditor {
 	const state = createProjectState({ createId: () => 'project-1', now: NOW });
 	return new ProjectEditor({ state, now: NOW });
+}
+
+/** A pre-loaded source image with no holes -- for editor.setHoles seeding below (contract A: the Approve banner/button only exists for holes whose tee+basket already existed, unconfirmed, before review started — the CV-proposal shape, not manual click+Tab placement). */
+function makeEditorWithSourceImage(widthPx: number, heightPx: number): ProjectEditor {
+	const state = createProjectState({ createId: () => 'project-1', now: NOW });
+	const asset = createImageAsset({
+		id: 'source-1',
+		role: 'source-overview',
+		fileName: 'course.png',
+		mimeType: 'image/png',
+		widthPx,
+		heightPx
+	});
+	state.images = [asset];
+	return new ProjectEditor({
+		state,
+		now: NOW,
+		assets: new Map([[asset.id, { bytes: new Uint8Array([1, 2, 3, 4]), decoded: document.createElement('img') }]])
+	});
+}
+
+/** A fully-placed (unconfirmed) hole at the given image-space points. */
+function placedHole(number: number, teeImg: [number, number], basketImg: [number, number]): AnnotatedHole {
+	return {
+		id: `hole-${number}`,
+		number,
+		tee: { xPx: teeImg[0], yPx: teeImg[1] },
+		basket: { xPx: basketImg[0], yPx: basketImg[1] },
+		shots: [],
+		corridorBends: [],
+		corridorWidthPx: 60
+	};
 }
 
 interface Mounted {
@@ -79,6 +112,21 @@ function dispatchDrag(host: HTMLElement, from: { x: number; y: number }, to: { x
 	);
 	window.dispatchEvent(new PointerEvent('pointermove', { pointerId, clientX: to.x, clientY: to.y }));
 	window.dispatchEvent(new PointerEvent('pointerup', { pointerId, clientX: to.x, clientY: to.y }));
+}
+
+/**
+ * Placement never auto-advances GuidedReview (CHSPT-48 hotfix, 499ef3e):
+ * Tab explicitly accepts Tee, then Basket, then Bends -- Tab-through IS
+ * the acceptance (contract A). Two Tabs (after tee, after basket)
+ * individually confirm both pieces, landing on the BENDS step with the
+ * hole already in section 4. A third Tab from there is the manual-
+ * placement equivalent of the old approve-hole-button click: it runs the
+ * full approveHolePieces path and advances the guided flow to the next
+ * unconfirmed hole -- that banner/button only exists for the
+ * CV-proposal path now (see annotateCourseCompletionHandoff.test.ts).
+ */
+function pressTab(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
 }
 
 function view(host: HTMLElement): { zoom: number; panX: number; panY: number } {
@@ -139,7 +187,7 @@ afterEach(() => {
 });
 
 describe('sidebar hole grid — sections derive from real hole state', () => {
-	it('starts with all 18 holes in "Missing tee", and moves a hole through every section as it is placed and approved', async () => {
+	it('starts with all 18 holes in "Missing tee", and moves a hole through every section as it is placed and confirmed', async () => {
 		const editor = makeEditor();
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
@@ -157,8 +205,14 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
-		// Section 2 (missing basket) now — the banner should ask for the basket next, no return trip to the sidebar.
+		// Section 2 (missing basket) now. Placement never auto-advances
+		// GuidedReview (499ef3e/contract A) -- the banner still asks for the
+		// tee to be accepted (Tab) before it moves on to the basket.
 		expect(sidebarSection(host, 2).textContent).toContain('1');
+		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Tee');
+
+		pressTab(); // accept the tee
+		await flush();
 		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Basket');
 
 		const basketAt = screenPointFor(host, 60, 60);
@@ -166,13 +220,14 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		await flush();
 		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
 
-		// Both placed but unconfirmed: section 3, with an Approve button near the markers.
+		// Tee confirmed, basket placed but not yet accepted: section 3 in the
+		// grid. Contract A has no distinct "approve" moment for a manually
+		// placed hole (the Approve banner/button is CV-proposal-only — see
+		// the "+ Add Bend(s)" describe block below); the next Tab both
+		// accepts the basket and confirms the hole in one motion.
 		expect(sidebarSection(host, 3).textContent).toContain('1');
-		const approveButton = host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]');
-		expect(approveButton).not.toBeNull();
-		expect(approveButton?.textContent).toContain('1');
 
-		approveButton?.click();
+		pressTab(); // accept the basket
 		await flush();
 
 		// Confirmed: section 4.
@@ -207,6 +262,8 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		const tee2 = screenPointFor(host, 100, 30);
 		dispatchClick(host, tee2.x, tee2.y);
 		await flush();
+		pressTab(); // accept the tee -> Basket step, so the next click places the basket
+		await flush();
 		const basket2 = screenPointFor(host, 120, 30);
 		dispatchClick(host, basket2.x, basket2.y);
 		await flush();
@@ -239,6 +296,8 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		const tee3 = screenPointFor(host, 30, 30);
 		dispatchClick(host, tee3.x, tee3.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basket3 = screenPointFor(host, 40, 40);
 		dispatchClick(host, basket3.x, basket3.y);
 		await flush();
@@ -250,10 +309,14 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 		const tee1 = screenPointFor(host, 80, 80);
 		dispatchClick(host, tee1.x, tee1.y);
 		await flush();
+		pressTab();
+		await flush();
 		const basket1 = screenPointFor(host, 90, 90);
 		dispatchClick(host, basket1.x, basket1.y);
 		await flush();
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressTab(); // accept the basket
+		await flush();
+		pressTab(); // completing Tab: confirms + advances to the next unconfirmed hole
 		await flush();
 
 		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Hole 2');
@@ -262,23 +325,28 @@ describe('sidebar hole grid — sections derive from real hole state', () => {
 });
 
 describe('"+ Add Bend(s)" — a hole under review or already approved gets bends without leaving it', () => {
-	async function placeHoleFully(host: HTMLElement, number: number): Promise<void> {
-		sidebarHoleButton(host, number).click();
+	/**
+	 * The Approve banner/button only exists for a hole whose tee+basket
+	 * already existed, unconfirmed, before review started (the CV-proposal
+	 * shape -- `derivedStepFor` lands straight on BENDS) -- manual click+Tab
+	 * placement confirms tee and basket individually and never shows it (see
+	 * contract A / 499ef3e). Seed hole 1 pre-placed, matching
+	 * annotateCourseCompletionHandoff.test.ts's pattern, and activate it.
+	 */
+	async function mountReviewingHole1(): Promise<Mounted> {
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [20, 20], [80, 80])]);
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		setGeometry(host);
 		await flush();
-		const tee = screenPointFor(host, 20, 20);
-		dispatchClick(host, tee.x, tee.y);
+		sidebarHoleButton(host, 1).click();
 		await flush();
-		const basket = screenPointFor(host, 80, 80);
-		dispatchClick(host, basket.x, basket.y);
-		await flush();
+		return { editor, component, host };
 	}
 
 	it('the Approve action lives inside the fixed placement-banner, not floating over the corridor', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 
 		const banner = host.querySelector('[data-testid="placement-banner"]');
 		const approveButton = host.querySelector('[data-testid="approve-hole-button"]');
@@ -292,14 +360,11 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 	});
 
 	it('ordinary map clicks during review place bends directly (guided flow)', async () => {
-		// After Tee + Basket are placed (section 3), ordinary empty-map clicks
-		// place bends directly without requiring the "+ Add Bend(s)" button click.
-		// This is the natural guided flow per CHSPT-48.
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		// With Tee + Basket already placed (section 3), ordinary empty-map
+		// clicks place bends directly without requiring the "+ Add Bend(s)"
+		// button click. This is the natural guided flow per CHSPT-48.
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 
 		const empty = screenPointFor(host, 50, 5);
 		dispatchClick(host, empty.x, empty.y);
@@ -312,11 +377,8 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 	});
 
 	it('adds a bend mid-review (before Approve) via the banner action, then still approves normally', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 
 		host.querySelector<HTMLButtonElement>('[data-testid="add-bend-button"]')?.click();
 		await flush();
@@ -342,11 +404,8 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 	});
 
 	it('adds a bend to an already-approved hole without any unapprove step', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -377,15 +436,16 @@ describe('"+ Add Bend(s)" — a hole under review or already approved gets bends
 });
 
 describe('"Enter" approves the active hole', () => {
-	async function placeHoleFully(host: HTMLElement, number: number): Promise<void> {
-		sidebarHoleButton(host, number).click();
+	/** See mountReviewingHole1 above: the Approve banner is CV-proposal-only under contract A. */
+	async function mountReviewingHole1(): Promise<Mounted> {
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [20, 20], [80, 80])]);
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		setGeometry(host);
 		await flush();
-		const tee = screenPointFor(host, 20, 20);
-		dispatchClick(host, tee.x, tee.y);
+		sidebarHoleButton(host, 1).click();
 		await flush();
-		const basket = screenPointFor(host, 80, 80);
-		dispatchClick(host, basket.x, basket.y);
-		await flush();
+		return { editor, component, host };
 	}
 
 	function pressEnter(target: EventTarget = window): void {
@@ -393,11 +453,8 @@ describe('"Enter" approves the active hole', () => {
 	}
 
 	it('approves the hole once both pieces are placed and the Approve banner is showing', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 		expect(host.querySelector('[data-testid="approve-hole-button"]')).not.toBeNull();
 
 		pressEnter();
@@ -424,11 +481,8 @@ describe('"Enter" approves the active hole', () => {
 	});
 
 	it('is a no-op while the banner is asking for bends', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 		host.querySelector<HTMLButtonElement>('[data-testid="add-bend-button"]')?.click();
 		await flush();
 		expect(host.querySelector('[data-testid="placement-banner"]')?.textContent).toContain('Bends');
@@ -441,11 +495,8 @@ describe('"Enter" approves the active hole', () => {
 	});
 
 	it('does not hijack Enter on a focused banner button (e.g. Cancel)', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 
 		const cancelButton = host.querySelector<HTMLButtonElement>('[data-testid="placement-banner-cancel"]');
 		expect(cancelButton).not.toBeNull();
@@ -459,11 +510,8 @@ describe('"Enter" approves the active hole', () => {
 	});
 
 	it('is a no-op while a marker correction chip is open', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-		await placeHoleFully(host, 1);
+		mounted = await mountReviewingHole1();
+		const { host } = mounted;
 
 		const teeAt = screenPointFor(host, 20, 20);
 		dispatchClick(host, teeAt.x, teeAt.y);
@@ -487,16 +535,17 @@ describe('guided bends phase — after all 18 confirm, before the completion pan
 		return { tee: [x, y], basket: [x, y + 25] };
 	}
 
+	/**
+	 * Seeds all 18 holes pre-placed (unconfirmed -- the CV-proposal shape;
+	 * see mountReviewingHole1 above) and confirms each through the sidebar's
+	 * own Approve button, matching
+	 * annotateCourseCompletionHandoff.test.ts's approveHoles. What this test
+	 * guards is the bend-phase panel that appears once all 18 are confirmed,
+	 * not how each hole got there.
+	 */
 	async function confirmAllHoles(host: HTMLElement): Promise<void> {
 		for (let number = 1; number <= 18; number += 1) {
-			const { tee, basket } = holeSpots(number);
 			sidebarHoleButton(host, number).click();
-			await flush();
-			const teeScreen = screenPointFor(host, ...tee);
-			dispatchClick(host, teeScreen.x, teeScreen.y);
-			await flush();
-			const basketScreen = screenPointFor(host, ...basket);
-			dispatchClick(host, basketScreen.x, basketScreen.y);
 			await flush();
 			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 			await flush();
@@ -504,10 +553,16 @@ describe('guided bends phase — after all 18 confirm, before the completion pan
 	}
 
 	it('walks through bends after the 18th approval, places bends by direct map click, and only then offers the completion panel', async () => {
-		const editor = makeEditor();
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles(Array.from({ length: 18 }, (_, index) => {
+			const number = index + 1;
+			const { tee, basket } = holeSpots(number);
+			return placedHole(number, tee, basket);
+		}));
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
+		setGeometry(host);
+		await flush();
 
 		await confirmAllHoles(host);
 
@@ -546,24 +601,18 @@ describe('guided bends phase — after all 18 confirm, before the completion pan
 });
 
 describe('marker correction chip — reassign and delete, not proximity-gated', () => {
-	async function placeHoleFully(host: HTMLElement, number: number, teeImg: [number, number], basketImg: [number, number]): Promise<void> {
-		sidebarHoleButton(host, number).click();
-		await flush();
-		const tee = screenPointFor(host, ...teeImg);
-		dispatchClick(host, tee.x, tee.y);
-		await flush();
-		const basket = screenPointFor(host, ...basketImg);
-		dispatchClick(host, basket.x, basket.y);
-		await flush();
-	}
-
 	it('reassigns a marker to an arbitrary hole number, resetting confirmed status even if it was confirmed before', async () => {
-		const editor = makeEditor();
+		// A CV-proposal-shaped hole (see mountReviewingHole1 above), confirmed
+		// through the sidebar's Approve button -- this test is about the
+		// reassign correction, not placement mechanics.
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [30, 30], [40, 40])]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		await placeHoleFully(host, 1, [30, 30], [40, 40]);
+		setGeometry(host);
+		await flush();
+		sidebarHoleButton(host, 1).click();
+		await flush();
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
 		expect(sidebarSection(host, 4).textContent).toContain('1');
@@ -705,25 +754,19 @@ describe('drag vs click on an existing marker', () => {
 
 describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT-47)', () => {
 	it('clicking a hole in the sidebar pans to center its badge without changing zoom', async () => {
-		const editor = makeEditor();
+		// A CV-proposal-shaped hole (see mountReviewingHole1 elsewhere in this
+		// file), confirmed through the sidebar's Approve button -- this test
+		// is about the camera on focus, not placement mechanics. (No badge is
+		// actually injected here or in the original test; focus falls back to
+		// the tee/basket bounding box either way.)
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [40, 40], [60, 60])]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		// Manually inject a badge for hole 1 (simulating CV detection).
-		// The editor is already passed to the component, so we can access its state.
-		const workspace = component;
-		// We'll place a hole then simulate having detected its badge.
+		setGeometry(host);
+		await flush();
 		sidebarHoleButton(host, 1).click();
 		await flush();
-		const teeAt = screenPointFor(host, 40, 40);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		const basketAt = screenPointFor(host, 60, 60);
-		dispatchClick(host, basketAt.x, basketAt.y);
-		await flush();
-
-		// Approve the hole so it has both pieces.
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
 
@@ -780,19 +823,13 @@ describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT
 	});
 
 	it('re-clicking the same hole recenters on its badge without changing zoom', async () => {
-		const editor = makeEditor();
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [40, 40], [60, 60])]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		// Place hole 1 fully.
+		setGeometry(host);
+		await flush();
 		sidebarHoleButton(host, 1).click();
-		await flush();
-		const teeAt = screenPointFor(host, 40, 40);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		const basketAt = screenPointFor(host, 60, 60);
-		dispatchClick(host, basketAt.x, basketAt.y);
 		await flush();
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
@@ -809,19 +846,13 @@ describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT
 	});
 
 	it('moving a tee/basket (marker correction) does not trigger a camera refocus away from the badge anchor', async () => {
-		const editor = makeEditor();
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(1, [40, 40], [60, 60])]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		// Place hole 1 fully at one position.
+		setGeometry(host);
+		await flush();
 		sidebarHoleButton(host, 1).click();
-		await flush();
-		const teeAt = screenPointFor(host, 40, 40);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		const basketAt = screenPointFor(host, 60, 60);
-		dispatchClick(host, basketAt.x, basketAt.y);
 		await flush();
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
@@ -830,6 +861,7 @@ describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT
 		const zoomAfterFocus = view(host).zoom;
 
 		// Drag the tee to a new location (marker correction).
+		const teeAt = screenPointFor(host, 40, 40);
 		const newTeeAt = screenPointFor(host, 35, 35);
 		dispatchDrag(host, teeAt, newTeeAt);
 		await flush();
@@ -845,19 +877,14 @@ describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT
 	});
 
 	it('hole focus gracefully falls back to tee/basket when badge is unavailable', async () => {
-		const editor = makeEditor();
+		// No badge, since we're not running course detection.
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles([placedHole(2, [50, 50], [70, 70])]);
 		const { component, host } = mountPage(editor, decodeOf(200, 200));
 		mounted = { editor, component, host };
-		await loadImage(host);
-
-		// Place hole 2 with tee and basket (no badge, since we're not running course detection).
+		setGeometry(host);
+		await flush();
 		sidebarHoleButton(host, 2).click();
-		await flush();
-		const teeAt = screenPointFor(host, 50, 50);
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		const basketAt = screenPointFor(host, 70, 70);
-		dispatchClick(host, basketAt.x, basketAt.y);
 		await flush();
 		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 		await flush();
@@ -878,22 +905,23 @@ describe('hole focus — badge as canonical anchor with zoom preservation (CHSPT
 
 describe('completion panel', () => {
 	it('appears only once all 18 holes are confirmed, and gates mapping a round on saving the course first', async () => {
-		const editor = makeEditor();
-		const { component, host } = mountPage(editor, decodeOf(200, 200));
-		mounted = { editor, component, host };
-		await loadImage(host);
-
-		for (let number = 1; number <= 18; number += 1) {
-			sidebarHoleButton(host, number).click();
-			await flush();
+		// Seeded (see mountReviewingHole1 elsewhere in this file) -- this test
+		// is about the completion panel gating, not placement mechanics.
+		const editor = makeEditorWithSourceImage(200, 200);
+		editor.setHoles(Array.from({ length: 18 }, (_, index) => {
+			const number = index + 1;
 			// Spread points across the image so no two holes' markers collide.
 			const col = ((number - 1) % 6) * 30 + 10;
 			const row = Math.floor((number - 1) / 6) * 30 + 10;
-			const tee = screenPointFor(host, col, row);
-			dispatchClick(host, tee.x, tee.y);
-			await flush();
-			const basket = screenPointFor(host, col + 10, row);
-			dispatchClick(host, basket.x, basket.y);
+			return placedHole(number, [col, row], [col + 10, row]);
+		}));
+		const { component, host } = mountPage(editor, decodeOf(200, 200));
+		mounted = { editor, component, host };
+		setGeometry(host);
+		await flush();
+
+		for (let number = 1; number <= 18; number += 1) {
+			sidebarHoleButton(host, number).click();
 			await flush();
 			host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
 			await flush();
