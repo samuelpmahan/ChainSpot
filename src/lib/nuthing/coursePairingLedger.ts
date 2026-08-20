@@ -11,7 +11,7 @@
  *    signed lift (the Rec tree-line RibbonExit family);
  *  - a narrow linear distractor such as the BTD walking path looks like a
  *    plausible paired strip but does not exhibit corridor-width paint lift;
- *  - a tee is physically present under known UI furniture and the normal
+ *  - a tee is physically present under known basket furniture and the normal
  *    hollow-glyph detector cannot close its outline.
  *
  * The deliberately crude course calibration is a four-bin luma -> signed
@@ -22,7 +22,6 @@
 import {
   backtrack,
   dijkstraFrom,
-  FIELD_SCALE,
   SUPPORT_TAU,
   WORST_WINDOW_SRC_PX,
   measureCoursePairs as measureBaseCoursePairs,
@@ -58,7 +57,7 @@ const GAP_EDGE_SCORE_MIN = 0.65;
 const GAP_SUPPORT_CAP = 0.55;
 const OCCLUDER_EDGE_SCORE_MIN = 0.65;
 const OCCLUDER_SUPPORT_CAP = 0.72;
-const RUNTIME_TEE_SCORE_MIN = 0.82;
+const RUNTIME_TEE_SCORE_MIN = 0.84;
 const RUNTIME_TEE_DEDUPE_PX = 14;
 const WALKING_CONSISTENCY_FLOOR = 0.8;
 
@@ -374,8 +373,8 @@ function patchShortContrastGaps(
 ): number {
   const before = new Float32Array(field.support);
   let patched = 0;
-  for (let fy = 1; fy < field.height - 1; fy++) {
-    for (let fx = 1; fx < field.width - 1; fx++) {
+  for (let fy = 2; fy < field.height - 2; fy++) {
+    for (let fx = 2; fx < field.width - 2; fx++) {
       const i = fy * field.width + fx;
       if (before[i] >= GAP_LOW_SUPPORT) continue;
       const sx = fx * field.scale + field.scale / 2;
@@ -419,15 +418,21 @@ function recoverRuntimeOccludedTees(
   corridorWidthPx: number,
 ): CourseTeePoint[] {
   const out: CourseTeePoint[] = [];
-  const sizes = [18, 22, 26, 30, 34];
+  const sizes = [20, 26, 32];
   const existing = [...result.teePoints];
-  const centers = boxes.filter((b) => b.kind === 'basket' || b.kind === 'badge');
-  for (const target of centers) {
+  // The measured deep-occlusion family is tee-under-basket-sprite/skirt.
+  // Do not run an expensive blind sweep around every badge. Also skip a
+  // basket target when a normal tee is already visible beside it: recovery
+  // is a fallback, not a parallel candidate generator.
+  const targets = boxes.filter((b) => b.kind === 'basket');
+  const searchRadius = Math.min(34, Math.max(24, corridorWidthPx * 0.8));
+  for (const target of targets) {
+    if (existing.some((t) => Math.hypot(t.x - target.xPx, t.y - target.yPx) < 28)) continue;
     const match = findOccludedTeePadMatch(
       { rgba: image.data, widthPx: image.width, heightPx: image.height },
       target.xPx,
       target.yPx,
-      Math.max(28, corridorWidthPx),
+      searchRadius,
       sizes,
       boxes,
       [],
