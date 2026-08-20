@@ -65,7 +65,7 @@ afterEach(() => {
 describe('demo catalog', () => {
 	it('declares only supported image types and base-path-relative asset URLs', () => {
 		const assets = [...DEMO_DATASET.captures, DEMO_DATASET.roundOverview];
-		expect(assets.length).toBe(5);
+		expect(assets.length).toBe(3);
 		for (const asset of assets) {
 			expect(SUPPORTED_MIME_TYPES).toContain(asset.mimeType);
 			expect(asset.path.startsWith('/resources/demo/')).toBe(true);
@@ -73,10 +73,14 @@ describe('demo catalog', () => {
 		}
 	});
 
-	it('supplies exactly the four captures Smart Import requires, with no grid position in their names', () => {
-		expect(DEMO_DATASET.captures).toHaveLength(4);
+	it('supplies the captures Stitch Map needs (>= 2, no grid position in their names)', () => {
+		// Smart Import/Stitch Map require N >= 2 captures, not exactly 4 -- that
+		// was dashs-track's own capture count, not a system invariant (see
+		// autoCrop.ts's module doc: "N (N >= 2) screenshots"). The REC (the
+		// current DEMO_DATASET, since 7a31f0f) ships 2.
+		expect(DEMO_DATASET.captures.length).toBeGreaterThanOrEqual(2);
 		const names = DEMO_DATASET.captures.map((capture) => capture.fileName);
-		expect(new Set(names).size).toBe(4);
+		expect(new Set(names).size).toBe(names.length);
 		for (const name of names) {
 			expect(name).not.toMatch(/upper|lower|left|right|top|bottom|\b(tl|tr|bl|br)\b/i);
 		}
