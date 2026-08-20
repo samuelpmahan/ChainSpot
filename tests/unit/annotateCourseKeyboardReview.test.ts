@@ -359,41 +359,41 @@ describe('X — reject the current step\'s obvious proposal', () => {
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
-
-		// Return to the TEE step: Ctrl-Z undoes the placement (and its step
-		// advancement), then re-place to test X at the TEE step directly.
-		pressKey('z', { ctrlKey: true });
-		await flush();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+		// Placement never advances GuidedReview (499ef3e) -- still TEE.
 		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 
-		dispatchClick(host, teeAt.x, teeAt.y);
+		// X rejects the just-placed tee with no selection click needed.
+		pressKey('x');
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-1"]')).toBeNull();
+
+		pressKey('z', { ctrlKey: true });
+		await flush();
+		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
+
+		// Tab accepts the tee and moves the step to BASKET; X there with no
+		// basket placed yet is a no-op.
+		pressKey('Tab');
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
-		// X on the BASKET step with no basket is a no-op…
 		pressKey('x');
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
 
-		// …while Ctrl-Z back to TEE then X rejects the placed tee.
+		// Place the basket, then X rejects IT (the current step), again with
+		// no selection click; Ctrl-Z restores it.
+		const basketAt = screenPointFor(host, 80, 80);
+		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
+		pressKey('x');
+		await flush();
+		expect(host.querySelector('[data-testid="basket-marker-1"]')).toBeNull();
+
 		pressKey('z', { ctrlKey: true });
 		await flush();
-		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
-		// The placement was undone with the step, so re-place and X it away.
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		pressKey('z', { ctrlKey: true });
-		await flush();
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		expect(host.querySelector('[data-testid="tee-marker-1"]')).not.toBeNull();
-		// Step auto-advanced to BASKET; a rejected tee is reachable by
-		// stepping the workflow back once.
-		pressKey('z', { ctrlKey: true });
-		await flush();
-		dispatchClick(host, teeAt.x, teeAt.y);
-		await flush();
-		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
 	});
 
 	it('on the BENDS step, X rejects the most recent bend and Ctrl-Z restores it', async () => {
@@ -406,7 +406,11 @@ describe('X — reject the current step\'s obvious proposal', () => {
 		await flush();
 		dispatchClick(host, ...(({ x, y }) => [x, y] as const)(screenPointFor(host, 40, 40)));
 		await flush();
+		pressKey('Tab');
+		await flush();
 		dispatchClick(host, ...(({ x, y }) => [x, y] as const)(screenPointFor(host, 80, 80)));
+		await flush();
+		pressKey('Tab');
 		await flush();
 		const bendAt = screenPointFor(host, 30, 90);
 		dispatchClick(host, bendAt.x, bendAt.y);
@@ -504,13 +508,17 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		mounted = { editor, component, host };
 		await loadImage(host);
 
-		pressKey('Tab');
+		pressKey('Tab'); // enter Hole 1 · TEE
 		await flush();
 		const teeAt = screenPointFor(host, 40, 40);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressKey('Tab'); // accept tee -> BASKET
+		await flush();
 		const basketAt = screenPointFor(host, 80, 80);
 		dispatchClick(host, basketAt.x, basketAt.y);
+		await flush();
+		pressKey('Tab'); // accept basket -> BENDS
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
 
@@ -525,7 +533,9 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		const viewAfterPan = view(host);
 		expect(viewAfterPan.panX).not.toBe(viewBeforeCompletingHole1.panX);
 
-		// Accidental double-Tab: completes hole 1 and enters hole 2, twice.
+		// The completing Tab: approves hole 1 (tee+basket+bends) and enters
+		// hole 2. A further Tab on hole 2's still-empty TEE step just advances
+		// the step (nothing to confirm yet).
 		pressKey('Tab');
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 2 · TEE');
@@ -543,13 +553,22 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		pressKey('z', { ctrlKey: true });
 		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
-		// Hole 1's confirmation from the completing Tab was rolled back too.
-		expect(host.querySelector('[data-testid="sidebar-section-4"]')?.textContent).toContain('0');
-		// The pan that happened between placing hole 1's basket and completing
-		// the hole is restored right along with the hole/step.
+		// Hole 1's tee+basket were already confirmed by their own Tab presses
+		// earlier (each an independent undo step) — undoing only the
+		// completing Tab leaves that confirmation in place.
+		expect(host.querySelector('[data-testid="sidebar-section-4"]')?.textContent).toContain('1');
+		// The pan that happened between accepting hole 1's basket and
+		// completing the hole is restored right along with the hole/step.
 		expect(view(host)).toEqual(viewAfterPan);
 
-		// Next Ctrl-Z removes the basket placement.
+		// Next Ctrl-Z undoes the Tab that accepted the basket (BASKET -> BENDS);
+		// the basket marker itself is a separate, earlier undo step.
+		pressKey('z', { ctrlKey: true });
+		await flush();
+		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+		// Then the basket PLACEMENT itself.
 		pressKey('z', { ctrlKey: true });
 		await flush();
 		expect(host.querySelector('[data-testid="basket-marker-1"]')).toBeNull();
@@ -559,6 +578,10 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		pressKey('Z', { ctrlKey: true, shiftKey: true });
 		await flush();
 		expect(host.querySelector('[data-testid="basket-marker-1"]')).not.toBeNull();
+		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+
+		pressKey('Z', { ctrlKey: true, shiftKey: true });
+		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
 		expect(view(host)).toEqual(viewAfterPan);
 
@@ -611,7 +634,8 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('40');
-		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+		// Placement never advances GuidedReview (499ef3e) -- still TEE.
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 
 		pressKey('z', { ctrlKey: true });
 		await flush();
@@ -621,7 +645,7 @@ describe('Ctrl-Z / Ctrl-Shift-Z — workflow undo and redo', () => {
 		pressKey('Z', { ctrlKey: true, shiftKey: true });
 		await flush();
 		expect(host.querySelector('[data-testid="tee-marker-1"]')?.getAttribute('cx')).toBe('40');
-		expect(stepIndicator(host)).toBe('HOLE 1 · BASKET');
+		expect(stepIndicator(host)).toBe('HOLE 1 · TEE');
 
 		// A real drag (past click-slop) moves the existing tee marker.
 		const teeMoveTo = screenPointFor(host, 55, 60);
@@ -711,32 +735,36 @@ describe('X — bend priority (CHSPT-55): the most recently manually-added bend 
 		mounted = { editor, component, host };
 		await loadImage(host);
 
-		pressKey('Tab');
+		pressKey('Tab'); // enter Hole 1 · TEE
 		await flush();
 		const teeAt = screenPointFor(host, 40, 40);
 		dispatchClick(host, teeAt.x, teeAt.y);
 		await flush();
+		pressKey('Tab'); // accept tee -> BASKET
+		await flush();
 		const basketAt = screenPointFor(host, 80, 80);
 		dispatchClick(host, basketAt.x, basketAt.y);
 		await flush();
+		pressKey('Tab'); // accept basket -> BENDS
+		await flush();
 		expect(stepIndicator(host)).toBe('HOLE 1 · BENDS');
 
-		// Approving hole 1 fires the eager auto-bend detector's "immediate"
-		// path (`approveHolePieces`) — mocked here to propose one bend at
-		// (70,70), geometrically FARTHER toward the basket than the manual
-		// bend placed next at (50,50). This is the exact geometry CHSPT-55
-		// describes: `sortBendsByPosition` (tee→basket projection) puts the
-		// manual bend first and the AutoBend last, so the old code's
-		// `removeLastBend` popped the AutoBend instead of the bend the user
-		// actually just added.
+		// Completing hole 1 (the 3rd Tab, on BENDS) fires the eager auto-bend
+		// detector's "immediate" path (`approveHolePieces`) — mocked here to
+		// propose one bend at (70,70), geometrically FARTHER toward the
+		// basket than the manual bend placed next at (50,50). This is the
+		// exact geometry CHSPT-55 describes: `sortBendsByPosition`
+		// (tee→basket projection) puts the manual bend first and the
+		// AutoBend last, so the old code's `removeLastBend` popped the
+		// AutoBend instead of the bend the user actually just added.
 		detectAndApplyCorridorBendsCapsuleAsyncMock.mockImplementation(
 			async (currentHoles: readonly AnnotatedHole[], holeId: string) =>
 				applyDetectedCorridorBends(currentHoles, holeId, [{ xPx: 70, yPx: 70 }])
 		);
-		host.querySelector<HTMLButtonElement>('[data-testid="approve-hole-button"]')?.click();
+		pressKey('Tab'); // completing Tab: approveHolePieces + advance to hole 2
 		await flush();
 
-		// Approving auto-advances to hole 2 — come back to hole 1 to see (and
+		// Completing auto-advances to hole 2 — come back to hole 1 to see (and
 		// act on) its AutoBend.
 		sidebarHoleButton(host, 1).click();
 		await flush();

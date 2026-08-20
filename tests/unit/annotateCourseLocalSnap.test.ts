@@ -102,6 +102,11 @@ function dispatchClick(host: HTMLElement, x: number, y: number, options: { altKe
 	);
 }
 
+/** Placement never auto-advances GuidedReview (CHSPT-48 hotfix, 499ef3e) -- Tab accepts the step. */
+function pressTab(): void {
+	window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+}
+
 /** Presses down on an existing marker, drags past click-slop, and releases at a new point — the drag-RELEASE path `applyLocalSnap` hooks into. */
 function dispatchDrag(
 	host: HTMLElement,
@@ -306,10 +311,14 @@ describe('snap-to-detection — placement via the sidebar-driven placing flow', 
 		await setUpDetectedHole(host, editor);
 
 		// First click places the tee (asked for first, per the placing flow's
-		// ordering); the basket this test is actually about is the second.
+		// ordering); Tab accepts it and moves the step to Basket (placement
+		// never auto-advances — see 499ef3e). The basket this test is
+		// actually about is the second click.
 		requestLocalSnapMock.mockResolvedValueOnce(null);
 		const teeAt = screenPointFor(host, 40, 150);
 		dispatchClick(host, teeAt.x, teeAt.y);
+		await flush();
+		pressTab();
 		await flush();
 
 		requestLocalSnapMock.mockResolvedValueOnce(null);
