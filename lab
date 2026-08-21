@@ -9,8 +9,12 @@ case "${1:-}" in
 		shift
 		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/lab-grid.ts" "$@"
 		;;
+	check)
+		shift
+		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/lab-check.ts" "$@"
+		;;
 	*)
-		echo "Usage: ./lab grid <course>" >&2
+		echo "Usage: ./lab grid <course> | ./lab check <badges|baskets|tees> <course>" >&2
 		exit 2
 		;;
 esac
