@@ -96,9 +96,8 @@
 					});
 				} else if (e.objType === 'basket') {
 					out.push({ xPx: x, yPx: y, color: '#222', label: 'B', title: `basket (${e.confidence.toFixed(2)})` });
-				} else if (e.objType === 'tee') {
-					out.push({ xPx: x, yPx: y, color: '#2c4a2c', label: 'T', title: `tee (${e.confidence.toFixed(2)})` });
 				}
+				// tees deliberately not rendered: too many false positives for now
 			}
 			return out;
 		});
@@ -137,6 +136,65 @@
 
 	let markers = $derived(projectMarkers(mapImages));
 
+	// ---- semantic stitch: align tiles geometrically from shared badge numbers.
+	// 'spread' placements auto-upgrade when matches exist; any manual drag or
+	// pixel-stitch run stops the auto-upgrade from fighting the user.
+	let placementSource: 'none' | 'spread' | 'semantic' | 'pixel' | 'manual' = 'none';
+
+	function badgeCentersByN(img: LoadedImage | undefined): Map<number, { x: number; y: number }> {
+		const out = new Map<number, { x: number; y: number }>();
+		if (!img) return out;
+		const emitted = detections[img.objectUrl];
+		if (!emitted) return out;
+		const labelByDet = new Map(
+			emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
+		);
+		for (const e of emitted) {
+			if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
+			const n = labelByDet.get(e.detId);
+			if (n !== undefined && !out.has(n)) out.set(n, { x: e.xPx, y: e.yPx });
+		}
+		return out;
+	}
+
+	function trySemanticAlign() {
+		if (placementSource !== 'spread') return;
+		if (mapImages.length < 2 || placements.length !== mapImages.length) return;
+		const anchor = badgeCentersByN(mapImages[0]);
+		if (anchor.size === 0) return;
+
+		const next = placements.slice();
+		const matchedTiles: string[] = [];
+		for (let i = 1; i < mapImages.length; i++) {
+			const mine = badgeCentersByN(mapImages[i]);
+			const offsets: { dx: number; dy: number; n: number }[] = [];
+			for (const [n, p] of mine) {
+				const ap = anchor.get(n);
+				if (ap) offsets.push({ dx: ap.x - p.x, dy: ap.y - p.y, n });
+			}
+			if (offsets.length === 0) continue;
+			// median offset; shared badge positions ARE the transform
+			offsets.sort((a, b) => a.dx - b.dx);
+			const dx = offsets[Math.floor(offsets.length / 2)].dx;
+			offsets.sort((a, b) => a.dy - b.dy);
+			const dy = offsets[Math.floor(offsets.length / 2)].dy;
+			next[i] = { x: next[0].x + dx, y: next[0].y + dy };
+			matchedTiles.push(`tile ${i + 1} via badge${offsets.length > 1 ? 's' : ''} ${offsets.map((o) => o.n).join(', ')}`);
+		}
+		if (matchedTiles.length === 0) return;
+		placements = next;
+		placementSource = 'semantic';
+		fitKey++;
+		dbg('semantic align', matchedTiles);
+		workflowMessage = `Aligned geometrically: ${matchedTiles.join('; ')}. Approve or adjust.`;
+	}
+
+	$effect(() => {
+		void detections;
+		void mapImages;
+		trySemanticAlign();
+	});
+
 	function resetStitchState() {
 		for (const [index, url] of displayUrls.entries()) {
 			if (url !== mapImages[index]?.objectUrl) URL.revokeObjectURL(url);
@@ -168,7 +226,11 @@
 		analyze();
 	}
 
-	// AutoCrop + AutoStitch, confidently applied; the user approves or adjusts.
+	const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+
+	// Show the tiles IMMEDIATELY (originals, spread side by side); semantic
+	// alignment from badge detections upgrades the layout the moment matches
+	// exist; crop swaps in from the background. No pixel search on this path.
 	async function analyze() {
 		const tiles = images.filter((_, i) => i !== thrownIdx);
 		if (tiles.length < 2) {
@@ -177,7 +239,23 @@
 		}
 
 		const seq = selectionSeq;
-		workflowMessage = 'Analyzing…';
+		displayUrls = tiles.map((image) => image.objectUrl);
+		appliedInsets = null;
+		let x = 0;
+		placements = tiles.map((img) => {
+			const p = { x, y: 0 };
+			x += img.widthPx + 120;
+			return p;
+		});
+		selectedIdx = 0;
+		layoutApproved = false;
+		placementSource = 'spread';
+		fitKey++;
+		workflowMessage = 'Tiles up. Aligning from badges; cropping in the background…';
+		trySemanticAlign();
+		await nextFrame();
+
+		// background: rasterize for crop proposal (and the pixel-stitch fallback)
 		let nextRasters: GrayRaster[];
 		try {
 			nextRasters = await Promise.all(tiles.map((image) => rasterFromFile(image.file)));
@@ -186,36 +264,34 @@
 			return;
 		}
 		if (seq !== selectionSeq) return;
-
 		rasters = nextRasters;
+
 		const proposal = skipCrop ? null : proposeSharedCrop(rasters);
 		dbg('analyze done', { tiles: tiles.length, proposal });
+		if (!proposal) return;
 
-		if (proposal) {
-			let croppedUrls: string[];
-			try {
-				croppedUrls = await Promise.all(tiles.map((image) => croppedObjectUrl(image, proposal)));
-			} catch (e) {
-				workflowMessage = `Crop failed: ${e instanceof Error ? e.message : String(e)}`;
-				displayUrls = tiles.map((image) => image.objectUrl);
-				runStitch();
-				return;
-			}
-			if (seq !== selectionSeq) {
-				for (const url of croppedUrls) URL.revokeObjectURL(url);
-				return;
-			}
-			displayUrls = croppedUrls;
-			rasters = rasters.map((raster) => cropRaster(raster, proposal));
-			appliedInsets = proposal;
-		} else {
-			displayUrls = tiles.map((image) => image.objectUrl);
-			appliedInsets = null;
+		let croppedUrls: string[];
+		try {
+			croppedUrls = await Promise.all(tiles.map((image) => croppedObjectUrl(image, proposal)));
+		} catch (e) {
+			dbg('crop failed', e instanceof Error ? e.message : e);
+			return;
 		}
-		runStitch();
+		if (seq !== selectionSeq) {
+			for (const url of croppedUrls) URL.revokeObjectURL(url);
+			return;
+		}
+		displayUrls = croppedUrls;
+		rasters = rasters.map((raster) => cropRaster(raster, proposal));
+		appliedInsets = proposal;
 	}
 
+	// pixel-search fallback, user-invoked only
 	function runStitch() {
+		if (rasters.length !== mapImages.length || rasters.length < 2) {
+			workflowMessage = 'Pixel stitch not ready yet — still reading pixels.';
+			return;
+		}
 		const nextPlacements: Placement[] = [{ x: 0, y: 0 }];
 		let hadFallback = false;
 
@@ -233,18 +309,17 @@
 		placements = nextPlacements;
 		selectedIdx = 0;
 		layoutApproved = false;
+		placementSource = 'pixel';
 		fitKey++;
 		dbg('stitch result', { placements: nextPlacements, hadFallback });
-		const cropNote = appliedInsets
-			? `Cropped ${appliedInsets.top}/${appliedInsets.bottom}px chrome. `
-			: 'No crop applied. ';
 		workflowMessage = hadFallback
-			? cropNote + 'Some tiles could not be matched — drag them into place.'
-			: cropNote + 'Auto-stitched — inspect the overlap, then approve or adjust.';
+			? 'Pixel stitch could not match some tiles — drag them into place.'
+			: 'Pixel-stitched — inspect the overlap, then approve or adjust.';
 	}
 
 	function moveSelectedBy(deltaX: number, deltaY: number) {
 		if (selectedIdx < 0 || !placements[selectedIdx]) return;
+		placementSource = 'manual';
 		placements = placements.map((placement, index) =>
 			index === selectedIdx ? { x: placement.x + deltaX, y: placement.y + deltaY } : placement
 		);
@@ -253,6 +328,7 @@
 
 	function onLayerMove(index: number, deltaX: number, deltaY: number) {
 		if (!placements[index]) return;
+		placementSource = 'manual';
 		selectedIdx = index;
 		placements = placements.map((placement, placementIndex) =>
 			placementIndex === index
@@ -375,7 +451,7 @@
 			</div>
 		{/if}
 		<button onclick={() => (layoutApproved = true)}><strong>Approve layout</strong></button>
-		<button onclick={runStitch}>Re-run stitch</button>
+		<button onclick={runStitch}>Pixel stitch (fallback)</button>
 		{#if appliedInsets}
 			<button onclick={undoCrop}>Undo crop</button>
 		{/if}

@@ -19,8 +19,6 @@ Deliberate differences from that snapshot:
 - the P1 badge constants live beside `badgeStage.ts`, avoiding the unused
   projected-border tee scorer;
 - training code was removed from the logistic module; only inference ships;
-- every qualifying hollow marker is a tee. The LAB snapshot's alternate
-  hollow-marker category was a mistaken interpretation and is not represented;
 - `index.ts` adapts the stages to `src/lib/detect.ts`. It emits object and
   badge-label events; ownership association remains a later Detector pass.
 

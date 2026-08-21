@@ -38,7 +38,13 @@ export function downsample(r: GrayRaster, factor: number): GrayRaster {
 	return { widthPx: w, heightPx: h, gray };
 }
 
-function scoreOffset(a: GrayRaster, b: GrayRaster, dx: number, dy: number): number | null {
+function scoreOffset(
+	a: GrayRaster,
+	b: GrayRaster,
+	dx: number,
+	dy: number,
+	rowStride = 1
+): number | null {
 	const x0 = Math.max(0, dx);
 	const y0 = Math.max(0, dy);
 	const x1 = Math.min(a.widthPx, dx + b.widthPx);
@@ -50,12 +56,14 @@ function scoreOffset(a: GrayRaster, b: GrayRaster, dx: number, dy: number): numb
 	if (ow <= 0 || oh <= 0 || ow * oh < minArea) return null;
 
 	let sum = 0;
-	for (let y = y0; y < y1; y++) {
+	let rows = 0;
+	for (let y = y0; y < y1; y += rowStride) {
 		let ai = y * a.widthPx + x0;
 		let bi = (y - dy) * b.widthPx + (x0 - dx);
 		for (let x = 0; x < ow; x++) sum += Math.abs(a.gray[ai++] - b.gray[bi++]);
+		rows++;
 	}
-	return sum / (ow * oh);
+	return sum / (ow * rows);
 }
 
 function searchRange(
@@ -65,12 +73,13 @@ function searchRange(
 	dxMax: number,
 	dyMin: number,
 	dyMax: number,
-	step: number
+	step: number,
+	rowStride = 1
 ): StitchOffset | null {
 	let best: StitchOffset | null = null;
 	for (let dy = dyMin; dy <= dyMax; dy += step) {
 		for (let dx = dxMin; dx <= dxMax; dx += step) {
-			const score = scoreOffset(a, b, dx, dy);
+			const score = scoreOffset(a, b, dx, dy, rowStride);
 			if (score !== null && (best === null || score < best.score)) {
 				best = { dx, dy, score };
 			}
@@ -92,8 +101,23 @@ export function findBestTranslation(a: GrayRaster, b: GrayRaster): StitchOffset 
 	if (coarse === null) return null;
 	if (factor === 1) return coarse;
 
-	const r = Math.ceil(factor * REFINE_RADIUS_FACTOR);
-	const gx = coarse.dx * factor;
-	const gy = coarse.dy * factor;
-	return searchRange(a, b, gx - r, gx + r, gy - r, gy + r, 1);
+	// refine through a mid level so the full-res pass only sweeps a few px;
+	// sampled rows (stride 4) keep the mean-abs-diff ranking intact at ~4x speed
+	const mid = Math.max(1, Math.floor(factor / 4));
+	let cx = coarse.dx * factor;
+	let cy = coarse.dy * factor;
+	if (mid > 1) {
+		const ma = downsample(a, mid);
+		const mb = downsample(b, mid);
+		const rm = Math.ceil((factor / mid) * REFINE_RADIUS_FACTOR);
+		const mx = Math.round(cx / mid);
+		const my = Math.round(cy / mid);
+		const midBest = searchRange(ma, mb, mx - rm, mx + rm, my - rm, my + rm, 1, 2);
+		if (midBest) {
+			cx = midBest.dx * mid;
+			cy = midBest.dy * mid;
+		}
+	}
+	const r = Math.ceil(mid * REFINE_RADIUS_FACTOR);
+	return searchRange(a, b, cx - r, cx + r, cy - r, cy + r, 1, 4);
 }
