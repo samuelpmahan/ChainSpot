@@ -67,6 +67,7 @@ E2E/browser tests skipped per AGENTS.md (no UI surface changed).
 `samuelpmahan/toph` was not adopted as a dependency (reference-only, per
 ticket scope); Heritage's remaining ~10 tee losses behind rooftop-FP
 protection gates were not touched (explicitly out of scope).
+
 ## 2026-08-17 — CHSPT-68: Fetch Clean Target inside the Clean target viewport
 
 - Create Graphics: standalone NAIP fetch section removed from both positions
@@ -87,6 +88,7 @@ naipCleanMap e2e specs green in Chromium; scripted browser walkthrough; 3-round
 independent review accepted at a7f4965. Coverage re-fetch + saved-location flows are
 manual-acceptance items (need an annotated course). Six pointer suites red at clean
 HEAD — pre-existing, unrelated.
+
 ## 2026-08-17 — CHSPT-65: course + thrown-round inputs into Create Graphics
 
 - Stitch Map: import prompt with thumbnails — pick the thrown round BEFORE any crop/stitch
