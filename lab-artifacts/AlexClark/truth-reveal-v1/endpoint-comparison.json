@@ -1,0 +1,3620 @@
+{
+  "schemaVersion": 1,
+  "epistemicLabels": {
+    "CORPUS_TRUTH": "existing endpoint reference; not Oracle-approved",
+    "SOL_BLIND": "sealed state A",
+    "SOL_ASSISTED": "sealed state B",
+    "MACHINE_MEASUREMENT": "raw truth-free candidate pools from state B",
+    "ORACLE_OBSERVATION": "none"
+  },
+  "experiment": {
+    "A": "47fd2e97cbaaf40e6288693d716fa0dd3df73245",
+    "B": "41bd2df385304d4ce2ba686297b41a3ce6bd49b3",
+    "revealBoundaryRecordedAt": "2026-08-21T09:42:29-05:00",
+    "firstEndpointTruthProjectionAt": "2026-08-21T14:43:15.282Z",
+    "oracleObservationCount": 0
+  },
+  "canonicalFrame": {
+    "widthPx": 1290,
+    "heightPx": 2082,
+    "sourceRows": [
+      2,
+      2084
+    ],
+    "transform": {
+      "xCrop": "xSource",
+      "yCrop": "ySource - 2"
+    },
+    "origin": "crop top-left",
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "truthProvenance": {
+    "project": {
+      "path": "/home/mahansa/workspace/ChainSpot-lab-bootstrap/resources/AlexClarkSet.chainspot.zip",
+      "zipSha256": "3a342816d4b8457429651180e56e89a4c037fd646404edf7a8c54ed25322cfeb",
+      "projectJsonSha256": "ba074372b75c4145ce7752af3fd04c5aa55f459afa73d861311e9699a39fa637",
+      "role": "15 straight-hole endpoints plus full-course ownership index"
+    },
+    "bentSubset": {
+      "path": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json",
+      "sha256": "8bcc919471f718e5222f0e2e4aaecb9901ef2d523d62d6f57e2c7631d91c7b84",
+      "role": "higher-specificity endpoint pairs for three bent holes; left/right geometry not inspected",
+      "mapping": [
+        {
+          "subsetIndex": 1,
+          "fullCourseHole": 16,
+          "summedEndpointDistancePx": 8.812,
+          "tee": {
+            "xPx": 603.7,
+            "yPx": 435
+          },
+          "basket": {
+            "xPx": 864.5,
+            "yPx": 792.5
+          }
+        },
+        {
+          "subsetIndex": 2,
+          "fullCourseHole": 13,
+          "summedEndpointDistancePx": 5.463,
+          "tee": {
+            "xPx": 738,
+            "yPx": 70.2
+          },
+          "basket": {
+            "xPx": 1017.5,
+            "yPx": 285.9
+          }
+        },
+        {
+          "subsetIndex": 3,
+          "fullCourseHole": 6,
+          "summedEndpointDistancePx": 6.581,
+          "tee": {
+            "xPx": 673.9,
+            "yPx": 1844.1
+          },
+          "basket": {
+            "xPx": 432,
+            "yPx": 1584.2
+          }
+        }
+      ]
+    },
+    "badges": {
+      "path": "/home/mahansa/workspace/ChainSpot-lab-bootstrap/resources/nuthing-p2/badges/manifest.json",
+      "sha256": "6a2737a6004ee88facf61361649aa57b74bab52c853134379e78b105ed94f859",
+      "coverage": "16 registered bboxes; H5/H18 absent",
+      "circularityCaveat": "bbox localization shares machinery with M"
+    }
+  },
+  "truth": [
+    {
+      "hole": 1,
+      "tee": {
+        "xPx": 621,
+        "yPx": 1599
+      },
+      "basket": {
+        "xPx": 773,
+        "yPx": 1325
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 2,
+      "tee": {
+        "xPx": 636,
+        "yPx": 1287
+      },
+      "basket": {
+        "xPx": 495,
+        "yPx": 1394
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 3,
+      "tee": {
+        "xPx": 366,
+        "yPx": 1740
+      },
+      "basket": {
+        "xPx": 296,
+        "yPx": 2000
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 4,
+      "tee": {
+        "xPx": 373,
+        "yPx": 2053
+      },
+      "basket": {
+        "xPx": 607,
+        "yPx": 1944
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 5,
+      "tee": {
+        "xPx": 486,
+        "yPx": 1886
+      },
+      "basket": {
+        "xPx": 763,
+        "yPx": 1894
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 6,
+      "tee": {
+        "xPx": 673.9,
+        "yPx": 1844.1
+      },
+      "basket": {
+        "xPx": 432,
+        "yPx": 1584.2
+      },
+      "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 3"
+    },
+    {
+      "hole": 7,
+      "tee": {
+        "xPx": 460,
+        "yPx": 1408
+      },
+      "basket": {
+        "xPx": 512,
+        "yPx": 1165
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 8,
+      "tee": {
+        "xPx": 449,
+        "yPx": 865
+      },
+      "basket": {
+        "xPx": 526,
+        "yPx": 570
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 9,
+      "tee": {
+        "xPx": 431,
+        "yPx": 663
+      },
+      "basket": {
+        "xPx": 355,
+        "yPx": 369
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 10,
+      "tee": {
+        "xPx": 384,
+        "yPx": 304
+      },
+      "basket": {
+        "xPx": 439,
+        "yPx": 564
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 11,
+      "tee": {
+        "xPx": 543,
+        "yPx": 508
+      },
+      "basket": {
+        "xPx": 456,
+        "yPx": 273
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 12,
+      "tee": {
+        "xPx": 459,
+        "yPx": 232
+      },
+      "basket": {
+        "xPx": 607,
+        "yPx": 92
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 13,
+      "tee": {
+        "xPx": 738,
+        "yPx": 70.2
+      },
+      "basket": {
+        "xPx": 1017.5,
+        "yPx": 285.9
+      },
+      "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 2"
+    },
+    {
+      "hole": 14,
+      "tee": {
+        "xPx": 914,
+        "yPx": 309
+      },
+      "basket": {
+        "xPx": 751,
+        "yPx": 108
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 15,
+      "tee": {
+        "xPx": 706,
+        "yPx": 112
+      },
+      "basket": {
+        "xPx": 674,
+        "yPx": 333
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 16,
+      "tee": {
+        "xPx": 603.7,
+        "yPx": 435
+      },
+      "basket": {
+        "xPx": 864.5,
+        "yPx": 792.5
+      },
+      "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 1"
+    },
+    {
+      "hole": 17,
+      "tee": {
+        "xPx": 681,
+        "yPx": 704
+      },
+      "basket": {
+        "xPx": 491,
+        "yPx": 871
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    },
+    {
+      "hole": 18,
+      "tee": {
+        "xPx": 514,
+        "yPx": 1023
+      },
+      "basket": {
+        "xPx": 582,
+        "yPx": 1197
+      },
+      "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+    }
+  ],
+  "badgeTruth": [
+    {
+      "hole": 13,
+      "bbox": {
+        "x": 794,
+        "y": 84,
+        "width": 55,
+        "height": 42
+      },
+      "center": {
+        "xPx": 821.5,
+        "yPx": 105
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 12,
+      "bbox": {
+        "x": 509,
+        "y": 138,
+        "width": 55,
+        "height": 42
+      },
+      "center": {
+        "xPx": 536.5,
+        "yPx": 159
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 14,
+      "bbox": {
+        "x": 799,
+        "y": 180,
+        "width": 56,
+        "height": 42
+      },
+      "center": {
+        "xPx": 827,
+        "yPx": 201
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 15,
+      "bbox": {
+        "x": 659,
+        "y": 206,
+        "width": 55,
+        "height": 42
+      },
+      "center": {
+        "xPx": 686.5,
+        "yPx": 227
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 11,
+      "bbox": {
+        "x": 470,
+        "y": 366,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 497,
+        "yPx": 387
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 10,
+      "bbox": {
+        "x": 384,
+        "y": 415,
+        "width": 57,
+        "height": 42
+      },
+      "center": {
+        "xPx": 412.5,
+        "yPx": 436
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 9,
+      "bbox": {
+        "x": 363,
+        "y": 488,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 390,
+        "yPx": 509
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 16,
+      "bbox": {
+        "x": 622,
+        "y": 551,
+        "width": 55,
+        "height": 42
+      },
+      "center": {
+        "xPx": 649.5,
+        "yPx": 572
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 8,
+      "bbox": {
+        "x": 463,
+        "y": 693,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 490,
+        "yPx": 714
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 17,
+      "bbox": {
+        "x": 549,
+        "y": 767,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 576,
+        "yPx": 788
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 7,
+      "bbox": {
+        "x": 458,
+        "y": 1260,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 485,
+        "yPx": 1281
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 2,
+      "bbox": {
+        "x": 532,
+        "y": 1323,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 559,
+        "yPx": 1344
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 1,
+      "bbox": {
+        "x": 669,
+        "y": 1432,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 696,
+        "yPx": 1453
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 6,
+      "bbox": {
+        "x": 553,
+        "y": 1757,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 580,
+        "yPx": 1778
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 3,
+      "bbox": {
+        "x": 300,
+        "y": 1860,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 327,
+        "yPx": 1881
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    },
+    {
+      "hole": 4,
+      "bbox": {
+        "x": 466,
+        "y": 1982,
+        "width": 54,
+        "height": 42
+      },
+      "center": {
+        "xPx": 493,
+        "yPx": 2003
+      },
+      "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+    }
+  ],
+  "summary": {
+    "badges": {
+      "A": {
+        "identityCorrect": 18,
+        "identityTotal": 18,
+        "candidateRecall": "18/18",
+        "position": {
+          "count": 16,
+          "medianPx": 2.019,
+          "p90Px": 8.638,
+          "maxPx": 77.026
+        },
+        "unresolved": 0,
+        "wrongIdentity": 0
+      },
+      "B": {
+        "identityCorrect": 18,
+        "identityTotal": 18,
+        "candidateRecall": "18/18",
+        "position": {
+          "count": 16,
+          "medianPx": 0.843,
+          "p90Px": 1.78,
+          "maxPx": 1.83
+        },
+        "unresolved": 0,
+        "wrongIdentity": 0
+      },
+      "M": {
+        "identityCorrect": 16,
+        "identityTotal": 16,
+        "candidateRecall": "16/18",
+        "position": {
+          "count": 16,
+          "medianPx": 0.843,
+          "p90Px": 1.78,
+          "maxPx": 1.83
+        },
+        "unresolved": 2,
+        "wrongIdentity": 0
+      },
+      "positionReferenceCoverage": "16/18; H5 and H18 lack registered badge bboxes",
+      "independenceCaveat": "Registered badge bboxes were produced by the same badge localization family; B/M position agreement is not an independent test."
+    },
+    "baskets": {
+      "A": {
+        "identityRecall": "18/18",
+        "ownershipCorrect": 15,
+        "ownershipTotal": 18,
+        "position": {
+          "count": 18,
+          "medianPx": 11.886,
+          "p90Px": 22.052,
+          "maxPx": 47.011
+        },
+        "unresolved": 0,
+        "wrongOwnership": 3
+      },
+      "B": {
+        "identityRecall": "18/18",
+        "ownershipCorrect": 15,
+        "ownershipTotal": 18,
+        "position": {
+          "count": 18,
+          "medianPx": 4.357,
+          "p90Px": 8.49,
+          "maxPx": 11.402
+        },
+        "unresolved": 0,
+        "wrongOwnership": 3
+      },
+      "M": {
+        "candidateRecall": "18/18",
+        "candidates": 20,
+        "falseOrUnmatched": 2,
+        "ownership": "not produced",
+        "position": {
+          "count": 18,
+          "medianPx": 4.357,
+          "p90Px": 8.49,
+          "maxPx": 11.402
+        },
+        "unresolved": 0
+      }
+    },
+    "tees": {
+      "A": {
+        "identityRecall": "13/18",
+        "ownershipCorrect": 13,
+        "ownershipTotal": 13,
+        "position": {
+          "count": 13,
+          "medianPx": 9.055,
+          "p90Px": 23.479,
+          "maxPx": 49.092
+        },
+        "unresolved": 5,
+        "wrongOwnership": 0
+      },
+      "B": {
+        "identityRecall": "16/18",
+        "ownershipCorrect": 15,
+        "ownershipTotal": 16,
+        "position": {
+          "count": 16,
+          "medianPx": 4.621,
+          "p90Px": 6.96,
+          "maxPx": 14.318
+        },
+        "unresolved": 2,
+        "wrongOwnership": 1
+      },
+      "M": {
+        "candidateRecall": "17/18",
+        "candidates": 25,
+        "falseOrUnmatched": 8,
+        "ownership": "not produced",
+        "position": {
+          "count": 17,
+          "medianPx": 4.82,
+          "p90Px": 6.938,
+          "maxPx": 13.822
+        },
+        "unresolved": 1
+      }
+    }
+  },
+  "matchingPolicy": {
+    "rawCandidateRadiusPx": 20,
+    "reviewPriorityThresholdPx": 10,
+    "changeNeutralTolerancePx": 1,
+    "solObjectIdentityRadiusPx": 60,
+    "missingPredictions": "preserved as unresolved; no numeric penalty"
+  },
+  "changes": [
+    {
+      "hole": 1,
+      "stage": "badge",
+      "A": {
+        "xPx": 696,
+        "yPx": 1450
+      },
+      "B": {
+        "xPx": 695.3376344086022,
+        "yPx": 1452.5569892473118
+      },
+      "corpus": {
+        "xPx": 696,
+        "yPx": 1453
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 273,
+          "center": {
+            "x": 695.3376344086022,
+            "y": 1452.5569892473118
+          },
+          "bbox": {
+            "x": 669,
+            "y": 1432,
+            "width": 54,
+            "height": 42
+          },
+          "area": 465,
+          "major": 54.54533340796536,
+          "minor": 42.7940968896395,
+          "angleRadians": -0.0223444022265334,
+          "fill": 0.19921016103709493
+        },
+        "interiorBbox": [
+          672,
+          1435,
+          48,
+          36
+        ],
+        "decodedLabel": "1",
+        "minimumDigitMargin": 0.9927118263029904,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              19,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 1,
+      "stage": "basket",
+      "A": {
+        "xPx": 770,
+        "yPx": 1337
+      },
+      "B": {
+        "xPx": 770,
+        "yPx": 1322
+      },
+      "corpus": {
+        "xPx": 773,
+        "yPx": 1325
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 749,
+        "y": 1252,
+        "cx": 770,
+        "cy": 1285,
+        "tipX": 770,
+        "tipY": 1322,
+        "onFrac": 0.9994272623138603,
+        "offFrac": 0,
+        "score": 0.9994272623138603
+      }
+    },
+    {
+      "hole": 1,
+      "stage": "tee",
+      "A": {
+        "xPx": 615,
+        "yPx": 1587
+      },
+      "B": {
+        "xPx": 616,
+        "yPx": 1595
+      },
+      "corpus": {
+        "xPx": 621,
+        "yPx": 1599
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 616.4202898550725,
+          "y": 1595.038647342995
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 616.4202898550725,
+          "cy": 1595.038647342995,
+          "holeArea": 207,
+          "bboxX": 608,
+          "bboxY": 1585,
+          "bboxW": 18,
+          "bboxH": 21,
+          "elongation": 1.5749118750342959,
+          "angle": 2.0797954198594306,
+          "ringFrac": 0.7333333333333333,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 2,
+      "stage": "badge",
+      "A": {
+        "xPx": 559,
+        "yPx": 1347
+      },
+      "B": {
+        "xPx": 558.2875536480686,
+        "yPx": 1343.5278969957083
+      },
+      "corpus": {
+        "xPx": 559,
+        "yPx": 1344
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 266,
+          "center": {
+            "x": 558.2875536480686,
+            "y": 1343.5278969957083
+          },
+          "bbox": {
+            "x": 532,
+            "y": 1323,
+            "width": 54,
+            "height": 42
+          },
+          "area": 466,
+          "major": 55.159347734361475,
+          "minor": 43.57574324590406,
+          "angleRadians": -0.04493538896827843,
+          "fill": 0.1938750806066434
+        },
+        "interiorBbox": [
+          535,
+          1326,
+          48,
+          36
+        ],
+        "decodedLabel": "2",
+        "minimumDigitMargin": 0.9926273566316093,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              17,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "2",
+            "runnerUp": "3",
+            "margin": 0.9926273566316093,
+            "scoresByDigit": {
+              "0": 0.0003930478505086928,
+              "1": 0.00041957910368531506,
+              "2": 0.9942922384182071,
+              "3": 0.001664881786597857,
+              "4": 0.0002595446398836955,
+              "5": 0.0001561231154401237,
+              "6": 0.00024484888218344797,
+              "7": 0.0012891506955485202,
+              "8": 0.0005600732095803634,
+              "9": 0.0007205122983648253
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 2,
+      "stage": "basket",
+      "A": {
+        "xPx": 493,
+        "yPx": 1391
+      },
+      "B": {
+        "xPx": 493,
+        "yPx": 1394
+      },
+      "corpus": {
+        "xPx": 495,
+        "yPx": 1394
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 472,
+        "y": 1324,
+        "cx": 493,
+        "cy": 1357,
+        "tipX": 493,
+        "tipY": 1394,
+        "onFrac": 0.9994272623138603,
+        "offFrac": 0,
+        "score": 0.9994272623138603
+      }
+    },
+    {
+      "hole": 2,
+      "stage": "tee",
+      "A": {
+        "xPx": 633,
+        "yPx": 1238
+      },
+      "B": {
+        "xPx": 633,
+        "yPx": 1288
+      },
+      "corpus": {
+        "xPx": 636,
+        "yPx": 1287
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 632.9903381642512,
+          "y": 1288.1400966183576
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 632.9903381642512,
+          "cy": 1288.1400966183576,
+          "holeArea": 207,
+          "bboxX": 623,
+          "bboxY": 1279,
+          "bboxW": 21,
+          "bboxH": 19,
+          "elongation": 1.5640023763881092,
+          "angle": 2.4981459619121686,
+          "ringFrac": 0.7318840579710145,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 3,
+      "stage": "badge",
+      "A": {
+        "xPx": 326,
+        "yPx": 1877
+      },
+      "B": {
+        "xPx": 326.3333333333333,
+        "yPx": 1880.5376344086021
+      },
+      "corpus": {
+        "xPx": 327,
+        "yPx": 1881
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 311,
+          "center": {
+            "x": 326.3333333333333,
+            "y": 1880.5376344086021
+          },
+          "bbox": {
+            "x": 300,
+            "y": 1860,
+            "width": 54,
+            "height": 42
+          },
+          "area": 465,
+          "major": 54.1180983649018,
+          "minor": 42.177548435781645,
+          "angleRadians": 0.004563486504184623,
+          "fill": 0.2037178538970076
+        },
+        "interiorBbox": [
+          303,
+          1863,
+          48,
+          36
+        ],
+        "decodedLabel": "3",
+        "minimumDigitMargin": 0.9889231093205834,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              17,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "3",
+            "runnerUp": "8",
+            "margin": 0.9889231093205834,
+            "scoresByDigit": {
+              "0": 0.0008451491080855122,
+              "1": 0.0008591584293128438,
+              "2": 0.0014225862373101164,
+              "3": 0.9912397166897359,
+              "4": 0.0002824953401060745,
+              "5": 0.001312098150013893,
+              "6": 0.00026467743355189794,
+              "7": 0.0007846418860890742,
+              "8": 0.002316607369152547,
+              "9": 0.0006728693566419542
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 3,
+      "stage": "basket",
+      "A": {
+        "xPx": 295,
+        "yPx": 2047
+      },
+      "B": {
+        "xPx": 295,
+        "yPx": 2008
+      },
+      "corpus": {
+        "xPx": 296,
+        "yPx": 2000
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 274,
+        "y": 1938,
+        "cx": 295,
+        "cy": 1971,
+        "tipX": 295,
+        "tipY": 2008,
+        "onFrac": 1,
+        "offFrac": 0,
+        "score": 1
+      }
+    },
+    {
+      "hole": 3,
+      "stage": "tee",
+      "A": {
+        "xPx": 364,
+        "yPx": 1724
+      },
+      "B": {
+        "xPx": 363,
+        "yPx": 1743
+      },
+      "corpus": {
+        "xPx": 366,
+        "yPx": 1740
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 362.5990338164251,
+          "y": 1743.415458937198
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 362.5990338164251,
+          "cy": 1743.415458937198,
+          "holeArea": 207,
+          "bboxX": 356,
+          "bboxY": 1734,
+          "bboxW": 15,
+          "bboxH": 20,
+          "elongation": 1.5876960778868425,
+          "angle": 1.82101046019384,
+          "ringFrac": 0.8658536585365854,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 4,
+      "stage": "badge",
+      "A": {
+        "xPx": 492,
+        "yPx": 2001
+      },
+      "B": {
+        "xPx": 492.74200426439234,
+        "yPx": 2002.3944562899787
+      },
+      "corpus": {
+        "xPx": 493,
+        "yPx": 2003
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 320,
+          "center": {
+            "x": 492.74200426439234,
+            "y": 2002.3944562899787
+          },
+          "bbox": {
+            "x": 466,
+            "y": 1982,
+            "width": 54,
+            "height": 42
+          },
+          "area": 469,
+          "major": 55.2351383747048,
+          "minor": 43.850919552180905,
+          "angleRadians": -0.050082181391176546,
+          "fill": 0.1936326956176622
+        },
+        "interiorBbox": [
+          469,
+          1985,
+          48,
+          36
+        ],
+        "decodedLabel": "4",
+        "minimumDigitMargin": 0.9937225815626725,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              16,
+              8,
+              16,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "4",
+            "runnerUp": "1",
+            "margin": 0.9937225815626725,
+            "scoresByDigit": {
+              "0": 0.0003864707067800449,
+              "1": 0.0018292265460583667,
+              "2": 0.00025017289744471035,
+              "3": 0.00020089524440437763,
+              "4": 0.9955518081087308,
+              "5": 0.0001551183636905341,
+              "6": 0.0006711931472170616,
+              "7": 0.00029062591073628584,
+              "8": 0.0005366788768340169,
+              "9": 0.00012781019810370527
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 4,
+      "stage": "basket",
+      "A": {
+        "xPx": 607,
+        "yPx": 1965
+      },
+      "B": {
+        "xPx": 610,
+        "yPx": 1953
+      },
+      "corpus": {
+        "xPx": 607,
+        "yPx": 1944
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 589,
+        "y": 1883,
+        "cx": 610,
+        "cy": 1916,
+        "tipX": 610,
+        "tipY": 1953,
+        "onFrac": 0.5246277205040092,
+        "offFrac": 0.16569200779727095,
+        "score": 0.35893571270673824
+      }
+    },
+    {
+      "hole": 4,
+      "stage": "tee",
+      "A": {
+        "xPx": 369,
+        "yPx": 2078
+      },
+      "B": {
+        "xPx": 369,
+        "yPx": 2058
+      },
+      "corpus": {
+        "xPx": 373,
+        "yPx": 2053
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 368.536231884058,
+          "y": 2057.8115942028985
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 368.536231884058,
+          "cy": 2057.8115942028985,
+          "holeArea": 207,
+          "bboxX": 359,
+          "bboxY": 2050,
+          "bboxW": 20,
+          "bboxH": 17,
+          "elongation": 1.5502069250108372,
+          "angle": 2.723349376637461,
+          "ringFrac": 0.8062015503875969,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 5,
+      "stage": "tee",
+      "A": {
+        "xPx": 472,
+        "yPx": 1881
+      },
+      "B": {
+        "xPx": 472,
+        "yPx": 1889
+      },
+      "corpus": {
+        "xPx": 486,
+        "yPx": 1886
+      },
+      "outcome": "TRUTH_DISPUTED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 472.41062801932367,
+          "y": 1888.5265700483092
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 472.41062801932367,
+          "cy": 1888.5265700483092,
+          "holeArea": 207,
+          "bboxX": 464,
+          "bboxY": 1883,
+          "bboxW": 18,
+          "bboxH": 12,
+          "elongation": 1.5345471876381318,
+          "angle": 0.08333015561249857,
+          "ringFrac": 0.9305555555555556,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 6,
+      "stage": "badge",
+      "A": {
+        "xPx": 578,
+        "yPx": 1765
+      },
+      "B": {
+        "xPx": 579.6498951781971,
+        "yPx": 1777.4633123689728
+      },
+      "corpus": {
+        "xPx": 580,
+        "yPx": 1778
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 307,
+          "center": {
+            "x": 579.6498951781971,
+            "y": 1777.4633123689728
+          },
+          "bbox": {
+            "x": 553,
+            "y": 1757,
+            "width": 54,
+            "height": 42
+          },
+          "area": 477,
+          "major": 54.9624678030596,
+          "minor": 43.37757433636367,
+          "angleRadians": 0.03699880449920839,
+          "fill": 0.20007226653576726
+        },
+        "interiorBbox": [
+          556,
+          1760,
+          48,
+          36
+        ],
+        "decodedLabel": "6",
+        "minimumDigitMargin": 0.9912952676409862,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              16,
+              8,
+              15,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "6",
+            "runnerUp": "5",
+            "margin": 0.9912952676409862,
+            "scoresByDigit": {
+              "0": 0.0007775292401605122,
+              "1": 0.00015878802335326305,
+              "2": 0.0002669510178494503,
+              "3": 0.00014623020664113857,
+              "4": 0.00048050248032990687,
+              "5": 0.002291323969527806,
+              "6": 0.993586591610514,
+              "7": 0.00016415605890611254,
+              "8": 0.0015092268929886954,
+              "9": 0.0006187004997293516
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 6,
+      "stage": "basket",
+      "A": {
+        "xPx": 429,
+        "yPx": 1566
+      },
+      "B": {
+        "xPx": 429,
+        "yPx": 1586
+      },
+      "corpus": {
+        "xPx": 432,
+        "yPx": 1584.2
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 408,
+        "y": 1516,
+        "cx": 429,
+        "cy": 1549,
+        "tipX": 429,
+        "tipY": 1586,
+        "onFrac": 1,
+        "offFrac": 0.004873294346978557,
+        "score": 0.9951267056530214
+      }
+    },
+    {
+      "hole": 6,
+      "stage": "tee",
+      "A": {
+        "xPx": 674,
+        "yPx": 1840
+      },
+      "B": {
+        "xPx": 673,
+        "yPx": 1848
+      },
+      "corpus": {
+        "xPx": 673.9,
+        "yPx": 1844.1
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 673.3446601941747,
+          "y": 1847.5485436893205
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 673.3446601941747,
+          "cy": 1847.5485436893205,
+          "holeArea": 206,
+          "bboxX": 664,
+          "bboxY": 1838,
+          "bboxW": 20,
+          "bboxH": 20,
+          "elongation": 1.5562078870772746,
+          "angle": 0.6763091049314673,
+          "ringFrac": 0.7427536231884058,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 7,
+      "stage": "badge",
+      "A": {
+        "xPx": 484,
+        "yPx": 1283
+      },
+      "B": {
+        "xPx": 484.82947368421054,
+        "yPx": 1280.5978947368421
+      },
+      "corpus": {
+        "xPx": 485,
+        "yPx": 1281
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 258,
+          "center": {
+            "x": 484.82947368421054,
+            "y": 1280.5978947368421
+          },
+          "bbox": {
+            "x": 458,
+            "y": 1260,
+            "width": 54,
+            "height": 42
+          },
+          "area": 475,
+          "major": 54.21946419083556,
+          "minor": 42.31000333430625,
+          "angleRadians": -0.00819429776008527,
+          "fill": 0.2070595799274448
+        },
+        "interiorBbox": [
+          461,
+          1263,
+          48,
+          36
+        ],
+        "decodedLabel": "7",
+        "minimumDigitMargin": 0.9936164619177876,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              17,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "7",
+            "runnerUp": "2",
+            "margin": 0.9936164619177876,
+            "scoresByDigit": {
+              "0": 0.00012443112870214827,
+              "1": 0.0005785004598384963,
+              "2": 0.0014558807533777912,
+              "3": 0.0009891632016882153,
+              "4": 0.0003768860108718172,
+              "5": 0.0005759828989017533,
+              "6": 0.00022152224008015195,
+              "7": 0.9950723426711654,
+              "8": 0.00022316667924986226,
+              "9": 0.00038212395612448487
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 7,
+      "stage": "basket",
+      "A": {
+        "xPx": 513,
+        "yPx": 1148
+      },
+      "B": {
+        "xPx": 513,
+        "yPx": 1170
+      },
+      "corpus": {
+        "xPx": 512,
+        "yPx": 1165
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 492,
+        "y": 1100,
+        "cx": 513,
+        "cy": 1133,
+        "tipX": 513,
+        "tipY": 1170,
+        "onFrac": 0.9095074455899198,
+        "offFrac": 0.07504873294346978,
+        "score": 0.83445871264645
+      }
+    },
+    {
+      "hole": 7,
+      "stage": "tee",
+      "A": {
+        "xPx": 454,
+        "yPx": 1403
+      },
+      "B": {
+        "xPx": 454,
+        "yPx": 1405
+      },
+      "corpus": {
+        "xPx": 460,
+        "yPx": 1408
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 454.06341463414634,
+          "y": 1404.6536585365855
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 454.06341463414634,
+          "cy": 1404.6536585365855,
+          "holeArea": 205,
+          "bboxX": 447,
+          "bboxY": 1395,
+          "bboxW": 15,
+          "bboxH": 20,
+          "elongation": 1.5761163152640771,
+          "angle": 1.8213106453931558,
+          "ringFrac": 0.8780487804878049,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 8,
+      "stage": "badge",
+      "A": {
+        "xPx": 490,
+        "yPx": 714
+      },
+      "B": {
+        "xPx": 489.3905579399142,
+        "yPx": 713.6566523605151
+      },
+      "corpus": {
+        "xPx": 490,
+        "yPx": 714
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 135,
+          "center": {
+            "x": 489.3905579399142,
+            "y": 713.6566523605151
+          },
+          "bbox": {
+            "x": 463,
+            "y": 693,
+            "width": 54,
+            "height": 42
+          },
+          "area": 466,
+          "major": 54.65065046484369,
+          "minor": 42.9115957921897,
+          "angleRadians": -0.025701057296922743,
+          "fill": 0.19870825795009
+        },
+        "interiorBbox": [
+          466,
+          696,
+          48,
+          36
+        ],
+        "decodedLabel": "8",
+        "minimumDigitMargin": 0.9866599424053506,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              17,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "8",
+            "runnerUp": "5",
+            "margin": 0.9866599424053506,
+            "scoresByDigit": {
+              "0": 0.0011494380293273516,
+              "1": 0.00012436830802146218,
+              "2": 0.0005118471731019097,
+              "3": 0.0026007753570513703,
+              "4": 0.0005542783834202394,
+              "5": 0.0026607091331511995,
+              "6": 0.0018442849235324507,
+              "7": 0.00022215760547980262,
+              "8": 0.9893206515385018,
+              "9": 0.001011489548412392
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 8,
+      "stage": "basket",
+      "A": {
+        "xPx": 485,
+        "yPx": 864
+      },
+      "B": {
+        "xPx": 485,
+        "yPx": 870
+      },
+      "corpus": {
+        "xPx": 526,
+        "yPx": 570
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "x": 464,
+        "y": 800,
+        "cx": 485,
+        "cy": 833,
+        "tipX": 485,
+        "tipY": 870,
+        "onFrac": 1,
+        "offFrac": 0.02046783625730994,
+        "score": 0.97953216374269
+      }
+    },
+    {
+      "hole": 9,
+      "stage": "badge",
+      "A": {
+        "xPx": 390,
+        "yPx": 509
+      },
+      "B": {
+        "xPx": 389.9614561027837,
+        "yPx": 508.6873661670235
+      },
+      "corpus": {
+        "xPx": 390,
+        "yPx": 509
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 54,
+          "center": {
+            "x": 389.9614561027837,
+            "y": 508.6873661670235
+          },
+          "bbox": {
+            "x": 363,
+            "y": 488,
+            "width": 54,
+            "height": 42
+          },
+          "area": 467,
+          "major": 54.20023513405849,
+          "minor": 42.305648337838946,
+          "angleRadians": -0.00807867372889943,
+          "fill": 0.20366544708608908
+        },
+        "interiorBbox": [
+          366,
+          491,
+          51,
+          39
+        ],
+        "decodedLabel": "9",
+        "minimumDigitMargin": 0.9913164298244996,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              16,
+              8,
+              15,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "9",
+            "runnerUp": "0",
+            "margin": 0.9913164298244996,
+            "scoresByDigit": {
+              "0": 0.0022464467630642945,
+              "1": 0.00012858114969365708,
+              "2": 0.0006132251501654699,
+              "3": 0.0006216665825868778,
+              "4": 0.00016159774211976522,
+              "5": 0.0009651637871123874,
+              "6": 0.0007162677907666548,
+              "7": 0.0002522071130764186,
+              "8": 0.0007319673338504028,
+              "9": 0.9935628765875639
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 9,
+      "stage": "basket",
+      "A": {
+        "xPx": 353,
+        "yPx": 389
+      },
+      "B": {
+        "xPx": 353,
+        "yPx": 373
+      },
+      "corpus": {
+        "xPx": 355,
+        "yPx": 369
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 332,
+        "y": 303,
+        "cx": 353,
+        "cy": 336,
+        "tipX": 353,
+        "tipY": 373,
+        "onFrac": 0.9994272623138603,
+        "offFrac": 0.0009746588693957114,
+        "score": 0.9984526034444645
+      }
+    },
+    {
+      "hole": 9,
+      "stage": "tee",
+      "A": {
+        "xPx": 430,
+        "yPx": 654
+      },
+      "B": {
+        "xPx": 429,
+        "yPx": 657
+      },
+      "corpus": {
+        "xPx": 431,
+        "yPx": 663
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 429.3883495145631,
+          "y": 657.0145631067961
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 429.3883495145631,
+          "cy": 657.0145631067961,
+          "holeArea": 206,
+          "bboxX": 422,
+          "bboxY": 648,
+          "bboxW": 16,
+          "bboxH": 19,
+          "elongation": 1.5519614103258654,
+          "angle": 1.2862275775169891,
+          "ringFrac": 0.8536585365853658,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 10,
+      "stage": "badge",
+      "A": {
+        "xPx": 413,
+        "yPx": 435
+      },
+      "B": {
+        "xPx": 411.00631578947366,
+        "yPx": 435.4526315789474
+      },
+      "corpus": {
+        "xPx": 412.5,
+        "yPx": 436
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 49,
+          "center": {
+            "x": 411.00631578947366,
+            "y": 435.4526315789474
+          },
+          "bbox": {
+            "x": 384,
+            "y": 415,
+            "width": 57,
+            "height": 42
+          },
+          "area": 475,
+          "major": 57.14734852621447,
+          "minor": 42.296664788955326,
+          "angleRadians": 0.007445095967230264,
+          "fill": 0.19651305219689294
+        },
+        "interiorBbox": [
+          387,
+          418,
+          50,
+          36
+        ],
+        "decodedLabel": "10",
+        "minimumDigitMargin": 0.9915827360524491,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              16,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "0",
+            "runnerUp": "6",
+            "margin": 0.9915827360524491,
+            "scoresByDigit": {
+              "0": 0.9933349342693115,
+              "1": 0.000057318132609707004,
+              "2": 0.00040951121198076854,
+              "3": 0.0008632297306205354,
+              "4": 0.0003865704262986193,
+              "5": 0.00026770919685159626,
+              "6": 0.0017521982168624526,
+              "7": 0.00009283634662848736,
+              "8": 0.0012264971448359067,
+              "9": 0.0016091953240005257
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 10,
+      "stage": "basket",
+      "A": {
+        "xPx": 437,
+        "yPx": 558
+      },
+      "B": {
+        "xPx": 438,
+        "yPx": 561
+      },
+      "corpus": {
+        "xPx": 439,
+        "yPx": 564
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 417,
+        "y": 491,
+        "cx": 438,
+        "cy": 524,
+        "tipX": 438,
+        "tipY": 561,
+        "onFrac": 1,
+        "offFrac": 0.007797270955165692,
+        "score": 0.9922027290448343
+      }
+    },
+    {
+      "hole": 10,
+      "stage": "tee",
+      "A": {
+        "xPx": 383,
+        "yPx": 302
+      },
+      "B": {
+        "xPx": 381,
+        "yPx": 304
+      },
+      "corpus": {
+        "xPx": 384,
+        "yPx": 304
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 380.56953642384104,
+          "y": 303.89403973509934
+        },
+        "tier": "component",
+        "component": {
+          "label": 36,
+          "center": {
+            "x": 380.56953642384104,
+            "y": 303.89403973509934
+          },
+          "bbox": {
+            "x": 374,
+            "y": 290,
+            "width": 20,
+            "height": 26
+          },
+          "area": 151,
+          "major": 27.04893851286979,
+          "minor": 16.47951041727962,
+          "angleRadians": 1.2343195680494203,
+          "fill": 0.3387524269486295
+        }
+      }
+    },
+    {
+      "hole": 11,
+      "stage": "badge",
+      "A": {
+        "xPx": 496,
+        "yPx": 386
+      },
+      "B": {
+        "xPx": 496.3939393939394,
+        "yPx": 386.4307359307359
+      },
+      "corpus": {
+        "xPx": 497,
+        "yPx": 387
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 40,
+          "center": {
+            "x": 496.3939393939394,
+            "y": 386.4307359307359
+          },
+          "bbox": {
+            "x": 470,
+            "y": 366,
+            "width": 54,
+            "height": 42
+          },
+          "area": 462,
+          "major": 54.41593988116283,
+          "minor": 42.64760050449823,
+          "angleRadians": 0.01767675638983539,
+          "fill": 0.19907706964508268
+        },
+        "interiorBbox": [
+          473,
+          369,
+          48,
+          36
+        ],
+        "decodedLabel": "11",
+        "minimumDigitMargin": 0.9786504295635575,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              12,
+              8,
+              8,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9786504295635575,
+            "scoresByDigit": {
+              "0": 0.00023800775349649798,
+              "1": 0.9851070388368723,
+              "2": 0.0012216651205364639,
+              "3": 0.0033128723629235915,
+              "4": 0.006456609273314848,
+              "5": 0.0005856742679093562,
+              "6": 0.0007217922118932442,
+              "7": 0.0010797429716145996,
+              "8": 0.00049223999206369,
+              "9": 0.000784357209375706
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              26,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 11,
+      "stage": "basket",
+      "A": {
+        "xPx": 457,
+        "yPx": 277
+      },
+      "B": {
+        "xPx": 458,
+        "yPx": 275
+      },
+      "corpus": {
+        "xPx": 456,
+        "yPx": 273
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 437,
+        "y": 205,
+        "cx": 458,
+        "cy": 238,
+        "tipX": 458,
+        "tipY": 275,
+        "onFrac": 1,
+        "offFrac": 0,
+        "score": 1
+      }
+    },
+    {
+      "hole": 11,
+      "stage": "tee",
+      "A": {
+        "xPx": 541,
+        "yPx": 517
+      },
+      "B": {
+        "xPx": 542,
+        "yPx": 507
+      },
+      "corpus": {
+        "xPx": 543,
+        "yPx": 508
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 542.1744966442953,
+          "y": 507.0469798657718
+        },
+        "tier": "component",
+        "component": {
+          "label": 57,
+          "center": {
+            "x": 542.1744966442953,
+            "y": 507.0469798657718
+          },
+          "bbox": {
+            "x": 527,
+            "y": 496,
+            "width": 25,
+            "height": 27
+          },
+          "area": 149,
+          "major": 27.712891714982813,
+          "minor": 18.168577164395497,
+          "angleRadians": 1.0346092709484767,
+          "fill": 0.2959262602893594
+        }
+      }
+    },
+    {
+      "hole": 12,
+      "stage": "badge",
+      "A": {
+        "xPx": 536,
+        "yPx": 158
+      },
+      "B": {
+        "xPx": 535.4491525423729,
+        "yPx": 158.29449152542372
+      },
+      "corpus": {
+        "xPx": 536.5,
+        "yPx": 159
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 23,
+          "center": {
+            "x": 535.4491525423729,
+            "y": 158.29449152542372
+          },
+          "bbox": {
+            "x": 509,
+            "y": 138,
+            "width": 55,
+            "height": 42
+          },
+          "area": 472,
+          "major": 57.41069468387278,
+          "minor": 45.62489874640883,
+          "angleRadians": -0.10416471614770051,
+          "fill": 0.18019688657550095
+        },
+        "interiorBbox": [
+          512,
+          141,
+          48,
+          36
+        ],
+        "decodedLabel": "12",
+        "minimumDigitMargin": 0.9926273566316093,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "2",
+            "runnerUp": "3",
+            "margin": 0.9926273566316093,
+            "scoresByDigit": {
+              "0": 0.0003930478505086928,
+              "1": 0.00041957910368531506,
+              "2": 0.9942922384182071,
+              "3": 0.001664881786597857,
+              "4": 0.0002595446398836955,
+              "5": 0.0001561231154401237,
+              "6": 0.00024484888218344797,
+              "7": 0.0012891506955485202,
+              "8": 0.0005600732095803634,
+              "9": 0.0007205122983648253
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 12,
+      "stage": "basket",
+      "A": {
+        "xPx": 607,
+        "yPx": 93
+      },
+      "B": {
+        "xPx": 607,
+        "yPx": 96
+      },
+      "corpus": {
+        "xPx": 607,
+        "yPx": 92
+      },
+      "outcome": "REGRESSED",
+      "causalMachineEvidence": {
+        "x": 586,
+        "y": 26,
+        "cx": 607,
+        "cy": 59,
+        "tipX": 607,
+        "tipY": 96,
+        "onFrac": 1,
+        "offFrac": 0,
+        "score": 1
+      }
+    },
+    {
+      "hole": 12,
+      "stage": "tee",
+      "A": null,
+      "B": {
+        "xPx": 604,
+        "yPx": 436
+      },
+      "corpus": {
+        "xPx": 459,
+        "yPx": 232
+      },
+      "outcome": "REGRESSED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 603.5631067961165,
+          "y": 436.0728155339806
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 603.5631067961165,
+          "cy": 436.0728155339806,
+          "holeArea": 206,
+          "bboxX": 596,
+          "bboxY": 426,
+          "bboxW": 16,
+          "bboxH": 21,
+          "elongation": 1.5955713768954005,
+          "angle": 1.2459806905178636,
+          "ringFrac": 0.7713178294573644,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 13,
+      "stage": "badge",
+      "A": {
+        "xPx": 821,
+        "yPx": 104
+      },
+      "B": {
+        "xPx": 820.3376906318083,
+        "yPx": 104.5272331154684
+      },
+      "corpus": {
+        "xPx": 821.5,
+        "yPx": 105
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 19,
+          "center": {
+            "x": 820.3376906318083,
+            "y": 104.5272331154684
+          },
+          "bbox": {
+            "x": 794,
+            "y": 84,
+            "width": 55,
+            "height": 42
+          },
+          "area": 459,
+          "major": 55.16211695761917,
+          "minor": 42.326733865683764,
+          "angleRadians": 0.008638625499138611,
+          "fill": 0.1965879994987757
+        },
+        "interiorBbox": [
+          797,
+          87,
+          48,
+          36
+        ],
+        "decodedLabel": "13",
+        "minimumDigitMargin": 0.9874886775214906,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.992268656827479,
+            "scoresByDigit": {
+              "0": 0.00019165007387833053,
+              "1": 0.9940381148621742,
+              "2": 0.0006647679370569672,
+              "3": 0.001271854459121133,
+              "4": 0.001769458034695178,
+              "5": 0.00038977758085285226,
+              "6": 0.00037577338094707595,
+              "7": 0.0007696677062943983,
+              "8": 0.00023511128001125778,
+              "9": 0.0002938246849687532
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "3",
+            "runnerUp": "8",
+            "margin": 0.9874886775214906,
+            "scoresByDigit": {
+              "0": 0.0009108296567359978,
+              "1": 0.0009053040079024637,
+              "2": 0.0014666051325861423,
+              "3": 0.9902050800203064,
+              "4": 0.0003262576223873524,
+              "5": 0.0015040013575690005,
+              "6": 0.0003026496813886894,
+              "7": 0.000934847298499524,
+              "8": 0.0027164024988157306,
+              "9": 0.0007280227238086612
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 13,
+      "stage": "basket",
+      "A": {
+        "xPx": 1015,
+        "yPx": 299
+      },
+      "B": {
+        "xPx": 1015,
+        "yPx": 288
+      },
+      "corpus": {
+        "xPx": 1017.5,
+        "yPx": 285.9
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 994,
+        "y": 218,
+        "cx": 1015,
+        "cy": 251,
+        "tipX": 1015,
+        "tipY": 288,
+        "onFrac": 1,
+        "offFrac": 0,
+        "score": 1
+      }
+    },
+    {
+      "hole": 13,
+      "stage": "tee",
+      "A": null,
+      "B": {
+        "xPx": 733,
+        "yPx": 68
+      },
+      "corpus": {
+        "xPx": 738,
+        "yPx": 70.2
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 732.7922077922078,
+          "y": 67.71428571428571
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 732.7922077922078,
+          "cy": 67.71428571428571,
+          "holeArea": 77,
+          "bboxX": 727,
+          "bboxY": 63,
+          "bboxW": 13,
+          "bboxH": 11,
+          "elongation": 1.6609022009319752,
+          "angle": 2.94975757690687,
+          "ringFrac": 0.6032608695652174,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 14,
+      "stage": "badge",
+      "A": {
+        "xPx": 824,
+        "yPx": 199
+      },
+      "B": {
+        "xPx": 825.2263736263736,
+        "yPx": 200.54945054945054
+      },
+      "corpus": {
+        "xPx": 827,
+        "yPx": 201
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 26,
+          "center": {
+            "x": 825.2263736263736,
+            "y": 200.54945054945054
+          },
+          "bbox": {
+            "x": 799,
+            "y": 180,
+            "width": 56,
+            "height": 42
+          },
+          "area": 455,
+          "major": 56.68216383589745,
+          "minor": 43.038385093723264,
+          "angleRadians": 0.02701205482521143,
+          "fill": 0.18651295740812263
+        },
+        "interiorBbox": [
+          802,
+          183,
+          50,
+          36
+        ],
+        "decodedLabel": "14",
+        "minimumDigitMargin": 0.9923545979573839,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              16,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "4",
+            "runnerUp": "1",
+            "margin": 0.9923545979573839,
+            "scoresByDigit": {
+              "0": 0.0004737318474719034,
+              "1": 0.0022994632148460744,
+              "2": 0.00029689575110562305,
+              "3": 0.0002379832893541512,
+              "4": 0.99465406117223,
+              "5": 0.00019192105762057387,
+              "6": 0.0006857244552916975,
+              "7": 0.00034481595813473794,
+              "8": 0.0006628477829087193,
+              "9": 0.00015255547103685608
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 14,
+      "stage": "basket",
+      "A": {
+        "xPx": 751,
+        "yPx": 103
+      },
+      "B": {
+        "xPx": 752,
+        "yPx": 106
+      },
+      "corpus": {
+        "xPx": 751,
+        "yPx": 108
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 731,
+        "y": 36,
+        "cx": 752,
+        "cy": 69,
+        "tipX": 752,
+        "tipY": 106,
+        "onFrac": 0.9994272623138603,
+        "offFrac": 0.01364522417153996,
+        "score": 0.9857820381423203
+      }
+    },
+    {
+      "hole": 14,
+      "stage": "tee",
+      "A": {
+        "xPx": 909,
+        "yPx": 306
+      },
+      "B": {
+        "xPx": 910,
+        "yPx": 306
+      },
+      "corpus": {
+        "xPx": 914,
+        "yPx": 309
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 909.8382352941177,
+          "y": 306.4019607843137
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 909.8382352941177,
+          "cy": 306.4019607843137,
+          "holeArea": 204,
+          "bboxX": 901,
+          "bboxY": 297,
+          "bboxW": 19,
+          "bboxH": 20,
+          "elongation": 1.5770506272600402,
+          "angle": 0.9046471888211958,
+          "ringFrac": 0.7296296296296296,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 15,
+      "stage": "badge",
+      "A": {
+        "xPx": 685,
+        "yPx": 226
+      },
+      "B": {
+        "xPx": 685.2307692307693,
+        "yPx": 226.54505494505494
+      },
+      "corpus": {
+        "xPx": 686.5,
+        "yPx": 227
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 30,
+          "center": {
+            "x": 685.2307692307693,
+            "y": 226.54505494505494
+          },
+          "bbox": {
+            "x": 659,
+            "y": 206,
+            "width": 55,
+            "height": 42
+          },
+          "area": 455,
+          "major": 55.164034894038465,
+          "minor": 42.33093071117986,
+          "angleRadians": -0.009241282238950594,
+          "fill": 0.1948487189940077
+        },
+        "interiorBbox": [
+          662,
+          209,
+          48,
+          36
+        ],
+        "decodedLabel": "15",
+        "minimumDigitMargin": 0.9898624127436312,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "5",
+            "runnerUp": "6",
+            "margin": 0.9898624127436312,
+            "scoresByDigit": {
+              "0": 0.0003098245639090231,
+              "1": 0.00015390945490871305,
+              "2": 0.00016181637893284442,
+              "3": 0.001057380170256496,
+              "4": 0.00021630723179207002,
+              "5": 0.992321318982212,
+              "6": 0.0024589062385807887,
+              "7": 0.000366591333746456,
+              "8": 0.002055095852944701,
+              "9": 0.0008988497927166651
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 15,
+      "stage": "basket",
+      "A": {
+        "xPx": 669,
+        "yPx": 340
+      },
+      "B": {
+        "xPx": 669,
+        "yPx": 334
+      },
+      "corpus": {
+        "xPx": 674,
+        "yPx": 333
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 648,
+        "y": 264,
+        "cx": 669,
+        "cy": 297,
+        "tipX": 669,
+        "tipY": 334,
+        "onFrac": 1,
+        "offFrac": 0,
+        "score": 1
+      }
+    },
+    {
+      "hole": 15,
+      "stage": "tee",
+      "A": {
+        "xPx": 705,
+        "yPx": 109
+      },
+      "B": {
+        "xPx": 706,
+        "yPx": 109
+      },
+      "corpus": {
+        "xPx": 706,
+        "yPx": 112
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 705.8883495145631,
+          "y": 108.98058252427184
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 705.8883495145631,
+          "cy": 108.98058252427184,
+          "holeArea": 206,
+          "bboxX": 699,
+          "bboxY": 100,
+          "bboxW": 14,
+          "bboxH": 19,
+          "elongation": 1.5865589713993808,
+          "angle": 1.7299449281327706,
+          "ringFrac": 0.8846153846153846,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 16,
+      "stage": "badge",
+      "A": {
+        "xPx": 648,
+        "yPx": 573
+      },
+      "B": {
+        "xPx": 647.8463251670379,
+        "yPx": 571.3830734966592
+      },
+      "corpus": {
+        "xPx": 649.5,
+        "yPx": 572
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 67,
+          "center": {
+            "x": 647.8463251670379,
+            "y": 571.3830734966592
+          },
+          "bbox": {
+            "x": 622,
+            "y": 551,
+            "width": 55,
+            "height": 42
+          },
+          "area": 449,
+          "major": 55.18992048808132,
+          "minor": 42.27525806542026,
+          "angleRadians": 0.0070843390589818474,
+          "fill": 0.19244219650843028
+        },
+        "interiorBbox": [
+          625,
+          554,
+          49,
+          36
+        ],
+        "decodedLabel": "16",
+        "minimumDigitMargin": 0.9870909194408238,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              15,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "6",
+            "runnerUp": "5",
+            "margin": 0.9870909194408238,
+            "scoresByDigit": {
+              "0": 0.0027219852089952526,
+              "1": 0.00014419840378843176,
+              "2": 0.00026971328517228703,
+              "3": 0.00038580405579709986,
+              "4": 0.0005978513788286626,
+              "5": 0.002832773590050612,
+              "6": 0.9899236930308745,
+              "7": 0.0001858834626442723,
+              "8": 0.0018437913950709308,
+              "9": 0.0010943061887779717
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 16,
+      "stage": "basket",
+      "A": {
+        "xPx": 523,
+        "yPx": 578
+      },
+      "B": {
+        "xPx": 523,
+        "yPx": 576
+      },
+      "corpus": {
+        "xPx": 864.5,
+        "yPx": 792.5
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "x": 502,
+        "y": 506,
+        "cx": 523,
+        "cy": 539,
+        "tipX": 523,
+        "tipY": 576,
+        "onFrac": 1,
+        "offFrac": 0.025341130604288498,
+        "score": 0.9746588693957114
+      }
+    },
+    {
+      "hole": 17,
+      "stage": "badge",
+      "A": {
+        "xPx": 578,
+        "yPx": 711
+      },
+      "B": {
+        "xPx": 574.2674157303371,
+        "yPx": 787.5280898876405
+      },
+      "corpus": {
+        "xPx": 576,
+        "yPx": 788
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "plate": {
+          "label": 141,
+          "center": {
+            "x": 574.2674157303371,
+            "y": 787.5280898876405
+          },
+          "bbox": {
+            "x": 549,
+            "y": 767,
+            "width": 54,
+            "height": 42
+          },
+          "area": 445,
+          "major": 54.73034771082911,
+          "minor": 43.04088862675623,
+          "angleRadians": -0.0278126716649453,
+          "fill": 0.1889080975853054
+        },
+        "interiorBbox": [
+          552,
+          770,
+          48,
+          36
+        ],
+        "decodedLabel": "17",
+        "minimumDigitMargin": 0.9927118263029904,
+        "digits": [
+          {
+            "glyphLocalBbox": [
+              11,
+              8,
+              7,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "1",
+            "runnerUp": "4",
+            "margin": 0.9927118263029904,
+            "scoresByDigit": {
+              "0": 0.00017596401132866896,
+              "1": 0.9944465662997974,
+              "2": 0.0006068884544417388,
+              "3": 0.0011489041760352602,
+              "4": 0.001734739996807115,
+              "5": 0.0003583081700122855,
+              "6": 0.00034195857337159175,
+              "7": 0.000701047219015602,
+              "8": 0.00021499550429503306,
+              "9": 0.00027062759489568524
+            }
+          },
+          {
+            "glyphLocalBbox": [
+              24,
+              8,
+              14,
+              21
+            ],
+            "segmentationMethod": "cc",
+            "predicted": "7",
+            "runnerUp": "2",
+            "margin": 0.9929859864233515,
+            "scoresByDigit": {
+              "0": 0.00013484708305297919,
+              "1": 0.000631474936881775,
+              "2": 0.001611731743614135,
+              "3": 0.0010869137762833524,
+              "4": 0.00041008996237258563,
+              "5": 0.0006287277295747444,
+              "6": 0.0002404394524084361,
+              "7": 0.9945977181669656,
+              "8": 0.00024223240269306224,
+              "9": 0.00041582474615320224
+            }
+          }
+        ]
+      }
+    },
+    {
+      "hole": 17,
+      "stage": "basket",
+      "A": {
+        "xPx": 864,
+        "yPx": 768
+      },
+      "B": {
+        "xPx": 864,
+        "yPx": 795
+      },
+      "corpus": {
+        "xPx": 491,
+        "yPx": 871
+      },
+      "outcome": "NEUTRAL",
+      "causalMachineEvidence": {
+        "x": 843,
+        "y": 725,
+        "cx": 864,
+        "cy": 758,
+        "tipX": 864,
+        "tipY": 795,
+        "onFrac": 0.9988545246277205,
+        "offFrac": 0,
+        "score": 0.9988545246277205
+      }
+    },
+    {
+      "hole": 17,
+      "stage": "tee",
+      "A": null,
+      "B": {
+        "xPx": 675,
+        "yPx": 700
+      },
+      "corpus": {
+        "xPx": 681,
+        "yPx": 704
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 675.0728155339806,
+          "y": 700.0485436893204
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 675.0728155339806,
+          "cy": 700.0485436893204,
+          "holeArea": 206,
+          "bboxX": 665,
+          "bboxY": 691,
+          "bboxW": 21,
+          "bboxH": 19,
+          "elongation": 1.5471031996541913,
+          "angle": 2.4497940608640625,
+          "ringFrac": 0.7536231884057971,
+          "kind": "tee-rect"
+        }
+      }
+    },
+    {
+      "hole": 18,
+      "stage": "basket",
+      "A": {
+        "xPx": 578,
+        "yPx": 1180
+      },
+      "B": {
+        "xPx": 579,
+        "yPx": 1193
+      },
+      "corpus": {
+        "xPx": 582,
+        "yPx": 1197
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "x": 558,
+        "y": 1123,
+        "cx": 579,
+        "cy": 1156,
+        "tipX": 579,
+        "tipY": 1193,
+        "onFrac": 0.9679266895761741,
+        "offFrac": 0.011695906432748537,
+        "score": 0.9562307831434256
+      }
+    },
+    {
+      "hole": 18,
+      "stage": "tee",
+      "A": {
+        "xPx": 513,
+        "yPx": 1016
+      },
+      "B": {
+        "xPx": 512,
+        "yPx": 1020
+      },
+      "corpus": {
+        "xPx": 514,
+        "yPx": 1023
+      },
+      "outcome": "IMPROVED",
+      "causalMachineEvidence": {
+        "center": {
+          "x": 511.80193236714973,
+          "y": 1020.2705314009662
+        },
+        "tier": "ring",
+        "ring": {
+          "cx": 511.80193236714973,
+          "cy": 1020.2705314009662,
+          "holeArea": 207,
+          "bboxX": 504,
+          "bboxY": 1011,
+          "bboxW": 17,
+          "bboxH": 20,
+          "elongation": 1.5651835383065935,
+          "angle": 1.177645656371964,
+          "ringFrac": 0.8488372093023255,
+          "kind": "tee-rect"
+        }
+      }
+    }
+  ],
+  "changeCounts": {
+    "IMPROVED": 31,
+    "REGRESSED": 2,
+    "NEUTRAL": 15,
+    "TRUTH_DISPUTED": 1
+  },
+  "reviewQueue": [
+    {
+      "hole": 1,
+      "stage": "basket",
+      "reason": "position disagreement max=12.369px",
+      "truth": {
+        "xPx": 773,
+        "yPx": 1325
+      },
+      "a": {
+        "xPx": 770,
+        "yPx": 1337
+      },
+      "b": {
+        "xPx": 770,
+        "yPx": 1322
+      },
+      "m": [
+        {
+          "xPx": 770,
+          "yPx": 1322
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H01-basket.png"
+    },
+    {
+      "hole": 1,
+      "stage": "tee",
+      "reason": "position disagreement max=13.416px",
+      "truth": {
+        "xPx": 621,
+        "yPx": 1599
+      },
+      "a": {
+        "xPx": 615,
+        "yPx": 1587
+      },
+      "b": {
+        "xPx": 616,
+        "yPx": 1595
+      },
+      "m": [
+        {
+          "xPx": 616.4202898550725,
+          "yPx": 1595.038647342995
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H01-tee.png"
+    },
+    {
+      "hole": 2,
+      "stage": "tee",
+      "reason": "position disagreement max=49.092px",
+      "truth": {
+        "xPx": 636,
+        "yPx": 1287
+      },
+      "a": {
+        "xPx": 633,
+        "yPx": 1238
+      },
+      "b": {
+        "xPx": 633,
+        "yPx": 1288
+      },
+      "m": [
+        {
+          "xPx": 632.9903381642512,
+          "yPx": 1288.1400966183576
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H02-tee.png"
+    },
+    {
+      "hole": 3,
+      "stage": "basket",
+      "reason": "position disagreement max=47.011px",
+      "truth": {
+        "xPx": 296,
+        "yPx": 2000
+      },
+      "a": {
+        "xPx": 295,
+        "yPx": 2047
+      },
+      "b": {
+        "xPx": 295,
+        "yPx": 2008
+      },
+      "m": [
+        {
+          "xPx": 295,
+          "yPx": 2008
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H03-basket.png"
+    },
+    {
+      "hole": 3,
+      "stage": "tee",
+      "reason": "position disagreement max=16.125px",
+      "truth": {
+        "xPx": 366,
+        "yPx": 1740
+      },
+      "a": {
+        "xPx": 364,
+        "yPx": 1724
+      },
+      "b": {
+        "xPx": 363,
+        "yPx": 1743
+      },
+      "m": [
+        {
+          "xPx": 362.5990338164251,
+          "yPx": 1743.415458937198
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H03-tee.png"
+    },
+    {
+      "hole": 4,
+      "stage": "basket",
+      "reason": "position disagreement max=21px",
+      "truth": {
+        "xPx": 607,
+        "yPx": 1944
+      },
+      "a": {
+        "xPx": 607,
+        "yPx": 1965
+      },
+      "b": {
+        "xPx": 610,
+        "yPx": 1953
+      },
+      "m": [
+        {
+          "xPx": 610,
+          "yPx": 1953
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H04-basket.png"
+    },
+    {
+      "hole": 4,
+      "stage": "tee",
+      "reason": "position disagreement max=25.318px",
+      "truth": {
+        "xPx": 373,
+        "yPx": 2053
+      },
+      "a": {
+        "xPx": 369,
+        "yPx": 2078
+      },
+      "b": {
+        "xPx": 369,
+        "yPx": 2058
+      },
+      "m": [
+        {
+          "xPx": 368.536231884058,
+          "yPx": 2057.8115942028985
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H04-tee.png"
+    },
+    {
+      "hole": 5,
+      "stage": "basket",
+      "reason": "position disagreement max=11.402px",
+      "truth": {
+        "xPx": 763,
+        "yPx": 1894
+      },
+      "a": {
+        "xPx": 760,
+        "yPx": 1905
+      },
+      "b": {
+        "xPx": 760,
+        "yPx": 1905
+      },
+      "m": [
+        {
+          "xPx": 760,
+          "yPx": 1905
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H05-basket.png"
+    },
+    {
+      "hole": 5,
+      "stage": "tee",
+      "reason": "position disagreement max=14.866px",
+      "truth": {
+        "xPx": 486,
+        "yPx": 1886
+      },
+      "a": {
+        "xPx": 472,
+        "yPx": 1881
+      },
+      "b": {
+        "xPx": 472,
+        "yPx": 1889
+      },
+      "m": [
+        {
+          "xPx": 472.41062801932367,
+          "yPx": 1888.5265700483092
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H05-tee.png"
+    },
+    {
+      "hole": 6,
+      "stage": "badge",
+      "reason": "position disagreement max=13.153px",
+      "truth": {
+        "xPx": 580,
+        "yPx": 1778
+      },
+      "a": {
+        "xPx": 578,
+        "yPx": 1765
+      },
+      "b": {
+        "xPx": 579.6498951781971,
+        "yPx": 1777.4633123689728
+      },
+      "m": [
+        {
+          "xPx": 579.6498951781971,
+          "yPx": 1777.4633123689728
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H06-badge.png"
+    },
+    {
+      "hole": 6,
+      "stage": "basket",
+      "reason": "position disagreement max=18.446px",
+      "truth": {
+        "xPx": 432,
+        "yPx": 1584.2
+      },
+      "a": {
+        "xPx": 429,
+        "yPx": 1566
+      },
+      "b": {
+        "xPx": 429,
+        "yPx": 1586
+      },
+      "m": [
+        {
+          "xPx": 429,
+          "yPx": 1586
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H06-basket.png"
+    },
+    {
+      "hole": 7,
+      "stage": "basket",
+      "reason": "position disagreement max=17.029px",
+      "truth": {
+        "xPx": 512,
+        "yPx": 1165
+      },
+      "a": {
+        "xPx": 513,
+        "yPx": 1148
+      },
+      "b": {
+        "xPx": 513,
+        "yPx": 1170
+      },
+      "m": [
+        {
+          "xPx": 513,
+          "yPx": 1170
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H07-basket.png"
+    },
+    {
+      "hole": 8,
+      "stage": "basket",
+      "reason": "ownership disagreement; position disagreement max=302.789px",
+      "truth": {
+        "xPx": 526,
+        "yPx": 570
+      },
+      "a": {
+        "xPx": 485,
+        "yPx": 864
+      },
+      "b": {
+        "xPx": 485,
+        "yPx": 870
+      },
+      "m": [
+        {
+          "xPx": 523,
+          "yPx": 576
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H08-basket.png"
+    },
+    {
+      "hole": 8,
+      "stage": "tee",
+      "reason": "A unresolved; B unresolved",
+      "truth": {
+        "xPx": 449,
+        "yPx": 865
+      },
+      "m": [
+        {
+          "xPx": 446.47,
+          "yPx": 862.8
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H08-tee.png"
+    },
+    {
+      "hole": 9,
+      "stage": "basket",
+      "reason": "position disagreement max=20.1px",
+      "truth": {
+        "xPx": 355,
+        "yPx": 369
+      },
+      "a": {
+        "xPx": 353,
+        "yPx": 389
+      },
+      "b": {
+        "xPx": 353,
+        "yPx": 373
+      },
+      "m": [
+        {
+          "xPx": 353,
+          "yPx": 373
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H09-basket.png"
+    },
+    {
+      "hole": 12,
+      "stage": "tee",
+      "reason": "A unresolved; ownership disagreement; M missing",
+      "truth": {
+        "xPx": 459,
+        "yPx": 232
+      },
+      "b": {
+        "xPx": 604,
+        "yPx": 436
+      },
+      "m": [],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H12-tee.png"
+    },
+    {
+      "hole": 13,
+      "stage": "basket",
+      "reason": "position disagreement max=13.336px",
+      "truth": {
+        "xPx": 1017.5,
+        "yPx": 285.9
+      },
+      "a": {
+        "xPx": 1015,
+        "yPx": 299
+      },
+      "b": {
+        "xPx": 1015,
+        "yPx": 288
+      },
+      "m": [
+        {
+          "xPx": 1015,
+          "yPx": 288
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H13-basket.png"
+    },
+    {
+      "hole": 13,
+      "stage": "tee",
+      "reason": "A unresolved",
+      "truth": {
+        "xPx": 738,
+        "yPx": 70.2
+      },
+      "b": {
+        "xPx": 733,
+        "yPx": 68
+      },
+      "m": [
+        {
+          "xPx": 732.7922077922078,
+          "yPx": 67.71428571428571
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H13-tee.png"
+    },
+    {
+      "hole": 16,
+      "stage": "basket",
+      "reason": "ownership disagreement; position disagreement max=404.345px",
+      "truth": {
+        "xPx": 864.5,
+        "yPx": 792.5
+      },
+      "a": {
+        "xPx": 523,
+        "yPx": 578
+      },
+      "b": {
+        "xPx": 523,
+        "yPx": 576
+      },
+      "m": [
+        {
+          "xPx": 864,
+          "yPx": 795
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H16-basket.png"
+    },
+    {
+      "hole": 16,
+      "stage": "tee",
+      "reason": "A unresolved; B unresolved",
+      "truth": {
+        "xPx": 603.7,
+        "yPx": 435
+      },
+      "m": [
+        {
+          "xPx": 603.5631067961165,
+          "yPx": 436.0728155339806
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H16-tee.png"
+    },
+    {
+      "hole": 17,
+      "stage": "badge",
+      "reason": "position disagreement max=77.026px",
+      "truth": {
+        "xPx": 576,
+        "yPx": 788
+      },
+      "a": {
+        "xPx": 578,
+        "yPx": 711
+      },
+      "b": {
+        "xPx": 574.2674157303371,
+        "yPx": 787.5280898876405
+      },
+      "m": [
+        {
+          "xPx": 574.2674157303371,
+          "yPx": 787.5280898876405
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H17-badge.png"
+    },
+    {
+      "hole": 17,
+      "stage": "basket",
+      "reason": "ownership disagreement; position disagreement max=386.96px",
+      "truth": {
+        "xPx": 491,
+        "yPx": 871
+      },
+      "a": {
+        "xPx": 864,
+        "yPx": 768
+      },
+      "b": {
+        "xPx": 864,
+        "yPx": 795
+      },
+      "m": [
+        {
+          "xPx": 485,
+          "yPx": 870
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H17-basket.png"
+    },
+    {
+      "hole": 17,
+      "stage": "tee",
+      "reason": "A unresolved",
+      "truth": {
+        "xPx": 681,
+        "yPx": 704
+      },
+      "b": {
+        "xPx": 675,
+        "yPx": 700
+      },
+      "m": [
+        {
+          "xPx": 675.0728155339806,
+          "yPx": 700.0485436893204
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H17-tee.png"
+    },
+    {
+      "hole": 18,
+      "stage": "basket",
+      "reason": "position disagreement max=17.464px",
+      "truth": {
+        "xPx": 582,
+        "yPx": 1197
+      },
+      "a": {
+        "xPx": 578,
+        "yPx": 1180
+      },
+      "b": {
+        "xPx": 579,
+        "yPx": 1193
+      },
+      "m": [
+        {
+          "xPx": 579,
+          "yPx": 1193
+        }
+      ],
+      "artifactPath": "lab-artifacts/AlexClark/truth-reveal-v1/review/H18-basket.png"
+    }
+  ]
+}

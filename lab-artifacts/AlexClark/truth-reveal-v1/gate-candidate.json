@@ -1,0 +1,572 @@
+{
+  "schemaVersion": 1,
+  "status": "CANDIDATE_NOT_ORACLE_APPROVED",
+  "course": "AlexClark",
+  "canonicalFrame": {
+    "widthPx": 1290,
+    "heightPx": 2082,
+    "sourceRows": [
+      2,
+      2084
+    ]
+  },
+  "crop": {
+    "candidate": true
+  },
+  "badges": {
+    "identityLabels": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ],
+    "positionCandidates": [
+      {
+        "hole": 13,
+        "bbox": {
+          "x": 794,
+          "y": 84,
+          "width": 55,
+          "height": 42
+        },
+        "center": {
+          "xPx": 821.5,
+          "yPx": 105
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 12,
+        "bbox": {
+          "x": 509,
+          "y": 138,
+          "width": 55,
+          "height": 42
+        },
+        "center": {
+          "xPx": 536.5,
+          "yPx": 159
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 14,
+        "bbox": {
+          "x": 799,
+          "y": 180,
+          "width": 56,
+          "height": 42
+        },
+        "center": {
+          "xPx": 827,
+          "yPx": 201
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 15,
+        "bbox": {
+          "x": 659,
+          "y": 206,
+          "width": 55,
+          "height": 42
+        },
+        "center": {
+          "xPx": 686.5,
+          "yPx": 227
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 11,
+        "bbox": {
+          "x": 470,
+          "y": 366,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 497,
+          "yPx": 387
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 10,
+        "bbox": {
+          "x": 384,
+          "y": 415,
+          "width": 57,
+          "height": 42
+        },
+        "center": {
+          "xPx": 412.5,
+          "yPx": 436
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 9,
+        "bbox": {
+          "x": 363,
+          "y": 488,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 390,
+          "yPx": 509
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 16,
+        "bbox": {
+          "x": 622,
+          "y": 551,
+          "width": 55,
+          "height": 42
+        },
+        "center": {
+          "xPx": 649.5,
+          "yPx": 572
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 8,
+        "bbox": {
+          "x": 463,
+          "y": 693,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 490,
+          "yPx": 714
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 17,
+        "bbox": {
+          "x": 549,
+          "y": 767,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 576,
+          "yPx": 788
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 7,
+        "bbox": {
+          "x": 458,
+          "y": 1260,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 485,
+          "yPx": 1281
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 2,
+        "bbox": {
+          "x": 532,
+          "y": 1323,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 559,
+          "yPx": 1344
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 1,
+        "bbox": {
+          "x": 669,
+          "y": 1432,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 696,
+          "yPx": 1453
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 6,
+        "bbox": {
+          "x": 553,
+          "y": 1757,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 580,
+          "yPx": 1778
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 3,
+        "bbox": {
+          "x": 300,
+          "y": 1860,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 327,
+          "yPx": 1881
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      },
+      {
+        "hole": 4,
+        "bbox": {
+          "x": 466,
+          "y": 1982,
+          "width": 54,
+          "height": 42
+        },
+        "center": {
+          "xPx": 493,
+          "yPx": 2003
+        },
+        "source": "resources/nuthing-p2/badges/manifest.json registered bbox"
+      }
+    ],
+    "excludedPositionHoles": [
+      5,
+      18
+    ],
+    "note": "registered bbox coverage only; localization-reference circularity remains"
+  },
+  "baskets": {
+    "ownershipCandidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      18
+    ],
+    "positionCandidates": [
+      {
+        "hole": 1,
+        "point": {
+          "xPx": 773,
+          "yPx": 1325
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 2,
+        "point": {
+          "xPx": 495,
+          "yPx": 1394
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 3,
+        "point": {
+          "xPx": 296,
+          "yPx": 2000
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 4,
+        "point": {
+          "xPx": 607,
+          "yPx": 1944
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 6,
+        "point": {
+          "xPx": 432,
+          "yPx": 1584.2
+        },
+        "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 3"
+      },
+      {
+        "hole": 7,
+        "point": {
+          "xPx": 512,
+          "yPx": 1165
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 9,
+        "point": {
+          "xPx": 355,
+          "yPx": 369
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 10,
+        "point": {
+          "xPx": 439,
+          "yPx": 564
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 11,
+        "point": {
+          "xPx": 456,
+          "yPx": 273
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 12,
+        "point": {
+          "xPx": 607,
+          "yPx": 92
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 13,
+        "point": {
+          "xPx": 1017.5,
+          "yPx": 285.9
+        },
+        "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 2"
+      },
+      {
+        "hole": 14,
+        "point": {
+          "xPx": 751,
+          "yPx": 108
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 15,
+        "point": {
+          "xPx": 674,
+          "yPx": 333
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 18,
+        "point": {
+          "xPx": 582,
+          "yPx": 1197
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      }
+    ],
+    "excluded": [
+      {
+        "hole": 5,
+        "reason": "position review"
+      },
+      {
+        "hole": 8,
+        "reason": "ownership review"
+      },
+      {
+        "hole": 16,
+        "reason": "ownership review"
+      },
+      {
+        "hole": 17,
+        "reason": "ownership review"
+      }
+    ]
+  },
+  "tees": {
+    "ownershipCandidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      13,
+      14,
+      15,
+      17,
+      18
+    ],
+    "positionCandidates": [
+      {
+        "hole": 1,
+        "point": {
+          "xPx": 621,
+          "yPx": 1599
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 2,
+        "point": {
+          "xPx": 636,
+          "yPx": 1287
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 3,
+        "point": {
+          "xPx": 366,
+          "yPx": 1740
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 4,
+        "point": {
+          "xPx": 373,
+          "yPx": 2053
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 6,
+        "point": {
+          "xPx": 673.9,
+          "yPx": 1844.1
+        },
+        "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 3"
+      },
+      {
+        "hole": 7,
+        "point": {
+          "xPx": 460,
+          "yPx": 1408
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 9,
+        "point": {
+          "xPx": 431,
+          "yPx": 663
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 10,
+        "point": {
+          "xPx": 384,
+          "yPx": 304
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 11,
+        "point": {
+          "xPx": 543,
+          "yPx": 508
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 13,
+        "point": {
+          "xPx": 738,
+          "yPx": 70.2
+        },
+        "source": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.annotation.json subset 2"
+      },
+      {
+        "hole": 14,
+        "point": {
+          "xPx": 914,
+          "yPx": 309
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 15,
+        "point": {
+          "xPx": 706,
+          "yPx": 112
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 17,
+        "point": {
+          "xPx": 681,
+          "yPx": 704
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      },
+      {
+        "hole": 18,
+        "point": {
+          "xPx": 514,
+          "yPx": 1023
+        },
+        "source": "resources/AlexClarkSet.chainspot.zip:project.json"
+      }
+    ],
+    "excluded": [
+      {
+        "hole": 5,
+        "reason": "position review"
+      },
+      {
+        "hole": 8,
+        "reason": "B unresolved; component candidate review"
+      },
+      {
+        "hole": 12,
+        "reason": "B assigns H16 tee"
+      },
+      {
+        "hole": 16,
+        "reason": "B unresolved; H16 candidate assigned to H12"
+      }
+    ]
+  },
+  "approval": "Sam approval required before any --gate behavior"
+}
