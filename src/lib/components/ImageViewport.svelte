@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { ViewportLayer } from '$lib/viewport';
+	import type { ViewportLayer, ViewportMarker } from '$lib/viewport';
 	import type { CropInsets } from '$lib/raster';
 
 	import { untrack } from 'svelte';
@@ -12,7 +12,8 @@
 		cropPreview,
 		children,
 		height = '70vh',
-		fitKey = 0
+		fitKey = 0,
+		markers = []
 	}: {
 		layers: ViewportLayer[];
 		selectedIndex: number;
@@ -21,6 +22,8 @@
 		children?: Snippet;
 		height?: string;
 		fitKey?: number; // bump to re-frame the content (new stitch result etc.)
+		/** per-layer detection markers, in that layer's local (display) pixels */
+		markers?: ViewportMarker[][];
 	} = $props();
 
 	// Only the OVERLAP goes translucent (55% visible), not the whole tile.
@@ -165,6 +168,14 @@
 				onpointerdown={(event) => onLayerPointerDown(event, index)}
 				style={`display: block; ${overlapMask(index)}`}
 			/>
+			{#each markers[index] ?? [] as marker (marker.xPx + ':' + marker.yPx + ':' + marker.label)}
+				<div
+					title={marker.title}
+					style={`position: absolute; left: ${marker.xPx}px; top: ${marker.yPx}px; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 50%; background: ${marker.color}; color: white; display: flex; align-items: center; justify-content: center; font: bold 24px sans-serif; opacity: 0.85; pointer-events: none;`}
+				>
+					{marker.label}
+				</div>
+			{/each}
 			{#if cropPreview}
 				<div
 					aria-label="Proposed crop preview"

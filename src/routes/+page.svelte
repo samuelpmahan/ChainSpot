@@ -10,6 +10,10 @@
 	} from '$lib/raster';
 	import { proposeSharedCrop } from '$lib/autoCrop';
 	import { findBestTranslation } from '$lib/stitch';
+	import { rgbaFromFile } from '$lib/rgba';
+	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
+	import type { DetectorEmission } from '$lib/detect';
+	import type { ViewportMarker } from '$lib/viewport';
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
 	const MAX_IMAGES = 6;
@@ -31,6 +35,74 @@
 	let selectionSeq = 0;
 	let headerH = $state(0);
 	let fitKey = $state(0);
+
+	// detector emissions per image, keyed by objectUrl (stable UI identity)
+	let detections = $state<Record<string, DetectorEmission[]>>({});
+	const HOLE_COLORS = [
+		'#d33',
+		'#36c',
+		'#2a862a',
+		'#c70',
+		'#849',
+		'#087',
+		'#b3b',
+		'#770',
+		'#345'
+	];
+
+	async function runDetection(img: LoadedImage) {
+		const seq = selectionSeq;
+		try {
+			const raster = await rgbaFromFile(img.file);
+			const emitted: DetectorEmission[] = [];
+			await labEndpointDetector(raster, (e) => emitted.push(e));
+			if (seq !== selectionSeq) return;
+			detections = { ...detections, [img.objectUrl]: emitted };
+			dbg('detector done', img.file.name, {
+				objects: emitted.filter((e) => e.kind === 'object').length,
+				labels: emitted.filter((e) => e.kind === 'label').length
+			});
+		} catch (e) {
+			dbg('detector failed', img.file.name, e instanceof Error ? e.message : e);
+		}
+	}
+
+	// project detections into each layer's local (cropped display) pixels
+	function projectMarkers(imgs: LoadedImage[]): ViewportMarker[][] {
+		return imgs.map((img, i) => {
+			const emitted = detections[img.objectUrl];
+			if (!emitted) return [] as ViewportMarker[];
+			const labelByDet = new Map(
+				emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
+			);
+			const left = appliedInsets?.left ?? 0;
+			const top = appliedInsets?.top ?? 0;
+			const w = rasters[i]?.widthPx ?? img.widthPx;
+			const h = rasters[i]?.heightPx ?? img.heightPx;
+			const out: ViewportMarker[] = [];
+			for (const e of emitted) {
+				if (e.kind !== 'object') continue;
+				const x = e.xPx - left;
+				const y = e.yPx - top;
+				if (x < 0 || y < 0 || x > w || y > h) continue;
+				if (e.objType === 'hole-badge') {
+					const n = labelByDet.get(e.detId);
+					out.push({
+						xPx: x,
+						yPx: y,
+						color: n ? HOLE_COLORS[(n - 1) % HOLE_COLORS.length] : '#666',
+						label: n ? String(n) : '?',
+						title: `badge ${n ?? '?'} (${e.confidence.toFixed(2)})`
+					});
+				} else if (e.objType === 'basket') {
+					out.push({ xPx: x, yPx: y, color: '#222', label: 'B', title: `basket (${e.confidence.toFixed(2)})` });
+				} else if (e.objType === 'tee') {
+					out.push({ xPx: x, yPx: y, color: '#2c4a2c', label: 'T', title: `tee (${e.confidence.toFixed(2)})` });
+				}
+			}
+			return out;
+		});
+	}
 
 	// temporary instrumentation for the canvas bring-up — grep tag: [stitch]
 	function dbg(...args: unknown[]) {
@@ -62,6 +134,8 @@
 				}))
 			: []
 	);
+
+	let markers = $derived(projectMarkers(mapImages));
 
 	function resetStitchState() {
 		for (const [index, url] of displayUrls.entries()) {
@@ -230,6 +304,7 @@
 			} else {
 				images.push(r.image);
 				addedAny = true;
+				runDetection(r.image);
 			}
 		}
 		if (addedAny) {
@@ -245,6 +320,7 @@
 		resetStitchState();
 		for (const img of images) releaseImage(img);
 		images = [];
+		detections = {};
 		thrownIdx = -1;
 		skipCrop = false;
 		error = null;
@@ -290,6 +366,7 @@
 		cropPreview={null}
 		height={`calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px)`}
 		{fitKey}
+		{markers}
 	>
 		{#if thrownRound}
 			<div style="background: rgba(255,255,255,0.9); border: 1px solid black; padding: 0.25rem; text-align: center;">
