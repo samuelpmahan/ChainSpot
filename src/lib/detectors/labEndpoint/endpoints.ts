@@ -18,9 +18,8 @@
  *   Detection finds small enclosed dark holes in the bright mask and
  *   verifies the enclosing white ring. Merging with walking-path dashes or
  *   ring furniture does not destroy the hole, so this survives exactly the
- *   cases that broke component-family matching. Diamond path/ring markers
- *   are hollow squares — separated by hole elongation (a tee's hole is ~2:1,
- *   a diamond's is square) and kept, tagged, for distractor attribution.
+ *   cases that broke component-family matching. Every qualifying hollow
+ *   marker is a tee; squarer renderings are not a separate object class.
  */
 
 import type { Mask } from './raster';
@@ -59,14 +58,10 @@ export interface TeeRing {
 	bboxY: number;
 	bboxW: number;
 	bboxH: number;
-	/** Principal-axis elongation of the interior (√(λ1/λ2)). */
-	elongation: number;
 	/** Principal-axis angle, radians in [0,π). */
 	angle: number;
 	/** Bright fraction of the enclosing ring band. */
 	ringFrac: number;
-	/** 'tee-rect' when elongated, 'diamond' when square-ish (path/ring marker). */
-	kind: 'tee-rect' | 'diamond';
 }
 
 interface TemplateOffsets {
@@ -248,14 +243,13 @@ const HOLE_AREA_MAX = 480;
 const HOLE_DIM_MAX = 44;
 const RING_BAND = 3;
 const RING_FRAC_MIN = 0.6;
-const TEE_ELONGATION_MIN = 1.18;
 
 /**
  * Enclosed-hole tee detection: flood the non-bright background in from the
  * image border; any remaining non-bright pixel belongs to a hole fully
- * enclosed by bright pixels. Small rect-ish holes wrapped in a mostly-bright
- * ring band are hollow glyphs; elongation separates tee rects from diamond
- * markers.
+ * enclosed by bright pixels. Small holes wrapped in a mostly-bright ring band
+ * are tee glyphs. Near-square geometry is expected and is not a negative
+ * signal; no aspect or elongation gate is applied.
  *
  * Occlusion/antialiasing cuts 1-4 px gaps into some tee outlines, letting
  * the hole leak to background (5 of 9 dev tee misses). Fix: run the flood
@@ -389,7 +383,7 @@ export function detectTeeRingsPass(
 		if (bw > HOLE_DIM_MAX || bh > HOLE_DIM_MAX) continue;
 		const cx = sx / cells.length;
 		const cy = sy / cells.length;
-		// Central moments → elongation + angle.
+		// Central moments → undirected tee orientation.
 		let mxx = 0;
 		let myy = 0;
 		let mxy = 0;
@@ -403,12 +397,6 @@ export function detectTeeRingsPass(
 		mxx /= cells.length;
 		myy /= cells.length;
 		mxy /= cells.length;
-		const tr = mxx + myy;
-		const det = mxx * myy - mxy * mxy;
-		const disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - det));
-		const l1 = tr / 2 + disc;
-		const l2 = Math.max(tr / 2 - disc, 1e-6);
-		const elongation = Math.sqrt(l1 / l2);
 		const angle = (Math.atan2(2 * mxy, mxx - myy) / 2 + Math.PI) % Math.PI;
 		// Ring band: bright fraction within RING_BAND px (8-neighbor dilation)
 		// of the hole itself — hugs rotated shapes, unlike a bbox band.
@@ -464,10 +452,8 @@ export function detectTeeRingsPass(
 			bboxY: y0,
 			bboxW: bw,
 			bboxH: bh,
-			elongation,
 			angle,
-			ringFrac,
-			kind: elongation >= TEE_ELONGATION_MIN ? 'tee-rect' : 'diamond'
+			ringFrac
 		});
 	}
 	return out;
@@ -494,10 +480,10 @@ export interface TeePoint {
 }
 
 /**
- * Two-tier tee candidate set. Tier 1: ring-detected tee-rects. Tier 2:
+ * Two-tier tee candidate set. Tier 1: ring-detected hollow tees. Tier 2:
  * bright components matching the (widened, dev-measured) tee-rect family,
- * excluding anything already explained — a tier-1 tee, a diamond marker, or
- * a matched basket sprite's own neighborhood. Caller removes badge glyphs
+ * excluding anything already explained by a tier-1 tee or a matched basket
+ * sprite's own neighborhood. Caller removes badge glyphs
  * from `components` first (digit counters contain rect-like holes/shapes).
  */
 export function collectTeePoints(
@@ -505,10 +491,12 @@ export function collectTeePoints(
 	components: TeeComponentLike[],
 	spriteCenters: { cx: number; cy: number }[]
 ): TeePoint[] {
-	const out: TeePoint[] = rings
-		.filter((r) => r.kind === 'tee-rect')
-		.map((r) => ({ cx: r.cx, cy: r.cy, tier: 'ring' as const, ring: r }));
-	const diamonds = rings.filter((r) => r.kind === 'diamond');
+	const out: TeePoint[] = rings.map((r) => ({
+		cx: r.cx,
+		cy: r.cy,
+		tier: 'ring' as const,
+		ring: r
+	}));
 	for (const c of components) {
 		const minDim = Math.min(c.bboxW, c.bboxH);
 		const maxDim = Math.max(c.bboxW, c.bboxH);
@@ -516,7 +504,6 @@ export function collectTeePoints(
 		if (c.area < 80 || c.area > 350) continue;
 		if (c.fill < 0.2 || c.fill > 0.85) continue;
 		if (out.some((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < 12)) continue;
-		if (diamonds.some((d) => Math.hypot(d.cx - c.cx, d.cy - c.cy) < 12)) continue;
 		if (spriteCenters.some((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < 24)) continue;
 		out.push({ cx: c.cx, cy: c.cy, tier: 'component' });
 	}

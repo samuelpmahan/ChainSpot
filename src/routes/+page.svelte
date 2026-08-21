@@ -38,16 +38,17 @@
 
 	// detector emissions per image, keyed by objectUrl (stable UI identity)
 	let detections = $state<Record<string, DetectorEmission[]>>({});
+	// one hue family each — no magenta/purple double-up
 	const HOLE_COLORS = [
-		'#d33',
-		'#36c',
-		'#2a862a',
-		'#c70',
-		'#849',
-		'#087',
-		'#b3b',
-		'#770',
-		'#345'
+		'#d33', // red
+		'#36c', // blue
+		'#2a862a', // green
+		'#c70', // orange
+		'#849', // purple
+		'#087', // teal
+		'#853', // brown
+		'#770', // olive
+		'#345' // navy
 	];
 
 	async function runDetection(img: LoadedImage) {

@@ -44,6 +44,19 @@ async function detect(image: RgbaRaster): Promise<DetectorEmission[]> {
 }
 
 describe('labEndpointDetector', () => {
+	it('emits a square hollow marker as a tee', async () => {
+		const image = raster(96, 96);
+		outline(image, 35, 35, 24, 24);
+
+		const emissions = await detect(image);
+		const tees = emissions.filter(
+			(emission) => emission.kind === 'object' && emission.objType === 'tee'
+		);
+
+		expect(tees).toHaveLength(1);
+		expect(tees[0]).toMatchObject({ imageId: 'synthetic', detId: 'tee-0' });
+	});
+
 	it('emits a basket at the sprite pole tip', async () => {
 		const image = raster(100, 100);
 		const sprite = (await import('$lib/detectors/labEndpoint/assets/basket-sprite.json')).default;
