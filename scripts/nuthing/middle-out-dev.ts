@@ -6,10 +6,9 @@
 // digits == hole number) must have BOTH its tee and its basket matched by an
 // endpoint candidate. Timing target: < 2 s per image total, warm.
 //
-// Truth: DashsTrack annotation (sha-verified identity frame); Heritage/
-// Lenard/TowneLake via resources/nuthing-p2/registered-annotations.json;
-// AlexClark bent holes via corridor-centerline midpoints (holes 16 and 6
-// confident, 14 ambiguous-but-included).
+// Truth: DashsTrack and AlexClark full corpus annotations (sha-verified
+// identity frames); Heritage/Lenard/TowneLake via
+// resources/nuthing-p2/registered-annotations.json.
 //
 // Usage: npx tsx scripts/nuthing/middle-out-dev.ts RGBA_DIR [--report MD] [--tol PX]
 
@@ -61,9 +60,6 @@ function registeredTruth(name: string): TruthHole[] {
 }
 
 function alexClarkTruth(): TruthHole[] {
-  // Bent holes annotated with tool-internal numbers 1..3; course numbers
-  // resolved via corridor-centerline midpoint -> badge association
-  // (docs/nuthing-p2/two-pass-tees.md): 1->16, 2->14 (ambiguous), 3->6.
   const ann = JSON.parse(
     readFileSync(join(CORPUS, 'dev/AlexClark/AlexClark-full.annotation.json'), 'utf8'),
   ) as {
@@ -73,14 +69,8 @@ function alexClarkTruth(): TruthHole[] {
       basket: { xPx: number; yPx: number };
     }[];
   };
-  const courseNumber: Record<number, { n: number; note?: string }> = {
-    1: { n: 16 },
-    2: { n: 14, note: 'ambiguous badge association (1.4px margin)' },
-    3: { n: 6 },
-  };
   return ann.holes.map((h) => ({
-    number: courseNumber[h.number].n,
-    note: courseNumber[h.number].note,
+    number: h.number,
     tee: [h.tee.xPx, h.tee.yPx],
     basket: [h.basket.xPx, h.basket.yPx],
   }));
