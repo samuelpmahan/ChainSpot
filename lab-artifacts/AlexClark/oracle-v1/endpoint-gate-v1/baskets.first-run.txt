@@ -1,0 +1,344 @@
+course: AlexClark
+stage: baskets
+crop rows: [2, 2084) (provenance only)
+canonical frame: 1290x2082 crop-local pixels
+measurements: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/baskets.measurements.json
+course evidence: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/baskets-course.png
+
+GATE AlexClark / baskets
+fixture: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-fixtures.json
+fixture status: ORACLE_APPROVED_ACTIVE
+canonical frame: 1290x2082 crop-local pixels
+position tolerance: 0 px (exact fixture localization; no tolerance is encoded in the fixture)
+instrument limitation: current baskets output has no hole ownership labels; proximity is not used to fabricate ownership.
+
+FAIL AlexClark / baskets / H1
+
+approved:
+  identity basket
+  owner H1
+  center (770, 1322)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (770, 1322)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H2
+
+approved:
+  identity basket
+  owner H2
+  center (493, 1394)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (493, 1394)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H3
+
+approved:
+  identity basket
+  owner H3
+  center (295, 2008)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (295, 2008)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H4
+
+approved:
+  identity basket
+  owner H4
+  center (610, 1953)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (610, 1953)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H5
+
+approved:
+  identity basket
+  owner H5
+  center (759.8710360039926, 1904.841606869048)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (760, 1905)
+  distance from approved center 0.204255 px
+  owner unavailable
+
+changed:
+  localization changed by 0.204255 px
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H6
+
+approved:
+  identity basket
+  owner H6
+  center (429, 1586)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (429, 1586)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H7
+
+approved:
+  identity basket
+  owner H7
+  center (513, 1170)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (513, 1170)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H8
+
+approved:
+  identity basket
+  owner H8
+  center (523, 576)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (523, 576)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H9
+
+approved:
+  identity basket
+  owner H9
+  center (353, 373)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (353, 373)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H10
+
+approved:
+  identity basket
+  owner H10
+  center (438, 561)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (438, 561)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H11
+
+approved:
+  identity basket
+  owner H11
+  center (458, 275)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (458, 275)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H12
+
+approved:
+  identity basket
+  owner H12
+  center (607, 96)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (607, 96)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H13
+
+approved:
+  identity basket
+  owner H13
+  center (1015, 288)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (1015, 288)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H14
+
+approved:
+  identity basket
+  owner H14
+  center (752, 106)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (752, 106)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H15
+
+approved:
+  identity basket
+  owner H15
+  center (669, 334)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (669, 334)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H16
+
+approved:
+  identity basket
+  owner H16
+  center (864, 795)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (864, 795)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H17
+
+approved:
+  identity basket
+  owner H17
+  center (485, 870)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (485, 870)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / baskets / H18
+
+approved:
+  identity basket
+  owner H18
+  center (579, 1193)
+
+current:
+  testimony basket sprite candidate
+  nearest unassigned center (579, 1193)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+RESULT: FAIL AlexClark / baskets
+approved facts checked: 18
+changed approved facts: 18
+
+first gate output preserved: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/baskets.first-run.txt

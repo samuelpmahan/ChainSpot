@@ -1,0 +1,350 @@
+{
+  "schemaVersion": 1,
+  "course": "AlexClark",
+  "canonicalFrame": {
+    "widthPx": 1290,
+    "heightPx": 2082,
+    "origin": "crop top-left",
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "oracle": "Sam",
+  "stageApprovals": [
+    {
+      "recordedAt": "2026-08-21T12:36:51-05:00",
+      "stage": "endpoints",
+      "status": "ORACLE_CONFIRMED",
+      "oracleWords": "All triplets successfully marked!",
+      "oracleWordsContext": "Sam reviewed the full current AlexClark endpoint overlay and confirmed all 18 displayed tee-badge-basket triplets.",
+      "scope": {
+        "holes": "H1-H18",
+        "objects": [
+          "tee",
+          "badge",
+          "basket"
+        ],
+        "ownership": "approved",
+        "displayedMeasurementLocalizations": "approved as sufficiently accurate for the endpoint annotation"
+      },
+      "precisionBoundary": "Sam approved the displayed triplets. Subpixel coordinates retain their machine or deterministic-fit provenance and are not represented as manually supplied Oracle precision.",
+      "sourceArtifact": "lab-artifacts/AlexClark/oracle-v1/current-endpoints-review-overlay.png"
+    }
+  ],
+  "observations": [
+    {
+      "recordedAt": "2026-08-21T11:03:53.5763788-05:00",
+      "hole": 8,
+      "object": "basket",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H8",
+        "selectedVisibleObject": "upper basket marked by the orange machine-candidate diamond"
+      },
+      "oracleWords": "upper (orange diamond)",
+      "measurementLocalization": {
+        "xPx": 523,
+        "yPx": 576,
+        "source": "matchBasketSprites pole-tip measurement"
+      },
+      "historicalReference": {
+        "xPx": 526,
+        "yPx": 570,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "precisionBoundary": "Sam established visible-object identity and H8 ownership; Sam did not supply a subpixel coordinate. Stored coordinates come from the existing machine measurement.",
+      "learningNote": "B already contained both basket candidates but selected the lower sprite. Candidate inventory and matched-filter strength were insufficient ownership evidence; an additional ownership cue was missing.",
+      "downstreamImplication": "The H8/H16/H17 basket inventory is constrained, but H16 and H17 remain INFERRED until Sam explicitly reviews them."
+    },
+    {
+      "recordedAt": "2026-08-21T11:06:11.3190053-05:00",
+      "hole": 16,
+      "object": "basket",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H16",
+        "selectedVisibleObject": "southeast basket marked by the orange machine-candidate diamond"
+      },
+      "oracleWords": "Yes",
+      "oracleWordsContext": "Sam confirmed Sol's immediately preceding inference that the orange-diamond basket near (864,795) belongs to H16.",
+      "measurementLocalization": {
+        "xPx": 864,
+        "yPx": 795,
+        "source": "matchBasketSprites pole-tip measurement"
+      },
+      "historicalReference": {
+        "xPx": 864.5,
+        "yPx": 792.5,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "precisionBoundary": "Sam established visible-object identity and H16 ownership; Sam did not supply a subpixel coordinate. Stored coordinates come from the existing machine measurement.",
+      "basisPresentedToOracle": [
+        "H8 was already Oracle-confirmed to own the competing (523,576) basket.",
+        "Visible route continuity from the H16 tee/badge neighborhood proceeds southeast toward this basket.",
+        "Matched-filter scores established both objects as baskets but did not establish ownership."
+      ],
+      "learningNote": "B lacked global endpoint-inventory exclusion and route-continuity evidence. It assigned H16 the same visible basket that Sam had already established as H8's endpoint.",
+      "downstreamImplication": "The remaining H17 basket is strongly constrained by inventory, but remains INFERRED until Sam explicitly reviews it."
+    },
+    {
+      "recordedAt": "2026-08-21T11:08:24.4574517-05:00",
+      "hole": 17,
+      "object": "basket",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H17",
+        "selectedVisibleObject": "southwest basket marked by the remaining machine candidate"
+      },
+      "oracleWords": "thats the one",
+      "oracleWordsContext": "Sam confirmed the immediately preceding question asking whether the southwest basket near (485,870) belongs to H17.",
+      "measurementLocalization": {
+        "xPx": 485,
+        "yPx": 870,
+        "source": "matchBasketSprites pole-tip measurement"
+      },
+      "historicalReference": {
+        "xPx": 491,
+        "yPx": 871,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "precisionBoundary": "Sam established visible-object identity and H17 ownership; Sam did not supply a subpixel coordinate. Stored coordinates come from the existing machine measurement.",
+      "basisPresentedToOracle": [
+        "H8 and H16 basket ownerships were already Oracle-confirmed.",
+        "The southwest basket was the remaining member of the H8/H16/H17 inventory permutation."
+      ],
+      "learningNote": "Global endpoint inventory resolved the ambiguity after two explicit ownership observations. B detected every involved sprite but did not solve the ownership permutation.",
+      "downstreamImplication": "The H8/H16/H17 basket permutation is now fully Oracle-confirmed."
+    },
+    {
+      "recordedAt": "2026-08-21T11:23:34-05:00",
+      "hole": 8,
+      "object": "tee",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H8",
+        "selectedVisibleObject": "the tee glyph occluded by H17's C1S basket ring"
+      },
+      "oracleWords": "Correct :D",
+      "oracleWordsContext": "Sam confirmed Sol's immediately preceding question asking whether the C1S-occluded glyph is H8's tee.",
+      "localization": {
+        "status": "NOT_ORACLE_APPROVED",
+        "provisionalCenterPx": {
+          "xPx": 449,
+          "yPx": 865
+        },
+        "uncertaintyPx": 6,
+        "basis": "visible glyph extent plus historical localization; existing machine output split the glyph into component candidates at (446.47,862.80) and (459.18,866.66)"
+      },
+      "historicalReference": {
+        "xPx": 449,
+        "yPx": 865,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "precisionBoundary": "Sam established glyph identity and H8 ownership. Sam did not approve an exact center; the provisional coordinate is not an Oracle observation or gate fact.",
+      "basisPresentedToOracle": [
+        "The proposed tee center is 36.35 px from H17's basket pole tip, on the documented inner edge of the C1S solid-ring band (44 +/- 8 px).",
+        "The tee-to-badge and tee-to-basket rays differ by approximately 0.6 degrees, within the historical straight-hole alignment distribution.",
+        "The badge lies approximately 0.53 of the tee-to-basket distance, within the documented straight-hole range of 0.19 to 0.54.",
+        "Known ring-attribution evidence says real tees can overlap neighboring basket rings; ring association is not a blanket exclusion rule."
+      ],
+      "evidenceAgainstOrDoubt": [
+        "The enclosing ring is open and the glyph is split into two machine components, so localization is unstable.",
+        "The historical reference influenced the proposed center and is not itself an Oracle observation."
+      ],
+      "learningNote": "B dismissed a component-tier tee candidate because a neighboring basket's C1S ring interfered with the glyph. Ring provenance plus global straight-hole geometry recovered semantic identity, but not an independently measured exact center."
+    },
+    {
+      "recordedAt": "2026-08-21T11:35:21-05:00",
+      "hole": 12,
+      "object": "tee",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H12",
+        "selectedEndpoint": "the tee endpoint completely hidden beneath H11's basket sprite"
+      },
+      "oracleWords": "Confirmed 🥲",
+      "oracleWordsContext": "Sam confirmed Sol's immediately preceding question asking whether H12's tee is hidden beneath H11's basket sprite, approximately at (459,232).",
+      "localization": {
+        "status": "NOT_ORACLE_APPROVED_AS_EXACT",
+        "provisionalCenterPx": {
+          "xPx": 459,
+          "yPx": 232
+        },
+        "basis": "historical endpoint localization plus deterministic route geometry; no tee pixels survive beneath the occluding sprite"
+      },
+      "historicalReference": {
+        "xPx": 459,
+        "yPx": 232,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "occlusionMeasurement": {
+        "occludingObject": "H11 basket sprite",
+        "h11BasketPoleTipPx": {
+          "xPx": 458,
+          "yPx": 275
+        },
+        "fixedSpriteSizePx": {
+          "width": 42,
+          "height": 66
+        },
+        "derivedSpriteBoundsPx": {
+          "xMin": 437,
+          "xMax": 479,
+          "yMin": 205,
+          "yMax": 271
+        }
+      },
+      "precisionBoundary": "Sam established the hidden endpoint's semantic identity and H12 ownership. No surviving pixels or independent machine component establish an exact center; (459,232) remains a reference/geometry localization rather than Oracle-supplied precision.",
+      "basisPresentedToOracle": [
+        "The proposed endpoint lies inside the measured 42x66 H11 basket sprite bounds.",
+        "At (459,232), H12 tee-to-badge and tee-to-basket bearings differ by approximately 0.1 degrees.",
+        "The H12 badge lies approximately 0.52 along tee-to-basket, within the documented straight-hole interval 0.19 to 0.54.",
+        "The machine candidate at (603.56,436.07) gives approximately 14 degrees of H12 angular disagreement and puts the badge approximately 0.83 along the route."
+      ],
+      "evidenceAgainstOrDoubt": [
+        "No H12 tee pixels survive at the approved semantic location.",
+        "The provisional center originates from the historical reference and geometric consistency, not an independently localized tee component."
+      ],
+      "learningNote": "B lacked occlusion-aware negative evidence: detector silence underneath a known fixed basket sprite should not be treated like detector silence in visible terrain. Global straight-hole geometry supplied ownership while the sprite model explained why local tee evidence was absent."
+    },
+    {
+      "recordedAt": "2026-08-21T11:38:32-05:00",
+      "hole": 16,
+      "object": "tee",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H16",
+        "selectedVisibleObject": "the orange-marked hollow tee glyph northwest of the H16 badge"
+      },
+      "oracleWords": "yes, feel free to batch requests as well",
+      "oracleWordsContext": "Sam confirmed Sol's immediately preceding question asking whether the orange-marked glyph near (604,436) is H16's tee.",
+      "measurementLocalization": {
+        "xPx": 603.5631067961165,
+        "yPx": 436.0728155339806,
+        "source": "detectTeeRings ring-interior centroid"
+      },
+      "historicalReference": {
+        "xPx": 603.7,
+        "yPx": 435,
+        "relation": "REFERENCE_AGREES_SEMANTICALLY"
+      },
+      "precisionBoundary": "Sam established visible-object identity and H16 ownership; stored subpixel coordinates come from the existing ring-centroid measurement.",
+      "basisPresentedToOracle": [
+        "The direct ring-tier candidate has enclosed area 206 px2, elongation 1.596, and enclosing-ring fraction 0.771.",
+        "The measured glyph orientation is 71.39 degrees and the candidate-to-H16-badge bearing is 71.33 degrees, a 0.06 degree difference.",
+        "The H16 badge lies approximately 0.32 of the candidate-to-basket distance.",
+        "H12's hidden tee ownership was already Oracle-confirmed, eliminating B's competing H12 assignment."
+      ],
+      "evidenceAgainstOrDoubt": [
+        "The enclosing ring is incomplete at ringFrac 0.771.",
+        "The detector establishes tee-shaped morphology; ownership still depends on route context."
+      ],
+      "learningNote": "The most useful machine evidence was not the tee label alone but the measured glyph orientation: it matched the initial tee-to-badge route within 0.06 degrees. Oracle-confirming H12 first also removed the harmful ownership permutation made by B."
+    },
+    {
+      "recordedAt": "2026-08-21T12:25:01-05:00",
+      "hole": 5,
+      "object": "tee",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H5",
+        "selectedVisibleObject": "the isolated horizontal hollow tee glyph west of the H5 badge"
+      },
+      "oracleWords": "Close enuogh that it aint worth remeasuring",
+      "oracleWordsContext": "Sam accepted Sol's corrected, pixel-annotated H5 tee/badge/basket triplet as sufficiently precise to freeze without further measurement.",
+      "measurementLocalization": {
+        "xPx": 472.41062801932367,
+        "yPx": 1888.5265700483092,
+        "source": "detectTeeRings enclosed-hole centroid"
+      },
+      "historicalReference": {
+        "xPx": 486,
+        "yPx": 1886,
+        "relation": "REFERENCE_DISAGREES_POSITION"
+      },
+      "precisionBoundary": "Sam approved the measured localization as sufficiently precise; Sam did not manually assert the stored subpixel digits.",
+      "learningNote": "The enclosed-hole centroid localized the visible glyph more faithfully than the historical point, which lands near the glyph's right side."
+    },
+    {
+      "recordedAt": "2026-08-21T12:25:01-05:00",
+      "hole": 5,
+      "object": "badge",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "identity": "H5",
+        "selectedVisibleObject": "the black H5 badge plate immediately above the overlapping H4 basket sprite"
+      },
+      "oracleWords": "Close enuogh that it aint worth remeasuring",
+      "oracleWordsContext": "Sam accepted Sol's corrected, pixel-annotated H5 tee/badge/basket triplet as sufficiently precise to freeze without further measurement.",
+      "measurementLocalization": {
+        "xPx": 620.5,
+        "yPx": 1896.5,
+        "source": "geometric center of exact 54x42 consensus badge-plate border fit",
+        "bbox": {
+          "x": 594,
+          "y": 1876,
+          "width": 54,
+          "height": 42
+        },
+        "fitEvidence": "1152 of 1152 tested border-template pixels agreed"
+      },
+      "historicalReference": {
+        "relation": "NO_REGISTERED_H5_BADGE_POSITION"
+      },
+      "precisionBoundary": "Sam approved the measurement as sufficiently precise; the half-pixel center is deterministic bbox geometry, not manually supplied precision.",
+      "learningNote": "The earlier visual estimate (621,1925) landed in the overlapping H4 basket sprite. Drawing the center directly on clean pixels exposed the category error; a renderer-specific plate-border fit recovered the badge."
+    },
+    {
+      "recordedAt": "2026-08-21T12:25:01-05:00",
+      "hole": 5,
+      "object": "basket",
+      "status": "ORACLE_CONFIRMED",
+      "oracleSemanticDecision": {
+        "ownership": "H5",
+        "selectedVisibleObject": "the eastern basket sprite and its concentric renderer circles"
+      },
+      "oracleWords": "Close enuogh that it aint worth remeasuring",
+      "oracleWordsContext": "Sam accepted Sol's corrected, pixel-annotated H5 tee/badge/basket triplet as sufficiently precise to freeze without further measurement.",
+      "measurementLocalization": {
+        "xPx": 759.8710360039926,
+        "yPx": 1904.841606869048,
+        "source": "mean of independently sampled inner and outer circle-center fits"
+      },
+      "circleEvidence": {
+        "inner": {
+          "center": {
+            "xPx": 759.8636972331975,
+            "yPx": 1905.652942481769
+          },
+          "radiusPx": 32.663250763937704,
+          "inliers": 48,
+          "radialRmsePx": 0.642
+        },
+        "outer": {
+          "center": {
+            "xPx": 759.8783747747877,
+            "yPx": 1904.030271256327
+          },
+          "radiusPx": 72.08233908970638,
+          "inliers": 49,
+          "radialRmsePx": 0.379
+        },
+        "centerSeparationPx": 1.623
+      },
+      "fixedSpriteTestimony": {
+        "poleTip": {
+          "xPx": 760,
+          "yPx": 1905
+        },
+        "distanceFromCircleConsensusPx": 0.204,
+        "matchScore": 0.998453
+      },
+      "historicalReference": {
+        "xPx": 763,
+        "yPx": 1894,
+        "relation": "REFERENCE_AGREES_OWNERSHIP_DISAGREES_POSITION"
+      },
+      "precisionBoundary": "Sam approved the fitted basket location as sufficiently precise; the stored subpixel digits come from boundary fits, not manual Oracle placement.",
+      "learningNote": "Showing sampled boundary pixels corrected an over-persuasive visualization. Two circle fits and the independent fixed-sprite transform converge within 1.7 px, placing the basket near (760,1905), not the historical y=1894 point."
+    }
+  ]
+}

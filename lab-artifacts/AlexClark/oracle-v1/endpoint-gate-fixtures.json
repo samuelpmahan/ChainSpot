@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "status": "ORACLE_APPROVED_ACTIVE",
+  "course": "AlexClark",
+  "canonicalFrame": {
+    "widthPx": 1290,
+    "heightPx": 2082,
+    "origin": "crop top-left",
+    "xAxis": "right",
+    "yAxis": "down"
+  },
+  "facts": [
+    {
+      "hole": 1,
+      "tee": {
+        "xPx": 616,
+        "yPx": 1595,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 695.3376344086022,
+        "yPx": 1452.5569892473118,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 770,
+        "yPx": 1322,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 2,
+      "tee": {
+        "xPx": 633,
+        "yPx": 1288,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 558.2875536480686,
+        "yPx": 1343.5278969957083,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 493,
+        "yPx": 1394,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 3,
+      "tee": {
+        "xPx": 363,
+        "yPx": 1743,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 326.3333333333333,
+        "yPx": 1880.5376344086021,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 295,
+        "yPx": 2008,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 4,
+      "tee": {
+        "xPx": 369,
+        "yPx": 2058,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 492.74200426439234,
+        "yPx": 2002.3944562899787,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 610,
+        "yPx": 1953,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 5,
+      "tee": {
+        "xPx": 472.41062801932367,
+        "yPx": 1888.5265700483092,
+        "source": "detectTeeRings enclosed-hole centroid",
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 620.5,
+        "yPx": 1896.5,
+        "source": "geometric center of exact 54x42 consensus badge-plate border fit",
+        "bbox": {
+          "x": 594,
+          "y": 1876,
+          "width": 54,
+          "height": 42
+        },
+        "fitEvidence": "1152 of 1152 tested border-template pixels agreed",
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 759.8710360039926,
+        "yPx": 1904.841606869048,
+        "source": "mean of independently sampled inner and outer circle-center fits",
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 6,
+      "tee": {
+        "xPx": 673,
+        "yPx": 1848,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 579.6498951781971,
+        "yPx": 1777.4633123689728,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 429,
+        "yPx": 1586,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 7,
+      "tee": {
+        "xPx": 454,
+        "yPx": 1405,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 484.82947368421054,
+        "yPx": 1280.5978947368421,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 513,
+        "yPx": 1170,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 8,
+      "tee": {
+        "xPx": 449,
+        "yPx": 865,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 489.3905579399142,
+        "yPx": 713.6566523605151,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 523,
+        "yPx": 576,
+        "source": "matchBasketSprites pole-tip measurement",
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 9,
+      "tee": {
+        "xPx": 429,
+        "yPx": 657,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 389.9614561027837,
+        "yPx": 508.6873661670235,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 353,
+        "yPx": 373,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 10,
+      "tee": {
+        "xPx": 381,
+        "yPx": 304,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 411.00631578947366,
+        "yPx": 435.4526315789474,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 438,
+        "yPx": 561,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 11,
+      "tee": {
+        "xPx": 542,
+        "yPx": 507,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 496.3939393939394,
+        "yPx": 386.4307359307359,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 458,
+        "yPx": 275,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 12,
+      "tee": {
+        "xPx": 459,
+        "yPx": 232,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 535.4491525423729,
+        "yPx": 158.29449152542372,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 607,
+        "yPx": 96,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 13,
+      "tee": {
+        "xPx": 733,
+        "yPx": 68,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 820.3376906318083,
+        "yPx": 104.5272331154684,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 1015,
+        "yPx": 288,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 14,
+      "tee": {
+        "xPx": 910,
+        "yPx": 306,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 825.2263736263736,
+        "yPx": 200.54945054945054,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 752,
+        "yPx": 106,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 15,
+      "tee": {
+        "xPx": 706,
+        "yPx": 109,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 685.2307692307693,
+        "yPx": 226.54505494505494,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 669,
+        "yPx": 334,
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 16,
+      "tee": {
+        "xPx": 603.5631067961165,
+        "yPx": 436.0728155339806,
+        "source": "detectTeeRings ring-interior centroid",
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 647.8463251670379,
+        "yPx": 571.3830734966592,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 864,
+        "yPx": 795,
+        "source": "matchBasketSprites pole-tip measurement",
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 17,
+      "tee": {
+        "xPx": 675,
+        "yPx": 700,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 574.2674157303371,
+        "yPx": 787.5280898876405,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 485,
+        "yPx": 870,
+        "source": "matchBasketSprites pole-tip measurement",
+        "oracleReviewed": true
+      }
+    },
+    {
+      "hole": 18,
+      "tee": {
+        "xPx": 512,
+        "yPx": 1020,
+        "oracleReviewed": true
+      },
+      "badge": {
+        "xPx": 548,
+        "yPx": 1041,
+        "oracleReviewed": true
+      },
+      "basket": {
+        "xPx": 579,
+        "yPx": 1193,
+        "oracleReviewed": true
+      }
+    }
+  ]
+}

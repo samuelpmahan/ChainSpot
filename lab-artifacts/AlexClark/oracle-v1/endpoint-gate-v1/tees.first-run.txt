@@ -1,0 +1,377 @@
+course: AlexClark
+stage: tees
+crop rows: [2, 2084) (provenance only)
+canonical frame: 1290x2082 crop-local pixels
+measurements: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/tees.measurements.json
+course evidence: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/tees-course.png
+
+GATE AlexClark / tees
+fixture: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-fixtures.json
+fixture status: ORACLE_APPROVED_ACTIVE
+canonical frame: 1290x2082 crop-local pixels
+position tolerance: 0 px (exact fixture localization; no tolerance is encoded in the fixture)
+instrument limitation: current tees output has no hole ownership labels; proximity is not used to fabricate ownership.
+
+FAIL AlexClark / tees / H1
+
+approved:
+  identity tee
+  owner H1
+  center (616, 1595)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (616.4202898550725, 1595.038647342995)
+  distance from approved center 0.422063 px
+  owner unavailable
+
+changed:
+  localization changed by 0.422063 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H2
+
+approved:
+  identity tee
+  owner H2
+  center (633, 1288)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (632.9903381642512, 1288.1400966183576)
+  distance from approved center 0.140429 px
+  owner unavailable
+
+changed:
+  localization changed by 0.140429 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H3
+
+approved:
+  identity tee
+  owner H3
+  center (363, 1743)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (362.5990338164251, 1743.415458937198)
+  distance from approved center 0.577391 px
+  owner unavailable
+
+changed:
+  localization changed by 0.577391 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H4
+
+approved:
+  identity tee
+  owner H4
+  center (369, 2058)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (368.536231884058, 2057.8115942028985)
+  distance from approved center 0.500577 px
+  owner unavailable
+
+changed:
+  localization changed by 0.500577 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H5
+
+approved:
+  identity tee
+  owner H5
+  center (472.41062801932367, 1888.5265700483092)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (472.41062801932367, 1888.5265700483092)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H6
+
+approved:
+  identity tee
+  owner H6
+  center (673, 1848)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (673.3446601941747, 1847.5485436893205)
+  distance from approved center 0.567982 px
+  owner unavailable
+
+changed:
+  localization changed by 0.567982 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H7
+
+approved:
+  identity tee
+  owner H7
+  center (454, 1405)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (454.06341463414634, 1404.6536585365855)
+  distance from approved center 0.352099 px
+  owner unavailable
+
+changed:
+  localization changed by 0.352099 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H8
+
+approved:
+  identity tee
+  owner H8
+  center (449, 865)
+
+current:
+  testimony component-tier tee-like candidate
+  nearest unassigned center (446.47, 862.8)
+  distance from approved center 3.352745 px
+  owner unavailable
+
+changed:
+  localization changed by 3.352745 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H9
+
+approved:
+  identity tee
+  owner H9
+  center (429, 657)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (429.3883495145631, 657.0145631067961)
+  distance from approved center 0.388622 px
+  owner unavailable
+
+changed:
+  localization changed by 0.388622 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H10
+
+approved:
+  identity tee
+  owner H10
+  center (381, 304)
+
+current:
+  testimony component-tier tee-like candidate
+  nearest unassigned center (380.56953642384104, 303.89403973509934)
+  distance from approved center 0.443313 px
+  owner unavailable
+
+changed:
+  localization changed by 0.443313 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H11
+
+approved:
+  identity tee
+  owner H11
+  center (542, 507)
+
+current:
+  testimony component-tier tee-like candidate
+  nearest unassigned center (542.1744966442953, 507.0469798657718)
+  distance from approved center 0.180710 px
+  owner unavailable
+
+changed:
+  localization changed by 0.180710 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H12
+
+approved:
+  identity tee
+  owner H12
+  center (459, 232)
+
+current:
+  testimony component-tier tee-like candidate
+  nearest unassigned center (380.56953642384104, 303.89403973509934)
+  distance from approved center 106.395914 px
+  owner unavailable
+
+changed:
+  localization changed by 106.395914 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H13
+
+approved:
+  identity tee
+  owner H13
+  center (733, 68)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (732.7922077922078, 67.71428571428571)
+  distance from approved center 0.353285 px
+  owner unavailable
+
+changed:
+  localization changed by 0.353285 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H14
+
+approved:
+  identity tee
+  owner H14
+  center (910, 306)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (909.8382352941177, 306.4019607843137)
+  distance from approved center 0.433290 px
+  owner unavailable
+
+changed:
+  localization changed by 0.433290 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H15
+
+approved:
+  identity tee
+  owner H15
+  center (706, 109)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (705.8883495145631, 108.98058252427184)
+  distance from approved center 0.113326 px
+  owner unavailable
+
+changed:
+  localization changed by 0.113326 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H16
+
+approved:
+  identity tee
+  owner H16
+  center (603.5631067961165, 436.0728155339806)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (603.5631067961165, 436.0728155339806)
+  distance from approved center 0.000000 px
+  owner unavailable
+
+changed:
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H17
+
+approved:
+  identity tee
+  owner H17
+  center (675, 700)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (675.0728155339806, 700.0485436893204)
+  distance from approved center 0.087513 px
+  owner unavailable
+
+changed:
+  localization changed by 0.087513 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / tees / H18
+
+approved:
+  identity tee
+  owner H18
+  center (512, 1020)
+
+current:
+  testimony ring-tier tee-like candidate
+  nearest unassigned center (511.80193236714973, 1020.2705314009662)
+  distance from approved center 0.335288 px
+  owner unavailable
+
+changed:
+  localization changed by 0.335288 px
+  identity unavailable: current output establishes only tee-like morphology
+  ownership unavailable in current detector output
+
+REGRESSION: approved fact changed or was not reproduced
+
+RESULT: FAIL AlexClark / tees
+approved facts checked: 18
+changed approved facts: 18
+
+first gate output preserved: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/tees.first-run.txt

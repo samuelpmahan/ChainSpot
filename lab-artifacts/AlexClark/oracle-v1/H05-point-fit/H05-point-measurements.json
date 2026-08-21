@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "course": "AlexClark",
+  "hole": 5,
+  "coordinateFrame": "canonical crop-local 1290x2082 raster",
+  "badge": {
+    "method": "translation fit of consensus renderer plate border from 16 detected Alex plates; numeral interior excluded",
+    "bbox": {
+      "x": 594,
+      "y": 1876,
+      "width": 54,
+      "height": 42
+    },
+    "center": {
+      "xPx": 620.5,
+      "yPx": 1896.5
+    },
+    "score": 1,
+    "agreements": 1152,
+    "disagreements": 0,
+    "secondBest": {
+      "x": 593,
+      "y": 1876,
+      "score": 0.9340277777777778,
+      "used": 1152,
+      "agreements": 1106,
+      "disagreements": 30
+    }
+  },
+  "tee": {
+    "method": "existing detectTeeRings enclosed-hole centroid",
+    "center": {
+      "xPx": 472.411,
+      "yPx": 1888.527
+    },
+    "holeAreaPx": 207,
+    "interiorBbox": {
+      "x": 464,
+      "y": 1883,
+      "width": 18,
+      "height": 12
+    },
+    "elongation": 1.535,
+    "ringFraction": 0.931
+  },
+  "basket": {
+    "fixedSprite": {
+      "bbox": {
+        "x": 739,
+        "y": 1835,
+        "width": 42,
+        "height": 66
+      },
+      "center": {
+        "xPx": 760,
+        "yPx": 1868
+      },
+      "poleTip": {
+        "xPx": 760,
+        "yPx": 1905
+      },
+      "score": 0.998453
+    },
+    "innerCircleFit": {
+      "center": {
+        "xPx": 759.8636972331975,
+        "yPx": 1905.652942481769
+      },
+      "radiusPx": 32.663250763937704,
+      "score": 14.259
+    },
+    "innerCircleSupport": {
+      "sampledPoints": 56,
+      "inliers": 48,
+      "radialRmsePx": 0.642
+    },
+    "outerDashedCircleFit": {
+      "center": {
+        "xPx": 759.8783747747877,
+        "yPx": 1904.030271256327
+      },
+      "radiusPx": 72.08233908970638,
+      "score": 88.066
+    },
+    "outerCircleSupport": {
+      "sampledPoints": 53,
+      "inliers": 49,
+      "radialRmsePx": 0.379
+    },
+    "circleCenterConsensus": {
+      "xPx": 759.871,
+      "yPx": 1904.842
+    },
+    "circleCentersSeparationPx": 1.623,
+    "circleConsensusVsSpriteTipPx": 0.204
+  }
+}

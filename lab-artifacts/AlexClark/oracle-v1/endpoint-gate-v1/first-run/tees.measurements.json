@@ -1,0 +1,831 @@
+{
+  "schemaVersion": 1,
+  "course": "AlexClark",
+  "stage": "tees",
+  "coordinateFrame": {
+    "name": "production-auto-cropped-map-raster",
+    "origin": "cropped top-left",
+    "xAxis": "right",
+    "yAxis": "down",
+    "widthPx": 1290,
+    "heightPx": 2082
+  },
+  "cropProvenanceOnly": {
+    "implementation": "src/lib/nuthing/viewport.ts:detectMapViewport+cropRows",
+    "sourceWidthPx": 1290,
+    "sourceHeightPx": 2086,
+    "sourceRows": [
+      2,
+      2084
+    ]
+  },
+  "inputs": {
+    "sourcePath": "/home/mahansa/workspace/chainspot-corpus/dev/AlexClark/AlexClark-full.jpg",
+    "sourceSha256": "e1b257382f0d459fd6b57366529c6fbb8bfeca9ca3ec580b48cc9959bbdfe976",
+    "croppedRgbaSha256": "ee4c8f76163bd6cff6ae45e9f516e2137a00aa34f59f7f8d96dc13e9e02cbc0f"
+  },
+  "implementation": {
+    "endpointComposition": "src/lib/nuthing/endpointStage.ts:runEndpointStage",
+    "rings": "src/lib/nuthing/endpoints.ts:detectTeeRings",
+    "candidateCollection": "src/lib/nuthing/endpoints.ts:collectTeePoints",
+    "templatePath": "/home/mahansa/workspace/ChainSpot-lab-bootstrap/resources/nuthing-p2/endpoints/basket-sprite.json",
+    "templateSha256": "c2867340d477a5e2f88e83b78516fc89005004a4aa279b6b9bc86a6f98e3598f"
+  },
+  "recoveredTier": {
+    "used": false,
+    "reason": "Existing recovered-tee probe consumes truth basket coordinates and hard-coded course answers; no truth-independent recovered measurement was found."
+  },
+  "chromeRegions": [
+    {
+      "x": 1070,
+      "y": 2002,
+      "width": 199,
+      "height": 50,
+      "componentCount": 14
+    },
+    {
+      "x": 23,
+      "y": 2023,
+      "width": 167,
+      "height": 49,
+      "componentCount": 6
+    }
+  ],
+  "ringCount": 17,
+  "rings": [
+    {
+      "cx": 705.8883495145631,
+      "cy": 108.98058252427184,
+      "holeArea": 206,
+      "bboxX": 699,
+      "bboxY": 100,
+      "bboxW": 14,
+      "bboxH": 19,
+      "elongation": 1.5865589713993808,
+      "angle": 1.7299449281327706,
+      "ringFrac": 0.8846153846153846,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 909.8382352941177,
+      "cy": 306.4019607843137,
+      "holeArea": 204,
+      "bboxX": 901,
+      "bboxY": 297,
+      "bboxW": 19,
+      "bboxH": 20,
+      "elongation": 1.5770506272600402,
+      "angle": 0.9046471888211958,
+      "ringFrac": 0.7296296296296296,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 603.5631067961165,
+      "cy": 436.0728155339806,
+      "holeArea": 206,
+      "bboxX": 596,
+      "bboxY": 426,
+      "bboxW": 16,
+      "bboxH": 21,
+      "elongation": 1.5955713768954005,
+      "angle": 1.2459806905178636,
+      "ringFrac": 0.7713178294573644,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 429.3883495145631,
+      "cy": 657.0145631067961,
+      "holeArea": 206,
+      "bboxX": 422,
+      "bboxY": 648,
+      "bboxW": 16,
+      "bboxH": 19,
+      "elongation": 1.5519614103258654,
+      "angle": 1.2862275775169891,
+      "ringFrac": 0.8536585365853658,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 675.0728155339806,
+      "cy": 700.0485436893204,
+      "holeArea": 206,
+      "bboxX": 665,
+      "bboxY": 691,
+      "bboxW": 21,
+      "bboxH": 19,
+      "elongation": 1.5471031996541913,
+      "angle": 2.4497940608640625,
+      "ringFrac": 0.7536231884057971,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 511.80193236714973,
+      "cy": 1020.2705314009662,
+      "holeArea": 207,
+      "bboxX": 504,
+      "bboxY": 1011,
+      "bboxW": 17,
+      "bboxH": 20,
+      "elongation": 1.5651835383065935,
+      "angle": 1.177645656371964,
+      "ringFrac": 0.8488372093023255,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 553.5862068965517,
+      "cy": 1106.2758620689656,
+      "holeArea": 29,
+      "bboxX": 551,
+      "bboxY": 1104,
+      "bboxW": 6,
+      "bboxH": 6,
+      "elongation": 1.0790730053807707,
+      "angle": 0.5122576144720075,
+      "ringFrac": 0.9574468085106383,
+      "kind": "diamond"
+    },
+    {
+      "cx": 632.9903381642512,
+      "cy": 1288.1400966183576,
+      "holeArea": 207,
+      "bboxX": 623,
+      "bboxY": 1279,
+      "bboxW": 21,
+      "bboxH": 19,
+      "elongation": 1.5640023763881092,
+      "angle": 2.4981459619121686,
+      "ringFrac": 0.7318840579710145,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 454.06341463414634,
+      "cy": 1404.6536585365855,
+      "holeArea": 205,
+      "bboxX": 447,
+      "bboxY": 1395,
+      "bboxW": 15,
+      "bboxH": 20,
+      "elongation": 1.5761163152640771,
+      "angle": 1.8213106453931558,
+      "ringFrac": 0.8780487804878049,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 616.4202898550725,
+      "cy": 1595.038647342995,
+      "holeArea": 207,
+      "bboxX": 608,
+      "bboxY": 1585,
+      "bboxW": 18,
+      "bboxH": 21,
+      "elongation": 1.5749118750342959,
+      "angle": 2.0797954198594306,
+      "ringFrac": 0.7333333333333333,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 362.5990338164251,
+      "cy": 1743.415458937198,
+      "holeArea": 207,
+      "bboxX": 356,
+      "bboxY": 1734,
+      "bboxW": 15,
+      "bboxH": 20,
+      "elongation": 1.5876960778868425,
+      "angle": 1.82101046019384,
+      "ringFrac": 0.8658536585365854,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 673.3446601941747,
+      "cy": 1847.5485436893205,
+      "holeArea": 206,
+      "bboxX": 664,
+      "bboxY": 1838,
+      "bboxW": 20,
+      "bboxH": 20,
+      "elongation": 1.5562078870772746,
+      "angle": 0.6763091049314673,
+      "ringFrac": 0.7427536231884058,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 472.41062801932367,
+      "cy": 1888.5265700483092,
+      "holeArea": 207,
+      "bboxX": 464,
+      "bboxY": 1883,
+      "bboxW": 18,
+      "bboxH": 12,
+      "elongation": 1.5345471876381318,
+      "angle": 0.08333015561249857,
+      "ringFrac": 0.9305555555555556,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 368.536231884058,
+      "cy": 2057.8115942028985,
+      "holeArea": 207,
+      "bboxX": 359,
+      "bboxY": 2050,
+      "bboxW": 20,
+      "bboxH": 17,
+      "elongation": 1.5502069250108372,
+      "angle": 2.723349376637461,
+      "ringFrac": 0.8062015503875969,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 1001.5,
+      "cy": 2054.8611111111113,
+      "holeArea": 36,
+      "bboxX": 1000,
+      "bboxY": 2050,
+      "bboxW": 4,
+      "bboxH": 10,
+      "elongation": 2.4966540211903103,
+      "angle": 1.5814192117093602,
+      "ringFrac": 0.6341463414634146,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 732.7922077922078,
+      "cy": 67.71428571428571,
+      "holeArea": 77,
+      "bboxX": 727,
+      "bboxY": 63,
+      "bboxW": 13,
+      "bboxH": 11,
+      "elongation": 1.6609022009319752,
+      "angle": 2.94975757690687,
+      "ringFrac": 0.6032608695652174,
+      "kind": "tee-rect"
+    },
+    {
+      "cx": 1004.5,
+      "cy": 2034.5,
+      "holeArea": 16,
+      "bboxX": 1003,
+      "bboxY": 2033,
+      "bboxW": 4,
+      "bboxH": 4,
+      "elongation": 1,
+      "angle": 0,
+      "ringFrac": 0.6049382716049383,
+      "kind": "diamond"
+    }
+  ],
+  "teeCandidateCount": 25,
+  "teeCandidates": [
+    {
+      "center": {
+        "x": 705.8883495145631,
+        "y": 108.98058252427184
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 705.8883495145631,
+        "cy": 108.98058252427184,
+        "holeArea": 206,
+        "bboxX": 699,
+        "bboxY": 100,
+        "bboxW": 14,
+        "bboxH": 19,
+        "elongation": 1.5865589713993808,
+        "angle": 1.7299449281327706,
+        "ringFrac": 0.8846153846153846,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 909.8382352941177,
+        "y": 306.4019607843137
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 909.8382352941177,
+        "cy": 306.4019607843137,
+        "holeArea": 204,
+        "bboxX": 901,
+        "bboxY": 297,
+        "bboxW": 19,
+        "bboxH": 20,
+        "elongation": 1.5770506272600402,
+        "angle": 0.9046471888211958,
+        "ringFrac": 0.7296296296296296,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 603.5631067961165,
+        "y": 436.0728155339806
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 603.5631067961165,
+        "cy": 436.0728155339806,
+        "holeArea": 206,
+        "bboxX": 596,
+        "bboxY": 426,
+        "bboxW": 16,
+        "bboxH": 21,
+        "elongation": 1.5955713768954005,
+        "angle": 1.2459806905178636,
+        "ringFrac": 0.7713178294573644,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 429.3883495145631,
+        "y": 657.0145631067961
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 429.3883495145631,
+        "cy": 657.0145631067961,
+        "holeArea": 206,
+        "bboxX": 422,
+        "bboxY": 648,
+        "bboxW": 16,
+        "bboxH": 19,
+        "elongation": 1.5519614103258654,
+        "angle": 1.2862275775169891,
+        "ringFrac": 0.8536585365853658,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 675.0728155339806,
+        "y": 700.0485436893204
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 675.0728155339806,
+        "cy": 700.0485436893204,
+        "holeArea": 206,
+        "bboxX": 665,
+        "bboxY": 691,
+        "bboxW": 21,
+        "bboxH": 19,
+        "elongation": 1.5471031996541913,
+        "angle": 2.4497940608640625,
+        "ringFrac": 0.7536231884057971,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 511.80193236714973,
+        "y": 1020.2705314009662
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 511.80193236714973,
+        "cy": 1020.2705314009662,
+        "holeArea": 207,
+        "bboxX": 504,
+        "bboxY": 1011,
+        "bboxW": 17,
+        "bboxH": 20,
+        "elongation": 1.5651835383065935,
+        "angle": 1.177645656371964,
+        "ringFrac": 0.8488372093023255,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 632.9903381642512,
+        "y": 1288.1400966183576
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 632.9903381642512,
+        "cy": 1288.1400966183576,
+        "holeArea": 207,
+        "bboxX": 623,
+        "bboxY": 1279,
+        "bboxW": 21,
+        "bboxH": 19,
+        "elongation": 1.5640023763881092,
+        "angle": 2.4981459619121686,
+        "ringFrac": 0.7318840579710145,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 454.06341463414634,
+        "y": 1404.6536585365855
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 454.06341463414634,
+        "cy": 1404.6536585365855,
+        "holeArea": 205,
+        "bboxX": 447,
+        "bboxY": 1395,
+        "bboxW": 15,
+        "bboxH": 20,
+        "elongation": 1.5761163152640771,
+        "angle": 1.8213106453931558,
+        "ringFrac": 0.8780487804878049,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 616.4202898550725,
+        "y": 1595.038647342995
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 616.4202898550725,
+        "cy": 1595.038647342995,
+        "holeArea": 207,
+        "bboxX": 608,
+        "bboxY": 1585,
+        "bboxW": 18,
+        "bboxH": 21,
+        "elongation": 1.5749118750342959,
+        "angle": 2.0797954198594306,
+        "ringFrac": 0.7333333333333333,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 362.5990338164251,
+        "y": 1743.415458937198
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 362.5990338164251,
+        "cy": 1743.415458937198,
+        "holeArea": 207,
+        "bboxX": 356,
+        "bboxY": 1734,
+        "bboxW": 15,
+        "bboxH": 20,
+        "elongation": 1.5876960778868425,
+        "angle": 1.82101046019384,
+        "ringFrac": 0.8658536585365854,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 673.3446601941747,
+        "y": 1847.5485436893205
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 673.3446601941747,
+        "cy": 1847.5485436893205,
+        "holeArea": 206,
+        "bboxX": 664,
+        "bboxY": 1838,
+        "bboxW": 20,
+        "bboxH": 20,
+        "elongation": 1.5562078870772746,
+        "angle": 0.6763091049314673,
+        "ringFrac": 0.7427536231884058,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 472.41062801932367,
+        "y": 1888.5265700483092
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 472.41062801932367,
+        "cy": 1888.5265700483092,
+        "holeArea": 207,
+        "bboxX": 464,
+        "bboxY": 1883,
+        "bboxW": 18,
+        "bboxH": 12,
+        "elongation": 1.5345471876381318,
+        "angle": 0.08333015561249857,
+        "ringFrac": 0.9305555555555556,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 368.536231884058,
+        "y": 2057.8115942028985
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 368.536231884058,
+        "cy": 2057.8115942028985,
+        "holeArea": 207,
+        "bboxX": 359,
+        "bboxY": 2050,
+        "bboxW": 20,
+        "bboxH": 17,
+        "elongation": 1.5502069250108372,
+        "angle": 2.723349376637461,
+        "ringFrac": 0.8062015503875969,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 1001.5,
+        "y": 2054.8611111111113
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 1001.5,
+        "cy": 2054.8611111111113,
+        "holeArea": 36,
+        "bboxX": 1000,
+        "bboxY": 2050,
+        "bboxW": 4,
+        "bboxH": 10,
+        "elongation": 2.4966540211903103,
+        "angle": 1.5814192117093602,
+        "ringFrac": 0.6341463414634146,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 732.7922077922078,
+        "y": 67.71428571428571
+      },
+      "tier": "ring",
+      "ring": {
+        "cx": 732.7922077922078,
+        "cy": 67.71428571428571,
+        "holeArea": 77,
+        "bboxX": 727,
+        "bboxY": 63,
+        "bboxW": 13,
+        "bboxH": 11,
+        "elongation": 1.6609022009319752,
+        "angle": 2.94975757690687,
+        "ringFrac": 0.6032608695652174,
+        "kind": "tee-rect"
+      }
+    },
+    {
+      "center": {
+        "x": 380.56953642384104,
+        "y": 303.89403973509934
+      },
+      "tier": "component",
+      "component": {
+        "label": 36,
+        "center": {
+          "x": 380.56953642384104,
+          "y": 303.89403973509934
+        },
+        "bbox": {
+          "x": 374,
+          "y": 290,
+          "width": 20,
+          "height": 26
+        },
+        "area": 151,
+        "major": 27.04893851286979,
+        "minor": 16.47951041727962,
+        "angleRadians": 1.2343195680494203,
+        "fill": 0.3387524269486295
+      }
+    },
+    {
+      "center": {
+        "x": 542.1744966442953,
+        "y": 507.0469798657718
+      },
+      "tier": "component",
+      "component": {
+        "label": 57,
+        "center": {
+          "x": 542.1744966442953,
+          "y": 507.0469798657718
+        },
+        "bbox": {
+          "x": 527,
+          "y": 496,
+          "width": 25,
+          "height": 27
+        },
+        "area": 149,
+        "major": 27.712891714982813,
+        "minor": 18.168577164395497,
+        "angleRadians": 1.0346092709484767,
+        "fill": 0.2959262602893594
+      }
+    },
+    {
+      "center": {
+        "x": 1176.7470588235294,
+        "y": 639.5411764705882
+      },
+      "tier": "component",
+      "component": {
+        "label": 126,
+        "center": {
+          "x": 1176.7470588235294,
+          "y": 639.5411764705882
+        },
+        "bbox": {
+          "x": 1167,
+          "y": 633,
+          "width": 21,
+          "height": 14
+        },
+        "area": 170,
+        "major": 22.53985601455401,
+        "minor": 9.7947069702435,
+        "angleRadians": 0.371870578963351,
+        "fill": 0.7700276788405549
+      }
+    },
+    {
+      "center": {
+        "x": 459.175,
+        "y": 866.665
+      },
+      "tier": "component",
+      "component": {
+        "label": 148,
+        "center": {
+          "x": 459.175,
+          "y": 866.665
+        },
+        "bbox": {
+          "x": 452,
+          "y": 849,
+          "width": 14,
+          "height": 35
+        },
+        "area": 200,
+        "major": 35.21176260165218,
+        "minor": 12.507199276041666,
+        "angleRadians": -1.4901243075160497,
+        "fill": 0.4541320584221457
+      }
+    },
+    {
+      "center": {
+        "x": 446.47,
+        "y": 862.8
+      },
+      "tier": "component",
+      "component": {
+        "label": 149,
+        "center": {
+          "x": 446.47,
+          "y": 862.8
+        },
+        "bbox": {
+          "x": 442,
+          "y": 850,
+          "width": 11,
+          "height": 26
+        },
+        "area": 100,
+        "major": 26.293265277064,
+        "minor": 7.481350066573134,
+        "angleRadians": -1.3679540779455825,
+        "fill": 0.5083648334065737
+      }
+    },
+    {
+      "center": {
+        "x": 523.1888111888112,
+        "y": 1167.6083916083917
+      },
+      "tier": "component",
+      "component": {
+        "label": 242,
+        "center": {
+          "x": 523.1888111888112,
+          "y": 1167.6083916083917
+        },
+        "bbox": {
+          "x": 516,
+          "y": 1156,
+          "width": 13,
+          "height": 26
+        },
+        "area": 143,
+        "major": 26.281444174842537,
+        "minor": 12.806795109714557,
+        "angleRadians": 1.3584132561646443,
+        "fill": 0.42486049404945275
+      }
+    },
+    {
+      "center": {
+        "x": 420.88775510204084,
+        "y": 1593.5102040816328
+      },
+      "tier": "component",
+      "component": {
+        "label": 290,
+        "center": {
+          "x": 420.88775510204084,
+          "y": 1593.5102040816328
+        },
+        "bbox": {
+          "x": 415,
+          "y": 1588,
+          "width": 15,
+          "height": 12
+        },
+        "area": 98,
+        "major": 15.545276992421233,
+        "minor": 12.395447857601784,
+        "angleRadians": 0.23299071168556168,
+        "fill": 0.5085871557811844
+      }
+    },
+    {
+      "center": {
+        "x": 1052.0146341463415,
+        "y": 2049.2292682926827
+      },
+      "tier": "component",
+      "component": {
+        "label": 375,
+        "center": {
+          "x": 1052.0146341463415,
+          "y": 2049.2292682926827
+        },
+        "bbox": {
+          "x": 1046,
+          "y": 2032,
+          "width": 12,
+          "height": 33
+        },
+        "area": 205,
+        "major": 33.208904961323825,
+        "minor": 12.41589279021888,
+        "angleRadians": -1.496331482428981,
+        "fill": 0.49718881720516805
+      }
+    },
+    {
+      "center": {
+        "x": 940.9096774193548,
+        "y": 2055.9225806451614
+      },
+      "tier": "component",
+      "component": {
+        "label": 384,
+        "center": {
+          "x": 940.9096774193548,
+          "y": 2055.9225806451614
+        },
+        "bbox": {
+          "x": 930,
+          "y": 2040,
+          "width": 38,
+          "height": 27
+        },
+        "area": 155,
+        "major": 46.03111937684134,
+        "minor": 15.435927329323142,
+        "angleRadians": 0.704372204359166,
+        "fill": 0.21814609178709618
+      }
+    },
+    {
+      "center": {
+        "x": 1088.235294117647,
+        "y": 2062.598039215686
+      },
+      "tier": "component",
+      "component": {
+        "label": 406,
+        "center": {
+          "x": 1088.235294117647,
+          "y": 2062.598039215686
+        },
+        "bbox": {
+          "x": 1074,
+          "y": 2057,
+          "width": 24,
+          "height": 10
+        },
+        "area": 102,
+        "major": 25.6928982582563,
+        "minor": 8.550049062915466,
+        "angleRadians": -0.3523101511335092,
+        "fill": 0.4643211514848057
+      }
+    }
+  ]
+}

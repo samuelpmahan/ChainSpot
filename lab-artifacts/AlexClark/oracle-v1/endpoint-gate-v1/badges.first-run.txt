@@ -1,0 +1,50 @@
+course: AlexClark
+stage: badges
+crop rows: [2, 2084) (provenance only)
+canonical frame: 1290x2082 crop-local pixels
+measurements: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/badges.measurements.json
+course evidence: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/first-run/badges-course.png
+
+GATE AlexClark / badges
+fixture: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-fixtures.json
+fixture status: ORACLE_APPROVED_ACTIVE
+canonical frame: 1290x2082 crop-local pixels
+position tolerance: 0 px (exact fixture localization; no tolerance is encoded in the fixture)
+
+FAIL AlexClark / badges / H5
+
+approved:
+  identity badge
+  owner H5
+  center (620.5, 1896.5)
+
+current:
+  missing
+  decoded owner missing
+
+changed:
+  missing approved object
+
+REGRESSION: approved fact changed or was not reproduced
+
+FAIL AlexClark / badges / H18
+
+approved:
+  identity badge
+  owner H18
+  center (548, 1041)
+
+current:
+  missing
+  decoded owner missing
+
+changed:
+  missing approved object
+
+REGRESSION: approved fact changed or was not reproduced
+
+RESULT: FAIL AlexClark / badges
+approved facts checked: 18
+changed approved facts: 2
+
+first gate output preserved: /home/mahansa/workspace/ChainSpot-lab-bootstrap/lab-artifacts/AlexClark/oracle-v1/endpoint-gate-v1/badges.first-run.txt

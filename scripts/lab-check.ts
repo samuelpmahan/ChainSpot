@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
@@ -20,6 +20,39 @@ import { decodeImageFile } from './nuthing/decode';
 
 type Stage = 'badges' | 'baskets' | 'tees';
 type Color = readonly [number, number, number];
+type Point = { xPx: number; yPx: number };
+
+interface ApprovedEndpoint {
+	hole: number;
+	tee: Point;
+	badge: Point;
+	basket: Point;
+}
+
+interface EndpointGateFixture {
+	schemaVersion: number;
+	status: string;
+	course: string;
+	canonicalFrame: {
+		widthPx: number;
+		heightPx: number;
+		origin: string;
+		xAxis: string;
+		yAxis: string;
+	};
+	facts: ApprovedEndpoint[];
+}
+
+interface GateCandidate {
+	point: Point;
+	identity: string;
+}
+
+const POSITION_TOLERANCE_PX: Record<Stage, number> = {
+	badges: 0,
+	baskets: 0,
+	tees: 0,
+};
 
 const COLORS = {
 	badge: [0, 240, 255] as Color,
@@ -97,6 +130,98 @@ function componentEvidence(c: ComponentStats) {
 	};
 }
 
+function pointText(point: Point): string {
+	return `(${point.xPx}, ${point.yPx})`;
+}
+
+function nearestCandidate(approved: Point, candidates: GateCandidate[]): { candidate: GateCandidate; distancePx: number } | undefined {
+	let nearest: { candidate: GateCandidate; distancePx: number } | undefined;
+	for (const candidate of candidates) {
+		const distancePx = Math.hypot(candidate.point.xPx - approved.xPx, candidate.point.yPx - approved.yPx);
+		if (!nearest || distancePx < nearest.distancePx) nearest = { candidate, distancePx };
+	}
+	return nearest;
+}
+
+function endpointGateReport(
+	stage: Stage,
+	course: string,
+	fixturePath: string,
+	fixture: EndpointGateFixture,
+	cropped: RgbaImage,
+	candidates: GateCandidate[],
+): { passed: boolean; lines: string[] } {
+	if (fixture.course !== course) throw new Error(`Gate fixture course ${fixture.course} does not match ${course}`);
+	if (fixture.canonicalFrame.widthPx !== cropped.width || fixture.canonicalFrame.heightPx !== cropped.height) {
+		throw new Error(
+			`Gate fixture frame ${fixture.canonicalFrame.widthPx}x${fixture.canonicalFrame.heightPx} does not match current crop ${cropped.width}x${cropped.height}`,
+		);
+	}
+	if (fixture.facts.length !== 18) throw new Error(`Expected 18 approved endpoint facts; found ${fixture.facts.length}`);
+
+	const object = stage === 'badges' ? 'badge' : stage === 'baskets' ? 'basket' : 'tee';
+	const tolerancePx = POSITION_TOLERANCE_PX[stage];
+	const lines = [
+		'',
+		`GATE ${course} / ${stage}`,
+		`fixture: ${fixturePath}`,
+		`fixture status: ${fixture.status}`,
+		`canonical frame: ${cropped.width}x${cropped.height} crop-local pixels`,
+		`position tolerance: ${tolerancePx} px (exact fixture localization; no tolerance is encoded in the fixture)`,
+	];
+	let failures = 0;
+
+	if (stage !== 'badges') {
+		lines.push(
+			`instrument limitation: current ${stage} output has no hole ownership labels; proximity is not used to fabricate ownership.`,
+		);
+	}
+
+	for (const fact of fixture.facts) {
+		const approved = fact[object];
+		const stageCandidates = stage === 'badges'
+			? candidates.filter((candidate) => candidate.identity === `H${fact.hole}`)
+			: candidates;
+		const nearest = nearestCandidate(approved, stageCandidates);
+		const changed: string[] = [];
+
+		if (!nearest) {
+			changed.push('missing approved object');
+		} else if (nearest.distancePx > tolerancePx) {
+			changed.push(`localization changed by ${nearest.distancePx.toFixed(6)} px`);
+		}
+		if (stage === 'badges' && stageCandidates.length > 1) {
+			changed.push(`identity ambiguous: ${stageCandidates.length} candidates decode as H${fact.hole}`);
+		}
+		if (stage === 'baskets') changed.push('ownership unavailable in current detector output');
+		if (stage === 'tees') {
+			changed.push('identity unavailable: current output establishes only tee-like morphology');
+			changed.push('ownership unavailable in current detector output');
+		}
+
+		if (!changed.length) continue;
+		failures++;
+		lines.push('', `FAIL ${course} / ${stage} / H${fact.hole}`, '');
+		lines.push('approved:', `  identity ${object}`, `  owner H${fact.hole}`, `  center ${pointText(approved)}`);
+		lines.push('', 'current:');
+		if (!nearest) {
+			lines.push('  missing');
+		} else {
+			lines.push(`  testimony ${nearest.candidate.identity}`);
+			lines.push(`  nearest unassigned center ${pointText(nearest.candidate.point)}`);
+			lines.push(`  distance from approved center ${nearest.distancePx.toFixed(6)} px`);
+		}
+		if (stage === 'badges') lines.push(`  decoded owner ${stageCandidates.length ? `H${fact.hole}` : 'missing'}`);
+		else lines.push('  owner unavailable');
+		lines.push('', 'changed:', ...changed.map((entry) => `  ${entry}`), '', 'REGRESSION: approved fact changed or was not reproduced');
+	}
+
+	lines.push('', `RESULT: ${failures ? 'FAIL' : 'PASS'} ${course} / ${stage}`);
+	lines.push(`approved facts checked: ${fixture.facts.length}`);
+	lines.push(`changed approved facts: ${failures}`);
+	return { passed: failures === 0, lines };
+}
+
 function commonProvenance(
 	stage: Stage,
 	course: string,
@@ -134,8 +259,9 @@ function commonProvenance(
 
 function main(): void {
 	const [stageArg, course, ...rest] = process.argv.slice(2);
-	if (!['badges', 'baskets', 'tees'].includes(stageArg) || !course || rest.length) {
-		console.error('Usage: ./lab check <badges|baskets|tees> <course>');
+	const gate = rest.length === 1 && rest[0] === '--gate';
+	if (!['badges', 'baskets', 'tees'].includes(stageArg) || !course || (rest.length && !gate)) {
+		console.error('Usage: ./lab check <badges|baskets|tees> <course> [--gate]');
 		process.exit(2);
 	}
 	const stage = stageArg as Stage;
@@ -146,13 +272,19 @@ function main(): void {
 	const full = decodeImageFile(sourcePath);
 	const viewport = detectMapViewport(full);
 	const cropped = cropRows(full, viewport);
-	const evidenceDir = join(repoRoot, 'lab-artifacts', course, 'sol-assisted-v1-evidence');
+	const gateRoot = join(repoRoot, 'lab-artifacts', course, 'oracle-v1', 'endpoint-gate-v1');
+	const firstRunOutput = join(gateRoot, `${stage}.first-run.txt`);
+	const firstGateRun = gate && !existsSync(firstRunOutput);
+	const evidenceDir = gate
+		? join(gateRoot, firstGateRun ? 'first-run' : 'latest')
+		: join(repoRoot, 'lab-artifacts', course, 'sol-assisted-v1-evidence');
 	mkdirSync(evidenceDir, { recursive: true });
 	const outputJson = join(evidenceDir, `${stage}.measurements.json`);
 	const outputPng = join(evidenceDir, `${stage}-course.png`);
 	const png = PNG.sync.read(encodePng(cropped));
 	const common = commonProvenance(stage, course, sourcePath, sourceBytes, full, cropped, viewport);
 	let payload: unknown;
+	let gateCandidates: GateCandidate[] = [];
 
 	if (stage === 'badges') {
 		const modelPath = join(repoRoot, 'resources', 'nuthing-p2', 'digits', 'models', 'logistic.json');
@@ -193,6 +325,10 @@ function main(): void {
 				})),
 			})),
 		};
+		gateCandidates = readings.map((reading) => ({
+			point: { xPx: reading.badge.cx, yPx: reading.badge.cy },
+			identity: `H${reading.label}`,
+		}));
 	} else {
 		const templatePath = join(repoRoot, 'resources', 'nuthing-p2', 'endpoints', 'basket-sprite.json');
 		const templateBytes = readFileSync(templatePath);
@@ -216,6 +352,10 @@ function main(): void {
 				candidateCount: candidates.length,
 				candidates,
 			};
+			gateCandidates = candidates.map((candidate) => ({
+				point: { xPx: candidate.tipX, yPx: candidate.tipY },
+				identity: 'basket sprite candidate',
+			}));
 		} else {
 			const result = runEndpointStage(cropped, template);
 			for (const ring of result.rings) {
@@ -254,17 +394,39 @@ function main(): void {
 						: undefined,
 				})),
 			};
+			gateCandidates = result.tees.map((tee) => ({
+				point: { xPx: tee.cx, yPx: tee.cy },
+				identity: `${tee.tier}-tier tee-like candidate`,
+			}));
 		}
 	}
 
 	writeFileSync(outputJson, `${JSON.stringify(payload, null, 2)}\n`);
 	writeFileSync(outputPng, PNG.sync.write(png));
-	console.log(`course: ${course}`);
-	console.log(`stage: ${stage}`);
-	console.log(`crop rows: [${viewport.top}, ${viewport.bottom}) (provenance only)`);
-	console.log(`canonical frame: ${cropped.width}x${cropped.height} crop-local pixels`);
-	console.log(`measurements: ${outputJson}`);
-	console.log(`course evidence: ${outputPng}`);
+	const lines = [
+		`course: ${course}`,
+		`stage: ${stage}`,
+		`crop rows: [${viewport.top}, ${viewport.bottom}) (provenance only)`,
+		`canonical frame: ${cropped.width}x${cropped.height} crop-local pixels`,
+		`measurements: ${outputJson}`,
+		`course evidence: ${outputPng}`,
+	];
+	let gatePassed = true;
+	if (gate) {
+		if (course !== 'AlexClark') throw new Error(`No approved endpoint gate fixture for ${course}`);
+		const fixturePath = join(repoRoot, 'lab-artifacts', course, 'oracle-v1', 'endpoint-gate-fixtures.json');
+		const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as EndpointGateFixture;
+		const report = endpointGateReport(stage, course, fixturePath, fixture, cropped, gateCandidates);
+		gatePassed = report.passed;
+		lines.push(...report.lines);
+		if (firstGateRun) {
+			lines.push('', `first gate output preserved: ${firstRunOutput}`);
+			mkdirSync(gateRoot, { recursive: true });
+			writeFileSync(firstRunOutput, `${lines.join('\n')}\n`);
+		}
+	}
+	console.log(lines.join('\n'));
+	if (!gatePassed) process.exitCode = 1;
 }
 
 main();
