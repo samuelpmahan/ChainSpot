@@ -185,16 +185,25 @@ hand flips the curve).
 
 ## Slice sequencing (each = contract commit → impl → proof)
 
-1. **S3 (in flight)**: page-1 manual flow verified & committed (current code).
-2. **S4**: `badges.ts` + auto round pick + page-1 choreography (FLIP, badge
-   pop, viewport overlay slot, transitions). Storyboard stage 1–2 parity.
-3. **S5**: `runRecord.ts` + LAB CLI harness (`node scripts/replay.ts`).
-4. **S6**: `courseDetect.ts` (badge-seeded, minimal) + `guidedReview.ts` port
-   + two-pane annotate UI.
-5. **S7**: `geo.ts` + correspondence UI + clean-map render (icon set).
-6. **S8**: `roundDetect.ts` + projection + map-round choreography.
-7. **S9**: `graphics.ts` views + shot shapes (+ frispy spike behind
-   `flightPath`).
+Referred to by NAME, not number:
+
+1. **Manual stitch baseline** (in flight): page-1 manual flow (upload → crop →
+   stitch → adjust → approve) verified & committed.
+2. **Badge detection & choreography**: `badges.ts` + evidence store + worker
+   pool (`evidence.ts`, `jobs.ts` — see cv-orchestration.md) + auto
+   thrown-round pick + page-1 polish (FLIP fly-in, badge pop, viewport overlay
+   controls). Storyboard stage 1–2 parity.
+3. **LAB replay harness**: `runRecord.ts` tapping the evidence store + CLI
+   (`node scripts/replay.ts`) that reruns algorithms on recorded inputs and
+   diffs.
+4. **Guided course review**: `courseDetect.ts` (badge-seeded, minimal) +
+   `guidedReview.ts` (port of old activeReview) + two-pane annotate UI.
+5. **World transform**: `geo.ts` + correspondence-pair UI + clean-map render
+   (our icon set).
+6. **Round projection**: `roundDetect.ts` (walk trace + droplet sprites) +
+   registration + map-round choreography.
+7. **Graphics views**: `graphics.ts` view transforms + per-shot shapes
+   (frispy spike behind the `flightPath` signature).
 
 Division of labor per the coaching arrangement: Claude writes lib modules and
 docs; the user writes Svelte components/pages, coached, with COACH notes
