@@ -75,9 +75,9 @@ its native pixel dimensions.
 - `src/lib/image.ts` — plain TypeScript, no Svelte imports (service layer wrapping
   the browser boundary):
   - `interface LoadedImage { readonly file: File; readonly objectUrl: string;
-    readonly widthPx: number; readonly heightPx: number }` — immutable.
+readonly widthPx: number; readonly heightPx: number }` — immutable.
   - `type LoadImageResult = { ok: true; image: LoadedImage }
-    | { ok: false; reason: 'not-a-decodable-image' }` — discriminated union;
+| { ok: false; reason: 'not-a-decodable-image' }` — discriminated union;
     expected failures are returned as values, not thrown.
   - `async loadImageFromFile(file: File): Promise<LoadImageResult>` — decodes via
     `createImageBitmap` to obtain native pixel dimensions (bitmap closed after
@@ -104,3 +104,31 @@ its native pixel dimensions.
   Optionally inspect devtools for revoked/leaked `blob:` URLs.
 - Limitation: the race guard's timing window is not deterministically provable by
   hand; it is proven by code review of the sequence-counter logic in this slice.
+
+## Slice 2 — multi-image intake + round-screenshot selection
+
+User action: the user uploads up to 6 images (course-blank tiles plus their
+thrown-round screenshot), sees them all, and marks which one is the round
+screenshot. (Later CV will propose this; user selection is also the visual
+confirmation step.)
+
+### Contract
+
+- `src/lib/image.ts` unchanged.
+- `+page.svelte` state: `images: LoadedImage[]` (max 6), `roundIndex: number |
+  null`, `error: string | null`. File input gains `multiple`; each selection adds
+  to the set. Non-decodable files and over-limit files are skipped and named in
+  the error line; decodable ones still land.
+- Each image renders with its name/dimensions line, the image itself, and a radio
+  ("this is my round screenshot"); exactly zero or one can be marked.
+- "Clear all" releases every object URL and resets all state.
+- Race guard: sequence counter survives; late decode batches after a newer
+  selection or a clear are dropped and released.
+
+### Proof Plan (slice 2)
+
+- `npm run check` / `npm run build` green.
+- Manual: multi-select several screenshots at once → all appear; add more in a
+  second selection → appended; exceed 6 → overflow named in error, first 6 kept;
+  include a bogus file → named in error, others still added; radio-mark one;
+  Clear all empties the page.
