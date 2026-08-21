@@ -171,7 +171,7 @@
 			{#each markers[index] ?? [] as marker (marker.xPx + ':' + marker.yPx + ':' + marker.label)}
 				<div
 					title={marker.title}
-					style={`position: absolute; left: ${marker.xPx}px; top: ${marker.yPx}px; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 50%; background: ${marker.color}; color: white; display: flex; align-items: center; justify-content: center; font: bold 24px sans-serif; opacity: 0.85; pointer-events: none;`}
+					style={`position: absolute; left: ${marker.xPx}px; top: ${marker.yPx}px; transform: translate(-50%, ${marker.anchor === 'above' ? '-135%' : '-50%'}); width: 44px; height: 44px; border-radius: 50%; background: ${marker.color}; color: white; display: flex; align-items: center; justify-content: center; font: bold 24px sans-serif; opacity: 0.85; pointer-events: none;`}
 				>
 					{marker.label}
 				</div>

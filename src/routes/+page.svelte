@@ -92,7 +92,8 @@
 						yPx: y,
 						color: n ? HOLE_COLORS[(n - 1) % HOLE_COLORS.length] : '#666',
 						label: n ? String(n) : '?',
-						title: `badge ${n ?? '?'} (${e.confidence.toFixed(2)})`
+						title: `badge ${n ?? '?'} (${e.confidence.toFixed(2)})`,
+						anchor: 'above'
 					});
 				} else if (e.objType === 'basket') {
 					out.push({ xPx: x, yPx: y, color: '#222', label: 'B', title: `basket (${e.confidence.toFixed(2)})` });
