@@ -132,3 +132,46 @@ confirmation step.)
   second selection → appended; exceed 6 → overflow named in error, first 6 kept;
   include a bogus file → named in error, others still added; radio-mark one;
   Clear all empties the page.
+
+## Slice 3 — ImageViewport + minimal AutoCrop/AutoStitch (2 tiles + round)
+
+Objective: a coherent stitch-map flow for 2 course tiles + 1 thrown-round
+screenshot. Algorithms are minimal clean rederivations (never imports from
+old-stuff/), pure TS over plain arrays so CLI/Vitest can drive them; the LAB
+can later benchmark them against the old corpus.
+
+### Division of labor (coaching mode amendment)
+
+Claude writes the pixel-math lib modules; the user types all Svelte components
+and page orchestration, coached.
+
+### Contract
+
+- `src/lib/raster.ts` (Claude) — the only browser-touching helper: decode to
+  `{ widthPx, heightPx, gray: Uint8Array }` grayscale rasters.
+- `src/lib/autoCrop.ts` (Claude) — pure. 2-tile cross-capture agreement scan:
+  chrome is bit-identical at fixed screen coordinates across captures; scan
+  inward from each edge until tiles stop agreeing; return proposed insets.
+  Proposal only — user confirms; never silently applied.
+- `src/lib/stitch.ts` (Claude) — pure translation-only search: two cropped
+  rasters → best `{ dx, dy, score }` (same device/zoom capture protocol makes
+  rotation/scale out of scope).
+- `src/lib/components/ImageViewport.svelte` (user) — the single image-handling
+  viewport for the whole flow. Renders N positioned layers:
+  `{ objectUrl, x, y, widthPx, heightPx, borderColor, opacity }`. Zoom (wheel,
+  cursor-anchored) + pan (drag). Per-layer colored border and opacity so
+  overlap can be inspected. Layer nudging for manual adjustment. Emits
+  adjustments up ("props down, events up"); owns only view state (zoom/pan),
+  never document state.
+- Page flow: intake (slice 2) → auto-crop proposal + confirm → auto-stitch →
+  viewport inspection/adjust → confirm. Unstyled beyond what inspection needs.
+
+### Proof Plan (slice 3)
+
+- `npm run check` / `npm run build` green.
+- Lib modules provable headless (Vitest/CLI with synthetic rasters): agreement
+  band detected on synthetic chrome; known-offset synthetic pair recovered by
+  stitch search.
+- Manual: two real UDisc tiles + round screenshot through the full flow; crop
+  proposal looks sane and is confirmable; stitched placement inspectable via
+  zoom/opacity; a deliberate misalignment is nudgeable then confirmable.
