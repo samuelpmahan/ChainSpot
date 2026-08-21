@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "sourceImage": {
+    "fileName": "AlexClark-cropped.png",
+    "mimeType": "image/png",
+    "widthPx": 1290,
+    "heightPx": 2082,
+    "sha256": "454e61b3c070b3c2fd72f029010fe8656835816791dcdfd32ee2d3db81540d72",
+    "bundlePath": "lab-artifacts/AlexClark/AlexClark-cropped.png"
+  },
+  "holes": [
+    { "id": "7d77543f-5753-4c9c-9234-b77ccda94104", "number": 1, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 615, "yPx": 1587 }, "basket": { "xPx": 770, "yPx": 1337 } },
+    { "id": "0991fb96-59b6-46c6-b62f-a94b0230b4e6", "number": 2, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 633, "yPx": 1238 }, "basket": { "xPx": 493, "yPx": 1391 } },
+    { "id": "c4e97f8d-ff1f-4550-81dc-57eee0f89b44", "number": 3, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 364, "yPx": 1724 }, "basket": { "xPx": 295, "yPx": 2047 } },
+    { "id": "5a96d14c-969b-4dd7-a057-25ee32341fce", "number": 4, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 369, "yPx": 2078 }, "basket": { "xPx": 607, "yPx": 1965 } },
+    { "id": "9b99a011-23b2-4099-9f1f-f003724aa155", "number": 5, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 472, "yPx": 1881 }, "basket": { "xPx": 760, "yPx": 1905 } },
+    { "id": "e39155ab-bb5c-4241-a8a3-04df4876196b", "number": 6, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 674, "yPx": 1840 }, "basket": { "xPx": 429, "yPx": 1566 } },
+    { "id": "88dbc1ed-53a7-4a6f-92d6-9bbf0a94aca7", "number": 7, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 454, "yPx": 1403 }, "basket": { "xPx": 513, "yPx": 1148 } },
+    { "id": "344ba4dd-7c69-4b86-a96c-d17b96369861", "number": 8, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "basket": { "xPx": 485, "yPx": 864 } },
+    { "id": "90d055ef-4e60-456b-b65d-2b4f4c6d3fed", "number": 9, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 430, "yPx": 654 }, "basket": { "xPx": 353, "yPx": 389 } },
+    { "id": "49ff7b3c-a8a1-4f6b-a751-665628c74683", "number": 10, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 383, "yPx": 302 }, "basket": { "xPx": 437, "yPx": 558 } },
+    { "id": "e7b0b36a-5c42-4810-8e1c-3582a31ad13b", "number": 11, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 541, "yPx": 517 }, "basket": { "xPx": 457, "yPx": 277 } },
+    { "id": "bf32cf26-8204-4279-aefd-838b38e6fc13", "number": 12, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "basket": { "xPx": 607, "yPx": 93 } },
+    { "id": "7e8cbf02-671a-44af-a07e-57d00c627e4e", "number": 13, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "basket": { "xPx": 1015, "yPx": 299 } },
+    { "id": "21cf6292-48d9-4873-ad40-a68e9ea9ca05", "number": 14, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 909, "yPx": 306 }, "basket": { "xPx": 751, "yPx": 103 } },
+    { "id": "335dc73e-0b06-4b93-9ab0-f358e36a7fa3", "number": 15, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 705, "yPx": 109 }, "basket": { "xPx": 669, "yPx": 340 } },
+    { "id": "3d275716-d436-4d16-9c90-7678bba22035", "number": 16, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "basket": { "xPx": 523, "yPx": 578 } },
+    { "id": "8b42f0b1-ed28-4461-8dcc-189fa0f15c7d", "number": 17, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "basket": { "xPx": 864, "yPx": 768 } },
+    { "id": "630c297e-894c-4f7b-b0e4-27c386383111", "number": 18, "shots": [], "corridorBends": [], "corridorWidthPx": 40, "tee": { "xPx": 513, "yPx": 1016 }, "basket": { "xPx": 578, "yPx": 1180 } }
+  ]
+}
