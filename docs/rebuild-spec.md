@@ -75,6 +75,30 @@ detectBadges; known-offset pair recovered; composite badge dedup (shared badge
 appears once, at the coincident point). Manual — real 2-tile UDisc captures
 through the full choreography; badge coincidence visible.
 
+## DECIDED 2026-08-21 — Import Data page + fair-use pixel discard
+
+- Stitch Map and Annotate Course are ONE page ("Import Data"): a single
+  fullscreen viewport whose phases are upload → select round → crop+stitch →
+  annotate (GuidedReview) → pairs; it slides into a two-pane (blank |
+  satellite) layout when annotation is confirmed.
+- **Fair use rule:** the moment annotation is done, every UDisc-derived pixel
+  is discarded — object URLs revoked, rasters dropped, detections' source
+  images gone. Only vector data (CourseMap, MappedRound), the satellite
+  imagery, and our own clean-course rendering survive. Consequence: any
+  pixel-consuming extraction (walk trace, droplets from the thrown round)
+  must run DURING import, before the discard point.
+- Annotation algorithm plugs in Detector-shaped (per-image emissions +
+  associations; placements-independent). No automatic re-runs when the user
+  adjusts placements — instead targeted on-demand luxuries, each per-hole and
+  user-invoked: bend detection on fix, snap-to-best-point (with an easy
+  toggle off).
+- Annotation carries no confidence values; detection is expected accurate and
+  GuidedReview is the backup.
+- Satellite source: geocode (course search) → US federal imagery (NAIP), with
+  known raster bounds — correspondence pairs therefore get lat/lng from the
+  imagery itself. Old-stuff's geocode/naip chain is the reference for
+  rederivation.
+
 ## Page 2 — Annotate Course
 
 UX (locked): opens with detection already run on the blank; GuidedReview
