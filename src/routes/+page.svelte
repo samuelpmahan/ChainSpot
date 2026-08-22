@@ -73,7 +73,7 @@
 	// SAME hole number from another tile lands within the match radius in
 	// composite space — the stitch verified itself right there — the halo
 	// flips to the match color.
-	const MATCH_RADIUS_PX = 30;
+	const MATCH_RADIUS_PX = 1;
 	const MATCH_COLOR = 'gold';
 
 	function projectMarkers(imgs: LoadedImage[]): ViewportMarker[][] {
