@@ -175,3 +175,47 @@ and page orchestration, coached.
 - Manual: two real UDisc tiles + round screenshot through the full flow; crop
   proposal looks sane and is confirmable; stitched placement inspectable via
   zoom/opacity; a deliberate misalignment is nudgeable then confirmable.
+
+## Slice — round pre-read (lib side): walk trace, landing droplets, registration
+
+Implements the lib half of src/lib/detectors/TODO-thrown-round-preread.md.
+Division of labor: Claude writes these lib modules + unit tests; the user wires
+the Import page (pre-read before confirmAnnotation's pixel discard, copy into
+session MappedRound) coached.
+
+### Contract
+
+- `src/lib/detectors/hsv.ts` — shared `rgbToHsv` helper (pure).
+- `src/lib/detectors/landingDroplet.ts` — Detector emitting
+  `object`/`landing-droplet`. Clean rederivation of the proven old-app approach
+  (old-stuff/src/lib/autoAnnotation/landingDropletDetection.ts): mask UDisc
+  marker blue in HSV, 4-connected components, droplet shape gates (min area/
+  size, aspect, max-size fraction), semantic point = TIP (bottom-most run's
+  mid-x), never the centroid. Pure TS, no OpenCV. Merged-droplet splitting is
+  out of scope (old app deferred it too); oversized suspicious components are
+  simply not emitted. Glyph classification (C1/C2/off-fairway) is out of scope
+  for MVP — MappedRound carries positions only.
+- `src/lib/detectors/walkTrace.ts` — Detector emitting ordered
+  `object`/`walk-vertex` (`seq`). New capability (old app annotated the walk
+  manually): mask UDisc walk purple (same hue window purpleMass measured),
+  coarse occupancy grid, largest connected mass, endpoints via double-BFS
+  (path diameter), BFS path ordering, Douglas–Peucker simplification to a
+  small vertex list in image px.
+- `src/lib/registration.ts` — pure pixel↔pixel similarity:
+  `fitSimilarity(pairs: {from, to}[]) : Transform2D | null` (least-squares
+  scale+rotation+translation, ≥2 distinct pairs), `applySimilarity`, and
+  `matchByHoleNumber(roundBadges, compositeBadges)` pairing uniquely-numbered
+  badges as registration input. Distinct from geo.ts (px↔lat/lng); this is
+  round px → course-composite px.
+
+### Proof Plan
+
+- Vitest, synthetic rasters: (1) two drawn droplet shapes detected with tip at
+  the drawn tip row, decoys (wrong color / too small / wrong aspect) rejected;
+  (2) a drawn purple polyline recovered as ordered vertices whose endpoints and
+  corner match the drawn geometry within the grid cell size; (3) fitSimilarity
+  recovers a known scale/rotation/translation within 1e-6 and returns null on
+  degenerate input; matchByHoleNumber drops ambiguous duplicate numbers.
+- `npm run check` green; no imports from old-stuff (grep).
+- Not proven here: behavior on real UDisc captures — LAB/manual acceptance
+  when the page wiring lands.
