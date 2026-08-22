@@ -23,6 +23,7 @@ function flood(field: SupportFieldEvidence, source: RoutePoint): Flood {
 	const size = field.width * field.height;
 	const distance = new Float64Array(size).fill(Infinity);
 	const previous = new Int32Array(size).fill(-1);
+	const done = new Uint8Array(size);
 	const local = new Float32Array(cost);
 	const sx = Math.max(0, Math.min(field.width - 1, Math.round(source.xPx / field.scale)));
 	const sy = Math.max(0, Math.min(field.height - 1, Math.round(source.yPx / field.scale)));
@@ -48,11 +49,14 @@ function flood(field: SupportFieldEvidence, source: RoutePoint): Flood {
 		}
 		const current = queue.pop() as number;
 		pending--;
-		if (Math.floor(distance[current] / QUANTUM) > cursor) {
-			queues[Math.floor(distance[current] / QUANTUM) % RING].push(current);
+		if (done[current]) continue;
+		const scheduled = Math.floor(distance[current] / QUANTUM);
+		if (scheduled > cursor) {
+			queues[scheduled % RING].push(current);
 			pending++;
 			continue;
 		}
+		done[current] = 1;
 		const x = current % field.width;
 		const y = Math.floor(current / field.width);
 		for (let k = 0; k < 8; k++) {
@@ -60,6 +64,7 @@ function flood(field: SupportFieldEvidence, source: RoutePoint): Flood {
 			const ny = y + DY[k];
 			if (nx < 0 || ny < 0 || nx >= field.width || ny >= field.height) continue;
 			const next = ny * field.width + nx;
+			if (done[next]) continue;
 			const candidate = distance[current] + 0.5 * (local[current] + local[next]) * STEP[k];
 			if (candidate < distance[next]) {
 				distance[next] = candidate;
