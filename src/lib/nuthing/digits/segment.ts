@@ -60,65 +60,65 @@ export const VALLEY_SEARCH_LO = 0.3;
 export const VALLEY_SEARCH_HI = 0.7;
 
 export interface DigitCandidate {
-  /** [x, y, w, h] in glyph-mask pixel coordinates. */
-  bbox: [number, number, number, number];
-  /** Tight w*h crop, row-major, 0/1 per byte. */
-  mask: Uint8Array;
-  method: 'cc' | 'valley-split';
+	/** [x, y, w, h] in glyph-mask pixel coordinates. */
+	bbox: [number, number, number, number];
+	/** Tight w*h crop, row-major, 0/1 per byte. */
+	mask: Uint8Array;
+	method: 'cc' | 'valley-split';
 }
 
 export interface SegmentResult {
-  digits: DigitCandidate[];
-  notes: string[];
+	digits: DigitCandidate[];
+	notes: string[];
 }
 
 function tightCropOfLabel(
-  mask: Mask,
-  labels: Int32Array,
-  label: number,
-  xLo: number,
-  xHi: number,
-  yLo: number,
-  yHi: number,
+	mask: Mask,
+	labels: Int32Array,
+	label: number,
+	xLo: number,
+	xHi: number,
+	yLo: number,
+	yHi: number
 ): { bbox: [number, number, number, number]; mask: Uint8Array } | null {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (let y = yLo; y < yHi; y++) {
-    const row = y * mask.width;
-    for (let x = xLo; x < xHi; x++) {
-      if (labels[row + x] === label) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-  if (maxX < minX || maxY < minY) return null;
-  const w = maxX - minX + 1;
-  const h = maxY - minY + 1;
-  const out = new Uint8Array(w * h);
-  for (let y = minY; y <= maxY; y++) {
-    const row = y * mask.width;
-    for (let x = minX; x <= maxX; x++) {
-      if (labels[row + x] === label) out[(y - minY) * w + (x - minX)] = 1;
-    }
-  }
-  return { bbox: [minX, minY, w, h], mask: out };
+	let minX = Infinity;
+	let maxX = -Infinity;
+	let minY = Infinity;
+	let maxY = -Infinity;
+	for (let y = yLo; y < yHi; y++) {
+		const row = y * mask.width;
+		for (let x = xLo; x < xHi; x++) {
+			if (labels[row + x] === label) {
+				if (x < minX) minX = x;
+				if (x > maxX) maxX = x;
+				if (y < minY) minY = y;
+				if (y > maxY) maxY = y;
+			}
+		}
+	}
+	if (maxX < minX || maxY < minY) return null;
+	const w = maxX - minX + 1;
+	const h = maxY - minY + 1;
+	const out = new Uint8Array(w * h);
+	for (let y = minY; y <= maxY; y++) {
+		const row = y * mask.width;
+		for (let x = minX; x <= maxX; x++) {
+			if (labels[row + x] === label) out[(y - minY) * w + (x - minX)] = 1;
+		}
+	}
+	return { bbox: [minX, minY, w, h], mask: out };
 }
 
 /** Column pixel-count projection of one component, indexed 0..bboxW-1. */
 function columnSums(mask: Mask, labels: Int32Array, c: ComponentStats): Int32Array {
-  const sums = new Int32Array(c.bboxW);
-  for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
-    const row = y * mask.width;
-    for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
-      if (labels[row + x] === c.label) sums[x - c.bboxX]++;
-    }
-  }
-  return sums;
+	const sums = new Int32Array(c.bboxW);
+	for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
+		const row = y * mask.width;
+		for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
+			if (labels[row + x] === c.label) sums[x - c.bboxX]++;
+		}
+	}
+	return sums;
 }
 
 /**
@@ -126,122 +126,122 @@ function columnSums(mask: Mask, labels: Int32Array, c: ComponentStats): Int32Arr
  * Returns null if no valid interior valley / two-sided split exists.
  */
 function trySplit(
-  mask: Mask,
-  labels: Int32Array,
-  c: ComponentStats,
-  notes: string[],
+	mask: Mask,
+	labels: Int32Array,
+	c: ComponentStats,
+	notes: string[]
 ): DigitCandidate[] | null {
-  const w = c.bboxW;
-  const sums = columnSums(mask, labels, c);
-  const lo = Math.floor(VALLEY_SEARCH_LO * w);
-  const hi = Math.ceil(VALLEY_SEARCH_HI * w);
-  if (hi <= lo) {
-    notes.push(
-      `label=${c.label} bbox=${c.bboxW}x${c.bboxH}: too narrow for an interior valley search window, kept whole`,
-    );
-    return null;
-  }
-  let bestIdx = -1;
-  let bestSum = Infinity;
-  for (let i = lo; i < hi; i++) {
-    if (sums[i] < bestSum) {
-      bestSum = sums[i];
-      bestIdx = i;
-    }
-  }
-  if (bestIdx < 0) return null;
-  // Split so the valley column itself goes to the right half; guard against
-  // producing an empty side (e.g. valley pinned at the search window edge).
-  const splitX = c.bboxX + bestIdx;
-  if (splitX <= c.bboxX || splitX >= c.bboxX + w) {
-    notes.push(
-      `label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley split degenerate (splitX at edge), kept whole`,
-    );
-    return null;
-  }
-  const left = tightCropOfLabel(mask, labels, c.label, c.bboxX, splitX, c.bboxY, c.bboxY + c.bboxH);
-  const right = tightCropOfLabel(
-    mask,
-    labels,
-    c.label,
-    splitX,
-    c.bboxX + w,
-    c.bboxY,
-    c.bboxY + c.bboxH,
-  );
-  if (!left || !right) {
-    notes.push(
-      `label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley split produced an empty half, kept whole`,
-    );
-    return null;
-  }
-  notes.push(
-    `label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley-split at col=${bestIdx} (colSum=${bestSum}) -> ${left.bbox[2]}x${left.bbox[3]} + ${right.bbox[2]}x${right.bbox[3]}`,
-  );
-  return [
-    { bbox: left.bbox, mask: left.mask, method: 'valley-split' },
-    { bbox: right.bbox, mask: right.mask, method: 'valley-split' },
-  ];
+	const w = c.bboxW;
+	const sums = columnSums(mask, labels, c);
+	const lo = Math.floor(VALLEY_SEARCH_LO * w);
+	const hi = Math.ceil(VALLEY_SEARCH_HI * w);
+	if (hi <= lo) {
+		notes.push(
+			`label=${c.label} bbox=${c.bboxW}x${c.bboxH}: too narrow for an interior valley search window, kept whole`
+		);
+		return null;
+	}
+	let bestIdx = -1;
+	let bestSum = Infinity;
+	for (let i = lo; i < hi; i++) {
+		if (sums[i] < bestSum) {
+			bestSum = sums[i];
+			bestIdx = i;
+		}
+	}
+	if (bestIdx < 0) return null;
+	// Split so the valley column itself goes to the right half; guard against
+	// producing an empty side (e.g. valley pinned at the search window edge).
+	const splitX = c.bboxX + bestIdx;
+	if (splitX <= c.bboxX || splitX >= c.bboxX + w) {
+		notes.push(
+			`label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley split degenerate (splitX at edge), kept whole`
+		);
+		return null;
+	}
+	const left = tightCropOfLabel(mask, labels, c.label, c.bboxX, splitX, c.bboxY, c.bboxY + c.bboxH);
+	const right = tightCropOfLabel(
+		mask,
+		labels,
+		c.label,
+		splitX,
+		c.bboxX + w,
+		c.bboxY,
+		c.bboxY + c.bboxH
+	);
+	if (!left || !right) {
+		notes.push(
+			`label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley split produced an empty half, kept whole`
+		);
+		return null;
+	}
+	notes.push(
+		`label=${c.label} bbox=${c.bboxW}x${c.bboxH}: valley-split at col=${bestIdx} (colSum=${bestSum}) -> ${left.bbox[2]}x${left.bbox[3]} + ${right.bbox[2]}x${right.bbox[3]}`
+	);
+	return [
+		{ bbox: left.bbox, mask: left.mask, method: 'valley-split' },
+		{ bbox: right.bbox, mask: right.mask, method: 'valley-split' }
+	];
 }
 
 export function segmentDigits(mask: Mask): SegmentResult {
-  const notes: string[] = [];
-  const { labels, components } = extractComponents(mask);
-  if (components.length === 0) {
-    notes.push('no components in glyph mask');
-    return { digits: [], notes };
-  }
+	const notes: string[] = [];
+	const { labels, components } = extractComponents(mask);
+	if (components.length === 0) {
+		notes.push('no components in glyph mask');
+		return { digits: [], notes };
+	}
 
-  let tallest = 0;
-  for (const c of components) if (c.bboxH > tallest) tallest = c.bboxH;
-  const heightThresh = HEIGHT_RATIO_MIN * tallest;
+	let tallest = 0;
+	for (const c of components) if (c.bboxH > tallest) tallest = c.bboxH;
+	const heightThresh = HEIGHT_RATIO_MIN * tallest;
 
-  const kept: ComponentStats[] = [];
-  for (const c of components) {
-    if (c.area < MIN_COMPONENT_AREA) {
-      notes.push(`dropped label=${c.label} area=${c.area} < ${MIN_COMPONENT_AREA} (noise)`);
-      continue;
-    }
-    if (c.bboxH < heightThresh) {
-      notes.push(
-        `dropped label=${c.label} height=${c.bboxH} < ${heightThresh.toFixed(2)} (${HEIGHT_RATIO_MIN} x tallest=${tallest})`,
-      );
-      continue;
-    }
-    kept.push(c);
-  }
-  if (kept.length === 0) {
-    notes.push('all components dropped as noise');
-    return { digits: [], notes };
-  }
+	const kept: ComponentStats[] = [];
+	for (const c of components) {
+		if (c.area < MIN_COMPONENT_AREA) {
+			notes.push(`dropped label=${c.label} area=${c.area} < ${MIN_COMPONENT_AREA} (noise)`);
+			continue;
+		}
+		if (c.bboxH < heightThresh) {
+			notes.push(
+				`dropped label=${c.label} height=${c.bboxH} < ${heightThresh.toFixed(2)} (${HEIGHT_RATIO_MIN} x tallest=${tallest})`
+			);
+			continue;
+		}
+		kept.push(c);
+	}
+	if (kept.length === 0) {
+		notes.push('all components dropped as noise');
+		return { digits: [], notes };
+	}
 
-  kept.sort((a, b) => a.cx - b.cx);
+	kept.sort((a, b) => a.cx - b.cx);
 
-  const digits: DigitCandidate[] = [];
-  for (const c of kept) {
-    const isWide = c.bboxW > WIDE_RATIO * c.bboxH;
-    if (isWide) {
-      const split = trySplit(mask, labels, c, notes);
-      if (split) {
-        digits.push(...split);
-        continue;
-      }
-    }
-    const crop = tightCropOfLabel(
-      mask,
-      labels,
-      c.label,
-      c.bboxX,
-      c.bboxX + c.bboxW,
-      c.bboxY,
-      c.bboxY + c.bboxH,
-    );
-    if (!crop) {
-      notes.push(`label=${c.label}: unexpected empty crop, dropped`);
-      continue;
-    }
-    digits.push({ bbox: crop.bbox, mask: crop.mask, method: 'cc' });
-  }
+	const digits: DigitCandidate[] = [];
+	for (const c of kept) {
+		const isWide = c.bboxW > WIDE_RATIO * c.bboxH;
+		if (isWide) {
+			const split = trySplit(mask, labels, c, notes);
+			if (split) {
+				digits.push(...split);
+				continue;
+			}
+		}
+		const crop = tightCropOfLabel(
+			mask,
+			labels,
+			c.label,
+			c.bboxX,
+			c.bboxX + c.bboxW,
+			c.bboxY,
+			c.bboxY + c.bboxH
+		);
+		if (!crop) {
+			notes.push(`label=${c.label}: unexpected empty crop, dropped`);
+			continue;
+		}
+		digits.push({ bbox: crop.bbox, mask: crop.mask, method: 'cc' });
+	}
 
-  return { digits, notes };
+	return { digits, notes };
 }

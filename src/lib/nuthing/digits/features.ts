@@ -28,9 +28,9 @@ import { DIGIT_W, DIGIT_H, type NormalizedDigit } from './normalize';
  * occupancy-grid features are compared against.
  */
 export function fullMask768(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  const out = new Array<number>(DIGIT_W * DIGIT_H);
-  for (let i = 0; i < out.length; i++) out[i] = mask[i] ? 1 : 0;
-  return out;
+	const out = new Array<number>(DIGIT_W * DIGIT_H);
+	for (let i = 0; i < out.length; i++) out[i] = mask[i] ? 1 : 0;
+	return out;
 }
 
 /**
@@ -44,29 +44,29 @@ export function fullMask768(mask: NormalizedDigit | ArrayLike<number>): number[]
  * are set (0..1). Output is row-major, `cols * rows` dims.
  */
 export function occupancyGrid(
-  mask: NormalizedDigit | ArrayLike<number>,
-  cols: number,
-  rows: number,
+	mask: NormalizedDigit | ArrayLike<number>,
+	cols: number,
+	rows: number
 ): number[] {
-  const out = new Array<number>(cols * rows).fill(0);
-  const colBound = (i: number): number => Math.round((i * DIGIT_W) / cols);
-  const rowBound = (j: number): number => Math.round((j * DIGIT_H) / rows);
-  for (let j = 0; j < rows; j++) {
-    const y0 = rowBound(j);
-    const y1 = rowBound(j + 1);
-    for (let i = 0; i < cols; i++) {
-      const x0 = colBound(i);
-      const x1 = colBound(i + 1);
-      const area = (x1 - x0) * (y1 - y0);
-      let sum = 0;
-      for (let y = y0; y < y1; y++) {
-        const row = y * DIGIT_W;
-        for (let x = x0; x < x1; x++) sum += mask[row + x] ? 1 : 0;
-      }
-      out[j * cols + i] = area > 0 ? sum / area : 0;
-    }
-  }
-  return out;
+	const out = new Array<number>(cols * rows).fill(0);
+	const colBound = (i: number): number => Math.round((i * DIGIT_W) / cols);
+	const rowBound = (j: number): number => Math.round((j * DIGIT_H) / rows);
+	for (let j = 0; j < rows; j++) {
+		const y0 = rowBound(j);
+		const y1 = rowBound(j + 1);
+		for (let i = 0; i < cols; i++) {
+			const x0 = colBound(i);
+			const x1 = colBound(i + 1);
+			const area = (x1 - x0) * (y1 - y0);
+			let sum = 0;
+			for (let y = y0; y < y1; y++) {
+				const row = y * DIGIT_W;
+				for (let x = x0; x < x1; x++) sum += mask[row + x] ? 1 : 0;
+			}
+			out[j * cols + i] = area > 0 ? sum / area : 0;
+		}
+	}
+	return out;
 }
 
 /**
@@ -74,7 +74,7 @@ export function occupancyGrid(
  * divide evenly). 48 dims.
  */
 export function occupancy6x8(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  return occupancyGrid(mask, 6, 8);
+	return occupancyGrid(mask, 6, 8);
 }
 
 /**
@@ -86,12 +86,12 @@ export function occupancy6x8(mask: NormalizedDigit | ArrayLike<number>): number[
  * dims.
  */
 export function occupancy8x10(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  return occupancyGrid(mask, 8, 10);
+	return occupancyGrid(mask, 8, 10);
 }
 
 /** 12 cols x 16 rows occupancy grid: exact 2x2px cells. 192 dims. */
 export function occupancy12x16(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  return occupancyGrid(mask, 12, 16);
+	return occupancyGrid(mask, 12, 16);
 }
 
 /**
@@ -101,7 +101,7 @@ export function occupancy12x16(mask: NormalizedDigit | ArrayLike<number>): numbe
  * way to the full 768-pixel mask.
  */
 export function multiscale(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  return occupancy6x8(mask).concat(occupancy12x16(mask));
+	return occupancy6x8(mask).concat(occupancy12x16(mask));
 }
 
 /**
@@ -109,14 +109,14 @@ export function multiscale(mask: NormalizedDigit | ArrayLike<number>): number[] 
  * pixels that are set (0..1). 32 dims.
  */
 export function rowProjection32(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  const out = new Array<number>(DIGIT_H).fill(0);
-  for (let y = 0; y < DIGIT_H; y++) {
-    let sum = 0;
-    const row = y * DIGIT_W;
-    for (let x = 0; x < DIGIT_W; x++) sum += mask[row + x] ? 1 : 0;
-    out[y] = sum / DIGIT_W;
-  }
-  return out;
+	const out = new Array<number>(DIGIT_H).fill(0);
+	for (let y = 0; y < DIGIT_H; y++) {
+		let sum = 0;
+		const row = y * DIGIT_W;
+		for (let x = 0; x < DIGIT_W; x++) sum += mask[row + x] ? 1 : 0;
+		out[y] = sum / DIGIT_W;
+	}
+	return out;
 }
 
 /**
@@ -124,13 +124,13 @@ export function rowProjection32(mask: NormalizedDigit | ArrayLike<number>): numb
  * column's 32 pixels that are set (0..1). 24 dims.
  */
 export function colProjection24(mask: NormalizedDigit | ArrayLike<number>): number[] {
-  const out = new Array<number>(DIGIT_W).fill(0);
-  for (let x = 0; x < DIGIT_W; x++) {
-    let sum = 0;
-    for (let y = 0; y < DIGIT_H; y++) sum += mask[y * DIGIT_W + x] ? 1 : 0;
-    out[x] = sum / DIGIT_H;
-  }
-  return out;
+	const out = new Array<number>(DIGIT_W).fill(0);
+	for (let x = 0; x < DIGIT_W; x++) {
+		let sum = 0;
+		for (let y = 0; y < DIGIT_H; y++) sum += mask[y * DIGIT_W + x] ? 1 : 0;
+		out[x] = sum / DIGIT_H;
+	}
+	return out;
 }
 
 /**
@@ -142,16 +142,16 @@ export function colProjection24(mask: NormalizedDigit | ArrayLike<number>): numb
  * `[aspect(rawWidth, rawHeight)]` themselves.
  */
 export function aspect(rawWidth: number, rawHeight: number): number {
-  return rawHeight > 0 ? rawWidth / rawHeight : 0;
+	return rawHeight > 0 ? rawWidth / rawHeight : 0;
 }
 
 export interface TopologyFeatures {
-  /** Count of background regions fully enclosed by stroke pixels (not touching the mask border). */
-  holeCount: number;
-  /** Each enclosed region's pixel count as a fraction of total mask pixels (768), holeCount entries, largest first. */
-  holeSizeFractions: number[];
-  /** Fraction of the 768 mask pixels that are set (stroke density). */
-  strokeFraction: number;
+	/** Count of background regions fully enclosed by stroke pixels (not touching the mask border). */
+	holeCount: number;
+	/** Each enclosed region's pixel count as a fraction of total mask pixels (768), holeCount entries, largest first. */
+	holeSizeFractions: number[];
+	/** Fraction of the 768 mask pixels that are set (stroke density). */
+	strokeFraction: number;
 }
 
 /**
@@ -170,114 +170,117 @@ export interface TopologyFeatures {
  * hole count differs), and overall strokeFraction (set-pixel density).
  */
 export function topology(mask: NormalizedDigit | ArrayLike<number>): TopologyFeatures {
-  const n = DIGIT_W * DIGIT_H;
-  const visited = new Uint8Array(n);
-  const outside = new Uint8Array(n);
+	const n = DIGIT_W * DIGIT_H;
+	const visited = new Uint8Array(n);
+	const outside = new Uint8Array(n);
 
-  // BFS flood fill of background pixels reachable from the border.
-  const queue: number[] = [];
-  for (let x = 0; x < DIGIT_W; x++) {
-    for (const y of [0, DIGIT_H - 1]) {
-      const idx = y * DIGIT_W + x;
-      if (!mask[idx] && !visited[idx]) {
-        visited[idx] = 1;
-        outside[idx] = 1;
-        queue.push(idx);
-      }
-    }
-  }
-  for (let y = 0; y < DIGIT_H; y++) {
-    for (const x of [0, DIGIT_W - 1]) {
-      const idx = y * DIGIT_W + x;
-      if (!mask[idx] && !visited[idx]) {
-        visited[idx] = 1;
-        outside[idx] = 1;
-        queue.push(idx);
-      }
-    }
-  }
-  while (queue.length > 0) {
-    const idx = queue.pop()!;
-    const x = idx % DIGIT_W;
-    const y = (idx - x) / DIGIT_W;
-    const neighbors: [number, number][] = [
-      [x - 1, y],
-      [x + 1, y],
-      [x, y - 1],
-      [x, y + 1],
-    ];
-    for (const [nx, ny] of neighbors) {
-      if (nx < 0 || nx >= DIGIT_W || ny < 0 || ny >= DIGIT_H) continue;
-      const nIdx = ny * DIGIT_W + nx;
-      if (!mask[nIdx] && !visited[nIdx]) {
-        visited[nIdx] = 1;
-        outside[nIdx] = 1;
-        queue.push(nIdx);
-      }
-    }
-  }
+	// BFS flood fill of background pixels reachable from the border.
+	const queue: number[] = [];
+	for (let x = 0; x < DIGIT_W; x++) {
+		for (const y of [0, DIGIT_H - 1]) {
+			const idx = y * DIGIT_W + x;
+			if (!mask[idx] && !visited[idx]) {
+				visited[idx] = 1;
+				outside[idx] = 1;
+				queue.push(idx);
+			}
+		}
+	}
+	for (let y = 0; y < DIGIT_H; y++) {
+		for (const x of [0, DIGIT_W - 1]) {
+			const idx = y * DIGIT_W + x;
+			if (!mask[idx] && !visited[idx]) {
+				visited[idx] = 1;
+				outside[idx] = 1;
+				queue.push(idx);
+			}
+		}
+	}
+	while (queue.length > 0) {
+		const idx = queue.pop()!;
+		const x = idx % DIGIT_W;
+		const y = (idx - x) / DIGIT_W;
+		const neighbors: [number, number][] = [
+			[x - 1, y],
+			[x + 1, y],
+			[x, y - 1],
+			[x, y + 1]
+		];
+		for (const [nx, ny] of neighbors) {
+			if (nx < 0 || nx >= DIGIT_W || ny < 0 || ny >= DIGIT_H) continue;
+			const nIdx = ny * DIGIT_W + nx;
+			if (!mask[nIdx] && !visited[nIdx]) {
+				visited[nIdx] = 1;
+				outside[nIdx] = 1;
+				queue.push(nIdx);
+			}
+		}
+	}
 
-  // Any remaining unvisited background pixel is part of an enclosed hole.
-  // Flood-fill each such region (4-connected) to count holes and their sizes.
-  const holeSizes: number[] = [];
-  let strokeCount = 0;
-  for (let i = 0; i < n; i++) {
-    if (mask[i]) {
-      strokeCount++;
-      continue;
-    }
-    if (visited[i]) continue; // reachable from border, not a hole
-    // New hole region: flood fill it.
-    let size = 0;
-    const q: number[] = [i];
-    visited[i] = 1;
-    while (q.length > 0) {
-      const idx = q.pop()!;
-      size++;
-      const x = idx % DIGIT_W;
-      const y = (idx - x) / DIGIT_W;
-      const neighbors: [number, number][] = [
-        [x - 1, y],
-        [x + 1, y],
-        [x, y - 1],
-        [x, y + 1],
-      ];
-      for (const [nx, ny] of neighbors) {
-        if (nx < 0 || nx >= DIGIT_W || ny < 0 || ny >= DIGIT_H) continue;
-        const nIdx = ny * DIGIT_W + nx;
-        if (!mask[nIdx] && !visited[nIdx]) {
-          visited[nIdx] = 1;
-          q.push(nIdx);
-        }
-      }
-    }
-    holeSizes.push(size);
-  }
-  holeSizes.sort((a, b) => b - a);
+	// Any remaining unvisited background pixel is part of an enclosed hole.
+	// Flood-fill each such region (4-connected) to count holes and their sizes.
+	const holeSizes: number[] = [];
+	let strokeCount = 0;
+	for (let i = 0; i < n; i++) {
+		if (mask[i]) {
+			strokeCount++;
+			continue;
+		}
+		if (visited[i]) continue; // reachable from border, not a hole
+		// New hole region: flood fill it.
+		let size = 0;
+		const q: number[] = [i];
+		visited[i] = 1;
+		while (q.length > 0) {
+			const idx = q.pop()!;
+			size++;
+			const x = idx % DIGIT_W;
+			const y = (idx - x) / DIGIT_W;
+			const neighbors: [number, number][] = [
+				[x - 1, y],
+				[x + 1, y],
+				[x, y - 1],
+				[x, y + 1]
+			];
+			for (const [nx, ny] of neighbors) {
+				if (nx < 0 || nx >= DIGIT_W || ny < 0 || ny >= DIGIT_H) continue;
+				const nIdx = ny * DIGIT_W + nx;
+				if (!mask[nIdx] && !visited[nIdx]) {
+					visited[nIdx] = 1;
+					q.push(nIdx);
+				}
+			}
+		}
+		holeSizes.push(size);
+	}
+	holeSizes.sort((a, b) => b - a);
 
-  return {
-    holeCount: holeSizes.length,
-    holeSizeFractions: holeSizes.map((s) => s / n),
-    strokeFraction: strokeCount / n,
-  };
+	return {
+		holeCount: holeSizes.length,
+		holeSizeFractions: holeSizes.map((s) => s / n),
+		strokeFraction: strokeCount / n
+	};
 }
 
 /** Named registry of the vector-returning extractors, for the experiment driver. */
-export const FEATURE_EXTRACTORS: Record<string, (mask: NormalizedDigit | ArrayLike<number>) => number[]> = {
-  fullMask768,
-  occupancy6x8,
-  occupancy8x10,
-  multiscale,
-  rowProjection32,
-  colProjection24,
+export const FEATURE_EXTRACTORS: Record<
+	string,
+	(mask: NormalizedDigit | ArrayLike<number>) => number[]
+> = {
+	fullMask768,
+	occupancy6x8,
+	occupancy8x10,
+	multiscale,
+	rowProjection32,
+	colProjection24
 };
 
 /** Dimensionality of each registered extractor's output, without evaluating a mask. */
 export const FEATURE_DIMS: Record<string, number> = {
-  fullMask768: DIGIT_W * DIGIT_H,
-  occupancy6x8: 6 * 8,
-  occupancy8x10: 8 * 10,
-  multiscale: 6 * 8 + 12 * 16,
-  rowProjection32: DIGIT_H,
-  colProjection24: DIGIT_W,
+	fullMask768: DIGIT_W * DIGIT_H,
+	occupancy6x8: 6 * 8,
+	occupancy8x10: 8 * 10,
+	multiscale: 6 * 8 + 12 * 16,
+	rowProjection32: DIGIT_H,
+	colProjection24: DIGIT_W
 };

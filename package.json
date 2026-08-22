@@ -1,61 +1,65 @@
 {
-  "name": "chainspot",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
-  "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lab:gates": "tsx scripts/chainspot-lab/gates.ts",
-    "detect:tees": "tsx scripts/detect-tees.ts",
-    "overfit:tees": "tsx scripts/overfit-tees.ts",
-    "validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
-    "detect:baskets": "tsx scripts/detect-baskets-entry.ts",
-    "detect:course": "tsx scripts/detect-course.ts",
-    "verify:course-detection": "tsx scripts/verify-course-detection.ts",
-    "benchmark:active-review": "node --experimental-strip-types scripts/benchmark-active-review.ts",
-    "benchmark:course-corpus": "tsx scripts/benchmark-course-corpus.ts",
-    "benchmark:corridor-bends": "tsx scripts/benchmark-corridor-bend-detection.ts",
-    "benchmark:collinearity-straightness": "tsx scripts/collinearity-straightness-check.ts",
-    "detect:landing-droplets": "tsx scripts/detect-landing-droplets.ts",
-    "verify:tee-scale": "tsx scripts/verify-tee-scale-sweep.ts",
-    "cv:dev": "tsx scripts/verify-cv-gallery.ts --mode dev",
-    "verify:cv": "tsx scripts/verify-cv-gallery.ts --mode gate",
-    "verify:cv:legacy": "tsx scripts/verify-cv-guardrails.ts",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
-    "test:e2e": "playwright test",
-    "test": "npm run test:unit && npm run test:e2e",
-    "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts",
-    "lab:invariants": "tsx scripts/chainspot-lab/invariants.ts",
-    "lab:cases": "tsx scripts/chainspot-lab/cases.ts"
-  },
-  "dependencies": {
-    "@techstark/opencv-js": "^5.0.0-release.1",
-    "fflate": "^0.8.3",
-    "konva": "^10.3.0"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.70.2",
-    "@sveltejs/vite-plugin-svelte": "^7.2.0",
-    "@types/node": "^26.1.2",
-    "fake-indexeddb": "^6.2.5",
-    "jpeg-js": "^0.4.4",
-    "jsdom": "^30.0.1",
-    "pngjs": "^7.0.0",
-    "svelte": "^5.56.8",
-    "svelte-check": "^4.7.5",
-    "tsx": "^4.20.3",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
-  },
-  "optionalDependencies": {
-    "@rolldown/binding-darwin-x64": "^1.2.3"
-  }
+	"name": "chainspot",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"lab:gates": "tsx scripts/chainspot-lab/gates.ts",
+		"detect:tees": "tsx scripts/detect-tees.ts",
+		"overfit:tees": "tsx scripts/overfit-tees.ts",
+		"validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
+		"detect:baskets": "tsx scripts/detect-baskets-entry.ts",
+		"detect:course": "tsx scripts/detect-course.ts",
+		"verify:course-detection": "tsx scripts/verify-course-detection.ts",
+		"benchmark:active-review": "node --experimental-strip-types scripts/benchmark-active-review.ts",
+		"benchmark:course-corpus": "tsx scripts/benchmark-course-corpus.ts",
+		"benchmark:corridor-bends": "tsx scripts/benchmark-corridor-bend-detection.ts",
+		"benchmark:collinearity-straightness": "tsx scripts/collinearity-straightness-check.ts",
+		"detect:landing-droplets": "tsx scripts/detect-landing-droplets.ts",
+		"verify:tee-scale": "tsx scripts/verify-tee-scale-sweep.ts",
+		"cv:dev": "tsx scripts/verify-cv-gallery.ts --mode dev",
+		"verify:cv": "tsx scripts/verify-cv-gallery.ts --mode gate",
+		"verify:cv:legacy": "tsx scripts/verify-cv-guardrails.ts",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
+		"test:e2e": "playwright test",
+		"test": "npm run test:unit && npm run test:e2e",
+		"lab:detectors": "tsx scripts/chainspot-lab/detectors.ts",
+		"lab:invariants": "tsx scripts/chainspot-lab/invariants.ts",
+		"lab:cases": "tsx scripts/chainspot-lab/cases.ts",
+		"format": "prettier --write src/lib/nuthing scripts/chainspot-lab",
+		"format:check": "prettier --check src/lib/nuthing scripts/chainspot-lab"
+	},
+	"dependencies": {
+		"@techstark/opencv-js": "^5.0.0-release.1",
+		"fflate": "^0.8.3",
+		"konva": "^10.3.0"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.62.1",
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.70.2",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"@types/node": "^26.1.2",
+		"fake-indexeddb": "^6.2.5",
+		"jpeg-js": "^0.4.4",
+		"jsdom": "^30.0.1",
+		"pngjs": "^7.0.0",
+		"prettier": "^3.8.3",
+		"prettier-plugin-svelte": "^4.1.0",
+		"svelte": "^5.56.8",
+		"svelte-check": "^4.7.5",
+		"tsx": "^4.20.3",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
+	},
+	"optionalDependencies": {
+		"@rolldown/binding-darwin-x64": "^1.2.3"
+	}
 }

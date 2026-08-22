@@ -30,29 +30,29 @@
 import type { CandidatePool, RankedCandidate } from './candidatePool';
 
 export interface TwoPassPass<R> {
-  results: R[];
-  seconds: number;
-  candidateCount: number;
+	results: R[];
+	seconds: number;
+	candidateCount: number;
 }
 
 export interface TwoPassOutcome<R> {
-  /** Pass A: task run over pool.forwarded — the operational timing number. */
-  culledRun: TwoPassPass<R>;
-  /** Pass B: task re-run over pool.unculled — diagnostic / floor falsification. */
-  fullReplay: TwoPassPass<R>;
+	/** Pass A: task run over pool.forwarded — the operational timing number. */
+	culledRun: TwoPassPass<R>;
+	/** Pass B: task re-run over pool.unculled — diagnostic / floor falsification. */
+	fullReplay: TwoPassPass<R>;
 }
 
 function timedRun<T, R>(
-  candidates: RankedCandidate<T>[],
-  task: (c: RankedCandidate<T>) => R,
+	candidates: RankedCandidate<T>[],
+	task: (c: RankedCandidate<T>) => R
 ): TwoPassPass<R> {
-  const results: R[] = new Array(candidates.length);
-  const t0 = performance.now();
-  for (let i = 0; i < candidates.length; i++) {
-    results[i] = task(candidates[i]);
-  }
-  const seconds = (performance.now() - t0) / 1000;
-  return { results, seconds, candidateCount: candidates.length };
+	const results: R[] = new Array(candidates.length);
+	const t0 = performance.now();
+	for (let i = 0; i < candidates.length; i++) {
+		results[i] = task(candidates[i]);
+	}
+	const seconds = (performance.now() - t0) / 1000;
+	return { results, seconds, candidateCount: candidates.length };
 }
 
 /**
@@ -63,10 +63,10 @@ function timedRun<T, R>(
  * Pass A's leftovers.
  */
 export function runTwoPass<T, R>(
-  pool: CandidatePool<T>,
-  task: (c: RankedCandidate<T>) => R,
+	pool: CandidatePool<T>,
+	task: (c: RankedCandidate<T>) => R
 ): TwoPassOutcome<R> {
-  const culledRun = timedRun(pool.forwarded, task);
-  const fullReplay = timedRun(pool.unculled, task);
-  return { culledRun, fullReplay };
+	const culledRun = timedRun(pool.forwarded, task);
+	const fullReplay = timedRun(pool.unculled, task);
+	return { culledRun, fullReplay };
 }

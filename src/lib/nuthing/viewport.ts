@@ -17,20 +17,20 @@ import type { AnalysisRaster } from '../stitch/analysis';
 import { proposeSingleImageCrop } from '../stitch/autoCrop';
 
 export interface Viewport {
-  /** First map row (inclusive). */
-  top: number;
-  /** One past the last map row. */
-  bottom: number;
+	/** First map row (inclusive). */
+	top: number;
+	/** One past the last map row. */
+	bottom: number;
 }
 
 /** Same grayscale as the stitch analysis pipeline, at native resolution. */
 function toGrayRaster(image: RgbaImage): AnalysisRaster {
-  const { width, height, data } = image;
-  const gray = new Uint8Array(width * height);
-  for (let i = 0, j = 0; j < gray.length; i += 4, j++) {
-    gray[j] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 + 0.5) | 0;
-  }
-  return { widthPx: width, heightPx: height, gray, scale: 1 };
+	const { width, height, data } = image;
+	const gray = new Uint8Array(width * height);
+	for (let i = 0, j = 0; j < gray.length; i += 4, j++) {
+		gray[j] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 + 0.5) | 0;
+	}
+	return { widthPx: width, heightPx: height, gray, scale: 1 };
 }
 
 /**
@@ -39,19 +39,19 @@ function toGrayRaster(image: RgbaImage): AnalysisRaster {
  * image.
  */
 export function detectMapViewport(image: RgbaImage): Viewport {
-  const proposal = proposeSingleImageCrop(toGrayRaster(image));
-  if (!proposal.insets) return { top: 0, bottom: image.height };
-  return {
-    top: proposal.insets.topPx,
-    bottom: image.height - proposal.insets.bottomPx,
-  };
+	const proposal = proposeSingleImageCrop(toGrayRaster(image));
+	if (!proposal.insets) return { top: 0, bottom: image.height };
+	return {
+		top: proposal.insets.topPx,
+		bottom: image.height - proposal.insets.bottomPx
+	};
 }
 
 /** Crop an RgbaImage to a row range (full width). */
 export function cropRows(image: RgbaImage, viewport: Viewport): RgbaImage {
-  const { width, data } = image;
-  const height = viewport.bottom - viewport.top;
-  const out = new Uint8Array(width * height * 4);
-  out.set(data.subarray(viewport.top * width * 4, viewport.bottom * width * 4) as Uint8Array);
-  return { width, height, data: out };
+	const { width, data } = image;
+	const height = viewport.bottom - viewport.top;
+	const out = new Uint8Array(width * height * 4);
+	out.set(data.subarray(viewport.top * width * 4, viewport.bottom * width * 4) as Uint8Array);
+	return { width, height, data: out };
 }

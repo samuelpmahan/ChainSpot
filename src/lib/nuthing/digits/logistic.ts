@@ -58,42 +58,42 @@ export const LEARNING_RATE_DECAY = 0.004;
 export const DEFAULT_ITERATIONS = 800;
 
 export interface LogisticModel {
-  classes: string[]; // CLASSES, order defines the score/probability vector order
-  W: number[][]; // NUM_CLASSES x NUM_FEATURES
-  b: number[]; // NUM_CLASSES
-  lambda: number;
-  iters: number;
+	classes: string[]; // CLASSES, order defines the score/probability vector order
+	W: number[][]; // NUM_CLASSES x NUM_FEATURES
+	b: number[]; // NUM_CLASSES
+	lambda: number;
+	iters: number;
 }
 
 export interface TrainSample {
-  /** length NUM_FEATURES, values in {0,1} (a decoded normalized digit mask). */
-  features: Uint8Array | number[];
-  /** index into CLASSES, 0..9 */
-  label: number;
+	/** length NUM_FEATURES, values in {0,1} (a decoded normalized digit mask). */
+	features: Uint8Array | number[];
+	/** index into CLASSES, 0..9 */
+	label: number;
 }
 
 function softmaxInPlace(z: Float64Array, rowStart: number, k: number): void {
-  let max = -Infinity;
-  for (let j = 0; j < k; j++) {
-    const v = z[rowStart + j];
-    if (v > max) max = v;
-  }
-  let sum = 0;
-  for (let j = 0; j < k; j++) {
-    const e = Math.exp(z[rowStart + j] - max);
-    z[rowStart + j] = e;
-    sum += e;
-  }
-  const inv = sum > 0 ? 1 / sum : 0;
-  for (let j = 0; j < k; j++) z[rowStart + j] *= inv;
+	let max = -Infinity;
+	for (let j = 0; j < k; j++) {
+		const v = z[rowStart + j];
+		if (v > max) max = v;
+	}
+	let sum = 0;
+	for (let j = 0; j < k; j++) {
+		const e = Math.exp(z[rowStart + j] - max);
+		z[rowStart + j] = e;
+		sum += e;
+	}
+	const inv = sum > 0 ? 1 / sum : 0;
+	for (let j = 0; j < k; j++) z[rowStart + j] *= inv;
 }
 
 /** Numerically stable softmax over a plain array (used at inference time). */
 export function softmax(logits: number[]): number[] {
-  const k = logits.length;
-  const z = Float64Array.from(logits);
-  softmaxInPlace(z, 0, k);
-  return Array.from(z);
+	const k = logits.length;
+	const z = Float64Array.from(logits);
+	softmaxInPlace(z, 0, k);
+	return Array.from(z);
 }
 
 /**
@@ -103,34 +103,34 @@ export function softmax(logits: number[]): number[] {
  * gradient no matter how many samples of that class are present.
  */
 export function classBalanceWeights(labels: ArrayLike<number>, numClasses: number): Float64Array {
-  const n = labels.length;
-  const counts = new Array(numClasses).fill(0);
-  for (let i = 0; i < n; i++) counts[labels[i]]++;
-  const raw = new Float64Array(n);
-  let sum = 0;
-  for (let i = 0; i < n; i++) {
-    const c = counts[labels[i]];
-    const w = c > 0 ? 1 / c : 0;
-    raw[i] = w;
-    sum += w;
-  }
-  const scale = sum > 0 ? n / sum : 1;
-  for (let i = 0; i < n; i++) raw[i] *= scale;
-  return raw;
+	const n = labels.length;
+	const counts = new Array(numClasses).fill(0);
+	for (let i = 0; i < n; i++) counts[labels[i]]++;
+	const raw = new Float64Array(n);
+	let sum = 0;
+	for (let i = 0; i < n; i++) {
+		const c = counts[labels[i]];
+		const w = c > 0 ? 1 / c : 0;
+		raw[i] = w;
+		sum += w;
+	}
+	const scale = sum > 0 ? n / sum : 1;
+	for (let i = 0; i < n; i++) raw[i] *= scale;
+	return raw;
 }
 
 export interface TrainOptions {
-  /** L2 regularization strength on W (never applied to b). */
-  lambda: number;
-  iters?: number; // default DEFAULT_ITERATIONS
-  learningRateInitial?: number; // default LEARNING_RATE_INITIAL
-  learningRateDecay?: number; // default LEARNING_RATE_DECAY
-  /**
-   * Optional externally supplied per-sample weights (e.g. to also fold in
-   * a real/synthetic mixing weight). Defaults to classBalanceWeights()
-   * over `samples`' labels.
-   */
-  weights?: ArrayLike<number>;
+	/** L2 regularization strength on W (never applied to b). */
+	lambda: number;
+	iters?: number; // default DEFAULT_ITERATIONS
+	learningRateInitial?: number; // default LEARNING_RATE_INITIAL
+	learningRateDecay?: number; // default LEARNING_RATE_DECAY
+	/**
+	 * Optional externally supplied per-sample weights (e.g. to also fold in
+	 * a real/synthetic mixing weight). Defaults to classBalanceWeights()
+	 * over `samples`' labels.
+	 */
+	weights?: ArrayLike<number>;
 }
 
 /**
@@ -143,130 +143,133 @@ export interface TrainOptions {
  * Zero-initialized W, b. No RNG. Given identical (samples order, options),
  * two calls produce bit-identical W and b.
  */
-export function trainLogisticRegression(samples: TrainSample[], options: TrainOptions): LogisticModel {
-  const n = samples.length;
-  const d = NUM_FEATURES;
-  const k = NUM_CLASSES;
-  const iters = options.iters ?? DEFAULT_ITERATIONS;
-  const lr0 = options.learningRateInitial ?? LEARNING_RATE_INITIAL;
-  const decay = options.learningRateDecay ?? LEARNING_RATE_DECAY;
-  const lambda = options.lambda;
+export function trainLogisticRegression(
+	samples: TrainSample[],
+	options: TrainOptions
+): LogisticModel {
+	const n = samples.length;
+	const d = NUM_FEATURES;
+	const k = NUM_CLASSES;
+	const iters = options.iters ?? DEFAULT_ITERATIONS;
+	const lr0 = options.learningRateInitial ?? LEARNING_RATE_INITIAL;
+	const decay = options.learningRateDecay ?? LEARNING_RATE_DECAY;
+	const lambda = options.lambda;
 
-  if (n === 0) {
-    return {
-      classes: [...CLASSES],
-      W: Array.from({ length: k }, () => new Array(d).fill(0)),
-      b: new Array(k).fill(0),
-      lambda,
-      iters,
-    };
-  }
+	if (n === 0) {
+		return {
+			classes: [...CLASSES],
+			W: Array.from({ length: k }, () => new Array(d).fill(0)),
+			b: new Array(k).fill(0),
+			lambda,
+			iters
+		};
+	}
 
-  // Flatten features into row-major X (n x d) once; avoids re-touching the
-  // caller's arrays (which may be Uint8Array or number[]) on every iter.
-  const X = new Float64Array(n * d);
-  const labels = new Int32Array(n);
-  for (let i = 0; i < n; i++) {
-    const f = samples[i].features;
-    const row = i * d;
-    for (let j = 0; j < d; j++) X[row + j] = f[j];
-    labels[i] = samples[i].label;
-  }
+	// Flatten features into row-major X (n x d) once; avoids re-touching the
+	// caller's arrays (which may be Uint8Array or number[]) on every iter.
+	const X = new Float64Array(n * d);
+	const labels = new Int32Array(n);
+	for (let i = 0; i < n; i++) {
+		const f = samples[i].features;
+		const row = i * d;
+		for (let j = 0; j < d; j++) X[row + j] = f[j];
+		labels[i] = samples[i].label;
+	}
 
-  const weights =
-    options.weights !== undefined
-      ? Float64Array.from(options.weights)
-      : classBalanceWeights(labels, k);
-  let weightSum = 0;
-  for (let i = 0; i < n; i++) weightSum += weights[i];
-  const invWeightSum = weightSum > 0 ? 1 / weightSum : 1;
+	const weights =
+		options.weights !== undefined
+			? Float64Array.from(options.weights)
+			: classBalanceWeights(labels, k);
+	let weightSum = 0;
+	for (let i = 0; i < n; i++) weightSum += weights[i];
+	const invWeightSum = weightSum > 0 ? 1 / weightSum : 1;
 
-  const W = new Float64Array(k * d); // zero-init
-  const b = new Float64Array(k); // zero-init
-  const Z = new Float64Array(n * k); // reused logits/probs buffer
-  const gW = new Float64Array(k * d);
-  const gb = new Float64Array(k);
+	const W = new Float64Array(k * d); // zero-init
+	const b = new Float64Array(k); // zero-init
+	const Z = new Float64Array(n * k); // reused logits/probs buffer
+	const gW = new Float64Array(k * d);
+	const gb = new Float64Array(k);
 
-  for (let t = 0; t < iters; t++) {
-    // Forward pass: Z[i] = softmax(W x_i + b)
-    for (let i = 0; i < n; i++) {
-      const xRow = i * d;
-      const zRow = i * k;
-      for (let c = 0; c < k; c++) {
-        let s = b[c];
-        const wRow = c * d;
-        for (let j = 0; j < d; j++) s += W[wRow + j] * X[xRow + j];
-        Z[zRow + c] = s;
-      }
-      softmaxInPlace(Z, zRow, k);
-    }
+	for (let t = 0; t < iters; t++) {
+		// Forward pass: Z[i] = softmax(W x_i + b)
+		for (let i = 0; i < n; i++) {
+			const xRow = i * d;
+			const zRow = i * k;
+			for (let c = 0; c < k; c++) {
+				let s = b[c];
+				const wRow = c * d;
+				for (let j = 0; j < d; j++) s += W[wRow + j] * X[xRow + j];
+				Z[zRow + c] = s;
+			}
+			softmaxInPlace(Z, zRow, k);
+		}
 
-    // Gradient of the weighted mean cross-entropy + L2 penalty.
-    gW.fill(0);
-    gb.fill(0);
-    for (let i = 0; i < n; i++) {
-      const wgt = weights[i];
-      const zRow = i * k;
-      const xRow = i * d;
-      const label = labels[i];
-      for (let c = 0; c < k; c++) {
-        const p = Z[zRow + c];
-        const y = c === label ? 1 : 0;
-        const diff = wgt * (p - y);
-        gb[c] += diff;
-        const gwRow = c * d;
-        for (let j = 0; j < d; j++) gW[gwRow + j] += diff * X[xRow + j];
-      }
-    }
+		// Gradient of the weighted mean cross-entropy + L2 penalty.
+		gW.fill(0);
+		gb.fill(0);
+		for (let i = 0; i < n; i++) {
+			const wgt = weights[i];
+			const zRow = i * k;
+			const xRow = i * d;
+			const label = labels[i];
+			for (let c = 0; c < k; c++) {
+				const p = Z[zRow + c];
+				const y = c === label ? 1 : 0;
+				const diff = wgt * (p - y);
+				gb[c] += diff;
+				const gwRow = c * d;
+				for (let j = 0; j < d; j++) gW[gwRow + j] += diff * X[xRow + j];
+			}
+		}
 
-    const lr = lr0 / (1 + decay * t);
-    for (let c = 0; c < k; c++) {
-      const wRow = c * d;
-      for (let j = 0; j < d; j++) {
-        const reg = lambda * W[wRow + j];
-        W[wRow + j] -= lr * (gW[wRow + j] * invWeightSum + reg);
-      }
-      b[c] -= lr * gb[c] * invWeightSum;
-    }
-  }
+		const lr = lr0 / (1 + decay * t);
+		for (let c = 0; c < k; c++) {
+			const wRow = c * d;
+			for (let j = 0; j < d; j++) {
+				const reg = lambda * W[wRow + j];
+				W[wRow + j] -= lr * (gW[wRow + j] * invWeightSum + reg);
+			}
+			b[c] -= lr * gb[c] * invWeightSum;
+		}
+	}
 
-  const Wout: number[][] = [];
-  for (let c = 0; c < k; c++) {
-    const row = new Array(d);
-    const wRow = c * d;
-    for (let j = 0; j < d; j++) row[j] = W[wRow + j];
-    Wout.push(row);
-  }
-  return { classes: [...CLASSES], W: Wout, b: Array.from(b), lambda, iters };
+	const Wout: number[][] = [];
+	for (let c = 0; c < k; c++) {
+		const row = new Array(d);
+		const wRow = c * d;
+		for (let j = 0; j < d; j++) row[j] = W[wRow + j];
+		Wout.push(row);
+	}
+	return { classes: [...CLASSES], W: Wout, b: Array.from(b), lambda, iters };
 }
 
 /** Softmax class probabilities, in CLASSES order, for one feature vector. */
 export function predictProbs(model: LogisticModel, features: ArrayLike<number>): number[] {
-  const k = model.classes.length;
-  const d = model.W[0]?.length ?? NUM_FEATURES;
-  const z = new Array(k);
-  for (let c = 0; c < k; c++) {
-    let s = model.b[c];
-    const Wc = model.W[c];
-    for (let j = 0; j < d; j++) s += Wc[j] * features[j];
-    z[c] = s;
-  }
-  return softmax(z);
+	const k = model.classes.length;
+	const d = model.W[0]?.length ?? NUM_FEATURES;
+	const z = new Array(k);
+	for (let c = 0; c < k; c++) {
+		let s = model.b[c];
+		const Wc = model.W[c];
+		for (let j = 0; j < d; j++) s += Wc[j] * features[j];
+		z[c] = s;
+	}
+	return softmax(z);
 }
 
 /** Highest-probability class label (a member of model.classes). */
 export function predictClass(model: LogisticModel, features: ArrayLike<number>): string {
-  const probs = predictProbs(model, features);
-  let best = 0;
-  for (let c = 1; c < probs.length; c++) if (probs[c] > probs[best]) best = c;
-  return model.classes[best];
+	const probs = predictProbs(model, features);
+	let best = 0;
+	for (let c = 1; c < probs.length; c++) if (probs[c] > probs[best]) best = c;
+	return model.classes[best];
 }
 
 /** Decode a dataset sample's base64 mask field into the raw feature vector. */
 export function featuresFromBase64Mask(mask: string): Uint8Array {
-  return digitFromBase64(mask);
+	return digitFromBase64(mask);
 }
 
 export function classIndex(digit: string): number {
-  return (CLASSES as readonly string[]).indexOf(digit);
+	return (CLASSES as readonly string[]).indexOf(digit);
 }

@@ -5,12 +5,17 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const tsx = join(repoRoot, 'node_modules', '.bin', 'tsx');
-const devCourses = ['DashsTrack-full', 'HeritagePark-full', 'Lenard-full', 'TowneLake-full'] as const;
+const devCourses = [
+	'DashsTrack-full',
+	'HeritagePark-full',
+	'Lenard-full',
+	'TowneLake-full'
+] as const;
 const corpusRasters: Record<(typeof devCourses)[number], string> = {
 	'DashsTrack-full': 'dev/DashsTrack/DashsTrack-full.jpg',
 	'HeritagePark-full': 'dev/Heritage/HeritagePark-full.png',
 	'Lenard-full': 'dev/Lenard/Lenard-full.PNG',
-	'TowneLake-full': 'dev/TowneLake/TowneLake-full.png',
+	'TowneLake-full': 'dev/TowneLake/TowneLake-full.png'
 };
 
 function usage(): never {
@@ -22,7 +27,7 @@ function runScript(script: string, args: readonly string[], env = process.env) {
 	const result = spawnSync(tsx, [join(repoRoot, script), ...args], {
 		cwd: repoRoot,
 		encoding: 'utf8',
-		env,
+		env
 	});
 	if (result.error) throw result.error;
 	return result;
@@ -42,8 +47,13 @@ function ensureCorpus(corpusRoot: string): void {
 	console.log(`Corpus checkout is absent; cloning the canonical input into ${corpusRoot}.`);
 	const cloned = run(
 		'git',
-		['clone', '--filter=blob:none', 'https://github.com/samuelpmahan/chainspot-corpus.git', corpusRoot],
-		{ ...process.env, GIT_LFS_SKIP_SMUDGE: '1' },
+		[
+			'clone',
+			'--filter=blob:none',
+			'https://github.com/samuelpmahan/chainspot-corpus.git',
+			corpusRoot
+		],
+		{ ...process.env, GIT_LFS_SKIP_SMUDGE: '1' }
 	);
 	process.stdout.write(cloned.stdout);
 	process.stderr.write(cloned.stderr);
@@ -53,19 +63,24 @@ function ensureCorpus(corpusRoot: string): void {
 		corpusRoot,
 		'lfs',
 		'pull',
-		`--include=${Object.values(corpusRasters).join(',')}`,
+		`--include=${Object.values(corpusRasters).join(',')}`
 	]);
 	process.stdout.write(hydrated.stdout);
 	process.stderr.write(hydrated.stderr);
 	if (hydrated.status !== 0) process.exit(hydrated.status ?? 1);
 }
 
-function ensureTrace(course: (typeof devCourses)[number], corpusRoot: string, traceDir: string): void {
+function ensureTrace(
+	course: (typeof devCourses)[number],
+	corpusRoot: string,
+	traceDir: string
+): void {
 	const trace = join(traceDir, `${course}.rgba.bin`);
 	if (existsSync(trace)) return;
 	const source = join(corpusRoot, corpusRasters[course]);
 	const header = readFileSync(source, { encoding: 'utf8', flag: 'r' }).slice(0, 80);
-	if (header.startsWith('version https://git-lfs')) throw new Error(`Corpus raster is an unhydrated LFS pointer: ${source}`);
+	if (header.startsWith('version https://git-lfs'))
+		throw new Error(`Corpus raster is an unhydrated LFS pointer: ${source}`);
 	mkdirSync(traceDir, { recursive: true });
 	console.log(`Decoding canonical raster for ${course}...`);
 	const traced = run('uv', [
@@ -79,7 +94,7 @@ function ensureTrace(course: (typeof devCourses)[number], corpusRoot: string, tr
 		source,
 		traceDir,
 		'--name',
-		course,
+		course
 	]);
 	process.stdout.write(traced.stdout);
 	process.stderr.write(traced.stderr);
@@ -89,23 +104,30 @@ function ensureTrace(course: (typeof devCourses)[number], corpusRoot: string, tr
 function orientRun(verbose: boolean): void {
 	const cache = process.env.NUTHING_CACHE_DIR ?? '/workspace/nuthing-work/pair-matrix-v6';
 	const traceDir = process.env.NUTHING_TRACE_DIR ?? join(cache, 'source-rgba');
-	const corpusRoot = process.env.CHAINSPOT_CORPUS_PATH ?? resolve(repoRoot, '..', 'chainspot-corpus');
+	const corpusRoot =
+		process.env.CHAINSPOT_CORPUS_PATH ?? resolve(repoRoot, '..', 'chainspot-corpus');
 	const missingCourses: string[] = [];
 	for (const course of devCourses) {
-		if (['.json', '-field.bin', '-theta.bin'].some((suffix) => !existsSync(join(cache, `${course}${suffix}`)))) {
+		if (
+			['.json', '-field.bin', '-theta.bin'].some(
+				(suffix) => !existsSync(join(cache, `${course}${suffix}`))
+			)
+		) {
 			missingCourses.push(course);
 		}
 	}
 	if (missingCourses.length > 0) {
 		ensureCorpus(corpusRoot);
-		console.log(`Measurement cache is cold; generating ${missingCourses.length} course(s) before replay.`);
+		console.log(
+			`Measurement cache is cold; generating ${missingCourses.length} course(s) before replay.`
+		);
 		for (const course of missingCourses) {
 			ensureTrace(course as (typeof devCourses)[number], corpusRoot, traceDir);
 			console.log(`Measuring ${course}...`);
 			const measured = runScript(
 				'scripts/nuthing/pair-matrix.ts',
 				[cache, '--course', course, '--patch-badges'],
-				{ ...process.env, CHAINSPOT_CORPUS_PATH: corpusRoot, NUTHING_TRACE_DIR: traceDir },
+				{ ...process.env, CHAINSPOT_CORPUS_PATH: corpusRoot, NUTHING_TRACE_DIR: traceDir }
 			);
 			if (verbose) process.stdout.write(measured.stdout);
 			process.stderr.write(measured.stderr);
@@ -113,14 +135,16 @@ function orientRun(verbose: boolean): void {
 		}
 	}
 
-	console.log('Running the frozen Dev72 scorer from cached measurements; focus course: DashsTrack.');
+	console.log(
+		'Running the frozen Dev72 scorer from cached measurements; focus course: DashsTrack.'
+	);
 	const result = runScript('scripts/nuthing/pair-matrix-replay.ts', [
 		cache,
 		'--zones',
 		'--simple',
 		'--invariants',
 		'--identity',
-		'--assign',
+		'--assign'
 	]);
 	if (result.status !== 0) {
 		process.stderr.write(result.stdout);
@@ -137,10 +161,14 @@ function orientRun(verbose: boolean): void {
 		}
 	}
 	if (!result.stdout.includes('DashsTrack-full: ASSIGNED exact=18/18')) {
-		throw new Error('DashsTrack did not reproduce assigned exact=18/18. Analyze the run; do not request a pass.');
+		throw new Error(
+			'DashsTrack did not reproduce assigned exact=18/18. Analyze the run; do not request a pass.'
+		);
 	}
 	if (!result.stdout.includes('ASSIGNED exact=72/72')) {
-		throw new Error('Dev72 did not reproduce assigned exact=72/72. Analyze the cache recipe; do not request a pass.');
+		throw new Error(
+			'Dev72 did not reproduce assigned exact=72/72. Analyze the cache recipe; do not request a pass.'
+		);
 	}
 
 	console.log('\nTell Sam one concise, useful thing you learned from this run.');
@@ -153,7 +181,7 @@ function orientAnnotate(course: string, verbose: boolean): void {
 	const artifactRoot = process.env.CHAINSPOT_LAB_ARTIFACTS ?? '/mnt/d/ChainSpot-LAB/artifacts';
 	const result = runScript('scripts/lab-grid.ts', [course], {
 		...process.env,
-		CHAINSPOT_LAB_ARTIFACTS: artifactRoot,
+		CHAINSPOT_LAB_ARTIFACTS: artifactRoot
 	});
 	if (verbose || result.status !== 0) process.stderr.write(result.stderr);
 	if (result.status !== 0) {
@@ -162,9 +190,15 @@ function orientAnnotate(course: string, verbose: boolean): void {
 	}
 	process.stdout.write(result.stdout);
 	console.log('\nOpen the labeled grid and work with Sam to choose inspection bounds.');
-	console.log('For each proposed view, say what evidence it should contain and why those bounds are useful.');
-	console.log('Before annotating, speculate about likely difficulties and expose the pixel evidence and assumptions behind that prediction.');
-	console.log('Inspection crops are views only: all coordinates remain in the canonical cropped-raster frame.');
+	console.log(
+		'For each proposed view, say what evidence it should contain and why those bounds are useful.'
+	);
+	console.log(
+		'Before annotating, speculate about likely difficulties and expose the pixel evidence and assumptions behind that prediction.'
+	);
+	console.log(
+		'Inspection crops are views only: all coordinates remain in the canonical cropped-raster frame.'
+	);
 	console.log('\nORIENT STATUS: WAITING FOR SHARED INSPECTION BOUNDS');
 }
 

@@ -92,27 +92,32 @@ const DEFAULTS: Required<SmartBasketOptions> = {
 	areaRatioMin: 0.96,
 	areaRatioMax: 1.03,
 	cleanWhiteCoverageMin: 0.96,
-	cleanDarkShellMin: 0.50,
-	cleanDarkCoherenceMin: 0.80,
+	cleanDarkShellMin: 0.5,
+	cleanDarkCoherenceMin: 0.8,
 	shellRadiusPx: 2,
 	blackConsensusFraction: 0.75,
 	blackConsensusMarginPx: 4,
-	recoveryIdentityMin: 0.90,
-	recoveryWhiteCoverageMin: 0.90,
-	recoveryBlackSupportMin: 0.80,
+	recoveryIdentityMin: 0.9,
+	recoveryWhiteCoverageMin: 0.9,
+	recoveryBlackSupportMin: 0.8,
 	recoveryVisibilityMin: 0.25,
-	highVisibilityMin: 0.50,
+	highVisibilityMin: 0.5,
 	dedupeRadiusPx: 14,
 	semanticTipOffsetPx: 4,
-	maxChildrenPerSeed: 2,
+	maxChildrenPerSeed: 2
 };
 
 function clamp(v: number, lo: number, hi: number): number {
 	return Math.max(lo, Math.min(hi, v));
 }
 
-function templateWhite(t: SmartBasketTemplate): { mask: Uint8Array; offsets: Int32Array; count: number } {
-	if (t.rows.length !== t.height) throw new Error('basket template row count does not match height');
+function templateWhite(t: SmartBasketTemplate): {
+	mask: Uint8Array;
+	offsets: Int32Array;
+	count: number;
+} {
+	if (t.rows.length !== t.height)
+		throw new Error('basket template row count does not match height');
 	const mask = new Uint8Array(t.width * t.height);
 	const offsets: number[] = [];
 	for (let y = 0; y < t.height; y++) {
@@ -127,7 +132,13 @@ function templateWhite(t: SmartBasketTemplate): { mask: Uint8Array; offsets: Int
 	return { mask, offsets: Int32Array.from(offsets), count: offsets.length };
 }
 
-function nearestDarkLabel(labels: Int32Array, width: number, height: number, x: number, y: number): number {
+function nearestDarkLabel(
+	labels: Int32Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number
+): number {
 	const cx = clamp(Math.round(x), 0, width - 1);
 	const cy = clamp(Math.round(y), 0, height - 1);
 	const direct = labels[cy * width + cx];
@@ -152,7 +163,7 @@ function shellEvidence(
 	dark: Mask,
 	darkLabels: Int32Array,
 	component: ComponentStats,
-	radius: number,
+	radius: number
 ): { darkFraction: number; darkCoherence: number } {
 	const { width, height } = dark;
 	const x0 = Math.max(0, component.bboxX - radius);
@@ -211,7 +222,7 @@ function shellEvidence(
 	for (const n of counts.values()) if (n > dominant) dominant = n;
 	return {
 		darkFraction: shellCount ? darkCount / shellCount : 0,
-		darkCoherence: darkCount ? dominant / darkCount : 0,
+		darkCoherence: darkCount ? dominant / darkCount : 0
 	};
 }
 
@@ -219,7 +230,7 @@ function componentWhiteCoverage(
 	brightLabels: Int32Array,
 	width: number,
 	component: ComponentStats,
-	family: { width: number; height: number; offsets: Int32Array },
+	family: { width: number; height: number; offsets: Int32Array }
 ): number {
 	if (component.bboxW !== family.width || component.bboxH !== family.height) return 0;
 	let hit = 0;
@@ -227,7 +238,8 @@ function componentWhiteCoverage(
 		const o = family.offsets[k];
 		const x = o % family.width;
 		const y = (o - x) / family.width;
-		if (brightLabels[(component.bboxY + y) * width + component.bboxX + x] === component.label) hit++;
+		if (brightLabels[(component.bboxY + y) * width + component.bboxX + x] === component.label)
+			hit++;
 	}
 	return hit / Math.max(1, family.offsets.length);
 }
@@ -239,14 +251,20 @@ function learnBlackConsensus(
 	tw: number,
 	th: number,
 	margin: number,
-	fraction: number,
+	fraction: number
 ): Uint8Array {
 	const ew = tw + 2 * margin;
 	const eh = th + 2 * margin;
 	const counts = new Uint16Array(ew * eh);
 	let usable = 0;
 	for (const b of clean) {
-		if (b.x < margin || b.y < margin || b.x + tw + margin > dark.width || b.y + th + margin > dark.height) continue;
+		if (
+			b.x < margin ||
+			b.y < margin ||
+			b.x + tw + margin > dark.width ||
+			b.y + th + margin > dark.height
+		)
+			continue;
 		usable++;
 		for (let y = 0; y < eh; y++) {
 			const row = (b.y - margin + y) * dark.width;
@@ -273,9 +291,22 @@ function offsetsOf(mask: Uint8Array): Int32Array {
 	return Int32Array.from(out);
 }
 
-function isOccluded(seed: Seed, gx: number, gy: number, darkLabels: Int32Array, width: number, height: number, margin: number): boolean {
+function isOccluded(
+	seed: Seed,
+	gx: number,
+	gy: number,
+	darkLabels: Int32Array,
+	width: number,
+	height: number,
+	margin: number
+): boolean {
 	if (seed.kind === 'basket') {
-		return gx >= seed.x - margin && gx < seed.x + seed.w + margin && gy >= seed.y - margin && gy < seed.y + seed.h + margin;
+		return (
+			gx >= seed.x - margin &&
+			gx < seed.x + seed.w + margin &&
+			gy >= seed.y - margin &&
+			gy < seed.y + seed.h + margin
+		);
 	}
 	if (!seed.darkLabel) return false;
 	for (let dy = -2; dy <= 2; dy++) {
@@ -296,7 +327,7 @@ function scoreCandidate(
 	bright: Mask,
 	dark: Mask,
 	darkLabels: Int32Array,
-	family: PreparedFamily,
+	family: PreparedFamily
 ): CandidateScore | null {
 	const { width, height } = bright;
 	const { width: tw, height: th, margin } = family;
@@ -313,7 +344,7 @@ function scoreCandidate(
 		availableWhite++;
 		if (bright.data[gy * width + gx]) whiteHit++;
 	}
-	if (availableWhite < family.whiteCount * 0.20) return null;
+	if (availableWhite < family.whiteCount * 0.2) return null;
 	const whiteCoverage = whiteHit / availableWhite;
 	const effectiveVisibility = whiteHit / family.whiteCount;
 	const ew = tw + 2 * margin;
@@ -343,10 +374,7 @@ function scoreCandidate(
 	const darkCoherence = darkHit ? dominant / darkHit : 0;
 	const blackBright = brightInBlack / availableBlack;
 	const identity =
-		0.60 * whiteCoverage +
-		0.30 * blackBorderSupport +
-		0.10 * darkCoherence -
-		0.25 * blackBright;
+		0.6 * whiteCoverage + 0.3 * blackBorderSupport + 0.1 * darkCoherence - 0.25 * blackBright;
 	return { identity, whiteCoverage, blackBorderSupport, darkCoherence, effectiveVisibility };
 }
 
@@ -355,7 +383,7 @@ function searchSeed(
 	bright: Mask,
 	dark: Mask,
 	darkLabels: Int32Array,
-	family: PreparedFamily,
+	family: PreparedFamily
 ): { x: number; y: number; score: CandidateScore }[] {
 	const { width, height } = bright;
 	const { width: tw, height: th, margin } = family;
@@ -383,8 +411,16 @@ function searchSeed(
 	const mid: { x: number; y: number; score: CandidateScore }[] = [];
 	const seenMid = new Set<string>();
 	for (const c of coarse.slice(0, 6)) {
-		for (let y = Math.max(ymin, c.y - Math.floor(sy / 2)); y <= Math.min(ymax, c.y + Math.floor(sy / 2)); y += 3) {
-			for (let x = Math.max(xmin, c.x - Math.floor(sx / 2)); x <= Math.min(xmax, c.x + Math.floor(sx / 2)); x += 3) {
+		for (
+			let y = Math.max(ymin, c.y - Math.floor(sy / 2));
+			y <= Math.min(ymax, c.y + Math.floor(sy / 2));
+			y += 3
+		) {
+			for (
+				let x = Math.max(xmin, c.x - Math.floor(sx / 2));
+				x <= Math.min(xmax, c.x + Math.floor(sx / 2));
+				x += 3
+			) {
 				const key = `${x}:${y}`;
 				if (seenMid.has(key)) continue;
 				seenMid.add(key);
@@ -416,9 +452,10 @@ export function matchBasketSpritesSmart(
 	dark: Mask,
 	badges: readonly BasketBadgeLike[],
 	template: SmartBasketTemplate,
-	options: SmartBasketOptions = {},
+	options: SmartBasketOptions = {}
 ): SmartBasketEvidence[] {
-	if (bright.width !== dark.width || bright.height !== dark.height) throw new Error('bright/dark mask dimensions differ');
+	if (bright.width !== dark.width || bright.height !== dark.height)
+		throw new Error('bright/dark mask dimensions differ');
 	const cfg = { ...DEFAULTS, ...options };
 	const white = templateWhite(template);
 	const brightStage = extractComponents(bright);
@@ -432,16 +469,10 @@ export function matchBasketSpritesSmart(
 		const whiteCoverage = componentWhiteCoverage(brightStage.labels, bright.width, c, {
 			width: template.width,
 			height: template.height,
-			offsets: white.offsets,
+			offsets: white.offsets
 		});
 		if (whiteCoverage < cfg.cleanWhiteCoverageMin) continue;
-		const shell = shellEvidence(
-			brightStage.labels,
-			dark,
-			darkStage.labels,
-			c,
-			cfg.shellRadiusPx,
-		);
+		const shell = shellEvidence(brightStage.labels, dark, darkStage.labels, c, cfg.shellRadiusPx);
 		if (shell.darkFraction < cfg.cleanDarkShellMin) continue;
 		if (shell.darkCoherence < cfg.cleanDarkCoherenceMin) continue;
 		clean.push({
@@ -460,7 +491,7 @@ export function matchBasketSpritesSmart(
 			whiteCoverage,
 			blackBorderSupport: shell.darkFraction,
 			darkCoherence: shell.darkCoherence,
-			source: `bright-component:${c.label}`,
+			source: `bright-component:${c.label}`
 		});
 	}
 	if (clean.length < 2) return clean;
@@ -471,7 +502,7 @@ export function matchBasketSpritesSmart(
 		template.width,
 		template.height,
 		cfg.blackConsensusMarginPx,
-		cfg.blackConsensusFraction,
+		cfg.blackConsensusFraction
 	);
 	const family: PreparedFamily = {
 		width: template.width,
@@ -481,7 +512,7 @@ export function matchBasketSpritesSmart(
 		whiteCount: white.count,
 		black,
 		blackOffsets: offsetsOf(black),
-		margin: cfg.blackConsensusMarginPx,
+		margin: cfg.blackConsensusMarginPx
 	};
 	const accepted = clean.slice();
 	const queue: Seed[] = [];
@@ -494,7 +525,7 @@ export function matchBasketSpritesSmart(
 			y: Math.round(b.bboxY),
 			w: Math.round(b.bboxW),
 			h: Math.round(b.bboxH),
-			darkLabel: nearestDarkLabel(darkStage.labels, dark.width, dark.height, b.cx, b.cy),
+			darkLabel: nearestDarkLabel(darkStage.labels, dark.width, dark.height, b.cx, b.cy)
 		});
 	}
 	for (let i = 0; i < clean.length; i++) {
@@ -514,8 +545,11 @@ export function matchBasketSpritesSmart(
 			if (s.blackBorderSupport < cfg.recoveryBlackSupportMin) continue;
 			if (s.effectiveVisibility < cfg.recoveryVisibilityMin) continue;
 			const confidence: SmartBasketConfidence =
-				s.effectiveVisibility >= cfg.highVisibilityMin ? 'high' :
-				s.effectiveVisibility >= cfg.recoveryVisibilityMin ? 'medium' : 'low';
+				s.effectiveVisibility >= cfg.highVisibilityMin
+					? 'high'
+					: s.effectiveVisibility >= cfg.recoveryVisibilityMin
+						? 'medium'
+						: 'low';
 			const recovered: SmartBasketEvidence = {
 				x: candidate.x,
 				y: candidate.y,
@@ -532,7 +566,7 @@ export function matchBasketSpritesSmart(
 				whiteCoverage: s.whiteCoverage,
 				blackBorderSupport: s.blackBorderSupport,
 				darkCoherence: s.darkCoherence,
-				source: `${seed.kind}:${seed.id}`,
+				source: `${seed.kind}:${seed.id}`
 			};
 			accepted.push(recovered);
 			queue.push({
@@ -542,7 +576,7 @@ export function matchBasketSpritesSmart(
 				y: recovered.y,
 				w: recovered.bboxW,
 				h: recovered.bboxH,
-				darkLabel: 0,
+				darkLabel: 0
 			});
 			added++;
 			if (added >= cfg.maxChildrenPerSeed) break;

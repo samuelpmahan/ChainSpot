@@ -25,10 +25,10 @@
  */
 
 export interface RankedCandidate<T> {
-  value: T;
-  score: number;
-  /** 1-based rank in descending score order. */
-  rank: number;
+	value: T;
+	score: number;
+	/** 1-based rank in descending score order. */
+	rank: number;
 }
 
 /**
@@ -38,61 +38,55 @@ export interface RankedCandidate<T> {
 export const TEE_THEORETICAL_FLOOR = 0.4;
 
 export class CandidatePool<T> {
-  /** Complete ranked population. Nothing is ever removed from this. */
-  readonly all: RankedCandidate<T>[];
-  /** Observed cardinality (e.g. badge count) — a priority cutoff, not truth. */
-  readonly primaryCount: number;
-  /** Theoretical compute floor — see module docs; never an acceptance test. */
-  readonly theoreticalFloor: number;
+	/** Complete ranked population. Nothing is ever removed from this. */
+	readonly all: RankedCandidate<T>[];
+	/** Observed cardinality (e.g. badge count) — a priority cutoff, not truth. */
+	readonly primaryCount: number;
+	/** Theoretical compute floor — see module docs; never an acceptance test. */
+	readonly theoreticalFloor: number;
 
-  /**
-   * @param entries value/score pairs in ranking order if `preRanked`,
-   *   otherwise ranked here by descending score (stable: ties keep input
-   *   order, matching the baseline's stable sort).
-   */
-  constructor(
-    entries: { value: T; score: number }[],
-    options: { primaryCount: number; theoreticalFloor: number; preRanked?: boolean },
-  ) {
-    const ordered = options.preRanked
-      ? entries.slice()
-      : entries
-          .map((e, i) => [e, i] as const)
-          .sort((a, b) => b[0].score - a[0].score || a[1] - b[1])
-          .map(([e]) => e);
-    this.all = ordered.map((e, i) => ({ value: e.value, score: e.score, rank: i + 1 }));
-    this.primaryCount = options.primaryCount;
-    this.theoreticalFloor = options.theoreticalFloor;
-  }
+	/**
+	 * @param entries value/score pairs in ranking order if `preRanked`,
+	 *   otherwise ranked here by descending score (stable: ties keep input
+	 *   order, matching the baseline's stable sort).
+	 */
+	constructor(
+		entries: { value: T; score: number }[],
+		options: { primaryCount: number; theoreticalFloor: number; preRanked?: boolean }
+	) {
+		const ordered = options.preRanked
+			? entries.slice()
+			: entries
+					.map((e, i) => [e, i] as const)
+					.sort((a, b) => b[0].score - a[0].score || a[1] - b[1])
+					.map(([e]) => e);
+		this.all = ordered.map((e, i) => ({ value: e.value, score: e.score, rank: i + 1 }));
+		this.primaryCount = options.primaryCount;
+		this.theoreticalFloor = options.theoreticalFloor;
+	}
 
-  /** Strongest candidates to process first (rank <= primaryCount). */
-  get primary(): RankedCandidate<T>[] {
-    return this.all.slice(0, Math.min(this.primaryCount, this.all.length));
-  }
+	/** Strongest candidates to process first (rank <= primaryCount). */
+	get primary(): RankedCandidate<T>[] {
+		return this.all.slice(0, Math.min(this.primaryCount, this.all.length));
+	}
 
-  /** Non-primary candidates at or above the theoretical floor. */
-  get secondary(): RankedCandidate<T>[] {
-    return this.all.filter(
-      (c) => c.rank > this.primaryCount && c.score >= this.theoreticalFloor,
-    );
-  }
+	/** Non-primary candidates at or above the theoretical floor. */
+	get secondary(): RankedCandidate<T>[] {
+		return this.all.filter((c) => c.rank > this.primaryCount && c.score >= this.theoreticalFloor);
+	}
 
-  /** What a realistic (timed) downstream pass consumes: primary + secondary. */
-  get forwarded(): RankedCandidate<T>[] {
-    return this.all.filter(
-      (c) => c.rank <= this.primaryCount || c.score >= this.theoreticalFloor,
-    );
-  }
+	/** What a realistic (timed) downstream pass consumes: primary + secondary. */
+	get forwarded(): RankedCandidate<T>[] {
+		return this.all.filter((c) => c.rank <= this.primaryCount || c.score >= this.theoreticalFloor);
+	}
 
-  /** Withheld from downstream compute only — the evidence is retained. */
-  get culled(): RankedCandidate<T>[] {
-    return this.all.filter(
-      (c) => c.rank > this.primaryCount && c.score < this.theoreticalFloor,
-    );
-  }
+	/** Withheld from downstream compute only — the evidence is retained. */
+	get culled(): RankedCandidate<T>[] {
+		return this.all.filter((c) => c.rank > this.primaryCount && c.score < this.theoreticalFloor);
+	}
 
-  /** Full population for diagnostic replay (identical to `all`). */
-  get unculled(): RankedCandidate<T>[] {
-    return this.all.slice();
-  }
+	/** Full population for diagnostic replay (identical to `all`). */
+	get unculled(): RankedCandidate<T>[] {
+		return this.all.slice();
+	}
 }

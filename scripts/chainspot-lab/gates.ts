@@ -60,7 +60,12 @@ export const LAB_GATES: readonly LabGate[] = [
 				'composite bounds and canonical width/height',
 				'crop/stitch diagnostics and abstentions'
 			],
-			images: ['original source raster(s)', 'cropped source raster(s)', 'canonical flattened raster', 'seam/crop diagnostic overlay'],
+			images: [
+				'original source raster(s)',
+				'cropped source raster(s)',
+				'canonical flattened raster',
+				'seam/crop diagnostic overlay'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -87,8 +92,12 @@ export const LAB_GATES: readonly LabGate[] = [
 				'NuThing uses the production single-image crop proposal through detectMapViewport and then slices rows with cropRows.',
 				'The stitch pipeline supports multiple tiles and emits a flattened output raster plus source transforms.'
 			],
-			rejected: ['Treating the screenshot frame and cropped frame as two equally valid annotation systems.'],
-			open: ['A LAB run-scoped evidence store has not yet been wired to persist every crop/stitch image and hash.']
+			rejected: [
+				'Treating the screenshot frame and cropped frame as two equally valid annotation systems.'
+			],
+			open: [
+				'A LAB run-scoped evidence store has not yet been wired to persist every crop/stitch image and hash.'
+			]
 		},
 		changelog: [
 			{
@@ -96,7 +105,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				change: 'Moved crop-boundary detection to native-resolution evidence.',
 				why: 'Downsampled analysis moved crop boundaries.',
 				evidence: 'Commit records the crop-boundary correction.',
-				consequences: 'Crop coordinates can define the canonical frame without scale-rounding drift.',
+				consequences:
+					'Crop coordinates can define the canonical frame without scale-rounding drift.',
 				limits: 'This does not validate stitching or downstream detection.'
 			},
 			{
@@ -111,7 +121,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				commit: '2f38e2e440050d2fb7e314f21b83d1e9420d1c61',
 				change: 'Integrated production auto-crop into the NuThing experiment.',
 				why: 'Endpoint and assignment measurements needed the same raster frame as production intake.',
-				evidence: 'The commit was explicitly known-bad for assignment (21/66) while pool recall remained 69/69.',
+				evidence:
+					'The commit was explicitly known-bad for assignment (21/66) while pool recall remained 69/69.',
 				consequences: 'Crop correctness became separable from later algorithm correctness.',
 				limits: 'The commit is not an assignment baseline.'
 			}
@@ -124,14 +135,21 @@ export const LAB_GATES: readonly LabGate[] = [
 		description:
 			'Detect badge plates, segment their digit glyphs, and score number identities while preserving alternatives. The gate answers which numbered anchors are measurable and where they are; it does not assign tees or baskets.',
 		rawEvidence: {
-			producers: ['src/lib/nuthing/badgeStage.ts: runBadgeStage', 'src/lib/nuthing/digits/readBadges.ts: readCourseBadges'],
+			producers: [
+				'src/lib/nuthing/badgeStage.ts: runBadgeStage',
+				'src/lib/nuthing/digits/readBadges.ts: readCourseBadges'
+			],
 			measurements: [
 				'plate/component geometry and source tier',
 				'badge anchor position',
 				'glyph masks and per-digit scores/alternatives',
 				'decoded label and score margin'
 			],
-			images: ['canonical raster with every plate candidate', 'per-badge plate crop', 'nearest-neighbor glyph mask'],
+			images: [
+				'canonical raster with every plate candidate',
+				'per-badge plate crop',
+				'nearest-neighbor glyph mask'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -151,7 +169,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				'multi-digit segmentation splits or joins glyphs incorrectly',
 				'one physical badge yields duplicate candidates'
 			],
-			nextDecision: 'Are all badge identities and anchors stable enough to measure endpoint candidates?'
+			nextDecision:
+				'Are all badge identities and anchors stable enough to measure endpoint candidates?'
 		},
 		history: {
 			reproduced: [
@@ -159,12 +178,15 @@ export const LAB_GATES: readonly LabGate[] = [
 				'Dark-plate recovery restored the full 1..18 badge set on the four-course dev corpus.'
 			],
 			rejected: ['Assuming every badge must survive as an ordinary bright-frame component.'],
-			open: ['The current browser/progressive handoff must be audited for lost digit alternatives and fabricated geometry.']
+			open: [
+				'The current browser/progressive handoff must be audited for lost digit alternatives and fabricated geometry.'
+			]
 		},
 		changelog: [
 			{
 				commit: '22c89d3347c807434707fa2b458f5e7fdc72b5a4',
-				change: 'Added the browser-portable end-to-end badge reader with retained per-digit evidence.',
+				change:
+					'Added the browser-portable end-to-end badge reader with retained per-digit evidence.',
 				why: 'A decoded label alone was insufficient for diagnosis.',
 				evidence: 'The pipeline retains masks, scores, and margins.',
 				consequences: 'Agents can separate plate detection from digit interpretation.',
@@ -175,8 +197,10 @@ export const LAB_GATES: readonly LabGate[] = [
 				change: 'Added dark-plate recovery and large-component exclusion for recovered glyphs.',
 				why: 'Sprite-merged frames caused six missing dev badges and phantom digit strings.',
 				evidence: 'Badge identity recall changed from 66/72 to 72/72 on the four dev courses.',
-				consequences: 'Recovered badges use synthesized component label -1 and must retain that provenance.',
-				limits: 'Full assignment moved from 57/63 to 60/68, so badge recovery did not solve ownership.'
+				consequences:
+					'Recovered badges use synthesized component label -1 and must retain that provenance.',
+				limits:
+					'Full assignment moved from 57/63 to 60/68, so badge recovery did not solve ownership.'
 			},
 			{
 				commit: '4597b748b908981be8b91dacc44a1bd0278e6409',
@@ -202,7 +226,11 @@ export const LAB_GATES: readonly LabGate[] = [
 				'onFrac and offFrac',
 				'fixed sprite-to-pole-tip transform and resulting endpoint'
 			],
-			images: ['course candidate overlay', 'sprite neighborhood crop', 'nearest-neighbor template/evidence crop'],
+			images: [
+				'course candidate overlay',
+				'sprite neighborhood crop',
+				'nearest-neighbor template/evidence crop'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -230,7 +258,9 @@ export const LAB_GATES: readonly LabGate[] = [
 				'Occlusion-tolerant matched filtering plus matching-pursuit deduplication reached 72/72 dev basket recall.'
 			],
 			rejected: ['Treating solid white support or sprite-center position as the basket endpoint.'],
-			open: ['Preserve onFrac, offFrac, candidate suppression, and pole-tip provenance through the browser ledger.']
+			open: [
+				'Preserve onFrac, offFrac, candidate suppression, and pole-tip provenance through the browser ledger.'
+			]
 		},
 		changelog: [
 			{
@@ -238,8 +268,10 @@ export const LAB_GATES: readonly LabGate[] = [
 				change: 'Introduced fixed-sprite matched filtering and matching-pursuit deduplication.',
 				why: 'Generic component identity was weaker than renderer identity and failed under occlusion.',
 				evidence: 'The commit reports 72/72 basket recall on the four-course dev set.',
-				consequences: 'The detector yields useful object-localization testimony before ownership exists.',
-				limits: 'Recall was measured on the dev renderer/corpus; ownership was not measured by this detector.'
+				consequences:
+					'The detector yields useful object-localization testimony before ownership exists.',
+				limits:
+					'Recall was measured on the dev renderer/corpus; ownership was not measured by this detector.'
 			}
 		]
 	},
@@ -250,14 +282,21 @@ export const LAB_GATES: readonly LabGate[] = [
 		description:
 			'Detect visible tee-pad glyphs from enclosed rings and component-family evidence. Preserve the measured component geometry because orientation and shape can later separate a real pad from nearby furniture; do not assign holes here.',
 		rawEvidence: {
-			producers: ['src/lib/nuthing/endpoints.ts: detectTeeRings + collectTeePoints', 'src/lib/nuthing/components.ts: ComponentStats'],
+			producers: [
+				'src/lib/nuthing/endpoints.ts: detectTeeRings + collectTeePoints',
+				'src/lib/nuthing/components.ts: ComponentStats'
+			],
 			measurements: [
 				'tier/provenance: ring, component, or later recovery',
 				'center, bbox, area, fill, major axis, minor axis, and PCA angle',
 				'enclosed-hole elongation, ring fraction, enclosed area, and actual onRing evidence',
 				'deduplication/suppression relationship to nearby candidates'
 			],
-			images: ['course candidate overlay by tier', 'tee neighborhood crop', 'nearest-neighbor raw bright-mask/ring evidence'],
+			images: [
+				'course candidate overlay by tier',
+				'tee neighborhood crop',
+				'nearest-neighbor raw bright-mask/ring evidence'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -277,7 +316,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				'fill changes with pad size and rotation because a hollow border occupies less of its bounding box',
 				'collectTeePoints or the browser adapter discards measured angle/bbox/ring evidence'
 			],
-			nextDecision: 'Is the visible tee inventory complete, with honest provenance, or must endpoint recovery run?'
+			nextDecision:
+				'Is the visible tee inventory complete, with honest provenance, or must endpoint recovery run?'
 		},
 		history: {
 			reproduced: [
@@ -288,23 +328,29 @@ export const LAB_GATES: readonly LabGate[] = [
 				'Using a component fill floor of 0.20 as if hollow-border fill were scale- and rotation-invariant.',
 				'Reconstructing onRing from the candidate tier.'
 			],
-			open: ['The current progressive handoff throws away PCA orientation and other ComponentStats; repairing that seam remains unfinished.']
+			open: [
+				'The current progressive handoff throws away PCA orientation and other ComponentStats; repairing that seam remains unfinished.'
+			]
 		},
 		changelog: [
 			{
 				commit: 'b30c1bace119f075bce72984d05ebdf879c00dcc',
 				change: 'Added hollow-ring detection and a component-family fallback.',
 				why: 'Tee pads are renderer-specific hollow glyphs, and some outlines open into C2 furniture.',
-				evidence: 'The commit reports 69/72 dev tee recall; three Heritage tees remained fused into large furniture blobs.',
+				evidence:
+					'The commit reports 69/72 dev tee recall; three Heritage tees remained fused into large furniture blobs.',
 				consequences: 'Tier provenance became essential evidence.',
 				limits: 'The fallback did not solve heavy occlusion.'
 			},
 			{
 				commit: '209f5100708df9f93f3612f7026e4a8735cffd31',
-				change: 'Lowered the tee-family fill floor from 0.20 to 0.12 after a measured Rec failure analysis.',
+				change:
+					'Lowered the tee-family fill floor from 0.20 to 0.12 after a measured Rec failure analysis.',
 				why: 'Four large/rotated Rec pads measured fill 0.13 to 0.199 and failed only that gate.',
-				evidence: 'The Rec changed to 9/9 assigned; Dev72 endpoint recall and assignment stayed 72/72, while rank-1 changed 65 to 64.',
-				consequences: 'Fill must be interpreted with scale/rotation geometry, not as a universal confidence.',
+				evidence:
+					'The Rec changed to 9/9 assigned; Dev72 endpoint recall and assignment stayed 72/72, while rank-1 changed 65 to 64.',
+				consequences:
+					'Fill must be interpreted with scale/rotation geometry, not as a universal confidence.',
 				limits: 'Transfer beyond the measured Rec and Dev72 images is unvalidated.'
 			}
 		]
@@ -327,8 +373,15 @@ export const LAB_GATES: readonly LabGate[] = [
 				'recovery transform, score components, alternatives, and abstention reason',
 				'provenance: detected, deterministic recovery, or manual Oracle-localized'
 			],
-			images: ['course missing-endpoint locator', 'occluder/fragment neighborhood', 'nearest-neighbor masked-fit or manual-mark evidence'],
-			provenance: [...commonProvenance, 'whether any resource or measurement was derived from historical truth']
+			images: [
+				'course missing-endpoint locator',
+				'occluder/fragment neighborhood',
+				'nearest-neighbor masked-fit or manual-mark evidence'
+			],
+			provenance: [
+				...commonProvenance,
+				'whether any resource or measurement was derived from historical truth'
+			]
 		},
 		interpretation: {
 			matters: [
@@ -347,14 +400,18 @@ export const LAB_GATES: readonly LabGate[] = [
 				'a tiny visible sliver does not constrain center/orientation enough',
 				'GT-derived recovered resources leak into a supposedly blind run'
 			],
-			nextDecision: 'Is the endpoint inventory complete enough for straight testing, or must the run stop for focused manual review?'
+			nextDecision:
+				'Is the endpoint inventory complete enough for straight testing, or must the run stop for focused manual review?'
 		},
 		history: {
 			reproduced: [
 				'Fragment-anchored masked tee-border fitting recovered two Heritage tees at 4.8 px and 6.9 px while leaving the 3x7 px sliver unresolved.',
 				'Merging historical recovered coordinates into the pool enabled all 72 dev holes to be judged.'
 			],
-			rejected: ['Unanchored grid sweeps over the whole neighborhood.', 'Using recovered-tees.json as blind instrumentation.'],
+			rejected: [
+				'Unanchored grid sweeps over the whole neighborhood.',
+				'Using recovered-tees.json as blind instrumentation.'
+			],
 			open: [
 				'A quick app-side manual recovery seam before association is desired but not implemented here.',
 				'A truth-independent ribbon-termination recovery for fully hidden pads remains an experiment, not an established detector.'
@@ -365,17 +422,22 @@ export const LAB_GATES: readonly LabGate[] = [
 				commit: '57d6ac4660f0eb8b5208d308cfcc767ab420af37',
 				change: 'Added fragment-anchored, occluder-masked tee-border fitting.',
 				why: 'Three Heritage tees were fused into large white map-furniture blobs.',
-				evidence: 'Recovered H10 at 4.8 px and H5 at 6.9 px; H6 remained unresolved; two dev false positives remained.',
-				consequences: 'Focused occlusion evidence is useful, while missing evidence remains legitimate.',
+				evidence:
+					'Recovered H10 at 4.8 px and H5 at 6.9 px; H6 remained unresolved; two dev false positives remained.',
+				consequences:
+					'Focused occlusion evidence is useful, while missing evidence remains legitimate.',
 				limits: 'This was a probe, not a general blind recovery stage.'
 			},
 			{
 				commit: '4abdc42d7783c163a39363b1fbeed27bcc7c3a32',
 				change: 'Loaded recovered tee coordinates as tier recovered with a 0.7 assignment prior.',
 				why: 'The experiment needed complete endpoint availability to measure assignment.',
-				evidence: 'Endpoint availability became 18/18/18 on all four dev courses and assignment reached 65/72.',
-				consequences: 'Recovered-tier provenance and its different scoring behavior became observable.',
-				limits: 'The resource contains historical coordinates and is forbidden in fresh-course blind work.'
+				evidence:
+					'Endpoint availability became 18/18/18 on all four dev courses and assignment reached 65/72.',
+				consequences:
+					'Recovered-tier provenance and its different scoring behavior became observable.',
+				limits:
+					'The resource contains historical coordinates and is forbidden in fresh-course blind work.'
 			}
 		]
 	},
@@ -386,14 +448,21 @@ export const LAB_GATES: readonly LabGate[] = [
 		description:
 			'Test whether a candidate tee-badge-basket triple is supported as a straight hole using measured geometry and ribbon evidence. This stage may confirm high-confidence straight structure or abstain; it must not force a bent route into a line.',
 		rawEvidence: {
-			producers: ['scripts/nuthing/straight-hole-test.ts (historical analysis)', 'scripts/nuthing/pair-matrix-replay.ts: collinearity scoring'],
+			producers: [
+				'scripts/nuthing/straight-hole-test.ts (historical analysis)',
+				'scripts/nuthing/pair-matrix-replay.ts: collinearity scoring'
+			],
 			measurements: [
 				'tee-to-badge versus tee-to-basket angle',
 				'badge fraction along the tee-to-basket chord',
 				'corridor support and off-chord mass along the line',
 				'endpoint provenance and all competing straight triples'
 			],
-			images: ['course straight-candidate overlay', 'hole ribbon neighborhood', 'tight chord-support/off-chord evidence view'],
+			images: [
+				'course straight-candidate overlay',
+				'hole ribbon neighborhood',
+				'tight chord-support/off-chord evidence view'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -413,7 +482,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				'a false triple in a parallel cluster is also nearly collinear',
 				'uncertain/recovered endpoints make precise angle evidence persuasive-looking but unstable'
 			],
-			nextDecision: 'Which holes are safely locked as straight, and which must remain for global assignment or bend refinement?'
+			nextDecision:
+				'Which holes are safely locked as straight, and which must remain for global assignment or bend refinement?'
 		},
 		history: {
 			reproduced: [
@@ -421,23 +491,31 @@ export const LAB_GATES: readonly LabGate[] = [
 				'Nine of 41 straight routes violated simple chord adherence because of walking paths or basket-zone pixels.',
 				'A bounded collinearity bonus helped resolve Lenard cluster thefts in the historical Dev72 replay.'
 			],
-			rejected: ['Treating chord adherence or a straightness bonus as sufficient by itself.', 'Unrestricted agreement-bearing bonuses; they reduced rank-1 and assignment quality.'],
-			open: ['Define the smallest truth-blind straight-test output that transfers beyond the four dev courses without importing bend truth.']
+			rejected: [
+				'Treating chord adherence or a straightness bonus as sufficient by itself.',
+				'Unrestricted agreement-bearing bonuses; they reduced rank-1 and assignment quality.'
+			],
+			open: [
+				'Define the smallest truth-blind straight-test output that transfers beyond the four dev courses without importing bend truth.'
+			]
 		},
 		changelog: [
 			{
 				commit: 'd316cf3727278e607893fde4220e6ccbef448297',
 				change: 'Measured straight-hole ray geometry and attributed off-chord distractors.',
 				why: 'Residual wrong assignments needed a discriminating measurement.',
-				evidence: '41 straight holes measured max 1.4 degrees; walking paths and basket zones explained all nine chord violations.',
+				evidence:
+					'41 straight holes measured max 1.4 degrees; walking paths and basket zones explained all nine chord violations.',
 				consequences: 'Straight geometry became useful evidence with explicit distractor caveats.',
-				limits: 'The analysis selected straight holes using historical bend truth and cannot itself classify an unseen course.'
+				limits:
+					'The analysis selected straight holes using historical bend truth and cannot itself classify an unseen course.'
 			},
 			{
 				commit: '6d7f0fe1b2b9cdd4d4c23531449d6a1cc134676c',
 				change: 'Added a bounded perfect-line bonus and recentered the badge-position prior.',
 				why: 'Lenard parallel-cluster thefts and Heritage H7 were not resolved by the prior score family.',
-				evidence: 'Historical Dev72 assignment reached 72/72; badge-fraction recentering alone reached 72/72 in ablation.',
+				evidence:
+					'Historical Dev72 assignment reached 72/72; badge-fraction recentering alone reached 72/72 in ablation.',
 				consequences: 'Straight evidence can assist assignment without becoming a hard rule.',
 				limits: 'The settings were swept on Dev72 and are not a validated universal threshold.'
 			}
@@ -460,14 +538,21 @@ export const LAB_GATES: readonly LabGate[] = [
 		description:
 			'Assign measured tee and basket candidates to numbered badges using route evidence, scores, and course-wide one-to-one constraints. This is where object identity becomes ownership, so competing hypotheses and theft chains must remain visible.',
 		rawEvidence: {
-			producers: ['scripts/nuthing/pair-matrix.ts: pair measurements', 'scripts/nuthing/pair-matrix-replay.ts: scoring + global assignment'],
+			producers: [
+				'scripts/nuthing/pair-matrix.ts: pair measurements',
+				'scripts/nuthing/pair-matrix-replay.ts: scoring + global assignment'
+			],
 			measurements: [
 				'complete tee x basket candidate matrix per badge',
 				'raw and transformed score components for each pair',
 				'candidate ranks before global uniqueness',
 				'final one-to-one assignment, swaps, unresolved rows, and theft-chain explanation'
 			],
-			images: ['course assignment overlay', 'focused competing-route view', 'tight evidence view for the score component that changed ownership'],
+			images: [
+				'course assignment overlay',
+				'focused competing-route view',
+				'tight evidence view for the score component that changed ownership'
+			],
 			provenance: commonProvenance
 		},
 		interpretation: {
@@ -487,7 +572,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				'missing endpoints force a false complete assignment',
 				'score summaries hide which raw measurement caused the choice'
 			],
-			nextDecision: 'Are endpoint ownerships sufficiently supported to lock them, or which small ambiguity set needs Oracle review?'
+			nextDecision:
+				'Are endpoint ownerships sufficiently supported to lock them, or which small ambiguity set needs Oracle review?'
 		},
 		history: {
 			reproduced: [
@@ -495,31 +581,43 @@ export const LAB_GATES: readonly LabGate[] = [
 				'At the Dev72 reference, rank 1 was 65/72 while assigned ownership was 72/72; five of seven non-rank-1 rows were same-tee/wrong-basket rivalries resolved structurally.',
 				'Attempts to tune every true pair to rank 1 were measured harmful or inert.'
 			],
-			rejected: ['Using rank-1 count as the sole health metric.', 'Assuming global uniqueness can compensate for missing endpoint evidence.', 'Unrestricted agreement-bearing tuning.'],
-			open: ['Rival-conditioned evidence is the measured next direction if rank-1 quality matters; it is not yet an established feature.']
+			rejected: [
+				'Using rank-1 count as the sole health metric.',
+				'Assuming global uniqueness can compensate for missing endpoint evidence.',
+				'Unrestricted agreement-bearing tuning.'
+			],
+			open: [
+				'Rival-conditioned evidence is the measured next direction if rank-1 quality matters; it is not yet an established feature.'
+			]
 		},
 		changelog: [
 			{
 				commit: '9d5ca483c1615ad15e9853db60a080fe71e37717',
 				change: 'Added simple-path discipline and global one-to-one assignment.',
 				why: 'False pairs rode another hole ribbon and local choices reused endpoints.',
-				evidence: 'Rank-1 rose 35 to 40/61; global assignment reached 42/61 and exposed Lenard cascades.',
-				consequences: 'Ownership became a course-level decision rather than independent per-hole argmax.',
+				evidence:
+					'Rank-1 rose 35 to 40/61; global assignment reached 42/61 and exposed Lenard cascades.',
+				consequences:
+					'Ownership became a course-level decision rather than independent per-hole argmax.',
 				limits: 'Greedy plus two-swap is not proof of globally correct ownership.'
 			},
 			{
 				commit: '6d7f0fe1b2b9cdd4d4c23531449d6a1cc134676c',
-				change: 'Combined bounded straight evidence, salvage-only Z-fit, and a measured badge-position band.',
+				change:
+					'Combined bounded straight evidence, salvage-only Z-fit, and a measured badge-position band.',
 				why: 'Seven residual Dev72 ownership errors remained after endpoint recovery.',
 				evidence: 'Assigned exact 72/72, rank 1 65/72, rank <=3 71/72 on perfect endpoint recall.',
 				consequences: 'This is the historical Dev72 reference state.',
-				limits: 'It is a development-set reproduction, not validation and not evidence that every included feature transfers.'
+				limits:
+					'It is a development-set reproduction, not validation and not evidence that every included feature transfers.'
 			},
 			{
 				commit: '57962815b24f80f010a4c9c737f40269b16257e2',
-				change: 'Measured whether the seven non-rank-1 rows could be tuned to rank 1 and rejected that goal for the current score family.',
+				change:
+					'Measured whether the seven non-rank-1 rows could be tuned to rank 1 and rejected that goal for the current score family.',
 				why: 'Rank-1 lagged assignment despite exact ownership.',
-				evidence: 'Unrestricted agreement-bearing changed rank 1 from 65 to 64; straight-gating dropped assignment to 63-67; Z-fit was inert.',
+				evidence:
+					'Unrestricted agreement-bearing changed rank 1 from 65 to 64; straight-gating dropped assignment to 63-67; Z-fit was inert.',
 				consequences: 'The catalog must report rank and assignment separately.',
 				limits: 'This negative result is specific to the tested score family and Dev72 evidence.'
 			}
@@ -528,7 +626,12 @@ export const LAB_GATES: readonly LabGate[] = [
 	{
 		id: 7,
 		title: 'Bend Refinement',
-		detectors: ['D06-ribbon-support', 'D10-zfit-pair-rescue', 'D11-basket-backwalk', 'D12-capsule-bends'],
+		detectors: [
+			'D06-ribbon-support',
+			'D10-zfit-pair-rescue',
+			'D11-basket-backwalk',
+			'D12-capsule-bends'
+		],
 		description:
 			'Refine the corridor geometry only after tee and basket ownership is established. Straight holes pass through without invented vertices; bent holes retain inner/outer-corner evidence, uncertainty, and any Oracle contribution.',
 		rawEvidence: {
@@ -543,8 +646,15 @@ export const LAB_GATES: readonly LabGate[] = [
 				'ribbon support by segment/window and corridor width',
 				'inner/outer rail or miter evidence, endpoint-cap evidence, alternatives, and uncertainty'
 			],
-			images: ['course bent-hole locator', 'whole-hole corridor crop', 'nearest-neighbor inner/outer-corner and termination evidence'],
-			provenance: [...commonProvenance, 'whether each vertex is measured, inferred, historical-reference, or Oracle-established']
+			images: [
+				'course bent-hole locator',
+				'whole-hole corridor crop',
+				'nearest-neighbor inner/outer-corner and termination evidence'
+			],
+			provenance: [
+				...commonProvenance,
+				'whether each vertex is measured, inferred, historical-reference, or Oracle-established'
+			]
 		},
 		interpretation: {
 			matters: [
@@ -563,7 +673,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				'an attractive centerline fit places visually wrong inner/outer corners',
 				'ground-truth-derived bend labels leak into an unseen-course measurement'
 			],
-			nextDecision: 'Is each assigned hole faithfully represented as straight or with evidence-supported bend vertices, or does it require Oracle review?'
+			nextDecision:
+				'Is each assigned hole faithfully represented as straight or with evidence-supported bend vertices, or does it require Oracle review?'
 		},
 		history: {
 			reproduced: [
@@ -587,7 +698,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				commit: 'f2e6b7f364a5c7f2b23fbb3722dd4a65e3b47ea5',
 				change: 'Added a measurement-only basket backward-walk probe.',
 				why: 'Approach bearing could discriminate competing baskets on bent holes.',
-				evidence: '43/72 were within 15 degrees; 22/72 were catastrophically reversed; confidence was anti-correlated on six wrong-assignment holes.',
+				evidence:
+					'43/72 were within 15 degrees; 22/72 were catastrophically reversed; confidence was anti-correlated on six wrong-assignment holes.',
 				consequences: 'Standalone confidence-weighted integration was rejected.',
 				limits: 'The probe measures terminal direction, not full bend geometry.'
 			},
@@ -595,7 +707,8 @@ export const LAB_GATES: readonly LabGate[] = [
 				commit: '66b86ac9060dad7c8210d7d32dc9c63600b2afac',
 				change: 'Added semicircle-aware angular peaks and raw radial profiles.',
 				why: 'Basket-zone and neighboring-render traps needed inspectable terminal evidence.',
-				evidence: 'Rotated flanks exposed a near-field signature and flipped two historical cases, while standalone argmax stayed at parity.',
+				evidence:
+					'Rotated flanks exposed a near-field signature and flipped two historical cases, while standalone argmax stayed at parity.',
 				consequences: 'Raw profiles are useful future candidate-conditioned evidence.',
 				limits: 'The argmax remained unwired; no general bend refiner was established.'
 			},
@@ -603,9 +716,12 @@ export const LAB_GATES: readonly LabGate[] = [
 				commit: '6d7f0fe1b2b9cdd4d4c23531449d6a1cc134676c',
 				change: 'Restricted Z-fit to salvage when routed evidence was weak.',
 				why: 'Unconditional fits created false two-bend bridges.',
-				evidence: 'The bounded fit recovered Heritage H7 near its historical bend coordinates as part of the 72/72 assignment replay.',
-				consequences: 'Model-based bend evidence can rescue a pair without becoming a general route annotation.',
-				limits: 'Z-fit was optimized for pair scoring and does not define precise inner/outer bend corners.'
+				evidence:
+					'The bounded fit recovered Heritage H7 near its historical bend coordinates as part of the 72/72 assignment replay.',
+				consequences:
+					'Model-based bend evidence can rescue a pair without becoming a general route annotation.',
+				limits:
+					'Z-fit was optimized for pair scoring and does not define precise inner/outer bend corners.'
 			}
 		]
 	}

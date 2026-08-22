@@ -55,7 +55,11 @@ export const CASE_CARDS: readonly CaseCard[] = [
 		tags: ['tee', 'occlusion', 'partial-evidence', 'renderer-overlap'],
 		gates: [3, 4, 6],
 		detectors: ['D04-tee-candidates', 'D05-occluded-tee-recovery', 'D08-pair-matrix'],
-		invariants: ['I01-render-stack-order', 'I06-anchor-locked-basket-zone', 'I09-tee-glyph-anatomy'],
+		invariants: [
+			'I01-render-stack-order',
+			'I06-anchor-locked-basket-zone',
+			'I09-tee-glyph-anatomy'
+		],
 		definition:
 			'A tee whose ordinary hollow-glyph observation is destroyed by a known higher render layer, leaving only a small visible white border fragment that could still belong to the tee family.',
 		whyHard: [
@@ -121,7 +125,11 @@ export const CASE_CARDS: readonly CaseCard[] = [
 		tags: ['tee', 'occlusion', 'zero-visible-evidence', 'latent-endpoint'],
 		gates: [3, 4, 6],
 		detectors: ['D05-occluded-tee-recovery', 'D08-pair-matrix', 'D09-global-assignment'],
-		invariants: ['I01-render-stack-order', 'I18-one-to-one-ownership', 'I19-rank1-is-not-assignment'],
+		invariants: [
+			'I01-render-stack-order',
+			'I18-one-to-one-ownership',
+			'I19-rank1-is-not-assignment'
+		],
 		definition:
 			'An endpoint is geometrically plausible under a known higher render layer but no tee-owned pixel survives visibly enough to test tee appearance.',
 		whyHard: [
@@ -155,7 +163,9 @@ export const CASE_CARDS: readonly CaseCard[] = [
 			'Do not synthesize a confident center or orientation solely because one endpoint is missing.'
 		],
 		examples: [],
-		open: ['Add the first fully verified zero-visible-pixel example; near-complete shards belong in C00, not here.']
+		open: [
+			'Add the first fully verified zero-visible-pixel example; near-complete shards belong in C00, not here.'
+		]
 	},
 	{
 		id: 'C02-tight-cluster',
@@ -163,8 +173,17 @@ export const CASE_CARDS: readonly CaseCard[] = [
 		status: 'observed',
 		tags: ['crowding', 'ownership', 'multiple-real-candidates', 'global-assignment'],
 		gates: [2, 3, 6],
-		detectors: ['D03-basket-sprite', 'D04-tee-candidates', 'D08-pair-matrix', 'D09-global-assignment'],
-		invariants: ['I06-anchor-locked-basket-zone', 'I18-one-to-one-ownership', 'I19-rank1-is-not-assignment'],
+		detectors: [
+			'D03-basket-sprite',
+			'D04-tee-candidates',
+			'D08-pair-matrix',
+			'D09-global-assignment'
+		],
+		invariants: [
+			'I06-anchor-locked-basket-zone',
+			'I18-one-to-one-ownership',
+			'I19-rank1-is-not-assignment'
+		],
 		definition:
 			'Multiple genuine endpoints and renderer zones occupy the same small neighborhood, so local proximity and local score rank cannot safely establish ownership.',
 		whyHard: [
@@ -173,9 +192,13 @@ export const CASE_CARDS: readonly CaseCard[] = [
 			'Greedy nearest-neighbor reasoning can be locally plausible while globally impossible.'
 		],
 		evidenceSemantics: {
-			positive: ['Preserve every credible endpoint and every measured tee→basket pair; global one-to-one structure is useful evidence here.'],
+			positive: [
+				'Preserve every credible endpoint and every measured tee→basket pair; global one-to-one structure is useful evidence here.'
+			],
 			neutral: ['A lower local pair rank is not itself negative evidence in a crowded cluster.'],
-			contradictions: ['A proposed ownership that duplicates an endpoint or contradicts strong route evidence should lose even if it is nearest locally.']
+			contradictions: [
+				'A proposed ownership that duplicates an endpoint or contradicts strong route evidence should lose even if it is nearest locally.'
+			]
 		},
 		measure: [
 			'pairwise endpoint and badge distances',
@@ -199,7 +222,9 @@ export const CASE_CARDS: readonly CaseCard[] = [
 				source: 'chainspot-corpus dev/DashsTrack + 2026-08-22 LAB shared inspection'
 			}
 		],
-		open: ['Persist one canonical tight-cluster crop with candidate IDs and raw-vs-assigned pair tables.']
+		open: [
+			'Persist one canonical tight-cluster crop with candidate IDs and raw-vs-assigned pair tables.'
+		]
 	},
 	{
 		id: 'C03-merged-renderer-component',
@@ -207,8 +232,18 @@ export const CASE_CARDS: readonly CaseCard[] = [
 		status: 'measured',
 		tags: ['components', 'renderer-collision', 'white-mask', 'identity-vs-geometry'],
 		gates: [1, 2, 3, 4],
-		detectors: ['D02-badge-reader', 'D03-basket-sprite', 'D04-tee-candidates', 'D05-occluded-tee-recovery'],
-		invariants: ['I01-render-stack-order', 'I06-anchor-locked-basket-zone', 'I07-badge-anatomy', 'I09-tee-glyph-anatomy'],
+		detectors: [
+			'D02-badge-reader',
+			'D03-basket-sprite',
+			'D04-tee-candidates',
+			'D05-occluded-tee-recovery'
+		],
+		invariants: [
+			'I01-render-stack-order',
+			'I06-anchor-locked-basket-zone',
+			'I07-badge-anatomy',
+			'I09-tee-glyph-anatomy'
+		],
 		definition:
 			'Two renderer objects touch in the thresholded white mask and become one connected component, so component bbox/aspect/fill no longer describe either object faithfully.',
 		whyHard: [
@@ -216,17 +251,28 @@ export const CASE_CARDS: readonly CaseCard[] = [
 			'A strong object identity signal may remain in another channel even though the white component is contaminated.'
 		],
 		evidenceSemantics: {
-			positive: ['Use independent renderer identity such as the dark badge plate or fixed basket sprite before trusting merged white-component geometry.'],
-			neutral: ['A contaminated outer bbox is not evidence that the underlying object changed scale or shape.'],
-			contradictions: ['If all independent identity channels disagree, do not retain the object merely because a white blob exists.']
+			positive: [
+				'Use independent renderer identity such as the dark badge plate or fixed basket sprite before trusting merged white-component geometry.'
+			],
+			neutral: [
+				'A contaminated outer bbox is not evidence that the underlying object changed scale or shape.'
+			],
+			contradictions: [
+				'If all independent identity channels disagree, do not retain the object merely because a white blob exists.'
+			]
 		},
 		measure: [
 			'component labels before/after contact and exact touching pixels',
 			'independent dark-plate, sprite-template, ring, or shard evidence',
 			'which geometry fields were contaminated and which channels survived'
 		],
-		success: ['Recover identity from the surviving independent channel while preserving that the ordinary component geometry was contaminated.'],
-		doNotInfer: ['Do not loosen global aspect/size thresholds to accommodate a merged component.', 'Do not treat synthesized recovery geometry as a normal measured component.'],
+		success: [
+			'Recover identity from the surviving independent channel while preserving that the ordinary component geometry was contaminated.'
+		],
+		doNotInfer: [
+			'Do not loosen global aspect/size thresholds to accommodate a merged component.',
+			'Do not treat synthesized recovery geometry as a normal measured component.'
+		],
 		examples: [
 			{
 				course: 'HeritagePark / Lenard',
@@ -235,7 +281,9 @@ export const CASE_CARDS: readonly CaseCard[] = [
 				source: 'D02 badge card history and badgeStage dark-plate recovery'
 			}
 		],
-		open: ['Catalog tee-specific merged-component examples separately from C00 shards when substantial tee geometry still survives.']
+		open: [
+			'Catalog tee-specific merged-component examples separately from C00 shards when substantial tee geometry still survives.'
+		]
 	},
 	{
 		id: 'C04-extreme-turn',
@@ -244,7 +292,11 @@ export const CASE_CARDS: readonly CaseCard[] = [
 		tags: ['ribbon', 'bend', 'endpoint', 'geometry-outlier'],
 		gates: [4, 5, 7],
 		detectors: ['D06-ribbon-support', 'D12-capsule-bends'],
-		invariants: ['I02-corridor-render-primitive', 'I03-one-width-per-course', 'I04-alpha-composite-paint'],
+		invariants: [
+			'I02-corridor-render-primitive',
+			'I03-one-width-per-course',
+			'I04-alpha-composite-paint'
+		],
 		definition:
 			'A corridor changes heading unusually soon after an endpoint and/or by an unusually large angle, so a one-bend or straight-arm approximation conflates endpoint-cap, join, and turn evidence.',
 		whyHard: [
@@ -252,17 +304,26 @@ export const CASE_CARDS: readonly CaseCard[] = [
 			'One bend can smear a slight initial drift and a later hard turn into a single inaccurate vertex.'
 		],
 		evidenceSemantics: {
-			positive: ['Multiple exposed ribbon fragments on distinct arms should support the direction change; constant-width paired rails are stronger than a single edge.'],
+			positive: [
+				'Multiple exposed ribbon fragments on distinct arms should support the direction change; constant-width paired rails are stronger than a single edge.'
+			],
 			neutral: ['Pixels hidden by endpoint furniture do not determine where the turn begins.'],
-			contradictions: ['A proposed extra bend that only improves contaminated endpoint pixels but disagrees with exposed arms is overfit.']
+			contradictions: [
+				'A proposed extra bend that only improves contaminated endpoint pixels but disagrees with exposed arms is overfit.'
+			]
 		},
 		measure: [
 			'distance from endpoint to first stable heading change',
 			'heading-change angle and uncertainty',
 			'one-bend versus two-bend residual on exposed, non-furniture ribbon pixels'
 		],
-		success: ['Represent the minimum bend complexity supported by multiple exposed fragments and keep unusual geometry tagged as an outlier rather than retuning normal holes around it.'],
-		doNotInfer: ['A visually hard real-life hole does not prove a raster bend.', 'A two-bend fit with lower residual is not enough if both bends are supported only by the same contaminated pixels.'],
+		success: [
+			'Represent the minimum bend complexity supported by multiple exposed fragments and keep unusual geometry tagged as an outlier rather than retuning normal holes around it.'
+		],
+		doNotInfer: [
+			'A visually hard real-life hole does not prove a raster bend.',
+			'A two-bend fit with lower residual is not enough if both bends are supported only by the same contaminated pixels.'
+		],
 		examples: [
 			{
 				course: 'DashsTrack',
@@ -271,7 +332,9 @@ export const CASE_CARDS: readonly CaseCard[] = [
 				source: '2026-08-22 LAB shared inspection; outlier ranking not yet proven'
 			}
 		],
-		open: ['Measure endpoint-to-turn distance and angle over dev + validation before calling H4 the corpus extreme.']
+		open: [
+			'Measure endpoint-to-turn distance and angle over dev + validation before calling H4 the corpus extreme.'
+		]
 	}
 ] as const;
 
@@ -282,17 +345,22 @@ const caseIds = new Set<string>();
 for (const card of CASE_CARDS) {
 	if (caseIds.has(card.id)) throw new Error(`Duplicate case card ${card.id}`);
 	caseIds.add(card.id);
-	for (const gate of card.gates) if (!gateIds.has(gate)) throw new Error(`${card.id} names unknown gate ${gate}`);
+	for (const gate of card.gates)
+		if (!gateIds.has(gate)) throw new Error(`${card.id} names unknown gate ${gate}`);
 	for (const detector of card.detectors) {
-		if (!detectorIds.has(detector)) throw new Error(`${card.id} names unknown detector ${detector}`);
+		if (!detectorIds.has(detector))
+			throw new Error(`${card.id} names unknown detector ${detector}`);
 	}
 	for (const invariant of card.invariants) {
-		if (!invariantIds.has(invariant)) throw new Error(`${card.id} names unknown invariant ${invariant}`);
+		if (!invariantIds.has(invariant))
+			throw new Error(`${card.id} names unknown invariant ${invariant}`);
 	}
 }
 
 function printCard(card: CaseCard): void {
-	console.log(`${card.id} — ${card.title}\nstatus: ${card.status}\ntags: ${card.tags.join(', ')}\ngates: ${card.gates.join(', ')}\n${card.definition}`);
+	console.log(
+		`${card.id} — ${card.title}\nstatus: ${card.status}\ntags: ${card.tags.join(', ')}\ngates: ${card.gates.join(', ')}\n${card.definition}`
+	);
 	for (const [label, values] of [
 		['WHY THIS IS HARD', card.whyHard],
 		['POSITIVE EVIDENCE', card.evidenceSemantics.positive],
