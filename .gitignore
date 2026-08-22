@@ -6,3 +6,6 @@ build/
 !.env.example
 .DS_Store
 /TS Notes/
+
+# LAB tooling has its own dependency tree
+scripts/chainspot-lab/node_modules/
