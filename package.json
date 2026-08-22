@@ -30,7 +30,8 @@
     "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:e2e",
-    "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts"
+    "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts",
+    "lab:invariants": "tsx scripts/chainspot-lab/invariants.ts"
   },
   "dependencies": {
     "@techstark/opencv-js": "^5.0.0-release.1",
