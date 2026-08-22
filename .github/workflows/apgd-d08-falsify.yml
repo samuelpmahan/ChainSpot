@@ -4,9 +4,14 @@ on:
   push:
     branches:
       - codex/lab-apgd-ribbon-kernels
+    paths-ignore:
+      - docs/lab/results/**
   pull_request:
     branches:
       - samuelpmahan/chspt-82-frontend-rebuild-rederive-the-mvp-from-a-clean-room-app
+
+permissions:
+  contents: write
 
 jobs:
   falsify:
@@ -98,3 +103,22 @@ jobs:
           name: apgd-real-d08-falsification
           path: .apgd/out
           if-no-files-found: error
+
+      - name: Publish small falsification checkpoint
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/lab/results
+          cp .apgd/out/falsification.json docs/lab/results/apgd-real-d08-falsification.json
+          cp .apgd/out/falsification.log docs/lab/results/apgd-real-d08-falsification.log
+          cp .apgd/out/SHA256SUMS docs/lab/results/apgd-real-d08-SHA256SUMS
+          git config user.name 'chainspot-lab-bot'
+          git config user.email 'chainspot-lab-bot@users.noreply.github.com'
+          git add docs/lab/results
+          if git diff --cached --quiet; then
+            echo 'No result change to publish.'
+          else
+            git commit -m 'lab: record real D08 falsification [apgd-result]'
+            git push origin HEAD:codex/lab-apgd-ribbon-kernels
+          fi
