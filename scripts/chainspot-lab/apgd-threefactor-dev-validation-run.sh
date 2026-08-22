@@ -70,7 +70,9 @@ run_stage() {
 must_run() {
 	local name="$1"
 	shift
-	if ! run_stage "$name" "$@"; then
+	if run_stage "$name" "$@"; then
+		return 0
+	else
 		local code=$?
 		exit "$code"
 	fi
