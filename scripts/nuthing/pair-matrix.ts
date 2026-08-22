@@ -46,6 +46,7 @@
 // Usage: npx tsx scripts/nuthing/pair-matrix.ts OUT_DIR [--course NAME]
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { PNG } from 'pngjs';
 import { runBadgeStage } from '../../src/lib/nuthing/badgeStage';
@@ -82,6 +83,7 @@ const SUPPORT_TAU = 0.5;
 // Weakest-window width in source px: a convincing ribbon has no ~45px
 // stretch of unsupported ground anywhere along it.
 const WORST_WINDOW_SRC_PX = 45;
+const CORPUS_ROOT = process.env.CHAINSPOT_CORPUS_PATH ?? resolve('..', 'chainspot-corpus');
 
 interface TruthHole {
   number: number;
@@ -95,7 +97,7 @@ function loadTruth(): Record<string, TruthHole[]> {
   ) as Record<string, { registeredHoles: { number: number; tee: number[]; basket: number[] }[] }>;
   const dashs = JSON.parse(
     readFileSync(
-      '/workspace/chainspot-corpus/dev/DashsTrack/DashsTrack-full.annotation.json',
+      `${CORPUS_ROOT}/dev/DashsTrack/DashsTrack-full.annotation.json`,
       'utf8',
     ),
   ) as { holes: { number: number; tee: { xPx: number; yPx: number }; basket: { xPx: number; yPx: number } }[] };
@@ -263,7 +265,8 @@ function main(): void {
   for (const nm of Object.keys(truthAll)) {
     if (onlyCourse && nm !== onlyCourse) continue;
     const t0 = performance.now();
-    const fullImage = decodeRgbaBin(`/workspace/nuthing-work/traces-py/${nm}.rgba.bin`);
+    const traceDir = process.env.NUTHING_TRACE_DIR ?? '/workspace/nuthing-work/traces-py';
+    const fullImage = decodeRgbaBin(`${traceDir}/${nm}.rgba.bin`);
     const viewport = detectMapViewport(fullImage);
     const image = cropRows(fullImage, viewport);
     const stage = runBadgeStage(image);
