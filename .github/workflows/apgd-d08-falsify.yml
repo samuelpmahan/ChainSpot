@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/lab-apgd-ribbon-kernels
+  pull_request:
+    branches:
+      - samuelpmahan/chspt-82-frontend-rebuild-rederive-the-mvp-from-a-clean-room-app
 
 jobs:
   falsify:
