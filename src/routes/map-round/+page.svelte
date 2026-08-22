@@ -9,7 +9,7 @@
 	 *
 	 * Pre-read requirement: by the time a MappedRound lands in session storage, all UDisc-derived
 	 * pixels have already been discarded per the fair-use clause in docs/rebuild-spec.md.
-	 * See src/lib/detectors/TODO-thrown-round-preread.md for why the walk/droplets must be extracted
+	 * The pre-read (walkTrace + landingDroplet + registration) runs on the Import page and must finish
 	 * during the Import phase before pixels are released.
 	 */
 

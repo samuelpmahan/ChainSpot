@@ -219,3 +219,12 @@ session MappedRound) coached.
 - `npm run check` green; no imports from old-stuff (grep).
 - Not proven here: behavior on real UDisc captures — LAB/manual acceptance
   when the page wiring lands.
+
+### Amendment (round pre-read wiring)
+
+The Import-page wiring was reassigned from "user, coached" to Claude by user
+directive ("pre-read is pre-MVP; CV exists so nobody clicks 54 times"). If
+registration fails (<2 unambiguous badge pairs), confirm PROCEEDS with an
+explicit "Round NOT registered" message rather than blocking — the course is
+still valid, and blocking would strand the user on a CV failure. Coaching
+resumes after pre-MVP.

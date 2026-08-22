@@ -36,7 +36,10 @@
 		type GeoBoundingBox
 	} from '$lib/satellite';
 	import { distanceFt, fitTransform, type CorrespondencePair } from '$lib/geo';
-	import { setCourseMap } from '$lib/session';
+	import { walkTraceDetector } from '$lib/detectors/walkTrace';
+	import { landingDropletDetector } from '$lib/detectors/landingDroplet';
+	import { applySimilarity, fitSimilarity, matchByHoleNumber } from '$lib/registration';
+	import { setCourseMap, setMappedRound } from '$lib/session';
 	import { goto } from '$app/navigation';
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
@@ -63,6 +66,18 @@
 	let headerH = $state(0);
 	let fitKey = $state(0);
 	let purpleReady = $state<Record<string, boolean>>({});
+	// Thrown-round pre-read (fair use: must finish BEFORE confirmAnnotation
+	// discards the pixels). Keyed by objectUrl; own store so runDetection's
+	// whole-array reassignment of `detections` can never clobber it.
+	let preRead = $state<
+		Record<
+			string,
+			{
+				readonly walk: readonly { xPx: number; yPx: number }[];
+				readonly droplets: readonly { xPx: number; yPx: number }[];
+			}
+		>
+	>({});
 	let autoThrownEnabled = true;
 	let thrownSelectionSource = $state<'auto' | 'manual' | null>(null);
 
@@ -304,7 +319,41 @@
 		skipCrop = false;
 		thrownIdx = index;
 		thrownSelectionSource = source;
+		const img = images[index];
+		if (img) void runRoundPreRead(img);
 		analyze();
+	}
+
+	// Extract walk trace + landing droplets from the thrown round while its
+	// pixels still exist. Results are round-image px; registration onto the
+	// composite happens at confirmAnnotation.
+	async function runRoundPreRead(img: LoadedImage) {
+		if (preRead[img.objectUrl]) return;
+		const seq = selectionSeq;
+		try {
+			const raster = await rgbaFromFile(img.file);
+			const walk: { xPx: number; yPx: number }[] = [];
+			const droplets: { xPx: number; yPx: number }[] = [];
+			await walkTraceDetector(raster, (e) => {
+				if (e.kind === 'object' && e.objType === 'walk-vertex') walk.push({ xPx: e.xPx, yPx: e.yPx });
+			});
+			await landingDropletDetector(raster, (e) => {
+				if (e.kind === 'object' && e.objType === 'landing-droplet')
+					droplets.push({ xPx: e.xPx, yPx: e.yPx });
+			});
+			if (seq !== selectionSeq) return;
+			preRead = { ...preRead, [img.objectUrl]: { walk, droplets } };
+			dbg('round pre-read done', img.file.name, {
+				walkVertices: walk.length,
+				droplets: droplets.length
+			});
+		} catch (e) {
+			if (seq !== selectionSeq) return;
+			// An empty pre-read is a valid pre-read: confirm may proceed, Map
+			// Round simply gets no trace. Never block the pipeline on CV failure.
+			preRead = { ...preRead, [img.objectUrl]: { walk: [], droplets: [] } };
+			dbg('round pre-read failed', img.file.name, e instanceof Error ? e.message : e);
+		}
 	}
 
 	function markThrownRound(index: number) {
@@ -574,6 +623,7 @@
 		images = [];
 		detections = {};
 		purpleReady = {};
+		preRead = {};
 		thrownIdx = -1;
 		thrownSelectionSource = null;
 		autoThrownEnabled = true;
@@ -646,6 +696,47 @@
 
 	function confirmAnnotation() {
 		if (!review || !review.done) return;
+
+		// Register the thrown round onto the confirmed course BEFORE the pixel
+		// discard: after this function, only vectors exist anywhere.
+		const thrown = thrownRound;
+		let roundNote = '';
+		if (thrown) {
+			const pre = preRead[thrown.objectUrl];
+			if (!pre) {
+				workflowMessage = 'Still reading the thrown round — give it a second, then Confirm again.';
+				return;
+			}
+			const emitted = detections[thrown.objectUrl] ?? [];
+			const labelByDet = new Map(
+				emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
+			);
+			const roundBadges = emitted.flatMap((e) => {
+				if (e.kind !== 'object' || e.objType !== 'hole-badge') return [];
+				const n = labelByDet.get(e.detId);
+				return n === undefined ? [] : [{ n, xPx: e.xPx, yPx: e.yPx }];
+			});
+			const compositeBadges = review.holes.map((h) => ({
+				n: h.n,
+				xPx: h.badge.xPx,
+				yPx: h.badge.yPx
+			}));
+			const pairs = matchByHoleNumber(roundBadges, compositeBadges);
+			const t = fitSimilarity(pairs);
+			if (t) {
+				setMappedRound({
+					walk: pre.walk.map((p) => applySimilarity(t, p)),
+					droplets: pre.droplets.map((p) => applySimilarity(t, p))
+				});
+				roundNote = ` Round registered (${pairs.length} badge pairs, ${pre.walk.length} walk vertices, ${pre.droplets.length} landings).`;
+			} else {
+				setMappedRound(null);
+				roundNote = ` Round NOT registered — ${pairs.length} unambiguous badge match(es), need 2; Map Round will show the course only.`;
+			}
+		} else {
+			setMappedRound(null);
+		}
+
 		cleanHoles = review.holes;
 		// FAIR USE: annotation is done — discard every UDisc-derived pixel NOW.
 		// Object URLs revoked, rasters dropped, detections cleared; only the
@@ -656,13 +747,14 @@
 		images = [];
 		detections = {};
 		purpleReady = {};
+		preRead = {};
 		thrownIdx = -1;
 		thrownSelectionSource = null;
 		review = null;
 		replaceArming = null;
 		phase = 'clean';
 		setCourseMap({ holes: cleanHoles, transform: null });
-		workflowMessage = 'Course annotated. UDisc pixels discarded — vectors only from here.';
+		workflowMessage = `Course annotated. UDisc pixels discarded — vectors only from here.${roundNote}`;
 	}
 
 	// clean-course viewBox from the surviving vectors
