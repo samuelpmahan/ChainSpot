@@ -14,6 +14,7 @@
 		height = '70vh',
 		fitKey = 0,
 		markers = [],
+		onCanvasClick,
 		animate = false,
 		clipInsets = null,
 		clipAnimate = false
@@ -27,6 +28,8 @@
 		fitKey?: number; // bump to re-frame the content (new stitch result etc.)
 		/** per-layer detection markers, in that layer's local (display) pixels */
 		markers?: ViewportMarker[][];
+		/** fired for a true click (no drag): point in CONTENT coordinates */
+		onCanvasClick?: (p: { x: number; y: number }) => void;
 		/** transition layer transforms (choreography only — keep off for drags) */
 		animate?: boolean;
 		/** animated shared clip applied to every layer (the crop "drawers") */
@@ -117,11 +120,16 @@
 		scale *= factor;
 	}
 
+	let downX = 0;
+	let downY = 0;
+
 	function onPointerDown(event: PointerEvent) {
 		container.setPointerCapture(event.pointerId);
 		panning = true;
 		lastX = event.clientX;
 		lastY = event.clientY;
+		downX = event.clientX;
+		downY = event.clientY;
 	}
 
 	function onPointerMove(event: PointerEvent) {
@@ -142,6 +150,14 @@
 	}
 
 	function onPointerUp(event: PointerEvent) {
+		const moved = Math.hypot(event.clientX - downX, event.clientY - downY);
+		if (moved < 5 && onCanvasClick) {
+			const rect = container.getBoundingClientRect();
+			onCanvasClick({
+				x: (event.clientX - rect.left - offsetX) / scale,
+				y: (event.clientY - rect.top - offsetY) / scale
+			});
+		}
 		panning = false;
 		movingLayerIndex = -1;
 	}
@@ -152,6 +168,8 @@
 		movingLayerIndex = index;
 		lastX = event.clientX;
 		lastY = event.clientY;
+		downX = event.clientX;
+		downY = event.clientY;
 	}
 </script>
 

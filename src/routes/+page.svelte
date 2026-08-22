@@ -13,11 +13,25 @@
 	import { findBestTranslation } from '$lib/stitch';
 	import { rgbaFromFile } from '$lib/rgba';
 	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
+	import { purpleMassDetector } from '$lib/detectors/purpleMass';
 	import type { DetectorEmission } from '$lib/detect';
 	import type { ViewportMarker } from '$lib/viewport';
+	import { detectCourse, type SeedBadge } from '$lib/courseDetect';
+	import {
+		accept,
+		createReview,
+		replace,
+		type Anchor,
+		type ReviewHoleState,
+		type ReviewState
+	} from '$lib/guidedReview';
+	import GuidedReviewPanel from '$lib/components/GuidedReviewPanel.svelte';
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
 	const MAX_IMAGES = 6;
+	// Purple is not expected on a clean course capture. Keep this explicit so
+	// real-capture evidence can raise it later without changing the detector.
+	const THROWN_ROUND_PURPLE_MASS_MIN = 0;
 	const PAGE_MARGIN_PX = 8; // matches the browser's default body margin (sides)
 
 	type Placement = { x: number; y: number };
@@ -36,6 +50,16 @@
 	let selectionSeq = 0;
 	let headerH = $state(0);
 	let fitKey = $state(0);
+	let purpleReady = $state<Record<string, boolean>>({});
+	let autoThrownEnabled = true;
+	let thrownSelectionSource = $state<'auto' | 'manual' | null>(null);
+
+	// Import Data phases: 'import' (upload -> stitch), 'annotate' (GuidedReview
+	// over the composite), 'clean' (UDisc pixels DISCARDED — vectors only)
+	let phase = $state<'import' | 'annotate' | 'clean'>('import');
+	let review = $state<ReviewState | null>(null);
+	let replaceArming = $state<{ holeN: number; anchor: Anchor } | null>(null);
+	let cleanHoles = $state<readonly ReviewHoleState[]>([]);
 
 	// choreography state: spread/grow -> crop drawers -> badges light -> slide to stitch
 	let vpAnimate = $state(false);
@@ -64,6 +88,12 @@
 		try {
 			const raster = await rgbaFromFile(img.file);
 			const emitted: DetectorEmission[] = [];
+			await purpleMassDetector(raster, (e) => emitted.push(e));
+			if (seq !== selectionSeq) return;
+			detections = { ...detections, [img.objectUrl]: emitted.slice() };
+			purpleReady = { ...purpleReady, [img.objectUrl]: true };
+			considerAutoThrownRound();
+
 			await labEndpointDetector(raster, (e) => emitted.push(e));
 			if (seq !== selectionSeq) return;
 			detections = { ...detections, [img.objectUrl]: emitted };
@@ -72,6 +102,10 @@
 				labels: emitted.filter((e) => e.kind === 'label').length
 			});
 		} catch (e) {
+			if (seq === selectionSeq) {
+				purpleReady = { ...purpleReady, [img.objectUrl]: true };
+				considerAutoThrownRound();
+			}
 			dbg('detector failed', img.file.name, e instanceof Error ? e.message : e);
 		}
 	}
@@ -217,7 +251,9 @@
 			offsets.sort((a, b) => a.dy - b.dy);
 			const dy = offsets[Math.floor(offsets.length / 2)].dy;
 			next[i] = { x: next[0].x + dx, y: next[0].y + dy };
-			matchedTiles.push(`tile ${i + 1} via badge${offsets.length > 1 ? 's' : ''} ${offsets.map((o) => o.n).join(', ')}`);
+			matchedTiles.push(
+				`tile ${i + 1} via badge${offsets.length > 1 ? 's' : ''} ${offsets.map((o) => o.n).join(', ')}`
+			);
 		}
 		if (matchedTiles.length === 0) return;
 		placements = next;
@@ -250,12 +286,37 @@
 	// slide from there to its corner instead of popping
 	let thrownFromRect: DOMRect | null = null;
 
-	function markThrownRound(index: number) {
+	function selectThrownRound(index: number, source: 'auto' | 'manual') {
 		thrownFromRect = document.getElementById(`thumb-${index}`)?.getBoundingClientRect() ?? null;
 		resetStitchState();
 		skipCrop = false;
 		thrownIdx = index;
+		thrownSelectionSource = source;
 		analyze();
+	}
+
+	function markThrownRound(index: number) {
+		autoThrownEnabled = false;
+		selectThrownRound(index, 'manual');
+	}
+
+	function considerAutoThrownRound() {
+		if (!autoThrownEnabled || thrownIdx >= 0 || images.length === 0) return;
+		if (images.some((image) => !purpleReady[image.objectUrl])) return;
+		const candidates = images
+			.map((image, index) => ({ image, index }))
+			.map(({ image, index }) => ({
+				index,
+				score:
+					detections[image.objectUrl]?.find(
+						(emission) => emission.kind === 'classification' && emission.trait === 'thrown-round'
+					)?.confidence ?? 0
+			}))
+			.filter(({ score }) => score > THROWN_ROUND_PURPLE_MASS_MIN);
+		if (candidates.length === 1) selectThrownRound(candidates[0].index, 'auto');
+		else if (candidates.length > 1) {
+			workflowMessage = `${candidates.length} screenshots contain purple path mass — keep them separate until the thrown-round stitch is decided.`;
+		}
 	}
 
 	function cardFly() {
@@ -269,12 +330,17 @@
 
 	function reselectThrownRound() {
 		resetStitchState();
+		phase = 'import';
+		review = null;
+		replaceArming = null;
 		vpAnimate = false;
 		showBadges = false;
 		alignEnabled = false;
 		clipInsets = null;
 		clipAnimate = false;
+		autoThrownEnabled = false;
 		thrownIdx = -1;
+		thrownSelectionSource = null;
 	}
 
 	function undoCrop() {
@@ -425,15 +491,13 @@
 		placementSource = 'manual';
 		selectedIdx = index;
 		placements = placements.map((placement, placementIndex) =>
-			placementIndex === index
-				? { x: placement.x + deltaX, y: placement.y + deltaY }
-				: placement
+			placementIndex === index ? { x: placement.x + deltaX, y: placement.y + deltaY } : placement
 		);
 		layoutApproved = false;
 	}
 
 	function onKeyDown(event: KeyboardEvent) {
-		if (!stitchReady) return;
+		if (!stitchReady || phase !== 'import') return;
 		const numberKey = Number(event.key);
 		if (Number.isInteger(numberKey) && numberKey >= 1 && numberKey <= mapImages.length) {
 			selectedIdx = numberKey - 1;
@@ -481,6 +545,12 @@
 			resetStitchState();
 			skipCrop = false;
 			thrownIdx = -1;
+			thrownSelectionSource = null;
+			autoThrownEnabled = true;
+			phase = 'import';
+			review = null;
+			replaceArming = null;
+			cleanHoles = [];
 		}
 		error = rejected.length > 0 ? `Not added: ${rejected.join(', ')}` : null;
 	}
@@ -491,15 +561,118 @@
 		for (const img of images) releaseImage(img);
 		images = [];
 		detections = {};
+		purpleReady = {};
 		thrownIdx = -1;
+		thrownSelectionSource = null;
+		autoThrownEnabled = true;
 		skipCrop = false;
 		error = null;
+		phase = 'import';
+		review = null;
+		replaceArming = null;
+		cleanHoles = [];
 	}
+
+	// ---- Annotate phase: GuidedReview over the approved composite ----
+
+	function enterAnnotate() {
+		// seeds: labeled badge detections projected through current placements
+		const left = appliedInsets?.left ?? 0;
+		const top = appliedInsets?.top ?? 0;
+		const seeds: SeedBadge[] = [];
+		mapImages.forEach((img, i) => {
+			const emitted = detections[img.objectUrl];
+			if (!emitted || !placements[i]) return;
+			const labelByDet = new Map(
+				emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
+			);
+			for (const e of emitted) {
+				if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
+				const n = labelByDet.get(e.detId);
+				if (n === undefined) continue;
+				seeds.push({
+					n,
+					xPx: placements[i].x + (e.xPx - left),
+					yPx: placements[i].y + (e.yPx - top)
+				});
+			}
+		});
+		review = createReview(detectCourse(seeds));
+		replaceArming = null;
+		layoutApproved = true;
+		phase = 'annotate';
+		workflowMessage =
+			review.holes.length > 0
+				? `Layout approved — GuidedReview: ${review.holes.length} holes.`
+				: 'Layout approved — no labeled badges detected, nothing to review.';
+	}
+
+	function onAccept(holeN: number) {
+		if (review) review = accept(review, holeN);
+	}
+	function onArmReplace(holeN: number, anchor: Anchor) {
+		replaceArming = { holeN, anchor };
+	}
+	function onCancelReplace() {
+		replaceArming = null;
+	}
+	function onCanvasClick(p: { x: number; y: number }) {
+		if (phase !== 'annotate' || !review || !replaceArming) return;
+		review = replace(review, replaceArming.holeN, replaceArming.anchor, { xPx: p.x, yPx: p.y });
+		replaceArming = null;
+	}
+
+	function confirmAnnotation() {
+		if (!review || !review.done) return;
+		cleanHoles = review.holes;
+		// FAIR USE: annotation is done — discard every UDisc-derived pixel NOW.
+		// Object URLs revoked, rasters dropped, detections cleared; only the
+		// vector course survives.
+		selectionSeq++;
+		resetStitchState();
+		for (const img of images) releaseImage(img);
+		images = [];
+		detections = {};
+		purpleReady = {};
+		thrownIdx = -1;
+		thrownSelectionSource = null;
+		review = null;
+		replaceArming = null;
+		phase = 'clean';
+		workflowMessage = 'Course annotated. UDisc pixels discarded — vectors only from here.';
+	}
+
+	// clean-course viewBox from the surviving vectors
+	let cleanBBox = $derived.by(() => {
+		let x0 = Infinity,
+			y0 = Infinity,
+			x1 = -Infinity,
+			y1 = -Infinity;
+		const eat = (p: { xPx: number; yPx: number } | null) => {
+			if (!p) return;
+			x0 = Math.min(x0, p.xPx);
+			y0 = Math.min(y0, p.yPx);
+			x1 = Math.max(x1, p.xPx);
+			y1 = Math.max(y1, p.yPx);
+		};
+		for (const h of cleanHoles) {
+			eat(h.badge);
+			eat(h.tee);
+			eat(h.basket);
+			for (const b of h.bends) eat(b);
+		}
+		if (x0 === Infinity) return { x: 0, y: 0, w: 100, h: 100 };
+		const pad = 80;
+		return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+	});
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
 
-<div bind:clientHeight={headerH} style="display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;">
+<div
+	bind:clientHeight={headerH}
+	style="display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;"
+>
 	<h1 style="margin: 0.25rem 0; font-size: 1.5rem;">Stitch Map</h1>
 	<input type="file" accept="image/*" multiple onchange={onFileChange} />
 	<button onclick={clearAll}>Clear all</button>
@@ -513,10 +686,15 @@
 
 {#if thrownIdx < 0}
 	{#if images.length > 0}
-		<p><strong>Click the screenshot that shows your throws.</strong> The rest become the course blank.</p>
+		<p>
+			<strong>Click the screenshot that shows your throws.</strong> The rest become the course blank.
+		</p>
 	{/if}
 	<div style="display: flex; gap: 1rem; overflow-x: auto;">
 		{#each images as img, i (img.objectUrl)}
+			{@const thrownScore = detections[img.objectUrl]?.find(
+				(emission) => emission.kind === 'classification' && emission.trait === 'thrown-round'
+			)?.confidence}
 			<div>
 				<img
 					id={`thumb-${i}`}
@@ -526,18 +704,22 @@
 				/>
 				<p>
 					<button onclick={() => markThrownRound(i)}>Mark as Thrown Round</button><br />
-					{img.file.name} - {img.widthPx} x {img.heightPx} px
+					{img.file.name} - {img.widthPx} x {img.heightPx} px<br />
+					{#if thrownScore !== undefined}
+						<strong>Thrown-round score: {thrownScore.toFixed(3)}</strong>
+					{/if}
 				</p>
 			</div>
 		{/each}
 	</div>
 {/if}
 
-{#if stitchReady}
+{#if stitchReady && phase !== 'clean'}
 	<ImageViewport
 		{layers}
 		selectedIndex={selectedIdx}
 		{onLayerMove}
+		{onCanvasClick}
 		cropPreview={null}
 		height={`calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px)`}
 		{fitKey}
@@ -551,19 +733,70 @@
 				in:fly={cardFly()}
 				style="background: rgba(255,255,255,0.9); border: 1px solid black; padding: 0.25rem; text-align: center;"
 			>
-				<img src={thrownRound.objectUrl} alt={thrownRound.file.name} style="width: 60px; display: block; margin: 0 auto;" />
-				<small>Thrown Round</small>
+				<img
+					src={thrownRound.objectUrl}
+					alt={thrownRound.file.name}
+					style="width: 60px; display: block; margin: 0 auto;"
+				/>
+				<small
+					>Thrown Round{thrownSelectionSource === 'auto' ? ' — purple path detected' : ''}</small
+				>
 			</div>
 		{/if}
-		<button class="vp-btn" onclick={() => (layoutApproved = true)}
-			><strong>Approve layout</strong></button
-		>
-		<button class="vp-btn" onclick={runStitch}>Pixel stitch (fallback)</button>
-		{#if appliedInsets}
-			<button class="vp-btn" onclick={undoCrop}>Undo crop</button>
+		{#if phase === 'import'}
+			<button class="vp-btn" onclick={enterAnnotate}><strong>Approve layout</strong></button>
+			<button class="vp-btn" onclick={runStitch}>Pixel stitch (fallback)</button>
+			{#if appliedInsets}
+				<button class="vp-btn" onclick={undoCrop}>Undo crop</button>
+			{/if}
+			<button class="vp-btn" onclick={reselectThrownRound}>Re-Select Thrown Round</button>
+		{:else if phase === 'annotate' && review}
+			<GuidedReviewPanel
+				{review}
+				{replaceArming}
+				{onAccept}
+				{onArmReplace}
+				{onCancelReplace}
+				onConfirmAll={confirmAnnotation}
+			/>
 		{/if}
-		<button class="vp-btn" onclick={reselectThrownRound}>Re-Select Thrown Round</button>
 	</ImageViewport>
+{/if}
+
+{#if phase === 'clean'}
+	<svg
+		width="100%"
+		style={`height: calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px); border: 1px solid black; background: #f2efe6;`}
+		viewBox={`${cleanBBox.x} ${cleanBBox.y} ${cleanBBox.w} ${cleanBBox.h}`}
+		role="img"
+		aria-label="Clean course map"
+	>
+		{#each cleanHoles as h (h.n)}
+			{#if h.tee && h.basket}
+				<path
+					d={`M ${h.tee.xPx} ${h.tee.yPx} ${h.bends.length ? `Q ${h.bends[0].xPx} ${h.bends[0].yPx}` : 'L'} ${h.basket.xPx} ${h.basket.yPx}`}
+					stroke="#465446"
+					fill="none"
+					stroke-width="4"
+				/>
+			{/if}
+			{#if h.tee}
+				<path
+					d={`M ${h.tee.xPx} ${h.tee.yPx - 14} L ${h.tee.xPx - 14} ${h.tee.yPx + 12} L ${h.tee.xPx + 14} ${h.tee.yPx + 12} Z`}
+					fill="#2c4a2c"
+				/>
+			{/if}
+			{#if h.basket}
+				<circle cx={h.basket.xPx} cy={h.basket.yPx} r="13" fill="none" stroke="#2c4a2c" stroke-width="5" />
+				<circle cx={h.basket.xPx} cy={h.basket.yPx} r="4" fill="#2c4a2c" />
+			{/if}
+			{#each h.bends as b (b.xPx + ':' + b.yPx)}
+				<circle cx={b.xPx} cy={b.yPx} r="6" fill="#465446" />
+			{/each}
+			<rect x={h.badge.xPx - 16} y={h.badge.yPx - 16} width="32" height="32" fill="#ffffff" stroke="#2c4a2c" stroke-width="3" />
+			<text x={h.badge.xPx} y={h.badge.yPx + 8} font-size="24" fill="#2c4a2c" text-anchor="middle">{h.n}</text>
+		{/each}
+	</svg>
 {/if}
 
 <style>
