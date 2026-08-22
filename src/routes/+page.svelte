@@ -26,6 +26,18 @@
 		type ReviewState
 	} from '$lib/guidedReview';
 	import GuidedReviewPanel from '$lib/components/GuidedReviewPanel.svelte';
+	import PairPanel from '$lib/components/PairPanel.svelte';
+	import { searchPlace, attributionFor, type GeocodeMatch } from '$lib/geocodeSearch';
+	import {
+		bboxFromCenter,
+		fetchGeometryFromViewport,
+		fetchSatellite,
+		pixelToGeo,
+		type GeoBoundingBox
+	} from '$lib/satellite';
+	import { distanceFt, fitTransform, type CorrespondencePair } from '$lib/geo';
+	import { setCourseMap } from '$lib/session';
+	import { goto } from '$app/navigation';
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
 	const MAX_IMAGES = 6;
@@ -597,13 +609,23 @@
 				});
 			}
 		});
-		review = createReview(detectCourse(seeds));
+		// strong-hole verdicts come FROM the CV service; the app only obeys
+		const strongNs = new Set<number>();
+		for (const img of mapImages) {
+			for (const e of detections[img.objectUrl] ?? []) {
+				if (e.kind === 'strong-hole') strongNs.add(e.n);
+			}
+		}
+		let r = createReview(detectCourse(seeds));
+		for (const n of strongNs) r = accept(r, n);
+		review = r;
 		replaceArming = null;
 		layoutApproved = true;
 		phase = 'annotate';
+		const strongNote = strongNs.size > 0 ? ` (${strongNs.size} strong, auto-accepted)` : '';
 		workflowMessage =
 			review.holes.length > 0
-				? `Layout approved — GuidedReview: ${review.holes.length} holes.`
+				? `Layout approved — GuidedReview: ${review.holes.length} holes${strongNote}.`
 				: 'Layout approved — no labeled badges detected, nothing to review.';
 	}
 
@@ -639,6 +661,7 @@
 		review = null;
 		replaceArming = null;
 		phase = 'clean';
+		setCourseMap({ holes: cleanHoles, transform: null });
 		workflowMessage = 'Course annotated. UDisc pixels discarded — vectors only from here.';
 	}
 
@@ -665,6 +688,103 @@
 		const pad = 80;
 		return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
 	});
+
+	// ---- Pairs phase: clean course <-> georeferenced satellite ----
+	let satQuery = $state('');
+	let satNote = $state<string | null>(null);
+	let satMatches = $state<GeocodeMatch[]>([]);
+	let satProviderName = $state('');
+	let satRaster = $state<{
+		url: string;
+		bbox: GeoBoundingBox;
+		widthPx: number;
+		heightPx: number;
+		provider: string;
+	} | null>(null);
+	let pairs = $state<CorrespondencePair[]>([]);
+	let pairArming = $state<'blank' | 'satellite' | null>(null);
+	let pendingBlankPx: { xPx: number; yPx: number } | null = null;
+
+	let worldTransform = $derived(fitTransform(pairs));
+	let sampleDistanceFt = $derived.by(() => {
+		if (!worldTransform) return null;
+		const h = cleanHoles.find((c) => c.tee && c.basket);
+		if (!h || !h.tee || !h.basket) return null;
+		return distanceFt(worldTransform, h.tee, h.basket);
+	});
+
+	async function satSearch() {
+		if (!satQuery.trim()) return;
+		satNote = 'Searching…';
+		satMatches = [];
+		const r = await searchPlace(satQuery.trim());
+		if (!r.ok) {
+			satNote = `Search failed: ${r.reason}`;
+			return;
+		}
+		satMatches = r.matches;
+		satProviderName = r.providerName;
+		satNote = r.matches.length === 0 ? 'No matches.' : null;
+	}
+
+	async function satPick(m: GeocodeMatch) {
+		satMatches = [];
+		satNote = 'Fetching satellite imagery…';
+		const geom = fetchGeometryFromViewport({ lat: m.lat, lon: m.lon }, m.viewport);
+		const bbox = bboxFromCenter(geom.center, geom.radiusMeters);
+		const r = await fetchSatellite(bbox, 1024);
+		if (!r.ok) {
+			satNote = 'All imagery providers failed (see console).';
+			dbg('satellite fetch failed', r.attempts);
+			return;
+		}
+		if (satRaster) URL.revokeObjectURL(satRaster.url);
+		satRaster = {
+			url: URL.createObjectURL(r.blob),
+			bbox: r.bbox,
+			widthPx: r.widthPx,
+			heightPx: r.heightPx,
+			provider: r.provider
+		};
+		satNote = null;
+		dbg('satellite ready', { provider: r.provider, bbox: r.bbox });
+	}
+
+	function onStartPair() {
+		pairArming = 'blank';
+		pendingBlankPx = null;
+	}
+	function onCancelPair() {
+		pairArming = null;
+		pendingBlankPx = null;
+	}
+	function onRemovePair(index: number) {
+		pairs = pairs.filter((_, i) => i !== index);
+	}
+	function cleanSvgClick(event: MouseEvent) {
+		if (pairArming !== 'blank') return;
+		const svg = event.currentTarget as SVGSVGElement;
+		const ctm = svg.getScreenCTM();
+		if (!ctm) return;
+		const pt = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+		pendingBlankPx = { xPx: pt.x, yPx: pt.y };
+		pairArming = 'satellite';
+	}
+	function satClick(event: MouseEvent) {
+		if (pairArming !== 'satellite' || !satRaster || !pendingBlankPx) return;
+		const img = event.currentTarget as HTMLElement;
+		const rect = img.getBoundingClientRect();
+		const xPx = ((event.clientX - rect.left) / rect.width) * satRaster.widthPx;
+		const yPx = ((event.clientY - rect.top) / rect.height) * satRaster.heightPx;
+		const g = pixelToGeo(satRaster, { xPx, yPx });
+		pairs = [...pairs, { blankPx: pendingBlankPx, latLng: { lat: g.lat, lng: g.lon } }];
+		pendingBlankPx = null;
+		pairArming = null;
+	}
+	function pairsDone() {
+		setCourseMap({ holes: cleanHoles, transform: worldTransform });
+		goto('/map-round');
+	}
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
@@ -759,17 +879,23 @@
 				{onCancelReplace}
 				onConfirmAll={confirmAnnotation}
 			/>
+			<button class="vp-btn" disabled title="Not implemented">Detect bends (this hole)</button>
+			<button class="vp-btn" disabled title="Not implemented">Snap to best point</button>
 		{/if}
 	</ImageViewport>
 {/if}
 
 {#if phase === 'clean'}
+	<div
+		style={`position: relative; display: flex; gap: 6px; height: calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px);`}
+	>
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<svg
-		width="100%"
-		style={`height: calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px); border: 1px solid black; background: #f2efe6;`}
+		style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #f2efe6;"
 		viewBox={`${cleanBBox.x} ${cleanBBox.y} ${cleanBBox.w} ${cleanBBox.h}`}
 		role="img"
 		aria-label="Clean course map"
+		onclick={cleanSvgClick}
 	>
 		{#each cleanHoles as h (h.n)}
 			{#if h.tee && h.basket}
@@ -796,7 +922,60 @@
 			<rect x={h.badge.xPx - 16} y={h.badge.yPx - 16} width="32" height="32" fill="#ffffff" stroke="#2c4a2c" stroke-width="3" />
 			<text x={h.badge.xPx} y={h.badge.yPx + 8} font-size="24" fill="#2c4a2c" text-anchor="middle">{h.n}</text>
 		{/each}
+		{#each pairs as pair, i (i)}
+			<circle cx={pair.blankPx.xPx} cy={pair.blankPx.yPx} r="10" fill="none" stroke="red" stroke-width="4" />
+			<text x={pair.blankPx.xPx + 14} y={pair.blankPx.yPx + 6} font-size="20" fill="red">P{i + 1}</text>
+		{/each}
 	</svg>
+
+	<div style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #9db89d; position: relative; overflow: hidden;">
+		{#if satRaster}
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+			<div style="position: relative; width: 100%; height: 100%;" onclick={satClick}>
+				<img
+					src={satRaster.url}
+					alt="Satellite imagery"
+					style="width: 100%; height: 100%; object-fit: fill; display: block;"
+					draggable="false"
+				/>
+				{#each pairs as pair, i (i)}
+					{@const sp = { xPx: ((pair.latLng.lng - satRaster.bbox.minLon) / (satRaster.bbox.maxLon - satRaster.bbox.minLon)) * 100, yPx: ((satRaster.bbox.maxLat - pair.latLng.lat) / (satRaster.bbox.maxLat - satRaster.bbox.minLat)) * 100 }}
+					<div
+						style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(-50%, -50%); width: 18px; height: 18px; border: 4px solid red; border-radius: 50%; pointer-events: none;`}
+					></div>
+					<span style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(12px, -8px); color: red; font-weight: bold; pointer-events: none;`}>P{i + 1}</span>
+				{/each}
+			</div>
+			<small style="position: absolute; left: 4px; bottom: 4px; background: rgba(255,255,255,0.85); padding: 1px 5px;">
+				{satRaster.provider} · {attributionFor(satProviderName)}
+			</small>
+		{:else}
+			<div style="padding: 1rem; background: rgba(255,255,255,0.92); margin: 1rem; border: 1px solid black;">
+				<strong>Find the course's satellite imagery</strong><br />
+				<input placeholder="Course name or address" bind:value={satQuery} style="width: 60%;" onkeydown={(e) => e.key === 'Enter' && satSearch()} />
+				<button onclick={satSearch}>Search</button>
+				{#if satNote}<p>{satNote}</p>{/if}
+				{#each satMatches as m (m.displayName)}
+					<p><button onclick={() => satPick(m)}>{m.displayName}</button></p>
+				{/each}
+				{#if satMatches.length > 0}<small>Results: {attributionFor(satProviderName)}</small>{/if}
+			</div>
+		{/if}
+
+		<div style="position: absolute; top: 0.5rem; right: 0.5rem;">
+			<PairPanel
+				{pairs}
+				arming={pairArming}
+				transform={worldTransform}
+				{sampleDistanceFt}
+				{onStartPair}
+				{onCancelPair}
+				{onRemovePair}
+				onDone={pairsDone}
+			/>
+		</div>
+	</div>
+	</div>
 {/if}
 
 <style>
