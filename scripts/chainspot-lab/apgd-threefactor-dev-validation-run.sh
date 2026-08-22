@@ -32,8 +32,6 @@ publish_status() {
 
 housekeep() {
 	local stage="$1"
-	# No debug images survive. The user explicitly allowed only the final four
-	# validation prediction overlays for this experiment.
 	find "$APGD" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) \
 		! -path "$FINAL/*-prediction.png" -delete 2>/dev/null || true
 	printf 'housekeeping stage=%s files=%s images=%s\n' \
@@ -78,43 +76,47 @@ must_run() {
 	fi
 }
 
-# DEV: truth file is passed only so the adapter can attach endpoint ownership
-# after measureThreeFactor has already finished producing candidates + raw legs.
-must_run 'dev measure DashsTrack' npx tsx scripts/chainspot-lab/apgd-threefactor-cache.ts \
+# Same current ThreeFactor primitives as measureThreeFactor, but stop after
+# badge->endpoint legs. The APGD policy never consumes the Cartesian pair
+# materialization, so doing it here only wastes runtime on large holdouts.
+MEASURE=(npx tsx scripts/chainspot-lab/apgd-threefactor-leg-cache.ts)
+FEATURE=(npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts)
+
+# DEV: annotations attach ownership only after pixel measurement and routing.
+must_run 'dev measure DashsTrack' "${MEASURE[@]}" \
 	--input "$CORPUS/dev/DashsTrack/DashsTrack-full.jpg" \
 	--annotation "$CORPUS/dev/DashsTrack/DashsTrack-full.annotation.json" \
 	--course DashsTrack-full --out "$DEV/DashsTrack-full.json"
-must_run 'dev features DashsTrack' npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts \
+must_run 'dev features DashsTrack' "${FEATURE[@]}" \
 	--cache "$DEV/DashsTrack-full.json" --field "$DEV/DashsTrack-full-field.bin" \
 	--image "$CORPUS/dev/DashsTrack/DashsTrack-full.jpg" --out "$DEV/DashsTrack-full.features.json"
 
-must_run 'dev measure HeritagePark' npx tsx scripts/chainspot-lab/apgd-threefactor-cache.ts \
+must_run 'dev measure HeritagePark' "${MEASURE[@]}" \
 	--input "$CORPUS/dev/Heritage/HeritagePark-full.png" \
 	--annotation "$CORPUS/dev/Heritage/HeritagePark-full.annotation.json" \
 	--course HeritagePark-full --out "$DEV/HeritagePark-full.json"
-must_run 'dev features HeritagePark' npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts \
+must_run 'dev features HeritagePark' "${FEATURE[@]}" \
 	--cache "$DEV/HeritagePark-full.json" --field "$DEV/HeritagePark-full-field.bin" \
 	--image "$CORPUS/dev/Heritage/HeritagePark-full.png" --out "$DEV/HeritagePark-full.features.json"
 
-must_run 'dev measure Lenard' npx tsx scripts/chainspot-lab/apgd-threefactor-cache.ts \
+must_run 'dev measure Lenard' "${MEASURE[@]}" \
 	--input "$CORPUS/dev/Lenard/Lenard-full.PNG" \
 	--annotation "$CORPUS/dev/Lenard/Lenard-full.annotation.json" \
 	--course Lenard-full --out "$DEV/Lenard-full.json"
-must_run 'dev features Lenard' npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts \
+must_run 'dev features Lenard' "${FEATURE[@]}" \
 	--cache "$DEV/Lenard-full.json" --field "$DEV/Lenard-full-field.bin" \
 	--image "$CORPUS/dev/Lenard/Lenard-full.PNG" --out "$DEV/Lenard-full.features.json"
 
-must_run 'dev measure TowneLake' npx tsx scripts/chainspot-lab/apgd-threefactor-cache.ts \
+must_run 'dev measure TowneLake' "${MEASURE[@]}" \
 	--input "$CORPUS/dev/TowneLake/TowneLake-full.png" \
 	--annotation "$CORPUS/dev/TowneLake/TowneLake-full.annotation.json" \
 	--course TowneLake-full --out "$DEV/TowneLake-full.json"
-must_run 'dev features TowneLake' npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts \
+must_run 'dev features TowneLake' "${FEATURE[@]}" \
 	--cache "$DEV/TowneLake-full.json" --field "$DEV/TowneLake-full-field.bin" \
 	--image "$CORPUS/dev/TowneLake/TowneLake-full.png" --out "$DEV/TowneLake-full.features.json"
 
-# VALIDATION: no annotation argument exists in these invocations. A single
-# predeclared measurement width 37px is used; transverse profile features use
-# the frozen 30/37/40 multiscale median independent of validation truth.
+# VALIDATION: no annotation argument. Measurement width is frozen to 37px;
+# profile kernels independently use the predeclared 30/37/40 median.
 declare -A VIMAGE=(
 	[BeaverRanch-Gold]="$CORPUS/validation/BeaverRanch-Gold/clean/BeaverRanch-Gold-full.PNG"
 	[ColetoCreek]="$CORPUS/validation/ColetoCreek/clean/ColetoCreek-full.PNG"
@@ -123,9 +125,9 @@ declare -A VIMAGE=(
 )
 
 for course in BeaverRanch-Gold ColetoCreek FountainHills Seatac; do
-	must_run "validation measure $course" npx tsx scripts/chainspot-lab/apgd-threefactor-cache.ts \
+	must_run "validation measure $course" "${MEASURE[@]}" \
 		--input "${VIMAGE[$course]}" --course "$course" --corridor-width 37 --out "$VAL/$course.json"
-	must_run "validation features $course" npx tsx scripts/chainspot-lab/apgd-threefactor-leg-features.ts \
+	must_run "validation features $course" "${FEATURE[@]}" \
 		--cache "$VAL/$course.json" --field "$VAL/$course-field.bin" \
 		--image "${VIMAGE[$course]}" --out "$VAL/$course.features.json"
 done
