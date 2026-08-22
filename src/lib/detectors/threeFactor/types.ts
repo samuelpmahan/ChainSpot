@@ -25,6 +25,7 @@ export interface CorridorParams {
 	readonly alignmentPower: number;
 	readonly worstWindowSrcPx: number;
 	readonly supportTau: number;
+	readonly zfit?: boolean;
 }
 
 export interface ThreeFactorParams {
@@ -38,6 +39,7 @@ export interface ThreeFactorParams {
 	readonly alignmentPower?: number;
 	readonly worstWindowSrcPx?: number;
 	readonly supportTau?: number;
+	readonly zfit?: boolean;
 }
 
 export interface DigitEvidence {
