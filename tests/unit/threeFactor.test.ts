@@ -210,22 +210,36 @@ describe('3factor-dev72 Detector adapter', () => {
 		expect(result.badges[0].bbox[1]).toBeGreaterThanOrEqual(32);
 	});
 
-	it('preserves raw measurements while inserting recovered tees before assignment', () => {
+	it('inserts distant recovered tees, dedups within 14px, and never mutates the measurement (frozen semantics)', () => {
 		const measured = measurement();
-		const assigned = insertRecoveredEndpoints(measured, [
+		const snapshot = structuredClone(measured);
+
+		// within 14px of the existing tee at (8, 14): frozen recovery SKIPS it
+		const deduped = insertRecoveredEndpoints(measured, [
 			{
 				xPx: 9,
 				yPx: 15,
+				provenance: { source: 'explicit-injected', note: 'near duplicate', score: 0.7 }
+			}
+		]);
+		expect(deduped.tees).toHaveLength(1);
+		expect(deduped.tees.some((candidate) => candidate.tier === 'recovered')).toBe(false);
+
+		// beyond the dedup radius: inserted with recovered tier + provenance
+		const inserted = insertRecoveredEndpoints(measured, [
+			{
+				xPx: 28,
+				yPx: 30,
 				provenance: { source: 'explicit-injected', note: 'test recovery', score: 0.7 }
 			}
 		]);
-
-		expect(measured.tees).toHaveLength(1);
-		expect(assigned.tees).toHaveLength(2);
-		expect(assigned.tees.some((candidate) => candidate.tier === 'recovered')).toBe(true);
+		expect(inserted.tees).toHaveLength(2);
 		expect(
-			assigned.tees.find((candidate) => candidate.tier === 'recovered')?.recovery?.source
+			inserted.tees.find((candidate) => candidate.tier === 'recovered')?.recovery?.source
 		).toBe('explicit-injected');
+
+		// "preserves raw measurements" pinned for real: deep equality, not length
+		expect(measured).toEqual(snapshot);
 	});
 
 	it('emits stamped objects, labels, and final associations in input pixel coordinates', () => {
