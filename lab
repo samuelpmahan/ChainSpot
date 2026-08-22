@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$repo_dir"
+
+if ! command -v node >/dev/null 2>&1; then
+	export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+	# shellcheck disable=SC1091
+	. "$NVM_DIR/nvm.sh"
+fi
+
+case "${1:-}" in
+	orient)
+		shift
+		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/chainspot-lab/orient.ts" "$@"
+		;;
+	grid)
+		shift
+		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/lab-grid.ts" "$@"
+		;;
+	*)
+		echo "Usage: ./lab orient <run|annotate COURSE> [--verbose] | ./lab grid <course>" >&2
+		exit 2
+		;;
+esac
