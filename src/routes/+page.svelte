@@ -124,10 +124,12 @@
 			await labEndpointDetector(raster, (e) => emitted.push(e));
 			if (seq !== selectionSeq) return;
 			detections = { ...detections, [img.objectUrl]: emitted };
-			dbg('detector done', img.file.name, {
-				objects: emitted.filter((e) => e.kind === 'object').length,
-				labels: emitted.filter((e) => e.kind === 'label').length
-			});
+			const byType: Record<string, number> = {};
+			for (const e of emitted) {
+				const key = e.kind === 'object' ? e.objType : e.kind;
+				byType[key] = (byType[key] ?? 0) + 1;
+			}
+			dbg('detector done', img.file.name, byType);
 		} catch (e) {
 			if (seq === selectionSeq) {
 				purpleReady = { ...purpleReady, [img.objectUrl]: true };
@@ -199,6 +201,40 @@
 				title: `badge ${b.n} (${b.conf.toFixed(2)})${matched.has(`${i}:${b.n}`) ? ' — matched across tiles' : ''}`
 			}))
 		);
+	}
+
+	// TEMP DEBUG (remove before merge prep): one-click dump of everything the
+	// page knows, for LAB triage. Filenames keyed to the moment.
+	function exportDebug() {
+		const byType: Record<string, number> = {};
+		for (const list of Object.values(detections)) {
+			for (const e of list) {
+				const key = e.kind === 'object' ? `object:${e.objType}` : e.kind;
+				byType[key] = (byType[key] ?? 0) + 1;
+			}
+		}
+		dbg('emission counts', byType);
+		const dump = {
+			exportedAt: new Date().toISOString(),
+			phase,
+			imageNames: images.map((i) => i.file.name),
+			thrownIdx,
+			appliedInsets,
+			placements,
+			placementSource,
+			emissionCountsByType: byType,
+			detections,
+			preRead,
+			cleanHoles,
+			pairs
+		};
+		const blob = new Blob([JSON.stringify(dump, null, 1)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `chainspot-debug-${Date.now()}.json`;
+		a.click();
+		setTimeout(() => URL.revokeObjectURL(url), 5000);
 	}
 
 	// temporary instrumentation for the canvas bring-up — grep tag: [stitch]
@@ -888,6 +924,10 @@
 	<h1 style="margin: 0.25rem 0; font-size: 1.5rem;">Stitch Map</h1>
 	<input type="file" accept="image/*" multiple onchange={onFileChange} />
 	<button onclick={clearAll}>Clear all</button>
+	<!-- TEMP DEBUG (remove before merge prep): full-state export for LAB triage -->
+	<button onclick={exportDebug} title="Downloads detections/pre-read/placements as JSON">
+		Export debug JSON
+	</button>
 	{#if error}<span>{error}</span>{/if}
 	{#if workflowMessage}<span>{workflowMessage}</span>{/if}
 	{#if stitchReady && selectedIdx >= 0}
