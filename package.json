@@ -10,6 +10,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "lab:gates": "tsx scripts/chainspot-lab/gates.ts",
     "detect:tees": "tsx scripts/detect-tees.ts",
     "overfit:tees": "tsx scripts/overfit-tees.ts",
     "validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
@@ -28,7 +29,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
     "test:e2e": "playwright test",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:e2e",
+    "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts"
   },
   "dependencies": {
     "@techstark/opencv-js": "^5.0.0-release.1",
