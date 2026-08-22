@@ -31,7 +31,8 @@
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:e2e",
     "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts",
-    "lab:invariants": "tsx scripts/chainspot-lab/invariants.ts"
+    "lab:invariants": "tsx scripts/chainspot-lab/invariants.ts",
+    "lab:cases": "tsx scripts/chainspot-lab/cases.ts"
   },
   "dependencies": {
     "@techstark/opencv-js": "^5.0.0-release.1",
@@ -44,7 +45,6 @@
     "@sveltejs/kit": "^2.70.2",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/node": "^26.1.2",
-    "@types/pngjs": "^6.0.5",
     "fake-indexeddb": "^6.2.5",
     "jpeg-js": "^0.4.4",
     "jsdom": "^30.0.1",
