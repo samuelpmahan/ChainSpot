@@ -68,41 +68,67 @@
 		}
 	}
 
-	// project detections into each layer's local (cropped display) pixels
+	// Badges only (baskets can FP, badges pretty much can't). Each badge gets a
+	// translucent halo in its hole color that "lights up" the glyph; when the
+	// SAME hole number from another tile lands within the match radius in
+	// composite space — the stitch verified itself right there — the halo
+	// flips to the match color.
+	const MATCH_RADIUS_PX = 30;
+	const MATCH_COLOR = 'gold';
+
 	function projectMarkers(imgs: LoadedImage[]): ViewportMarker[][] {
-		return imgs.map((img, i) => {
+		const left = appliedInsets?.left ?? 0;
+		const top = appliedInsets?.top ?? 0;
+
+		type B = { n: number; x: number; y: number; conf: number };
+		const perTile: B[][] = imgs.map((img) => {
 			const emitted = detections[img.objectUrl];
-			if (!emitted) return [] as ViewportMarker[];
+			if (!emitted) return [];
 			const labelByDet = new Map(
 				emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
 			);
-			const left = appliedInsets?.left ?? 0;
-			const top = appliedInsets?.top ?? 0;
-			const w = rasters[i]?.widthPx ?? img.widthPx;
-			const h = rasters[i]?.heightPx ?? img.heightPx;
-			const out: ViewportMarker[] = [];
+			const out: B[] = [];
 			for (const e of emitted) {
-				if (e.kind !== 'object') continue;
-				const x = e.xPx - left;
-				const y = e.yPx - top;
-				if (x < 0 || y < 0 || x > w || y > h) continue;
-				if (e.objType === 'hole-badge') {
-					const n = labelByDet.get(e.detId);
-					out.push({
-						xPx: x,
-						yPx: y,
-						color: n ? HOLE_COLORS[(n - 1) % HOLE_COLORS.length] : '#666',
-						label: n ? String(n) : '?',
-						title: `badge ${n ?? '?'} (${e.confidence.toFixed(2)})`,
-						anchor: 'above'
-					});
-				} else if (e.objType === 'basket') {
-					out.push({ xPx: x, yPx: y, color: '#222', label: 'B', title: `basket (${e.confidence.toFixed(2)})` });
-				}
-				// tees deliberately not rendered: too many false positives for now
+				if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
+				const n = labelByDet.get(e.detId);
+				if (n === undefined) continue;
+				out.push({ n, x: e.xPx - left, y: e.yPx - top, conf: e.confidence });
 			}
 			return out;
 		});
+
+		const matched = new Set<string>();
+		if (placements.length === imgs.length) {
+			for (let i = 0; i < perTile.length; i++) {
+				for (let j = i + 1; j < perTile.length; j++) {
+					for (const a of perTile[i]) {
+						for (const b of perTile[j]) {
+							if (a.n !== b.n) continue;
+							const ax = placements[i].x + a.x;
+							const ay = placements[i].y + a.y;
+							const bx = placements[j].x + b.x;
+							const by = placements[j].y + b.y;
+							if (Math.hypot(ax - bx, ay - by) <= MATCH_RADIUS_PX) {
+								matched.add(`${i}:${a.n}`);
+								matched.add(`${j}:${b.n}`);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return perTile.map((badges, i) =>
+			badges.map((b) => ({
+				xPx: b.x,
+				yPx: b.y,
+				color: matched.has(`${i}:${b.n}`)
+					? MATCH_COLOR
+					: HOLE_COLORS[(b.n - 1) % HOLE_COLORS.length],
+				label: '',
+				title: `badge ${b.n} (${b.conf.toFixed(2)})${matched.has(`${i}:${b.n}`) ? ' — matched across tiles' : ''}`
+			}))
+		);
 	}
 
 	// temporary instrumentation for the canvas bring-up — grep tag: [stitch]
