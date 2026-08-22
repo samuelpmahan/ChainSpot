@@ -75,7 +75,18 @@ export interface UiAssociation extends EmissionBase {
 	readonly candidates?: readonly { toDetId: DetId; confidence: number }[];
 }
 
-export type DetectorEmission = UiObjectDetected | UiLabelRead | UiAssociation;
+/**
+ * "This IMAGE, as a whole, has trait X" — e.g. it is the thrown round
+ * (walk trace + droplets present). `confidence` carries the score; the app
+ * compares across the session's images and picks the argmax, so emit a
+ * calibrated-ish score even when unsure rather than staying silent.
+ */
+export interface UiClassification extends EmissionBase {
+	readonly kind: 'classification';
+	readonly trait: 'thrown-round';
+}
+
+export type DetectorEmission = UiObjectDetected | UiLabelRead | UiAssociation | UiClassification;
 
 export type OnDetectorEmission = (emission: DetectorEmission) => void;
 
