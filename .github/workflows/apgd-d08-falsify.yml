@@ -1,0 +1,97 @@
+name: APGD real-D08 falsifier
+
+on:
+  push:
+    branches:
+      - codex/lab-apgd-ribbon-kernels
+
+jobs:
+  falsify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build exact NUP1 dev inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .apgd/traces .apgd/cache .apgd/out
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg .apgd/traces/DashsTrack-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/Heritage/HeritagePark-full.png .apgd/traces/HeritagePark-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/Lenard/Lenard-full.PNG .apgd/traces/Lenard-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/TowneLake/TowneLake-full.png .apgd/traces/TowneLake-full.rgba.bin
+
+      - name: D08 DashsTrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course DashsTrack-full | tee .apgd/out/DashsTrack-full.log
+          echo "wall=$(( $(date +%s) - start ))s" >> .apgd/out/DashsTrack-full.log
+          find .apgd/cache -type f -name '*.png' -delete
+
+      - name: D08 HeritagePark
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course HeritagePark-full | tee .apgd/out/HeritagePark-full.log
+          echo "wall=$(( $(date +%s) - start ))s" >> .apgd/out/HeritagePark-full.log
+          find .apgd/cache -type f -name '*.png' -delete
+
+      - name: D08 Lenard
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course Lenard-full | tee .apgd/out/Lenard-full.log
+          echo "wall=$(( $(date +%s) - start ))s" >> .apgd/out/Lenard-full.log
+          find .apgd/cache -type f -name '*.png' -delete
+
+      - name: D08 TowneLake
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course TowneLake-full | tee .apgd/out/TowneLake-full.log
+          echo "wall=$(( $(date +%s) - start ))s" >> .apgd/out/TowneLake-full.log
+          find .apgd/cache -type f -name '*.png' -delete
+
+      - name: Falsify two synthetic-scaffold headline kernels
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-d08-falsify.ts --cache "$PWD/.apgd/cache" --corpus "$PWD/chainspot-corpus" --out "$PWD/.apgd/out/falsification.json" | tee .apgd/out/falsification.log
+          echo "wall=$(( $(date +%s) - start ))s" >> .apgd/out/falsification.log
+          find .apgd -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) -delete
+          printf 'retained_images=' >> .apgd/out/falsification.log
+          find .apgd -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) | wc -l >> .apgd/out/falsification.log
+          sha256sum .apgd/out/* > .apgd/out/SHA256SUMS
+
+      - name: Upload falsification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: apgd-real-d08-falsification
+          path: .apgd/out
+          if-no-files-found: error
