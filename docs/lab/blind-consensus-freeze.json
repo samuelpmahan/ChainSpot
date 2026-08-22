@@ -1,0 +1,53 @@
+{
+  "status": "FROZEN_BEFORE_VALIDATION",
+  "roster": [
+    "uPair",
+    "physics",
+    "geometry"
+  ],
+  "confidencePolicy": {
+    "HIGH_PAIR": [
+      "all3 same",
+      "physics+uPair same while geometry differs"
+    ],
+    "DO_NOT_TRUST": [
+      "geometry+physics same while uPair differs"
+    ],
+    "LOW_OR_UNRESOLVED": [
+      "all three different / uPair alone"
+    ],
+    "HIGH_TEE": [
+      "all3 same",
+      "physics+uPair same"
+    ],
+    "HIGH_BASKET": [
+      "all3 same"
+    ]
+  },
+  "devOOF": {
+    "uPair": "68/72",
+    "physics": "61/72",
+    "geometry": "56/72",
+    "all3PairAgreement": "55/55",
+    "physics_uPairPairAgreement": "5/5",
+    "geometry_physicsAgainstUPair": "1/6"
+  },
+  "hashes": {
+    "calibration": "a18a7c31d0d7b1b7ac3157050fdcc790d1c0a8f1630a8fc3c77360df5eb7706c",
+    "uPairModel": "10ba36f92e1cf6513eb6fe8457bd532db45892791874387aa46efe2de80ed85a",
+    "runner": "2c30ac2e80f946760d9f4d375cd36fb5acaa243a6636ad03639b1501785e5bb3",
+    "devMatrices": {
+      "DashsTrack-dev.pkl": "4e7d4b29b3c2f757e0065aa7d8dac1f71307940e361677aee9cb6e43d1bb397c",
+      "Heritage-dev.pkl": "ceb9ac8b8242c2d3f3247c150d5e0aa040b7dfcf2909a671a1cf0f430594624b",
+      "Lenard-dev.pkl": "76e3667fd3bc4b1a8fce905f6b124f8dba5c1a0458c13cafe3b50ccdec5add73",
+      "TowneLake-dev.pkl": "cfbfc4fe8cb4bd73d12a16c26c456f1e840724fbc5634378f8c071e83483c17e"
+    }
+  },
+  "validationRule": "No feature/model/threshold/roster/confidence change after this file. One blind inference pass per validation course. Keep only final prediction image per course plus JSON/text.",
+  "validationCourses": [
+    "BeaverRanch-Gold",
+    "ColetoCreek",
+    "FountainHills",
+    "Seatac"
+  ]
+}
