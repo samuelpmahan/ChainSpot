@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fly } from 'svelte/transition';
 	import { loadImageFromFile, releaseImage, type LoadedImage } from '$lib/image';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import {
@@ -35,6 +36,13 @@
 	let selectionSeq = 0;
 	let headerH = $state(0);
 	let fitKey = $state(0);
+
+	// choreography state: spread/grow -> crop drawers -> badges light -> slide to stitch
+	let vpAnimate = $state(false);
+	let clipInsets = $state<CropInsets | null>(null);
+	let clipAnimate = $state(false);
+	let showBadges = $state(false);
+	let alignEnabled = false;
 
 	// detector emissions per image, keyed by objectUrl (stable UI identity)
 	let detections = $state<Record<string, DetectorEmission[]>>({});
@@ -77,6 +85,7 @@
 	const MATCH_COLOR = 'gold';
 
 	function projectMarkers(imgs: LoadedImage[]): ViewportMarker[][] {
+		if (!showBadges) return imgs.map(() => []);
 		const left = appliedInsets?.left ?? 0;
 		const top = appliedInsets?.top ?? 0;
 
@@ -186,6 +195,7 @@
 	}
 
 	function trySemanticAlign() {
+		if (!alignEnabled) return;
 		if (placementSource !== 'spread') return;
 		if (mapImages.length < 2 || placements.length !== mapImages.length) return;
 		const anchor = badgeCentersByN(mapImages[0]);
@@ -245,6 +255,11 @@
 
 	function reselectThrownRound() {
 		resetStitchState();
+		vpAnimate = false;
+		showBadges = false;
+		alignEnabled = false;
+		clipInsets = null;
+		clipAnimate = false;
 		thrownIdx = -1;
 	}
 
@@ -255,10 +270,11 @@
 	}
 
 	const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+	const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-	// Show the tiles IMMEDIATELY (originals, spread side by side); semantic
-	// alignment from badge detections upgrades the layout the moment matches
-	// exist; crop swaps in from the background. No pixel search on this path.
+	// The choreography: tiles appear spread and grow/center; crops slide in like
+	// drawers (pre-computed while the grow plays); badges light up one by one;
+	// then the tiles slide into their stitched placement.
 	async function analyze() {
 		const tiles = images.filter((_, i) => i !== thrownIdx);
 		if (tiles.length < 2) {
@@ -267,6 +283,10 @@
 		}
 
 		const seq = selectionSeq;
+		vpAnimate = true;
+		showBadges = false;
+		alignEnabled = false;
+		clipInsets = null;
 		displayUrls = tiles.map((image) => image.objectUrl);
 		appliedInsets = null;
 		let x = 0;
@@ -279,11 +299,11 @@
 		layoutApproved = false;
 		placementSource = 'spread';
 		fitKey++;
-		workflowMessage = 'Tiles up. Aligning from badges; cropping in the background…';
-		trySemanticAlign();
+		workflowMessage = 'Reading the tiles…';
 		await nextFrame();
 
-		// background: rasterize for crop proposal (and the pixel-stitch fallback)
+		// worked ahead: rasterize + crop proposal + cropped copies while the
+		// grow/center transition plays
 		let nextRasters: GrayRaster[];
 		try {
 			nextRasters = await Promise.all(tiles.map((image) => rasterFromFile(image.file)));
@@ -296,22 +316,54 @@
 
 		const proposal = skipCrop ? null : proposeSharedCrop(rasters);
 		dbg('analyze done', { tiles: tiles.length, proposal });
-		if (!proposal) return;
 
-		let croppedUrls: string[];
-		try {
-			croppedUrls = await Promise.all(tiles.map((image) => croppedObjectUrl(image, proposal)));
-		} catch (e) {
-			dbg('crop failed', e instanceof Error ? e.message : e);
-			return;
+		if (proposal) {
+			let croppedUrls: string[];
+			try {
+				croppedUrls = await Promise.all(tiles.map((image) => croppedObjectUrl(image, proposal)));
+			} catch (e) {
+				dbg('crop failed', e instanceof Error ? e.message : e);
+				return;
+			}
+			if (seq !== selectionSeq) {
+				for (const url of croppedUrls) URL.revokeObjectURL(url);
+				return;
+			}
+			// drawers: animate the clip to the proposed insets on the originals…
+			workflowMessage = `Cropping ${proposal.top}/${proposal.bottom}px of chrome…`;
+			clipAnimate = true;
+			await nextFrame();
+			clipInsets = proposal;
+			await delay(800);
+			if (seq !== selectionSeq) return;
+			// …then swap in the real cropped images at the same visual position
+			clipAnimate = false;
+			clipInsets = null;
+			displayUrls = croppedUrls;
+			rasters = rasters.map((raster) => cropRaster(raster, proposal));
+			appliedInsets = proposal;
+			placements = placements.map((p) => ({ x: p.x + proposal.left, y: p.y + proposal.top }));
 		}
-		if (seq !== selectionSeq) {
-			for (const url of croppedUrls) URL.revokeObjectURL(url);
-			return;
-		}
-		displayUrls = croppedUrls;
-		rasters = rasters.map((raster) => cropRaster(raster, proposal));
-		appliedInsets = proposal;
+
+		// badges light up individually (detection ran at upload; usually done)
+		workflowMessage = 'Identifying badges…';
+		showBadges = true;
+		const badgeCount = tiles.reduce(
+			(sum, t) =>
+				sum +
+				(detections[t.objectUrl]?.filter((e) => e.kind === 'object' && e.objType === 'hole-badge')
+					.length ?? 0),
+			0
+		);
+		await delay(Math.min(badgeCount, 8) * 150 + 450);
+		if (seq !== selectionSeq) return;
+
+		// slide into the stitched placement
+		alignEnabled = true;
+		trySemanticAlign();
+		await delay(900);
+		if (seq !== selectionSeq) return;
+		vpAnimate = false;
 	}
 
 	// pixel-search fallback, user-invoked only
@@ -471,9 +523,15 @@
 		height={`calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px)`}
 		{fitKey}
 		{markers}
+		animate={vpAnimate}
+		{clipInsets}
+		{clipAnimate}
 	>
 		{#if thrownRound}
-			<div style="background: rgba(255,255,255,0.9); border: 1px solid black; padding: 0.25rem; text-align: center;">
+			<div
+				in:fly={{ x: -260, y: 160, duration: 550 }}
+				style="background: rgba(255,255,255,0.9); border: 1px solid black; padding: 0.25rem; text-align: center;"
+			>
 				<img src={thrownRound.objectUrl} alt={thrownRound.file.name} style="width: 60px; display: block; margin: 0 auto;" />
 				<small>Thrown Round</small>
 			</div>

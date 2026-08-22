@@ -13,7 +13,10 @@
 		children,
 		height = '70vh',
 		fitKey = 0,
-		markers = []
+		markers = [],
+		animate = false,
+		clipInsets = null,
+		clipAnimate = false
 	}: {
 		layers: ViewportLayer[];
 		selectedIndex: number;
@@ -24,6 +27,11 @@
 		fitKey?: number; // bump to re-frame the content (new stitch result etc.)
 		/** per-layer detection markers, in that layer's local (display) pixels */
 		markers?: ViewportMarker[][];
+		/** transition layer transforms (choreography only — keep off for drags) */
+		animate?: boolean;
+		/** animated shared clip applied to every layer (the crop "drawers") */
+		clipInsets?: CropInsets | null;
+		clipAnimate?: boolean;
 	} = $props();
 
 	// Only the OVERLAP goes translucent (55% visible), not the whole tile.
@@ -159,7 +167,7 @@
 >
 	{#each layers as layer, index (layer.objectUrl)}
 		<div
-			style={`position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate(${offsetX + layer.x * scale}px, ${offsetY + layer.y * scale}px) scale(${scale}); opacity: ${layer.opacity}; outline: ${index === selectedIndex ? 5 : 3}px solid ${layer.borderColor}; cursor: move;`}
+			style={`position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate(${offsetX + layer.x * scale}px, ${offsetY + layer.y * scale}px) scale(${scale}); opacity: ${layer.opacity}; outline: ${index === selectedIndex ? 5 : 3}px solid ${layer.borderColor}; cursor: move; clip-path: inset(${clipInsets ? `${clipInsets.top}px ${clipInsets.right}px ${clipInsets.bottom}px ${clipInsets.left}px` : '0 0 0 0'}); transition: ${[animate ? 'transform 0.8s ease-in-out' : '', clipAnimate ? 'clip-path 0.75s ease-in-out' : ''].filter(Boolean).join(', ') || 'none'};`}
 		>
 			<img
 				src={layer.objectUrl}
@@ -168,12 +176,14 @@
 				onpointerdown={(event) => onLayerPointerDown(event, index)}
 				style={`display: block; ${overlapMask(index)}`}
 			/>
-			{#each markers[index] ?? [] as marker (marker.xPx + ':' + marker.yPx + ':' + marker.label)}
+			{#each markers[index] ?? [] as marker, markerIndex (marker.xPx + ':' + marker.yPx + ':' + marker.label)}
 				{#if marker.label === ''}
-					<!-- halo: translucent tint that lights up the glyph beneath it -->
+					<!-- halo: translucent tint that lights up the glyph beneath it,
+					     staggered so badges light individually -->
 					<div
 						title={marker.title}
-						style={`position: absolute; left: ${marker.xPx}px; top: ${marker.yPx}px; transform: translate(-50%, -50%); width: 58px; height: 58px; border-radius: 50%; background: ${marker.color}; opacity: 0.45; border: 4px solid ${marker.color}; pointer-events: none;`}
+						class="halo"
+						style={`position: absolute; left: ${marker.xPx}px; top: ${marker.yPx}px; transform: translate(-50%, -50%); width: 58px; height: 58px; border-radius: 50%; background: ${marker.color}; border: 4px solid ${marker.color}; pointer-events: none; animation-delay: ${markerIndex * 0.15}s;`}
 					></div>
 				{:else}
 					<div
@@ -216,9 +226,29 @@
 			tabindex="-1"
 			aria-label="Viewport controls"
 			onpointerdown={(event) => event.stopPropagation()}
-			style="position: absolute; top: 0.5rem; right: 0.5rem; display: flex; flex-direction: row; align-items: center; gap: 0.5rem; max-width: min(95%, 60rem);"
+			style="position: absolute; top: 0.5rem; right: 0.5rem; display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; max-width: min(90%, 28rem);"
 		>
 			{@render children()}
 		</div>
 	{/if}
 </div>
+
+<style>
+	.halo {
+		animation: halo-in 0.35s ease-out both;
+	}
+	@keyframes halo-in {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 0.45;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.halo {
+			animation: none;
+			opacity: 0.45;
+		}
+	}
+</style>
