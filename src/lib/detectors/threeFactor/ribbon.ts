@@ -169,7 +169,7 @@ export function buildSupportCost(field: SupportFieldEvidence): Float32Array {
 	const cost = new Float32Array(field.support.length);
 	for (let i = 0; i < cost.length; i++) {
 		const support = field.support[i];
-		cost[i] = support < 0.12 ? 10 : 1 + 4 * (1 - support) ** 2;
+		cost[i] = 1 + 4 * (1 - support) ** 2;
 	}
 	return cost;
 }
@@ -227,7 +227,10 @@ export function patchBadgeOcclusion(
 					const outer = gray(points[side[1]][0], points[side[1]][1]);
 					if (inner === null || outer === null || inside(points[side[0]][0], points[side[0]][1]) || inside(points[side[1]][0], points[side[1]][1])) continue;
 					const lift = inner - outer;
-					if (lift > 0) best = Math.max(best, Math.min(1, lift / 45));
+					if (lift <= 0) continue;
+					const center = gray(sx, sy);
+					if (center !== null && !inside(sx, sy) && center - outer < -8) continue;
+					best = Math.max(best, Math.min(1, lift / 45));
 				}
 				if (best >= 0.5) {
 					const cell = y * field.width + x;
