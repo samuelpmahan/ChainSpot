@@ -1,0 +1,40 @@
+{
+  "totalHoles": 86,
+  "high": 69,
+  "low": 10,
+  "doNotTrust": 7,
+  "tierA_all3": 56,
+  "tierB_physics_uPair": 13,
+  "highTee": 77,
+  "highBasket": 59,
+  "byCourse": {
+    "BeaverRanch-Gold": {
+      "N": 21,
+      "counts": {"HIGH": 13, "LOW": 3, "DO_NOT_TRUST": 5},
+      "imageSha256": "77fa0fe7f9a1b313e6c61efd827590855bbfbd2d070e08cffd8fdc266ad4391a",
+      "jsonSha256": "1a21c1b728a982a8014f70cae9b4a6083982ad90c2d414032ca6a8877e878e0b",
+      "inventory": {"badges": 21, "tees": 33, "baskets": 44}
+    },
+    "ColetoCreek": {
+      "N": 18,
+      "counts": {"HIGH": 18},
+      "imageSha256": "a66ab3e3eecd2b31a52e16dfbc4f7f1f73214adc61144ab8a727fde8945bfb01",
+      "jsonSha256": "5a42bc4b560fca5125d7a75f99872913f7435325051aff1d69087ebc5b7057f0",
+      "inventory": {"badges": 18, "tees": 56, "baskets": 51}
+    },
+    "FountainHills": {
+      "N": 20,
+      "counts": {"HIGH": 17, "LOW": 2, "DO_NOT_TRUST": 1},
+      "imageSha256": "7409b6cebdd54a6dc5785aa3708257d1411d0d893033b56cff7071e2a1f9e4ee",
+      "jsonSha256": "6cda9a55dbe6ed4298d8817f7cfbad9911970e5e440c3649aafd8435e3eeb03f",
+      "inventory": {"badges": 20, "tees": 120, "baskets": 78}
+    },
+    "Seatac": {
+      "N": 27,
+      "counts": {"HIGH": 21, "LOW": 5, "DO_NOT_TRUST": 1},
+      "imageSha256": "ccac6ff53f9000237ffbc4e36ed8a3dfbcdaf83296bc6ecb0f39110c0f3195a1",
+      "jsonSha256": "b27f082943da15dc6636a43415ad6da91b95b8a2c248c4d677f98104160704d1",
+      "inventory": {"badges": 27, "tees": 61, "baskets": 70}
+    }
+  }
+}
