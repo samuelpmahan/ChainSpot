@@ -10,8 +10,7 @@ on:
       - scripts/chainspot-lab/apgd-blind-d08.ts
       - scripts/chainspot-lab/apgd-leg-features.ts
       - scripts/chainspot-lab/apgd-fit-validation.ts
-    paths-ignore:
-      - docs/lab/results/validation-v2/**
+      - '!docs/lab/results/validation-v2/**'
 
 permissions:
   contents: write
