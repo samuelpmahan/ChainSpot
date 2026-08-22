@@ -246,11 +246,25 @@
 		layoutApproved = false;
 	}
 
+	// where the clicked thumbnail sat on screen, so the thrown-round card can
+	// slide from there to its corner instead of popping
+	let thrownFromRect: DOMRect | null = null;
+
 	function markThrownRound(index: number) {
+		thrownFromRect = document.getElementById(`thumb-${index}`)?.getBoundingClientRect() ?? null;
 		resetStitchState();
 		skipCrop = false;
 		thrownIdx = index;
 		analyze();
+	}
+
+	function cardFly() {
+		if (!thrownFromRect || typeof window === 'undefined') return { x: -600, y: 150, duration: 700 };
+		return {
+			x: thrownFromRect.left - (window.innerWidth - 140),
+			y: thrownFromRect.top - 80,
+			duration: 700
+		};
 	}
 
 	function reselectThrownRound() {
@@ -504,7 +518,12 @@
 	<div style="display: flex; gap: 1rem; overflow-x: auto;">
 		{#each images as img, i (img.objectUrl)}
 			<div>
-				<img src={img.objectUrl} alt={img.file.name} style="height: 33vh; width: auto;" />
+				<img
+					id={`thumb-${i}`}
+					src={img.objectUrl}
+					alt={img.file.name}
+					style="height: 33vh; width: auto;"
+				/>
 				<p>
 					<button onclick={() => markThrownRound(i)}>Mark as Thrown Round</button><br />
 					{img.file.name} - {img.widthPx} x {img.heightPx} px
@@ -529,18 +548,28 @@
 	>
 		{#if thrownRound}
 			<div
-				in:fly={{ x: -260, y: 160, duration: 550 }}
+				in:fly={cardFly()}
 				style="background: rgba(255,255,255,0.9); border: 1px solid black; padding: 0.25rem; text-align: center;"
 			>
 				<img src={thrownRound.objectUrl} alt={thrownRound.file.name} style="width: 60px; display: block; margin: 0 auto;" />
 				<small>Thrown Round</small>
 			</div>
 		{/if}
-		<button onclick={() => (layoutApproved = true)}><strong>Approve layout</strong></button>
-		<button onclick={runStitch}>Pixel stitch (fallback)</button>
+		<button class="vp-btn" onclick={() => (layoutApproved = true)}
+			><strong>Approve layout</strong></button
+		>
+		<button class="vp-btn" onclick={runStitch}>Pixel stitch (fallback)</button>
 		{#if appliedInsets}
-			<button onclick={undoCrop}>Undo crop</button>
+			<button class="vp-btn" onclick={undoCrop}>Undo crop</button>
 		{/if}
-		<button onclick={reselectThrownRound}>Re-Select Thrown Round</button>
+		<button class="vp-btn" onclick={reselectThrownRound}>Re-Select Thrown Round</button>
 	</ImageViewport>
 {/if}
+
+<style>
+	.vp-btn {
+		width: 14rem;
+		padding: 0.55rem 0.75rem;
+		font-size: 1rem;
+	}
+</style>
