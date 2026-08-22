@@ -102,22 +102,45 @@ function alignedPairSamples(
 }
 
 function overlapFactor(
+	field: SupportFieldEvidence,
 	teeLeg: LegEvidence,
 	basketLeg: LegEvidence,
 	badge: BadgeEvidence,
 	yOffsetPx: number
 ): number {
-	const teeCells = new Set(teeLeg.path.map(([x, y]) => `${Math.round(x)}:${Math.round(y)}`));
-	const outside = basketLeg.path.filter(([x, y]) => Math.hypot(x - badge.cxPx, y - badge.cyPx) > 8);
-	if (!outside.length) return 1;
-	const shared = outside.filter(([x, y]) => teeCells.has(`${Math.round(x)}:${Math.round(y)}`)).length;
-	const overlap = shared / outside.length;
+	const badgeX = Math.round(badge.cxPx / field.scale);
+	const badgeY = Math.round((badge.cyPx - yOffsetPx) / field.scale);
+	const outsideBadgeWaiver = (point: readonly [number, number]): boolean => {
+		const x = Math.round(point[0] / field.scale);
+		const y = Math.round((point[1] - yOffsetPx) / field.scale);
+		return Math.hypot(x - badgeX, y - badgeY) > 8;
+	};
+	const teeCells = new Set<number>();
+	for (const point of teeLeg.path) {
+		if (!outsideBadgeWaiver(point)) continue;
+		teeCells.add(cell(field, point[0], point[1], yOffsetPx));
+	}
+	let outside = 0;
+	let shared = 0;
+	for (const point of basketLeg.path) {
+		if (!outsideBadgeWaiver(point)) continue;
+		outside++;
+		if (teeCells.has(cell(field, point[0], point[1], yOffsetPx))) shared++;
+	}
+	if (!outside) return 1;
+	const overlap = shared / outside;
 	return (1 - overlap) ** 2;
 }
 
-function angleDegrees(a: number, b: number): number {
+function axisAngleDegrees(a: number, b: number): number {
 	let delta = Math.abs(a - b) % Math.PI;
 	if (delta > Math.PI / 2) delta = Math.PI - delta;
+	return (delta * 180) / Math.PI;
+}
+
+function directionalAngleDegrees(a: number, b: number): number {
+	let delta = Math.abs(a - b) % (2 * Math.PI);
+	if (delta > Math.PI) delta = 2 * Math.PI - delta;
 	return (delta * 180) / Math.PI;
 }
 
@@ -130,14 +153,14 @@ function geometryFactors(badge: BadgeEvidence, tee: TeeEvidence, basket: BasketE
 	const dy = by - ty;
 	const chord = Math.hypot(dx, dy);
 	const teeToBadge = Math.atan2(badge.cyPx - ty, badge.cxPx - tx);
-	const teeAngle = tee.angleRad === null ? 0 : angleDegrees(tee.angleRad, teeToBadge);
+	const teeAngle = tee.angleRad === null ? 0 : axisAngleDegrees(tee.angleRad, teeToBadge);
 	const teeOrientation = tee.angleRad === null ? 1 : Math.exp(-((teeAngle / 12) ** 2));
 	const fraction = chord > 0 ? ((badge.cxPx - tx) * dx + (badge.cyPx - ty) * dy) / (chord * chord) : 0.5;
 	const excess = Math.max(0, Math.abs(fraction - 0.36) - 0.19);
 	const badgeFraction = Math.exp(-((excess / 0.15) ** 2));
 	const badgeAngle = Math.atan2(badge.cyPx - ty, badge.cxPx - tx);
 	const endpointAngle = Math.atan2(by - ty, bx - tx);
-	const collinearityDegrees = angleDegrees(badgeAngle, endpointAngle);
+	const collinearityDegrees = directionalAngleDegrees(badgeAngle, endpointAngle);
 	const collinearity = 1 + 0.6 * Math.exp(-((collinearityDegrees / 2) ** 2));
 	return { teeOrientation, badgeFraction, collinearity };
 }
@@ -263,19 +286,21 @@ export function scorePair(
 	basket: BasketEvidence,
 	baskets: readonly BasketEvidence[],
 	params: CorridorParams,
-	yOffsetPx: number
+	yOffsetPx: number,
+	allowZfit = false
 ): ScoredPairEvidence {
-	const path = canonicalPath(raw.teeLeg, raw.basketLeg);
 	const aligned = alignedPairSamples(field, raw.teeLeg, raw.basketLeg, baskets, basket.detId, params, yOffsetPx);
 	const alignedWorst = weakWindow(aligned, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale)));
 	const alignment = raw.worstWindowMean > 0 ? alignedWorst / raw.worstWindowMean : 0;
 	const zone = aligned.length && raw.supportMean > 0 ? aligned.reduce((sum, value) => sum + value, 0) / aligned.length / Math.max(raw.supportMean, 1e-6) : 0;
-	const simplePath = overlapFactor(raw.teeLeg, raw.basketLeg, badge, yOffsetPx);
+	const simplePath = overlapFactor(field, raw.teeLeg, raw.basketLeg, badge, yOffsetPx);
 	const geometry = geometryFactors(badge, tee, basket);
 	const basketIdentity = Math.max(0.4, Math.min(1, (basket.score - 0.2) / 0.5));
 	const recoveredPrior = tee.tier === 'recovered' ? 0.7 : 1;
-	const preliminary = alignedWorst * zone * simplePath * geometry.teeOrientation * geometry.badgeFraction * geometry.collinearity * basketIdentity * recoveredPrior;
-	const zfit = zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst);
+	const preliminary = alignedWorst * simplePath * geometry.teeOrientation * geometry.badgeFraction * geometry.collinearity * basketIdentity * recoveredPrior;
+	const zfit = params.zfit && allowZfit
+		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst)
+		: 1;
 	const score = preliminary * zfit;
 	return {
 		raw,
