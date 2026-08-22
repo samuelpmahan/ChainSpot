@@ -331,6 +331,43 @@ export const INVARIANT_CARDS: readonly InvariantCard[] = [
 		id: 'I20-useful-family-signal',
 		title: 'Useful Family Signal',
 		strength: 'renderer-family-observed',
+		gates: [1, 2, 3, 4, 5, 6, 7],
+		detectors: ['D02-badge-reader', 'D03-basket-sprite', 'D04-tee-candidates', 'D05-occluded-tee-recovery', 'D06-ribbon-support', 'D12-capsule-bends'],
+		claim: 'When a renderer repeats the same semantic object or graphic primitive many times in one raster, the useful signal is the joint repeatability of several independently measured features—not one universal scalar or one hand-picked exemplar.',
+		scope: 'Generic ChainSpot LAB methodology for repeated renderer families: badges, basket sprites, C1/C2 furniture, tee glyphs, corridor width/paint signatures, and future repeated overlay primitives.',
+		evidence: [
+			'Badge work separated a stable dark-plate family from a fragile white-frame family; the independent channel survived renderer merges and restored full dev badge availability.',
+			'Basket work found a highly repeated fixed sprite family whose bitmap/on-off support was substantially more informative than generic bright-component geometry.',
+			'Basket-zone work found repeated anchor-locked radial families (C1/C2) whose shared radii explain otherwise confusing local evidence.',
+			'Tee work found a repeated course-local family across white-component geometry, enclosed-hole size, interior material, orientation/corner evidence, and neighborhood support; using the family jointly rejected false structures that could fool any single feature.',
+			'Corridor studies similarly rely on repeated course-local width and local-compositing behavior rather than transferring one absolute pixel threshold between rasters.'
+		],
+		use: [
+			'On a fresh raster, measure broad candidates first and look for repeated clusters across multiple raw features before setting object-specific thresholds.',
+			'Keep each family dimension separately in the evidence ledger: geometry, pixel/material support, spatial/anchor relationship, provenance, and any independent identity channel.',
+			'Use family membership as a strong prior and a way to estimate course-local scale/appearance; use independent evidence to decide which repeated cluster actually corresponds to the semantic object.',
+			'When an otherwise expected object falls outside the intact family, preserve it as an outlier/recovery hypothesis instead of widening the family until unrelated junk becomes normal.',
+			'Prefer simple family statistics and explicit outlier cases over increasingly complicated one-off detectors when the renderer itself supplies repeated examples.'
+		],
+		doNotInfer: [
+			'The largest or tightest repeated family is automatically the desired semantic family; map/UI furniture can repeat too.',
+			'Every member of a useful family is interchangeable for every downstream purpose; identity, pose, ownership, and path evidence remain separate questions.',
+			'A scalar threshold learned from one family or one raster transfers unchanged to another zoom/theme/course.',
+			'Family membership replaces contradictory visible evidence or Oracle truth.'
+		],
+		breakers: [
+			'Mixed zoom, mixed renderer versions, or resampling that creates multiple legitimate scales inside one raster.',
+			'A repeated false-positive family that is more numerous than the target family.',
+			'Heavy occlusion/merging contaminating the bootstrap examples used to estimate the intact family.',
+			'A semantic object whose renderer intentionally varies instance appearance rather than repeating a family.'
+		],
+		retest: 'For each proposed family on a fresh raster, print the candidate pixels and distributions for every retained feature, report cluster size/spread and outliers, compare against independent object/neighborhood evidence, and—with truth—report real extrema plus the strongest false-positive family values before promoting a threshold.',
+		sources: ['I05 basket-sprite anchor', 'I06 anchor-locked basket zone', 'I07 badge anatomy', 'I09 tee-glyph anatomy', 'I03 one-width-per-course', '2026-08-22 held-out validation family studies']
+	},
+	{
+		id: 'I21-tee-family-signal',
+		title: 'Tee Family Signal',
+		strength: 'renderer-family-observed',
 		gates: [3, 4, 6],
 		detectors: ['D04-tee-candidates', 'D05-occluded-tee-recovery'],
 		claim: 'An intact tee is best identified as a course-local renderer family whose white component geometry, enclosed-hole size, and gray interior payload repeat tightly together; no single scalar is the family.',
@@ -343,16 +380,16 @@ export const INVARIANT_CARDS: readonly InvariantCard[] = [
 			'On validation, neighborhood filtering and gray-support checks removed large false-positive families without deleting any member of the dominant white tee family in the measured pass.'
 		],
 		use: [
-			'Learn the course-local intact tee family before tuning individual candidate thresholds.',
+			'Instantiate I20 Useful Family Signal specifically for tee pads: learn the course-local intact tee family before tuning individual candidate thresholds.',
 			'Preserve white-component bbox/area/fill, rotated geometry, enclosed-hole area, gray count/fraction, edge/corner evidence, and neighborhood support as separate measurements rather than collapsing them into one persuasive score.',
 			'For an unoccluded candidate, require compatibility with both family geometry and interior material evidence; a high gray count in an oversized or otherwise non-family hole is not tee evidence.',
 			'If the intact-family inventory is short of badge cardinality, treat the deficit as a recovery/TeeShard problem rather than widening the intact family until junk enters.'
 		],
 		doNotInfer: [
-			'The dominant measured family is automatically Oracle truth; repeated map furniture can form its own family.',
+			'The dominant measured tee family is automatically Oracle truth; repeated map furniture can form its own family.',
 			'Raw gray P100 transfers between courses or zoom levels.',
 			'A candidate outside the intact family is false; occlusion, renderer merges, and TeeShards can destroy ordinary family geometry.',
-			'One family statistic should replace the raw evidence ledger.'
+			'One tee-family statistic should replace the raw evidence ledger.'
 		],
 		breakers: [
 			'Mixed zoom or resampling within one raster.',
@@ -361,7 +398,7 @@ export const INVARIANT_CARDS: readonly InvariantCard[] = [
 			'Using heavily occluded or merged candidates to estimate the intact family.'
 		],
 		retest: 'On each fresh raster, print the distributions of white-component geometry, enclosed-hole area, gray count/fraction, and neighborhood support. With truth, report real minimum/P50/P100 and maximum false-positive values; without truth, keep family/non-family labels provisional and print the pixels before changing thresholds.',
-		sources: ['2026-08-22 LAB tee gray/shape study across Dev72 + Beaver/Coleto/Fountain/SeaTac validation', 'I09 tee-glyph anatomy', 'C00 Tee Shard case semantics']
+		sources: ['I20 Useful Family Signal', '2026-08-22 LAB tee gray/shape study across Dev72 + Beaver/Coleto/Fountain/SeaTac validation', 'I09 tee-glyph anatomy', 'C00 Tee Shard case semantics']
 	}
 ] as const;
 
