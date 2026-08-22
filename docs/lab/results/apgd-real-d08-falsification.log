@@ -1,0 +1,10 @@
+REAL-D08 n=69 contrast=49+9ties paired=46+3ties
+DashsTrack-full: n=18 contrast=14+2t paired=13+0t
+HeritagePark-full: n=15 contrast=8+6t paired=10+0t
+Lenard-full: n=18 contrast=11+0t paired=10+2t
+TowneLake-full: n=18 contrast=16+1t paired=13+1t
+sharesTee: n=32 contrast=23+5t paired=21+2t
+sharesBasket: n=21 contrast=12+4t paired=12+1t
+sharesNeither: n=16 contrast=14+0t paired=13+0t
+wall=1s
+retained_images=0
