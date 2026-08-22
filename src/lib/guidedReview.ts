@@ -9,6 +9,8 @@ export interface Point {
 // satisfies this type as-is).
 export interface HoleProposal {
 	readonly n: number;
+	/** merged badge position, composite px — the hole's visual anchor */
+	readonly badge: Point;
 	readonly tee: Point | null;
 	readonly basket: Point | null;
 	readonly bends: readonly Point[];
@@ -18,6 +20,7 @@ export type Anchor = 'tee' | 'basket' | 'bend';
 
 export interface ReviewHoleState {
 	readonly n: number;
+	readonly badge: Point;
 	readonly tee: Point | null;
 	readonly basket: Point | null;
 	readonly bends: readonly Point[];
@@ -38,6 +41,7 @@ export function createReview(proposals: readonly HoleProposal[]): ReviewState {
 	// Map each to a ReviewHoleState with status:'pending', replacements:{tee:0,basket:0,bend:0}
 	const holes: ReviewHoleState[] = sorted.map((proposal) => ({
 		n: proposal.n,
+		badge: proposal.badge,
 		tee: proposal.tee,
 		basket: proposal.basket,
 		bends: proposal.bends,

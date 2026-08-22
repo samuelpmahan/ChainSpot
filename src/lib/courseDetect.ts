@@ -22,6 +22,8 @@ export interface Point {
 
 export interface HoleProposal {
 	readonly n: number;
+	/** merged badge position, composite px — the hole's visual anchor */
+	readonly badge: Point;
 	readonly tee: Point | null;
 	readonly basket: Point | null;
 	readonly bends: readonly Point[];
@@ -50,14 +52,18 @@ export function detectCourse(badges: readonly SeedBadge[]): HoleProposal[] {
 		}
 	}
 
-	// Convert to proposals, sorted by n ascending.
+	// Convert to proposals, sorted by n ascending; badge = mean of sightings.
 	const proposals: HoleProposal[] = Array.from(byN.entries())
 		.sort((a, b) => a[0] - b[0])
-		.map(([n]) => ({
+		.map(([n, points]) => ({
 			n,
+			badge: {
+				xPx: points.reduce((s, p) => s + p.xPx, 0) / points.length,
+				yPx: points.reduce((s, p) => s + p.yPx, 0) / points.length
+			},
 			tee: null,
 			basket: null,
-			bends: [],
+			bends: []
 		}));
 
 	return proposals;

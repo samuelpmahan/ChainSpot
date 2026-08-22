@@ -20,7 +20,7 @@ function holeProposal(
 	basket: Point | null = null,
 	bends: readonly Point[] = []
 ): HoleProposal {
-	return { n, tee, basket, bends };
+	return { n, badge: point(n * 10, n * 10), tee, basket, bends };
 }
 
 describe('guidedReview', () => {
