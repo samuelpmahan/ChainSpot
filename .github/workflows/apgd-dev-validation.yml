@@ -1,0 +1,237 @@
+name: APGD dev-fit sealed-validation
+
+on:
+  push:
+    branches:
+      - codex/lab-apgd-ribbon-kernels
+    paths:
+      - .github/workflows/apgd-dev-validation.yml
+      - scripts/chainspot-lab/apgd-blind-d08.ts
+      - scripts/chainspot-lab/apgd-leg-features.ts
+      - scripts/chainspot-lab/apgd-fit-validation.ts
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout chainspot-corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Prepare experiment directories and exact dev inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .apgd
+          mkdir -p .apgd/traces .apgd/cache .apgd/dev .apgd/validation .apgd/final
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg .apgd/traces/DashsTrack-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/Heritage/HeritagePark-full.png .apgd/traces/HeritagePark-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/Lenard/Lenard-full.PNG .apgd/traces/Lenard-full.rgba.bin
+          npx tsx scripts/chainspot-lab/apgd-make-nup1.ts chainspot-corpus/dev/TowneLake/TowneLake-full.png .apgd/traces/TowneLake-full.rgba.bin
+          printf 'run_commit=%s\ncorpus_commit=%s\n' "$GITHUB_SHA" "$(git -C chainspot-corpus rev-parse HEAD)" > .apgd/final/runtime.log
+
+      - name: Dev D08 - DashsTrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course DashsTrack-full >> .apgd/final/runtime.log 2>&1
+          echo "DashsTrack D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          find .apgd/cache -type f -name '*.png' -delete
+          sha256sum .apgd/cache/DashsTrack-full.json >> .apgd/final/runtime.log
+
+      - name: Dev D08 - HeritagePark
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course HeritagePark-full >> .apgd/final/runtime.log 2>&1
+          echo "Heritage D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          find .apgd/cache -type f -name '*.png' -delete
+          sha256sum .apgd/cache/HeritagePark-full.json >> .apgd/final/runtime.log
+
+      - name: Dev D08 - Lenard
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course Lenard-full >> .apgd/final/runtime.log 2>&1
+          echo "Lenard D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          find .apgd/cache -type f -name '*.png' -delete
+          sha256sum .apgd/cache/Lenard-full.json >> .apgd/final/runtime.log
+
+      - name: Dev D08 - TowneLake
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s env NUTHING_TRACE_DIR="$PWD/.apgd/traces" CHAINSPOT_CORPUS_PATH="$PWD/chainspot-corpus" npx tsx scripts/nuthing/pair-matrix.ts "$PWD/.apgd/cache" --course TowneLake-full >> .apgd/final/runtime.log 2>&1
+          echo "TowneLake D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          find .apgd/cache -type f -name '*.png' -delete
+          sha256sum .apgd/cache/TowneLake-full.json >> .apgd/final/runtime.log
+
+      - name: Extract dev leg evidence - DashsTrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .apgd/cache/DashsTrack-full.json .apgd/dev/DashsTrack-full.json
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/dev/DashsTrack-full.json --field .apgd/cache/DashsTrack-full-field.bin --image chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg --out .apgd/dev/DashsTrack-full.features.json >> .apgd/final/runtime.log 2>&1
+          echo "DashsTrack features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/dev/DashsTrack-full.features.json >> .apgd/final/runtime.log
+
+      - name: Extract dev leg evidence - HeritagePark
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .apgd/cache/HeritagePark-full.json .apgd/dev/HeritagePark-full.json
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/dev/HeritagePark-full.json --field .apgd/cache/HeritagePark-full-field.bin --image chainspot-corpus/dev/Heritage/HeritagePark-full.png --out .apgd/dev/HeritagePark-full.features.json >> .apgd/final/runtime.log 2>&1
+          echo "Heritage features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/dev/HeritagePark-full.features.json >> .apgd/final/runtime.log
+
+      - name: Extract dev leg evidence - Lenard
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .apgd/cache/Lenard-full.json .apgd/dev/Lenard-full.json
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/dev/Lenard-full.json --field .apgd/cache/Lenard-full-field.bin --image chainspot-corpus/dev/Lenard/Lenard-full.PNG --out .apgd/dev/Lenard-full.features.json >> .apgd/final/runtime.log 2>&1
+          echo "Lenard features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/dev/Lenard-full.features.json >> .apgd/final/runtime.log
+
+      - name: Extract dev leg evidence - TowneLake
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .apgd/cache/TowneLake-full.json .apgd/dev/TowneLake-full.json
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/dev/TowneLake-full.json --field .apgd/cache/TowneLake-full-field.bin --image chainspot-corpus/dev/TowneLake/TowneLake-full.png --out .apgd/dev/TowneLake-full.features.json >> .apgd/final/runtime.log 2>&1
+          echo "TowneLake features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/dev/TowneLake-full.features.json >> .apgd/final/runtime.log
+
+      - name: Blind validation cache - BeaverRanch Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-blind-d08.ts --input chainspot-corpus/validation/BeaverRanch-Gold/clean/BeaverRanch-Gold-full.PNG --out .apgd/validation/BeaverRanch-Gold.json --course BeaverRanch-Gold >> .apgd/final/runtime.log 2>&1
+          echo "BeaverRanch blind D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/validation/BeaverRanch-Gold.json >> .apgd/final/runtime.log
+
+      - name: Blind validation cache - ColetoCreek
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-blind-d08.ts --input chainspot-corpus/validation/ColetoCreek/clean/ColetoCreek-full.PNG --out .apgd/validation/ColetoCreek.json --course ColetoCreek >> .apgd/final/runtime.log 2>&1
+          echo "ColetoCreek blind D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/validation/ColetoCreek.json >> .apgd/final/runtime.log
+
+      - name: Blind validation cache - FountainHills
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-blind-d08.ts --input chainspot-corpus/validation/FountainHills/clean/FountainHills-full.PNG --out .apgd/validation/FountainHills.json --course FountainHills >> .apgd/final/runtime.log 2>&1
+          echo "FountainHills blind D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/validation/FountainHills.json >> .apgd/final/runtime.log
+
+      - name: Blind validation cache - Seatac
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-blind-d08.ts --input chainspot-corpus/validation/Seatac/clean/Seatac-full.PNG --out .apgd/validation/Seatac.json --course Seatac >> .apgd/final/runtime.log 2>&1
+          echo "Seatac blind D08 wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          sha256sum .apgd/validation/Seatac.json >> .apgd/final/runtime.log
+
+      - name: Validation leg evidence - BeaverRanch Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/validation/BeaverRanch-Gold.json --field .apgd/validation/BeaverRanch-Gold-field.bin --image chainspot-corpus/validation/BeaverRanch-Gold/clean/BeaverRanch-Gold-full.PNG --out .apgd/validation/BeaverRanch-Gold.features.json >> .apgd/final/runtime.log 2>&1
+          echo "BeaverRanch features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+
+      - name: Validation leg evidence - ColetoCreek
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/validation/ColetoCreek.json --field .apgd/validation/ColetoCreek-field.bin --image chainspot-corpus/validation/ColetoCreek/clean/ColetoCreek-full.PNG --out .apgd/validation/ColetoCreek.features.json >> .apgd/final/runtime.log 2>&1
+          echo "ColetoCreek features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+
+      - name: Validation leg evidence - FountainHills
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/validation/FountainHills.json --field .apgd/validation/FountainHills-field.bin --image chainspot-corpus/validation/FountainHills/clean/FountainHills-full.PNG --out .apgd/validation/FountainHills.features.json >> .apgd/final/runtime.log 2>&1
+          echo "FountainHills features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+
+      - name: Validation leg evidence - Seatac
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-leg-features.ts --cache .apgd/validation/Seatac.json --field .apgd/validation/Seatac-field.bin --image chainspot-corpus/validation/Seatac/clean/Seatac-full.PNG --out .apgd/validation/Seatac.features.json >> .apgd/final/runtime.log 2>&1
+          echo "Seatac features wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+
+      - name: Fit fixed dev model and render sealed validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout 40s npx tsx scripts/chainspot-lab/apgd-fit-validation.ts --dev .apgd/dev --validation .apgd/validation --corpus chainspot-corpus --out .apgd/final >> .apgd/final/runtime.log 2>&1
+          echo "fit+predict wall=$(( $(date +%s)-start ))s" >> .apgd/final/runtime.log
+          count=$(find .apgd/final -maxdepth 1 -type f -name '*-prediction.png' | wc -l)
+          test "$count" -eq 4
+          find .apgd -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) ! -path '.apgd/final/*-prediction.png' -delete
+          printf 'retained_prediction_images=%s\n' "$count" >> .apgd/final/runtime.log
+          sha256sum .apgd/final/* > .apgd/final/SHA256SUMS
+
+      - name: Upload final validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apgd-dev-fit-validation
+          path: .apgd/final
+          if-no-files-found: error
+
+      - name: Publish final validation checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf docs/lab/results/validation
+          mkdir -p docs/lab/results/validation
+          cp .apgd/final/validation-predictions.json docs/lab/results/validation/
+          cp .apgd/final/validation-report.md docs/lab/results/validation/
+          cp .apgd/final/runtime.log docs/lab/results/validation/
+          cp .apgd/final/SHA256SUMS docs/lab/results/validation/
+          cp .apgd/final/*-prediction.png docs/lab/results/validation/
+          git config user.name 'chainspot-lab-bot'
+          git config user.email 'chainspot-lab-bot@users.noreply.github.com'
+          git add docs/lab/results/validation
+          git commit -m 'lab: record sealed validation predictions [apgd-result]'
+          git push origin HEAD:codex/lab-apgd-ribbon-kernels
