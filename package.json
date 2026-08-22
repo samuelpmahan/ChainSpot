@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lab:gates": "tsx scripts/chainspot-lab/gates.ts",
+    "lab:gate2": "tsx scripts/chainspot-lab/gate2.ts",
     "detect:tees": "tsx scripts/detect-tees.ts",
     "overfit:tees": "tsx scripts/overfit-tees.ts",
     "validate:badge-invariant": "tsx scripts/validate-badge-invariant.ts",
@@ -32,6 +33,7 @@
     "test": "npm run test:unit && npm run test:e2e",
     "lab:detectors": "tsx scripts/chainspot-lab/detectors.ts",
     "lab:invariants": "tsx scripts/chainspot-lab/invariants.ts",
+    "lab:basket-family": "tsx scripts/chainspot-lab/basketFamily.ts",
     "lab:cases": "tsx scripts/chainspot-lab/cases.ts"
   },
   "dependencies": {
@@ -41,7 +43,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/adapter-static": "^2.70.2",
     "@sveltejs/kit": "^2.70.2",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/node": "^26.1.2",
