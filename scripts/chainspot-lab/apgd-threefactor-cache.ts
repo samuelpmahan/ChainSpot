@@ -13,6 +13,15 @@ const DEV_WIDTHS: Record<string, number> = {
 	'Lenard-full': 37,
 	'TowneLake-full': 37
 };
+// Exact crop-local annotation frames established by the existing Dev72 LAB.
+// measureThreeFactor emits original-image coordinates, so dev truth is shifted
+// by topPx only when attaching evaluation ownership after measurement.
+const DEV_VIEWPORTS: Record<string, { topPx: number; bottomPx: number }> = {
+	'DashsTrack-full': { topPx: 0, bottomPx: 2091 },
+	'HeritagePark-full': { topPx: 429, bottomPx: 2544 },
+	'Lenard-full': { topPx: 429, bottomPx: 2518 },
+	'TowneLake-full': { topPx: 532, bottomPx: 2544 }
+};
 const VALIDATION_WIDTH = 37;
 
 interface Annotation {
@@ -131,8 +140,11 @@ function main(): void {
 
 	const raster = decode(resolve(input));
 	const corridorWidthPx = explicitWidth ? Number(explicitWidth) : (DEV_WIDTHS[course] ?? VALIDATION_WIDTH);
+	const devViewport = annotationPath ? DEV_VIEWPORTS[course] : undefined;
+	if (annotationPath && !devViewport) throw new Error(`No frozen dev viewport for ${course}`);
 	const measurement = measureThreeFactor(raster, {
 		corridorWidthPx,
+		...(devViewport ? { viewport: devViewport } : {}),
 		zfit: false
 	});
 	const topPx = measurement.viewport.topPx;
@@ -184,22 +196,26 @@ function main(): void {
 
 	let judgments: { hole: number; trueTee: number; trueBasket: number }[] | undefined;
 	if (annotationPath) {
-		// Candidate generation is complete before truth is opened. Truth exists only
-		// to attach dev evaluation/training ownership to already-measured candidates.
+		// Candidate generation is complete before truth is opened. Annotation
+		// coordinates are crop-local; measurement coordinates are original-image.
 		const annotation = JSON.parse(readFileSync(resolve(annotationPath), 'utf8')) as Annotation;
-		judgments = annotation.holes.map((hole) => ({
-			hole: hole.number,
-			trueTee: matchNearest(
-				measurement.tees.map((tee) => ({ x: tee.xPx, y: tee.yPx })),
-				hole.tee,
-				18
-			),
-			trueBasket: matchNearest(
-				measurement.baskets.map((basket) => ({ x: basket.tipXPx, y: basket.tipYPx })),
-				hole.basket,
-				16
-			)
-		}));
+		judgments = annotation.holes.map((hole) => {
+			const shiftedTee = { xPx: hole.tee.xPx, yPx: hole.tee.yPx + topPx };
+			const shiftedBasket = { xPx: hole.basket.xPx, yPx: hole.basket.yPx + topPx };
+			return {
+				hole: hole.number,
+				trueTee: matchNearest(
+					measurement.tees.map((tee) => ({ x: tee.xPx, y: tee.yPx })),
+					shiftedTee,
+					18
+				),
+				trueBasket: matchNearest(
+					measurement.baskets.map((basket) => ({ x: basket.tipXPx, y: basket.tipYPx })),
+					shiftedBasket,
+					16
+				)
+			};
+		});
 	}
 
 	const output = {
