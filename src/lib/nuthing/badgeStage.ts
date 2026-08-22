@@ -1,11 +1,13 @@
 /**
  * Fast badge-only localization stage (experimental speed path).
  *
- * Runs exactly P1's mask -> components -> badge-family stages and stops:
- * the projected-border tee scoring (the dominant P1 cost) is skipped
- * because middle-out ribbon endpoint discovery (./ribbon.ts) replaces the
- * tee template ranking in the P1.5 pipeline. Badge semantics are identical
- * to runNuThingP1 — same masks, same components, same anchored family.
+ * Runs P1's mask -> components stages and stops before tee scoring. Badge
+ * localization is plate-first: the near-black badge plate is the stable
+ * identity primitive because neighboring white renderer furniture can merge
+ * into the white frame component. The repeated white-frame family remains a
+ * backup source for any plate the primary path misses. Bright-mask components
+ * are still computed unchanged because downstream basket/tee detectors use
+ * that evidence independently of badge localization.
  */
 
 import type { RgbaImage, Mask } from './raster';
@@ -35,34 +37,16 @@ export function runBadgeStage(image: RgbaImage): BadgeStageResult {
   const { width, height } = image;
   const { bright, dark } = computeBrightDarkMasks(image);
   const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
-
-  const badgeCandidates: ComponentStats[] = [];
-  for (const c of brightComponents) {
-    if (c.bboxH <= 0) continue;
-    const aspect = c.bboxW / c.bboxH;
-    if (aspect < BADGE_ASPECT_MIN || aspect > BADGE_ASPECT_MAX) continue;
-    let darkCount = 0;
-    for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
-      const row = y * width;
-      for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
-        if (dark.data[row + x]) darkCount++;
-      }
-    }
-    if (darkCount / (c.bboxW * c.bboxH) >= BADGE_DARK_INTERIOR_MIN) badgeCandidates.push(c);
-  }
-  const families = anchoredFamilies(badgeCandidates, BADGE_SIZE_TOL, bboxSizeDistance);
-  const badges = families.length > 0 ? [...families[0]] : [];
-
-  // Dark-plate recovery: when a basket sprite overlaps a badge's white
-  // frame, the frame component merges with the sprite blob and the family
-  // path above loses the badge (measured: 6 of 72 dev badges — Heritage
-  // 2/12/13/15, Lenard 5/12). The badge's dark PLATE (~48x36 near-black
-  // rounded rect with white digit glyphs) can never merge with anything
-  // white, so it recovers those. Plate-detected badges are synthesized as
-  // frame-sized ComponentStats (plate bbox + frame margin) with label -1
-  // so glyph extraction's frame-pixel exclusion never fires on them.
-  // Measured on dev: exactly 18 plates per course, zero false positives.
   const { components: darkComponents } = extractComponents(dark);
+
+  // Primary badge identity: the dark plate (~48x36 near-black rounded rect
+  // with one or two white digit glyphs). Unlike the white frame, this cannot
+  // merge with adjacent white tee/basket furniture, so its geometry remains
+  // stable when the frame component is contaminated. Synthesized badges use
+  // label -1 because there is intentionally no bright frame-component identity
+  // to exclude during glyph extraction; badgeGlyph.ts instead rejects large
+  // bright intruders by component area for label<0 observations.
+  const badges: ComponentStats[] = [];
   for (const c of darkComponents) {
     if (c.bboxW < 34 || c.bboxW > 78 || c.bboxH < 24 || c.bboxH > 54) continue;
     const aspect = c.bboxW / c.bboxH;
@@ -80,7 +64,6 @@ export function runBadgeStage(image: RgbaImage): BadgeStageResult {
     if (interior === 0) continue;
     const gf = glyphCount / interior;
     if (gf < 0.04 || gf > 0.4) continue;
-    if (badges.some((b) => Math.hypot(b.cx - c.cx, b.cy - c.cy) < 22)) continue;
     const M = 4; // white frame margin around the plate
     badges.push({
       label: -1,
@@ -97,6 +80,32 @@ export function runBadgeStage(image: RgbaImage): BadgeStageResult {
       fill: c.fill,
     });
   }
+
+  // Backup badge identity: repeated white frame + dark interior. This remains
+  // useful when a plate is genuinely absent from the dark mask, but it no
+  // longer defines the primary badge inventory. Do not duplicate a plate-first
+  // observation when both render layers survive.
+  const badgeCandidates: ComponentStats[] = [];
+  for (const c of brightComponents) {
+    if (c.bboxH <= 0) continue;
+    const aspect = c.bboxW / c.bboxH;
+    if (aspect < BADGE_ASPECT_MIN || aspect > BADGE_ASPECT_MAX) continue;
+    let darkCount = 0;
+    for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
+      const row = y * width;
+      for (let x = c.bboxX; x < c.bboxX + c.bboxW; x++) {
+        if (dark.data[row + x]) darkCount++;
+      }
+    }
+    if (darkCount / (c.bboxW * c.bboxH) >= BADGE_DARK_INTERIOR_MIN) badgeCandidates.push(c);
+  }
+  const families = anchoredFamilies(badgeCandidates, BADGE_SIZE_TOL, bboxSizeDistance);
+  const frameBadges = families.length > 0 ? families[0] : [];
+  for (const frame of frameBadges) {
+    if (badges.some((badge) => Math.hypot(badge.cx - frame.cx, badge.cy - frame.cy) < 22)) continue;
+    badges.push(frame);
+  }
+
   return {
     width,
     height,
