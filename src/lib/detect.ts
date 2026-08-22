@@ -86,7 +86,26 @@ export interface UiClassification extends EmissionBase {
 	readonly trait: 'thrown-round';
 }
 
-export type DetectorEmission = UiObjectDetected | UiLabelRead | UiAssociation | UiClassification;
+/**
+ * "Hole N's tee/badge/basket triple is self-consistent — pre-approved."
+ * Emitted by the CV service when a bendless hole's collinearity divergence
+ * (see detectors/strongHole.ts) is within the strong gate. The app
+ * auto-accepts these holes in GuidedReview; they never enter the queue as
+ * pending. The DECISION lives here, algorithm-side — the app only obeys.
+ */
+export interface UiStrongHole extends EmissionBase {
+	readonly kind: 'strong-hole';
+	readonly n: number;
+	/** RMSE of perpendicular offsets / tee->basket length (0.015 = 1.5%) */
+	readonly divergence: number;
+}
+
+export type DetectorEmission =
+	| UiObjectDetected
+	| UiLabelRead
+	| UiAssociation
+	| UiClassification
+	| UiStrongHole;
 
 export type OnDetectorEmission = (emission: DetectorEmission) => void;
 

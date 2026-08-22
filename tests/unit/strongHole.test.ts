@@ -1,13 +1,13 @@
-import { describe, expect, test } from 'vitest';
+﻿import { describe, expect, test } from 'vitest';
 import {
 	evaluateStrongHoles,
 	STRONG_DIVERGENCE_MAX,
 	type StrongHoleInput,
 	type StrongHoleVerdict
-} from '$lib/strongHole';
+} from '$lib/detectors/strongHole';
 
 describe('evaluateStrongHoles', () => {
-	test('perfectly collinear points (tee-badge-basket in a line) → divergence near 0, strong', () => {
+	test('perfectly collinear points (tee-badge-basket in a line) â†’ divergence near 0, strong', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 1,
@@ -26,7 +26,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(true);
 	});
 
-	test('clearly divergent triple (~2.4% RMSE ratio) → not strong', () => {
+	test('clearly divergent triple (~2.4% RMSE ratio) â†’ not strong', () => {
 		// Tee at (0, 0), basket at (100, 0), badge at (50, 5)
 		// The fitted line minimizes perpendicular distance of all three points
 		// RMSE will be dominated by badge's offset, normalized by hole length
@@ -47,7 +47,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('just under threshold → strong', () => {
+	test('just under threshold â†’ strong', () => {
 		// Tee at (0, 0), basket at (1000, 0), badge at (500, 30)
 		// RMSE ~14.1, divergence ~0.0141 < 0.015
 		const holes: StrongHoleInput[] = [
@@ -66,7 +66,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(true);
 	});
 
-	test('just over threshold → not strong', () => {
+	test('just over threshold â†’ not strong', () => {
 		// Tee at (0, 0), basket at (1000, 0), badge at (500, 35)
 		// RMSE ~16.5, divergence ~0.0165 > 0.015
 		const holes: StrongHoleInput[] = [
@@ -85,7 +85,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('bends present → not strong even if collinear', () => {
+	test('bends present â†’ not strong even if collinear', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 5,
@@ -102,7 +102,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('missing tee → divergence null, not strong', () => {
+	test('missing tee â†’ divergence null, not strong', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 6,
@@ -119,7 +119,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('missing basket → divergence null, not strong', () => {
+	test('missing basket â†’ divergence null, not strong', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 7,
@@ -136,7 +136,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('tee coincides with badge → divergence null, not strong', () => {
+	test('tee coincides with badge â†’ divergence null, not strong', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 8,
@@ -153,7 +153,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('tee coincides with basket → divergence null, not strong', () => {
+	test('tee coincides with basket â†’ divergence null, not strong', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 9,
@@ -170,7 +170,7 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(false);
 	});
 
-	test('zero-length tee-basket → divergence null, not strong, no NaN', () => {
+	test('zero-length tee-basket â†’ divergence null, not strong, no NaN', () => {
 		const holes: StrongHoleInput[] = [
 			{
 				n: 10,
@@ -317,13 +317,13 @@ describe('evaluateStrongHoles', () => {
 		expect(result[0].strong).toBe(true);
 	});
 
-	test('no holes input → empty result', () => {
+	test('no holes input â†’ empty result', () => {
 		const result = evaluateStrongHoles([]);
 		expect(result).toHaveLength(0);
 	});
 
 	test('large-scale hole with small perpendicular offset', () => {
-		// A very large hole (2000-unit tee-basket distance) with a 30-unit badge offset → 1.5%
+		// A very large hole (2000-unit tee-basket distance) with a 30-unit badge offset â†’ 1.5%
 		const holes: StrongHoleInput[] = [
 			{
 				n: 16,
