@@ -1,0 +1,59 @@
+name: APGD current ThreeFactor dev-validation
+
+on:
+  pull_request:
+    branches:
+      - samuelpmahan/chspt-82-frontend-rebuild-rederive-the-mvp-from-a-clean-room-app
+    paths:
+      - .github/workflows/apgd-threefactor-dev-validation.yml
+      - scripts/chainspot-lab/apgd-threefactor-cache.ts
+      - scripts/chainspot-lab/apgd-threefactor-leg-features.ts
+      - scripts/chainspot-lab/apgd-threefactor-fit.ts
+      - scripts/chainspot-lab/apgd-threefactor-render.ts
+      - scripts/chainspot-lab/apgd-threefactor-dev-validation-run.sh
+      - src/lib/detectors/threeFactor/**
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot PR
+        uses: actions/checkout@v4
+
+      - name: Checkout chainspot-corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install pinned LAB-only script helpers
+        run: npm install --no-save --package-lock=false tsx@4.20.3 pngjs@7.0.0 jpeg-js@0.4.4
+
+      - name: Run fixed current-ThreeFactor protocol
+        id: protocol
+        continue-on-error: true
+        shell: bash
+        run: bash scripts/chainspot-lab/apgd-threefactor-dev-validation-run.sh
+
+      - name: Upload final/partial APGD evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apgd-current-threefactor-dev-validation
+          path: .apgd-current/final
+          if-no-files-found: warn
+
+      - name: Preserve protocol failure
+        if: steps.protocol.outcome != 'success'
+        run: exit 1
