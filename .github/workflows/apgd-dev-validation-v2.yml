@@ -1,0 +1,87 @@
+name: APGD dev-fit sealed-validation v2
+
+on:
+  push:
+    branches:
+      - codex/lab-apgd-ribbon-kernels
+    paths:
+      - .github/workflows/apgd-dev-validation-v2.yml
+      - scripts/chainspot-lab/apgd-dev-validation-run.sh
+      - scripts/chainspot-lab/apgd-blind-d08.ts
+      - scripts/chainspot-lab/apgd-leg-features.ts
+      - scripts/chainspot-lab/apgd-fit-validation.ts
+    paths-ignore:
+      - docs/lab/results/validation-v2/**
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout chainspot-corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Run fixed dev-fit sealed-validation protocol
+        id: protocol
+        continue-on-error: true
+        shell: bash
+        run: bash scripts/chainspot-lab/apgd-dev-validation-run.sh
+
+      - name: Upload whatever evidence exists
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apgd-dev-fit-validation-v2
+          path: .apgd/final
+          if-no-files-found: warn
+
+      - name: Publish success or failure checkpoint
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf docs/lab/results/validation-v2
+          mkdir -p docs/lab/results/validation-v2
+          if [[ -d .apgd/final ]]; then
+            cp -f .apgd/final/validation-attempt.md docs/lab/results/validation-v2/ 2>/dev/null || true
+            cp -f .apgd/final/runtime.log docs/lab/results/validation-v2/ 2>/dev/null || true
+            cp -f .apgd/final/validation-predictions.json docs/lab/results/validation-v2/ 2>/dev/null || true
+            cp -f .apgd/final/validation-report.md docs/lab/results/validation-v2/ 2>/dev/null || true
+            cp -f .apgd/final/SHA256SUMS docs/lab/results/validation-v2/ 2>/dev/null || true
+            cp -f .apgd/final/*-prediction.png docs/lab/results/validation-v2/ 2>/dev/null || true
+          fi
+          if [[ ! -f docs/lab/results/validation-v2/validation-attempt.md ]]; then
+            printf '# APGD sealed validation attempt\n\nStatus: **FAILED BEFORE RUNNER CHECKPOINT**\n\nWorkflow commit: `%s`\n' "$GITHUB_SHA" > docs/lab/results/validation-v2/validation-attempt.md
+          fi
+          git config user.name 'chainspot-lab-bot'
+          git config user.email 'chainspot-lab-bot@users.noreply.github.com'
+          git add docs/lab/results/validation-v2
+          if ! git diff --cached --quiet; then
+            git commit -m 'lab: record sealed validation v2 attempt [apgd-result]'
+            git push origin HEAD:codex/lab-apgd-ribbon-kernels
+          fi
+
+      - name: Preserve failure status
+        if: steps.protocol.outcome != 'success'
+        run: exit 1
