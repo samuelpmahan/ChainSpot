@@ -6,5 +6,5 @@ TowneLake-full: n=18 contrast=16+1t paired=13+1t
 sharesTee: n=32 contrast=23+5t paired=21+2t
 sharesBasket: n=21 contrast=12+4t paired=12+1t
 sharesNeither: n=16 contrast=14+0t paired=13+0t
-wall=2s
+wall=1s
 retained_images=0
