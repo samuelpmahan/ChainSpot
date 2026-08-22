@@ -49,16 +49,37 @@ function lineAgrees(rasters: GrayRaster[], edge: Edge, depth: number): boolean {
 function scanEdge(rasters: GrayRaster[], edge: Edge): number {
 	const { widthPx: w, heightPx: h } = rasters[0];
 	const maxDepth = Math.floor((edge === 'top' || edge === 'bottom' ? h : w) * MAX_INSET_FRACTION);
-	let band = 0;
-	let disagreeRun = 0;
-	for (let d = 0; d < maxDepth; d++) {
-		if (lineAgrees(rasters, edge, d)) {
-			band = d + 1;
-			disagreeRun = 0;
-		} else if (++disagreeRun >= RUN_LINES) {
-			break;
+	if (maxDepth === 0) return 0;
+
+	// The chrome band is monotone (agree ... agree | disagree ...), so binary
+	// search finds the transition in ~log2(maxDepth) probes instead of a full
+	// linear walk. Each probe is majority-of-3 consecutive lines so a single
+	// noisy chrome row (clock digits, spinner) can't fake the boundary. A
+	// false-agree pocket deep in map content could overshoot, but the result
+	// is a bounded PROPOSAL the user sees applied and can undo.
+	const robustAgrees = (d: number): boolean => {
+		let agree = 0;
+		let probes = 0;
+		for (let k = 0; k < RUN_LINES - 1 && d + k < maxDepth; k++) {
+			probes++;
+			if (lineAgrees(rasters, edge, d + k)) agree++;
 		}
+		return probes > 0 && agree * 2 > probes;
+	};
+
+	if (!robustAgrees(0)) return 0;
+	let lo = 0; // deepest known agreeing depth
+	let hi = maxDepth; // shallowest known disagreeing depth (or the cap)
+	while (hi - lo > 1) {
+		const mid = (lo + hi) >> 1;
+		if (robustAgrees(mid)) lo = mid;
+		else hi = mid;
 	}
+	// the majority probe lands NEAR the boundary (it under-reaches when its
+	// samples straddle into content); refine the exact edge with a short
+	// linear extension of single-line checks from there
+	let band = lo + 1;
+	while (band < maxDepth && lineAgrees(rasters, edge, band)) band++;
 	return band >= MIN_BAND_PX ? band : 0;
 }
 
