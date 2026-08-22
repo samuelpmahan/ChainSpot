@@ -326,6 +326,42 @@ export const INVARIANT_CARDS: readonly InvariantCard[] = [
 		breakers: ['A validation course where true pairs fall beyond the shallow candidate pool.', 'A changed score family with new independent evidence.'],
 		retest: 'Track rank-1, rank≤3, assigned ownership, and theft chains after every algorithm change.',
 		sources: ['docs/nuthing-p2/cx-catalog.md: CX-042', 'commit 5796281']
+	},
+	{
+		id: 'I20-useful-family-signal',
+		title: 'Useful Family Signal',
+		strength: 'renderer-family-observed',
+		gates: [3, 4, 6],
+		detectors: ['D04-tee-candidates', 'D05-occluded-tee-recovery'],
+		claim: 'An intact tee is best identified as a course-local renderer family whose white component geometry, enclosed-hole size, and gray interior payload repeat tightly together; no single scalar is the family.',
+		scope: 'Dev72 annotation-graded intact tee rings plus blind held-out validation family measurements from Beaver Ranch Gold, Coleto Creek, Fountain Hills, and SeaTac on 2026-08-22. Validation family membership remains provisional until Oracle truth exists.',
+		evidence: [
+			'Annotation-confirmed Dev72 intact-ring hole-area ranges were tight within each course despite large cross-course scale changes: DashsTrack 295–346 px, Heritage 42–52, Lenard 71–74, TowneLake 76–82.',
+			'Held-out validation dominant white-family hole-area ranges were likewise tight: Beaver Ranch Gold 97–102 px, Coleto Creek 65–71, Fountain Hills 83–91, SeaTac 52–59.',
+			'Gray payload also repeated tightly inside each validation family but changed with scale: Beaver 77–84 px, Coleto 50–55, Fountain 67–72, SeaTac 36–45. Raw gray count is therefore course-local evidence, not a transferable threshold.',
+			'High raw gray count can be a false signal when the enclosed hole has the wrong family size: a Coleto non-family candidate carried 105 gray pixels inside a 210-px hole versus real-family holes 65–71 px; a SeaTac non-family candidate carried 53 gray pixels inside a 290-px hole versus real-family holes 52–59 px.',
+			'On validation, neighborhood filtering and gray-support checks removed large false-positive families without deleting any member of the dominant white tee family in the measured pass.'
+		],
+		use: [
+			'Learn the course-local intact tee family before tuning individual candidate thresholds.',
+			'Preserve white-component bbox/area/fill, rotated geometry, enclosed-hole area, gray count/fraction, edge/corner evidence, and neighborhood support as separate measurements rather than collapsing them into one persuasive score.',
+			'For an unoccluded candidate, require compatibility with both family geometry and interior material evidence; a high gray count in an oversized or otherwise non-family hole is not tee evidence.',
+			'If the intact-family inventory is short of badge cardinality, treat the deficit as a recovery/TeeShard problem rather than widening the intact family until junk enters.'
+		],
+		doNotInfer: [
+			'The dominant measured family is automatically Oracle truth; repeated map furniture can form its own family.',
+			'Raw gray P100 transfers between courses or zoom levels.',
+			'A candidate outside the intact family is false; occlusion, renderer merges, and TeeShards can destroy ordinary family geometry.',
+			'One family statistic should replace the raw evidence ledger.'
+		],
+		breakers: [
+			'Mixed zoom or resampling within one raster.',
+			'A renderer/theme update that changes tee border scale, interior material, or antialiasing.',
+			'Bootstrapping from a dominant repeated false-positive family without independent neighborhood/object context.',
+			'Using heavily occluded or merged candidates to estimate the intact family.'
+		],
+		retest: 'On each fresh raster, print the distributions of white-component geometry, enclosed-hole area, gray count/fraction, and neighborhood support. With truth, report real minimum/P50/P100 and maximum false-positive values; without truth, keep family/non-family labels provisional and print the pixels before changing thresholds.',
+		sources: ['2026-08-22 LAB tee gray/shape study across Dev72 + Beaver/Coleto/Fountain/SeaTac validation', 'I09 tee-glyph anatomy', 'C00 Tee Shard case semantics']
 	}
 ] as const;
 
