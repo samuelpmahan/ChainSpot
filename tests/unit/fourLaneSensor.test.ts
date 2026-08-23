@@ -33,6 +33,8 @@ const state: FourLaneState = {
 	corridorWidthPx: 12
 };
 
+const knobs = DEFAULT_FOUR_LANE_SENSOR_KNOBS;
+
 describe('ST four-lane cross-section sensor', () => {
 	test('is a default-off deviation with the LAB knob defaults', () => {
 		expect(fourLaneSensorFeature.kind).toBe('deviation');
@@ -43,7 +45,7 @@ describe('ST four-lane cross-section sensor', () => {
 	});
 
 	test('uses the exact four-lane geometry and paired=min(left,right)', () => {
-		const observation = observeFourLaneCrossSection(stripeRaster(), state);
+		const observation = observeFourLaneCrossSection(stripeRaster(), state, [], knobs);
 		expect(observation.laneWidthPx).toBe(4);
 		expect(observation.laneOffsetsPx).toEqual([-6, -2, 2, 6]);
 		expect(observation.railMode).toBe('paired');
@@ -62,7 +64,7 @@ describe('ST four-lane cross-section sensor', () => {
 			bboxH: 7,
 			kind: 'badge'
 		};
-		const observation = observeFourLaneCrossSection(stripeRaster(), state, [occluder]);
+		const observation = observeFourLaneCrossSection(stripeRaster(), state, [occluder], knobs);
 		expect(observation.railMode).toBe('one-sided');
 		expect(observation.leftRailOccluded).toBe(false);
 		expect(observation.rightRailOccluded).toBe(true);
@@ -78,7 +80,7 @@ describe('ST four-lane cross-section sensor', () => {
 			bboxH: 22,
 			kind: 'badge'
 		};
-		const observation = observeFourLaneCrossSection(stripeRaster(), state, [occluder]);
+		const observation = observeFourLaneCrossSection(stripeRaster(), state, [occluder], knobs);
 		expect(observation.railMode).toBe('occluded');
 		expect(observation.railScore).toBeNull();
 		expect(observation.innerScore).toBeNull();
@@ -98,7 +100,7 @@ describe('ST four-lane cross-section sensor', () => {
 			0,
 			0,
 			[occluder],
-			DEFAULT_FOUR_LANE_SENSOR_KNOBS
+			knobs
 		);
 		expect(sample.occluded).toBe(true);
 		// The two visible samples still retain their measured value; occlusion,
@@ -107,7 +109,7 @@ describe('ST four-lane cross-section sensor', () => {
 	});
 
 	test('transcribes normalized lift exactly: (inside - outside) / liftReference', () => {
-		const observation = observeFourLaneCrossSection(stripeRaster(72, 50), state);
+		const observation = observeFourLaneCrossSection(stripeRaster(72, 50), state, [], knobs);
 		const expected = 22 / 45;
 		expect(observation.leftRail).toBeCloseTo(expected, 12);
 		expect(observation.rightRail).toBeCloseTo(expected, 12);
