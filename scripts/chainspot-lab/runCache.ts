@@ -130,11 +130,11 @@ export class LabRunCache {
 			options.compute.toString()
 		]);
 		const dir = join(this.runDir, options.name);
-		const metaPath = join(dir, 'meta.json');
+		const stageMetaPath = join(dir, '.stage.json');
 
-		if (existsSync(metaPath)) {
+		if (existsSync(stageMetaPath)) {
 			try {
-				const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as StageMeta;
+				const meta = JSON.parse(readFileSync(stageMetaPath, 'utf8')) as StageMeta;
 				if (meta.key === key) {
 					const started = performance.now();
 					const value = options.codec.load(dir);
@@ -165,7 +165,7 @@ export class LabRunCache {
 			stage: options.name,
 			createdAt: new Date().toISOString()
 		};
-		writeFileSync(join(tmp, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+		writeFileSync(join(tmp, '.stage.json'), `${JSON.stringify(meta, null, 2)}\n`);
 		rmSync(dir, { recursive: true, force: true });
 		renameSync(tmp, dir);
 		console.log(`[cache] ${options.name}: MISS (${elapsedMs.toFixed(1)}ms)`);
