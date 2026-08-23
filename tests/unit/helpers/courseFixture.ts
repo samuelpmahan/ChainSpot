@@ -48,13 +48,28 @@ export interface CourseSpec {
 	readonly annotationFile: string;
 }
 
-/** The 4 in-scope full-course (18-hole) fixtures. AlexClark is deliberately
- * excluded — see tests/unit/corpusSweep.test.ts's header comment. */
+/** The 3 in-scope full-course (18-hole) PNG fixtures used by corpusSweep.test.ts.
+ * AlexClark is deliberately excluded — see that file's header comment.
+ * DashsTrack is NOT in this list (it keeps its own dedicated loader in
+ * dashsTrackFixture.ts / dashsTrackSweep.test.ts, unmodified) — see
+ * DASHSTRACK_VIA_ANNOTATED below for the one place it's added back, for
+ * reuse by tests/unit/familyDeviationSweep.test.ts only. */
 export const COURSES: readonly CourseSpec[] = [
 	{ name: 'Heritage', dir: 'Heritage', imageFile: 'HeritagePark-full.png', annotationFile: 'HeritagePark-full.annotation.json' },
 	{ name: 'Lenard', dir: 'Lenard', imageFile: 'Lenard-full.PNG', annotationFile: 'Lenard-full.annotation.json' },
 	{ name: 'TowneLake', dir: 'TowneLake', imageFile: 'TowneLake-full.png', annotationFile: 'TowneLake-full.annotation.json' }
 ];
+
+/** Same DashsTrack image/annotation dashsTrackFixture.ts loads (byte-identical
+ * copy under dev/Annotated/), exposed here only so the family-deviation sweep
+ * can iterate all 4 in-scope courses through one loader. Not used by, and
+ * does not affect, corpusSweep.test.ts or dashsTrackSweep.test.ts. */
+export const DASHSTRACK_VIA_ANNOTATED: CourseSpec = {
+	name: 'DashsTrack',
+	dir: 'DashsTrack',
+	imageFile: 'DashsTrack-full.jpg',
+	annotationFile: 'DashsTrack-full.annotation.json'
+};
 
 function readFileOrThrow(path: string, what: string): Buffer {
 	try {
