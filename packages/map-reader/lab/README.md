@@ -36,7 +36,7 @@ merely documenting the rule:
 
 The practical consequence is that algorithm branches and app branches can
 diverge freely: the only thing they share is the contract. Divergence behind it
-costs nothing; divergence *on* it reaches every branch at once, which is why it
+costs nothing; divergence _on_ it reaches every branch at once, which is why it
 is the one part held still.
 
 ## Porting status
@@ -48,21 +48,21 @@ detector code that this package now carries as `src/threeFactor/`.
 
 **Ported (no dependency on detector source):**
 
-| file              | what it holds                                   |
-| ----------------- | ----------------------------------------------- |
-| `invariants.ts`   | invariant cards I00–I21                         |
-| `detectors.ts`    | detector cards D00–D12                          |
-| `gates.ts`        | LAB gates 0–7                                   |
+| file              | what it holds                                             |
+| ----------------- | --------------------------------------------------------- |
+| `invariants.ts`   | invariant cards I00–I21                                   |
+| `detectors.ts`    | detector cards D00–D12                                    |
+| `gates.ts`        | LAB gates 0–7                                             |
 | `cases.ts`        | hard-evidence case cards, cross-checked against the above |
-| `basketFamily.ts` | provisional basket family signal card           |
+| `basketFamily.ts` | provisional basket family signal card                     |
 
 **Not ported — these import `src/lib/nuthing/*`, which does not exist here:**
 
-| file             | blocked on                                                     |
-| ---------------- | -------------------------------------------------------------- |
-| `gate2.ts`       | `badgeStage`, `smartBasket`, `viewport`, a PNG decoder          |
-| `gate3.ts`       | `badgeStage`, `endpoints`, `teeCandidates`, `viewport`, decoder |
-| `orient.ts`      | `scripts/nuthing/pair-matrix*.ts`, `scripts/lab-grid.ts`, and a raster corpus checkout |
+| file        | blocked on                                                                             |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `gate2.ts`  | `badgeStage`, `smartBasket`, `viewport`, a PNG decoder                                 |
+| `gate3.ts`  | `badgeStage`, `endpoints`, `teeCandidates`, `viewport`, decoder                        |
+| `orient.ts` | `scripts/nuthing/pair-matrix*.ts`, `scripts/lab-grid.ts`, and a raster corpus checkout |
 
 Unblocking them means reconciling `src/lib/nuthing/` with
 `src/lib/detectors/threeFactor/`. After both trees were put on the same prettier
@@ -103,7 +103,52 @@ gate and detector a card names must exist. A card that cites a detector id which
 has been renamed will throw rather than print, so the registry cannot silently
 drift out of sync with `detectors.ts` and `gates.ts`.
 
-What the cards do *not* do is check the code. An invariant states what the
+What the cards do _not_ do is check the code. An invariant states what the
 renderer was observed to do and what a detector should therefore avoid assuming;
 nothing enforces that the detector complies. Treat a card as a claim with
 evidence attached, and the `retest` field as the procedure that would falsify it.
+
+## Open decisions
+
+These are choices the port deliberately did not make. Each one changes behaviour
+or ownership, so they belong to whoever owns the algorithm, not to a mechanical
+move.
+
+**Which crop does the algorithm own?** `nuthing/viewport.ts` is the one module
+not ported. It called `proposeSingleImageCrop` from the LAB branch's
+`src/lib/stitch/autoCrop.ts` — deliberately delegating to a validated production
+crop instead of forking one. That module has no counterpart in the app tree,
+whose `src/lib/autoCrop.ts` is a different implementation exposing only
+`proposeSharedCrop(rasters[])`. Three ways out: bring the LAB's stitch crop into
+the package, point the algorithm at the app's crop, or make the proposer an
+argument so callers choose. Cropping is a detector concern (`D00-map-viewport-crop`),
+so this is not merely plumbing. Nothing ported depends on `viewport.ts`; only the
+unported `gate2`/`gate3` do.
+
+**Do the two implementations merge, and which wins where?** `nuthing/` and
+`threeFactor/` are both in the package now, side by side. Five modules were
+byte-identical and are kept as one copy (see below). The rest still differ, and
+the differences are algorithm decisions rather than merge conflicts:
+
+| module                 | differing lines | note                                  |
+| ---------------------- | --------------: | ------------------------------------- |
+| `ribbon.ts`            |            1347 | nuthing 1200 lines vs threeFactor 247 |
+| `badgeStage.ts`        |             147 |                                       |
+| `endpoints.ts`         |              63 |                                       |
+| `digits/badgeGlyph.ts` |              14 |                                       |
+| `digits/readBadges.ts` |              10 |                                       |
+
+`threeFactor/` additionally has `assignment`, `measure`, `routing`, `scoring`,
+`screenChrome`, `types` and the sprite/logistic assets, which `nuthing/` lacks.
+`nuthing/` has `p1` (a pipeline entry, `runNuThingP1`), `smartBasket`,
+`teeCandidates`, `chamfer`, `candidatePool`, `badgeOcclusion`, `twoPass`,
+`npcompat` and three `digits/` modules, which `threeFactor/` lacks. Nothing here
+is dead: every module has importers.
+
+**Shared modules.** `components.ts`, `families.ts`, `raster.ts`,
+`digits/normalize.ts` and `digits/segment.ts` were byte-identical after both
+trees were put on the same prettier config. The `nuthing/` copies are now
+one-line re-exports of the `threeFactor/` originals, so there is a single
+implementation of each. This was mechanical — byte equality was checked, not
+assumed — but it is still a structural choice, and reverting it is five file
+restores.

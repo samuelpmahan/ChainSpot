@@ -6,7 +6,7 @@
 // and on any dependency the package has not declared. It is the mechanical half
 // of the boundary; surface.test.ts is the other half.
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { globSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,27 @@ describe('package isolation', () => {
 			}
 		}
 		expect(escapes).toEqual([]);
+	});
+
+	// Staying under src/ is not enough. An import copied in from another tree can
+	// point at a path that merely looks local — `../stitch/autoCrop` resolves
+	// inside src/ but names a module the package does not have. Only tsc caught
+	// that during the nuthing port, so resolve every relative import for real.
+	it('resolves every relative import to a file that exists', () => {
+		const dangling: string[] = [];
+		for (const file of sourceFiles) {
+			for (const specifier of importSpecifiers(file)) {
+				if (!specifier.startsWith('.')) continue;
+				const target = resolve(dirname(file), specifier);
+				const candidates = [target, `${target}.ts`, `${target}.json`, join(target, 'index.ts')];
+				if (
+					!candidates.some((candidate) => existsSync(candidate) && statSync(candidate).isFile())
+				) {
+					dangling.push(`${relative(packageRoot, file)} -> ${specifier}`);
+				}
+			}
+		}
+		expect(dangling).toEqual([]);
 	});
 
 	it('imports no bare module the package has not declared', () => {
