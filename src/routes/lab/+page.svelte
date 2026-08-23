@@ -202,9 +202,17 @@
 		}
 	}
 
+	// layer toggles — the gate stepper is just a preset that sets these
+	let show = $state({ badges: true, baskets: false, tees: false, ownership: false, path: false });
+
+	function setGate(i: number) {
+		gate = i;
+		show = { badges: i >= 0, baskets: i >= 1, tees: i >= 2, ownership: i >= 3, path: i >= 4 };
+	}
+
 	function onKey(event: KeyboardEvent) {
-		if (event.key === 'ArrowRight') gate = Math.min(GATES.length - 1, gate + 1);
-		else if (event.key === 'ArrowLeft') gate = Math.max(0, gate - 1);
+		if (event.key === 'ArrowRight') setGate(Math.min(GATES.length - 1, gate + 1));
+		else if (event.key === 'ArrowLeft') setGate(Math.max(0, gate - 1));
 		else return;
 		event.preventDefault();
 	}
@@ -249,18 +257,25 @@
 </div>
 
 {#if run && m}
-	<div style="display: flex; gap: 0.75rem; align-items: center; margin: 0.4rem 0;">
-		<button onclick={() => (gate = Math.max(0, gate - 1))} disabled={gate === 0}>◀</button>
+	<div style="display: flex; gap: 0.75rem; align-items: center; margin: 0.4rem 0; flex-wrap: wrap;">
+		<button onclick={() => setGate(Math.max(0, gate - 1))} disabled={gate === 0}>◀</button>
 		{#each GATES as g, i (g.id)}
 			<button
-				onclick={() => (gate = i)}
+				onclick={() => setGate(i)}
 				style={i === gate ? 'font-weight: bold; outline: 2px solid black;' : ''}
 			>
 				{g.id} {g.name}
 			</button>
 		{/each}
-		<button onclick={() => (gate = Math.min(GATES.length - 1, gate + 1))} disabled={gate === GATES.length - 1}>▶</button>
+		<button onclick={() => setGate(Math.min(GATES.length - 1, gate + 1))} disabled={gate === GATES.length - 1}>▶</button>
 		<em>{GATES[gate].note}</em>
+	</div>
+	<div style="display: flex; gap: 1rem; margin: 0.2rem 0; font-family: monospace; font-size: 13px;">
+		<label><input type="checkbox" bind:checked={show.badges} /> badges</label>
+		<label><input type="checkbox" bind:checked={show.baskets} /> baskets</label>
+		<label><input type="checkbox" bind:checked={show.tees} /> tees</label>
+		<label><input type="checkbox" bind:checked={show.ownership} /> tee→badge</label>
+		<label><input type="checkbox" bind:checked={show.path} /> paths</label>
 	</div>
 	<div style="font-family: monospace; font-size: 13px; margin-bottom: 0.3rem;">
 		badges {counts?.badges} · baskets {counts?.baskets} · tees {counts?.tees} · owned {counts?.owned} · raw pairs {counts?.pairs}
@@ -274,7 +289,7 @@
 	>
 		<image href={imgUrl} width={m.widthPx} height={m.heightPx} />
 
-		{#if gate >= 0}
+		{#if show.badges}
 			{#each m.badges as b (b.detId)}
 				<rect
 					x={b.bbox[0]}
@@ -283,10 +298,9 @@
 					height={b.bbox[3]}
 					fill="none"
 					stroke="gold"
-					stroke-width={gate === 0 ? 3 : 1.2}
-					opacity={gate === 0 ? 1 : 0.55}
+					stroke-width="3"
 				/>
-				{#if gate === 0}
+				{#if show.badges}
 					<text x={b.bbox[0]} y={b.bbox[1] - 6} fill="gold" font-size="20" font-family="monospace">
 						{b.label ?? '?'} ({b.confidence.toFixed(2)}{b.source === 'dark-plate-recovery' ? ' R' : ''})
 					</text>
@@ -294,7 +308,7 @@
 			{/each}
 		{/if}
 
-		{#if gate >= 1}
+		{#if show.baskets}
 			{#each m.baskets as k (k.detId)}
 				<rect
 					x={k.bbox[0]}
@@ -303,11 +317,10 @@
 					height={k.bbox[3]}
 					fill="none"
 					stroke="#ff5555"
-					stroke-width={gate === 1 ? 3 : 1.2}
-					opacity={gate === 1 ? 1 : 0.55}
+					stroke-width="3"
 				/>
-				<circle cx={k.tipXPx} cy={k.tipYPx} r={gate === 1 ? 5 : 3} fill="#ff5555" />
-				{#if gate === 1}
+				<circle cx={k.tipXPx} cy={k.tipYPx} r="5" fill="#ff5555" />
+				{#if show.baskets}
 					<text x={k.bbox[0]} y={k.bbox[1] - 6} fill="#ff5555" font-size="18" font-family="monospace">
 						{k.score.toFixed(2)}
 					</text>
@@ -315,17 +328,17 @@
 			{/each}
 		{/if}
 
-		{#if gate >= 2 && a}
+		{#if show.tees && a}
 			{#each a.tees as t (t.detId)}
 				<circle
 					cx={t.xPx}
 					cy={t.yPx}
-					r={gate === 2 ? 9 : 5}
+					r="9"
 					fill="none"
 					stroke={t.tier === 'ring' ? '#4fd1ff' : t.tier === 'component' ? '#9fd14f' : '#ff9f4f'}
-					stroke-width={gate === 2 ? 3 : 1.5}
+					stroke-width="3"
 				/>
-				{#if t.angleRad !== null && gate === 2}
+				{#if t.angleRad !== null}
 					<line
 						x1={t.xPx - Math.cos(t.angleRad) * 30}
 						y1={t.yPx - Math.sin(t.angleRad) * 30}
@@ -335,13 +348,13 @@
 						stroke-width="2"
 					/>
 				{/if}
-				{#if gate === 2}
+				{#if show.tees}
 					<text x={t.xPx + 12} y={t.yPx + 5} fill="#4fd1ff" font-size="16" font-family="monospace">{t.tier}</text>
 				{/if}
 			{/each}
 		{/if}
 
-		{#if gate >= 3 && a}
+		{#if show.ownership && a}
 			{#each a.assignments as own (own.badgeId + own.teeId)}
 				{@const badge = byId(m.badges, own.badgeId)}
 				{@const tee = byId(a.tees, own.teeId)}
@@ -352,10 +365,10 @@
 						x2={badge.cxPx}
 						y2={badge.cyPx}
 						stroke="#7CFC00"
-						stroke-width={gate === 3 ? 3.5 : 1.5}
-						opacity={gate === 3 ? 0.95 : 0.5}
+						stroke-width="3.5"
+						opacity="0.95"
 					/>
-					{#if gate === 3}
+					{#if show.ownership}
 						<text
 							x={(tee.xPx + badge.cxPx) / 2 + 6}
 							y={(tee.yPx + badge.cyPx) / 2}
@@ -368,7 +381,7 @@
 			{/each}
 		{/if}
 
-		{#if gate === 4 && a}
+		{#if show.path && a}
 			{#each a.assignments as own (own.badgeId + own.basketId)}
 				{@const pair = pairFor(own.badgeId, own.teeId, own.basketId)}
 				{@const badge = byId(m.badges, own.badgeId)}
@@ -403,7 +416,7 @@
 			{/each}
 		{/if}
 	</svg>
-	{#if gate === 4 && a && a.assignments.length === 0}
+	{#if show.path && a && a.assignments.length === 0}
 		<p><strong>No assignments — nothing to route.</strong></p>
 	{/if}
 {:else if !busy}
