@@ -9,7 +9,7 @@
  */
 
 import type { RgbaImage, Mask } from './raster';
-import { computeBrightDarkMasks } from './raster';
+import { computeBrightDarkMasks, DEFAULT_HSV_KNOBS, type HsvKnobs } from './raster';
 import type { ComponentStats } from './components';
 import { extractComponents } from './components';
 import { anchoredFamilies, bboxSizeDistance } from './families';
@@ -109,9 +109,13 @@ export function detectBadgeFamily(
 	return families.length > 0 ? families[0] : [];
 }
 
-export function runBadgeStage(image: RgbaImage, knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS): BadgeStageResult {
+export function runBadgeStage(
+	image: RgbaImage,
+	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS,
+	hsvKnobs: HsvKnobs = DEFAULT_HSV_KNOBS
+): BadgeStageResult {
 	const { width, height } = image;
-	const { bright, dark } = computeBrightDarkMasks(image);
+	const { bright, dark } = computeBrightDarkMasks(image, hsvKnobs);
 	const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
 
 	const badges = detectBadgeFamily(width, dark, brightComponents, knobs);

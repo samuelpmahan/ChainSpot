@@ -842,6 +842,44 @@
 							}
 						}
 					}
+				},
+				"shared": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"hsv": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Bright/dark pixel-mask HSV thresholds feeding every downstream gate.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"brightVMin": {
+											"type": "number",
+											"description": "minimum V (brightness) for bright-pixel classification (was BRIGHT_V_MIN)",
+											"default": 210
+										},
+										"brightSMax": {
+											"type": "number",
+											"description": "maximum S (saturation — colorfulness) for bright-pixel classification (was BRIGHT_S_MAX); coincidentally also 45, but a different HSV axis from darkVMax — see file header",
+											"default": 45
+										},
+										"darkVMax": {
+											"type": "number",
+											"description": "maximum V (brightness) for dark-pixel classification (was DARK_V_MAX); coincidentally also 45, but a different HSV axis from brightSMax — see file header",
+											"default": 45
+										}
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 		}

@@ -23,9 +23,32 @@ export interface Mask {
 	data: Uint8Array;
 }
 
-export const BRIGHT_V_MIN = 210;
-export const BRIGHT_S_MAX = 45;
-export const DARK_V_MAX = 45;
+/**
+ * shared.hsv knobs, threaded down as plain parameters. This feeds the
+ * bright/dark pixel masks that EVERY downstream gate consumes (badges,
+ * baskets, tees, screen chrome...) — built once in badgeStage.ts's
+ * runBadgeStage (the only call site of computeBrightDarkMasks), so
+ * threading here alone reaches the whole pipeline; there is no second
+ * mask-building call site to miss.
+ *
+ * brightSMax (S, saturation — how colorful a pixel is) and darkVMax (V,
+ * brightness/value — how bright a pixel is) are different HSV axes,
+ * coincidentally both 45, separate knobs. HSV_SHIFT (12, bit-shift
+ * precision for the fixed-point OpenCV-identical saturation table) stays a
+ * literal per knob-inventory merge note 3 — it's not an experiment
+ * dimension, it's the fixed-point radix the reference algorithm requires.
+ */
+export interface HsvKnobs {
+	readonly brightVMin: number;
+	readonly brightSMax: number;
+	readonly darkVMax: number;
+}
+
+export const DEFAULT_HSV_KNOBS: HsvKnobs = {
+	brightVMin: 210,
+	brightSMax: 45,
+	darkVMax: 45
+};
 
 function roundHalfToEven(x: number): number {
 	const floor = Math.floor(x);
@@ -61,7 +84,7 @@ export interface BrightDarkMasks {
  * bright = (V >= 210) & (S <= 45); dark = (V <= 45), matching the baseline's
  * BRIGHT_V_MIN / BRIGHT_S_MAX / DARK_V_MAX exactly.
  */
-export function computeBrightDarkMasks(image: RgbaImage): BrightDarkMasks {
+export function computeBrightDarkMasks(image: RgbaImage, knobs: HsvKnobs = DEFAULT_HSV_KNOBS): BrightDarkMasks {
 	const { width, height, data } = image;
 	const n = width * height;
 	const bright = new Uint8Array(n);
@@ -71,11 +94,11 @@ export function computeBrightDarkMasks(image: RgbaImage): BrightDarkMasks {
 		const g = data[p + 1];
 		const b = data[p + 2];
 		const v = r > g ? (r > b ? r : b) : g > b ? g : b;
-		if (v <= DARK_V_MAX) dark[i] = 1;
-		if (v >= BRIGHT_V_MIN) {
+		if (v <= knobs.darkVMax) dark[i] = 1;
+		if (v >= knobs.brightVMin) {
 			const vmin = r < g ? (r < b ? r : b) : g < b ? g : b;
 			const s = ((v - vmin) * sdivTable[v] + (1 << (HSV_SHIFT - 1))) >> HSV_SHIFT;
-			if (s <= BRIGHT_S_MAX) bright[i] = 1;
+			if (s <= knobs.brightSMax) bright[i] = 1;
 		}
 	}
 	return {
