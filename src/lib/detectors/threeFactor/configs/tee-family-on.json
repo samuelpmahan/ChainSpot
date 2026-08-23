@@ -1,0 +1,33 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-family-on",
+	"note": "LAB G3 intact tee-family enabled: after 'tees', keep only the largest mutually-consistent ring-tee family by enclosing-frame major/minor/area (frameForRing + selectTeeFamily, courseSweep.ts); component/recovered tiers pass through untouched. Note the execution list gains the teeFamily unit right after 'tees' (before 'rawPairs') — the order IS part of the experiment.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"supportField",
+		"badgeOcclusionPatch",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"rawPairs",
+		"measurement",
+		"assignment"
+	],
+	"gates": {
+		"G3": {
+			"teeFamily": {
+				"enabled": true,
+				"knobs": {
+					"frameAreaMin": 10,
+					"frameAreaMax": 500,
+					"frameMaxWidth": 50,
+					"frameMaxHeight": 50,
+					"majorRatioToleranceFactor": 1.25,
+					"minorRatioToleranceFactor": 1.25,
+					"areaRatioToleranceFactor": 1.5
+				}
+			}
+		}
+	}
+}
