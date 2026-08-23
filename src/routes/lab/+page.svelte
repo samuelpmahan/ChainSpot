@@ -5,6 +5,17 @@
 	// G4 Tee->Badge -> G5 Path. Arrow keys scrub.
 	import { rgbaFromFile } from '$lib/rgba';
 	import { rasterFromFile, cropRaster, type CropInsets } from '$lib/raster';
+	import {
+		DEFAULT_EXECUTION,
+		canonicalJson,
+		parseConfig,
+		resolveConfig,
+		sha256Hex,
+		type ResolvedConfig,
+		type RunTrace
+	} from '$lib/detectors/threeFactor';
+	import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
+	import TracePanel from './TracePanel.svelte';
 	import { proposeSharedCrop } from '$lib/autoCrop';
 	import { findBestTranslation } from '$lib/stitch';
 	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
@@ -35,6 +46,79 @@
 		ticker = null;
 	}
 
+	// engine config: default = frozen baseline; load any config JSON to deviate
+	let labConfig = $state<ResolvedConfig>(resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION));
+	let labParamsHash = $state('');
+	let configError = $state<string | null>(null);
+	let traceLayerShow = $state<Record<string, { accepted: boolean; rejected: boolean }>>({});
+	let heatmapUrl = $state<string | null>(null);
+	let heatmapShow = $state(false);
+	let heatmapMeta = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+
+	async function hashConfig(resolved: ResolvedConfig): Promise<string> {
+		return sha256Hex(canonicalJson(resolved));
+	}
+
+	$effect(() => {
+		if (labParamsHash === '') {
+			hashConfig(labConfig).then((hash) => (labParamsHash = hash));
+		}
+	});
+
+	async function onConfigFile(event: Event) {
+		const file = (event.currentTarget as HTMLInputElement).files?.[0];
+		if (!file) return;
+		try {
+			const resolved = resolveConfig(parseConfig(JSON.parse(await file.text())), DEFAULT_EXECUTION);
+			labConfig = resolved;
+			labParamsHash = await hashConfig(resolved);
+			configError = null;
+		} catch (e) {
+			configError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function heatmapDataUrl(data: Float32Array, w: number, h: number): string {
+		const canvas = document.createElement('canvas');
+		canvas.width = w;
+		canvas.height = h;
+		const ctx2d = canvas.getContext('2d');
+		if (!ctx2d) return '';
+		const img = ctx2d.createImageData(w, h);
+		for (let i = 0; i < data.length; i++) {
+			const v = Math.max(0, Math.min(1, data[i]));
+			img.data[i * 4] = Math.round(255 * v);
+			img.data[i * 4 + 1] = Math.round(160 * v);
+			img.data[i * 4 + 2] = Math.round(255 * (1 - v));
+			img.data[i * 4 + 3] = Math.round(60 + 140 * v);
+		}
+		ctx2d.putImageData(img, 0, 0);
+		return canvas.toDataURL();
+	}
+
+	function onTraceArrived(trace: RunTrace) {
+		const show: Record<string, { accepted: boolean; rejected: boolean }> = {};
+		for (const unit of trace.units) {
+			if (unit.drawables.length > 0) show[unit.id] = { accepted: false, rejected: false };
+		}
+		traceLayerShow = show;
+		heatmapUrl = null;
+		heatmapMeta = null;
+		const field = trace.heatmaps['supportField'];
+		const heatmapDrawable = trace.units
+			.flatMap((u) => u.drawables)
+			.find((d) => d.type === 'heatmap' && d.key === 'supportField');
+		if (field && heatmapDrawable && heatmapDrawable.type === 'heatmap') {
+			heatmapUrl = heatmapDataUrl(field, heatmapDrawable.widthCells, heatmapDrawable.heightCells);
+			heatmapMeta = {
+				x: heatmapDrawable.originXPx,
+				y: heatmapDrawable.originYPx,
+				w: heatmapDrawable.widthCells * heatmapDrawable.cellPx,
+				h: heatmapDrawable.heightCells * heatmapDrawable.cellPx
+			};
+		}
+	}
+
 	function startWorker(raster: RgbaRaster) {
 		busy = 'Running threeFactor in worker…';
 		elapsedS = 0;
@@ -49,6 +133,7 @@
 				runMs = msg.data.ms;
 				busy = null;
 				gate = 0;
+				if (run.trace) onTraceArrived(run.trace);
 			} else {
 				busy = `Failed: ${msg.data.error}`;
 			}
@@ -57,7 +142,8 @@
 			stopTicker();
 			busy = `Worker error: ${e.message}`;
 		};
-		worker.postMessage(raster);
+		// $state proxies are not structured-cloneable — post a plain snapshot
+		worker.postMessage({ raster, config: $state.snapshot(labConfig), paramsHash: labParamsHash });
 	}
 
 	function badgeCenters(emitted: DetectorEmission[]): Map<number, { x: number; y: number }> {
@@ -253,6 +339,13 @@
 	{#if busy}<strong>{busy} {elapsedS > 0 ? `(${elapsedS}s)` : ''}</strong>{/if}
 	{#if run}<span>{imgName} · ran in {runMs}ms</span>{/if}
 	{#if heldOut}<span style="color: #849;">held out (thrown round): {heldOut}</span>{/if}
+	<label style="font-family: monospace; font-size: 12px;">
+		config <input type="file" accept=".json,application/json" onchange={onConfigFile} />
+	</label>
+	<span style="font-family: monospace; font-size: 12px;">
+		{labConfig.name}{labParamsHash ? ` · ${labParamsHash.slice(0, 12)}…` : ''}
+	</span>
+	{#if configError}<strong style="color: #a00;">config: {configError}</strong>{/if}
 	<a href="/">← Import Data</a>
 </div>
 
@@ -275,12 +368,25 @@
 		<button onclick={() => setGate(Math.min(GATES.length - 1, gate + 1))} disabled={gate === GATES.length - 1}>▶</button>
 		<em>{GATES[gate].note}</em>
 	</div>
-	<div style="display: flex; gap: 1rem; margin: 0.2rem 0; font-family: monospace; font-size: 13px;">
+	<div style="display: flex; gap: 1rem; margin: 0.2rem 0; font-family: monospace; font-size: 13px; flex-wrap: wrap;">
 		<label><input type="checkbox" bind:checked={show.badges} /> badges</label>
 		<label><input type="checkbox" bind:checked={show.baskets} /> baskets</label>
 		<label><input type="checkbox" bind:checked={show.tees} /> tees</label>
 		<label><input type="checkbox" bind:checked={show.ownership} /> tee→badge</label>
 		<label><input type="checkbox" bind:checked={show.path} /> paths</label>
+		{#if run?.trace}
+			<span>| trace:</span>
+			{#if heatmapUrl}
+				<label><input type="checkbox" bind:checked={heatmapShow} /> support heatmap</label>
+			{/if}
+			{#each Object.keys(traceLayerShow) as unitId (unitId)}
+				<span>
+					{unitId}
+					<label>✓<input type="checkbox" bind:checked={traceLayerShow[unitId].accepted} /></label>
+					<label>✗<input type="checkbox" bind:checked={traceLayerShow[unitId].rejected} /></label>
+				</span>
+			{/each}
+		{/if}
 	</div>
 	<div style="font-family: monospace; font-size: 13px; margin-bottom: 0.3rem;">
 		badges {counts?.badges} · baskets {counts?.baskets} · tees {counts?.tees} · owned {counts?.owned} · raw pairs {counts?.pairs}
@@ -293,6 +399,63 @@
 		aria-label="Gate overlay"
 	>
 		<image href={imgUrl} width={m.widthPx} height={m.heightPx} />
+
+		{#if heatmapShow && heatmapUrl && heatmapMeta}
+			<image
+				href={heatmapUrl}
+				x={heatmapMeta.x}
+				y={heatmapMeta.y}
+				width={heatmapMeta.w}
+				height={heatmapMeta.h}
+				preserveAspectRatio="none"
+				style="image-rendering: pixelated;"
+			/>
+		{/if}
+
+		{#if run.trace}
+			{#each run.trace.units as unit (unit.id)}
+				{@const layer = traceLayerShow[unit.id]}
+				{#if layer}
+					{#each unit.drawables as d, di (di)}
+						{@const visible =
+							d.type !== 'heatmap' &&
+							((d.verdict === 'accepted' && layer.accepted) ||
+								(d.verdict === 'rejected' && layer.rejected) ||
+								(d.verdict === 'info' && (layer.accepted || layer.rejected)))}
+						{#if visible}
+							{@const color = d.verdict === 'accepted' ? '#7CFC00' : d.verdict === 'rejected' ? '#ff4444' : '#ffffff'}
+							{#if d.type === 'box'}
+								<rect
+									x={d.bbox[0]}
+									y={d.bbox[1]}
+									width={d.bbox[2]}
+									height={d.bbox[3]}
+									fill="none"
+									stroke={color}
+									stroke-width="2"
+									stroke-dasharray={d.verdict === 'rejected' ? '4 3' : undefined}
+								>
+									<title>{unit.id} {d.verdict}{d.reason ? `: ${d.reason}` : ''} {d.ref ?? ''}</title>
+								</rect>
+							{:else if d.type === 'point'}
+								<circle cx={d.xPx} cy={d.yPx} r="4" fill={color}>
+									<title>{unit.id} {d.verdict}{d.reason ? `: ${d.reason}` : ''}</title>
+								</circle>
+							{:else if d.type === 'polyline'}
+								<polyline
+									points={d.path.map(([x, y]) => `${x},${y}`).join(' ')}
+									fill="none"
+									stroke={color}
+									stroke-width="2"
+								>
+									<title>{unit.id} {d.verdict}{d.reason ? `: ${d.reason}` : ''}</title>
+								</polyline>
+							{/if}
+						{/if}
+					{/each}
+				{/if}
+			{/each}
+		{/if}
 
 		{#if show.badges}
 			{#each m.badges as b (b.detId)}
@@ -423,6 +586,9 @@
 	</svg>
 	{#if show.path && a && a.assignments.length === 0}
 		<p><strong>No assignments — nothing to route.</strong></p>
+	{/if}
+	{#if run.trace}
+		<TracePanel trace={run.trace} />
 	{/if}
 {:else if !busy}
 	<p>Pick any screenshot. The whole pipeline runs locally; arrows or buttons scrub the gates.</p>

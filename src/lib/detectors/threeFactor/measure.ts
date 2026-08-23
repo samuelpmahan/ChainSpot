@@ -29,7 +29,13 @@ import type {
 	ThreeFactorParams
 } from './types';
 import { THREE_FACTOR_ALGO, THREE_FACTOR_ALGO_VERSION } from './types';
-import { nullFeatureContext, type EngineUnit, type EvidenceBoard, type EvidenceSlot } from './features/types';
+import {
+	nullFeatureContext,
+	type EngineUnit,
+	type EvidenceBoard,
+	type EvidenceSlot,
+	type FeatureContext
+} from './features/types';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -219,19 +225,47 @@ function makeBaskets(sprites: readonly SpriteMatch[], yOffsetPx: number): Basket
 function makeTees(
 	stage: ReturnType<typeof runBadgeStage>,
 	sprites: readonly SpriteMatch[],
-	yOffsetPx: number
+	yOffsetPx: number,
+	ctx: FeatureContext = nullFeatureContext
 ): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
 	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
 		(badge) => x >= badge.bboxX - 3 && x <= badge.bboxX + badge.bboxW + 3 && y >= badge.bboxY - 3 && y <= badge.bboxY + badge.bboxH + 3
 	);
-	const rings = detectTeeRings(stage.brightMask).filter(
-		(ring) => !insideBadge(ring.cx, ring.cy) && !pointInScreenChrome(ring.cx, ring.cy, chrome)
-	);
+	// no silent drops: every examined-and-killed candidate leaves a rejected
+	// drawable with its reason — this is the "why 0 tees?" answer on the raster
+	const reject = (x: number, y: number, reason: string) =>
+		ctx.overlay('tees', {
+			type: 'point',
+			xPx: x,
+			yPx: y + yOffsetPx,
+			verdict: 'rejected',
+			reason
+		});
+	const rings = detectTeeRings(stage.brightMask).filter((ring) => {
+		if (insideBadge(ring.cx, ring.cy)) {
+			reject(ring.cx, ring.cy, 'ring inside badge bbox (+3px pad)');
+			return false;
+		}
+		if (pointInScreenChrome(ring.cx, ring.cy, chrome)) {
+			reject(ring.cx, ring.cy, 'ring inside screen-chrome cluster');
+			return false;
+		}
+		return true;
+	});
 	const badgeLabels = new Set(stage.badges.map((badge) => badge.label));
-	const components = stage.brightComponents.filter(
-		(component) => !badgeLabels.has(component.label) && !insideBadge(component.cx, component.cy) && !pointInScreenChrome(component.cx, component.cy, chrome)
-	);
+	const components = stage.brightComponents.filter((component) => {
+		if (badgeLabels.has(component.label)) return false; // is a badge, not a candidate
+		if (insideBadge(component.cx, component.cy)) {
+			reject(component.cx, component.cy, 'component inside badge bbox (+3px pad)');
+			return false;
+		}
+		if (pointInScreenChrome(component.cx, component.cy, chrome)) {
+			reject(component.cx, component.cy, 'component inside screen-chrome cluster');
+			return false;
+		}
+		return true;
+	});
 	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })));
 	return points
 		.map((tee) => {
@@ -438,7 +472,7 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
 			const sprites = board.get<readonly SpriteMatch[]>('sprites');
 			const { topPx } = board.get<ViewportSeed>('viewport');
-			const tees = makeTees(stage, sprites, topPx);
+			const tees = makeTees(stage, sprites, topPx, ctx);
 			for (const tee of tees) {
 				ctx.overlay('tees', {
 					type: 'box',
