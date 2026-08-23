@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# ChainSpot LAB entrypoint (POSIX). See scripts/chainspot-lab/README.md.
+#
+# NOTE: lab.cmd in this same directory is a DIFFERENT tool — the machine-bound
+# 3fd72 provenance auditor (scripts/lab-orient-3fd72.mjs). The two have not been
+# reconciled; on Windows `lab` resolves to lab.cmd, on POSIX to this file.
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+lab_dir="$repo_dir/scripts/chainspot-lab"
+tsx="$lab_dir/node_modules/.bin/tsx"
+
+if ! command -v node >/dev/null 2>&1; then
+	export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+	# shellcheck disable=SC1091
+	[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+fi
+
+if [ ! -x "$tsx" ]; then
+	echo "LAB dependencies are not installed. Run:  (cd scripts/chainspot-lab && npm install)" >&2
+	exit 1
+fi
+
+usage() {
+	cat >&2 <<'EOF'
+Usage: ./lab <command> [id]
+
+  invariants [ID]   List invariant cards, or print one in full (e.g. ./lab invariants I21)
+  detectors  [ID]   List detector cards, or print one in full (e.g. ./lab detectors D04)
+  gates      [N]    List LAB gates, or print one in full
+  cases      [ID]   List hard-evidence case cards, or print one in full
+
+Not yet ported from the LAB branch — these import src/lib/nuthing, which has no
+counterpart here yet. See scripts/chainspot-lab/README.md, "Porting status":
+
+  orient, gate2, gate3
+EOF
+	exit 2
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+	invariants | detectors | gates | cases)
+		exec "$tsx" "$lab_dir/$cmd.ts" "$@"
+		;;
+	*)
+		usage
+		;;
+esac
