@@ -4,6 +4,11 @@
 	// same vocabulary as the CLI: G1 Badges -> G2 Baskets -> G3 Tees ->
 	// G4 Tee->Badge -> G5 Path. Arrow keys scrub.
 	import { rgbaFromFile } from '$lib/rgba';
+	import { rasterFromFile, cropRaster, type CropInsets } from '$lib/raster';
+	import { proposeSharedCrop } from '$lib/autoCrop';
+	import { findBestTranslation } from '$lib/stitch';
+	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
+	import type { RgbaRaster, DetectorEmission } from '$lib/detect';
 	import type { ThreeFactorRun } from '$lib/detectors/threeFactor';
 
 	const GATES = [
@@ -29,40 +34,136 @@
 		ticker = null;
 	}
 
-	async function onFile(event: Event) {
-		const file = (event.currentTarget as HTMLInputElement).files?.[0];
-		if (!file) return;
+	function startWorker(raster: RgbaRaster) {
+		busy = 'Running threeFactor in worker…';
+		elapsedS = 0;
+		ticker = setInterval(() => elapsedS++, 1000);
+		worker = new Worker(new URL('./threeFactor.worker.ts', import.meta.url), {
+			type: 'module'
+		});
+		worker.onmessage = (msg: MessageEvent) => {
+			stopTicker();
+			if (msg.data.ok) {
+				run = msg.data.run as ThreeFactorRun;
+				runMs = msg.data.ms;
+				busy = null;
+				gate = 0;
+			} else {
+				busy = `Failed: ${msg.data.error}`;
+			}
+		};
+		worker.onerror = (e) => {
+			stopTicker();
+			busy = `Worker error: ${e.message}`;
+		};
+		worker.postMessage(raster);
+	}
+
+	function badgeCenters(emitted: DetectorEmission[]): Map<number, { x: number; y: number }> {
+		const labels = new Map(emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n]));
+		const out = new Map<number, { x: number; y: number }>();
+		for (const e of emitted) {
+			if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
+			const n = labels.get(e.detId);
+			if (n !== undefined && !out.has(n)) out.set(n, { x: e.xPx, y: e.yPx });
+		}
+		return out;
+	}
+
+	// Multi-image: autocrop -> stitch (badges first, pixel fallback) -> flatten
+	// to the CANONICAL post-stitch composite -> threeFactor on the composite.
+	async function buildComposite(files: File[]): Promise<RgbaRaster> {
+		busy = 'AutoCrop…';
+		const grays = await Promise.all(files.map(rasterFromFile));
+		const insets: CropInsets = proposeSharedCrop(grays) ?? { top: 0, right: 0, bottom: 0, left: 0 };
+
+		busy = 'Badge pass for semantic stitch…';
+		const rgbas = await Promise.all(files.map(rgbaFromFile));
+		const centers: Map<number, { x: number; y: number }>[] = [];
+		for (const r of rgbas) {
+			const emitted: DetectorEmission[] = [];
+			await labEndpointDetector(r, (e) => emitted.push(e));
+			centers.push(badgeCenters(emitted));
+		}
+
+		busy = 'Stitching…';
+		const cropped = grays.map((g) => cropRaster(g, insets));
+		const placements = [{ x: 0, y: 0 }];
+		for (let i = 1; i < files.length; i++) {
+			const offsets: { dx: number; dy: number }[] = [];
+			for (const [n, p] of centers[i]) {
+				const anchor = centers[0].get(n);
+				if (anchor) offsets.push({ dx: anchor.x - p.x, dy: anchor.y - p.y });
+			}
+			if (offsets.length > 0) {
+				offsets.sort((a, b) => a.dx - b.dx);
+				const dx = offsets[(offsets.length / 2) | 0].dx;
+				offsets.sort((a, b) => a.dy - b.dy);
+				const dy = offsets[(offsets.length / 2) | 0].dy;
+				placements.push({ x: dx, y: dy });
+			} else {
+				const off = findBestTranslation(cropped[i - 1], cropped[i]);
+				placements.push(
+					off
+						? { x: placements[i - 1].x + off.dx, y: placements[i - 1].y + off.dy }
+						: { x: placements[i - 1].x + cropped[i - 1].widthPx + 40, y: placements[i - 1].y }
+				);
+			}
+		}
+
+		busy = 'Flattening composite…';
+		let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+		placements.forEach((p, i) => {
+			x0 = Math.min(x0, p.x);
+			y0 = Math.min(y0, p.y);
+			x1 = Math.max(x1, p.x + cropped[i].widthPx);
+			y1 = Math.max(y1, p.y + cropped[i].heightPx);
+		});
+		const w = Math.ceil(x1 - x0);
+		const h = Math.ceil(y1 - y0);
+		const canvas = new OffscreenCanvas(w, h);
+		const ctx = canvas.getContext('2d');
+		if (!ctx) throw new Error('no 2d context');
+		for (let i = 0; i < files.length; i++) {
+			const bitmap = await createImageBitmap(files[i]);
+			ctx.drawImage(
+				bitmap,
+				insets.left,
+				insets.top,
+				cropped[i].widthPx,
+				cropped[i].heightPx,
+				Math.round(placements[i].x - x0),
+				Math.round(placements[i].y - y0),
+				cropped[i].widthPx,
+				cropped[i].heightPx
+			);
+			bitmap.close();
+		}
+		const blob = await canvas.convertToBlob({ type: 'image/png' });
 		if (imgUrl) URL.revokeObjectURL(imgUrl);
-		imgUrl = URL.createObjectURL(file);
-		imgName = file.name;
+		imgUrl = URL.createObjectURL(blob);
+		const { data } = ctx.getImageData(0, 0, w, h);
+		return { imageId: 'composite-' + Date.now().toString(16).padStart(64, '0'), widthPx: w, heightPx: h, rgba: data };
+	}
+
+	async function onFile(event: Event) {
+		const files = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
+		if (files.length === 0) return;
 		run = null;
 		worker?.terminate();
 		stopTicker();
-		busy = 'Rasterizing…';
 		try {
-			const raster = await rgbaFromFile(file);
-			busy = 'Running threeFactor in worker…';
-			elapsedS = 0;
-			ticker = setInterval(() => elapsedS++, 1000);
-			worker = new Worker(new URL('./threeFactor.worker.ts', import.meta.url), {
-				type: 'module'
-			});
-			worker.onmessage = (msg: MessageEvent) => {
-				stopTicker();
-				if (msg.data.ok) {
-					run = msg.data.run as ThreeFactorRun;
-					runMs = msg.data.ms;
-					busy = null;
-					gate = 0;
-				} else {
-					busy = `Failed: ${msg.data.error}`;
-				}
-			};
-			worker.onerror = (e) => {
-				stopTicker();
-				busy = `Worker error: ${e.message}`;
-			};
-			worker.postMessage(raster);
+			if (files.length === 1) {
+				if (imgUrl) URL.revokeObjectURL(imgUrl);
+				imgUrl = URL.createObjectURL(files[0]);
+				imgName = files[0].name;
+				busy = 'Rasterizing…';
+				startWorker(await rgbaFromFile(files[0]));
+			} else {
+				imgName = files.map((f) => f.name).join(' + ');
+				const composite = await buildComposite(files);
+				startWorker(composite);
+			}
 		} catch (e) {
 			stopTicker();
 			busy = `Failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -108,7 +209,7 @@
 
 <div style="display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;">
 	<h1 style="margin: 0.25rem 0; font-size: 1.4rem;">LAB · gate scrubber</h1>
-	<input type="file" accept="image/*" onchange={onFile} />
+	<input type="file" accept="image/*" multiple onchange={onFile} />
 	{#if busy}<strong>{busy} {elapsedS > 0 ? `(${elapsedS}s)` : ''}</strong>{/if}
 	{#if run}<span>{imgName} · ran in {runMs}ms</span>{/if}
 	<a href="/">← Import Data</a>
