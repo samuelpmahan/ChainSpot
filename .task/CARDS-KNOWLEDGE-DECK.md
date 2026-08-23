@@ -1,5 +1,17 @@
 # LAB deck update — engine-era knowledge cards
 
+## Intent (owner, 2026-08-23): the deck is an agentic rolodex
+
+Not a knowledge-graph substrate — that framing is DROPPED. The deck exists
+so an agent must actually flip through cards and follow cross-references to
+grasp the SHAPE of the knowledge (what constrains what, what evidence means
+where) instead of reading one search result and assuming it knows
+everything. Cross-reference id arrays are navigation — they make an agent
+traverse — not future graph edges. Write cards to be read in sequence by an
+agent orienting itself: self-contained enough to teach, cross-referenced
+enough to force traversal. No graph tooling, no export formats, ever, until
+the owner says otherwise.
+
 Branch: `cards/knowledge-deck-engine-era`. Base: `0850f75`.
 Scope: files under `scripts/chainspot-lab/` ONLY. No engine code, no test
 pins, no configs. The deck's import-time self-check must stay green.
