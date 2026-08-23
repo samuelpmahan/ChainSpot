@@ -16,6 +16,7 @@ import { g2SpriteFeature } from './g2.sprite';
 import { g1BadgesFeature } from './g1.badges';
 import { g1DigitsFeature } from './g1.digits';
 import { sharedHsvFeature } from './shared.hsv';
+import { teeFamilyFeature } from './g3.teeFamily';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
@@ -28,7 +29,8 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g2SpriteFeature,
 	g1BadgesFeature,
 	g1DigitsFeature,
-	sharedHsvFeature
+	sharedHsvFeature,
+	teeFamilyFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {

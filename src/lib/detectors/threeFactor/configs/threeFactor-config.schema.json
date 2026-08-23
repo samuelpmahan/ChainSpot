@@ -36,7 +36,8 @@
 					"rawPairs",
 					"measurement",
 					"assignment",
-					"phantomTee"
+					"phantomTee",
+					"teeFamily"
 				]
 			},
 			"uniqueItems": true,
@@ -412,6 +413,58 @@
 											"type": "number",
 											"description": "distance threshold excluding a component-tee candidate near a matched basket-sprite center",
 											"default": 24
+										}
+									}
+								}
+							}
+						},
+						"teeFamily": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "LAB intact tee-family refinement: keep only the largest mutually-consistent ring-tee family by enclosing-frame major/minor/area (frameForRing + selectTeeFamily, courseSweep.ts). Component/recovered tee tiers pass through untouched.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"frameAreaMin": {
+											"type": "number",
+											"description": "minimum enclosing bright-component area to count as a frame candidate (LAB: area >= 10)",
+											"default": 10
+										},
+										"frameAreaMax": {
+											"type": "number",
+											"description": "maximum enclosing bright-component area to count as a frame candidate (LAB: area <= 500)",
+											"default": 500
+										},
+										"frameMaxWidth": {
+											"type": "number",
+											"description": "maximum frame bbox width (LAB: bboxW <= 50)",
+											"default": 50
+										},
+										"frameMaxHeight": {
+											"type": "number",
+											"description": "maximum frame bbox height (LAB: bboxH <= 50)",
+											"default": 50
+										},
+										"majorRatioToleranceFactor": {
+											"type": "number",
+											"description": "a family member's frame major must satisfy |log(f.major/s.major)| <= log(this) vs the anchor frame (LAB: log(1.25))",
+											"default": 1.25
+										},
+										"minorRatioToleranceFactor": {
+											"type": "number",
+											"description": "same tolerance, applied to frame minor (LAB: log(1.25))",
+											"default": 1.25
+										},
+										"areaRatioToleranceFactor": {
+											"type": "number",
+											"description": "same tolerance, applied to frame area (LAB: log(1.5))",
+											"default": 1.5
 										}
 									}
 								}
