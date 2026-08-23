@@ -13,8 +13,10 @@ import { defaultKnobs } from '$lib/detectors/threeFactor/features/types';
 import { g4ScoringFeature } from '$lib/detectors/threeFactor/features/g4.scoring';
 import { g4SearchFeature } from '$lib/detectors/threeFactor/features/g4.search';
 import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
+import { g5RibbonFeature } from '$lib/detectors/threeFactor/features/g5.ribbon';
 import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
 import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
+import { DEFAULT_RIBBON_KNOBS } from '$lib/detectors/threeFactor/ribbon';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -110,6 +112,17 @@ describe('fallback-default mirrors', () => {
 		expect(DEFAULT_SCORING_KNOBS).toEqual(defaultKnobs(g4ScoringFeature));
 		expect(DEFAULT_ZFIT_KNOBS).toEqual(defaultKnobs(zfitFeature));
 		expect(DEFAULT_SEARCH_KNOBS).toEqual(defaultKnobs(g4SearchFeature));
+		// DEFAULT_RIBBON_KNOBS covers the ribbon.ts-function-parameter knobs
+		// only; fieldScale/supportTau ride CorridorParams instead (see
+		// features/g5.ribbon.ts's file header), so they're excluded here and
+		// compared separately below.
+		const { fieldScale, supportTau, ...ribbonFunctionKnobDefaults } = defaultKnobs(g5RibbonFeature) as Record<
+			string,
+			unknown
+		>;
+		expect(DEFAULT_RIBBON_KNOBS).toEqual(ribbonFunctionKnobDefaults);
+		expect(fieldScale).toBe(3);
+		expect(supportTau).toBe(0.5);
 	});
 });
 
@@ -138,7 +151,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('03254689d263d8d2fb92b1e837c897b217cf02e06288e83c5914b3d6d6997777');
+		expect(hash).toBe('0b4beffcd99cc710ba39704160ca03087f480144104cbdf9a512ee33a9ee67b3');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

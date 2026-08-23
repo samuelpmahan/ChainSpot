@@ -319,6 +319,113 @@
 									}
 								}
 							}
+						},
+						"ribbon": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Support-field construction (blur, gradient ribbon sampling, normalization) and badge-occlusion patching.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"fieldScale": {
+											"type": "number",
+											"description": "support-field downsampling scale factor (was measure.ts DEFAULT_FIELD_SCALE; rides CorridorParams, see file header)",
+											"default": 3
+										},
+										"supportTau": {
+											"type": "number",
+											"description": "support-field gradient percentile threshold (was measure.ts DEFAULT_SUPPORT_TAU; rides CorridorParams, see file header)",
+											"default": 0.5
+										},
+										"gaussianSigma": {
+											"type": "number",
+											"description": "sigma for the initial gaussian blur of the support field (was GAUSSIAN_SIGMA)",
+											"default": 0.8
+										},
+										"blurRadiusSigmas": {
+											"type": "number",
+											"description": "blur kernel radius, as a multiple of gaussianSigma (missed by the original inventory sweep: a THIRD distinct literal \"4\" in this file, alongside gradientDeltaMultiplier and costMultiplier)",
+											"default": 4
+										},
+										"gradientDeltaMultiplier": {
+											"type": "number",
+											"description": "multiplier scaling ribbon half-width for edge-difference (gradient) sampling — coincidentally also 4, but a distinct knob from blurRadiusSigmas/costMultiplier",
+											"default": 4
+										},
+										"normalizationPercentile": {
+											"type": "number",
+											"description": "percentile of raw support magnitude used for normalization",
+											"default": 0.995
+										},
+										"supportGamma": {
+											"type": "number",
+											"description": "gamma exponent for support-field power normalization",
+											"default": 0.7
+										},
+										"costMultiplier": {
+											"type": "number",
+											"description": "multiplicative boost to unsupported regions in the routing cost field — coincidentally also 4, but a distinct knob from gradientDeltaMultiplier/blurRadiusSigmas",
+											"default": 4
+										},
+										"haloSupportThreshold": {
+											"type": "number",
+											"description": "support level capped for cells under a badge (halo occlusion) — separate from patchAcceptanceThreshold despite the same value",
+											"default": 0.5
+										},
+										"patchReachMargin": {
+											"type": "number",
+											"description": "pixel margin added to badge half-width for patch-search expansion",
+											"default": 6
+										},
+										"sampleOffsetPx": {
+											"type": "number",
+											"description": "symmetric inner/outer offset from ribbon half-width for edge-patch orientation sampling (one knob: the code uses the same value on both sides, half-2.5 and half+2.5)",
+											"default": 2.5
+										},
+										"patchOrientations": {
+											"type": "number",
+											"description": "number of angles sampled when testing badge-edge patching",
+											"default": 24
+										},
+										"centerOuterGrayMargin": {
+											"type": "number",
+											"description": "grayscale difference threshold used to reject a badge-edge patch candidate",
+											"default": 8
+										},
+										"liftThreshold": {
+											"type": "number",
+											"description": "grayscale lift (inner-outer difference) that normalizes to a full-strength patch score",
+											"default": 45
+										},
+										"patchAcceptanceThreshold": {
+											"type": "number",
+											"description": "minimum patch score (from liftThreshold normalization) before a cell is patched at all (missed by the original inventory sweep — coincidentally also 0.5, but a distinct knob from haloSupportThreshold)",
+											"default": 0.5
+										},
+										"patchedCellSupportCap": {
+											"type": "number",
+											"description": "maximum support value assigned to a patched cell",
+											"default": 0.85
+										},
+										"haloBboxMargin": {
+											"type": "number",
+											"description": "pixel margin expanding a badge bbox for the halo-capping scan (missed by the original inventory sweep; distinct from insideBadgeMargin and from patchReachMargin)",
+											"default": 3
+										},
+										"insideBadgeMargin": {
+											"type": "number",
+											"description": "pixel margin used by the \"is this point inside a badge\" occlusion test during patch search (missed by the original inventory sweep; distinct from haloBboxMargin)",
+											"default": 2
+										}
+									}
+								}
+							}
 						}
 					}
 				}

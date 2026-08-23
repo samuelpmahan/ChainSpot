@@ -9,12 +9,14 @@ import { zfitFeature } from './g5.zfit';
 import { phantomTeeFeature } from './g3.phantomTee';
 import { g4ScoringFeature } from './g4.scoring';
 import { g4SearchFeature } from './g4.search';
+import { g5RibbonFeature } from './g5.ribbon';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
 	phantomTeeFeature,
 	g4ScoringFeature,
-	g4SearchFeature
+	g4SearchFeature,
+	g5RibbonFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {

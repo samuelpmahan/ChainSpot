@@ -10,6 +10,7 @@
 	ThreeFactorMeasurement
 } from './types';
 import { routeBadgeLegs } from './routing';
+import { DEFAULT_RIBBON_KNOBS, type RibbonKnobs } from './ribbon';
 import {
 	DEFAULT_SCORING_KNOBS,
 	DEFAULT_ZFIT_KNOBS,
@@ -73,7 +74,8 @@ function pairKey(pair: ScoredPairEvidence): string {
 
 function rerouteRawPairs(
 	measurement: ThreeFactorMeasurement,
-	tees: readonly TeeEvidence[]
+	tees: readonly TeeEvidence[],
+	ribbonKnobs: RibbonKnobs
 ): RawPairEvidence[] {
 	const rawPairs: RawPairEvidence[] = [];
 	const teePoints = tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx }));
@@ -88,7 +90,8 @@ function rerouteRawPairs(
 			{ id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx },
 			teePoints,
 			basketPoints,
-			measurement.viewport.topPx
+			measurement.viewport.topPx,
+			ribbonKnobs
 		);
 		for (let teeIndex = 0; teeIndex < tees.length; teeIndex++) {
 			for (let basketIndex = 0; basketIndex < measurement.baskets.length; basketIndex++) {
@@ -332,7 +335,8 @@ export function assignThreeFactor(
 	recoveredTees: readonly RecoveredTeeInput[] = [],
 	zfitKnobs?: ZfitKnobs,
 	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
-	searchKnobs: SearchKnobs = DEFAULT_SEARCH_KNOBS
+	searchKnobs: SearchKnobs = DEFAULT_SEARCH_KNOBS,
+	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
 ): ThreeFactorAssignment {
 	const sortedRecovered = [...recoveredTees].sort(
 		(a, b) =>
@@ -349,7 +353,7 @@ export function assignThreeFactor(
 	tees.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.detId.localeCompare(b.detId));
 
 	const rawPairs = acceptedRecovered > 0
-		? rerouteRawPairs(measurement, tees)
+		? rerouteRawPairs(measurement, tees, ribbonKnobs)
 		: measurement.rawPairs;
 	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
 	const byBadge = rankPairsByBadge(scoredUnranked);

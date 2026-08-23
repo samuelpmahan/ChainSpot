@@ -1,5 +1,5 @@
 import type { LegEvidence, SupportFieldEvidence } from './types';
-import { buildSupportCost } from './ribbon';
+import { buildSupportCost, DEFAULT_RIBBON_KNOBS, type RibbonKnobs } from './ribbon';
 
 const DX = [-1, 0, 1, -1, 1, -1, 0, 1];
 const DY = [-1, -1, -1, 0, 0, 1, 1, 1];
@@ -18,8 +18,8 @@ interface Flood {
 	readonly previous: Int32Array;
 }
 
-function flood(field: SupportFieldEvidence, source: RoutePoint): Flood {
-	const cost = buildSupportCost(field);
+function flood(field: SupportFieldEvidence, source: RoutePoint, ribbonKnobs: RibbonKnobs): Flood {
+	const cost = buildSupportCost(field, ribbonKnobs);
 	const size = field.width * field.height;
 	const distance = new Float64Array(size).fill(Infinity);
 	const previous = new Int32Array(size).fill(-1);
@@ -111,9 +111,10 @@ export function routeBadgeLegs(
 	badge: RoutePoint,
 	tees: readonly RoutePoint[],
 	baskets: readonly RoutePoint[],
-	yOffsetPx: number
+	yOffsetPx: number,
+	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
 ): { tees: readonly LegEvidence[]; baskets: readonly LegEvidence[] } {
-	const flooded = flood(field, { ...badge, yPx: badge.yPx - yOffsetPx });
+	const flooded = flood(field, { ...badge, yPx: badge.yPx - yOffsetPx }, ribbonKnobs);
 	return {
 		tees: tees.map((tee) => pathFor(field, flooded, tee, yOffsetPx)),
 		baskets: baskets.map((basket) => pathFor(field, flooded, basket, yOffsetPx))

@@ -4,6 +4,7 @@
 // (pinned by tests/unit/threeFactorParity.test.ts).
 
 import { assignThreeFactor, type SearchKnobs } from './assignment';
+import type { RibbonKnobs } from './ribbon';
 import type { ScoringKnobs, ZfitKnobs } from './scoring';
 import { validateExecution, type ResolvedConfig } from './config';
 import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
@@ -11,6 +12,7 @@ import { featureById } from './features/registry';
 import { zfitFeature } from './features/g5.zfit';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g4SearchFeature } from './features/g4.search';
+import { g5RibbonFeature } from './features/g5.ribbon';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import {
 	defaultKnobs,
@@ -46,7 +48,8 @@ const assignmentUnit: EngineUnit = {
 		const zfitKnobs = zfit.knobs as unknown as ZfitKnobs;
 		const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
-		const assignment = assignThreeFactor(measurement, recovered, zfitKnobs, scoringKnobs, searchKnobs);
+		const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
+		const assignment = assignThreeFactor(measurement, recovered, zfitKnobs, scoringKnobs, searchKnobs, ribbonKnobs);
 		for (const own of assignment.assignments) {
 			ctx.measure('assignment', 'score', own.score);
 		}
@@ -182,9 +185,23 @@ export function runEngine(
 	// feature -> params bridge: zfit rides CorridorParams so measurement
 	// records it (the frozen shape) — engine injects the resolved state.
 	const zfitState = resolved?.features['zfit'];
-	const effectiveParams: ThreeFactorParams | undefined = zfitState?.enabled
+	let effectiveParams: ThreeFactorParams | undefined = zfitState?.enabled
 		? { ...(params ?? {}), zfit: true }
 		: params;
+
+	// Same bridge for g5.ribbon's fieldScale/supportTau: these are baseline
+	// knobs (always apply) but already ride CorridorParams via
+	// measure.ts's makeParameters rather than a ribbon.ts function
+	// parameter, so a config deviation has to be injected here — same
+	// silent-drop failure mode the zfit bridge above exists to avoid. Only
+	// fills in when the caller hasn't already set the param explicitly.
+	const ribbonState = resolved?.features['ribbon'];
+	if (ribbonState && effectiveParams?.fieldScale === undefined) {
+		effectiveParams = { ...(effectiveParams ?? {}), fieldScale: ribbonState.knobs['fieldScale'] as number };
+	}
+	if (ribbonState && effectiveParams?.supportTau === undefined) {
+		effectiveParams = { ...(effectiveParams ?? {}), supportTau: ribbonState.knobs['supportTau'] as number };
+	}
 
 	const board = createBoard();
 	seedBoard(board, image, effectiveParams);

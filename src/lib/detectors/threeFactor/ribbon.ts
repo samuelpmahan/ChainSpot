@@ -1,7 +1,52 @@
 import type { BadgeEvidence, CorridorParams, SupportFieldEvidence } from './types';
 import type { RgbaImage } from './types';
 
-const GAUSSIAN_SIGMA = 0.8;
+/**
+ * g5.ribbon knobs, threaded down as plain parameters from the resolving
+ * unit(s). fieldScale/supportTau are NOT here: they already flow as
+ * ThreeFactorParams -> CorridorParams (measure.ts's makeParameters), so the
+ * engine bridges the resolved knob values in at that existing site (see
+ * engine.ts's ribbonState handling) instead of re-plumbing them through
+ * ribbon.ts's functions. They're still registered on g5RibbonFeature so
+ * config deviations and the resolved-config hash see them.
+ */
+export interface RibbonKnobs {
+	readonly gaussianSigma: number;
+	readonly blurRadiusSigmas: number;
+	readonly gradientDeltaMultiplier: number;
+	readonly normalizationPercentile: number;
+	readonly supportGamma: number;
+	readonly costMultiplier: number;
+	readonly haloSupportThreshold: number;
+	readonly patchReachMargin: number;
+	readonly sampleOffsetPx: number;
+	readonly patchOrientations: number;
+	readonly centerOuterGrayMargin: number;
+	readonly liftThreshold: number;
+	readonly patchAcceptanceThreshold: number;
+	readonly patchedCellSupportCap: number;
+	readonly haloBboxMargin: number;
+	readonly insideBadgeMargin: number;
+}
+
+export const DEFAULT_RIBBON_KNOBS: RibbonKnobs = {
+	gaussianSigma: 0.8,
+	blurRadiusSigmas: 4,
+	gradientDeltaMultiplier: 4,
+	normalizationPercentile: 0.995,
+	supportGamma: 0.7,
+	costMultiplier: 4,
+	haloSupportThreshold: 0.5,
+	patchReachMargin: 6,
+	sampleOffsetPx: 2.5,
+	patchOrientations: 24,
+	centerOuterGrayMargin: 8,
+	liftThreshold: 45,
+	patchAcceptanceThreshold: 0.5,
+	patchedCellSupportCap: 0.85,
+	haloBboxMargin: 3,
+	insideBadgeMargin: 2
+};
 
 function reflect(index: number, size: number): number {
 	if (size <= 1) return 0;
@@ -44,12 +89,12 @@ function areaResizeRgb(image: RgbaImage, width: number, height: number): Float32
 	return out;
 }
 
-function blurRgb(image: Float32Array, width: number, height: number): Float32Array {
-	const radius = Math.max(1, Math.round(4 * GAUSSIAN_SIGMA));
+function blurRgb(image: Float32Array, width: number, height: number, knobs: RibbonKnobs): Float32Array {
+	const radius = Math.max(1, Math.round(knobs.blurRadiusSigmas * knobs.gaussianSigma));
 	const kernel: number[] = [];
 	let total = 0;
 	for (let i = -radius; i <= radius; i++) {
-		const value = Math.exp(-(i * i) / (2 * GAUSSIAN_SIGMA * GAUSSIAN_SIGMA));
+		const value = Math.exp(-(i * i) / (2 * knobs.gaussianSigma * knobs.gaussianSigma));
 		kernel.push(value);
 		total += value;
 	}
@@ -101,14 +146,14 @@ function percentile(values: number[], fraction: number): number {
 	return values[Math.min(values.length - 1, Math.floor(fraction * (values.length - 1)))];
 }
 
-export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParams): SupportFieldEvidence {
+export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParams, knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS): SupportFieldEvidence {
 	const scale = parameters.fieldScale;
 	const width = Math.max(1, Math.floor(image.width / scale));
 	const height = Math.max(1, Math.floor(image.height / scale));
-	const blurred = blurRgb(areaResizeRgb(image, width, height), width, height);
+	const blurred = blurRgb(areaResizeRgb(image, width, height), width, height, knobs);
 	const raw = new Float32Array(width * height);
 	const bestTheta = new Float32Array(width * height);
-	const delta = Math.max(1, 4 / scale);
+	const delta = Math.max(1, knobs.gradientDeltaMultiplier / scale);
 	for (let orientation = 0; orientation < parameters.orientations; orientation++) {
 		const theta = (Math.PI * orientation) / parameters.orientations;
 		const nx = -Math.sin(theta);
@@ -146,9 +191,9 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 			}
 		}
 	}
-	const norm = Math.max(percentile(Array.from(raw).filter((value) => value > 0), 0.995), 1e-6);
+	const norm = Math.max(percentile(Array.from(raw).filter((value) => value > 0), knobs.normalizationPercentile), 1e-6);
 	const support = new Float32Array(raw.length);
-	for (let i = 0; i < raw.length; i++) support[i] = Math.pow(Math.min(1, raw[i] / norm), 0.7);
+	for (let i = 0; i < raw.length; i++) support[i] = Math.pow(Math.min(1, raw[i] / norm), knobs.supportGamma);
 	return {
 		width,
 		height,
@@ -158,18 +203,18 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 		parameters: {
 			orientations: parameters.orientations,
 			widthsSrc: [...parameters.widthsSrc],
-			gaussianSigma: GAUSSIAN_SIGMA,
-			normalizationPercentile: 0.995,
-			gamma: 0.7
+			gaussianSigma: knobs.gaussianSigma,
+			normalizationPercentile: knobs.normalizationPercentile,
+			gamma: knobs.supportGamma
 		}
 	};
 }
 
-export function buildSupportCost(field: SupportFieldEvidence): Float32Array {
+export function buildSupportCost(field: SupportFieldEvidence, knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS): Float32Array {
 	const cost = new Float32Array(field.support.length);
 	for (let i = 0; i < cost.length; i++) {
 		const support = field.support[i];
-		cost[i] = 1 + 4 * (1 - support) ** 2;
+		cost[i] = 1 + knobs.costMultiplier * (1 - support) ** 2;
 	}
 	return cost;
 }
@@ -178,7 +223,8 @@ export function patchBadgeOcclusion(
 	field: SupportFieldEvidence,
 	image: RgbaImage,
 	badges: readonly BadgeEvidence[],
-	widthPx: number
+	widthPx: number,
+	knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
 ): { haloCells: number; patchedCells: number } {
 	let haloCells = 0;
 	let patchedCells = 0;
@@ -192,33 +238,33 @@ export function patchBadgeOcclusion(
 	};
 	const inside = (x: number, y: number): boolean => badges.some((badge) => {
 		const [bx, by, bw, bh] = badge.bbox;
-		return x >= bx - 2 && x <= bx + bw + 2 && y >= by - 2 && y <= by + bh + 2;
+		return x >= bx - knobs.insideBadgeMargin && x <= bx + bw + knobs.insideBadgeMargin && y >= by - knobs.insideBadgeMargin && y <= by + bh + knobs.insideBadgeMargin;
 	});
 	for (const badge of badges) {
 		const [bx, by, bw, bh] = badge.bbox;
-		const x0 = Math.max(0, Math.floor((bx - 3) / field.scale));
-		const x1 = Math.min(field.width - 1, Math.ceil((bx + bw + 3) / field.scale));
-		const y0 = Math.max(0, Math.floor((by - 3) / field.scale));
-		const y1 = Math.min(field.height - 1, Math.ceil((by + bh + 3) / field.scale));
+		const x0 = Math.max(0, Math.floor((bx - knobs.haloBboxMargin) / field.scale));
+		const x1 = Math.min(field.width - 1, Math.ceil((bx + bw + knobs.haloBboxMargin) / field.scale));
+		const y0 = Math.max(0, Math.floor((by - knobs.haloBboxMargin) / field.scale));
+		const y1 = Math.min(field.height - 1, Math.ceil((by + bh + knobs.haloBboxMargin) / field.scale));
 		for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
 			const cell = y * field.width + x;
-			if (field.support[cell] > 0.5) {
-				field.support[cell] = 0.5;
+			if (field.support[cell] > knobs.haloSupportThreshold) {
+				field.support[cell] = knobs.haloSupportThreshold;
 				haloCells++;
 			}
 		}
 		if (!widthPx) continue;
-		const reach = half + 6;
+		const reach = half + knobs.patchReachMargin;
 		for (let y = Math.max(0, Math.floor((by - reach) / field.scale)); y <= Math.min(field.height - 1, Math.ceil((by + bh + reach) / field.scale)); y++) {
 			for (let x = Math.max(0, Math.floor((bx - reach) / field.scale)); x <= Math.min(field.width - 1, Math.ceil((bx + bw + reach) / field.scale)); x++) {
 				const sx = x * field.scale + field.scale / 2;
 				const sy = y * field.scale + field.scale / 2;
 				let best = 0;
-				for (let orientation = 0; orientation < 24; orientation++) {
-					const theta = (orientation * Math.PI) / 24;
+				for (let orientation = 0; orientation < knobs.patchOrientations; orientation++) {
+					const theta = (orientation * Math.PI) / knobs.patchOrientations;
 					const nx = -Math.sin(theta);
 					const ny = Math.cos(theta);
-					const points = [[sx - nx * (half - 2.5), sy - ny * (half - 2.5)], [sx - nx * (half + 2.5), sy - ny * (half + 2.5)], [sx + nx * (half - 2.5), sy + ny * (half - 2.5)], [sx + nx * (half + 2.5), sy + ny * (half + 2.5)]];
+					const points = [[sx - nx * (half - knobs.sampleOffsetPx), sy - ny * (half - knobs.sampleOffsetPx)], [sx - nx * (half + knobs.sampleOffsetPx), sy - ny * (half + knobs.sampleOffsetPx)], [sx + nx * (half - knobs.sampleOffsetPx), sy + ny * (half - knobs.sampleOffsetPx)], [sx + nx * (half + knobs.sampleOffsetPx), sy + ny * (half + knobs.sampleOffsetPx)]];
 					const leftBlocked = inside(points[0][0], points[0][1]) || inside(points[1][0], points[1][1]);
 					const rightBlocked = inside(points[2][0], points[2][1]) || inside(points[3][0], points[3][1]);
 					if (leftBlocked === rightBlocked) continue;
@@ -229,12 +275,12 @@ export function patchBadgeOcclusion(
 					const lift = inner - outer;
 					if (lift <= 0) continue;
 					const center = gray(sx, sy);
-					if (center !== null && !inside(sx, sy) && center - outer < -8) continue;
-					best = Math.max(best, Math.min(1, lift / 45));
+					if (center !== null && !inside(sx, sy) && center - outer < -knobs.centerOuterGrayMargin) continue;
+					best = Math.max(best, Math.min(1, lift / knobs.liftThreshold));
 				}
-				if (best >= 0.5) {
+				if (best >= knobs.patchAcceptanceThreshold) {
 					const cell = y * field.width + x;
-					const next = Math.min(0.85, best);
+					const next = Math.min(knobs.patchedCellSupportCap, best);
 					if (next > field.support[cell]) {
 						field.support[cell] = next;
 						patchedCells++;
