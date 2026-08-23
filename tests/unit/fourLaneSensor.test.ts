@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest';
+import { DEFAULT_EXECUTION, parseConfig, resolveConfig } from '$lib/detectors/threeFactor';
+import sensorConfigJson from '$lib/detectors/threeFactor/configs/tbs-four-lane-sensor-on.json';
 import {
 	DEFAULT_FOUR_LANE_SENSOR_KNOBS,
 	fourLaneSensorFeature,
@@ -42,6 +44,14 @@ describe('ST four-lane cross-section sensor', () => {
 		expect(Object.fromEntries(Object.entries(fourLaneSensorFeature.knobs).map(([k, v]) => [k, v.default]))).toEqual(
 			DEFAULT_FOUR_LANE_SENSOR_KNOBS
 		);
+	});
+
+	test('the experiment config resolves every sensor knob explicitly', () => {
+		const resolved = resolveConfig(parseConfig(sensorConfigJson), DEFAULT_EXECUTION);
+		expect(resolved.features['fourLaneSensor']).toEqual({
+			enabled: true,
+			knobs: DEFAULT_FOUR_LANE_SENSOR_KNOBS
+		});
 	});
 
 	test('uses the exact four-lane geometry and paired=min(left,right)', () => {
