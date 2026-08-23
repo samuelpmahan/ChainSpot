@@ -8,6 +8,7 @@
 	import { proposeSharedCrop } from '$lib/autoCrop';
 	import { findBestTranslation } from '$lib/stitch';
 	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
+	import { purpleMassDetector } from '$lib/detectors/purpleMass';
 	import type { RgbaRaster, DetectorEmission } from '$lib/detect';
 	import type { ThreeFactorRun } from '$lib/detectors/threeFactor';
 
@@ -72,13 +73,14 @@
 
 	// Multi-image: autocrop -> stitch (badges first, pixel fallback) -> flatten
 	// to the CANONICAL post-stitch composite -> threeFactor on the composite.
-	async function buildComposite(files: File[]): Promise<RgbaRaster> {
+	// The thrown round (purple mass) is held OUT — it is not course chrome and
+	// would pixel-chain into nonsense.
+	async function buildComposite(files: File[], rgbas: RgbaRaster[]): Promise<RgbaRaster> {
 		busy = 'AutoCrop…';
 		const grays = await Promise.all(files.map(rasterFromFile));
 		const insets: CropInsets = proposeSharedCrop(grays) ?? { top: 0, right: 0, bottom: 0, left: 0 };
 
 		busy = 'Badge pass for semantic stitch…';
-		const rgbas = await Promise.all(files.map(rgbaFromFile));
 		const centers: Map<number, { x: number; y: number }>[] = [];
 		for (const r of rgbas) {
 			const emitted: DetectorEmission[] = [];
@@ -146,10 +148,13 @@
 		return { imageId: 'composite-' + Date.now().toString(16).padStart(64, '0'), widthPx: w, heightPx: h, rgba: data };
 	}
 
+	let heldOut = $state('');
+
 	async function onFile(event: Event) {
 		const files = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
 		if (files.length === 0) return;
 		run = null;
+		heldOut = '';
 		worker?.terminate();
 		stopTicker();
 		try {
@@ -159,11 +164,38 @@
 				imgName = files[0].name;
 				busy = 'Rasterizing…';
 				startWorker(await rgbaFromFile(files[0]));
-			} else {
-				imgName = files.map((f) => f.name).join(' + ');
-				const composite = await buildComposite(files);
-				startWorker(composite);
+				return;
 			}
+			busy = 'Classifying (purple mass)…';
+			const rgbas = await Promise.all(files.map(rgbaFromFile));
+			const tiles: { file: File; rgba: RgbaRaster }[] = [];
+			const held: string[] = [];
+			for (let i = 0; i < files.length; i++) {
+				let thrownScore = 0;
+				await purpleMassDetector(rgbas[i], (e) => {
+					if (e.kind === 'classification' && e.trait === 'thrown-round') thrownScore = e.confidence;
+				});
+				if (thrownScore > 0) held.push(files[i].name);
+				else tiles.push({ file: files[i], rgba: rgbas[i] });
+			}
+			heldOut = held.join(', ');
+			if (tiles.length === 0) {
+				busy = 'Every file classified as thrown round — nothing to stitch.';
+				return;
+			}
+			if (tiles.length === 1) {
+				if (imgUrl) URL.revokeObjectURL(imgUrl);
+				imgUrl = URL.createObjectURL(tiles[0].file);
+				imgName = tiles[0].file.name;
+				startWorker(tiles[0].rgba);
+				return;
+			}
+			imgName = tiles.map((t) => t.file.name).join(' + ');
+			const composite = await buildComposite(
+				tiles.map((t) => t.file),
+				tiles.map((t) => t.rgba)
+			);
+			startWorker(composite);
 		} catch (e) {
 			stopTicker();
 			busy = `Failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -212,6 +244,7 @@
 	<input type="file" accept="image/*" multiple onchange={onFile} />
 	{#if busy}<strong>{busy} {elapsedS > 0 ? `(${elapsedS}s)` : ''}</strong>{/if}
 	{#if run}<span>{imgName} · ran in {runMs}ms</span>{/if}
+	{#if heldOut}<span style="color: #849;">held out (thrown round): {heldOut}</span>{/if}
 	<a href="/">← Import Data</a>
 </div>
 
