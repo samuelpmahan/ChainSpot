@@ -9,24 +9,40 @@ plain chat and WAIT for an explicit go before editing any file. All numbers
 below must be re-verified against their stated sources before being written
 into a card; a number you cannot re-derive does not go on a card.
 
-## Design rules (owner-approved, 2026-08-23)
+## Design rules (owner-approved 2026-08-23; convention-corrected same day)
 
-1. **Relationships are data, not prose.** Every cross-reference is a typed,
-   labeled field the registry self-check validates (existing pattern:
-   invariant cards name gates/detectors). New relationship labels needed:
-   `constrains`, `is-enforced-by`, `supersedes`, `is-implemented-by`,
-   `validates-on`. These become knowledge-graph edges later; build no graph
-   tooling now.
-2. **Re-run button.** Every evidence entry carries the exact zero-fill
-   command that re-derives it (test invocation + config name + expected
-   resolved-config hash).
-3. **Append-only history.** Evidence cards hold dated entries
-   (date, commit, paramsHash, numbers). New measurements append; old entries
-   never change. Superseded claims stay, marked retired.
-4. **Scope claims to what was measured.** Per-course entries, never blended
-   ("on DashsTrack", not "the engine works").
-5. **Plain-language note on every card** — a reader two months from now
-   gets the concept without jargon.
+**RULE ZERO — follow the existing deck convention, do not invent a parallel
+one.** Read `cases.ts`, `invariants.ts`, `detectors.ts` FIRST and mirror
+their shapes exactly:
+- IDs in the established style (`I22-...`, `E00-...` — hyphenated slug).
+- Relations are what the deck already does: arrays of validated card ids
+  where THE FIELD NAME IS THE EDGE LABEL (`gates: [5]`,
+  `detectors: ['D07-...']`, `invariants: [...]`). Add new relation FIELDS
+  only where a genuinely new edge kind is needed (e.g. `supersedes`,
+  `implementedBy`) and give them the same shape: validated id/path arrays.
+- Epistemic level uses the deck's EXISTING status vocabulary
+  (`measured` | `observed` | `archetype`) — do not invent a parallel
+  confidence taxonomy. Extend it only if a run-record status genuinely
+  cannot map (say so explicitly if so).
+- Provenance follows the existing `examples`/`source` pattern; the
+  run-record extensions below are additions to that pattern, not a
+  replacement format.
+- Self-check style mirrors the existing import-time validation.
+
+Within that convention, the owner's requirements:
+1. **Re-run command** on every run-record entry: the exact zero-fill
+   command (test invocation + config name + expected resolved-config hash).
+2. **Append-only history**: run-record cards hold dated entries
+   (date, commit, paramsHash, numbers). New measurements append; old
+   entries never change; superseded claims stay, marked retired.
+3. **Scope claims to what was measured** — per-course entries, never
+   blended ("on DashsTrack", not "the engine works").
+4. **Plain-language `definition`/note on every card**, matching the depth
+   of existing cards' definitions.
+5. Run records are a NEW FIFTH AXIS (`evidence.ts`, in-scope, no `./lab`
+   wiring this task): Gate=where, Detector=mechanism, Invariant=claim,
+   Case=pathology, Evidence=dated reproducible measurement. Shape the type
+   like a sibling of `CaseCard`, not like a foreign format.
 
 ## Card 1 — NEW invariant card: routing bucket-queue capacity
 
