@@ -31,5 +31,11 @@
 		"typescript-eslint": "^8.60.1",
 		"vite": "^6.3.0",
 		"vitest": "^4.1.11"
+	},
+	"workspaces": [
+		"packages/*"
+	],
+	"dependencies": {
+		"@chainspot/map-reader": "*"
 	}
 }

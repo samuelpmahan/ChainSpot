@@ -14,28 +14,37 @@ Run it with the `./lab` script at the repository root:
 ./lab cases
 ```
 
-First use needs its own dependency install, which is deliberately separate from
-the root app:
+A plain `npm install` at the repository root is enough — the LAB's TypeScript
+runner is a devDependency of `@chainspot/map-reader`, which the root workspace
+installs.
 
-```
-(cd scripts/chainspot-lab && npm install)
-```
+## Where this sits
 
-## Why the deps are isolated
+The LAB lives inside the package that owns the algorithm
+(`packages/map-reader/`), not beside the app. That is the point of the layout:
+the algorithm, the evidence about it, and the gates that evidence has to clear
+are one unit, and the app consumes that unit through a single exported contract
+(`packages/map-reader/src/index.ts`).
 
-The root `package.json` is the clean-room surface from CHSPT-82, where every
-dependency has to be explainable. The LAB needs a TypeScript runner (and, once
-the gate harnesses land, a PNG decoder) that the shipped app does not. Keeping a
-second `package.json` here means LAB tooling can grow without widening what the
-application itself depends on. `scripts/chainspot-lab/node_modules/` is covered
-by the root `.gitignore`.
+Two tests hold that boundary up, and both fail on a real violation rather than
+merely documenting the rule:
+
+- `tests/isolation.test.ts` — no import in the package may escape it, no bare
+  module may go undeclared, and no browser or Node runtime global may appear.
+- `tests/surface.test.ts` — the package's exported names are pinned, so a change
+  to what the app can see is a deliberate diff instead of a surprise.
+
+The practical consequence is that algorithm branches and app branches can
+diverge freely: the only thing they share is the contract. Divergence behind it
+costs nothing; divergence *on* it reaches every branch at once, which is why it
+is the one part held still.
 
 ## Porting status
 
 The LAB currently lives in two places, and this directory is the destination
 rather than the source. Files here came from `codex/lab-smart-basket-finish`,
 where the LAB sits alongside `src/lib/nuthing/` — an older layout of the same
-detector code that the product tree carries as `src/lib/detectors/threeFactor/`.
+detector code that this package now carries as `src/threeFactor/`.
 
 **Ported (no dependency on detector source):**
 
@@ -59,7 +68,7 @@ Unblocking them means reconciling `src/lib/nuthing/` with
 `src/lib/detectors/threeFactor/`. After both trees were put on the same prettier
 config, most of that gap turned out to be formatting: `components.ts`,
 `raster.ts`, `families.ts`, `digits/normalize.ts` and `digits/segment.ts` are now
-byte-identical between the two. The real remaining divergence is `ribbon.ts`
+byte-identical between the two, which is what makes the remaining merge legible. The real remaining divergence is `ribbon.ts`
 (substantial), `badgeStage.ts`, `endpoints.ts`, and two `digits/` files, plus the
 LAB-only modules with no product counterpart (`teeCandidates.ts`,
 `smartBasket.ts`, `candidatePool.ts`, `chamfer.ts`, `twoPass.ts`, `viewport.ts`,
@@ -71,8 +80,8 @@ One consequence to be aware of while reading cards in this tree: the ported card
 still cite their original `src/lib/nuthing/...` implementation paths, because
 those strings are recorded provenance rather than live references. `./lab
 detectors D04` will point at `src/lib/nuthing/endpoints.ts`, which does not exist
-here. The card text is left exactly as it was written when the evidence was
-gathered; rewriting it to point at `src/lib/detectors/threeFactor/` would assert
+here; the code it describes is `packages/map-reader/src/threeFactor/endpoints.ts`. The card text is left exactly as it was written when the evidence was
+gathered; rewriting it to point at this package would assert
 a correspondence the port has not yet established. Those citations get updated as
 part of the reconciliation, not ahead of it.
 

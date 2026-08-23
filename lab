@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ChainSpot LAB entrypoint (POSIX). See scripts/chainspot-lab/README.md.
+# ChainSpot LAB entrypoint (POSIX). See packages/map-reader/lab/README.md.
 #
 # NOTE: lab.cmd in this same directory is a DIFFERENT tool — the machine-bound
 # 3fd72 provenance auditor (scripts/lab-orient-3fd72.mjs). The two have not been
@@ -7,8 +7,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-lab_dir="$repo_dir/scripts/chainspot-lab"
-tsx="$lab_dir/node_modules/.bin/tsx"
+lab_dir="$repo_dir/packages/map-reader/lab"
 
 if ! command -v node >/dev/null 2>&1; then
 	export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -16,8 +15,20 @@ if ! command -v node >/dev/null 2>&1; then
 	[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 fi
 
-if [ ! -x "$tsx" ]; then
-	echo "LAB dependencies are not installed. Run:  (cd scripts/chainspot-lab && npm install)" >&2
+# tsx is a devDependency of @chainspot/map-reader; npm workspaces usually hoists
+# it to the repo root, but honour a package-local install too.
+tsx=""
+for candidate in \
+	"$repo_dir/node_modules/.bin/tsx" \
+	"$repo_dir/packages/map-reader/node_modules/.bin/tsx"; do
+	if [ -x "$candidate" ]; then
+		tsx="$candidate"
+		break
+	fi
+done
+
+if [ -z "$tsx" ]; then
+	echo "LAB dependencies are not installed. Run:  npm install" >&2
 	exit 1
 fi
 
@@ -31,7 +42,7 @@ Usage: ./lab <command> [id]
   cases      [ID]   List hard-evidence case cards, or print one in full
 
 Not yet ported from the LAB branch — these import src/lib/nuthing, which has no
-counterpart here yet. See scripts/chainspot-lab/README.md, "Porting status":
+counterpart here. See packages/map-reader/lab/README.md, "Porting status":
 
   orient, gate2, gate3
 EOF

@@ -1,0 +1,22 @@
+{
+	"name": "@chainspot/map-reader",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"description": "The UDisc map reading algorithm, and the LAB that develops it. Depends on nothing; the app consumes it through the exported contract.",
+	"exports": {
+		".": "./src/index.ts",
+		"./contract": "./src/contract.ts"
+	},
+	"files": [
+		"src"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"lab": "tsx --tsconfig tsconfig.json"
+	},
+	"devDependencies": {
+		"tsx": "^4.20.3",
+		"typescript": "^5.8.0"
+	}
+}

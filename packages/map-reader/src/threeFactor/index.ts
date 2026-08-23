@@ -5,7 +5,7 @@ import type {
 	UiAssociation,
 	UiLabelRead,
 	UiObjectDetected
-} from '../../detect';
+} from '../contract';
 import { assignThreeFactor } from './assignment';
 import { measureThreeFactor as measureStage } from './measure';
 import {
