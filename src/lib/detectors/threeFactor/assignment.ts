@@ -1,4 +1,4 @@
-import type {
+﻿import type {
 	AssignmentEvidence,
 	BasketEvidence,
 	CorridorParams,
@@ -98,7 +98,7 @@ export interface ZfitKnobs {
 	readonly alignedWorstCeiling: number;
 }
 
-const DEFAULT_ZFIT_KNOBS: ZfitKnobs = { topK: ZFIT_TOP_K, alignedWorstCeiling: 0.28 };
+export const DEFAULT_ZFIT_KNOBS: ZfitKnobs = { topK: ZFIT_TOP_K, alignedWorstCeiling: 0.28 };
 
 function scoreRawPairs(
 	measurement: ThreeFactorMeasurement,

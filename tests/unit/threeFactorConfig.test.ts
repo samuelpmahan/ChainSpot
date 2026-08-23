@@ -9,6 +9,11 @@ import {
 } from '$lib/detectors/threeFactor';
 import { SEEDED_SLOTS } from '$lib/detectors/threeFactor/engine';
 import { canonicalJson, sha256Hex } from '$lib/detectors/threeFactor/hash';
+import { defaultKnobs } from '$lib/detectors/threeFactor/features/types';
+import { g4ScoringFeature } from '$lib/detectors/threeFactor/features/g4.scoring';
+import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
+import { DEFAULT_SCORING_KNOBS } from '$lib/detectors/threeFactor/scoring';
+import { DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/assignment';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -94,6 +99,15 @@ describe('validateExecution', () => {
 		expect(() =>
 			validateExecution([...DEFAULT_EXECUTION, 'assignment'], ENGINE_UNITS, SEEDED_SLOTS)
 		).toThrow(/twice/);
+	});
+});
+
+describe('fallback-default mirrors', () => {
+	// The bare (configless) path uses DEFAULT_*_KNOBS consts; the config path
+	// uses the feature files' defaults. Byte-equal or the two paths diverge.
+	test('DEFAULT_*_KNOBS equal their feature defaults', () => {
+		expect(DEFAULT_SCORING_KNOBS).toEqual(defaultKnobs(g4ScoringFeature));
+		expect(DEFAULT_ZFIT_KNOBS).toEqual(defaultKnobs(zfitFeature));
 	});
 });
 
