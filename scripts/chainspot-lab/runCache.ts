@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export interface StageCodec<T> {
 	load(dir: string): T;
@@ -74,18 +74,10 @@ export function readFloat32(path: string): Float32Array {
 }
 
 /**
- * Persistent LAB stage cache.
- *
- * A stage key is derived from:
- * - the exact input raster bytes;
- * - upstream stage keys;
- * - the imported files/config the caller says this stage depends on;
- * - compute.toString(); and
- * - the codec implementation used to persist/reload the stage.
- *
- * That gives dependency-aware invalidation without a hand-maintained SHA
- * registry: editing G3 can leave G1/G2 hot, while changing G1 naturally
- * invalidates every downstream stage that consumes its key.
+ * Persistent LAB stage cache. A stage key follows the actual execution
+ * dependency graph: input bytes, upstream keys, transitive relative imports,
+ * config, stage closure, and codec implementation. No hand-maintained SHA
+ * registry is required.
  */
 export class LabRunCache {
 	readonly inputPath: string;
@@ -106,10 +98,35 @@ export class LabRunCache {
 
 	dependencyDigest(paths: readonly string[]): string {
 		const pieces: string[] = [];
-		for (const path of paths) {
-			const abs = resolve(this.repoRoot, path);
-			pieces.push(path, fileDigest(abs));
-		}
+		const visited = new Set<string>();
+		const resolveImport = (from: string, specifier: string): string | null => {
+			const base = resolve(dirname(from), specifier);
+			const candidates = [
+				base,
+				`${base}.ts`,
+				`${base}.tsx`,
+				`${base}.js`,
+				`${base}.json`,
+				join(base, 'index.ts'),
+				join(base, 'index.tsx')
+			];
+			return candidates.find((candidate) => existsSync(candidate)) ?? null;
+		};
+		const visit = (abs: string): void => {
+			const canonical = resolve(abs);
+			if (visited.has(canonical)) return;
+			visited.add(canonical);
+			const bytes = readFileSync(canonical);
+			pieces.push(relative(this.repoRoot, canonical), sha256([bytes]));
+			if (!/\.(?:[cm]?js|tsx?)$/.test(canonical)) return;
+			const text = bytes.toString('utf8');
+			const imports = [...text.matchAll(/(?:from\s+|import\s*)['"](\.[^'"]+)['"]/g)]
+				.map((match) => resolveImport(canonical, match[1]))
+				.filter((path): path is string => path !== null)
+				.sort();
+			for (const imported of imports) visit(imported);
+		};
+		for (const path of [...paths].sort()) visit(resolve(this.repoRoot, path));
 		return sha256(pieces);
 	}
 
@@ -163,11 +180,7 @@ export class LabRunCache {
 		rmSync(tmp, { recursive: true, force: true });
 		mkdirSync(tmp, { recursive: true });
 		options.codec.save(tmp, value);
-		const meta: StageMeta = {
-			key,
-			stage: options.name,
-			createdAt: new Date().toISOString()
-		};
+		const meta: StageMeta = { key, stage: options.name, createdAt: new Date().toISOString() };
 		writeFileSync(join(tmp, '.stage.json'), `${JSON.stringify(meta, null, 2)}\n`);
 		rmSync(dir, { recursive: true, force: true });
 		renameSync(tmp, dir);
