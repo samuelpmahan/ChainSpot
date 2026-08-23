@@ -8,7 +8,7 @@
 // explicit provenance and must never feed an appearance model (appearance
 // is UNKNOWN by construction). Default OFF.
 
-import { assignThreeFactor, type ZfitKnobs } from '../assignment';
+import { assignThreeFactor, type SearchKnobs, type ZfitKnobs } from '../assignment';
 import type { ScoringKnobs } from '../scoring';
 import type {
 	AssignmentEvidence,
@@ -20,6 +20,7 @@ import type {
 import type { ABFeature, EngineUnit } from './types';
 import { zfitFeature } from './g5.zfit';
 import { g4ScoringFeature } from './g4.scoring';
+import { g4SearchFeature } from './g4.search';
 
 export const phantomTeeFeature = {
 	id: 'phantomTee',
@@ -112,10 +113,11 @@ export const phantomTeeUnit: EngineUnit = {
 				const merged = [...existing, ...phantoms];
 				const zfit = ctx.resolve(zfitFeature);
 				const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
+				const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 				board.set('recoveredTees', merged);
 				board.set(
 					'assignment',
-					assignThreeFactor(measurement, merged, zfit.knobs as unknown as ZfitKnobs, scoringKnobs)
+					assignThreeFactor(measurement, merged, zfit.knobs as unknown as ZfitKnobs, scoringKnobs, searchKnobs)
 				);
 			}
 		}

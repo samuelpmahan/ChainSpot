@@ -179,6 +179,43 @@
 									}
 								}
 							}
+						},
+						"search": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"assignTopRows": {
+											"type": "number",
+											"description": "window size (top-N by score) of candidate pairs per badge kept for the search (was ASSIGN_TOP_ROWS)",
+											"default": 60
+										},
+										"exchangeTopK": {
+											"type": "number",
+											"description": "top-k limit per badge for pairwise exchange optimization (was EXCHANGE_TOP_K)",
+											"default": 12
+										},
+										"maxAssignPasses": {
+											"type": "number",
+											"description": "iteration limit for the assignment optimization loop (was MAX_ASSIGN_PASSES)",
+											"default": 60
+										},
+										"recoveredTeeDedupeDistance": {
+											"type": "number",
+											"description": "minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate",
+											"default": 14
+										}
+									}
+								}
+							}
 						}
 					}
 				},

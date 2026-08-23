@@ -13,10 +13,21 @@ import { routeBadgeLegs } from './routing';
 import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, scorePair, type ScoringKnobs } from './scoring';
 
 const ZFIT_TOP_K = 80;
-const ASSIGN_TOP_ROWS = 60;
-const EXCHANGE_TOP_K = 12;
-const MAX_ASSIGN_PASSES = 60;
 const IMPROVEMENT_EPSILON = 1e-9;
+
+export interface SearchKnobs {
+	readonly assignTopRows: number;
+	readonly exchangeTopK: number;
+	readonly maxAssignPasses: number;
+	readonly recoveredTeeDedupeDistance: number;
+}
+
+export const DEFAULT_SEARCH_KNOBS: SearchKnobs = {
+	assignTopRows: 60,
+	exchangeTopK: 12,
+	maxAssignPasses: 60,
+	recoveredTeeDedupeDistance: 14
+};
 
 function recoveredTee(
 	input: RecoveredTeeInput,
@@ -190,7 +201,8 @@ export function rankScoredPairs(
 }
 
 export function selectAssignments(
-	rescoredByBadge: ReadonlyMap<string, readonly ScoredPairEvidence[]>
+	rescoredByBadge: ReadonlyMap<string, readonly ScoredPairEvidence[]>,
+	knobs: SearchKnobs = DEFAULT_SEARCH_KNOBS
 ): Map<string, ScoredPairEvidence | null> {
 	const labels = [...rescoredByBadge.keys()];
 	const margin = (label: string): number => {
@@ -222,12 +234,12 @@ export function selectAssignments(
 		const topRows = new Map(
 			labels.map((label) => [
 				label,
-				[...(rescoredByBadge.get(label) ?? [])].sort(comparePairs).slice(0, ASSIGN_TOP_ROWS)
+				[...(rescoredByBadge.get(label) ?? [])].sort(comparePairs).slice(0, knobs.assignTopRows)
 			])
 		);
 		let improved = true;
 		let guard = 0;
-		while (improved && guard++ < MAX_ASSIGN_PASSES) {
+		while (improved && guard++ < knobs.maxAssignPasses) {
 			improved = false;
 
 			for (const label of labels) {
@@ -271,8 +283,8 @@ export function selectAssignments(
 						ScoredPairEvidence | null
 					] = [currentA, currentB];
 					let bestTotal = base;
-					const rowsA = (topRows.get(labelA) ?? []).slice(0, EXCHANGE_TOP_K);
-					const rowsB = (topRows.get(labelB) ?? []).slice(0, EXCHANGE_TOP_K);
+					const rowsA = (topRows.get(labelA) ?? []).slice(0, knobs.exchangeTopK);
+					const rowsB = (topRows.get(labelB) ?? []).slice(0, knobs.exchangeTopK);
 					for (const rowA of rowsA) {
 						if (usedTees.has(rowA.raw.teeId) || usedBaskets.has(rowA.raw.basketId)) continue;
 						for (const rowB of rowsB) {
@@ -318,7 +330,8 @@ export function assignThreeFactor(
 	measurement: ThreeFactorMeasurement,
 	recoveredTees: readonly RecoveredTeeInput[] = [],
 	zfitKnobs?: ZfitKnobs,
-	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
+	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
+	searchKnobs: SearchKnobs = DEFAULT_SEARCH_KNOBS
 ): ThreeFactorAssignment {
 	const sortedRecovered = [...recoveredTees].sort(
 		(a, b) =>
@@ -329,7 +342,7 @@ export function assignThreeFactor(
 	const tees: TeeEvidence[] = [...measurement.tees];
 	let acceptedRecovered = 0;
 	for (const input of sortedRecovered) {
-		if (tees.some((tee) => Math.hypot(tee.xPx - input.xPx, tee.yPx - input.yPx) < 14)) continue;
+		if (tees.some((tee) => Math.hypot(tee.xPx - input.xPx, tee.yPx - input.yPx) < searchKnobs.recoveredTeeDedupeDistance)) continue;
 		tees.push(recoveredTee(input, acceptedRecovered++, measurement.baskets, scoringKnobs));
 	}
 	tees.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.detId.localeCompare(b.detId));
@@ -340,7 +353,7 @@ export function assignThreeFactor(
 	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
 	const byBadge = rankPairsByBadge(scoredUnranked);
 	const scoredPairs = [...byBadge.values()].flat();
-	const selected = selectAssignments(byBadge);
+	const selected = selectAssignments(byBadge, searchKnobs);
 	const assignments: AssignmentEvidence[] = [...selected.entries()]
 		.filter((entry): entry is [string, ScoredPairEvidence] => entry[1] !== null)
 		.sort(([a], [b]) => a.localeCompare(b))
