@@ -76,7 +76,8 @@ function rerouteRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
 	ribbonKnobs: RibbonKnobs,
-	routingKnobs: RoutingKnobs
+	routingKnobs: RoutingKnobs,
+	scoringKnobs: ScoringKnobs
 ): RawPairEvidence[] {
 	const rawPairs: RawPairEvidence[] = [];
 	const teePoints = tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx }));
@@ -106,7 +107,8 @@ function rerouteRawPairs(
 						legs.tees[teeIndex],
 						legs.baskets[basketIndex],
 						measurement.parameters,
-						measurement.viewport.topPx
+						measurement.viewport.topPx,
+						scoringKnobs
 					)
 				);
 			}
@@ -356,7 +358,7 @@ export function assignThreeFactor(
 	tees.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.detId.localeCompare(b.detId));
 
 	const rawPairs = acceptedRecovered > 0
-		? rerouteRawPairs(measurement, tees, ribbonKnobs, routingKnobs)
+		? rerouteRawPairs(measurement, tees, ribbonKnobs, routingKnobs, scoringKnobs)
 		: measurement.rawPairs;
 	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
 	const byBadge = rankPairsByBadge(scoredUnranked);

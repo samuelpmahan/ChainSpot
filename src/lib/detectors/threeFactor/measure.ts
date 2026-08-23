@@ -336,7 +336,8 @@ function makeRawPairs(
 	params: CorridorParams,
 	yOffsetPx: number,
 	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS,
-	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS
+	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS,
+	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): RawPairEvidence[] {
 	const teePoints = tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx }));
 	const basketPoints = baskets.map((basket) => ({ id: basket.detId, xPx: basket.tipXPx, yPx: basket.tipYPx }));
@@ -345,7 +346,7 @@ function makeRawPairs(
 		const legs = routeBadgeLegs(field, { id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx }, teePoints, basketPoints, yOffsetPx, ribbonKnobs, routingKnobs);
 		for (let teeIndex = 0; teeIndex < tees.length; teeIndex++) {
 			for (let basketIndex = 0; basketIndex < baskets.length; basketIndex++) {
-				pairs.push(makeRawPairEvidence(field, badge, tees[teeIndex], baskets[basketIndex], legs.tees[teeIndex], legs.baskets[basketIndex], params, yOffsetPx));
+				pairs.push(makeRawPairEvidence(field, badge, tees[teeIndex], baskets[basketIndex], legs.tees[teeIndex], legs.baskets[basketIndex], params, yOffsetPx, scoringKnobs));
 			}
 		}
 	}
@@ -535,6 +536,7 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stop = ctx.span('rawPairs');
 			const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
+			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const rawPairs = makeRawPairs(
 				board.get<SupportFieldEvidence>('supportField'),
 				board.get<BadgeEvidence[]>('badges'),
@@ -543,7 +545,8 @@ export const measureUnits: readonly EngineUnit[] = [
 				board.get<CorridorParams>('params'),
 				board.get<ViewportSeed>('viewport').topPx,
 				ribbonKnobs,
-				routingKnobs
+				routingKnobs,
+				scoringKnobs
 			);
 			for (const pair of rawPairs) ctx.measure('rawPairs', 'supportMin', pair.supportMin);
 			board.set('rawPairs', rawPairs);

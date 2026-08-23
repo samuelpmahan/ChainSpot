@@ -29,6 +29,10 @@ export interface ScoringKnobs {
 	readonly basketIdentityFloor: number;
 	readonly basketScoreOffset: number;
 	readonly basketScoreScale: number;
+	readonly endpointSupportSampleCount: number;
+	readonly badgeOverlapWaiverRadius: number;
+	readonly recoveredTeePrior: number;
+	readonly minWindowCells: number;
 }
 
 export const DEFAULT_SCORING_KNOBS: ScoringKnobs = {
@@ -48,7 +52,11 @@ export const DEFAULT_SCORING_KNOBS: ScoringKnobs = {
 	collinearitySigma: 2,
 	basketIdentityFloor: 0.4,
 	basketScoreOffset: 0.2,
-	basketScoreScale: 0.5
+	basketScoreScale: 0.5,
+	endpointSupportSampleCount: 3,
+	badgeOverlapWaiverRadius: 8,
+	recoveredTeePrior: 0.7,
+	minWindowCells: 3
 };
 
 /**
@@ -127,8 +135,8 @@ function weakWindow(samples: readonly number[], windowCells: number): number {
 	return worst;
 }
 
-function endpointSupport(field: SupportFieldEvidence, leg: LegEvidence, yOffsetPx: number): number {
-	const samples = leg.path.slice(-3);
+function endpointSupport(field: SupportFieldEvidence, leg: LegEvidence, yOffsetPx: number, sampleCount: number): number {
+	const samples = leg.path.slice(-sampleCount);
 	return samples.length ? samples.reduce((sum, point) => sum + supportAt(field, point, yOffsetPx), 0) / samples.length : 0;
 }
 
@@ -200,14 +208,15 @@ function overlapFactor(
 	teeLeg: LegEvidence,
 	basketLeg: LegEvidence,
 	badge: BadgeEvidence,
-	yOffsetPx: number
+	yOffsetPx: number,
+	knobs: ScoringKnobs
 ): number {
 	const badgeX = Math.round(badge.cxPx / field.scale);
 	const badgeY = Math.round((badge.cyPx - yOffsetPx) / field.scale);
 	const outsideBadgeWaiver = (point: readonly [number, number]): boolean => {
 		const x = Math.round(point[0] / field.scale);
 		const y = Math.round((point[1] - yOffsetPx) / field.scale);
-		return Math.hypot(x - badgeX, y - badgeY) > 8;
+		return Math.hypot(x - badgeX, y - badgeY) > knobs.badgeOverlapWaiverRadius;
 	};
 	const teeCells = new Set<number>();
 	for (const point of teeLeg.path) {
@@ -297,7 +306,7 @@ function zfitFactor(
 				}
 				const samples = alignedSamples(field, path, baskets, basket.detId, params, yOffsetPx, knobs);
 				const bendFactor = bendDegrees === 0 ? 1 : secondLength > 0 ? zfitKnobs.bendFactorWithSegment : zfitKnobs.bendFactorWithoutSegment;
-				best = Math.max(best, weakWindow(samples, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale))) * bendFactor * zfitKnobs.scoreMultiplier);
+				best = Math.max(best, weakWindow(samples, Math.max(knobs.minWindowCells, Math.round(params.worstWindowSrcPx / field.scale))) * bendFactor * zfitKnobs.scoreMultiplier);
 			}
 		}
 	}
@@ -312,7 +321,8 @@ export function makeRawPairEvidence(
 	teeLeg: LegEvidence,
 	basketLeg: LegEvidence,
 	params: CorridorParams,
-	yOffsetPx: number
+	yOffsetPx: number,
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): RawPairEvidence {
 	const path = canonicalPath(teeLeg, basketLeg);
 	if (!teeLeg.reachable || !basketLeg.reachable || !path.length) {
@@ -362,14 +372,14 @@ export function makeRawPairEvidence(
 		supportMean: samples.reduce((sum, value) => sum + value, 0) / samples.length,
 		supportMin: Math.min(...samples),
 		supportedFraction: samples.filter((value) => value >= params.supportTau).length / samples.length,
-		worstWindowMean: weakWindow(samples, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale))),
+		worstWindowMean: weakWindow(samples, Math.max(knobs.minWindowCells, Math.round(params.worstWindowSrcPx / field.scale))),
 		weakSpanCount,
 		weakSpanLongestPx: weakSpanLongest,
 		pathLengthPx: pathLength,
 		straightDistancePx: straight,
 		efficiency: straight > 0 ? pathLength / straight : 0,
-		endpointSupportTee: endpointSupport(field, teeLeg, yOffsetPx),
-		endpointSupportBasket: endpointSupport(field, basketLeg, yOffsetPx),
+		endpointSupportTee: endpointSupport(field, teeLeg, yOffsetPx, knobs.endpointSupportSampleCount),
+		endpointSupportBasket: endpointSupport(field, basketLeg, yOffsetPx, knobs.endpointSupportSampleCount),
 		failureReason: null
 	};
 }
@@ -388,13 +398,13 @@ export function scorePair(
 	zfitKnobs: ZfitKnobs = DEFAULT_ZFIT_KNOBS
 ): ScoredPairEvidence {
 	const aligned = alignedPairSamples(field, raw.teeLeg, raw.basketLeg, baskets, basket.detId, params, yOffsetPx, knobs);
-	const alignedWorst = weakWindow(aligned, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale)));
+	const alignedWorst = weakWindow(aligned, Math.max(knobs.minWindowCells, Math.round(params.worstWindowSrcPx / field.scale)));
 	const alignment = raw.worstWindowMean > 0 ? alignedWorst / raw.worstWindowMean : 0;
 	const zone = aligned.length && raw.supportMean > 0 ? aligned.reduce((sum, value) => sum + value, 0) / aligned.length / Math.max(raw.supportMean, 1e-6) : 0;
-	const simplePath = overlapFactor(field, raw.teeLeg, raw.basketLeg, badge, yOffsetPx);
+	const simplePath = overlapFactor(field, raw.teeLeg, raw.basketLeg, badge, yOffsetPx, knobs);
 	const geometry = geometryFactors(badge, tee, basket, knobs);
 	const basketIdentity = Math.max(knobs.basketIdentityFloor, Math.min(1, (basket.score - knobs.basketScoreOffset) / knobs.basketScoreScale));
-	const recoveredPrior = tee.tier === 'recovered' ? 0.7 : 1;
+	const recoveredPrior = tee.tier === 'recovered' ? knobs.recoveredTeePrior : 1;
 	const preliminary = alignedWorst * simplePath * geometry.teeOrientation * geometry.badgeFraction * geometry.collinearity * basketIdentity * recoveredPrior;
 	const zfit = params.zfit && allowZfit
 		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst, knobs, zfitKnobs)
