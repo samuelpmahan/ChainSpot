@@ -1,0 +1,95 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "chainspot://threeFactor-config@1",
+	"title": "threeFactor engine config",
+	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = frozen dev72 behavior.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["schema", "name"],
+	"properties": {
+		"$schema": { "type": "string" },
+		"schema": { "const": "threeFactor-config@1" },
+		"name": { "type": "string", "minLength": 1 },
+		"note": { "type": "string" },
+		"execution": {
+			"type": "array",
+			"items": {
+				"enum": [
+					"badgeStage",
+					"badges",
+					"supportField",
+					"badgeOcclusionPatch",
+					"baskets",
+					"tees",
+					"rawPairs",
+					"measurement",
+					"assignment",
+					"phantomTee"
+				]
+			},
+			"uniqueItems": true,
+			"description": "Full unit order; omit to inherit the default order."
+		},
+		"gates": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"G3": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"phantomTee": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "C01 complete-occlusion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
+							"properties": {
+								"enabled": { "type": "boolean", "default": false },
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minViableScore": {
+											"type": "number",
+											"description": "a hole whose best assignment score is at or below this counts as tee-less",
+											"default": 0
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G5": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"zfit": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
+							"properties": {
+								"enabled": { "type": "boolean", "default": false },
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"topK": {
+											"type": "number",
+											"description": "assignment rows eligible for the salvage re-score (was ZFIT_TOP_K)",
+											"default": 80
+										},
+										"alignedWorstCeiling": {
+											"type": "number",
+											"description": "skip salvage when the aligned worst-window support is already at/above this",
+											"default": 0.28
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

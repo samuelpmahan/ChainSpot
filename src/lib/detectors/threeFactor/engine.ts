@@ -8,6 +8,7 @@ import { validateExecution, type ResolvedConfig } from './config';
 import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
 import { featureById } from './features/registry';
 import { zfitFeature } from './features/g5.zfit';
+import { phantomTeeUnit } from './features/g3.phantomTee';
 import {
 	defaultKnobs,
 	nullFeatureContext,
@@ -49,7 +50,7 @@ const assignmentUnit: EngineUnit = {
 	}
 };
 
-export const ENGINE_UNITS: readonly EngineUnit[] = [...measureUnits, assignmentUnit];
+export const ENGINE_UNITS: readonly EngineUnit[] = [...measureUnits, assignmentUnit, phantomTeeUnit];
 
 export const DEFAULT_EXECUTION: readonly string[] = [...DEFAULT_MEASURE_EXECUTION, 'assignment'];
 

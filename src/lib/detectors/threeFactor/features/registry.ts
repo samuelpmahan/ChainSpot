@@ -6,8 +6,9 @@
 
 import type { ABFeature } from './types';
 import { zfitFeature } from './g5.zfit';
+import { phantomTeeFeature } from './g3.phantomTee';
 
-export const ALL_FEATURES: readonly ABFeature[] = [zfitFeature];
+export const ALL_FEATURES: readonly ABFeature[] = [zfitFeature, phantomTeeFeature];
 
 export function featureById(id: string): ABFeature | undefined {
 	return ALL_FEATURES.find((feature) => feature.id === id);

@@ -1,0 +1,22 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "phantom-tee-on",
+	"note": "C01 complete-occlusion fallback enabled: after assignment, tee-less holes get a tee synthesized at the predecessor hole's assigned basket tip, then assignment re-runs. Note the execution list gains the phantomTee unit — the order IS part of the experiment.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"supportField",
+		"badgeOcclusionPatch",
+		"baskets",
+		"tees",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"phantomTee"
+	],
+	"gates": {
+		"G3": {
+			"phantomTee": { "enabled": true, "knobs": { "minViableScore": 0 } }
+		}
+	}
+}
