@@ -21,7 +21,7 @@ case "${1:-}" in
 		;;
 	sweep)
 		shift
-		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/chainspot-lab/courseSweep.ts" "$@"
+		exec "$repo_dir/node_modules/.bin/tsx" "$repo_dir/scripts/chainspot-lab/courseLab.ts" "$@"
 		;;
 	*)
 		echo "Usage: ./lab orient <run|annotate COURSE> [--verbose] | ./lab grid <course> | ./lab sweep <course-or-image> [--gate G|--through G] [--from G] [--out DIR]" >&2
