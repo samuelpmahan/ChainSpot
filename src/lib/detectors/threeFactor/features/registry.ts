@@ -18,6 +18,7 @@ import { g1BadgesFeature } from './g1.badges';
 import { g1DigitsFeature } from './g1.digits';
 import { sharedHsvFeature } from './shared.hsv';
 import { teeFamilyFeature } from './g3.teeFamily';
+import { fourLaneSensorFeature } from './st.fourLaneSensor';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
@@ -32,7 +33,8 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g1BadgesFeature,
 	g1DigitsFeature,
 	sharedHsvFeature,
-	teeFamilyFeature
+	teeFamilyFeature,
+	fourLaneSensorFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {

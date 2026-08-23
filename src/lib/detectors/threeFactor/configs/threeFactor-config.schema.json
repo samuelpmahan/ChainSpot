@@ -695,6 +695,49 @@
 						}
 					}
 				},
+				"ST": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"fourLaneSensor": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"edgeDeltaPx": {
+											"type": "number",
+											"description": "normal-distance offset on each side of an expected rail used for inside-vs-outside grayscale lift",
+											"default": 2.5
+										},
+										"liftReference": {
+											"type": "number",
+											"description": "inside-minus-outside grayscale lift that maps to score 1.0",
+											"default": 45
+										},
+										"tangentHalfPx": {
+											"type": "number",
+											"description": "half-length in source pixels sampled along the tangent for each band observation",
+											"default": 4
+										},
+										"tangentSamples": {
+											"type": "number",
+											"description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
+											"default": 5
+										}
+									}
+								}
+							}
+						}
+					}
+				},
 				"G5": {
 					"type": "object",
 					"additionalProperties": false,
