@@ -3,10 +3,10 @@
 // engine path must reproduce it exactly. If this test fails, behavior
 // changed — that must be a conscious decision, not a side effect.
 import { describe, expect, test } from 'vitest';
-import { runThreeFactor } from '$lib/detectors/threeFactor';
-import { canonicalJson, sha256Hex } from '$lib/detectors/threeFactor/hash';
-import type { RgbaRaster } from '$lib/detect';
-import type { ThreeFactorRun } from '$lib/detectors/threeFactor';
+import { runThreeFactor } from '@chainspot/alg/detectors/threeFactor';
+import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor/hash';
+import type { RgbaRaster } from '@chainspot/alg/detect';
+import type { ThreeFactorRun } from '@chainspot/alg/detectors/threeFactor';
 
 // Deterministic synthetic scene: bright background, one dark-digit badge
 // box, a bright hollow tee ring, and a basket-ish blob — enough to push

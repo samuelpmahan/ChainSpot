@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DetectorEmission, RgbaRaster } from '$lib/detect';
-import { labEndpointDetector } from '$lib/detectors/labEndpoint';
+import type { DetectorEmission, RgbaRaster } from '@chainspot/alg/detect';
+import { labEndpointDetector } from '@chainspot/alg/detectors/labEndpoint';
 
 function raster(widthPx: number, heightPx: number): RgbaRaster {
 	const rgba = new Uint8ClampedArray(widthPx * heightPx * 4);
@@ -59,7 +59,7 @@ describe('labEndpointDetector', () => {
 
 	it('emits a basket at the sprite pole tip', async () => {
 		const image = raster(100, 100);
-		const sprite = (await import('$lib/detectors/labEndpoint/assets/basket-sprite.json')).default;
+		const sprite = (await import('@chainspot/alg/detectors/labEndpoint/assets/basket-sprite.json')).default;
 		const x0 = 20;
 		const y0 = 10;
 		for (let y = 0; y < sprite.height; y++) {

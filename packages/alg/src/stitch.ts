@@ -5,7 +5,7 @@
 // (mean absolute luma difference over the overlap, lower = better), then
 // refine at full resolution around the coarse winner.
 
-import type { GrayRaster } from '$lib/raster';
+import type { GrayRaster } from './raster';
 
 export interface StitchOffset {
 	/** Position of raster B's origin relative to raster A's origin, in A's pixels. */

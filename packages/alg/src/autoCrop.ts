@@ -8,7 +8,7 @@
 // on a line, it's chrome; the first sustained disagreement is map content.
 // The result is a proposal — the caller must get explicit user confirmation.
 
-import type { GrayRaster, CropInsets } from '$lib/raster';
+import type { GrayRaster, CropInsets } from './raster';
 
 /** Max fraction of a dimension an inset may consume. */
 const MAX_INSET_FRACTION = 0.25;

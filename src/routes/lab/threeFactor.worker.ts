@@ -1,8 +1,8 @@
 // LAB tooling: run the (heavy, synchronous) threeFactor pipeline off the main
 // thread. The algorithm itself is untouched — this is pure transport.
 // Message: a bare RgbaRaster (legacy) or { raster, config?, paramsHash? }.
-import { runThreeFactor, type ResolvedConfig } from '$lib/detectors/threeFactor';
-import type { RgbaRaster } from '$lib/detect';
+import { runThreeFactor, type ResolvedConfig } from '@chainspot/alg/detectors/threeFactor';
+import type { RgbaRaster } from '@chainspot/alg/detect';
 
 interface RunRequest {
 	readonly raster: RgbaRaster;

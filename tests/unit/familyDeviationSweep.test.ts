@@ -40,9 +40,9 @@ import {
 	canonicalJson,
 	sha256Hex,
 	type ThreeFactorRun
-} from '$lib/detectors/threeFactor';
-import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
-import familyOnConfigJson from '$lib/detectors/threeFactor/configs/family-on.json';
+} from '@chainspot/alg/detectors/threeFactor';
+import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
+import familyOnConfigJson from '@chainspot/alg/detectors/threeFactor/configs/family-on.json';
 import {
 	COURSES,
 	DASHSTRACK_VIA_ANNOTATED,

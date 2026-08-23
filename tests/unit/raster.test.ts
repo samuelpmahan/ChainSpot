@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { cropRaster, type GrayRaster } from '$lib/raster';
+import { cropRaster, type GrayRaster } from '@chainspot/alg';
 
 const raster: GrayRaster = {
 	widthPx: 4,

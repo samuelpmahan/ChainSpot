@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { proposeSharedCrop } from '$lib/autoCrop';
-import type { GrayRaster } from '$lib/raster';
+import { proposeSharedCrop } from '@chainspot/alg/autoCrop';
+import type { GrayRaster } from '@chainspot/alg';
 
 function screenshotLikeRaster(tileNumber: number, widthPx = 24, heightPx = 20): GrayRaster {
 	const gray = new Uint8Array(widthPx * heightPx);

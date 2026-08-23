@@ -1,7 +1,7 @@
 // Browser boundary for the Detector contract: original file bytes → RgbaRaster
 // with a content-addressed imageId (sha256 of the bytes).
 
-import type { RgbaRaster } from '$lib/detect';
+import type { RgbaRaster } from '@chainspot/alg/detect';
 
 export async function rgbaFromFile(file: File): Promise<RgbaRaster> {
 	const bytes = await file.arrayBuffer();

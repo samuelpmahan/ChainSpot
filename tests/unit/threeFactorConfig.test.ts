@@ -6,31 +6,31 @@ import {
 	resolveConfig,
 	runThreeFactor,
 	validateExecution
-} from '$lib/detectors/threeFactor';
-import { SEEDED_SLOTS } from '$lib/detectors/threeFactor/engine';
-import { canonicalJson, sha256Hex } from '$lib/detectors/threeFactor/hash';
-import { defaultKnobs } from '$lib/detectors/threeFactor/features/types';
-import { g4ScoringFeature } from '$lib/detectors/threeFactor/features/g4.scoring';
-import { g4SearchFeature } from '$lib/detectors/threeFactor/features/g4.search';
-import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
-import { g5RibbonFeature } from '$lib/detectors/threeFactor/features/g5.ribbon';
-import { g5RoutingFeature } from '$lib/detectors/threeFactor/features/g5.routing';
-import { g3EndpointsFeature } from '$lib/detectors/threeFactor/features/g3.endpoints';
-import { g2SpriteFeature } from '$lib/detectors/threeFactor/features/g2.sprite';
-import { g1BadgesFeature } from '$lib/detectors/threeFactor/features/g1.badges';
-import { g1DigitsFeature } from '$lib/detectors/threeFactor/features/g1.digits';
-import { sharedHsvFeature } from '$lib/detectors/threeFactor/features/shared.hsv';
-import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
-import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
-import { DEFAULT_RIBBON_KNOBS } from '$lib/detectors/threeFactor/ribbon';
-import { DEFAULT_ROUTING_KNOBS } from '$lib/detectors/threeFactor/routing';
-import { DEFAULT_ENDPOINTS_KNOBS, DEFAULT_SPRITE_KNOBS } from '$lib/detectors/threeFactor/endpoints';
-import { DEFAULT_BADGE_STAGE_KNOBS } from '$lib/detectors/threeFactor/badgeStage';
-import { DEFAULT_DIGITS_KNOBS } from '$lib/detectors/threeFactor/digits/segment';
-import { DEFAULT_HSV_KNOBS } from '$lib/detectors/threeFactor/raster';
-import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
-import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
-import type { RgbaRaster } from '$lib/detect';
+} from '@chainspot/alg/detectors/threeFactor';
+import { SEEDED_SLOTS } from '@chainspot/alg/detectors/threeFactor/engine';
+import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor/hash';
+import { defaultKnobs } from '@chainspot/alg/detectors/threeFactor/features/types';
+import { g4ScoringFeature } from '@chainspot/alg/detectors/threeFactor/features/g4.scoring';
+import { g4SearchFeature } from '@chainspot/alg/detectors/threeFactor/features/g4.search';
+import { zfitFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.zfit';
+import { g5RibbonFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.ribbon';
+import { g5RoutingFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.routing';
+import { g3EndpointsFeature } from '@chainspot/alg/detectors/threeFactor/features/g3.endpoints';
+import { g2SpriteFeature } from '@chainspot/alg/detectors/threeFactor/features/g2.sprite';
+import { g1BadgesFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.badges';
+import { g1DigitsFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.digits';
+import { sharedHsvFeature } from '@chainspot/alg/detectors/threeFactor/features/shared.hsv';
+import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '@chainspot/alg/detectors/threeFactor/scoring';
+import { DEFAULT_SEARCH_KNOBS } from '@chainspot/alg/detectors/threeFactor/assignment';
+import { DEFAULT_RIBBON_KNOBS } from '@chainspot/alg/detectors/threeFactor/ribbon';
+import { DEFAULT_ROUTING_KNOBS } from '@chainspot/alg/detectors/threeFactor/routing';
+import { DEFAULT_ENDPOINTS_KNOBS, DEFAULT_SPRITE_KNOBS } from '@chainspot/alg/detectors/threeFactor/endpoints';
+import { DEFAULT_BADGE_STAGE_KNOBS } from '@chainspot/alg/detectors/threeFactor/badgeStage';
+import { DEFAULT_DIGITS_KNOBS } from '@chainspot/alg/detectors/threeFactor/digits/segment';
+import { DEFAULT_HSV_KNOBS } from '@chainspot/alg/detectors/threeFactor/raster';
+import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
+import zfitOnJson from '@chainspot/alg/detectors/threeFactor/configs/zfit-on.json';
+import type { RgbaRaster } from '@chainspot/alg/detect';
 
 function tinyRaster(): RgbaRaster {
 	const w = 48;

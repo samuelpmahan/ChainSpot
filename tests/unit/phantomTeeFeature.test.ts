@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
-import { synthesizePhantomTees } from '$lib/detectors/threeFactor/features/g3.phantomTee';
-import { parseConfig } from '$lib/detectors/threeFactor';
-import phantomOnJson from '$lib/detectors/threeFactor/configs/phantom-tee-on.json';
+import { synthesizePhantomTees } from '@chainspot/alg/detectors/threeFactor/features/g3.phantomTee';
+import { parseConfig } from '@chainspot/alg/detectors/threeFactor';
+import phantomOnJson from '@chainspot/alg/detectors/threeFactor/configs/phantom-tee-on.json';
 import type {
 	AssignmentEvidence,
 	ThreeFactorMeasurement
-} from '$lib/detectors/threeFactor';
+} from '@chainspot/alg/detectors/threeFactor';
 
 function badge(detId: string, label: string, cx: number, cy: number) {
 	return {

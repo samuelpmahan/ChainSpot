@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_EXECUTION, parseConfig, resolveConfig } from '$lib/detectors/threeFactor';
-import sensorConfigJson from '$lib/detectors/threeFactor/configs/tbs-four-lane-sensor-on.json';
+import { DEFAULT_EXECUTION, parseConfig, resolveConfig } from '@chainspot/alg/detectors/threeFactor';
+import sensorConfigJson from '@chainspot/alg/detectors/threeFactor/configs/tbs-four-lane-sensor-on.json';
 import {
 	DEFAULT_FOUR_LANE_SENSOR_KNOBS,
 	fourLaneSensorFeature,
@@ -8,8 +8,8 @@ import {
 	sampleFourLaneBand,
 	type FourLaneOccluder,
 	type FourLaneState
-} from '$lib/detectors/threeFactor/features/st.fourLaneSensor';
-import type { RgbaImage } from '$lib/detectors/threeFactor/types';
+} from '@chainspot/alg/detectors/threeFactor/features/st.fourLaneSensor';
+import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor/types';
 
 function stripeRaster(insideGray = 95, groundGray = 50): RgbaImage {
 	const width = 48;

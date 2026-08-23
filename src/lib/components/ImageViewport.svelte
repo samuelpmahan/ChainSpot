@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { ViewportLayer, ViewportMarker } from '$lib/viewport';
-	import type { CropInsets } from '$lib/raster';
+	import type { CropInsets } from '@chainspot/alg';
 
 	import { untrack } from 'svelte';
 

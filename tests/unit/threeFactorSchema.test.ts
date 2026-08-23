@@ -5,9 +5,9 @@
 //
 //   npx vitest run tests/unit/threeFactorSchema.test.ts (prints on mismatch)
 import { describe, expect, test } from 'vitest';
-import { buildConfigJsonSchema } from '$lib/detectors/threeFactor/schema';
-import { ENGINE_UNITS } from '$lib/detectors/threeFactor';
-import checkedIn from '$lib/detectors/threeFactor/configs/threeFactor-config.schema.json';
+import { buildConfigJsonSchema } from '@chainspot/alg/detectors/threeFactor/schema';
+import { ENGINE_UNITS } from '@chainspot/alg/detectors/threeFactor';
+import checkedIn from '@chainspot/alg/detectors/threeFactor/configs/threeFactor-config.schema.json';
 
 describe('threeFactor config JSON Schema', () => {
 	test('checked-in schema matches the registry-generated one', () => {

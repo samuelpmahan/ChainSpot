@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { findBestTranslation } from '$lib/stitch';
-import type { GrayRaster } from '$lib/raster';
+import { findBestTranslation } from '@chainspot/alg/stitch';
+import type { GrayRaster } from '@chainspot/alg';
 
 function worldPixel(x: number, y: number): number {
 	return ((x * 73) ^ (y * 151) ^ (x * y * 29)) & 255;

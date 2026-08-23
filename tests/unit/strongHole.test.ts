@@ -4,7 +4,7 @@ import {
 	STRONG_DIVERGENCE_MAX,
 	type StrongHoleInput,
 	type StrongHoleVerdict
-} from '$lib/detectors/strongHole';
+} from '@chainspot/alg/detectors/strongHole';
 
 describe('evaluateStrongHoles', () => {
 	test('perfectly collinear points (tee-badge-basket in a line) â†’ divergence near 0, strong', () => {

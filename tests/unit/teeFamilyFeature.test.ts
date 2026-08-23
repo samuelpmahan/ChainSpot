@@ -7,9 +7,9 @@ import {
 	type TeeFamilyKnobs,
 	type TeeFamilyMeasure,
 	type TeeFamilyRingPoint
-} from '$lib/detectors/threeFactor/features/g3.teeFamily';
-import { parseConfig } from '$lib/detectors/threeFactor';
-import teeFamilyOnJson from '$lib/detectors/threeFactor/configs/tee-family-on.json';
+} from '@chainspot/alg/detectors/threeFactor/features/g3.teeFamily';
+import { parseConfig } from '@chainspot/alg/detectors/threeFactor';
+import teeFamilyOnJson from '@chainspot/alg/detectors/threeFactor/configs/tee-family-on.json';
 
 const KNOBS: TeeFamilyKnobs = {
 	frameAreaMin: 10,

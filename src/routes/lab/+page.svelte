@@ -4,7 +4,8 @@
 	// same vocabulary as the CLI: G1 Badges -> G2 Baskets -> G3 Tees ->
 	// G4 Tee->Badge -> G5 Path. Arrow keys scrub.
 	import { rgbaFromFile } from '$lib/rgba';
-	import { rasterFromFile, cropRaster, type CropInsets } from '$lib/raster';
+	import { rasterFromFile } from '$lib/raster';
+	import { cropRaster, type CropInsets } from '@chainspot/alg';
 	import {
 		DEFAULT_EXECUTION,
 		canonicalJson,
@@ -13,15 +14,15 @@
 		sha256Hex,
 		type ResolvedConfig,
 		type RunTrace
-	} from '$lib/detectors/threeFactor';
-	import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
+	} from '@chainspot/alg/detectors/threeFactor';
+	import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 	import TracePanel from './TracePanel.svelte';
-	import { proposeSharedCrop } from '$lib/autoCrop';
-	import { findBestTranslation } from '$lib/stitch';
-	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
-	import { purpleMassDetector } from '$lib/detectors/purpleMass';
-	import type { RgbaRaster, DetectorEmission } from '$lib/detect';
-	import type { ThreeFactorRun } from '$lib/detectors/threeFactor';
+	import { proposeSharedCrop } from '@chainspot/alg/autoCrop';
+	import { findBestTranslation } from '@chainspot/alg/stitch';
+	import { labEndpointDetector } from '@chainspot/alg/detectors/labEndpoint';
+	import { purpleMassDetector } from '@chainspot/alg/detectors/purpleMass';
+	import type { RgbaRaster, DetectorEmission } from '@chainspot/alg/detect';
+	import type { ThreeFactorRun } from '@chainspot/alg/detectors/threeFactor';
 
 	const GATES = [
 		{ id: 'G1', name: 'Badges', note: 'bright-family + dark-plate recovery; label + candidates' },

@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jpeg from 'jpeg-js';
-import type { RgbaRaster } from '$lib/detect';
+import type { RgbaRaster } from '@chainspot/alg/detect';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // tests/unit/helpers -> repo root is 3 levels up; chainspot-corpus is a

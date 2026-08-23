@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DetectorEmission, RgbaRaster } from '$lib/detect';
-import { simplifyPath, traceWalk, walkTraceDetector } from '$lib/detectors/walkTrace';
+import type { DetectorEmission, RgbaRaster } from '@chainspot/alg/detect';
+import { simplifyPath, traceWalk, walkTraceDetector } from '@chainspot/alg/detectors/walkTrace';
 
 const WALK_PURPLE = { r: 120, g: 40, b: 240 }; // hue ≈ 264°, saturated, bright
 

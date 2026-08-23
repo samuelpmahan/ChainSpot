@@ -2,19 +2,14 @@
 	import { fly } from 'svelte/transition';
 	import { loadImageFromFile, releaseImage, type LoadedImage } from '$lib/image';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
-	import {
-		cropRaster,
-		croppedObjectUrl,
-		rasterFromFile,
-		type CropInsets,
-		type GrayRaster
-	} from '$lib/raster';
-	import { proposeSharedCrop } from '$lib/autoCrop';
-	import { findBestTranslation } from '$lib/stitch';
+	import { croppedObjectUrl, rasterFromFile } from '$lib/raster';
+	import { cropRaster, type CropInsets, type GrayRaster } from '@chainspot/alg';
+	import { proposeSharedCrop } from '@chainspot/alg/autoCrop';
+	import { findBestTranslation } from '@chainspot/alg/stitch';
 	import { rgbaFromFile } from '$lib/rgba';
-	import { labEndpointDetector } from '$lib/detectors/labEndpoint';
-	import { purpleMassDetector } from '$lib/detectors/purpleMass';
-	import type { DetectorEmission } from '$lib/detect';
+	import { labEndpointDetector } from '@chainspot/alg/detectors/labEndpoint';
+	import { purpleMassDetector } from '@chainspot/alg/detectors/purpleMass';
+	import type { DetectorEmission } from '@chainspot/alg/detect';
 	import type { ViewportMarker } from '$lib/viewport';
 	import { detectCourse, type SeedBadge } from '$lib/courseDetect';
 	import {
@@ -36,8 +31,8 @@
 		type GeoBoundingBox
 	} from '$lib/satellite';
 	import { distanceFt, fitTransform, type CorrespondencePair } from '$lib/geo';
-	import { walkTraceDetector } from '$lib/detectors/walkTrace';
-	import { landingDropletDetector } from '$lib/detectors/landingDroplet';
+	import { walkTraceDetector } from '@chainspot/alg/detectors/walkTrace';
+	import { landingDropletDetector } from '@chainspot/alg/detectors/landingDroplet';
 	import { applySimilarity, fitSimilarity, matchByHoleNumber } from '$lib/registration';
 	import { setCourseMap, setMappedRound, getMappedRound } from '$lib/session';
 	import { goto } from '$app/navigation';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DetectorEmission, RgbaRaster } from '$lib/detect';
-import { measurePurpleMass, purpleMassDetector } from '$lib/detectors/purpleMass';
+import type { DetectorEmission, RgbaRaster } from '@chainspot/alg/detect';
+import { measurePurpleMass, purpleMassDetector } from '@chainspot/alg/detectors/purpleMass';
 
 function raster(widthPx = 200, heightPx = 200): RgbaRaster {
 	const rgba = new Uint8ClampedArray(widthPx * heightPx * 4);

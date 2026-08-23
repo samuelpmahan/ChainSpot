@@ -13,7 +13,7 @@ import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
-import type { RgbaRaster } from '$lib/detect';
+import type { RgbaRaster } from '@chainspot/alg/detect';
 import { autocropLikeIntake } from './intakeAutocrop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

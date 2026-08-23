@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Per-unit trace: knobs (deviations bolded), timings, exact measurement
 	// aggregates. Spatial drawables render in the parent's SVG, not here.
-	import type { RunTrace } from '$lib/detectors/threeFactor';
+	import type { RunTrace } from '@chainspot/alg/detectors/threeFactor';
 
 	let { trace }: { trace: RunTrace } = $props();
 </script>

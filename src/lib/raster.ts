@@ -1,33 +1,11 @@
 // Browser boundary for pixel access. Everything downstream (autoCrop, stitch)
-// is pure math over GrayRaster and never touches the DOM.
+// is pure math over GrayRaster and never touches the DOM — those pure types
+// and cropRaster now live in @chainspot/alg (CHSPT-82 Wave 0 ownership
+// inversion); this file keeps only the browser-bound pieces (canvas/File/
+// ImageBitmap access).
 
 import type { LoadedImage } from '$lib/image';
-
-export interface GrayRaster {
-	readonly widthPx: number;
-	readonly heightPx: number;
-	/** Row-major luma, one byte per pixel: gray[y * widthPx + x]. */
-	readonly gray: Uint8Array;
-}
-
-export interface CropInsets {
-	readonly top: number;
-	readonly right: number;
-	readonly bottom: number;
-	readonly left: number;
-}
-
-/** Pure raster crop (no DOM) — feed autoCrop-confirmed insets to stitch. */
-export function cropRaster(r: GrayRaster, insets: CropInsets): GrayRaster {
-	const w = r.widthPx - insets.left - insets.right;
-	const h = r.heightPx - insets.top - insets.bottom;
-	if (w <= 0 || h <= 0) throw new Error('insets exceed raster size');
-	const gray = new Uint8Array(w * h);
-	for (let y = 0; y < h; y++) {
-		gray.set(r.gray.subarray((y + insets.top) * r.widthPx + insets.left, (y + insets.top) * r.widthPx + insets.left + w), y * w);
-	}
-	return { widthPx: w, heightPx: h, gray };
-}
+import type { GrayRaster, CropInsets } from '@chainspot/alg';
 
 function drawToCanvas(bitmap: ImageBitmap): OffscreenCanvasRenderingContext2D {
 	const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);

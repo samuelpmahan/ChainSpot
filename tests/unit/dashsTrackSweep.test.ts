@@ -46,8 +46,8 @@ import {
 	canonicalJson,
 	sha256Hex,
 	type ThreeFactorRun
-} from '$lib/detectors/threeFactor';
-import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
+} from '@chainspot/alg/detectors/threeFactor';
+import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 import { loadDashsTrackRaster, loadDashsTrackTruth } from './helpers/dashsTrackFixture';
 
 /** Borrowed from old-stuff/scripts/toph-corpus-gate.ts:45 — see file header note. */

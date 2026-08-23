@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DetectorEmission, RgbaRaster } from '$lib/detect';
-import { findDroplets, landingDropletDetector } from '$lib/detectors/landingDroplet';
+import type { DetectorEmission, RgbaRaster } from '@chainspot/alg/detect';
+import { findDroplets, landingDropletDetector } from '@chainspot/alg/detectors/landingDroplet';
 
 const MARKER_BLUE = { r: 30, g: 90, b: 230 }; // hue ≈ 222°, saturated, bright
 const GRASS_GREEN = { r: 60, g: 160, b: 60 };

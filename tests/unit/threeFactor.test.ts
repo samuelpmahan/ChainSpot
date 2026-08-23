@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RgbaRaster, DetectorEmission } from '../../src/lib/detect';
+import type { RgbaRaster, DetectorEmission } from '@chainspot/alg/detect';
 import {
 	emitThreeFactorRun,
 	insertRecoveredEndpoints,
@@ -8,7 +8,7 @@ import {
 	THREE_FACTOR_ALGO,
 	THREE_FACTOR_ALGO_VERSION,
 	type ThreeFactorRun
-} from '../../src/lib/detectors/threeFactor';
+} from '@chainspot/alg/detectors/threeFactor';
 import type {
 	BadgeEvidence,
 	BasketEvidence,
@@ -16,7 +16,7 @@ import type {
 	SupportFieldEvidence,
 	TeeEvidence,
 	ThreeFactorMeasurement
-} from '../../src/lib/detectors/threeFactor/types';
+} from '@chainspot/alg/detectors/threeFactor/types';
 
 const FAST_PARAMS = {
 	corridorWidthPx: 24,
