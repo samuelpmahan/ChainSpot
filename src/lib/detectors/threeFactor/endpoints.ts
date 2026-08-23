@@ -242,11 +242,53 @@ export function matchBasketSprites(
 	return kept;
 }
 
-const HOLE_AREA_MIN = 10;
-const HOLE_AREA_MAX = 480;
-const HOLE_DIM_MAX = 44;
-const RING_BAND = 3;
-const RING_FRAC_MIN = 0.6;
+/**
+ * g3.endpoints knobs, threaded down as plain parameters. Covers only the
+ * TEE-related detection below (detectTeeRings/detectTeeRingsPass/
+ * collectTeePoints); the sprite constants above (SPRITE_*, BASKET_TIP_OFFSET)
+ * are g2.sprite's, a separate cluster — not touched here.
+ */
+export interface EndpointsKnobs {
+	readonly holeAreaMin: number;
+	readonly holeAreaMax: number;
+	readonly holeDimMax: number;
+	readonly ringBand: number;
+	readonly ringFracMin: number;
+	readonly dilationRadii: readonly number[];
+	readonly largeRadiiThreshold: number;
+	readonly largeRadiiAreaMin: number;
+	readonly ringMergeProximity: number;
+	readonly elongationThreshold: number;
+	readonly componentMinDim: number;
+	readonly componentMaxDim: number;
+	readonly componentMinArea: number;
+	readonly componentMaxArea: number;
+	readonly componentMinFill: number;
+	readonly componentMaxFill: number;
+	readonly teeRingDedupDistance: number;
+	readonly teeSpriteExclusionDistance: number;
+}
+
+export const DEFAULT_ENDPOINTS_KNOBS: EndpointsKnobs = {
+	holeAreaMin: 10,
+	holeAreaMax: 480,
+	holeDimMax: 44,
+	ringBand: 3,
+	ringFracMin: 0.6,
+	dilationRadii: [0, 1, 2, 3],
+	largeRadiiThreshold: 2,
+	largeRadiiAreaMin: 40,
+	ringMergeProximity: 10,
+	elongationThreshold: 1.18,
+	componentMinDim: 8,
+	componentMaxDim: 42,
+	componentMinArea: 80,
+	componentMaxArea: 350,
+	componentMinFill: 0.2,
+	componentMaxFill: 0.85,
+	teeRingDedupDistance: 12,
+	teeSpriteExclusionDistance: 24
+};
 
 /**
  * Enclosed-hole tee detection: flood the non-bright background in from the
@@ -263,16 +305,16 @@ const RING_FRAC_MIN = 0.6;
  * Detections merge across radii, preferring the smallest radius (least
  * geometric distortion). Ring brightness is verified on the raw mask.
  */
-export function detectTeeRings(bright: Mask): TeeRing[] {
+export function detectTeeRings(bright: Mask, knobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS): TeeRing[] {
 	const merged: TeeRing[] = [];
-	for (const radius of [0, 1, 2, 3]) {
+	for (const radius of knobs.dilationRadii) {
 		// Larger radii erode the measurable hole by ~radius on each side; keep
-		// the base HOLE_AREA_MIN but require the coarser passes to find
+		// the base holeAreaMin but require the coarser passes to find
 		// reasonably big holes so wall-pockets between separate glyphs don't
 		// slip in as fakes.
-		const areaMin = radius >= 2 ? 40 : HOLE_AREA_MIN;
-		for (const ring of detectTeeRingsPass(bright, radius, areaMin)) {
-			if (merged.some((m) => Math.hypot(m.cx - ring.cx, m.cy - ring.cy) < 10)) continue;
+		const areaMin = radius >= knobs.largeRadiiThreshold ? knobs.largeRadiiAreaMin : knobs.holeAreaMin;
+		for (const ring of detectTeeRingsPass(bright, radius, areaMin, knobs)) {
+			if (merged.some((m) => Math.hypot(m.cx - ring.cx, m.cy - ring.cy) < knobs.ringMergeProximity)) continue;
 			merged.push(ring);
 		}
 	}
@@ -283,7 +325,7 @@ export function detectTeeRingsPass(
 	bright: Mask,
 	wallRadius: number,
 	areaMin: number,
-	ringFracMin = RING_FRAC_MIN
+	knobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS
 ): TeeRing[] {
 	const { width, height, data: raw } = bright;
 	const n = width * height;
@@ -353,7 +395,7 @@ export function detectTeeRingsPass(
 		while (holeStack.length) {
 			const i = holeStack.pop() as number;
 			cells.push(i);
-			if (cells.length > HOLE_AREA_MAX * 4) overflow = true;
+			if (cells.length > knobs.holeAreaMax * 4) overflow = true;
 			const x = i % width;
 			const neigh = [i - 1, i + 1, i - width, i + width];
 			for (const j of neigh) {
@@ -365,7 +407,7 @@ export function detectTeeRingsPass(
 				}
 			}
 		}
-		if (overflow || cells.length < areaMin || cells.length > HOLE_AREA_MAX) continue;
+		if (overflow || cells.length < areaMin || cells.length > knobs.holeAreaMax) continue;
 		let x0 = width;
 		let x1 = -1;
 		let y0 = height;
@@ -384,7 +426,7 @@ export function detectTeeRingsPass(
 		}
 		const bw = x1 - x0 + 1;
 		const bh = y1 - y0 + 1;
-		if (bw > HOLE_DIM_MAX || bh > HOLE_DIM_MAX) continue;
+		if (bw > knobs.holeDimMax || bh > knobs.holeDimMax) continue;
 	const cx = sx / cells.length;
 	const cy = sy / cells.length;
 	// Central moments → undirected tee orientation and elongation.
@@ -408,17 +450,17 @@ export function detectTeeRingsPass(
 		const lambda2 = Math.max(trace / 2 - discriminant, 1e-6);
 		const elongation = Math.sqrt(lambda1 / lambda2);
 		const angle = (Math.atan2(2 * mxy, mxx - myy) / 2 + Math.PI) % Math.PI;
-		// Ring band: bright fraction within RING_BAND px (8-neighbor dilation)
+		// Ring band: bright fraction within ringBand px (8-neighbor dilation)
 		// of the hole itself — hugs rotated shapes, unlike a bbox band.
-		const lw = bw + 2 * RING_BAND;
-		const lh = bh + 2 * RING_BAND;
+		const lw = bw + 2 * knobs.ringBand;
+		const lh = bh + 2 * knobs.ringBand;
 		let grid = new Uint8Array(lw * lh);
 		for (const i of cells) {
-			const x = (i % width) - x0 + RING_BAND;
-			const y = (i - (i % width)) / width - y0 + RING_BAND;
+			const x = (i % width) - x0 + knobs.ringBand;
+			const y = (i - (i % width)) / width - y0 + knobs.ringBand;
 			grid[y * lw + x] = 1;
 		}
-		for (let it = 0; it < RING_BAND; it++) {
+		for (let it = 0; it < knobs.ringBand; it++) {
 			const next = new Uint8Array(grid);
 			for (let y = 0; y < lh; y++) {
 				for (let x = 0; x < lw; x++) {
@@ -443,8 +485,8 @@ export function detectTeeRingsPass(
 		for (let y = 0; y < lh; y++) {
 			for (let x = 0; x < lw; x++) {
 				if (!grid[y * lw + x]) continue;
-				const sxp = x0 - RING_BAND + x;
-				const syp = y0 - RING_BAND + y;
+				const sxp = x0 - knobs.ringBand + x;
+				const syp = y0 - knobs.ringBand + y;
 				if (sxp < 0 || sxp >= width || syp < 0 || syp >= height) continue;
 				const i = syp * width + sxp;
 				if (state[i] === 3) continue; // the hole itself
@@ -453,7 +495,7 @@ export function detectTeeRingsPass(
 			}
 		}
 		const ringFrac = ringTot ? ringOn / ringTot : 0;
-		if (ringFrac < ringFracMin) continue;
+		if (ringFrac < knobs.ringFracMin) continue;
 		out.push({
 			cx,
 			cy,
@@ -465,7 +507,7 @@ export function detectTeeRingsPass(
 			angle,
 			elongation,
 			ringFrac,
-			kind: elongation >= 1.18 ? 'tee-rect' : 'diamond'
+			kind: elongation >= knobs.elongationThreshold ? 'tee-rect' : 'diamond'
 		});
 	}
 	return out;
@@ -505,7 +547,8 @@ export interface TeePoint {
 export function collectTeePoints(
 	rings: TeeRing[],
 	components: TeeComponentLike[],
-	spriteCenters: { cx: number; cy: number }[]
+	spriteCenters: { cx: number; cy: number }[],
+	knobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS
 ): TeePoint[] {
 	const out: TeePoint[] = rings.filter((r) => r.kind === 'tee-rect').map((r) => ({
 		cx: r.cx,
@@ -516,11 +559,13 @@ export function collectTeePoints(
 	for (const c of components) {
 		const minDim = Math.min(c.bboxW, c.bboxH);
 		const maxDim = Math.max(c.bboxW, c.bboxH);
-		if (minDim < 8 || maxDim > 42) continue;
-		if (c.area < 80 || c.area > 350) continue;
-		if (c.fill < 0.2 || c.fill > 0.85) continue;
-		if (out.some((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < 12)) continue;
-		if (spriteCenters.some((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < 24)) continue;
+		if (minDim < knobs.componentMinDim || maxDim > knobs.componentMaxDim) continue;
+		if (c.area < knobs.componentMinArea || c.area > knobs.componentMaxArea) continue;
+		if (c.fill < knobs.componentMinFill || c.fill > knobs.componentMaxFill) continue;
+		// NOT the g4.scoring ringTolerance knob (coincidentally also 12) — a
+		// distinct dedup check here, tee-vs-tee, before assignment even runs.
+		if (out.some((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < knobs.teeRingDedupDistance)) continue;
+		if (spriteCenters.some((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < knobs.teeSpriteExclusionDistance)) continue;
 		out.push({ cx: c.cx, cy: c.cy, tier: 'component', component: c });
 	}
 	return out;

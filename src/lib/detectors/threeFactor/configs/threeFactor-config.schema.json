@@ -71,6 +71,118 @@
 									}
 								}
 							}
+						},
+						"endpoints": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Enclosed-hole tee-ring detection plus the bright-component fallback tier.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"holeAreaMin": {
+											"type": "number",
+											"description": "minimum enclosed dark hole area for tee detection (was HOLE_AREA_MIN)",
+											"default": 10
+										},
+										"holeAreaMax": {
+											"type": "number",
+											"description": "maximum enclosed dark hole area for tee detection (was HOLE_AREA_MAX)",
+											"default": 480
+										},
+										"holeDimMax": {
+											"type": "number",
+											"description": "maximum hole bbox dimension, width or height (was HOLE_DIM_MAX)",
+											"default": 44
+										},
+										"ringBand": {
+											"type": "number",
+											"description": "ring band width (px) for bright-fraction measurement around the hole, and the dilation radius used to grow it (was RING_BAND)",
+											"default": 3
+										},
+										"ringFracMin": {
+											"type": "number",
+											"description": "minimum bright fraction in the enclosing ring band (was RING_FRAC_MIN)",
+											"default": 0.6
+										},
+										"dilationRadii": {
+											"type": "array",
+											"description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
+											"default": [
+												0,
+												1,
+												2,
+												3
+											]
+										},
+										"largeRadiiThreshold": {
+											"type": "number",
+											"description": "dilation radius at/above which the coarser (largeRadiiAreaMin) hole-area floor applies instead of holeAreaMin (missed by the original inventory sweep — only the resulting area floor, 40, was recorded, not this threshold)",
+											"default": 2
+										},
+										"largeRadiiAreaMin": {
+											"type": "number",
+											"description": "minimum hole area required for the larger dilation radii (radius >= largeRadiiThreshold)",
+											"default": 40
+										},
+										"ringMergeProximity": {
+											"type": "number",
+											"description": "distance threshold for merging ring detections found at different dilation radii",
+											"default": 10
+										},
+										"elongationThreshold": {
+											"type": "number",
+											"description": "principal-axis elongation ratio threshold distinguishing tee-rect from diamond (near-square) hole shape",
+											"default": 1.18
+										},
+										"componentMinDim": {
+											"type": "number",
+											"description": "minimum component width or height for the bright-component tee fallback tier",
+											"default": 8
+										},
+										"componentMaxDim": {
+											"type": "number",
+											"description": "maximum component width or height for the bright-component tee fallback tier",
+											"default": 42
+										},
+										"componentMinArea": {
+											"type": "number",
+											"description": "minimum component area for the bright-component tee fallback tier",
+											"default": 80
+										},
+										"componentMaxArea": {
+											"type": "number",
+											"description": "maximum component area for the bright-component tee fallback tier",
+											"default": 350
+										},
+										"componentMinFill": {
+											"type": "number",
+											"description": "minimum component fill (area/bbox) for the bright-component tee fallback tier",
+											"default": 0.2
+										},
+										"componentMaxFill": {
+											"type": "number",
+											"description": "maximum component fill (area/bbox) for the bright-component tee fallback tier",
+											"default": 0.85
+										},
+										"teeRingDedupDistance": {
+											"type": "number",
+											"description": "distance threshold excluding a component-tee candidate near an already-accepted ring-tee (coincidentally also 12, but distinct from g4.scoring.ringTolerance — see file header)",
+											"default": 12
+										},
+										"teeSpriteExclusionDistance": {
+											"type": "number",
+											"description": "distance threshold excluding a component-tee candidate near a matched basket-sprite center",
+											"default": 24
+										}
+									}
+								}
+							}
 						}
 					}
 				},

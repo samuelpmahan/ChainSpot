@@ -15,10 +15,12 @@ import { g4SearchFeature } from '$lib/detectors/threeFactor/features/g4.search';
 import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
 import { g5RibbonFeature } from '$lib/detectors/threeFactor/features/g5.ribbon';
 import { g5RoutingFeature } from '$lib/detectors/threeFactor/features/g5.routing';
+import { g3EndpointsFeature } from '$lib/detectors/threeFactor/features/g3.endpoints';
 import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
 import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
 import { DEFAULT_RIBBON_KNOBS } from '$lib/detectors/threeFactor/ribbon';
 import { DEFAULT_ROUTING_KNOBS } from '$lib/detectors/threeFactor/routing';
+import { DEFAULT_ENDPOINTS_KNOBS } from '$lib/detectors/threeFactor/endpoints';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -143,6 +145,7 @@ describe('fallback-default mirrors', () => {
 		expect(widthsSrc).toEqual([24, 32, 40, 48, 56, 64]);
 		expect(alignmentPower).toBe(2);
 		expect(worstWindowSrcPx).toBe(90);
+		expect(DEFAULT_ENDPOINTS_KNOBS).toEqual(defaultKnobs(g3EndpointsFeature));
 	});
 });
 
@@ -187,7 +190,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('992d0935686a7d1248bdc1493c227769283f88aa1113c2f548e35a98dec89a15');
+		expect(hash).toBe('9bf5a4fd8376b1c8ae5d97c3553c2f696a71c9e043762c86953477b900ae6e4e');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

@@ -4,9 +4,11 @@ import type { ComponentStats } from './components';
 import { runBadgeStage } from './badgeStage';
 import {
 	collectTeePoints,
+	DEFAULT_ENDPOINTS_KNOBS,
 	detectTeeRings,
 	matchBasketSprites,
 	prepareSpriteTemplate,
+	type EndpointsKnobs,
 	type SpriteMatch,
 	type SpriteTemplate
 } from './endpoints';
@@ -39,6 +41,7 @@ import {
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
+import { g3EndpointsFeature } from './features/g3.endpoints';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -230,7 +233,8 @@ function makeTees(
 	sprites: readonly SpriteMatch[],
 	yOffsetPx: number,
 	ctx: FeatureContext = nullFeatureContext,
-	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
+	endpointsKnobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS
 ): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
 	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
@@ -246,7 +250,7 @@ function makeTees(
 			verdict: 'rejected',
 			reason
 		});
-	const rings = detectTeeRings(stage.brightMask).filter((ring) => {
+	const rings = detectTeeRings(stage.brightMask, endpointsKnobs).filter((ring) => {
 		if (insideBadge(ring.cx, ring.cy)) {
 			reject(ring.cx, ring.cy, 'ring inside badge bbox (+3px pad)');
 			return false;
@@ -270,7 +274,7 @@ function makeTees(
 		}
 		return true;
 	});
-	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })));
+	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })), endpointsKnobs);
 	return points
 		.map((tee) => {
 			const ring = tee.ring;
@@ -483,7 +487,8 @@ export const measureUnits: readonly EngineUnit[] = [
 			const sprites = board.get<readonly SpriteMatch[]>('sprites');
 			const { topPx } = board.get<ViewportSeed>('viewport');
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
-			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs);
+			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
+			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs, endpointsKnobs);
 			for (const tee of tees) {
 				ctx.overlay('tees', {
 					type: 'box',
