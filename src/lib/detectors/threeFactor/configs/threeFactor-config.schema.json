@@ -46,6 +46,79 @@
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
+				"G2": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"sprite": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Basket matched-filter sprite detection: coarse scan, stride-1 refinement, matching-pursuit dedupe.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"coarseStride": {
+											"type": "number",
+											"description": "pixel stride for the coarse sprite-matching scan pass (was SPRITE_COARSE_STRIDE)",
+											"default": 3
+										},
+										"coarseThreshold": {
+											"type": "number",
+											"description": "score threshold for coarse sprite-matching peaks (was SPRITE_COARSE_THRESHOLD)",
+											"default": 0.18
+										},
+										"scoreMin": {
+											"type": "number",
+											"description": "minimum score for final sprite match acceptance, after refinement (was DEFAULT_SPRITE_SCORE_MIN; coincidentally also g5.zfit.alignedWorstCeiling's value — see file header, unrelated)",
+											"default": 0.28
+										},
+										"tipOffset": {
+											"type": "number",
+											"description": "offset from basket center to the pole-tip annotation point (was BASKET_TIP_OFFSET)",
+											"default": 4
+										},
+										"coarseGateYOffset": {
+											"type": "number",
+											"description": "y offset (from the sprite top) used by the cheap coarse-pass bright-pixel gate",
+											"default": 10
+										},
+										"coarseGateXOffset": {
+											"type": "number",
+											"description": "x offset (±) used by the cheap coarse-pass bright-pixel gate",
+											"default": 4
+										},
+										"refinementRadius": {
+											"type": "number",
+											"description": "stride-1 search radius around each coarse peak during refinement (missed by the original inventory sweep)",
+											"default": 2
+										},
+										"staleScoreEpsilon": {
+											"type": "number",
+											"description": "minimum score drop, versus the live (partially-erased) mask, before a matching-pursuit candidate is treated as stale and re-scored (missed by the original inventory sweep)",
+											"default": 0.001
+										},
+										"spriteWidth": {
+											"type": "number",
+											"description": "reported basket bbox width — see file header on the coupling to the basket-sprite.json asset",
+											"default": 42
+										},
+										"spriteHeight": {
+											"type": "number",
+											"description": "reported basket bbox height — see file header on the coupling to the basket-sprite.json asset",
+											"default": 66
+										}
+									}
+								}
+							}
+						}
+					}
+				},
 				"G3": {
 					"type": "object",
 					"additionalProperties": false,

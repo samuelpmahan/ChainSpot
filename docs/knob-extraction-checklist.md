@@ -60,6 +60,16 @@ Rules:
 - A constant used in two clusters belongs to the earlier one; the later
   cluster consumes it via the same feature.
 
+## Delegation rule
+
+The extracting agent may delegate MECHANICAL subtasks (file sweeps, bulk
+renames, schema regeneration, table formatting) to cheaper subagents — but
+numbers and math are never delegated-and-trusted: every knob default, every
+threading site, and every invariant derivation must be validated against the
+source by the extracting agent itself, and independently re-checked by the
+reviewer at the gate. Two sets of eyes on every number, neither of them a
+delegate's.
+
 ## Sign-off (phase 3 — reviewer)
 
 - `grep` the touched files for surviving numeric literals; every survivor

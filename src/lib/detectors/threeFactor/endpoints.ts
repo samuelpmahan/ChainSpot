@@ -97,10 +97,47 @@ export function prepareSpriteTemplate(t: SpriteTemplate): TemplateOffsets {
 	};
 }
 
-const SPRITE_COARSE_STRIDE = 3;
-const SPRITE_COARSE_THRESHOLD = 0.18;
-const DEFAULT_SPRITE_SCORE_MIN = 0.28;
-export const BASKET_TIP_OFFSET = 4;
+/**
+ * g2.sprite knobs, threaded down as plain parameters. spriteWidth/
+ * spriteHeight (measure.ts's basket bbox) are structurally coupled to the
+ * committed basket-sprite.json template asset — see the validate() on those
+ * two knobs in features/g2.sprite.ts, which checks the configured value
+ * against the asset's actual width/height rather than letting a mismatch
+ * silently misreport the basket bbox size.
+ *
+ * NOT here: prepareSpriteTemplate's internal `sample(a, 4)` calls (its
+ * on/off subsampling stride for the coarse pass) stay a literal. That
+ * function runs once at MODULE LOAD (measure.ts's top-level
+ * `prepareSpriteTemplate(basketSpriteData)`), before any config or ctx
+ * exists — wiring it would mean recomputing the packed template per run
+ * instead of once for the process lifetime, a restructuring beyond
+ * "thread as parameter" for this commit.
+ */
+export interface SpriteKnobs {
+	readonly coarseStride: number;
+	readonly coarseThreshold: number;
+	readonly scoreMin: number;
+	readonly tipOffset: number;
+	readonly coarseGateYOffset: number;
+	readonly coarseGateXOffset: number;
+	readonly refinementRadius: number;
+	readonly staleScoreEpsilon: number;
+	readonly spriteWidth: number;
+	readonly spriteHeight: number;
+}
+
+export const DEFAULT_SPRITE_KNOBS: SpriteKnobs = {
+	coarseStride: 3,
+	coarseThreshold: 0.18,
+	scoreMin: 0.28,
+	tipOffset: 4,
+	coarseGateYOffset: 10,
+	coarseGateXOffset: 4,
+	refinementRadius: 2,
+	staleScoreEpsilon: 1e-3,
+	spriteWidth: 42,
+	spriteHeight: 66
+};
 
 /**
  * Matched filter for the fixed basket sprite over the bright mask.
@@ -112,9 +149,9 @@ export const BASKET_TIP_OFFSET = 4;
 export function matchBasketSprites(
 	bright: Mask,
 	template: TemplateOffsets,
-	options?: { scoreMin?: number }
+	knobs: SpriteKnobs = DEFAULT_SPRITE_KNOBS
 ): SpriteMatch[] {
-	const scoreMin = options?.scoreMin ?? DEFAULT_SPRITE_SCORE_MIN;
+	const scoreMin = knobs.scoreMin;
 	const { width, height, data } = bright;
 	const { w: tw, h: th } = template;
 	const maxX = width - tw;
@@ -151,22 +188,22 @@ export function matchBasketSprites(
 
 	// Coarse pass.
 	const peaks: { x: number; y: number; s: number }[] = [];
-	for (let y = 0; y <= maxY; y += SPRITE_COARSE_STRIDE) {
-		for (let x = 0; x <= maxX; x += SPRITE_COARSE_STRIDE) {
+	for (let y = 0; y <= maxY; y += knobs.coarseStride) {
+		for (let x = 0; x <= maxX; x += knobs.coarseStride) {
 			// Cheap gate: the sprite's broad top must have bright pixels.
-			const gy = y + 10;
+			const gy = y + knobs.coarseGateYOffset;
 			const g = gy * width + x + tw / 2;
-			if (!data[g] && !data[g - 4] && !data[g + 4]) continue;
+			if (!data[g] && !data[g - knobs.coarseGateXOffset] && !data[g + knobs.coarseGateXOffset]) continue;
 			const { s } = evalAt(x, y, template.onSample, template.offSample);
-			if (s >= SPRITE_COARSE_THRESHOLD) peaks.push({ x, y, s });
+			if (s >= knobs.coarseThreshold) peaks.push({ x, y, s });
 		}
 	}
 	// Refine each coarse peak in a stride-1 neighborhood with the full template.
 	const refined: SpriteMatch[] = [];
 	for (const p of peaks) {
 		let best: SpriteMatch | null = null;
-		for (let dy = -2; dy <= 2; dy++) {
-			for (let dx = -2; dx <= 2; dx++) {
+		for (let dy = -knobs.refinementRadius; dy <= knobs.refinementRadius; dy++) {
+			for (let dx = -knobs.refinementRadius; dx <= knobs.refinementRadius; dx++) {
 				const x = p.x + dx;
 				const y = p.y + dy;
 				if (x < 0 || y < 0 || x > maxX || y > maxY) continue;
@@ -178,7 +215,7 @@ export function matchBasketSprites(
 						cx: x + tw / 2,
 						cy: y + th / 2,
 						tipX: x + tw / 2,
-						tipY: y + th + BASKET_TIP_OFFSET,
+						tipY: y + th + knobs.tipOffset,
 						onFrac: onF,
 						offFrac: offF,
 						score: s
@@ -220,7 +257,7 @@ export function matchBasketSprites(
 	while (pool.length) {
 		const m = pool.pop() as SpriteMatch;
 		const s = evalLive(m.x, m.y);
-		if (s < m.score - 1e-3) {
+		if (s < m.score - knobs.staleScoreEpsilon) {
 			// Stale — some accepted sprite claimed part of it. Re-insert.
 			if (s >= scoreMin) {
 				const updated = { ...m, score: s };
@@ -245,8 +282,8 @@ export function matchBasketSprites(
 /**
  * g3.endpoints knobs, threaded down as plain parameters. Covers only the
  * TEE-related detection below (detectTeeRings/detectTeeRingsPass/
- * collectTeePoints); the sprite constants above (SPRITE_*, BASKET_TIP_OFFSET)
- * are g2.sprite's, a separate cluster — not touched here.
+ * collectTeePoints); the sprite matched-filter knobs above (SpriteKnobs /
+ * matchBasketSprites) are g2.sprite's, a separate cluster.
  */
 export interface EndpointsKnobs {
 	readonly holeAreaMin: number;

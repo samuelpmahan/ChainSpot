@@ -5,10 +5,12 @@ import { runBadgeStage } from './badgeStage';
 import {
 	collectTeePoints,
 	DEFAULT_ENDPOINTS_KNOBS,
+	DEFAULT_SPRITE_KNOBS,
 	detectTeeRings,
 	matchBasketSprites,
 	prepareSpriteTemplate,
 	type EndpointsKnobs,
+	type SpriteKnobs,
 	type SpriteMatch,
 	type SpriteTemplate
 } from './endpoints';
@@ -42,6 +44,7 @@ import { g4ScoringFeature } from './features/g4.scoring';
 import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { g3EndpointsFeature } from './features/g3.endpoints';
+import { g2SpriteFeature } from './features/g2.sprite';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -212,12 +215,16 @@ function makeBadges(stage: ReturnType<typeof runBadgeStage>, yOffsetPx: number):
 	});
 }
 
-function makeBaskets(sprites: readonly SpriteMatch[], yOffsetPx: number): BasketEvidence[] {
+function makeBaskets(
+	sprites: readonly SpriteMatch[],
+	yOffsetPx: number,
+	knobs: SpriteKnobs = DEFAULT_SPRITE_KNOBS
+): BasketEvidence[] {
 	return [...sprites]
 		.sort((a, b) => a.y - b.y || a.x - b.x || b.score - a.score)
 		.map((sprite, index) => ({
 			detId: `basket-${index}`,
-			bbox: [sprite.x, sprite.y + yOffsetPx, 42, 66] as const,
+			bbox: [sprite.x, sprite.y + yOffsetPx, knobs.spriteWidth, knobs.spriteHeight] as const,
 			centerXPx: sprite.cx,
 			centerYPx: sprite.cy + yOffsetPx,
 			tipXPx: sprite.tipX,
@@ -458,8 +465,9 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stop = ctx.span('baskets');
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
 			const { topPx } = board.get<ViewportSeed>('viewport');
-			const sprites = matchBasketSprites(stage.brightMask, basketTemplate);
-			const baskets = makeBaskets(sprites, topPx);
+			const spriteKnobs = ctx.resolve(g2SpriteFeature).knobs as unknown as SpriteKnobs;
+			const sprites = matchBasketSprites(stage.brightMask, basketTemplate, spriteKnobs);
+			const baskets = makeBaskets(sprites, topPx, spriteKnobs);
 			for (const basket of baskets) {
 				ctx.overlay('baskets', {
 					type: 'box',
