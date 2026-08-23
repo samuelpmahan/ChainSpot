@@ -122,6 +122,35 @@ export function validateExecution(
 	}
 }
 
+/**
+ * Cross-feature invariant: routing.ts's `flood` uses a bucketed priority
+ * queue (ring buffer of `ring` buckets, each `quantum` wide). Correctness
+ * requires `ring * quantum` to exceed the maximum possible single-step edge
+ * weight, or a relaxation's target bucket wraps around the ring and
+ * collides with an already-drained bucket — corrupting distances silently
+ * instead of erroring. The max edge weight is `(1 + costMultiplier) *
+ * Math.SQRT2` (worst-case local cost at zero support, times the diagonal
+ * step length; see ribbon.ts buildSupportCost / routing.ts STEP). A single
+ * knob's validate() can't see another feature's resolved value, so this is
+ * enforced here instead — fail at config-resolve time, not at runtime.
+ */
+function validateRoutingRingQuantum(features: Readonly<Record<string, ResolvedFeature>>): void {
+	const routing = features['routing'];
+	const ribbon = features['ribbon'];
+	if (!routing || !ribbon) return;
+	const quantum = routing.knobs['quantum'] as number;
+	const ring = routing.knobs['ring'] as number;
+	const costMultiplier = ribbon.knobs['costMultiplier'] as number;
+	const maxEdgeWeight = (1 + costMultiplier) * Math.SQRT2;
+	if (ring * quantum <= maxEdgeWeight) {
+		fail(
+			`routing: ring (${ring}) * quantum (${quantum}) = ${ring * quantum} must exceed the maximum ` +
+				`possible single-step edge weight (~${maxEdgeWeight.toFixed(3)}, from ribbon.costMultiplier=` +
+				`${costMultiplier}) — otherwise the bucket queue wraps and silently corrupts routing distances.`
+		);
+	}
+}
+
 /** Merge registry defaults with the config's deviations. */
 export function resolveConfig(config: ThreeFactorConfig, defaultExecution: readonly string[]): ResolvedConfig {
 	const features: Record<string, ResolvedFeature> = {};
@@ -132,6 +161,7 @@ export function resolveConfig(config: ThreeFactorConfig, defaultExecution: reado
 			knobs: { ...defaultKnobs(feature), ...(deviation?.knobs ?? {}) }
 		};
 	}
+	validateRoutingRingQuantum(features);
 	return {
 		name: config.name,
 		execution: config.execution ?? defaultExecution,

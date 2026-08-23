@@ -4,8 +4,30 @@ import { buildSupportCost, DEFAULT_RIBBON_KNOBS, type RibbonKnobs } from './ribb
 const DX = [-1, 0, 1, -1, 1, -1, 0, 1];
 const DY = [-1, -1, -1, 0, 0, 1, 1, 1];
 const STEP = [Math.SQRT2, 1, Math.SQRT2, 1, 1, Math.SQRT2, 1, Math.SQRT2];
-const QUANTUM = 0.125;
-const RING = 64;
+
+/**
+ * g5.routing knobs, threaded down as plain parameters. quantum/ring are the
+ * bucketed priority queue's geometry: correctness requires
+ * `ring * quantum` to exceed the maximum possible single-step edge weight
+ * (`(1 + ribbon.costMultiplier) * Math.SQRT2`), or bucket indices wrap and
+ * silently corrupt distances instead of erroring. That cross-feature
+ * relationship can't live in a single knob's validate() (which only sees
+ * its own value), so it's enforced in config.ts's resolveConfig instead —
+ * see validateRoutingRingQuantum there.
+ */
+export interface RoutingKnobs {
+	readonly quantum: number;
+	readonly ring: number;
+	readonly seedCostClamp: number;
+	readonly seedClampRadiusCells: number;
+}
+
+export const DEFAULT_ROUTING_KNOBS: RoutingKnobs = {
+	quantum: 0.125,
+	ring: 64,
+	seedCostClamp: 1.4,
+	seedClampRadiusCells: 6
+};
 
 export interface RoutePoint {
 	readonly id: string;
@@ -18,7 +40,12 @@ interface Flood {
 	readonly previous: Int32Array;
 }
 
-function flood(field: SupportFieldEvidence, source: RoutePoint, ribbonKnobs: RibbonKnobs): Flood {
+function flood(
+	field: SupportFieldEvidence,
+	source: RoutePoint,
+	ribbonKnobs: RibbonKnobs,
+	routingKnobs: RoutingKnobs
+): Flood {
 	const cost = buildSupportCost(field, ribbonKnobs);
 	const size = field.width * field.height;
 	const distance = new Float64Array(size).fill(Infinity);
@@ -27,22 +54,23 @@ function flood(field: SupportFieldEvidence, source: RoutePoint, ribbonKnobs: Rib
 	const local = new Float32Array(cost);
 	const sx = Math.max(0, Math.min(field.width - 1, Math.round(source.xPx / field.scale)));
 	const sy = Math.max(0, Math.min(field.height - 1, Math.round(source.yPx / field.scale)));
-	for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
-		if (dx * dx + dy * dy > 36) continue;
+	const seedRadius = routingKnobs.seedClampRadiusCells;
+	for (let dy = -seedRadius; dy <= seedRadius; dy++) for (let dx = -seedRadius; dx <= seedRadius; dx++) {
+		if (dx * dx + dy * dy > seedRadius * seedRadius) continue;
 		const x = sx + dx;
 		const y = sy + dy;
 		if (x < 0 || y < 0 || x >= field.width || y >= field.height) continue;
 		const cell = y * field.width + x;
-		if (local[cell] > 1.4) local[cell] = 1.4;
+		if (local[cell] > routingKnobs.seedCostClamp) local[cell] = routingKnobs.seedCostClamp;
 	}
-	const queues: number[][] = Array.from({ length: RING }, () => []);
+	const queues: number[][] = Array.from({ length: routingKnobs.ring }, () => []);
 	const seed = sy * field.width + sx;
 	distance[seed] = 0;
 	queues[0].push(seed);
 	let pending = 1;
 	let cursor = 0;
 	while (pending > 0) {
-		const queue = queues[cursor % RING];
+		const queue = queues[cursor % routingKnobs.ring];
 		if (!queue.length) {
 			cursor++;
 			continue;
@@ -50,9 +78,9 @@ function flood(field: SupportFieldEvidence, source: RoutePoint, ribbonKnobs: Rib
 		const current = queue.pop() as number;
 		pending--;
 		if (done[current]) continue;
-		const scheduled = Math.floor(distance[current] / QUANTUM);
+		const scheduled = Math.floor(distance[current] / routingKnobs.quantum);
 		if (scheduled > cursor) {
-			queues[scheduled % RING].push(current);
+			queues[scheduled % routingKnobs.ring].push(current);
 			pending++;
 			continue;
 		}
@@ -69,7 +97,7 @@ function flood(field: SupportFieldEvidence, source: RoutePoint, ribbonKnobs: Rib
 			if (candidate < distance[next]) {
 				distance[next] = candidate;
 				previous[next] = current;
-				queues[Math.floor(candidate / QUANTUM) % RING].push(next);
+				queues[Math.floor(candidate / routingKnobs.quantum) % routingKnobs.ring].push(next);
 				pending++;
 			}
 		}
@@ -112,9 +140,10 @@ export function routeBadgeLegs(
 	tees: readonly RoutePoint[],
 	baskets: readonly RoutePoint[],
 	yOffsetPx: number,
-	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
+	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS,
+	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS
 ): { tees: readonly LegEvidence[]; baskets: readonly LegEvidence[] } {
-	const flooded = flood(field, { ...badge, yPx: badge.yPx - yOffsetPx }, ribbonKnobs);
+	const flooded = flood(field, { ...badge, yPx: badge.yPx - yOffsetPx }, ribbonKnobs, routingKnobs);
 	return {
 		tees: tees.map((tee) => pathFor(field, flooded, tee, yOffsetPx)),
 		baskets: baskets.map((basket) => pathFor(field, flooded, basket, yOffsetPx))

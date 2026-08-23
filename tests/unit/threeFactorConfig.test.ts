@@ -14,9 +14,11 @@ import { g4ScoringFeature } from '$lib/detectors/threeFactor/features/g4.scoring
 import { g4SearchFeature } from '$lib/detectors/threeFactor/features/g4.search';
 import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
 import { g5RibbonFeature } from '$lib/detectors/threeFactor/features/g5.ribbon';
+import { g5RoutingFeature } from '$lib/detectors/threeFactor/features/g5.routing';
 import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
 import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
 import { DEFAULT_RIBBON_KNOBS } from '$lib/detectors/threeFactor/ribbon';
+import { DEFAULT_ROUTING_KNOBS } from '$lib/detectors/threeFactor/routing';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -123,6 +125,40 @@ describe('fallback-default mirrors', () => {
 		expect(DEFAULT_RIBBON_KNOBS).toEqual(ribbonFunctionKnobDefaults);
 		expect(fieldScale).toBe(3);
 		expect(supportTau).toBe(0.5);
+		// Same split for g5.routing: quantum/ring/seedCostClamp/
+		// seedClampRadiusCells are routing.ts-function-parameter knobs;
+		// corridorWidthPx/orientations/widthsSrc/alignmentPower/
+		// worstWindowSrcPx ride CorridorParams instead.
+		const {
+			corridorWidthPx,
+			orientations,
+			widthsSrc,
+			alignmentPower,
+			worstWindowSrcPx,
+			...routingFunctionKnobDefaults
+		} = defaultKnobs(g5RoutingFeature) as Record<string, unknown>;
+		expect(DEFAULT_ROUTING_KNOBS).toEqual(routingFunctionKnobDefaults);
+		expect(corridorWidthPx).toBe(37);
+		expect(orientations).toBe(12);
+		expect(widthsSrc).toEqual([24, 32, 40, 48, 56, 64]);
+		expect(alignmentPower).toBe(2);
+		expect(worstWindowSrcPx).toBe(90);
+	});
+});
+
+describe('validateRoutingRingQuantum (g5.routing / g5.ribbon cross-feature invariant)', () => {
+	test('default ring/quantum/costMultiplier combination resolves cleanly', () => {
+		expect(() => resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION)).not.toThrow();
+	});
+
+	test('a ring/quantum pair too small for the max edge weight fails at resolve time', () => {
+		const base = { schema: 'threeFactor-config@1', name: 'x' };
+		expect(() =>
+			resolveConfig(
+				parseConfig({ ...base, gates: { G5: { routing: { knobs: { ring: 2 } } } } }),
+				DEFAULT_EXECUTION
+			)
+		).toThrow(/ring \(2\) \* quantum/);
 	});
 });
 
@@ -151,7 +187,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('0b4beffcd99cc710ba39704160ca03087f480144104cbdf9a512ee33a9ee67b3');
+		expect(hash).toBe('992d0935686a7d1248bdc1493c227769283f88aa1113c2f548e35a98dec89a15');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

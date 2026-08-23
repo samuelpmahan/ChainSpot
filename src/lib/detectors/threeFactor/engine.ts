@@ -5,6 +5,7 @@
 
 import { assignThreeFactor, type SearchKnobs } from './assignment';
 import type { RibbonKnobs } from './ribbon';
+import type { RoutingKnobs } from './routing';
 import type { ScoringKnobs, ZfitKnobs } from './scoring';
 import { validateExecution, type ResolvedConfig } from './config';
 import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
@@ -13,6 +14,7 @@ import { zfitFeature } from './features/g5.zfit';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g4SearchFeature } from './features/g4.search';
 import { g5RibbonFeature } from './features/g5.ribbon';
+import { g5RoutingFeature } from './features/g5.routing';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import {
 	defaultKnobs,
@@ -49,7 +51,16 @@ const assignmentUnit: EngineUnit = {
 		const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 		const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
-		const assignment = assignThreeFactor(measurement, recovered, zfitKnobs, scoringKnobs, searchKnobs, ribbonKnobs);
+		const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
+		const assignment = assignThreeFactor(
+			measurement,
+			recovered,
+			zfitKnobs,
+			scoringKnobs,
+			searchKnobs,
+			ribbonKnobs,
+			routingKnobs
+		);
 		for (const own of assignment.assignments) {
 			ctx.measure('assignment', 'score', own.score);
 		}
@@ -161,6 +172,25 @@ export function createTraceContext(resolved: ResolvedConfig, paramsHash: string)
 	};
 }
 
+/**
+ * Injects a baseline feature's knob value into ThreeFactorParams at the
+ * key it already rides (measure.ts's makeParameters), when the caller
+ * hasn't set that param explicitly. Shared by every baseline feature whose
+ * knobs ride CorridorParams instead of a function parameter of their own
+ * (g5.ribbon's fieldScale/supportTau, g5.routing's corridorWidthPx/
+ * orientations/widthsSrc/alignmentPower/worstWindowSrcPx) — precedence is
+ * caller-explicit param > config knob > frozen default.
+ */
+function bridgeParam<K extends keyof ThreeFactorParams>(
+	params: ThreeFactorParams | undefined,
+	key: K,
+	state: ResolvedFeature | undefined,
+	knobName: string
+): ThreeFactorParams | undefined {
+	if (!state || params?.[key] !== undefined) return params;
+	return { ...(params ?? {}), [key]: state.knobs[knobName] } as ThreeFactorParams;
+}
+
 export interface EngineResult {
 	readonly measurement: ThreeFactorMeasurement;
 	readonly assignment: ThreeFactorAssignment;
@@ -189,19 +219,19 @@ export function runEngine(
 		? { ...(params ?? {}), zfit: true }
 		: params;
 
-	// Same bridge for g5.ribbon's fieldScale/supportTau: these are baseline
-	// knobs (always apply) but already ride CorridorParams via
-	// measure.ts's makeParameters rather than a ribbon.ts function
-	// parameter, so a config deviation has to be injected here — same
-	// silent-drop failure mode the zfit bridge above exists to avoid. Only
-	// fills in when the caller hasn't already set the param explicitly.
+	// Same bridge for baseline features whose knobs ride CorridorParams
+	// rather than a function parameter of their own — see bridgeParam's doc
+	// comment. Only fills in when the caller hasn't already set the param.
 	const ribbonState = resolved?.features['ribbon'];
-	if (ribbonState && effectiveParams?.fieldScale === undefined) {
-		effectiveParams = { ...(effectiveParams ?? {}), fieldScale: ribbonState.knobs['fieldScale'] as number };
-	}
-	if (ribbonState && effectiveParams?.supportTau === undefined) {
-		effectiveParams = { ...(effectiveParams ?? {}), supportTau: ribbonState.knobs['supportTau'] as number };
-	}
+	effectiveParams = bridgeParam(effectiveParams, 'fieldScale', ribbonState, 'fieldScale');
+	effectiveParams = bridgeParam(effectiveParams, 'supportTau', ribbonState, 'supportTau');
+
+	const routingState = resolved?.features['routing'];
+	effectiveParams = bridgeParam(effectiveParams, 'corridorWidthPx', routingState, 'corridorWidthPx');
+	effectiveParams = bridgeParam(effectiveParams, 'orientations', routingState, 'orientations');
+	effectiveParams = bridgeParam(effectiveParams, 'widthsSrc', routingState, 'widthsSrc');
+	effectiveParams = bridgeParam(effectiveParams, 'alignmentPower', routingState, 'alignmentPower');
+	effectiveParams = bridgeParam(effectiveParams, 'worstWindowSrcPx', routingState, 'worstWindowSrcPx');
 
 	const board = createBoard();
 	seedBoard(board, image, effectiveParams);

@@ -13,7 +13,7 @@ import {
 import { predictProbs, type LogisticModel } from './digits/logisticInference';
 import { readCourseBadges, type BadgeReading, type DigitScorer } from './digits/readBadges';
 import { computeRibbonSupport, DEFAULT_RIBBON_KNOBS, patchBadgeOcclusion, type RibbonKnobs } from './ribbon';
-import { routeBadgeLegs } from './routing';
+import { DEFAULT_ROUTING_KNOBS, routeBadgeLegs, type RoutingKnobs } from './routing';
 import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, type ScoringKnobs } from './scoring';
 import { detectScreenChromeRegions, pointInScreenChrome } from './screenChrome';
 import type {
@@ -38,6 +38,7 @@ import {
 } from './features/types';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g5RibbonFeature } from './features/g5.ribbon';
+import { g5RoutingFeature } from './features/g5.routing';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -312,13 +313,14 @@ function makeRawPairs(
 	baskets: readonly BasketEvidence[],
 	params: CorridorParams,
 	yOffsetPx: number,
-	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
+	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS,
+	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS
 ): RawPairEvidence[] {
 	const teePoints = tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx }));
 	const basketPoints = baskets.map((basket) => ({ id: basket.detId, xPx: basket.tipXPx, yPx: basket.tipYPx }));
 	const pairs: RawPairEvidence[] = [];
 	for (const badge of badges) {
-		const legs = routeBadgeLegs(field, { id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx }, teePoints, basketPoints, yOffsetPx, ribbonKnobs);
+		const legs = routeBadgeLegs(field, { id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx }, teePoints, basketPoints, yOffsetPx, ribbonKnobs, routingKnobs);
 		for (let teeIndex = 0; teeIndex < tees.length; teeIndex++) {
 			for (let basketIndex = 0; basketIndex < baskets.length; basketIndex++) {
 				pairs.push(makeRawPairEvidence(field, badge, tees[teeIndex], baskets[basketIndex], legs.tees[teeIndex], legs.baskets[basketIndex], params, yOffsetPx));
@@ -504,6 +506,7 @@ export const measureUnits: readonly EngineUnit[] = [
 		run(board, ctx) {
 			const stop = ctx.span('rawPairs');
 			const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
+			const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
 			const rawPairs = makeRawPairs(
 				board.get<SupportFieldEvidence>('supportField'),
 				board.get<BadgeEvidence[]>('badges'),
@@ -511,7 +514,8 @@ export const measureUnits: readonly EngineUnit[] = [
 				board.get<BasketEvidence[]>('baskets'),
 				board.get<CorridorParams>('params'),
 				board.get<ViewportSeed>('viewport').topPx,
-				ribbonKnobs
+				ribbonKnobs,
+				routingKnobs
 			);
 			for (const pair of rawPairs) ctx.measure('rawPairs', 'supportMin', pair.supportMin);
 			board.set('rawPairs', rawPairs);

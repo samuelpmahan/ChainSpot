@@ -10,6 +10,7 @@
 
 import { assignThreeFactor, type SearchKnobs } from '../assignment';
 import type { RibbonKnobs } from '../ribbon';
+import type { RoutingKnobs } from '../routing';
 import type { ScoringKnobs, ZfitKnobs } from '../scoring';
 import type {
 	AssignmentEvidence,
@@ -23,6 +24,7 @@ import { zfitFeature } from './g5.zfit';
 import { g4ScoringFeature } from './g4.scoring';
 import { g4SearchFeature } from './g4.search';
 import { g5RibbonFeature } from './g5.ribbon';
+import { g5RoutingFeature } from './g5.routing';
 
 export const phantomTeeFeature = {
 	id: 'phantomTee',
@@ -117,10 +119,19 @@ export const phantomTeeUnit: EngineUnit = {
 				const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 				const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 				const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
+				const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
 				board.set('recoveredTees', merged);
 				board.set(
 					'assignment',
-					assignThreeFactor(measurement, merged, zfit.knobs as unknown as ZfitKnobs, scoringKnobs, searchKnobs, ribbonKnobs)
+					assignThreeFactor(
+						measurement,
+						merged,
+						zfit.knobs as unknown as ZfitKnobs,
+						scoringKnobs,
+						searchKnobs,
+						ribbonKnobs,
+						routingKnobs
+					)
 				);
 			}
 		}

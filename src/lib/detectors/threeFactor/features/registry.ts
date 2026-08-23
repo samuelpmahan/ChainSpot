@@ -10,13 +10,15 @@ import { phantomTeeFeature } from './g3.phantomTee';
 import { g4ScoringFeature } from './g4.scoring';
 import { g4SearchFeature } from './g4.search';
 import { g5RibbonFeature } from './g5.ribbon';
+import { g5RoutingFeature } from './g5.routing';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
 	phantomTeeFeature,
 	g4ScoringFeature,
 	g4SearchFeature,
-	g5RibbonFeature
+	g5RibbonFeature,
+	g5RoutingFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {

@@ -426,6 +426,75 @@
 									}
 								}
 							}
+						},
+						"routing": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Bucketed-priority-queue pathfinding geometry plus the corridor/route-search parameters.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"quantum": {
+											"type": "number",
+											"description": "distance quantum (bucket width) for the bucketed priority queue in pathfinding (was QUANTUM)",
+											"default": 0.125
+										},
+										"ring": {
+											"type": "number",
+											"description": "ring buffer size (bucket count) for the pathfinding queue (was RING); see validateRoutingRingQuantum for the cross-feature relationship to quantum and ribbon.costMultiplier",
+											"default": 64
+										},
+										"seedCostClamp": {
+											"type": "number",
+											"description": "local cost cap applied to the seed neighborhood in pathfinding",
+											"default": 1.4
+										},
+										"seedClampRadiusCells": {
+											"type": "number",
+											"description": "radius (field cells) of the seed neighborhood that gets seedCostClamp applied (missed by the original inventory sweep — only the clamp value was recorded, not this radius)",
+											"default": 6
+										},
+										"corridorWidthPx": {
+											"type": "number",
+											"description": "corridor width in pixels for leg search (was measure.ts DEFAULT_CORRIDOR_WIDTH; rides CorridorParams, see file header)",
+											"default": 37
+										},
+										"orientations": {
+											"type": "number",
+											"description": "number of angle orientations sampled for routing (was measure.ts DEFAULT_ORIENTATIONS; rides CorridorParams, see file header)",
+											"default": 12
+										},
+										"widthsSrc": {
+											"type": "array",
+											"description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
+											"default": [
+												24,
+												32,
+												40,
+												48,
+												56,
+												64
+											]
+										},
+										"alignmentPower": {
+											"type": "number",
+											"description": "alignment weighting power for routing (was measure.ts DEFAULT_ALIGNMENT_POWER; rides CorridorParams, see file header)",
+											"default": 2
+										},
+										"worstWindowSrcPx": {
+											"type": "number",
+											"description": "worst-case search window size in pixels (was measure.ts DEFAULT_WORST_WINDOW; rides CorridorParams, see file header)",
+											"default": 90
+										}
+									}
+								}
+							}
 						}
 					}
 				}
