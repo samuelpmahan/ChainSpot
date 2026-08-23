@@ -7,6 +7,9 @@ import type {
 	UiObjectDetected
 } from '../../detect';
 import { assignThreeFactor } from './assignment';
+import { runEngine } from './engine';
+import type { ResolvedConfig } from './config';
+import type { RunTrace } from './features/types';
 import { measureThreeFactor as measureStage } from './measure';
 import {
 	THREE_FACTOR_ALGO,
@@ -36,12 +39,18 @@ export type {
 
 export interface ThreeFactorDetectorParams extends ThreeFactorParams {
 	readonly recoveredTees?: readonly RecoveredTeeInput[];
+	/** resolved engine config; omit for frozen defaults (no trace collected) */
+	readonly config?: ResolvedConfig;
+	/** sha256 of the resolved config's canonical JSON — caller-computed */
+	readonly paramsHash?: string;
 }
 
 export interface ThreeFactorRun {
 	readonly imageId: string;
 	readonly measurement: ThreeFactorMeasurement;
 	readonly assignment: ThreeFactorAssignment;
+	readonly trace?: RunTrace;
+	readonly paramsHash?: string;
 }
 
 function clamp01(value: number): number {
@@ -91,10 +100,23 @@ export function runThreeFactor(
 	image: RgbaRaster,
 	params: ThreeFactorDetectorParams = {}
 ): ThreeFactorRun {
-	const measurement = measureThreeFactor(image, params);
-	const assignment = insertRecoveredEndpoints(measurement, params.recoveredTees ?? []);
-	return { imageId: image.imageId, measurement, assignment };
+	const stageImage = toStageImage(image);
+	validateParams(params);
+	const { config, paramsHash, recoveredTees, ...stageParams } = params;
+	const result = runEngine(stageImage, stageParams, recoveredTees ?? [], config, paramsHash);
+	return {
+		imageId: image.imageId,
+		measurement: result.measurement,
+		assignment: result.assignment,
+		...(result.trace ? { trace: result.trace } : {}),
+		...(paramsHash ? { paramsHash } : {})
+	};
 }
+
+export { DEFAULT_EXECUTION, ENGINE_UNITS } from './engine';
+export { parseConfig, resolveConfig, validateExecution, type ResolvedConfig, type ThreeFactorConfig } from './config';
+export { canonicalJson, sha256Hex } from './hash';
+export type { RunTrace, Drawable, UnitTrace } from './features/types';
 
 function badgeConfidence(badge: BadgeEvidence): number {
 	return clamp01(badge.confidence);
@@ -232,8 +254,12 @@ export function emitThreeFactorRun(
 	run: ThreeFactorRun,
 	emit: OnDetectorEmission
 ): void {
-	emitMeasurementObjects(image, run.measurement, run.assignment.tees, emit);
-	emitAssignmentAssociations(image, run.assignment.assignments, emit);
+	// stamp paramsHash on every emission when the run carries one
+	const stamped: OnDetectorEmission = run.paramsHash
+		? (emission) => emit({ ...emission, paramsHash: run.paramsHash })
+		: emit;
+	emitMeasurementObjects(image, run.measurement, run.assignment.tees, stamped);
+	emitAssignmentAssociations(image, run.assignment.assignments, stamped);
 }
 
 export function createThreeFactorDetector(params: ThreeFactorDetectorParams = {}): Detector {

@@ -1,0 +1,17 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "dev72-frozen-baseline",
+	"note": "Empty gates: registry defaults reproduce frozen dev72 behavior byte-for-byte (pinned by threeFactorParity.test.ts). The execution list below IS the algorithm — read it top to bottom.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"supportField",
+		"badgeOcclusionPatch",
+		"baskets",
+		"tees",
+		"rawPairs",
+		"measurement",
+		"assignment"
+	],
+	"gates": {}
+}

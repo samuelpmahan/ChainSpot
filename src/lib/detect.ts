@@ -43,6 +43,11 @@ interface EmissionBase {
 	/** implementation name + version, for caching and LAB diffing */
 	readonly algo: string;
 	readonly algoVersion: string;
+	/**
+	 * sha256 of the resolved engine config that produced this emission —
+	 * the cache/replay key third leg (imageId, algo+version, paramsHash).
+	 */
+	readonly paramsHash?: string;
 }
 
 /** "Something is at (x, y)." No semantics beyond its type. */

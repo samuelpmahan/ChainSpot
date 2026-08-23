@@ -87,10 +87,18 @@ function rerouteRawPairs(
 	return rawPairs.sort((a, b) => a.pairId.localeCompare(b.pairId));
 }
 
+export interface ZfitKnobs {
+	readonly topK: number;
+	readonly alignedWorstCeiling: number;
+}
+
+const DEFAULT_ZFIT_KNOBS: ZfitKnobs = { topK: ZFIT_TOP_K, alignedWorstCeiling: 0.28 };
+
 function scoreRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
-	rawPairs: readonly RawPairEvidence[]
+	rawPairs: readonly RawPairEvidence[],
+	zfitKnobs: ZfitKnobs = DEFAULT_ZFIT_KNOBS
 ): ScoredPairEvidence[] {
 	const badges = new Map(measurement.badges.map((badge) => [badge.detId, badge]));
 	const teesById = new Map(tees.map((tee) => [tee.detId, tee]));
@@ -122,12 +130,12 @@ function scoreRawPairs(
 	const salvage = scored
 		.map((row, index) => ({ row, index }))
 		.sort((a, b) => b.row.score - a.row.score || a.row.raw.pairId.localeCompare(b.row.raw.pairId))
-		.slice(0, ZFIT_TOP_K);
+		.slice(0, zfitKnobs.topK);
 	for (const { row, index } of salvage) {
 		const alignedWorst = row.raw.worstWindowMean > 0
 			? row.raw.worstWindowMean * row.factors.alignment
 			: 0;
-		if (alignedWorst <= 0 || row.score <= 0 || alignedWorst >= 0.28) continue;
+		if (alignedWorst <= 0 || row.score <= 0 || alignedWorst >= zfitKnobs.alignedWorstCeiling) continue;
 		const badge = badges.get(row.raw.badgeId);
 		const tee = teesById.get(row.raw.teeId);
 		const basket = baskets.get(row.raw.basketId);
@@ -298,7 +306,8 @@ export function selectAssignments(
 
 export function assignThreeFactor(
 	measurement: ThreeFactorMeasurement,
-	recoveredTees: readonly RecoveredTeeInput[] = []
+	recoveredTees: readonly RecoveredTeeInput[] = [],
+	zfitKnobs?: ZfitKnobs
 ): ThreeFactorAssignment {
 	const sortedRecovered = [...recoveredTees].sort(
 		(a, b) =>
@@ -317,7 +326,7 @@ export function assignThreeFactor(
 	const rawPairs = acceptedRecovered > 0
 		? rerouteRawPairs(measurement, tees)
 		: measurement.rawPairs;
-	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs);
+	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs);
 	const byBadge = rankPairsByBadge(scoredUnranked);
 	const scoredPairs = [...byBadge.values()].flat();
 	const selected = selectAssignments(byBadge);

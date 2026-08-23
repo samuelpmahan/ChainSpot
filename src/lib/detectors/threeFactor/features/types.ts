@@ -198,6 +198,7 @@ export type EvidenceSlot =
 	| 'tees'
 	| 'rawPairs'
 	| 'measurement'
+	| 'recoveredTees'
 	| 'assignment';
 
 export interface EvidenceBoard {
