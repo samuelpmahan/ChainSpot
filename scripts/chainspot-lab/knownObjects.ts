@@ -31,10 +31,14 @@ export const KNOWN_OBJECT_CARDS: readonly KnownObjectCard[] = [
 		detectors: ['D04-tee-candidates', 'D05-occluded-tee-recovery'],
 		invariants: ['I09-tee-glyph-anatomy', 'I10-tee-aims-at-badge', 'I17-tee-on-neighbor-ring', 'I21-tee-family-signal'],
 		cases: ['C00-tee-shard', 'C01-complete-occlusion'],
-		implementedBy: ['src/lib/detectors/threeFactor/features/g3.endpoints.ts', 'g3.teeFamily.ts', 'configs/tee-family-on.json'],
+		implementedBy: [
+			'src/lib/detectors/threeFactor/features/g3.endpoints.ts',
+			'src/lib/detectors/threeFactor/features/g3.teeFamily.ts',
+			'src/lib/detectors/threeFactor/configs/tee-family-on.json'
+		],
 		is: [
 			'White-bordered grey rectangle, aims at badge (I10), one family/course (I21), occludable (I01, C00, C01).',
-			'4/72 dev tees: outline gap, un-closable hollow. 16/72 on neighbor C2 ring (I17).'
+			'4/72 dev tees: outline gap opens into C2D ring, un-closable hollow. 16/72 sit on neighbor C2D (I17).'
 		],
 		think: [
 			'Two-tier ring/component across all 72 dev tees.',
