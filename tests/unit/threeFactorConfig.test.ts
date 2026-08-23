@@ -13,8 +13,8 @@ import { defaultKnobs } from '$lib/detectors/threeFactor/features/types';
 import { g4ScoringFeature } from '$lib/detectors/threeFactor/features/g4.scoring';
 import { g4SearchFeature } from '$lib/detectors/threeFactor/features/g4.search';
 import { zfitFeature } from '$lib/detectors/threeFactor/features/g5.zfit';
-import { DEFAULT_SCORING_KNOBS } from '$lib/detectors/threeFactor/scoring';
-import { DEFAULT_SEARCH_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/assignment';
+import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
+import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -118,12 +118,27 @@ describe('resolveConfig + engine', () => {
 		const resolved = resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION);
 		expect(resolved.features['zfit']).toEqual({
 			enabled: false,
-			knobs: { topK: 80, alignedWorstCeiling: 0.28 }
+			knobs: {
+				topK: 80,
+				alignedWorstCeiling: 0.28,
+				distanceStartOffset: 8,
+				distanceStepPx: 14,
+				maxChordFraction: 0.85,
+				maxAdditionalDistance: 220,
+				bendAngles: [-60, -45, -30, -20, 0, 20, 30, 45, 60],
+				bendLengthShort: 0.8,
+				bendLengthMedium: 1.6,
+				bendLengthLong: 3,
+				maxPathOvershootFraction: 1.4,
+				bendFactorWithSegment: 0.8,
+				bendFactorWithoutSegment: 0.9,
+				scoreMultiplier: 0.9
+			}
 		});
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('69be764aec72da0100ff976af5cab9b11b14fa140f1af0dbc14b8a583e70917e');
+		expect(hash).toBe('03254689d263d8d2fb92b1e837c897b217cf02e06288e83c5914b3d6d6997777');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

@@ -8,8 +8,8 @@
 // explicit provenance and must never feed an appearance model (appearance
 // is UNKNOWN by construction). Default OFF.
 
-import { assignThreeFactor, type SearchKnobs, type ZfitKnobs } from '../assignment';
-import type { ScoringKnobs } from '../scoring';
+import { assignThreeFactor, type SearchKnobs } from '../assignment';
+import type { ScoringKnobs, ZfitKnobs } from '../scoring';
 import type {
 	AssignmentEvidence,
 	BasketEvidence,

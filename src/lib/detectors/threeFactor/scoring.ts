@@ -51,6 +51,56 @@ export const DEFAULT_SCORING_KNOBS: ScoringKnobs = {
 	basketScoreScale: 0.5
 };
 
+/**
+ * g5.zfit knobs. topK/alignedWorstCeiling are the original retrofit knobs
+ * (assignment.ts salvage gate); the rest are the zfitFactor search internals
+ * added here per knob-inventory merge note 5 (same feature, no new file).
+ *
+ * NOTE on the 0.28 early-return in zfitFactor (`if (current >= ...) return
+ * 1`): this is the SAME quantity and SAME threshold as the salvage gate in
+ * assignment.ts's scoreRawPairs (`alignedWorst >= zfitKnobs.alignedWorstCeiling`),
+ * not a distinct "eligibility" concept. scorePair's allowZfit=true path is
+ * only ever reached from that one gated salvage loop, and the `alignedWorst`
+ * it recomputes internally is a pure function of inputs zfitFactor's guard
+ * never sees `params.zfit` change (zoneFactor/alignedSamples don't read it),
+ * so it is byte-identical to the value the outer gate already checked. It
+ * therefore reuses `alignedWorstCeiling` rather than adding a second knob
+ * that could silently diverge from a gate that already forecloses it.
+ */
+export interface ZfitKnobs {
+	readonly topK: number;
+	readonly alignedWorstCeiling: number;
+	readonly distanceStartOffset: number;
+	readonly distanceStepPx: number;
+	readonly maxChordFraction: number;
+	readonly maxAdditionalDistance: number;
+	readonly bendAngles: readonly number[];
+	readonly bendLengthShort: number;
+	readonly bendLengthMedium: number;
+	readonly bendLengthLong: number;
+	readonly maxPathOvershootFraction: number;
+	readonly bendFactorWithSegment: number;
+	readonly bendFactorWithoutSegment: number;
+	readonly scoreMultiplier: number;
+}
+
+export const DEFAULT_ZFIT_KNOBS: ZfitKnobs = {
+	topK: 80,
+	alignedWorstCeiling: 0.28,
+	distanceStartOffset: 8,
+	distanceStepPx: 14,
+	maxChordFraction: 0.85,
+	maxAdditionalDistance: 220,
+	bendAngles: [-60, -45, -30, -20, 0, 20, 30, 45, 60],
+	bendLengthShort: 0.8,
+	bendLengthMedium: 1.6,
+	bendLengthLong: 3,
+	maxPathOvershootFraction: 1.4,
+	bendFactorWithSegment: 0.8,
+	bendFactorWithoutSegment: 0.9,
+	scoreMultiplier: 0.9
+};
+
 function cell(field: SupportFieldEvidence, x: number, y: number, yOffsetPx: number): number {
 	const cx = Math.max(0, Math.min(field.width - 1, Math.round(x / field.scale)));
 	const cy = Math.max(0, Math.min(field.height - 1, Math.round((y - yOffsetPx) / field.scale)));
@@ -218,25 +268,26 @@ function zfitFactor(
 	params: CorridorParams,
 	yOffsetPx: number,
 	current: number,
-	knobs: ScoringKnobs
+	knobs: ScoringKnobs,
+	zfitKnobs: ZfitKnobs
 ): number {
-	if (current >= 0.28) return 1;
+	if (current >= zfitKnobs.alignedWorstCeiling) return 1;
 	const chord = Math.hypot(basket.tipXPx - tee.xPx, basket.tipYPx - tee.yPx);
 	const firstLength = Math.hypot(badge.cxPx - tee.xPx, badge.cyPx - tee.yPx);
 	if (chord < 1 || firstLength < 1) return 1;
 	const ux = (badge.cxPx - tee.xPx) / firstLength;
 	const uy = (badge.cyPx - tee.yPx) / firstLength;
 	let best = current;
-	for (let distance = firstLength + 8; distance <= Math.min(chord * 0.85, firstLength + 220); distance += 14) {
+	for (let distance = firstLength + zfitKnobs.distanceStartOffset; distance <= Math.min(chord * zfitKnobs.maxChordFraction, firstLength + zfitKnobs.maxAdditionalDistance); distance += zfitKnobs.distanceStepPx) {
 		const p1: [number, number] = [tee.xPx + ux * distance, tee.yPx + uy * distance];
-		for (const bendDegrees of [-60, -45, -30, -20, 0, 20, 30, 45, 60]) {
+		for (const bendDegrees of zfitKnobs.bendAngles) {
 			const radians = (bendDegrees * Math.PI) / 180;
 			const vx = ux * Math.cos(radians) - uy * Math.sin(radians);
 			const vy = ux * Math.sin(radians) + uy * Math.cos(radians);
-			const lengths = bendDegrees === 0 ? [0] : [0.8 * params.corridorWidthPx, 1.6 * params.corridorWidthPx, 3 * params.corridorWidthPx];
+			const lengths = bendDegrees === 0 ? [0] : [zfitKnobs.bendLengthShort * params.corridorWidthPx, zfitKnobs.bendLengthMedium * params.corridorWidthPx, zfitKnobs.bendLengthLong * params.corridorWidthPx];
 			for (const secondLength of lengths) {
 				const p2: [number, number] = [p1[0] + vx * secondLength, p1[1] + vy * secondLength];
-				if (distance + secondLength + Math.hypot(basket.tipXPx - p2[0], basket.tipYPx - p2[1]) > 1.4 * chord) continue;
+				if (distance + secondLength + Math.hypot(basket.tipXPx - p2[0], basket.tipYPx - p2[1]) > zfitKnobs.maxPathOvershootFraction * chord) continue;
 				const path: [number, number][] = [];
 				const segments: readonly [number, number, number, number][] = [[tee.xPx, tee.yPx, p1[0], p1[1]], ...(secondLength ? [[p1[0], p1[1], p2[0], p2[1]] as [number, number, number, number]] : []), [p2[0], p2[1], basket.tipXPx, basket.tipYPx]];
 				for (const [x0, y0, x1, y1] of segments) {
@@ -245,8 +296,8 @@ function zfitFactor(
 					for (let i = 1; i <= steps; i++) path.push([x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps]);
 				}
 				const samples = alignedSamples(field, path, baskets, basket.detId, params, yOffsetPx, knobs);
-				const bendFactor = bendDegrees === 0 ? 1 : secondLength > 0 ? 0.8 : 0.9;
-				best = Math.max(best, weakWindow(samples, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale))) * bendFactor * 0.9);
+				const bendFactor = bendDegrees === 0 ? 1 : secondLength > 0 ? zfitKnobs.bendFactorWithSegment : zfitKnobs.bendFactorWithoutSegment;
+				best = Math.max(best, weakWindow(samples, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale))) * bendFactor * zfitKnobs.scoreMultiplier);
 			}
 		}
 	}
@@ -333,7 +384,8 @@ export function scorePair(
 	params: CorridorParams,
 	yOffsetPx: number,
 	allowZfit = false,
-	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
+	zfitKnobs: ZfitKnobs = DEFAULT_ZFIT_KNOBS
 ): ScoredPairEvidence {
 	const aligned = alignedPairSamples(field, raw.teeLeg, raw.basketLeg, baskets, basket.detId, params, yOffsetPx, knobs);
 	const alignedWorst = weakWindow(aligned, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale)));
@@ -345,7 +397,7 @@ export function scorePair(
 	const recoveredPrior = tee.tier === 'recovered' ? 0.7 : 1;
 	const preliminary = alignedWorst * simplePath * geometry.teeOrientation * geometry.badgeFraction * geometry.collinearity * basketIdentity * recoveredPrior;
 	const zfit = params.zfit && allowZfit
-		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst, knobs)
+		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst, knobs, zfitKnobs)
 		: 1;
 	const score = preliminary * zfit;
 	return {

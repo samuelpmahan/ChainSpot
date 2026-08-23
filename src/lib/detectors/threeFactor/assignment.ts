@@ -10,9 +10,15 @@
 	ThreeFactorMeasurement
 } from './types';
 import { routeBadgeLegs } from './routing';
-import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, scorePair, type ScoringKnobs } from './scoring';
+import {
+	DEFAULT_SCORING_KNOBS,
+	DEFAULT_ZFIT_KNOBS,
+	makeRawPairEvidence,
+	scorePair,
+	type ScoringKnobs,
+	type ZfitKnobs
+} from './scoring';
 
-const ZFIT_TOP_K = 80;
 const IMPROVEMENT_EPSILON = 1e-9;
 
 export interface SearchKnobs {
@@ -104,13 +110,6 @@ function rerouteRawPairs(
 	return rawPairs.sort((a, b) => a.pairId.localeCompare(b.pairId));
 }
 
-export interface ZfitKnobs {
-	readonly topK: number;
-	readonly alignedWorstCeiling: number;
-}
-
-export const DEFAULT_ZFIT_KNOBS: ZfitKnobs = { topK: ZFIT_TOP_K, alignedWorstCeiling: 0.28 };
-
 function scoreRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
@@ -141,7 +140,8 @@ function scoreRawPairs(
 			baseParameters,
 			measurement.viewport.topPx,
 			false,
-			scoringKnobs
+			scoringKnobs,
+			zfitKnobs
 		);
 	});
 
@@ -170,7 +170,8 @@ function scoreRawPairs(
 			measurement.parameters,
 			measurement.viewport.topPx,
 			true,
-			scoringKnobs
+			scoringKnobs,
+			zfitKnobs
 		);
 	}
 	return scored;

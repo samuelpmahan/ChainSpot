@@ -3,8 +3,8 @@
 // The DEFAULT config reproduces frozen dev72 behavior byte-for-byte
 // (pinned by tests/unit/threeFactorParity.test.ts).
 
-import { assignThreeFactor, type SearchKnobs, type ZfitKnobs } from './assignment';
-import type { ScoringKnobs } from './scoring';
+import { assignThreeFactor, type SearchKnobs } from './assignment';
+import type { ScoringKnobs, ZfitKnobs } from './scoring';
 import { validateExecution, type ResolvedConfig } from './config';
 import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
 import { featureById } from './features/registry';

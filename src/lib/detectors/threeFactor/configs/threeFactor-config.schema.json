@@ -243,8 +243,78 @@
 										},
 										"alignedWorstCeiling": {
 											"type": "number",
-											"description": "skip salvage when the aligned worst-window support is already at/above this",
+											"description": "skip salvage when the aligned worst-window support is already at/above this (also the zfitFactor early-return ceiling — same check, same value)",
 											"default": 0.28
+										},
+										"distanceStartOffset": {
+											"type": "number",
+											"description": "pixel offset past the first leg length where zfit waypoint search begins",
+											"default": 8
+										},
+										"distanceStepPx": {
+											"type": "number",
+											"description": "spacing between successive waypoint distances tried in the zfit search",
+											"default": 14
+										},
+										"maxChordFraction": {
+											"type": "number",
+											"description": "maximum detour ratio (of the tee-basket chord) allowed in zfit path search",
+											"default": 0.85
+										},
+										"maxAdditionalDistance": {
+											"type": "number",
+											"description": "maximum extra distance beyond the first leg for zfit waypoint searches",
+											"default": 220
+										},
+										"bendAngles": {
+											"type": "array",
+											"description": "bend angle samples (degrees) tried at each zfit waypoint",
+											"default": [
+												-60,
+												-45,
+												-30,
+												-20,
+												0,
+												20,
+												30,
+												45,
+												60
+											]
+										},
+										"bendLengthShort": {
+											"type": "number",
+											"description": "shortest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 0.8
+										},
+										"bendLengthMedium": {
+											"type": "number",
+											"description": "middle bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 1.6
+										},
+										"bendLengthLong": {
+											"type": "number",
+											"description": "longest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 3
+										},
+										"maxPathOvershootFraction": {
+											"type": "number",
+											"description": "maximum total bent-path length, as a multiple of the direct tee-basket chord, before a candidate waypoint/bend is rejected (missed by the original inventory sweep)",
+											"default": 1.4
+										},
+										"bendFactorWithSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has a non-zero second segment",
+											"default": 0.8
+										},
+										"bendFactorWithoutSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has no second segment (angle bends immediately into the basket leg)",
+											"default": 0.9
+										},
+										"scoreMultiplier": {
+											"type": "number",
+											"description": "final multiplier applied to every zfit candidate score, on top of the bend factor",
+											"default": 0.9
 										}
 									}
 								}
