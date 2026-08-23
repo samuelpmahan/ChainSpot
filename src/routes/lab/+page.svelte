@@ -256,6 +256,11 @@
 	<a href="/">← Import Data</a>
 </div>
 
+{#if imgUrl && !run}
+	<!-- the input (or composite) stays visible while the worker crunches -->
+	<img src={imgUrl} alt="processing" style="max-width: 100%; max-height: 78vh; border: 1px solid black; opacity: 0.75;" />
+{/if}
+
 {#if run && m}
 	<div style="display: flex; gap: 0.75rem; align-items: center; margin: 0.4rem 0; flex-wrap: wrap;">
 		<button onclick={() => setGate(Math.max(0, gate - 1))} disabled={gate === 0}>◀</button>
