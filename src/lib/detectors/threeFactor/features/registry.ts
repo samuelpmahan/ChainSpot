@@ -13,6 +13,7 @@ import { g5RibbonFeature } from './g5.ribbon';
 import { g5RoutingFeature } from './g5.routing';
 import { g3EndpointsFeature } from './g3.endpoints';
 import { g2SpriteFeature } from './g2.sprite';
+import { cleanBasketFamilyFeature } from './g2.cleanBasketFamily';
 import { g1BadgesFeature } from './g1.badges';
 import { g1DigitsFeature } from './g1.digits';
 import { sharedHsvFeature } from './shared.hsv';
@@ -27,6 +28,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g5RoutingFeature,
 	g3EndpointsFeature,
 	g2SpriteFeature,
+	cleanBasketFamilyFeature,
 	g1BadgesFeature,
 	g1DigitsFeature,
 	sharedHsvFeature,

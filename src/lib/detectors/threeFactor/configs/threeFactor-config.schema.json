@@ -37,7 +37,8 @@
 					"measurement",
 					"assignment",
 					"phantomTee",
-					"teeFamily"
+					"teeFamily",
+					"cleanBasketFamily"
 				]
 			},
 			"uniqueItems": true,
@@ -273,6 +274,63 @@
 											"type": "number",
 											"description": "reported basket bbox height — see file header on the coupling to the basket-sprite.json asset",
 											"default": 66
+										}
+									}
+								}
+							}
+						},
+						"cleanBasketFamily": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Refine baseline basket matches to intact renderer-family members using basket-shape white coverage plus a coherent local dark shell.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"bboxTolerancePx": {
+											"type": "number",
+											"description": "allowed difference between the bright component bbox and the 42x66 renderer-family bbox",
+											"default": 0
+										},
+										"positionTolerancePx": {
+											"type": "number",
+											"description": "maximum top-left displacement between a baseline sprite match and its bright connected component",
+											"default": 2
+										},
+										"areaRatioMin": {
+											"type": "number",
+											"description": "minimum connected bright-component area divided by the basket template white-pixel count",
+											"default": 0.96
+										},
+										"areaRatioMax": {
+											"type": "number",
+											"description": "maximum connected bright-component area divided by the basket template white-pixel count",
+											"default": 1.03
+										},
+										"whiteCoverageMin": {
+											"type": "number",
+											"description": "minimum fraction of expected basket-shape white pixels owned by the matched bright component; bbox-off pixels are ignored",
+											"default": 0.96
+										},
+										"shellRadiusPx": {
+											"type": "number",
+											"description": "8-neighbor dilation radius used to form the local shell around the actual bright basket component shape",
+											"default": 2
+										},
+										"darkShellMin": {
+											"type": "number",
+											"description": "minimum fraction of the shape-local shell occupied by dark-mask pixels",
+											"default": 0.5
+										},
+										"darkCoherenceMin": {
+											"type": "number",
+											"description": "minimum fraction of dark shell pixels belonging to one connected dark component",
+											"default": 0.8
 										}
 									}
 								}

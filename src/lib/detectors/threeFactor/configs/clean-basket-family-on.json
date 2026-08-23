@@ -1,0 +1,25 @@
+{
+	"$schema": "./threeFactor-config.schema.json",
+	"schema": "threeFactor-config@1",
+	"name": "g2-clean-basket-family",
+	"note": "A/B: refine baseline basket candidates to intact renderer-family members using shape-local white coverage and coherent dark shell evidence.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"supportField",
+		"badgeOcclusionPatch",
+		"baskets",
+		"cleanBasketFamily",
+		"tees",
+		"rawPairs",
+		"measurement",
+		"assignment"
+	],
+	"gates": {
+		"G2": {
+			"cleanBasketFamily": {
+				"enabled": true
+			}
+		}
+	}
+}
