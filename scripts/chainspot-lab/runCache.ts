@@ -79,12 +79,13 @@ export function readFloat32(path: string): Float32Array {
  * A stage key is derived from:
  * - the exact input raster bytes;
  * - upstream stage keys;
- * - the imported files/config the caller says this stage depends on; and
- * - compute.toString(), so edits to the stage closure invalidate that stage
- *   without requiring a hand-maintained version/SHA registry.
+ * - the imported files/config the caller says this stage depends on;
+ * - compute.toString(); and
+ * - the codec implementation used to persist/reload the stage.
  *
- * The cache is an execution detail, not research evidence. Stage outputs and
- * overlays remain the evidence handed downstream and shown to humans.
+ * That gives dependency-aware invalidation without a hand-maintained SHA
+ * registry: editing G3 can leave G1/G2 hot, while changing G1 naturally
+ * invalidates every downstream stage that consumes its key.
  */
 export class LabRunCache {
 	readonly inputPath: string;
@@ -127,7 +128,9 @@ export class LabRunCache {
 			...(options.upstream ?? []),
 			dependencyKey,
 			JSON.stringify(options.config ?? null),
-			options.compute.toString()
+			options.compute.toString(),
+			options.codec.load.toString(),
+			options.codec.save.toString()
 		]);
 		const dir = join(this.runDir, options.name);
 		const stageMetaPath = join(dir, '.stage.json');
