@@ -13,12 +13,63 @@ import { computeBrightDarkMasks } from './raster';
 import type { ComponentStats } from './components';
 import { extractComponents } from './components';
 import { anchoredFamilies, bboxSizeDistance } from './families';
-// Copied from LAB's P1 constants. Keeping them here avoids importing the
-// slower projected-border tee scorer that the quick endpoint pass does not use.
-const BADGE_ASPECT_MIN = 1.15;
-const BADGE_ASPECT_MAX = 1.8;
-const BADGE_DARK_INTERIOR_MIN = 0.45;
-const BADGE_SIZE_TOL = Math.log(1.15);
+
+/**
+ * g1.badges knobs, threaded down as plain parameters. Copied from LAB's P1
+ * constants originally (see file header); badgeSizeTolFactor is the
+ * human-readable knob (1.15) — Math.log(...) is applied at the use site
+ * (anchoredFamilies) per knob-inventory merge note 4, not baked into a
+ * pre-logged constant, so the config value stays human-readable.
+ * badgeAspectMin (1.15) and badgeSizeTolFactor (1.15) are coincidentally
+ * equal, separate knobs. plateInteriorMargin and plateBboxMargin are also
+ * coincidentally both 4, separate knobs.
+ *
+ * badgeInsidePadding is NOT read by any function in this file — it's the
+ * measure.ts makeTees tee-exclusion padding (a g1.badges knob per the
+ * cluster's row list). Bundled here anyway, unlike the g5.ribbon/g5.routing
+ * CorridorParams-riding knobs: it doesn't ride any separate mechanism, it's
+ * just consumed by a different file, so one shared bundle type threaded to
+ * both badgeStage.ts and measure.ts is simpler than a second knobs type.
+ */
+export interface BadgeStageKnobs {
+	readonly badgeAspectMin: number;
+	readonly badgeAspectMax: number;
+	readonly badgeDarkInteriorMin: number;
+	readonly badgeSizeTolFactor: number;
+	readonly plateMinWidth: number;
+	readonly plateMaxWidth: number;
+	readonly plateMinHeight: number;
+	readonly plateMaxHeight: number;
+	readonly plateAspectMin: number;
+	readonly plateAspectMax: number;
+	readonly plateFillMin: number;
+	readonly plateInteriorMargin: number;
+	readonly plateGlyphFractionMin: number;
+	readonly plateGlyphFractionMax: number;
+	readonly plateProximityThreshold: number;
+	readonly plateBboxMargin: number;
+	readonly badgeInsidePadding: number;
+}
+
+export const DEFAULT_BADGE_STAGE_KNOBS: BadgeStageKnobs = {
+	badgeAspectMin: 1.15,
+	badgeAspectMax: 1.8,
+	badgeDarkInteriorMin: 0.45,
+	badgeSizeTolFactor: 1.15,
+	plateMinWidth: 34,
+	plateMaxWidth: 78,
+	plateMinHeight: 24,
+	plateMaxHeight: 54,
+	plateAspectMin: 1,
+	plateAspectMax: 2.4,
+	plateFillMin: 0.55,
+	plateInteriorMargin: 4,
+	plateGlyphFractionMin: 0.04,
+	plateGlyphFractionMax: 0.4,
+	plateProximityThreshold: 22,
+	plateBboxMargin: 4,
+	badgeInsidePadding: 3
+};
 
 export interface BadgeStageResult {
 	width: number;
@@ -37,13 +88,14 @@ export interface BadgeStageResult {
 export function detectBadgeFamily(
 	width: number,
 	dark: Mask,
-	brightComponents: readonly ComponentStats[]
+	brightComponents: readonly ComponentStats[],
+	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
 ): ComponentStats[] {
 	const badgeCandidates: ComponentStats[] = [];
 	for (const c of brightComponents) {
 		if (c.bboxH <= 0) continue;
 		const aspect = c.bboxW / c.bboxH;
-		if (aspect < BADGE_ASPECT_MIN || aspect > BADGE_ASPECT_MAX) continue;
+		if (aspect < knobs.badgeAspectMin || aspect > knobs.badgeAspectMax) continue;
 		let darkCount = 0;
 		for (let y = c.bboxY; y < c.bboxY + c.bboxH; y++) {
 			const row = y * width;
@@ -51,18 +103,18 @@ export function detectBadgeFamily(
 				if (dark.data[row + x]) darkCount++;
 			}
 		}
-		if (darkCount / (c.bboxW * c.bboxH) >= BADGE_DARK_INTERIOR_MIN) badgeCandidates.push(c);
+		if (darkCount / (c.bboxW * c.bboxH) >= knobs.badgeDarkInteriorMin) badgeCandidates.push(c);
 	}
-	const families = anchoredFamilies(badgeCandidates, BADGE_SIZE_TOL, bboxSizeDistance);
+	const families = anchoredFamilies(badgeCandidates, Math.log(knobs.badgeSizeTolFactor), bboxSizeDistance);
 	return families.length > 0 ? families[0] : [];
 }
 
-export function runBadgeStage(image: RgbaImage): BadgeStageResult {
+export function runBadgeStage(image: RgbaImage, knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS): BadgeStageResult {
 	const { width, height } = image;
 	const { bright, dark } = computeBrightDarkMasks(image);
 	const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
 
-	const badges = detectBadgeFamily(width, dark, brightComponents);
+	const badges = detectBadgeFamily(width, dark, brightComponents, knobs);
 	const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
 		() => 'bright-family'
 	);
@@ -72,28 +124,28 @@ export function runBadgeStage(image: RgbaImage): BadgeStageResult {
 	const { components: darkComponents } = extractComponents(dark);
 	for (const component of darkComponents) {
 		if (
-			component.bboxW < 34 ||
-			component.bboxW > 78 ||
-			component.bboxH < 24 ||
-			component.bboxH > 54
+			component.bboxW < knobs.plateMinWidth ||
+			component.bboxW > knobs.plateMaxWidth ||
+			component.bboxH < knobs.plateMinHeight ||
+			component.bboxH > knobs.plateMaxHeight
 		)
 			continue;
 		const aspect = component.bboxW / component.bboxH;
-		if (aspect < 1 || aspect > 2.4) continue;
-		if (component.area / (component.bboxW * component.bboxH) < 0.55) continue;
+		if (aspect < knobs.plateAspectMin || aspect > knobs.plateAspectMax) continue;
+		if (component.area / (component.bboxW * component.bboxH) < knobs.plateFillMin) continue;
 		let glyphCount = 0;
 		let interior = 0;
-		for (let y = component.bboxY + 4; y < component.bboxY + component.bboxH - 4; y++) {
+		for (let y = component.bboxY + knobs.plateInteriorMargin; y < component.bboxY + component.bboxH - knobs.plateInteriorMargin; y++) {
 			const row = y * width;
-			for (let x = component.bboxX + 4; x < component.bboxX + component.bboxW - 4; x++) {
+			for (let x = component.bboxX + knobs.plateInteriorMargin; x < component.bboxX + component.bboxW - knobs.plateInteriorMargin; x++) {
 				interior++;
 				if (bright.data[row + x]) glyphCount++;
 			}
 		}
 		const glyphFraction = interior ? glyphCount / interior : 0;
-		if (glyphFraction < 0.04 || glyphFraction > 0.4) continue;
-		if (badges.some((badge) => Math.hypot(badge.cx - component.cx, badge.cy - component.cy) < 22)) continue;
-		const margin = 4;
+		if (glyphFraction < knobs.plateGlyphFractionMin || glyphFraction > knobs.plateGlyphFractionMax) continue;
+		if (badges.some((badge) => Math.hypot(badge.cx - component.cx, badge.cy - component.cy) < knobs.plateProximityThreshold)) continue;
+		const margin = knobs.plateBboxMargin;
 		badges.push({
 			label: -1,
 			cx: component.cx,

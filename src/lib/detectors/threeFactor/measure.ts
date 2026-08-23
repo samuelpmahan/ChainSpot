@@ -1,7 +1,7 @@
 import basketSpriteData from './assets/basket-sprite.json';
 import logisticModelData from './assets/logistic.json';
 import type { ComponentStats } from './components';
-import { runBadgeStage } from './badgeStage';
+import { DEFAULT_BADGE_STAGE_KNOBS, runBadgeStage, type BadgeStageKnobs } from './badgeStage';
 import {
 	collectTeePoints,
 	DEFAULT_ENDPOINTS_KNOBS,
@@ -45,6 +45,7 @@ import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { g3EndpointsFeature } from './features/g3.endpoints';
 import { g2SpriteFeature } from './features/g2.sprite';
+import { g1BadgesFeature } from './features/g1.badges';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -241,11 +242,13 @@ function makeTees(
 	yOffsetPx: number,
 	ctx: FeatureContext = nullFeatureContext,
 	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
-	endpointsKnobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS
+	endpointsKnobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS,
+	badgeStageKnobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
 ): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
+	const insideBadgePadding = badgeStageKnobs.badgeInsidePadding;
 	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
-		(badge) => x >= badge.bboxX - 3 && x <= badge.bboxX + badge.bboxW + 3 && y >= badge.bboxY - 3 && y <= badge.bboxY + badge.bboxH + 3
+		(badge) => x >= badge.bboxX - insideBadgePadding && x <= badge.bboxX + badge.bboxW + insideBadgePadding && y >= badge.bboxY - insideBadgePadding && y <= badge.bboxY + badge.bboxH + insideBadgePadding
 	);
 	// no silent drops: every examined-and-killed candidate leaves a rejected
 	// drawable with its reason — this is the "why 0 tees?" answer on the raster
@@ -259,7 +262,7 @@ function makeTees(
 		});
 	const rings = detectTeeRings(stage.brightMask, endpointsKnobs).filter((ring) => {
 		if (insideBadge(ring.cx, ring.cy)) {
-			reject(ring.cx, ring.cy, 'ring inside badge bbox (+3px pad)');
+			reject(ring.cx, ring.cy, `ring inside badge bbox (+${insideBadgePadding}px pad)`);
 			return false;
 		}
 		if (pointInScreenChrome(ring.cx, ring.cy, chrome)) {
@@ -272,7 +275,7 @@ function makeTees(
 	const components = stage.brightComponents.filter((component) => {
 		if (badgeLabels.has(component.label)) return false; // is a badge, not a candidate
 		if (insideBadge(component.cx, component.cy)) {
-			reject(component.cx, component.cy, 'component inside badge bbox (+3px pad)');
+			reject(component.cx, component.cy, `component inside badge bbox (+${insideBadgePadding}px pad)`);
 			return false;
 		}
 		if (pointInScreenChrome(component.cx, component.cy, chrome)) {
@@ -361,7 +364,8 @@ export const measureUnits: readonly EngineUnit[] = [
 		note: 'HSV masks, connected components, badge candidate detection',
 		run(board, ctx) {
 			const stop = ctx.span('badgeStage');
-			board.set('stage', runBadgeStage(board.get<RgbaImage>('localImage')));
+			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
+			board.set('stage', runBadgeStage(board.get<RgbaImage>('localImage'), badgeStageKnobs));
 			stop();
 		}
 	},
@@ -496,7 +500,8 @@ export const measureUnits: readonly EngineUnit[] = [
 			const { topPx } = board.get<ViewportSeed>('viewport');
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
-			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs, endpointsKnobs);
+			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
+			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs, endpointsKnobs, badgeStageKnobs);
 			for (const tee of tees) {
 				ctx.overlay('tees', {
 					type: 'box',

@@ -46,6 +46,114 @@
 			"type": "object",
 			"additionalProperties": false,
 			"properties": {
+				"G1": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"badges": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Badge-family detection (aspect/dark-interior/size gates) plus dark-plate glyph recovery.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"badgeAspectMin": {
+											"type": "number",
+											"description": "minimum aspect ratio for bright badge candidates (was BADGE_ASPECT_MIN)",
+											"default": 1.15
+										},
+										"badgeAspectMax": {
+											"type": "number",
+											"description": "maximum aspect ratio for bright badge candidates (was BADGE_ASPECT_MAX)",
+											"default": 1.8
+										},
+										"badgeDarkInteriorMin": {
+											"type": "number",
+											"description": "minimum dark pixel fraction for badge interior (was BADGE_DARK_INTERIOR_MIN)",
+											"default": 0.45
+										},
+										"badgeSizeTolFactor": {
+											"type": "number",
+											"description": "size tolerance for badge family clustering, in linear space; Math.log(...) is applied at the anchoredFamilies use site (was BADGE_SIZE_TOL = Math.log(1.15), per merge note 4)",
+											"default": 1.15
+										},
+										"plateMinWidth": {
+											"type": "number",
+											"description": "minimum width for dark-plate badge recovery candidates",
+											"default": 34
+										},
+										"plateMaxWidth": {
+											"type": "number",
+											"description": "maximum width for dark-plate badge recovery candidates",
+											"default": 78
+										},
+										"plateMinHeight": {
+											"type": "number",
+											"description": "minimum height for dark-plate badge recovery candidates",
+											"default": 24
+										},
+										"plateMaxHeight": {
+											"type": "number",
+											"description": "maximum height for dark-plate badge recovery candidates",
+											"default": 54
+										},
+										"plateAspectMin": {
+											"type": "number",
+											"description": "minimum aspect ratio for dark-plate candidates",
+											"default": 1
+										},
+										"plateAspectMax": {
+											"type": "number",
+											"description": "maximum aspect ratio for dark-plate candidates",
+											"default": 2.4
+										},
+										"plateFillMin": {
+											"type": "number",
+											"description": "minimum fill fraction (area/bbox) for dark-plate candidates",
+											"default": 0.55
+										},
+										"plateInteriorMargin": {
+											"type": "number",
+											"description": "pixel margin for interior glyph fraction measurement (coincidentally also 4, but a distinct knob from plateBboxMargin)",
+											"default": 4
+										},
+										"plateGlyphFractionMin": {
+											"type": "number",
+											"description": "minimum bright pixel fraction in plate interior",
+											"default": 0.04
+										},
+										"plateGlyphFractionMax": {
+											"type": "number",
+											"description": "maximum bright pixel fraction in plate interior",
+											"default": 0.4
+										},
+										"plateProximityThreshold": {
+											"type": "number",
+											"description": "distance threshold: a dark-plate candidate must not be near an already-accepted bright badge",
+											"default": 22
+										},
+										"plateBboxMargin": {
+											"type": "number",
+											"description": "margin for expanding the dark-plate badge bounding box (coincidentally also 4, but a distinct knob from plateInteriorMargin)",
+											"default": 4
+										},
+										"badgeInsidePadding": {
+											"type": "number",
+											"description": "padding (px) around a badge bbox for the tee-candidate exclusion test in measure.ts makeTees; the rejection reason string is templated from this value (was hard-coded \"+3px pad\" — see file header)",
+											"default": 3
+										}
+									}
+								}
+							}
+						}
+					}
+				},
 				"G2": {
 					"type": "object",
 					"additionalProperties": false,
