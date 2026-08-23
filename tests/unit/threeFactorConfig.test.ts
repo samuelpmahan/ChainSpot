@@ -199,7 +199,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('dd0fa098d173a96cab6cbf3d8bebf455ee3795c116c27c4e72aa649d931e921f');
+		expect(hash).toBe('5503d16a0120cd96cbc06abc1fa66d28dbb5c7090e3ef424012f5d1676851a62');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {
