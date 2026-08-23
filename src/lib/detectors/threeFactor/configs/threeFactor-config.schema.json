@@ -151,6 +151,58 @@
 									}
 								}
 							}
+						},
+						"digits": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Badge digit segmentation (noise/height/wide-merge gates) and canonical digit-mask normalization.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minComponentArea": {
+											"type": "number",
+											"description": "minimum pixel area for a connected component to be a digit candidate (was MIN_COMPONENT_AREA)",
+											"default": 6
+										},
+										"heightRatioMin": {
+											"type": "number",
+											"description": "minimum height, as a fraction of the tallest surviving component, for a digit candidate (was HEIGHT_RATIO_MIN)",
+											"default": 0.5
+										},
+										"wideRatio": {
+											"type": "number",
+											"description": "width-to-height ratio threshold for detecting a merged (touching) digit pair (was WIDE_RATIO)",
+											"default": 0.95
+										},
+										"valleySearchLo": {
+											"type": "number",
+											"description": "lower bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_LO); see file header — an inverted pair vs. valleySearchHi is safe, not corrupting",
+											"default": 0.3
+										},
+										"valleySearchHi": {
+											"type": "number",
+											"description": "upper bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_HI); see file header — an inverted pair vs. valleySearchLo is safe, not corrupting",
+											"default": 0.7
+										},
+										"digitW": {
+											"type": "number",
+											"description": "normalized digit mask width fed to the trained classifier (was DIGIT_W) — see file header on the model coupling",
+											"default": 24
+										},
+										"digitH": {
+											"type": "number",
+											"description": "normalized digit mask height fed to the trained classifier (was DIGIT_H) — see file header on the model coupling",
+											"default": 32
+										}
+									}
+								}
+							}
 						}
 					}
 				},

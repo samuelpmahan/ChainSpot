@@ -52,12 +52,43 @@
 import { extractComponents, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 
-export const MIN_COMPONENT_AREA = 6;
-export const HEIGHT_RATIO_MIN = 0.5;
-export const WIDE_RATIO = 0.95;
-/** Fraction of a wide component's width defining the interior valley-search window. */
-export const VALLEY_SEARCH_LO = 0.3;
-export const VALLEY_SEARCH_HI = 0.7;
+/**
+ * g1.digits knobs, threaded down as plain parameters. digitW/digitH
+ * (normalize.ts) are here too — one shared bundle for the whole feature,
+ * even though segment.ts's own functions don't read them.
+ *
+ * valleySearchLo/valleySearchHi: an inverted or degenerate pair (lo >= hi)
+ * is NOT corrupting — trySplit's `if (hi <= lo)` guard already treats that
+ * as "no valid interior search window" and bails out to the safe "kept
+ * whole" fallback (same as a too-narrow component today). It just disables
+ * valley-splitting, a useless-but-safe config, not a cross-knob invariant
+ * that needs a resolveConfig-level check like validateRoutingRingQuantum.
+ * Left as two independent knobs, undocumented by a validate() or
+ * cross-feature check because there's nothing unsafe to guard against.
+ *
+ * digitW/digitH: validated in features/g1.digits.ts against the trained
+ * digit classifier's actual input size (assets/logistic.json's weight-row
+ * length, 768 = 24x32) — see that file for the coupling evidence.
+ */
+export interface DigitsKnobs {
+	readonly minComponentArea: number;
+	readonly heightRatioMin: number;
+	readonly wideRatio: number;
+	readonly valleySearchLo: number;
+	readonly valleySearchHi: number;
+	readonly digitW: number;
+	readonly digitH: number;
+}
+
+export const DEFAULT_DIGITS_KNOBS: DigitsKnobs = {
+	minComponentArea: 6,
+	heightRatioMin: 0.5,
+	wideRatio: 0.95,
+	valleySearchLo: 0.3,
+	valleySearchHi: 0.7,
+	digitW: 24,
+	digitH: 32
+};
 
 export interface DigitCandidate {
 	/** [x, y, w, h] in glyph-mask pixel coordinates. */
@@ -129,12 +160,13 @@ function trySplit(
 	mask: Mask,
 	labels: Int32Array,
 	c: ComponentStats,
-	notes: string[]
+	notes: string[],
+	knobs: DigitsKnobs
 ): DigitCandidate[] | null {
 	const w = c.bboxW;
 	const sums = columnSums(mask, labels, c);
-	const lo = Math.floor(VALLEY_SEARCH_LO * w);
-	const hi = Math.ceil(VALLEY_SEARCH_HI * w);
+	const lo = Math.floor(knobs.valleySearchLo * w);
+	const hi = Math.ceil(knobs.valleySearchHi * w);
 	if (hi <= lo) {
 		notes.push(
 			`label=${c.label} bbox=${c.bboxW}x${c.bboxH}: too narrow for an interior valley search window, kept whole`
@@ -184,7 +216,7 @@ function trySplit(
 	];
 }
 
-export function segmentDigits(mask: Mask): SegmentResult {
+export function segmentDigits(mask: Mask, knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS): SegmentResult {
 	const notes: string[] = [];
 	const { labels, components } = extractComponents(mask);
 	if (components.length === 0) {
@@ -194,17 +226,17 @@ export function segmentDigits(mask: Mask): SegmentResult {
 
 	let tallest = 0;
 	for (const c of components) if (c.bboxH > tallest) tallest = c.bboxH;
-	const heightThresh = HEIGHT_RATIO_MIN * tallest;
+	const heightThresh = knobs.heightRatioMin * tallest;
 
 	const kept: ComponentStats[] = [];
 	for (const c of components) {
-		if (c.area < MIN_COMPONENT_AREA) {
-			notes.push(`dropped label=${c.label} area=${c.area} < ${MIN_COMPONENT_AREA} (noise)`);
+		if (c.area < knobs.minComponentArea) {
+			notes.push(`dropped label=${c.label} area=${c.area} < ${knobs.minComponentArea} (noise)`);
 			continue;
 		}
 		if (c.bboxH < heightThresh) {
 			notes.push(
-				`dropped label=${c.label} height=${c.bboxH} < ${heightThresh.toFixed(2)} (${HEIGHT_RATIO_MIN} x tallest=${tallest})`
+				`dropped label=${c.label} height=${c.bboxH} < ${heightThresh.toFixed(2)} (${knobs.heightRatioMin} x tallest=${tallest})`
 			);
 			continue;
 		}
@@ -219,9 +251,9 @@ export function segmentDigits(mask: Mask): SegmentResult {
 
 	const digits: DigitCandidate[] = [];
 	for (const c of kept) {
-		const isWide = c.bboxW > WIDE_RATIO * c.bboxH;
+		const isWide = c.bboxW > knobs.wideRatio * c.bboxH;
 		if (isWide) {
-			const split = trySplit(mask, labels, c, notes);
+			const split = trySplit(mask, labels, c, notes, knobs);
 			if (split) {
 				digits.push(...split);
 				continue;

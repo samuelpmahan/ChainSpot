@@ -14,6 +14,7 @@ import { g5RoutingFeature } from './g5.routing';
 import { g3EndpointsFeature } from './g3.endpoints';
 import { g2SpriteFeature } from './g2.sprite';
 import { g1BadgesFeature } from './g1.badges';
+import { g1DigitsFeature } from './g1.digits';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
@@ -24,7 +25,8 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g5RoutingFeature,
 	g3EndpointsFeature,
 	g2SpriteFeature,
-	g1BadgesFeature
+	g1BadgesFeature,
+	g1DigitsFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {

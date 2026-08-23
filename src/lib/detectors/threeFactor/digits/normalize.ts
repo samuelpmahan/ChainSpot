@@ -10,6 +10,8 @@
  * aspect (nearest-neighbor), centered with equal margins.
  */
 
+import { DEFAULT_DIGITS_KNOBS, type DigitsKnobs } from './segment';
+
 export const DIGIT_W = 24;
 export const DIGIT_H = 32;
 
@@ -19,20 +21,23 @@ export type NormalizedDigit = Uint8Array;
 export function normalizeDigitMask(
 	mask: Uint8Array | number[],
 	width: number,
-	height: number
+	height: number,
+	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
 ): NormalizedDigit {
-	const out = new Uint8Array(DIGIT_W * DIGIT_H);
+	const digitW = knobs.digitW;
+	const digitH = knobs.digitH;
+	const out = new Uint8Array(digitW * digitH);
 	if (width <= 0 || height <= 0) return out;
-	const s = Math.min(DIGIT_W / width, DIGIT_H / height);
+	const s = Math.min(digitW / width, digitH / height);
 	const outW = Math.max(1, Math.round(width * s));
 	const outH = Math.max(1, Math.round(height * s));
-	const ox = Math.floor((DIGIT_W - outW) / 2);
-	const oy = Math.floor((DIGIT_H - outH) / 2);
+	const ox = Math.floor((digitW - outW) / 2);
+	const oy = Math.floor((digitH - outH) / 2);
 	for (let y = 0; y < outH; y++) {
 		const sy = Math.min(height - 1, Math.floor(((y + 0.5) * height) / outH));
 		for (let x = 0; x < outW; x++) {
 			const sx = Math.min(width - 1, Math.floor(((x + 0.5) * width) / outW));
-			if (mask[sy * width + sx]) out[(oy + y) * DIGIT_W + (ox + x)] = 1;
+			if (mask[sy * width + sx]) out[(oy + y) * digitW + (ox + x)] = 1;
 		}
 	}
 	return out;

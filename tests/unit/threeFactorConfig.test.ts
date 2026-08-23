@@ -18,12 +18,14 @@ import { g5RoutingFeature } from '$lib/detectors/threeFactor/features/g5.routing
 import { g3EndpointsFeature } from '$lib/detectors/threeFactor/features/g3.endpoints';
 import { g2SpriteFeature } from '$lib/detectors/threeFactor/features/g2.sprite';
 import { g1BadgesFeature } from '$lib/detectors/threeFactor/features/g1.badges';
+import { g1DigitsFeature } from '$lib/detectors/threeFactor/features/g1.digits';
 import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '$lib/detectors/threeFactor/scoring';
 import { DEFAULT_SEARCH_KNOBS } from '$lib/detectors/threeFactor/assignment';
 import { DEFAULT_RIBBON_KNOBS } from '$lib/detectors/threeFactor/ribbon';
 import { DEFAULT_ROUTING_KNOBS } from '$lib/detectors/threeFactor/routing';
 import { DEFAULT_ENDPOINTS_KNOBS, DEFAULT_SPRITE_KNOBS } from '$lib/detectors/threeFactor/endpoints';
 import { DEFAULT_BADGE_STAGE_KNOBS } from '$lib/detectors/threeFactor/badgeStage';
+import { DEFAULT_DIGITS_KNOBS } from '$lib/detectors/threeFactor/digits/segment';
 import defaultConfigJson from '$lib/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '$lib/detectors/threeFactor/configs/zfit-on.json';
 import type { RgbaRaster } from '$lib/detect';
@@ -155,6 +157,7 @@ describe('fallback-default mirrors', () => {
 		// same BadgeStageKnobs type even though only measure.ts's makeTees
 		// reads it, not badgeStage.ts. Plain equality, no split needed.
 		expect(DEFAULT_BADGE_STAGE_KNOBS).toEqual(defaultKnobs(g1BadgesFeature));
+		expect(DEFAULT_DIGITS_KNOBS).toEqual(defaultKnobs(g1DigitsFeature));
 	});
 });
 
@@ -199,7 +202,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('dd0fa098d173a96cab6cbf3d8bebf455ee3795c116c27c4e72aa649d931e921f');
+		expect(hash).toBe('52708f068d60e25fecac2ef8a97afe32690defc50949c8d4874e2c042f39f64b');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

@@ -15,7 +15,7 @@ import type { Mask } from '../raster';
 import type { ComponentStats } from '../components';
 import { extractBadgeGlyph } from './badgeGlyph';
 import type { BadgeGlyph } from './badgeGlyph';
-import { segmentDigits } from './segment';
+import { DEFAULT_DIGITS_KNOBS, segmentDigits, type DigitsKnobs } from './segment';
 import type { DigitCandidate } from './segment';
 import { normalizeDigitMask } from './normalize';
 import type { NormalizedDigit } from './normalize';
@@ -61,13 +61,14 @@ export interface BadgeReadContext {
 export function readBadge(
 	badge: ComponentStats,
 	result: BadgeReadContext,
-	scorer: DigitScorer
+	scorer: DigitScorer,
+	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
 ): BadgeReading {
 	const glyph = extractBadgeGlyph(badge, result.brightMask, result.darkMask, result.brightLabels);
-	const segmented = glyph.mask.width > 0 ? segmentDigits(glyph.mask) : { digits: [], notes: [] };
+	const segmented = glyph.mask.width > 0 ? segmentDigits(glyph.mask, knobs) : { digits: [], notes: [] };
 	const digits: DigitReading[] = [];
 	for (const candidate of segmented.digits) {
-		const normalized = normalizeDigitMask(candidate.mask, candidate.bbox[2], candidate.bbox[3]);
+		const normalized = normalizeDigitMask(candidate.mask, candidate.bbox[2], candidate.bbox[3], knobs);
 		const scores = scorer.scores(normalized);
 		let win = 0;
 		let second = -1;
@@ -98,6 +99,10 @@ export function readBadge(
 }
 
 /** Read every badge-family observation of a P1 (or badge-stage) result. */
-export function readCourseBadges(result: BadgeReadContext, scorer: DigitScorer): BadgeReading[] {
-	return result.badges.map((badge) => readBadge(badge, result, scorer));
+export function readCourseBadges(
+	result: BadgeReadContext,
+	scorer: DigitScorer,
+	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
+): BadgeReading[] {
+	return result.badges.map((badge) => readBadge(badge, result, scorer, knobs));
 }

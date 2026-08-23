@@ -16,6 +16,7 @@ import {
 } from './endpoints';
 import { predictProbs, type LogisticModel } from './digits/logisticInference';
 import { readCourseBadges, type BadgeReading, type DigitScorer } from './digits/readBadges';
+import { DEFAULT_DIGITS_KNOBS, type DigitsKnobs } from './digits/segment';
 import { computeRibbonSupport, DEFAULT_RIBBON_KNOBS, patchBadgeOcclusion, type RibbonKnobs } from './ribbon';
 import { DEFAULT_ROUTING_KNOBS, routeBadgeLegs, type RoutingKnobs } from './routing';
 import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, type ScoringKnobs } from './scoring';
@@ -46,6 +47,7 @@ import { g5RoutingFeature } from './features/g5.routing';
 import { g3EndpointsFeature } from './features/g3.endpoints';
 import { g2SpriteFeature } from './features/g2.sprite';
 import { g1BadgesFeature } from './features/g1.badges';
+import { g1DigitsFeature } from './features/g1.digits';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -175,8 +177,12 @@ function digitEvidence(reading: BadgeReading, yOffsetPx: number): DigitEvidence[
 	}));
 }
 
-function makeBadges(stage: ReturnType<typeof runBadgeStage>, yOffsetPx: number): BadgeEvidence[] {
-	const readings = readCourseBadges(stage, digitScorer);
+function makeBadges(
+	stage: ReturnType<typeof runBadgeStage>,
+	yOffsetPx: number,
+	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
+): BadgeEvidence[] {
+	const readings = readCourseBadges(stage, digitScorer, knobs);
 	const entries = readings.map((reading, index) => ({
 		reading,
 		index,
@@ -379,7 +385,8 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stop = ctx.span('badges');
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
 			const { topPx } = board.get<ViewportSeed>('viewport');
-			const badges = makeBadges(stage, topPx);
+			const digitsKnobs = ctx.resolve(g1DigitsFeature).knobs as unknown as DigitsKnobs;
+			const badges = makeBadges(stage, topPx, digitsKnobs);
 			for (const badge of badges) {
 				ctx.overlay('badges', {
 					type: 'box',
