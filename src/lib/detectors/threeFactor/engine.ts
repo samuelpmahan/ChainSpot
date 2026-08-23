@@ -16,6 +16,7 @@ import { g4SearchFeature } from './features/g4.search';
 import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { phantomTeeUnit } from './features/g3.phantomTee';
+import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
 	defaultKnobs,
 	nullFeatureContext,
@@ -69,7 +70,12 @@ const assignmentUnit: EngineUnit = {
 	}
 };
 
-export const ENGINE_UNITS: readonly EngineUnit[] = [...measureUnits, assignmentUnit, phantomTeeUnit];
+export const ENGINE_UNITS: readonly EngineUnit[] = [
+	...measureUnits,
+	assignmentUnit,
+	phantomTeeUnit,
+	cleanBasketFamilyUnit
+];
 
 export const DEFAULT_EXECUTION: readonly string[] = [...DEFAULT_MEASURE_EXECUTION, 'assignment'];
 
