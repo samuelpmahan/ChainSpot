@@ -14,6 +14,7 @@ import { g5RoutingFeature } from './g5.routing';
 import { g3EndpointsFeature } from './g3.endpoints';
 import { g2SpriteFeature } from './g2.sprite';
 import { g1BadgesFeature } from './g1.badges';
+import { fourLaneSensorFeature } from './st.fourLaneSensor';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
@@ -24,7 +25,8 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g5RoutingFeature,
 	g3EndpointsFeature,
 	g2SpriteFeature,
-	g1BadgesFeature
+	g1BadgesFeature,
+	fourLaneSensorFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {
@@ -48,7 +50,6 @@ export function featureById(id: string): ABFeature | undefined {
 				if (error !== null) {
 					throw new Error(`ABFeature ${feature.id}: default for knob '${name}' invalid: ${error}`);
 				}
-			}
 		}
 	}
 }
