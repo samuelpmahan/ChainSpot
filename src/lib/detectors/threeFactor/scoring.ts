@@ -10,6 +10,47 @@ import type {
 	TeeEvidence
 } from './types';
 
+/** g4.scoring knobs, threaded down as plain parameters from the resolving unit. */
+export interface ScoringKnobs {
+	readonly fallbackTeeBboxOffset: number;
+	readonly fallbackTeeBboxSize: number;
+	readonly ringDistance: number;
+	readonly ringTolerance: number;
+	readonly zoneFactorDistance: number;
+	readonly secondaryRingDistance: number;
+	readonly secondaryRingTolerance: number;
+	readonly radialTolerance: number;
+	readonly teeOrientationSigma: number;
+	readonly badgeFractionTarget: number;
+	readonly badgeFractionTolerance: number;
+	readonly badgeFractionSigma: number;
+	readonly collinearityWeight: number;
+	readonly collinearitySigma: number;
+	readonly basketIdentityFloor: number;
+	readonly basketScoreOffset: number;
+	readonly basketScoreScale: number;
+}
+
+export const DEFAULT_SCORING_KNOBS: ScoringKnobs = {
+	fallbackTeeBboxOffset: 6,
+	fallbackTeeBboxSize: 12,
+	ringDistance: 84,
+	ringTolerance: 12,
+	zoneFactorDistance: 35,
+	secondaryRingDistance: 44,
+	secondaryRingTolerance: 8,
+	radialTolerance: 0.5,
+	teeOrientationSigma: 12,
+	badgeFractionTarget: 0.36,
+	badgeFractionTolerance: 0.19,
+	badgeFractionSigma: 0.15,
+	collinearityWeight: 0.6,
+	collinearitySigma: 2,
+	basketIdentityFloor: 0.4,
+	basketScoreOffset: 0.2,
+	basketScoreScale: 0.5
+};
+
 function cell(field: SupportFieldEvidence, x: number, y: number, yOffsetPx: number): number {
 	const cx = Math.max(0, Math.min(field.width - 1, Math.round(x / field.scale)));
 	const cy = Math.max(0, Math.min(field.height - 1, Math.round((y - yOffsetPx) / field.scale)));
@@ -46,17 +87,18 @@ function zoneFactor(
 	point: readonly [number, number],
 	baskets: readonly BasketEvidence[],
 	ownBasketId: string,
-	yOffsetPx: number
+	yOffsetPx: number,
+	knobs: ScoringKnobs
 ): number {
 	const [x, y] = point;
 	for (const basket of baskets) {
 		if (basket.detId === ownBasketId) continue;
 		const d = Math.hypot(x - basket.centerXPx, y - basket.centerYPx);
-		if (d <= 35) return 0.4;
-		if (Math.abs(d - 84) <= 12 || Math.abs(d - 44) <= 8) {
+		if (d <= knobs.zoneFactorDistance) return 0.4;
+		if (Math.abs(d - knobs.ringDistance) <= knobs.ringTolerance || Math.abs(d - knobs.secondaryRingDistance) <= knobs.secondaryRingTolerance) {
 			const theta = field.bestTheta[cell(field, x, y, yOffsetPx)];
 			const radial = Math.abs(((x - basket.centerXPx) * Math.cos(theta) + (y - basket.centerYPx) * Math.sin(theta)) / Math.max(d, 1e-9));
-			if (radial <= 0.5) return 0.4;
+			if (radial <= knobs.radialTolerance) return 0.4;
 		}
 	}
 	return 1;
@@ -68,7 +110,8 @@ function alignedSamples(
 	baskets: readonly BasketEvidence[],
 	ownBasketId: string,
 	params: CorridorParams,
-	yOffsetPx: number
+	yOffsetPx: number,
+	knobs: ScoringKnobs
 ): number[] {
 	const samples: number[] = [];
 	for (let i = 0; i < path.length; i++) {
@@ -78,7 +121,7 @@ function alignedSamples(
 		const fieldCell = cell(field, path[i][0], path[i][1], yOffsetPx);
 		const alignment = length ? Math.abs(((next[0] - previous[0]) * Math.cos(field.bestTheta[fieldCell]) + (next[1] - previous[1]) * Math.sin(field.bestTheta[fieldCell])) / length) : 1;
 		const support = field.support[fieldCell] * alignment ** params.alignmentPower;
-		samples.push(support * zoneFactor(field, path[i], baskets, ownBasketId, yOffsetPx));
+		samples.push(support * zoneFactor(field, path[i], baskets, ownBasketId, yOffsetPx, knobs));
 	}
 	return samples;
 }
@@ -90,14 +133,15 @@ function alignedPairSamples(
 	baskets: readonly BasketEvidence[],
 	ownBasketId: string,
 	params: CorridorParams,
-	yOffsetPx: number
+	yOffsetPx: number,
+	knobs: ScoringKnobs
 ): number[] {
 	// The reference scores each leg independently: a basket's furniture is
 	// exempt only on the basket leg, never on the tee leg. Concatenate after
 	// applying that distinction so a route cannot borrow its own basket's zone
 	// while travelling from the tee to the badge.
-	const tee = alignedSamples(field, teeLeg.path, baskets, '', params, yOffsetPx).reverse();
-	const basket = alignedSamples(field, basketLeg.path, baskets, ownBasketId, params, yOffsetPx);
+	const tee = alignedSamples(field, teeLeg.path, baskets, '', params, yOffsetPx, knobs).reverse();
+	const basket = alignedSamples(field, basketLeg.path, baskets, ownBasketId, params, yOffsetPx, knobs);
 	return tee.concat(basket.slice(1));
 }
 
@@ -144,7 +188,7 @@ function directionalAngleDegrees(a: number, b: number): number {
 	return (delta * 180) / Math.PI;
 }
 
-function geometryFactors(badge: BadgeEvidence, tee: TeeEvidence, basket: BasketEvidence): Pick<PairFactorBreakdown, 'teeOrientation' | 'badgeFraction' | 'collinearity'> {
+function geometryFactors(badge: BadgeEvidence, tee: TeeEvidence, basket: BasketEvidence, knobs: ScoringKnobs): Pick<PairFactorBreakdown, 'teeOrientation' | 'badgeFraction' | 'collinearity'> {
 	const tx = tee.xPx;
 	const ty = tee.yPx;
 	const bx = basket.tipXPx;
@@ -154,14 +198,14 @@ function geometryFactors(badge: BadgeEvidence, tee: TeeEvidence, basket: BasketE
 	const chord = Math.hypot(dx, dy);
 	const teeToBadge = Math.atan2(badge.cyPx - ty, badge.cxPx - tx);
 	const teeAngle = tee.angleRad === null ? 0 : axisAngleDegrees(tee.angleRad, teeToBadge);
-	const teeOrientation = tee.angleRad === null ? 1 : Math.exp(-((teeAngle / 12) ** 2));
+	const teeOrientation = tee.angleRad === null ? 1 : Math.exp(-((teeAngle / knobs.teeOrientationSigma) ** 2));
 	const fraction = chord > 0 ? ((badge.cxPx - tx) * dx + (badge.cyPx - ty) * dy) / (chord * chord) : 0.5;
-	const excess = Math.max(0, Math.abs(fraction - 0.36) - 0.19);
-	const badgeFraction = Math.exp(-((excess / 0.15) ** 2));
+	const excess = Math.max(0, Math.abs(fraction - knobs.badgeFractionTarget) - knobs.badgeFractionTolerance);
+	const badgeFraction = Math.exp(-((excess / knobs.badgeFractionSigma) ** 2));
 	const badgeAngle = Math.atan2(badge.cyPx - ty, badge.cxPx - tx);
 	const endpointAngle = Math.atan2(by - ty, bx - tx);
 	const collinearityDegrees = directionalAngleDegrees(badgeAngle, endpointAngle);
-	const collinearity = 1 + 0.6 * Math.exp(-((collinearityDegrees / 2) ** 2));
+	const collinearity = 1 + knobs.collinearityWeight * Math.exp(-((collinearityDegrees / knobs.collinearitySigma) ** 2));
 	return { teeOrientation, badgeFraction, collinearity };
 }
 
@@ -173,7 +217,8 @@ function zfitFactor(
 	baskets: readonly BasketEvidence[],
 	params: CorridorParams,
 	yOffsetPx: number,
-	current: number
+	current: number,
+	knobs: ScoringKnobs
 ): number {
 	if (current >= 0.28) return 1;
 	const chord = Math.hypot(basket.tipXPx - tee.xPx, basket.tipYPx - tee.yPx);
@@ -199,7 +244,7 @@ function zfitFactor(
 					const steps = Math.max(1, Math.round(length / field.scale));
 					for (let i = 1; i <= steps; i++) path.push([x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps]);
 				}
-				const samples = alignedSamples(field, path, baskets, basket.detId, params, yOffsetPx);
+				const samples = alignedSamples(field, path, baskets, basket.detId, params, yOffsetPx, knobs);
 				const bendFactor = bendDegrees === 0 ? 1 : secondLength > 0 ? 0.8 : 0.9;
 				best = Math.max(best, weakWindow(samples, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale))) * bendFactor * 0.9);
 			}
@@ -287,19 +332,20 @@ export function scorePair(
 	baskets: readonly BasketEvidence[],
 	params: CorridorParams,
 	yOffsetPx: number,
-	allowZfit = false
+	allowZfit = false,
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): ScoredPairEvidence {
-	const aligned = alignedPairSamples(field, raw.teeLeg, raw.basketLeg, baskets, basket.detId, params, yOffsetPx);
+	const aligned = alignedPairSamples(field, raw.teeLeg, raw.basketLeg, baskets, basket.detId, params, yOffsetPx, knobs);
 	const alignedWorst = weakWindow(aligned, Math.max(3, Math.round(params.worstWindowSrcPx / field.scale)));
 	const alignment = raw.worstWindowMean > 0 ? alignedWorst / raw.worstWindowMean : 0;
 	const zone = aligned.length && raw.supportMean > 0 ? aligned.reduce((sum, value) => sum + value, 0) / aligned.length / Math.max(raw.supportMean, 1e-6) : 0;
 	const simplePath = overlapFactor(field, raw.teeLeg, raw.basketLeg, badge, yOffsetPx);
-	const geometry = geometryFactors(badge, tee, basket);
-	const basketIdentity = Math.max(0.4, Math.min(1, (basket.score - 0.2) / 0.5));
+	const geometry = geometryFactors(badge, tee, basket, knobs);
+	const basketIdentity = Math.max(knobs.basketIdentityFloor, Math.min(1, (basket.score - knobs.basketScoreOffset) / knobs.basketScoreScale));
 	const recoveredPrior = tee.tier === 'recovered' ? 0.7 : 1;
 	const preliminary = alignedWorst * simplePath * geometry.teeOrientation * geometry.badgeFraction * geometry.collinearity * basketIdentity * recoveredPrior;
 	const zfit = params.zfit && allowZfit
-		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst)
+		? zfitFactor(field, badge, tee, basket, baskets, params, yOffsetPx, alignedWorst, knobs)
 		: 1;
 	const score = preliminary * zfit;
 	return {

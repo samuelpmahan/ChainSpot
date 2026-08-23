@@ -10,7 +10,7 @@ import type {
 	ThreeFactorMeasurement
 } from './types';
 import { routeBadgeLegs } from './routing';
-import { makeRawPairEvidence, scorePair } from './scoring';
+import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, scorePair, type ScoringKnobs } from './scoring';
 
 const ZFIT_TOP_K = 80;
 const ASSIGN_TOP_ROWS = 60;
@@ -21,9 +21,15 @@ const IMPROVEMENT_EPSILON = 1e-9;
 function recoveredTee(
 	input: RecoveredTeeInput,
 	index: number,
-	baskets: readonly BasketEvidence[]
+	baskets: readonly BasketEvidence[],
+	knobs: ScoringKnobs
 ): TeeEvidence {
-	const bbox = input.bbox ?? [Math.round(input.xPx - 6), Math.round(input.yPx - 6), 12, 12] as const;
+	const bbox = input.bbox ?? [
+		Math.round(input.xPx - knobs.fallbackTeeBboxOffset),
+		Math.round(input.yPx - knobs.fallbackTeeBboxOffset),
+		knobs.fallbackTeeBboxSize,
+		knobs.fallbackTeeBboxSize
+	] as const;
 	return {
 		detId: `tee-recovered-${index}`,
 		xPx: input.xPx,
@@ -34,7 +40,7 @@ function recoveredTee(
 		area: input.area ?? 0,
 		fill: input.fill ?? 0,
 		onRing: baskets.some(
-			(basket) => Math.abs(Math.hypot(input.xPx - basket.tipXPx, input.yPx - basket.tipYPx) - 84) <= 12
+			(basket) => Math.abs(Math.hypot(input.xPx - basket.tipXPx, input.yPx - basket.tipYPx) - knobs.ringDistance) <= knobs.ringTolerance
 		),
 		recovery: input.provenance
 	};
@@ -98,7 +104,8 @@ function scoreRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
 	rawPairs: readonly RawPairEvidence[],
-	zfitKnobs: ZfitKnobs = DEFAULT_ZFIT_KNOBS
+	zfitKnobs: ZfitKnobs = DEFAULT_ZFIT_KNOBS,
+	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): ScoredPairEvidence[] {
 	const badges = new Map(measurement.badges.map((badge) => [badge.detId, badge]));
 	const teesById = new Map(tees.map((tee) => [tee.detId, tee]));
@@ -121,7 +128,9 @@ function scoreRawPairs(
 			basket,
 			measurement.baskets,
 			baseParameters,
-			measurement.viewport.topPx
+			measurement.viewport.topPx,
+			false,
+			scoringKnobs
 		);
 	});
 
@@ -149,7 +158,8 @@ function scoreRawPairs(
 			measurement.baskets,
 			measurement.parameters,
 			measurement.viewport.topPx,
-			true
+			true,
+			scoringKnobs
 		);
 	}
 	return scored;
@@ -307,7 +317,8 @@ export function selectAssignments(
 export function assignThreeFactor(
 	measurement: ThreeFactorMeasurement,
 	recoveredTees: readonly RecoveredTeeInput[] = [],
-	zfitKnobs?: ZfitKnobs
+	zfitKnobs?: ZfitKnobs,
+	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): ThreeFactorAssignment {
 	const sortedRecovered = [...recoveredTees].sort(
 		(a, b) =>
@@ -319,14 +330,14 @@ export function assignThreeFactor(
 	let acceptedRecovered = 0;
 	for (const input of sortedRecovered) {
 		if (tees.some((tee) => Math.hypot(tee.xPx - input.xPx, tee.yPx - input.yPx) < 14)) continue;
-		tees.push(recoveredTee(input, acceptedRecovered++, measurement.baskets));
+		tees.push(recoveredTee(input, acceptedRecovered++, measurement.baskets, scoringKnobs));
 	}
 	tees.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.detId.localeCompare(b.detId));
 
 	const rawPairs = acceptedRecovered > 0
 		? rerouteRawPairs(measurement, tees)
 		: measurement.rawPairs;
-	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs);
+	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
 	const byBadge = rankPairsByBadge(scoredUnranked);
 	const scoredPairs = [...byBadge.values()].flat();
 	const selected = selectAssignments(byBadge);

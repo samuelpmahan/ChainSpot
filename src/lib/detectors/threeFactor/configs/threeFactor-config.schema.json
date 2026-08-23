@@ -5,12 +5,24 @@
 	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = frozen dev72 behavior.",
 	"type": "object",
 	"additionalProperties": false,
-	"required": ["schema", "name"],
+	"required": [
+		"schema",
+		"name"
+	],
 	"properties": {
-		"$schema": { "type": "string" },
-		"schema": { "const": "threeFactor-config@1" },
-		"name": { "type": "string", "minLength": 1 },
-		"note": { "type": "string" },
+		"$schema": {
+			"type": "string"
+		},
+		"schema": {
+			"const": "threeFactor-config@1"
+		},
+		"name": {
+			"type": "string",
+			"minLength": 1
+		},
+		"note": {
+			"type": "string"
+		},
 		"execution": {
 			"type": "array",
 			"items": {
@@ -43,7 +55,10 @@
 							"additionalProperties": false,
 							"description": "C01 complete-occlusion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
 							"properties": {
-								"enabled": { "type": "boolean", "default": false },
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
 								"knobs": {
 									"type": "object",
 									"additionalProperties": false,
@@ -52,6 +67,114 @@
 											"type": "number",
 											"description": "a hole whose best assignment score is at or below this counts as tee-less",
 											"default": 0
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G4": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"scoring": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"fallbackTeeBboxOffset": {
+											"type": "number",
+											"description": "fallback tee bbox half-size when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 6
+										},
+										"fallbackTeeBboxSize": {
+											"type": "number",
+											"description": "fallback tee bbox dimension (size x size) when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 12
+										},
+										"ringDistance": {
+											"type": "number",
+											"description": "basket-to-tee ring membership distance (shared: assignment.ts recoveredTee onRing, measure.ts makeTees onRing, scoring.ts zoneFactor primary ring)",
+											"default": 84
+										},
+										"ringTolerance": {
+											"type": "number",
+											"description": "tolerance band around ringDistance for the basket-to-tee ring check (shared: assignment.ts, measure.ts, scoring.ts)",
+											"default": 12
+										},
+										"zoneFactorDistance": {
+											"type": "number",
+											"description": "close-proximity threshold for the zone factor penalty around a non-owning basket",
+											"default": 35
+										},
+										"secondaryRingDistance": {
+											"type": "number",
+											"description": "secondary ring distance for the zone factor radial check",
+											"default": 44
+										},
+										"secondaryRingTolerance": {
+											"type": "number",
+											"description": "tolerance band around secondaryRingDistance for the zone factor radial check",
+											"default": 8
+										},
+										"radialTolerance": {
+											"type": "number",
+											"description": "radial alignment fraction threshold for the zone factor penalty",
+											"default": 0.5
+										},
+										"teeOrientationSigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the tee-to-badge angle penalty",
+											"default": 12
+										},
+										"badgeFractionTarget": {
+											"type": "number",
+											"description": "optimal fractional position of the badge along the tee-basket chord",
+											"default": 0.36
+										},
+										"badgeFractionTolerance": {
+											"type": "number",
+											"description": "acceptable deviation from badgeFractionTarget before the fraction penalty kicks in",
+											"default": 0.19
+										},
+										"badgeFractionSigma": {
+											"type": "number",
+											"description": "gaussian sigma for the badge-fraction penalty",
+											"default": 0.15
+										},
+										"collinearityWeight": {
+											"type": "number",
+											"description": "upward factor for the collinearity bonus",
+											"default": 0.6
+										},
+										"collinearitySigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the collinearity angle penalty",
+											"default": 2
+										},
+										"basketIdentityFloor": {
+											"type": "number",
+											"description": "minimum score factor for the basket identity prior",
+											"default": 0.4
+										},
+										"basketScoreOffset": {
+											"type": "number",
+											"description": "offset subtracted from basket.score in the basket identity calculation",
+											"default": 0.2
+										},
+										"basketScoreScale": {
+											"type": "number",
+											"description": "divisor for basket.score normalization in the basket identity calculation",
+											"default": 0.5
 										}
 									}
 								}
@@ -68,7 +191,10 @@
 							"additionalProperties": false,
 							"description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
 							"properties": {
-								"enabled": { "type": "boolean", "default": false },
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
 								"knobs": {
 									"type": "object",
 									"additionalProperties": false,

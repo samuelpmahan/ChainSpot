@@ -4,10 +4,12 @@
 // (pinned by tests/unit/threeFactorParity.test.ts).
 
 import { assignThreeFactor, type ZfitKnobs } from './assignment';
+import type { ScoringKnobs } from './scoring';
 import { validateExecution, type ResolvedConfig } from './config';
 import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
 import { featureById } from './features/registry';
 import { zfitFeature } from './features/g5.zfit';
+import { g4ScoringFeature } from './features/g4.scoring';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import {
 	defaultKnobs,
@@ -41,7 +43,8 @@ const assignmentUnit: EngineUnit = {
 		const recovered = board.get<readonly RecoveredTeeInput[]>('recoveredTees');
 		const zfit = ctx.resolve(zfitFeature);
 		const zfitKnobs = zfit.knobs as unknown as ZfitKnobs;
-		const assignment = assignThreeFactor(measurement, recovered, zfitKnobs);
+		const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
+		const assignment = assignThreeFactor(measurement, recovered, zfitKnobs, scoringKnobs);
 		for (const own of assignment.assignments) {
 			ctx.measure('assignment', 'score', own.score);
 		}

@@ -9,6 +9,7 @@
 // is UNKNOWN by construction). Default OFF.
 
 import { assignThreeFactor, type ZfitKnobs } from '../assignment';
+import type { ScoringKnobs } from '../scoring';
 import type {
 	AssignmentEvidence,
 	BasketEvidence,
@@ -18,6 +19,7 @@ import type {
 } from '../types';
 import type { ABFeature, EngineUnit } from './types';
 import { zfitFeature } from './g5.zfit';
+import { g4ScoringFeature } from './g4.scoring';
 
 export const phantomTeeFeature = {
 	id: 'phantomTee',
@@ -109,10 +111,11 @@ export const phantomTeeUnit: EngineUnit = {
 			if (phantoms.length > 0) {
 				const merged = [...existing, ...phantoms];
 				const zfit = ctx.resolve(zfitFeature);
+				const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 				board.set('recoveredTees', merged);
 				board.set(
 					'assignment',
-					assignThreeFactor(measurement, merged, zfit.knobs as unknown as ZfitKnobs)
+					assignThreeFactor(measurement, merged, zfit.knobs as unknown as ZfitKnobs, scoringKnobs)
 				);
 			}
 		}

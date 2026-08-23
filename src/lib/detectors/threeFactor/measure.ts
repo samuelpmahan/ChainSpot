@@ -14,7 +14,7 @@ import { predictProbs, type LogisticModel } from './digits/logisticInference';
 import { readCourseBadges, type BadgeReading, type DigitScorer } from './digits/readBadges';
 import { computeRibbonSupport, patchBadgeOcclusion } from './ribbon';
 import { routeBadgeLegs } from './routing';
-import { makeRawPairEvidence } from './scoring';
+import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, type ScoringKnobs } from './scoring';
 import { detectScreenChromeRegions, pointInScreenChrome } from './screenChrome';
 import type {
 	BadgeEvidence,
@@ -36,6 +36,7 @@ import {
 	type EvidenceSlot,
 	type FeatureContext
 } from './features/types';
+import { g4ScoringFeature } from './features/g4.scoring';
 
 /** Minimal evidence board: named slots with fail-loud reads. */
 export function createBoard(): EvidenceBoard {
@@ -226,7 +227,8 @@ function makeTees(
 	stage: ReturnType<typeof runBadgeStage>,
 	sprites: readonly SpriteMatch[],
 	yOffsetPx: number,
-	ctx: FeatureContext = nullFeatureContext
+	ctx: FeatureContext = nullFeatureContext,
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
 	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
@@ -276,8 +278,8 @@ function makeTees(
 			const bbox = ring
 				? [ring.bboxX, ring.bboxY + yOffsetPx, ring.bboxW, ring.bboxH] as const
 				: component
-					? [component.bboxX ?? Math.round(xPx - 6), (component.bboxY ?? Math.round(tee.cy - 6)) + yOffsetPx, component.bboxW, component.bboxH] as const
-					: [Math.round(xPx - 6), Math.round(yPx - 6), 12, 12] as const;
+					? [component.bboxX ?? Math.round(xPx - knobs.fallbackTeeBboxOffset), (component.bboxY ?? Math.round(tee.cy - knobs.fallbackTeeBboxOffset)) + yOffsetPx, component.bboxW, component.bboxH] as const
+					: [Math.round(xPx - knobs.fallbackTeeBboxOffset), Math.round(yPx - knobs.fallbackTeeBboxOffset), knobs.fallbackTeeBboxSize, knobs.fallbackTeeBboxSize] as const;
 			return {
 				detId: '',
 				xPx,
@@ -295,7 +297,7 @@ function makeTees(
 				bbox,
 				area: ring?.holeArea ?? component?.area ?? 0,
 				fill: component?.fill ?? ring?.ringFrac ?? 0,
-				onRing: sprites.some((sprite) => Math.abs(Math.hypot(xPx - sprite.cx, yPx - (sprite.cy + yOffsetPx)) - 84) <= 12)
+				onRing: sprites.some((sprite) => Math.abs(Math.hypot(xPx - sprite.cx, yPx - (sprite.cy + yOffsetPx)) - knobs.ringDistance) <= knobs.ringTolerance)
 			};
 		})
 		.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.tier.localeCompare(b.tier))
@@ -472,7 +474,8 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
 			const sprites = board.get<readonly SpriteMatch[]>('sprites');
 			const { topPx } = board.get<ViewportSeed>('viewport');
-			const tees = makeTees(stage, sprites, topPx, ctx);
+			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
+			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs);
 			for (const tee of tees) {
 				ctx.overlay('tees', {
 					type: 'box',
