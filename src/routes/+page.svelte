@@ -39,8 +39,10 @@
 	import { walkTraceDetector } from '$lib/detectors/walkTrace';
 	import { landingDropletDetector } from '$lib/detectors/landingDroplet';
 	import { applySimilarity, fitSimilarity, matchByHoleNumber } from '$lib/registration';
-	import { setCourseMap, setMappedRound } from '$lib/session';
+	import { setCourseMap, setMappedRound, getMappedRound } from '$lib/session';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
+	import { loadMockFixture, type MockCourseFixture } from '$lib/mockBoot';
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
 	const MAX_IMAGES = 6;
@@ -87,6 +89,26 @@
 	let review = $state<ReviewState | null>(null);
 	let replaceArming = $state<{ holeN: number; anchor: Anchor } | null>(null);
 	let cleanHoles = $state<readonly ReviewHoleState[]>([]);
+
+	// DEV-ONLY mock boot: ?mock=<fixture> skips upload/CV/annotation entirely
+	// and drops the Import page straight into the finished 'clean' phase with
+	// a preloaded course, so the owner can test downstream UI/UX.
+	// COACH: import.meta.env.DEV is inlined at build time by Vite (it's not
+	// process.env — no server, no runtime toggle), so `if (!import.meta.env.DEV)`
+	// becomes `if (true)` and the whole branch (plus mockBoot.ts's dynamic
+	// import) is stripped from the production bundle by dead-code elimination.
+	onMount(() => {
+		if (!import.meta.env.DEV) return;
+		const mockName = new URLSearchParams(location.search).get('mock');
+		if (!mockName) return;
+		loadMockFixture(mockName)
+			.then((fixture: MockCourseFixture) => {
+				cleanHoles = fixture.holes;
+				phase = 'clean';
+				workflowMessage = `Mock boot: loaded fixture "${fixture.name}" (${fixture.holes.length} holes).`;
+			})
+			.catch((e) => console.error('[mockBoot] import page', e));
+	});
 
 	// choreography state: spread/grow -> crop drawers -> badges light -> slide to stitch
 	let vpAnimate = $state(false);
@@ -911,6 +933,21 @@
 	}
 	function pairsDone() {
 		setCourseMap({ holes: cleanHoles, transform: worldTransform });
+		// DEV-ONLY fixture minting: prints the exact MockCourseFixture this run
+		// just produced (derived geometry only, never pixels) so it can be
+		// captured into a static/mock/*.json fixture for the mock-boot flow.
+		// COACH: a later automated run scrapes this console line to mint
+		// static/mock/therec.json the first time TheRec gets annotated — see
+		// mockBoot.ts's fromAnnotationJson doc comment for the corpus-side half.
+		if (import.meta.env.DEV) {
+			const fixture: MockCourseFixture = {
+				name: 'therec',
+				holes: cleanHoles,
+				transform: worldTransform,
+				round: getMappedRound() ?? { walk: [], droplets: [] }
+			};
+			console.log('CHAINSPOT_FIXTURE ' + JSON.stringify(fixture));
+		}
 		goto('/map-round');
 	}
 </script>

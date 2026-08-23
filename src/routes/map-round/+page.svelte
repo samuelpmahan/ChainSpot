@@ -15,6 +15,8 @@
 
 	import { getCourseMap, getMappedRound } from '$lib/session';
 	import type { CourseMap, MappedRound } from '$lib/session';
+	import { onMount } from 'svelte';
+	import { loadMockFixture } from '$lib/mockBoot';
 
 	let courseMap = $state<CourseMap | null>(null);
 	let mappedRound = $state<MappedRound | null>(null);
@@ -22,6 +24,28 @@
 	$effect.pre(() => {
 		courseMap = getCourseMap();
 		mappedRound = getMappedRound();
+	});
+
+	// DEV-ONLY mock boot: ?mock=<fixture> preloads a finished course so the
+	// owner can test this page's UI without running Import first.
+	// COACH: import.meta.env.DEV is a Vite compile-time constant, not a
+	// runtime env read — in a production build `if (false)` here gets dead-
+	// code-eliminated along with everything inside it, so this branch (and
+	// its dynamic import of mockBoot.ts) never ships to prod users.
+	// COACH: $effect.pre above already ran by the time onMount fires (mount
+	// order: effect.pre -> DOM update -> onMount), so this simply overwrites
+	// courseMap/mappedRound once the fixture fetch resolves; reassigning
+	// $state here re-renders same as any other update.
+	onMount(() => {
+		if (!import.meta.env.DEV) return;
+		const mockName = new URLSearchParams(location.search).get('mock');
+		if (!mockName) return;
+		loadMockFixture(mockName)
+			.then((fixture) => {
+				courseMap = { holes: fixture.holes, transform: fixture.transform };
+				mappedRound = fixture.round;
+			})
+			.catch((e) => console.error('[mockBoot] map-round', e));
 	});
 
 	/**
