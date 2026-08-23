@@ -78,12 +78,15 @@ describe('fromAnnotationJson', () => {
 	});
 });
 
-describe('static/mock/heritage.json fixture', () => {
+describe.each([
+	['heritage', 'static/mock/heritage.json'],
+	['dashstrack', 'static/mock/dashstrack.json']
+])('%s fixture', (name, path) => {
 	test('parses to the MockCourseFixture shape', () => {
-		const raw = readFileSync('static/mock/heritage.json', 'utf-8');
+		const raw = readFileSync(path, 'utf-8');
 		const fixture = JSON.parse(raw) as MockCourseFixture;
 
-		expect(fixture.name).toBe('heritage');
+		expect(fixture.name).toBe(name);
 		expect(Array.isArray(fixture.holes)).toBe(true);
 		expect(fixture.holes.length).toBe(18);
 		expect(fixture.transform).toBeNull();
