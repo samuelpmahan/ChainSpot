@@ -42,6 +42,12 @@ function fail(message: string): never {
 export function parseConfig(raw: unknown): ThreeFactorConfig {
 	if (raw === null || typeof raw !== 'object') fail('config must be a JSON object.');
 	const cfg = raw as Record<string, unknown>;
+	// Reject typos loudly: a silently ignored key (e.g. 'gatess') would make an
+	// experiment run as baseline while looking like it ran.
+	const KNOWN_KEYS = ['$schema', 'schema', 'name', 'note', 'execution', 'gates'];
+	for (const key of Object.keys(cfg)) {
+		if (!KNOWN_KEYS.includes(key)) fail(`unknown key '${key}'.`);
+	}
 	if (cfg.schema !== CONFIG_SCHEMA) fail(`schema must be '${CONFIG_SCHEMA}'.`);
 	if (typeof cfg.name !== 'string' || !cfg.name) fail('name must be a non-empty string.');
 	if (cfg.execution !== undefined) {

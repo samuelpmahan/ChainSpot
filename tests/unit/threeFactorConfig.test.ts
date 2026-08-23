@@ -46,6 +46,12 @@ describe('parseConfig', () => {
 		expect(() => parseConfig(zfitOnJson)).not.toThrow();
 	});
 
+	test('rejects unknown top-level keys (typo protection)', () => {
+		expect(() =>
+			parseConfig({ schema: 'threeFactor-config@1', name: 'x', gatess: {} })
+		).toThrow(/unknown key 'gatess'/);
+	});
+
 	test('rejects unknown gate, feature, knob, and bad knob values', () => {
 		const base = { schema: 'threeFactor-config@1', name: 'x' };
 		expect(() => parseConfig({ ...base, gates: { G9: {} } })).toThrow(/unknown gate/);
