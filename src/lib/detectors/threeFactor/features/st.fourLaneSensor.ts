@@ -180,8 +180,8 @@ function normalizedLift(inside: number, outside: number, liftReference: number):
 export function observeFourLaneCrossSection(
 	image: RgbaImage,
 	state: FourLaneState,
-	occluders: readonly FourLaneOccluder[] = [],
-	knobs: FourLaneSensorKnobs = DEFAULT_FOUR_LANE_SENSOR_KNOBS
+	occluders: readonly FourLaneOccluder[],
+	knobs: FourLaneSensorKnobs
 ): FourLaneObservation {
 	const width = Math.max(1, state.corridorWidthPx);
 	const laneWidth = width / 3;
