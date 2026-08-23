@@ -23,6 +23,14 @@ import type { RgbaImage } from './raster';
  *   - zero visible rails -> UNKNOWN, never a zero/miss
  * Hidden expected pixels are neutral. This is important around badges,
  * basket sprites, and other known higher render layers.
+ *
+ * Known-occluder transit is stricter than ordinary unknown evidence. When the
+ * seed lies inside an occluder (the normal G5 case is the number badge), the
+ * incoming Tee->Badge pose is propagated deterministically through that box:
+ * no heading search, no lookahead steering, and no evidence-loss counters.
+ * The optimizer is re-enabled only after the center has geometrically exited
+ * the known box plus one tracker step. This prevents future unrelated rails
+ * from "pulling" the tracker while the current ribbon is knowingly hidden.
  */
 
 export interface FourLanePoint {
@@ -76,6 +84,8 @@ export interface FourLaneTrackStep {
   /** Weakest visible cross-section over the lookahead horizon. */
   sustainedScore: number | null;
   headingDeltaDeg: number;
+  /** True while a known seed occluder owns the transition; no search occurred. */
+  deterministicOccluderTransit?: boolean;
 }
 
 export type FourLaneStopReason = 'max-distance' | 'evidence-lost' | 'occluded-too-long';
@@ -126,10 +136,42 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function inOccluder(x: number, y: number, occluders: readonly FourLaneOccluder[]): boolean {
-  return occluders.some(
-    (o) => x >= o.bboxX && x <= o.bboxX + o.bboxW && y >= o.bboxY && y <= o.bboxY + o.bboxH,
+function containsPoint(occluder: FourLaneOccluder, point: FourLanePoint): boolean {
+  return (
+    point.xPx >= occluder.bboxX &&
+    point.xPx <= occluder.bboxX + occluder.bboxW &&
+    point.yPx >= occluder.bboxY &&
+    point.yPx <= occluder.bboxY + occluder.bboxH
   );
+}
+
+function inOccluder(x: number, y: number, occluders: readonly FourLaneOccluder[]): boolean {
+  return occluders.some((o) => containsPoint(o, { xPx: x, yPx: y }));
+}
+
+/**
+ * Source-pixel distance along state's heading until its CENTER exits an
+ * axis-aligned known occluder. Returns 0 when state is already outside.
+ *
+ * This is deliberately geometry-only: no raster evidence participates. G5
+ * knows the incoming Tee->Badge pose and the badge bbox, so the hidden span
+ * does not need an optimizer at all.
+ */
+export function deterministicOccluderExitDistancePx(
+  state: FourLaneState,
+  occluder: FourLaneOccluder,
+): number {
+  if (!containsPoint(occluder, state)) return 0;
+  const dx = Math.cos(state.headingRad);
+  const dy = Math.sin(state.headingRad);
+  const candidates: number[] = [];
+  const epsilon = 1e-9;
+  if (dx > epsilon) candidates.push((occluder.bboxX + occluder.bboxW - state.xPx) / dx);
+  else if (dx < -epsilon) candidates.push((occluder.bboxX - state.xPx) / dx);
+  if (dy > epsilon) candidates.push((occluder.bboxY + occluder.bboxH - state.yPx) / dy);
+  else if (dy < -epsilon) candidates.push((occluder.bboxY - state.yPx) / dy);
+  const forward = candidates.filter((distance) => Number.isFinite(distance) && distance >= 0);
+  return forward.length ? Math.max(0, Math.min(...forward)) : 0;
 }
 
 function grayAt(image: RgbaImage, x: number, y: number): number | null {
@@ -357,7 +399,42 @@ export function trackFourLaneRibbon(
   let consecutiveUnknown = 0;
   const recentVisible: number[] = [];
 
+  // G5 normally seeds at the center of a known opaque number badge. That box
+  // is not evidence to optimize against: its hidden span is determined by the
+  // frozen Tee->Badge pose plus bbox geometry. Propagate through it, plus one
+  // complete tracker step beyond the centerline exit, before enabling search.
+  const startingOccluder = occluders.find((occluder) => containsPoint(occluder, start));
+  let deterministicTransitRemainingPx = startingOccluder
+    ? deterministicOccluderExitDistancePx(start, startingOccluder) + options.stepPx
+    : 0;
+
   while (distance < options.maxDistancePx) {
+    if (deterministicTransitRemainingPx > 1e-9) {
+      const stepPx = Math.min(options.stepPx, options.maxDistancePx - distance);
+      const next: FourLaneState = {
+        xPx: current.xPx + Math.cos(current.headingRad) * stepPx,
+        yPx: current.yPx + Math.sin(current.headingRad) * stepPx,
+        headingRad: current.headingRad,
+        corridorWidthPx: current.corridorWidthPx,
+      };
+      const observation = observeFourLaneCrossSection(image, next, occluders, options);
+      current = next;
+      distance += stepPx;
+      deterministicTransitRemainingPx = Math.max(0, deterministicTransitRemainingPx - stepPx);
+      points.push({ xPx: current.xPx, yPx: current.yPx });
+      steps.push({
+        distancePx: distance,
+        state: { ...current },
+        observation,
+        sustainedScore: null,
+        headingDeltaDeg: 0,
+        deterministicOccluderTransit: true,
+      });
+      // Known-hidden/partial pixels are neutral. They may be useful for
+      // diagnostics, but cannot terminate or steer the traversal.
+      continue;
+    }
+
     const candidates = options.headingOffsetsDeg.map((deltaDeg) =>
       evaluateCandidate(image, current, deltaDeg, occluders, options),
     );
@@ -378,6 +455,7 @@ export function trackFourLaneRibbon(
       observation: chosen.observation,
       sustainedScore: chosen.sustainedScore,
       headingDeltaDeg: chosen.deltaDeg,
+      deterministicOccluderTransit: false,
     });
 
     if (chosen.observation.score === null) {
