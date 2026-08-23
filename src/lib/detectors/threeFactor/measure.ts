@@ -29,6 +29,22 @@ import type {
 	ThreeFactorParams
 } from './types';
 import { THREE_FACTOR_ALGO, THREE_FACTOR_ALGO_VERSION } from './types';
+import { nullFeatureContext, type EngineUnit, type EvidenceBoard, type EvidenceSlot } from './features/types';
+
+/** Minimal evidence board: named slots with fail-loud reads. */
+export function createBoard(): EvidenceBoard {
+	const slots = new Map<EvidenceSlot, unknown>();
+	return {
+		get<T>(slot: EvidenceSlot): T {
+			if (!slots.has(slot)) throw new Error(`evidence board: slot '${slot}' not produced yet.`);
+			return slots.get(slot) as T;
+		},
+		has: (slot) => slots.has(slot),
+		set: (slot, value) => {
+			slots.set(slot, value);
+		}
+	};
+}
 
 const basketTemplate = prepareSpriteTemplate(basketSpriteData as SpriteTemplate);
 const logisticModel = logisticModelData as LogisticModel;
@@ -76,7 +92,10 @@ function makeParameters(params: ThreeFactorParams | undefined): CorridorParams {
 		patchBadges: params?.patchBadges ?? true,
 		alignmentPower,
 		worstWindowSrcPx,
-		supportTau
+		supportTau,
+		// zfit passthrough — previously dropped here, which made the salvage
+		// pass unreachable via the public path (bug). undefined stays absent.
+		...(params?.zfit !== undefined ? { zfit: params.zfit } : {})
 	};
 }
 
@@ -271,35 +290,238 @@ function makeRawPairs(
 	return pairs.sort((a, b) => a.pairId.localeCompare(b.pairId));
 }
 
-export function measureThreeFactor(image: RgbaImage, params?: ThreeFactorParams): ThreeFactorMeasurement {
+// ---------------------------------------------------------------------------
+// Engine units. Each unit's body is the exact code the monolithic
+// measureThreeFactor used to run at that seam (moved, not rewritten); the
+// evidence board carries what used to be local variables. Execution order
+// comes from the config — DEFAULT_MEASURE_EXECUTION is the frozen order.
+
+interface ViewportSeed {
+	readonly topPx: number;
+	readonly bottomPx: number;
+}
+
+export const measureUnits: readonly EngineUnit[] = [
+	{
+		id: 'badgeStage',
+		gate: 'G1',
+		consumes: ['localImage'],
+		produces: ['stage'],
+		note: 'HSV masks, connected components, badge candidate detection',
+		run(board, ctx) {
+			const stop = ctx.span('badgeStage');
+			board.set('stage', runBadgeStage(board.get<RgbaImage>('localImage')));
+			stop();
+		}
+	},
+	{
+		id: 'badges',
+		gate: 'G1',
+		consumes: ['stage', 'viewport'],
+		produces: ['badges'],
+		note: 'digit reading + label candidates, original-image coordinates',
+		run(board, ctx) {
+			const stop = ctx.span('badges');
+			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
+			const { topPx } = board.get<ViewportSeed>('viewport');
+			const badges = makeBadges(stage, topPx);
+			for (const badge of badges) {
+				ctx.overlay('badges', {
+					type: 'box',
+					bbox: badge.bbox,
+					verdict: 'accepted',
+					ref: badge.detId,
+					values: { confidence: badge.confidence },
+					reason: undefined
+				});
+				ctx.measure('badges', 'confidence', badge.confidence);
+			}
+			board.set('badges', badges);
+			stop();
+		}
+	},
+	{
+		id: 'supportField',
+		gate: 'G5',
+		consumes: ['localImage', 'params'],
+		produces: ['supportField'],
+		note: 'ribbon support field — what the line follower sees',
+		run(board, ctx) {
+			const stop = ctx.span('supportField');
+			const field = computeRibbonSupport(
+				board.get<RgbaImage>('localImage'),
+				board.get<CorridorParams>('params')
+			);
+			const { topPx } = board.get<ViewportSeed>('viewport');
+			ctx.heatmap('supportField', 'supportField', field.support);
+			ctx.overlay('supportField', {
+				type: 'heatmap',
+				key: 'supportField',
+				widthCells: field.width,
+				heightCells: field.height,
+				cellPx: field.scale,
+				originXPx: 0,
+				originYPx: topPx,
+				verdict: 'info'
+			});
+			board.set('supportField', field);
+			stop();
+		}
+	},
+	{
+		id: 'badgeOcclusionPatch',
+		gate: 'G5',
+		consumes: ['supportField', 'localImage', 'badges', 'params', 'viewport'],
+		produces: ['supportField'],
+		note: 'lifts support under badges that occlude the corridor (patchBadges)',
+		run(board, ctx) {
+			const stop = ctx.span('badgeOcclusionPatch');
+			const parameters = board.get<CorridorParams>('params');
+			if (parameters.patchBadges) {
+				const { topPx } = board.get<ViewportSeed>('viewport');
+				const badges = board.get<BadgeEvidence[]>('badges');
+				const localBadges = badges.map((badge) => ({
+					...badge,
+					cyPx: badge.cyPx - topPx,
+					bbox: [badge.bbox[0], badge.bbox[1] - topPx, badge.bbox[2], badge.bbox[3]] as const,
+					component: {
+						...badge.component,
+						cy: badge.component.cy - topPx,
+						bboxY: badge.component.bboxY - topPx
+					}
+				}));
+				patchBadgeOcclusion(
+					board.get<SupportFieldEvidence>('supportField'),
+					board.get<RgbaImage>('localImage'),
+					localBadges,
+					parameters.corridorWidthPx
+				);
+			}
+			stop();
+		}
+	},
+	{
+		id: 'baskets',
+		gate: 'G2',
+		consumes: ['stage', 'viewport'],
+		produces: ['sprites', 'baskets'],
+		note: 'basket sprite matching (coarse→fine) + evidence assembly',
+		run(board, ctx) {
+			const stop = ctx.span('baskets');
+			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
+			const { topPx } = board.get<ViewportSeed>('viewport');
+			const sprites = matchBasketSprites(stage.brightMask, basketTemplate);
+			const baskets = makeBaskets(sprites, topPx);
+			for (const basket of baskets) {
+				ctx.overlay('baskets', {
+					type: 'box',
+					bbox: basket.bbox,
+					verdict: 'accepted',
+					ref: basket.detId,
+					values: { score: basket.score }
+				});
+				ctx.measure('baskets', 'score', basket.score);
+			}
+			board.set('sprites', sprites);
+			board.set('baskets', baskets);
+			stop();
+		}
+	},
+	{
+		id: 'tees',
+		gate: 'G3',
+		consumes: ['stage', 'sprites', 'viewport'],
+		produces: ['tees'],
+		note: 'ring/component tee candidates with chrome + badge exclusion',
+		run(board, ctx) {
+			const stop = ctx.span('tees');
+			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
+			const sprites = board.get<readonly SpriteMatch[]>('sprites');
+			const { topPx } = board.get<ViewportSeed>('viewport');
+			const tees = makeTees(stage, sprites, topPx);
+			for (const tee of tees) {
+				ctx.overlay('tees', {
+					type: 'box',
+					bbox: tee.bbox,
+					verdict: 'accepted',
+					ref: tee.detId,
+					values: { fill: tee.fill, area: tee.area }
+				});
+			}
+			board.set('tees', tees);
+			stop();
+		}
+	},
+	{
+		id: 'rawPairs',
+		gate: 'G5',
+		consumes: ['supportField', 'badges', 'tees', 'baskets', 'params', 'viewport'],
+		produces: ['rawPairs'],
+		note: 'route both legs for every badge×tee×basket hypothesis',
+		run(board, ctx) {
+			const stop = ctx.span('rawPairs');
+			const rawPairs = makeRawPairs(
+				board.get<SupportFieldEvidence>('supportField'),
+				board.get<BadgeEvidence[]>('badges'),
+				board.get<TeeEvidence[]>('tees'),
+				board.get<BasketEvidence[]>('baskets'),
+				board.get<CorridorParams>('params'),
+				board.get<ViewportSeed>('viewport').topPx
+			);
+			for (const pair of rawPairs) ctx.measure('rawPairs', 'supportMin', pair.supportMin);
+			board.set('rawPairs', rawPairs);
+			stop();
+		}
+	},
+	{
+		id: 'measurement',
+		gate: 'shared',
+		consumes: ['image', 'viewport', 'params', 'stage', 'badges', 'baskets', 'tees', 'supportField', 'rawPairs'],
+		produces: ['measurement'],
+		note: 'assemble the ThreeFactorMeasurement artifact',
+		run(board, ctx) {
+			const stop = ctx.span('measurement');
+			const image = board.get<RgbaImage>('image');
+			const { topPx, bottomPx } = board.get<ViewportSeed>('viewport');
+			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
+			const measurement: ThreeFactorMeasurement = {
+				algo: THREE_FACTOR_ALGO,
+				algoVersion: THREE_FACTOR_ALGO_VERSION,
+				widthPx: image.width,
+				heightPx: image.height,
+				viewport: { topPx, bottomPx, sourceFrame: 'original-image' },
+				parameters: board.get<CorridorParams>('params'),
+				brightMask: stage.brightMask,
+				darkMask: stage.darkMask,
+				badges: board.get<BadgeEvidence[]>('badges'),
+				baskets: board.get<BasketEvidence[]>('baskets'),
+				tees: board.get<TeeEvidence[]>('tees'),
+				field: board.get<SupportFieldEvidence>('supportField'),
+				rawPairs: board.get<RawPairEvidence[]>('rawPairs')
+			};
+			board.set('measurement', measurement);
+			stop();
+		}
+	}
+];
+
+export const DEFAULT_MEASURE_EXECUTION: readonly string[] = measureUnits.map((unit) => unit.id);
+
+/** Seed the evidence board exactly as the monolithic entry point did. */
+export function seedBoard(board: EvidenceBoard, image: RgbaImage, params?: ThreeFactorParams): void {
 	if (image.width <= 0 || image.height <= 0) throw new Error('Image dimensions must be positive.');
 	if (image.data.length !== image.width * image.height * 4) throw new Error('RGBA byte length does not match image dimensions.');
 	const topPx = clampInt(params?.viewport?.topPx ?? 0, 0, image.height - 1);
 	const bottomPx = clampInt(params?.viewport?.bottomPx ?? image.height, topPx + 1, image.height);
-	const parameters = makeParameters(params);
-	const localImage = cropImage(image, topPx, bottomPx);
-	const stage = runBadgeStage(localImage);
-	const badges = makeBadges(stage, topPx);
-	const localBadges = badges.map((badge) => ({ ...badge, cyPx: badge.cyPx - topPx, bbox: [badge.bbox[0], badge.bbox[1] - topPx, badge.bbox[2], badge.bbox[3]] as const, component: { ...badge.component, cy: badge.component.cy - topPx, bboxY: badge.component.bboxY - topPx } }));
-	const field = computeRibbonSupport(localImage, parameters);
-	if (parameters.patchBadges) patchBadgeOcclusion(field, localImage, localBadges, parameters.corridorWidthPx);
-	const sprites = matchBasketSprites(stage.brightMask, basketTemplate);
-	const baskets = makeBaskets(sprites, topPx);
-	const tees = makeTees(stage, sprites, topPx);
-	const rawPairs = makeRawPairs(field, badges, tees, baskets, parameters, topPx);
-	return {
-		algo: THREE_FACTOR_ALGO,
-		algoVersion: THREE_FACTOR_ALGO_VERSION,
-		widthPx: image.width,
-		heightPx: image.height,
-		viewport: { topPx, bottomPx, sourceFrame: 'original-image' },
-		parameters,
-		brightMask: stage.brightMask,
-		darkMask: stage.darkMask,
-		badges,
-		baskets,
-		tees,
-		field,
-		rawPairs
-	};
+	board.set('image', image);
+	board.set('viewport', { topPx, bottomPx });
+	board.set('params', makeParameters(params));
+	board.set('localImage', cropImage(image, topPx, bottomPx));
+}
+
+export function measureThreeFactor(image: RgbaImage, params?: ThreeFactorParams): ThreeFactorMeasurement {
+	const board = createBoard();
+	seedBoard(board, image, params);
+	for (const unit of measureUnits) unit.run(board, nullFeatureContext);
+	return board.get<ThreeFactorMeasurement>('measurement');
 }
