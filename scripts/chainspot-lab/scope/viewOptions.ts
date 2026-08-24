@@ -3,6 +3,7 @@ import type { ScopeViewOptions } from './types';
 export const DEFAULT_SCOPE_VIEW: ScopeViewOptions = {
 	contextSpanPx: 800,
 	contextOutputPx: 800,
+	fullOutputPx: 1200,
 	// Total extra width/height, split evenly around the active request.
 	localExtraWidthPx: 100,
 	localExtraHeightPx: 100,
@@ -17,6 +18,7 @@ export const DEFAULT_SCOPE_VIEW: ScopeViewOptions = {
 const NUMERIC_FLAGS: Readonly<Record<string, keyof ScopeViewOptions>> = {
 	'--context': 'contextSpanPx',
 	'--context-out': 'contextOutputPx',
+	'--full-out': 'fullOutputPx',
 	'--local-extra-w': 'localExtraWidthPx',
 	'--local-extra-h': 'localExtraHeightPx',
 	'--local-out': 'localOutputPx',
@@ -38,6 +40,7 @@ export function resolveScopeView(view?: Partial<ScopeViewOptions>): ScopeViewOpt
 	const resolved: ScopeViewOptions = { ...DEFAULT_SCOPE_VIEW, ...view };
 	positiveInteger(resolved.contextSpanPx, 'contextSpanPx');
 	positiveInteger(resolved.contextOutputPx, 'contextOutputPx');
+	positiveInteger(resolved.fullOutputPx, 'fullOutputPx');
 	positiveInteger(resolved.localExtraWidthPx, 'localExtraWidthPx', true);
 	positiveInteger(resolved.localExtraHeightPx, 'localExtraHeightPx', true);
 	positiveInteger(resolved.localOutputPx, 'localOutputPx');
@@ -75,7 +78,7 @@ export function parseManifestView(value: unknown, where: string): Partial<ScopeV
 	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`lab scope: ${where} must be an object.`);
 	const raw = value as Record<string, unknown>;
 	const allowed = new Set<keyof ScopeViewOptions>([
-		'contextSpanPx', 'contextOutputPx', 'localExtraWidthPx', 'localExtraHeightPx', 'localOutputPx',
+		'contextSpanPx', 'contextOutputPx', 'fullOutputPx', 'localExtraWidthPx', 'localExtraHeightPx', 'localOutputPx',
 		'forensicWidePx', 'forensicMidPx', 'forensicTightPx', 'forensicOutputPx', 'grid'
 	]);
 	for (const key of Object.keys(raw)) if (!allowed.has(key as keyof ScopeViewOptions)) throw new Error(`lab scope: ${where} has unknown key '${key}'.`);
