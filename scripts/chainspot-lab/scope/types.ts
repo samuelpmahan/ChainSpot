@@ -6,6 +6,8 @@ export interface ScopeViewOptions {
 	/** Canonical source span for the regional Context crop. */
 	readonly contextSpanPx: number;
 	readonly contextOutputPx: number;
+	/** Whole canonical raster display size for `scope full` (aspect preserved inside it). */
+	readonly fullOutputPx: number;
 	/** Extra canonical pixels added to the active request's total width/height for Local. */
 	readonly localExtraWidthPx: number;
 	readonly localExtraHeightPx: number;
@@ -25,6 +27,7 @@ export interface ScopeRequest {
 	readonly dots?: readonly PointTuple[];
 	readonly path?: readonly PointTuple[];
 	readonly hole?: number;
+	readonly full?: true;
 	readonly template?: string;
 	readonly color?: number;
 	readonly pointLabels?: readonly number[];
@@ -72,7 +75,7 @@ export interface ScopePinOverlay {
 
 export interface ScopeResolvedRequest {
 	readonly name: string;
-	readonly kind: 'point' | 'box' | 'mark' | 'dots' | 'path' | 'hole';
+	readonly kind: 'point' | 'box' | 'mark' | 'dots' | 'path' | 'hole' | 'full';
 	/** Tight active-object bounds in canonical raster coordinates. */
 	readonly focus: Rect;
 	readonly points: readonly PointTuple[];
@@ -85,7 +88,7 @@ export interface ScopeResolvedRequest {
 }
 
 export interface ScopePanelMeta {
-	readonly name: 'context' | 'local' | 'forensic-wide' | 'forensic-mid' | 'forensic-tight';
+	readonly name: 'context' | 'local' | 'forensic-wide' | 'forensic-mid' | 'forensic-tight' | 'full';
 	readonly label: string;
 	readonly source: Rect;
 	readonly outputPx: number;
@@ -115,6 +118,7 @@ export interface ScopeRenderMeta {
 	readonly annotation?: string;
 	readonly canonical: ScopeCanonicalMeta;
 	readonly request: ScopeResolvedRequest;
+	readonly overlays?: readonly ScopeResolvedRequest[];
 	readonly view: ScopeViewOptions;
 	readonly pins?: readonly ScopePinOverlay[];
 	readonly panels: readonly ScopePanelMeta[];
