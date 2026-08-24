@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { parseManifestView } from './viewOptions';
 import type { BoxTuple, PointTuple, ScopeManifest, ScopeManifestCase, ScopeRequest } from './types';
 
 function isFiniteNumber(value: unknown): value is number {
@@ -32,7 +33,8 @@ function parseRequest(value: unknown, where: string): ScopeRequest {
 		path: raw.path === undefined ? undefined : (Array.isArray(raw.path) ? raw.path.map((p, i) => point(p, `${where}.path[${i}]`)) : (() => { throw new Error(`lab scope: ${where}.path must be an array of [x,y].`); })()),
 		hole: raw.hole === undefined ? undefined : (isFiniteNumber(raw.hole) && Number.isInteger(raw.hole) && raw.hole > 0 ? raw.hole : (() => { throw new Error(`lab scope: ${where}.hole must be a positive integer.`); })()),
 		template: typeof raw.template === 'string' ? raw.template : undefined,
-		color: raw.color === undefined ? undefined : (isFiniteNumber(raw.color) ? Math.trunc(raw.color) : undefined)
+		color: raw.color === undefined ? undefined : (isFiniteNumber(raw.color) ? Math.trunc(raw.color) : undefined),
+		view: parseManifestView(raw.view, `${where}.view`)
 	};
 	const kinds = [request.point, request.box, request.mark, request.dots, request.path, request.hole].filter((v) => v !== undefined).length;
 	if (kinds !== 1) throw new Error(`lab scope: ${where} must specify exactly one of point, box, mark, dots, path, or hole.`);
