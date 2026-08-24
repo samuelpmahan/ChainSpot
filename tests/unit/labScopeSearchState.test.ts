@@ -3,26 +3,34 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+	activePageName,
 	addTempPin,
 	addTrailPoint,
-	ageTempPinsForImage,
+	ageTempPinsForPage,
 	backTrail,
+	backTraversal,
 	branchTrail,
 	emptySearchState,
+	ensurePage,
 	keepPin,
 	loadSearchState,
+	moveTraversal,
+	pagesForImage,
 	recordSuccessfulScope,
 	releasePin,
 	saveSearchState,
 	startTrail,
+	startTraversal,
 	trailByName,
+	trailsForPage,
+	usePage,
 	visibleTrailPoints
-} from '../../scripts/chainspot-lab/scope/searchState';
+} from '../../scripts/chainspot-lab/search/searchState';
 
 const IMAGE = '/tmp/course.png';
 const IMAGE_ID = 'a'.repeat(64);
 
-describe('LAB scope search state', () => {
+describe('LAB search state', () => {
 	test('back removes visible evidence but preserves history and numbering', () => {
 		let state = emptySearchState();
 		state = startTrail(state, { name: 'shard-search', imagePath: IMAGE, imageId: IMAGE_ID, point: [10, 10] });
@@ -31,35 +39,32 @@ describe('LAB scope search state', () => {
 		state = addTrailPoint(state, 'shard-search', [40, 40]);
 		state = backTrail(state, 'shard-search');
 		state = addTrailPoint(state, 'shard-search', [50, 50]);
-
 		const trail = trailByName(state, 'shard-search');
 		expect(visibleTrailPoints(trail).map((point) => point.id)).toEqual([1, 2, 3, 5]);
 		expect(trail.points.map((point) => point.id)).toEqual([1, 2, 3, 4, 5]);
 		expect(state.events.some((event) => event.op === 'path-back' && event.pointId === 4)).toBe(true);
 	});
 
-	test('branch copies only currently visible evidence', () => {
+	test('Pages separate messy scratch evidence from clean final overlays', () => {
 		let state = emptySearchState();
-		state = startTrail(state, { name: 'a', imagePath: IMAGE, imageId: IMAGE_ID, point: [1, 1] });
-		state = addTrailPoint(state, 'a', [2, 2]);
-		state = addTrailPoint(state, 'a', [3, 3]);
-		state = backTrail(state, 'a');
-		state = branchTrail(state, 'a', 'b');
-		const branch = trailByName(state, 'b');
-		expect(branch.points.map((point) => point.id)).toEqual([1, 2]);
-		expect(branch.visiblePointIds).toEqual([1, 2]);
+		state = startTrail(state, { name: 'scratch-path', imagePath: IMAGE, imageId: IMAGE_ID, point: [1, 1], page: 'scratch' });
+		state = addTrailPoint(state, 'scratch-path', [2, 2]);
+		state = ensurePage(state, { imagePath: IMAGE, imageId: IMAGE_ID, page: 'final' });
+		state = usePage(state, IMAGE_ID, 'final');
+		state = branchTrail(state, 'scratch-path', 'final-path', 'final');
+		expect(activePageName(state, IMAGE_ID)).toBe('final');
+		expect(pagesForImage(state, IMAGE_ID).map((page) => page.name)).toEqual(['final', 'scratch']);
+		expect(trailsForPage(state, IMAGE_ID, 'scratch').map((trail) => trail.name)).toEqual(['scratch-path']);
+		expect(trailsForPage(state, IMAGE_ID, 'final').map((trail) => trail.name)).toEqual(['final-path']);
 	});
 
 	test('TempPin shown at ttl=1 remains keepable until the following inspection', () => {
 		let state = emptySearchState();
-		state = addTempPin(state, { name: 'maybe', imagePath: IMAGE, imageId: IMAGE_ID, point: [9, 9], ttl: 2 });
+		state = addTempPin(state, { name: 'maybe', imagePath: IMAGE, imageId: IMAGE_ID, page: 'scratch', point: [9, 9], ttl: 2 });
 		expect(state.pins.maybe.style).toBe('ring-dot');
-
-		// Before the next successful render ttl=2 ages to ttl=1, which is what is displayed.
-		state = ageTempPinsForImage(state, IMAGE_ID);
+		state = ageTempPinsForPage(state, IMAGE_ID, 'scratch');
 		expect(state.pins.maybe.ttlRemaining).toBe(1);
-		state = recordSuccessfulScope(state, { imagePath: IMAGE, imageId: IMAGE_ID, focus: [10, 10] });
-		// It is still present/actionable after the ttl=1 render.
+		state = recordSuccessfulScope(state, { imagePath: IMAGE, imageId: IMAGE_ID, page: 'scratch', focus: [10, 10] });
 		expect(state.pins.maybe.ttlRemaining).toBe(1);
 		state = keepPin(state, 'maybe');
 		expect(state.pins.maybe.kind).toBe('kept');
@@ -68,29 +73,35 @@ describe('LAB scope search state', () => {
 		expect(state.pins.maybe).toBeUndefined();
 	});
 
-	test('ttl=1 expires immediately before the following scope and leaves audit evidence', () => {
+	test('Traverse is Search trail state: move, back, history retained', () => {
 		let state = emptySearchState();
-		state = addTempPin(state, { name: 'fleeting', imagePath: IMAGE, imageId: IMAGE_ID, point: [5, 5], ttl: 1, style: 'crosshair' });
-		expect(state.pins.fleeting.style).toBe('crosshair');
-		state = ageTempPinsForImage(state, IMAGE_ID);
-		expect(state.pins.fleeting).toBeUndefined();
-		expect(state.events.some((event) => event.op === 'pin-expire' && event.pin === 'fleeting')).toBe(true);
-		const dir = mkdtempSync(join(tmpdir(), 'lab-scope-state-'));
-		const path = join(dir, 'state.json');
-		saveSearchState(path, state);
-		expect(loadSearchState(path)).toEqual(state);
+		state = startTraversal(state, { name: 'course-walk', imagePath: IMAGE, imageId: IMAGE_ID, page: 'scratch', point: [100, 100], radiusPx: 75 });
+		state = moveTraversal(state, 'course-walk', [175, 100], 'xy 75,0');
+		state = moveTraversal(state, 'course-walk', [175, 175], 'xy 0,75');
+		state = backTraversal(state, 'course-walk');
+		const trail = trailByName(state, 'course-walk');
+		expect(visibleTrailPoints(trail).map((point) => point.point)).toEqual([[100, 100], [175, 100]]);
+		expect(trail.points.map((point) => point.point)).toEqual([[100, 100], [175, 100], [175, 175]]);
+		expect(state.events.some((event) => event.op === 'traverse-back')).toBe(true);
 	});
 
-	test('old saved pin state migrates to ring-dot without losing the trail', () => {
-		const dir = mkdtempSync(join(tmpdir(), 'lab-scope-old-state-'));
+	test('v1 state migrates into scratch Page with ring-dot pins', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'lab-search-old-state-'));
 		const path = join(dir, 'state.json');
 		const old = {
-			...emptySearchState(),
-			pins: {
-				legacy: { name: 'legacy', imagePath: IMAGE, imageId: IMAGE_ID, point: [7, 8], kind: 'temp', ttlRemaining: 2 }
-			}
+			schemaVersion: 1,
+			nextEventId: 1,
+			trails: {},
+			pins: { legacy: { name: 'legacy', imagePath: IMAGE, imageId: IMAGE_ID, point: [7, 8], kind: 'temp', ttlRemaining: 2 } },
+			events: []
 		};
 		writeFileSync(path, JSON.stringify(old));
-		expect(loadSearchState(path).pins.legacy.style).toBe('ring-dot');
+		const migrated = loadSearchState(path);
+		expect(migrated.schemaVersion).toBe(2);
+		expect(migrated.pins.legacy.style).toBe('ring-dot');
+		expect(migrated.pins.legacy.page).toBe('scratch');
+		expect(pagesForImage(migrated, IMAGE_ID).map((page) => page.name)).toEqual(['scratch']);
+		saveSearchState(path, migrated);
+		expect(loadSearchState(path)).toEqual(migrated);
 	});
 });
