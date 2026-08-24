@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { PointTuple, ScopePinOverlay } from './types';
+import type { PointTuple, ScopePinOverlay, ScopePinStyle } from './types';
 
 export interface TrailPoint {
 	readonly id: number;
@@ -23,6 +23,7 @@ export interface PinState {
 	readonly imageId: string;
 	readonly point: PointTuple;
 	readonly kind: 'temp' | 'kept';
+	readonly style: ScopePinStyle;
 	readonly ttlRemaining: number | null;
 }
 
@@ -70,6 +71,10 @@ export function emptySearchState(): ScopeSearchState {
 	return { schemaVersion: 1, nextEventId: 1, trails: {}, pins: {}, events: [] };
 }
 
+function normalizeStyle(value: unknown): ScopePinStyle {
+	return value === 'crosshair' || value === 'diamond' || value === 'ring-dot' ? value : 'ring-dot';
+}
+
 export function loadSearchState(path: string): ScopeSearchState {
 	const resolvedPath = resolve(path);
 	if (!existsSync(resolvedPath)) return emptySearchState();
@@ -77,7 +82,9 @@ export function loadSearchState(path: string): ScopeSearchState {
 	if (parsed.schemaVersion !== 1 || typeof parsed.nextEventId !== 'number' || !parsed.trails || !parsed.pins || !Array.isArray(parsed.events)) {
 		throw new Error(`lab scope: invalid search state at ${resolvedPath}.`);
 	}
-	return parsed;
+	// Backward-compatible migration for v0 state created before pin styles.
+	const pins = Object.fromEntries(Object.entries(parsed.pins).map(([name, pin]) => [name, { ...pin, style: normalizeStyle((pin as Partial<PinState>).style) }]));
+	return { ...parsed, pins };
 }
 
 export function saveSearchState(path: string, state: ScopeSearchState): void {
@@ -198,7 +205,7 @@ export function trailByName(state: ScopeSearchState, name: string): TrailState {
 
 export function addTempPin(
 	state: ScopeSearchState,
-	input: { name: string; imagePath: string; imageId: string; point: PointTuple; ttl: number }
+	input: { name: string; imagePath: string; imageId: string; point: PointTuple; ttl: number; style?: ScopePinStyle }
 ): ScopeSearchState {
 	if (!Number.isInteger(input.ttl) || input.ttl <= 0) throw new Error('lab scope: TempPin ttl must be a positive integer.');
 	if (state.pins[input.name]) throw new Error(`lab scope: pin '${input.name}' already exists.`);
@@ -208,10 +215,11 @@ export function addTempPin(
 		imageId: input.imageId,
 		point: input.point,
 		kind: 'temp',
+		style: input.style ?? 'ring-dot',
 		ttlRemaining: input.ttl
 	};
 	let next: ScopeSearchState = { ...state, pins: { ...state.pins, [input.name]: pin } };
-	next = appendEvent(next, { op: 'pin-temp', pin: input.name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point, detail: `ttl=${input.ttl}` });
+	next = appendEvent(next, { op: 'pin-temp', pin: input.name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point, detail: `ttl=${input.ttl} style=${pin.style}` });
 	return next;
 }
 
@@ -219,7 +227,7 @@ export function keepPin(state: ScopeSearchState, name: string): ScopeSearchState
 	const pin = requirePin(state, name);
 	const kept: PinState = { ...pin, kind: 'kept', ttlRemaining: null };
 	let next: ScopeSearchState = { ...state, pins: { ...state.pins, [name]: kept } };
-	next = appendEvent(next, { op: 'pin-keep', pin: name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point });
+	next = appendEvent(next, { op: 'pin-keep', pin: name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point, detail: `style=${pin.style}` });
 	return next;
 }
 
@@ -238,38 +246,48 @@ export function pinByName(state: ScopeSearchState, name: string): PinState {
 
 export function activePinsForImage(state: ScopeSearchState, imageId: string): readonly ScopePinOverlay[] {
 	return Object.values(state.pins)
-		.filter((pin) => pin.imageId === imageId)
+		.filter((pin) => pin.imageId === imageId && (pin.kind === 'kept' || (pin.ttlRemaining ?? 0) > 0))
 		.map((pin) => ({
 			name: pin.name,
 			point: pin.point,
 			kind: pin.kind,
+			style: pin.style,
 			ttlRemaining: pin.ttlRemaining ?? undefined
 		}));
 }
 
+/**
+ * Age TempPins BEFORE a new scope render. This makes the display truthful:
+ * a pin shown as ttl=1 remains actionable/keepable after that render and only
+ * disappears immediately before the following successful inspection.
+ */
+export function ageTempPinsForImage(state: ScopeSearchState, imageId: string): ScopeSearchState {
+	let next = state;
+	const pins: Record<string, PinState> = { ...state.pins };
+	let changed = false;
+	for (const [name, pin] of Object.entries(state.pins)) {
+		if (pin.imageId !== imageId || pin.kind !== 'temp' || pin.ttlRemaining === null) continue;
+		if (pin.ttlRemaining <= 1) {
+			delete pins[name];
+			next = appendEvent(next, { op: 'pin-expire', pin: name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point });
+		} else {
+			pins[name] = { ...pin, ttlRemaining: pin.ttlRemaining - 1 };
+		}
+		changed = true;
+	}
+	return changed ? { ...next, pins } : next;
+}
+
 export function recordSuccessfulScope(
 	state: ScopeSearchState,
-	input: { imagePath: string; imageId: string; focus: PointTuple; ageTempPins?: boolean }
+	input: { imagePath: string; imageId: string; focus: PointTuple }
 ): ScopeSearchState {
 	let next: ScopeSearchState = {
 		...state,
 		lastFocus: { imagePath: resolve(input.imagePath), imageId: input.imageId, point: input.focus }
 	};
 	next = appendEvent(next, { op: 'scope', imagePath: resolve(input.imagePath), imageId: input.imageId, point: input.focus });
-	if (input.ageTempPins === false) return next;
-
-	const pins: Record<string, PinState> = { ...next.pins };
-	for (const [name, pin] of Object.entries(next.pins)) {
-		if (pin.imageId !== input.imageId || pin.kind !== 'temp' || pin.ttlRemaining === null) continue;
-		const ttl = pin.ttlRemaining - 1;
-		if (ttl <= 0) {
-			delete pins[name];
-			next = appendEvent(next, { op: 'pin-expire', pin: name, imagePath: pin.imagePath, imageId: pin.imageId, point: pin.point });
-		} else {
-			pins[name] = { ...pin, ttlRemaining: ttl };
-		}
-	}
-	return { ...next, pins };
+	return next;
 }
 
 export function lastScopeFocus(state: ScopeSearchState): LastScopeFocus {
