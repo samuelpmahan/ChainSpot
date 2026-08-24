@@ -1,0 +1,1138 @@
+{
+  "protocol": {
+    "rivals": "actual D08 strongest false competitor from pair-matrix cache",
+    "contrastDirection": "lower contrastFracLow is better",
+    "pairedDirection": "higher pairedEdgeQ25 is better",
+    "objectMask": "detected badges/tees/baskets only; no truth coordinates",
+    "rendersRetained": 0
+  },
+  "total": {
+    "n": 69,
+    "contrastWins": 49,
+    "contrastTies": 9,
+    "contrastHalfCredit": 53.5,
+    "contrastMedianDelta": 0.15131578947368418,
+    "pairedWins": 46,
+    "pairedTies": 3,
+    "pairedHalfCredit": 47.5,
+    "pairedMedianDelta": 0.05261780732591301
+  },
+  "byCourse": {
+    "DashsTrack-full": {
+      "n": 18,
+      "contrastWins": 14,
+      "contrastTies": 2,
+      "contrastHalfCredit": 15,
+      "contrastMedianDelta": 0.13287587247689114,
+      "pairedWins": 13,
+      "pairedTies": 0,
+      "pairedHalfCredit": 13,
+      "pairedMedianDelta": 0.028161354701206946
+    },
+    "HeritagePark-full": {
+      "n": 15,
+      "contrastWins": 8,
+      "contrastTies": 6,
+      "contrastHalfCredit": 11,
+      "contrastMedianDelta": 0.0970004837929366,
+      "pairedWins": 10,
+      "pairedTies": 0,
+      "pairedHalfCredit": 10,
+      "pairedMedianDelta": 0.1534357735811411
+    },
+    "Lenard-full": {
+      "n": 18,
+      "contrastWins": 11,
+      "contrastTies": 0,
+      "contrastHalfCredit": 11,
+      "contrastMedianDelta": 0.14843308865047994,
+      "pairedWins": 10,
+      "pairedTies": 2,
+      "pairedHalfCredit": 11,
+      "pairedMedianDelta": 0.017212142575305997
+    },
+    "TowneLake-full": {
+      "n": 18,
+      "contrastWins": 16,
+      "contrastTies": 1,
+      "contrastHalfCredit": 16.5,
+      "contrastMedianDelta": 0.23636363636363636,
+      "pairedWins": 13,
+      "pairedTies": 1,
+      "pairedHalfCredit": 13.5,
+      "pairedMedianDelta": 0.07346052622037841
+    }
+  },
+  "byRivalry": {
+    "sharesTee": {
+      "n": 32,
+      "contrastWins": 23,
+      "contrastTies": 5,
+      "contrastHalfCredit": 25.5,
+      "contrastMedianDelta": 0.1431818181818182,
+      "pairedWins": 21,
+      "pairedTies": 2,
+      "pairedHalfCredit": 22,
+      "pairedMedianDelta": 0.04186806065699146
+    },
+    "sharesBasket": {
+      "n": 21,
+      "contrastWins": 12,
+      "contrastTies": 4,
+      "contrastHalfCredit": 14,
+      "contrastMedianDelta": 0.1045751633986928,
+      "pairedWins": 12,
+      "pairedTies": 1,
+      "pairedHalfCredit": 12.5,
+      "pairedMedianDelta": 0.028871738259177215
+    },
+    "sharesNeither": {
+      "n": 16,
+      "contrastWins": 14,
+      "contrastTies": 0,
+      "contrastHalfCredit": 14,
+      "contrastMedianDelta": 0.22843371099185053,
+      "pairedWins": 13,
+      "pairedTies": 0,
+      "pairedHalfCredit": 13,
+      "pairedMedianDelta": 0.08899121115826569
+    }
+  },
+  "examples": [
+    {
+      "course": "DashsTrack-full",
+      "hole": 1,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.38848872464359896,
+        "points": 40
+      },
+      "rival": {
+        "contrastFracLow": 0.15,
+        "pairedEdgeQ25": 0.4115795882267454,
+        "points": 20
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 2,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.26630902508859594,
+        "points": 32
+      },
+      "rival": {
+        "contrastFracLow": 0.125,
+        "pairedEdgeQ25": 0.012223057371974433,
+        "points": 16
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 3,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.25,
+        "pairedEdgeQ25": 0.3806156781155716,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0.3870967741935484,
+        "pairedEdgeQ25": 0.03551756137899924,
+        "points": 31
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 4,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.11764705882352941,
+        "pairedEdgeQ25": 0.19836957510955533,
+        "points": 17
+      },
+      "rival": {
+        "contrastFracLow": 0.2222222222222222,
+        "pairedEdgeQ25": 0.22530967107236177,
+        "points": 18
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 5,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.03782752695717982,
+        "points": 14
+      },
+      "rival": {
+        "contrastFracLow": 0.5555555555555556,
+        "pairedEdgeQ25": 0.010376555813943145,
+        "points": 9
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 6,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.23809523809523808,
+        "pairedEdgeQ25": 0.02397549203654159,
+        "points": 21
+      },
+      "rival": {
+        "contrastFracLow": 0.3333333333333333,
+        "pairedEdgeQ25": 0.016695722046753958,
+        "points": 6
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 7,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.09090909090909091,
+        "pairedEdgeQ25": 0.2050667783539164,
+        "points": 22
+      },
+      "rival": {
+        "contrastFracLow": 0.3125,
+        "pairedEdgeQ25": 0.1524489710280034,
+        "points": 16
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 8,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.22325395833795314,
+        "points": 10
+      },
+      "rival": {
+        "contrastFracLow": 0.3125,
+        "pairedEdgeQ25": 0.1524489710280034,
+        "points": 16
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 9,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3553198075004743,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.34815148946130314,
+        "points": 30
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 10,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.07692307692307693,
+        "pairedEdgeQ25": 0.013791388179486885,
+        "points": 13
+      },
+      "rival": {
+        "contrastFracLow": 0.06818181818181818,
+        "pairedEdgeQ25": 0.1524489710280034,
+        "points": 44
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 11,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.21389057342409823,
+        "points": 32
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.13203805495358667,
+        "points": 28
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 12,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.05,
+        "pairedEdgeQ25": 0.33570495722051474,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0.06896551724137931,
+        "pairedEdgeQ25": 0.31943525723090055,
+        "points": 29
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 13,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.05,
+        "pairedEdgeQ25": 0.23307557147099625,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0.5294117647058824,
+        "pairedEdgeQ25": 0.20420383321181904,
+        "points": 17
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 14,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.5333333333333333,
+        "pairedEdgeQ25": 0.16316441302503876,
+        "points": 15
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.29393292062811704,
+        "points": 13
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 15,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.16824537546286347,
+        "points": 29
+      },
+      "rival": {
+        "contrastFracLow": 0.3333333333333333,
+        "pairedEdgeQ25": 0.19577613163831387,
+        "points": 12
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 16,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.10204081632653061,
+        "pairedEdgeQ25": 0.27544692264149434,
+        "points": 49
+      },
+      "rival": {
+        "contrastFracLow": 0.35,
+        "pairedEdgeQ25": 0.12196896769482893,
+        "points": 40
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 17,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.3157894736842105,
+        "pairedEdgeQ25": 0.08126264064450678,
+        "points": 19
+      },
+      "rival": {
+        "contrastFracLow": 0.4444444444444444,
+        "pairedEdgeQ25": 0.050144326656436866,
+        "points": 27
+      }
+    },
+    {
+      "course": "DashsTrack-full",
+      "hole": 18,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3318406964113537,
+        "points": 51
+      },
+      "rival": {
+        "contrastFracLow": 0.16091954022988506,
+        "pairedEdgeQ25": 0.1398845647178028,
+        "points": 87
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 1,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.32509539569921997,
+        "points": 19
+      },
+      "rival": {
+        "contrastFracLow": 0.34615384615384615,
+        "pairedEdgeQ25": 0.07208352401243251,
+        "points": 156
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 2,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3041287447959593,
+        "points": 7
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.020335691192612224,
+        "points": 2
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 3,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.1983796790655132,
+        "points": 2
+      },
+      "rival": {
+        "contrastFracLow": 0.2857142857142857,
+        "pairedEdgeQ25": 0.044943905484372104,
+        "points": 7
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 4,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3638030851162226,
+        "points": 18
+      },
+      "rival": {
+        "contrastFracLow": 1,
+        "pairedEdgeQ25": 0.10801508772285796,
+        "points": 2
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 5,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.31014981852941836,
+        "points": 18
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0,
+        "points": 8
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 6,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.25,
+        "pairedEdgeQ25": 0.00475339523849079,
+        "points": 4
+      },
+      "rival": {
+        "contrastFracLow": 0.25,
+        "pairedEdgeQ25": 0.07880440448899613,
+        "points": 8
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 7,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3188469334212317,
+        "points": 25
+      },
+      "rival": {
+        "contrastFracLow": 0.8235294117647058,
+        "pairedEdgeQ25": 0.13506123328815745,
+        "points": 17
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 8,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.19230769230769232,
+        "pairedEdgeQ25": 0.1685474048435917,
+        "points": 26
+      },
+      "rival": {
+        "contrastFracLow": 0.2893081761006289,
+        "pairedEdgeQ25": 0.06852058069763389,
+        "points": 159
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 10,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.1848517900594,
+        "points": 15
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.0959030591661656,
+        "points": 25
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 12,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3578294160860165,
+        "points": 5
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 1.0757045223623949,
+        "points": 2
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 13,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.05735640480987958,
+        "points": 7
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.06096046716346276,
+        "points": 8
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 14,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.5,
+        "pairedEdgeQ25": 0.20428817204958355,
+        "points": 2
+      },
+      "rival": {
+        "contrastFracLow": 0.6363636363636364,
+        "pairedEdgeQ25": 0.015849072248575014,
+        "points": 11
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 15,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.8333333333333334,
+        "pairedEdgeQ25": 0,
+        "points": 12
+      },
+      "rival": {
+        "contrastFracLow": 0.7333333333333333,
+        "pairedEdgeQ25": 0.010156987243854932,
+        "points": 30
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 16,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.07086316668775905,
+        "points": 5
+      },
+      "rival": {
+        "contrastFracLow": 0.7777777777777778,
+        "pairedEdgeQ25": 0.0873102961214578,
+        "points": 9
+      }
+    },
+    {
+      "course": "HeritagePark-full",
+      "hole": 18,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.33658647481244736,
+        "points": 13
+      },
+      "rival": {
+        "contrastFracLow": 0.15384615384615385,
+        "pairedEdgeQ25": 0.09284114246983194,
+        "points": 13
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 1,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.659427708402401,
+        "points": 2
+      },
+      "rival": {
+        "contrastFracLow": 0.5714285714285714,
+        "pairedEdgeQ25": 0.025861680432940876,
+        "points": 7
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 2,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.34045535134712457,
+        "points": 4
+      },
+      "rival": {
+        "contrastFracLow": 0.23076923076923078,
+        "pairedEdgeQ25": 0.262499753176551,
+        "points": 26
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 3,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.75,
+        "pairedEdgeQ25": 0,
+        "points": 8
+      },
+      "rival": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0,
+        "points": 5
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 4,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.25,
+        "pairedEdgeQ25": 0.04344462423519049,
+        "points": 4
+      },
+      "rival": {
+        "contrastFracLow": 0.1111111111111111,
+        "pairedEdgeQ25": 0.05792616564692066,
+        "points": 18
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 5,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0.3724469668846643,
+        "points": 10
+      },
+      "rival": {
+        "contrastFracLow": 0.5555555555555556,
+        "pairedEdgeQ25": 0.11166523386130678,
+        "points": 9
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 6,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.2594306848969415,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0.06944444444444445,
+        "pairedEdgeQ25": 0.08229797612030171,
+        "points": 72
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 7,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.125,
+        "pairedEdgeQ25": 0.08954136695268144,
+        "points": 24
+      },
+      "rival": {
+        "contrastFracLow": 0.22077922077922077,
+        "pairedEdgeQ25": 0.07484679318853105,
+        "points": 77
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 8,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.2777777777777778,
+        "pairedEdgeQ25": 0.0416743077205766,
+        "points": 18
+      },
+      "rival": {
+        "contrastFracLow": 0.5038759689922481,
+        "pairedEdgeQ25": 0.04456177876877118,
+        "points": 129
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 9,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.5384615384615384,
+        "pairedEdgeQ25": 0,
+        "points": 13
+      },
+      "rival": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0.43972076503027924,
+        "points": 5
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 10,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.4,
+        "pairedEdgeQ25": 0.038136943060293305,
+        "points": 25
+      },
+      "rival": {
+        "contrastFracLow": 0.3181818181818182,
+        "pairedEdgeQ25": 0,
+        "points": 44
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 11,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.3684210526315789,
+        "pairedEdgeQ25": 0.1382894176459381,
+        "points": 19
+      },
+      "rival": {
+        "contrastFracLow": 0.09090909090909091,
+        "pairedEdgeQ25": 0.3540852630814692,
+        "points": 11
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 12,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.25,
+        "pairedEdgeQ25": 0,
+        "points": 8
+      },
+      "rival": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0,
+        "points": 5
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 13,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.17391304347826086,
+        "pairedEdgeQ25": 0.11441341661329417,
+        "points": 23
+      },
+      "rival": {
+        "contrastFracLow": 0.375,
+        "pairedEdgeQ25": 0.11591606547872334,
+        "points": 16
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 14,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.23333333333333334,
+        "pairedEdgeQ25": 0.14130962043779707,
+        "points": 30
+      },
+      "rival": {
+        "contrastFracLow": 0.625,
+        "pairedEdgeQ25": 0,
+        "points": 8
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 15,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.06666666666666667,
+        "pairedEdgeQ25": 0.1588763656854402,
+        "points": 15
+      },
+      "rival": {
+        "contrastFracLow": 0.5,
+        "pairedEdgeQ25": 0.01932710123735315,
+        "points": 10
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 16,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.17391304347826086,
+        "pairedEdgeQ25": 0.12379410854506295,
+        "points": 23
+      },
+      "rival": {
+        "contrastFracLow": 0.391304347826087,
+        "pairedEdgeQ25": 0.10406439715860136,
+        "points": 23
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 17,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.15625,
+        "pairedEdgeQ25": 0.2351385045733405,
+        "points": 32
+      },
+      "rival": {
+        "contrastFracLow": 0.03333333333333333,
+        "pairedEdgeQ25": 0.5964298000240167,
+        "points": 30
+      }
+    },
+    {
+      "course": "Lenard-full",
+      "hole": 18,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3642305568873665,
+        "points": 16
+      },
+      "rival": {
+        "contrastFracLow": 0.4444444444444444,
+        "pairedEdgeQ25": 0.036814842831533245,
+        "points": 108
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 1,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.4913843954051177,
+        "points": 11
+      },
+      "rival": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0.23861231049994563,
+        "points": 15
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 2,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3324945498932146,
+        "points": 44
+      },
+      "rival": {
+        "contrastFracLow": 0.6923076923076923,
+        "pairedEdgeQ25": 0,
+        "points": 13
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 3,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.6,
+        "pairedEdgeQ25": 0.04068021376372244,
+        "points": 20
+      },
+      "rival": {
+        "contrastFracLow": 0.8947368421052632,
+        "pairedEdgeQ25": 0.03335235060948816,
+        "points": 19
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 4,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.31901477854821725,
+        "points": 18
+      },
+      "rival": {
+        "contrastFracLow": 0.2,
+        "pairedEdgeQ25": 0.15242377390765516,
+        "points": 10
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 5,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3318354060609958,
+        "points": 6
+      },
+      "rival": {
+        "contrastFracLow": 0.4117647058823529,
+        "pairedEdgeQ25": 0.23609119278930962,
+        "points": 17
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 6,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.06159839287131573,
+        "points": 16
+      },
+      "rival": {
+        "contrastFracLow": 0.55,
+        "pairedEdgeQ25": 0.009927543345746831,
+        "points": 20
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 7,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.08277723852622858,
+        "points": 19
+      },
+      "rival": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.13195275804169831,
+        "points": 12
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 8,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.125,
+        "pairedEdgeQ25": 0.17219277763090513,
+        "points": 8
+      },
+      "rival": {
+        "contrastFracLow": 0.13333333333333333,
+        "pairedEdgeQ25": 0.1099925735139283,
+        "points": 15
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 9,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0.0625,
+        "pairedEdgeQ25": 0.1354712130752841,
+        "points": 16
+      },
+      "rival": {
+        "contrastFracLow": 0.5714285714285714,
+        "pairedEdgeQ25": 0.07199639358940924,
+        "points": 28
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 10,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.15384615384615385,
+        "pairedEdgeQ25": 0.0840868477990957,
+        "points": 13
+      },
+      "rival": {
+        "contrastFracLow": 0.3333333333333333,
+        "pairedEdgeQ25": 0,
+        "points": 21
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 11,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0.375,
+        "pairedEdgeQ25": 0.017597019244264905,
+        "points": 16
+      },
+      "rival": {
+        "contrastFracLow": 0.5263157894736842,
+        "pairedEdgeQ25": 0.09147966747532288,
+        "points": 19
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 12,
+      "rivalry": "sharesNeither",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.2571025357779645,
+        "points": 22
+      },
+      "rival": {
+        "contrastFracLow": 0.5925925925925926,
+        "pairedEdgeQ25": 0.017497767231362926,
+        "points": 27
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 13,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.40642812619493085,
+        "points": 21
+      },
+      "rival": {
+        "contrastFracLow": 0.5,
+        "pairedEdgeQ25": 0.43070430322601727,
+        "points": 18
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 14,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.3733651469733443,
+        "points": 18
+      },
+      "rival": {
+        "contrastFracLow": 0.047619047619047616,
+        "pairedEdgeQ25": 0.37721994166648337,
+        "points": 21
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 15,
+      "rivalry": "sharesBasket",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.20031125073155817,
+        "points": 30
+      },
+      "rival": {
+        "contrastFracLow": 0.2727272727272727,
+        "pairedEdgeQ25": 0.04777821503156435,
+        "points": 66
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 16,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0.5555555555555556,
+        "pairedEdgeQ25": 0.12292873389807261,
+        "points": 36
+      },
+      "rival": {
+        "contrastFracLow": 0.1,
+        "pairedEdgeQ25": 0.039482500943190654,
+        "points": 50
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 17,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.4055296353777177,
+        "points": 10
+      },
+      "rival": {
+        "contrastFracLow": 0.5338345864661654,
+        "pairedEdgeQ25": 0.06362779441020006,
+        "points": 133
+      }
+    },
+    {
+      "course": "TowneLake-full",
+      "hole": 18,
+      "rivalry": "sharesTee",
+      "truth": {
+        "contrastFracLow": 0,
+        "pairedEdgeQ25": 0.12333427856127228,
+        "points": 36
+      },
+      "rival": {
+        "contrastFracLow": 0.041666666666666664,
+        "pairedEdgeQ25": 0.12333427856127228,
+        "points": 48
+      }
+    }
+  ]
+}
