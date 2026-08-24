@@ -1,5 +1,6 @@
 export type PointTuple = readonly [number, number];
 export type BoxTuple = readonly [number, number, number, number];
+export type ScopePinStyle = 'ring-dot' | 'crosshair' | 'diamond';
 
 export interface ScopeViewOptions {
 	/** Canonical source span for the regional Context crop. */
@@ -63,6 +64,7 @@ export interface ScopePinOverlay {
 	readonly name: string;
 	readonly point: PointTuple;
 	readonly kind: 'temp' | 'kept';
+	readonly style: ScopePinStyle;
 	readonly ttlRemaining?: number;
 }
 
@@ -76,7 +78,7 @@ export interface ScopeResolvedRequest {
 	readonly template: string;
 	readonly color: number;
 	readonly hole?: number;
-	readonly view: ScopeViewOptions;
+	readonly view?: Partial<ScopeViewOptions>;
 }
 
 export interface ScopePanelMeta {
