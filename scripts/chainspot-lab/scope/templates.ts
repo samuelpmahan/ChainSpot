@@ -24,7 +24,9 @@ function centeredRect(cx: number, cy: number, w: number, h: number, imageWidth: 
 	return clampRect({ x: cx - w / 2, y: cy - h / 2, w, h }, imageWidth, imageHeight);
 }
 
-function previousPoint(request: ScopeResolvedRequest): PointTuple {
+/** The point an agent is actively inspecting. Context/local may frame the whole
+ * request, but forensic views and `pin here` follow this exact anchor. */
+export function inspectionAnchor(request: ScopeResolvedRequest): PointTuple {
 	if (request.points.length === 0) {
 		return [request.focus.x + request.focus.w / 2, request.focus.y + request.focus.h / 2];
 	}
@@ -43,7 +45,7 @@ export const defaultScopeTemplate: ScopeTemplate = {
 		const span = Math.max(request.focus.w, request.focus.h, 1);
 		const contextSpan = Math.max(256, span * 6);
 		const localSpan = Math.max(64, span * 2.5);
-		const [fx, fy] = previousPoint(request);
+		const [fx, fy] = inspectionAnchor(request);
 		return [
 			{ name: 'context', source: centeredRect(cx, cy, contextSpan, contextSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },
 			{ name: 'local', source: centeredRect(cx, cy, localSpan, localSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },

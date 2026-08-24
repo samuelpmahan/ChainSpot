@@ -50,7 +50,7 @@ function usage(exitCode = 0): never {
 		'  ./lab scope templates',
 		'',
 		'Default output is a 1→1→3 nearest-neighbor crosscheck: context | local | three forensic zooms.',
-		'The forensic triplet is overlay-free and centered on the previous path point (or the requested point otherwise).',
+		'The forensic triplet is centered on the previous point and uses a one-pixel hairline target with a clear center; no filled dot/trail/pin covers that evidence.',
 		'',
 		'Back removes a point from the VISIBLE trail but keeps it in the append-only search log.',
 		'Revisit can inspect a historical point without restoring it to the visible trail.',

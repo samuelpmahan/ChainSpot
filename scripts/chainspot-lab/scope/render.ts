@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PNG } from 'pngjs';
 import type { PointTuple, RasterImage, Rect, ScopePanelMeta, ScopePinOverlay, ScopeRenderMeta, ScopeResolvedRequest } from './types';
-import { getScopeTemplate } from './templates';
+import { getScopeTemplate, inspectionAnchor } from './templates';
 
 const BG = [24, 26, 30, 255] as const;
 const FRAME = [210, 214, 220, 255] as const;
@@ -117,8 +117,34 @@ function isForensic(panel: ScopePanelMeta): boolean {
 	return panel.name.startsWith('forensic-');
 }
 
+/** Forensic annotation deliberately leaves the exact target pixels uncovered.
+ * Four one-pixel hairlines point at a 5px clear center instead of painting the
+ * agent's coarse dot over the evidence it is trying to inspect. */
+function overlayForensicTarget(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	panel: ScopePanelMeta,
+	px: number,
+	py: number,
+	request: ScopeResolvedRequest
+): void {
+	const p = imageToPanel(panel.source, px, py, panel.outputPx, inspectionAnchor(request));
+	const cx = Math.round(p[0]);
+	const cy = Math.round(p[1]);
+	const gap = 3;
+	const arm = 9;
+	drawLine(data, width, height, cx - arm, cy, cx - gap, cy, CLAIM, 1);
+	drawLine(data, width, height, cx + gap, cy, cx + arm, cy, CLAIM, 1);
+	drawLine(data, width, height, cx, cy - arm, cx, cy - gap, CLAIM, 1);
+	drawLine(data, width, height, cx, cy + gap, cx, cy + arm, CLAIM, 1);
+}
+
 function overlayRequest(data: Uint8Array, width: number, height: number, panel: ScopePanelMeta, px: number, py: number, request: ScopeResolvedRequest): void {
-	if (isForensic(panel)) return;
+	if (isForensic(panel)) {
+		overlayForensicTarget(data, width, height, panel, px, py, request);
+		return;
+	}
 	const panelSize = panel.outputPx;
 	const r = panel.source;
 	const color = PATH_COLORS[((request.color % PATH_COLORS.length) + PATH_COLORS.length) % PATH_COLORS.length];
