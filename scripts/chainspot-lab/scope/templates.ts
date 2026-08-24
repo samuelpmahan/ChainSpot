@@ -88,9 +88,27 @@ export const defaultScopeTemplate: ScopeTemplate = {
 	}
 };
 
+export const fullScopeTemplate: ScopeTemplate = {
+	id: 'full',
+	description: 'Entire Sweep-canonical raster after StripChrome/AutoStitch, before Scope AutoCrop.',
+	panels({ imageWidth, imageHeight, request }) {
+		const view = resolveScopeView(request.view);
+		return [{
+			name: 'full',
+			label: `FULL CANONICAL ${imageWidth}x${imageHeight} PRE-SCOPECROP GRID ${view.grid ? 'ON' : 'OFF'}`,
+			source: { x: 0, y: 0, w: imageWidth, h: imageHeight },
+			outputPx: view.fullOutputPx,
+			resampling: 'bilinear',
+			nearestNeighbor: false,
+			grid: view.grid
+		}];
+	}
+};
+
 // Extensibility is intentionally this boring: add a ScopeTemplate and register it here.
 export const SCOPE_TEMPLATES: Readonly<Record<string, ScopeTemplate>> = {
-	[defaultScopeTemplate.id]: defaultScopeTemplate
+	[defaultScopeTemplate.id]: defaultScopeTemplate,
+	[fullScopeTemplate.id]: fullScopeTemplate
 };
 
 export function getScopeTemplate(id: string): ScopeTemplate {
