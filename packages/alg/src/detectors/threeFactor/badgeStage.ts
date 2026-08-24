@@ -109,22 +109,25 @@ export function detectBadgeFamily(
 	return families.length > 0 ? families[0] : [];
 }
 
-export function runBadgeStage(
-	image: RgbaImage,
-	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS,
-	hsvKnobs: HsvKnobs = DEFAULT_HSV_KNOBS
-): BadgeStageResult {
-	const { width, height } = image;
-	const { bright, dark } = computeBrightDarkMasks(image, hsvKnobs);
-	const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
-
-	const badges = detectBadgeFamily(width, dark, brightComponents, knobs);
-	const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
-		() => 'bright-family'
-	);
-	const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(
-		() => null
-	);
+/**
+ * Dark-plate badge recovery: scans dark-mask components for plausible
+ * hole-number plates that the bright-family pass missed, and appends any
+ * that pass, mutating `badges`/`badgeSources`/`plateBboxes` in place.
+ * Extracted from runBadgeStage's tail (moved verbatim, not rewritten) so
+ * the exec layer's badgeStage.badges operation (packages/alg/src/exec/
+ * operations.ts) can call the exact same recovery pass without duplicating
+ * its logic — runBadgeStage below is now a thin composition of this
+ * function plus the earlier mask/component/family steps.
+ */
+export function recoverDarkPlateBadges(
+	width: number,
+	bright: Mask,
+	dark: Mask,
+	badges: ComponentStats[],
+	badgeSources: ('bright-family' | 'dark-plate-recovery')[],
+	plateBboxes: (readonly [number, number, number, number] | null)[],
+	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
+): void {
 	const { components: darkComponents } = extractComponents(dark);
 	for (const component of darkComponents) {
 		if (
@@ -172,6 +175,25 @@ export function runBadgeStage(
 			component.bboxH
 		]);
 	}
+}
+
+export function runBadgeStage(
+	image: RgbaImage,
+	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS,
+	hsvKnobs: HsvKnobs = DEFAULT_HSV_KNOBS
+): BadgeStageResult {
+	const { width, height } = image;
+	const { bright, dark } = computeBrightDarkMasks(image, hsvKnobs);
+	const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
+
+	const badges = detectBadgeFamily(width, dark, brightComponents, knobs);
+	const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
+		() => 'bright-family'
+	);
+	const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(
+		() => null
+	);
+	recoverDarkPlateBadges(width, bright, dark, badges, badgeSources, plateBboxes, knobs);
 	return {
 		width,
 		height,

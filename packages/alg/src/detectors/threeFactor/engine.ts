@@ -7,8 +7,11 @@ import { assignThreeFactor, type SearchKnobs } from './assignment';
 import type { RibbonKnobs } from './ribbon';
 import type { RoutingKnobs } from './routing';
 import type { ScoringKnobs, ZfitKnobs } from './scoring';
-import { validateExecution, type ResolvedConfig } from './config';
-import { createBoard, measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
+import { type ResolvedConfig } from './config';
+import { measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
+import { createExecBoard } from '../../exec/board';
+import { compileExecutionPlan } from '../../exec/compile';
+import { executeCompiledPlan } from '../../exec/gateway';
 import { featureById } from './features/registry';
 import { zfitFeature } from './features/g5.zfit';
 import { g4ScoringFeature } from './features/g4.scoring';
@@ -23,6 +26,7 @@ import {
 	nullFeatureContext,
 	type Drawable,
 	type EngineUnit,
+	type EvidenceBoard,
 	type FeatureContext,
 	type GateId,
 	type MeasurementAggregate,
@@ -218,7 +222,15 @@ export function runEngine(
 	paramsHash?: string
 ): EngineResult {
 	const execution = resolved?.execution ?? DEFAULT_EXECUTION;
-	validateExecution(execution, ENGINE_UNITS, SEEDED_SLOTS);
+	// Compile validates the fully-expanded OPERATION list against the op-level
+	// dependency DAG (stronger than the old unit-level validateExecution it
+	// replaces: it also proves each decomposed unit's own internal chain is a
+	// genuine, satisfiable dependency order — R2). `resolved` may be absent
+	// (frozen-default, no-trace callers, e.g. the parity pin): compile still
+	// needs a ResolvedConfig shape to expand `execution`, so an empty-features
+	// stand-in is used — ctx (nullFeatureContext below) never consults it.
+	const compileTarget: ResolvedConfig = resolved ?? { name: 'frozen-default', execution, features: {} };
+	const plan = compileExecutionPlan(compileTarget, paramsHash);
 
 	// feature -> params bridge: zfit rides CorridorParams so measurement
 	// records it (the frozen shape) — engine injects the resolved state.
@@ -241,8 +253,13 @@ export function runEngine(
 	effectiveParams = bridgeParam(effectiveParams, 'alignmentPower', routingState, 'alignmentPower');
 	effectiveParams = bridgeParam(effectiveParams, 'worstWindowSrcPx', routingState, 'worstWindowSrcPx');
 
-	const board = createBoard();
-	seedBoard(board, image, effectiveParams);
+	// Exactly ONE gateway walks operations from here down — executeCompiledPlan
+	// (packages/alg/src/exec/gateway.ts). The board is now the exec layer's
+	// generic string-keyed ExecBoard; it is structurally identical to the
+	// EvidenceBoard the legacy unit bodies expect (get/has/set), so
+	// seedBoard — untouched — still seeds it directly.
+	const board = createExecBoard();
+	seedBoard(board as unknown as EvidenceBoard, image, effectiveParams);
 	board.set('recoveredTees', recoveredTees);
 
 	const withTrace = resolved !== undefined;
@@ -250,12 +267,7 @@ export function runEngine(
 		? createTraceContext(resolved, paramsHash ?? '')
 		: { ctx: nullFeatureContext, trace: undefined as unknown as RunTrace };
 
-	const unitById = new Map(ENGINE_UNITS.map((unit) => [unit.id, unit]));
-	for (const id of execution) {
-		const unit = unitById.get(id);
-		if (!unit) throw new Error(`engine: unknown unit '${id}'.`);
-		unit.run(board, ctx);
-	}
+	executeCompiledPlan(plan, board, ctx);
 
 	return {
 		measurement: board.get<ThreeFactorMeasurement>('measurement'),

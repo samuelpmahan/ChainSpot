@@ -12,7 +12,8 @@ import {
 	type EndpointsKnobs,
 	type SpriteKnobs,
 	type SpriteMatch,
-	type SpriteTemplate
+	type SpriteTemplate,
+	type TeeRing
 } from './endpoints';
 import { predictProbs, type LogisticModel } from './digits/logisticInference';
 import { readCourseBadges, type BadgeReading, type DigitScorer } from './digits/readBadges';
@@ -253,6 +254,34 @@ function makeTees(
 	endpointsKnobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS,
 	badgeStageKnobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
 ): TeeEvidence[] {
+	const rawRings = detectTeeRings(stage.brightMask, endpointsKnobs);
+	const badgeLabels = new Set(stage.badges.map((badge) => badge.label));
+	const rawComponents = stage.brightComponents.filter((component) => !badgeLabels.has(component.label)); // is a badge, not a candidate
+	return excludeAndAssembleTees(stage, rawRings, rawComponents, sprites, yOffsetPx, ctx, knobs, endpointsKnobs, badgeStageKnobs);
+}
+
+/**
+ * Exclude ring/component tee candidates that fall inside a badge bbox or a
+ * screen-chrome cluster, then merge + sort + assign detIds. Extracted from
+ * makeTees's tail (moved verbatim, not rewritten) so the exec layer's
+ * tees.exclusion operation (packages/alg/src/exec/operations.ts) can run
+ * the exact same exclusion + assembly pass over independently-produced raw
+ * ring/component candidate sets, without duplicating this logic. Callers
+ * own producing `rawRings` (e.g. detectTeeRings) and `rawComponents`
+ * (bright components with badge-labeled ones already dropped) — see
+ * makeTees below for the canonical, single-call-site composition.
+ */
+export function excludeAndAssembleTees(
+	stage: Pick<ReturnType<typeof runBadgeStage>, 'brightComponents' | 'width' | 'height' | 'badges'>,
+	rawRings: readonly TeeRing[],
+	rawComponents: readonly ComponentStats[],
+	sprites: readonly SpriteMatch[],
+	yOffsetPx: number,
+	ctx: FeatureContext = nullFeatureContext,
+	knobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
+	endpointsKnobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS,
+	badgeStageKnobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
+): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
 	const insideBadgePadding = badgeStageKnobs.badgeInsidePadding;
 	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
@@ -268,7 +297,7 @@ function makeTees(
 			verdict: 'rejected',
 			reason
 		});
-	const rings = detectTeeRings(stage.brightMask, endpointsKnobs).filter((ring) => {
+	const rings = rawRings.filter((ring) => {
 		if (insideBadge(ring.cx, ring.cy)) {
 			reject(ring.cx, ring.cy, `ring inside badge bbox (+${insideBadgePadding}px pad)`);
 			return false;
@@ -279,9 +308,7 @@ function makeTees(
 		}
 		return true;
 	});
-	const badgeLabels = new Set(stage.badges.map((badge) => badge.label));
-	const components = stage.brightComponents.filter((component) => {
-		if (badgeLabels.has(component.label)) return false; // is a badge, not a candidate
+	const components = rawComponents.filter((component) => {
 		if (insideBadge(component.cx, component.cy)) {
 			reject(component.cx, component.cy, `component inside badge bbox (+${insideBadgePadding}px pad)`);
 			return false;

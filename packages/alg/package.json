@@ -19,6 +19,14 @@
 			"types": "./dist/detectors/threeFactor/index.d.ts",
 			"default": "./dist/detectors/threeFactor/index.js"
 		},
+		"./exec": {
+			"types": "./dist/exec/index.d.ts",
+			"default": "./dist/exec/index.js"
+		},
+		"./exec/node-sink": {
+			"types": "./dist/exec/node-sink.d.ts",
+			"default": "./dist/exec/node-sink.js"
+		},
 		"./*.json": "./dist/*.json",
 		"./*": {
 			"types": "./dist/*.d.ts",

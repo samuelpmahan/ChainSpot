@@ -36,7 +36,7 @@ export const DEFAULT_SEARCH_KNOBS: SearchKnobs = {
 	recoveredTeeDedupeDistance: 14
 };
 
-function recoveredTee(
+export function recoveredTee(
 	input: RecoveredTeeInput,
 	index: number,
 	baskets: readonly BasketEvidence[],
@@ -72,7 +72,7 @@ function pairKey(pair: ScoredPairEvidence): string {
 	return `${pair.raw.teeId}:${pair.raw.basketId}`;
 }
 
-function rerouteRawPairs(
+export function rerouteRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
 	ribbonKnobs: RibbonKnobs,
@@ -117,7 +117,7 @@ function rerouteRawPairs(
 	return rawPairs.sort((a, b) => a.pairId.localeCompare(b.pairId));
 }
 
-function scoreRawPairs(
+export function scoreRawPairs(
 	measurement: ThreeFactorMeasurement,
 	tees: readonly TeeEvidence[],
 	rawPairs: readonly RawPairEvidence[],
@@ -184,7 +184,7 @@ function scoreRawPairs(
 	return scored;
 }
 
-function rankPairsByBadge(
+export function rankPairsByBadge(
 	scoredPairs: readonly ScoredPairEvidence[]
 ): Map<string, ScoredPairEvidence[]> {
 	const byBadge = new Map<string, ScoredPairEvidence[]>();
