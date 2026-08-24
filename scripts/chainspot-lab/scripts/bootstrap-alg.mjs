@@ -8,7 +8,12 @@ const REPO_ROOT = resolve(HERE, '../../..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function run(args) {
-  const result = spawnSync(npm, args, { cwd: REPO_ROOT, stdio: 'inherit', shell: false });
+  const result = spawnSync(npm, args, {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+    // Windows cannot directly CreateProcess an npm.cmd shim.
+    shell: process.platform === 'win32',
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
