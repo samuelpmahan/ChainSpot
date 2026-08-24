@@ -1,60 +1,89 @@
-# LAB scope v0
+# LAB embodied tooling v0
 
 Base: `1141835668d039856b65c73116ef0be097d6010e`
 Branch: `codex/lab-scope-v0`
 
 ## Intent
 
-Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scope` is one visual operation. `lab --help` is the discoverable front door.
+Make LAB usable as an embodied CV toolkit with distinct motions:
 
-## Authorized scope
+- `scope` — stateless inspection.
+- `search` — stateful investigation, trails, pins, Pages.
+- `traverse` — spatial movement over Search state using Scope rendering.
+- `sweep` — canonical raster intake and the only algorithm execution path.
 
-- `scripts/chainspot-lab` is a private npm package: `@chainspot/lab`, with a `lab` bin.
-- Root `./lab` and `lab.cmd` are thin launchers into that package.
-- The npm CLI owns one-shot dispatch, the interactive `lab>` shell, help, history, completion, and `run-script`.
-- The CLI exposes no arbitrary shell/eval escape; all substantive commands dispatch to the existing LAB TypeScript/Node operations.
-- Root `lab --help` exposes the real LAB surface.
-- Add `lab scope` with a default nearest-neighbor `1 -> 1 -> 3` visual grammar: one context view, one local view, then three progressively tighter forensic views.
-- For path/dot/hole work, all three forensic views are centered on the previous point; for a direct point/mark they stay centered on that requested point.
-- Context/local keep the rich geometry/pin overlays. Forensic views replace coarse dots/labels with a tiny one-pixel hairline target that leaves the exact anchor pixels uncovered.
-- Support point, bbox, named mark, numbered dot-to-dot geometry, and named search paths.
-- Search paths are stateful across CLI invocations: start, add, back, branch, show, revisit, log, list.
-- `path back` removes the last point from VISIBLE evidence while preserving the historical point and append-only operation log; later additions keep advancing point numbers.
-- `path branch` snapshots only the currently visible trail, not backed-out historical clutter.
-- Add TempPins: temporary named visual anchors with TTL measured in subsequent successful scope renders, plus `pin here`, `keep`, `release`, and `list`.
-- TempPin expiry/release removes visible evidence but stays in the append-only search log. `keep` promotes a TempPin to persistent visible evidence.
-- Persist this small interaction state as boring JSON under LAB artifacts; do not create a database/session framework.
-- Preserve a tiny scope-template seam that demonstrates extensibility without a plugin framework.
-- Add manifest batching and contact-sheet output.
-- Manifest annotation is optional. No annotation means BLIND; blind cases must not derive hole truth.
-- Add usable single-hole framing when an explicit annotation is supplied.
-- Keep a TODO file for later single-hole/performance optimization; do not optimize v0.
-- Reuse the sweep raster intake seam. `scope` must not become a second detector/algorithm execution path.
-- `sweep` remains the only LAB command that executes the algorithm against raster input.
-- Preserve existing `orient 3fd72` behavior on both launchers.
+`lab --help` is the discoverable front door.
 
-## Non-goals
+## Raster contract
 
-- No detector changes.
-- No ABFeature changes.
-- No browser `/lab` UI work.
-- No persistent search database/session framework beyond one generated JSON state artifact.
-- No generalized annotation framework.
-- No crop-first or single-hole algorithm optimization.
-- No Python CLI dependency.
-- No arbitrary shell or JavaScript eval inside LAB.
+Raw raster input is not a downstream mode:
+
+```text
+raw capture(s)
+  -> Sweep StripChrome
+  -> Sweep AutoStitch
+  -> canonical raster
+  -> Scope / Search / Traverse / algorithm
+```
+
+StripChrome is required sanitation, not presentation. Scope's later AutoCrop is presentation/intelligence over the canonical raster.
+
+`scope full` means whole canonical raster after StripChrome/AutoStitch and before Scope AutoCrop. It must never expose pre-StripChrome pixels.
+
+## Scope
+
+- Default visual grammar is Context -> Local -> Forensic Wide/Mid/Tight.
+- Context defaults to an 800 canonical-px regional crop and 800 output.
+- Local contains active geometry plus 100 total px width and 100 total px height.
+- Context/Local use natural resampling and coordinate grid by default; `--no-grid` disables it.
+- Forensics use tunable source spans, nearest-neighbor, no grid, and a fine non-occluding hairline target.
+- All major panel sizes are tunable and labeled in artifacts/sidecars.
+- `scope full` is a one-panel whole-canonical view, aspect preserved.
+- Scope supports point, box, mark, dots, one-shot path, manifest/contact-sheet, and truth-assisted hole framing.
+- Scope owns no persistent search state.
+
+## Search
+
+- Search owns persistent investigation state as boring JSON under LAB artifacts.
+- Stateful trails support start/add/back/branch/show/revisit/log/list.
+- `back` removes visible evidence while preserving historical evidence and monotonic numbering.
+- Pins default to `ring-dot`; `crosshair` and `diamond` are experimental presentation styles.
+- TempPin TTL is deterministic and visibly actionable; keep/release/style are logged.
+- Search Pages are named overlay namespaces on the same canonical raster, allowing scratch/notes/final surfaces without duplicating image data.
+- Trails/pins belong to Pages. Branching can promote visible geometry into a different Page.
+- Page display uses the Scope renderer; Search must not own another raster renderer.
+
+## Traverse
+
+- Traverse state lives in Search.
+- Each Traverse render shows current position `0` plus six numbered neighboring previews.
+- Default discrete travel radius is 75 canonical px.
+- Hex handles are conveniences, not constraints.
+- Cartesian movement: `--xy DX,DY`.
+- Polar movement: `--polar DISTANCE,ANGLE` with image-coordinate convention 0° right, 90° down, 180° left, 270° up.
+- Backtracking uses Search trail semantics, preserving hidden historical movement.
+- Assisted starts accept `Tn` and `Bn` from annotation truth.
+- `Nn` is accepted only when annotation explicitly carries `numberBadge`/`badge`; never guess it and never execute a detector outside Sweep.
+- Traverse navigation artifacts use Scope's renderer primitives, not a second renderer.
+
+## Package / execution
+
+- `scripts/chainspot-lab` is private npm package `@chainspot/lab`.
+- Root `./lab` and `lab.cmd` launch the same Node dispatcher.
+- No Python control layer.
+- Node uses `--import tsx`, avoiding the sandbox-hostile tsx CLI IPC path.
+- LAB install bootstraps/builds local `@chainspot/alg`.
+- Interactive, one-shot, and `.lab` script commands share one registry.
+- No arbitrary shell/eval escape.
+- `sweep` remains the only command that executes the algorithm plan.
 
 ## Proof plan
 
-- `./lab --help` and `lab.cmd --help` traverse the same npm dispatcher and expose `scope`, `compile`, `sweep`, knowledge tools, orient, and `run-script`.
-- Running `./lab` opens the same dispatcher interactively at `lab>`.
-- A command issued one-shot, interactively, or from `run-script` reaches the same command registry.
-- Scope manifest parser proves annotation is optional and path resolution is manifest-relative.
-- Default template proves the `1 -> 1 -> 3` sequence is nearest-neighbor: 320px context, 320px local, then 160px forensic views sourced from 96px, 48px, and 24px crops.
-- A three-point path proves all forensic crop centers equal the previous point, while context/local retain whole-request framing.
-- Pixel-level forensic proof: the exact anchor pixel remains source-identical while one-pixel hairline arms point toward it; no filled dot, label, trail, or pin covers forensic evidence.
-- Blind manifests can point/box/mark/dots/path but `hole` requires an explicit annotation.
-- Mechanical trail proof: start -> add -> add -> add -> back -> add renders labels `1 -> 2 -> 3 -> 5`, while point 4 remains revisitable/logged but invisible.
-- Branch proof: branch after back copies only active visible points.
-- TempPin proof: temp pin survives exactly N subsequent successful renders, disappears on expiry/release, remains logged, and survives indefinitely after `keep`.
-- Generated scope PNGs carry JSON sidecars with source rectangles, active pins, and `BLIND`/`TRUTH_AVAILABLE` mode.
+- Root help exposes Scope, Search, Traverse, Sweep, knowledge tools, orient, and scripting.
+- StripChrome synthetic proof removes phone UI before downstream use and does not invent single-image horizontal crop.
+- Scope template proof covers 800 Context, +100 Local, tunable forensic triplet, grids, and explicit full canonical view.
+- Pixel-level forensic proof keeps the exact anchor source pixel uncovered.
+- Search proof covers monotonic backtracking, Page isolation/promotion, TempPin lifecycle/style, and v1 state migration.
+- Traverse proof covers hex direction mapping, Cartesian/polar vector convention, Search-backed backtracking, and seven-view artifact structure.
+- Assisted truth coordinates are transformed into canonical coordinates after StripChrome, including optional badge anchors.
+- Full repo/unit and real-raster dogfood must be run in an environment with repository/network/dependencies before promotion; do not claim those passed from a connector-only environment.
