@@ -7,15 +7,14 @@
 // canonical raster crosses the boundary into presentation or algorithm code.
 
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
-import { toGrayRaster } from '@chainspot/alg/g0/inputAsset';
+import { toGrayRaster, type InputAsset } from '@chainspot/alg/g0/inputAsset';
 import { stripChromeProposal, type StripChromeResult } from '@chainspot/alg/g0/stripChrome';
 import { cropRaster } from '@chainspot/alg/raster';
 import { solvePixelStitch } from '@chainspot/alg/g0/stitchSolve';
 import { materializeComposite } from '@chainspot/alg/g0/composite';
-import { appendEntries, createLedger, type CoordinateTransformLedger } from '@chainspot/alg/g0/ledger';
+import { appendEntries, createLedger, type CoordinateTransformLedger, type LedgerEntry } from '@chainspot/alg/g0/ledger';
 import { matchTruth, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor';
-import type { InputAsset } from '@chainspot/alg/g0/inputAsset';
 import type { Placement } from '@chainspot/alg/g0/types';
 
 export interface G0Report {
@@ -89,7 +88,7 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 	if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
 	const assets = await Promise.all(filePaths.map((path) => decodeNodeFile(path)));
 	if (assets.length > 1 && !sameDimensions(assets)) {
-		throw new Error('LAB intake: AutoStitch currently requires same-size captures from one device/orientation.');
+		throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
 	}
 
 	const gray = assets.map(toGrayRaster);
@@ -117,15 +116,14 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 		stripChrome.insets
 	);
 
-	let ledger = createLedger();
-	const entries = [] as Parameters<typeof appendEntries>[1] extends readonly (infer T)[] ? T[] : never;
+	const entries: LedgerEntry[] = [];
 	if (stripChrome.insets) entries.push({ kind: 'crop', insets: stripChrome.insets });
 	if (assets.length > 1) {
 		for (let index = 0; index < placements.length; index++) {
 			entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
 		}
 	}
-	ledger = appendEntries(ledger, entries);
+	const ledger = appendEntries(createLedger(), entries);
 
 	const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
 	const truthMatch = truth
@@ -141,7 +139,7 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 	const top = stripChrome.insets?.top ?? 0;
 	const canonicalTruth = assets.length === 1
 		? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
-		: truth;
+		: undefined;
 
 	const report: G0Report = {
 		shimmed: false,
