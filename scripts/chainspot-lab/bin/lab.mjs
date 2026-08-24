@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
@@ -10,13 +12,14 @@ import { stdin as input, stdout as output } from 'node:process';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LAB_DIR = resolve(HERE, '..');
 const REPO_ROOT = resolve(LAB_DIR, '../..');
-const TSX = resolve(LAB_DIR, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
+const requireFromLab = createRequire(import.meta.url);
+let tsxImportPath = null;
 
 const COMMANDS = {
   scope: {
     group: 'LOOK',
-    summary: 'inspect image regions, trace geometry/search, batch, contact-sheet',
-    examples: ['scope --help', 'scope course.png 880,429', 'scope --manifest manifest.json'],
+    summary: 'canonicalize, crop, inspect, trace/search, batch, contact-sheet',
+    examples: ['scope --help', 'scope course.png 880,429', 'scope course.png 880,429 --no-grid', 'scope --manifest manifest.json'],
     run: (args) => runTs('scope/scopeCli.ts', args),
   },
   invariants: {
@@ -51,8 +54,8 @@ const COMMANDS = {
   },
   sweep: {
     group: 'RUN',
-    summary: 'the only LAB command that executes the algorithm against raster input',
-    examples: ['sweep CONFIG.json IMAGE.png', 'sweep CONFIG.json IMAGE.png TRUTH.json'],
+    summary: 'StripChrome/AutoStitch canonicalization + the only algorithm execution path',
+    examples: ['sweep CONFIG.json IMAGE.png', 'sweep CONFIG.json TILE1.png TILE2.png', 'sweep CONFIG.json IMAGE.png TRUTH.json'],
     run: (args) => runTs('sweep/sweepCli.ts', ['sweep', ...args]),
   },
   orient: {
@@ -90,7 +93,8 @@ function printRootHelp() {
   console.log('  lab scope --help');
   console.log('  lab help sweep');
   console.log('');
-  console.log('LAB does not expose an arbitrary shell/eval escape. `sweep` remains the algorithm execution path.');
+  console.log('Raster rule: raw capture(s) enter Sweep; StripChrome/AutoStitch produce the canonical raster consumed by Scope/alg.');
+  console.log('LAB exposes no arbitrary shell/eval escape. `sweep` remains the algorithm execution path.');
 }
 
 function printCommandHelp(name) {
@@ -108,8 +112,12 @@ function printCommandHelp(name) {
   return 0;
 }
 
-function ensureTsx() {
-  if (!existsSync(TSX)) {
+function ensureTsxImport() {
+  if (tsxImportPath) return tsxImportPath;
+  try {
+    tsxImportPath = requireFromLab.resolve('tsx');
+    return tsxImportPath;
+  } catch {
     throw new Error('LAB dependencies are not installed. Run: (cd scripts/chainspot-lab && npm install)');
   }
 }
@@ -131,8 +139,15 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function runTs(relativeFile, args) {
-  ensureTsx();
-  return spawnProcess(TSX, [resolve(LAB_DIR, relativeFile), ...args]);
+  const tsxLoader = ensureTsxImport();
+  // Use Node's loader path rather than the `tsx` CLI binary. The latter uses
+  // an IPC coordination channel that some Codex/sandbox environments block.
+  return spawnProcess(process.execPath, [
+    '--import',
+    pathToFileURL(tsxLoader).href,
+    resolve(LAB_DIR, relativeFile),
+    ...args,
+  ]);
 }
 
 async function runOrient(args) {
