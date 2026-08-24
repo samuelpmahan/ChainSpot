@@ -67,6 +67,26 @@ ranked results table. Deliver: schema doc + JSON Schema, a runner harness
 whiteCoverageMin x 3 values on DashsTrack) with captured ranked output. No
 executor/engine changes at all.
 
+## T6 — branch codex/c-sweep-completion (Codex OWNS Chunk C forward)
+The lab sweep CLI works end-to-end (verified: scripts/chainspot-lab/sweep/,
+run via `npx tsx sweep/sweepCli.ts sweep <config> <image> [truth]` from
+scripts/chainspot-lab; DashsTrack: 17 ops, receipts, 9 artifacts, truth
+scoreboard 18/18 G1-G4). Codex owns everything C-related from here:
+(a) fix the conformance drift it exposed — badgeOcclusionPatch's
+OperationSpec declares consumes=[] produces=[supportField] but actually
+reads supportField+stage: correct the DECLARATION in packages/alg
+operations to match reality (do not silence the check);
+(b) swap sweep/inputShim.ts to the REAL G0 intake — packages/alg/src/g0/
++ adapters/node landed (CanonicalFrame, ledger, C3 match levels): sweep
+should report the true G0 section (decode -> crop -> canonical frame ->
+truth match level) instead of the shim;
+(c) integrate T1's renderers via sweep/rendererContract.ts registry when
+that ticket lands (until then stubs stand);
+(d) `lab compile CONFIG` inspection subcommand if not complete; POSIX
+./lab dispatch + documented Windows invocation;
+(e) tests: labSweep unit tests + a pinned smoke (op count, scoreboard
+values) added to the suite. Full battery green.
+
 ## T5 — branch codex/sprint2-f-receipt-viewers
 Early slice of Sprint 2 Agent F: a receipts browser in the /lab web route
 (src/routes/lab/ — additive page or section) that loads a sweep output

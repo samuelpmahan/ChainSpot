@@ -7,9 +7,17 @@
 		"invariants": "tsx invariants.ts",
 		"detectors": "tsx detectors.ts",
 		"gates": "tsx gates.ts",
-		"cases": "tsx cases.ts"
+		"cases": "tsx cases.ts",
+		"compile": "tsx sweep/sweepCli.ts compile",
+		"sweep": "tsx sweep/sweepCli.ts sweep"
+	},
+	"dependencies": {
+		"@chainspot/alg": "file:../../packages/alg",
+		"jpeg-js": "^0.4.4",
+		"pngjs": "^7.0.0"
 	},
 	"devDependencies": {
+		"@types/pngjs": "^6.0.5",
 		"tsx": "^4.20.3"
 	}
 }
