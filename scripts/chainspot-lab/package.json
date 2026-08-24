@@ -8,14 +8,15 @@
 		"lab": "bin/lab.mjs"
 	},
 	"scripts": {
+		"postinstall": "node scripts/bootstrap-alg.mjs",
 		"lab": "node bin/lab.mjs",
-		"scope": "tsx scope/scopeCli.ts",
-		"invariants": "tsx invariants.ts",
-		"detectors": "tsx detectors.ts",
-		"gates": "tsx gates.ts",
-		"cases": "tsx cases.ts",
-		"compile": "tsx sweep/sweepCli.ts compile",
-		"sweep": "tsx sweep/sweepCli.ts sweep"
+		"scope": "node --import tsx scope/scopeCli.ts",
+		"invariants": "node --import tsx invariants.ts",
+		"detectors": "node --import tsx detectors.ts",
+		"gates": "node --import tsx gates.ts",
+		"cases": "node --import tsx cases.ts",
+		"compile": "node --import tsx sweep/sweepCli.ts compile",
+		"sweep": "node --import tsx sweep/sweepCli.ts sweep"
 	},
 	"dependencies": {
 		"@chainspot/alg": "file:../../packages/alg",
