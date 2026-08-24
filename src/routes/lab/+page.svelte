@@ -232,6 +232,14 @@
 		if (imgUrl) URL.revokeObjectURL(imgUrl);
 		imgUrl = URL.createObjectURL(blob);
 		const { data } = ctx.getImageData(0, 0, w, h);
+		// GAP-CLOSED (CHSPT-82 Sprint 1 Chunk B): this Date.now() imageId
+		// fabrication is no longer the only option — @chainspot/alg/g0/composite
+		// (materializeComposite) now does this same flatten as pure, headless
+		// array math with a real content-addressed imageId (sha256 over
+		// [u32be width][u32be height][raw RGBA]). Not wired in here: this
+		// chunk's app-rewiring priority was the Import page
+		// (src/routes/+page.svelte), and /lab is a separate, lower-priority
+		// path. Left as a pointer rather than touched, per that chunk's scope.
 		return { imageId: 'composite-' + Date.now().toString(16).padStart(64, '0'), widthPx: w, heightPx: h, rgba: data };
 	}
 
