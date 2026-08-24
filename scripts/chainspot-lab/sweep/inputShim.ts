@@ -1,93 +1,188 @@
-// ============================================================================
-// B-SHIM -- reads this comment block before touching this file.
-// ============================================================================
-// Chunk B (G0 intake: packages/alg/src/g0/** driving crop/stitch/composite/
-// ledger, plus a real CanonicalInput) is still in flight in this checkout.
-// @chainspot/alg/exec's CanonicalInput is currently `unknown` (see
-// contract.ts) -- there is nothing to import yet.
+// Sweep canonical raster intake.
 //
-// Until B lands, `./lab sweep` decodes each input file DIRECTLY with B's own
-// Node adapter (@chainspot/alg/adapters/node's decodeNodeFile -- this DID
-// land, commit ad6a661) and skips the rest of G0 entirely: no crop, no
-// stitch, no composite, no ledger. One input file becomes one image, full
-// stop. That is real decode (real bytes, real sha256 imageId, real pixels)
-// wearing a fake front door.
-//
-// The truth-match call below is NOT shimmed -- g0/truth.ts's matchTruth
-// also landed (real G0 code, not provisional) and is called here exactly as
-// B intends it to be called, with one honest simplification: the ledger
-// this shim hands it is always empty (`{ entries: [] }`), because no real
-// G0 crop/stitch ran to populate one. That means this shim can only ever
-// report 'byte' (raw file bytes hash-equal the truth's declared source
-// image) or 'dims-only' (dimensions coincide, ledger proves nothing) --
-// never 'reconciled-verified', which requires a real transform record.
-// DashsTrack-full.jpg is an unmodified copy of the annotation's original
-// capture, so it hits 'byte' today; a course needing a real crop/stitch to
-// line up with its truth would show 'dims-only' here, correctly flagged
-// with matchTruth's own warning, until B's real intake replaces this shim.
-//
-// SNAPS OUT WHEN B LANDS: this file's decodeInput() becomes "call B's real
-// G0 intake pipeline instead of decodeNodeFile + an empty ledger" and the
-// CanonicalInput import in configIo.ts/sweepCli.ts stops being `unknown`.
-// Nothing downstream of G0Report should need to change shape.
-// ============================================================================
+// Historical note: this file kept the name inputShim while Chunk B was in
+// flight, but it is no longer a decode-only shim. Scope and Sweep both enter
+// here. Raw capture(s) are validated/decoded, StripChrome removes phone/app
+// capture chrome, AutoStitch solves multi-tile placement, and only the resulting
+// canonical raster crosses the boundary into presentation or algorithm code.
 
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
+import { toGrayRaster } from '@chainspot/alg/g0/inputAsset';
+import { stripChromeProposal, type StripChromeResult } from '@chainspot/alg/g0/stripChrome';
+import { cropRaster } from '@chainspot/alg/raster';
+import { solvePixelStitch } from '@chainspot/alg/g0/stitchSolve';
+import { materializeComposite } from '@chainspot/alg/g0/composite';
+import { appendEntries, createLedger, type CoordinateTransformLedger } from '@chainspot/alg/g0/ledger';
 import { matchTruth, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor';
+import type { InputAsset } from '@chainspot/alg/g0/inputAsset';
+import type { Placement } from '@chainspot/alg/g0/types';
 
 export interface G0Report {
-	readonly shimmed: true;
-	readonly filePath: string;
+	readonly shimmed: false;
+	readonly filePaths: readonly string[];
+	readonly rawImageIds: readonly string[];
 	readonly imageId: string;
 	readonly widthPx: number;
 	readonly heightPx: number;
 	readonly sourceByteLength: number;
-	/** null when no truth file was supplied to this sweep. */
+	readonly stripChrome: StripChromeResult;
+	readonly autoStitch: {
+		readonly sourceCount: number;
+		readonly hadFallback: boolean;
+		readonly placements: readonly Placement[];
+	};
+	readonly ledger: CoordinateTransformLedger;
+	/** Raw->canonical translation for the degenerate single-source case. */
+	readonly singleSourceOffset?: { readonly xPx: number; readonly yPx: number };
 	readonly truthMatch: TruthMatch | null;
 }
 
 export interface DecodedInput {
 	readonly report: G0Report;
-	/** width/height/data -- what seedBoard (@chainspot/alg/detectors/threeFactor/measure) expects. */
 	readonly image: RgbaImage;
+	/** Evaluation-only truth transformed into canonical coordinates when possible. */
+	readonly canonicalTruth?: CanonicalTruth;
 }
 
-/** Decode one input file and, if truth was supplied, run the REAL
- * matchTruth against it with an empty ledger (see file header). This is
- * the one function that snaps out wholesale once B's G0 intake lands. */
-export async function decodeInput(filePath: string, truth?: CanonicalTruth): Promise<DecodedInput> {
-	const asset = await decodeNodeFile(filePath);
+function sameDimensions(assets: readonly InputAsset[]): boolean {
+	const first = assets[0];
+	return assets.every((asset) => asset.widthPx === first.widthPx && asset.heightPx === first.heightPx);
+}
+
+function transformedTruthForSingleSource(
+	truth: CanonicalTruth | undefined,
+	canonicalImageId: string,
+	canonicalWidthPx: number,
+	canonicalHeightPx: number,
+	left: number,
+	top: number
+): CanonicalTruth | undefined {
+	if (!truth) return undefined;
+	const shift = (point: { readonly xPx: number; readonly yPx: number }) => ({
+		xPx: point.xPx - left,
+		yPx: point.yPx - top
+	});
+	return {
+		...truth,
+		sourceImage: {
+			...truth.sourceImage,
+			widthPx: canonicalWidthPx,
+			heightPx: canonicalHeightPx,
+			sha256: canonicalImageId
+		},
+		holes: truth.holes.map((hole) => ({
+			...hole,
+			tee: shift(hole.tee),
+			basket: shift(hole.basket),
+			corridorBends: hole.corridorBends.map(shift)
+		}))
+	};
+}
+
+/**
+ * Canonicalize raw raster input(s). This is the single LAB raster-intake seam.
+ * Scope calls this through decodeInput([one source]); Sweep may hand it one or
+ * more tiles. No downstream caller receives uncropped/unstitched raw pixels.
+ */
+export async function canonicalizeInputs(filePaths: readonly string[], truth?: CanonicalTruth): Promise<DecodedInput> {
+	if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
+	const assets = await Promise.all(filePaths.map((path) => decodeNodeFile(path)));
+	if (assets.length > 1 && !sameDimensions(assets)) {
+		throw new Error('LAB intake: AutoStitch currently requires same-size captures from one device/orientation.');
+	}
+
+	const gray = assets.map(toGrayRaster);
+	const stripChrome = stripChromeProposal(gray);
+	const croppedGray = stripChrome.insets ? gray.map((raster) => cropRaster(raster, stripChrome.insets!)) : gray;
+
+	let placements: readonly Placement[];
+	let hadFallback = false;
+	if (assets.length === 1) {
+		placements = [{ x: 0, y: 0 }];
+	} else {
+		const stitched = solvePixelStitch(croppedGray);
+		if (!stitched) throw new Error('LAB intake: AutoStitch failed to produce a placement solution.');
+		placements = stitched.placements;
+		hadFallback = stitched.hadFallback;
+	}
+
+	const composite = await materializeComposite(
+		assets.map((asset, index) => ({
+			rgba: asset.rgba,
+			widthPx: asset.widthPx,
+			heightPx: asset.heightPx,
+			placement: placements[index]
+		})),
+		stripChrome.insets
+	);
+
+	let ledger = createLedger();
+	const entries = [] as Parameters<typeof appendEntries>[1] extends readonly (infer T)[] ? T[] : never;
+	if (stripChrome.insets) entries.push({ kind: 'crop', insets: stripChrome.insets });
+	if (assets.length > 1) {
+		for (let index = 0; index < placements.length; index++) {
+			entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
+		}
+	}
+	ledger = appendEntries(ledger, entries);
+
+	const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
 	const truthMatch = truth
-		? matchTruth(asset.imageId, { imageId: asset.imageId, widthPx: asset.widthPx, heightPx: asset.heightPx, ledger: { entries: [] } }, truth)
+		? matchTruth(rawShaForTruth, {
+			imageId: composite.imageId,
+			widthPx: composite.widthPx,
+			heightPx: composite.heightPx,
+			ledger
+		}, truth)
 		: null;
 
+	const left = stripChrome.insets?.left ?? 0;
+	const top = stripChrome.insets?.top ?? 0;
+	const canonicalTruth = assets.length === 1
+		? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
+		: truth;
+
 	const report: G0Report = {
-		shimmed: true,
-		filePath,
-		imageId: asset.imageId,
-		widthPx: asset.widthPx,
-		heightPx: asset.heightPx,
-		sourceByteLength: asset.sourceByteLength,
+		shimmed: false,
+		filePaths: [...filePaths],
+		rawImageIds: assets.map((asset) => asset.imageId),
+		imageId: composite.imageId,
+		widthPx: composite.widthPx,
+		heightPx: composite.heightPx,
+		sourceByteLength: assets.reduce((sum, asset) => sum + asset.sourceByteLength, 0),
+		stripChrome,
+		autoStitch: { sourceCount: assets.length, hadFallback, placements },
+		ledger,
+		singleSourceOffset: assets.length === 1 ? { xPx: -left, yPx: -top } : undefined,
 		truthMatch
 	};
 
 	return {
 		report,
-		image: { width: asset.widthPx, height: asset.heightPx, data: asset.rgba }
+		image: { width: composite.widthPx, height: composite.heightPx, data: composite.rgba },
+		canonicalTruth
 	};
 }
 
+/** Compatibility convenience for callers with one source (including Scope). */
+export async function decodeInput(filePath: string, truth?: CanonicalTruth): Promise<DecodedInput> {
+	return canonicalizeInputs([filePath], truth);
+}
+
 export function printG0Report(report: G0Report): void {
-	console.log('--- G0 intake (SHIMMED -- see scripts/chainspot-lab/sweep/inputShim.ts) ---');
-	console.log(`  file:        ${report.filePath}`);
-	console.log(`  imageId:     ${report.imageId}`);
-	console.log(`  dims:        ${report.widthPx}x${report.heightPx}px (${report.sourceByteLength} bytes on disk)`);
+	console.log('--- G0 canonical intake ---');
+	console.log(`  source(s):    ${report.filePaths.length}`);
+	for (const path of report.filePaths) console.log(`                ${path}`);
+	console.log(`  StripChrome:  ${report.stripChrome.source}${report.stripChrome.insets ? ` ${JSON.stringify(report.stripChrome.insets)}` : ' (no chrome detected)'}`);
+	console.log(`  AutoStitch:   ${report.autoStitch.sourceCount > 1 ? `${report.autoStitch.sourceCount} tiles${report.autoStitch.hadFallback ? ' (fallback used)' : ''}` : 'single source'}`);
+	console.log(`  canonical id: ${report.imageId}`);
+	console.log(`  canonical:    ${report.widthPx}x${report.heightPx}px`);
 	if (report.truthMatch) {
 		const m = report.truthMatch;
-		console.log(`  truth match: ${m.level}${m.matchedAgainst ? ` (matched against ${m.matchedAgainst})` : ''}`);
-		if (m.warning) console.log(`               WARNING: ${m.warning}`);
+		console.log(`  truth match:  ${m.level}${m.matchedAgainst ? ` (${m.matchedAgainst})` : ''}`);
+		if (m.warning) console.log(`                WARNING: ${m.warning}`);
 	} else {
-		console.log('  truth match: (no truth file supplied)');
+		console.log('  truth match:  (no truth supplied / no match)');
 	}
 }
