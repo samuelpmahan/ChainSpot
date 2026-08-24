@@ -2,7 +2,7 @@
 
 LAB is ChainSpot's embodied CV toolkit. It is tooling around the algorithm, not a second algorithm implementation.
 
-The package lives at `scripts/chainspot-lab` as private npm package `@chainspot/lab` and exposes the `lab` bin. The repository-root `./lab` and `lab.cmd` launch that same bin.
+The package lives at `scripts/chainspot-lab` as private npm package `@chainspot/lab`. Repository-root `./lab` and `lab.cmd` launch that same npm/Node dispatcher. No Python control layer is involved.
 
 ## First use
 
@@ -13,87 +13,113 @@ cd ../..
 ./lab --help
 ```
 
-Windows:
+The LAB install bootstraps/builds the local `@chainspot/alg` workspace and the CLI executes TypeScript through Node's `--import tsx` loader rather than the sandbox-hostile `tsx` IPC CLI path.
 
-```bat
-cd scripts\chainspot-lab
-npm install
-cd ..\..
-lab --help
-```
-
-LAB dependencies stay isolated from the root application dependency surface.
-
-## One front door
-
-One-shot:
-
-```bash
-./lab scope --help
-./lab scope course.png 880,429
-./lab sweep CONFIG.json IMAGE.png
-```
-
-Interactive:
+## Raster contract
 
 ```text
-./lab
-ChainSpot LAB. `help` to discover; `exit` to leave.
-lab> help
-lab> scope course.png 880,429
-lab> history
+raw capture(s)
+  -> Sweep StripChrome
+  -> Sweep AutoStitch
+  -> canonical raster
+  -> Scope / Search / Traverse / algorithm
 ```
 
-Scripted:
+StripChrome is required input sanitation. Pre-StripChrome pixels are not a supported downstream representation.
 
-```text
-./lab run-script investigation.lab
-```
+`scope full` means the entire **canonical** raster after StripChrome/AutoStitch and before Scope's task-aware AutoCrop. It is not a raw-capture escape hatch.
 
-A `.lab` script is intentionally boring: one normal LAB command per line; blank lines and lines beginning with `#` are ignored. The same dispatcher handles one-shot commands, interactive commands, and script commands. This is the substrate for later guided/apply workflows without inventing a second execution system.
+## LOOK operations
 
-LAB does not expose an arbitrary shell, Python, or JavaScript eval escape.
-
-## Operations
-
-### LOOK
-
-`scope` is the embodied inspection operation. It supports point/bbox inspection, named marks, numbered dot-to-dot geometry, named search paths, manifest batching, contact sheets, and truth-assisted single-hole framing. Annotation in a manifest is optional; absence means BLIND.
-
-Start at:
+### Scope — inspect
 
 ```bash
+./lab scope IMAGE 880,429
+./lab scope IMAGE x,y,w,h
+./lab scope full IMAGE
+./lab scope --hole 7 IMAGE annotation.json
 ./lab scope --help
 ```
 
-### KNOW
+Default Scope presentation is `Context -> Local -> Forensic Wide/Mid/Tight`:
+
+- Context: 800 canonical px by default, natural resampling, coordinate grid.
+- Local: active geometry +100 total px width and +100 total px height, natural resampling, coordinate grid.
+- Forensics: tunable source spans, nearest-neighbor, non-occluding hairline target, no grid/pins/trails over evidence.
+
+`--no-grid`, Context/Local sizing, and all three forensic spans are tunable from the CLI.
+
+### Search — remember/explore
+
+Search owns state. Scope does not.
 
 ```bash
-./lab invariants
-./lab detectors
-./lab gates
-./lab cases
+./lab search start IMAGE h7 1143,1105
+./lab search add h7 1050,1120
+./lab search back h7
+./lab search revisit h7 4
+./lab search branch h7 h7-clean --page final
 ```
 
-These are the observed renderer/detector/gate/evidence registries. They are claims and provenance, not enforcement.
+Search Pages are named overlay workspaces over the same canonical map. A `scratch` Page can remain messy while `notes` or `final` retain only useful evidence.
 
-### RUN
+```bash
+./lab search page new final IMAGE
+./lab search page use final IMAGE
+./lab search page show final IMAGE
+```
+
+Pins default to a thin `ring-dot`; experimental `crosshair` and `diamond` styles are available. TempPins have deterministic render-count TTL, can be kept, styled, or released, and never enter forensic panels.
+
+### Traverse — move
+
+Traverse stores its movement as Search trail state and renders its navigation surface through Scope.
+
+```bash
+./lab traverse start IMAGE walk 700,900
+./lab traverse go walk 2
+./lab traverse go walk --xy 40,-25
+./lab traverse go walk --polar 110,330
+./lab traverse back walk
+```
+
+Each render shows current position `0` plus six numbered neighboring previews. The numbered hex handles are conveniences, not constraints: Cartesian and polar movement can go to any valid canonical coordinate.
+
+Image-coordinate polar convention:
+
+```text
+0° right   90° down   180° left   270° up
+```
+
+Assisted starts may use explicit annotation anchors:
+
+```bash
+./lab traverse start IMAGE h7 --annotation annotation.json --start T7
+./lab traverse start IMAGE h7 --annotation annotation.json --start B7
+./lab traverse start IMAGE h7 --annotation annotation.json --start N7
+```
+
+`Tn` and `Bn` use tee/basket truth. `Nn` is accepted only when the annotation explicitly owns a `numberBadge`/`badge` coordinate; Traverse never guesses a badge or secretly executes a detector.
+
+## RUN
 
 ```bash
 ./lab compile CONFIG.json
 ./lab sweep CONFIG.json IMAGE.png [TRUTH.json]
 ```
 
-`compile` is inspection-only. `sweep` is the only LAB command that executes the algorithm against raster input. Scope reuses the sweep raster intake seam for decoding but does not execute detector plans.
+`compile` is inspection-only. `sweep` remains the only LAB command that executes the algorithm plan against raster input.
 
-### PROVENANCE
+## KNOW / PROVENANCE
 
 ```bash
+./lab invariants
+./lab detectors
+./lab gates
+./lab cases
 ./lab orient 3fd72 [--verbose]
 ```
 
-This preserves the frozen-reference auditor behind the same root dispatcher.
+## One front door
 
-## Discoverability rule
-
-`lab --help` is the front door. Successful tools should leave a useful artifact or handle and point toward the nearest useful next operation. Prefer discovering through LAB before reading implementation source.
+`lab --help` is the discoverable front door. One-shot, interactive `lab>`, and `.lab` scripts use the same command registry. LAB exposes no arbitrary shell, Python, or JavaScript eval escape.
