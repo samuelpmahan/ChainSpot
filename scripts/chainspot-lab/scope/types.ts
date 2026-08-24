@@ -1,6 +1,21 @@
 export type PointTuple = readonly [number, number];
 export type BoxTuple = readonly [number, number, number, number];
 
+export interface ScopeViewOptions {
+	/** Canonical source span for the regional Context crop. */
+	readonly contextSpanPx: number;
+	readonly contextOutputPx: number;
+	/** Extra canonical pixels added to the active request's total width/height for Local. */
+	readonly localExtraWidthPx: number;
+	readonly localExtraHeightPx: number;
+	readonly localOutputPx: number;
+	readonly forensicWidePx: number;
+	readonly forensicMidPx: number;
+	readonly forensicTightPx: number;
+	readonly forensicOutputPx: number;
+	readonly grid: boolean;
+}
+
 export interface ScopeRequest {
 	readonly name?: string;
 	readonly point?: PointTuple;
@@ -12,6 +27,7 @@ export interface ScopeRequest {
 	readonly template?: string;
 	readonly color?: number;
 	readonly pointLabels?: readonly number[];
+	readonly view?: Partial<ScopeViewOptions>;
 }
 
 export interface ScopeManifestCase {
@@ -53,19 +69,38 @@ export interface ScopePinOverlay {
 export interface ScopeResolvedRequest {
 	readonly name: string;
 	readonly kind: 'point' | 'box' | 'mark' | 'dots' | 'path' | 'hole';
+	/** Tight active-object bounds in canonical raster coordinates. */
 	readonly focus: Rect;
 	readonly points: readonly PointTuple[];
 	readonly pointLabels?: readonly number[];
 	readonly template: string;
 	readonly color: number;
 	readonly hole?: number;
+	readonly view: ScopeViewOptions;
 }
 
 export interface ScopePanelMeta {
 	readonly name: 'context' | 'local' | 'forensic-wide' | 'forensic-mid' | 'forensic-tight';
+	readonly label: string;
 	readonly source: Rect;
 	readonly outputPx: number;
-	readonly nearestNeighbor: true;
+	readonly resampling: 'bilinear' | 'nearest';
+	readonly nearestNeighbor: boolean;
+	readonly grid: boolean;
+}
+
+export interface ScopeCanonicalMeta {
+	readonly imageId: string;
+	readonly widthPx: number;
+	readonly heightPx: number;
+	readonly stripChrome: {
+		readonly source: string;
+		readonly insets: { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number } | null;
+	};
+	readonly autoStitch: {
+		readonly sourceCount: number;
+		readonly hadFallback: boolean;
+	};
 }
 
 export interface ScopeRenderMeta {
@@ -73,7 +108,9 @@ export interface ScopeRenderMeta {
 	readonly mode: 'BLIND' | 'TRUTH_AVAILABLE';
 	readonly image: string;
 	readonly annotation?: string;
+	readonly canonical: ScopeCanonicalMeta;
 	readonly request: ScopeResolvedRequest;
+	readonly view: ScopeViewOptions;
 	readonly pins?: readonly ScopePinOverlay[];
 	readonly panels: readonly ScopePanelMeta[];
 	readonly output: string;
