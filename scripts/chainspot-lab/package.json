@@ -1,9 +1,15 @@
 {
-	"name": "chainspot-lab",
+	"name": "@chainspot/lab",
+	"version": "0.0.1",
 	"private": true,
 	"type": "module",
-	"description": "ChainSpot LAB — knowledge registry and gate harness for the UDisc map reading algorithm. Dependencies are deliberately isolated from the root app so the clean-room dependency surface stays minimal.",
+	"description": "ChainSpot LAB — embodied CV tooling and algorithm inspection harness.",
+	"bin": {
+		"lab": "bin/lab.mjs"
+	},
 	"scripts": {
+		"lab": "node bin/lab.mjs",
+		"scope": "tsx scope/scopeCli.ts",
 		"invariants": "tsx invariants.ts",
 		"detectors": "tsx detectors.ts",
 		"gates": "tsx gates.ts",

@@ -1,100 +1,99 @@
 # ChainSpot LAB
 
-The LAB is the instrument for the UDisc map reading algorithm: a registry of what
-has actually been observed about the renderer, which detectors depend on which
-observations, and the gates that evidence has to clear. It is not the algorithm.
+LAB is ChainSpot's embodied CV toolkit. It is tooling around the algorithm, not a second algorithm implementation.
 
-Run it with the `./lab` script at the repository root:
+The package lives at `scripts/chainspot-lab` as private npm package `@chainspot/lab` and exposes the `lab` bin. The repository-root `./lab` and `lab.cmd` launch that same bin.
 
+## First use
+
+```bash
+cd scripts/chainspot-lab
+npm install
+cd ../..
+./lab --help
 ```
-./lab invariants          # list every invariant card
-./lab invariants I21      # print one card in full
-./lab detectors D04       # the detector that card constrains
-./lab gates 3
+
+Windows:
+
+```bat
+cd scripts\chainspot-lab
+npm install
+cd ..\..
+lab --help
+```
+
+LAB dependencies stay isolated from the root application dependency surface.
+
+## One front door
+
+One-shot:
+
+```bash
+./lab scope --help
+./lab scope course.png 880,429
+./lab sweep CONFIG.json IMAGE.png
+```
+
+Interactive:
+
+```text
+./lab
+ChainSpot LAB. `help` to discover; `exit` to leave.
+lab> help
+lab> scope course.png 880,429
+lab> history
+```
+
+Scripted:
+
+```text
+./lab run-script investigation.lab
+```
+
+A `.lab` script is intentionally boring: one normal LAB command per line; blank lines and lines beginning with `#` are ignored. The same dispatcher handles one-shot commands, interactive commands, and script commands. This is the substrate for later guided/apply workflows without inventing a second execution system.
+
+LAB does not expose an arbitrary shell, Python, or JavaScript eval escape.
+
+## Operations
+
+### LOOK
+
+`scope` is the embodied inspection operation. It supports point/bbox inspection, named marks, numbered dot-to-dot geometry, named search paths, manifest batching, contact sheets, and truth-assisted single-hole framing. Annotation in a manifest is optional; absence means BLIND.
+
+Start at:
+
+```bash
+./lab scope --help
+```
+
+### KNOW
+
+```bash
+./lab invariants
+./lab detectors
+./lab gates
 ./lab cases
 ```
 
-First use needs its own dependency install, which is deliberately separate from
-the root app:
+These are the observed renderer/detector/gate/evidence registries. They are claims and provenance, not enforcement.
 
+### RUN
+
+```bash
+./lab compile CONFIG.json
+./lab sweep CONFIG.json IMAGE.png [TRUTH.json]
 ```
-(cd scripts/chainspot-lab && npm install)
+
+`compile` is inspection-only. `sweep` is the only LAB command that executes the algorithm against raster input. Scope reuses the sweep raster intake seam for decoding but does not execute detector plans.
+
+### PROVENANCE
+
+```bash
+./lab orient 3fd72 [--verbose]
 ```
 
-## Why the deps are isolated
+This preserves the frozen-reference auditor behind the same root dispatcher.
 
-The root `package.json` is the clean-room surface from CHSPT-82, where every
-dependency has to be explainable. The LAB needs a TypeScript runner (and, once
-the gate harnesses land, a PNG decoder) that the shipped app does not. Keeping a
-second `package.json` here means LAB tooling can grow without widening what the
-application itself depends on. `scripts/chainspot-lab/node_modules/` is covered
-by the root `.gitignore`.
+## Discoverability rule
 
-## Porting status
-
-The LAB currently lives in two places, and this directory is the destination
-rather than the source. Files here came from `codex/lab-smart-basket-finish`,
-where the LAB sits alongside `src/lib/nuthing/` — an older layout of the same
-detector code that the product tree carries as `src/lib/detectors/threeFactor/`.
-
-**Ported (no dependency on detector source):**
-
-| file              | what it holds                                   |
-| ----------------- | ----------------------------------------------- |
-| `invariants.ts`   | invariant cards I00–I21                         |
-| `detectors.ts`    | detector cards D00–D12                          |
-| `gates.ts`        | LAB gates 0–7                                   |
-| `cases.ts`        | hard-evidence case cards, cross-checked against the above |
-| `basketFamily.ts` | provisional basket family signal card           |
-
-**Not ported — these import `src/lib/nuthing/*`, which does not exist here:**
-
-| file             | blocked on                                                     |
-| ---------------- | -------------------------------------------------------------- |
-| `gate2.ts`       | `badgeStage`, `smartBasket`, `viewport`, a PNG decoder          |
-| `gate3.ts`       | `badgeStage`, `endpoints`, `teeCandidates`, `viewport`, decoder |
-| `orient.ts`      | `scripts/nuthing/pair-matrix*.ts`, `scripts/lab-grid.ts`, and a raster corpus checkout |
-
-Unblocking them means reconciling `src/lib/nuthing/` with
-`src/lib/detectors/threeFactor/`. After both trees were put on the same prettier
-config, most of that gap turned out to be formatting: `components.ts`,
-`raster.ts`, `families.ts`, `digits/normalize.ts` and `digits/segment.ts` are now
-byte-identical between the two. The real remaining divergence is `ribbon.ts`
-(substantial), `badgeStage.ts`, `endpoints.ts`, and two `digits/` files, plus the
-LAB-only modules with no product counterpart (`teeCandidates.ts`,
-`smartBasket.ts`, `candidatePool.ts`, `chamfer.ts`, `twoPass.ts`, `viewport.ts`,
-`badgeOcclusion.ts`, `npcompat.ts`, `p1.ts`, `digits/{features,logistic,prototype}.ts`).
-
-That reconciliation is a separate, reviewable change. It is not attempted here.
-
-One consequence to be aware of while reading cards in this tree: the ported cards
-still cite their original `src/lib/nuthing/...` implementation paths, because
-those strings are recorded provenance rather than live references. `./lab
-detectors D04` will point at `src/lib/nuthing/endpoints.ts`, which does not exist
-here. The card text is left exactly as it was written when the evidence was
-gathered; rewriting it to point at `src/lib/detectors/threeFactor/` would assert
-a correspondence the port has not yet established. Those citations get updated as
-part of the reconciliation, not ahead of it.
-
-## Two entrypoints named `lab`
-
-`lab.cmd` at the repository root is a different program: the machine-bound 3fd72
-provenance auditor (`scripts/lab-orient-3fd72.mjs`), which checks a frozen source
-tag and evidence ledger across a specific Windows + WSL pair of checkouts. It
-does not run anywhere else, and it shares no subcommands with `./lab`.
-
-On Windows, typing `lab` runs `lab.cmd`. On POSIX, `./lab` runs this one. That
-collision is unreconciled and deliberate for now — naming it is cheaper than
-guessing which one should win.
-
-## Reading the cards
-
-`invariants.ts` validates itself on import: card ids must be unique, and every
-gate and detector a card names must exist. A card that cites a detector id which
-has been renamed will throw rather than print, so the registry cannot silently
-drift out of sync with `detectors.ts` and `gates.ts`.
-
-What the cards do *not* do is check the code. An invariant states what the
-renderer was observed to do and what a detector should therefore avoid assuming;
-nothing enforces that the detector complies. Treat a card as a claim with
-evidence attached, and the `retest` field as the procedure that would falsify it.
+`lab --help` is the front door. Successful tools should leave a useful artifact or handle and point toward the nearest useful next operation. Prefer discovering through LAB before reading implementation source.
