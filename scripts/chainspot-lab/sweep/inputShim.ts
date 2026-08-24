@@ -1,10 +1,8 @@
 // Sweep canonical raster intake.
 //
-// Historical note: this file kept the name inputShim while Chunk B was in
-// flight, but it is no longer a decode-only shim. Scope and Sweep both enter
-// here. Raw capture(s) are validated/decoded, StripChrome removes phone/app
-// capture chrome, AutoStitch solves multi-tile placement, and only the resulting
-// canonical raster crosses the boundary into presentation or algorithm code.
+// Raw capture(s) are decoded, StripChrome removes capture chrome, AutoStitch
+// solves multi-tile placement, and only the resulting canonical raster crosses
+// the boundary into presentation or algorithm code.
 
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
 import { toGrayRaster, type InputAsset } from '@chainspot/alg/g0/inputAsset';
@@ -13,7 +11,7 @@ import { cropRaster } from '@chainspot/alg/raster';
 import { solvePixelStitch } from '@chainspot/alg/g0/stitchSolve';
 import { materializeComposite } from '@chainspot/alg/g0/composite';
 import { appendEntries, createLedger, type CoordinateTransformLedger, type LedgerEntry } from '@chainspot/alg/g0/ledger';
-import { matchTruth, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
+import { matchTruth, type AnnotationPoint, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor';
 import type { Placement } from '@chainspot/alg/g0/types';
 
@@ -32,7 +30,6 @@ export interface G0Report {
 		readonly placements: readonly Placement[];
 	};
 	readonly ledger: CoordinateTransformLedger;
-	/** Raw->canonical translation for the degenerate single-source case. */
 	readonly singleSourceOffset?: { readonly xPx: number; readonly yPx: number };
 	readonly truthMatch: TruthMatch | null;
 }
@@ -40,7 +37,6 @@ export interface G0Report {
 export interface DecodedInput {
 	readonly report: G0Report;
 	readonly image: RgbaImage;
-	/** Evaluation-only truth transformed into canonical coordinates when possible. */
 	readonly canonicalTruth?: CanonicalTruth;
 }
 
@@ -58,38 +54,25 @@ function transformedTruthForSingleSource(
 	top: number
 ): CanonicalTruth | undefined {
 	if (!truth) return undefined;
-	const shift = (point: { readonly xPx: number; readonly yPx: number }) => ({
-		xPx: point.xPx - left,
-		yPx: point.yPx - top
-	});
+	const shift = (point: AnnotationPoint): AnnotationPoint => ({ xPx: point.xPx - left, yPx: point.yPx - top });
 	return {
 		...truth,
-		sourceImage: {
-			...truth.sourceImage,
-			widthPx: canonicalWidthPx,
-			heightPx: canonicalHeightPx,
-			sha256: canonicalImageId
-		},
+		sourceImage: { ...truth.sourceImage, widthPx: canonicalWidthPx, heightPx: canonicalHeightPx, sha256: canonicalImageId },
 		holes: truth.holes.map((hole) => ({
 			...hole,
 			tee: shift(hole.tee),
 			basket: shift(hole.basket),
-			corridorBends: hole.corridorBends.map(shift)
+			corridorBends: hole.corridorBends.map(shift),
+			...(hole.numberBadge ? { numberBadge: shift(hole.numberBadge) } : {}),
+			...(hole.badge ? { badge: shift(hole.badge) } : {})
 		}))
 	};
 }
 
-/**
- * Canonicalize raw raster input(s). This is the single LAB raster-intake seam.
- * Scope calls this through decodeInput([one source]); Sweep may hand it one or
- * more tiles. No downstream caller receives uncropped/unstitched raw pixels.
- */
 export async function canonicalizeInputs(filePaths: readonly string[], truth?: CanonicalTruth): Promise<DecodedInput> {
 	if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
 	const assets = await Promise.all(filePaths.map((path) => decodeNodeFile(path)));
-	if (assets.length > 1 && !sameDimensions(assets)) {
-		throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
-	}
+	if (assets.length > 1 && !sameDimensions(assets)) throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
 
 	const gray = assets.map(toGrayRaster);
 	const stripChrome = stripChromeProposal(gray);
@@ -97,9 +80,8 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 
 	let placements: readonly Placement[];
 	let hadFallback = false;
-	if (assets.length === 1) {
-		placements = [{ x: 0, y: 0 }];
-	} else {
+	if (assets.length === 1) placements = [{ x: 0, y: 0 }];
+	else {
 		const stitched = solvePixelStitch(croppedGray);
 		if (!stitched) throw new Error('LAB intake: AutoStitch failed to produce a placement solution.');
 		placements = stitched.placements;
@@ -107,39 +89,20 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 	}
 
 	const composite = await materializeComposite(
-		assets.map((asset, index) => ({
-			rgba: asset.rgba,
-			widthPx: asset.widthPx,
-			heightPx: asset.heightPx,
-			placement: placements[index]
-		})),
+		assets.map((asset, index) => ({ rgba: asset.rgba, widthPx: asset.widthPx, heightPx: asset.heightPx, placement: placements[index] })),
 		stripChrome.insets
 	);
 
 	const entries: LedgerEntry[] = [];
 	if (stripChrome.insets) entries.push({ kind: 'crop', insets: stripChrome.insets });
-	if (assets.length > 1) {
-		for (let index = 0; index < placements.length; index++) {
-			entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
-		}
-	}
+	if (assets.length > 1) for (let index = 0; index < placements.length; index++) entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
 	const ledger = appendEntries(createLedger(), entries);
 
 	const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
-	const truthMatch = truth
-		? matchTruth(rawShaForTruth, {
-			imageId: composite.imageId,
-			widthPx: composite.widthPx,
-			heightPx: composite.heightPx,
-			ledger
-		}, truth)
-		: null;
-
+	const truthMatch = truth ? matchTruth(rawShaForTruth, { imageId: composite.imageId, widthPx: composite.widthPx, heightPx: composite.heightPx, ledger }, truth) : null;
 	const left = stripChrome.insets?.left ?? 0;
 	const top = stripChrome.insets?.top ?? 0;
-	const canonicalTruth = assets.length === 1
-		? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
-		: undefined;
+	const canonicalTruth = assets.length === 1 ? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top) : undefined;
 
 	const report: G0Report = {
 		shimmed: false,
@@ -156,14 +119,9 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 		truthMatch
 	};
 
-	return {
-		report,
-		image: { width: composite.widthPx, height: composite.heightPx, data: composite.rgba },
-		canonicalTruth
-	};
+	return { report, image: { width: composite.widthPx, height: composite.heightPx, data: composite.rgba }, canonicalTruth };
 }
 
-/** Compatibility convenience for callers with one source (including Scope). */
 export async function decodeInput(filePath: string, truth?: CanonicalTruth): Promise<DecodedInput> {
 	return canonicalizeInputs([filePath], truth);
 }
@@ -180,7 +138,5 @@ export function printG0Report(report: G0Report): void {
 		const m = report.truthMatch;
 		console.log(`  truth match:  ${m.level}${m.matchedAgainst ? ` (${m.matchedAgainst})` : ''}`);
 		if (m.warning) console.log(`                WARNING: ${m.warning}`);
-	} else {
-		console.log('  truth match:  (no truth supplied / no match)');
-	}
+	} else console.log('  truth match:  (no truth supplied / no match)');
 }
