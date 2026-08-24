@@ -98,6 +98,19 @@ function requestToResolved(request: ScopeRequest, annotationPath?: string): Scop
 	throw new Error('lab scope: empty request.');
 }
 
+function validateResolvedRequest(request: ScopeResolvedRequest, width: number, height: number): void {
+	const inside = ([x, y]: PointTuple) => x >= 0 && y >= 0 && x < width && y < height;
+	for (const p of request.points) {
+		if (!inside(p)) throw new Error(`lab scope: point ${p[0]},${p[1]} is outside image bounds 0..${width - 1},0..${height - 1}.`);
+	}
+	if (request.kind === 'box') {
+		const r = request.focus;
+		if (r.x < 0 || r.y < 0 || r.x + r.w > width || r.y + r.h > height) {
+			throw new Error(`lab scope: box ${r.x},${r.y},${r.w},${r.h} exceeds image bounds ${width}x${height}.`);
+		}
+	}
+}
+
 function option(args: string[], name: string): string | undefined {
 	const i = args.indexOf(name);
 	if (i < 0) return undefined;
@@ -110,11 +123,14 @@ function option(args: string[], name: string): string | undefined {
 async function renderOne(imagePath: string, annotationPath: string | undefined, request: ScopeRequest, outputPath?: string, outDir = DEFAULT_OUT): Promise<string> {
 	if (!existsSync(imagePath)) throw new Error(`lab scope: image does not exist: ${imagePath}`);
 	if (annotationPath && !existsSync(annotationPath)) throw new Error(`lab scope: annotation does not exist: ${annotationPath}`);
+	const truth = annotationPath ? loadTruth(annotationPath) : undefined;
+	const { report, image } = await decodeInput(imagePath, truth);
+	if (truth && !report.truthMatch) {
+		throw new Error(`lab scope: supplied annotation does not match raster ${imagePath}; refusing truth-assisted scope.`);
+	}
+	if (report.truthMatch?.warning) console.warn(`lab scope: truth warning: ${report.truthMatch.warning}`);
 	const resolvedRequest = requestToResolved(request, annotationPath);
-	// decodeInput is the same raster intake seam used by `lab sweep`.
-	// Annotation is deliberately NOT passed here: scope truth is presentation-only,
-	// and BLIND mode must not accidentally participate in truth matching.
-	const { report, image } = await decodeInput(imagePath);
+	validateResolvedRequest(resolvedRequest, image.width, image.height);
 	const base = slug(basename(imagePath, extname(imagePath)));
 	const output = outputPath ? resolve(outputPath) : resolve(outDir, base, `${slug(resolvedRequest.name)}.png`);
 	const meta = renderScope({ raster: { width: image.width, height: image.height, data: image.data, imageId: report.imageId }, imagePath: resolve(imagePath), annotationPath: annotationPath ? resolve(annotationPath) : undefined, request: resolvedRequest, outputPath: output });
