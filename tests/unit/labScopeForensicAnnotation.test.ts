@@ -11,6 +11,30 @@ function pixel(png: PNG, x: number, y: number): readonly number[] {
 	return [png.data[i], png.data[i + 1], png.data[i + 2], png.data[i + 3]];
 }
 
+const CANONICAL = {
+	imageId: 'a'.repeat(64),
+	widthPx: 200,
+	heightPx: 200,
+	stripChrome: { source: 'none', insets: null },
+	autoStitch: { sourceCount: 1, hadFallback: false }
+} as const;
+
+function panelCenters(outputSizes: readonly number[]): readonly (readonly [number, number])[] {
+	const CHROME = 8;
+	const LABEL_H = 24;
+	const centers: [number, number][] = [];
+	let x = 0;
+	for (let i = 0; i < outputSizes.length; i++) {
+		const size = outputSizes[i];
+		centers.push([x + CHROME + size / 2, LABEL_H + CHROME + size / 2]);
+		const currentForensic = i >= 2;
+		const nextForensic = i + 1 >= 2;
+		const gap = i === outputSizes.length - 1 ? 0 : currentForensic && nextForensic ? 6 : 18;
+		x += size + CHROME * 2 + gap;
+	}
+	return centers;
+}
+
 describe('LAB scope forensic annotation', () => {
 	test('hairline target points at evidence without painting over the exact anchor pixel', () => {
 		const width = 200;
@@ -32,20 +56,46 @@ describe('LAB scope forensic annotation', () => {
 		};
 		const dir = mkdtempSync(join(tmpdir(), 'lab-scope-forensic-'));
 		const output = join(dir, 'scope.png');
-		renderScope({ raster: { width, height, data }, imagePath: '/tmp/raster.png', request, outputPath: output });
+		const meta = renderScope({ raster: { width, height, data }, imagePath: '/tmp/raster.png', canonical: CANONICAL, request, outputPath: output });
 		const png = PNG.sync.read(readFileSync(output));
+		const centers = panelCenters(meta.panels.map((panel) => panel.outputPx));
 
-		// context frame 340 + gap 18 + local frame 340 + gap 18 = forensic-wide x=716.
-		// 160px forensic content has 10px chrome and is vertically centered in the 340px canvas.
-		const forensicCenters: readonly (readonly [number, number])[] = [
-			[806, 170],
-			[992, 170],
-			[1178, 170]
-		];
-		for (const [cx, cy] of forensicCenters) {
+		for (const [cx, cy] of centers.slice(2)) {
 			expect(pixel(png, cx, cy)).toEqual([17, 23, 31, 255]);
 			expect(pixel(png, cx - 5, cy)).toEqual([255, 235, 90, 255]);
 			expect(pixel(png, cx + 5, cy)).toEqual([255, 235, 90, 255]);
+		}
+	});
+
+	test('pins never enter forensic panels', () => {
+		const width = 200;
+		const height = 200;
+		const data = new Uint8Array(width * height * 4).fill(40);
+		for (let i = 3; i < data.length; i += 4) data[i] = 255;
+		const request: ScopeResolvedRequest = {
+			name: 'pin-evidence',
+			kind: 'point',
+			focus: { x: 100, y: 100, w: 1, h: 1 },
+			points: [[100, 100]],
+			template: 'default',
+			color: 0,
+			richOverlay: false
+		};
+		const dir = mkdtempSync(join(tmpdir(), 'lab-scope-pin-'));
+		const output = join(dir, 'scope.png');
+		const meta = renderScope({
+			raster: { width, height, data },
+			imagePath: '/tmp/raster.png',
+			canonical: CANONICAL,
+			request,
+			pins: [{ name: 'maybe', point: [100, 100], kind: 'temp', style: 'ring-dot', ttlRemaining: 2 }],
+			outputPath: output
+		});
+		const png = PNG.sync.read(readFileSync(output));
+		const centers = panelCenters(meta.panels.map((panel) => panel.outputPx));
+		for (const [cx, cy] of centers.slice(2)) {
+			// Exact center remains the source pixel; only the forensic hairline is nearby.
+			expect(pixel(png, cx, cy)).toEqual([40, 40, 40, 255]);
 		}
 	});
 });
