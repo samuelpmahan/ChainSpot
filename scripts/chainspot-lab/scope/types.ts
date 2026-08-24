@@ -29,6 +29,8 @@ export interface ScopeRequest {
 	readonly color?: number;
 	readonly pointLabels?: readonly number[];
 	readonly view?: Partial<ScopeViewOptions>;
+	/** Internal presentation hint: preserve forensic target but suppress rich context/local claim overlay. */
+	readonly richOverlay?: boolean;
 }
 
 export interface ScopeManifestCase {
@@ -79,6 +81,7 @@ export interface ScopeResolvedRequest {
 	readonly color: number;
 	readonly hole?: number;
 	readonly view?: Partial<ScopeViewOptions>;
+	readonly richOverlay?: boolean;
 }
 
 export interface ScopePanelMeta {
