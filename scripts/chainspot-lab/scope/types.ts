@@ -11,6 +11,7 @@ export interface ScopeRequest {
 	readonly hole?: number;
 	readonly template?: string;
 	readonly color?: number;
+	readonly pointLabels?: readonly number[];
 }
 
 export interface ScopeManifestCase {
@@ -42,11 +43,19 @@ export interface Rect {
 	readonly h: number;
 }
 
+export interface ScopePinOverlay {
+	readonly name: string;
+	readonly point: PointTuple;
+	readonly kind: 'temp' | 'kept';
+	readonly ttlRemaining?: number;
+}
+
 export interface ScopeResolvedRequest {
 	readonly name: string;
 	readonly kind: 'point' | 'box' | 'mark' | 'dots' | 'path' | 'hole';
 	readonly focus: Rect;
 	readonly points: readonly PointTuple[];
+	readonly pointLabels?: readonly number[];
 	readonly template: string;
 	readonly color: number;
 	readonly hole?: number;
@@ -65,6 +74,7 @@ export interface ScopeRenderMeta {
 	readonly image: string;
 	readonly annotation?: string;
 	readonly request: ScopeResolvedRequest;
+	readonly pins?: readonly ScopePinOverlay[];
 	readonly panels: readonly ScopePanelMeta[];
 	readonly output: string;
 }

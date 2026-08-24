@@ -15,7 +15,13 @@ Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scop
 - The CLI exposes no arbitrary shell/eval escape; all substantive commands dispatch to the existing LAB TypeScript/Node operations.
 - Root `lab --help` exposes the real LAB surface.
 - Add `lab scope` with a default multiscale nearest-neighbor inspection view.
-- Support point, bbox, named mark, numbered dot-to-dot geometry, and named numbered search paths.
+- Support point, bbox, named mark, numbered dot-to-dot geometry, and named search paths.
+- Search paths are stateful across CLI invocations: start, add, back, branch, show, revisit, log, list.
+- `path back` removes the last point from VISIBLE evidence while preserving the historical point and append-only operation log; later additions keep advancing point numbers.
+- `path branch` snapshots only the currently visible trail, not backed-out historical clutter.
+- Add TempPins: temporary named visual anchors with TTL measured in subsequent successful scope renders, plus `pin here`, `keep`, `release`, and `list`.
+- TempPin expiry/release removes visible evidence but stays in the append-only search log. `keep` promotes a TempPin to persistent visible evidence.
+- Persist this small interaction state as boring JSON under LAB artifacts; do not create a database/session framework.
 - Preserve a tiny scope-template seam that demonstrates extensibility without a plugin framework.
 - Add manifest batching and contact-sheet output.
 - Manifest annotation is optional. No annotation means BLIND; blind cases must not derive hole truth.
@@ -30,7 +36,7 @@ Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scop
 - No detector changes.
 - No ABFeature changes.
 - No browser `/lab` UI work.
-- No persistent search database/session framework.
+- No persistent search database/session framework beyond one generated JSON state artifact.
 - No generalized annotation framework.
 - No crop-first or single-hole algorithm optimization.
 - No Python CLI dependency.
@@ -44,4 +50,7 @@ Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scop
 - Scope manifest parser proves annotation is optional and path resolution is manifest-relative.
 - Default template proves context/local/pixels are all nearest-neighbor and ordered coarse→fine.
 - Blind manifests can point/box/mark/dots/path but `hole` requires an explicit annotation.
-- Generated scope PNGs carry JSON sidecars with source rectangles and `BLIND`/`TRUTH_AVAILABLE` mode.
+- Mechanical trail proof: start -> add -> add -> add -> back -> add renders labels `1 -> 2 -> 3 -> 5`, while point 4 remains revisitable/logged but invisible.
+- Branch proof: branch after back copies only active visible points.
+- TempPin proof: temp pin survives exactly N subsequent successful renders, disappears on expiry/release, remains logged, and survives indefinitely after `keep`.
+- Generated scope PNGs carry JSON sidecars with source rectangles, active pins, and `BLIND`/`TRUTH_AVAILABLE` mode.

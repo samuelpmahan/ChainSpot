@@ -5,12 +5,15 @@ import { decodeInput } from '../sweep/inputShim';
 import { loadTruth } from '../sweep/truthScoring';
 import { loadScopeManifest, resolveManifestCasePaths } from './manifest';
 import { makeContactSheet, renderScope } from './render';
+import { activePinsForImage, loadSearchState, recordSuccessfulScope, saveSearchState } from './searchState';
+import { isStatefulScopeArgs, runStatefulScope, type StatefulRenderOptions } from './searchCli';
 import { SCOPE_TEMPLATES } from './templates';
 import type { BoxTuple, PointTuple, Rect, ScopeRequest, ScopeResolvedRequest } from './types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const DEFAULT_OUT = resolve(REPO_ROOT, 'artifacts', 'scope');
+const SEARCH_STATE = process.env.LAB_SCOPE_STATE ? resolve(process.env.LAB_SCOPE_STATE) : resolve(DEFAULT_OUT, 'search-state.json');
 
 function usage(exitCode = 0): never {
 	console.error([
@@ -21,7 +24,26 @@ function usage(exitCode = 0): never {
 		'  ./lab scope IMAGE x,y,w,h [--name NAME] [--out FILE]',
 		'  ./lab scope mark IMAGE NAME x,y [--out FILE]',
 		'  ./lab scope dots IMAGE NAME x,y x,y ... [--out FILE]',
-		'  ./lab scope path IMAGE NAME x,y x,y ... [--color N] [--out FILE]',
+		'  ./lab scope path IMAGE NAME x,y x,y ... [--color N] [--out FILE]   # one-shot',
+		'',
+		'Stateful search paths:',
+		'  ./lab scope path start IMAGE NAME x,y [--color N]',
+		'  ./lab scope path add NAME x,y',
+		'  ./lab scope path back NAME',
+		'  ./lab scope path branch NAME NEW_NAME',
+		'  ./lab scope path show NAME',
+		'  ./lab scope path revisit NAME POINT_NUMBER',
+		'  ./lab scope path log NAME',
+		'  ./lab scope path list',
+		'',
+		'TempPins:',
+		'  ./lab scope pin temp [IMAGE] NAME x,y [--ttl N]   # default ttl=3',
+		'  ./lab scope pin here NAME [--ttl N]              # last successful scope focus',
+		'  ./lab scope pin keep NAME',
+		'  ./lab scope pin release NAME',
+		'  ./lab scope pin list',
+		'',
+		'Batch / assisted:',
 		'  ./lab scope --hole N IMAGE ANNOTATION.json [--out FILE]',
 		'  ./lab scope --manifest MANIFEST.json [--case NAME] [--out-dir DIR]',
 		'  ./lab scope contact-sheet MANIFEST.json [--case NAME] [--out FILE]',
@@ -30,17 +52,16 @@ function usage(exitCode = 0): never {
 		'Default output is a three-view nearest-neighbor crosscheck: context | local | pixels.',
 		'The pixels panel is never drawn over; overlays live only on context/local views.',
 		'',
+		'Back removes a point from the VISIBLE trail but keeps it in the append-only search log.',
+		'Revisit can inspect a historical point without restoring it to the visible trail.',
+		'TempPins remain visible for N subsequent successful scope renders, then expire from view.',
+		'`pin keep` promotes a TempPin to a persistent visible pin; release/expiry remain logged.',
+		`Search state: ${SEARCH_STATE}`,
+		'',
 		'Manifest annotation is OPTIONAL. No annotation = BLIND.',
 		'BLIND cases may scope/mark/draw/search, but hole-derived framing is unavailable.',
 		'',
-		'Every PNG gets a .json sidecar containing source rectangles and mode.',
-		'',
-		'Examples:',
-		'  ./lab scope course.png 880,429',
-		'  ./lab scope course.png 850,400,60,50 --name h5-candidate',
-		'  ./lab scope dots course.png h5-hole 483,853 604,784 687,796',
-		'  ./lab scope path course.png shard-search 510,820 535,808 560,797',
-		'  ./lab scope --manifest ../chainspot-corpus/dev/lab-scope.json',
+		'Every PNG gets a .json sidecar containing source rectangles, pins, and mode.',
 		'',
 		'Raster decoding goes through sweep/inputShim.decodeInput: one LAB raster intake seam.',
 		'Scope itself does NOT execute the detector/algorithm plan.'
@@ -84,7 +105,8 @@ function requestToResolved(request: ScopeRequest, annotationPath?: string): Scop
 	}
 	if (request.path) {
 		if (request.path.length < 1) throw new Error('lab scope: path requires at least one point.');
-		return { name: request.name ?? 'path', kind: 'path', focus: bounds(request.path), points: request.path, template, color };
+		if (request.pointLabels && request.pointLabels.length !== request.path.length) throw new Error('lab scope: path pointLabels must match path point count.');
+		return { name: request.name ?? 'path', kind: 'path', focus: bounds(request.path), points: request.path, pointLabels: request.pointLabels, template, color };
 	}
 	if (request.hole !== undefined) {
 		if (!annotationPath) throw new Error(`lab scope: hole ${request.hole} requires an annotation path; BLIND mode will not derive truth.`);
@@ -120,11 +142,21 @@ function option(args: string[], name: string): string | undefined {
 	return value;
 }
 
-async function renderOne(imagePath: string, annotationPath: string | undefined, request: ScopeRequest, outputPath?: string, outDir = DEFAULT_OUT): Promise<string> {
+async function renderOne(
+	imagePath: string,
+	annotationPath: string | undefined,
+	request: ScopeRequest,
+	outputPath?: string,
+	outDir = DEFAULT_OUT,
+	options: StatefulRenderOptions = {}
+): Promise<string> {
 	if (!existsSync(imagePath)) throw new Error(`lab scope: image does not exist: ${imagePath}`);
 	if (annotationPath && !existsSync(annotationPath)) throw new Error(`lab scope: annotation does not exist: ${annotationPath}`);
 	const truth = annotationPath ? loadTruth(annotationPath) : undefined;
 	const { report, image } = await decodeInput(imagePath, truth);
+	if (options.expectedImageId && report.imageId !== options.expectedImageId) {
+		throw new Error(`lab scope: saved search state belongs to raster ${options.expectedImageId}, but ${imagePath} now decodes as ${report.imageId}.`);
+	}
 	if (truth && !report.truthMatch) {
 		throw new Error(`lab scope: supplied annotation does not match raster ${imagePath}; refusing truth-assisted scope.`);
 	}
@@ -133,9 +165,22 @@ async function renderOne(imagePath: string, annotationPath: string | undefined, 
 	validateResolvedRequest(resolvedRequest, image.width, image.height);
 	const base = slug(basename(imagePath, extname(imagePath)));
 	const output = outputPath ? resolve(outputPath) : resolve(outDir, base, `${slug(resolvedRequest.name)}.png`);
-	const meta = renderScope({ raster: { width: image.width, height: image.height, data: image.data, imageId: report.imageId }, imagePath: resolve(imagePath), annotationPath: annotationPath ? resolve(annotationPath) : undefined, request: resolvedRequest, outputPath: output });
+	let state = loadSearchState(SEARCH_STATE);
+	const pins = activePinsForImage(state, report.imageId);
+	const meta = renderScope({
+		raster: { width: image.width, height: image.height, data: image.data, imageId: report.imageId },
+		imagePath: resolve(imagePath),
+		annotationPath: annotationPath ? resolve(annotationPath) : undefined,
+		request: resolvedRequest,
+		pins,
+		outputPath: output
+	});
+	const focus: PointTuple = [resolvedRequest.focus.x + resolvedRequest.focus.w / 2, resolvedRequest.focus.y + resolvedRequest.focus.h / 2];
+	state = recordSuccessfulScope(state, { imagePath, imageId: report.imageId, focus, ageTempPins: options.ageTempPins });
+	saveSearchState(SEARCH_STATE, state);
 	console.log(`${meta.mode} · ${resolvedRequest.name} -> ${output}`);
-	console.log(`  next: ./lab scope ${imagePath} <x,y-or-box> | ./lab scope path ${imagePath} <name> <x,y>... | ./lab scope --help`);
+	if (pins.length > 0) console.log(`  pins: ${pins.map((p) => `${p.name}${p.kind === 'temp' ? `(${p.ttlRemaining})` : '(kept)'}`).join(', ')}`);
+	console.log(`  next: ./lab scope pin here <name> --ttl 3 | ./lab scope path start ${imagePath} <name> <x,y> | ./lab scope --help`);
 	return output;
 }
 
@@ -162,6 +207,10 @@ async function main(): Promise<void> {
 	if (args.length === 0 || args.includes('--help') || args.includes('-h')) usage(0);
 	if (args[0] === 'templates') {
 		for (const t of Object.values(SCOPE_TEMPLATES)) console.log(`${t.id}\t${t.description}`);
+		return;
+	}
+	if (isStatefulScopeArgs(args)) {
+		await runStatefulScope(args, { statePath: SEARCH_STATE, defaultOut: DEFAULT_OUT, renderOne });
 		return;
 	}
 	if (args[0] === '--manifest') {

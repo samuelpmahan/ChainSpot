@@ -1,13 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PNG } from 'pngjs';
-import type { PointTuple, RasterImage, Rect, ScopePanelMeta, ScopeRenderMeta, ScopeResolvedRequest } from './types';
+import type { PointTuple, RasterImage, Rect, ScopePanelMeta, ScopePinOverlay, ScopeRenderMeta, ScopeResolvedRequest } from './types';
 import { getScopeTemplate } from './templates';
 
 const BG = [24, 26, 30, 255] as const;
 const FRAME = [210, 214, 220, 255] as const;
 const INNER = [70, 76, 84, 255] as const;
 const CLAIM = [255, 235, 90, 255] as const;
+const TEMP_PIN = [105, 235, 215, 255] as const;
 const PATH_COLORS = [
 	[255, 90, 90, 255],
 	[90, 180, 255, 255],
@@ -136,7 +137,27 @@ function overlayRequest(data: Uint8Array, width: number, height: number, panel: 
 		for (let i = 0; i < request.points.length; i++) {
 			const p = imageToPanel(r, px, py, panelSize, request.points[i]);
 			drawCircle(data, width, height, p[0], p[1], 10, color);
-			drawNumber(data, width, height, p[0], p[1], i + 1);
+			drawNumber(data, width, height, p[0], p[1], request.pointLabels?.[i] ?? i + 1);
+		}
+	}
+}
+
+function pointInside(rect: Rect, point: PointTuple): boolean {
+	return point[0] >= rect.x && point[1] >= rect.y && point[0] <= rect.x + rect.w && point[1] <= rect.y + rect.h;
+}
+
+function overlayPins(data: Uint8Array, width: number, height: number, panel: ScopePanelMeta, px: number, py: number, pins: readonly ScopePinOverlay[]): void {
+	if (panel.name === 'pixels') return;
+	for (const pin of pins) {
+		if (!pointInside(panel.source, pin.point)) continue;
+		const p = imageToPanel(panel.source, px, py, panel.outputPx, pin.point);
+		const color = pin.kind === 'kept' ? CLAIM : TEMP_PIN;
+		drawCircle(data, width, height, p[0], p[1], pin.kind === 'kept' ? 9 : 8, color);
+		if (pin.kind === 'kept') {
+			drawLine(data, width, height, p[0] - 10, p[1], p[0] + 10, p[1], [20, 20, 20, 255], 2);
+			drawLine(data, width, height, p[0], p[1] - 10, p[0], p[1] + 10, [20, 20, 20, 255], 2);
+		} else if (pin.ttlRemaining !== undefined) {
+			drawNumber(data, width, height, p[0], p[1], pin.ttlRemaining);
 		}
 	}
 }
@@ -146,6 +167,7 @@ export interface RenderScopeInput {
 	readonly imagePath: string;
 	readonly annotationPath?: string;
 	readonly request: ScopeResolvedRequest;
+	readonly pins?: readonly ScopePinOverlay[];
 	readonly outputPath: string;
 }
 
@@ -166,6 +188,7 @@ export function renderScope(input: RenderScopeInput): ScopeRenderMeta {
 		fillRect(out, width, height, x + chrome - 3, chrome - 3, panel.outputPx + 6, panel.outputPx + 6, INNER);
 		copyNearest(input.raster, panel.source, out, width, height, x + chrome, chrome, panel.outputPx);
 		overlayRequest(out, width, height, panel, x + chrome, chrome, input.request);
+		overlayPins(out, width, height, panel, x + chrome, chrome, input.pins ?? []);
 		x += panel.outputPx + chrome * 2 + panelGap;
 	}
 	mkdirSync(dirname(input.outputPath), { recursive: true });
@@ -176,6 +199,7 @@ export function renderScope(input: RenderScopeInput): ScopeRenderMeta {
 		image: input.imagePath,
 		annotation: input.annotationPath,
 		request: input.request,
+		pins: input.pins,
 		panels,
 		output: input.outputPath
 	};
