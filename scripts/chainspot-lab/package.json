@@ -4,13 +4,13 @@
 	"private": true,
 	"type": "module",
 	"description": "ChainSpot LAB — embodied CV tooling and algorithm inspection harness.",
-	"bin": {
-		"lab": "bin/lab.mjs"
-	},
+	"bin": { "lab": "bin/lab.mjs" },
 	"scripts": {
 		"postinstall": "node scripts/bootstrap-alg.mjs",
 		"lab": "node bin/lab.mjs",
 		"scope": "node --import tsx scope/scopeCli.ts",
+		"search": "node --import tsx search/searchCli.ts",
+		"traverse": "node --import tsx traverse/traverseCli.ts",
 		"invariants": "node --import tsx invariants.ts",
 		"detectors": "node --import tsx detectors.ts",
 		"gates": "node --import tsx gates.ts",
@@ -23,8 +23,5 @@
 		"jpeg-js": "^0.4.4",
 		"pngjs": "^7.0.0"
 	},
-	"devDependencies": {
-		"@types/pngjs": "^6.0.5",
-		"tsx": "^4.20.3"
-	}
+	"devDependencies": { "@types/pngjs": "^6.0.5", "tsx": "^4.20.3" }
 }
