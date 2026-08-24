@@ -1,12 +1,6 @@
-// `./lab compile CONFIG` (inspection only) and `./lab sweep CONFIG
-// INPUTS... [TRUTH]` (the ONLY LAB command that executes @chainspot/alg).
-// See scripts/chainspot-lab/README.md for usage and the B-shim boundary.
-//
-// LAB's job here is thin on purpose: load a config, hand it to the ONE
-// gateway (executeCompiledPlan), and present what came back. It never
-// touches detector mathematics -- everything printed below is a config
-// file, a compiled plan, a Receipt, or a board slot the algorithm already
-// produced.
+// `lab compile CONFIG` (inspection only) and `lab sweep CONFIG INPUTS... [TRUTH]`.
+// Sweep owns raster canonicalization and is the ONLY LAB command that executes
+// @chainspot/alg. Scope may call Sweep's intake seam, but never the algorithm gateway.
 
 import { mkdirSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
@@ -16,7 +10,7 @@ import { createNodeSink } from '@chainspot/alg/exec/node-sink';
 import { seedBoard } from '@chainspot/alg/detectors/threeFactor/measure';
 import { nullFeatureContext, type EvidenceBoard } from '@chainspot/alg/detectors/threeFactor/features/types';
 import { loadConfig } from './configIo';
-import { decodeInput, printG0Report } from './inputShim';
+import { canonicalizeInputs, printG0Report } from './inputShim';
 import { loadTruth, scoreTruth, printScoreboard } from './truthScoring';
 import { printPlan, printTimeline } from './timeline';
 import { renderArtifact } from './artifactIo';
@@ -28,17 +22,18 @@ function usage(): never {
 	console.error(
 		[
 			'Usage:',
-			'  lab compile CONFIG.json                         inspect a config -- no execution',
-			'  lab sweep CONFIG.json INPUT... [TRUTH.json]      run the exec gateway against one or more images',
+			'  lab compile CONFIG.json',
+			'  lab sweep CONFIG.json INPUT... [TRUTH.json]',
 			'',
-			'INPUT is a .png/.jpg/.jpeg file. TRUTH (optional) is an Annotation JSON file --',
-			'detected by .json extension among the trailing args, distinct from CONFIG (the first arg).',
+			'INPUT is one or more .png/.jpg/.jpeg captures. Sweep canonicalizes the set:',
+			'  decode -> StripChrome -> AutoStitch (when N>1) -> canonical raster -> algorithm',
 			'',
-			'Examples:',
-			'  ./lab compile packages/alg/src/detectors/threeFactor/configs/default.json',
+			'TRUTH is optional evaluation-only Annotation JSON.',
+			'',
+			'Example:',
 			'  ./lab sweep packages/alg/src/detectors/threeFactor/configs/default.json \\',
-			'      ../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg \\',
-			'      ../chainspot-corpus/dev/DashsTrack/DashsTrack-full.annotation.json'
+			'      ../chainspot-corpus/dev/Annotated/DashsTrack/DashsTrack-full.jpg \\',
+			'      ../chainspot-corpus/dev/Annotated/DashsTrack/DashsTrack-full.annotation.json'
 		].join('\n')
 	);
 	process.exit(2);
@@ -54,18 +49,22 @@ async function runCompile(args: readonly string[]): Promise<void> {
 	printPlan(plan);
 }
 
+function canonicalRunName(inputPaths: readonly string[]): string {
+	if (inputPaths.length === 1) return basename(inputPaths[0], extname(inputPaths[0]));
+	const first = basename(inputPaths[0], extname(inputPaths[0]));
+	return `${first}-plus-${inputPaths.length - 1}-tiles`;
+}
+
 async function runSweep(args: readonly string[]): Promise<void> {
 	const [configPath, ...rest] = args;
 	if (!configPath || rest.length === 0) usage();
 
 	const truthPaths = rest.filter((p) => extname(p).toLowerCase() === '.json');
 	const inputPaths = rest.filter((p) => extname(p).toLowerCase() !== '.json');
-	if (truthPaths.length > 1) throw new Error(`lab sweep: more than one .json trailing arg given as truth: ${truthPaths.join(', ')}`);
+	if (truthPaths.length > 1) throw new Error(`lab sweep: more than one truth JSON supplied: ${truthPaths.join(', ')}`);
 	if (inputPaths.length === 0) throw new Error('lab sweep: no input image given.');
 	for (const p of inputPaths) {
-		if (!IMAGE_EXTENSIONS.has(extname(p).toLowerCase())) {
-			throw new Error(`lab sweep: input '${p}' is not .png/.jpg/.jpeg.`);
-		}
+		if (!IMAGE_EXTENSIONS.has(extname(p).toLowerCase())) throw new Error(`lab sweep: input '${p}' is not .png/.jpg/.jpeg.`);
 	}
 
 	const truth = truthPaths[0] ? loadTruth(truthPaths[0]) : undefined;
@@ -73,37 +72,38 @@ async function runSweep(args: readonly string[]): Promise<void> {
 	console.log(`config: ${resolved.name} (${resolvedConfigPath})`);
 	printPlan(plan);
 
-	for (const inputPath of inputPaths) {
-		console.log(`\n=== sweeping ${inputPath} ===`);
-		const { report, image } = await decodeInput(inputPath, truth);
-		printG0Report(report);
+	console.log(`\n=== canonicalizing ${inputPaths.length} raster input(s) ===`);
+	const { report, image, canonicalTruth } = await canonicalizeInputs(inputPaths, truth);
+	printG0Report(report);
 
-		const outDir = resolve(REPO_ROOT, 'artifacts', 'sweep', resolved.name, basename(inputPath, extname(inputPath)));
-		mkdirSync(outDir, { recursive: true });
+	const outDir = resolve(REPO_ROOT, 'artifacts', 'sweep', resolved.name, canonicalRunName(inputPaths));
+	mkdirSync(outDir, { recursive: true });
 
-		const board = createExecBoard();
-		seedBoard(board as unknown as EvidenceBoard, image, undefined);
-		board.set('recoveredTees', []);
+	const board = createExecBoard();
+	seedBoard(board as unknown as EvidenceBoard, image, undefined);
+	board.set('recoveredTees', []);
 
-		const sink = createNodeSink(outDir);
-		const receipts = executeCompiledPlan(plan, board, nullFeatureContext, sink);
+	const sink = createNodeSink(outDir);
+	const receipts = executeCompiledPlan(plan, board, nullFeatureContext, sink);
+	printTimeline(plan, receipts);
 
-		printTimeline(plan, receipts);
-
-		const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
-		let rendered = 0;
-		let stubbed = 0;
-		for (const receipt of receipts) {
-			for (const artifactRef of receipt.artifacts) {
-				const result = renderArtifact(outDir, receipt.opId, gateByOpId.get(receipt.opId) ?? 'shared', artifactRef);
-				if (result.rendered) rendered++;
-				else stubbed++;
-			}
+	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
+	let rendered = 0;
+	let stubbed = 0;
+	for (const receipt of receipts) {
+		for (const artifactRef of receipt.artifacts) {
+			const result = renderArtifact(outDir, receipt.opId, gateByOpId.get(receipt.opId) ?? 'shared', artifactRef);
+			if (result.rendered) rendered++;
+			else stubbed++;
 		}
-		console.log(`--- Renderer inventory: ${rendered} rendered, ${stubbed} stubbed (raw bytes + note) -- outDir: ${outDir} ---`);
+	}
+	console.log(`--- Renderer inventory: ${rendered} rendered, ${stubbed} stubbed -- outDir: ${outDir} ---`);
 
-		if (truth) {
-			const scoreboard = scoreTruth(board, truth);
+	if (truth) {
+		if (!report.truthMatch) {
+			console.log('--- Truth scoring skipped: supplied truth does not correspond to the canonical raster. ---');
+		} else {
+			const scoreboard = scoreTruth(board, canonicalTruth ?? truth);
 			printScoreboard(scoreboard);
 		}
 	}
