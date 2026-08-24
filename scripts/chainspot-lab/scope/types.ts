@@ -62,7 +62,7 @@ export interface ScopeResolvedRequest {
 }
 
 export interface ScopePanelMeta {
-	readonly name: 'context' | 'local' | 'pixels';
+	readonly name: 'context' | 'local' | 'forensic-wide' | 'forensic-mid' | 'forensic-tight';
 	readonly source: Rect;
 	readonly outputPx: number;
 	readonly nearestNeighbor: true;

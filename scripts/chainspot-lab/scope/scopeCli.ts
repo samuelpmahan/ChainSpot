@@ -49,8 +49,8 @@ function usage(exitCode = 0): never {
 		'  ./lab scope contact-sheet MANIFEST.json [--case NAME] [--out FILE]',
 		'  ./lab scope templates',
 		'',
-		'Default output is a three-view nearest-neighbor crosscheck: context | local | pixels.',
-		'The pixels panel is never drawn over; overlays live only on context/local views.',
+		'Default output is a 1→1→3 nearest-neighbor crosscheck: context | local | three forensic zooms.',
+		'The forensic triplet is overlay-free and centered on the previous path point (or the requested point otherwise).',
 		'',
 		'Back removes a point from the VISIBLE trail but keeps it in the append-only search log.',
 		'Revisit can inspect a historical point without restoring it to the visible trail.',
@@ -175,7 +175,8 @@ async function renderOne(
 		pins,
 		outputPath: output
 	});
-	const focus: PointTuple = [resolvedRequest.focus.x + resolvedRequest.focus.w / 2, resolvedRequest.focus.y + resolvedRequest.focus.h / 2];
+	const inspection = meta.panels.find((panel) => panel.name === 'forensic-wide') ?? meta.panels[meta.panels.length - 1];
+	const focus: PointTuple = [inspection.source.x + inspection.source.w / 2, inspection.source.y + inspection.source.h / 2];
 	state = recordSuccessfulScope(state, { imagePath, imageId: report.imageId, focus, ageTempPins: options.ageTempPins });
 	saveSearchState(SEARCH_STATE, state);
 	console.log(`${meta.mode} · ${resolvedRequest.name} -> ${output}`);

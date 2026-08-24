@@ -113,8 +113,12 @@ function imageToPanel(rect: Rect, x: number, y: number, panelSize: number, p: Po
 	return [x + ((p[0] - rect.x) / rect.w) * panelSize, y + ((p[1] - rect.y) / rect.h) * panelSize];
 }
 
+function isForensic(panel: ScopePanelMeta): boolean {
+	return panel.name.startsWith('forensic-');
+}
+
 function overlayRequest(data: Uint8Array, width: number, height: number, panel: ScopePanelMeta, px: number, py: number, request: ScopeResolvedRequest): void {
-	if (panel.name === 'pixels') return;
+	if (isForensic(panel)) return;
 	const panelSize = panel.outputPx;
 	const r = panel.source;
 	const color = PATH_COLORS[((request.color % PATH_COLORS.length) + PATH_COLORS.length) % PATH_COLORS.length];
@@ -147,7 +151,7 @@ function pointInside(rect: Rect, point: PointTuple): boolean {
 }
 
 function overlayPins(data: Uint8Array, width: number, height: number, panel: ScopePanelMeta, px: number, py: number, pins: readonly ScopePinOverlay[]): void {
-	if (panel.name === 'pixels') return;
+	if (isForensic(panel)) return;
 	for (const pin of pins) {
 		if (!pointInside(panel.source, pin.point)) continue;
 		const p = imageToPanel(panel.source, px, py, panel.outputPx, pin.point);
@@ -171,25 +175,32 @@ export interface RenderScopeInput {
 	readonly outputPath: string;
 }
 
+function panelGapAfter(panels: readonly ScopePanelMeta[], index: number): number {
+	if (index >= panels.length - 1) return 0;
+	return isForensic(panels[index]) && isForensic(panels[index + 1]) ? 6 : 18;
+}
+
 export function renderScope(input: RenderScopeInput): ScopeRenderMeta {
 	const template = getScopeTemplate(input.request.template);
 	const panels = template.panels({ imageWidth: input.raster.width, imageHeight: input.raster.height, request: input.request });
-	const panelGap = 18;
 	const chrome = 10;
 	const maxPanel = Math.max(...panels.map((p) => p.outputPx));
-	const width = panels.reduce((sum, p) => sum + p.outputPx + chrome * 2, 0) + panelGap * (panels.length - 1);
+	const width = panels.reduce((sum, panel, i) => sum + panel.outputPx + chrome * 2 + panelGapAfter(panels, i), 0);
 	const height = maxPanel + chrome * 2;
 	const png = new PNG({ width, height });
 	const out = png.data as Uint8Array;
 	fill(out, width, height, BG);
 	let x = 0;
-	for (const panel of panels) {
-		fillRect(out, width, height, x, 0, panel.outputPx + chrome * 2, panel.outputPx + chrome * 2, FRAME);
-		fillRect(out, width, height, x + chrome - 3, chrome - 3, panel.outputPx + 6, panel.outputPx + 6, INNER);
-		copyNearest(input.raster, panel.source, out, width, height, x + chrome, chrome, panel.outputPx);
-		overlayRequest(out, width, height, panel, x + chrome, chrome, input.request);
-		overlayPins(out, width, height, panel, x + chrome, chrome, input.pins ?? []);
-		x += panel.outputPx + chrome * 2 + panelGap;
+	for (let i = 0; i < panels.length; i++) {
+		const panel = panels[i];
+		const frameSize = panel.outputPx + chrome * 2;
+		const y = Math.floor((height - frameSize) / 2);
+		fillRect(out, width, height, x, y, frameSize, frameSize, FRAME);
+		fillRect(out, width, height, x + chrome - 3, y + chrome - 3, panel.outputPx + 6, panel.outputPx + 6, INNER);
+		copyNearest(input.raster, panel.source, out, width, height, x + chrome, y + chrome, panel.outputPx);
+		overlayRequest(out, width, height, panel, x + chrome, y + chrome, input.request);
+		overlayPins(out, width, height, panel, x + chrome, y + chrome, input.pins ?? []);
+		x += frameSize + panelGapAfter(panels, i);
 	}
 	mkdirSync(dirname(input.outputPath), { recursive: true });
 	writeFileSync(input.outputPath, PNG.sync.write(png));

@@ -47,7 +47,7 @@ describe('LAB scope manifest', () => {
 });
 
 describe('LAB scope template seam', () => {
-	test('ships one deliberately boring default template with three nearest-neighbor views', () => {
+	test('ships one deliberately boring default template with a 1→1→3 nearest-neighbor progression', () => {
 		expect(Object.keys(SCOPE_TEMPLATES)).toEqual(['default']);
 		const panels = defaultScopeTemplate.panels({
 			imageWidth: 1000,
@@ -61,9 +61,29 @@ describe('LAB scope template seam', () => {
 				color: 0
 			}
 		});
-		expect(panels.map((p) => p.name)).toEqual(['context', 'local', 'pixels']);
+		expect(panels.map((p) => p.name)).toEqual(['context', 'local', 'forensic-wide', 'forensic-mid', 'forensic-tight']);
 		expect(panels.every((p) => p.nearestNeighbor)).toBe(true);
+		expect(panels.map((p) => p.outputPx)).toEqual([320, 320, 160, 160, 160]);
 		expect(panels[0].source.w).toBeGreaterThan(panels[1].source.w);
-		expect(panels[1].source.w).toBeGreaterThan(panels[2].source.w);
+		expect(panels.slice(2).map((p) => p.source.w)).toEqual([96, 48, 24]);
+	});
+
+	test('locks all three forensic zooms to the previous path point', () => {
+		const panels = defaultScopeTemplate.panels({
+			imageWidth: 1000,
+			imageHeight: 1000,
+			request: {
+				name: 'trail',
+				kind: 'path',
+				focus: { x: 100, y: 100, w: 500, h: 500 },
+				points: [[100, 100], [300, 400], [600, 600]],
+				template: 'default',
+				color: 0
+			}
+		});
+		for (const panel of panels.slice(2)) {
+			expect(panel.source.x + panel.source.w / 2).toBe(300);
+			expect(panel.source.y + panel.source.h / 2).toBe(400);
+		}
 	});
 });

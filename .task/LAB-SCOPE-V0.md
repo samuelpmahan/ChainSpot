@@ -14,7 +14,9 @@ Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scop
 - The npm CLI owns one-shot dispatch, the interactive `lab>` shell, help, history, completion, and `run-script`.
 - The CLI exposes no arbitrary shell/eval escape; all substantive commands dispatch to the existing LAB TypeScript/Node operations.
 - Root `lab --help` exposes the real LAB surface.
-- Add `lab scope` with a default multiscale nearest-neighbor inspection view.
+- Add `lab scope` with a default nearest-neighbor `1 -> 1 -> 3` visual grammar: one context view, one local view, then three progressively tighter forensic views.
+- For path/dot/hole work, all three forensic views are centered on the previous point; for a direct point/mark they stay centered on that requested point.
+- The three forensic views remain overlay-free; overlays stay on context/local views only.
 - Support point, bbox, named mark, numbered dot-to-dot geometry, and named search paths.
 - Search paths are stateful across CLI invocations: start, add, back, branch, show, revisit, log, list.
 - `path back` removes the last point from VISIBLE evidence while preserving the historical point and append-only operation log; later additions keep advancing point numbers.
@@ -48,7 +50,8 @@ Make LAB usable as an embodied CV toolkit. `LAB` is the toolkit namespace; `scop
 - Running `./lab` opens the same dispatcher interactively at `lab>`.
 - A command issued one-shot, interactively, or from `run-script` reaches the same command registry.
 - Scope manifest parser proves annotation is optional and path resolution is manifest-relative.
-- Default template proves context/local/pixels are all nearest-neighbor and ordered coarse→fine.
+- Default template proves the `1 -> 1 -> 3` sequence is nearest-neighbor: 320px context, 320px local, then 160px forensic views sourced from 96px, 48px, and 24px crops.
+- A three-point path proves all forensic crop centers equal the previous point, while context/local retain whole-request framing.
 - Blind manifests can point/box/mark/dots/path but `hole` requires an explicit annotation.
 - Mechanical trail proof: start -> add -> add -> add -> back -> add renders labels `1 -> 2 -> 3 -> 5`, while point 4 remains revisitable/logged but invisible.
 - Branch proof: branch after back copies only active visible points.

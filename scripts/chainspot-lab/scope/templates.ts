@@ -1,4 +1,4 @@
-import type { Rect, ScopePanelMeta, ScopeResolvedRequest } from './types';
+import type { PointTuple, Rect, ScopePanelMeta, ScopeResolvedRequest } from './types';
 
 export interface ScopeTemplateContext {
 	readonly imageWidth: number;
@@ -24,20 +24,32 @@ function centeredRect(cx: number, cy: number, w: number, h: number, imageWidth: 
 	return clampRect({ x: cx - w / 2, y: cy - h / 2, w, h }, imageWidth, imageHeight);
 }
 
+function previousPoint(request: ScopeResolvedRequest): PointTuple {
+	if (request.points.length === 0) {
+		return [request.focus.x + request.focus.w / 2, request.focus.y + request.focus.h / 2];
+	}
+	if (request.kind === 'path' || request.kind === 'dots' || request.kind === 'hole') {
+		return request.points[Math.max(0, request.points.length - 2)];
+	}
+	return request.points[request.points.length - 1];
+}
+
 export const defaultScopeTemplate: ScopeTemplate = {
 	id: 'default',
-	description: 'Three-view crosscheck: context, local, and forensic nearest-neighbor pixels.',
+	description: '1→1→3 crosscheck: one context, one local, then three forensic zooms locked to the previous point.',
 	panels({ imageWidth, imageHeight, request }) {
 		const cx = request.focus.x + request.focus.w / 2;
 		const cy = request.focus.y + request.focus.h / 2;
 		const span = Math.max(request.focus.w, request.focus.h, 1);
 		const contextSpan = Math.max(256, span * 6);
 		const localSpan = Math.max(64, span * 2.5);
-		const pixelSpan = Math.max(12, Math.min(40, span * 1.15));
+		const [fx, fy] = previousPoint(request);
 		return [
 			{ name: 'context', source: centeredRect(cx, cy, contextSpan, contextSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },
 			{ name: 'local', source: centeredRect(cx, cy, localSpan, localSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },
-			{ name: 'pixels', source: centeredRect(cx, cy, pixelSpan, pixelSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true }
+			{ name: 'forensic-wide', source: centeredRect(fx, fy, 96, 96, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true },
+			{ name: 'forensic-mid', source: centeredRect(fx, fy, 48, 48, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true },
+			{ name: 'forensic-tight', source: centeredRect(fx, fy, 24, 24, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true }
 		];
 	}
 };
