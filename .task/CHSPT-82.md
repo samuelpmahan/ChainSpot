@@ -228,3 +228,91 @@ registration fails (<2 unambiguous badge pairs), confirm PROCEEDS with an
 explicit "Round NOT registered" message rather than blocking — the course is
 still valid, and blocking would strand the user on a CV failure. Coaching
 resumes after pre-MVP.
+
+## Sprint 1 Chunk B — G0 canonical intake + truth (@chainspot/alg)
+
+Objective: extract the page-embedded G0 decisions (thrown-round arbitration,
+crop apply, stitch solve, tile→composite projection, round pre-read
+orchestration) out of `src/routes/+page.svelte` into singular,
+package-owned, adapter-agnostic operations under `packages/alg/src/g0/**`
+and `packages/alg/src/adapters/**`, and add the capability that does not
+exist anywhere today: a real, content-addressed pixel composite plus
+Annotation-JSON truth loading and reconciliation, evaluation-only (truth
+firewall). Concurrent with Chunk A (`src/exec/**`,
+`detectors/threeFactor/**`) in the same checkout; exclusive paths per the
+coordinator's split: `packages/alg/src/g0/**`, `packages/alg/src/adapters/**`,
+`src/routes/+page.svelte` (call-seam only), `src/lib/rgba.ts`/`raster.ts`/
+`image.ts`, `tests/unit/g0*.test.ts`.
+
+### Contract
+
+- `packages/alg/src/g0/inputAsset.ts` — `InputAsset` (a decoded-image shape
+  both adapters below produce; structurally an `RgbaRaster` plus
+  `sourceByteLength`), the single point both adapters and every G0 operation
+  agree on.
+- `packages/alg/src/adapters/node.ts` — Node-only decode (`jpeg-js`/`pngjs`,
+  `node:fs`/`node:crypto`) → `InputAsset`, exported under a Node-only
+  subpath so no `node:*` import ever reaches the browser-safe core.
+- `packages/alg/src/adapters/browser.ts` — browser decode
+  (`createImageBitmap`/`OffscreenCanvas`/Web Crypto), absorbing
+  `src/lib/rgba.ts`'s current logic; `src/lib/rgba.ts`/`raster.ts` become
+  thin re-exports so existing app imports keep working.
+- `packages/alg/src/g0/thrownRound.ts` — arbitration DECIDE extracted from
+  `considerAutoThrownRound()` (threshold gate + exactly-one-candidate rule),
+  behavior-identical.
+- `packages/alg/src/g0/crop.ts` — crop APPLY wrapping the existing
+  `proposeSharedCrop`/`cropRaster`, including the inset→placement shift
+  extracted from `analyze()`.
+- `packages/alg/src/g0/stitchSolve.ts` — semantic-first/pixel-fallback
+  stitch solve, accumulation, `width+120` placement-only fallback,
+  `hadFallback` surfaced in the result (not just a UI string).
+- `packages/alg/src/g0/composite.ts` — canonical composite materialization:
+  real pixel flattening (Node-runnable, no canvas) + content-addressed
+  `imageId` = sha256 over `[u32be widthPx][u32be heightPx][raw RGBA bytes]`,
+  documented and pinned by a known-tiny-composite unit test.
+- `packages/alg/src/g0/ledger.ts` — ordered coordinate-transform ledger
+  (crop insets, per-tile placement, projection) attached to a
+  `CanonicalFrame` (named to avoid collision with `src/exec/contract.ts`'s
+  reserved, still-`unknown` `CanonicalInput`).
+- `packages/alg/src/g0/truth.ts` — `CanonicalTruth` (Annotation JSON as
+  native truth) + C3 match level (`byte` / `reconciled-verified` /
+  `dims-only`, the last always warning-carrying).
+- `packages/alg/src/g0/roundPreRead.ts` — orchestration policy extracted
+  from `runRoundPreRead()` (walkTrace + landingDroplet, empty-pre-read is a
+  valid result, never throws).
+- `src/routes/+page.svelte` — the five call sites above become calls into
+  `@chainspot/alg`'s G0 surface; choreography (`vpAnimate`, `delay()`,
+  phase transitions) stays exactly where it is.
+
+### Proof Plan
+
+- Truth firewall (mandatory, owner acceptance test): every G0
+  measure/decide function enumerated explicitly, each run once with a
+  `CanonicalTruth` attached and once without, over the same
+  `CanonicalFrame` — production fingerprints byte-identical both ways.
+- Cross-adapter parity: Node and browser adapters decoding the same source
+  bytes agree on `imageId` and pixel-dependent measurements within the
+  invariant the test defines.
+- Headless evidence chain (vitest-runnable): Heritage
+  (`chainspot-corpus/dev/Heritage/HeritagePark-full.png`, raw 1290x2796) —
+  crop measured via consensus against a second same-session raw tile,
+  applied, canonical frame 1290x2115 matches truth exactly,
+  `reconciled-verified`; prints raw frame → ledger transforms → truth frame
+  + match level. Multi-tile: `chainspot-corpus/demo/TheRec-{L,R}.PNG` (crop
+  + pixel stitch, coherent composite, no truth JSON exists for this course
+  so `dims-only`-with-warning is reported honestly) plus
+  `TheRec-Thrown-full.PNG` for thrown-round arbitration (exactly-one-
+  candidate). Chosen over `Lenard-{1..5}.PNG` — verified during research
+  that Lenard's raw tiles do not stitch coherently under pixel-search alone
+  (offsets jump 1000+px, inconsistent directions) without semantic/badge
+  anchoring; using it would misrepresent the mechanism as working when it
+  needs the semantic-first path this deliverable doesn't wire up.
+- `npm run test:unit` green (existing + new `g0*`/adapter suites);
+  `npm run check` 0/0; `packages/alg` build clean.
+- App smokes: mock boot (`?mock=`) + live TheRec-L Import via Browser pane
+  tools where available; reported honestly as NOT RUN if browser tools are
+  unavailable in this session.
+- Not proven here: Chunk A's `src/exec/**` compiler/gateway wiring these G0
+  operations into compiled plans — `OperationKind` tagging is left as
+  doc-comment metadata on each G0 function for that follow-up, not a live
+  integration.
