@@ -3,10 +3,18 @@
 	import { loadImageFromFile, releaseImage, type LoadedImage } from '$lib/image';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import { croppedObjectUrl, rasterFromFile } from '$lib/raster';
-	import { cropRaster, type CropInsets, type GrayRaster } from '@chainspot/alg';
-	import { proposeSharedCrop } from '@chainspot/alg/autoCrop';
-	import { findBestTranslation } from '@chainspot/alg/stitch';
+	import type { CropInsets, GrayRaster } from '@chainspot/alg';
 	import { rgbaFromFile } from '$lib/rgba';
+	import { decideThrownRound } from '@chainspot/alg/g0/thrownRound';
+	import { applyCrop } from '@chainspot/alg/g0/crop';
+	import {
+		initialSpreadPlacements,
+		solvePixelStitch,
+		trySemanticAlign as g0TrySemanticAlign,
+		type BadgeCenter
+	} from '@chainspot/alg/g0/stitchSolve';
+	import { projectToComposite } from '@chainspot/alg/g0/projection';
+	import { preReadRound } from '@chainspot/alg/g0/roundPreRead';
 	import { labEndpointDetector } from '@chainspot/alg/detectors/labEndpoint';
 	import { purpleMassDetector } from '@chainspot/alg/detectors/purpleMass';
 	import type { DetectorEmission } from '@chainspot/alg/detect';
@@ -31,8 +39,6 @@
 		type GeoBoundingBox
 	} from '$lib/satellite';
 	import { distanceFt, fitTransform, type CorrespondencePair } from '$lib/geo';
-	import { walkTraceDetector } from '@chainspot/alg/detectors/walkTrace';
-	import { landingDropletDetector } from '@chainspot/alg/detectors/landingDroplet';
 	import { applySimilarity, fitSimilarity, matchByHoleNumber } from '$lib/registration';
 	import { setCourseMap, setMappedRound, getMappedRound } from '$lib/session';
 	import { goto } from '$app/navigation';
@@ -41,9 +47,6 @@
 
 	const LAYER_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'teal'];
 	const MAX_IMAGES = 6;
-	// Purple is not expected on a clean course capture. Keep this explicit so
-	// real-capture evidence can raise it later without changing the detector.
-	const THROWN_ROUND_PURPLE_MASS_MIN = 0;
 	const PAGE_MARGIN_PX = 8; // matches the browser's default body margin (sides)
 
 	type Placement = { x: number; y: number };
@@ -166,8 +169,6 @@
 
 	function projectMarkers(imgs: LoadedImage[]): ViewportMarker[][] {
 		if (!showBadges) return imgs.map(() => []);
-		const left = appliedInsets?.left ?? 0;
-		const top = appliedInsets?.top ?? 0;
 
 		type B = { n: number; x: number; y: number; conf: number };
 		const perTile: B[][] = imgs.map((img) => {
@@ -181,7 +182,9 @@
 				if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
 				const n = labelByDet.get(e.detId);
 				if (n === undefined) continue;
-				out.push({ n, x: e.xPx - left, y: e.yPx - top, conf: e.confidence });
+				// crop-adjusted tile-local coords (no placement yet — the layer itself is already positioned at `placements[i]`)
+				const p = projectToComposite({ xPx: e.xPx, yPx: e.yPx }, appliedInsets);
+				out.push({ n, x: p.xPx, y: p.yPx, conf: e.confidence });
 			}
 			return out;
 		});
@@ -193,11 +196,10 @@
 					for (const a of perTile[i]) {
 						for (const b of perTile[j]) {
 							if (a.n !== b.n) continue;
-							const ax = placements[i].x + a.x;
-							const ay = placements[i].y + a.y;
-							const bx = placements[j].x + b.x;
-							const by = placements[j].y + b.y;
-							if (Math.hypot(ax - bx, ay - by) <= MATCH_RADIUS_PX) {
+							// a.x/a.y are already crop-adjusted — only add each tile's placement to reach composite-space
+							const pa = projectToComposite({ xPx: a.x, yPx: a.y }, null, placements[i]);
+							const pb = projectToComposite({ xPx: b.x, yPx: b.y }, null, placements[j]);
+							if (Math.hypot(pa.xPx - pb.xPx, pa.yPx - pb.yPx) <= MATCH_RADIUS_PX) {
 								matched.add(`${i}:${a.n}`);
 								matched.add(`${j}:${b.n}`);
 							}
@@ -292,18 +294,22 @@
 	// pixel-stitch run stops the auto-upgrade from fighting the user.
 	let placementSource: 'none' | 'spread' | 'semantic' | 'pixel' | 'manual' = 'none';
 
-	function badgeCentersByN(img: LoadedImage | undefined): Map<number, { x: number; y: number }> {
-		const out = new Map<number, { x: number; y: number }>();
-		if (!img) return out;
+	function badgeCentersOf(img: LoadedImage | undefined): BadgeCenter[] {
+		if (!img) return [];
 		const emitted = detections[img.objectUrl];
-		if (!emitted) return out;
+		if (!emitted) return [];
 		const labelByDet = new Map(
 			emitted.filter((e) => e.kind === 'label').map((e) => [e.detId, e.n])
 		);
+		const seen = new Set<number>();
+		const out: BadgeCenter[] = [];
 		for (const e of emitted) {
 			if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
 			const n = labelByDet.get(e.detId);
-			if (n !== undefined && !out.has(n)) out.set(n, { x: e.xPx, y: e.yPx });
+			if (n !== undefined && !seen.has(n)) {
+				seen.add(n);
+				out.push({ n, x: e.xPx, y: e.yPx });
+			}
 		}
 		return out;
 	}
@@ -312,31 +318,15 @@
 		if (!alignEnabled) return;
 		if (placementSource !== 'spread') return;
 		if (mapImages.length < 2 || placements.length !== mapImages.length) return;
-		const anchor = badgeCentersByN(mapImages[0]);
-		if (anchor.size === 0) return;
 
-		const next = placements.slice();
-		const matchedTiles: string[] = [];
-		for (let i = 1; i < mapImages.length; i++) {
-			const mine = badgeCentersByN(mapImages[i]);
-			const offsets: { dx: number; dy: number; n: number }[] = [];
-			for (const [n, p] of mine) {
-				const ap = anchor.get(n);
-				if (ap) offsets.push({ dx: ap.x - p.x, dy: ap.y - p.y, n });
-			}
-			if (offsets.length === 0) continue;
-			// median offset; shared badge positions ARE the transform
-			offsets.sort((a, b) => a.dx - b.dx);
-			const dx = offsets[Math.floor(offsets.length / 2)].dx;
-			offsets.sort((a, b) => a.dy - b.dy);
-			const dy = offsets[Math.floor(offsets.length / 2)].dy;
-			next[i] = { x: next[0].x + dx, y: next[0].y + dy };
-			matchedTiles.push(
-				`tile ${i + 1} via badge${offsets.length > 1 ? 's' : ''} ${offsets.map((o) => o.n).join(', ')}`
-			);
-		}
-		if (matchedTiles.length === 0) return;
-		placements = next;
+		const result = g0TrySemanticAlign(mapImages.map(badgeCentersOf), placements);
+		if (!result) return;
+
+		const matchedTiles = result.matches.map(
+			({ tileIndex, badgeNumbers }) =>
+				`tile ${tileIndex + 1} via badge${badgeNumbers.length > 1 ? 's' : ''} ${badgeNumbers.join(', ')}`
+		);
+		placements = result.placements.slice();
 		placementSource = 'semantic';
 		fitKey++;
 		dbg('semantic align', matchedTiles);
@@ -385,20 +375,15 @@
 		const seq = selectionSeq;
 		try {
 			const raster = await rgbaFromFile(img.file);
-			const walk: { xPx: number; yPx: number }[] = [];
-			const droplets: { xPx: number; yPx: number }[] = [];
-			await walkTraceDetector(raster, (e) => {
-				if (e.kind === 'object' && e.objType === 'walk-vertex') walk.push({ xPx: e.xPx, yPx: e.yPx });
-			});
-			await landingDropletDetector(raster, (e) => {
-				if (e.kind === 'object' && e.objType === 'landing-droplet')
-					droplets.push({ xPx: e.xPx, yPx: e.yPx });
-			});
+			// preReadRound itself never throws (empty pre-read is a valid
+			// result) — this try/catch is only for rgbaFromFile's own decode
+			// failures, which fall through to the same empty-and-valid result.
+			const result = await preReadRound(raster);
 			if (seq !== selectionSeq) return;
-			preRead = { ...preRead, [img.objectUrl]: { walk, droplets } };
+			preRead = { ...preRead, [img.objectUrl]: result };
 			dbg('round pre-read done', img.file.name, {
-				walkVertices: walk.length,
-				droplets: droplets.length
+				walkVertices: result.walk.length,
+				droplets: result.droplets.length
 			});
 		} catch (e) {
 			if (seq !== selectionSeq) return;
@@ -416,20 +401,18 @@
 
 	function considerAutoThrownRound() {
 		if (!autoThrownEnabled || thrownIdx >= 0 || images.length === 0) return;
-		if (images.some((image) => !purpleReady[image.objectUrl])) return;
-		const candidates = images
-			.map((image, index) => ({ image, index }))
-			.map(({ image, index }) => ({
-				index,
-				score:
-					detections[image.objectUrl]?.find(
+		const scores = images.map((image) =>
+			purpleReady[image.objectUrl]
+				? (detections[image.objectUrl]?.find(
 						(emission) => emission.kind === 'classification' && emission.trait === 'thrown-round'
-					)?.confidence ?? 0
-			}))
-			.filter(({ score }) => score > THROWN_ROUND_PURPLE_MASS_MIN);
-		if (candidates.length === 1) selectThrownRound(candidates[0].index, 'auto');
-		else if (candidates.length > 1) {
-			workflowMessage = `${candidates.length} screenshots contain purple path mass — keep them separate until the thrown-round stitch is decided.`;
+					)?.confidence ?? 0)
+				: undefined
+		);
+		const decision = decideThrownRound(scores);
+		if (decision.status === 'auto') {
+			selectThrownRound(decision.index, 'auto');
+		} else if (decision.status === 'ambiguous') {
+			workflowMessage = `${decision.candidates.length} screenshots contain purple path mass — keep them separate until the thrown-round stitch is decided.`;
 		}
 	}
 
@@ -483,12 +466,7 @@
 		clipInsets = null;
 		displayUrls = tiles.map((image) => image.objectUrl);
 		appliedInsets = null;
-		let x = 0;
-		placements = tiles.map((img) => {
-			const p = { x, y: 0 };
-			x += img.widthPx + 120;
-			return p;
-		});
+		placements = initialSpreadPlacements(tiles.map((img) => img.widthPx));
 		selectedIdx = 0;
 		layoutApproved = false;
 		placementSource = 'spread';
@@ -508,10 +486,11 @@
 		if (seq !== selectionSeq) return;
 		rasters = nextRasters;
 
-		const proposal = skipCrop ? null : proposeSharedCrop(rasters);
-		dbg('analyze done', { tiles: tiles.length, proposal });
+		const cropResult = applyCrop(rasters, placements, { skip: skipCrop });
+		dbg('analyze done', { tiles: tiles.length, proposal: cropResult.insets });
 
-		if (proposal) {
+		if (cropResult.insets) {
+			const proposal = cropResult.insets;
 			let croppedUrls: string[];
 			try {
 				croppedUrls = await Promise.all(tiles.map((image) => croppedObjectUrl(image, proposal)));
@@ -534,9 +513,9 @@
 			clipAnimate = false;
 			clipInsets = null;
 			displayUrls = croppedUrls;
-			rasters = rasters.map((raster) => cropRaster(raster, proposal));
+			rasters = cropResult.rasters.slice();
 			appliedInsets = proposal;
-			placements = placements.map((p) => ({ x: p.x + proposal.left, y: p.y + proposal.top }));
+			placements = cropResult.placements.slice();
 		}
 
 		// badges light up individually (detection ran at upload; usually done)
@@ -566,27 +545,15 @@
 			workflowMessage = 'Pixel stitch not ready yet — still reading pixels.';
 			return;
 		}
-		const nextPlacements: Placement[] = [{ x: 0, y: 0 }];
-		let hadFallback = false;
+		const result = solvePixelStitch(rasters)!; // rasters.length >= 2 just checked above
 
-		for (let index = 1; index < rasters.length; index++) {
-			const previous = nextPlacements[index - 1];
-			const offset = findBestTranslation(rasters[index - 1], rasters[index]);
-			if (offset) {
-				nextPlacements.push({ x: previous.x + offset.dx, y: previous.y + offset.dy });
-			} else {
-				hadFallback = true;
-				nextPlacements.push({ x: previous.x + rasters[index - 1].widthPx + 120, y: previous.y });
-			}
-		}
-
-		placements = nextPlacements;
+		placements = result.placements.slice();
 		selectedIdx = 0;
 		layoutApproved = false;
 		placementSource = 'pixel';
 		fitKey++;
-		dbg('stitch result', { placements: nextPlacements, hadFallback });
-		workflowMessage = hadFallback
+		dbg('stitch result', result);
+		workflowMessage = result.hadFallback
 			? 'Pixel stitch could not match some tiles — drag them into place.'
 			: 'Pixel-stitched — inspect the overlap, then approve or adjust.';
 	}
@@ -692,8 +659,6 @@
 
 	function enterAnnotate() {
 		// seeds: labeled badge detections projected through current placements
-		const left = appliedInsets?.left ?? 0;
-		const top = appliedInsets?.top ?? 0;
 		const seeds: SeedBadge[] = [];
 		mapImages.forEach((img, i) => {
 			const emitted = detections[img.objectUrl];
@@ -705,11 +670,8 @@
 				if (e.kind !== 'object' || e.objType !== 'hole-badge') continue;
 				const n = labelByDet.get(e.detId);
 				if (n === undefined) continue;
-				seeds.push({
-					n,
-					xPx: placements[i].x + (e.xPx - left),
-					yPx: placements[i].y + (e.yPx - top)
-				});
+				const p = projectToComposite({ xPx: e.xPx, yPx: e.yPx }, appliedInsets, placements[i]);
+				seeds.push({ n, xPx: p.xPx, yPx: p.yPx });
 			}
 		});
 		// strong-hole verdicts come FROM the CV service; the app only obeys
