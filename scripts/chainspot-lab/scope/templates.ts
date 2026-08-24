@@ -1,3 +1,4 @@
+import { resolveScopeView } from './viewOptions';
 import type { PointTuple, Rect, ScopePanelMeta, ScopeResolvedRequest } from './types';
 
 export interface ScopeTemplateContext {
@@ -24,40 +25,70 @@ function centeredRect(cx: number, cy: number, w: number, h: number, imageWidth: 
 	return clampRect({ x: cx - w / 2, y: cy - h / 2, w, h }, imageWidth, imageHeight);
 }
 
-/** The point an agent is actively inspecting. Context/local may frame the whole
- * request, but forensic views and `pin here` follow this exact anchor. */
+function expandedRect(rect: Rect, extraWidth: number, extraHeight: number, imageWidth: number, imageHeight: number): Rect {
+	return clampRect({
+		x: rect.x - extraWidth / 2,
+		y: rect.y - extraHeight / 2,
+		w: rect.w + extraWidth,
+		h: rect.h + extraHeight
+	}, imageWidth, imageHeight);
+}
+
+/** The evidence point being inspected at higher magnification. */
 export function inspectionAnchor(request: ScopeResolvedRequest): PointTuple {
-	if (request.points.length === 0) {
-		return [request.focus.x + request.focus.w / 2, request.focus.y + request.focus.h / 2];
-	}
+	if (request.points.length === 0) return [request.focus.x + request.focus.w / 2, request.focus.y + request.focus.h / 2];
 	if (request.kind === 'path' || request.kind === 'dots' || request.kind === 'hole') {
 		return request.points[Math.max(0, request.points.length - 2)];
 	}
 	return request.points[request.points.length - 1];
 }
 
+/** Scope's task-aware AutoCrop. This is presentation, AFTER Sweep canonicalization. */
+export function autoCropScopePanels(
+	imageWidth: number,
+	imageHeight: number,
+	request: ScopeResolvedRequest
+): readonly ScopePanelMeta[] {
+	const view = resolveScopeView(request.view);
+	const cx = request.focus.x + request.focus.w / 2;
+	const cy = request.focus.y + request.focus.h / 2;
+	const local = expandedRect(request.focus, view.localExtraWidthPx, view.localExtraHeightPx, imageWidth, imageHeight);
+	const contextSpan = Math.max(view.contextSpanPx, local.w, local.h);
+	const context = centeredRect(cx, cy, contextSpan, contextSpan, imageWidth, imageHeight);
+	const [fx, fy] = inspectionAnchor(request);
+	return [
+		{
+			name: 'context', label: `CONTEXT ${Math.round(context.w)}x${Math.round(context.h)} GRID ${view.grid ? 'ON' : 'OFF'}`,
+			source: context, outputPx: view.contextOutputPx, resampling: 'bilinear', nearestNeighbor: false, grid: view.grid
+		},
+		{
+			name: 'local', label: `LOCAL +${view.localExtraWidthPx}W +${view.localExtraHeightPx}H`,
+			source: local, outputPx: view.localOutputPx, resampling: 'bilinear', nearestNeighbor: false, grid: view.grid
+		},
+		{
+			name: 'forensic-wide', label: `FORENSIC WIDE ${view.forensicWidePx}px`,
+			source: centeredRect(fx, fy, view.forensicWidePx, view.forensicWidePx, imageWidth, imageHeight), outputPx: view.forensicOutputPx, resampling: 'nearest', nearestNeighbor: true, grid: false
+		},
+		{
+			name: 'forensic-mid', label: `FORENSIC MID ${view.forensicMidPx}px`,
+			source: centeredRect(fx, fy, view.forensicMidPx, view.forensicMidPx, imageWidth, imageHeight), outputPx: view.forensicOutputPx, resampling: 'nearest', nearestNeighbor: true, grid: false
+		},
+		{
+			name: 'forensic-tight', label: `FORENSIC TIGHT ${view.forensicTightPx}px`,
+			source: centeredRect(fx, fy, view.forensicTightPx, view.forensicTightPx, imageWidth, imageHeight), outputPx: view.forensicOutputPx, resampling: 'nearest', nearestNeighbor: true, grid: false
+		}
+	];
+}
+
 export const defaultScopeTemplate: ScopeTemplate = {
 	id: 'default',
-	description: '1→1→3 crosscheck: one context, one local, then three forensic zooms locked to the previous point.',
+	description: 'Scope AutoCrop: 800px regional Context, request+100px Local, then three tunable forensic zooms.',
 	panels({ imageWidth, imageHeight, request }) {
-		const cx = request.focus.x + request.focus.w / 2;
-		const cy = request.focus.y + request.focus.h / 2;
-		const span = Math.max(request.focus.w, request.focus.h, 1);
-		const contextSpan = Math.max(256, span * 6);
-		const localSpan = Math.max(64, span * 2.5);
-		const [fx, fy] = inspectionAnchor(request);
-		return [
-			{ name: 'context', source: centeredRect(cx, cy, contextSpan, contextSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },
-			{ name: 'local', source: centeredRect(cx, cy, localSpan, localSpan, imageWidth, imageHeight), outputPx: 320, nearestNeighbor: true },
-			{ name: 'forensic-wide', source: centeredRect(fx, fy, 96, 96, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true },
-			{ name: 'forensic-mid', source: centeredRect(fx, fy, 48, 48, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true },
-			{ name: 'forensic-tight', source: centeredRect(fx, fy, 24, 24, imageWidth, imageHeight), outputPx: 160, nearestNeighbor: true }
-		];
+		return autoCropScopePanels(imageWidth, imageHeight, request);
 	}
 };
 
 // Extensibility is intentionally this boring: add a ScopeTemplate and register it here.
-// Do not build a plugin/config framework until a real second presentation needs one.
 export const SCOPE_TEMPLATES: Readonly<Record<string, ScopeTemplate>> = {
 	[defaultScopeTemplate.id]: defaultScopeTemplate
 };
