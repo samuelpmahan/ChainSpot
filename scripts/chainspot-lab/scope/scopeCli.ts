@@ -1,4 +1,5 @@
 import { basename, extname, resolve } from 'node:path';
+import { appendLabCommand, guardTruthTaint, resolveCourseContext } from '../context/context.mjs';
 import { loadScopeManifest, resolveManifestCasePaths } from './manifest';
 import { makeContactSheet } from './render';
 import { DEFAULT_SCOPE_OUT, runScopeOperation, scopeSlug } from './operation';
@@ -10,11 +11,18 @@ function usage(exitCode = 0): never {
 	console.error([
 		'SCOPE — inspect Sweep-canonical visual evidence',
 		'',
+		'Configured course shortcut:',
+		'  lab scope hN [--truth] [view flags]',
+		'    hN       uses the selected course manifest viewport (no Annotation truth)',
+		'    --truth  explicitly uses Annotation geometry; logs TRUTH-TAINT and is forbidden in blind/test runs',
+		'    select a course first with: lab set DT',
+		'',
 		'Raster contract:',
 		'  raw capture(s) -> Sweep StripChrome -> Sweep AutoStitch -> canonical raster -> Scope AutoCrop',
 		'  `scope full` shows the entire canonical raster AFTER StripChrome/AutoStitch and BEFORE Scope AutoCrop.',
 		'',
 		'Usage:',
+		'  lab scope hN [--truth] [view flags]',
 		'  lab scope IMAGE x,y [view flags]',
 		'  lab scope IMAGE x,y,w,h [view flags]',
 		'  lab scope full IMAGE [view flags]',
@@ -72,6 +80,13 @@ function option(args: string[], name: string): string | undefined {
 	return value;
 }
 
+function flag(args: string[], name: string): boolean {
+	const index = args.indexOf(name);
+	if (index < 0) return false;
+	args.splice(index, 1);
+	return true;
+}
+
 async function renderOne(
 	imagePath: string,
 	annotationPath: string | undefined,
@@ -106,6 +121,34 @@ async function main(): Promise<void> {
 	const raw = process.argv.slice(2);
 	const args = raw[0] === 'scope' ? raw.slice(1) : raw;
 	if (!args.length || args.includes('--help') || args.includes('-h')) usage(0);
+
+	const configuredHole = /^h(\d+)$/i.exec(args[0]);
+	if (configuredHole) {
+		const hole = Number(configuredHole[1]);
+		const rest = args.slice(1);
+		const truth = flag(rest, '--truth');
+		const out = option(rest, '--out');
+		const view = consumeViewOptions(rest);
+		if (rest.length) throw new Error(`lab scope: unexpected args: ${rest.join(' ')}`);
+		const course = resolveCourseContext();
+		const commandArgv = ['scope', `h${hole}`, ...(truth ? ['--truth'] : [])];
+		if (truth) {
+			if (!course.annotationPath) throw new Error(`lab scope: ${course.manifest.course} has no Annotation truth configured.`);
+			guardTruthTaint(commandArgv);
+			console.log(`TRUTH-TAINT · ${course.manifest.course} · H${hole}`);
+			await renderOne(course.imagePath, course.annotationPath, { name: `h${hole}-truth`, hole, view }, out);
+			return;
+		}
+		const viewport = course.manifest.holes?.[String(hole)]?.box as BoxTuple | undefined;
+		if (!viewport) {
+			throw new Error(`lab scope: ${course.manifest.course} manifest has no blind viewport for H${hole}. --truth will not be used implicitly.`);
+		}
+		appendLabCommand({ argv: commandArgv, taints: [] });
+		console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
+		await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
+		return;
+	}
+
 	if (args[0] === 'templates') {
 		for (const template of Object.values(SCOPE_TEMPLATES)) console.log(`${template.id}\t${template.description}`);
 		return;
