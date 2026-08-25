@@ -64,6 +64,25 @@ export interface ABFeature<K extends KnobSpecs = KnobSpecs> {
 	readonly defaultEnabled: boolean;
 	readonly note?: string;
 	readonly knobs: K;
+	/**
+	 * OPTIONAL feature-owned rendering. Absent on every feature by default,
+	 * so this member cannot move parity and cannot break a feature that
+	 * never opts in.
+	 *
+	 * Why it exists: the LAB renderer registry keys on ArtifactKind (mask,
+	 * rgba, componentSet, ...). A kind-keyed renderer gets ONE artifact and
+	 * knows nothing about which feature produced it or why, so it can draw
+	 * "a mask" but never "the tee candidates this feature rejected, over
+	 * the bright mask it rejected them on". The feature knows that. This
+	 * hook lets the feature say it.
+	 *
+	 * It is a DESCRIPTION, not a drawing: `draw` returns a FeatureRenderPlan
+	 * of layers over already-traced drawables. It must not rasterize, must
+	 * not recompute detector data, and must not reach for pixels — every
+	 * value in the plan has to come from the UnitTrace/RunTrace it was
+	 * handed. The kind-keyed path stays the owner of raw bytes.
+	 */
+	readonly render?: FeatureRender;
 }
 
 export interface ResolvedFeature {
@@ -148,6 +167,55 @@ export interface RunTrace {
 	readonly units: UnitTrace[];
 	/** keyed heatmap buffers; transfer these across postMessage */
 	readonly heatmaps: Record<string, Float32Array>;
+}
+
+// ---------------------------------------------------------------------------
+// Feature-owned rendering — the three types ABFeature.render is made of, and
+// nothing else. They live here because the alg may not depend on LAB and
+// ABFeature.render needs a name for its shape; they carry no runtime logic.
+
+/** One draw pass over drawables the trace already holds. Style comes from
+ * each Drawable's own `verdict` (accepted/rejected/info) — a layer never
+ * restates it, so a renderer can never disagree with the trace. */
+export interface FeatureRenderLayer {
+	readonly name: string;
+	/** one line explaining what this layer is evidence OF */
+	readonly note?: string;
+	readonly drawables: readonly Drawable[];
+}
+
+/** What a feature wants drawn for one run. Declarative: the renderer picks
+ * the medium (SVG/PNG/text), the feature picks the content. */
+export interface FeatureRenderPlan {
+	readonly title: string;
+	/**
+	 * Artifact id of the raster this plan reads best over (e.g.
+	 * 'badgeStage.masks:bright'), for a renderer that can resolve one.
+	 * A NAME, never bytes — resolving it stays with the kind-keyed path.
+	 * Omit when the overlay stands on its own.
+	 */
+	readonly base?: string;
+	readonly layers: readonly FeatureRenderLayer[];
+	/**
+	 * Receipt lines. Repo rule: every number ships with where it came from,
+	 * or a loud UNKNOWN. These are printed verbatim next to the image.
+	 */
+	readonly notes: readonly string[];
+}
+
+export interface FeatureRender {
+	/**
+	 * Trace unit ids whose UnitTrace this render consumes. Required because
+	 * a unit id is NOT a feature id: the trace unit that carries g3.endpoints'
+	 * drawables is called 'tees'. Declaring it here keeps that mapping next
+	 * to the feature instead of in a lookup table on the LAB side that goes
+	 * stale silently.
+	 */
+	readonly units: readonly string[];
+	/** `unit` is one of `units`; `run` is the whole trace, so cross-gate
+	 * overlays (a G3 rejection drawn against G2's accepted baskets) are
+	 * possible without a second pass over the image. */
+	draw(unit: UnitTrace, run: RunTrace): FeatureRenderPlan;
 }
 
 // ---------------------------------------------------------------------------
