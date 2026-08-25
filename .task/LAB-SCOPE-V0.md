@@ -28,7 +28,8 @@ Make LAB usable as an embodied CV toolkit with distinct motions:
 - `lab set DT` resolves DashsTrack.
 - LAB context persists locally under ignored `.lab/config.json` by default and may be overridden by `LAB_CONFIG` / `LAB_HOME`.
 - Arbitrary vars and corpus path may be persisted. Current context may be saved/loaded as local named presets.
-- CLI and UI read the same persisted course context; the workbench may auto-open that configured course.
+- CLI and UI read the same persisted course context; the workbench may auto-open that configured course raster.
+- Selecting a course is not truth consent. The UI does not auto-load the course Annotation; truth/assisted use remains explicit.
 
 ## Tutorial / single-hole learning
 
@@ -70,7 +71,7 @@ StripChrome is required sanitation, not presentation. Scope's later AutoCrop is 
 - The UI is tooling, not a replacement implementation of the algorithm or production app.
 - No additional Python/control layer and no arbitrary eval/shell surface.
 - Canonical raster opening uses the same Sweep intake seam as CLI.
-- Persisted `lab set` course context is exposed through the local UI API and used as the initial raster/annotation selection.
+- Persisted `lab set` course context is exposed through the local UI API and used as the initial raster selection only; Annotation remains opt-in.
 - Scope clicks/boxes/full call the shared Scope operation.
 - Search UI mutates the same append-only Search state used by CLI and preserves the same visual-interaction/TempPin aging semantics.
 - Traverse UI uses the shared movement/anchor semantics and same Search traversal state as CLI. Existing traversals can be resumed.
@@ -137,5 +138,5 @@ StripChrome is required sanitation, not presentation. Scope's later AutoCrop is 
 - Pixel-level forensic proof keeps the exact anchor source pixel uncovered.
 - Search proof covers monotonic backtracking, Page isolation/promotion, TempPin lifecycle/style, and v1 state migration.
 - Traverse proof covers shared hex/Cartesian/polar/absolute target math, Search-backed backtracking, and seven-view artifact structure.
-- UI dogfood proves a human can select a course once, open the configured raster, keep a working Page messy, explicitly retain/promote evidence, resume traversal, Scope arbitrary evidence, and run/browse Sweep without the demo frontend.
+- UI dogfood proves a human can select a course once, open the configured raster without silently loading truth, keep a working Page messy, explicitly retain/promote evidence, resume traversal, Scope arbitrary evidence, and run/browse Sweep without the demo frontend.
 - Full repo/unit and real-raster dogfood must be run in an environment with repository/network/dependencies before promotion; do not claim those passed from a connector-only environment.
