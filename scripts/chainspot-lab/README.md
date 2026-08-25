@@ -15,6 +15,16 @@ cd ../..
 
 The LAB install bootstraps/builds the local `@chainspot/alg` workspace and the CLI executes TypeScript through Node's `--import tsx` loader rather than the sandbox-hostile `tsx` IPC CLI path.
 
+For a human-facing workbench:
+
+```bash
+./lab ui
+```
+
+`lab ui` binds a local server to `127.0.0.1:4317` and opens the browser. Use `--port N` or `--no-open` when useful. It adds no new frontend/runtime dependency: the server is Node/TS and the browser shell is plain local JS/CSS.
+
+The UI and CLI call the same LAB operation modules. The UI is not the demo app and does not shell out to the CLI.
+
 ## Raster contract
 
 ```text
@@ -28,6 +38,28 @@ raw capture(s)
 StripChrome is required input sanitation. Pre-StripChrome pixels are not a supported downstream representation.
 
 `scope full` means the entire **canonical** raster after StripChrome/AutoStitch and before Scope's task-aware AutoCrop. It is not a raw-capture escape hatch.
+
+## LAB UI — human algorithm workbench
+
+`lab ui` exists so CV work does not depend on the production/demo frontend.
+
+The first slice supports:
+
+- opening any local raster by path and canonicalizing it through Sweep intake;
+- optional Annotation truth for assisted inspection/Traverse starts;
+- clicking a canonical raster for Scope point inspection;
+- dragging a Scope box and opening `scope full`;
+- tuning Context/Local/forensic spans and grid visibility;
+- creating/switching Search Pages with an explicit `WRITING TO:` destination;
+- clicking trails and pins directly on the canonical map;
+- keeping/releasing pins and explicitly branching a visible trail into `heritage-main`;
+- ghosting retained `heritage-main` evidence underneath a scratch Page;
+- starting Traverse from a clicked point or `Tn` / `Nn` / `Bn` annotation anchor;
+- Traverse by numbered hex neighbor, arbitrary map click, Cartesian delta, or polar distance/heading;
+- the same append-only Search event log used by CLI;
+- choosing an algorithm config, running the real Sweep operation, seeing the op/gate timeline, and browsing generated LAB artifacts.
+
+The workbench intentionally makes mutation consequences obvious. Scope is labeled stateless; Search/Traverse always show the Page that the next click/move will modify; Sweep explicitly leaves Search state alone.
 
 ## LOOK operations
 
@@ -47,7 +79,7 @@ Default Scope presentation is `Context -> Local -> Forensic Wide/Mid/Tight`:
 - Local: active geometry +100 total px width and +100 total px height, natural resampling, coordinate grid.
 - Forensics: tunable source spans, nearest-neighbor, non-occluding hairline target, no grid/pins/trails over evidence.
 
-`--no-grid`, Context/Local sizing, and all three forensic spans are tunable from the CLI.
+`--no-grid`, Context/Local sizing, and all three forensic spans are tunable from the CLI or UI.
 
 ### Search — remember/explore
 
@@ -61,13 +93,16 @@ Search owns state. Scope does not.
 ./lab search branch h7 h7-clean --page final
 ```
 
-Search Pages are named overlay workspaces over the same canonical map. A `scratch` Page can remain messy while `notes` or `final` retain only useful evidence.
+Search Pages are named overlay workspaces over the same canonical map. A `scratch` Page can remain messy while `notes` or `heritage-main` retain only useful evidence.
 
 ```bash
-./lab search page new final IMAGE
-./lab search page use final IMAGE
-./lab search page show final IMAGE
+./lab search page new heritage-main IMAGE
+./lab search page new scratch IMAGE
+./lab search page use scratch IMAGE
+./lab search page show heritage-main IMAGE
 ```
+
+Pages are visibility/mutation namespaces, not separate raster copies. Promotion granularity is deliberately still dogfoodable: the current explicit operation is branch/copy of the visible trail to another Page rather than silently treating any Page as special.
 
 Pins default to a thin `ring-dot`; experimental `crosshair` and `diamond` styles are available. TempPins have deterministic render-count TTL, can be kept, styled, or released, and never enter forensic panels.
 
@@ -83,7 +118,7 @@ Traverse stores its movement as Search trail state and renders its navigation su
 ./lab traverse back walk
 ```
 
-Each render shows current position `0` plus six numbered neighboring previews. The numbered hex handles are conveniences, not constraints: Cartesian and polar movement can go to any valid canonical coordinate.
+Each render shows current position `0` plus six numbered neighboring previews. The numbered hex handles are conveniences, not constraints: Cartesian and polar movement can go to any valid canonical coordinate. The UI also allows clicking an arbitrary destination; that is recorded with the same Cartesian motion semantics.
 
 Image-coordinate polar convention:
 
@@ -108,7 +143,7 @@ Assisted starts may use explicit annotation anchors:
 ./lab sweep CONFIG.json IMAGE.png [TRUTH.json]
 ```
 
-`compile` is inspection-only. `sweep` remains the only LAB command that executes the algorithm plan against raster input.
+`compile` is inspection-only. `sweep` remains the only LAB operation that executes the algorithm plan against raster input. `lab sweep` and the Sweep tab in `lab ui` both call `sweep/operation.ts`; there is no frontend algorithm implementation.
 
 ## KNOW / PROVENANCE
 
@@ -122,4 +157,4 @@ Assisted starts may use explicit annotation anchors:
 
 ## One front door
 
-`lab --help` is the discoverable front door. One-shot, interactive `lab>`, and `.lab` scripts use the same command registry. LAB exposes no arbitrary shell, Python, or JavaScript eval escape.
+`lab --help` is the discoverable front door for agents and `lab ui` is the discoverable clickable front door for humans. One-shot, interactive `lab>`, `.lab` scripts, and the local UI share LAB state/operation code. LAB exposes no arbitrary shell, Python, or JavaScript eval escape.
