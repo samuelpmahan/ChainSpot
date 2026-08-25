@@ -19,8 +19,14 @@
 	</header>
 
 	<section class="openbar">
-		<label class="grow">Raster path <input id="imagePath" placeholder="../chainspot-corpus/dev/Annotated/Heritage/HeritagePark-full.png" /></label>
-		<label class="grow">Annotation (optional) <input id="annotationPath" placeholder="...annotation.json" /></label>
+		<label class="grow">Raster path
+			<span class="pathPicker"><input id="imagePath" placeholder="../chainspot-corpus/dev/Annotated/Heritage/HeritagePark-full.png" /><button id="pickImage" type="button">Choose/drop</button></span>
+			<input id="imageFile" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden />
+		</label>
+		<label class="grow">Annotation (optional)
+			<span class="pathPicker"><input id="annotationPath" placeholder="...annotation.json" /><button id="pickAnnotation" type="button">Choose/drop</button></span>
+			<input id="annotationFile" type="file" accept=".json,application/json" hidden />
+		</label>
 		<button id="openRaster" class="primary">Open canonical</button>
 	</section>
 

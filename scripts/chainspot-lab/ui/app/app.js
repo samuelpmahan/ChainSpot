@@ -28,6 +28,45 @@ async function api(path, options = {}) {
 	return payload;
 }
 
+async function uploadFile(kind, file) {
+	const response = await fetch(`/api/upload?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(file.name)}`, {
+		method: 'POST', body: file
+	});
+	const payload = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
+	return payload.path;
+}
+
+function wireFilePicker(kind, pathSelector, fileSelector, buttonSelector) {
+	const path = $(pathSelector);
+	const fileInput = $(fileSelector);
+	const button = $(buttonSelector);
+	const useFile = async (file) => {
+		if (!file) return;
+		button.disabled = true;
+		try {
+			path.value = await uploadFile(kind, file);
+			toast(`${file.name} ready.`);
+		} catch (error) {
+			toast(error.message);
+		} finally {
+			button.disabled = false;
+			fileInput.value = '';
+		}
+	};
+	button.onclick = () => fileInput.click();
+	fileInput.onchange = () => useFile(fileInput.files[0]);
+	for (const type of ['dragenter', 'dragover']) path.addEventListener(type, (event) => {
+		event.preventDefault();
+		path.classList.add('dragover');
+	});
+	for (const type of ['dragleave', 'drop']) path.addEventListener(type, (event) => {
+		event.preventDefault();
+		path.classList.remove('dragover');
+	});
+	path.addEventListener('drop', (event) => useFile(event.dataTransfer.files[0]));
+}
+
 function toast(message) {
 	const el = $('#toast');
 	el.textContent = message;
@@ -538,6 +577,8 @@ $('#modeNav').addEventListener('click', (event) => {
 	const button = event.target.closest('button[data-mode]');
 	if (button) setMode(button.dataset.mode);
 });
+wireFilePicker('raster', '#imagePath', '#imageFile', '#pickImage');
+wireFilePicker('annotation', '#annotationPath', '#annotationFile', '#pickAnnotation');
 $('#openRaster').onclick = openRaster;
 $('#scopePoint').onclick = () => {
 	app.scopeTool = 'point';

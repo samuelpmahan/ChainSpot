@@ -82,6 +82,10 @@ a { color: var(--cyan); }
 }
 .openbar label { margin: 0; }
 .openbar .grow { flex: 1; }
+.pathPicker { display: flex; gap: 6px; }
+.pathPicker input { min-width: 0; }
+.pathPicker button { white-space: nowrap; }
+.pathPicker input.dragover { border-color: var(--accent); background: #292516; }
 .layout {
 	display: grid;
 	grid-template-columns: 280px minmax(500px, 1fr) 310px;
