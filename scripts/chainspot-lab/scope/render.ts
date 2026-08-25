@@ -65,10 +65,140 @@ function overlayPins(data:Uint8Array,width:number,height:number,panel:ScopePanel
 
 export interface RenderScopeInput { readonly raster:RasterImage; readonly imagePath:string; readonly annotationPath?:string; readonly canonical:ScopeCanonicalMeta; readonly request:ScopeResolvedRequest; readonly overlays?:readonly ScopeResolvedRequest[]; readonly pins?:readonly ScopePinOverlay[]; readonly outputPath:string; }
 function panelGapAfter(panels:readonly ScopePanelMeta[],index:number):number{if(index>=panels.length-1)return 0;return isForensic(panels[index])&&isForensic(panels[index+1])?6:18;}
+
+// --- readout ------------------------------------------------------------
+// An agent cannot diff two pictures. It can diff two numbers. Every value a
+// repeatable check needs is printed here in a fixed order at a fixed place,
+// so two runs are comparable line by line and a drift shows up as a changed
+// digit rather than as "the image looks different".
+
+const READOUT_W = 360;
+const READOUT_SCALE = 2;
+const READOUT_LINE = 14;
+
+function rgbToHsv(r:number,g:number,b:number):[number,number,number]{
+	const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
+	let h=0;
+	if(d!==0){
+		if(mx===r)h=60*(((g-b)/d)%6);
+		else if(mx===g)h=60*(((b-r)/d)+2);
+		else h=60*(((r-g)/d)+4);
+	}
+	if(h<0)h+=360;
+	return [Math.round(h),mx===0?0:Math.round((d/mx)*100),Math.round((mx/255)*100)];
+}
+
+function meanBox(src:RasterImage,cx:number,cy:number,half:number):[number,number,number]{
+	let r=0,g=0,b=0,n=0;
+	for(let y=Math.round(cy)-half;y<=Math.round(cy)+half;y++)for(let x=Math.round(cx)-half;x<=Math.round(cx)+half;x++){
+		if(x<0||y<0||x>=src.width||y>=src.height)continue;
+		const i=rgbaIndex(src.width,x,y);r+=src.data[i];g+=src.data[i+1];b+=src.data[i+2];n++;
+	}
+	return n===0?[0,0,0]:[Math.round(r/n),Math.round(g/n),Math.round(b/n)];
+}
+
+function readoutLines(input:RenderScopeInput,request:ScopeResolvedRequest,panels:readonly ScopePanelMeta[]):string[] {
+	const [ax,ay]=inspectionAnchor(request);
+	const px=Math.max(0,Math.min(input.raster.width-1,Math.round(ax)));
+	const py=Math.max(0,Math.min(input.raster.height-1,Math.round(ay)));
+	const i=rgbaIndex(input.raster.width,px,py);
+	const r=input.raster.data[i],g=input.raster.data[i+1],b=input.raster.data[i+2];
+	const [h,s,v]=rgbToHsv(r,g,b);
+	const m3=meanBox(input.raster,px,py,1);
+	const m9=meanBox(input.raster,px,py,4);
+	const c=input.canonical;
+	const ins=c.stripChrome.insets;
+	const lines=[
+		'INPUT',
+		`  ID      ${c.imageId.slice(0,16).toUpperCase()}`,
+		`  MODE    ${input.annotationPath?'TRUTH':'BLIND'}`,
+		`  SIZE    ${c.widthPx}X${c.heightPx}`,
+		`  STRIP   ${c.stripChrome.source.toUpperCase()}`,
+		`  INSETS  ${ins?`${ins.top}/${ins.right}/${ins.bottom}/${ins.left}`:'NONE'}`,
+		`  STITCH  ${c.autoStitch.sourceCount} SRC${c.autoStitch.hadFallback?' FALLBACK':''}`,
+		'',
+		'ANCHOR PIXEL',
+		`  KIND    ${String(request.kind).toUpperCase()}`,
+		`  AT      ${px} ${py}`,
+		`  RGB     ${r}/${g}/${b}`,
+		`  HSV     ${h} ${s} ${v}`,
+		`  MEAN3   ${m3[0]}/${m3[1]}/${m3[2]}`,
+		`  MEAN9   ${m9[0]}/${m9[1]}/${m9[2]}`,
+		'',
+		'PANELS'
+	];
+	for(const panel of panels){
+		const scale=panel.outputPx/Math.max(panel.source.w,panel.source.h);
+		lines.push(`  ${panel.label.slice(0,34).toUpperCase()}`);
+		lines.push(`    ${panel.source.x} ${panel.source.y} ${panel.source.w}X${panel.source.h} ${scale.toFixed(2)}X`);
+	}
+	return lines;
+}
+
+function drawReadout(out:Uint8Array,width:number,height:number,x:number,lines:readonly string[]):void{
+	fillRect(out,width,height,x,0,READOUT_W,LABEL_H,LABEL_BG);
+	drawText(out,width,height,x+6,7,'READOUT',1,TEXT);
+	fillRect(out,width,height,x,LABEL_H,READOUT_W,height-LABEL_H,FRAME);
+	fillRect(out,width,height,x+CHROME,LABEL_H+CHROME,READOUT_W-CHROME*2,height-LABEL_H-CHROME*2,BG);
+	let y=LABEL_H+CHROME+8;
+	for(const line of lines){
+		if(y+6>height-CHROME)break;
+		if(line)drawText(out,width,height,x+CHROME+8,y,line,READOUT_SCALE,TEXT);
+		y+=READOUT_LINE;
+	}
+}
+
 export function renderScope(input:RenderScopeInput):ScopeRenderMeta{
-	const view=resolveScopeView(input.request.view),request:ScopeResolvedRequest={...input.request,view},template=getScopeTemplate(request.template),panels=template.panels({imageWidth:input.raster.width,imageHeight:input.raster.height,request}),cardWidths=panels.map(p=>p.outputPx+CHROME*2),width=cardWidths.reduce((s,w,i)=>s+w+panelGapAfter(panels,i),0),height=LABEL_H+Math.max(...panels.map(p=>p.outputPx))+CHROME*2,png=new PNG({width,height}),out=png.data as Uint8Array;fill(out,width,height,BG);
-	let x=0;for(let i=0;i<panels.length;i++){const panel=panels[i],cardWidth=cardWidths[i],imageY=LABEL_H+CHROME;fillRect(out,width,height,x,0,cardWidth,LABEL_H,LABEL_BG);drawText(out,width,height,x+6,7,panel.label,1,TEXT);fillRect(out,width,height,x,LABEL_H,cardWidth,panel.outputPx+CHROME*2,FRAME);fillRect(out,width,height,x+CHROME,imageY,panel.outputPx,panel.outputPx,INNER);const dest=copyPanel(input.raster,panel,out,width,height,x+CHROME,imageY);drawGrid(out,width,height,panel,dest);overlayRequest(out,width,height,panel,dest,request,true);for(const overlay of input.overlays??[])overlayRequest(out,width,height,panel,dest,overlay,false);overlayPins(out,width,height,panel,dest,input.pins??[]);x+=cardWidth+panelGapAfter(panels,i);}
-	mkdirSync(dirname(input.outputPath),{recursive:true});writeFileSync(input.outputPath,PNG.sync.write(png));const meta:ScopeRenderMeta={schemaVersion:1,mode:input.annotationPath?'TRUTH_AVAILABLE':'BLIND',image:input.imagePath,annotation:input.annotationPath,canonical:input.canonical,request,overlays:input.overlays,view,pins:input.pins,panels,output:input.outputPath};writeFileSync(`${input.outputPath}.json`,JSON.stringify(meta,null,2)+'\n');return meta;
+	const view=resolveScopeView(input.request.view);
+	const request:ScopeResolvedRequest={...input.request,view};
+	const template=getScopeTemplate(request.template);
+	const panels=template.panels({imageWidth:input.raster.width,imageHeight:input.raster.height,request});
+
+	// Main panels run left to right. Forensic panels stack in ONE column instead
+	// of extending the row -- they are small, and a row of them left ~70% of the
+	// canvas empty under each. Stacking costs nothing and removes the dead space.
+	const main=panels.filter(p=>!isForensic(p));
+	const forensic=panels.filter(p=>isForensic(p));
+	const FGAP=6;
+
+	const mainWidth=main.reduce((sum,p,i)=>sum+p.outputPx+CHROME*2+(i<main.length-1?18:0),0);
+	const forensicWidth=forensic.length?Math.max(...forensic.map(p=>p.outputPx))+CHROME*2:0;
+	const forensicHeight=forensic.reduce((sum,p,i)=>sum+LABEL_H+p.outputPx+CHROME*2+(i<forensic.length-1?FGAP:0),0);
+	const mainHeight=main.length?LABEL_H+Math.max(...main.map(p=>p.outputPx))+CHROME*2:0;
+
+	const width=mainWidth+(forensic.length?18+forensicWidth:0)+18+READOUT_W;
+	const height=Math.max(mainHeight,forensicHeight,LABEL_H+120);
+	const png=new PNG({width,height});
+	const out=png.data as Uint8Array;
+	fill(out,width,height,BG);
+
+	const paint=(panel:ScopePanelMeta,cardX:number,cardY:number):void=>{
+		const cardWidth=panel.outputPx+CHROME*2,imageY=cardY+LABEL_H+CHROME;
+		fillRect(out,width,height,cardX,cardY,cardWidth,LABEL_H,LABEL_BG);
+		drawText(out,width,height,cardX+6,cardY+7,panel.label,1,TEXT);
+		fillRect(out,width,height,cardX,cardY+LABEL_H,cardWidth,panel.outputPx+CHROME*2,FRAME);
+		fillRect(out,width,height,cardX+CHROME,imageY,panel.outputPx,panel.outputPx,INNER);
+		const dest=copyPanel(input.raster,panel,out,width,height,cardX+CHROME,imageY);
+		drawGrid(out,width,height,panel,dest);
+		overlayRequest(out,width,height,panel,dest,request,true);
+		for(const overlay of input.overlays??[])overlayRequest(out,width,height,panel,dest,overlay,false);
+		overlayPins(out,width,height,panel,dest,input.pins??[]);
+	};
+
+	let x=0;
+	for(let i=0;i<main.length;i++){paint(main[i],x,0);x+=main[i].outputPx+CHROME*2+(i<main.length-1?18:0);}
+	if(forensic.length){
+		x+=18;let fy=0;
+		for(let i=0;i<forensic.length;i++){paint(forensic[i],x,fy);fy+=LABEL_H+forensic[i].outputPx+CHROME*2+FGAP;}
+		x+=forensicWidth;
+	}
+	drawReadout(out,width,height,x+18,readoutLines(input,request,panels));
+
+	mkdirSync(dirname(input.outputPath),{recursive:true});
+	writeFileSync(input.outputPath,PNG.sync.write(png));
+	const meta:ScopeRenderMeta={schemaVersion:1,mode:input.annotationPath?'TRUTH_AVAILABLE':'BLIND',image:input.imagePath,annotation:input.annotationPath,canonical:input.canonical,request,overlays:input.overlays,view,pins:input.pins,panels,output:input.outputPath};
+	writeFileSync(`${input.outputPath}.json`,JSON.stringify(meta,null,2)+'\n');
+	return meta;
 }
 
 export function makeContactSheet(renderedPaths:readonly string[],outputPath:string):void{if(!renderedPaths.length)throw new Error('lab scope: contact-sheet has no rendered scopes.');const images=renderedPaths.map(path=>({path,png:PNG.sync.read(readFileSync(path))})),tileW=Math.max(...images.map(i=>i.png.width)),tileH=Math.max(...images.map(i=>i.png.height)),cols=Math.max(1,Math.ceil(Math.sqrt(images.length))),rows=Math.ceil(images.length/cols),gap=14,width=cols*tileW+(cols-1)*gap,height=rows*tileH+(rows-1)*gap,sheet=new PNG({width,height}),out=sheet.data as Uint8Array;fill(out,width,height,BG);for(let i=0;i<images.length;i++){const col=i%cols,row=Math.floor(i/cols),dx=col*(tileW+gap),dy=row*(tileH+gap),src=images[i].png;for(let y=0;y<src.height;y++)for(let x=0;x<src.width;x++){const si=rgbaIndex(src.width,x,y),di=rgbaIndex(width,dx+x,dy+y);out[di]=src.data[si];out[di+1]=src.data[si+1];out[di+2]=src.data[si+2];out[di+3]=src.data[si+3];}drawRing(out,width,height,dx+18,dy+18,14,FRAME);drawNumber(out,width,height,dx+18,dy+18,i+1);}mkdirSync(dirname(outputPath),{recursive:true});writeFileSync(outputPath,PNG.sync.write(sheet));writeFileSync(`${outputPath}.json`,JSON.stringify({schemaVersion:1,scopes:renderedPaths.map((path,index)=>({index:index+1,path})),output:outputPath},null,2)+'\n');}
