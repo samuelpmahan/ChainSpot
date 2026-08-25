@@ -17,27 +17,34 @@ Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No back
 - Before making changes, inspect `git status --short` and preserve unrelated user changes.
 - Try not to run E2E tests or tests involving browser control for now unless they are the highest-value proof for the task. This is still a build-out and the user frequently performs manual browser acceptance. Never substitute unit/type checks for a browser interaction that they cannot prove.
 
-## Task workflow — defer to Linear
+## How work gets done — small demonstrable progress
 
-The single canonical workflow definition lives in Linear: **ChainSpot Development Workflow**
-(https://linear.app/chainspot/document/chainspot-development-workflow-fe350a97c5b9).
-Read it before starting any task. This file deliberately does not mirror it; if the two ever
-appear to disagree, the Linear document wins and this pointer gets fixed.
+The full definition lives in [`docs/WORKFLOW.md`](./docs/WORKFLOW.md). Read it
+before starting. The short version:
 
-The non-negotiables you will find defined there:
+**The bar is small demonstrable progress. Not tickets.**
 
-- Linear ticket first; then a branch **from the intended base** — normally current `main`,
-  with the document defining how the base is chosen for work that depends on an unmerged
-  branch, and why `staging/*` accumulation branches are never a base. Prefer Linear's
-  generated branch name.
-- The first task-specific commit is `.task/<LINEAR-ID>.md` (task definition + implementer
-  Proof Plan before any production code).
-- Then: implementation → implementer Review Brief → fresh independent review → merge prep
-  (delete `.task`, update `CHANGELOG-dev.md`) → staging deployment → manual acceptance →
-  merge to `main` → production.
-- Any external write — a push, a Linear issue/comment/doc, a GitHub comment, a deploy —
-  requires showing the user the verbatim content first and getting explicit approval.
-  The document defines the full rule.
+A piece of work is done when it produces something a human can look at and
+accept on sight — a real run, on real course data, printing a receipt. Not
+"tests pass". Not "the ticket is closed". A picture and a receipt.
+
+- **No ticket is required to start.** Ticket ceremony (`.task/<ID>.md`, Proof
+  Plans, Review Briefs, merge prep) is retired. It bought paperwork, not
+  progress.
+- **Prefer ten landings a human can each accept on sight** over one large
+  landing that requires trust.
+- **A lane commit is a half.** Halves meet in `staging/<area>` and must
+  demonstrate that they combine before the work counts. See the waiting room
+  rules in `docs/WORKFLOW.md`.
+- **Every number ships with where it came from**, or a loud `UNKNOWN`.
+  Thresholds are dataset-fit estimates, not physics, and they are the first
+  suspect when a gate misbehaves.
+- **No silent drops.** `features/types.ts` already states the rule: filtering
+  code emits a rejected drawable with a reason per killed candidate. A
+  candidate that vanishes with no record is a bug, not a filter.
+- **Any external write** — a push, a GitHub or Linear comment, a deploy —
+  requires showing the user the verbatim content first and getting explicit
+  approval.
 
 ## Long-running tasks
 
