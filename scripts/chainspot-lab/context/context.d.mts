@@ -5,7 +5,7 @@ export interface LabCourseManifest {
   readonly devDir: string;
   readonly image: string;
   readonly annotation?: string;
-  readonly holes?: Readonly<Record<string, { readonly box: readonly [number, number, number, number] }>>;
+  readonly holes?: Readonly<Record<string, { readonly sourceBox: readonly [number, number, number, number] }>>;
 }
 
 export interface LabConfig {
