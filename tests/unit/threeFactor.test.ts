@@ -177,6 +177,21 @@ function emissionsFor(run: ThreeFactorRun): DetectorEmission[] {
 	return emissions;
 }
 
+describe('three-factor root object graph', () => {
+	it('keeps detector-owned raster support immutable and records occlusion separately', async () => {
+		const { occlude } = await import('@chainspot/alg/detectors/threeFactor');
+		const measured = measurement();
+		const graph = objectGraph(measured);
+		const related = occlude(graph, {
+			kind: 'occlusion', occluderId: 'basket-0', occludedId: 'tee-0',
+			evidence: { basis: 'alpha-mask', visiblePixels: 8, occludedPixels: 12, note: 'test-only' }
+		});
+		expect(related.occlusions).toHaveLength(1);
+		expect(related.tees[0].raster).toEqual(graph.tees[0].raster);
+		expect(measured.tees[0]).toEqual(tee());
+	});
+});
+
 describe('3factor-dev72 Detector adapter', () => {
 	it('runs deterministically on valid blank raster evidence', () => {
 		const image = raster();
