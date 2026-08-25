@@ -78,4 +78,24 @@ describe('LAB cold-checkout discoverability', () => {
 		expect(result.status).toBe(1);
 		expect(result.stderr).toContain('Run: ./lab setup');
 	});
+
+	test('a persisted truth-tainted command log blocks a later blind/test execution before tsx is touched', () => {
+		const { launcher, root } = coldLauncher();
+		const commandLog = join(root, 'commands.jsonl');
+		writeFileSync(commandLog, JSON.stringify({ argv: ['scope', 'h1', '--truth'], taints: ['truth'] }) + '\n');
+		const result = spawnSync(process.execPath, [launcher, 'scope', 'course.png', '10,10'], {
+			encoding: 'utf8',
+			env: {
+				...process.env,
+				NODE_PATH: '',
+				LAB_CONFIG: join(root, 'config.json'),
+				LAB_COMMAND_LOG: commandLog,
+				LAB_TEST_RUN: '1'
+			}
+		});
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain('LAB TRUTH-TAINT');
+		expect(result.stderr).toContain('scope h1 --truth');
+		expect(result.stderr).not.toContain('runtime dependencies are not installed');
+	});
 });
