@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { printTutorial, runSetCommand } from '../context/context.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LAB_DIR = resolve(HERE, '..');
@@ -28,6 +29,40 @@ const COMMANDS = {
     ],
     run: () => runSetup(),
   },
+  set: {
+    group: 'CONTEXT',
+    summary: 'persist course, paths, vars, and reusable presets',
+    examples: ['set DT', 'set', 'set page scratch', 'set save dashs', 'set @dashs'],
+    usage: [
+      'lab set                         show persisted LAB context',
+      'lab set COURSE                  select course (DT -> DashsTrack)',
+      'lab set course COURSE           explicit course form',
+      'lab set courses                 list known course manifests',
+      'lab set corpus PATH             override sibling chainspot-corpus',
+      'lab set KEY VALUE               persist an arbitrary local variable',
+      'lab set unset KEY',
+      'lab set save NAME               save current context as a preset',
+      'lab set load NAME | lab set @NAME',
+      'lab set reset',
+      '',
+      'Context persists in .lab/config.json by default and survives shell/UI restarts.',
+      'Course lookup assumes ../chainspot-corpus and resolves through explicit course manifests.',
+      'Unique initials/prefixes are accepted until they become ambiguous.'
+    ],
+    run: (args) => runSetCommand(args),
+  },
+  tutorial: {
+    group: 'LEARN',
+    summary: 'guided first visual loop: set course -> blind hole -> truth-assisted hole',
+    examples: ['tutorial'],
+    usage: [
+      'lab tutorial',
+      '',
+      'Prints the dependency-free first-run tutorial.',
+      'The teaching sequence uses DashsTrack: lab set DT -> lab scope h1 -> lab scope h1 --truth.'
+    ],
+    run: () => (printTutorial(), 0),
+  },
   ui: {
     group: 'LOOK',
     summary: 'open the local clickable LAB workbench',
@@ -46,8 +81,9 @@ const COMMANDS = {
   scope: {
     group: 'LOOK',
     summary: 'stateless canonical raster inspection',
-    examples: ['scope course.png 880,429', 'scope full course.png', 'scope --hole 7 course.png truth.json'],
+    examples: ['scope h1', 'scope h1 --truth', 'scope course.png 880,429', 'scope full course.png'],
     usage: [
+      'lab scope hN [--truth] [view flags]',
       'lab scope IMAGE x,y [view flags]',
       'lab scope IMAGE x,y,w,h [view flags]',
       'lab scope full IMAGE [view flags]',
@@ -58,6 +94,9 @@ const COMMANDS = {
       'lab scope --manifest MANIFEST.json [--case NAME] [--out-dir DIR]',
       'lab scope contact-sheet MANIFEST.json [--case NAME] [--out FILE]',
       'lab scope templates',
+      '',
+      'Configured hN uses the selected course manifest viewport without Annotation truth.',
+      '--truth explicitly uses Annotation geometry, is logged as TRUTH-TAINT, and fails blind/test runs.',
       '',
       'Raster contract:',
       '  StripChrome -> AutoStitch -> canonical raster -> Scope AutoCrop',
@@ -180,7 +219,7 @@ function printRootHelp() {
   console.log('  lab <command> [args]     one-shot');
   console.log('  lab                      interactive shell');
   console.log('');
-  for (const group of ['SETUP', 'LOOK', 'KNOW', 'RUN', 'PROVENANCE']) {
+  for (const group of ['SETUP', 'CONTEXT', 'LEARN', 'LOOK', 'KNOW', 'RUN', 'PROVENANCE']) {
     console.log(group);
     for (const [name, command] of Object.entries(COMMANDS)) {
       if (command.group === group) console.log(`  ${name.padEnd(12)} ${command.summary}`);
@@ -194,13 +233,19 @@ function printRootHelp() {
   console.log('  exit | quit               leave interactive LAB');
   console.log('');
   console.log('Cold checkout:');
-  console.log('  All help works before dependencies are installed.');
+  console.log('  All help, `set`, and `tutorial` work before dependencies are installed.');
   console.log('  Run `lab setup` before executing TypeScript-backed operations.');
+  console.log('');
+  console.log('First visual loop:');
+  console.log('  lab tutorial');
+  console.log('  lab set DT');
+  console.log('  lab scope h1');
   console.log('');
   console.log('Raster contract:');
   console.log('  raw capture(s) -> Sweep StripChrome -> AutoStitch -> canonical raster -> Scope/Search/Traverse/algorithm');
   console.log('');
   console.log('Discover:');
+  console.log('  lab set --help');
   console.log('  lab scope --help');
   console.log('  lab search --help');
   console.log('  lab traverse --help');
@@ -342,8 +387,6 @@ async function dispatch(argv, state = { history: [] }, options = {}) {
   const command = COMMANDS[name];
   if (!command) { console.error(`lab: unknown command '${name}'. Try: lab --help`); return 2; }
 
-  // Recursive discovery must work from a completely cold checkout. Never touch
-  // the TS loader for a help-only invocation.
   if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) return printCommandHelp(name);
 
   try { return await command.run(args); }
