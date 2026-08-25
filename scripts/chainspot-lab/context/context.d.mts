@@ -24,6 +24,14 @@ export interface LabCourseContext {
   readonly annotationPath?: string;
 }
 
+export interface LabCommandLogEntry {
+  readonly at?: string;
+  readonly course?: string | null;
+  readonly argv?: readonly string[];
+  readonly taints?: readonly string[];
+  readonly [key: string]: unknown;
+}
+
 export const LAB_DIR: string;
 export const REPO_ROOT: string;
 export const COURSE_MANIFEST_DIR: string;
@@ -39,6 +47,8 @@ export function loadLabConfig(): LabConfig;
 export function saveLabConfig(config: LabConfig): LabConfig;
 export function resolveCourseContext(config?: LabConfig): LabCourseContext;
 export function runSetCommand(args: readonly string[]): number;
-export function appendLabCommand(entry: { readonly argv: readonly string[]; readonly taints?: readonly string[]; readonly [key: string]: unknown }): void;
+export function appendLabCommand(entry: LabCommandLogEntry): void;
+export function readLabCommandLog(): readonly LabCommandLogEntry[];
+export function assertBlindCommandLogClean(): void;
 export function guardTruthTaint(argv: readonly string[]): void;
 export function printTutorial(): void;
