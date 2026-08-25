@@ -10,7 +10,7 @@
 
 import { mkdirSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ArtifactKind, ArtifactRef, Receipt } from './contract';
+import type { ArtifactKind, ArtifactRef, RasterDims, Receipt } from './contract';
 import { sha256HexSync } from './sha256';
 import type { ExecSink } from './sink';
 
@@ -21,13 +21,13 @@ export function createNodeSink(outDir: string): ExecSink {
 	if (existsSync(receiptsPath)) writeFileSync(receiptsPath, '');
 
 	return {
-		putArtifact(kind: ArtifactKind, id: string, bytes: Uint8Array): ArtifactRef {
+		putArtifact(kind: ArtifactKind, id: string, bytes: Uint8Array, dims?: RasterDims): ArtifactRef {
 			const sha256 = sha256HexSync(bytes);
 			const kindDir = join(artifactsDir, kind);
 			mkdirSync(kindDir, { recursive: true });
 			const filePath = join(kindDir, `${id}.bin`);
 			writeFileSync(filePath, bytes);
-			return { id, kind, sha256, uri: `file://${filePath.replace(/\\/g, '/')}` };
+			return { id, kind, sha256, uri: `file://${filePath.replace(/\\/g, '/')}`, ...(dims ? { dims } : {}) };
 		},
 		putReceipt(receipt: Receipt): void {
 			appendFileSync(receiptsPath, `${JSON.stringify(receipt)}\n`);

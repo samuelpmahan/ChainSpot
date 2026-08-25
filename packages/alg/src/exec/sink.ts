@@ -7,19 +7,19 @@
 // filesystem sink lives in node-sink.ts, a separate module the core never
 // imports.
 
-import type { ArtifactKind, ArtifactRef, Receipt } from './contract';
+import type { ArtifactKind, ArtifactRef, RasterDims, Receipt } from './contract';
 import { sha256HexSync } from './sha256';
 
 export interface ExecSink {
-	putArtifact(kind: ArtifactKind, id: string, bytes: Uint8Array): ArtifactRef;
+	putArtifact(kind: ArtifactKind, id: string, bytes: Uint8Array, dims?: RasterDims): ArtifactRef;
 	putReceipt(receipt: Receipt): void;
 }
 
 /** No-op sink: hashes nothing, stores nothing, for callers that don't want receipts/artifacts collected (the trace-off fast path). */
 export function createNullSink(): ExecSink {
 	return {
-		putArtifact(kind, id) {
-			return { id, kind, sha256: '', uri: '' };
+		putArtifact(kind, id, _bytes, dims) {
+			return { id, kind, sha256: '', uri: '', ...(dims ? { dims } : {}) };
 		},
 		putReceipt() {}
 	};
@@ -40,9 +40,9 @@ export function createMemorySink(): MemorySink {
 		artifacts,
 		receipts,
 		blobs,
-		putArtifact(kind, id, bytes) {
+		putArtifact(kind, id, bytes, dims) {
 			const sha256 = sha256HexSync(bytes);
-			const ref: ArtifactRef = { id, kind, sha256, uri: `memory://${id}` };
+			const ref: ArtifactRef = { id, kind, sha256, uri: `memory://${id}`, ...(dims ? { dims } : {}) };
 			blobs.set(id, bytes);
 			artifacts.push(ref);
 			return ref;

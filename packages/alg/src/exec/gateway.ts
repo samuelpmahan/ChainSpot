@@ -60,7 +60,7 @@ export function executeCompiledPlan(
 		impl(tracked, ctx);
 		const durationMs = now() - startedAtMs;
 
-		const artifacts = (ARTIFACT_EXTRACTORS[op.id]?.(board) ?? []).map((a) => sink.putArtifact(a.kind, a.id, a.bytes));
+		const artifacts = (ARTIFACT_EXTRACTORS[op.id]?.(board) ?? []).map((a) => sink.putArtifact(a.kind, a.id, a.bytes, a.dims));
 
 		const receipt: Receipt = {
 			opId: op.id,

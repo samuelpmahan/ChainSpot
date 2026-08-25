@@ -65,11 +65,23 @@ export type ArtifactKind =
  * from a browser/collector sink) — the exec core never interprets it,
  * only carries it through the receipt.
  */
+/** Pixel dimensions of a raster-shaped payload (rgba/mask/scalarField/
+ * orientationField), in image-px. Present only when the producing extractor
+ * had them in hand; the payload bytes themselves never carry shape. */
+export interface RasterDims {
+	readonly width: number;
+	readonly height: number;
+}
+
 export interface ArtifactRef {
 	readonly id: string;
 	readonly kind: ArtifactKind;
 	readonly sha256: string;
 	readonly uri: string;
+	/** Optional. Set for raster kinds whose extractor knew the shape. A
+	 * consumer receiving undefined MUST NOT infer dimensions from byte
+	 * length -- decline to rasterize instead. */
+	readonly dims?: RasterDims;
 }
 
 /** A single named numeric observation captured during an operation's run. */

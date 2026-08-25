@@ -528,6 +528,10 @@ export interface ArtifactExtraction {
 	readonly kind: ArtifactKind;
 	readonly id: string;
 	readonly bytes: Uint8Array;
+	/** Shape for raster kinds. maskBytes()/floatBytes() drop width+height from
+	 * the payload, so the extractor -- the only place that still has them --
+	 * forwards them here. See rendererContract.ts GAP note. */
+	readonly dims?: { readonly width: number; readonly height: number };
 }
 
 export const ARTIFACT_EXTRACTORS: Readonly<Record<string, (board: ExecBoard) => ArtifactExtraction[]>> = {
@@ -535,9 +539,9 @@ export const ARTIFACT_EXTRACTORS: Readonly<Record<string, (board: ExecBoard) => 
 		const image = board.get<RgbaImage>('localImage');
 		const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
 		return [
-			{ kind: 'rgba', id: 'badgeStage.masks.localImage', bytes: Uint8Array.from(image.data) },
-			{ kind: 'mask', id: 'badgeStage.masks.bright', bytes: maskBytes(bright) },
-			{ kind: 'mask', id: 'badgeStage.masks.dark', bytes: maskBytes(dark) }
+			{ kind: 'rgba', id: 'badgeStage.masks.localImage', bytes: Uint8Array.from(image.data), dims: { width: image.width, height: image.height } },
+			{ kind: 'mask', id: 'badgeStage.masks.bright', bytes: maskBytes(bright), dims: { width: bright.width, height: bright.height } },
+			{ kind: 'mask', id: 'badgeStage.masks.dark', bytes: maskBytes(dark), dims: { width: dark.width, height: dark.height } }
 		];
 	},
 	'badgeStage.components'(board) {
