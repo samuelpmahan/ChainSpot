@@ -7,12 +7,13 @@ Branch: `codex/lab-scope-v0`
 
 Make LAB usable as an embodied CV toolkit with distinct motions:
 
+- `ui` — local clickable human workbench over LAB.
 - `scope` — stateless inspection.
 - `search` — stateful investigation, trails, pins, Pages.
-- `traverse` — spatial movement over Search state using Scope rendering.
+- `traverse` — spatial movement over Search state using Scope rendering/presentation semantics.
 - `sweep` — canonical raster intake and the only algorithm execution path.
 
-`lab --help` is the discoverable front door.
+`lab --help` is the discoverable agent front door. `lab ui` is the discoverable human front door. The production/demo frontend is not required to inspect or exercise the CV algorithm.
 
 ## Raster contract
 
@@ -29,6 +30,21 @@ raw capture(s)
 StripChrome is required sanitation, not presentation. Scope's later AutoCrop is presentation/intelligence over the canonical raster.
 
 `scope full` means whole canonical raster after StripChrome/AutoStitch and before Scope AutoCrop. It must never expose pre-StripChrome pixels.
+
+## LAB UI
+
+- `lab ui` starts a local-only Node/TS workbench on `127.0.0.1` and opens a browser by default.
+- The UI is tooling, not a replacement implementation of the algorithm or production app.
+- No additional Python/control layer and no arbitrary eval/shell surface.
+- Canonical raster opening uses the same Sweep intake seam as CLI.
+- Scope clicks/boxes/full call the shared Scope operation.
+- Search UI mutates the same append-only Search state used by CLI and preserves the same visual-interaction/TempPin aging semantics.
+- Traverse UI uses the shared movement/anchor semantics and same Search traversal state as CLI. Existing traversals can be resumed.
+- Sweep UI calls the same `runSweepOperation` executor used by `lab sweep`; the browser never executes detector code itself.
+- The workbench displays the canonical raster, Search Pages/trails/pins, Traverse handles, Search event log, Scope artifacts, Sweep op/gate receipts, and generated artifacts.
+- Search/Traverse always expose the Page receiving the next mutation.
+- A retained target Page is explicit and generic. The UI must not hard-code a course-specific Page name or silently decide what evidence is final.
+- A retained target can be ghosted underneath a working Page and visible trail geometry can be explicitly branched/copied into it.
 
 ## Scope
 
@@ -51,20 +67,22 @@ StripChrome is required sanitation, not presentation. Scope's later AutoCrop is 
 - TempPin TTL is deterministic and visibly actionable; keep/release/style are logged.
 - Search Pages are named overlay namespaces on the same canonical raster, allowing scratch/notes/final surfaces without duplicating image data.
 - Trails/pins belong to Pages. Branching can promote visible geometry into a different Page.
-- Page display uses the Scope renderer; Search must not own another raster renderer.
+- Page names and retained/promoted semantics remain user-controlled and dogfoodable; no specific Page name is privileged in the state model.
+- CLI Page display uses the Scope renderer; the human UI may draw the same Search state directly over the canonical raster as its frontend presentation adapter.
 
 ## Traverse
 
 - Traverse state lives in Search.
-- Each Traverse render shows current position `0` plus six numbered neighboring previews.
+- Each CLI Traverse render shows current position `0` plus six numbered neighboring previews; the UI projects the same six movement handles over the canonical map.
 - Default discrete travel radius is 75 canonical px.
 - Hex handles are conveniences, not constraints.
 - Cartesian movement: `--xy DX,DY`.
 - Polar movement: `--polar DISTANCE,ANGLE` with image-coordinate convention 0° right, 90° down, 180° left, 270° up.
+- UI arbitrary map clicks use the same Cartesian target semantics rather than a new movement model.
 - Backtracking uses Search trail semantics, preserving hidden historical movement.
 - Assisted starts accept `Tn` and `Bn` from annotation truth.
 - `Nn` is accepted only when annotation explicitly carries `numberBadge`/`badge`; never guess it and never execute a detector outside Sweep.
-- Traverse navigation artifacts use Scope's renderer primitives, not a second renderer.
+- Traverse navigation artifacts use Scope's renderer primitives, not a second detector/rendering pipeline.
 
 ## Package / execution
 
@@ -75,15 +93,17 @@ StripChrome is required sanitation, not presentation. Scope's later AutoCrop is 
 - LAB install bootstraps/builds local `@chainspot/alg`.
 - Interactive, one-shot, and `.lab` script commands share one registry.
 - No arbitrary shell/eval escape.
-- `sweep` remains the only command that executes the algorithm plan.
+- `sweep` remains the only LAB operation that executes the algorithm plan; CLI and UI call the same Sweep operation module.
 
 ## Proof plan
 
-- Root help exposes Scope, Search, Traverse, Sweep, knowledge tools, orient, and scripting.
+- Root help exposes UI, Scope, Search, Traverse, Sweep, knowledge tools, orient, and scripting.
+- `lab ui --help` exposes the local-only workbench contract.
 - StripChrome synthetic proof removes phone UI before downstream use and does not invent single-image horizontal crop.
 - Scope template proof covers 800 Context, +100 Local, tunable forensic triplet, grids, and explicit full canonical view.
 - Pixel-level forensic proof keeps the exact anchor source pixel uncovered.
 - Search proof covers monotonic backtracking, Page isolation/promotion, TempPin lifecycle/style, and v1 state migration.
-- Traverse proof covers hex direction mapping, Cartesian/polar vector convention, Search-backed backtracking, and seven-view artifact structure.
+- Traverse proof covers shared hex/Cartesian/polar/absolute target math, Search-backed backtracking, and seven-view artifact structure.
 - Assisted truth coordinates are transformed into canonical coordinates after StripChrome, including optional badge anchors.
+- UI dogfood must prove a human can open a canonical raster, keep a working Page messy, explicitly retain/promote clean evidence on another Page, resume traversal, Scope arbitrary evidence, and run/browse Sweep without the production/demo frontend.
 - Full repo/unit and real-raster dogfood must be run in an environment with repository/network/dependencies before promotion; do not claim those passed from a connector-only environment.
