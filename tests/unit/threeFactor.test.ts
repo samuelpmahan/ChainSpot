@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RgbaRaster, DetectorEmission } from '@chainspot/alg/detect';
 import {
 	emitThreeFactorRun,
+	objectGraph,
 	insertRecoveredEndpoints,
 	measureThreeFactor,
 	runThreeFactor,
@@ -246,7 +247,8 @@ describe('3factor-dev72 Detector adapter', () => {
 		const run: ThreeFactorRun = {
 			imageId: 'b'.repeat(64),
 			measurement: measurement(),
-			assignment: {
+			objects: objectGraph(measurement()),
+		assignment: {
 				measurement: measurement(),
 				tees: [tee()],
 				scoredPairs: [],
@@ -294,7 +296,8 @@ describe('3factor-dev72 Detector adapter', () => {
 		const run: ThreeFactorRun = {
 			imageId: 'c'.repeat(64),
 			measurement: measurement(),
-			assignment: {
+			objects: objectGraph(measurement()),
+		assignment: {
 				measurement: measurement(),
 				tees: [tee()],
 				scoredPairs: [],
