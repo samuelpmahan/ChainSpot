@@ -17,6 +17,7 @@
 	} from '@chainspot/alg/detectors/threeFactor';
 	import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 	import TracePanel from './TracePanel.svelte';
+	import CommandHistory, { type HistoryEntry } from './CommandHistory.svelte';
 	import { proposeSharedCrop } from '@chainspot/alg/autoCrop';
 	import { findBestTranslation } from '@chainspot/alg/stitch';
 	import { labEndpointDetector } from '@chainspot/alg/detectors/labEndpoint';
@@ -24,13 +25,60 @@
 	import type { RgbaRaster, DetectorEmission } from '@chainspot/alg/detect';
 	import type { ThreeFactorRun } from '@chainspot/alg/detectors/threeFactor';
 
+	// `cli` is the id `lab gates N` takes, and it is NOT the digit in `id`.
+	// Two numberings coexist in this repo and they disagree:
+	//   - GateId in packages/alg (G1..G5) — what these buttons show, what the
+	//     trace units carry, what dashsTrackSweep calls G1..G4.
+	//   - the `lab gates` registry (0..7) — a longer pipeline that also numbers
+	//     Crop+Stitch (0), Endpoint Recovery (4) and Bend Refinement (7).
+	// So alg G4 (ownership) is registry 6 Assignment, and registry 4 is a
+	// different stage entirely. Echoing `cli` is what makes the copied line
+	// actually run; `cliName` is shown beside it so the offset is visible
+	// rather than something you rediscover by pasting the wrong number.
 	const GATES = [
-		{ id: 'G1', name: 'Badges', note: 'bright-family + dark-plate recovery; label + candidates' },
-		{ id: 'G2', name: 'Baskets', note: 'sprite matches; tip marks the route endpoint' },
-		{ id: 'G3', name: 'Tees', note: 'ring/component/recovered tiers; axis where known' },
-		{ id: 'G4', name: 'Tee→Badge', note: 'one-to-one tee→badge ownership — no basket knowledge' },
-		{ id: 'G5', name: 'Path', note: 'known tee → known badge → candidate basket, recovered route' }
+		{ id: 'G1', name: 'Badges', cli: 1, cliName: 'Badges', note: 'bright-family + dark-plate recovery; label + candidates' },
+		{ id: 'G2', name: 'Baskets', cli: 2, cliName: 'Baskets', note: 'sprite matches; tip marks the route endpoint' },
+		{ id: 'G3', name: 'Tees', cli: 3, cliName: 'Tees', note: 'ring/component/recovered tiers; axis where known' },
+		{ id: 'G4', name: 'Tee→Badge', cli: 6, cliName: 'Assignment', note: 'one-to-one tee→badge ownership — no basket knowledge' },
+		{ id: 'G5', name: 'Path', cli: 5, cliName: 'Straight Test', note: 'known tee → known badge → candidate basket, recovered route' }
 	] as const;
+
+	// `lab compile --help` prints this exact path as its example.
+	const DEFAULT_CONFIG_PATH = 'packages/alg/src/detectors/threeFactor/configs/default.json';
+
+	// ---- command echo -------------------------------------------------------
+	// Every UI action appends the LAB command that would have done the same
+	// thing. Lines are what `lab run-script FILE` accepts: a real command, or a
+	// `#` comment. An action with no CLI form echoes a `#` line saying so —
+	// a silent click would be exactly the missing-consequence this panel exists
+	// to remove.
+	let history = $state<HistoryEntry[]>([
+		{ cmd: '# LAB session recorded in the browser gate scrubber' },
+		{ cmd: `compile ${DEFAULT_CONFIG_PATH}`, note: 'page load: frozen baseline is the starting config' }
+	]);
+	// the config token used by every `sweep` line; tracks the loaded config file
+	let configArg = $state(DEFAULT_CONFIG_PATH);
+
+	function echo(cmd: string, note?: string) {
+		history = [...history, { cmd, note }];
+	}
+
+	// bin/lab.mjs splitCommandLine understands quotes and backslash escapes
+	function arg(value: string): string {
+		return /[\s"'\\]/.test(value) ? `"${value.replace(/(["\\])/g, '\\$1')}"` : value;
+	}
+
+	function clearHistory() {
+		history = [{ cmd: '# cleared' }];
+	}
+
+	// Every checkbox in the layer row carries data-echo; one delegated change
+	// handler covers show.*, the heatmap, and every per-unit trace toggle.
+	function onViewToggle(event: Event) {
+		const el = event.target as HTMLInputElement | null;
+		if (!el || el.type !== 'checkbox' || !el.dataset.echo) return;
+		echo(`# view-only: ${el.dataset.echo} ${el.checked ? 'on' : 'off'} (overlay state, no LAB command)`);
+	}
 
 	let imgUrl = $state<string | null>(null);
 	let imgName = $state('');
@@ -74,8 +122,14 @@
 			labConfig = resolved;
 			labParamsHash = await hashConfig(resolved);
 			configError = null;
+			configArg = file.name;
+			echo(
+				`compile ${arg(file.name)}`,
+				`${resolved.name} · paramsHash ${labParamsHash.slice(0, 12)}… · every sweep below uses it`
+			);
 		} catch (e) {
 			configError = e instanceof Error ? e.message : String(e);
+			echo(`# compile ${arg(file.name)} rejected: ${configError}`);
 		}
 	}
 
@@ -244,12 +298,27 @@
 	}
 
 	let heldOut = $state('');
+	// The image token a `scope` line can name. A stitched composite exists only
+	// in this tab, so it is null and clicks say that instead of naming a file
+	// that is not on disk.
+	let scopeTarget = $state<string | null>(null);
+
+	// `lab sweep` is the only LAB command that executes the algorithm plan, so
+	// loading an image here IS a sweep. Echo exactly the inputs that reached it.
+	function echoSweep(names: string[], held: string[]) {
+		for (const name of held) echo(`# held out (thrown round, purple mass): ${name} — not passed to sweep`);
+		echo(
+			`sweep ${configArg} ${names.map(arg).join(' ')}`,
+			names.length > 1 ? 'multi-tile: sweep does StripChrome → AutoStitch → algorithm' : undefined
+		);
+	}
 
 	async function onFile(event: Event) {
 		const files = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
 		if (files.length === 0) return;
 		run = null;
 		heldOut = '';
+		scopeTarget = null;
 		worker?.terminate();
 		stopTicker();
 		try {
@@ -257,6 +326,8 @@
 				if (imgUrl) URL.revokeObjectURL(imgUrl);
 				imgUrl = URL.createObjectURL(files[0]);
 				imgName = files[0].name;
+				scopeTarget = files[0].name;
+				echoSweep([files[0].name], []);
 				busy = 'Rasterizing…';
 				startWorker(await rgbaFromFile(files[0]));
 				return;
@@ -276,16 +347,21 @@
 			heldOut = held.join(', ');
 			if (tiles.length === 0) {
 				busy = 'Every file classified as thrown round — nothing to stitch.';
+				for (const name of held) echo(`# held out (thrown round, purple mass): ${name}`);
+				echo('# nothing left to sweep');
 				return;
 			}
 			if (tiles.length === 1) {
 				if (imgUrl) URL.revokeObjectURL(imgUrl);
 				imgUrl = URL.createObjectURL(tiles[0].file);
 				imgName = tiles[0].file.name;
+				scopeTarget = tiles[0].file.name;
+				echoSweep([tiles[0].file.name], held);
 				startWorker(tiles[0].rgba);
 				return;
 			}
 			imgName = tiles.map((t) => t.file.name).join(' + ');
+			echoSweep(tiles.map((t) => t.file.name), held);
 			const composite = await buildComposite(
 				tiles.map((t) => t.file),
 				tiles.map((t) => t.rgba)
@@ -294,6 +370,7 @@
 		} catch (e) {
 			stopTicker();
 			busy = `Failed: ${e instanceof Error ? e.message : String(e)}`;
+			echo(`# sweep failed: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
@@ -301,8 +378,14 @@
 	let show = $state({ badges: true, baskets: false, tees: false, ownership: false, path: false });
 
 	function setGate(i: number) {
+		// clicking the current gate still re-applies its layer preset (the old
+		// behavior); it just is not a move, so it echoes nothing — which also
+		// keeps a held arrow key at either end from spamming the panel
+		const moved = i !== gate;
 		gate = i;
 		show = { badges: i >= 0, baskets: i >= 1, tees: i >= 2, ownership: i >= 3, path: i >= 4 };
+		const g = GATES[i];
+		if (moved) echo(`gates ${g.cli}`, `UI ${g.id} ${g.name} = registry gate ${g.cli} ${g.cliName}`);
 	}
 
 	function onKey(event: KeyboardEvent) {
@@ -325,6 +408,30 @@
 	}
 	function poly(path: readonly (readonly [number, number])[]): string {
 		return path.map(([x, y]) => `${x},${y}`).join(' ');
+	}
+
+	// Click any pixel of the overlay -> `scope IMAGE x,y`, the same stateless
+	// raster inspection the CLI does. getScreenCTM inverts the viewBox fit, so
+	// the coordinates are canonical raster pixels regardless of how the SVG is
+	// letterboxed on screen — the same frame `lab scope` expects.
+	function onScopeClick(event: MouseEvent) {
+		const svg = event.currentTarget as SVGSVGElement;
+		const ctm = svg.getScreenCTM();
+		if (!ctm) return;
+		const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+		const px = Math.round(p.x);
+		const py = Math.round(p.y);
+		// preserveAspectRatio letterboxes the raster inside the element, so the
+		// margins are real clicks at coordinates that are not in the raster.
+		// Emitting `scope IMAGE -9,150` would hand over a command that cannot
+		// run; say what happened instead of fabricating an in-bounds pixel.
+		if (!m || px < 0 || py < 0 || px >= m.widthPx || py >= m.heightPx) {
+			echo(`# click at ${px},${py} falls outside the ${m ? `${m.widthPx}x${m.heightPx}` : 'canonical'} raster — no scope command`);
+			return;
+		}
+		const at = `${px},${py}`;
+		if (scopeTarget) echo(`scope ${arg(scopeTarget)} ${at}`);
+		else echo(`# scope ${at} — canonical raster is the in-tab composite of ${imgName}; no file to name`);
 	}
 
 	let counts = $derived(
@@ -358,6 +465,8 @@
 	<a href="/">← Import Data</a>
 </div>
 
+<CommandHistory entries={history} onclear={clearHistory} />
+
 {#if imgUrl && !run}
 	<!-- the input (or composite) stays visible while the worker crunches -->
 	<img src={imgUrl} alt="processing" style="max-width: 100%; max-height: 78vh; border: 1px solid black; opacity: 0.75;" />
@@ -377,22 +486,26 @@
 		<button onclick={() => setGate(Math.min(GATES.length - 1, gate + 1))} disabled={gate === GATES.length - 1}>▶</button>
 		<em>{GATES[gate].note}</em>
 	</div>
-	<div style="display: flex; gap: 1rem; margin: 0.2rem 0; font-family: monospace; font-size: 13px; flex-wrap: wrap;">
-		<label><input type="checkbox" bind:checked={show.badges} /> badges</label>
-		<label><input type="checkbox" bind:checked={show.baskets} /> baskets</label>
-		<label><input type="checkbox" bind:checked={show.tees} /> tees</label>
-		<label><input type="checkbox" bind:checked={show.ownership} /> tee→badge</label>
-		<label><input type="checkbox" bind:checked={show.path} /> paths</label>
+	<!-- one delegated change handler; every checkbox names itself via data-echo -->
+	<div
+		style="display: flex; gap: 1rem; margin: 0.2rem 0; font-family: monospace; font-size: 13px; flex-wrap: wrap;"
+		onchange={onViewToggle}
+	>
+		<label><input type="checkbox" data-echo="badges" bind:checked={show.badges} /> badges</label>
+		<label><input type="checkbox" data-echo="baskets" bind:checked={show.baskets} /> baskets</label>
+		<label><input type="checkbox" data-echo="tees" bind:checked={show.tees} /> tees</label>
+		<label><input type="checkbox" data-echo="tee→badge" bind:checked={show.ownership} /> tee→badge</label>
+		<label><input type="checkbox" data-echo="paths" bind:checked={show.path} /> paths</label>
 		{#if run?.trace}
 			<span>| trace:</span>
 			{#if heatmapUrl}
-				<label><input type="checkbox" bind:checked={heatmapShow} /> support heatmap</label>
+				<label><input type="checkbox" data-echo="support heatmap" bind:checked={heatmapShow} /> support heatmap</label>
 			{/if}
 			{#each Object.keys(traceLayerShow) as unitId (unitId)}
 				<span>
 					{unitId}
-					<label>✓<input type="checkbox" bind:checked={traceLayerShow[unitId].accepted} /></label>
-					<label>✗<input type="checkbox" bind:checked={traceLayerShow[unitId].rejected} /></label>
+					<label>✓<input type="checkbox" data-echo={`${unitId} accepted`} bind:checked={traceLayerShow[unitId].accepted} /></label>
+					<label>✗<input type="checkbox" data-echo={`${unitId} rejected`} bind:checked={traceLayerShow[unitId].rejected} /></label>
 				</span>
 			{/each}
 		{/if}
@@ -401,11 +514,17 @@
 		badges {counts?.badges} · baskets {counts?.baskets} · tees {counts?.tees} · owned {counts?.owned} · raw pairs {counts?.pairs}
 	</div>
 
+	<!-- the overlay is an image; clicking it is an additive shortcut that only
+	     writes a `scope` line to the history panel, so it stays role="img" and
+	     changes nothing a keyboard user can otherwise reach -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<svg
 		viewBox={`0 0 ${m.widthPx} ${m.heightPx}`}
-		style="width: 100%; max-height: 82vh; border: 1px solid black; background: #111;"
+		style="width: 100%; max-height: 82vh; border: 1px solid black; background: #111; cursor: crosshair;"
 		role="img"
-		aria-label="Gate overlay"
+		aria-label="Gate overlay — click any pixel to echo its scope command"
+		onclick={onScopeClick}
 	>
 		<image href={imgUrl} width={m.widthPx} height={m.heightPx} />
 
