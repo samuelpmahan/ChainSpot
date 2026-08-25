@@ -2,6 +2,26 @@
 
 Paste this to a cloud agent starting cold on ChainSpot.
 
+## Start here
+
+Both repositories are public. No token, no SSH key needed.
+
+```bash
+git clone https://github.com/samuelpmahan/ChainSpot.git
+git clone https://github.com/samuelpmahan/chainspot-corpus.git   # SIBLING, not nested
+cd ChainSpot
+git checkout staging/lab        # <- the branch with everything
+npm install
+cd scripts/chainspot-lab && npm install && cd ../..
+./lab --help
+```
+
+`staging/lab` carries both halves of the current work plus `docs/WORKFLOW.md`.
+The lanes are `lab/alg`, `lab/ui`, `lab/cv-harness`, `demo/mock-server`.
+
+Note: the owner's local clone uses an SSH host alias (`git@gh-spm:...`) bound
+to a dedicated key. That is local convenience only — ignore it and use HTTPS.
+
 ---
 
 ## The thesis this work serves
@@ -133,7 +153,7 @@ What you DO need:
    most tests read `../chainspot-corpus`. Clone it next to this repo, not
    inside it:
    ```
-   git clone <corpus-remote> ../chainspot-corpus
+   git clone https://github.com/samuelpmahan/chainspot-corpus.git ../chainspot-corpus
    ```
    Without it you will get confusing ENOENT failures deep inside tests.
 2. **Node >= 22.**
