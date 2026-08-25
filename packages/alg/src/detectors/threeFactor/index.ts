@@ -26,6 +26,8 @@ import {
 } from './types';
 
 export { THREE_FACTOR_ALGO, THREE_FACTOR_ALGO_VERSION } from './types';
+export { objectGraph, occlude } from './objects';
+export type { Badge, Basket, Tee, CourseObject, ObjectGraph, Occlusion, RasterOwnership } from './objects';
 export type {
 	AssignmentEvidence,
 	BadgeEvidence,
