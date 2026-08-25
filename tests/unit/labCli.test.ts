@@ -17,11 +17,11 @@ describe('LAB npm CLI dispatcher', () => {
 	test('root help is available before LAB npm dependencies are installed', () => {
 		const result = run(['--help']);
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('LAB — tools for seeing, measuring, testing, and learning ChainSpot CV');
+		expect(result.stdout).toContain('LAB — tools for seeing, navigating, measuring, testing, and learning ChainSpot CV');
 		expect(result.stdout).toContain('scope');
 		expect(result.stdout).toContain('sweep');
 		expect(result.stdout).toContain('run-script');
-		expect(result.stdout).toContain('sweep` remains the algorithm execution path');
+		expect(result.stdout).toContain('sweep` remains the only algorithm execution path');
 	});
 
 	test('run-script feeds commands through the same built-in dispatcher', () => {
@@ -30,8 +30,8 @@ describe('LAB npm CLI dispatcher', () => {
 		writeFileSync(script, '# discover without running CV\nhelp scope\nhelp sweep\n');
 		const result = run(['run-script', script]);
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('SCOPE — inspect image regions');
-		expect(result.stdout).toContain('SWEEP — the only LAB command that executes the algorithm');
+		expect(result.stdout).toContain('SCOPE — stateless canonical raster inspection');
+		expect(result.stdout).toContain('SWEEP — StripChrome/AutoStitch + only algorithm execution path');
 		expect(result.stdout).toContain('lab[2]> help scope');
 	});
 });

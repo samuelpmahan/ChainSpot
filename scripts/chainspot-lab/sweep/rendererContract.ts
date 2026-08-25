@@ -21,6 +21,7 @@
 // operations.ts first, this doc second.
 
 import type { ArtifactKind, ArtifactRef } from '@chainspot/alg/exec';
+import { renderMask } from './renderers/mask';
 
 // ---------------------------------------------------------------------------
 // Per-kind payload formats, as actually written by operations.ts today.
@@ -32,9 +33,19 @@ import type { ArtifactKind, ArtifactRef } from '@chainspot/alg/exec';
 //
 // mask               Uint8Array = Mask.data alone (Mask.width/height are
 //                    NOT included — maskBytes() drops them). One byte per
-//                    element; this codebase's Mask is 0/255 per pixel, not
-//                    bit-packed (confirm against raster.ts's mask writers
-//                    before assuming bit-packing).
+//                    element; this codebase's Mask is 0/1 per pixel, NOT
+//                    0/255 and NOT bit-packed. Confirmed against
+//                    packages/alg/src/detectors/threeFactor/raster.ts:20's
+//                    `export interface Mask { width: number; height:
+//                    number; data: Uint8Array; }` (doc comment: "Binary
+//                    mask stored one byte per pixel (0/1), row-major") and
+//                    against its only writer, computeBrightDarkMasks in
+//                    the same file, which does `dark[i] = 1` /
+//                    `bright[i] = 1` on zero-initialized Uint8Arrays. A
+//                    renderer that assumes 0/255 here paints every mask
+//                    solid black (0/1 read as near-zero intensity) — this
+//                    has already cost one bugfix on another branch, so
+//                    treat 0/1 as verified, not "confirm before assuming".
 //
 // scalarField        Float32Array's raw bytes (floatBytes(): a view over
 // orientationField    the buffer, no header). Example: supportField's
@@ -145,7 +156,7 @@ export type RendererFn = (input: RendererInput) => RendererOutput;
  */
 export const RENDERERS: Partial<Record<ArtifactKind, RendererFn>> = {
 	// rgba: renderRgba,
-	// mask: renderMask,
+	mask: renderMask,
 	// scalarField: renderScalarField,
 	// orientationField: renderOrientationField,
 	// componentSet: renderComponentSet,

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -48,6 +48,8 @@ const LAB_DIR = resolve(HERE, '..');
 const REPO_ROOT = resolve(LAB_DIR, '../..');
 const APP_DIR = resolve(HERE, 'app');
 const ARTIFACT_ROOT = resolve(REPO_ROOT, 'artifacts');
+const UPLOAD_ROOT = resolve(ARTIFACT_ROOT, 'ui', 'uploads');
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const SEARCH_STATE = process.env.LAB_SEARCH_STATE
 	? resolve(process.env.LAB_SEARCH_STATE)
 	: resolve(ARTIFACT_ROOT, 'search', 'search-state.json');
@@ -118,6 +120,40 @@ async function readJson(req: import('node:http').IncomingMessage): Promise<any> 
 	}
 	if (chunks.length === 0) return {};
 	return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+async function readBody(req: import('node:http').IncomingMessage): Promise<Buffer> {
+	const chunks: Buffer[] = [];
+	let bytes = 0;
+	for await (const chunk of req) {
+		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		bytes += buffer.length;
+		if (bytes > MAX_UPLOAD_BYTES) throw new Error('lab ui: upload exceeds 100MB.');
+		chunks.push(buffer);
+	}
+	return Buffer.concat(chunks);
+}
+
+function uploadExtension(kind: string, name: string): string {
+	const extension = extname(basename(name)).toLowerCase();
+	if (kind === 'raster' && ['.png', '.jpg', '.jpeg'].includes(extension)) return extension;
+	if (kind === 'annotation' && extension === '.json') return extension;
+	throw new Error(`lab ui: ${kind === 'annotation' ? 'annotation must be JSON' : 'raster must be PNG, JPG, or JPEG'}.`);
+}
+
+async function upload(req: import('node:http').IncomingMessage, url: URL): Promise<string> {
+	const kind = url.searchParams.get('kind');
+	const name = url.searchParams.get('name');
+	if (kind !== 'raster' && kind !== 'annotation') throw new Error('lab ui: upload kind must be raster or annotation.');
+	if (!name) throw new Error('lab ui: upload name is required.');
+	const extension = uploadExtension(kind, name);
+	const body = await readBody(req);
+	if (!body.length) throw new Error('lab ui: upload is empty.');
+	const stem = basename(name, extension).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || kind;
+	const destination = resolve(UPLOAD_ROOT, kind, `${Date.now()}-${stem}${extension}`);
+	mkdirSync(dirname(destination), { recursive: true });
+	writeFileSync(destination, body);
+	return destination;
 }
 
 function mime(path: string): string {
@@ -340,6 +376,10 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 			const resolved = resolve(path);
 			if (!isInside(ARTIFACT_ROOT, resolved)) throw new Error('lab ui: only LAB artifacts may be served.');
 			serveFile(res, resolved);
+			return true;
+		}
+		if (req.method === 'POST' && url.pathname === '/api/upload') {
+			json(res, 200, { path: await upload(req, url) });
 			return true;
 		}
 		if (req.method === 'POST' && url.pathname === '/api/open') {

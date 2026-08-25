@@ -38,7 +38,19 @@ export function renderArtifact(outDir: string, opId: string, gate: string, artif
 			artifactRef,
 			bytes,
 			parsed,
-			dims: undefined, // no renderer-consumed dims source is wired up yet -- see rendererContract.ts's GAP note
+			// ArtifactRef gained an optional `dims` field on the alg side (Chunk A's
+			// candidate fix (a) from the GAP note above) -- forward it verbatim.
+			// This is a source OUTSIDE the artifact's own bytes (the producing
+			// extractor's in-memory width/height), never inferred from the
+			// payload, so it satisfies RendererInput.dims's contract as written.
+			// Verified end-to-end 2026-08-25 via a real `lab sweep` against
+			// DashsTrack-full.jpg: badgeStage.masks's rgba/mask artifacts all
+			// carried dims (1290x2083) through gateway.ts -> createNodeSink ->
+			// here -> the mask renderer, which rasterized successfully. Still
+			// `undefined` for any artifact whose extractor/sink doesn't populate
+			// ArtifactRef.dims -- that stays a per-artifact/per-sink fact, not
+			// something to special-case here.
+			dims: artifactRef.dims,
 			baseRasterPngPath: undefined,
 			outDir: renderDir,
 			opId,
