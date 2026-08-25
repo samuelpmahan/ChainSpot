@@ -14,13 +14,10 @@ import {
 	backTraversal,
 	branchTrail,
 	clearPage,
-	emptySearchState,
 	ensurePage,
 	keepPin,
 	loadSearchState,
 	moveTraversal,
-	pagesForImage,
-	pinByName,
 	releasePin,
 	saveSearchState,
 	startTrail,
@@ -137,7 +134,10 @@ function resolveUserPath(path: string): string {
 
 function isInside(root: string, path: string): boolean {
 	const rel = relative(root, path);
-	return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !resolve(rel).startsWith(sep));
+	if (rel === '') return true;
+	if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) return false;
+	if (/^[a-zA-Z]:[\\/]/.test(rel)) return false;
+	return true;
 }
 
 function artifactUrl(path: string): string {
@@ -229,9 +229,7 @@ function listConfigs(): string[] {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) walk(path);
-			else if (entry.isFile() && entry.name.endsWith('.json') && path.split(sep).includes('configs')) {
-				found.push(relative(REPO_ROOT, path));
-			}
+			else if (entry.isFile() && entry.name.endsWith('.json') && path.split(sep).includes('configs')) found.push(relative(REPO_ROOT, path));
 		}
 	};
 	walk(root);
@@ -313,33 +311,23 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				request,
 				outputPath
 			});
-			json(res, 200, {
-				outputPath: result.outputPath,
-				artifactUrl: artifactUrl(result.outputPath),
-				meta: result.meta,
-				report: result.report
-			});
+			json(res, 200, { outputPath: result.outputPath, artifactUrl: artifactUrl(result.outputPath), meta: result.meta, report: result.report });
 			return true;
 		}
 		if (req.method === 'POST' && url.pathname === '/api/search/action') {
 			const body = await readJson(req);
 			let state = searchState();
 			const action = body.action;
-			if (action === 'page-new') {
-				state = ensurePage(state, { imagePath: body.imagePath, imageId: body.imageId, page: body.page });
-			} else if (action === 'page-use') {
-				state = usePage(state, body.imageId, body.page);
-			} else if (action === 'page-clear') {
-				state = clearPage(state, body.imageId, body.page);
-			} else if (action === 'path-click') {
+			if (action === 'page-new') state = ensurePage(state, { imagePath: body.imagePath, imageId: body.imageId, page: body.page });
+			else if (action === 'page-use') state = usePage(state, body.imageId, body.page);
+			else if (action === 'page-clear') state = clearPage(state, body.imageId, body.page);
+			else if (action === 'path-click') {
 				const point = body.point as PointTuple;
 				if (state.trails[body.name]) state = addTrailPoint(state, body.name, point);
 				else state = startTrail(state, { name: body.name, imagePath: body.imagePath, imageId: body.imageId, page: body.page, point, color: body.color ?? 0 });
-			} else if (action === 'path-back') {
-				state = backTrail(state, body.name);
-			} else if (action === 'path-branch') {
-				state = branchTrail(state, body.name, body.newName, body.page);
-			} else if (action === 'pin-temp') {
+			} else if (action === 'path-back') state = backTrail(state, body.name);
+			else if (action === 'path-branch') state = branchTrail(state, body.name, body.newName, body.page);
+			else if (action === 'pin-temp') {
 				state = addTempPin(state, {
 					name: body.name,
 					imagePath: body.imagePath,
@@ -349,15 +337,10 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 					ttl: Number(body.ttl ?? 3),
 					style: (body.style ?? 'ring-dot') as ScopePinStyle
 				});
-			} else if (action === 'pin-keep') {
-				state = keepPin(state, body.name);
-			} else if (action === 'pin-release') {
-				state = releasePin(state, body.name).state;
-			} else if (action === 'pin-style') {
-				state = stylePin(state, body.name, body.style as ScopePinStyle);
-			} else {
-				throw new Error(`lab ui: unknown Search action '${action}'.`);
-			}
+			} else if (action === 'pin-keep') state = keepPin(state, body.name);
+			else if (action === 'pin-release') state = releasePin(state, body.name).state;
+			else if (action === 'pin-style') state = stylePin(state, body.name, body.style as ScopePinStyle);
+			else throw new Error(`lab ui: unknown Search action '${action}'.`);
 			json(res, 200, searchSummary(saveState(state)));
 			return true;
 		}
@@ -386,12 +369,9 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				const target = traverseTarget(current, traversal.radiusPx, body.move as TraverseMove);
 				assertTraverseInside(target.point, cached.width, cached.height);
 				state = moveTraversal(state, body.name, target.point, target.detail);
-			} else if (body.action === 'back') {
-				state = backTraversal(state, body.name);
-			} else {
-				throw new Error(`lab ui: unknown Traverse action '${body.action}'.`);
-			}
-			state = saveState(state);
+			} else if (body.action === 'back') state = backTraversal(state, body.name);
+			else if (body.action !== 'show') throw new Error(`lab ui: unknown Traverse action '${body.action}'.`);
+			if (body.action !== 'show') state = saveState(state);
 			json(res, 200, { state: searchSummary(state), traversal: currentTraversal(state, body.name) });
 			return true;
 		}
@@ -427,15 +407,11 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 
 function openBrowser(url: string): void {
 	try {
-		if (process.platform === 'darwin') {
-			spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
-		} else if (process.platform === 'win32') {
-			spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-		} else {
-			spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
-		}
+		if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+		else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+		else spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
 	} catch {
-		// The URL is always printed; browser opening is best-effort only.
+		// URL is always printed; browser opening is best-effort only.
 	}
 }
 
