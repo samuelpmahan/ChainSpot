@@ -4,16 +4,28 @@ LAB is ChainSpot's embodied CV toolkit. It is tooling around the algorithm, not 
 
 The package lives at `scripts/chainspot-lab` as private npm package `@chainspot/lab`. Repository-root `./lab` and `lab.cmd` launch that same npm/Node dispatcher. No Python control layer is involved.
 
-## First use
+## Cold start
+
+A fresh checkout must be discoverable before dependencies exist:
 
 ```bash
-cd scripts/chainspot-lab
-npm install
-cd ../..
 ./lab --help
+./lab scope --help
+./lab search --help
+./lab traverse --help
+./lab ui --help
+./lab sweep --help
 ```
 
-The LAB install bootstraps/builds the local `@chainspot/alg` workspace and the CLI executes TypeScript through Node's `--import tsx` loader rather than the sandbox-hostile `tsx` IPC CLI path.
+Those help paths are implemented in the dependency-free JavaScript launcher and must not resolve `tsx` or any LAB package dependency.
+
+When you are ready to execute TypeScript-backed LAB operations:
+
+```bash
+./lab setup
+```
+
+`lab setup` runs `npm install` inside the private LAB package. Its postinstall bootstraps/builds the local `@chainspot/alg` workspace. A cold execution attempt that needs TypeScript fails loudly with `Run: ./lab setup` rather than requiring the user/agent to know an implementation directory.
 
 For a human-facing workbench:
 
@@ -52,10 +64,11 @@ The first slice supports:
 - tuning Context/Local/forensic spans and grid visibility;
 - creating/switching Search Pages with an explicit `WRITING TO:` destination;
 - clicking trails and pins directly on the canonical map;
-- keeping/releasing pins and explicitly branching a visible trail into `heritage-main`;
-- ghosting retained `heritage-main` evidence underneath a scratch Page;
+- keeping/releasing pins;
+- choosing any Page as the retained target, ghosting it under a working Page, and explicitly branching visible trail evidence into it;
 - starting Traverse from a clicked point or `Tn` / `Nn` / `Bn` annotation anchor;
 - Traverse by numbered hex neighbor, arbitrary map click, Cartesian delta, or polar distance/heading;
+- resuming existing saved traversals from the same Search state used by CLI;
 - the same append-only Search event log used by CLI;
 - choosing an algorithm config, running the real Sweep operation, seeing the op/gate timeline, and browsing generated LAB artifacts.
 
@@ -93,13 +106,13 @@ Search owns state. Scope does not.
 ./lab search branch h7 h7-clean --page final
 ```
 
-Search Pages are named overlay workspaces over the same canonical map. A `scratch` Page can remain messy while `notes` or `heritage-main` retain only useful evidence.
+Search Pages are named overlay workspaces over the same canonical map. A `scratch` Page can remain messy while `notes`, `final`, or any other chosen Page retains useful evidence.
 
 ```bash
-./lab search page new heritage-main IMAGE
+./lab search page new final IMAGE
 ./lab search page new scratch IMAGE
 ./lab search page use scratch IMAGE
-./lab search page show heritage-main IMAGE
+./lab search page show final IMAGE
 ```
 
 Pages are visibility/mutation namespaces, not separate raster copies. Promotion granularity is deliberately still dogfoodable: the current explicit operation is branch/copy of the visible trail to another Page rather than silently treating any Page as special.
@@ -157,4 +170,4 @@ Assisted starts may use explicit annotation anchors:
 
 ## One front door
 
-`lab --help` is the discoverable front door for agents and `lab ui` is the discoverable clickable front door for humans. One-shot, interactive `lab>`, `.lab` scripts, and the local UI share LAB state/operation code. LAB exposes no arbitrary shell, Python, or JavaScript eval escape.
+`lab --help` is the discoverable front door for agents and `lab ui` is the discoverable clickable front door for humans. Recursive `--help` remains available on a completely cold checkout. One-shot, interactive `lab>`, `.lab` scripts, and the local UI share LAB state/operation code. LAB exposes no arbitrary shell, Python, or JavaScript eval escape.
