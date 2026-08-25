@@ -74,8 +74,6 @@ export function objectGraph(measurement: ThreeFactorMeasurement): ObjectGraph {
 }
 
 export function occlude(graph: ObjectGraph, relation: Occlusion): ObjectGraph {
-	const ids = new Set<CourseObject>([...graph.badges, ...graph.baskets, ...graph.tees] as CourseObject[]);
-	if (!ids) throw new Error('unreachable');
 	const known = new Set([...graph.badges, ...graph.baskets, ...graph.tees].map((object) => object.id));
 	if (!known.has(relation.occluderId) || !known.has(relation.occludedId))
 		throw new Error('Occlusion endpoints must be existing root objects.');
