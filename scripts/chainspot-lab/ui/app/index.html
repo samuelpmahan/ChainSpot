@@ -51,15 +51,16 @@
 				<div id="writeTarget" class="writeTarget">WRITING TO: —</div>
 				<label>Page <select id="pageSelect"></select></label>
 				<div class="row"><input id="newPage" placeholder="scratch" /><button id="createPage">New</button></div>
-				<div class="quick"><button data-page="scratch">scratch</button><button data-page="heritage-main">heritage-main</button></div>
-				<label class="check"><input id="ghostMain" type="checkbox" checked /> ghost heritage-main under scratch</label>
+				<div class="quick"><button data-page="scratch">+ scratch</button><button data-page="main">+ main</button></div>
+				<label>Retained target <select id="retainedPage"></select></label>
+				<label class="check"><input id="ghostRetained" type="checkbox" checked /> ghost retained target under working Page</label>
 				<h3>Click tool</h3>
 				<div class="segmented">
 					<button id="searchPathTool" class="active">Trail</button>
 					<button id="searchPinTool">Pin</button>
 				</div>
 				<label>Trail name <input id="trailName" value="working" /></label>
-				<div class="row"><button id="trailBack">Back</button><button id="promoteTrail" class="good">Branch → heritage-main</button></div>
+				<div class="row"><button id="trailBack">Back</button><button id="promoteTrail" class="good">Branch → retained</button></div>
 				<label>Pin name <input id="pinName" value="maybe" /></label>
 				<label>Style <select id="pinStyle"><option>ring-dot</option><option>crosshair</option><option>diamond</option></select></label>
 				<button id="clearPage" class="danger wide">Clear visible Page</button>
