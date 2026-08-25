@@ -232,6 +232,26 @@ export function appendLabCommand(entry) {
   }) + '\n');
 }
 
+export function readLabCommandLog() {
+  if (!existsSync(LAB_COMMAND_LOG)) return [];
+  return readFileSync(LAB_COMMAND_LOG, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line, index) => {
+      try { return JSON.parse(line); }
+      catch { throw new Error(`lab: invalid command-log JSON at ${LAB_COMMAND_LOG}:${index + 1}`); }
+    });
+}
+
+export function assertBlindCommandLogClean() {
+  if (process.env.LAB_TEST_RUN !== '1' && process.env.LAB_BLIND_TEST !== '1') return;
+  const tainted = readLabCommandLog().find((entry) => Array.isArray(entry.taints) && entry.taints.includes('truth'));
+  if (tainted) {
+    const command = Array.isArray(tainted.argv) ? tainted.argv.join(' ') : '(unknown command)';
+    throw new Error(`LAB TRUTH-TAINT: this blind/test run reuses a command log containing truth assistance: ${command}. Use a fresh LAB_COMMAND_LOG for an independent test run.`);
+  }
+}
+
 export function guardTruthTaint(argv) {
   appendLabCommand({ argv, taints: ['truth'] });
   if (process.env.LAB_TEST_RUN === '1' || process.env.LAB_BLIND_TEST === '1') {
@@ -257,7 +277,8 @@ export function printTutorial() {
     '   ./lab scope h1 --truth',
     '',
     '   --truth is deliberately TAINTED. It is logged and auto-fails when',
-    '   LAB_TEST_RUN=1 or LAB_BLIND_TEST=1. Use it to learn, never to certify.',
+    '   LAB_TEST_RUN=1 or LAB_BLIND_TEST=1. A later blind/test run using the same',
+    '   command log also fails; use a fresh LAB_COMMAND_LOG for independent testing.',
     '',
     '4. Inspect your persisted context:',
     '   ./lab set',
