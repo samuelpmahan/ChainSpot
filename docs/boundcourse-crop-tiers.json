@@ -1,0 +1,95 @@
+{
+  "measuredFrom": [
+    "DashsTrack",
+    "Heritage",
+    "Lenard",
+    "TowneLake"
+  ],
+  "excluded": {
+    "AlexClark": "3 holes annotated -- these are the BENT holes, deliberately chosen as the hard case. Excluded from margin DERIVATION (its 15 unannotated holes cannot confirm zero-loss) but retained as a SCORING course: a tier that clips a bent hole is disqualified."
+  },
+  "worstCaseMargins": {
+    "top": 0.039,
+    "bottom": 0.126,
+    "left": 0.0198,
+    "right": 0.0511
+  },
+  "tiers": {
+    "T0-off": {
+      "top": 0.0,
+      "bottom": 0.0,
+      "left": 0.0,
+      "right": 0.0
+    },
+    "T1-safe": {
+      "top": 0.0234,
+      "bottom": 0.0756,
+      "left": 0.0119,
+      "right": 0.0307
+    },
+    "T2-balanced": {
+      "top": 0.0312,
+      "bottom": 0.1008,
+      "left": 0.0158,
+      "right": 0.0409
+    },
+    "T3-edge": {
+      "top": 0.039,
+      "bottom": 0.126,
+      "left": 0.0198,
+      "right": 0.0511
+    }
+  },
+  "measuredNote": "Margins are fractions of image W/H, applied per-image, so they are scale-free. Derived from the 4 fully-annotated courses; scored against all 5.",
+  "results": {
+    "T0-off": {
+      "cut": 0.0,
+      "lostByCourse": {
+        "AlexClark": 0,
+        "DashsTrack": 0,
+        "Heritage": 0,
+        "Lenard": 0,
+        "TowneLake": 0
+      }
+    },
+    "T1-safe": {
+      "cut": 13.74,
+      "lostByCourse": {
+        "AlexClark": 0,
+        "DashsTrack": 0,
+        "Heritage": 0,
+        "Lenard": 0,
+        "TowneLake": 0
+      }
+    },
+    "T2-balanced": {
+      "cut": 18.13,
+      "lostByCourse": {
+        "AlexClark": 0,
+        "DashsTrack": 0,
+        "Heritage": 0,
+        "Lenard": 0,
+        "TowneLake": 0
+      }
+    },
+    "T3-edge": {
+      "cut": 22.42,
+      "lostByCourse": {
+        "AlexClark": 2,
+        "DashsTrack": 0,
+        "Heritage": 0,
+        "Lenard": 1,
+        "TowneLake": 0
+      }
+    }
+  },
+  "gates": {
+    "gate1": "avg 10% cut, 0 loss -- MET by T1 (13.74%) and T2 (18.13%)",
+    "gate2": "avg 25% cut, 0 loss -- NOT met by any blind crop; ceiling is ~22.4%. Requires object-aware cutting."
+  },
+  "lessons": [
+    "Mask density is NOT a course-region signal. Zero fully-empty rows or columns on Heritage; p1 row density is 5.9%. The margins are more satellite imagery, not blank space.",
+    "T3-edge sits exactly on the worst observed margin and still clips Lenard by one point. Never set a bound at the extreme you measured; that is what the safety factor is for.",
+    "Emitted artifacts carry no object coordinates -- assignment.selection.table holds only ids and scores. An object-aware cut (gate 2) is not computable from what the algorithm emits today."
+  ]
+}
