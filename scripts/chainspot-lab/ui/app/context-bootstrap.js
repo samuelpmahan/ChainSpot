@@ -16,4 +16,8 @@ async function bootstrapPersistedCourse() {
   }
 }
 
-bootstrapPersistedCourse();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapPersistedCourse, { once: true });
+} else {
+  bootstrapPersistedCourse();
+}
