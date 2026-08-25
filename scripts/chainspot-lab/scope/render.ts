@@ -72,9 +72,9 @@ function panelGapAfter(panels:readonly ScopePanelMeta[],index:number):number{if(
 // so two runs are comparable line by line and a drift shows up as a changed
 // digit rather than as "the image looks different".
 
-const READOUT_W = 360;
-const READOUT_SCALE = 2;
-const READOUT_LINE = 14;
+const READOUT_W = 520;
+const READOUT_SCALE = 3;
+const READOUT_LINE = 21;
 
 function rgbToHsv(r:number,g:number,b:number):[number,number,number]{
 	const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
@@ -137,7 +137,7 @@ function readoutLines(input:RenderScopeInput,request:ScopeResolvedRequest,panels
 
 function drawReadout(out:Uint8Array,width:number,height:number,x:number,lines:readonly string[]):void{
 	fillRect(out,width,height,x,0,READOUT_W,LABEL_H,LABEL_BG);
-	drawText(out,width,height,x+6,7,'READOUT',1,TEXT);
+	drawText(out,width,height,x+6,6,'READOUT',2,TEXT);
 	fillRect(out,width,height,x,LABEL_H,READOUT_W,height-LABEL_H,FRAME);
 	fillRect(out,width,height,x+CHROME,LABEL_H+CHROME,READOUT_W-CHROME*2,height-LABEL_H-CHROME*2,BG);
 	let y=LABEL_H+CHROME+8;
