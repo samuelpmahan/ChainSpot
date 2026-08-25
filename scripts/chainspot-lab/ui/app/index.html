@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>ChainSpot LAB</title>
+	<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+	<header class="topbar">
+		<div class="brand">CHAINSPOT <b>LAB</b></div>
+		<nav id="modeNav">
+			<button data-mode="scope" class="active">Scope</button>
+			<button data-mode="search">Search</button>
+			<button data-mode="traverse">Traverse</button>
+			<button data-mode="sweep">Sweep</button>
+		</nav>
+		<div id="canonicalBadge" class="badge muted">NO RASTER</div>
+	</header>
+
+	<section class="openbar">
+		<label class="grow">Raster path <input id="imagePath" placeholder="../chainspot-corpus/dev/Annotated/Heritage/HeritagePark-full.png" /></label>
+		<label class="grow">Annotation (optional) <input id="annotationPath" placeholder="...annotation.json" /></label>
+		<button id="openRaster" class="primary">Open canonical</button>
+	</section>
+
+	<div class="layout">
+		<aside class="controls">
+			<div id="scopeControls" class="modeControls">
+				<h2>Scope</h2>
+				<p class="hint">Stateless inspection. Click or drag the canonical raster.</p>
+				<div class="segmented">
+					<button id="scopePoint" class="active">Point</button>
+					<button id="scopeBox">Box</button>
+				</div>
+				<button id="scopeFull" class="wide">Full canonical</button>
+				<h3>View</h3>
+				<label>Context <input id="contextSpan" type="number" value="800" /></label>
+				<label>Local +W <input id="localW" type="number" value="100" /></label>
+				<label>Local +H <input id="localH" type="number" value="100" /></label>
+				<div class="triple">
+					<label>fW <input id="fw" type="number" value="192" /></label>
+					<label>fM <input id="fm" type="number" value="96" /></label>
+					<label>fT <input id="ft" type="number" value="48" /></label>
+				</div>
+				<label class="check"><input id="grid" type="checkbox" checked /> coordinate grid</label>
+			</div>
+
+			<div id="searchControls" class="modeControls hidden">
+				<h2>Search</h2>
+				<div id="writeTarget" class="writeTarget">WRITING TO: —</div>
+				<label>Page <select id="pageSelect"></select></label>
+				<div class="row"><input id="newPage" placeholder="scratch" /><button id="createPage">New</button></div>
+				<div class="quick"><button data-page="scratch">scratch</button><button data-page="heritage-main">heritage-main</button></div>
+				<label class="check"><input id="ghostMain" type="checkbox" checked /> ghost heritage-main under scratch</label>
+				<h3>Click tool</h3>
+				<div class="segmented">
+					<button id="searchPathTool" class="active">Trail</button>
+					<button id="searchPinTool">Pin</button>
+				</div>
+				<label>Trail name <input id="trailName" value="working" /></label>
+				<div class="row"><button id="trailBack">Back</button><button id="promoteTrail" class="good">Branch → heritage-main</button></div>
+				<label>Pin name <input id="pinName" value="maybe" /></label>
+				<label>Style <select id="pinStyle"><option>ring-dot</option><option>crosshair</option><option>diamond</option></select></label>
+				<button id="clearPage" class="danger wide">Clear visible Page</button>
+				<div id="pinList" class="miniList"></div>
+			</div>
+
+			<div id="traverseControls" class="modeControls hidden">
+				<h2>Traverse</h2>
+				<div id="traverseWriteTarget" class="writeTarget">WRITING TO: —</div>
+				<p class="hint">Click the map to choose/start or move anywhere. Hex neighbors are shortcuts, not rails.</p>
+				<label>Name <input id="traverseName" value="course-walk" /></label>
+				<label>Page <select id="traversePage"></select></label>
+				<label>Radius <input id="traverseRadius" type="number" value="75" /></label>
+				<label>Annotated start <input id="traverseAnchor" placeholder="T7 / N7 / B7" /></label>
+				<button id="startTraverse" class="primary wide">Start at selected point / anchor</button>
+				<h3>Cartesian</h3>
+				<div class="row"><input id="dx" type="number" value="100" /><input id="dy" type="number" value="0" /><button id="goXY">Go</button></div>
+				<h3>Polar</h3>
+				<div class="row"><input id="distance" type="number" value="150" /><input id="angle" type="number" value="330" /><button id="goPolar">Go</button></div>
+				<button id="traverseBack" class="wide">Back</button>
+				<div id="traverseStatus" class="status">Not started.</div>
+			</div>
+
+			<div id="sweepControls" class="modeControls hidden">
+				<h2>Sweep</h2>
+				<p class="hint">The same Sweep operation used by CLI. This is the only algorithm executor.</p>
+				<label>Config <select id="configSelect"></select></label>
+				<label>Input(s) <textarea id="sweepInputs" rows="5" placeholder="one raster path per line"></textarea></label>
+				<label>Truth <input id="sweepTruth" placeholder="optional annotation.json" /></label>
+				<button id="runSweep" class="primary wide">Run Sweep</button>
+				<div id="sweepStatus" class="status">Idle.</div>
+			</div>
+		</aside>
+
+		<main class="workspace">
+			<div id="emptyState" class="emptyState">
+				<h1>Open a raster.</h1>
+				<p>LAB will StripChrome / AutoStitch first. Everything you see after that is canonical.</p>
+			</div>
+			<div id="mapCard" class="card hidden">
+				<div class="cardHead">
+					<div><b>Canonical raster</b><span id="mapMeta" class="meta"></span></div>
+					<div id="cursorReadout" class="mono muted">x — · y —</div>
+				</div>
+				<div id="mapStage" class="mapStage">
+					<img id="canonicalImage" alt="canonical raster" />
+					<svg id="overlay" preserveAspectRatio="none"></svg>
+				</div>
+			</div>
+
+			<div id="scopeArtifactCard" class="card hidden">
+				<div class="cardHead"><b>Scope artifact</b><a id="scopeArtifactLink" target="_blank">open</a></div>
+				<img id="scopeArtifact" class="artifactImage" alt="scope artifact" />
+			</div>
+
+			<div id="sweepResultCard" class="card hidden">
+				<div class="cardHead"><b>Sweep run</b><span id="sweepRunMeta" class="meta"></span></div>
+				<div id="sweepOps" class="ops"></div>
+				<div class="split">
+					<div><h3>Artifacts</h3><div id="artifactList" class="artifactList"></div></div>
+					<div id="artifactPreview" class="artifactPreview"><span class="muted">Select an image artifact.</span></div>
+				</div>
+			</div>
+		</main>
+
+		<aside class="inspector">
+			<h2>State</h2>
+			<div id="mutationExplain" class="callout">Open a raster to begin.</div>
+			<h3>Pages</h3>
+			<div id="pageList" class="pageList"></div>
+			<h3>Append-only event log</h3>
+			<div id="eventLog" class="eventLog"></div>
+		</aside>
+	</div>
+	<div id="toast" class="toast hidden"></div>
+	<script type="module" src="/app.js"></script>
+</body>
+</html>
