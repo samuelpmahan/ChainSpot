@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { PNG } from 'pngjs';
+import { loadLabConfig, resolveCourseContext } from '../context/context.mjs';
 import { loadScopeInput, runScopeOperation, scopeSlug } from '../scope/operation';
 import type { PointTuple, ScopePinStyle, ScopeRequest } from '../scope/types';
 import {
@@ -74,6 +75,7 @@ function usage(code = 0): never {
 		'UI is bound to 127.0.0.1 only. It calls LAB operations directly:',
 		'  Sweep intake/execution · Scope · Search Pages · Traverse',
 		'',
+		'Persisted `lab set` course context is shared with the workbench.',
 		'No production/demo frontend is required.'
 	].join('\n'));
 	process.exit(code);
@@ -194,6 +196,26 @@ function publicCanonical(cached: CachedCanonical) {
 	};
 }
 
+function publicContext() {
+	const config = loadLabConfig();
+	if (!config.course) return { config, course: null };
+	try {
+		const context = resolveCourseContext(config);
+		return {
+			config,
+			course: {
+				name: context.manifest.course,
+				corpusRoot: context.corpusRoot,
+				imagePath: context.imagePath,
+				annotationPath: context.annotationPath,
+				manifestPath: context.manifest.path
+			}
+		};
+	} catch (error) {
+		return { config, course: null, error: (error as Error).message };
+	}
+}
+
 function searchState(): SearchState {
 	return loadSearchState(SEARCH_STATE);
 }
@@ -287,6 +309,10 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 	try {
 		if (req.method === 'GET' && url.pathname === '/api/health') {
 			json(res, 200, { ok: true, repoRoot: REPO_ROOT, searchState: SEARCH_STATE });
+			return true;
+		}
+		if (req.method === 'GET' && url.pathname === '/api/context') {
+			json(res, 200, publicContext());
 			return true;
 		}
 		if (req.method === 'GET' && url.pathname === '/api/configs') {
