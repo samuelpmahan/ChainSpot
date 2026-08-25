@@ -8,6 +8,10 @@ export interface LabCourseManifest {
   readonly holes?: Readonly<Record<string, { readonly sourceBox: readonly [number, number, number, number] }>>;
 }
 
+export interface ResolvedLabCourseManifest extends LabCourseManifest {
+  readonly path: string;
+}
+
 export interface LabConfig {
   readonly version: 1;
   readonly course?: string;
@@ -17,7 +21,7 @@ export interface LabConfig {
 
 export interface LabCourseContext {
   readonly config: LabConfig;
-  readonly manifest: LabCourseManifest;
+  readonly manifest: ResolvedLabCourseManifest;
   readonly corpusRoot: string;
   readonly devDir: string;
   readonly imagePath: string;
@@ -40,8 +44,8 @@ export const LAB_CONFIG_PATH: string;
 export const LAB_PRESET_DIR: string;
 export const LAB_COMMAND_LOG: string;
 
-export function listCourseManifests(): readonly (LabCourseManifest & { readonly path: string })[];
-export function resolveCourseManifest(query: string): LabCourseManifest & { readonly path: string };
+export function listCourseManifests(): readonly ResolvedLabCourseManifest[];
+export function resolveCourseManifest(query: string): ResolvedLabCourseManifest;
 export function emptyLabConfig(): LabConfig;
 export function loadLabConfig(): LabConfig;
 export function saveLabConfig(config: LabConfig): LabConfig;
