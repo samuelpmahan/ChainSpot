@@ -61,6 +61,13 @@ function activePage() {
 	return app.search.activePageByImage?.[app.canonical.imageId] || currentPages()[0]?.name || null;
 }
 
+function retainedPageName() {
+	const select = $('#retainedPage');
+	if (select?.value) return select.value;
+	const pages = currentPages();
+	return pages.find((page) => /(^|[-_])(main|final|retained)([-_]|$)/i.test(page.name))?.name || pages.find((page) => page.name !== activePage())?.name || null;
+}
+
 function setMode(mode) {
 	app.mode = mode;
 	$$('#modeNav button').forEach((button) => button.classList.toggle('active', button.dataset.mode === mode));
@@ -166,14 +173,15 @@ function renderOverlay() {
 	root.innerHTML = '';
 	if (!app.canonical) return;
 	root.setAttribute('viewBox', `0 0 ${app.canonical.width} ${app.canonical.height}`);
+	const retained = retainedPageName();
 	if (app.mode === 'search') {
 		const page = activePage();
-		if ($('#ghostMain').checked && page !== 'heritage-main') drawPage(root, 'heritage-main', 'ghost');
-		drawPage(root, page, page === 'heritage-main' ? 'main' : '');
+		if ($('#ghostRetained').checked && retained && page !== retained) drawPage(root, retained, 'ghost');
+		drawPage(root, page, page === retained ? 'main' : '');
 	} else if (app.mode === 'traverse') {
 		const page = app.traversal?.page || $('#traversePage').value;
-		if (page !== 'heritage-main') drawPage(root, 'heritage-main', 'ghost');
-		drawPage(root, page, page === 'heritage-main' ? 'main' : '');
+		if (retained && page !== retained) drawPage(root, retained, 'ghost');
+		drawPage(root, page, page === retained ? 'main' : '');
 		drawTraverse(root);
 		if (!app.traversal && app.selectedStart) {
 			root.appendChild(svg('circle', {
@@ -194,12 +202,15 @@ function renderPages() {
 	const active = activePage();
 	const select = $('#pageSelect');
 	const traverseSelect = $('#traversePage');
+	const retainedSelect = $('#retainedPage');
 	const previousSearch = select.value;
 	const previousTraverse = app.traversal?.page || traverseSelect.value;
+	const previousRetained = retainedSelect.value;
 	select.innerHTML = '';
 	traverseSelect.innerHTML = '';
+	retainedSelect.innerHTML = '';
 	for (const page of pages) {
-		for (const target of [select, traverseSelect]) {
+		for (const target of [select, traverseSelect, retainedSelect]) {
 			const option = document.createElement('option');
 			option.value = page.name;
 			option.textContent = page.name;
@@ -209,6 +220,10 @@ function renderPages() {
 	if (pages.length) {
 		select.value = pages.some((page) => page.name === active) ? active : previousSearch;
 		traverseSelect.value = pages.some((page) => page.name === previousTraverse) ? previousTraverse : active;
+		const inferredRetained = pages.find((page) => /(^|[-_])(main|final|retained)([-_]|$)/i.test(page.name))?.name;
+		retainedSelect.value = pages.some((page) => page.name === previousRetained)
+			? previousRetained
+			: inferredRetained || pages.find((page) => page.name !== active)?.name || active;
 	}
 	$('#writeTarget').textContent = `WRITING TO: ${active || 'NO PAGE'}`;
 	$('#traverseWriteTarget').textContent = `WRITING TO: ${app.traversal?.page || traverseSelect.value || active || 'NO PAGE'}`;
@@ -274,9 +289,10 @@ function renderMutationExplain() {
 		element.innerHTML = '<b>Scope is stateless.</b> Clicking creates an inspection artifact but does not change Search.';
 	} else if (app.mode === 'search') {
 		const page = activePage();
+		const retained = retainedPageName();
 		element.innerHTML = page
-			? `Next Search click writes to <b>${esc(page)}</b>. ${page === 'heritage-main' ? '<span style="color:var(--orange)">This is your retained Page.</span>' : 'heritage-main stays untouched unless you explicitly promote/branch.'}`
-			: '<b>No Page selected.</b> Create scratch or heritage-main before writing evidence.';
+			? `Next Search click writes to <b>${esc(page)}</b>. ${page === retained ? '<span style="color:var(--orange)">This is also the selected retained target.</span>' : `${retained ? `<b>${esc(retained)}</b>` : 'the retained target'} stays untouched unless you explicitly promote/branch.`}`
+			: '<b>No Page selected.</b> Create a working Page before writing evidence.';
 	} else if (app.mode === 'traverse') {
 		const page = app.traversal?.page || $('#traversePage').value || activePage();
 		element.innerHTML = `Traverse motion is Search evidence. Every move appends to <b>${esc(page || 'NO PAGE')}</b>; the six hexes are only suggested moves.`;
@@ -544,7 +560,8 @@ $('#searchPinTool').onclick = () => {
 	$('#searchPinTool').classList.add('active');
 	$('#searchPathTool').classList.remove('active');
 };
-$('#ghostMain').onchange = renderOverlay;
+$('#ghostRetained').onchange = renderOverlay;
+$('#retainedPage').onchange = () => { renderMutationExplain(); renderOverlay(); };
 $('#pageSelect').onchange = () => searchAction({
 	action: 'page-use', imageId: app.canonical.imageId, page: $('#pageSelect').value
 });
@@ -559,19 +576,16 @@ $$('.quick button[data-page]').forEach((button) => {
 $('#trailBack').onclick = () => searchAction({ action: 'path-back', name: $('#trailName').value.trim() });
 $('#promoteTrail').onclick = async () => {
 	const source = $('#trailName').value.trim();
+	const target = retainedPageName();
 	if (!source) return toast('Trail name is required.');
-	if (!currentPages().some((page) => page.name === 'heritage-main')) await createAndUsePage('heritage-main');
-	const fromPage = app.search.trails?.[source]?.page;
-	if (fromPage && fromPage !== 'heritage-main') {
-		await searchAction({ action: 'page-use', imageId: app.canonical.imageId, page: fromPage });
-	}
-	const name = `${source}-final-${Date.now().toString(36)}`;
-	await searchAction({ action: 'path-branch', name: source, newName: name, page: 'heritage-main' });
+	if (!target) return toast('Create/select a retained target Page first.');
+	const name = `${source}-retained-${Date.now().toString(36)}`;
+	await searchAction({ action: 'path-branch', name: source, newName: name, page: target });
 };
 $('#clearPage').onclick = () => {
 	const page = activePage();
 	if (!page) return;
-	if (page === 'heritage-main' && !confirm('Clear heritage-main visible evidence? History remains, but the clean Page will be emptied.')) return;
+	if (page === retainedPageName() && !confirm(`Clear retained target '${page}'? History remains, but its visible evidence will be emptied.`)) return;
 	searchAction({ action: 'page-clear', imageId: app.canonical.imageId, page });
 };
 $('#resumeTraverse').onclick = resumeTraverse;
