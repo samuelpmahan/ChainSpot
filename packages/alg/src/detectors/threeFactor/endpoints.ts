@@ -581,11 +581,29 @@ export interface TeePoint {
  * sprite's own neighborhood. Caller removes badge glyphs
  * from `components` first (digit counters contain rect-like holes/shapes).
  */
+/** A tee candidate this function dropped, and exactly why. Recorded ONLY when
+ * the caller passes a sink; omit the sink and behavior is byte-identical to
+ * before this type existed. A dropped candidate is not evidence the hole has
+ * no tee -- `sprite-exclusion` in particular fires on tees that sit close to a
+ * basket, which is the occluded case, not the absent one. */
+export interface SuppressedTee {
+	readonly cx: number;
+	readonly cy: number;
+	readonly reason: 'dim' | 'area' | 'fill' | 'dedup-tee' | 'sprite-exclusion';
+	/** The measured value that failed. */
+	readonly value: number;
+	/** The knob it was measured against. */
+	readonly limit: number;
+	/** For 'sprite-exclusion' and 'dedup-tee': what suppressed it, and how far. */
+	readonly nearest?: { readonly cx: number; readonly cy: number; readonly dist: number };
+}
+
 export function collectTeePoints(
 	rings: TeeRing[],
 	components: TeeComponentLike[],
 	spriteCenters: { cx: number; cy: number }[],
-	knobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS
+	knobs: EndpointsKnobs = DEFAULT_ENDPOINTS_KNOBS,
+	suppressed?: SuppressedTee[]
 ): TeePoint[] {
 	const out: TeePoint[] = rings.filter((r) => r.kind === 'tee-rect').map((r) => ({
 		cx: r.cx,
@@ -596,13 +614,38 @@ export function collectTeePoints(
 	for (const c of components) {
 		const minDim = Math.min(c.bboxW, c.bboxH);
 		const maxDim = Math.max(c.bboxW, c.bboxH);
-		if (minDim < knobs.componentMinDim || maxDim > knobs.componentMaxDim) continue;
-		if (c.area < knobs.componentMinArea || c.area > knobs.componentMaxArea) continue;
-		if (c.fill < knobs.componentMinFill || c.fill > knobs.componentMaxFill) continue;
+		if (minDim < knobs.componentMinDim || maxDim > knobs.componentMaxDim) {
+			suppressed?.push(minDim < knobs.componentMinDim
+				? { cx: c.cx, cy: c.cy, reason: 'dim', value: minDim, limit: knobs.componentMinDim }
+				: { cx: c.cx, cy: c.cy, reason: 'dim', value: maxDim, limit: knobs.componentMaxDim });
+			continue;
+		}
+		if (c.area < knobs.componentMinArea || c.area > knobs.componentMaxArea) {
+			suppressed?.push({ cx: c.cx, cy: c.cy, reason: 'area', value: c.area,
+				limit: c.area < knobs.componentMinArea ? knobs.componentMinArea : knobs.componentMaxArea });
+			continue;
+		}
+		if (c.fill < knobs.componentMinFill || c.fill > knobs.componentMaxFill) {
+			suppressed?.push({ cx: c.cx, cy: c.cy, reason: 'fill', value: c.fill,
+				limit: c.fill < knobs.componentMinFill ? knobs.componentMinFill : knobs.componentMaxFill });
+			continue;
+		}
 		// NOT the g4.scoring ringTolerance knob (coincidentally also 12) — a
 		// distinct dedup check here, tee-vs-tee, before assignment even runs.
-		if (out.some((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < knobs.teeRingDedupDistance)) continue;
-		if (spriteCenters.some((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < knobs.teeSpriteExclusionDistance)) continue;
+		const nearTee = out.find((t) => Math.hypot(t.cx - c.cx, t.cy - c.cy) < knobs.teeRingDedupDistance);
+		if (nearTee) {
+			suppressed?.push({ cx: c.cx, cy: c.cy, reason: 'dedup-tee',
+				value: Math.hypot(nearTee.cx - c.cx, nearTee.cy - c.cy), limit: knobs.teeRingDedupDistance,
+				nearest: { cx: nearTee.cx, cy: nearTee.cy, dist: Math.hypot(nearTee.cx - c.cx, nearTee.cy - c.cy) } });
+			continue;
+		}
+		const nearSprite = spriteCenters.find((s) => Math.hypot(s.cx - c.cx, s.cy - c.cy) < knobs.teeSpriteExclusionDistance);
+		if (nearSprite) {
+			suppressed?.push({ cx: c.cx, cy: c.cy, reason: 'sprite-exclusion',
+				value: Math.hypot(nearSprite.cx - c.cx, nearSprite.cy - c.cy), limit: knobs.teeSpriteExclusionDistance,
+				nearest: { cx: nearSprite.cx, cy: nearSprite.cy, dist: Math.hypot(nearSprite.cx - c.cx, nearSprite.cy - c.cy) } });
+			continue;
+		}
 		out.push({ cx: c.cx, cy: c.cy, tier: 'component', component: c });
 	}
 	return out;
