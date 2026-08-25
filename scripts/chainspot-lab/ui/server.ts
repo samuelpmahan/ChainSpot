@@ -10,6 +10,7 @@ import {
 	activePageName,
 	addTempPin,
 	addTrailPoint,
+	ageTempPinsForPage,
 	backTrail,
 	backTraversal,
 	branchTrail,
@@ -18,6 +19,8 @@ import {
 	keepPin,
 	loadSearchState,
 	moveTraversal,
+	pinByName,
+	recordSuccessfulScope,
 	releasePin,
 	saveSearchState,
 	startTrail,
@@ -210,6 +213,27 @@ function searchSummary(state: SearchState) {
 	};
 }
 
+function completeVisualInteraction(
+	state: SearchState,
+	input: { imagePath: string; imageId: string; page: string; focus: PointTuple; agePins?: boolean }
+): SearchState {
+	let next = input.agePins === false ? state : ageTempPinsForPage(state, input.imageId, input.page);
+	next = recordSuccessfulScope(next, {
+		imagePath: input.imagePath,
+		imageId: input.imageId,
+		page: input.page,
+		focus: input.focus
+	});
+	return next;
+}
+
+function trailCursor(state: SearchState, name: string): { imagePath: string; imageId: string; page: string; point: PointTuple } {
+	const trail = trailByName(state, name);
+	const point = visibleTrailPoints(trail).at(-1)?.point;
+	if (!point) throw new Error(`lab ui: trail '${name}' has no visible point.`);
+	return { imagePath: trail.imagePath, imageId: trail.imageId, page: trail.page, point };
+}
+
 function currentTraversal(state: SearchState, name: string) {
 	const traversal = traversalByName(state, name);
 	const current = traversalCurrentPoint(state, name);
@@ -325,9 +349,17 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				const point = body.point as PointTuple;
 				if (state.trails[body.name]) state = addTrailPoint(state, body.name, point);
 				else state = startTrail(state, { name: body.name, imagePath: body.imagePath, imageId: body.imageId, page: body.page, point, color: body.color ?? 0 });
-			} else if (action === 'path-back') state = backTrail(state, body.name);
-			else if (action === 'path-branch') state = branchTrail(state, body.name, body.newName, body.page);
-			else if (action === 'pin-temp') {
+				const cursor = trailCursor(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: cursor.imagePath, imageId: cursor.imageId, page: cursor.page, focus: cursor.point });
+			} else if (action === 'path-back') {
+				state = backTrail(state, body.name);
+				const cursor = trailCursor(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: cursor.imagePath, imageId: cursor.imageId, page: cursor.page, focus: cursor.point });
+			} else if (action === 'path-branch') {
+				state = branchTrail(state, body.name, body.newName, body.page);
+				const cursor = trailCursor(state, body.newName);
+				state = completeVisualInteraction(state, { imagePath: cursor.imagePath, imageId: cursor.imageId, page: cursor.page, focus: cursor.point });
+			} else if (action === 'pin-temp') {
 				state = addTempPin(state, {
 					name: body.name,
 					imagePath: body.imagePath,
@@ -337,10 +369,17 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 					ttl: Number(body.ttl ?? 3),
 					style: (body.style ?? 'ring-dot') as ScopePinStyle
 				});
-			} else if (action === 'pin-keep') state = keepPin(state, body.name);
-			else if (action === 'pin-release') state = releasePin(state, body.name).state;
-			else if (action === 'pin-style') state = stylePin(state, body.name, body.style as ScopePinStyle);
-			else throw new Error(`lab ui: unknown Search action '${action}'.`);
+				state = completeVisualInteraction(state, { imagePath: body.imagePath, imageId: body.imageId, page: body.page, focus: body.point as PointTuple, agePins: false });
+			} else if (action === 'pin-keep') {
+				const pin = pinByName(state, body.name);
+				state = keepPin(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: pin.imagePath, imageId: pin.imageId, page: pin.page, focus: pin.point, agePins: false });
+			} else if (action === 'pin-release') state = releasePin(state, body.name).state;
+			else if (action === 'pin-style') {
+				const pin = pinByName(state, body.name);
+				state = stylePin(state, body.name, body.style as ScopePinStyle);
+				state = completeVisualInteraction(state, { imagePath: pin.imagePath, imageId: pin.imageId, page: pin.page, focus: pin.point, agePins: false });
+			} else throw new Error(`lab ui: unknown Search action '${action}'.`);
 			json(res, 200, searchSummary(saveState(state)));
 			return true;
 		}
@@ -362,6 +401,8 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 					radiusPx: Number(body.radiusPx ?? 75),
 					color: body.color ?? 0
 				});
+				const traversal = traversalByName(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: traversal.imagePath, imageId: traversal.imageId, page: traversal.page, focus: point });
 			} else if (body.action === 'move') {
 				const traversal = traversalByName(state, body.name);
 				const cached = canonicalCache.get(traversal.imageId) ?? await openCanonical(traversal.imagePath);
@@ -369,9 +410,18 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				const target = traverseTarget(current, traversal.radiusPx, body.move as TraverseMove);
 				assertTraverseInside(target.point, cached.width, cached.height);
 				state = moveTraversal(state, body.name, target.point, target.detail);
-			} else if (body.action === 'back') state = backTraversal(state, body.name);
-			else if (body.action !== 'show') throw new Error(`lab ui: unknown Traverse action '${body.action}'.`);
-			if (body.action !== 'show') state = saveState(state);
+				state = completeVisualInteraction(state, { imagePath: traversal.imagePath, imageId: traversal.imageId, page: traversal.page, focus: target.point });
+			} else if (body.action === 'back') {
+				const traversal = traversalByName(state, body.name);
+				state = backTraversal(state, body.name);
+				const point = traversalCurrentPoint(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: traversal.imagePath, imageId: traversal.imageId, page: traversal.page, focus: point });
+			} else if (body.action === 'show') {
+				const traversal = traversalByName(state, body.name);
+				const point = traversalCurrentPoint(state, body.name);
+				state = completeVisualInteraction(state, { imagePath: traversal.imagePath, imageId: traversal.imageId, page: traversal.page, focus: point });
+			} else throw new Error(`lab ui: unknown Traverse action '${body.action}'.`);
+			state = saveState(state);
 			json(res, 200, { state: searchSummary(state), traversal: currentTraversal(state, body.name) });
 			return true;
 		}
