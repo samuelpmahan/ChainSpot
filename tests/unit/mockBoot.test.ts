@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fromAnnotationJson, type CorpusAnnotation, type MockCourseFixture } from '$lib/mockBoot';
 
 function annotation(holes: CorpusAnnotation['holes']): CorpusAnnotation {
@@ -68,7 +69,7 @@ describe('fromAnnotationJson', () => {
 
 	test('translates the full HeritagePark corpus annotation 1:1 by hole count', () => {
 		const raw = readFileSync(
-			'C:/Users/tenni/workspace/chainspot-corpus/dev/Annotated/Heritage/HeritagePark-full.annotation.json',
+			resolve('../chainspot-corpus/dev/Annotated/Heritage/HeritagePark-full.annotation.json'),
 			'utf-8'
 		);
 		const corpus = JSON.parse(raw) as CorpusAnnotation;
