@@ -2,7 +2,7 @@ import { basename, extname, resolve } from 'node:path';
 import { appendLabCommand, guardTruthTaint, resolveCourseContext } from '../context/context.mjs';
 import { loadScopeManifest, resolveManifestCasePaths } from './manifest';
 import { makeContactSheet } from './render';
-import { DEFAULT_SCOPE_OUT, runScopeOperation, scopeSlug } from './operation';
+import { DEFAULT_SCOPE_OUT, loadScopeInput, runScopeOperation, scopeSlug } from './operation';
 import { SCOPE_TEMPLATES } from './templates';
 import { consumeViewOptions } from './viewOptions';
 import type { BoxTuple, PointTuple, ScopeRequest } from './types';
@@ -87,6 +87,19 @@ function flag(args: string[], name: string): boolean {
 	return true;
 }
 
+function canonicalBoxFromSourceBox(sourceBox: BoxTuple, offset: { xPx: number; yPx: number }, width: number, height: number): BoxTuple {
+	const sourceX1 = sourceBox[0] + offset.xPx;
+	const sourceY1 = sourceBox[1] + offset.yPx;
+	const sourceX2 = sourceBox[0] + sourceBox[2] + offset.xPx;
+	const sourceY2 = sourceBox[1] + sourceBox[3] + offset.yPx;
+	const x1 = Math.max(0, sourceX1);
+	const y1 = Math.max(0, sourceY1);
+	const x2 = Math.min(width, sourceX2);
+	const y2 = Math.min(height, sourceY2);
+	if (!(x2 > x1 && y2 > y1)) throw new Error('lab scope: configured source viewport is fully outside the sanitized canonical raster.');
+	return [x1, y1, x2 - x1, y2 - y1];
+}
+
 async function renderOne(
 	imagePath: string,
 	annotationPath: string | undefined,
@@ -131,7 +144,7 @@ async function main(): Promise<void> {
 		const view = consumeViewOptions(rest);
 		if (rest.length) throw new Error(`lab scope: unexpected args: ${rest.join(' ')}`);
 		const course = resolveCourseContext();
-		const commandArgv = ['scope', `h${hole}`, ...(truth ? ['--truth'] : [])];
+		const commandArgv = ['scope', ...args];
 		if (truth) {
 			if (!course.annotationPath) throw new Error(`lab scope: ${course.manifest.course} has no Annotation truth configured.`);
 			guardTruthTaint(commandArgv);
@@ -139,11 +152,17 @@ async function main(): Promise<void> {
 			await renderOne(course.imagePath, course.annotationPath, { name: `h${hole}-truth`, hole, view }, out);
 			return;
 		}
-		const viewport = course.manifest.holes?.[String(hole)]?.box as BoxTuple | undefined;
-		if (!viewport) {
+		const sourceViewport = course.manifest.holes?.[String(hole)]?.sourceBox as BoxTuple | undefined;
+		if (!sourceViewport) {
 			throw new Error(`lab scope: ${course.manifest.course} manifest has no blind viewport for H${hole}. --truth will not be used implicitly.`);
 		}
-		appendLabCommand({ argv: commandArgv, taints: [] });
+		const loaded = await loadScopeInput(course.imagePath);
+		if (loaded.decoded.report.autoStitch.sourceCount !== 1) {
+			throw new Error('lab scope: source-frame hole viewports currently require a single-source course raster.');
+		}
+		const offset = loaded.decoded.report.singleSourceOffset ?? { xPx: 0, yPx: 0 };
+		const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
+		appendLabCommand({ argv: commandArgv, taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
 		console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
 		await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
 		return;
