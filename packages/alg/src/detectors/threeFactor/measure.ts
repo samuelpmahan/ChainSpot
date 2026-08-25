@@ -13,6 +13,7 @@ import {
 	type SpriteKnobs,
 	type SpriteMatch,
 	type SpriteTemplate,
+	type SuppressedTee,
 	type TeeRing
 } from './endpoints';
 import { predictProbs, type LogisticModel } from './digits/logisticInference';
@@ -261,6 +262,38 @@ function makeTees(
 }
 
 /**
+ * Prose for one suppressed tee candidate, naming the knob its value failed
+ * against so the drawable carries its own provenance and a human never has to
+ * open this file to read the receipt.
+ *
+ * `sprite-exclusion` says OCCLUDED out loud on purpose. A candidate inside a
+ * matched basket sprite's exclusion radius is a tee we SAW and chose to drop —
+ * not evidence the hole has no tee. Three separate agents have read output
+ * with a tee missing, concluded the detector was broken, and rewritten correct
+ * code, because that distinction had no way to reach the raster.
+ *
+ * `dim`/`area`/`fill` each guard a two-sided band and the sink records only
+ * the single limit that was breached, so the bound is recovered from the
+ * comparison: value below the limit failed the Min knob, above it the Max one.
+ * Both branches are strict inequalities in collectTeePoints, so value ===
+ * limit never reaches here.
+ */
+function suppressionReason(drop: SuppressedTee): string {
+	const near = drop.nearest ? ` of (${drop.nearest.cx.toFixed(1)}, ${drop.nearest.cy.toFixed(1)})` : '';
+	switch (drop.reason) {
+		case 'dedup-tee':
+			return `dedup-tee: component ${drop.value.toFixed(2)}px${near}, an already-accepted tee (< teeRingDedupDistance=${drop.limit})`;
+		case 'sprite-exclusion':
+			return `sprite-exclusion: component ${drop.value.toFixed(2)}px${near}, a matched basket sprite (< teeSpriteExclusionDistance=${drop.limit}) — OCCLUDED tee, not an absent one`;
+		default: {
+			const bound = drop.value < drop.limit ? 'Min' : 'Max';
+			const cap = drop.reason === 'dim' ? 'Dim' : drop.reason === 'area' ? 'Area' : 'Fill';
+			return `${drop.reason}: component ${drop.value.toFixed(2)} vs component${bound}${cap}=${drop.limit}`;
+		}
+	}
+}
+
+/**
  * Exclude ring/component tee candidates that fall inside a badge bbox or a
  * screen-chrome cluster, then merge + sort + assign detIds. Extracted from
  * makeTees's tail (moved verbatim, not rewritten) so the exec layer's
@@ -289,13 +322,14 @@ export function excludeAndAssembleTees(
 	);
 	// no silent drops: every examined-and-killed candidate leaves a rejected
 	// drawable with its reason — this is the "why 0 tees?" answer on the raster
-	const reject = (x: number, y: number, reason: string) =>
+	const reject = (x: number, y: number, reason: string, values?: Record<string, number>) =>
 		ctx.overlay('tees', {
 			type: 'point',
 			xPx: x,
 			yPx: y + yOffsetPx,
 			verdict: 'rejected',
-			reason
+			reason,
+			...(values ? { values } : {})
 		});
 	const rings = rawRings.filter((ring) => {
 		if (insideBadge(ring.cx, ring.cy)) {
@@ -319,7 +353,18 @@ export function excludeAndAssembleTees(
 		}
 		return true;
 	});
-	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })), endpointsKnobs);
+	// collectTeePoints' five threshold gates were silent `continue`s. Its
+	// optional sink records reason + failing value + the knob limit it failed
+	// against; this loop is the only thing that was missing — it drains the
+	// sink onto the SAME rejected-drawable channel as the badge/chrome drops
+	// above, satisfying features/types.ts's "no silent drops" rule instead of
+	// adding a second reporting path. Instrumentation only: `points` is
+	// identical whether or not the sink is passed.
+	const suppressed: SuppressedTee[] = [];
+	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })), endpointsKnobs, suppressed);
+	for (const drop of suppressed) {
+		reject(drop.cx, drop.cy, suppressionReason(drop), { value: drop.value, limit: drop.limit });
+	}
 	return points
 		.map((tee) => {
 			const ring = tee.ring;
