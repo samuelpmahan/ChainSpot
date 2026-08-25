@@ -1,5 +1,7 @@
 import type { ScopeViewOptions } from './types';
 
+type MutableScopeViewOptions = { -readonly [Key in keyof ScopeViewOptions]: ScopeViewOptions[Key] };
+
 export const DEFAULT_SCOPE_VIEW: ScopeViewOptions = {
 	contextSpanPx: 800,
 	contextOutputPx: 800,
@@ -56,7 +58,7 @@ export function resolveScopeView(view?: Partial<ScopeViewOptions>): ScopeViewOpt
 
 /** Mutates args by consuming only presentation flags and returns their overrides. */
 export function consumeViewOptions(args: string[]): Partial<ScopeViewOptions> {
-	const view: Partial<ScopeViewOptions> = {};
+	const view: Partial<MutableScopeViewOptions> = {};
 	for (const [flag, field] of Object.entries(NUMERIC_FLAGS)) {
 		const index = args.indexOf(flag);
 		if (index < 0) continue;
@@ -82,7 +84,7 @@ export function parseManifestView(value: unknown, where: string): Partial<ScopeV
 		'forensicWidePx', 'forensicMidPx', 'forensicTightPx', 'forensicOutputPx', 'grid'
 	]);
 	for (const key of Object.keys(raw)) if (!allowed.has(key as keyof ScopeViewOptions)) throw new Error(`lab scope: ${where} has unknown key '${key}'.`);
-	const result: Partial<ScopeViewOptions> = {};
+	const result: Partial<MutableScopeViewOptions> = {};
 	for (const key of allowed) {
 		if (raw[key] === undefined) continue;
 		if (key === 'grid') {
