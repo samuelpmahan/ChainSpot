@@ -1,10 +1,11 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, test } from 'vitest';
 
-const SOURCE = 'scripts/chainspot-lab/bin/lab.mjs';
+const LAB = 'scripts/chainspot-lab';
+const SOURCE = `${LAB}/bin/lab.mjs`;
 
 function coldLauncher() {
 	const root = mkdtempSync(join(tmpdir(), 'chainspot-lab-cold-help-'));
@@ -12,20 +13,25 @@ function coldLauncher() {
 	mkdirSync(bin, { recursive: true });
 	const launcher = join(bin, 'lab.mjs');
 	writeFileSync(launcher, readFileSync(SOURCE, 'utf8'));
-	return launcher;
+	mkdirSync(join(root, 'context'), { recursive: true });
+	writeFileSync(join(root, 'context', 'context.mjs'), readFileSync(`${LAB}/context/context.mjs`, 'utf8'));
+	cpSync(`${LAB}/courses`, join(root, 'courses'), { recursive: true });
+	return { launcher, root };
 }
 
 function runColdHelp(command: string) {
-	const launcher = coldLauncher();
+	const { launcher, root } = coldLauncher();
 	return spawnSync(process.execPath, [launcher, command, '--help'], {
 		encoding: 'utf8',
-		env: { ...process.env, NODE_PATH: '' }
+		env: { ...process.env, NODE_PATH: '', LAB_CONFIG: join(root, 'config.json') }
 	});
 }
 
 describe('LAB cold-checkout discoverability', () => {
 	for (const [command, expected] of [
-		['scope', 'lab scope IMAGE x,y'],
+		['set', 'lab set COURSE'],
+		['tutorial', 'lab tutorial'],
+		['scope', 'lab scope hN [--truth]'],
 		['search', 'lab search start IMAGE NAME x,y'],
 		['traverse', 'lab traverse start IMAGE NAME x,y'],
 		['ui', 'lab ui [--port N] [--no-open]'],
@@ -40,11 +46,34 @@ describe('LAB cold-checkout discoverability', () => {
 		});
 	}
 
-	test('cold execution failure points at the dependency-free setup command', () => {
-		const launcher = coldLauncher();
+	test('course selection itself works cold and persists DT -> DashsTrack', () => {
+		const { launcher, root } = coldLauncher();
+		const config = join(root, 'config.json');
+		const result = spawnSync(process.execPath, [launcher, 'set', 'DT'], {
+			encoding: 'utf8',
+			env: { ...process.env, NODE_PATH: '', LAB_CONFIG: config }
+		});
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain('course -> DashsTrack');
+		expect(JSON.parse(readFileSync(config, 'utf8')).course).toBe('DashsTrack');
+	});
+
+	test('tutorial is executable from a completely cold checkout', () => {
+		const { launcher, root } = coldLauncher();
+		const result = spawnSync(process.execPath, [launcher, 'tutorial'], {
+			encoding: 'utf8',
+			env: { ...process.env, NODE_PATH: '', LAB_CONFIG: join(root, 'config.json') }
+		});
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain('./lab set DT');
+		expect(result.stdout).toContain('./lab scope h1 --truth');
+	});
+
+	test('cold TypeScript execution failure points at the dependency-free setup command', () => {
+		const { launcher, root } = coldLauncher();
 		const result = spawnSync(process.execPath, [launcher, 'scope', 'course.png', '10,10'], {
 			encoding: 'utf8',
-			env: { ...process.env, NODE_PATH: '' }
+			env: { ...process.env, NODE_PATH: '', LAB_CONFIG: join(root, 'config.json') }
 		});
 		expect(result.status).toBe(1);
 		expect(result.stderr).toContain('Run: ./lab setup');
