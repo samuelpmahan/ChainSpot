@@ -8,6 +8,8 @@ import type {
 } from '../../detect';
 import { assignThreeFactor } from './assignment';
 import { runEngine } from './engine';
+import { objectGraph } from './objects';
+import type { ObjectGraph } from './objects';
 import type { ResolvedConfig } from './config';
 import type { RunTrace } from './features/types';
 import { measureThreeFactor as measureStage } from './measure';
@@ -51,6 +53,8 @@ export interface ThreeFactorRun {
 	readonly imageId: string;
 	readonly measurement: ThreeFactorMeasurement;
 	readonly assignment: ThreeFactorAssignment;
+	/** Root objects + explicit relations derived without mutating measurement evidence. */
+	readonly objects: ObjectGraph;
 	readonly trace?: RunTrace;
 	readonly paramsHash?: string;
 }
@@ -110,6 +114,7 @@ export function runThreeFactor(
 		imageId: image.imageId,
 		measurement: result.measurement,
 		assignment: result.assignment,
+		objects: objectGraph(result.measurement),
 		...(result.trace ? { trace: result.trace } : {}),
 		...(paramsHash ? { paramsHash } : {})
 	};
