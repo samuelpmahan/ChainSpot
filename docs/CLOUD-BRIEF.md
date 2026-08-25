@@ -120,21 +120,56 @@ could not see**, every number with provenance, and what changed vs frozen.
 If a number appears with no provenance, the receipt failed. If something is
 missing with no line explaining why, the receipt failed.
 
-## Environment — read this or lose an hour each
+## Environment
 
-- **Nothing runs on Windows.** `@esbuild/linux-x64` is installed; Windows needs
+### If you are on Linux (cloud agents, CI, containers)
+
+Most of what follows does not apply to you. `@esbuild/linux-x64` is already
+correct for your host. Ignore any mention of WSL.
+
+What you DO need:
+
+1. **The corpus is a SEPARATE SIBLING REPOSITORY.** Almost every real run and
+   most tests read `../chainspot-corpus`. Clone it next to this repo, not
+   inside it:
+   ```
+   git clone <corpus-remote> ../chainspot-corpus
+   ```
+   Without it you will get confusing ENOENT failures deep inside tests.
+2. **Node >= 22.**
+3. **Build the algorithm before using LAB.** LAB consumes `packages/alg/dist`,
+   not `src`. Installing the LAB package runs a postinstall that bootstraps it:
+   ```
+   npm install
+   cd scripts/chainspot-lab && npm install && cd ../..
+   ./lab --help
+   ```
+   **Re-run the alg build after ANY edit under `packages/alg/src`**
+   (`cd packages/alg && npm run build`), or you will test stale code and
+   conclude your change did nothing. This has already cost time.
+
+### If you are on Windows (the owner's local machine)
+
+- **Nothing runs natively.** `@esbuild/linux-x64` is installed; Windows needs
   `win32-x64`. Every `lab` command goes through `tsx`. Use WSL:
   ```
-  wsl -d Ubuntu -e bash -lc 'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; \
-    nvm use 22.22.2; cd /mnt/d/LAB/ChainSpot && ./lab <args>'
+  wsl -d Ubuntu -e bash -lc 'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh";     nvm use 22.22.2; cd /mnt/d/LAB/ChainSpot && ./lab <args>'
   ```
   WSL's PATH resolves `npm` to Windows nvm4w, which is why `node` looks
   missing. Sourcing nvm explicitly is required.
 - **Git Bash mangles paths starting with a dot.** `git show <ref>:.github/...`
-  silently returns nothing. Use `MSYS_NO_PATHCONV=1`.
-- **`packages/alg` must be rebuilt** after editing (`npm run build` in that
-  directory) — LAB consumes `dist/`, not `src/`.
-- **Corpus** is a sibling checkout: `../chainspot-corpus`.
+  silently returns nothing and exits 0. Use `MSYS_NO_PATHCONV=1`.
+
+### If you are working in a git worktree
+
+A worktree gets source only — no `node_modules`, no `dist`. `./lab --help`
+works (cold help is dependency-free) but nothing else does.
+
+**Do not symlink `node_modules` from another worktree.**
+`scripts/chainspot-lab/node_modules/@chainspot/alg` is itself a symlink to
+`../../../../packages/alg`, so a shared `node_modules` makes you silently test
+a DIFFERENT worktree's algorithm while editing yours. Run the install in the
+worktree instead — it takes about 30 seconds.
 
 ## Repository facts that will mislead you
 
