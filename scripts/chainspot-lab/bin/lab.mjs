@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { printTutorial, runSetCommand } from '../context/context.mjs';
+import { assertBlindCommandLogClean, printTutorial, runSetCommand } from '../context/context.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LAB_DIR = resolve(HERE, '..');
@@ -307,6 +307,7 @@ async function runSetup() {
 }
 
 async function runTs(relativeFile, args) {
+  assertBlindCommandLogClean();
   return spawnProcess(process.execPath, [
     '--import',
     pathToFileURL(ensureTsxImport()).href,
