@@ -9,13 +9,13 @@ current branch or accuracy contract.
 
 - Received remote base: `origin/continuation/intake-engine` at `cf40f85`.
 - Local branch: `continuation/intake-engine`, tracking that remote.
-- `56d102d` adds the shared contextual-help catalog, CLI help/error routing,
+- `279a3a8` adds the shared contextual-help catalog, CLI help/error routing,
   browser help API, and accessible help drawer.
-- `555bcdb` checkpoints all 32 files that arrived dirty, including the
+- `d4829cc` checkpoints all 32 files that arrived dirty, including the
   previously untracked SmartBasket and Sweep receipt test files.
-- This handoff's hardening commit makes Sweep execution, provenance, cutoff,
+- `c061a5c` makes Sweep execution, provenance, cutoff,
   and trace receipts match what they claim.
-- Nothing on this line has been pushed by the current handoff pass.
+- The line is published at `origin/continuation/intake-engine`.
 
 ## What the checkpoint contains
 
