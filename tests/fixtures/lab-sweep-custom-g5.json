@@ -1,0 +1,41 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "lab-sweep-custom-g5",
+	"note": "Test-only config proving Sweep executes the same CorridorParams bridge it records.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"cleanBasketFamily",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment"
+	],
+	"gates": {
+		"G2": {
+			"cleanBasketFamily": { "enabled": true }
+		},
+		"G5": {
+			"zfit": { "enabled": true },
+			"ribbon": {
+				"knobs": {
+					"fieldScale": 4,
+					"supportTau": 0.6
+				}
+			},
+			"routing": {
+				"knobs": {
+					"corridorWidthPx": 41,
+					"orientations": 10,
+					"widthsSrc": [20, 28, 36, 44],
+					"alignmentPower": 3,
+					"worstWindowSrcPx": 84
+				}
+			}
+		}
+	}
+}

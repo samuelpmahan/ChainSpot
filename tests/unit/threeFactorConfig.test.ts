@@ -245,6 +245,12 @@ describe('resolveConfig + engine', () => {
 		expect(run.measurement.parameters.zfit).toBe(true);
 	});
 
+	test('enabled zfit config is authoritative over the legacy caller flag', () => {
+		const resolved = resolveConfig(parseConfig(zfitOnJson), DEFAULT_EXECUTION);
+		const run = runThreeFactor(tinyRaster(), { config: resolved, zfit: false });
+		expect(run.measurement.parameters.zfit).toBe(true);
+	});
+
 	test('trace collects unit spans and paramsHash lands on emissions', async () => {
 		const resolved = resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION);
 		const run = runThreeFactor(tinyRaster(), { config: resolved, paramsHash: 'deadbeef' });

@@ -10,6 +10,12 @@ export type EngineGateId = 'G1' | 'G2' | 'G3' | 'G4' | 'ST' | 'G5' | 'shared';
 
 export const GATE_ORDER: readonly EngineGateId[] = ['G1', 'G2', 'G3', 'G4', 'ST', 'G5', 'shared'];
 
+/** Cutoffs that currently form dependency-complete plan prefixes. Later
+ * conceptual gates depend on shared operations that are not a legal prefix,
+ * so advertising them as cutoffs would promise an execution that cannot run. */
+export const SWEEP_THROUGH_GATES = ['G1', 'G2', 'G3'] as const;
+export type SweepThroughGate = (typeof SWEEP_THROUGH_GATES)[number];
+
 /** Display labels. G1-G5 + 'ST' text taken from the owner's brief; 'shared'
  * covers cross-gate infra (shared.hsv's masks, the final measurement
  * materialize op) that isn't scoped to one gate. */
@@ -29,4 +35,8 @@ export function gateLabel(gate: string): string {
 
 export function isKnownGate(gate: string): gate is EngineGateId {
 	return (GATE_ORDER as readonly string[]).includes(gate);
+}
+
+export function isSweepThroughGate(gate: string): gate is SweepThroughGate {
+	return (SWEEP_THROUGH_GATES as readonly string[]).includes(gate);
 }

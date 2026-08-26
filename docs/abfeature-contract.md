@@ -1,10 +1,16 @@
 # ABFeature contract — porting your algorithm work into the engine
 
+> This contract predates the current operation-DAG/Sweep handoff. Use it for
+> the ABFeature model, then read
+> [`INTAKE-ENGINE-HANDOFF.md`](./INTAKE-ENGINE-HANDOFF.md) for the audited
+> branch position, runtime constraints, and current validation results.
+
 The threeFactor detector is now an **engine executing a config**. This doc is
 the contract for agents porting in-progress algorithm work, and the spec for
 defining "your" alg as a config file. Source of truth for types:
-`src/lib/detectors/threeFactor/features/types.ts`. Machine-readable config
-schema: `src/lib/detectors/threeFactor/configs/threeFactor-config.schema.json`
+`packages/alg/src/detectors/threeFactor/features/types.ts`. Machine-readable
+config schema:
+`packages/alg/src/detectors/threeFactor/configs/threeFactor-config.schema.json`
 (generated from the registry; drift-guarded by
 `tests/unit/threeFactorSchema.test.ts`).
 

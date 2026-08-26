@@ -3,8 +3,12 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { coverageForCatalog } from '../../scripts/chainspot-lab/help/catalog.mjs';
+import {
+	coverageForCatalog,
+	EXECUTABLE_SWEEP_GATES
+} from '../../scripts/chainspot-lab/help/catalog.mjs';
 import { completionCandidates } from '../../scripts/chainspot-lab/help/render.mjs';
+import { SWEEP_THROUGH_GATES } from '../../scripts/chainspot-lab/sweep/gateVocabulary';
 
 const CLI = resolve('scripts/chainspot-lab/bin/lab.mjs');
 
@@ -23,6 +27,7 @@ describe('LAB contextual help catalog', () => {
 		expect(coverage.missingShell).toEqual([]);
 		expect(Object.values(coverage.missingOptions).flat()).toEqual([]);
 		expect(Object.values(coverage.missingLeaves).flat()).toEqual([]);
+		expect(EXECUTABLE_SWEEP_GATES).toEqual([...SWEEP_THROUGH_GATES]);
 	});
 
 	test('root, exact, nested, local, and exhaustive help are catalog-backed', () => {

@@ -51,9 +51,12 @@ describe('LAB browser contextual-help API', () => {
 			const app = readFileSync(resolve('scripts/chainspot-lab/ui/app/app.js'), 'utf8');
 			expect(html).toContain('aria-expanded="true"');
 			expect(html).toContain('id="helpClose"');
+			expect(html).toContain('id="sweepTruthStatus"');
 			expect(app).toContain('function setHelpDrawerOpen');
 			expect(app).toContain("event.key !== 'Escape'");
 			expect(app).toContain("$('#helpClose').onclick = () => setHelpDrawerOpen(false, { focus: true })");
+			expect(app).toContain('Truth scoreboard skipped:');
+			expect(app).toContain('result.truthScoringReason');
 		} finally {
 			child.kill('SIGTERM');
 			await once(child, 'exit').catch(() => undefined);

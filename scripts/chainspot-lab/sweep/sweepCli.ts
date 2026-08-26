@@ -8,7 +8,7 @@ import { printG0Report } from './inputShim';
 import { printGroundingComparisons, printScoreboard } from './truthScoring';
 import { printPlan, printTimeline } from './timeline';
 import { printFeatureRenders } from './featureRenders';
-import { isKnownGate, type EngineGateId } from './gateVocabulary';
+import { isSweepThroughGate, type SweepThroughGate } from './gateVocabulary';
 
 function usage(): never {
 	console.error(
@@ -41,11 +41,11 @@ async function runCompile(args: readonly string[]): Promise<void> {
 
 async function runSweep(args: readonly string[]): Promise<void> {
 	const restArgs = [...args];
-	let throughGate: EngineGateId | undefined;
+	let throughGate: SweepThroughGate | undefined;
 	const throughIndex = restArgs.indexOf('--through');
 	if (throughIndex >= 0) {
 		const value = restArgs[throughIndex + 1];
-		if (!value || !isKnownGate(value) || value === 'shared') {
+		if (!value || !isSweepThroughGate(value)) {
 			throw new Error(`lab sweep: --through requires a gate such as G1, G2, or G3.`);
 		}
 		throughGate = value;
@@ -77,7 +77,7 @@ async function runSweep(args: readonly string[]): Promise<void> {
 		printGroundingComparisons(result.groundingComparisons);
 		if (result.truthScoringSkipped)
 			console.log(
-				'--- Truth scoring skipped: supplied truth does not correspond to the canonical raster. ---'
+				`--- Truth scoring skipped: ${result.truthScoringReason ?? 'truth provenance is not verified in the canonical raster.'} ---`
 			);
 		else if (result.scoreboard) printScoreboard(result.scoreboard);
 	}

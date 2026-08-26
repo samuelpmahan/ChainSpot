@@ -156,6 +156,11 @@ export interface MeasurementAggregate {
 export interface UnitTrace {
 	readonly id: string;
 	readonly gate: GateId;
+	/** Primary ABFeature whose state supplies this unit's legacy enabled/knob
+	 * fields. Derived from the compiled operations, never guessed from unit id. */
+	readonly featureId?: string;
+	/** Every ABFeature read by this unit's compiled operations, in plan order. */
+	readonly featureIds: readonly string[];
 	readonly enabled: boolean;
 	readonly knobs: Record<string, unknown>;
 	readonly knobsDeviating: readonly string[];

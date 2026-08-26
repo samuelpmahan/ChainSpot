@@ -1,6 +1,13 @@
 # Brief: expose the consequences
 
-Paste this to a cloud agent starting cold on ChainSpot.
+> Historical brief (2026-08-25). Its branch map and 18/18 accuracy claims are
+> not the current transfer contract. Start with
+> [`INTAKE-ENGINE-HANDOFF.md`](./INTAKE-ENGINE-HANDOFF.md) for the audited
+> local continuation, validation results, and known red tests.
+
+Archived for provenance. **Do not paste or execute the checkout instructions
+below as current setup.** Use `INTAKE-ENGINE-HANDOFF.md` and the branch/ref
+provided with the handoff instead.
 
 ## Start here
 

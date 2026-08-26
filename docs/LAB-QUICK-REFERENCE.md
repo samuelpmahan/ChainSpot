@@ -85,8 +85,9 @@ Image-coordinate headings are `0 deg` right, `90 deg` down, `180 deg` left, `270
 ```
 
 - `compile` inspects the plan; it does not execute raster work.
-- `--through` accepts `G1`, `G2`, `G3`, `G4`, `ST`, or `G5`. There is currently no `--stop-after`, and `shared` is not a valid stop gate.
+- `--through` accepts only `G1`, `G2`, or `G3`, the dependency-complete prefixes available today. `G4`, `ST`, `G5`, and `shared` remain engine vocabulary but are not valid cutoffs. There is currently no `--stop-after`.
 - A positional JSON after inputs is evaluation truth, not detector input.
+- An official scoreboard requires verified truth in the canonical execution frame. Dimensions-only or unmapped truth is skipped with an explicit reason.
 - Repeating the same config/input normally reuses the same artifact directory, so copy evidence you need to preserve before another run.
 
 Read the engine-produced receipt and render together. A useful receipt answers: what object was considered, where it is in original and canonical frames, measurements, verdict/reason, detected/expected counts, FP/FN when truth exists, and unowned detections separately.

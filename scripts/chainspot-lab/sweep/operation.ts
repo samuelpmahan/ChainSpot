@@ -10,15 +10,25 @@ import {
 } from '@chainspot/alg/exec';
 import { createNodeSink } from '@chainspot/alg/exec/node-sink';
 import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor';
-import { createTraceContext } from '@chainspot/alg/detectors/threeFactor/engine';
+import {
+	createTraceContext,
+	resolveConfiguredParams
+} from '@chainspot/alg/detectors/threeFactor/engine';
 import { seedBoard } from '@chainspot/alg/detectors/threeFactor/measure';
 import type { EvidenceBoard, RunTrace } from '@chainspot/alg/detectors/threeFactor/features/types';
+import type { ThreeFactorMeasurement } from '@chainspot/alg/detectors/threeFactor/types';
+import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
 import { loadConfig } from './configIo';
 import { canonicalizeInputs } from './inputShim';
 import { compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
 import { renderArtifact, type ArtifactRenderResult } from './artifactIo';
 import { renderTraceFeatures, type RenderTraceFeaturesOutput } from './featureRenders';
-import { GATE_ORDER, type EngineGateId } from './gateVocabulary';
+import {
+	GATE_ORDER,
+	isSweepThroughGate,
+	type EngineGateId,
+	type SweepThroughGate
+} from './gateVocabulary';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -39,7 +49,7 @@ export interface RunSweepOperationInput {
 	readonly inputPaths: readonly string[];
 	readonly truthPath?: string;
 	readonly outDir?: string;
-	readonly throughGate?: EngineGateId;
+	readonly throughGate?: SweepThroughGate;
 }
 
 export interface RunSweepOperationResult {
@@ -55,19 +65,63 @@ export interface RunSweepOperationResult {
 	readonly renderedCount: number;
 	readonly stubbedCount: number;
 	readonly scoreboard?: ReturnType<typeof scoreTruth>;
+	readonly measurement?: ThreeFactorMeasurement;
 	readonly groundingComparisons: ReturnType<typeof compareTruthGrounding>;
 	readonly truthScoringSkipped: boolean;
-	readonly throughGate?: EngineGateId;
+	readonly truthScoringReason?: string;
+	readonly throughGate?: SweepThroughGate;
+}
+
+export interface TruthScoringDecision {
+	readonly eligible: boolean;
+	readonly provenanceTrusted: boolean;
+	readonly reason?: string;
+}
+
+/** Decide whether a supplied truth file can support an authoritative
+ * scoreboard in the canonical execution frame. Diagnostic grounding may
+ * still run with provenanceTrusted=false when canonical coordinates exist. */
+export function decideTruthScoring(
+	report: Awaited<ReturnType<typeof canonicalizeInputs>>['report'],
+	canonicalTruth: CanonicalTruth | undefined
+): TruthScoringDecision {
+	if (!report.truthMatch) {
+		return {
+			eligible: false,
+			provenanceTrusted: false,
+			reason: 'Supplied truth does not correspond to the canonical raster.'
+		};
+	}
+	if (report.truthMatch.level === 'dims-only') {
+		return {
+			eligible: false,
+			provenanceTrusted: false,
+			reason:
+				'Dimensions-only truth correspondence is unverified and cannot produce an official scoreboard.'
+		};
+	}
+	if (!canonicalTruth) {
+		return {
+			eligible: false,
+			provenanceTrusted: false,
+			reason:
+				'Truth coordinates were not mapped into the canonical raster; multi-input truth requires an explicit composite-frame mapping.'
+		};
+	}
+	return { eligible: true, provenanceTrusted: true };
 }
 
 export async function slicePlanThroughGate(
 	plan: CompiledExecutionPlan,
-	throughGate: EngineGateId
+	throughGate: SweepThroughGate
 ): Promise<CompiledExecutionPlan> {
-	const limit = GATE_ORDER.indexOf(throughGate);
-	if (limit < 0 || throughGate === 'shared') {
-		throw new Error(`lab sweep: --through requires an algorithm gate such as G1, G2, or G3.`);
+	if (!isSweepThroughGate(throughGate)) {
+		throw new Error(
+			'lab sweep: --through supports only dependency-complete cutoffs G1, G2, or G3.'
+		);
 	}
+	const limit = GATE_ORDER.indexOf(throughGate);
+	if (limit < 0) throw new Error('lab sweep: unknown --through cutoff.');
 	const ops = plan.ops.filter((op) => {
 		const index = GATE_ORDER.indexOf(op.gate as EngineGateId);
 		return index >= 0 && index <= limit;
@@ -76,7 +130,8 @@ export async function slicePlanThroughGate(
 		validateOperationOrder(ops);
 	} catch (error) {
 		throw new Error(
-			`lab sweep: --through ${throughGate} cannot form a dependency-complete gate slice: ${(error as Error).message}`
+			`lab sweep: --through ${throughGate} cannot form a dependency-complete gate slice: ${(error as Error).message}`,
+			{ cause: error }
 		);
 	}
 	const planFingerprint = await sha256Hex(
@@ -123,7 +178,11 @@ export async function runSweepOperation(
 	writeFileSync(canonicalPngPath, PNG.sync.write(canonicalPng));
 
 	const board = createExecBoard();
-	seedBoard(board as unknown as EvidenceBoard, image, undefined);
+	seedBoard(
+		board as unknown as EvidenceBoard,
+		image,
+		resolveConfiguredParams(undefined, loaded.resolved)
+	);
 	board.set('recoveredTees', []);
 	const sink = createNodeSink(outDir);
 	const traceResolved = input.throughGate
@@ -132,7 +191,7 @@ export async function runSweepOperation(
 				execution: [...new Set(plan.ops.map((op) => op.unit))]
 			}
 		: loaded.resolved;
-	const { ctx, trace } = createTraceContext(traceResolved, plan.paramsHash ?? '');
+	const { ctx, trace } = createTraceContext(traceResolved, plan.paramsHash ?? '', plan.ops);
 	const receipts = executeCompiledPlan(plan, board, ctx, sink);
 	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
 	const artifactRenders: ArtifactRenderResult[] = [];
@@ -145,13 +204,27 @@ export async function runSweepOperation(
 	}
 	let scoreboard: ReturnType<typeof scoreTruth> | undefined;
 	let truthScoringSkipped = false;
+	let truthScoringReason: string | undefined;
+	const truthDecision = decideTruthScoring(report, canonicalTruth);
 	if (truth) {
-		if (!report.truthMatch) truthScoringSkipped = true;
-		else scoreboard = scoreTruth(board, canonicalTruth ?? truth, report.singleSourceOffset);
+		if (!truthDecision.eligible) {
+			truthScoringSkipped = true;
+			truthScoringReason = truthDecision.reason;
+		} else {
+			scoreboard = scoreTruth(board, canonicalTruth!, report.singleSourceOffset);
+		}
 	}
 	const groundingComparisons = canonicalTruth
-		? compareTruthGrounding(board, canonicalTruth, report.singleSourceOffset, report.truthMatch !== null)
+		? compareTruthGrounding(
+				board,
+				canonicalTruth,
+				report.singleSourceOffset,
+				truthDecision.provenanceTrusted
+			)
 		: [];
+	const measurement = board.has('measurement')
+		? board.get<ThreeFactorMeasurement>('measurement')
+		: undefined;
 	const artifactPng = (artifactId: string) =>
 		artifactRenders
 			.find((result) => result.rendered && result.artifactRef.id === artifactId)
@@ -221,8 +294,10 @@ export async function runSweepOperation(
 		renderedCount: artifactRenders.filter((result) => result.rendered).length,
 		stubbedCount: artifactRenders.filter((result) => !result.rendered).length,
 		scoreboard,
+		...(measurement ? { measurement } : {}),
 		groundingComparisons,
 		truthScoringSkipped,
+		...(truthScoringReason ? { truthScoringReason } : {}),
 		...(input.throughGate ? { throughGate: input.throughGate } : {})
 	};
 }

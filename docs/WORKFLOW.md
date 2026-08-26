@@ -1,5 +1,10 @@
 # OSS orchestration protocol — ChainSpot
 
+> Historical orchestration record (2026-08-25), not the current branch or
+> accuracy contract. See
+> [`INTAKE-ENGINE-HANDOFF.md`](./INTAKE-ENGINE-HANDOFF.md) before transferring
+> or resuming the intake-engine work.
+
 Pre-agreed by Sam and Claude, 2026-08-25. This dir is gitignored (`artifacts/`).
 Claude reads every file here at the START and END of every turn.
 

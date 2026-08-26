@@ -516,6 +516,7 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				renderedCount: result.renderedCount,
 				stubbedCount: result.stubbedCount,
 				truthScoringSkipped: result.truthScoringSkipped,
+				truthScoringReason: result.truthScoringReason,
 				scoreboard: result.scoreboard,
 				groundingComparisons: result.groundingComparisons,
 				ops: result.plan.ops.map((op) => ({ id: op.id, gate: op.gate, kind: (op as any).kind ?? (op as any).op ?? '' })),

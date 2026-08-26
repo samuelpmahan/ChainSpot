@@ -545,6 +545,17 @@ function renderSweep(result) {
 	$('#sweepResultCard').classList.remove('hidden');
 	$('#sweepRunMeta').textContent = ` · ${result.configName} · ${result.renderedCount} rendered / ${result.stubbedCount} stubbed`;
 	$('#sweepStatus').textContent = `Done. ${result.outDir}`;
+	const truthStatus = $('#sweepTruthStatus');
+	if (result.truthScoringSkipped) {
+		truthStatus.textContent = `Truth scoreboard skipped: ${result.truthScoringReason || 'truth provenance is not verified in the canonical raster.'}`;
+		truthStatus.classList.remove('hidden');
+	} else if (result.scoreboard) {
+		truthStatus.textContent = 'Truth scoreboard produced from verified canonical-frame provenance.';
+		truthStatus.classList.remove('hidden');
+	} else {
+		truthStatus.textContent = '';
+		truthStatus.classList.add('hidden');
+	}
 	$('#sweepOps').innerHTML = `<table><thead><tr><th>op</th><th>gate</th><th>kind</th><th>artifacts</th></tr></thead><tbody>${result.ops.map((op) => {
 		const receipt = result.receipts.find((candidate) => candidate.opId === op.id);
 		return `<tr><td>${esc(op.id)}</td><td>${esc(op.gate)}</td><td>${esc(op.kind)}</td><td>${receipt?.artifactCount ?? 0}</td></tr>`;

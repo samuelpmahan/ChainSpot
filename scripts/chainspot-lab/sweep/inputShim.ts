@@ -69,6 +69,22 @@ function transformedTruthForSingleSource(
 	};
 }
 
+/** A reconciled match can map one cropped source into its canonical frame,
+ * but it cannot establish which source frame a stitched multi-input
+ * annotation belongs to. Preserve exact composite-byte matches and downgrade
+ * only the ambiguous reconciliation case. */
+export function normalizeTruthMatchForInputCount(
+	sourceCount: number,
+	truthMatch: TruthMatch | null
+): TruthMatch | null {
+	if (sourceCount <= 1 || truthMatch?.level !== 'reconciled-verified') return truthMatch;
+	return {
+		level: 'dims-only',
+		warning:
+			'Multiple source placements do not establish how one Annotation coordinate frame maps into the stitched canonical composite. Treat this match as unverified.'
+	};
+}
+
 export async function canonicalizeInputs(filePaths: readonly string[], truth?: CanonicalTruth): Promise<DecodedInput> {
 	if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
 	const assets = await Promise.all(filePaths.map((path) => decodeNodeFile(path)));
@@ -99,10 +115,18 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 	const ledger = appendEntries(createLedger(), entries);
 
 	const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
-	const truthMatch = truth ? matchTruth(rawShaForTruth, { imageId: composite.imageId, widthPx: composite.widthPx, heightPx: composite.heightPx, ledger }, truth) : null;
+	const truthMatch = normalizeTruthMatchForInputCount(
+		assets.length,
+		truth ? matchTruth(rawShaForTruth, { imageId: composite.imageId, widthPx: composite.widthPx, heightPx: composite.heightPx, ledger }, truth) : null
+	);
 	const left = stripChrome.insets?.left ?? 0;
 	const top = stripChrome.insets?.top ?? 0;
-	const canonicalTruth = assets.length === 1 ? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top) : undefined;
+	const canonicalTruth =
+		assets.length === 1 && truthMatch
+			? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
+			: truthMatch?.level === 'byte' && truthMatch.matchedAgainst === 'canonical'
+				? truth
+				: undefined;
 
 	const report: G0Report = {
 		shimmed: false,

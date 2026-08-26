@@ -12,6 +12,7 @@ import { measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
 import { createExecBoard } from '../../exec/board';
 import { compileExecutionPlan } from '../../exec/compile';
 import { executeCompiledPlan } from '../../exec/gateway';
+import type { OperationSpec } from '../../exec/contract';
 import { featureById } from './features/registry';
 import { zfitFeature } from './features/g5.zfit';
 import { g4ScoringFeature } from './features/g4.scoring';
@@ -101,7 +102,8 @@ export const SEEDED_SLOTS: readonly string[] = [
 
 export function createTraceContext(
 	resolved: ResolvedConfig,
-	paramsHash: string
+	paramsHash: string,
+	operations: readonly OperationSpec[] = []
 ): {
 	ctx: FeatureContext;
 	trace: RunTrace;
@@ -109,13 +111,32 @@ export function createTraceContext(
 	const unitById = new Map(ENGINE_UNITS.map((unit) => [unit.id, unit]));
 	const traces = new Map<string, UnitTrace>();
 	const heatmaps: Record<string, Float32Array> = {};
+	const featureIdsByUnit = new Map<string, string[]>();
+	for (const operation of operations) {
+		let ids = featureIdsByUnit.get(operation.unit);
+		if (!ids) {
+			ids = [];
+			featureIdsByUnit.set(operation.unit, ids);
+		}
+		for (const featureId of operation.features ?? []) {
+			if (!ids.includes(featureId)) ids.push(featureId);
+		}
+	}
 
 	function traceFor(unitId: string): UnitTrace {
 		let entry = traces.get(unitId);
 		if (!entry) {
 			const gate: GateId = unitById.get(unitId)?.gate ?? 'shared';
-			const feature = featureById(unitId);
-			const state: ResolvedFeature | undefined = feature ? resolved.features[unitId] : undefined;
+			const boundFeatureIds = featureIdsByUnit.get(unitId) ?? [];
+			const fallbackFeature = featureById(unitId);
+			const featureIds =
+				boundFeatureIds.length > 0 ? boundFeatureIds : fallbackFeature ? [fallbackFeature.id] : [];
+			const featureId =
+				featureIds.find((id) => featureById(id)?.render?.units.includes(unitId)) ?? featureIds[0];
+			const feature = featureId ? featureById(featureId) : undefined;
+			const state: ResolvedFeature | undefined = featureId
+				? resolved.features[featureId]
+				: undefined;
 			const knobs = state?.knobs ?? (feature ? defaultKnobs(feature) : {});
 			const deviating = feature
 				? Object.entries(knobs)
@@ -125,6 +146,8 @@ export function createTraceContext(
 			entry = {
 				id: unitId,
 				gate,
+				...(featureId ? { featureId } : {}),
+				featureIds,
 				enabled: state?.enabled ?? true,
 				knobs,
 				knobsDeviating: deviating,
@@ -214,6 +237,47 @@ function bridgeParam<K extends keyof ThreeFactorParams>(
 	return { ...(params ?? {}), [key]: state.knobs[knobName] } as ThreeFactorParams;
 }
 
+/**
+ * Resolve every config feature whose values ride the legacy
+ * ThreeFactorParams/CorridorParams seed. All execution front doors must call
+ * this before seedBoard so the config hash and the executed parameters cannot
+ * disagree. Caller-explicit numeric/routing params retain precedence over
+ * baseline knobs. An enabled zfit ABFeature remains authoritative over the
+ * legacy boolean flag, preserving the existing config behavior.
+ */
+export function resolveConfiguredParams(
+	params: ThreeFactorParams | undefined,
+	resolved?: ResolvedConfig
+): ThreeFactorParams | undefined {
+	if (!resolved) return params;
+	const zfitState = resolved.features['zfit'];
+	let effectiveParams: ThreeFactorParams | undefined = zfitState?.enabled
+		? { ...(params ?? {}), zfit: true }
+		: params;
+
+	const ribbonState = resolved.features['ribbon'];
+	effectiveParams = bridgeParam(effectiveParams, 'fieldScale', ribbonState, 'fieldScale');
+	effectiveParams = bridgeParam(effectiveParams, 'supportTau', ribbonState, 'supportTau');
+
+	const routingState = resolved.features['routing'];
+	effectiveParams = bridgeParam(
+		effectiveParams,
+		'corridorWidthPx',
+		routingState,
+		'corridorWidthPx'
+	);
+	effectiveParams = bridgeParam(effectiveParams, 'orientations', routingState, 'orientations');
+	effectiveParams = bridgeParam(effectiveParams, 'widthsSrc', routingState, 'widthsSrc');
+	effectiveParams = bridgeParam(effectiveParams, 'alignmentPower', routingState, 'alignmentPower');
+	effectiveParams = bridgeParam(
+		effectiveParams,
+		'worstWindowSrcPx',
+		routingState,
+		'worstWindowSrcPx'
+	);
+	return effectiveParams;
+}
+
 export interface EngineResult {
 	readonly measurement: ThreeFactorMeasurement;
 	readonly assignment: ThreeFactorAssignment;
@@ -247,36 +311,7 @@ export function runEngine(
 	};
 	const plan = compileExecutionPlan(compileTarget, paramsHash);
 
-	// feature -> params bridge: zfit rides CorridorParams so measurement
-	// records it (the frozen shape) — engine injects the resolved state.
-	const zfitState = resolved?.features['zfit'];
-	let effectiveParams: ThreeFactorParams | undefined = zfitState?.enabled
-		? { ...(params ?? {}), zfit: true }
-		: params;
-
-	// Same bridge for baseline features whose knobs ride CorridorParams
-	// rather than a function parameter of their own — see bridgeParam's doc
-	// comment. Only fills in when the caller hasn't already set the param.
-	const ribbonState = resolved?.features['ribbon'];
-	effectiveParams = bridgeParam(effectiveParams, 'fieldScale', ribbonState, 'fieldScale');
-	effectiveParams = bridgeParam(effectiveParams, 'supportTau', ribbonState, 'supportTau');
-
-	const routingState = resolved?.features['routing'];
-	effectiveParams = bridgeParam(
-		effectiveParams,
-		'corridorWidthPx',
-		routingState,
-		'corridorWidthPx'
-	);
-	effectiveParams = bridgeParam(effectiveParams, 'orientations', routingState, 'orientations');
-	effectiveParams = bridgeParam(effectiveParams, 'widthsSrc', routingState, 'widthsSrc');
-	effectiveParams = bridgeParam(effectiveParams, 'alignmentPower', routingState, 'alignmentPower');
-	effectiveParams = bridgeParam(
-		effectiveParams,
-		'worstWindowSrcPx',
-		routingState,
-		'worstWindowSrcPx'
-	);
+	const effectiveParams = resolveConfiguredParams(params, resolved);
 
 	// Exactly ONE gateway walks operations from here down — executeCompiledPlan
 	// (packages/alg/src/exec/gateway.ts). The board is now the exec layer's
@@ -289,7 +324,7 @@ export function runEngine(
 
 	const withTrace = resolved !== undefined;
 	const { ctx, trace } = withTrace
-		? createTraceContext(resolved, paramsHash ?? '')
+		? createTraceContext(resolved, paramsHash ?? '', plan.ops)
 		: { ctx: nullFeatureContext, trace: undefined as unknown as RunTrace };
 
 	executeCompiledPlan(plan, board, ctx);
