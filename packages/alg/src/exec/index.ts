@@ -11,3 +11,4 @@ export * from './sink';
 export * from './compile';
 export * from './gateway';
 export * from './operations';
+export * from './feature-set';

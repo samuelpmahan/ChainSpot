@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { fly } from 'svelte/transition';
 	import { loadImageFromFile, releaseImage, type LoadedImage } from '$lib/image';
+	import { formatSourceCaptureReceipt, type SourceCaptureReceipt } from '$lib/sourceIntake';
+	import { type ScoutThumbnailTrace } from '$lib/scoutThumbnails';
+	import type { ScoutThumbnailEvidence } from '$lib/scoutThumbnailEvidence';
+	import type { ClassifyAndScoutEvidence } from '$lib/classifyAndScoutEvidence';
+	import type { SelectiveFullDecodeEvidence } from '$lib/selectiveFullDecodeEvidence';
+	import type { SelectiveFullDecodeTrace } from '$lib/selectiveFullDecode.types';
+	import { runIntakeFeatureSet } from '$lib/intakeFeatureSet';
 	import ImageViewport from '$lib/components/ImageViewport.svelte';
 	import { croppedObjectUrl, rasterFromFile } from '$lib/raster';
 	import type { CropInsets, GrayRaster } from '@chainspot/alg';
@@ -52,6 +59,14 @@
 	type Placement = { x: number; y: number };
 
 	let images = $state<LoadedImage[]>([]);
+	let lastIntakeReceipt = $state<SourceCaptureReceipt | null>(null);
+	let scoutThumbnailsEnabled = $state(false);
+	let scoutTraces = $state<readonly ScoutThumbnailTrace[]>([]);
+	let scoutEvidence = $state<readonly ScoutThumbnailEvidence[]>([]);
+	let classificationEvidence = $state<readonly ClassifyAndScoutEvidence[]>([]);
+	let selectiveFullDecodeTraces = $state<readonly SelectiveFullDecodeTrace[]>([]);
+	let selectiveFullDecodeEvidence = $state<readonly SelectiveFullDecodeEvidence[]>([]);
+	let intakeAcceptanceReceiptMarkdown = $state<string | null>(null);
 	let thrownIdx = $state(-1);
 	let appliedInsets = $state<CropInsets | null>(null);
 	let displayUrls = $state<string[]>([]);
@@ -288,6 +303,67 @@
 	);
 
 	let markers = $derived(projectMarkers(mapImages));
+
+	function releaseScoutThumbnails() {
+		for (const trace of scoutTraces) trace.thumbnailBitmap?.close();
+		for (const trace of selectiveFullDecodeTraces) trace.bitmap?.close();
+		scoutTraces = [];
+		scoutEvidence = [];
+		classificationEvidence = [];
+		selectiveFullDecodeTraces = [];
+		selectiveFullDecodeEvidence = [];
+	}
+
+	async function scoutParamsHash(): Promise<string> {
+		const bytes = new TextEncoder().encode('{"featureId":"scout-thumbnails","maxSidePx":256}');
+		const digest = await crypto.subtle.digest('SHA-256', bytes);
+		return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+			''
+		);
+	}
+
+	type ScoutCanvasView = {
+		readonly trace: ScoutThumbnailTrace;
+		readonly evidence?: ClassifyAndScoutEvidence;
+	};
+
+	function scoutThumbnailCanvas(node: HTMLCanvasElement, view: ScoutCanvasView) {
+		function draw(value: ScoutCanvasView) {
+			const bitmap = value.trace.thumbnailBitmap;
+			if (!bitmap || !value.trace.thumbnail) return;
+			node.width = value.trace.thumbnail.widthPx;
+			node.height = value.trace.thumbnail.heightPx;
+			const context = node.getContext('2d');
+			if (!context) return;
+			context.drawImage(bitmap, 0, 0);
+			for (const overlay of value.evidence?.visualRender.overlays ?? []) {
+				if (overlay.thumbnailRect === 'UNKNOWN') continue;
+				const rect = overlay.thumbnailRect;
+				context.strokeStyle = overlay.verdict === 'candidate' ? '#c000ff' : '#ff4040';
+				context.lineWidth = 2;
+				context.strokeRect(
+					rect.leftPx,
+					rect.topPx,
+					rect.rightPx - rect.leftPx,
+					rect.bottomPx - rect.topPx
+				);
+			}
+		}
+		draw(view);
+		return { update: draw };
+	}
+
+	function selectiveFullDecodeCanvas(node: HTMLCanvasElement, trace: SelectiveFullDecodeTrace) {
+		function draw(value: SelectiveFullDecodeTrace) {
+			const bitmap = value.bitmap;
+			if (!bitmap) return;
+			node.width = bitmap.width;
+			node.height = bitmap.height;
+			node.getContext('2d')?.drawImage(bitmap, 0, 0);
+		}
+		draw(trace);
+		return { update: draw };
+	}
 
 	// ---- semantic stitch: align tiles geometrically from shared badge numbers.
 	// 'spread' placements auto-upgrade when matches exist; any manual drag or
@@ -596,26 +672,56 @@
 
 	async function onFileChange(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
-		const files = Array.from(input.files ?? []);
-		input.value = '';
-		if (files.length == 0) return;
-
 		const seq = ++selectionSeq;
-		const results = await Promise.all(files.map(loadImageFromFile));
+		const selectedFiles = Array.from(input.files ?? []);
+		const runId = `selection-${seq}`;
+		const intakePromise = scoutParamsHash().then((paramsHash) =>
+			runIntakeFeatureSet({
+				selectedFiles,
+				runId,
+				invocation: 'Stitch Map file picker',
+				scoutParamsHash: paramsHash,
+				classifyParamsHash: paramsHash,
+				scoutEnabled: scoutThumbnailsEnabled
+			})
+		);
+		input.value = '';
+		const intake = await intakePromise;
+		if (seq !== selectionSeq) return;
+		const capture = intake.captureReceipt;
+		lastIntakeReceipt = capture;
+		intakeAcceptanceReceiptMarkdown = intake.acceptanceReceiptMarkdown;
+		console.info(intake.acceptanceReceiptMarkdown);
+		if (capture.entries.length === 0) return;
+
+		const results = await Promise.all(
+			capture.entries.map((entry) => (entry.ok ? loadImageFromFile(entry.source) : null))
+		);
 
 		if (seq !== selectionSeq) {
-			for (const r of results) if (r.ok) releaseImage(r.image);
+			for (const r of results) if (r?.ok) releaseImage(r.image);
+			for (const trace of intake.thumbnailTraces) trace.thumbnailBitmap?.close();
+			for (const trace of intake.selectiveFullDecodeTraces) trace.bitmap?.close();
 			return;
 		}
+		releaseScoutThumbnails();
+		scoutTraces = intake.thumbnailTraces;
+		scoutEvidence = intake.thumbnailEvidence;
+		classificationEvidence = intake.classificationEvidence;
+		selectiveFullDecodeTraces = intake.selectiveFullDecodeTraces;
+		selectiveFullDecodeEvidence = intake.selectiveFullDecodeEvidence;
 
 		const rejected: string[] = [];
 		let addedAny = false;
-		for (const [i, r] of results.entries()) {
-			if (!r.ok) {
-				rejected.push(files[i].name);
+		for (const [i, entry] of capture.entries.entries()) {
+			const r = results[i];
+			if (!entry.ok) {
+				rejected.push(`${entry.file.name} (${entry.reason})`);
+			} else if (!r?.ok) {
+				rejected.push(entry.source.file.name);
 			} else if (images.length >= MAX_IMAGES) {
 				releaseImage(r.image);
-				rejected.push(`${files[i].name} (over the ${MAX_IMAGES} image limit)`);
+				rejected.push(`${entry.source.file.name} (over the ${MAX_IMAGES} image limit)`);
 			} else {
 				images.push(r.image);
 				addedAny = true;
@@ -641,6 +747,9 @@
 		resetStitchState();
 		for (const img of images) releaseImage(img);
 		images = [];
+		lastIntakeReceipt = null;
+		intakeAcceptanceReceiptMarkdown = null;
+		releaseScoutThumbnails();
 		detections = {};
 		purpleReady = {};
 		preRead = {};
@@ -917,6 +1026,9 @@
 >
 	<h1 style="margin: 0.25rem 0; font-size: 1.5rem;">Stitch Map</h1>
 	<input type="file" accept="image/*" multiple onchange={onFileChange} />
+	<label
+		><input type="checkbox" bind:checked={scoutThumbnailsEnabled} /> Scout thumbnails (experimental)</label
+	>
 	<button onclick={clearAll}>Clear all</button>
 	<!-- TEMP DEBUG (remove before merge prep): full-state export for LAB triage -->
 	<button onclick={exportDebug} title="Downloads detections/pre-read/placements as JSON">
@@ -929,6 +1041,82 @@
 	{/if}
 	{#if layoutApproved}<strong>Layout approved.</strong>{/if}
 </div>
+
+{#if lastIntakeReceipt}
+	<details>
+		<summary>Intake receipt ({lastIntakeReceipt.entries.length} selected files)</summary>
+		<pre>{formatSourceCaptureReceipt(lastIntakeReceipt)}</pre>
+	</details>
+{/if}
+
+{#if scoutEvidence.length > 0}
+	<details open>
+		<summary>Tick 3–4 visual + CLI evidence ({scoutEvidence.length} images)</summary>
+		{#each scoutEvidence as evidence, i (evidence.visualRender.traceHash)}
+			<div style="display: flex; gap: 0.5rem; align-items: start; margin: 0.5rem 0;">
+				{#if scoutTraces[i]?.thumbnailBitmap}
+					<canvas
+						use:scoutThumbnailCanvas={{
+							trace: scoutTraces[i],
+							evidence: classificationEvidence[i]
+						}}
+						aria-label={`Scout thumbnail ${i + 1} with classification regions`}
+					></canvas>
+				{/if}
+				<div>
+					<strong>Measurement / math description</strong>
+					<pre style="margin: 0; white-space: pre-wrap;">{evidence.mathText}</pre>
+					{#if classificationEvidence[i]}
+						<pre style="margin: 0.5rem 0; white-space: pre-wrap;">{classificationEvidence[i]
+								.mathText}</pre>
+					{/if}
+					<strong>Exact CLI text</strong>
+					<pre style="margin: 0; white-space: pre-wrap;">{evidence.cliText}</pre>
+					{#if classificationEvidence[i]}
+						<pre style="margin: 0.5rem 0 0; white-space: pre-wrap;">{classificationEvidence[i]
+								.cliText}</pre>
+					{/if}
+				</div>
+			</div>
+		{/each}
+	</details>
+{/if}
+
+{#if selectiveFullDecodeEvidence.length > 0}
+	<details open>
+		<summary>Tick 5 Acceptance Receipt: selective full-resolution crops</summary>
+		{#each selectiveFullDecodeEvidence as evidence, i (evidence.visualRender.traceHash)}
+			<div style="display: flex; gap: 0.5rem; align-items: start; margin: 0.5rem 0;">
+				{#if selectiveFullDecodeTraces[i]?.bitmap}
+					<canvas
+						use:selectiveFullDecodeCanvas={selectiveFullDecodeTraces[i]}
+						aria-label={`Selective full-resolution crop ${i + 1}`}
+						style="max-width: 320px; height: auto;"
+					></canvas>
+				{:else}
+					<pre style="margin: 0; white-space: pre-wrap;">{JSON.stringify(
+							evidence.visualRender,
+							null,
+							2
+						)}</pre>
+				{/if}
+				<div>
+					<strong>Measurement / math description</strong>
+					<pre style="margin: 0; white-space: pre-wrap;">{evidence.mathText}</pre>
+					<strong>Exact CLI text</strong>
+					<pre style="margin: 0; white-space: pre-wrap;">{evidence.cliText}</pre>
+				</div>
+			</div>
+		{/each}
+	</details>
+{/if}
+
+{#if intakeAcceptanceReceiptMarkdown}
+	<details open>
+		<summary>Full hashed Acceptance Receipt: math + VisualRender + CLI</summary>
+		<pre style="white-space: pre-wrap;">{intakeAcceptanceReceiptMarkdown}</pre>
+	</details>
+{/if}
 
 {#if thrownIdx < 0}
 	{#if images.length > 0}
@@ -1015,92 +1203,141 @@
 	<div
 		style={`position: relative; display: flex; gap: 6px; height: calc(100vh - ${headerH + PAGE_MARGIN_PX * 2 + 2}px);`}
 	>
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<svg
-		style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #f2efe6;"
-		viewBox={`${cleanBBox.x} ${cleanBBox.y} ${cleanBBox.w} ${cleanBBox.h}`}
-		role="img"
-		aria-label="Clean course map"
-		onclick={cleanSvgClick}
-	>
-		{#each cleanHoles as h (h.n)}
-			{#if h.tee && h.basket}
-				<path
-					d={`M ${h.tee.xPx} ${h.tee.yPx} ${h.bends.length ? `Q ${h.bends[0].xPx} ${h.bends[0].yPx}` : 'L'} ${h.basket.xPx} ${h.basket.yPx}`}
-					stroke="#465446"
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+		<svg
+			style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #f2efe6;"
+			viewBox={`${cleanBBox.x} ${cleanBBox.y} ${cleanBBox.w} ${cleanBBox.h}`}
+			role="img"
+			aria-label="Clean course map"
+			onclick={cleanSvgClick}
+		>
+			{#each cleanHoles as h (h.n)}
+				{#if h.tee && h.basket}
+					<path
+						d={`M ${h.tee.xPx} ${h.tee.yPx} ${h.bends.length ? `Q ${h.bends[0].xPx} ${h.bends[0].yPx}` : 'L'} ${h.basket.xPx} ${h.basket.yPx}`}
+						stroke="#465446"
+						fill="none"
+						stroke-width="4"
+					/>
+				{/if}
+				{#if h.tee}
+					<path
+						d={`M ${h.tee.xPx} ${h.tee.yPx - 14} L ${h.tee.xPx - 14} ${h.tee.yPx + 12} L ${h.tee.xPx + 14} ${h.tee.yPx + 12} Z`}
+						fill="#2c4a2c"
+					/>
+				{/if}
+				{#if h.basket}
+					<circle
+						cx={h.basket.xPx}
+						cy={h.basket.yPx}
+						r="13"
+						fill="none"
+						stroke="#2c4a2c"
+						stroke-width="5"
+					/>
+					<circle cx={h.basket.xPx} cy={h.basket.yPx} r="4" fill="#2c4a2c" />
+				{/if}
+				{#each h.bends as b (b.xPx + ':' + b.yPx)}
+					<circle cx={b.xPx} cy={b.yPx} r="6" fill="#465446" />
+				{/each}
+				<rect
+					x={h.badge.xPx - 16}
+					y={h.badge.yPx - 16}
+					width="32"
+					height="32"
+					fill="#ffffff"
+					stroke="#2c4a2c"
+					stroke-width="3"
+				/>
+				<text x={h.badge.xPx} y={h.badge.yPx + 8} font-size="24" fill="#2c4a2c" text-anchor="middle"
+					>{h.n}</text
+				>
+			{/each}
+			{#each pairs as pair, i (i)}
+				<circle
+					cx={pair.blankPx.xPx}
+					cy={pair.blankPx.yPx}
+					r="10"
 					fill="none"
+					stroke="red"
 					stroke-width="4"
 				/>
-			{/if}
-			{#if h.tee}
-				<path
-					d={`M ${h.tee.xPx} ${h.tee.yPx - 14} L ${h.tee.xPx - 14} ${h.tee.yPx + 12} L ${h.tee.xPx + 14} ${h.tee.yPx + 12} Z`}
-					fill="#2c4a2c"
-				/>
-			{/if}
-			{#if h.basket}
-				<circle cx={h.basket.xPx} cy={h.basket.yPx} r="13" fill="none" stroke="#2c4a2c" stroke-width="5" />
-				<circle cx={h.basket.xPx} cy={h.basket.yPx} r="4" fill="#2c4a2c" />
-			{/if}
-			{#each h.bends as b (b.xPx + ':' + b.yPx)}
-				<circle cx={b.xPx} cy={b.yPx} r="6" fill="#465446" />
+				<text x={pair.blankPx.xPx + 14} y={pair.blankPx.yPx + 6} font-size="20" fill="red"
+					>P{i + 1}</text
+				>
 			{/each}
-			<rect x={h.badge.xPx - 16} y={h.badge.yPx - 16} width="32" height="32" fill="#ffffff" stroke="#2c4a2c" stroke-width="3" />
-			<text x={h.badge.xPx} y={h.badge.yPx + 8} font-size="24" fill="#2c4a2c" text-anchor="middle">{h.n}</text>
-		{/each}
-		{#each pairs as pair, i (i)}
-			<circle cx={pair.blankPx.xPx} cy={pair.blankPx.yPx} r="10" fill="none" stroke="red" stroke-width="4" />
-			<text x={pair.blankPx.xPx + 14} y={pair.blankPx.yPx + 6} font-size="20" fill="red">P{i + 1}</text>
-		{/each}
-	</svg>
+		</svg>
 
-	<div style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #9db89d; position: relative; overflow: hidden;">
-		{#if satRaster}
-			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-			<div style="position: relative; width: 100%; height: 100%;" onclick={satClick}>
-				<img
-					src={satRaster.url}
-					alt="Satellite imagery"
-					style="width: 100%; height: 100%; object-fit: fill; display: block;"
-					draggable="false"
+		<div
+			style="flex: 1; min-width: 0; height: 100%; border: 1px solid black; background: #9db89d; position: relative; overflow: hidden;"
+		>
+			{#if satRaster}
+				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+				<div style="position: relative; width: 100%; height: 100%;" onclick={satClick}>
+					<img
+						src={satRaster.url}
+						alt="Satellite imagery"
+						style="width: 100%; height: 100%; object-fit: fill; display: block;"
+						draggable="false"
+					/>
+					{#each pairs as pair, i (i)}
+						{@const sp = {
+							xPx:
+								((pair.latLng.lng - satRaster.bbox.minLon) /
+									(satRaster.bbox.maxLon - satRaster.bbox.minLon)) *
+								100,
+							yPx:
+								((satRaster.bbox.maxLat - pair.latLng.lat) /
+									(satRaster.bbox.maxLat - satRaster.bbox.minLat)) *
+								100
+						}}
+						<div
+							style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(-50%, -50%); width: 18px; height: 18px; border: 4px solid red; border-radius: 50%; pointer-events: none;`}
+						></div>
+						<span
+							style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(12px, -8px); color: red; font-weight: bold; pointer-events: none;`}
+							>P{i + 1}</span
+						>
+					{/each}
+				</div>
+				<small
+					style="position: absolute; left: 4px; bottom: 4px; background: rgba(255,255,255,0.85); padding: 1px 5px;"
+				>
+					{satRaster.provider} · {attributionFor(satProviderName)}
+				</small>
+			{:else}
+				<div
+					style="padding: 1rem; background: rgba(255,255,255,0.92); margin: 1rem; border: 1px solid black;"
+				>
+					<strong>Find the course's satellite imagery</strong><br />
+					<input
+						placeholder="Course name or address"
+						bind:value={satQuery}
+						style="width: 60%;"
+						onkeydown={(e) => e.key === 'Enter' && satSearch()}
+					/>
+					<button onclick={satSearch}>Search</button>
+					{#if satNote}<p>{satNote}</p>{/if}
+					{#each satMatches as m (m.displayName)}
+						<p><button onclick={() => satPick(m)}>{m.displayName}</button></p>
+					{/each}
+					{#if satMatches.length > 0}<small>Results: {attributionFor(satProviderName)}</small>{/if}
+				</div>
+			{/if}
+
+			<div style="position: absolute; top: 0.5rem; right: 0.5rem;">
+				<PairPanel
+					{pairs}
+					arming={pairArming}
+					transform={worldTransform}
+					{sampleDistanceFt}
+					{onStartPair}
+					{onCancelPair}
+					{onRemovePair}
+					onDone={pairsDone}
 				/>
-				{#each pairs as pair, i (i)}
-					{@const sp = { xPx: ((pair.latLng.lng - satRaster.bbox.minLon) / (satRaster.bbox.maxLon - satRaster.bbox.minLon)) * 100, yPx: ((satRaster.bbox.maxLat - pair.latLng.lat) / (satRaster.bbox.maxLat - satRaster.bbox.minLat)) * 100 }}
-					<div
-						style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(-50%, -50%); width: 18px; height: 18px; border: 4px solid red; border-radius: 50%; pointer-events: none;`}
-					></div>
-					<span style={`position: absolute; left: ${sp.xPx}%; top: ${sp.yPx}%; transform: translate(12px, -8px); color: red; font-weight: bold; pointer-events: none;`}>P{i + 1}</span>
-				{/each}
 			</div>
-			<small style="position: absolute; left: 4px; bottom: 4px; background: rgba(255,255,255,0.85); padding: 1px 5px;">
-				{satRaster.provider} · {attributionFor(satProviderName)}
-			</small>
-		{:else}
-			<div style="padding: 1rem; background: rgba(255,255,255,0.92); margin: 1rem; border: 1px solid black;">
-				<strong>Find the course's satellite imagery</strong><br />
-				<input placeholder="Course name or address" bind:value={satQuery} style="width: 60%;" onkeydown={(e) => e.key === 'Enter' && satSearch()} />
-				<button onclick={satSearch}>Search</button>
-				{#if satNote}<p>{satNote}</p>{/if}
-				{#each satMatches as m (m.displayName)}
-					<p><button onclick={() => satPick(m)}>{m.displayName}</button></p>
-				{/each}
-				{#if satMatches.length > 0}<small>Results: {attributionFor(satProviderName)}</small>{/if}
-			</div>
-		{/if}
-
-		<div style="position: absolute; top: 0.5rem; right: 0.5rem;">
-			<PairPanel
-				{pairs}
-				arming={pairArming}
-				transform={worldTransform}
-				{sampleDistanceFt}
-				{onStartPair}
-				{onCancelPair}
-				{onRemovePair}
-				onDone={pairsDone}
-			/>
 		</div>
-	</div>
 	</div>
 {/if}
 

@@ -17,11 +17,19 @@
 
 import type { OperationKind, OperationSpec, ArtifactKind } from './contract';
 import type { ExecBoard } from './board';
-import type { EngineUnit, EvidenceBoard, FeatureContext } from '../detectors/threeFactor/features/types';
+import type { OperationImpl } from './gateway';
+import type {
+	EngineUnit,
+	EvidenceBoard,
+	FeatureContext
+} from '../detectors/threeFactor/features/types';
 import { measureUnits } from '../detectors/threeFactor/measure';
 import { phantomTeeUnit, phantomTeeFeature } from '../detectors/threeFactor/features/g3.phantomTee';
 import { teeFamilyUnit, teeFamilyFeature } from '../detectors/threeFactor/features/g3.teeFamily';
-import { cleanBasketFamilyUnit, cleanBasketFamilyFeature } from '../detectors/threeFactor/features/g2.cleanBasketFamily';
+import {
+	cleanBasketFamilyUnit,
+	cleanBasketFamilyFeature
+} from '../detectors/threeFactor/features/g2.cleanBasketFamily';
 import { g1BadgesFeature } from '../detectors/threeFactor/features/g1.badges';
 import { g1DigitsFeature } from '../detectors/threeFactor/features/g1.digits';
 import { sharedHsvFeature } from '../detectors/threeFactor/features/shared.hsv';
@@ -41,7 +49,12 @@ import {
 	type BadgeStageResult
 } from '../detectors/threeFactor/badgeStage';
 import { excludeAndAssembleTees } from '../detectors/threeFactor/measure';
-import { detectTeeRings, type EndpointsKnobs, type SpriteMatch, type TeeRing } from '../detectors/threeFactor/endpoints';
+import {
+	detectTeeRings,
+	type EndpointsKnobs,
+	type SpriteMatch,
+	type TeeRing
+} from '../detectors/threeFactor/endpoints';
 import {
 	recoveredTee,
 	rerouteRawPairs,
@@ -77,17 +90,30 @@ function legacyUnit(id: string): EngineUnit {
 	return unit;
 }
 
-export type OperationImpl = (board: ExecBoard, ctx: FeatureContext) => void;
-
 interface OperationDef {
 	readonly spec: OperationSpec;
 	readonly run: OperationImpl;
 }
 
-function wrapLegacy(id: string, kind: OperationKind, gate: string, features?: readonly string[], note?: string): OperationDef {
+function wrapLegacy(
+	id: string,
+	kind: OperationKind,
+	gate: string,
+	features?: readonly string[],
+	note?: string
+): OperationDef {
 	const unit = legacyUnit(id);
 	return {
-		spec: { id, kind, gate, unit: id, consumes: unit.consumes, produces: unit.produces, ...(features ? { features } : {}), ...(note ? { note } : {}) },
+		spec: {
+			id,
+			kind,
+			gate,
+			unit: id,
+			consumes: unit.consumes,
+			produces: unit.produces,
+			...(features ? { features } : {}),
+			...(note ? { note } : {})
+		},
 		run: (board, ctx) => unit.run(asLegacyBoard(board), ctx)
 	};
 }
@@ -121,7 +147,17 @@ const badgeStageOps: OperationDef[] = [
 			const stop = ctx.span('badgeStage');
 			const hsvKnobs = ctx.resolve(sharedHsvFeature).knobs as unknown as HsvKnobs;
 			const image = board.get<RgbaImage>('localImage');
-			board.set('badgeStage.masks', computeBrightDarkMasks(image as unknown as { width: number; height: number; data: Uint8Array | Uint8ClampedArray }, hsvKnobs));
+			board.set(
+				'badgeStage.masks',
+				computeBrightDarkMasks(
+					image as unknown as {
+						width: number;
+						height: number;
+						data: Uint8Array | Uint8ClampedArray;
+					},
+					hsvKnobs
+				)
+			);
 			stop();
 		}
 	},
@@ -139,7 +175,10 @@ const badgeStageOps: OperationDef[] = [
 			const stop = ctx.span('badgeStage');
 			const { bright } = board.get<BadgeStageMasks>('badgeStage.masks');
 			const { labels, components } = extractComponents(bright);
-			board.set('badgeStage.components', { brightLabels: labels, brightComponents: components } satisfies BadgeStageComponents);
+			board.set('badgeStage.components', {
+				brightLabels: labels,
+				brightComponents: components
+			} satisfies BadgeStageComponents);
 			stop();
 		}
 	},
@@ -180,11 +219,16 @@ const badgeStageOps: OperationDef[] = [
 			const knobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const image = board.get<RgbaImage>('localImage');
 			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { brightLabels, brightComponents } = board.get<BadgeStageComponents>('badgeStage.components');
+			const { brightLabels, brightComponents } =
+				board.get<BadgeStageComponents>('badgeStage.components');
 			const family = board.get<ComponentStats[]>('badgeStage.family');
 			const badges = [...family];
-			const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(() => 'bright-family');
-			const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(() => null);
+			const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
+				() => 'bright-family'
+			);
+			const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(
+				() => null
+			);
 			recoverDarkPlateBadges(image.width, bright, dark, badges, badgeSources, plateBboxes, knobs);
 			const stage: BadgeStageResult = {
 				width: image.width,
@@ -270,9 +314,25 @@ const teesOps: OperationDef[] = [
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
 			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
-			const tees = excludeAndAssembleTees(stage, rawRings, rawComponents, sprites, topPx, ctx, scoringKnobs, endpointsKnobs, badgeStageKnobs);
+			const tees = excludeAndAssembleTees(
+				stage,
+				rawRings,
+				rawComponents,
+				sprites,
+				topPx,
+				ctx,
+				scoringKnobs,
+				endpointsKnobs,
+				badgeStageKnobs
+			);
 			for (const tee of tees) {
-				ctx.overlay('tees', { type: 'box', bbox: tee.bbox, verdict: 'accepted', ref: tee.detId, values: { fill: tee.fill, area: tee.area } });
+				ctx.overlay('tees', {
+					type: 'box',
+					bbox: tee.bbox,
+					verdict: 'accepted',
+					ref: tee.detId,
+					values: { fill: tee.fill, area: tee.area }
+				});
 			}
 			board.set('tees', tees);
 			stop();
@@ -310,12 +370,20 @@ const assignmentOps: OperationDef[] = [
 			const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
 			const sortedRecovered = [...recoveredTees].sort(
-				(a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.provenance.note.localeCompare(b.provenance.note)
+				(a, b) =>
+					a.yPx - b.yPx || a.xPx - b.xPx || a.provenance.note.localeCompare(b.provenance.note)
 			);
 			const tees: TeeEvidence[] = [...measurement.tees];
 			let acceptedRecovered = 0;
 			for (const input of sortedRecovered) {
-				if (tees.some((tee) => Math.hypot(tee.xPx - input.xPx, tee.yPx - input.yPx) < searchKnobs.recoveredTeeDedupeDistance)) continue;
+				if (
+					tees.some(
+						(tee) =>
+							Math.hypot(tee.xPx - input.xPx, tee.yPx - input.yPx) <
+							searchKnobs.recoveredTeeDedupeDistance
+					)
+				)
+					continue;
 				tees.push(recoveredTee(input, acceptedRecovered++, measurement.baskets, scoringKnobs));
 			}
 			tees.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.detId.localeCompare(b.detId));
@@ -346,7 +414,10 @@ const assignmentOps: OperationDef[] = [
 			const rawPairs = board.get<readonly RawPairEvidence[]>('assignment.rawPairs');
 			const zfitKnobs = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
-			board.set('assignment.scoredPairs', scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs));
+			board.set(
+				'assignment.scoredPairs',
+				scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs)
+			);
 			stop();
 		}
 	},
@@ -383,7 +454,8 @@ const assignmentOps: OperationDef[] = [
 			const measurement = board.get<ThreeFactorMeasurement>('measurement');
 			const tees = board.get<readonly TeeEvidence[]>('assignment.tees');
 			const byBadge = board.get<Map<string, ScoredPairEvidence[]>>('assignment.rankedByBadge');
-			const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs ?? DEFAULT_SEARCH_KNOBS;
+			const searchKnobs =
+				(ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs) ?? DEFAULT_SEARCH_KNOBS;
 			const scoredPairs = [...byBadge.values()].flat();
 			const selected = selectAssignments(byBadge, searchKnobs);
 			const assignments: AssignmentEvidence[] = [...selected.entries()]
@@ -399,7 +471,11 @@ const assignmentOps: OperationDef[] = [
 					alternatives: (byBadge.get(badgeId) ?? [])
 						.filter((candidate) => pairKey(candidate) !== pairKey(pair))
 						.slice(0, 3)
-						.map((candidate) => ({ teeId: candidate.raw.teeId, basketId: candidate.raw.basketId, score: candidate.score }))
+						.map((candidate) => ({
+							teeId: candidate.raw.teeId,
+							basketId: candidate.raw.basketId,
+							score: candidate.score
+						}))
 				}));
 			const result: ThreeFactorAssignment = { measurement, tees, scoredPairs, assignments };
 			for (const own of result.assignments) ctx.measure('assignment', 'score', own.score);
@@ -418,7 +494,11 @@ const reusedOps: OperationDef[] = [
 	wrapLegacy('supportField', 'measure', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('badgeOcclusionPatch', 'transform', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('baskets', 'compute', 'G2', [g2SpriteFeature.id]),
-	wrapLegacy('rawPairs', 'compute', 'G5', [g5RibbonFeature.id, g5RoutingFeature.id, g4ScoringFeature.id]),
+	wrapLegacy('rawPairs', 'compute', 'G5', [
+		g5RibbonFeature.id,
+		g5RoutingFeature.id,
+		g4ScoringFeature.id
+	]),
 	wrapLegacy('measurement', 'materialize', 'shared'),
 	{
 		spec: {
@@ -428,7 +508,14 @@ const reusedOps: OperationDef[] = [
 			unit: 'phantomTee',
 			consumes: phantomTeeUnit.consumes,
 			produces: phantomTeeUnit.produces,
-			features: [phantomTeeFeature.id, zfitFeature.id, g4ScoringFeature.id, g4SearchFeature.id, g5RibbonFeature.id, g5RoutingFeature.id],
+			features: [
+				phantomTeeFeature.id,
+				zfitFeature.id,
+				g4ScoringFeature.id,
+				g4SearchFeature.id,
+				g5RibbonFeature.id,
+				g5RoutingFeature.id
+			],
 			note: phantomTeeUnit.note
 		},
 		run: (board, ctx) => phantomTeeUnit.run(asLegacyBoard(board), ctx)
@@ -461,7 +548,12 @@ const reusedOps: OperationDef[] = [
 	}
 ];
 
-const allOpDefs: readonly OperationDef[] = [...badgeStageOps, ...teesOps, ...assignmentOps, ...reusedOps];
+const allOpDefs: readonly OperationDef[] = [
+	...badgeStageOps,
+	...teesOps,
+	...assignmentOps,
+	...reusedOps
+];
 const opDefById = new Map(allOpDefs.map((def) => [def.spec.id, def]));
 
 /**
@@ -490,12 +582,13 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['cleanBasketFamily', ['cleanBasketFamily']]
 ]);
 
-export const OPERATION_DEFS: readonly OperationDef[] = [...UNIT_OPERATIONS.values()].flatMap((opIds) =>
-	opIds.map((opId) => {
-		const def = opDefById.get(opId);
-		if (!def) throw new Error(`exec/operations: missing OperationDef for '${opId}'`);
-		return def;
-	})
+export const OPERATION_DEFS: readonly OperationDef[] = [...UNIT_OPERATIONS.values()].flatMap(
+	(opIds) =>
+		opIds.map((opId) => {
+			const def = opDefById.get(opId);
+			if (!def) throw new Error(`exec/operations: missing OperationDef for '${opId}'`);
+			return def;
+		})
 );
 
 export const OPERATION_UNIVERSE: readonly OperationSpec[] = OPERATION_DEFS.map((def) => def.spec);
@@ -534,19 +627,42 @@ export interface ArtifactExtraction {
 	readonly dims?: { readonly width: number; readonly height: number };
 }
 
-export const ARTIFACT_EXTRACTORS: Readonly<Record<string, (board: ExecBoard) => ArtifactExtraction[]>> = {
+export const ARTIFACT_EXTRACTORS: Readonly<
+	Record<string, (board: ExecBoard) => ArtifactExtraction[]>
+> = {
 	'badgeStage.masks'(board) {
 		const image = board.get<RgbaImage>('localImage');
 		const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
 		return [
-			{ kind: 'rgba', id: 'badgeStage.masks.localImage', bytes: Uint8Array.from(image.data), dims: { width: image.width, height: image.height } },
-			{ kind: 'mask', id: 'badgeStage.masks.bright', bytes: maskBytes(bright), dims: { width: bright.width, height: bright.height } },
-			{ kind: 'mask', id: 'badgeStage.masks.dark', bytes: maskBytes(dark), dims: { width: dark.width, height: dark.height } }
+			{
+				kind: 'rgba',
+				id: 'badgeStage.masks.localImage',
+				bytes: Uint8Array.from(image.data),
+				dims: { width: image.width, height: image.height }
+			},
+			{
+				kind: 'mask',
+				id: 'badgeStage.masks.bright',
+				bytes: maskBytes(bright),
+				dims: { width: bright.width, height: bright.height }
+			},
+			{
+				kind: 'mask',
+				id: 'badgeStage.masks.dark',
+				bytes: maskBytes(dark),
+				dims: { width: dark.width, height: dark.height }
+			}
 		];
 	},
 	'badgeStage.components'(board) {
 		const { brightComponents } = board.get<BadgeStageComponents>('badgeStage.components');
-		return [{ kind: 'componentSet', id: 'badgeStage.components.bright', bytes: jsonBytes(brightComponents) }];
+		return [
+			{
+				kind: 'componentSet',
+				id: 'badgeStage.components.bright',
+				bytes: jsonBytes(brightComponents)
+			}
+		];
 	},
 	'tees.exclusion'(board) {
 		const tees = board.get<readonly TeeEvidence[]>('tees');
@@ -563,10 +679,18 @@ export const ARTIFACT_EXTRACTORS: Readonly<Record<string, (board: ExecBoard) => 
 		const rawPairs = board.get<readonly RawPairEvidence[]>('rawPairs');
 		const sample = rawPairs[0];
 		if (!sample) return [];
-		return [{ kind: 'polyline', id: 'rawPairs.sampleTeeLeg', bytes: jsonBytes(sample.teeLeg.path) }];
+		return [
+			{ kind: 'polyline', id: 'rawPairs.sampleTeeLeg', bytes: jsonBytes(sample.teeLeg.path) }
+		];
 	},
 	'assignment.selection'(board) {
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
-		return [{ kind: 'measurementTable', id: 'assignment.selection.table', bytes: jsonBytes(assignment.assignments) }];
+		return [
+			{
+				kind: 'measurementTable',
+				id: 'assignment.selection.table',
+				bytes: jsonBytes(assignment.assignments)
+			}
+		];
 	}
 };

@@ -12,6 +12,27 @@ const THROWN_FRACTION_MIN = 0.004;
 const MAP_FRACTION_MAX = 0.0005;
 const TARGET_SAMPLE_COUNT = 20_000;
 
+export const PURPLE_MASS_MATH = {
+	hueMinDeg: HUE_MIN_DEG,
+	hueMaxDeg: HUE_MAX_DEG,
+	saturationMin: SATURATION_MIN,
+	valueMin: VALUE_MIN,
+	thrownFractionMin: THROWN_FRACTION_MIN,
+	mapFractionMax: MAP_FRACTION_MAX,
+	targetSampleCount: TARGET_SAMPLE_COUNT
+} as const;
+
+export function describePurpleMassMath(): string {
+	return [
+		`purple pixel: hue in [${HUE_MIN_DEG}, ${HUE_MAX_DEG}] degrees, saturation >= ${SATURATION_MIN}, value >= ${VALUE_MIN}`,
+		`sample stride: max(1, ceil(sqrt(width * height / ${TARGET_SAMPLE_COUNT})))`,
+		'purpleFraction = purplePixels / sampledPixels',
+		`classification: thrown when fraction >= ${THROWN_FRACTION_MIN}; map when fraction <= ${MAP_FRACTION_MAX}; otherwise unknown`,
+		'purple region: half-open bounds [left,right) x [top,bottom) over every thumbnail pixel',
+		'batch rule: exactly one thrown classification is retained; otherwise every row becomes unknown with reason no-unique-thrown'
+	].join('\n');
+}
+
 export type PurpleMassIntent = 'likely-thrown' | 'likely-map' | 'uncertain';
 
 export interface PurpleMassMeasurement {
@@ -24,7 +45,7 @@ export interface PurpleMassMeasurement {
 	readonly confidence: number;
 }
 
-function isPurple(r: number, g: number, b: number): boolean {
+export function isPurplePixel(r: number, g: number, b: number): boolean {
 	const rn = r / 255;
 	const gn = g / 255;
 	const bn = b / 255;
@@ -60,7 +81,7 @@ export function measurePurpleMass(image: RgbaRaster): PurpleMassMeasurement {
 		for (let x = 0; x < image.widthPx; x += stride) {
 			const i = (y * image.widthPx + x) * 4;
 			sampledPixels++;
-			if (!isPurple(image.rgba[i], image.rgba[i + 1], image.rgba[i + 2])) continue;
+			if (!isPurplePixel(image.rgba[i], image.rgba[i + 1], image.rgba[i + 2])) continue;
 			purplePixels++;
 			sumX += x;
 			sumY += y;
@@ -90,6 +111,29 @@ export function measurePurpleMass(image: RgbaRaster): PurpleMassMeasurement {
 }
 
 /** Emits one comparable image-level score on every valid image. */
+export function purpleMassBounds(
+	widthPx: number,
+	heightPx: number,
+	rgba: ArrayLike<number>
+): { leftPx: number; topPx: number; rightPx: number; bottomPx: number } | null {
+	let left = widthPx,
+		top = heightPx,
+		right = 0,
+		bottom = 0,
+		found = false;
+	for (let y = 0; y < heightPx; y++)
+		for (let x = 0; x < widthPx; x++) {
+			const i = (y * widthPx + x) * 4;
+			if (!isPurplePixel(rgba[i], rgba[i + 1], rgba[i + 2])) continue;
+			found = true;
+			left = Math.min(left, x);
+			top = Math.min(top, y);
+			right = Math.max(right, x + 1);
+			bottom = Math.max(bottom, y + 1);
+		}
+	return found ? { leftPx: left, topPx: top, rightPx: right, bottomPx: bottom } : null;
+}
+
 export const purpleMassDetector: Detector = async (image, emit) => {
 	const measurement = measurePurpleMass(image);
 	emit({

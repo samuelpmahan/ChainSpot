@@ -31,7 +31,13 @@ import { canonicalJson } from '../detectors/threeFactor/hash';
 import { sha256HexSyncText } from './sha256';
 
 /** Slots the caller seeds onto the board before any operation runs — mirrors engine.ts's SEEDED_SLOTS at operation granularity. */
-export const SEEDED_SLOTS: readonly SlotRef[] = ['image', 'localImage', 'params', 'viewport', 'recoveredTees'];
+export const SEEDED_SLOTS: readonly SlotRef[] = [
+	'image',
+	'localImage',
+	'params',
+	'viewport',
+	'recoveredTees'
+];
 
 export interface CompiledExecutionPlan {
 	readonly ops: readonly OperationSpec[];
@@ -47,9 +53,30 @@ function fail(message: string): never {
 	throw new Error(`exec compile: ${message}`);
 }
 
+export function validateOperationOrder(
+	ops: readonly OperationSpec[],
+	seededSlots: readonly SlotRef[] = SEEDED_SLOTS,
+	errorPrefix = 'exec compile'
+): void {
+	const available = new Set<SlotRef>(seededSlots);
+	for (const op of ops) {
+		for (const slot of op.consumes) {
+			if (!available.has(slot)) {
+				throw new Error(
+					`${errorPrefix}: operation '${op.id}' (unit '${op.unit}') consumes '${slot}' but no earlier operation produces it.`
+				);
+			}
+		}
+		for (const slot of op.produces) available.add(slot);
+	}
+}
+
 const specById = new Map(OPERATION_UNIVERSE.map((spec) => [spec.id, spec]));
 
-export function compileExecutionPlan(resolved: ResolvedConfig, paramsHash?: string): CompiledExecutionPlan {
+export function compileExecutionPlan(
+	resolved: ResolvedConfig,
+	paramsHash?: string
+): CompiledExecutionPlan {
 	// Expand the config's unit-level execution order into the fixed
 	// per-unit operation chain (UNIT_OPERATIONS) — this is the config
 	// intent choosing among legal unit orders, at the granularity configs
@@ -76,20 +103,14 @@ export function compileExecutionPlan(resolved: ResolvedConfig, paramsHash?: stri
 	// unit-level check it replaces: it also validates that each unit's own
 	// internal decomposition is a genuine, satisfiable dependency chain,
 	// not just decorative labels (R2).
-	const available = new Set<SlotRef>(SEEDED_SLOTS);
-	for (const op of ops) {
-		for (const slot of op.consumes) {
-			if (!available.has(slot)) {
-				fail(`operation '${op.id}' (unit '${op.unit}') consumes '${slot}' but no earlier operation produces it.`);
-			}
-		}
-		for (const slot of op.produces) available.add(slot);
-	}
+	validateOperationOrder(ops);
 
 	const bindings: Record<string, { enabled: boolean; knobs: Record<string, unknown> }> = {};
 	for (const [id, state] of Object.entries(resolved.features)) bindings[id] = state;
 
-	const planFingerprint = sha256HexSyncText(canonicalJson({ resolvedConfig: resolved, opUniverse: OPERATION_UNIVERSE }));
+	const planFingerprint = sha256HexSyncText(
+		canonicalJson({ resolvedConfig: resolved, opUniverse: OPERATION_UNIVERSE })
+	);
 
 	return {
 		ops,

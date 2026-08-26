@@ -7,6 +7,8 @@
 // baseline units default ON, deviations default OFF so that the default
 // config reproduces frozen dev72 behavior byte-for-byte.
 
+import type { ABFeatureOperation } from '../../../exec/feature-set';
+
 // ---------------------------------------------------------------------------
 // Gates — the human taxonomy over the DAG (organizes config/trace/UI; does
 // NOT define execution order, which the config's execution list carries).
@@ -64,6 +66,8 @@ export interface ABFeature<K extends KnobSpecs = KnobSpecs> {
 	readonly defaultEnabled: boolean;
 	readonly note?: string;
 	readonly knobs: K;
+	/** Ordered executable behavior when this feature participates in an ABFeatureSet. */
+	readonly operations?: readonly ABFeatureOperation[];
 	/**
 	 * OPTIONAL feature-owned rendering. Absent on every feature by default,
 	 * so this member cannot move parity and cannot break a feature that
