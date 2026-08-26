@@ -15,6 +15,7 @@
 			<button data-mode="traverse">Traverse</button>
 			<button data-mode="sweep">Sweep</button>
 		</nav>
+		<button id="helpToggle" class="helpToggle" type="button" aria-controls="helpDrawer" aria-expanded="true" aria-label="Toggle contextual help">?</button>
 		<div id="canonicalBadge" class="badge muted">NO RASTER</div>
 	</header>
 
@@ -136,6 +137,10 @@
 		</main>
 
 		<aside class="inspector">
+			<section id="helpDrawer" class="helpDrawer" aria-live="polite" tabindex="-1">
+				<div class="helpDrawerHead"><h2>Contextual help</h2><span id="helpMode" class="badge muted">SCOPE</span><button id="helpClose" class="helpClose" type="button" aria-label="Close contextual help">×</button></div>
+				<div id="helpContent" class="muted">Loading catalog help…</div>
+			</section>
 			<h2>State</h2>
 			<div id="mutationExplain" class="callout">Open a raster to begin.</div>
 			<h3>Pages</h3>

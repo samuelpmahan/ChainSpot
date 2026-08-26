@@ -14,7 +14,8 @@ const app = {
 	suppressClick: false,
 	selectedStart: null,
 	traversal: null,
-	sweep: null
+	sweep: null,
+	help: null
 };
 
 async function api(path, options = {}) {
@@ -115,6 +116,49 @@ function setMode(mode) {
 	$('#scopeArtifactCard').classList.toggle('hidden', mode !== 'scope' || !$('#scopeArtifact').src);
 	$('#sweepResultCard').classList.toggle('hidden', mode !== 'sweep' || !app.sweep);
 	renderAll();
+	void loadContextualHelp();
+}
+
+function helpList(title, items) {
+	if (!items?.length) return '';
+	return `<h3>${esc(title)}</h3><ul>${items.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`;
+}
+
+function helpOption(option) {
+	const details = [option.default === undefined ? '' : `default ${option.default}`, option.appliesTo, option.constraints].filter(Boolean);
+	return `<li><code>${esc(option.name)}${option.value ? ` ${esc(option.value)}` : ''}</code> — ${esc(option.summary)}${details.length ? ` <span class="muted">(${esc(details.join('; '))})</span>` : ''}</li>`;
+}
+
+function renderContextualHelp() {
+	const content = $('#helpContent');
+	const record = app.help?.record;
+	$('#helpMode').textContent = app.mode.toUpperCase();
+	if (!record) {
+		content.innerHTML = '<span class="muted">Catalog help is unavailable.</span>';
+		return;
+	}
+	content.innerHTML = `
+		<div class="helpTitle"><b>${esc(record.title)}</b><span class="availability">${esc(record.availability)}</span></div>
+		<p>${esc(record.summary)}</p>
+		${helpList('Usage', record.forms)}
+		${record.options?.length ? `<h3>Options</h3><ul>${record.options.map(helpOption).join('')}</ul>` : ''}
+		${helpList('Effects', record.sideEffects)}
+		${helpList('Caveats', record.caveats)}
+	`;
+}
+
+async function loadContextualHelp() {
+	const mode = app.mode;
+	try {
+		const payload = await api(`/api/help?topic=${encodeURIComponent(`ui/${mode}`)}`);
+		if (app.mode !== mode) return;
+		app.help = payload;
+		renderContextualHelp();
+	} catch (error) {
+		if (app.mode !== mode) return;
+		app.help = null;
+		renderContextualHelp();
+	}
 }
 
 function pointFromEvent(event) {
@@ -577,6 +621,24 @@ $('#modeNav').addEventListener('click', (event) => {
 	const button = event.target.closest('button[data-mode]');
 	if (button) setMode(button.dataset.mode);
 });
+function setHelpDrawerOpen(open, { focus = false } = {}) {
+	$('#helpDrawer').classList.toggle('hidden', !open);
+	$('#helpToggle').setAttribute('aria-expanded', String(open));
+	if (open && focus) {
+		$('#helpDrawer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+		$('#helpDrawer').focus();
+	}
+	if (!open && focus) $('#helpToggle').focus();
+}
+$('#helpToggle').onclick = () => {
+	const opening = $('#helpDrawer').classList.contains('hidden');
+	setHelpDrawerOpen(opening, { focus: opening });
+};
+$('#helpClose').onclick = () => setHelpDrawerOpen(false, { focus: true });
+document.addEventListener('keydown', (event) => {
+	if (event.key !== 'Escape' || $('#helpDrawer').classList.contains('hidden')) return;
+	setHelpDrawerOpen(false, { focus: true });
+});
 wireFilePicker('raster', '#imagePath', '#imageFile', '#pickImage');
 wireFilePicker('annotation', '#annotationPath', '#annotationFile', '#pickAnnotation');
 $('#openRaster').onclick = openRaster;
@@ -714,6 +776,7 @@ async function boot() {
 		const preferred = app.configs.find((config) => config.endsWith('/configs/default.json'));
 		if (preferred) $('#configSelect').value = preferred;
 		renderAll();
+		await loadContextualHelp();
 	} catch (error) {
 		toast(error.message);
 	}

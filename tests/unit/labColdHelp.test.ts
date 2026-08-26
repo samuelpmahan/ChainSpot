@@ -15,6 +15,7 @@ function coldLauncher() {
 	writeFileSync(launcher, readFileSync(SOURCE, 'utf8'));
 	mkdirSync(join(root, 'context'), { recursive: true });
 	writeFileSync(join(root, 'context', 'context.mjs'), readFileSync(`${LAB}/context/context.mjs`, 'utf8'));
+	cpSync(`${LAB}/help`, join(root, 'help'), { recursive: true });
 	cpSync(`${LAB}/courses`, join(root, 'courses'), { recursive: true });
 	return { launcher, root };
 }

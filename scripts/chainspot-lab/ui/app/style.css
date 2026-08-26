@@ -71,6 +71,8 @@ a { color: var(--cyan); }
 .topbar nav { display: flex; gap: 5px; }
 .topbar nav button { border-color: transparent; background: transparent; }
 .topbar nav button.active { border-color: var(--line); background: var(--panel2); color: var(--accent); }
+.helpToggle { width: 31px; height: 31px; padding: 0; border-radius: 50%; color: var(--accent); font: bold 17px ui-monospace, monospace; }
+.helpClose { width: 23px; height: 23px; padding: 0; border-radius: 50%; font: 16px/1 ui-monospace, monospace; }
 .badge { margin-left: auto; border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; font-size: 11px; font-family: ui-monospace, monospace; }
 .openbar {
 	display: flex;
@@ -169,6 +171,14 @@ a { color: var(--cyan); }
 	font-size: 12px;
 }
 .callout { border-left: 3px solid var(--accent); }
+.helpDrawer { margin: -1px -1px 18px; padding: 11px; border: 1px solid #75672d; border-radius: 8px; background: #1d1b15; scroll-margin-top: 66px; }
+.helpDrawerHead, .helpTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.helpDrawer h2 { margin: 0; }
+.helpDrawer h3 { margin: 12px 0 4px; }
+.helpDrawer p { margin: 8px 0; color: var(--ink); font-size: 12px; }
+.helpDrawer ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: 11px; }
+.helpDrawer li { margin: 4px 0; }
+.availability { border: 1px solid #75672d; border-radius: 999px; padding: 2px 6px; font: 9px ui-monospace, monospace; color: #fff1a8; white-space: nowrap; }
 .pageList { display: grid; gap: 5px; }
 .pageRow { display: flex; justify-content: space-between; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .pageRow.active { border-color: var(--accent); background: #292516; }

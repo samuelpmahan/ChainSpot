@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { PNG } from 'pngjs';
 import { loadLabConfig, resolveCourseContext } from '../context/context.mjs';
+import { browserHelpPayload } from '../help/render.mjs';
 import { loadScopeInput, runScopeOperation, scopeSlug } from '../scope/operation';
 import type { PointTuple, ScopePinStyle, ScopeRequest } from '../scope/types';
 import {
@@ -351,6 +352,16 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 			json(res, 200, publicContext());
 			return true;
 		}
+		if (req.method === 'GET' && url.pathname === '/api/help') {
+			const topic = url.searchParams.get('topic') ?? (url.searchParams.get('context') ? `ui/${url.searchParams.get('context')}` : 'ui/scope');
+			const payload = browserHelpPayload(topic);
+			if (!payload.record) {
+				json(res, 404, { error: `unknown help topic '${topic}'.` });
+				return true;
+			}
+			json(res, 200, payload);
+			return true;
+		}
 		if (req.method === 'GET' && url.pathname === '/api/configs') {
 			json(res, 200, { configs: listConfigs() });
 			return true;
@@ -506,9 +517,11 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				stubbedCount: result.stubbedCount,
 				truthScoringSkipped: result.truthScoringSkipped,
 				scoreboard: result.scoreboard,
+				groundingComparisons: result.groundingComparisons,
 				ops: result.plan.ops.map((op) => ({ id: op.id, gate: op.gate, kind: (op as any).kind ?? (op as any).op ?? '' })),
 				receipts: result.receipts.map((receipt) => ({ opId: receipt.opId, artifactCount: receipt.artifacts.length, artifacts: receipt.artifacts })),
 				artifactRenders: result.artifactRenders,
+				featureRenders: result.featureRenders,
 				files: listArtifacts(result.outDir)
 			});
 			return true;
