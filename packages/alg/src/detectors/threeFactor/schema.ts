@@ -53,7 +53,7 @@ export function buildConfigJsonSchema(unitIds: readonly string[]): Record<string
 		$id: 'chainspot://threeFactor-config@1',
 		title: 'threeFactor engine config',
 		description:
-			'Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = frozen dev72 behavior.',
+			'Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.',
 		type: 'object',
 		additionalProperties: false,
 		required: ['schema', 'name'],

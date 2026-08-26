@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'vitest';
 import {
 	findEnclosingFrame,
+	orientedPadCorners,
 	selectTeeFamily,
 	teeFamilyFeature,
+	teeFamilyUnit,
 	type TeeFamilyFrame,
 	type TeeFamilyKnobs,
 	type TeeFamilyMeasure,
 	type TeeFamilyRingPoint
 } from '@chainspot/alg/detectors/threeFactor/features/g3.teeFamily';
 import { parseConfig } from '@chainspot/alg/detectors/threeFactor';
+import type { TeeEvidence } from '@chainspot/alg/detectors/threeFactor';
+import { createBoard } from '@chainspot/alg/detectors/threeFactor/measure';
+import { nullFeatureContext } from '@chainspot/alg/detectors/threeFactor/features/types';
 import teeFamilyOnJson from '@chainspot/alg/detectors/threeFactor/configs/tee-family-on.json';
 
 const KNOBS: TeeFamilyKnobs = {
@@ -26,7 +31,24 @@ function ring(id: string, cx: number, cy: number): TeeFamilyRingPoint {
 }
 
 function frame(bboxX: number, bboxY: number, bboxW: number, bboxH: number, area: number, major: number, minor: number): TeeFamilyFrame {
-	return { bboxX, bboxY, bboxW, bboxH, area, major, minor };
+	return {
+		componentLabel: 1,
+		bboxX,
+		bboxY,
+		bboxW,
+		bboxH,
+		componentCentroidXPx: bboxX + bboxW / 2 - 0.5,
+		componentCentroidYPx: bboxY + bboxH / 2 - 0.5,
+		area,
+		fill: area / Math.max(1, major * minor),
+		major,
+		minor,
+		angleRad: 0,
+		axisMajorMin: -(major - 1) / 2,
+		axisMajorMax: (major - 1) / 2,
+		axisMinorMin: -(minor - 1) / 2,
+		axisMinorMax: (minor - 1) / 2
+	};
 }
 
 function measure(id: string, cx: number, cy: number, f: TeeFamilyFrame): TeeFamilyMeasure {
@@ -161,10 +183,99 @@ describe('selectTeeFamily (LAB selectTeeFamily) - exact ratio boundaries', () =>
 	});
 });
 
+describe('visible tee-pad geometry promotion', () => {
+	test('converts retained component PCA geometry into a closed-orientable quadrilateral', () => {
+		const horizontal = {
+			...frame(6, 18, 8, 4, 32, 8, 4),
+			componentCentroidXPx: 9.5,
+			componentCentroidYPx: 19.5
+		};
+		expect(orientedPadCorners(horizontal)).toEqual([
+			[6, 18],
+			[14, 18],
+			[14, 22],
+			[6, 22]
+		]);
+
+		const vertical = { ...horizontal, angleRad: Math.PI / 2 };
+		const corners = orientedPadCorners(vertical);
+		expect(corners[0][0]).toBeCloseTo(12);
+		expect(corners[0][1]).toBeCloseTo(16);
+		expect(corners[2][0]).toBeCloseTo(8);
+		expect(corners[2][1]).toBeCloseTo(24);
+	});
+
+	test('promotes the outer component AABB and oriented pad evidence without overwriting ring geometry or scoring angle', () => {
+		const board = createBoard();
+		const tee: TeeEvidence = {
+			detId: 'tee-test',
+			xPx: 14.5,
+			yPx: 13.5,
+			tier: 'ring',
+			angleRad: 0.1,
+			ring: {
+				bbox: [10, 9, 10, 8],
+				area: 80,
+				elongation: 1.25,
+				ringFrac: 0.9
+			},
+			bbox: [10, 9, 10, 8],
+			area: 80,
+			fill: 0.9,
+			onRing: false
+		};
+		board.set('stage', {
+			brightComponents: [
+				{
+					label: 7,
+					cx: 14.5,
+					cy: 9.5,
+					area: 220,
+					bboxX: 0,
+					bboxY: 0,
+					bboxW: 30,
+					bboxH: 20,
+					major: 30,
+					minor: 20,
+					angle: Math.PI / 4,
+					axisMajorMin: -14.5,
+					axisMajorMax: 14.5,
+					axisMinorMin: -9.5,
+					axisMinorMax: 9.5,
+					fill: 220 / 600
+				}
+			]
+		});
+		board.set('tees', [tee]);
+		board.set('viewport', { topPx: 4 });
+
+		teeFamilyUnit.run(board, nullFeatureContext);
+		const [promoted] = board.get<readonly TeeEvidence[]>('tees');
+		expect(promoted.bbox).toEqual([0, 4, 30, 20]);
+		expect(promoted.ring?.bbox).toEqual([10, 9, 10, 8]);
+		expect(promoted.angleRad).toBe(0.1);
+		expect(promoted.pad).toMatchObject({
+			source: 'bright-mask-component',
+			componentLabel: 7,
+			bbox: [0, 4, 30, 20],
+			componentCentroidXPx: 14.5,
+			componentCentroidYPx: 13.5,
+			centerXPx: 15,
+			centerYPx: 14,
+			angleRad: Math.PI / 4,
+			majorPx: 30,
+			minorPx: 20,
+			area: 220,
+			fill: 220 / 600
+		});
+		expect(promoted.pad?.orientedCorners).toHaveLength(4);
+	});
+});
+
 describe('teeFamilyFeature registration', () => {
-	test('deviation, default OFF, all 7 knobs at spec defaults', () => {
-		expect(teeFamilyFeature.kind).toBe('deviation');
-		expect(teeFamilyFeature.defaultEnabled).toBe(false);
+	test('visible-detection baseline, default ON, all 7 knobs at recovered defaults', () => {
+		expect(teeFamilyFeature.kind).toBe('baseline');
+		expect(teeFamilyFeature.defaultEnabled).toBe(true);
 		expect(Object.keys(teeFamilyFeature.knobs).sort()).toEqual(
 			[
 				'areaRatioToleranceFactor',

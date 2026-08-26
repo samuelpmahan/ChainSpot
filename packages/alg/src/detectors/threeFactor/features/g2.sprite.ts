@@ -1,93 +1,217 @@
-// g2.sprite — basket matched-filter sprite detection (coarse scan, stride-1
-// refinement, matching-pursuit dedupe), extracted from endpoints.ts's
-// matchBasketSprites, plus the basket bbox width/height from measure.ts's
-// makeBaskets. Baseline: default ON, knobs always apply, defaults byte-equal
-// to the pre-extraction literals.
-//
-// spriteWidth/spriteHeight are STRUCTURALLY COUPLED to the committed
-// resources/nuthing-p2/endpoints/basket-sprite.json template asset (loaded
-// as assets/basket-sprite.json): matchBasketSprites itself always matches
-// using the template's own actual width/height (template.w/template.h, read
-// from the JSON at load time), but the reported BasketEvidence.bbox in
-// measure.ts's makeBaskets used a hardcoded [42, 66] independent of that —
-// coincidentally equal to the asset's real dimensions, not derived from it.
-// validate() below checks the configured value against the asset's real
-// width/height so a mismatched config value fails at config-resolve time
-// with a clear reason instead of silently reporting a basket bbox that
-// doesn't match what was actually matched.
-//
-// coarseThreshold (0.18) and scoreMin (0.28) are two DIFFERENT thresholds on
-// the same score formula (onFrac - offFrac): coarseThreshold gates the
-// coarse sampled-template pass, scoreMin gates final acceptance after
-// stride-1 refinement. scoreMin (0.28) is also coincidentally equal to
-// g5.zfit's alignedWorstCeiling (0.28) — a different feature, different
-// quantity (aligned worst-window support vs. sprite match score) — no
-// relationship, not reused.
-//
-// NOT extracted: prepareSpriteTemplate's internal `sample(a, 4)` stride —
-// see the doc comment on SpriteKnobs in endpoints.ts for why (module-load-
-// time singleton, before any config exists).
+// g2.sprite — renderer-family basket detection recovered from the surviving
+// LAB smart-basket implementation. Pass 1 recognizes isolated 42x66 bright
+// components with the expected white shape and local dark shell. Pass 2
+// searches only around known badge/basket occluders for missing family
+// members. Ownership remains downstream.
 
 import basketSpriteData from '../assets/basket-sprite.json';
-import type { ABFeature } from './types';
+import { DEFAULT_SMART_BASKET_OPTIONS, type SmartBasketOptions } from '../smartBasket';
+import type { ABFeature, Drawable, FeatureRender, RunTrace, UnitTrace } from './types';
 
 const ASSET_WIDTH: number = (basketSpriteData as { width: number }).width;
 const ASSET_HEIGHT: number = (basketSpriteData as { height: number }).height;
+
+function fraction(value: unknown, name: string): string | null {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+		? null
+		: `${name} must be in [0, 1]`;
+}
+
+function nonNegative(value: unknown, name: string): string | null {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0
+		? null
+		: `${name} must be non-negative`;
+}
+
+export interface SmartSpriteKnobs extends Required<SmartBasketOptions> {
+	readonly spriteWidth: number;
+	readonly spriteHeight: number;
+}
+
+const BASKETS_UNIT = 'baskets';
+const BRIGHT_MASK_ARTIFACT = 'badgeStage.masks.bright';
+
+function verdictOf(drawables: readonly Drawable[], verdict: Drawable['verdict']): Drawable[] {
+	return drawables.filter((drawable) => drawable.verdict === verdict);
+}
+
+function countByReason(drawables: readonly Drawable[]): Array<[string, number]> {
+	const counts = new Map<string, number>();
+	for (const drawable of drawables) {
+		const reason = drawable.reason ?? '(no reason recorded -- invalid silent drop)';
+		counts.set(reason, (counts.get(reason) ?? 0) + 1);
+	}
+	return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/** The sprite feature owns this plan. LAB only rasterizes its traced geometry. */
+export const G2_SPRITE_RENDER: FeatureRender = {
+	units: [BASKETS_UNIT],
+	draw(unit: UnitTrace, run: RunTrace) {
+		const accepted = verdictOf(unit.drawables, 'accepted');
+		const rejected = verdictOf(unit.drawables, 'rejected');
+		const whiteBounds = verdictOf(unit.drawables, 'info').filter(
+			(drawable) => drawable.type === 'box' && drawable.ref?.endsWith(':white-component')
+		);
+		const semanticTips = verdictOf(unit.drawables, 'info').filter(
+			(drawable) => drawable.type === 'point' && drawable.ref?.endsWith(':semantic-tip')
+		);
+		const notes = [
+			`feature:      sprite (g2.sprite) -- ${unit.gate}, trace unit '${unit.id}'`,
+			`unit enabled: ${unit.enabled}  (source: UnitTrace.enabled)`,
+			`config:       ${run.configName}`,
+			`paramsHash:   ${run.paramsHash || 'UNKNOWN -- caller ran the engine without one'}`,
+			`unit ms:      ${unit.ms.toFixed(2)}  (source: UnitTrace.ms; wall clock, not quality)`,
+			`knobsDeviating: ${unit.knobsDeviating.length ? unit.knobsDeviating.join(', ') : 'none'}  (source: UnitTrace.knobsDeviating)`,
+			'',
+			`accepted basket candidates: ${accepted.length}   (source: accepted UnitTrace.drawables)`,
+			`rejected basket candidates: ${rejected.length}   (source: rejected UnitTrace.drawables)`,
+			`examined renderer-family candidates: ${accepted.length + rejected.length}`,
+			'',
+			'green/red candidate boxes are full-sprite bounds learned from white + associated black family support.',
+			'cyan boxes are the detector-local bright connected components and are never emitted as object bounds.',
+			'ownership: UNKNOWN -- G2 localizes sprites; downstream assignment owns course-hole ownership.',
+			'',
+			'rejections by reason:'
+		];
+		const reasons = countByReason(rejected);
+		if (reasons.length === 0) notes.push('  none');
+		else for (const [reason, count] of reasons) notes.push(`  ${String(count).padStart(4)} x  ${reason}`);
+		for (const measurement of unit.measurements) {
+			notes.push(
+				`measurement '${measurement.name}': n=${measurement.count} min=${measurement.min} max=${measurement.max} mean=${(measurement.sum / Math.max(1, measurement.count)).toFixed(4)}  (source: UnitTrace.measurements)`
+			);
+		}
+		return {
+			title: `g2.sprite -- full basket bounds (${run.configName})`,
+			base: BRIGHT_MASK_ARTIFACT,
+			layers: [
+				{
+					name: 'basket full-sprite bounds rejected (G2)',
+					note: 'full learned sprite bounding box plus measured rejection testimony',
+					drawables: rejected
+				},
+				{
+					name: 'basket full-sprite bounds accepted (G2)',
+					note: 'full learned sprite bounding box emitted to downstream evidence',
+					drawables: accepted
+				},
+				{
+					name: 'basket white-component bounds (G2)',
+					note: 'detector-local bright support, retained separately and never represented as object bounds',
+					drawables: whiteBounds
+				},
+				{
+					name: 'basket semantic endpoints (G2)',
+					note: 'engine-emitted geometric endpoints; informational only, never ownership',
+					drawables: semanticTips
+				}
+			],
+			notes
+		};
+	}
+};
 
 export const g2SpriteFeature = {
 	id: 'sprite',
 	gate: 'G2',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'Basket matched-filter sprite detection: coarse scan, stride-1 refinement, matching-pursuit dedupe.',
+	note: 'Two-pass basket renderer-family detection: intact connected components, then occlusion recovery seeded by known renderer objects.',
+	render: G2_SPRITE_RENDER,
 	knobs: {
-		coarseStride: {
-			default: 3,
-			note: 'pixel stride for the coarse sprite-matching scan pass (was SPRITE_COARSE_STRIDE)'
+		bboxTolerancePx: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.bboxTolerancePx,
+			note: 'allowed difference from the 42x66 connected-component family bbox',
+			validate: (value: unknown) =>
+				Number.isInteger(value) && (value as number) >= 0
+					? null
+					: 'bboxTolerancePx must be a non-negative integer'
 		},
-		coarseThreshold: {
-			default: 0.18,
-			note: 'score threshold for coarse sprite-matching peaks (was SPRITE_COARSE_THRESHOLD)'
+		areaRatioMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.areaRatioMin,
+			validate: (value: unknown) => nonNegative(value, 'areaRatioMin')
 		},
-		scoreMin: {
-			default: 0.28,
-			note: 'minimum score for final sprite match acceptance, after refinement (was DEFAULT_SPRITE_SCORE_MIN; coincidentally also g5.zfit.alignedWorstCeiling\'s value — see file header, unrelated)'
+		areaRatioMax: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.areaRatioMax,
+			validate: (value: unknown) => nonNegative(value, 'areaRatioMax')
 		},
-		tipOffset: {
-			default: 4,
-			note: 'offset from basket center to the pole-tip annotation point (was BASKET_TIP_OFFSET)'
+		cleanWhiteCoverageMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.cleanWhiteCoverageMin,
+			validate: (value: unknown) => fraction(value, 'cleanWhiteCoverageMin')
 		},
-		coarseGateYOffset: {
-			default: 10,
-			note: 'y offset (from the sprite top) used by the cheap coarse-pass bright-pixel gate'
+		cleanDarkShellMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.cleanDarkShellMin,
+			validate: (value: unknown) => fraction(value, 'cleanDarkShellMin')
 		},
-		coarseGateXOffset: {
-			default: 4,
-			note: 'x offset (±) used by the cheap coarse-pass bright-pixel gate'
+		cleanDarkCoherenceMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.cleanDarkCoherenceMin,
+			validate: (value: unknown) => fraction(value, 'cleanDarkCoherenceMin')
 		},
-		refinementRadius: {
-			default: 2,
-			note: 'stride-1 search radius around each coarse peak during refinement (missed by the original inventory sweep)'
+		shellRadiusPx: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.shellRadiusPx,
+			validate: (value: unknown) =>
+				Number.isInteger(value) && (value as number) >= 1
+					? null
+					: 'shellRadiusPx must be a positive integer'
 		},
-		staleScoreEpsilon: {
-			default: 1e-3,
-			note: 'minimum score drop, versus the live (partially-erased) mask, before a matching-pursuit candidate is treated as stale and re-scored (missed by the original inventory sweep)'
+		blackConsensusFraction: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.blackConsensusFraction,
+			validate: (value: unknown) => fraction(value, 'blackConsensusFraction')
+		},
+		blackConsensusMarginPx: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.blackConsensusMarginPx,
+			validate: (value: unknown) => nonNegative(value, 'blackConsensusMarginPx')
+		},
+		recoveryIdentityMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.recoveryIdentityMin,
+			validate: (value: unknown) => fraction(value, 'recoveryIdentityMin')
+		},
+		recoveryWhiteCoverageMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.recoveryWhiteCoverageMin,
+			validate: (value: unknown) => fraction(value, 'recoveryWhiteCoverageMin')
+		},
+		recoveryBlackSupportMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.recoveryBlackSupportMin,
+			validate: (value: unknown) => fraction(value, 'recoveryBlackSupportMin')
+		},
+		recoveryVisibilityMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.recoveryVisibilityMin,
+			validate: (value: unknown) => fraction(value, 'recoveryVisibilityMin')
+		},
+		highVisibilityMin: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.highVisibilityMin,
+			validate: (value: unknown) => fraction(value, 'highVisibilityMin')
+		},
+		dedupeRadiusPx: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.dedupeRadiusPx,
+			validate: (value: unknown) => nonNegative(value, 'dedupeRadiusPx')
+		},
+		semanticTipOffsetPx: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.semanticTipOffsetPx,
+			note: 'offset below the 42x66 family bbox to the pole-tip endpoint',
+			validate: (value: unknown) => nonNegative(value, 'semanticTipOffsetPx')
+		},
+		maxChildrenPerSeed: {
+			default: DEFAULT_SMART_BASKET_OPTIONS.maxChildrenPerSeed,
+			validate: (value: unknown) =>
+				Number.isInteger(value) && (value as number) >= 1
+					? null
+					: 'maxChildrenPerSeed must be a positive integer'
 		},
 		spriteWidth: {
-			default: 42,
-			note: 'reported basket bbox width — see file header on the coupling to the basket-sprite.json asset',
+			default: ASSET_WIDTH,
 			validate: (value: unknown) =>
 				value === ASSET_WIDTH
 					? null
-					: `spriteWidth must match the basket-sprite.json asset width (${ASSET_WIDTH})`
+					: `spriteWidth must match basket-sprite.json width (${ASSET_WIDTH})`
 		},
 		spriteHeight: {
-			default: 66,
-			note: 'reported basket bbox height — see file header on the coupling to the basket-sprite.json asset',
+			default: ASSET_HEIGHT,
 			validate: (value: unknown) =>
 				value === ASSET_HEIGHT
 					? null
-					: `spriteHeight must match the basket-sprite.json asset height (${ASSET_HEIGHT})`
+					: `spriteHeight must match basket-sprite.json height (${ASSET_HEIGHT})`
 		}
 	}
 } satisfies ABFeature;

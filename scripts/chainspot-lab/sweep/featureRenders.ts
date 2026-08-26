@@ -19,11 +19,10 @@
 // UNKNOWN with the reason, per the repo rule "every number ships with where
 // it came from, or a loud UNKNOWN".
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { PNG } from 'pngjs';
 import { OPERATION_UNIVERSE } from '@chainspot/alg/exec';
-import { runThreeFactor } from '@chainspot/alg/detectors/threeFactor';
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
 import type {
 	ABFeature,
@@ -33,6 +32,7 @@ import type {
 	RunTrace,
 	UnitTrace
 } from '@chainspot/alg/detectors/threeFactor/features/types';
+import type { GateScore, GroundingComparison, TruthScoreboard } from './truthScoring';
 
 // ---------------------------------------------------------------------------
 // unit id -> feature id, read off the compiled operation universe.
@@ -111,56 +111,112 @@ function verdictOf(drawables: readonly Drawable[], verdict: Drawable['verdict'])
 function countByReason(drawables: readonly Drawable[]): Array<[string, number]> {
 	const counts = new Map<string, number>();
 	for (const d of drawables) {
-		const reason = d.reason ?? '(no reason recorded -- violates features/types.ts "no silent drops")';
+		const reason =
+			d.reason ?? '(no reason recorded -- violates features/types.ts "no silent drops")';
 		counts.set(reason, (counts.get(reason) ?? 0) + 1);
 	}
 	return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-/**
- * Reads deviation state off the UnitTrace it was handed and says exactly
- * what it can and cannot conclude.
- *
- * FINDING (2026-08-25, this branch, measured -- not assumed): for unit
- * 'tees' this always returns the UNKNOWN branch. engine.ts's
- * createTraceContext() builds a UnitTrace's `knobs`/`knobsDeviating` from
- * `featureById(unitId)`, and there is no ABFeature whose id is 'tees' --
- * the knobs this unit runs on belong to feature 'endpoints'. So the trace
- * records `knobs: {}` and `knobsDeviating: []` for the single unit in the
- * algorithm where a deviated threshold changes what gets thrown away. An
- * empty list there does NOT mean "frozen defaults"; it means the question
- * was never asked. Printing that difference is the entire point of this
- * function -- silently rendering "no deviations" would be a fabricated
- * number, which is worse than no number.
- */
-function deviationNotes(unit: UnitTrace, featureId: string): string[] {
-	const knobNames = Object.keys(unit.knobs);
-	if (unit.knobsDeviating.length > 0) {
+/** Reads the exact feature state resolved for this run. Unit ids and feature
+ * ids differ, so UnitTrace.knobs cannot establish this provenance. */
+function deviationNotes(run: RunTrace, unit: UnitTrace, featureId: string): string[] {
+	const feature = ALL_FEATURES.find((candidate) => candidate.id === featureId);
+	const state = run.features[featureId];
+	if (!feature || !state) {
 		return [
-			`knobsDeviating: ${unit.knobsDeviating.length} of ${knobNames.length} knob(s) DEVIATE from the feature's frozen default --`,
-			...unit.knobsDeviating.map(
-				(name) => `    ${name} = ${JSON.stringify(unit.knobs[name])}  (source: UnitTrace.knobs['${name}'])`
+			`knobsDeviating: UNKNOWN -- resolved feature '${featureId}' is absent from RunTrace.features.`,
+			`  Unit '${unit.id}' cannot prove which thresholds it used.`
+		];
+	}
+	const knobNames = Object.keys(state.knobs);
+	const deviating = knobNames.filter((name) => feature.knobs[name]?.default !== state.knobs[name]);
+	if (deviating.length > 0) {
+		return [
+			`knobsDeviating: ${deviating.length} of ${knobNames.length} knob(s) DEVIATE from the feature's frozen default --`,
+			...deviating.map(
+				(name) =>
+					`    ${name} = ${JSON.stringify(state.knobs[name])}  (source: RunTrace.features['${featureId}'].knobs['${name}'])`
 			),
 			`  => this run did NOT use frozen '${featureId}' thresholds. Read every rejection below against the deviated value, not the default.`
 		];
 	}
-	if (knobNames.length > 0) {
-		return [
-			`knobsDeviating: none -- all ${knobNames.length} knob(s) sit at feature '${featureId}''s frozen defaults`,
-			`  (source: UnitTrace.knobsDeviating, computed in engine.ts createTraceContext against ABFeature.knobs[name].default)`
-		];
-	}
 	return [
-		`knobsDeviating: UNKNOWN -- not "none".`,
-		`  UnitTrace '${unit.id}' carries 0 knobs, so an empty knobsDeviating carries no information.`,
-		`  Why: engine.ts createTraceContext() resolves a unit's knobs via featureById('${unit.id}'),`,
-		`  and no ABFeature has id '${unit.id}' -- these knobs belong to feature '${featureId}'`,
-		`  (declared by OperationSpec.features on this unit's ops: ${featureIdsForUnit(unit.id).join(', ') || 'none'}).`,
-		`  Consequence: a deviated '${featureId}' threshold cannot appear anywhere in this trace,`,
-		`  so the rejections below cannot be attributed to a default vs a deviation from the trace alone.`,
-		`  Fix is one lookup in engine.ts (unit -> OperationSpec.features -> resolved.features), NOT a change here.`
+		`knobsDeviating: none -- all ${knobNames.length} knob(s) sit at feature '${featureId}'s frozen defaults`,
+		`  (source: RunTrace.features['${featureId}'], compared directly with ABFeature.knobs defaults)`
 	];
 }
+
+export const SPRITE_RENDER: FeatureRender = {
+	units: [BASKETS_UNIT],
+	draw(unit: UnitTrace, run: RunTrace): FeatureRenderPlan {
+		const accepted = verdictOf(unit.drawables, 'accepted');
+		const rejected = verdictOf(unit.drawables, 'rejected');
+		const whiteBounds = verdictOf(unit.drawables, 'info').filter(
+			(drawable) => drawable.type === 'box' && drawable.ref?.endsWith(':white-component')
+		);
+		const semanticTips = verdictOf(unit.drawables, 'info').filter(
+			(drawable) => drawable.type === 'point' && drawable.ref?.endsWith(':semantic-tip')
+		);
+		const reasons = countByReason(rejected);
+		const notes = [
+			`feature:      sprite (g2.sprite) -- ${unit.gate}, trace unit '${unit.id}'`,
+			`unit enabled: ${unit.enabled}  (source: UnitTrace.enabled)`,
+			`config:       ${run.configName}`,
+			`paramsHash:   ${run.paramsHash || 'UNKNOWN -- caller ran the engine without one'}`,
+			`unit ms:      ${unit.ms.toFixed(2)}  (source: UnitTrace.ms; wall clock, not a quality signal)`,
+			'',
+			...deviationNotes(run, unit, 'sprite'),
+			'',
+			`accepted basket candidates: ${accepted.length}   (source: count of UnitTrace.drawables with verdict 'accepted')`,
+			`rejected basket candidates: ${rejected.length}   (source: count of UnitTrace.drawables with verdict 'rejected')`,
+			`examined renderer-family candidates: ${accepted.length + rejected.length}`,
+			'',
+			'candidate boundary: Pass 1 promotes connected bright components within the basket-family bbox',
+			'  tolerance. Pass 2 promotes fine hypotheses only after they clear recoveryIdentityMin, inside',
+			'  neighborhoods seeded by a known badge or accepted basket. Lower-scoring grid samples are search',
+			'  measurements, not object candidates. Every promoted candidate is represented with its final decision.',
+			'',
+			'rejections by reason:'
+		];
+		if (reasons.length === 0) notes.push('  none');
+		else
+			for (const [reason, count] of reasons)
+				notes.push(`  ${String(count).padStart(4)} x  ${reason}`);
+		for (const measurement of unit.measurements) {
+			notes.push(
+				`measurement '${measurement.name}': n=${measurement.count} min=${measurement.min} max=${measurement.max} mean=${(measurement.sum / Math.max(1, measurement.count)).toFixed(4)}  (source: UnitTrace.measurements)`
+			);
+		}
+		return {
+			title: `g2.sprite -- basket candidates, accepted vs rejected (${run.configName})`,
+			base: BRIGHT_MASK_ARTIFACT,
+			layers: [
+				{
+					name: 'basket candidates rejected (G2)',
+					note: 'renderer-family or seeded-recovery candidates rejected with measured testimony',
+					drawables: rejected
+				},
+				{
+					name: 'basket candidates accepted (G2)',
+					note: 'the exact basket objects emitted to the evidence board',
+					drawables: accepted
+				},
+				{
+					name: 'basket white-component bounds (G2)',
+					note: 'detector-local bright bounds; deliberately not the semantic object bbox',
+					drawables: whiteBounds
+				},
+				{
+					name: 'basket semantic endpoints (G2)',
+					note: 'engine-emitted geometric endpoints; informational only, never ownership',
+					drawables: semanticTips
+				}
+			],
+			notes
+		};
+	}
+};
 
 export const ENDPOINTS_RENDER: FeatureRender = {
 	units: [ENDPOINTS_UNIT],
@@ -179,7 +235,7 @@ export const ENDPOINTS_RENDER: FeatureRender = {
 			`paramsHash:   ${run.paramsHash || 'UNKNOWN -- caller ran the engine without one'}`,
 			`unit ms:      ${unit.ms.toFixed(2)}  (source: UnitTrace.ms; wall clock, not a quality signal)`,
 			'',
-			...deviationNotes(unit, 'endpoints'),
+			...deviationNotes(run, unit, 'endpoints'),
 			'',
 			`accepted tee candidates: ${accepted.length}   (source: count of UnitTrace.drawables with verdict 'accepted')`,
 			`rejected tee candidates: ${rejected.length}   (source: count of UnitTrace.drawables with verdict 'rejected')`,
@@ -197,8 +253,12 @@ export const ENDPOINTS_RENDER: FeatureRender = {
 				'  it can only report that the trace is silent.'
 			);
 		} else {
-			notes.push('', 'rejections by reason (each line is a candidate the algorithm examined and threw away):');
-			for (const [reason, count] of reasons) notes.push(`  ${String(count).padStart(4)} x  ${reason}`);
+			notes.push(
+				'',
+				'rejections by reason (each line is a candidate the algorithm examined and threw away):'
+			);
+			for (const [reason, count] of reasons)
+				notes.push(`  ${String(count).padStart(4)} x  ${reason}`);
 		}
 
 		for (const measurement of unit.measurements) {
@@ -212,9 +272,9 @@ export const ENDPOINTS_RENDER: FeatureRender = {
 			`cross-gate layer: ${acceptedBaskets.length} accepted basket(s) from trace unit '${BASKETS_UNIT}'` +
 				(baskets ? '' : ` -- UNIT ABSENT from this trace, layer is empty`),
 			`  drawn because a tee killed for sitting near a basket sprite is unreadable without the basket.`,
-			`base raster: '${BRIGHT_MASK_ARTIFACT}' (artifact id, not bytes). It is computed over 'localImage',`,
-			`  the viewport crop, so it aligns with these original-image coordinates only when viewport.topPx = 0.`,
-			`  The trace does not carry topPx, so this render states the name and refuses to assume the offset.`
+			`base raster: '${BRIGHT_MASK_ARTIFACT}' (artifact id, not bytes). It is computed over the same`,
+			`  G0 canonical raster as these coordinates. Original-source coordinates remain a truth-receipt concern`,
+			`  because CROP/STITCH provenance lives in the G0 transform ledger, not in detector drawables.`
 		);
 
 		return {
@@ -237,7 +297,13 @@ export const ENDPOINTS_RENDER: FeatureRender = {
 					drawables: accepted
 				},
 				...(info.length > 0
-					? [{ name: 'tee candidates info (G3)', note: 'neither accepted nor rejected', drawables: info }]
+					? [
+							{
+								name: 'tee candidates info (G3)',
+								note: 'neither accepted nor rejected',
+								drawables: info
+							}
+						]
 					: [])
 			],
 			notes
@@ -257,6 +323,8 @@ export interface FeatureRenderCanvas {
 }
 
 export interface FeatureRenderBase {
+	/** stable suffix used in reusable filenames surfaced by LAB UI/scope */
+	readonly id: string;
 	/** absolute path to an already-rendered PNG (e.g. the kind-keyed mask
 	 * renderer's output). This module never produces one. */
 	readonly pngPath: string;
@@ -271,7 +339,18 @@ export interface RenderTraceFeaturesInput {
 	readonly run: RunTrace;
 	readonly outDir: string;
 	readonly canvas?: FeatureRenderCanvas;
-	readonly base?: FeatureRenderBase;
+	readonly bases?: readonly FeatureRenderBase[];
+	readonly truthEvaluation?: {
+		readonly scoreboard?: TruthScoreboard;
+		readonly groundingComparisons: readonly GroundingComparison[];
+	};
+	/** canonical = original + offset; omitted for a stitched frame that cannot
+	 * be mapped back to one unambiguous source image. */
+	readonly sourceFrameOffset?: {
+		readonly xPx: number;
+		readonly yPx: number;
+		readonly source: string;
+	};
 }
 
 export interface FeatureRenderResult {
@@ -309,7 +388,9 @@ export function renderTraceFeatures(input: RenderTraceFeaturesInput): RenderTrac
 	for (const feature of ALL_FEATURES) {
 		const render = renderFor(feature);
 		if (!render) continue;
-		for (const declared of render.units) declaredUnitIds.add(declared);
+		for (const declared of render.units) {
+			if (run.execution.includes(declared)) declaredUnitIds.add(declared);
+		}
 	}
 
 	for (const unit of run.units) {
@@ -334,7 +415,7 @@ export function renderTraceFeatures(input: RenderTraceFeaturesInput): RenderTrac
 			if (feature.render === undefined) {
 				warnings.push(
 					`render attached from PENDING_FEATURE_RENDERS, not from the feature file. ` +
-						`Land \`render: ENDPOINTS_RENDER\` in features/${feature.gate.toLowerCase()}.${feature.id}.ts and drop the entry.`
+						`Land the FeatureRender beside feature '${feature.id}' and drop the entry.`
 				);
 			}
 
@@ -364,11 +445,57 @@ const STYLE: Record<Drawable['verdict'], { stroke: string; fill: string; dash: s
 };
 
 function esc(text: string): string {
-	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
 }
 
 function safeSegment(s: string): string {
 	return s.replace(/[^a-zA-Z0-9_.-]+/g, '_');
+}
+
+function valuesText(values: Drawable['values']): string {
+	if (!values) return '[]';
+	return `[${Object.entries(values)
+		.map(([key, value]) => `${key}=${Number(value.toFixed(4))}`)
+		.join(',')}]`;
+}
+
+function drawableCoordinates(
+	drawable: Drawable,
+	offset: RenderTraceFeaturesInput['sourceFrameOffset']
+): { canonical: string; original: string } {
+	const shift = (x: number, y: number) =>
+		offset ? `(${(x - offset.xPx).toFixed(2)},${(y - offset.yPx).toFixed(2)})` : 'UNKNOWN';
+	if (drawable.type === 'point') {
+		return {
+			canonical: `(${drawable.xPx.toFixed(2)},${drawable.yPx.toFixed(2)})`,
+			original: shift(drawable.xPx, drawable.yPx)
+		};
+	}
+	if (drawable.type === 'box') {
+		const [x, y, width, height] = drawable.bbox;
+		return {
+			canonical: `bbox=(${x.toFixed(2)},${y.toFixed(2)},${width.toFixed(2)},${height.toFixed(2)})`,
+			original: offset
+				? `bbox=(${(x - offset.xPx).toFixed(2)},${(y - offset.yPx).toFixed(2)},${width.toFixed(2)},${height.toFixed(2)})`
+				: 'UNKNOWN'
+		};
+	}
+	if (drawable.type === 'polyline') {
+		return {
+			canonical: `path=${JSON.stringify(drawable.path)}`,
+			original: offset
+				? `path=${JSON.stringify(drawable.path.map(([x, y]) => [x - offset.xPx, y - offset.yPx]))}`
+				: 'UNKNOWN'
+		};
+	}
+	return {
+		canonical: `origin=(${drawable.originXPx.toFixed(2)},${drawable.originYPx.toFixed(2)}) cells=${drawable.widthCells}x${drawable.heightCells} cellPx=${drawable.cellPx}`,
+		original: shift(drawable.originXPx, drawable.originYPx)
+	};
 }
 
 function tooltip(d: Drawable, layerName: string): string {
@@ -435,6 +562,314 @@ function drawableSvg(d: Drawable, layerName: string): string {
 	return `<g>${title}<rect x="${d.originXPx}" y="${d.originYPx}" width="${w}" height="${h}" stroke="${s.stroke}" stroke-width="2" stroke-dasharray="6 5" fill="none"/></g>`;
 }
 
+function rasterPixel(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	color: readonly [number, number, number]
+): void {
+	const px = Math.round(x);
+	const py = Math.round(y);
+	if (px < 0 || py < 0 || px >= width || py >= height) return;
+	const index = (py * width + px) * 4;
+	data[index] = color[0];
+	data[index + 1] = color[1];
+	data[index + 2] = color[2];
+	data[index + 3] = 255;
+}
+
+function rasterLine(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	color: readonly [number, number, number]
+): void {
+	const steps = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+	for (let step = 0; step <= steps; step++) {
+		const t = step / steps;
+		for (let thickness = -1; thickness <= 1; thickness++) {
+			rasterPixel(data, width, height, x0 + (x1 - x0) * t + thickness, y0 + (y1 - y0) * t, color);
+			rasterPixel(data, width, height, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t + thickness, color);
+		}
+	}
+}
+
+function rasterDrawable(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	drawable: Drawable
+): void {
+	const color: readonly [number, number, number] =
+		drawable.verdict === 'accepted'
+			? [30, 255, 95]
+			: drawable.verdict === 'rejected'
+				? [255, 45, 45]
+				: [30, 210, 255];
+	if (drawable.type === 'box') {
+		const [x, y, w, h] = drawable.bbox;
+		rasterLine(data, width, height, x, y, x + w, y, color);
+		rasterLine(data, width, height, x + w, y, x + w, y + h, color);
+		rasterLine(data, width, height, x + w, y + h, x, y + h, color);
+		rasterLine(data, width, height, x, y + h, x, y, color);
+		return;
+	}
+	if (drawable.type === 'point') {
+		for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 24) {
+			rasterPixel(
+				data,
+				width,
+				height,
+				drawable.xPx + Math.cos(angle) * 7,
+				drawable.yPx + Math.sin(angle) * 7,
+				color
+			);
+		}
+		return;
+	}
+	if (drawable.type === 'polyline') {
+		for (let index = 1; index < drawable.path.length; index++) {
+			const [x0, y0] = drawable.path[index - 1];
+			const [x1, y1] = drawable.path[index];
+			rasterLine(data, width, height, x0, y0, x1, y1, color);
+		}
+	}
+}
+
+function writeRasterProof(
+	plan: FeatureRenderPlan,
+	base: FeatureRenderBase,
+	width: number,
+	height: number,
+	path: string
+): void {
+	const png = PNG.sync.read(readFileSync(base.pngPath));
+	if (png.width !== width || png.height !== height) {
+		throw new Error(
+			`feature render base dimensions ${png.width}x${png.height} do not match canvas ${width}x${height}`
+		);
+	}
+	for (const layer of plan.layers) {
+		for (const drawable of layer.drawables) rasterDrawable(png.data, width, height, drawable);
+	}
+	writeFileSync(path, PNG.sync.write(png));
+}
+
+function rasterCircle(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	radius: number,
+	color: readonly [number, number, number]
+): void {
+	for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 72) {
+		for (let thickness = -1; thickness <= 1; thickness++) {
+			rasterPixel(
+				data,
+				width,
+				height,
+				x + Math.cos(angle) * (radius + thickness),
+				y + Math.sin(angle) * (radius + thickness),
+				color
+			);
+		}
+	}
+}
+
+function rasterCross(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	color: readonly [number, number, number]
+): void {
+	rasterLine(data, width, height, x - 8, y - 8, x + 8, y + 8, color);
+	rasterLine(data, width, height, x + 8, y - 8, x - 8, y + 8, color);
+}
+
+function writeTruthProof(
+	plan: FeatureRenderPlan,
+	base: FeatureRenderBase,
+	score: GateScore | undefined,
+	comparison: GroundingComparison | undefined,
+	width: number,
+	height: number,
+	path: string
+): void {
+	const png = PNG.sync.read(readFileSync(base.pngPath));
+	if (png.width !== width || png.height !== height) {
+		throw new Error(
+			`feature truth base dimensions ${png.width}x${png.height} do not match canvas ${width}x${height}`
+		);
+	}
+	for (const layer of plan.layers) {
+		for (const drawable of layer.drawables) rasterDrawable(png.data, width, height, drawable);
+	}
+	const best = comparison
+		? [...comparison.hypotheses].sort(
+				(a, b) =>
+					a.medianDeviationPx - b.medianDeviationPx ||
+					a.meanDeviationPx - b.meanDeviationPx
+			)[0]
+		: undefined;
+	for (const match of score?.objectMatches ?? []) {
+		const truth = match.truthCanonical;
+		const detection = match.detection;
+		rasterLine(
+			png.data,
+			width,
+			height,
+			detection.xPx,
+			detection.yPx,
+			truth.xPx,
+			truth.yPx,
+			[255, 225, 30]
+		);
+		rasterCircle(png.data, width, height, truth.xPx, truth.yPx, 9, [255, 225, 30]);
+		rasterCircle(png.data, width, height, detection.xPx, detection.yPx, 6, [30, 210, 255]);
+		if (best && best.yShiftPx !== 0) {
+			rasterCircle(
+				png.data,
+				width,
+				height,
+				detection.xPx,
+				detection.yPx + best.yShiftPx,
+				4,
+				[255, 40, 220]
+			);
+		}
+	}
+	for (const target of score?.unmatchedTruth ?? []) {
+		rasterCircle(png.data, width, height, target.point.xPx, target.point.yPx, 10, [255, 40, 40]);
+		rasterCross(png.data, width, height, target.point.xPx, target.point.yPx, [255, 40, 40]);
+	}
+	for (const detection of score?.unownedDetections ?? []) {
+		rasterCircle(png.data, width, height, detection.xPx, detection.yPx, 10, [255, 40, 40]);
+		rasterCross(png.data, width, height, detection.xPx, detection.yPx, [255, 40, 40]);
+	}
+	writeFileSync(path, PNG.sync.write(png));
+}
+
+function writeTruthCropSheet(
+	truthProofPath: string,
+	score: GateScore,
+	path: string
+): void {
+	const source = PNG.sync.read(readFileSync(truthProofPath));
+	const matches = score.objectMatches ?? [];
+	const sourceSize = 72;
+	const scale = 3;
+	const tileSize = sourceSize * scale;
+	const columns = Math.min(6, Math.max(1, matches.length));
+	const rows = Math.max(1, Math.ceil(matches.length / columns));
+	const sheet = new PNG({ width: columns * tileSize, height: rows * tileSize });
+	sheet.data.fill(255);
+	for (const [index, match] of matches.entries()) {
+		const tileX = (index % columns) * tileSize;
+		const tileY = Math.floor(index / columns) * tileSize;
+		const startX = Math.round(match.truthCanonical.xPx) - sourceSize / 2;
+		const startY = Math.round(match.truthCanonical.yPx) - sourceSize / 2;
+		for (let y = 0; y < sourceSize; y++) {
+			for (let x = 0; x < sourceSize; x++) {
+				const sourceX = Math.max(0, Math.min(source.width - 1, startX + x));
+				const sourceY = Math.max(0, Math.min(source.height - 1, startY + y));
+				const sourceIndex = (sourceY * source.width + sourceX) * 4;
+				for (let sy = 0; sy < scale; sy++) {
+					for (let sx = 0; sx < scale; sx++) {
+						const outputX = tileX + x * scale + sx;
+						const outputY = tileY + y * scale + sy;
+						const outputIndex = (outputY * sheet.width + outputX) * 4;
+						for (let channel = 0; channel < 4; channel++)
+							sheet.data[outputIndex + channel] = source.data[sourceIndex + channel];
+					}
+				}
+			}
+		}
+		const border: readonly [number, number, number] = [255, 225, 30];
+		rasterLine(sheet.data, sheet.width, sheet.height, tileX, tileY, tileX + tileSize - 1, tileY, border);
+		rasterLine(sheet.data, sheet.width, sheet.height, tileX + tileSize - 1, tileY, tileX + tileSize - 1, tileY + tileSize - 1, border);
+		rasterLine(sheet.data, sheet.width, sheet.height, tileX + tileSize - 1, tileY + tileSize - 1, tileX, tileY + tileSize - 1, border);
+		rasterLine(sheet.data, sheet.width, sheet.height, tileX, tileY + tileSize - 1, tileX, tileY, border);
+	}
+	writeFileSync(path, PNG.sync.write(sheet));
+}
+
+function truthReceiptLines(unit: UnitTrace, input: RenderTraceFeaturesInput): string[] {
+	const score = input.truthEvaluation?.scoreboard?.scores.find(
+		(candidate) => candidate.gate === unit.gate
+	);
+	const comparison = input.truthEvaluation?.groundingComparisons.find(
+		(candidate) => candidate.gate === unit.gate
+	);
+	if (!score && !comparison) {
+		return [
+			'truth localization: UNKNOWN -- no annotation evaluation was available for this gate',
+			'ownership: UNKNOWN -- no ownership evaluation was available for this gate'
+		];
+	}
+	const lines = ['truth localization (evaluation only; never detector input):'];
+	if (score) {
+		lines.push(
+			`  official/as-emitted: detected=${score.detected ?? 'UNKNOWN'} expected=${score.expected} ` +
+				`matched=${score.matched} falsePositives=${score.unownedDetections?.length ?? 0} ` +
+				`falseNegatives=${score.unmatchedTruth?.length ?? score.misses.length} ` +
+				`maxDeviation=${score.maxDeviationPx.toFixed(2)}px (source: TruthScoreboard from this engine board)`
+		);
+		for (const match of score.objectMatches ?? []) {
+			lines.push(
+				`    MATCH ${match.truthIdentity} <- ${match.detection.identity} ` +
+				`detection=(${match.detection.xPx.toFixed(2)},${match.detection.yPx.toFixed(2)}) ` +
+				`truth=(${match.truthCanonical.xPx.toFixed(2)},${match.truthCanonical.yPx.toFixed(2)}) ` +
+				`delta=${match.deviationPx.toFixed(2)}px`
+			);
+		}
+		for (const target of score.unmatchedTruth ?? []) {
+			lines.push(
+				`    FALSE_NEGATIVE ${target.identity} truth=(${target.point.xPx.toFixed(2)},${target.point.yPx.toFixed(2)})`
+			);
+		}
+		for (const detection of score.unownedDetections ?? []) {
+			lines.push(
+				`    FALSE_POSITIVE ${detection.identity} detection=(${detection.xPx.toFixed(2)},${detection.yPx.toFixed(2)}) ownership=UNKNOWN`
+			);
+		}
+	} else {
+		lines.push('  official/as-emitted: UNKNOWN -- annotation source provenance did not pass the truth firewall');
+	}
+	if (comparison) {
+		lines.push(
+			`  grounding hypotheses: ${comparison.provenanceTrusted ? 'source provenance MATCHED' : 'DIAGNOSTIC ONLY -- source provenance UNMATCHED'}`
+		);
+		const ranked = [...comparison.hypotheses].sort(
+			(a, b) =>
+				a.medianDeviationPx - b.medianDeviationPx ||
+				a.meanDeviationPx - b.meanDeviationPx
+		);
+		for (const [index, hypothesis] of ranked.entries()) {
+			lines.push(
+				`    ${index === 0 ? 'LOWEST_RESIDUAL ' : ''}${hypothesis.id}: detectionY+=${hypothesis.yShiftPx}px ` +
+				`matched=${hypothesis.matchedWithinTolerance} falsePositives=${hypothesis.falsePositiveCount} ` +
+				`falseNegatives=${hypothesis.falseNegativeCount} median=${hypothesis.medianDeviationPx.toFixed(2)}px ` +
+				`mean=${hypothesis.meanDeviationPx.toFixed(2)}px max=${hypothesis.maxDeviationPx.toFixed(2)}px ` +
+				`provenance="${hypothesis.provenance}"`
+			);
+		}
+	}
+	lines.push(
+		`ownership: UNKNOWN -- ${unit.gate} truth scoring evaluates localization only; no hole ownership assignment was evaluated`
+	);
+	return lines;
+}
+
 function writePlan(
 	plan: FeatureRenderPlan,
 	feature: ABFeature,
@@ -442,7 +877,15 @@ function writePlan(
 	input: RenderTraceFeaturesInput,
 	warnings: string[]
 ): FeatureRenderResult {
-	const { outDir, canvas, base } = input;
+	const { outDir, canvas } = input;
+	const bases = input.bases ?? [];
+	const base = bases[0];
+	const truthScore = input.truthEvaluation?.scoreboard?.scores.find(
+		(candidate) => candidate.gate === unit.gate
+	);
+	const groundingComparison = input.truthEvaluation?.groundingComparisons.find(
+		(candidate) => candidate.gate === unit.gate
+	);
 	const all = plan.layers.flatMap((l) => l.drawables);
 	// Counted off the OWNING unit's drawables, not off the flattened plan: a
 	// plan may pull in another gate's accepted drawables for context (this
@@ -462,6 +905,21 @@ function writePlan(
 
 	const baseName = `feature.${safeSegment(feature.id)}.${safeSegment(unit.id)}`;
 	const svgPath = resolve(outDir, `${baseName}.svg`);
+	const pngProofs = bases.map((candidate, index) => ({
+		base: candidate,
+		path: resolve(
+			outDir,
+			index === 0 ? `${baseName}.png` : `${baseName}.${safeSegment(candidate.id)}.png`
+		)
+	}));
+	const truthProofPath =
+		base && (truthScore || groundingComparison)
+			? resolve(outDir, `${baseName}.truth-grounding.png`)
+			: undefined;
+	const truthCropSheetPath =
+		truthProofPath && truthScore?.objectMatches?.length
+			? resolve(outDir, `${baseName}.truth-grounding-crops.png`)
+			: undefined;
 	const receiptPath = resolve(outDir, `${baseName}.receipt.txt`);
 
 	let baseLine: string;
@@ -472,9 +930,15 @@ function writePlan(
 		const href = relative(dirname(svgPath), base.pngPath).split('\\').join('/');
 		baseTag = `<image href="${esc(href)}" x="${dx}" y="${dy}" width="${width - dx}" height="${height - dy}" preserveAspectRatio="none"/>`;
 		baseLine =
-			`base raster: ${base.pngPath}\n` +
-			`  offset applied: dx=${dx} dy=${dy} (source: caller, ${base.source} -- never inferred here)\n` +
-			`  plan asked for artifact '${plan.base ?? '(none)'}'; the caller is responsible for having resolved that id to this file.`;
+			`base rasters (${bases.length} reusable visualizations):\n` +
+			bases
+				.map(
+					(candidate) =>
+						`  ${candidate.id}: ${candidate.pngPath} ` +
+						`offset=(${candidate.offsetXPx ?? 0},${candidate.offsetYPx ?? 0}) source=${candidate.source}`
+				)
+				.join('\n') +
+			`\n  SVG base: ${base.id}; plan requested artifact '${plan.base ?? '(none)'}'.`;
 	} else {
 		baseLine =
 			`base raster: NOT COMPOSITED. The plan names artifact '${plan.base ?? '(none)'}', but resolving an\n` +
@@ -529,19 +993,66 @@ function writePlan(
 		'',
 		...plan.notes,
 		'',
+		...truthReceiptLines(unit, input),
+		'',
 		'layers drawn:',
-		...plan.layers.map((l) => `  ${String(l.drawables.length).padStart(4)}  ${l.name}${l.note ? `  -- ${l.note}` : ''}`),
+		...plan.layers.map(
+			(l) =>
+				`  ${String(l.drawables.length).padStart(4)}  ${l.name}${l.note ? `  -- ${l.note}` : ''}`
+		),
+		'',
+		'object rows (the exact objects drawn in the SVG; coordinates are not recomputed):',
+		...plan.layers.flatMap((layer) =>
+			layer.drawables.map((drawable, index) => {
+				const coordinates = drawableCoordinates(drawable, input.sourceFrameOffset);
+				return (
+					`  layer="${layer.name}" object=${index + 1} type=${drawable.type} verdict=${drawable.verdict} ` +
+					`identity=${drawable.ref ?? 'UNKNOWN'} canonical=${coordinates.canonical} original=${coordinates.original} ` +
+					`measurements=${valuesText(drawable.values)} reason="${drawable.reason ?? (drawable.verdict === 'accepted' ? 'accepted by detector' : 'UNKNOWN')}"`
+				);
+			})
+		),
 		'',
 		`canvas: ${canvasProvenance}`,
+		`coordinate transform: ${input.sourceFrameOffset ? `canonical = original + (${input.sourceFrameOffset.xPx},${input.sourceFrameOffset.yPx}) (source: ${input.sourceFrameOffset.source})` : 'UNKNOWN -- stitched/multi-source frame has no single inverse source mapping'}`,
 		baseLine,
 		'',
 		...(warnings.length > 0 ? ['WARNINGS:', ...warnings.map((w) => `  ${w}`), ''] : []),
 		`svg written to:     ${svgPath}`,
+		...(pngProofs.length > 0
+			? pngProofs.map((proof) => `png proof written [${proof.base.id}]: ${proof.path}`)
+			: ['png proof written:  NOT WRITTEN -- no base raster supplied']),
+		`truth grounding proof: ${truthProofPath ?? 'NOT WRITTEN -- no truth/grounding evaluation available'}`,
+		...(truthProofPath
+			? [
+					'  colors: yellow=annotation, cyan=as-emitted endpoint, magenta=lowest-residual diagnostic Y hypothesis, red-cross=FP/FN'
+				]
+			: []),
+		`truth grounding crop sheet: ${truthCropSheetPath ?? 'NOT WRITTEN -- no matched truth objects available'}`,
+		...(truthCropSheetPath && truthScore
+			? [
+					`  tiles left-to-right, top-to-bottom: ${(truthScore.objectMatches ?? []).map((match) => match.truthIdentity).join(', ')}`,
+					'  each tile: 72x72 canonical pixels enlarged 3x; yellow border is presentation only'
+				]
+			: []),
 		`receipt written to: ${receiptPath}`
 	];
 	const receiptText = receiptLines.join('\n');
 
 	writeFileSync(svgPath, svg);
+	for (const proof of pngProofs) writeRasterProof(plan, proof.base, width, height, proof.path);
+	if (truthProofPath && base)
+		writeTruthProof(
+			plan,
+			base,
+			truthScore,
+			groundingComparison,
+			width,
+			height,
+			truthProofPath
+		);
+	if (truthCropSheetPath && truthProofPath && truthScore)
+		writeTruthCropSheet(truthProofPath, truthScore, truthCropSheetPath);
 	writeFileSync(receiptPath, `${receiptText}\n`);
 
 	return {
@@ -552,7 +1063,13 @@ function writePlan(
 		drawableCount: all.length,
 		acceptedCount,
 		rejectedCount,
-		filesWritten: [svgPath, receiptPath],
+		filesWritten: [
+			svgPath,
+			...pngProofs.map((proof) => proof.path),
+			...(truthProofPath ? [truthProofPath] : []),
+			...(truthCropSheetPath ? [truthCropSheetPath] : []),
+			receiptPath
+		],
 		receiptText,
 		summary:
 			`${feature.id}@${unit.id}: ${acceptedCount} accepted / ${rejectedCount} rejected ` +
@@ -587,88 +1104,7 @@ export function printFeatureRenders(output: RenderTraceFeaturesOutput): void {
 	const warned = output.results.filter((r) => r.warnings.length > 0);
 	if (warned.length > 0) {
 		console.log('  WARNINGS (see receipts above):');
-		for (const r of warned) for (const w of r.warnings) console.log(`    ${r.featureId}@${r.unitId}: ${w}`);
+		for (const r of warned)
+			for (const w of r.warnings) console.log(`    ${r.featureId}@${r.unitId}: ${w}`);
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Direct entry point, so this path is runnable and checkable on its own
-// today. `lab sweep` (sweep/operation.ts) currently executes with
-// nullFeatureContext and therefore produces NO RunTrace at all -- wiring a
-// tracing context into that operation is a change to a file this module does
-// not own. Until that lands, this main() is how a human sees the output:
-//
-//   node --import tsx scripts/chainspot-lab/sweep/featureRenders.ts \
-//     packages/alg/src/detectors/threeFactor/configs/default.json \
-//     ../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg \
-//     [--out DIR] [--base PNG] [--base-offset-y N]
-// ---------------------------------------------------------------------------
-
-async function main(argv: readonly string[]): Promise<void> {
-	const positional: string[] = [];
-	const flags = new Map<string, string>();
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg.startsWith('--')) flags.set(arg.slice(2), argv[++i] ?? '');
-		else positional.push(arg);
-	}
-	const [configPath, imagePath] = positional;
-	if (!configPath || !imagePath) {
-		console.error(
-			'Usage: featureRenders.ts CONFIG.json IMAGE [--out DIR] [--base PNG] [--base-offset-x N] [--base-offset-y N]'
-		);
-		process.exit(2);
-	}
-
-	// Imported lazily so the module stays importable from a browser-safe
-	// context; these two reach node:fs and the decoder.
-	const { loadConfig } = await import('./configIo');
-	const { canonicalizeInputs } = await import('./inputShim');
-	const { canonicalJson, sha256Hex } = await import('@chainspot/alg/detectors/threeFactor');
-
-	const { resolved } = loadConfig(resolve(configPath));
-	const { report, image } = await canonicalizeInputs([resolve(imagePath)]);
-	const paramsHash = await sha256Hex(canonicalJson(resolved));
-	const run = runThreeFactor(
-		{ imageId: report.imageId, widthPx: image.width, heightPx: image.height, rgba: image.data },
-		{ config: resolved, paramsHash }
-	);
-	if (!run.trace) throw new Error('featureRenders: runThreeFactor returned no trace (a resolved config is required).');
-
-	const here = dirname(fileURLToPath(import.meta.url));
-	const outDir = resolve(flags.get('out') ?? resolve(here, '../../../artifacts/featureRenders', resolved.name));
-	const basePng = flags.get('base');
-
-	console.log(`config: ${resolved.name}  paramsHash: ${paramsHash}`);
-	console.log(`image:  ${report.imageId} ${image.width}x${image.height} from ${resolve(imagePath)}`);
-	console.log(`trace units: ${run.trace.units.map((u) => u.id).join(', ')}`);
-
-	printFeatureRenders(
-		renderTraceFeatures({
-			run: run.trace,
-			outDir,
-			canvas: {
-				widthPx: image.width,
-				heightPx: image.height,
-				source: 'LAB G0 canonical intake (sweep/inputShim.ts canonicalizeInputs), the same raster the engine ran on'
-			},
-			...(basePng
-				? {
-						base: {
-							pngPath: resolve(basePng),
-							offsetXPx: Number(flags.get('base-offset-x') ?? 0),
-							offsetYPx: Number(flags.get('base-offset-y') ?? 0),
-							source: '--base/--base-offset-* flags'
-						}
-					}
-				: {})
-		})
-	);
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-	main(process.argv.slice(2)).catch((error) => {
-		console.error(`featureRenders: ${(error as Error).message}`);
-		process.exit(1);
-	});
 }

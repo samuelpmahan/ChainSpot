@@ -68,7 +68,12 @@ export interface BadgeEvidence {
 
 export interface BasketEvidence {
 	readonly detId: string;
+	/** Full rendered basket footprint, including the dark shell around the
+	 * bright body. This is the semantic object box downstream consumers use. */
 	readonly bbox: readonly [number, number, number, number];
+	/** Tight connected-component bounds of the white/bright detector body.
+	 * Detection-local geometry only; never substitute this for `bbox`. */
+	readonly whiteBbox: readonly [number, number, number, number];
 	readonly centerXPx: number;
 	readonly centerYPx: number;
 	readonly tipXPx: number;
@@ -76,6 +81,14 @@ export interface BasketEvidence {
 	readonly onFrac: number;
 	readonly offFrac: number;
 	readonly score: number;
+	readonly tier?: 'clean-family' | 'occlusion-recovery';
+	readonly confidence?: 'high' | 'medium' | 'low';
+	readonly identity?: number;
+	readonly effectiveVisibility?: number;
+	readonly whiteCoverage?: number;
+	readonly blackBorderSupport?: number;
+	readonly darkCoherence?: number;
+	readonly source?: string;
 }
 
 export type TeeTier = 'ring' | 'component' | 'recovered';
@@ -84,6 +97,36 @@ export interface RecoveryProvenance {
 	readonly source: 'manual' | 'historical-fixture' | 'explicit-injected';
 	readonly note: string;
 	readonly score?: number;
+}
+
+export type OrientedQuad = readonly [
+	readonly [number, number],
+	readonly [number, number],
+	readonly [number, number],
+	readonly [number, number]
+];
+
+/** Full visible tee-pad geometry promoted from the enclosing bright-mask
+ * component. The hollow interior remains separately available as
+ * `TeeEvidence.ring`; none of the component measurements are discarded. */
+export interface TeePadEvidence {
+	readonly source: 'bright-mask-component';
+	readonly componentLabel: number;
+	readonly bbox: readonly [number, number, number, number];
+	readonly componentCentroidXPx: number;
+	readonly componentCentroidYPx: number;
+	readonly centerXPx: number;
+	readonly centerYPx: number;
+	readonly angleRad: number;
+	readonly majorPx: number;
+	readonly minorPx: number;
+	readonly area: number;
+	readonly fill: number;
+	readonly axisMajorMin: number;
+	readonly axisMajorMax: number;
+	readonly axisMinorMin: number;
+	readonly axisMinorMax: number;
+	readonly orientedCorners: OrientedQuad;
 }
 
 export interface TeeEvidence {
@@ -98,7 +141,13 @@ export interface TeeEvidence {
 		readonly elongation: number;
 		readonly ringFrac: number;
 	};
+	/** Full visible pad AABB after intact-family promotion. Before that phase,
+	 * this is candidate-local geometry; `ring.bbox` remains the hollow
+	 * detector's tight interior box either way. */
 	readonly bbox: readonly [number, number, number, number];
+	/** Present when G3 found the enclosing visible pad component. Carries the
+	 * component-derived orientation and exact quadrilateral used by renderers. */
+	readonly pad?: TeePadEvidence;
 	readonly area: number;
 	readonly fill: number;
 	readonly onRing: boolean;

@@ -4,8 +4,8 @@
 // evidence board; the order comes from the CONFIG (the single readable
 // source of truth for the alg), validated against each unit's declared
 // consumes/produces. ABFeatures are behavior with an A/B-style easy-off:
-// baseline units default ON, deviations default OFF so that the default
-// config reproduces frozen dev72 behavior byte-for-byte.
+// baseline units default ON and deviations default OFF so the default config
+// remains the explicit recovered production behavior.
 
 import type { ABFeatureOperation } from '../../../exec/feature-set';
 
@@ -61,7 +61,7 @@ export interface ABFeature<K extends KnobSpecs = KnobSpecs> {
 	/** unique across the registry, e.g. 'zfit', 'phantomTee' */
 	readonly id: string;
 	readonly gate: GateId;
-	/** baseline = part of frozen behavior (default ON); deviation = opt-in */
+	/** baseline = part of production behavior (default ON); deviation = opt-in */
 	readonly kind: 'baseline' | 'deviation';
 	readonly defaultEnabled: boolean;
 	readonly note?: string;
@@ -168,6 +168,9 @@ export interface RunTrace {
 	readonly configName: string;
 	readonly paramsHash: string;
 	readonly execution: readonly string[];
+	/** Exact feature states used by the run. Unit ids are not feature ids: the
+	 * `tees` unit, for example, reads the `endpoints` feature's knobs. */
+	readonly features: Readonly<Record<string, ResolvedFeature>>;
 	readonly units: UnitTrace[];
 	/** keyed heatmap buffers; transfer these across postMessage */
 	readonly heatmaps: Record<string, Float32Array>;

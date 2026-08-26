@@ -50,8 +50,16 @@
 // happens to agree with it.
 
 import type { ComponentStats } from '../components';
-import type { TeeEvidence, TeeTier } from '../types';
-import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
+import type { TeeEvidence, TeePadEvidence, TeeTier } from '../types';
+import type {
+	ABFeature,
+	EngineUnit,
+	EvidenceBoard,
+	FeatureContext,
+	FeatureRender,
+	RunTrace,
+	UnitTrace
+} from './types';
 
 export interface TeeFamilyKnobs {
 	readonly frameAreaMin: number;
@@ -71,12 +79,92 @@ function toleranceFactor(name: string): (value: unknown) => string | null {
 	return (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 1 ? null : `${name} must be a number > 1`);
 }
 
+const TEE_FAMILY_RENDER: FeatureRender = {
+	units: ['teeFamily'],
+	draw(unit: UnitTrace, run: RunTrace) {
+		const accepted = unit.drawables.filter((drawable) => drawable.verdict === 'accepted');
+		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
+		const info = unit.drawables.filter((drawable) => drawable.verdict === 'info');
+		const padAabbs = info.filter((drawable) => drawable.ref?.endsWith(':pad-aabb'));
+		const ringInteriors = info.filter((drawable) => drawable.ref?.endsWith(':ring-interior'));
+		const passthrough = info.filter(
+			(drawable) =>
+				!drawable.ref?.endsWith(':pad-aabb') && !drawable.ref?.endsWith(':ring-interior')
+		);
+		const badgeUnit = run.units.find((candidate) => candidate.id === 'badges');
+		const detectedBadgeCount =
+			badgeUnit?.drawables.filter((drawable) => drawable.verdict === 'accepted').length;
+		const acceptedVisibleTeeCount = accepted.length;
+		const expectedRecoverNum =
+			detectedBadgeCount === undefined
+				? undefined
+				: Math.max(0, detectedBadgeCount - acceptedVisibleTeeCount);
+		return {
+			title: `g3.teeFamily -- final visible tee detections (${run.configName})`,
+			base: 'badgeStage.masks.bright',
+			layers: [
+				{
+					name: 'visible tee-family rejections (G3)',
+					note: 'ring candidates rejected by enclosing-frame family consistency',
+					drawables: rejected
+				},
+				...(padAabbs.length
+					? [
+							{
+								name: 'visible tee pad raster AABBs (G3)',
+								note: 'axis-aligned component bounds retained as secondary evidence, not drawn as the oriented object boundary',
+								drawables: padAabbs
+							}
+						]
+					: []),
+				...(ringInteriors.length
+					? [
+							{
+								name: 'visible tee hollow-interior detector bounds (G3)',
+								note: 'tight ring-hole boxes retained separately; never represented as full tee-pad bounds',
+								drawables: ringInteriors
+							}
+						]
+					: []),
+				...(passthrough.length
+					? [
+							{
+								name: 'non-visible-tier passthrough (G3)',
+								note: 'not decided by visible family; recovery remains a separate phase',
+								drawables: passthrough
+							}
+						]
+					: []),
+				{
+					name: 'visible tee oriented full-pad bounds accepted (G3)',
+					note: 'component-derived quadrilateral drawn last so the semantic object perimeter remains visually primary',
+					drawables: accepted
+				}
+			],
+			notes: [
+				`feature: teeFamily (visible tees) -- ${unit.gate}, trace unit '${unit.id}'`,
+				'accepted object geometry: closed oriented quadrilateral from the enclosing bright-mask component PCA center/angle/major/minor.',
+				'corner math: retain the component projection extrema (axisMajorMin/Max and axisMinorMin/Max), expand each by 0.5px to cover whole raster cells, then rotate all four extrema intersections back into canonical image coordinates.',
+				'preserved secondary geometry: component raster AABB plus hollow-interior ring bbox; neither is substituted for the oriented pad boundary.',
+				'pair-scoring angle remains the original hollow-ring angle in TeeEvidence.angleRad; this geometry repair does not change assignment math.',
+				`acceptedVisibleTeeCount: ${acceptedVisibleTeeCount}  (source: accepted UnitTrace.drawables for teeFamily)`,
+				`detectedBadgeCount: ${detectedBadgeCount ?? 'UNKNOWN'}  (source: accepted RunTrace unit 'badges' drawables)`,
+				`expectedRecoverNum: ${expectedRecoverNum ?? 'UNKNOWN'}  (math: max(0, detectedBadgeCount - acceptedVisibleTeeCount))`,
+				'expectedRecoverNum is a cardinality-derived recovery expectation, not truth, localization, or ownership.',
+				'Visible/recovery labels are unavailable in the annotation truth; all-category G3 misses must not be relabeled as visible-tee misses.',
+				'ownership: UNKNOWN -- tee localization does not assign a tee to a hole.'
+			]
+		};
+	}
+};
+
 export const teeFamilyFeature = {
 	id: 'teeFamily',
 	gate: 'G3',
-	kind: 'deviation',
-	defaultEnabled: false,
-	note: 'LAB intact tee-family refinement: keep only the largest mutually-consistent ring-tee family by enclosing-frame major/minor/area (frameForRing + selectTeeFamily, courseSweep.ts). Component/recovered tee tiers pass through untouched.',
+	kind: 'baseline',
+	defaultEnabled: true,
+	note: 'Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area. Shard recovery is a separate phase.',
+	render: TEE_FAMILY_RENDER,
 	knobs: {
 		frameAreaMin: {
 			default: 10,
@@ -121,13 +209,22 @@ export const teeFamilyFeature = {
 // in already coordinate-aligned frames/ring points.
 
 export interface TeeFamilyFrame {
+	readonly componentLabel: number;
 	readonly bboxX: number;
 	readonly bboxY: number;
 	readonly bboxW: number;
 	readonly bboxH: number;
+	readonly componentCentroidXPx: number;
+	readonly componentCentroidYPx: number;
 	readonly area: number;
+	readonly fill: number;
 	readonly major: number;
 	readonly minor: number;
+	readonly angleRad: number;
+	readonly axisMajorMin: number;
+	readonly axisMajorMax: number;
+	readonly axisMinorMin: number;
+	readonly axisMinorMax: number;
 }
 
 export interface TeeFamilyRingPoint {
@@ -144,6 +241,68 @@ export interface TeeFamilyMeasure {
 export interface TeeFamilySelection {
 	readonly family: readonly TeeFamilyMeasure[];
 	readonly anchor: TeeFamilyMeasure | null;
+}
+
+/** Oriented rectangle centered on the already-measured component centroid.
+ * Component PCA already paid for angle + projected major/minor extents; this
+ * function only converts those retained measurements into four corners. */
+export function orientedPadCorners(
+	frame: TeeFamilyFrame
+): TeePadEvidence['orientedCorners'] {
+	const majorX = Math.cos(frame.angleRad);
+	const majorY = Math.sin(frame.angleRad);
+	const minorX = -majorY;
+	const minorY = majorX;
+	// Component statistics use integer pixel indices as pixel centers. Shift
+	// the origin by half a raster cell so an angle=0 oriented bound uses the
+	// same [bboxX,bboxX+bboxW] edge convention as the ordinary raster AABB.
+	const originX = frame.componentCentroidXPx + 0.5;
+	const originY = frame.componentCentroidYPx + 0.5;
+	const majorMin = frame.axisMajorMin - 0.5;
+	const majorMax = frame.axisMajorMax + 0.5;
+	const minorMin = frame.axisMinorMin - 0.5;
+	const minorMax = frame.axisMinorMax + 0.5;
+	const corner = (majorProjection: number, minorProjection: number) =>
+		[
+			originX + majorX * majorProjection + minorX * minorProjection,
+			originY + majorY * majorProjection + minorY * minorProjection
+		] as const;
+	return [
+		corner(majorMin, minorMin),
+		corner(majorMax, minorMin),
+		corner(majorMax, minorMax),
+		corner(majorMin, minorMax)
+	];
+}
+
+function teePadEvidence(frame: TeeFamilyFrame): TeePadEvidence {
+	const majorMid = (frame.axisMajorMin + frame.axisMajorMax) / 2;
+	const minorMid = (frame.axisMinorMin + frame.axisMinorMax) / 2;
+	const majorX = Math.cos(frame.angleRad);
+	const majorY = Math.sin(frame.angleRad);
+	const minorX = -majorY;
+	const minorY = majorX;
+	return {
+		source: 'bright-mask-component',
+		componentLabel: frame.componentLabel,
+		bbox: [frame.bboxX, frame.bboxY, frame.bboxW, frame.bboxH],
+		componentCentroidXPx: frame.componentCentroidXPx,
+		componentCentroidYPx: frame.componentCentroidYPx,
+		centerXPx:
+			frame.componentCentroidXPx + 0.5 + majorX * majorMid + minorX * minorMid,
+		centerYPx:
+			frame.componentCentroidYPx + 0.5 + majorY * majorMid + minorY * minorMid,
+		angleRad: frame.angleRad,
+		majorPx: frame.major,
+		minorPx: frame.minor,
+		area: frame.area,
+		fill: frame.fill,
+		axisMajorMin: frame.axisMajorMin,
+		axisMajorMax: frame.axisMajorMax,
+		axisMinorMin: frame.axisMinorMin,
+		axisMinorMax: frame.axisMinorMax,
+		orientedCorners: orientedPadCorners(frame)
+	};
 }
 
 /**
@@ -232,14 +391,33 @@ interface ViewportSlot {
 
 function toFrame(component: ComponentStats, topPx: number): TeeFamilyFrame {
 	// Only Y shifts: the viewport crop is vertical-only (see file header).
+	if (
+		component.axisMajorMin === undefined ||
+		component.axisMajorMax === undefined ||
+		component.axisMinorMin === undefined ||
+		component.axisMinorMax === undefined
+	) {
+		throw new Error(
+			`teeFamily: bright-mask component ${component.label} is missing measured PCA projection extrema`
+		);
+	}
 	return {
+		componentLabel: component.label,
 		bboxX: component.bboxX,
 		bboxY: component.bboxY + topPx,
 		bboxW: component.bboxW,
 		bboxH: component.bboxH,
+		componentCentroidXPx: component.cx,
+		componentCentroidYPx: component.cy + topPx,
 		area: component.area,
+		fill: component.fill,
 		major: component.major,
-		minor: component.minor
+		minor: component.minor,
+		angleRad: component.angle,
+		axisMajorMin: component.axisMajorMin,
+		axisMajorMax: component.axisMajorMax,
+		axisMinorMin: component.axisMinorMin,
+		axisMinorMax: component.axisMinorMax
 	};
 }
 
@@ -313,16 +491,68 @@ export const teeFamilyUnit: EngineUnit = {
 			const measures = [...measureByTeeId.values()];
 			const { family, anchor } = selectTeeFamily(measures, knobs);
 			const familyIds = new Set(family.map((m) => m.ring.id));
+			const teeById = new Map(ringTees.map((tee) => [tee.detId, tee]));
 
 			for (const [detId, measure] of measureByTeeId) {
 				if (familyIds.has(detId)) {
+					const tee = teeById.get(detId);
+					const pad = teePadEvidence(measure.frame);
 					ctx.overlay('teeFamily', {
-						type: 'box',
-						bbox: [measure.frame.bboxX, measure.frame.bboxY, measure.frame.bboxW, measure.frame.bboxH],
+						type: 'polyline',
+						path: [...pad.orientedCorners, pad.orientedCorners[0]],
 						verdict: 'accepted',
 						ref: detId,
-						values: { frameMajor: measure.frame.major, frameMinor: measure.frame.minor, frameArea: measure.frame.area }
+						reason: `accepted intact visible tee family; oriented bounds from bright component ${pad.componentLabel}`,
+						values: {
+							componentLabel: pad.componentLabel,
+							frameMajor: pad.majorPx,
+							frameMinor: pad.minorPx,
+							frameArea: pad.area,
+							frameFill: pad.fill,
+							frameAngleRad: pad.angleRad,
+							frameAngleDeg: (pad.angleRad * 180) / Math.PI,
+							componentCentroidX: pad.componentCentroidXPx,
+							componentCentroidY: pad.componentCentroidYPx,
+							orientedCenterX: pad.centerXPx,
+							orientedCenterY: pad.centerYPx,
+							axisMajorMin: pad.axisMajorMin,
+							axisMajorMax: pad.axisMajorMax,
+							axisMinorMin: pad.axisMinorMin,
+							axisMinorMax: pad.axisMinorMax,
+							...(tee?.angleRad === null || tee?.angleRad === undefined
+								? {}
+								: {
+										ringAngleRad: tee.angleRad,
+										ringAngleDeg: (tee.angleRad * 180) / Math.PI
+									})
+						}
 					});
+					ctx.overlay('teeFamily', {
+						type: 'box',
+						bbox: pad.bbox,
+						verdict: 'info',
+						ref: `${detId}:pad-aabb`,
+						reason: 'enclosing bright component raster AABB retained as secondary evidence; not the oriented object boundary',
+						values: {
+							componentLabel: pad.componentLabel,
+							bboxWidth: pad.bbox[2],
+							bboxHeight: pad.bbox[3]
+						}
+					});
+					if (tee?.ring) {
+						ctx.overlay('teeFamily', {
+							type: 'box',
+							bbox: tee.ring.bbox,
+							verdict: 'info',
+							ref: `${detId}:ring-interior`,
+							reason: 'hollow-interior detector bbox retained separately; never the full tee-pad boundary',
+							values: {
+								ringArea: tee.ring.area,
+								ringElongation: tee.ring.elongation,
+								ringFrac: tee.ring.ringFrac
+							}
+						});
+					}
 					continue;
 				}
 				// measured but excluded from the winning family: report the
@@ -339,9 +569,10 @@ export const teeFamilyUnit: EngineUnit = {
 				if (s && dMajor > majorTol) failing.push('major');
 				if (s && dMinor > minorTol) failing.push('minor');
 				if (s && dArea > areaTol) failing.push('area');
+				const orientedCorners = orientedPadCorners(f);
 				ctx.overlay('teeFamily', {
-					type: 'box',
-					bbox: [f.bboxX, f.bboxY, f.bboxW, f.bboxH],
+					type: 'polyline',
+					path: [...orientedCorners, orientedCorners[0]],
 					verdict: 'rejected',
 					ref: detId,
 					reason: `excluded from winning family (anchor ${anchor?.ring.id ?? 'none'}): failing ${failing.length ? failing.join(', ') : 'unknown'} log-ratio(s) — |Δlog major|=${dMajor.toFixed(4)} (tol ${majorTol.toFixed(4)}), |Δlog minor|=${dMinor.toFixed(4)} (tol ${minorTol.toFixed(4)}), |Δlog area|=${dArea.toFixed(4)} (tol ${areaTol.toFixed(4)})`,
@@ -349,15 +580,25 @@ export const teeFamilyUnit: EngineUnit = {
 				});
 			}
 
-			// Filter, don't rebuild: the incoming list is already sorted by
-			// `yPx, xPx, tier` (makeTees), so dropping the excluded ring tees
-			// is a strict subsequence — surviving ring tees stay in cy/cx order
-			// (matching the spec's family-order requirement) and passthrough
-			// tees keep their original relative positions. detIds are left
-			// untouched so every `ref` on the drawables above still resolves.
-			const kept = ringTees.filter((tee) => familyIds.has(tee.detId));
-			const keptIds = new Set(kept.map((tee) => tee.detId));
-			const merged = tees.filter((tee) => tee.tier !== 'ring' || keptIds.has(tee.detId));
+			// Filter in input order, enriching only accepted ring tees with the
+			// promoted full-pad geometry. Surviving tees therefore retain their
+			// cy/cx order and opaque detIds while the detector-local ring bbox
+			// remains separately available inside each TeeEvidence.
+			const familyFrameByTeeId = new Map(
+				family.map((measure) => [measure.ring.id, measure.frame] as const)
+			);
+			const merged: TeeEvidence[] = [];
+			for (const tee of tees) {
+				if (tee.tier !== 'ring') {
+					merged.push(tee);
+					continue;
+				}
+				const frame = familyFrameByTeeId.get(tee.detId);
+				if (!frame) continue;
+				const pad = teePadEvidence(frame);
+				merged.push({ ...tee, bbox: pad.bbox, pad });
+			}
+			const kept = merged.filter((tee) => tee.tier === 'ring');
 
 			ctx.measure('teeFamily', 'ringCandidates', ringTees.length);
 			ctx.measure('teeFamily', 'kept', kept.length);

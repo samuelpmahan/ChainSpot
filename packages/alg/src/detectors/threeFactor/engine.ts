@@ -1,6 +1,6 @@
 // The threeFactor engine: executes a config-declared unit order over the
 // evidence board, resolving ABFeatures and collecting the spatial trace.
-// The DEFAULT config reproduces frozen dev72 behavior byte-for-byte
+// The DEFAULT config is the recovered production baseline
 // (pinned by tests/unit/threeFactorParity.test.ts).
 
 import { assignThreeFactor, type SearchKnobs } from './assignment';
@@ -83,7 +83,12 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	cleanBasketFamilyUnit
 ];
 
-export const DEFAULT_EXECUTION: readonly string[] = [...DEFAULT_MEASURE_EXECUTION, 'assignment'];
+export const DEFAULT_EXECUTION: readonly string[] = [
+	...DEFAULT_MEASURE_EXECUTION.slice(0, DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
+	'teeFamily',
+	...DEFAULT_MEASURE_EXECUTION.slice(DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
+	'assignment'
+];
 
 /** Slots the engine seeds before any unit runs. */
 export const SEEDED_SLOTS: readonly string[] = [
@@ -94,7 +99,10 @@ export const SEEDED_SLOTS: readonly string[] = [
 	'recoveredTees'
 ];
 
-export function createTraceContext(resolved: ResolvedConfig, paramsHash: string): {
+export function createTraceContext(
+	resolved: ResolvedConfig,
+	paramsHash: string
+): {
 	ctx: FeatureContext;
 	trace: RunTrace;
 } {
@@ -107,12 +115,12 @@ export function createTraceContext(resolved: ResolvedConfig, paramsHash: string)
 		if (!entry) {
 			const gate: GateId = unitById.get(unitId)?.gate ?? 'shared';
 			const feature = featureById(unitId);
-			const state: ResolvedFeature | undefined = feature
-				? resolved.features[unitId]
-				: undefined;
+			const state: ResolvedFeature | undefined = feature ? resolved.features[unitId] : undefined;
 			const knobs = state?.knobs ?? (feature ? defaultKnobs(feature) : {});
 			const deviating = feature
-				? Object.entries(knobs).filter(([name, value]) => feature.knobs[name]?.default !== value).map(([name]) => name)
+				? Object.entries(knobs)
+						.filter(([name, value]) => feature.knobs[name]?.default !== value)
+						.map(([name]) => name)
 				: [];
 			entry = {
 				id: unitId,
@@ -133,6 +141,7 @@ export function createTraceContext(resolved: ResolvedConfig, paramsHash: string)
 		configName: resolved.name,
 		paramsHash,
 		execution: resolved.execution,
+		features: resolved.features,
 		units: [],
 		heatmaps
 	};
@@ -148,7 +157,9 @@ export function createTraceContext(resolved: ResolvedConfig, paramsHash: string)
 		},
 		measure(unitId, name, value) {
 			const entry = traceFor(unitId);
-			let aggregate: MeasurementAggregate | undefined = entry.measurements.find((m) => m.name === name);
+			let aggregate: MeasurementAggregate | undefined = entry.measurements.find(
+				(m) => m.name === name
+			);
 			if (!aggregate) {
 				aggregate = { name, count: 0, min: Infinity, max: -Infinity, sum: 0 };
 				entry.measurements.push(aggregate);
@@ -229,7 +240,11 @@ export function runEngine(
 	// (frozen-default, no-trace callers, e.g. the parity pin): compile still
 	// needs a ResolvedConfig shape to expand `execution`, so an empty-features
 	// stand-in is used — ctx (nullFeatureContext below) never consults it.
-	const compileTarget: ResolvedConfig = resolved ?? { name: 'frozen-default', execution, features: {} };
+	const compileTarget: ResolvedConfig = resolved ?? {
+		name: 'frozen-default',
+		execution,
+		features: {}
+	};
 	const plan = compileExecutionPlan(compileTarget, paramsHash);
 
 	// feature -> params bridge: zfit rides CorridorParams so measurement
@@ -247,11 +262,21 @@ export function runEngine(
 	effectiveParams = bridgeParam(effectiveParams, 'supportTau', ribbonState, 'supportTau');
 
 	const routingState = resolved?.features['routing'];
-	effectiveParams = bridgeParam(effectiveParams, 'corridorWidthPx', routingState, 'corridorWidthPx');
+	effectiveParams = bridgeParam(
+		effectiveParams,
+		'corridorWidthPx',
+		routingState,
+		'corridorWidthPx'
+	);
 	effectiveParams = bridgeParam(effectiveParams, 'orientations', routingState, 'orientations');
 	effectiveParams = bridgeParam(effectiveParams, 'widthsSrc', routingState, 'widthsSrc');
 	effectiveParams = bridgeParam(effectiveParams, 'alignmentPower', routingState, 'alignmentPower');
-	effectiveParams = bridgeParam(effectiveParams, 'worstWindowSrcPx', routingState, 'worstWindowSrcPx');
+	effectiveParams = bridgeParam(
+		effectiveParams,
+		'worstWindowSrcPx',
+		routingState,
+		'worstWindowSrcPx'
+	);
 
 	// Exactly ONE gateway walks operations from here down — executeCompiledPlan
 	// (packages/alg/src/exec/gateway.ts). The board is now the exec layer's

@@ -20,11 +20,15 @@ import { g2SpriteFeature } from '@chainspot/alg/detectors/threeFactor/features/g
 import { g1BadgesFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.badges';
 import { g1DigitsFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.digits';
 import { sharedHsvFeature } from '@chainspot/alg/detectors/threeFactor/features/shared.hsv';
-import { DEFAULT_SCORING_KNOBS, DEFAULT_ZFIT_KNOBS } from '@chainspot/alg/detectors/threeFactor/scoring';
+import {
+	DEFAULT_SCORING_KNOBS,
+	DEFAULT_ZFIT_KNOBS
+} from '@chainspot/alg/detectors/threeFactor/scoring';
 import { DEFAULT_SEARCH_KNOBS } from '@chainspot/alg/detectors/threeFactor/assignment';
 import { DEFAULT_RIBBON_KNOBS } from '@chainspot/alg/detectors/threeFactor/ribbon';
 import { DEFAULT_ROUTING_KNOBS } from '@chainspot/alg/detectors/threeFactor/routing';
-import { DEFAULT_ENDPOINTS_KNOBS, DEFAULT_SPRITE_KNOBS } from '@chainspot/alg/detectors/threeFactor/endpoints';
+import { DEFAULT_ENDPOINTS_KNOBS } from '@chainspot/alg/detectors/threeFactor/endpoints';
+import { DEFAULT_SMART_BASKET_OPTIONS } from '@chainspot/alg/detectors/threeFactor/smartBasket';
 import { DEFAULT_BADGE_STAGE_KNOBS } from '@chainspot/alg/detectors/threeFactor/badgeStage';
 import { DEFAULT_DIGITS_KNOBS } from '@chainspot/alg/detectors/threeFactor/digits/segment';
 import { DEFAULT_HSV_KNOBS } from '@chainspot/alg/detectors/threeFactor/raster';
@@ -66,30 +70,42 @@ describe('parseConfig', () => {
 	});
 
 	test('rejects unknown top-level keys (typo protection)', () => {
-		expect(() =>
-			parseConfig({ schema: 'threeFactor-config@1', name: 'x', gatess: {} })
-		).toThrow(/unknown key 'gatess'/);
+		expect(() => parseConfig({ schema: 'threeFactor-config@1', name: 'x', gatess: {} })).toThrow(
+			/unknown key 'gatess'/
+		);
 	});
 
 	test('rejects unknown gate, feature, knob, and bad knob values', () => {
 		const base = { schema: 'threeFactor-config@1', name: 'x' };
 		expect(() => parseConfig({ ...base, gates: { G9: {} } })).toThrow(/unknown gate/);
 		expect(() => parseConfig({ ...base, gates: { G5: { nope: {} } } })).toThrow(/unknown feature/);
-		expect(() =>
-			parseConfig({ ...base, gates: { G5: { zfit: { knobs: { nope: 1 } } } } })
-		).toThrow(/unknown knob/);
+		expect(() => parseConfig({ ...base, gates: { G5: { zfit: { knobs: { nope: 1 } } } } })).toThrow(
+			/unknown knob/
+		);
 		expect(() =>
 			parseConfig({ ...base, gates: { G5: { zfit: { knobs: { topK: -1 } } } } })
 		).toThrow(/positive integer/);
-		expect(() =>
-			parseConfig({ ...base, gates: { G3: { zfit: { enabled: true } } } })
-		).toThrow(/belongs to gate/);
+		expect(() => parseConfig({ ...base, gates: { G3: { zfit: { enabled: true } } } })).toThrow(
+			/belongs to gate/
+		);
 	});
 });
 
 describe('validateExecution', () => {
 	test('default order is valid', () => {
 		expect(() => validateExecution(DEFAULT_EXECUTION, ENGINE_UNITS, SEEDED_SLOTS)).not.toThrow();
+		expect(DEFAULT_EXECUTION).toEqual([
+			'badgeStage',
+			'badges',
+			'baskets',
+			'tees',
+			'teeFamily',
+			'supportField',
+			'badgeOcclusionPatch',
+			'rawPairs',
+			'measurement',
+			'assignment'
+		]);
 	});
 
 	test('reordered-but-valid passes; dependency violations fail with the slot named', () => {
@@ -127,10 +143,9 @@ describe('fallback-default mirrors', () => {
 		// only; fieldScale/supportTau ride CorridorParams instead (see
 		// features/g5.ribbon.ts's file header), so they're excluded here and
 		// compared separately below.
-		const { fieldScale, supportTau, ...ribbonFunctionKnobDefaults } = defaultKnobs(g5RibbonFeature) as Record<
-			string,
-			unknown
-		>;
+		const { fieldScale, supportTau, ...ribbonFunctionKnobDefaults } = defaultKnobs(
+			g5RibbonFeature
+		) as Record<string, unknown>;
 		expect(DEFAULT_RIBBON_KNOBS).toEqual(ribbonFunctionKnobDefaults);
 		expect(fieldScale).toBe(3);
 		expect(supportTau).toBe(0.5);
@@ -153,7 +168,12 @@ describe('fallback-default mirrors', () => {
 		expect(alignmentPower).toBe(2);
 		expect(worstWindowSrcPx).toBe(90);
 		expect(DEFAULT_ENDPOINTS_KNOBS).toEqual(defaultKnobs(g3EndpointsFeature));
-		expect(DEFAULT_SPRITE_KNOBS).toEqual(defaultKnobs(g2SpriteFeature));
+		const { spriteWidth, spriteHeight, ...smartBasketDefaults } = defaultKnobs(
+			g2SpriteFeature
+		) as Record<string, unknown>;
+		expect(smartBasketDefaults).toEqual(DEFAULT_SMART_BASKET_OPTIONS);
+		expect(spriteWidth).toBe(42);
+		expect(spriteHeight).toBe(66);
 		// badgeInsidePadding rides no separate mechanism (unlike g5.ribbon/
 		// g5.routing's CorridorParams-riding knobs) — it's bundled into the
 		// same BadgeStageKnobs type even though only measure.ts's makeTees
@@ -205,7 +225,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('7c75595338b0a45502ce615a9ea827d4e9140b6eca7a950061f03a6b7625a52e');
+		expect(hash).toBe('e58b67d17f4e6b5779b35465e183aa8af28c69786d6a056fbddb96be299d4c1a');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

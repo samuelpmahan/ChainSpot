@@ -249,8 +249,8 @@ const badgeStageOps: OperationDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// tees — decomposed per R2's own example: ring measure, component fallback,
-// exclusion decides.
+// Visible tees only: hollow-ring measurement followed by exclusion/family
+// decision. Component/shard recovery is deliberately a separate phase.
 
 const teesOps: OperationDef[] = [
 	{
@@ -274,35 +274,14 @@ const teesOps: OperationDef[] = [
 	},
 	{
 		spec: {
-			id: 'tees.componentFallback',
-			kind: 'transform',
-			gate: 'G3',
-			unit: 'tees',
-			consumes: ['stage'],
-			produces: ['tees.rawComponents'],
-			note: 'bright-component tee-candidate pool, badge-labeled components dropped'
-		},
-		run(board, ctx) {
-			const stop = ctx.span('tees');
-			const stage = board.get<BadgeStageResult>('stage');
-			const badgeLabels = new Set(stage.badges.map((badge) => badge.label));
-			board.set(
-				'tees.rawComponents',
-				stage.brightComponents.filter((component) => !badgeLabels.has(component.label))
-			);
-			stop();
-		}
-	},
-	{
-		spec: {
 			id: 'tees.exclusion',
 			kind: 'decide',
 			gate: 'G3',
 			unit: 'tees',
-			consumes: ['tees.rawRings', 'tees.rawComponents', 'stage', 'sprites', 'viewport'],
+			consumes: ['tees.rawRings', 'stage', 'sprites', 'viewport'],
 			produces: ['tees'],
 			features: [g4ScoringFeature.id, g3EndpointsFeature.id, g1BadgesFeature.id],
-			note: 'badge-bbox + screen-chrome exclusion over both candidate tiers, then merge/sort/assign detIds'
+			note: 'visible hollow-ring candidates only: badge-bbox + screen-chrome exclusion, then sort/assign detIds; shard recovery is separate'
 		},
 		run(board, ctx) {
 			const stop = ctx.span('tees');
@@ -310,14 +289,13 @@ const teesOps: OperationDef[] = [
 			const sprites = board.get<readonly SpriteMatch[]>('sprites');
 			const { topPx } = board.get<{ topPx: number }>('viewport');
 			const rawRings = board.get<readonly TeeRing[]>('tees.rawRings');
-			const rawComponents = board.get<readonly ComponentStats[]>('tees.rawComponents');
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
 			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const tees = excludeAndAssembleTees(
 				stage,
 				rawRings,
-				rawComponents,
+				[],
 				sprites,
 				topPx,
 				ctx,

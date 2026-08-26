@@ -12,7 +12,7 @@ import { solvePixelStitch } from '@chainspot/alg/g0/stitchSolve';
 import { materializeComposite } from '@chainspot/alg/g0/composite';
 import { appendEntries, createLedger, type CoordinateTransformLedger, type LedgerEntry } from '@chainspot/alg/g0/ledger';
 import { matchTruth, type AnnotationPoint, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
-import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor';
+import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor/types';
 import type { Placement } from '@chainspot/alg/g0/types';
 
 export interface G0Report {

@@ -101,6 +101,10 @@ function badge(): BadgeEvidence {
 			major: 5,
 			minor: 4,
 			angle: 0,
+			axisMajorMin: -2,
+			axisMajorMax: 2,
+			axisMinorMin: -1.5,
+			axisMinorMax: 1.5,
 			fill: 0.8
 		},
 		cxPx: 8,
@@ -121,6 +125,7 @@ function basket(): BasketEvidence {
 	return {
 		detId: 'basket-0',
 		bbox: [20, 6, 6, 8],
+		whiteBbox: [20, 6, 6, 8],
 		centerXPx: 23,
 		centerYPx: 10,
 		tipXPx: 23,

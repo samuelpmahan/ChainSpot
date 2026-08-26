@@ -125,7 +125,7 @@ describe('exec evidence chain 2 — family-on.json', () => {
 		const opIds = receipts.map((r) => r.opId);
 		expect(opIds).toContain('cleanBasketFamily');
 		expect(opIds).toContain('teeFamily');
-		expect(plan.ops.length).toBe(19); // default's 17 + cleanBasketFamily + teeFamily
+		expect(plan.ops.length).toBe(18); // visible teeFamily is baseline; this plan adds cleanBasketFamily
 	});
 });
 

@@ -27,14 +27,14 @@ const familyOnResolved = resolveConfig(familyOnConfigJson as ThreeFactorConfig, 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
 		expect(UNIT_OPERATIONS.size).toBe(12); // the 12 legacy EngineUnits
-		expect(OPERATION_UNIVERSE.length).toBe(20); // 9 x 1-op units + badgeStage(4) + tees(3) + assignment(4)
+		expect(OPERATION_UNIVERSE.length).toBe(19); // 9 x 1-op units + badgeStage(4) + visible tees(2) + assignment(4)
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
 			'badgeStage.family',
 			'badgeStage.badges'
 		]);
-		expect(UNIT_OPERATIONS.get('tees')).toEqual(['tees.ringMeasure', 'tees.componentFallback', 'tees.exclusion']);
+		expect(UNIT_OPERATIONS.get('tees')).toEqual(['tees.ringMeasure', 'tees.exclusion']);
 		expect(UNIT_OPERATIONS.get('assignment')).toEqual([
 			'assignment.pairs',
 			'assignment.scoring',
@@ -55,7 +55,7 @@ describe('operation universe (R2 inventory)', () => {
 });
 
 describe('compileExecutionPlan — C1 ordering', () => {
-	test('default.json compiles to the full 21-op sequence, badgeStage/tees/assignment expanded in place', () => {
+	test('default.json compiles visible tee family after ring detection', () => {
 		const plan = compileExecutionPlan(defaultResolved);
 		expect(plan.ops.map((op) => op.id).slice(0, 4)).toEqual([
 			'badgeStage.masks',
@@ -64,10 +64,10 @@ describe('compileExecutionPlan — C1 ordering', () => {
 			'badgeStage.badges'
 		]);
 		expect(plan.ops.map((op) => op.id)).not.toContain('cleanBasketFamily');
-		expect(plan.ops.map((op) => op.id)).not.toContain('teeFamily');
+		expect(plan.ops.map((op) => op.id)).toContain('teeFamily');
 	});
 
-	test('family-on.json compiles to a different, longer plan (cleanBasketFamily + teeFamily inserted)', () => {
+	test('family-on.json differs by inserting cleanBasketFamily while retaining baseline teeFamily', () => {
 		const plan = compileExecutionPlan(familyOnResolved);
 		const ids = plan.ops.map((op) => op.id);
 		expect(ids).toContain('cleanBasketFamily');

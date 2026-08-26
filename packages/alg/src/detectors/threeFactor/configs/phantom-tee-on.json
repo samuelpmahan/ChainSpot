@@ -5,10 +5,11 @@
 	"execution": [
 		"badgeStage",
 		"badges",
-		"supportField",
-		"badgeOcclusionPatch",
 		"baskets",
 		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",

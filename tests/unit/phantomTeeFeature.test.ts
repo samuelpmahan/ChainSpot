@@ -10,7 +10,7 @@ import type {
 function badge(detId: string, label: string, cx: number, cy: number) {
 	return {
 		detId,
-		component: { label: 1, area: 10, cx, cy, bboxX: cx - 5, bboxY: cy - 5, bboxW: 10, bboxH: 10, major: 5, minor: 4, angle: 0, fill: 0.8 },
+		component: { label: 1, area: 10, cx, cy, bboxX: cx - 5, bboxY: cy - 5, bboxW: 10, bboxH: 10, major: 5, minor: 4, angle: 0, axisMajorMin: -2, axisMajorMax: 2, axisMinorMin: -1.5, axisMinorMax: 1.5, fill: 0.8 },
 		cxPx: cx,
 		cyPx: cy,
 		bbox: [cx - 5, cy - 5, 10, 10] as const,
@@ -26,6 +26,7 @@ function basket(detId: string, tipX: number, tipY: number) {
 	return {
 		detId,
 		bbox: [tipX - 3, tipY - 8, 6, 8] as const,
+		whiteBbox: [tipX - 3, tipY - 8, 6, 8] as const,
 		centerXPx: tipX,
 		centerYPx: tipY - 4,
 		tipXPx: tipX,

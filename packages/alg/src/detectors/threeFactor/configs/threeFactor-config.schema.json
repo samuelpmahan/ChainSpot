@@ -2,7 +2,7 @@
 	"$schema": "http://json-schema.org/draft-07/schema#",
 	"$id": "chainspot://threeFactor-config@1",
 	"title": "threeFactor engine config",
-	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = frozen dev72 behavior.",
+	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
 	"type": "object",
 	"additionalProperties": false,
 	"required": [
@@ -215,7 +215,7 @@
 						"sprite": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Basket matched-filter sprite detection: coarse scan, stride-1 refinement, matching-pursuit dedupe.",
+							"description": "Two-pass basket renderer-family detection: intact connected components, then occlusion recovery seeded by known renderer objects.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
@@ -225,54 +225,99 @@
 									"type": "object",
 									"additionalProperties": false,
 									"properties": {
-										"coarseStride": {
+										"bboxTolerancePx": {
 											"type": "number",
-											"description": "pixel stride for the coarse sprite-matching scan pass (was SPRITE_COARSE_STRIDE)",
-											"default": 3
-										},
-										"coarseThreshold": {
-											"type": "number",
-											"description": "score threshold for coarse sprite-matching peaks (was SPRITE_COARSE_THRESHOLD)",
-											"default": 0.18
-										},
-										"scoreMin": {
-											"type": "number",
-											"description": "minimum score for final sprite match acceptance, after refinement (was DEFAULT_SPRITE_SCORE_MIN; coincidentally also g5.zfit.alignedWorstCeiling's value — see file header, unrelated)",
-											"default": 0.28
-										},
-										"tipOffset": {
-											"type": "number",
-											"description": "offset from basket center to the pole-tip annotation point (was BASKET_TIP_OFFSET)",
-											"default": 4
-										},
-										"coarseGateYOffset": {
-											"type": "number",
-											"description": "y offset (from the sprite top) used by the cheap coarse-pass bright-pixel gate",
-											"default": 10
-										},
-										"coarseGateXOffset": {
-											"type": "number",
-											"description": "x offset (±) used by the cheap coarse-pass bright-pixel gate",
-											"default": 4
-										},
-										"refinementRadius": {
-											"type": "number",
-											"description": "stride-1 search radius around each coarse peak during refinement (missed by the original inventory sweep)",
+											"description": "allowed difference from the 42x66 connected-component family bbox",
 											"default": 2
 										},
-										"staleScoreEpsilon": {
+										"areaRatioMin": {
 											"type": "number",
-											"description": "minimum score drop, versus the live (partially-erased) mask, before a matching-pursuit candidate is treated as stale and re-scored (missed by the original inventory sweep)",
-											"default": 0.001
+											"description": "",
+											"default": 0.96
+										},
+										"areaRatioMax": {
+											"type": "number",
+											"description": "",
+											"default": 1.03
+										},
+										"cleanWhiteCoverageMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.96
+										},
+										"cleanDarkShellMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.5
+										},
+										"cleanDarkCoherenceMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.8
+										},
+										"shellRadiusPx": {
+											"type": "number",
+											"description": "",
+											"default": 2
+										},
+										"blackConsensusFraction": {
+											"type": "number",
+											"description": "",
+											"default": 0.75
+										},
+										"blackConsensusMarginPx": {
+											"type": "number",
+											"description": "",
+											"default": 4
+										},
+										"recoveryIdentityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.9
+										},
+										"recoveryWhiteCoverageMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.9
+										},
+										"recoveryBlackSupportMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.8
+										},
+										"recoveryVisibilityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.25
+										},
+										"highVisibilityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.5
+										},
+										"dedupeRadiusPx": {
+											"type": "number",
+											"description": "",
+											"default": 14
+										},
+										"semanticTipOffsetPx": {
+											"type": "number",
+											"description": "offset below the 42x66 family bbox to the pole-tip endpoint",
+											"default": 4
+										},
+										"maxChildrenPerSeed": {
+											"type": "number",
+											"description": "",
+											"default": 2
 										},
 										"spriteWidth": {
 											"type": "number",
-											"description": "reported basket bbox width — see file header on the coupling to the basket-sprite.json asset",
+											"description": "",
 											"default": 42
 										},
 										"spriteHeight": {
 											"type": "number",
-											"description": "reported basket bbox height — see file header on the coupling to the basket-sprite.json asset",
+											"description": "",
 											"default": 66
 										}
 									}
@@ -367,7 +412,7 @@
 						"endpoints": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Enclosed-hole tee-ring detection plus the bright-component fallback tier.",
+							"description": "Visible tee candidate generation from enclosed hollow-glyph rings. Shard/component recovery is a separate G3 phase.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
@@ -479,11 +524,11 @@
 						"teeFamily": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "LAB intact tee-family refinement: keep only the largest mutually-consistent ring-tee family by enclosing-frame major/minor/area (frameForRing + selectTeeFamily, courseSweep.ts). Component/recovered tee tiers pass through untouched.",
+							"description": "Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area. Shard recovery is a separate phase.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
-									"default": false
+									"default": true
 								},
 								"knobs": {
 									"type": "object",

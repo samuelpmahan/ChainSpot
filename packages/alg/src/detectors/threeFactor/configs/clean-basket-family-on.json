@@ -6,11 +6,12 @@
 	"execution": [
 		"badgeStage",
 		"badges",
-		"supportField",
-		"badgeOcclusionPatch",
 		"baskets",
 		"cleanBasketFamily",
 		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment"

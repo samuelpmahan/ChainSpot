@@ -5,22 +5,28 @@ import { DEFAULT_BADGE_STAGE_KNOBS, runBadgeStage, type BadgeStageKnobs } from '
 import {
 	collectTeePoints,
 	DEFAULT_ENDPOINTS_KNOBS,
-	DEFAULT_SPRITE_KNOBS,
 	detectTeeRings,
-	matchBasketSprites,
-	prepareSpriteTemplate,
 	type EndpointsKnobs,
-	type SpriteKnobs,
 	type SpriteMatch,
-	type SpriteTemplate,
 	type SuppressedTee,
 	type TeeRing
 } from './endpoints';
+import {
+	matchBasketSpritesSmart,
+	type SmartBasketDecision,
+	type SmartBasketEvidence,
+	type SmartBasketTemplate
+} from './smartBasket';
 import { predictProbs, type LogisticModel } from './digits/logisticInference';
 import { readCourseBadges, type BadgeReading, type DigitScorer } from './digits/readBadges';
 import { DEFAULT_DIGITS_KNOBS, type DigitsKnobs } from './digits/segment';
 import { DEFAULT_HSV_KNOBS, type HsvKnobs } from './raster';
-import { computeRibbonSupport, DEFAULT_RIBBON_KNOBS, patchBadgeOcclusion, type RibbonKnobs } from './ribbon';
+import {
+	computeRibbonSupport,
+	DEFAULT_RIBBON_KNOBS,
+	patchBadgeOcclusion,
+	type RibbonKnobs
+} from './ribbon';
 import { DEFAULT_ROUTING_KNOBS, routeBadgeLegs, type RoutingKnobs } from './routing';
 import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, type ScoringKnobs } from './scoring';
 import { detectScreenChromeRegions, pointInScreenChrome } from './screenChrome';
@@ -48,7 +54,7 @@ import { g4ScoringFeature } from './features/g4.scoring';
 import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { g3EndpointsFeature } from './features/g3.endpoints';
-import { g2SpriteFeature } from './features/g2.sprite';
+import { g2SpriteFeature, type SmartSpriteKnobs } from './features/g2.sprite';
 import { g1BadgesFeature } from './features/g1.badges';
 import { g1DigitsFeature } from './features/g1.digits';
 import { sharedHsvFeature } from './features/shared.hsv';
@@ -68,7 +74,7 @@ export function createBoard(): EvidenceBoard {
 	};
 }
 
-const basketTemplate = prepareSpriteTemplate(basketSpriteData as SpriteTemplate);
+const basketTemplate = basketSpriteData as SmartBasketTemplate;
 const logisticModel = logisticModelData as LogisticModel;
 const digitScorer: DigitScorer = {
 	name: 'nuthing-p2-logistic',
@@ -99,13 +105,20 @@ function makeParameters(params: ThreeFactorParams | undefined): CorridorParams {
 	const alignmentPower = params?.alignmentPower ?? DEFAULT_ALIGNMENT_POWER;
 	const worstWindowSrcPx = params?.worstWindowSrcPx ?? DEFAULT_WORST_WINDOW;
 	const supportTau = params?.supportTau ?? DEFAULT_SUPPORT_TAU;
-	if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0) throw new Error('corridorWidthPx must be positive.');
-	if (!Number.isFinite(fieldScale) || fieldScale <= 0) throw new Error('fieldScale must be positive.');
-	if (!Number.isInteger(orientations) || orientations < 1) throw new Error('orientations must be a positive integer.');
-	if (!widthsSrc.length || widthsSrc.some((width) => !Number.isFinite(width) || width <= 0)) throw new Error('widthsSrc must contain positive values.');
-	if (!Number.isFinite(alignmentPower) || alignmentPower < 0) throw new Error('alignmentPower must be non-negative.');
-	if (!Number.isFinite(worstWindowSrcPx) || worstWindowSrcPx <= 0) throw new Error('worstWindowSrcPx must be positive.');
-	if (!Number.isFinite(supportTau) || supportTau < 0 || supportTau > 1) throw new Error('supportTau must be in [0, 1].');
+	if (!Number.isFinite(corridorWidthPx) || corridorWidthPx <= 0)
+		throw new Error('corridorWidthPx must be positive.');
+	if (!Number.isFinite(fieldScale) || fieldScale <= 0)
+		throw new Error('fieldScale must be positive.');
+	if (!Number.isInteger(orientations) || orientations < 1)
+		throw new Error('orientations must be a positive integer.');
+	if (!widthsSrc.length || widthsSrc.some((width) => !Number.isFinite(width) || width <= 0))
+		throw new Error('widthsSrc must contain positive values.');
+	if (!Number.isFinite(alignmentPower) || alignmentPower < 0)
+		throw new Error('alignmentPower must be non-negative.');
+	if (!Number.isFinite(worstWindowSrcPx) || worstWindowSrcPx <= 0)
+		throw new Error('worstWindowSrcPx must be positive.');
+	if (!Number.isFinite(supportTau) || supportTau < 0 || supportTau > 1)
+		throw new Error('supportTau must be in [0, 1].');
 	return {
 		corridorWidthPx,
 		fieldScale,
@@ -135,11 +148,15 @@ function shiftedComponent(component: ComponentStats, yOffsetPx: number): Compone
 	return { ...component, bboxY: component.bboxY + yOffsetPx, cy: component.cy + yOffsetPx };
 }
 
-function darkFraction(component: ComponentStats, dark: { width: number; data: Uint8Array }): number {
+function darkFraction(
+	component: ComponentStats,
+	dark: { width: number; data: Uint8Array }
+): number {
 	let count = 0;
 	for (let y = component.bboxY; y < component.bboxY + component.bboxH; y++) {
 		const row = y * dark.width;
-		for (let x = component.bboxX; x < component.bboxX + component.bboxW; x++) count += dark.data[row + x];
+		for (let x = component.bboxX; x < component.bboxX + component.bboxW; x++)
+			count += dark.data[row + x];
 	}
 	return count / Math.max(1, component.bboxW * component.bboxH);
 }
@@ -194,7 +211,12 @@ function makeBadges(
 		source: stage.badgeSources[index] ?? 'bright-family',
 		plateBbox: stage.plateBboxes[index]
 	}));
-	entries.sort((a, b) => a.reading.badge.cy - b.reading.badge.cy || a.reading.badge.cx - b.reading.badge.cx || a.index - b.index);
+	entries.sort(
+		(a, b) =>
+			a.reading.badge.cy - b.reading.badge.cy ||
+			a.reading.badge.cx - b.reading.badge.cx ||
+			a.index - b.index
+	);
 	return entries.map((entry, index) => {
 		const component = shiftedComponent(entry.component, yOffsetPx);
 		const bbox: readonly [number, number, number, number] = [
@@ -204,12 +226,18 @@ function makeBadges(
 			component.bboxH
 		];
 		const plateBbox = entry.plateBbox
-			? [entry.plateBbox[0], entry.plateBbox[1] + yOffsetPx, entry.plateBbox[2], entry.plateBbox[3]] as const
+			? ([
+					entry.plateBbox[0],
+					entry.plateBbox[1] + yOffsetPx,
+					entry.plateBbox[2],
+					entry.plateBbox[3]
+				] as const)
 			: undefined;
 		const candidates = labelCandidates(entry.reading);
-		const confidence = entry.reading.confidence === Infinity
-			? darkFraction(entry.component, stage.darkMask)
-			: clamp01(entry.reading.confidence);
+		const confidence =
+			entry.reading.confidence === Infinity
+				? darkFraction(entry.component, stage.darkMask)
+				: clamp01(entry.reading.confidence);
 		return {
 			detId: `badge-${index}`,
 			component,
@@ -227,23 +255,44 @@ function makeBadges(
 }
 
 function makeBaskets(
-	sprites: readonly SpriteMatch[],
-	yOffsetPx: number,
-	knobs: SpriteKnobs = DEFAULT_SPRITE_KNOBS
+	sprites: readonly (SpriteMatch & SmartBasketEvidence)[],
+	yOffsetPx: number
 ): BasketEvidence[] {
 	return [...sprites]
 		.sort((a, b) => a.y - b.y || a.x - b.x || b.score - a.score)
-		.map((sprite, index) => ({
-			detId: `basket-${index}`,
-			bbox: [sprite.x, sprite.y + yOffsetPx, knobs.spriteWidth, knobs.spriteHeight] as const,
+		.map((sprite, index) => {
+			const whiteBbox = [
+				sprite.x,
+				sprite.y + yOffsetPx,
+				sprite.bboxW,
+				sprite.bboxH
+			] as const;
+			return {
+				detId: `basket-${index}`,
+				bbox: [
+					sprite.semanticBbox[0],
+					sprite.semanticBbox[1] + yOffsetPx,
+					sprite.semanticBbox[2],
+					sprite.semanticBbox[3]
+			] as const,
+			whiteBbox,
 			centerXPx: sprite.cx,
 			centerYPx: sprite.cy + yOffsetPx,
 			tipXPx: sprite.tipX,
 			tipYPx: sprite.tipY + yOffsetPx,
 			onFrac: sprite.onFrac,
 			offFrac: sprite.offFrac,
-			score: sprite.score
-		}));
+			score: sprite.score,
+			tier: sprite.tier,
+			confidence: sprite.confidence,
+			identity: sprite.identity,
+			effectiveVisibility: sprite.effectiveVisibility,
+			whiteCoverage: sprite.whiteCoverage,
+			blackBorderSupport: sprite.blackBorderSupport,
+			darkCoherence: sprite.darkCoherence,
+			source: sprite.source
+		};
+		});
 }
 
 function makeTees(
@@ -256,9 +305,17 @@ function makeTees(
 	badgeStageKnobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
 ): TeeEvidence[] {
 	const rawRings = detectTeeRings(stage.brightMask, endpointsKnobs);
-	const badgeLabels = new Set(stage.badges.map((badge) => badge.label));
-	const rawComponents = stage.brightComponents.filter((component) => !badgeLabels.has(component.label)); // is a badge, not a candidate
-	return excludeAndAssembleTees(stage, rawRings, rawComponents, sprites, yOffsetPx, ctx, knobs, endpointsKnobs, badgeStageKnobs);
+	return excludeAndAssembleTees(
+		stage,
+		rawRings,
+		[],
+		sprites,
+		yOffsetPx,
+		ctx,
+		knobs,
+		endpointsKnobs,
+		badgeStageKnobs
+	);
 }
 
 /**
@@ -279,7 +336,9 @@ function makeTees(
  * limit never reaches here.
  */
 function suppressionReason(drop: SuppressedTee): string {
-	const near = drop.nearest ? ` of (${drop.nearest.cx.toFixed(1)}, ${drop.nearest.cy.toFixed(1)})` : '';
+	const near = drop.nearest
+		? ` of (${drop.nearest.cx.toFixed(1)}, ${drop.nearest.cy.toFixed(1)})`
+		: '';
 	switch (drop.reason) {
 		case 'dedup-tee':
 			return `dedup-tee: component ${drop.value.toFixed(2)}px${near}, an already-accepted tee (< teeRingDedupDistance=${drop.limit})`;
@@ -317,9 +376,14 @@ export function excludeAndAssembleTees(
 ): TeeEvidence[] {
 	const chrome = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
 	const insideBadgePadding = badgeStageKnobs.badgeInsidePadding;
-	const insideBadge = (x: number, y: number): boolean => stage.badges.some(
-		(badge) => x >= badge.bboxX - insideBadgePadding && x <= badge.bboxX + badge.bboxW + insideBadgePadding && y >= badge.bboxY - insideBadgePadding && y <= badge.bboxY + badge.bboxH + insideBadgePadding
-	);
+	const insideBadge = (x: number, y: number): boolean =>
+		stage.badges.some(
+			(badge) =>
+				x >= badge.bboxX - insideBadgePadding &&
+				x <= badge.bboxX + badge.bboxW + insideBadgePadding &&
+				y >= badge.bboxY - insideBadgePadding &&
+				y <= badge.bboxY + badge.bboxH + insideBadgePadding
+		);
 	// no silent drops: every examined-and-killed candidate leaves a rejected
 	// drawable with its reason — this is the "why 0 tees?" answer on the raster
 	const reject = (x: number, y: number, reason: string, values?: Record<string, number>) =>
@@ -344,7 +408,11 @@ export function excludeAndAssembleTees(
 	});
 	const components = rawComponents.filter((component) => {
 		if (insideBadge(component.cx, component.cy)) {
-			reject(component.cx, component.cy, `component inside badge bbox (+${insideBadgePadding}px pad)`);
+			reject(
+				component.cx,
+				component.cy,
+				`component inside badge bbox (+${insideBadgePadding}px pad)`
+			);
 			return false;
 		}
 		if (pointInScreenChrome(component.cx, component.cy, chrome)) {
@@ -361,7 +429,13 @@ export function excludeAndAssembleTees(
 	// adding a second reporting path. Instrumentation only: `points` is
 	// identical whether or not the sink is passed.
 	const suppressed: SuppressedTee[] = [];
-	const points = collectTeePoints(rings, components, sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })), endpointsKnobs, suppressed);
+	const points = collectTeePoints(
+		rings,
+		components,
+		sprites.map((sprite) => ({ cx: sprite.cx, cy: sprite.cy })),
+		endpointsKnobs,
+		suppressed
+	);
 	for (const drop of suppressed) {
 		reject(drop.cx, drop.cy, suppressionReason(drop), { value: drop.value, limit: drop.limit });
 	}
@@ -372,10 +446,20 @@ export function excludeAndAssembleTees(
 			const xPx = tee.cx;
 			const yPx = tee.cy + yOffsetPx;
 			const bbox = ring
-				? [ring.bboxX, ring.bboxY + yOffsetPx, ring.bboxW, ring.bboxH] as const
+				? ([ring.bboxX, ring.bboxY + yOffsetPx, ring.bboxW, ring.bboxH] as const)
 				: component
-					? [component.bboxX ?? Math.round(xPx - knobs.fallbackTeeBboxOffset), (component.bboxY ?? Math.round(tee.cy - knobs.fallbackTeeBboxOffset)) + yOffsetPx, component.bboxW, component.bboxH] as const
-					: [Math.round(xPx - knobs.fallbackTeeBboxOffset), Math.round(yPx - knobs.fallbackTeeBboxOffset), knobs.fallbackTeeBboxSize, knobs.fallbackTeeBboxSize] as const;
+					? ([
+							component.bboxX ?? Math.round(xPx - knobs.fallbackTeeBboxOffset),
+							(component.bboxY ?? Math.round(tee.cy - knobs.fallbackTeeBboxOffset)) + yOffsetPx,
+							component.bboxW,
+							component.bboxH
+						] as const)
+					: ([
+							Math.round(xPx - knobs.fallbackTeeBboxOffset),
+							Math.round(yPx - knobs.fallbackTeeBboxOffset),
+							knobs.fallbackTeeBboxSize,
+							knobs.fallbackTeeBboxSize
+						] as const);
 			return {
 				detId: '',
 				xPx,
@@ -384,16 +468,21 @@ export function excludeAndAssembleTees(
 				angleRad: ring?.angle ?? component?.angle ?? null,
 				ring: ring
 					? {
-						bbox: [ring.bboxX, ring.bboxY + yOffsetPx, ring.bboxW, ring.bboxH] as const,
-						area: ring.holeArea,
-						elongation: ring.elongation,
-						ringFrac: ring.ringFrac
-					}
+							bbox: [ring.bboxX, ring.bboxY + yOffsetPx, ring.bboxW, ring.bboxH] as const,
+							area: ring.holeArea,
+							elongation: ring.elongation,
+							ringFrac: ring.ringFrac
+						}
 					: undefined,
 				bbox,
 				area: ring?.holeArea ?? component?.area ?? 0,
 				fill: component?.fill ?? ring?.ringFrac ?? 0,
-				onRing: sprites.some((sprite) => Math.abs(Math.hypot(xPx - sprite.cx, yPx - (sprite.cy + yOffsetPx)) - knobs.ringDistance) <= knobs.ringTolerance)
+				onRing: sprites.some(
+					(sprite) =>
+						Math.abs(
+							Math.hypot(xPx - sprite.cx, yPx - (sprite.cy + yOffsetPx)) - knobs.ringDistance
+						) <= knobs.ringTolerance
+				)
 			};
 		})
 		.sort((a, b) => a.yPx - b.yPx || a.xPx - b.xPx || a.tier.localeCompare(b.tier))
@@ -412,13 +501,37 @@ function makeRawPairs(
 	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS
 ): RawPairEvidence[] {
 	const teePoints = tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx }));
-	const basketPoints = baskets.map((basket) => ({ id: basket.detId, xPx: basket.tipXPx, yPx: basket.tipYPx }));
+	const basketPoints = baskets.map((basket) => ({
+		id: basket.detId,
+		xPx: basket.tipXPx,
+		yPx: basket.tipYPx
+	}));
 	const pairs: RawPairEvidence[] = [];
 	for (const badge of badges) {
-		const legs = routeBadgeLegs(field, { id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx }, teePoints, basketPoints, yOffsetPx, ribbonKnobs, routingKnobs);
+		const legs = routeBadgeLegs(
+			field,
+			{ id: badge.detId, xPx: badge.cxPx, yPx: badge.cyPx },
+			teePoints,
+			basketPoints,
+			yOffsetPx,
+			ribbonKnobs,
+			routingKnobs
+		);
 		for (let teeIndex = 0; teeIndex < tees.length; teeIndex++) {
 			for (let basketIndex = 0; basketIndex < baskets.length; basketIndex++) {
-				pairs.push(makeRawPairEvidence(field, badge, tees[teeIndex], baskets[basketIndex], legs.tees[teeIndex], legs.baskets[basketIndex], params, yOffsetPx, scoringKnobs));
+				pairs.push(
+					makeRawPairEvidence(
+						field,
+						badge,
+						tees[teeIndex],
+						baskets[basketIndex],
+						legs.tees[teeIndex],
+						legs.baskets[basketIndex],
+						params,
+						yOffsetPx,
+						scoringKnobs
+					)
+				);
 			}
 		}
 	}
@@ -429,7 +542,7 @@ function makeRawPairs(
 // Engine units. Each unit's body is the exact code the monolithic
 // measureThreeFactor used to run at that seam (moved, not rewritten); the
 // evidence board carries what used to be local variables. Execution order
-// comes from the config — DEFAULT_MEASURE_EXECUTION is the frozen order.
+// comes from the config — DEFAULT_MEASURE_EXECUTION is the base semantic order.
 
 interface ViewportSeed {
 	readonly topPx: number;
@@ -447,7 +560,10 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stop = ctx.span('badgeStage');
 			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const hsvKnobs = ctx.resolve(sharedHsvFeature).knobs as unknown as HsvKnobs;
-			board.set('stage', runBadgeStage(board.get<RgbaImage>('localImage'), badgeStageKnobs, hsvKnobs));
+			board.set(
+				'stage',
+				runBadgeStage(board.get<RgbaImage>('localImage'), badgeStageKnobs, hsvKnobs)
+			);
 			stop();
 		}
 	},
@@ -552,16 +668,92 @@ export const measureUnits: readonly EngineUnit[] = [
 			const stop = ctx.span('baskets');
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
 			const { topPx } = board.get<ViewportSeed>('viewport');
-			const spriteKnobs = ctx.resolve(g2SpriteFeature).knobs as unknown as SpriteKnobs;
-			const sprites = matchBasketSprites(stage.brightMask, basketTemplate, spriteKnobs);
-			const baskets = makeBaskets(sprites, topPx, spriteKnobs);
-			for (const basket of baskets) {
+			const spriteKnobs = ctx.resolve(g2SpriteFeature).knobs as unknown as SmartSpriteKnobs;
+			const decisions: SmartBasketDecision[] = [];
+			const smart = matchBasketSpritesSmart(
+				stage.brightMask,
+				stage.darkMask,
+				stage.badges,
+				basketTemplate,
+				spriteKnobs,
+				decisions
+			);
+			const sprites: (SpriteMatch & SmartBasketEvidence)[] = smart.map((candidate) => ({
+				...candidate,
+				onFrac: candidate.whiteCoverage,
+				offFrac: 1 - candidate.blackBorderSupport,
+				score: candidate.identity
+			}));
+			const baskets = makeBaskets(sprites, topPx);
+			const basketByPosition = new Map(
+				baskets.map((basket) =>
+					[`${basket.whiteBbox[0]}:${basket.whiteBbox[1] - topPx}`, basket] as const
+				)
+			);
+			for (const [index, decision] of decisions.entries()) {
+				const basket = basketByPosition.get(`${decision.x}:${decision.y}`);
+				const whiteBbox = [
+					decision.x,
+					decision.y + topPx,
+					decision.bboxW,
+					decision.bboxH
+				] as const;
+				const semanticBbox = [
+					decision.semanticBbox[0],
+					decision.semanticBbox[1] + topPx,
+					decision.semanticBbox[2],
+					decision.semanticBbox[3]
+				] as const;
+				const ref = decision.accepted ? basket?.detId : `basket-candidate-${index}`;
 				ctx.overlay('baskets', {
 					type: 'box',
-					bbox: basket.bbox,
-					verdict: 'accepted',
-					ref: basket.detId,
-					values: { score: basket.score }
+					bbox: semanticBbox,
+					verdict: decision.accepted ? 'accepted' : 'rejected',
+					ref,
+					reason: `${decision.reason}; tier=${decision.tier}; source=${decision.source}`,
+					values: {
+						areaRatio: decision.areaRatio,
+						identity: decision.identity,
+						effectiveVisibility: decision.effectiveVisibility,
+						whiteCoverage: decision.whiteCoverage,
+						blackBorderSupport: decision.blackBorderSupport,
+						darkCoherence: decision.darkCoherence,
+						recovered: decision.tier === 'occlusion-recovery' ? 1 : 0
+					}
+				});
+				ctx.overlay('baskets', {
+					type: 'box',
+					bbox: whiteBbox,
+					verdict: 'info',
+					ref: `${ref ?? `basket-candidate-${index}`}:white-component`,
+					reason: 'bright connected-component bounds used by detector; not the basket object bbox',
+					values: {
+						blackConsensusSearchMarginPx: spriteKnobs.blackConsensusMarginPx,
+						semanticWidthPx: semanticBbox[2],
+						semanticHeightPx: semanticBbox[3]
+					}
+				});
+			}
+			for (const basket of baskets) {
+				const bboxLastPixelYPx = basket.bbox[1] + basket.bbox[3] - 1;
+				const whiteBboxLastPixelYPx =
+					basket.whiteBbox[1] + basket.whiteBbox[3] - 1;
+				ctx.overlay('baskets', {
+					type: 'point',
+					xPx: basket.tipXPx,
+					yPx: basket.tipYPx,
+					verdict: 'info',
+					ref: `${basket.detId}:semantic-tip`,
+					reason: 'engine-emitted semantic basket endpoint; ownership not evaluated',
+					values: {
+						bboxLastPixelYPx,
+						whiteBboxLastPixelYPx,
+						semanticTipYPx: basket.tipYPx,
+						tipBelowBboxLastPixelPx: basket.tipYPx - bboxLastPixelYPx,
+						tipBelowWhiteBboxLastPixelPx:
+							basket.tipYPx - whiteBboxLastPixelYPx,
+						configuredSemanticTipOffsetPx: spriteKnobs.semanticTipOffsetPx
+					}
 				});
 				ctx.measure('baskets', 'score', basket.score);
 			}
@@ -575,7 +767,7 @@ export const measureUnits: readonly EngineUnit[] = [
 		gate: 'G3',
 		consumes: ['stage', 'sprites', 'viewport'],
 		produces: ['tees'],
-		note: 'ring/component tee candidates with chrome + badge exclusion',
+		note: 'visible hollow-ring tee candidates with chrome + badge exclusion; shard recovery is separate',
 		run(board, ctx) {
 			const stop = ctx.span('tees');
 			const stage = board.get<ReturnType<typeof runBadgeStage>>('stage');
@@ -584,7 +776,15 @@ export const measureUnits: readonly EngineUnit[] = [
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
 			const badgeStageKnobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
-			const tees = makeTees(stage, sprites, topPx, ctx, scoringKnobs, endpointsKnobs, badgeStageKnobs);
+			const tees = makeTees(
+				stage,
+				sprites,
+				topPx,
+				ctx,
+				scoringKnobs,
+				endpointsKnobs,
+				badgeStageKnobs
+			);
 			for (const tee of tees) {
 				ctx.overlay('tees', {
 					type: 'box',
@@ -628,7 +828,17 @@ export const measureUnits: readonly EngineUnit[] = [
 	{
 		id: 'measurement',
 		gate: 'shared',
-		consumes: ['image', 'viewport', 'params', 'stage', 'badges', 'baskets', 'tees', 'supportField', 'rawPairs'],
+		consumes: [
+			'image',
+			'viewport',
+			'params',
+			'stage',
+			'badges',
+			'baskets',
+			'tees',
+			'supportField',
+			'rawPairs'
+		],
 		produces: ['measurement'],
 		note: 'assemble the ThreeFactorMeasurement artifact',
 		run(board, ctx) {
@@ -657,12 +867,26 @@ export const measureUnits: readonly EngineUnit[] = [
 	}
 ];
 
-export const DEFAULT_MEASURE_EXECUTION: readonly string[] = measureUnits.map((unit) => unit.id);
+export const DEFAULT_MEASURE_EXECUTION: readonly string[] = [
+	'badgeStage',
+	'badges',
+	'baskets',
+	'tees',
+	'supportField',
+	'badgeOcclusionPatch',
+	'rawPairs',
+	'measurement'
+];
 
 /** Seed the evidence board exactly as the monolithic entry point did. */
-export function seedBoard(board: EvidenceBoard, image: RgbaImage, params?: ThreeFactorParams): void {
+export function seedBoard(
+	board: EvidenceBoard,
+	image: RgbaImage,
+	params?: ThreeFactorParams
+): void {
 	if (image.width <= 0 || image.height <= 0) throw new Error('Image dimensions must be positive.');
-	if (image.data.length !== image.width * image.height * 4) throw new Error('RGBA byte length does not match image dimensions.');
+	if (image.data.length !== image.width * image.height * 4)
+		throw new Error('RGBA byte length does not match image dimensions.');
 	const topPx = clampInt(params?.viewport?.topPx ?? 0, 0, image.height - 1);
 	const bottomPx = clampInt(params?.viewport?.bottomPx ?? image.height, topPx + 1, image.height);
 	board.set('image', image);
@@ -671,7 +895,10 @@ export function seedBoard(board: EvidenceBoard, image: RgbaImage, params?: Three
 	board.set('localImage', cropImage(image, topPx, bottomPx));
 }
 
-export function measureThreeFactor(image: RgbaImage, params?: ThreeFactorParams): ThreeFactorMeasurement {
+export function measureThreeFactor(
+	image: RgbaImage,
+	params?: ThreeFactorParams
+): ThreeFactorMeasurement {
 	const board = createBoard();
 	seedBoard(board, image, params);
 	for (const unit of measureUnits) unit.run(board, nullFeatureContext);

@@ -1,15 +1,15 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "tee-family-on",
-	"note": "LAB G3 intact tee-family enabled: after 'tees', keep only the largest mutually-consistent ring-tee family by enclosing-frame major/minor/area (frameForRing + selectTeeFamily, courseSweep.ts); component/recovered tiers pass through untouched. Note the execution list gains the teeFamily unit right after 'tees' (before 'rawPairs') — the order IS part of the experiment.",
+	"note": "Compatibility config with the now-baseline G3 intact visible tee family stated explicitly. Shard recovery remains separate.",
 	"execution": [
 		"badgeStage",
 		"badges",
-		"supportField",
-		"badgeOcclusionPatch",
 		"baskets",
 		"tees",
 		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment"

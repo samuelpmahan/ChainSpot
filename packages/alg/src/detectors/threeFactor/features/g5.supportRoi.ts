@@ -18,12 +18,10 @@
 // canonical raster contains no course object at all, so most of that work
 // feeds cells nothing ever reads.
 //
-// WHY BADGES AND NOT TEES/BASKETS: the frozen execution order is
-//   badgeStage -> badges -> supportField -> badgeOcclusionPatch -> baskets
-//   -> tees -> rawPairs -> measurement -> assignment
-// supportField runs THIRD. Tees and baskets do not exist yet. Reordering to
-// get them would change the run and move the parity hash, so the only object
-// evidence available here is the badges from step 2.
+// WHY BADGES AND NOT TEES/BASKETS: ROI semantics were established against
+// badges, which label every hole. The base plan now keeps endpoint gates in
+// semantic order before G5 support, but changing this feature to derive its
+// ROI from other object families would still be a separate behavior choice.
 //
 // THE BET: a badge labels a hole, so the hull of all badges, dilated by a
 // margin, should contain every tee and basket. "Should" — this is a bet, not
@@ -111,7 +109,11 @@ export function badgeRoi(
 }
 
 /** Fraction of the raster the ROI skips, for receipts. */
-export function roiSkippedFraction(roi: SupportRoi | null, imageWidth: number, imageHeight: number): number {
+export function roiSkippedFraction(
+	roi: SupportRoi | null,
+	imageWidth: number,
+	imageHeight: number
+): number {
 	if (roi === null) return 0;
 	const kept = (roi.x1 - roi.x0 + 1) * (roi.y1 - roi.y0 + 1);
 	return 1 - kept / (imageWidth * imageHeight);

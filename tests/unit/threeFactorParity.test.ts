@@ -1,7 +1,7 @@
-// Frozen-behavior parity pin. The projection hash below was captured from
-// the PRE-engine-refactor pipeline on a deterministic synthetic raster; the
-// engine path must reproduce it exactly. If this test fails, behavior
-// changed — that must be a conscious decision, not a side effect.
+// Recovered-production-baseline pin. The projection hash below captures the
+// current production engine on a deterministic synthetic raster. If this
+// test fails, behavior changed — that must be a conscious decision, not a
+// side effect.
 import { describe, expect, test } from 'vitest';
 import { runThreeFactor } from '@chainspot/alg/detectors/threeFactor';
 import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor/hash';
@@ -77,10 +77,34 @@ function projectRun(run: ThreeFactorRun) {
 	};
 }
 
-describe('threeFactor frozen-behavior parity', () => {
+describe('threeFactor recovered-production baseline', () => {
 	test('pinned projection hash on the synthetic scene', async () => {
 		const run = runThreeFactor(syntheticRaster());
+		expect(run.measurement.tees).toHaveLength(1);
+		expect(run.measurement.tees[0]).toMatchObject({
+			detId: 'tee-2',
+			xPx: 51.5,
+			yPx: 129.5,
+			tier: 'ring',
+			bbox: [40, 120, 24, 20],
+			ring: { bbox: [44, 124, 16, 12] },
+			pad: {
+				source: 'bright-mask-component',
+				bbox: [40, 120, 24, 20],
+				componentCentroidXPx: 51.5,
+				componentCentroidYPx: 129.5,
+				centerXPx: 52,
+				centerYPx: 130,
+				orientedCorners: [
+					[40, 120],
+					[64, 120],
+					[64, 140],
+					[40, 140]
+				]
+			}
+		});
+		expect(run.measurement.tees.some((tee) => tee.tier !== 'ring')).toBe(false);
 		const hash = await sha256Hex(canonicalJson(projectRun(run)));
-		expect(hash).toBe('a0a1ac828ce98f89831210896e42aeee468a5527bfe5e752ffa5bf431095396c');
+		expect(hash).toBe('6bedd830552b6f36d6e9ce9f2c129f91453463a6b2d28d40c77c6a7ae0bcf5b9');
 	});
 });

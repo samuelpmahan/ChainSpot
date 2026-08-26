@@ -301,7 +301,12 @@ export const cleanBasketFamilyUnit: EngineUnit = {
 			const viewport = board.get<{ topPx: number }>('viewport');
 			const result = selectCleanBasketFamily(stage, sprites, template, state.knobs as unknown as CleanBasketFamilyKnobs);
 			const acceptedKeys = new Set(result.sprites.map((sprite) => spriteKey(sprite.x, sprite.y)));
-			const basketByKey = new Map(baskets.map((basket) => [spriteKey(basket.bbox[0], basket.bbox[1] - viewport.topPx), basket] as const));
+			const basketByKey = new Map(
+				baskets.map(
+					(basket) =>
+						[spriteKey(basket.whiteBbox[0], basket.whiteBbox[1] - viewport.topPx), basket] as const
+				)
+			);
 			for (const decision of result.decisions) {
 				const sprite = decision.sprite;
 				const basket = basketByKey.get(spriteKey(sprite.x, sprite.y));
@@ -332,7 +337,14 @@ export const cleanBasketFamilyUnit: EngineUnit = {
 			ctx.measure('cleanBasketFamily', 'acceptedCount', result.sprites.length);
 			ctx.measure('cleanBasketFamily', 'rejectedCount', sprites.length - result.sprites.length);
 			board.set('sprites', [...result.sprites]);
-			board.set('baskets', baskets.filter((basket) => acceptedKeys.has(spriteKey(basket.bbox[0], basket.bbox[1] - viewport.topPx))));
+			board.set(
+				'baskets',
+				baskets.filter((basket) =>
+					acceptedKeys.has(
+						spriteKey(basket.whiteBbox[0], basket.whiteBbox[1] - viewport.topPx)
+					)
+				)
+			);
 		}
 		stop();
 	}

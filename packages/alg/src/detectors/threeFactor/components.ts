@@ -27,6 +27,13 @@ export interface ComponentStats {
 	minor: number;
 	/** Orientation of the (sign-normalized) major axis, radians. */
 	angle: number;
+	/** Exact component-pixel projection extrema relative to (cx,cy). These are
+	 * already computed for major/minor and retained so oriented object bounds
+	 * do not have to assume the component is symmetric about its centroid. */
+	axisMajorMin?: number;
+	axisMajorMax?: number;
+	axisMinorMin?: number;
+	axisMinorMax?: number;
 	/** area / (major*minor), clamped denominator. */
 	fill: number;
 }
@@ -204,6 +211,10 @@ export function statsForPixels(
 		major,
 		minor,
 		angle,
+		axisMajorMin: uMin,
+		axisMajorMax: uMax,
+		axisMinorMin: vMin,
+		axisMinorMax: vMax,
 		fill
 	};
 }

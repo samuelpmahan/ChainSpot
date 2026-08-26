@@ -1,7 +1,8 @@
-// g3.endpoints — TEE candidate detection: enclosed-hole ring detection
-// (detectTeeRings/detectTeeRingsPass) and the bright-component fallback tier
-// (collectTeePoints), extracted from endpoints.ts. Baseline: default ON,
-// knobs always apply, defaults byte-equal to the pre-extraction literals.
+// g3.endpoints — visible TEE candidate detection: enclosed-hole ring
+// detection (detectTeeRings/detectTeeRingsPass). The surviving generic
+// bright-component fallback remains in endpoints.ts for recovery work, but
+// is deliberately disconnected from this visible phase: shard recovery must
+// be scoped to the perimeter of a known object.
 //
 // endpoints.ts also holds the G2 basket-sprite matched-filter constants
 // (SPRITE_COARSE_STRIDE, SPRITE_COARSE_THRESHOLD, DEFAULT_SPRITE_SCORE_MIN,
@@ -22,7 +23,7 @@ export const g3EndpointsFeature = {
 	gate: 'G3',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'Enclosed-hole tee-ring detection plus the bright-component fallback tier.',
+	note: 'Visible tee candidate generation from enclosed hollow-glyph rings. Shard/component recovery is a separate G3 phase.',
 	knobs: {
 		holeAreaMin: {
 			default: 10,
