@@ -9,6 +9,7 @@
 
 import type { ABFeatureOperation } from '../../../exec/feature-set';
 import { OcclusionDetector } from '../occlusion';
+import type { StraightTestTrace } from './st.straightTest.contract';
 
 // ---------------------------------------------------------------------------
 // Gates — one canonical knowledge order. The compiler still flattens units
@@ -68,6 +69,13 @@ export interface ABFeature<K extends KnobSpecs = KnobSpecs> {
 	/** baseline = part of production behavior (default ON); deviation = opt-in */
 	readonly kind: 'baseline' | 'deviation';
 	readonly defaultEnabled: boolean;
+	/**
+	 * Keep a newly introduced default-OFF experiment out of a pre-existing
+	 * frozen resolved-config hash unless the saved config names it explicitly.
+	 * This is intentionally opt-in: older deviations remain materialized in
+	 * legacy resolved configs exactly as their pinned baseline requires.
+	 */
+	readonly resolveOnlyWhenConfigured?: boolean;
 	readonly note?: string;
 	readonly knobs: K;
 	/** Ordered executable behavior when this feature participates in an ABFeatureSet. */
@@ -196,6 +204,12 @@ export interface UnitTrace {
 export interface RunTrace {
 	readonly configName: string;
 	readonly paramsHash: string;
+	/** Optional until a front door knows the canonical run/image identity. */
+	readonly runId?: string;
+	readonly imageId?: string;
+	/** Deterministic semantic trace digest. It intentionally excludes timers
+	 * and heatmap payload bytes so equivalent reviewed testimony hashes alike. */
+	readonly traceHash?: string;
 	readonly execution: readonly string[];
 	/** Exact feature states used by the run. Unit ids are not feature ids: the
 	 * `tees` unit, for example, reads the `endpoints` feature's knobs. */
@@ -203,6 +217,8 @@ export interface RunTrace {
 	readonly units: UnitTrace[];
 	/** keyed heatmap buffers; transfer these across postMessage */
 	readonly heatmaps: Record<string, Float32Array>;
+	/** S0 structured rows; optional so legacy traces remain source-compatible. */
+	readonly straightTest?: StraightTestTrace;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +279,10 @@ export interface FeatureContext {
 	measure(unitId: string, name: string, value: number): void;
 	overlay(unitId: string, drawable: Drawable): void;
 	heatmap(unitId: string, key: string, data: Float32Array): void;
+	/** Publish the reviewed S0 row payload beside normal drawables. Optional
+	 * keeps custom legacy FeatureContexts source-compatible; production trace
+	 * contexts always supply it. */
+	recordStraightTest?(trace: StraightTestTrace): void;
 	/** returns a stop function that records elapsed ms on the unit trace */
 	span(unitId: string): () => void;
 	/** Stable per-run known-occlusion service. */
@@ -306,6 +326,8 @@ export type EvidenceSlot =
 	| 'rawPairs'
 	| 'measurement'
 	| 'recoveredTees'
+	| 'straightProposals'
+	| 'straightTestTruthAssistance'
 	| 'assignment';
 
 export interface EvidenceBoard {

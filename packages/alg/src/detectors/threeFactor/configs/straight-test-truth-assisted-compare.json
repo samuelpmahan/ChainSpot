@@ -1,0 +1,21 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "straight-test-truth-assisted-compare",
+	"note": "Explicit TRUTH-TAINT S0 comparison; caller must provide verified-canonical assistance payload.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"straightTest",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery",
+		"zfit"
+	],
+	"gates": { "G5": { "straightTest": { "enabled": true, "knobs": { "truthAssisted": true } } } }
+}

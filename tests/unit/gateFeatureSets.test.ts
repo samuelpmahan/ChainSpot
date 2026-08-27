@@ -9,7 +9,7 @@ const expectedMembership = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily'],
 	'g4-set': ['teeRecovery', 'phantomTee'],
-	'g5-set': ['fourLaneSensor', 'ribbon', 'routing'],
+	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
 } as const;

@@ -16,18 +16,29 @@ import {
 	compileExecutionPlan,
 	type CompiledExecutionPlan
 } from '@chainspot/alg/exec';
-import { DEFAULT_EXECUTION, resolveConfig, type ThreeFactorConfig } from '@chainspot/alg/detectors/threeFactor';
+import {
+	DEFAULT_EXECUTION,
+	resolveConfig,
+	type ThreeFactorConfig
+} from '@chainspot/alg/detectors/threeFactor';
 import { CONFIG_SCHEMA } from '@chainspot/alg/detectors/threeFactor/config';
 import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 import familyOnConfigJson from '@chainspot/alg/detectors/threeFactor/configs/family-on.json';
+import straightTestOnConfigJson from '@chainspot/alg/detectors/threeFactor/configs/straight-test-on.json';
 
 const defaultResolved = resolveConfig(defaultConfigJson as ThreeFactorConfig, DEFAULT_EXECUTION);
 const familyOnResolved = resolveConfig(familyOnConfigJson as ThreeFactorConfig, DEFAULT_EXECUTION);
+const straightTestOnResolved = resolveConfig(
+	straightTestOnConfigJson as ThreeFactorConfig,
+	DEFAULT_EXECUTION
+);
+const FROZEN_DEFAULT_PLAN_FINGERPRINT =
+	'fdff6359168b52179ecf3ed3ca159fc1c61ccdc9881497af850035263f743d51';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(14); // 13 prior units + explicit G7 Z-fit refinement
-		expect(OPERATION_UNIVERSE.length).toBe(21); // prior 20 operations + Z-fit
+		expect(UNIT_OPERATIONS.size).toBe(15); // prior inventory + early G5 straightTest unit
+		expect(OPERATION_UNIVERSE.length).toBe(22); // prior universe + one S0 operation
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
@@ -42,6 +53,7 @@ describe('operation universe (R2 inventory)', () => {
 			'assignment.selection'
 		]);
 		expect(UNIT_OPERATIONS.get('zfit')).toEqual(['zfit']);
+		expect(UNIT_OPERATIONS.get('straightTest')).toEqual(['straightTest']);
 	});
 
 	test('all five OperationKinds are represented', () => {
@@ -85,15 +97,32 @@ describe('compileExecutionPlan — C1 ordering', () => {
 		expect(a.planFingerprint).toMatch(/^[0-9a-f]{64}$/);
 	});
 
+	test('an unconfigured resolve-only default-OFF feature cannot perturb the frozen default plan fingerprint', () => {
+		const baseline = compileExecutionPlan(defaultResolved);
+		expect(baseline.planFingerprint).toBe(FROZEN_DEFAULT_PLAN_FINGERPRINT);
+
+		const onA = compileExecutionPlan(straightTestOnResolved);
+		const onB = compileExecutionPlan(straightTestOnResolved);
+		expect(onA.planFingerprint).toBe(onB.planFingerprint);
+		expect(onA.planFingerprint).not.toBe(baseline.planFingerprint);
+		expect(onA.ops.map((operation) => operation.id)).toContain('straightTest');
+	});
+
 	test('paramsHash rides alongside untouched, never derived by compile', () => {
-		const plan: CompiledExecutionPlan = compileExecutionPlan(defaultResolved, 'caller-supplied-hash');
+		const plan: CompiledExecutionPlan = compileExecutionPlan(
+			defaultResolved,
+			'caller-supplied-hash'
+		);
 		expect(plan.paramsHash).toBe('caller-supplied-hash');
 	});
 });
 
 describe('compileExecutionPlan — illegal order is REJECTED, naming the violated dependency', () => {
 	test('assignment before badgeStage throws naming the missing slot', () => {
-		const illegalExecution = ['assignment', ...DEFAULT_EXECUTION.filter((id) => id !== 'assignment')];
+		const illegalExecution = [
+			'assignment',
+			...DEFAULT_EXECUTION.filter((id) => id !== 'assignment')
+		];
 		const illegalConfig: ThreeFactorConfig = {
 			schema: CONFIG_SCHEMA,
 			name: 'illegal-order-demo',
@@ -101,7 +130,9 @@ describe('compileExecutionPlan — illegal order is REJECTED, naming the violate
 			gates: {}
 		};
 		const resolved = resolveConfig(illegalConfig, DEFAULT_EXECUTION);
-		expect(() => compileExecutionPlan(resolved)).toThrow(/assignment\.pairs.*consumes 'measurement'.*no earlier operation produces it/s);
+		expect(() => compileExecutionPlan(resolved)).toThrow(
+			/assignment\.pairs.*consumes 'measurement'.*no earlier operation produces it/s
+		);
 	});
 
 	test('an unknown unit id throws', () => {
@@ -114,7 +145,12 @@ describe('compileExecutionPlan — illegal order is REJECTED, naming the violate
 
 	test('a duplicated unit id throws', () => {
 		const resolved = resolveConfig(
-			{ schema: CONFIG_SCHEMA, name: 'dup-unit', execution: [...DEFAULT_EXECUTION, 'badgeStage'], gates: {} },
+			{
+				schema: CONFIG_SCHEMA,
+				name: 'dup-unit',
+				execution: [...DEFAULT_EXECUTION, 'badgeStage'],
+				gates: {}
+			},
 			DEFAULT_EXECUTION
 		);
 		expect(() => compileExecutionPlan(resolved)).toThrow(/lists unit 'badgeStage' twice/);

@@ -471,10 +471,40 @@ function rejectionReceiptLines(run: RunTrace, unitIds: readonly string[]): strin
 }
 
 function endpointGateSpan(run: RunTrace): string {
+	if (run.units.some((unit) => unit.id === 'straightTest')) return 'G0-G5';
 	if (run.units.some((unit) => unit.gate === 'G4')) return 'G0-G4';
 	if (run.units.some((unit) => unit.gate === 'G3')) return 'G0-G3';
 	if (run.units.some((unit) => unit.gate === 'G2')) return 'G0-G2';
 	return 'G0-G1';
+}
+
+function straightDrawables(run: RunTrace): Drawable[] {
+	// S0 owns candidate selection and abstention markers. The LAB consumer is
+	// intentionally paint-only: every returned drawable is copied verbatim.
+	return run.units.find((candidate) => candidate.id === 'straightTest')?.drawables ?? [];
+}
+
+function straightReceiptLines(run: RunTrace): string[] {
+	const straight = run.straightTest;
+	if (!straight) return ['straightTest: NOT SCHEDULED'];
+	const lines = [
+		'G5 STRAIGHT TEST (TRACE-DRIVEN)',
+		`featureId: ${straight.featureId}`,
+		`runId: ${run.runId ?? 'UNKNOWN'}`,
+		`imageId: ${run.imageId ?? 'UNKNOWN'}`,
+		`paramsHash: ${run.paramsHash || 'UNKNOWN'}`,
+		`traceHash: ${run.traceHash ?? 'UNKNOWN'}`,
+		`coordinateFrame: ${straight.coordinateFrame}`,
+		`truthMode: ${straight.truthAssistance.mode}`,
+		...(straight.truthAssistance.taint ? [straight.truthAssistance.taint] : []),
+		`truthAssistance: ${JSON.stringify(straight.truthAssistance)}`
+	];
+	if (straight.proposals.length === 0) lines.push('proposal: []');
+	for (const proposal of straight.proposals) {
+		lines.push(`proposal ${proposal.proposalId}: ${JSON.stringify(proposal)}`);
+		for (const reason of proposal.reasons) lines.push(`  reason: ${reason}`);
+	}
+	return lines;
 }
 
 /** Write the single, minimal endpoint picture exposed by a normal Sweep. */
@@ -557,12 +587,23 @@ export function renderRunEndpointReceipt(
 	const phantomCenters = planDrawables(phantomPlan).filter(
 		(drawable) => drawable.visualRole === 'phantom-center' && drawable.verdict === 'accepted'
 	);
+	const straight = straightDrawables(run);
+	const straightAccepted = straight.filter((drawable) => drawable.verdict === 'accepted');
 	const gate = endpointGateSpan(run);
 
 	const plan: FeatureRenderPlan = {
 		title: `${gate} endpoint receipt (${run.configName})`,
 		base: 'g0.canonical',
 		layers: [
+			...(run.straightTest
+				? [
+						{
+							name: 'straight-test geometry (G5, trace-emitted)',
+							note: 'tee axis, tee-to-badge ray, tee-to-basket chord, projection/perpendicular, and provisional/abstention marks exactly as emitted by S0',
+							drawables: straight
+						}
+					]
+				: []),
 			{
 				name: 'badge white pixels (G1)',
 				note: 'yellow exact bright-mask pixels emitted by the badge detector; black badge pixels remain untouched',
@@ -633,7 +674,14 @@ export function renderRunEndpointReceipt(
 		'VISUAL RENDER RECEIPT',
 		`title: ${plan.title}`,
 		`config: ${run.configName}`,
+		...(run.straightTest
+			? [
+					`runId: ${run.runId ?? 'UNKNOWN'}`,
+					`imageId: ${run.imageId ?? 'UNKNOWN'}`
+				]
+			: []),
 		`paramsHash: ${run.paramsHash || 'UNKNOWN'}`,
+		...(run.straightTest ? [`traceHash: ${run.traceHash ?? 'UNKNOWN'}`] : []),
 		`gateSpan: ${endpointGateSpan(run)}`,
 		`base: ${base.pngPath}`,
 		`canvas: ${canvas.widthPx}x${canvas.heightPx} (${canvas.source})`,
@@ -671,6 +719,7 @@ export function renderRunEndpointReceipt(
 		'',
 		'REJECTIONS RETAINED IN TRACE',
 		...(rejectedLines.length ? rejectedLines : ['  none recorded in scheduled endpoint units']),
+		...(run.straightTest ? ['', ...straightReceiptLines(run)] : []),
 		'',
 		`image: ${pngPath}`,
 		`receipt: ${receiptPath}`
@@ -680,11 +729,12 @@ export function renderRunEndpointReceipt(
 	const all = plan.layers.flatMap((layer) => layer.drawables);
 	const rejectedCount = run.units
 		.filter((unit) =>
-			['baskets', 'tees', 'teeFamily', 'teeRecovery', 'phantomTee'].includes(unit.id)
+			['baskets', 'tees', 'teeFamily', 'teeRecovery', 'phantomTee', 'straightTest'].includes(unit.id)
 		)
 		.flatMap((unit) => unit.drawables)
 		.filter((drawable) => drawable.verdict === 'rejected').length;
 	const semanticAcceptedCount =
+		straightAccepted.length +
 		badgePixels.length +
 		basketTips.length +
 		visibleBorders.length +

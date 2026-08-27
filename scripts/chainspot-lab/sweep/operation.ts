@@ -24,9 +24,13 @@ import type {
 	ThreeFactorMeasurement
 } from '@chainspot/alg/detectors/threeFactor/types';
 import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
+import type { BadgeEvidence, BasketEvidence, TeeEvidence } from '@chainspot/alg/detectors/threeFactor/types';
+import type { LocatedDetection } from './truthScoring';
+import type { StraightTestTruthAssistance, StraightTestTruthLock } from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
+import { makeTraceRunId, sealTrace } from '@chainspot/alg/detectors/threeFactor/features/traceIdentity';
 import { loadConfig } from './configIo';
 import { canonicalizeInputs } from './inputShim';
-import { compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
+import { associateDetections, compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
 import { renderArtifact, type ArtifactRenderResult } from './artifactIo';
 import { renderRunEndpointReceipt, type RenderTraceFeaturesOutput } from './featureRenders';
 import {
@@ -43,6 +47,7 @@ import {
 	type RunPhaseTimings
 } from './runReceipt';
 import { formatRunReceiptText } from './runReceiptText';
+import { guardTruthTaint } from '../context/context.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -92,6 +97,70 @@ export interface TruthScoringDecision {
 	readonly eligible: boolean;
 	readonly provenanceTrusted: boolean;
 	readonly reason?: string;
+}
+
+function teeDetections(tees: readonly TeeEvidence[]): LocatedDetection[] {
+	return tees.map((tee) => ({
+		id: tee.detId,
+		spriteType: 'tee',
+		identity: tee.detId,
+		xPx: tee.xPx,
+		yPx: tee.yPx,
+		measurements: { tier: tee.tier }
+	}));
+}
+
+function basketDetections(baskets: readonly BasketEvidence[]): LocatedDetection[] {
+	return baskets.map((basket) => ({
+		id: basket.detId,
+		spriteType: 'basket',
+		identity: basket.detId,
+		xPx: basket.tipXPx,
+		yPx: basket.tipYPx,
+		measurements: { tier: basket.tier ?? 'unknown' }
+	}));
+}
+
+/** Build the explicit comparison-only payload after the detector prefix has
+ * run. Canonical endpoint coordinates are retained verbatim, while IDs name
+ * matched detector evidence where it exists (or an annotation-only ref for
+ * an absent endpoint). Nothing is written back to detector slots. */
+export function buildStraightTestTruthAssistance(
+	truth: CanonicalTruth,
+	badges: readonly BadgeEvidence[],
+	tees: readonly TeeEvidence[],
+	baskets: readonly BasketEvidence[],
+	provenance = 'verified canonical truth match'
+): StraightTestTruthAssistance {
+	const teeMatches = associateDetections(
+		truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.tee })),
+		teeDetections(tees)
+	).objectMatches ?? [];
+	const basketMatches = associateDetections(
+		truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.basket })),
+		basketDetections(baskets)
+	).objectMatches ?? [];
+	const teesByHole = new Map(teeMatches.map((match) => [match.truthIdentity, match.detection.id]));
+	const basketsByHole = new Map(basketMatches.map((match) => [match.truthIdentity, match.detection.id]));
+	const locks: StraightTestTruthLock[] = [];
+	for (const hole of [...truth.holes].sort((a, b) => a.number - b.number)) {
+		const badge = badges.find((candidate) => candidate.label === String(hole.number));
+		if (!badge) continue;
+		const teeId = teesByHole.get(`H${hole.number}`) ?? `truth:H${hole.number}:tee`;
+		const basketId = basketsByHole.get(`H${hole.number}`) ?? `truth:H${hole.number}:basket`;
+		locks.push({
+			holeNumber: hole.number,
+			badgeId: badge.detId,
+			teeId,
+			basketId,
+			teeReference: teesByHole.has(`H${hole.number}`) ? 'detector' : 'canonical-annotation',
+			basketReference: basketsByHole.has(`H${hole.number}`) ? 'detector' : 'canonical-annotation',
+			canonicalTee: { ...hole.tee, provenance: 'canonical-annotation-tee' },
+			canonicalBasket: { ...hole.basket, provenance: 'canonical-annotation-basket' },
+			provenance: 'canonical-annotation-endpoint-lock'
+		});
+	}
+	return { mode: 'verified-canonical', taint: 'TRUTH-TAINT', provenance, locks };
 }
 
 /** Decide whether a supplied truth file can support an authoritative
@@ -170,7 +239,6 @@ export async function runSweepOperation(
 		}
 	}
 	const truthPath = input.truthPath ? resolve(input.truthPath) : undefined;
-	const truth = truthPath ? loadTruth(truthPath) : undefined;
 	const configPath = resolve(input.configPath);
 	const firstLoad = loadConfig(configPath);
 	const paramsHash = await sha256Hex(canonicalJson(firstLoad.resolved));
@@ -178,6 +246,20 @@ export async function runSweepOperation(
 	const plan = input.throughGate
 		? await slicePlanThroughGate(loaded.plan, input.throughGate)
 		: loaded.plan;
+	const straightState = loaded.resolved.features['straightTest'];
+	const truthAssisted =
+		straightState?.enabled === true && straightState.knobs['truthAssisted'] === true;
+	if (truthAssisted && !truthPath) {
+		throw new Error(
+			'lab sweep: truth-assisted Straight Test requires a supplied verified canonical truth file.'
+		);
+	}
+	if (truthAssisted)
+		guardTruthTaint(['lab', 'sweep', configPath, ...inputPaths, truthPath!]);
+	// The taint/config firewall is intentionally before this read. A blind or
+	// automated test invocation must refuse before it can inspect annotation
+	// bytes, even when the supplied path is malformed or unreadable.
+	const truth = truthPath ? loadTruth(truthPath) : undefined;
 	const configMs = performance.now() - configStartedAtMs;
 	const intakeStartedAtMs = performance.now();
 	const { report, image, canonicalTruth } = await canonicalizeInputs(inputPaths, truth);
@@ -211,6 +293,10 @@ export async function runSweepOperation(
 		resolveConfiguredParams(undefined, loaded.resolved)
 	);
 	board.set('recoveredTees', []);
+	// Every production run receives an explicit blind payload. The tainted
+	// comparison payload is installed only after the detector prefix has
+	// produced the IDs it records; it never mutates those slots.
+	board.set('straightTestTruthAssistance', { mode: 'blind', locks: [] });
 	const sink = createNodeSink(outDir);
 	const traceResolved = input.throughGate
 		? {
@@ -220,7 +306,41 @@ export async function runSweepOperation(
 		: loaded.resolved;
 	const { ctx, trace } = createTraceContext(traceResolved, plan.paramsHash ?? '', plan.ops);
 	const gatewayStartedAtMs = performance.now();
-	const receipts = executeCompiledPlan(plan, board, ctx, sink);
+	let receipts: ReturnType<typeof executeCompiledPlan> = [];
+	const straightIndex = plan.ops.findIndex((operation) => operation.id === 'straightTest');
+	if (truthAssisted && straightIndex < 0) {
+		throw new Error('lab sweep: truth-assisted Straight Test is enabled but no straightTest operation is scheduled.');
+	}
+	if (truthAssisted && straightIndex >= 0) {
+		// Run the dependency-complete detector prefix through the same gateway,
+		// then issue verified canonical locks before the S0 operation itself.
+		const prefix = plan.ops.slice(0, straightIndex);
+		const suffix = plan.ops.slice(straightIndex);
+		const prefixReceipts = executeCompiledPlan({ ...plan, ops: prefix }, board, ctx, sink);
+		const teeEvidence = board.has('tees') ? board.get<readonly TeeEvidence[]>('tees') : [];
+		const basketEvidence = board.has('baskets') ? board.get<readonly BasketEvidence[]>('baskets') : [];
+		const badgeEvidence = board.has('badges') ? board.get<readonly BadgeEvidence[]>('badges') : [];
+		const decision = decideTruthScoring(report, canonicalTruth);
+		if (!decision.eligible || !canonicalTruth) {
+			throw new Error(
+				`lab sweep: truth-assisted Straight Test refused: ${decision.reason ?? 'verified canonical truth is unavailable.'}`
+			);
+		}
+		const assistance = buildStraightTestTruthAssistance(
+			canonicalTruth,
+			badgeEvidence,
+			teeEvidence,
+			basketEvidence,
+			`verified canonical truth match (${report.truthMatch?.level ?? 'unknown'})`
+		);
+		if (assistance.locks.length === 0)
+			throw new Error('lab sweep: truth-assisted Straight Test refused: no identified badge received a verified endpoint lock.');
+		board.set('straightTestTruthAssistance', assistance);
+		const suffixReceipts = executeCompiledPlan({ ...plan, ops: suffix }, board, ctx, sink);
+		receipts = [...prefixReceipts, ...suffixReceipts];
+	} else {
+		receipts = executeCompiledPlan(plan, board, ctx, sink);
+	}
 	const gatewayMs = performance.now() - gatewayStartedAtMs;
 	const operationBodyMs = receipts.reduce((sum, receipt) => sum + receipt.durationMs, 0);
 	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
@@ -259,9 +379,11 @@ export async function runSweepOperation(
 	const measurement = board.has('measurement')
 		? board.get<ThreeFactorMeasurement>('measurement')
 		: undefined;
+	const runId = makeTraceRunId(report.imageId, plan.paramsHash ?? '', plan.planFingerprint);
+	const sealedTrace = sealTrace(trace, { runId, imageId: report.imageId });
 	const featureRenderStartedAtMs = performance.now();
 	const featureRenders = renderRunEndpointReceipt({
-		run: trace,
+		run: sealedTrace,
 		outDir: resolve(outDir, 'renders', 'run'),
 		canvas: {
 			widthPx: image.width,
@@ -290,7 +412,7 @@ export async function runSweepOperation(
 	const featureRenderMs = performance.now() - featureRenderStartedAtMs;
 
 	const acceptedByUnit = (unitId: string) =>
-		trace.units
+		sealedTrace.units
 			.find((unit) => unit.id === unitId)
 			?.drawables.filter((drawable) => drawable.verdict === 'accepted').length;
 	const recoveredTees = board.has('recoveredTees')
@@ -353,7 +475,7 @@ export async function runSweepOperation(
 		plan,
 		receipts,
 		report,
-		trace,
+		trace: sealedTrace,
 		timings,
 		results: {
 			badges: acceptedByUnit('badges'),
@@ -388,7 +510,7 @@ export async function runSweepOperation(
 		outDir,
 		artifactRenders,
 		featureRenders,
-		trace,
+		trace: sealedTrace,
 		renderedCount: artifactRenders.filter((result) => result.rendered).length,
 		stubbedCount: artifactRenders.filter((result) => !result.rendered).length,
 		scoreboard,

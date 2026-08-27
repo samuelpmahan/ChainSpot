@@ -1,0 +1,21 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "straight-test-on",
+	"note": "Enable blind early S0 geometry testimony; soft factors remain UNKNOWN and no ownership/bend truth is asserted.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"straightTest",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery",
+		"zfit"
+	],
+	"gates": { "G5": { "straightTest": { "enabled": true } } }
+}

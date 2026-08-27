@@ -22,6 +22,7 @@ import { g5RoutingFeature } from './features/g5.routing';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import { teeFamilyUnit } from './features/g3.teeFamily';
 import { teeRecoveryUnit } from './features/g3.teeRecovery';
+import { straightTestUnit } from './features/st.straightTest';
 import { OcclusionDetector } from './occlusion';
 import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
@@ -37,6 +38,10 @@ import {
 	type RunTrace,
 	type UnitTrace
 } from './features/types';
+import type {
+	StraightTestTrace,
+	StraightTestTruthAssistance
+} from './features/st.straightTest.contract';
 import type {
 	RecoveredTeeInput,
 	RgbaImage,
@@ -99,7 +104,8 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	phantomTeeUnit,
 	teeFamilyUnit,
 	teeRecoveryUnit,
-	cleanBasketFamilyUnit
+	cleanBasketFamilyUnit,
+	straightTestUnit
 ];
 
 export const DEFAULT_EXECUTION: readonly string[] = [
@@ -117,7 +123,11 @@ export const SEEDED_SLOTS: readonly string[] = [
 	'localImage',
 	'params',
 	'viewport',
-	'recoveredTees'
+	'recoveredTees',
+	/** Always present at production front doors. Sweep may replace this
+	 * separate S0-only payload with verified canonical comparison assistance
+	 * before execution; it never changes detector/raster evidence. */
+	'straightTestTruthAssistance'
 ];
 
 export function createTraceContext(
@@ -131,6 +141,7 @@ export function createTraceContext(
 	const unitById = new Map(ENGINE_UNITS.map((unit) => [unit.id, unit]));
 	const traces = new Map<string, UnitTrace>();
 	const heatmaps: Record<string, Float32Array> = {};
+	let straightTest: StraightTestTrace | undefined;
 	const featureIdsByUnit = new Map<string, string[]>();
 	for (const operation of operations) {
 		let ids = featureIdsByUnit.get(operation.unit);
@@ -220,6 +231,13 @@ export function createTraceContext(
 			traceFor(unitId);
 			heatmaps[key] = data;
 		},
+		recordStraightTest(value) {
+			// An empty S0 result is still an executed semantic stage. Materialize
+			// its UnitTrace even when it emitted no geometry drawables so receipts
+			// can distinguish "ran and abstained" from "not scheduled".
+			traceFor('straightTest');
+			straightTest = value;
+		},
 		span(unitId) {
 			const start = performance.now();
 			return () => {
@@ -234,6 +252,9 @@ export function createTraceContext(
 			...trace,
 			get units() {
 				return [...traces.values()];
+			},
+			get straightTest() {
+				return straightTest;
 			}
 		} as RunTrace
 	};
@@ -342,6 +363,10 @@ export function runEngine(
 	const board = createExecBoard();
 	seedBoard(board as unknown as EvidenceBoard, image, effectiveParams);
 	board.set('recoveredTees', recoveredTees);
+	board.set(
+		'straightTestTruthAssistance',
+		{ mode: 'blind', locks: [] } satisfies StraightTestTruthAssistance
+	);
 
 	const withTrace = resolved !== undefined;
 	const { ctx, trace } = withTrace

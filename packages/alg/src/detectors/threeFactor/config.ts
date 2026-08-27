@@ -156,6 +156,10 @@ export function resolveConfig(config: ThreeFactorConfig, defaultExecution: reado
 	const features: Record<string, ResolvedFeature> = {};
 	for (const feature of ALL_FEATURES) {
 		const deviation = config.gates?.[feature.gate]?.[feature.id];
+		// New default-OFF experiments may opt into sparse resolution so merely
+		// registering them cannot alter a previously pinned default params hash.
+		// Explicit ON/comparison configs still receive the normal resolved state.
+		if (feature.resolveOnlyWhenConfigured && deviation === undefined) continue;
 		features[feature.id] = {
 			enabled: deviation?.enabled ?? feature.defaultEnabled,
 			knobs: { ...defaultKnobs(feature), ...(deviation?.knobs ?? {}) }

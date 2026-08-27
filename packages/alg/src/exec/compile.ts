@@ -27,6 +27,7 @@
 import type { OperationSpec, SlotRef } from './contract';
 import { OPERATION_UNIVERSE, UNIT_OPERATIONS } from './operations';
 import type { ResolvedConfig } from '../detectors/threeFactor/config';
+import { ALL_FEATURES } from '../detectors/threeFactor/features/registry';
 import { canonicalJson } from '../detectors/threeFactor/hash';
 import { sha256HexSyncText } from './sha256';
 
@@ -36,7 +37,8 @@ export const SEEDED_SLOTS: readonly SlotRef[] = [
 	'localImage',
 	'params',
 	'viewport',
-	'recoveredTees'
+	'recoveredTees',
+	'straightTestTruthAssistance'
 ];
 
 export interface CompiledExecutionPlan {
@@ -73,6 +75,19 @@ export function validateOperationOrder(
 
 const specById = new Map(OPERATION_UNIVERSE.map((spec) => [spec.id, spec]));
 
+/** Operations owned only by resolve-only deviations omitted from a sparse
+ * config are absent from its fingerprint universe. Explicit configurations
+ * still retain those operations and therefore distinct plan identity. */
+function resolveOnlyWhenConfigured(spec: OperationSpec, resolved: ResolvedConfig): boolean {
+	const omitted = new Set(
+		ALL_FEATURES.filter(
+			(feature) => feature.resolveOnlyWhenConfigured && resolved.features[feature.id] === undefined
+		).map((feature) => feature.id)
+	);
+	const features = spec.features ?? [];
+	return features.length > 0 && features.every((featureId) => omitted.has(featureId));
+}
+
 export function compileExecutionPlan(
 	resolved: ResolvedConfig,
 	paramsHash?: string
@@ -108,8 +123,11 @@ export function compileExecutionPlan(
 	const bindings: Record<string, { enabled: boolean; knobs: Record<string, unknown> }> = {};
 	for (const [id, state] of Object.entries(resolved.features)) bindings[id] = state;
 
+	const fingerprintUniverse = OPERATION_UNIVERSE.filter(
+		(spec) => !resolveOnlyWhenConfigured(spec, resolved)
+	);
 	const planFingerprint = sha256HexSyncText(
-		canonicalJson({ resolvedConfig: resolved, opUniverse: OPERATION_UNIVERSE })
+		canonicalJson({ resolvedConfig: resolved, opUniverse: fingerprintUniverse })
 	);
 
 	return {

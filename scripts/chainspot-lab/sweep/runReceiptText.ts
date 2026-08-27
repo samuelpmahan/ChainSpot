@@ -145,6 +145,25 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	lines.push(`evaluation.reason: ${value(receipt.evaluation.reason)}`);
 	lines.push(`evaluation.scoreboard: ${json(receipt.evaluation.scoreboard)}`);
 
+	if (receipt.straightTest) {
+		lines.push('', 'G5 STRAIGHT TEST (SEALED TRACE)');
+		const st = receipt.straightTest;
+		lines.push(`featureId: ${st.featureId}`);
+		lines.push(`runId: ${st.runId}`);
+		lines.push(`imageId: ${st.imageId}`);
+		lines.push(`paramsHash: ${st.paramsHash}`);
+		lines.push(`traceHash: ${st.traceHash}`);
+		lines.push(`coordinateFrame: ${st.coordinateFrame}`);
+		lines.push(`truthMode: ${st.truthAssistance.mode}`);
+		if (st.truthAssistance.taint) lines.push(st.truthAssistance.taint);
+		lines.push(`truthAssistance: ${json(st.truthAssistance)}`);
+		if (st.proposals.length === 0) lines.push('proposal: []');
+		for (const proposal of st.proposals) {
+			lines.push(`proposal ${proposal.proposalId}: ${json(proposal)}`);
+			for (const reason of proposal.reasons) lines.push(`  reason: ${reason}`);
+		}
+	}
+
 	lines.push('', 'VISUAL RENDERS', `visualRenderCount: ${receipt.visualRenders.length}`);
 	lines.push('index | gate | kind | owner | status | id | summary');
 	for (const [index, render] of receipt.visualRenders.entries()) {

@@ -5,6 +5,7 @@ import type {
 	MeasurementAggregate,
 	RunTrace
 } from '@chainspot/alg/detectors/threeFactor/features/types';
+import type { StraightTestTrace } from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
 import {
 	CANONICAL_GATE_ORDER,
 	GATE_TITLES
@@ -86,6 +87,15 @@ export interface RunReceiptVisualRender {
 	readonly files: readonly string[];
 }
 
+/** S0 testimony copied from the sealed semantic trace.  Keeping the trace
+ * identity beside the rows makes the JSON receipt independently checkable. */
+export interface RunReceiptStraightTest extends StraightTestTrace {
+	readonly runId: string;
+	readonly imageId: string;
+	readonly paramsHash: string;
+	readonly traceHash: string;
+}
+
 export interface RunReceipt {
 	readonly schema: typeof RUN_RECEIPT_SCHEMA;
 	readonly generatedAt: string;
@@ -117,6 +127,7 @@ export interface RunReceipt {
 	readonly units: readonly RunReceiptUnit[];
 	readonly results: RunReceiptResults;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
+	readonly straightTest?: RunReceiptStraightTest;
 	readonly evaluation: {
 		readonly truthSupplied: boolean;
 		readonly skipped: boolean;
@@ -256,6 +267,13 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 	});
 
 	const featureStates = Object.entries(input.trace.features);
+	const straightTest = input.trace.straightTest && {
+		...input.trace.straightTest,
+		runId: input.trace.runId ?? 'UNKNOWN',
+		imageId: input.trace.imageId ?? 'UNKNOWN',
+		paramsHash: input.trace.paramsHash || 'UNKNOWN',
+		traceHash: input.trace.traceHash ?? 'UNKNOWN'
+	};
 	return {
 		schema: RUN_RECEIPT_SCHEMA,
 		generatedAt: input.generatedAt,
@@ -292,6 +310,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		units: unitReceipt(input.trace),
 		results: input.results,
 		visualRenders: input.visualRenders,
+		...(straightTest ? { straightTest } : {}),
 		evaluation: {
 			truthSupplied: input.truthSupplied,
 			skipped: input.truthScoringSkipped,

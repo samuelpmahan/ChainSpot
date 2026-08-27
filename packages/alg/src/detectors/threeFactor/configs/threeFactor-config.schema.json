@@ -40,7 +40,8 @@
 					"phantomTee",
 					"teeFamily",
 					"teeRecovery",
-					"cleanBasketFamily"
+					"cleanBasketFamily",
+					"straightTest"
 				]
 			},
 			"uniqueItems": true,
@@ -603,6 +604,18 @@
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
+						"straightTest": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.",
+							"properties": {
+								"enabled": { "type": "boolean", "default": false },
+								"knobs": {
+									"type": "object", "additionalProperties": false,
+									"properties": { "truthAssisted": { "type": "boolean", "description": "Use verified canonical endpoint coordinates for explicitly tainted comparison only.", "default": false } }
+								}
+							}
+						},
 						"ribbon": {
 							"type": "object",
 							"additionalProperties": false,

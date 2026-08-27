@@ -68,6 +68,7 @@ import {
 import type { RibbonKnobs } from '../detectors/threeFactor/ribbon';
 import type { RoutingKnobs } from '../detectors/threeFactor/routing';
 import type { ScoringKnobs, ZfitKnobs } from '../detectors/threeFactor/scoring';
+import { straightTestFeature, straightTestUnit } from '../detectors/threeFactor/features/st.straightTest';
 import type {
 	AssignmentEvidence,
 	RawPairEvidence,
@@ -533,6 +534,10 @@ const zfitOps: OperationDef[] = [
 // decomposed further (R2: "your judgment on the exact cut").
 
 const reusedOps: OperationDef[] = [
+	{
+		spec: { id: 'straightTest', kind: 'decide', gate: 'G5', unit: 'straightTest', consumes: straightTestUnit.consumes, produces: straightTestUnit.produces, features: [straightTestFeature.id], note: straightTestUnit.note },
+		run: (board, ctx) => straightTestUnit.run(asLegacyBoard(board), ctx)
+	},
 	wrapLegacy('badges', 'compute', 'G1', [g1DigitsFeature.id]),
 	wrapLegacy('supportField', 'measure', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('badgeOcclusionPatch', 'transform', 'G5', [g5RibbonFeature.id]),
@@ -625,6 +630,7 @@ const opDefById = new Map(allOpDefs.map((def) => [def.spec.id, def]));
  * this map's key order.
  */
 export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
+	['straightTest', ['straightTest']],
 	['badgeStage', badgeStageOps.map((op) => op.spec.id)],
 	['badges', ['badges']],
 	['supportField', ['supportField']],

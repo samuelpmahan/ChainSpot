@@ -20,6 +20,7 @@ import { sharedHsvFeature } from './shared.hsv';
 import { teeFamilyFeature } from './g3.teeFamily';
 import { teeRecoveryFeature } from './g3.teeRecovery';
 import { fourLaneSensorFeature } from './st.fourLaneSensor';
+import { straightTestFeature } from './st.straightTest';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
 	zfitFeature,
@@ -36,7 +37,8 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	sharedHsvFeature,
 	teeFamilyFeature,
 	teeRecoveryFeature,
-	fourLaneSensorFeature
+	fourLaneSensorFeature,
+	straightTestFeature
 ];
 
 export function featureById(id: string): ABFeature | undefined {
