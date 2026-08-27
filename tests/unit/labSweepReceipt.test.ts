@@ -274,11 +274,11 @@ describe('LAB sweep receipt seam', () => {
 		]);
 		expect(result.receipts.map((receipt) => receipt.opId)).not.toContain('tees.componentFallback');
 		expect(result.featureRenders.results).toHaveLength(1);
-		expect(endpointRender?.receiptText).toContain('badgeCentroids: 18');
+		expect(endpointRender?.receiptText).toContain('badges: 18');
 		expect(endpointRender?.receiptText).toContain('basketSemanticTips: 18');
 		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 16');
 		expect(endpointRender?.receiptText).toContain(
-			'expectedRecoverNum: 2 (math: max(0, badgeCentroids - visibleTeeBorders))'
+			'expectedRecoverNum: 2 (math: max(0, badges - visibleTeeBorders))'
 		);
 		const teeVisualReceipt = result.runReceipt.visualRenders.find(
 			(render) => render.kind === 'feature' && render.id === 'run.endpoint-summary'

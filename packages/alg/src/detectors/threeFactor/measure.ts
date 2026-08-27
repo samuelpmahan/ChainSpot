@@ -254,6 +254,43 @@ function makeBadges(
 	});
 }
 
+/**
+ * Return only the detector-known bright pixels belonging to one accepted
+ * badge. Bright-family badges have an exact connected-component label; a
+ * dark-plate recovery has no bright component of its own, so its exact white
+ * glyph evidence is the bright mask intersected with the detector's tight
+ * plate bounds. Coordinates leave this helper in original-image space.
+ *
+ * This is deliberately a presentation evidence seam: it does not infer a
+ * shape from a bbox, and it does not alter any detection decision.
+ */
+function exactBadgeBrightPixels(
+	stage: ReturnType<typeof runBadgeStage>,
+	badge: BadgeEvidence,
+	yOffsetPx: number
+): readonly (readonly [number, number])[] {
+	const bounds = badge.source === 'dark-plate-recovery' ? badge.plateBbox : badge.bbox;
+	if (!bounds) return [];
+	const [x, y, width, height] = bounds;
+	const x0 = Math.max(0, Math.floor(x));
+	const y0 = Math.max(0, Math.floor(y - yOffsetPx));
+	const x1 = Math.min(stage.width, Math.ceil(x + width));
+	const y1 = Math.min(stage.height, Math.ceil(y - yOffsetPx + height));
+	const pixels: (readonly [number, number])[] = [];
+	for (let localY = y0; localY < y1; localY++) {
+		for (let localX = x0; localX < x1; localX++) {
+			const offset = localY * stage.width + localX;
+			const belongsToBrightComponent =
+				badge.source === 'bright-family' && stage.brightLabels[offset] === badge.component.label;
+			const belongsToRecoveredPlate =
+				badge.source === 'dark-plate-recovery' && stage.brightMask.data[offset] !== 0;
+			if (belongsToBrightComponent || belongsToRecoveredPlate)
+				pixels.push([localX, localY + yOffsetPx]);
+		}
+	}
+	return pixels;
+}
+
 function makeBaskets(
 	sprites: readonly (SpriteMatch & SmartBasketEvidence)[],
 	yOffsetPx: number
@@ -580,6 +617,19 @@ export const measureUnits: readonly EngineUnit[] = [
 			const digitsKnobs = ctx.resolve(g1DigitsFeature).knobs as unknown as DigitsKnobs;
 			const badges = makeBadges(stage, topPx, digitsKnobs);
 			for (const badge of badges) {
+				const brightPixels = exactBadgeBrightPixels(stage, badge, topPx);
+				ctx.overlay('badges', {
+					type: 'pixelSet',
+					pixels: brightPixels,
+					verdict: 'info',
+					visualRole: 'badge-pixels',
+					ref: badge.detId,
+					reason:
+						badge.source === 'bright-family'
+							? `presentation-only exact bright-mask component pixels (source: badgeStage.brightLabels[label=${badge.component.label}]; no bbox fill)`
+							: 'presentation-only exact bright-mask pixels inside recovered plateBbox (source: badgeStage.brightMask ∩ plateBbox; no bbox fill)',
+					values: { pixelCount: brightPixels.length }
+				});
 				ctx.overlay('badges', {
 					type: 'box',
 					bbox: badge.bbox,

@@ -488,25 +488,41 @@ export function renderRunEndpointReceipt(
 	if (!base) throw new Error('run endpoint receipt requires the G0 canonical raster as its base');
 
 	const badgeUnit = run.units.find((unit) => unit.id === 'badges');
-	const badgeCenters: Drawable[] = [];
+	const acceptedBadges = (badgeUnit?.drawables ?? []).filter(
+		(drawable) => drawable.type === 'box' && drawable.verdict === 'accepted'
+	);
+	const acceptedBadgeRefs = new Set<string>();
+	for (const badge of acceptedBadges) {
+		if (badge.ref === undefined)
+			warnings.push('accepted badge has no defined ref; exact bright-mask pixels cannot be associated');
+		else acceptedBadgeRefs.add(badge.ref);
+	}
+	const badgePixels: Drawable[] = [];
 	for (const drawable of badgeUnit?.drawables ?? []) {
-		if (drawable.type !== 'box' || drawable.verdict !== 'accepted') continue;
-		const xPx = drawable.values?.centerXPx;
-		const yPx = drawable.values?.centerYPx;
-		if (xPx === undefined || yPx === undefined) {
-			warnings.push(`badge '${drawable.ref ?? 'UNKNOWN'}' omitted: trace has no exact centroid`);
+		if (
+			drawable.type !== 'pixelSet' ||
+			drawable.verdict !== 'info' ||
+			drawable.visualRole !== 'badge-pixels'
+		)
+			continue;
+		if (drawable.ref === undefined) {
+			warnings.push('badge pixel set omitted: trace has no defined badge ref');
 			continue;
 		}
-		badgeCenters.push({
-			type: 'point',
-			xPx,
-			yPx,
-			verdict: 'info',
-			visualRole: 'badge-center',
-			ref: drawable.ref,
-			reason: 'presentation-only five-pixel mark at the detector-emitted badge centroid',
-			values: drawable.values
-		});
+		if (drawable.pixels.length === 0) {
+			warnings.push(`badge pixel set '${drawable.ref}' omitted: trace contains an empty exact pixel set`);
+			continue;
+		}
+		if (!acceptedBadgeRefs.has(drawable.ref)) {
+			warnings.push(`badge pixel set '${drawable.ref}' omitted: ref does not match a defined accepted badge`);
+			continue;
+		}
+		badgePixels.push(drawable);
+	}
+	const survivingBadgeRefs = new Set(badgePixels.map((drawable) => drawable.ref));
+	for (const badge of acceptedBadges) {
+		if (badge.ref !== undefined && !survivingBadgeRefs.has(badge.ref))
+			warnings.push(`accepted badge '${badge.ref}' omitted: no surviving exact bright-mask pixel set`);
 	}
 
 	const basketUnit = run.units.find((unit) => unit.id === 'baskets');
@@ -548,9 +564,9 @@ export function renderRunEndpointReceipt(
 		base: 'g0.canonical',
 		layers: [
 			{
-				name: 'badge centroids (G1)',
-				note: 'yellow five-pixel marks at exact detector-emitted centroids',
-				drawables: badgeCenters
+				name: 'badge white pixels (G1)',
+				note: 'yellow exact bright-mask pixels emitted by the badge detector; black badge pixels remain untouched',
+				drawables: badgePixels
 			},
 			{
 				name: 'basket semantic tips (G2)',
@@ -604,7 +620,7 @@ export function renderRunEndpointReceipt(
 		0
 	);
 	const expectedRecoverNum = visiblePlan
-		? Math.max(0, badgeCenters.length - visibleBorders.length)
+		? Math.max(0, acceptedBadges.length - visibleBorders.length)
 		: undefined;
 	const rejectedLines = rejectionReceiptLines(run, [
 		'baskets',
@@ -628,13 +644,15 @@ export function renderRunEndpointReceipt(
 		}`,
 		'',
 		'ACCEPTED ENDPOINT TESTIMONY',
-		`badgeCentroids: ${badgeCenters.length}`,
+		`badges: ${acceptedBadges.length} (source: accepted badge boxes in trace unit 'badges')`,
+		`badgeBrightPixelSets: ${badgePixels.length} (source: info pixelSet drawables with visualRole='badge-pixels')`,
+		`badgeBrightPixels: ${badgePixels.reduce((sum, drawable) => sum + (drawable.type === 'pixelSet' ? drawable.pixels.length : 0), 0)} (source: total cells in surviving exact badge pixel sets)`,
 		`basketSemanticTips: ${basketTips.length}`,
 		`visibleTeeBorders: ${visibleBorders.length}`,
 		`expectedRecoverNum: ${
 			expectedRecoverNum === undefined
 				? 'UNKNOWN -- visible tee gate was not scheduled'
-				: `${expectedRecoverNum} (math: max(0, badgeCentroids - visibleTeeBorders))`
+				: `${expectedRecoverNum} (math: max(0, badges - visibleTeeBorders))`
 		}`,
 		`recoveredTeePoses: ${recoveredShards.length}`,
 		`recoveredVisibleComponents: ${recoveredVisibleComponents}`,
@@ -643,7 +661,7 @@ export function renderRunEndpointReceipt(
 		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
 		'',
 		'VISUAL CONTRACT',
-		'yellow: exact badge centroid (five pixels)',
+		'yellow: exact detector-known white/bright badge pixels only (pixelSet; black badge pixels untouched)',
 		'magenta: basket semantic tip (tiny diamond)',
 		'green: exact visible tee border or exact recovered shard pixels',
 		'cyan: four pose-aligned tee corner pluses',
@@ -667,7 +685,7 @@ export function renderRunEndpointReceipt(
 		.flatMap((unit) => unit.drawables)
 		.filter((drawable) => drawable.verdict === 'rejected').length;
 	const semanticAcceptedCount =
-		badgeCenters.length +
+		badgePixels.length +
 		basketTips.length +
 		visibleBorders.length +
 		recoveredShards.length +
@@ -685,7 +703,7 @@ export function renderRunEndpointReceipt(
 				filesWritten: [pngPath, receiptPath],
 				receiptText,
 				summary:
-					`${badgeCenters.length} badges + ${basketTips.length} baskets + ` +
+					`${acceptedBadges.length} badges + ${basketTips.length} baskets + ` +
 					`${visibleBorders.length} visible tees + ${recoveredShards.length} recovered tees in one endpoint image`,
 				warnings
 			}
@@ -711,11 +729,11 @@ const TEE_CENTER_STYLE = { stroke: '#39ff7a', fill: 'none', dash: 'none' };
 const TEE_CORNER_STYLE = { stroke: '#4dd2ff', fill: 'none', dash: 'none' };
 const TEE_DIAGONAL_STYLE = { stroke: '#ff2020', fill: 'none', dash: 'none' };
 const PHANTOM_STYLE = { stroke: '#c56bff', fill: 'rgba(197,107,255,0.12)', dash: 'none' };
-const BADGE_CENTER_STYLE = { stroke: '#ffe11e', fill: 'none', dash: 'none' };
+const BADGE_PIXELS_STYLE = { stroke: '#ffe11e', fill: 'none', dash: 'none' };
 const BASKET_TIP_STYLE = { stroke: '#ff28dc', fill: 'none', dash: 'none' };
 
-function isBadgeCenter(drawable: Drawable): boolean {
-	return drawable.type === 'point' && drawable.visualRole === 'badge-center';
+function isBadgePixels(drawable: Drawable): boolean {
+	return drawable.type === 'pixelSet' && drawable.visualRole === 'badge-pixels';
 }
 
 function isBasketTip(drawable: Drawable): boolean {
@@ -755,7 +773,7 @@ function isPhantomMarker(drawable: Drawable): boolean {
 }
 
 function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: string } {
-	if (isBadgeCenter(drawable)) return BADGE_CENTER_STYLE;
+	if (isBadgePixels(drawable)) return BADGE_PIXELS_STYLE;
 	if (isBasketTip(drawable)) return BASKET_TIP_STYLE;
 	if (isPhantomMarker(drawable)) return PHANTOM_STYLE;
 	if (isCenterMarker(drawable)) return TEE_CENTER_STYLE;
@@ -765,8 +783,7 @@ function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: str
 }
 
 function strokeWidthFor(drawable: Drawable): number {
-	return isBadgeCenter(drawable) ||
-		isBasketTip(drawable) ||
+	return isBasketTip(drawable) ||
 		isCornerMarker(drawable) ||
 		isTeeDiagonal(drawable)
 		? 1
@@ -885,10 +902,6 @@ function drawableSvg(d: Drawable, layerName: string): string {
 	const semantics = `${d.visualRole ? ` data-visual-role="${esc(d.visualRole)}"` : ''}${d.ref ? ` data-ref="${esc(d.ref)}"` : ''}`;
 	const common = `stroke="${s.stroke}" stroke-width="${strokeWidthFor(d)}" stroke-dasharray="${s.dash}" fill="${s.fill}" vector-effect="non-scaling-stroke"${semantics}`;
 	if (d.type === 'point') {
-		if (isBadgeCenter(d)) {
-			const r = 1;
-			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
-		}
 		if (isBasketTip(d)) {
 			const r = 3;
 			return `<g>${title}<path d="M${d.xPx} ${d.yPx - r} L${d.xPx + r} ${d.yPx} L${d.xPx} ${d.yPx + r} L${d.xPx - r} ${d.yPx} Z" ${common} fill="none"/></g>`;
@@ -1033,19 +1046,19 @@ function rasterDrawable(
 ): void {
 	const color: readonly [number, number, number] = isPhantomMarker(drawable)
 		? [197, 107, 255]
-		: isBadgeCenter(drawable)
-			? [255, 225, 30]
-			: isBasketTip(drawable)
-				? [255, 40, 220]
-				: isTeeDiagonal(drawable)
-					? [255, 32, 32]
-					: isCenterMarker(drawable)
-						? [57, 255, 122]
-						: drawable.verdict === 'accepted'
-							? [30, 255, 95]
-							: drawable.verdict === 'rejected'
-								? [255, 45, 45]
-								: [30, 210, 255];
+			: isBadgePixels(drawable)
+				? [255, 225, 30]
+				: isBasketTip(drawable)
+					? [255, 40, 220]
+					: isTeeDiagonal(drawable)
+						? [255, 32, 32]
+						: isCenterMarker(drawable)
+							? [57, 255, 122]
+							: drawable.verdict === 'accepted'
+								? [30, 255, 95]
+								: drawable.verdict === 'rejected'
+									? [255, 45, 45]
+									: [30, 210, 255];
 	if (drawable.type === 'box') {
 		const [x, y, w, h] = drawable.bbox;
 		rasterLine(data, width, height, x, y, x + w, y, color);
@@ -1055,17 +1068,6 @@ function rasterDrawable(
 		return;
 	}
 	if (drawable.type === 'point') {
-		if (isBadgeCenter(drawable)) {
-			for (const [dx, dy] of [
-				[0, 0],
-				[-1, 0],
-				[1, 0],
-				[0, -1],
-				[0, 1]
-			] as const)
-				rasterPixel(data, width, height, drawable.xPx + dx, drawable.yPx + dy, color);
-			return;
-		}
 		if (isBasketTip(drawable)) {
 			const r = 3;
 			rasterLineThin(
