@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { PNG } from 'pngjs';
@@ -73,10 +73,7 @@ function writeWorldTile(path: string, originX: number, originY: number): void {
 	for (let y = 0; y < png.height; y++) {
 		for (let x = 0; x < png.width; x++) {
 			const value =
-				(((originX + x) * 73) ^
-					((originY + y) * 151) ^
-					((originX + x) * (originY + y) * 29)) &
-				255;
+				(((originX + x) * 73) ^ ((originY + y) * 151) ^ ((originX + x) * (originY + y) * 29)) & 255;
 			const index = (y * png.width + x) * 4;
 			png.data[index] = value;
 			png.data[index + 1] = value;
@@ -165,9 +162,21 @@ describe('LAB sweep receipt seam', () => {
 			expect(persisted.operations.map((operation: { id: string }) => operation.id)).toEqual(
 				result.receipts.map((receipt) => receipt.opId)
 			);
+			expect(persisted.visualRenders[0]).toMatchObject({
+				kind: 'canonical',
+				gate: 'G0',
+				id: 'g0.canonical',
+				status: 'rendered'
+			});
+			expect(
+				persisted.visualRenders
+					.flatMap((render: { files: string[] }) => render.files)
+					.every((file: string) => !isAbsolute(file) && existsSync(resolve(result.outDir, file)))
+			).toBe(true);
 			expect(readFileSync(result.runReceiptPaths[1], 'utf8')).toContain(
 				'OPERATIONS (CHRONOLOGICAL)'
 			);
+			expect(readFileSync(result.runReceiptPaths[1], 'utf8')).toContain('VISUAL RENDERS');
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -277,6 +286,12 @@ describe('LAB sweep receipt seam', () => {
 		expect(teeFamilyRender?.receiptText).toContain(
 			'expectedRecoverNum is a cardinality-derived recovery expectation, not truth, localization, or ownership.'
 		);
+		const teeVisualReceipt = result.runReceipt.visualRenders.find(
+			(render) => render.kind === 'feature' && render.id === 'teeFamily.teeFamily'
+		);
+		expect(teeVisualReceipt).toMatchObject({ gate: 'G3', status: 'rendered' });
+		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.svg'))).toBe(true);
+		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.png'))).toBe(true);
 	}, 60_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {

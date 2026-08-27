@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import {
@@ -39,6 +39,7 @@ import {
 	buildRunReceipt,
 	writeRunReceiptJson,
 	type RunReceipt,
+	type RunReceiptVisualRender,
 	type RunPhaseTimings
 } from './runReceipt';
 import { formatRunReceiptText } from './runReceiptText';
@@ -220,12 +221,17 @@ export async function runSweepOperation(
 	const operationBodyMs = receipts.reduce((sum, receipt) => sum + receipt.durationMs, 0);
 	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
 	const artifactRenders: ArtifactRenderResult[] = [];
+	const artifactRenderOwners: Array<{ readonly opId: string; readonly gate: string }> = [];
 	const artifactRenderStartedAtMs = performance.now();
 	for (const receipt of receipts) {
 		for (const artifactRef of receipt.artifacts) {
 			artifactRenders.push(
 				renderArtifact(outDir, receipt.opId, gateByOpId.get(receipt.opId) ?? 'shared', artifactRef)
 			);
+			artifactRenderOwners.push({
+				opId: receipt.opId,
+				gate: gateByOpId.get(receipt.opId) ?? 'shared'
+			});
 		}
 	}
 	const artifactRenderMs = performance.now() - artifactRenderStartedAtMs;
@@ -320,7 +326,9 @@ export async function runSweepOperation(
 		? board.get<readonly RecoveredTeeInput[]>('recoveredTees').length
 		: undefined;
 	const phantomTees = acceptedByUnit('phantomTee');
-	const visibleTees = acceptedByUnit('teeFamily') ?? (board.has('tees') ? board.get<readonly unknown[]>('tees').length : undefined);
+	const visibleTees =
+		acceptedByUnit('teeFamily') ??
+		(board.has('tees') ? board.get<readonly unknown[]>('tees').length : undefined);
 	const assignmentCount = board.has('assignment')
 		? board.get<ThreeFactorAssignment>('assignment').assignments.length
 		: undefined;
@@ -339,10 +347,52 @@ export async function runSweepOperation(
 		featureRenderMs,
 		observedTotalMs: performance.now() - runStartedAtMs
 	};
+	const runRelativePath = (path: string) => relative(outDir, path).split('\\').join('/');
+	const visualRenders: RunReceiptVisualRender[] = [
+		{
+			kind: 'canonical',
+			gate: 'G0',
+			id: 'g0.canonical',
+			owner: 'StripChrome + AutoStitch',
+			status: 'rendered',
+			summary: 'exact canonical RGBA raster executed by the engine',
+			files: [runRelativePath(canonicalPngPath)]
+		},
+		...artifactRenders.map((render, index): RunReceiptVisualRender => ({
+			kind: 'artifact',
+			gate: artifactRenderOwners[index]?.gate ?? 'UNKNOWN',
+			id: render.artifactRef.id,
+			owner: artifactRenderOwners[index]?.opId ?? 'UNKNOWN',
+			status: render.rendered ? 'rendered' : 'stub',
+			summary: render.summary,
+			files: render.filesWritten.map(runRelativePath)
+		})),
+		...featureRenders.results.map((render): RunReceiptVisualRender => ({
+			kind: 'feature',
+			gate: render.gate,
+			id: `${render.featureId}.${render.unitId}`,
+			owner: `${render.featureId}@${render.unitId}`,
+			status: 'rendered',
+			summary: render.summary,
+			files: render.filesWritten.map(runRelativePath)
+		}))
+	];
+	const visualGateRank = (gate: string): number => {
+		if (gate === 'G0') return 0;
+		const index = GATE_ORDER.indexOf(gate as EngineGateId);
+		return index >= 0 ? index + 1 : GATE_ORDER.length + 1;
+	};
+	visualRenders.sort((a, b) => visualGateRank(a.gate) - visualGateRank(b.gate));
 	let revision = 'UNKNOWN';
 	try {
-		const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-		const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+		const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+			cwd: REPO_ROOT,
+			encoding: 'utf8'
+		}).trim();
+		const dirty = execFileSync('git', ['status', '--porcelain'], {
+			cwd: REPO_ROOT,
+			encoding: 'utf8'
+		}).trim();
 		revision = `${sha}${dirty ? '+dirty' : ''}`;
 	} catch {
 		// A source archive may not have Git metadata; UNKNOWN is honest provenance.
@@ -371,6 +421,7 @@ export async function runSweepOperation(
 			assignments: assignmentCount,
 			rawPairs: rawPairCount
 		},
+		visualRenders,
 		truthSupplied: Boolean(truthPath),
 		truthScoringSkipped,
 		...(truthScoringReason ? { truthScoringReason } : {}),

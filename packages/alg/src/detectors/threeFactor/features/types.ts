@@ -120,6 +120,7 @@ export interface DrawableBase {
 		| 'tee-center'
 		| 'tee-shard'
 		| 'tee-corner-tick'
+		| 'tee-diagonal'
 		| 'tee-rejection'
 		| 'phantom-center';
 }
@@ -163,7 +164,8 @@ export interface HeatmapDrawable extends DrawableBase {
 	readonly originYPx: number;
 }
 
-export type Drawable = PointDrawable | BoxDrawable | PolylineDrawable | PixelSetDrawable | HeatmapDrawable;
+export type Drawable =
+	PointDrawable | BoxDrawable | PolylineDrawable | PixelSetDrawable | HeatmapDrawable;
 
 export interface MeasurementAggregate {
 	readonly name: string;

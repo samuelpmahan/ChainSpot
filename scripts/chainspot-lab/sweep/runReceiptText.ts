@@ -80,7 +80,11 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		lines.push(`timings.${name}: ${receipt.timings[name]}`);
 	}
 
-	lines.push('', 'OPERATIONS (CHRONOLOGICAL)', 'index | gate | id | durationMs | percentOfOperationBody | conformance | probes');
+	lines.push(
+		'',
+		'OPERATIONS (CHRONOLOGICAL)',
+		'index | gate | id | durationMs | percentOfOperationBody | conformance | probes'
+	);
 	for (const operation of receipt.operations) {
 		lines.push(
 			`${operation.index} | ${operation.gate} | ${operation.id} | ${operation.durationMs} | ${operation.percentOfOperationBody} | ${conformance(operation)} | ${probes(operation)}`
@@ -88,7 +92,11 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	}
 	if (receipt.operations.length === 0) lines.push('(none)');
 
-	lines.push('', 'CANONICAL GATE ROLLUPS', 'gate | title | status | operationIndexes | durationMs | percentOfOperationBody');
+	lines.push(
+		'',
+		'CANONICAL GATE ROLLUPS',
+		'gate | title | status | operationIndexes | durationMs | percentOfOperationBody'
+	);
 	for (const gate of receipt.gates) {
 		lines.push(
 			`${gate.gate} | ${gate.title} | ${gate.status} | ${list(gate.operationIndexes)} | ${gate.durationMs} | ${gate.percentOfOperationBody}`
@@ -137,6 +145,17 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	lines.push(`evaluation.reason: ${value(receipt.evaluation.reason)}`);
 	lines.push(`evaluation.scoreboard: ${json(receipt.evaluation.scoreboard)}`);
 
+	lines.push('', 'VISUAL RENDERS', `visualRenderCount: ${receipt.visualRenders.length}`);
+	lines.push('index | gate | kind | owner | status | id | summary');
+	for (const [index, render] of receipt.visualRenders.entries()) {
+		lines.push(
+			`${index + 1} | ${render.gate} | ${render.kind} | ${render.owner} | ${render.status} | ${render.id} | ${render.summary}`
+		);
+		if (render.files.length === 0) lines.push('  files: []');
+		else for (const file of render.files) lines.push(`  file: ${file}`);
+	}
+	if (receipt.visualRenders.length === 0) lines.push('(none)');
+
 	lines.push('', 'WARNINGS');
 	if (receipt.warnings.length === 0) lines.push('(none)');
 	else for (const warning of receipt.warnings) lines.push(`- ${warning}`);
@@ -144,7 +163,10 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	const artifactRefs = receipt.operations.flatMap((operation) => operation.artifacts);
 	lines.push('', 'ARTIFACTS', `artifactCount: ${artifactRefs.length}`);
 	if (artifactRefs.length === 0) lines.push('(none)');
-	else artifactRefs.forEach((artifact, index) => lines.push(`artifact[${index + 1}].uri: ${artifact.uri}`));
+	else
+		artifactRefs.forEach((artifact, index) =>
+			lines.push(`artifact[${index + 1}].uri: ${artifact.uri}`)
+		);
 
 	return `${lines.join('\n')}\n`;
 }

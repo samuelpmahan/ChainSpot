@@ -60,6 +60,7 @@ import type {
 	RunTrace,
 	UnitTrace
 } from './types';
+import { teePoseDecoration } from './teePoseVisuals';
 
 export interface TeeFamilyKnobs {
 	readonly frameAreaMin: number;
@@ -92,32 +93,15 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 		const acceptedBorders = accepted.filter((drawable) => drawable.type === 'polyline');
 		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
 		const info = unit.drawables.filter((drawable) => drawable.verdict === 'info');
-		// The center is already measured on each accepted border drawable. Add a
-		// presentation-only marker to this plan without mutating the trace or
-		// inflating semantic accepted counts.
-		const centerMarkers = acceptedBorders.flatMap((drawable) => {
-			const x = drawable.values?.orientedCenterX;
-			const y = drawable.values?.orientedCenterY;
-			return drawable.type === 'polyline' &&
-				typeof x === 'number' &&
-				Number.isFinite(x) &&
-				typeof y === 'number' &&
-				Number.isFinite(y)
-				? [
-						{
-							type: 'point' as const,
-							xPx: x,
-							yPx: y,
-							verdict: 'info' as const,
-							ref: `${drawable.ref ?? 'UNKNOWN'}:center`,
-							visualRole: 'tee-center' as const,
-							reason: 'center indicator derived from the accepted border drawable values',
-							values: { centerXPx: x, centerYPx: y }
-						}
-					]
-				: [];
-		});
-		const acceptedVisual = [...acceptedBorders, ...centerMarkers];
+		const poseDecorations = acceptedBorders.map((drawable) =>
+			teePoseDecoration(
+				drawable.path.slice(0, 4),
+				drawable.ref ?? 'UNKNOWN',
+				'presentation geometry connected from the accepted visible-tee border corners'
+			)
+		);
+		const cornerTicks = poseDecorations.flatMap((decoration) => decoration.cornerTicks);
+		const diagonals = poseDecorations.flatMap((decoration) => decoration.diagonals);
 		const badgeUnit = run.units.find((candidate) => candidate.id === 'badges');
 		const detectedBadgeCount = badgeUnit?.drawables.filter(
 			(drawable) => drawable.verdict === 'accepted'
@@ -140,14 +124,25 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 				},
 				{
 					name: 'visible tee oriented full-pad bounds accepted (G3)',
-					note: 'exact oriented detected border, with a tiny center cross; secondary raster/interior evidence is kept in the trace but omitted here',
-					drawables: acceptedVisual
+					note: 'exact oriented detected border; secondary raster/interior evidence is kept in the trace but omitted here',
+					drawables: acceptedBorders
+				},
+				{
+					name: 'tee pose center guides (G3)',
+					note: 'one-pixel red opposite-corner diagonals; their intersection is the fitted center',
+					drawables: diagonals
+				},
+				{
+					name: 'tee pose corner indicators (G3)',
+					note: 'small cyan plus signs rotated into the two pad-edge axes at each corner',
+					drawables: cornerTicks
 				}
 			],
 			notes: [
 				`feature: teeFamily (visible tees) -- ${unit.gate}, trace unit '${unit.id}'`,
 				'accepted object geometry: closed oriented quadrilateral from the enclosing bright-mask component PCA center/angle/major/minor.',
 				'corner math: retain the component projection extrema (axisMajorMin/Max and axisMinorMin/Max), expand each by 0.5px to cover whole raster cells, then rotate all four extrema intersections back into canonical image coordinates.',
+				'visual standard: exact green border, four pad-axis-aligned cyan corner plus signs, and two one-pixel red corner diagonals whose intersection exposes the fitted center.',
 				`secondary trace drawables omitted from the primary receipt: ${info.length} (raw trace remains available; no AABB, hollow-ring box, or passthrough marker is drawn here).`,
 				'pair-scoring angle remains the original hollow-ring angle in TeeEvidence.angleRad; this geometry repair does not change assignment math.',
 				`acceptedVisibleTeeCount: ${acceptedVisibleTeeCount}  (source: accepted UnitTrace.drawables for teeFamily)`,

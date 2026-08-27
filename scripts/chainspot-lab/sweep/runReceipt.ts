@@ -5,7 +5,10 @@ import type {
 	MeasurementAggregate,
 	RunTrace
 } from '@chainspot/alg/detectors/threeFactor/features/types';
-import { CANONICAL_GATE_ORDER, GATE_TITLES } from '@chainspot/alg/detectors/threeFactor/features/types';
+import {
+	CANONICAL_GATE_ORDER,
+	GATE_TITLES
+} from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { G0Report } from './inputShim';
 
 export const RUN_RECEIPT_SCHEMA = 'chainspot-lab-run-receipt@1' as const;
@@ -72,6 +75,17 @@ export interface RunReceiptResults {
 	readonly rawPairs?: number;
 }
 
+export interface RunReceiptVisualRender {
+	readonly kind: 'canonical' | 'artifact' | 'feature';
+	readonly gate: string;
+	readonly id: string;
+	readonly owner: string;
+	readonly status: 'rendered' | 'stub';
+	readonly summary: string;
+	/** Portable paths relative to this run's output directory. */
+	readonly files: readonly string[];
+}
+
 export interface RunReceipt {
 	readonly schema: typeof RUN_RECEIPT_SCHEMA;
 	readonly generatedAt: string;
@@ -102,6 +116,7 @@ export interface RunReceipt {
 	readonly gates: readonly RunReceiptGate[];
 	readonly units: readonly RunReceiptUnit[];
 	readonly results: RunReceiptResults;
+	readonly visualRenders: readonly RunReceiptVisualRender[];
 	readonly evaluation: {
 		readonly truthSupplied: boolean;
 		readonly skipped: boolean;
@@ -123,6 +138,7 @@ export interface BuildRunReceiptInput {
 	readonly trace: RunTrace;
 	readonly timings: RunPhaseTimings;
 	readonly results: RunReceiptResults;
+	readonly visualRenders: readonly RunReceiptVisualRender[];
 	readonly truthSupplied: boolean;
 	readonly truthScoringSkipped: boolean;
 	readonly truthScoringReason?: string;
@@ -178,7 +194,9 @@ function unitReceipt(trace: RunTrace): RunReceiptUnit[] {
 export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 	const warnings: string[] = [];
 	if (input.plan.ops.length !== input.receipts.length) {
-		warnings.push(`plan/receipt length mismatch: ${input.plan.ops.length} planned, ${input.receipts.length} received`);
+		warnings.push(
+			`plan/receipt length mismatch: ${input.plan.ops.length} planned, ${input.receipts.length} received`
+		);
 	}
 	const operations: RunReceiptOperation[] = [];
 	const plannedById = new Map(input.plan.ops.map((operation) => [operation.id, operation]));
@@ -198,7 +216,8 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 			);
 		}
 		const operationConformance = conformance(receipt);
-		if (!operationConformance.ok) warnings.push(`operation '${receipt.opId}' has consume/produce conformance drift`);
+		if (!operationConformance.ok)
+			warnings.push(`operation '${receipt.opId}' has consume/produce conformance drift`);
 		operations.push({
 			index: index + 1,
 			id: op.id,
@@ -219,7 +238,8 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 
 	for (const operation of operations) {
 		const rank = (CANONICAL_GATE_ORDER as readonly string[]).indexOf(operation.gate);
-		if (rank < 0) warnings.push(`operation '${operation.id}' has noncanonical gate '${operation.gate}'`);
+		if (rank < 0)
+			warnings.push(`operation '${operation.id}' has noncanonical gate '${operation.gate}'`);
 	}
 
 	const gates: RunReceiptGate[] = CANONICAL_GATE_ORDER.map((gate) => {
@@ -271,6 +291,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		gates,
 		units: unitReceipt(input.trace),
 		results: input.results,
+		visualRenders: input.visualRenders,
 		evaluation: {
 			truthSupplied: input.truthSupplied,
 			skipped: input.truthScoringSkipped,

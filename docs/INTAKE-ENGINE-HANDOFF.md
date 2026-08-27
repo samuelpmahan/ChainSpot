@@ -69,6 +69,12 @@ The 2026-08-27 frozen promotion ran the full default config on DashsTrack:
   and H5 uses one.
 - Phantom completion: disabled and unscheduled.
 - Receipt warnings: 0; operation conformance drift: 0.
+- The run receipt inventories 15 visual outputs/statuses, including G0 and
+  every existing G1-G4 artifact or semantic FeatureRender, using portable
+  run-relative paths.
+- Visible and recovered tees share one render standard: exact green
+  border/shard evidence, four pad-axis-aligned cyan corner plus signs, and
+  two one-pixel red diagonals whose intersection is the fitted center.
 
 Machine and human receipts are written by the repro command below to
 `artifacts/sweep/dev72-recovered-default/DashsTrack-full/run.receipt.{json,txt}`.
@@ -79,6 +85,8 @@ Run from the repository root after building `packages/alg`:
 npm run build --workspace @chainspot/alg
 npm run check
 node_modules/.bin/vitest run \
+  tests/unit/teeVisualReceipt.test.ts \
+  tests/unit/labRunReceiptText.test.ts \
   tests/unit/labSweepReceipt.test.ts \
   tests/unit/threeFactorConfig.test.ts \
   tests/unit/exec.compile.test.ts \
@@ -92,7 +100,7 @@ Observed on this handoff:
 
 - Algorithm package build: PASS.
 - App type check: 0 errors, 0 warnings.
-- Focused execution/help tests: 55/55 PASS.
+- Focused execution/help/render tests: 63/63 PASS.
 - Full corpus suite with sibling corpus detached at
   `origin/codex/lab-scope-validation@e98724d`: 318 pass, 7 fail,
   5 expected-fail, 3 skip, 1 todo.

@@ -68,9 +68,30 @@ const receipt: RunReceipt = {
 		}
 	],
 	gates: [
-		{ gate: 'G2', title: 'Baskets', status: 'ran', operationIndexes: [2], durationMs: 7, percentOfOperationBody: 70 },
-		{ gate: 'G1', title: 'Badges', status: 'ran', operationIndexes: [1], durationMs: 3, percentOfOperationBody: 30 },
-		{ gate: 'G7', title: 'Bend Refinement', status: 'not-scheduled', operationIndexes: [], durationMs: 0, percentOfOperationBody: 0 }
+		{
+			gate: 'G2',
+			title: 'Baskets',
+			status: 'ran',
+			operationIndexes: [2],
+			durationMs: 7,
+			percentOfOperationBody: 70
+		},
+		{
+			gate: 'G1',
+			title: 'Badges',
+			status: 'ran',
+			operationIndexes: [1],
+			durationMs: 3,
+			percentOfOperationBody: 30
+		},
+		{
+			gate: 'G7',
+			title: 'Bend Refinement',
+			status: 'not-scheduled',
+			operationIndexes: [],
+			durationMs: 0,
+			percentOfOperationBody: 0
+		}
 	],
 	units: [
 		{
@@ -85,6 +106,29 @@ const receipt: RunReceipt = {
 		}
 	],
 	results: { badges: 1, baskets: 1 },
+	visualRenders: [
+		{
+			kind: 'canonical',
+			gate: 'G0',
+			id: 'g0.canonical',
+			owner: 'StripChrome + AutoStitch',
+			status: 'rendered',
+			summary: 'exact canonical raster',
+			files: ['renders/input/g0.canonical.png']
+		},
+		{
+			kind: 'feature',
+			gate: 'G3',
+			id: 'teeFamily.teeFamily',
+			owner: 'teeFamily@teeFamily',
+			status: 'rendered',
+			summary: 'visible tee pose evidence',
+			files: [
+				'renders/features/feature.teeFamily.teeFamily.svg',
+				'renders/features/feature.teeFamily.teeFamily.png'
+			]
+		}
+	],
 	evaluation: { truthSupplied: false, skipped: true, reason: 'no truth' },
 	warnings: ['first warning', 'second warning']
 };
@@ -163,6 +207,15 @@ evaluation.skipped: true
 evaluation.reason: no truth
 evaluation.scoreboard: UNKNOWN
 
+VISUAL RENDERS
+visualRenderCount: 2
+index | gate | kind | owner | status | id | summary
+1 | G0 | canonical | StripChrome + AutoStitch | rendered | g0.canonical | exact canonical raster
+  file: renders/input/g0.canonical.png
+2 | G3 | feature | teeFamily@teeFamily | rendered | teeFamily.teeFamily | visible tee pose evidence
+  file: renders/features/feature.teeFamily.teeFamily.svg
+  file: renders/features/feature.teeFamily.teeFamily.png
+
 WARNINGS
 - first warning
 - second warning
@@ -179,6 +232,8 @@ artifact[2].uri: artifact://first
 		expect(text.indexOf('2 | G2 | second')).toBeLessThan(text.indexOf('1 | G1 | first'));
 		expect(text).toContain('WARNINGS\n- first warning\n- second warning');
 		expect(text).toContain('artifactCount: 2');
+		expect(text).toContain('visualRenderCount: 2');
+		expect(text).toContain('1 | G0 | canonical | StripChrome + AutoStitch');
 		expect(text).toContain('artifact[1].uri: artifact://second');
 		expect(text).not.toContain('sha256');
 	});

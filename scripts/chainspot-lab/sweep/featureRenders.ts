@@ -445,6 +445,8 @@ const STYLE: Record<Drawable['verdict'], { stroke: string; fill: string; dash: s
 };
 
 const TEE_CENTER_STYLE = { stroke: '#39ff7a', fill: 'none', dash: 'none' };
+const TEE_CORNER_STYLE = { stroke: '#4dd2ff', fill: 'none', dash: 'none' };
+const TEE_DIAGONAL_STYLE = { stroke: '#ff2020', fill: 'none', dash: 'none' };
 const PHANTOM_STYLE = { stroke: '#c56bff', fill: 'rgba(197,107,255,0.12)', dash: 'none' };
 
 function isCenterMarker(drawable: Drawable): boolean {
@@ -471,6 +473,10 @@ function isCornerMarker(drawable: Drawable): boolean {
 	return drawable.type === 'point' && drawable.visualRole === 'tee-corner-tick';
 }
 
+function isTeeDiagonal(drawable: Drawable): boolean {
+	return drawable.type === 'polyline' && drawable.visualRole === 'tee-diagonal';
+}
+
 function isPhantomMarker(drawable: Drawable): boolean {
 	return drawable.type === 'point' && drawable.visualRole === 'phantom-center';
 }
@@ -478,7 +484,17 @@ function isPhantomMarker(drawable: Drawable): boolean {
 function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: string } {
 	if (isPhantomMarker(drawable)) return PHANTOM_STYLE;
 	if (isCenterMarker(drawable)) return TEE_CENTER_STYLE;
+	if (isCornerMarker(drawable)) return TEE_CORNER_STYLE;
+	if (isTeeDiagonal(drawable)) return TEE_DIAGONAL_STYLE;
 	return STYLE[drawable.verdict];
+}
+
+function strokeWidthFor(drawable: Drawable): number {
+	return isCornerMarker(drawable) || isTeeDiagonal(drawable) ? 1 : 2;
+}
+
+function svgNumber(value: number): string {
+	return String(Number(value.toFixed(4)));
 }
 
 function esc(text: string): string {
@@ -586,7 +602,8 @@ function drawableExtent(plan: FeatureRenderPlan): { widthPx: number; heightPx: n
 function drawableSvg(d: Drawable, layerName: string): string {
 	const s = styleFor(d);
 	const title = `<title>${esc(tooltip(d, layerName))}</title>`;
-	const common = `stroke="${s.stroke}" stroke-width="2" stroke-dasharray="${s.dash}" fill="${s.fill}" vector-effect="non-scaling-stroke"`;
+	const semantics = `${d.visualRole ? ` data-visual-role="${esc(d.visualRole)}"` : ''}${d.ref ? ` data-ref="${esc(d.ref)}"` : ''}`;
+	const common = `stroke="${s.stroke}" stroke-width="${strokeWidthFor(d)}" stroke-dasharray="${s.dash}" fill="${s.fill}" vector-effect="non-scaling-stroke"${semantics}`;
 	if (d.type === 'point') {
 		if (isPhantomMarker(d)) {
 			const r = 6;
@@ -598,7 +615,17 @@ function drawableSvg(d: Drawable, layerName: string): string {
 		}
 		if (isCornerMarker(d)) {
 			const r = 3;
-			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
+			const angle = d.values?.teeAxisAngleRad ?? 0;
+			const axisX = Math.cos(angle) * r;
+			const axisY = Math.sin(angle) * r;
+			const normalX = -Math.sin(angle) * r;
+			const normalY = Math.cos(angle) * r;
+			const path =
+				`M${svgNumber(d.xPx - axisX)} ${svgNumber(d.yPx - axisY)} ` +
+				`L${svgNumber(d.xPx + axisX)} ${svgNumber(d.yPx + axisY)} ` +
+				`M${svgNumber(d.xPx - normalX)} ${svgNumber(d.yPx - normalY)} ` +
+				`L${svgNumber(d.xPx + normalX)} ${svgNumber(d.yPx + normalY)}`;
+			return `<g>${title}<path d="${path}" ${common} fill="none"/></g>`;
 		}
 		if (
 			isTeeBorderMarker(d) ||
@@ -625,9 +652,7 @@ function drawableSvg(d: Drawable, layerName: string): string {
 		return `<g>${title}<polyline points="${points}" ${common} fill="none"/></g>`;
 	}
 	if (d.type === 'pixelSet') {
-		const cells = d.pixels
-			.map(([x, y]) => `M${x - 0.5} ${y - 0.5}h1v1h-1z`)
-			.join('');
+		const cells = d.pixels.map(([x, y]) => `M${x - 0.5} ${y - 0.5}h1v1h-1z`).join('');
 		return `<g>${title}<path d="${cells}" fill="${s.stroke}" stroke="none"/></g>`;
 	}
 	// Heatmap payloads ride RunTrace.heatmaps out of band. Drawing the cells
@@ -676,6 +701,41 @@ function rasterLine(
 	}
 }
 
+function rasterLineThin(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	color: readonly [number, number, number]
+): void {
+	const steps = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+	for (let step = 0; step <= steps; step++) {
+		const t = step / steps;
+		rasterPixel(data, width, height, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, color);
+	}
+}
+
+function rasterOrientedPlus(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	angleRad: number,
+	radius: number,
+	color: readonly [number, number, number]
+): void {
+	const axisX = Math.cos(angleRad) * radius;
+	const axisY = Math.sin(angleRad) * radius;
+	const normalX = -Math.sin(angleRad) * radius;
+	const normalY = Math.cos(angleRad) * radius;
+	rasterLineThin(data, width, height, x - axisX, y - axisY, x + axisX, y + axisY, color);
+	rasterLineThin(data, width, height, x - normalX, y - normalY, x + normalX, y + normalY, color);
+}
+
 function rasterDrawable(
 	data: Uint8Array,
 	width: number,
@@ -685,13 +745,15 @@ function rasterDrawable(
 ): void {
 	const color: readonly [number, number, number] = isPhantomMarker(drawable)
 		? [197, 107, 255]
-		: isCenterMarker(drawable)
-			? [57, 255, 122]
-			: drawable.verdict === 'accepted'
-				? [30, 255, 95]
-				: drawable.verdict === 'rejected'
-					? [255, 45, 45]
-					: [30, 210, 255];
+		: isTeeDiagonal(drawable)
+			? [255, 32, 32]
+			: isCenterMarker(drawable)
+				? [57, 255, 122]
+				: drawable.verdict === 'accepted'
+					? [30, 255, 95]
+					: drawable.verdict === 'rejected'
+						? [255, 45, 45]
+						: [30, 210, 255];
 	if (drawable.type === 'box') {
 		const [x, y, w, h] = drawable.bbox;
 		rasterLine(data, width, height, x, y, x + w, y, color);
@@ -747,7 +809,16 @@ function rasterDrawable(
 			return;
 		}
 		if (isCornerMarker(drawable)) {
-			rasterCrossRadius(data, width, height, drawable.xPx, drawable.yPx, 3, color);
+			rasterOrientedPlus(
+				data,
+				width,
+				height,
+				drawable.xPx,
+				drawable.yPx,
+				drawable.values?.teeAxisAngleRad ?? 0,
+				3,
+				color
+			);
 			return;
 		}
 		if (isCenterMarker(drawable)) {
@@ -778,7 +849,8 @@ function rasterDrawable(
 		for (let index = 1; index < drawable.path.length; index++) {
 			const [x0, y0] = drawable.path[index - 1];
 			const [x1, y1] = drawable.path[index];
-			rasterLine(data, width, height, x0, y0, x1, y1, color);
+			if (isTeeDiagonal(drawable)) rasterLineThin(data, width, height, x0, y0, x1, y1, color);
+			else rasterLine(data, width, height, x0, y0, x1, y1, color);
 		}
 		return;
 	}
@@ -1082,7 +1154,18 @@ function writePlan(
 	// number this receipt is read for.
 	const acceptedCount = verdictOf(unit.drawables, 'accepted').length;
 	const rejectedCount = verdictOf(unit.drawables, 'rejected').length;
-	const crossGateCount = all.length - unit.drawables.length;
+	const owningDrawables = new Set<Drawable>(unit.drawables);
+	const otherUnitDrawables = new Set<Drawable>(
+		input.run.units
+			.filter((candidate) => candidate !== unit)
+			.flatMap((candidate) => candidate.drawables)
+	);
+	const crossGateCount = all.filter(
+		(drawable) => !owningDrawables.has(drawable) && otherUnitDrawables.has(drawable)
+	).length;
+	const presentationOnlyCount = all.filter(
+		(drawable) => !owningDrawables.has(drawable) && !otherUnitDrawables.has(drawable)
+	).length;
 
 	const derived = drawableExtent(plan);
 	const width = canvas?.widthPx ?? derived.widthPx;
@@ -1148,7 +1231,7 @@ function writePlan(
 	const legend = plan.layers
 		.map((layer, index) => {
 			const verdict = layer.drawables[0]?.verdict ?? 'info';
-			const s = STYLE[verdict];
+			const s = layer.drawables[0] ? styleFor(layer.drawables[0]) : STYLE[verdict];
 			const y = 28 + index * 26;
 			return (
 				`    <rect x="14" y="${y - 12}" width="16" height="16" fill="${s.fill}" stroke="${s.stroke}" stroke-width="2"/>` +
@@ -1190,7 +1273,7 @@ function writePlan(
 				`  ${String(l.drawables.length).padStart(4)}  ${l.name}${l.note ? `  -- ${l.note}` : ''}`
 		),
 		'',
-		'object rows (the exact objects drawn in the SVG; coordinates are not recomputed):',
+		'object rows (the exact objects drawn in the SVG; tee diagonals/corner orientation are presentation-only connections of detector-emitted corners):',
 		...plan.layers.flatMap((layer) =>
 			layer.drawables.map((drawable, index) => {
 				const coordinates = drawableCoordinates(drawable, input.sourceFrameOffset);
@@ -1256,6 +1339,9 @@ function writePlan(
 			`${feature.id}@${unit.id}: ${acceptedCount} accepted / ${rejectedCount} rejected ` +
 			`(both counted on unit '${unit.id}' only)` +
 			(crossGateCount > 0 ? ` + ${crossGateCount} cross-gate context drawable(s)` : '') +
+			(presentationOnlyCount > 0
+				? ` + ${presentationOnlyCount} presentation-only guide drawable(s)`
+				: '') +
 			` over ${plan.layers.length} layer(s) -> SVG + receipt`,
 		warnings
 	};

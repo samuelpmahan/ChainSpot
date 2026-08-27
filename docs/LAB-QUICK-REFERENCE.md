@@ -108,6 +108,8 @@ The aggregate schema is stable and ordered: course, case, inputs, badges, basket
 
 Read the engine-produced receipt and render together. A useful receipt answers: what object was considered, where it is in original and canonical frames, measurements, verdict/reason, detected/expected counts, FP/FN when truth exists, and unowned detections separately.
 
+Every Sweep writes `run.receipt.json` and `run.receipt.txt`. Their `visualRenders` inventory owns the G0 canonical image, artifact renders or explicit stubs, and every semantic FeatureRender produced by the run; paths are relative to the run directory. Tee renders use one visual contract: green exact border/shard evidence, four cyan corner `+` signs aligned with the pad axes, and two one-pixel red opposite-corner diagonals whose intersection is the fitted center. No missing recovery perimeter is invented.
+
 ## Pixel-work tips and traps
 
 - Treat bright and dark masks plus both connected-component maps as shared evidence; optimize duplicate labeling, not "black first" versus "white first."
