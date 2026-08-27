@@ -433,6 +433,269 @@ export function renderTraceFeatures(input: RenderTraceFeaturesInput): RenderTrac
 }
 
 // ---------------------------------------------------------------------------
+// The normal Sweep receipt.
+//
+// Feature-owned plans above remain the source of semantic drawing decisions,
+// but a normal run should not make a user reconcile four posters. This
+// composer selects only the endpoint testimony that survives those plans and
+// places it on one canonical image. Rejections remain in the text receipt;
+// drawing them would obscure the accepted geometry the receipt exists to
+// inspect.
+// ---------------------------------------------------------------------------
+
+function planForRunFeature(
+	run: RunTrace,
+	featureId: string,
+	unitId: string
+): FeatureRenderPlan | undefined {
+	const feature = ALL_FEATURES.find((candidate) => candidate.id === featureId);
+	const unit = run.units.find((candidate) => candidate.id === unitId);
+	const render = feature ? renderFor(feature) : undefined;
+	return unit && render?.units.includes(unit.id) ? render.draw(unit, run) : undefined;
+}
+
+function planDrawables(plan: FeatureRenderPlan | undefined): Drawable[] {
+	return plan?.layers.flatMap((layer) => layer.drawables) ?? [];
+}
+
+function rejectionReceiptLines(run: RunTrace, unitIds: readonly string[]): string[] {
+	const lines: string[] = [];
+	for (const unitId of unitIds) {
+		const unit = run.units.find((candidate) => candidate.id === unitId);
+		if (!unit) continue;
+		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
+		lines.push(`  ${unit.gate} ${unit.id}: ${rejected.length}`);
+		for (const [reason, count] of countByReason(rejected)) lines.push(`    ${count} x ${reason}`);
+	}
+	return lines;
+}
+
+function endpointGateSpan(run: RunTrace): string {
+	if (run.units.some((unit) => unit.gate === 'G4')) return 'G0-G4';
+	if (run.units.some((unit) => unit.gate === 'G3')) return 'G0-G3';
+	if (run.units.some((unit) => unit.gate === 'G2')) return 'G0-G2';
+	return 'G0-G1';
+}
+
+/** Write the single, minimal endpoint picture exposed by a normal Sweep. */
+export function renderRunEndpointReceipt(
+	input: RenderTraceFeaturesInput
+): RenderTraceFeaturesOutput {
+	const { run, outDir } = input;
+	mkdirSync(outDir, { recursive: true });
+	const warnings: string[] = [];
+	const base = input.bases?.find((candidate) => candidate.id === 'original') ?? input.bases?.[0];
+	if (!base) throw new Error('run endpoint receipt requires the G0 canonical raster as its base');
+
+	const badgeUnit = run.units.find((unit) => unit.id === 'badges');
+	const badgeCenters: Drawable[] = [];
+	for (const drawable of badgeUnit?.drawables ?? []) {
+		if (drawable.type !== 'box' || drawable.verdict !== 'accepted') continue;
+		const xPx = drawable.values?.centerXPx;
+		const yPx = drawable.values?.centerYPx;
+		if (xPx === undefined || yPx === undefined) {
+			warnings.push(`badge '${drawable.ref ?? 'UNKNOWN'}' omitted: trace has no exact centroid`);
+			continue;
+		}
+		badgeCenters.push({
+			type: 'point',
+			xPx,
+			yPx,
+			verdict: 'info',
+			visualRole: 'badge-center',
+			ref: drawable.ref,
+			reason: 'presentation-only five-pixel mark at the detector-emitted badge centroid',
+			values: drawable.values
+		});
+	}
+
+	const basketUnit = run.units.find((unit) => unit.id === 'baskets');
+	const basketTips = (basketUnit?.drawables ?? [])
+		.filter(
+			(drawable) =>
+				drawable.type === 'point' &&
+				(drawable.visualRole === 'basket-tip' || drawable.ref?.endsWith(':semantic-tip'))
+		)
+		.map((drawable): Drawable => ({
+			...drawable,
+			visualRole: 'basket-tip'
+		}));
+
+	const visiblePlan = planForRunFeature(run, 'teeFamily', 'teeFamily');
+	const visible = planDrawables(visiblePlan);
+	const visibleBorders = visible.filter(
+		(drawable) => drawable.visualRole === 'tee-border' && drawable.verdict === 'accepted'
+	);
+	const visibleDiagonals = visible.filter((drawable) => drawable.visualRole === 'tee-diagonal');
+	const visibleCorners = visible.filter((drawable) => drawable.visualRole === 'tee-corner-tick');
+
+	const recoveryPlan = planForRunFeature(run, 'teeRecovery', 'teeRecovery');
+	const recovery = planDrawables(recoveryPlan);
+	const recoveredShards = recovery.filter(
+		(drawable) => drawable.visualRole === 'tee-shard' && drawable.verdict === 'accepted'
+	);
+	const recoveryDiagonals = recovery.filter((drawable) => drawable.visualRole === 'tee-diagonal');
+	const recoveryCorners = recovery.filter((drawable) => drawable.visualRole === 'tee-corner-tick');
+
+	const phantomPlan = planForRunFeature(run, 'phantomTee', 'phantomTee');
+	const phantomCenters = planDrawables(phantomPlan).filter(
+		(drawable) => drawable.visualRole === 'phantom-center' && drawable.verdict === 'accepted'
+	);
+	const gate = endpointGateSpan(run);
+
+	const plan: FeatureRenderPlan = {
+		title: `${gate} endpoint receipt (${run.configName})`,
+		base: 'g0.canonical',
+		layers: [
+			{
+				name: 'badge centroids (G1)',
+				note: 'yellow five-pixel marks at exact detector-emitted centroids',
+				drawables: badgeCenters
+			},
+			{
+				name: 'basket semantic tips (G2)',
+				note: 'tiny magenta diamonds at the downstream basket endpoints',
+				drawables: basketTips
+			},
+			{
+				name: 'visible tee borders (G3)',
+				note: 'exact accepted oriented pad borders, recolored green',
+				drawables: visibleBorders
+			},
+			{
+				name: 'recovered tee visible shards (G4)',
+				note: 'only exact non-occluded white pixels accepted by recovery',
+				drawables: recoveredShards
+			},
+			{
+				name: 'tee fitted-center diagonals (G3-G4)',
+				note: 'one-pixel red opposite-corner diagonals',
+				drawables: [...visibleDiagonals, ...recoveryDiagonals]
+			},
+			{
+				name: 'tee pose corners (G3-G4)',
+				note: 'cyan pluses aligned to each fitted pad pose',
+				drawables: [...visibleCorners, ...recoveryCorners]
+			},
+			...(phantomCenters.length
+				? [
+						{
+							name: 'assignment-only phantom tee centers (G4)',
+							note: 'violet marks; no appearance claim',
+							drawables: phantomCenters
+						}
+					]
+				: [])
+		],
+		notes: []
+	};
+
+	const canvas = input.canvas ?? {
+		widthPx: PNG.sync.read(readFileSync(base.pngPath)).width,
+		heightPx: PNG.sync.read(readFileSync(base.pngPath)).height,
+		source: base.source
+	};
+	const pngPath = resolve(outDir, 'run.visual.png');
+	const receiptPath = resolve(outDir, 'run.visual.receipt.txt');
+	writeRasterProof(plan, base, canvas.widthPx, canvas.heightPx, pngPath);
+
+	const recoveredVisibleComponents = recoveredShards.reduce(
+		(sum, drawable) => sum + (drawable.values?.supportingComponents ?? 0),
+		0
+	);
+	const expectedRecoverNum = visiblePlan
+		? Math.max(0, badgeCenters.length - visibleBorders.length)
+		: undefined;
+	const rejectedLines = rejectionReceiptLines(run, [
+		'baskets',
+		'tees',
+		'teeFamily',
+		'teeRecovery',
+		'phantomTee'
+	]);
+	const receiptText = [
+		'VISUAL RENDER RECEIPT',
+		`title: ${plan.title}`,
+		`config: ${run.configName}`,
+		`paramsHash: ${run.paramsHash || 'UNKNOWN'}`,
+		`gateSpan: ${endpointGateSpan(run)}`,
+		`base: ${base.pngPath}`,
+		`canvas: ${canvas.widthPx}x${canvas.heightPx} (${canvas.source})`,
+		`coordinateTransform: ${
+			input.sourceFrameOffset
+				? `canonical = original + (${input.sourceFrameOffset.xPx},${input.sourceFrameOffset.yPx}) (${input.sourceFrameOffset.source})`
+				: 'UNKNOWN -- stitched/multi-source frame has no single inverse source mapping'
+		}`,
+		'',
+		'ACCEPTED ENDPOINT TESTIMONY',
+		`badgeCentroids: ${badgeCenters.length}`,
+		`basketSemanticTips: ${basketTips.length}`,
+		`visibleTeeBorders: ${visibleBorders.length}`,
+		`expectedRecoverNum: ${
+			expectedRecoverNum === undefined
+				? 'UNKNOWN -- visible tee gate was not scheduled'
+				: `${expectedRecoverNum} (math: max(0, badgeCentroids - visibleTeeBorders))`
+		}`,
+		`recoveredTeePoses: ${recoveredShards.length}`,
+		`recoveredVisibleComponents: ${recoveredVisibleComponents}`,
+		`phantomTeeCenters: ${phantomCenters.length}`,
+		`teeCornerMarks: ${visibleCorners.length + recoveryCorners.length}`,
+		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
+		'',
+		'VISUAL CONTRACT',
+		'yellow: exact badge centroid (five pixels)',
+		'magenta: basket semantic tip (tiny diamond)',
+		'green: exact visible tee border or exact recovered shard pixels',
+		'cyan: four pose-aligned tee corner pluses',
+		'red: thinnest opposite-corner X; intersection is fitted center',
+		'violet: assignment-only phantom center; appearance UNKNOWN',
+		'rejections: text only, never drawn over accepted geometry',
+		'',
+		'REJECTIONS RETAINED IN TRACE',
+		...(rejectedLines.length ? rejectedLines : ['  none recorded in scheduled endpoint units']),
+		'',
+		`image: ${pngPath}`,
+		`receipt: ${receiptPath}`
+	].join('\n');
+	writeFileSync(receiptPath, `${receiptText}\n`);
+
+	const all = plan.layers.flatMap((layer) => layer.drawables);
+	const rejectedCount = run.units
+		.filter((unit) =>
+			['baskets', 'tees', 'teeFamily', 'teeRecovery', 'phantomTee'].includes(unit.id)
+		)
+		.flatMap((unit) => unit.drawables)
+		.filter((drawable) => drawable.verdict === 'rejected').length;
+	const semanticAcceptedCount =
+		badgeCenters.length +
+		basketTips.length +
+		visibleBorders.length +
+		recoveredShards.length +
+		phantomCenters.length;
+	return {
+		results: [
+			{
+				featureId: 'endpointReceipt',
+				unitId: 'run',
+				gate,
+				title: plan.title,
+				drawableCount: all.length,
+				acceptedCount: semanticAcceptedCount,
+				rejectedCount,
+				filesWritten: [pngPath, receiptPath],
+				receiptText,
+				summary:
+					`${badgeCenters.length} badges + ${basketTips.length} baskets + ` +
+					`${visibleBorders.length} visible tees + ${recoveredShards.length} recovered tees in one endpoint image`,
+				warnings
+			}
+		],
+		unrenderedUnits: [],
+		unmatchedRenders: []
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Presentation. SVG because it is text (diffable, greppable), needs no
 // encoder, carries a <title> tooltip per drawable so the REASON is readable
 // by hovering, and can sit over a PNG the kind-keyed path already wrote.
@@ -448,6 +711,16 @@ const TEE_CENTER_STYLE = { stroke: '#39ff7a', fill: 'none', dash: 'none' };
 const TEE_CORNER_STYLE = { stroke: '#4dd2ff', fill: 'none', dash: 'none' };
 const TEE_DIAGONAL_STYLE = { stroke: '#ff2020', fill: 'none', dash: 'none' };
 const PHANTOM_STYLE = { stroke: '#c56bff', fill: 'rgba(197,107,255,0.12)', dash: 'none' };
+const BADGE_CENTER_STYLE = { stroke: '#ffe11e', fill: 'none', dash: 'none' };
+const BASKET_TIP_STYLE = { stroke: '#ff28dc', fill: 'none', dash: 'none' };
+
+function isBadgeCenter(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'badge-center';
+}
+
+function isBasketTip(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'basket-tip';
+}
 
 function isCenterMarker(drawable: Drawable): boolean {
 	return drawable.type === 'point' && drawable.visualRole === 'tee-center';
@@ -482,6 +755,8 @@ function isPhantomMarker(drawable: Drawable): boolean {
 }
 
 function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: string } {
+	if (isBadgeCenter(drawable)) return BADGE_CENTER_STYLE;
+	if (isBasketTip(drawable)) return BASKET_TIP_STYLE;
 	if (isPhantomMarker(drawable)) return PHANTOM_STYLE;
 	if (isCenterMarker(drawable)) return TEE_CENTER_STYLE;
 	if (isCornerMarker(drawable)) return TEE_CORNER_STYLE;
@@ -490,7 +765,12 @@ function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: str
 }
 
 function strokeWidthFor(drawable: Drawable): number {
-	return isCornerMarker(drawable) || isTeeDiagonal(drawable) ? 1 : 2;
+	return isBadgeCenter(drawable) ||
+		isBasketTip(drawable) ||
+		isCornerMarker(drawable) ||
+		isTeeDiagonal(drawable)
+		? 1
+		: 2;
 }
 
 function svgNumber(value: number): string {
@@ -605,6 +885,14 @@ function drawableSvg(d: Drawable, layerName: string): string {
 	const semantics = `${d.visualRole ? ` data-visual-role="${esc(d.visualRole)}"` : ''}${d.ref ? ` data-ref="${esc(d.ref)}"` : ''}`;
 	const common = `stroke="${s.stroke}" stroke-width="${strokeWidthFor(d)}" stroke-dasharray="${s.dash}" fill="${s.fill}" vector-effect="non-scaling-stroke"${semantics}`;
 	if (d.type === 'point') {
+		if (isBadgeCenter(d)) {
+			const r = 1;
+			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
+		}
+		if (isBasketTip(d)) {
+			const r = 3;
+			return `<g>${title}<path d="M${d.xPx} ${d.yPx - r} L${d.xPx + r} ${d.yPx} L${d.xPx} ${d.yPx + r} L${d.xPx - r} ${d.yPx} Z" ${common} fill="none"/></g>`;
+		}
 		if (isPhantomMarker(d)) {
 			const r = 6;
 			return `<g>${title}<path d="M${d.xPx} ${d.yPx - r} L${d.xPx + r} ${d.yPx} L${d.xPx} ${d.yPx + r} L${d.xPx - r} ${d.yPx} Z" ${common}/><path d="M${d.xPx - 4} ${d.yPx} L${d.xPx + 4} ${d.yPx} M${d.xPx} ${d.yPx - 4} L${d.xPx} ${d.yPx + 4}" stroke="${s.stroke}" stroke-width="2" fill="none"/></g>`;
@@ -745,15 +1033,19 @@ function rasterDrawable(
 ): void {
 	const color: readonly [number, number, number] = isPhantomMarker(drawable)
 		? [197, 107, 255]
-		: isTeeDiagonal(drawable)
-			? [255, 32, 32]
-			: isCenterMarker(drawable)
-				? [57, 255, 122]
-				: drawable.verdict === 'accepted'
-					? [30, 255, 95]
-					: drawable.verdict === 'rejected'
-						? [255, 45, 45]
-						: [30, 210, 255];
+		: isBadgeCenter(drawable)
+			? [255, 225, 30]
+			: isBasketTip(drawable)
+				? [255, 40, 220]
+				: isTeeDiagonal(drawable)
+					? [255, 32, 32]
+					: isCenterMarker(drawable)
+						? [57, 255, 122]
+						: drawable.verdict === 'accepted'
+							? [30, 255, 95]
+							: drawable.verdict === 'rejected'
+								? [255, 45, 45]
+								: [30, 210, 255];
 	if (drawable.type === 'box') {
 		const [x, y, w, h] = drawable.bbox;
 		rasterLine(data, width, height, x, y, x + w, y, color);
@@ -763,6 +1055,61 @@ function rasterDrawable(
 		return;
 	}
 	if (drawable.type === 'point') {
+		if (isBadgeCenter(drawable)) {
+			for (const [dx, dy] of [
+				[0, 0],
+				[-1, 0],
+				[1, 0],
+				[0, -1],
+				[0, 1]
+			] as const)
+				rasterPixel(data, width, height, drawable.xPx + dx, drawable.yPx + dy, color);
+			return;
+		}
+		if (isBasketTip(drawable)) {
+			const r = 3;
+			rasterLineThin(
+				data,
+				width,
+				height,
+				drawable.xPx,
+				drawable.yPx - r,
+				drawable.xPx + r,
+				drawable.yPx,
+				color
+			);
+			rasterLineThin(
+				data,
+				width,
+				height,
+				drawable.xPx + r,
+				drawable.yPx,
+				drawable.xPx,
+				drawable.yPx + r,
+				color
+			);
+			rasterLineThin(
+				data,
+				width,
+				height,
+				drawable.xPx,
+				drawable.yPx + r,
+				drawable.xPx - r,
+				drawable.yPx,
+				color
+			);
+			rasterLineThin(
+				data,
+				width,
+				height,
+				drawable.xPx - r,
+				drawable.yPx,
+				drawable.xPx,
+				drawable.yPx - r,
+				color
+			);
+			return;
+		}
 		if (isPhantomMarker(drawable)) {
 			const r = 6;
 			rasterLine(

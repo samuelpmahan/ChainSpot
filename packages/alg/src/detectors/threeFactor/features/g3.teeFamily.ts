@@ -504,6 +504,7 @@ export const teeFamilyUnit: EngineUnit = {
 						type: 'polyline',
 						path: [...pad.orientedCorners, pad.orientedCorners[0]],
 						verdict: 'accepted',
+						visualRole: 'tee-border',
 						ref: detId,
 						reason: `accepted intact visible tee family; oriented bounds from bright component ${pad.componentLabel}`,
 						values: {

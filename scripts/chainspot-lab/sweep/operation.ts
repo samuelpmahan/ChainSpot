@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +28,7 @@ import { loadConfig } from './configIo';
 import { canonicalizeInputs } from './inputShim';
 import { compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
 import { renderArtifact, type ArtifactRenderResult } from './artifactIo';
-import { renderTraceFeatures, type RenderTraceFeaturesOutput } from './featureRenders';
+import { renderRunEndpointReceipt, type RenderTraceFeaturesOutput } from './featureRenders';
 import {
 	GATE_ORDER,
 	isSweepThroughGate,
@@ -192,6 +192,10 @@ export async function runSweepOperation(
 				canonicalSweepRunName(inputPaths)
 			);
 	mkdirSync(outDir, { recursive: true });
+	// Runs reuse a deterministic output directory. Remove only the obsolete
+	// semantic-poster directory so a previous multi-poster run cannot masquerade
+	// as part of this run's single VisualRender receipt.
+	rmSync(resolve(outDir, 'renders', 'features'), { recursive: true, force: true });
 	const canonicalWriteStartedAtMs = performance.now();
 	const canonicalPngPath = resolve(outDir, 'renders', 'input', 'g0.canonical.png');
 	mkdirSync(dirname(canonicalPngPath), { recursive: true });
@@ -221,17 +225,12 @@ export async function runSweepOperation(
 	const operationBodyMs = receipts.reduce((sum, receipt) => sum + receipt.durationMs, 0);
 	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
 	const artifactRenders: ArtifactRenderResult[] = [];
-	const artifactRenderOwners: Array<{ readonly opId: string; readonly gate: string }> = [];
 	const artifactRenderStartedAtMs = performance.now();
 	for (const receipt of receipts) {
 		for (const artifactRef of receipt.artifacts) {
 			artifactRenders.push(
 				renderArtifact(outDir, receipt.opId, gateByOpId.get(receipt.opId) ?? 'shared', artifactRef)
 			);
-			artifactRenderOwners.push({
-				opId: receipt.opId,
-				gate: gateByOpId.get(receipt.opId) ?? 'shared'
-			});
 		}
 	}
 	const artifactRenderMs = performance.now() - artifactRenderStartedAtMs;
@@ -260,16 +259,10 @@ export async function runSweepOperation(
 	const measurement = board.has('measurement')
 		? board.get<ThreeFactorMeasurement>('measurement')
 		: undefined;
-	const artifactPng = (artifactId: string) =>
-		artifactRenders
-			.find((result) => result.rendered && result.artifactRef.id === artifactId)
-			?.filesWritten.find((path) => extname(path) === '.png');
-	const brightMaskPng = artifactPng('badgeStage.masks.bright');
-	const darkMaskPng = artifactPng('badgeStage.masks.dark');
 	const featureRenderStartedAtMs = performance.now();
-	const featureRenders = renderTraceFeatures({
+	const featureRenders = renderRunEndpointReceipt({
 		run: trace,
-		outDir: resolve(outDir, 'renders', 'features'),
+		outDir: resolve(outDir, 'renders', 'run'),
 		canvas: {
 			widthPx: image.width,
 			heightPx: image.height,
@@ -290,29 +283,7 @@ export async function runSweepOperation(
 				offsetXPx: 0,
 				offsetYPx: 0,
 				source: 'exact G0 canonical RGBA raster seeded into the production engine'
-			},
-			...(brightMaskPng
-				? [
-						{
-							id: 'bright-mask',
-							pngPath: brightMaskPng,
-							offsetXPx: 0,
-							offsetYPx: 0,
-							source: "same sweep's badgeStage.masks.bright renderer"
-						}
-					]
-				: []),
-			...(darkMaskPng
-				? [
-						{
-							id: 'dark-mask',
-							pngPath: darkMaskPng,
-							offsetXPx: 0,
-							offsetYPx: 0,
-							source: "same sweep's badgeStage.masks.dark renderer"
-						}
-					]
-				: [])
+			}
 		],
 		truthEvaluation: { scoreboard, groundingComparisons }
 	});
@@ -348,41 +319,17 @@ export async function runSweepOperation(
 		observedTotalMs: performance.now() - runStartedAtMs
 	};
 	const runRelativePath = (path: string) => relative(outDir, path).split('\\').join('/');
-	const visualRenders: RunReceiptVisualRender[] = [
-		{
-			kind: 'canonical',
-			gate: 'G0',
-			id: 'g0.canonical',
-			owner: 'StripChrome + AutoStitch',
-			status: 'rendered',
-			summary: 'exact canonical RGBA raster executed by the engine',
-			files: [runRelativePath(canonicalPngPath)]
-		},
-		...artifactRenders.map((render, index): RunReceiptVisualRender => ({
-			kind: 'artifact',
-			gate: artifactRenderOwners[index]?.gate ?? 'UNKNOWN',
-			id: render.artifactRef.id,
-			owner: artifactRenderOwners[index]?.opId ?? 'UNKNOWN',
-			status: render.rendered ? 'rendered' : 'stub',
-			summary: render.summary,
-			files: render.filesWritten.map(runRelativePath)
-		})),
-		...featureRenders.results.map((render): RunReceiptVisualRender => ({
+	const visualRenders: RunReceiptVisualRender[] = featureRenders.results.map(
+		(render): RunReceiptVisualRender => ({
 			kind: 'feature',
 			gate: render.gate,
-			id: `${render.featureId}.${render.unitId}`,
+			id: 'run.endpoint-summary',
 			owner: `${render.featureId}@${render.unitId}`,
 			status: 'rendered',
 			summary: render.summary,
 			files: render.filesWritten.map(runRelativePath)
-		}))
-	];
-	const visualGateRank = (gate: string): number => {
-		if (gate === 'G0') return 0;
-		const index = GATE_ORDER.indexOf(gate as EngineGateId);
-		return index >= 0 ? index + 1 : GATE_ORDER.length + 1;
-	};
-	visualRenders.sort((a, b) => visualGateRank(a.gate) - visualGateRank(b.gate));
+		})
+	);
 	let revision = 'UNKNOWN';
 	try {
 		const sha = execFileSync('git', ['rev-parse', 'HEAD'], {

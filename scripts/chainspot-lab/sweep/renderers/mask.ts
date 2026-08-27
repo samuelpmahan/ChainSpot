@@ -173,10 +173,6 @@ export const renderMask: RendererFn = (input) => {
 	writeFileSync(receiptPath, `${receiptText}\n`);
 	filesWritten.push(receiptPath);
 
-	console.log('');
-	console.log(receiptText);
-	console.log('');
-
 	const summary = dims
 		? pngPath
 			? `${dims.width}x${dims.height} PNG, ${withCommas(onCount)}/${withCommas(totalBytes)} px ON (${onPct}%)` +

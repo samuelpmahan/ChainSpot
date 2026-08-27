@@ -585,7 +585,14 @@ export const measureUnits: readonly EngineUnit[] = [
 					bbox: badge.bbox,
 					verdict: 'accepted',
 					ref: badge.detId,
-					values: { confidence: badge.confidence },
+					values: {
+						confidence: badge.confidence,
+						centerXPx: badge.cxPx,
+						centerYPx: badge.cyPx,
+						...(badge.label === null || !Number.isFinite(Number(badge.label))
+							? {}
+							: { label: Number(badge.label) })
+					},
 					reason: undefined
 				});
 				ctx.measure('badges', 'confidence', badge.confidence);
@@ -747,6 +754,7 @@ export const measureUnits: readonly EngineUnit[] = [
 					xPx: basket.tipXPx,
 					yPx: basket.tipYPx,
 					verdict: 'info',
+					visualRole: 'basket-tip',
 					ref: `${basket.detId}:semantic-tip`,
 					reason: 'engine-emitted semantic basket endpoint; ownership not evaluated',
 					values: {

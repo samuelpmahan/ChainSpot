@@ -2,12 +2,10 @@
 // Sweep is the ONLY LAB operation that executes @chainspot/alg. CLI and LAB UI
 // both call the same operation module.
 
+import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { compileSweepConfig, runSweepOperation } from './operation';
-import { printG0Report } from './inputShim';
-import { printGroundingComparisons, printScoreboard } from './truthScoring';
-import { printPlan, printTimeline } from './timeline';
-import { printFeatureRenders } from './featureRenders';
+import { printPlan } from './timeline';
 import { isSweepThroughGate, type SweepThroughGate } from './gateVocabulary';
 import { runSweepBatch } from './batch';
 
@@ -69,25 +67,7 @@ async function runSweep(args: readonly string[]): Promise<void> {
 		truthPath: truthPaths[0],
 		...(throughGate ? { throughGate } : {})
 	});
-	console.log(`config: ${result.configName} (${result.configPath})`);
-	if (result.throughGate) console.log(`execution slice: through ${result.throughGate}`);
-	printPlan(result.plan);
-	console.log(`\n=== canonicalizing ${inputPaths.length} raster input(s) ===`);
-	printG0Report(result.report);
-	printTimeline(result.plan, result.receipts);
-	console.log(
-		`--- Renderer inventory: ${result.renderedCount} rendered, ${result.stubbedCount} stubbed -- outDir: ${result.outDir} ---`
-	);
-	printFeatureRenders(result.featureRenders);
-	console.log(`--- Full run receipt: ${result.runReceiptPaths.join(', ')} ---`);
-	if (truthPaths[0]) {
-		printGroundingComparisons(result.groundingComparisons);
-		if (result.truthScoringSkipped)
-			console.log(
-				`--- Truth scoring skipped: ${result.truthScoringReason ?? 'truth provenance is not verified in the canonical raster.'} ---`
-			);
-		else if (result.scoreboard) printScoreboard(result.scoreboard);
-	}
+	console.log(readFileSync(result.runReceiptPaths[1], 'utf8').trimEnd());
 }
 
 async function main(): Promise<void> {

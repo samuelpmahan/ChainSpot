@@ -116,6 +116,8 @@ export interface DrawableBase {
 	/** Presentation intent carried by the detector trace, never inferred from
 	 * a magic ref string. It cannot change a verdict or semantic cardinality. */
 	readonly visualRole?:
+		| 'badge-center'
+		| 'basket-tip'
 		| 'tee-border'
 		| 'tee-center'
 		| 'tee-shard'

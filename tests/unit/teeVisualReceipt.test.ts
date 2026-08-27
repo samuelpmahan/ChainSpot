@@ -10,7 +10,10 @@ import type {
 	RunTrace,
 	UnitTrace
 } from '@chainspot/alg/detectors/threeFactor/features/types';
-import { renderTraceFeatures } from '../../scripts/chainspot-lab/sweep/featureRenders';
+import {
+	renderRunEndpointReceipt,
+	renderTraceFeatures
+} from '../../scripts/chainspot-lab/sweep/featureRenders';
 
 const corners = [
 	[25, 20],
@@ -19,7 +22,12 @@ const corners = [
 	[19, 28]
 ] as const;
 
-function unit(id: string, gate: 'G3' | 'G4', featureId: string, drawables: Drawable[]): UnitTrace {
+function unit(
+	id: string,
+	gate: 'G1' | 'G2' | 'G3' | 'G4',
+	featureId: string,
+	drawables: Drawable[]
+): UnitTrace {
 	return {
 		id,
 		gate,
@@ -40,6 +48,7 @@ function fixtureTrace(): RunTrace {
 			type: 'polyline',
 			path: [...corners, corners[0]],
 			verdict: 'accepted',
+			visualRole: 'tee-border',
 			ref: 'visible-tee',
 			values: { orientedCenterX: 30, orientedCenterY: 30, frameAngleRad: Math.atan2(12, 16) }
 		}
@@ -77,6 +86,39 @@ function fixtureTrace(): RunTrace {
 		},
 		units: [visible, recovered],
 		heatmaps: {}
+	};
+}
+
+function unifiedFixtureTrace(): RunTrace {
+	const trace = fixtureTrace();
+	const badges = unit('badges', 'G1', 'badges', [
+		{
+			type: 'box',
+			bbox: [3, 3, 10, 10],
+			verdict: 'accepted',
+			ref: 'badge-1',
+			values: { centerXPx: 8, centerYPx: 8, label: 1 }
+		}
+	]);
+	const baskets = unit('baskets', 'G2', 'sprite', [
+		{
+			type: 'point',
+			xPx: 52,
+			yPx: 52,
+			verdict: 'info',
+			visualRole: 'basket-tip',
+			ref: 'basket-1:semantic-tip'
+		}
+	]);
+	return {
+		...trace,
+		execution: ['badges', 'baskets', ...trace.execution],
+		features: {
+			...trace.features,
+			badges: { enabled: true, knobs: {} },
+			sprite: { enabled: true, knobs: {} }
+		},
+		units: [badges, baskets, ...trace.units]
 	};
 }
 
@@ -133,6 +175,43 @@ describe('canonical tee VisualRender', () => {
 				expect(rgb(png, 30, 30)).toEqual([255, 32, 32]);
 				expect(rgb(png, 30, 31)).not.toEqual([255, 32, 32]);
 			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test('normal Sweep composes one minimal endpoint VisualRender receipt', () => {
+		const root = mkdtempSync(join(tmpdir(), 'endpoint-visual-'));
+		try {
+			const basePath = join(root, 'base.png');
+			const base = new PNG({ width: 64, height: 64 });
+			base.data.fill(0);
+			writeFileSync(basePath, PNG.sync.write(base));
+			const output = renderRunEndpointReceipt({
+				run: unifiedFixtureTrace(),
+				outDir: join(root, 'renders'),
+				canvas: { widthPx: 64, heightPx: 64, source: 'test canvas' },
+				bases: [{ id: 'original', pngPath: basePath, source: 'test base' }]
+			});
+
+			expect(output.results).toHaveLength(1);
+			const [result] = output.results;
+			expect(result.featureId).toBe('endpointReceipt');
+			expect(result.gate).toBe('G0-G4');
+			expect(result.filesWritten.map((path) => path.slice(path.lastIndexOf('/') + 1))).toEqual([
+				'run.visual.png',
+				'run.visual.receipt.txt'
+			]);
+			expect(result.receiptText).toContain('badgeCentroids: 1');
+			expect(result.receiptText).toContain('basketSemanticTips: 1');
+			expect(result.receiptText).toContain('visibleTeeBorders: 1');
+			expect(result.receiptText).toContain('recoveredTeePoses: 1');
+
+			const png = PNG.sync.read(readFileSync(result.filesWritten[0]));
+			expect(rgb(png, 8, 8)).toEqual([255, 225, 30]);
+			expect(rgb(png, 52, 49)).toEqual([255, 40, 220]);
+			expect(rgb(png, 33, 26)).toEqual([30, 255, 95]);
+			expect(rgb(png, 30, 30)).toEqual([255, 32, 32]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -162,10 +162,11 @@ describe('LAB sweep receipt seam', () => {
 			expect(persisted.operations.map((operation: { id: string }) => operation.id)).toEqual(
 				result.receipts.map((receipt) => receipt.opId)
 			);
+			expect(persisted.visualRenders).toHaveLength(1);
 			expect(persisted.visualRenders[0]).toMatchObject({
-				kind: 'canonical',
-				gate: 'G0',
-				id: 'g0.canonical',
+				kind: 'feature',
+				gate: 'G0-G1',
+				id: 'run.endpoint-summary',
 				status: 'rendered'
 			});
 			expect(
@@ -228,9 +229,7 @@ describe('LAB sweep receipt seam', () => {
 		const teeFamilyUnit = result.trace.units.find((unit) => unit.id === 'teeFamily');
 		const basketUnit = result.trace.units.find((unit) => unit.id === 'baskets');
 		const teeUnit = result.trace.units.find((unit) => unit.id === 'tees');
-		const teeFamilyRender = result.featureRenders.results.find(
-			(render) => render.featureId === 'teeFamily' && render.unitId === 'teeFamily'
-		);
+		const endpointRender = result.featureRenders.results[0];
 		const detectedBadgeCount = badgeUnit?.drawables.filter(
 			(drawable) => drawable.verdict === 'accepted'
 		).length;
@@ -274,24 +273,20 @@ describe('LAB sweep receipt seam', () => {
 			'teeFamily'
 		]);
 		expect(result.receipts.map((receipt) => receipt.opId)).not.toContain('tees.componentFallback');
-		expect(teeFamilyRender?.acceptedCount).toBe(acceptedVisibleTeeCount);
-		expect(teeFamilyRender?.receiptText).toContain('acceptedVisibleTeeCount: 16');
-		expect(teeFamilyRender?.receiptText).toContain('detectedBadgeCount: 18');
-		expect(teeFamilyRender?.receiptText).toContain(
-			'accepted object geometry: closed oriented quadrilateral'
-		);
-		expect(teeFamilyRender?.receiptText).toContain(
-			'expectedRecoverNum: 2  (math: max(0, detectedBadgeCount - acceptedVisibleTeeCount))'
-		);
-		expect(teeFamilyRender?.receiptText).toContain(
-			'expectedRecoverNum is a cardinality-derived recovery expectation, not truth, localization, or ownership.'
+		expect(result.featureRenders.results).toHaveLength(1);
+		expect(endpointRender?.receiptText).toContain('badgeCentroids: 18');
+		expect(endpointRender?.receiptText).toContain('basketSemanticTips: 18');
+		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 16');
+		expect(endpointRender?.receiptText).toContain(
+			'expectedRecoverNum: 2 (math: max(0, badgeCentroids - visibleTeeBorders))'
 		);
 		const teeVisualReceipt = result.runReceipt.visualRenders.find(
-			(render) => render.kind === 'feature' && render.id === 'teeFamily.teeFamily'
+			(render) => render.kind === 'feature' && render.id === 'run.endpoint-summary'
 		);
-		expect(teeVisualReceipt).toMatchObject({ gate: 'G3', status: 'rendered' });
-		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.svg'))).toBe(true);
+		expect(teeVisualReceipt).toMatchObject({ gate: 'G0-G3', status: 'rendered' });
+		expect(teeVisualReceipt?.files).toHaveLength(2);
 		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.png'))).toBe(true);
+		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.receipt.txt'))).toBe(true);
 	}, 60_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {
@@ -322,39 +317,21 @@ describe('LAB sweep receipt seam', () => {
 		expect(cleanBasketReceipt?.actualProduces).toContain('baskets');
 
 		const basketUnit = result.trace.units.find((unit) => unit.id === 'baskets');
-		const basketRender = result.featureRenders.results.find(
-			(render) => render.featureId === 'sprite' && render.unitId === 'baskets'
-		);
+		const endpointRender = result.featureRenders.results[0];
 		expect(basketUnit?.drawables.some((drawable) => drawable.verdict === 'accepted')).toBe(true);
 		expect(basketUnit?.drawables.some((drawable) => drawable.verdict === 'rejected')).toBe(true);
-		expect(basketRender?.acceptedCount).toBe(
-			basketUnit?.drawables.filter((drawable) => drawable.verdict === 'accepted').length
-		);
-		expect(basketRender?.rejectedCount).toBe(
-			basketUnit?.drawables.filter((drawable) => drawable.verdict === 'rejected').length
-		);
-		expect(basketRender?.filesWritten.every(existsSync)).toBe(true);
-		expect(basketRender?.filesWritten.some((path) => path.endsWith('.bright-mask.png'))).toBe(true);
-		expect(basketRender?.filesWritten.some((path) => path.endsWith('.dark-mask.png'))).toBe(true);
-		expect(basketRender?.receiptText.match(/^  layer=/gm)?.length).toBe(
-			basketRender?.drawableCount
-		);
 
 		const teeUnit = result.trace.units.find((unit) => unit.id === 'tees');
-		const teeRender = result.featureRenders.results.find(
-			(render) => render.featureId === 'endpoints' && render.unitId === 'tees'
-		);
 		expect(teeUnit?.drawables.some((drawable) => drawable.verdict === 'accepted')).toBe(true);
 		expect(teeUnit?.drawables.some((drawable) => drawable.verdict === 'rejected')).toBe(true);
-		expect(teeRender?.acceptedCount).toBe(
-			teeUnit?.drawables.filter((drawable) => drawable.verdict === 'accepted').length
+		expect(result.featureRenders.results).toHaveLength(1);
+		expect(endpointRender?.filesWritten).toHaveLength(2);
+		expect(endpointRender?.filesWritten.every(existsSync)).toBe(true);
+		expect(endpointRender?.receiptText).toContain('basketSemanticTips: 18');
+		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 16');
+		expect(endpointRender?.receiptText).toContain(
+			'coordinateTransform: canonical = original + (0,-4)'
 		);
-		expect(teeRender?.rejectedCount).toBe(
-			teeUnit?.drawables.filter((drawable) => drawable.verdict === 'rejected').length
-		);
-		expect(teeRender?.filesWritten.every(existsSync)).toBe(true);
-		expect(teeRender?.receiptText.match(/^  layer=/gm)?.length).toBe(teeRender?.drawableCount);
-		expect(teeRender?.receiptText).toContain('coordinate transform: canonical = original + (0,-4)');
 	}, 60_000);
 });
 
