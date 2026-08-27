@@ -24,10 +24,36 @@ export interface ABFeatureOperation {
 	readonly extractArtifacts?: (board: ExecBoard) => readonly OperationArtifact[];
 }
 
+/**
+ * An executable operation owned by a set's composition boundary. Gate sets
+ * express composition, not execution scheduling; `spec.features` remains the
+ * honest list of every ABFeature the implementation reads.
+ */
+export interface ABFeatureSetOperation {
+	readonly operation: ABFeatureOperation;
+}
+
 /** An ordered, executable composition. List order is execution intent. */
 export interface ABFeatureSet {
 	readonly id: string;
 	readonly features: readonly ABFeature[];
+	/**
+	 * Feature ids read by this set's operations but owned by another set.
+	 * This is an explicit composition contract, distinct from execution order.
+	 */
+	readonly imports?: readonly string[];
+	/**
+	 * Owned features with no operation in this set. Their parameter/state may
+	 * be consumed by another set's operation, or await a future engine slot.
+	 * They remain visible in the compiled feature bindings.
+	 */
+	readonly locallyOperationlessFeatureIds?: readonly string[];
+	/**
+	 * Set-owned executable composition. This permits existing ABFeatures to
+	 * remain immutable declarations while their production operations are
+	 * grouped by an honest ownership boundary rather than a schedule.
+	 */
+	readonly operations?: readonly ABFeatureSetOperation[];
 	readonly seededSlots?: readonly SlotRef[];
 	readonly note?: string;
 }
@@ -48,7 +74,10 @@ export interface ABFeatureSetManifest {
 	readonly invocation: string;
 	readonly setId: string;
 	readonly planFingerprint: string;
+	readonly ownedFeatureIds: readonly string[];
 	readonly enabledFeatureIds: readonly string[];
+	readonly importedFeatureIds: readonly string[];
+	readonly locallyOperationlessFeatureIds: readonly string[];
 	readonly startedAtMs: number;
 	readonly durationMs: number;
 	readonly operations: readonly Receipt[];
@@ -88,6 +117,38 @@ export function compileABFeatureSet(
 	const artifactExtractors: Record<string, (board: ExecBoard) => readonly OperationArtifact[]> = {};
 	const bindings: Record<string, ResolvedFeature> = {};
 	const enabledFeatureIds: string[] = [];
+	const setOperations = definition.operations ?? [];
+	const ownedFeatureIds = new Set(definition.features.map((feature) => feature.id));
+	const locallyReadFeatureIds = new Set(
+		setOperations
+			.flatMap(({ operation }) => operation.spec.features ?? [])
+			.filter((id) => ownedFeatureIds.has(id))
+	);
+	const imports = new Set(definition.imports ?? []);
+	const locallyOperationlessFeatureIds = new Set(definition.locallyOperationlessFeatureIds ?? []);
+	for (const id of imports) {
+		if (ownedFeatureIds.has(id)) {
+			throw new Error(
+				`ABFeatureSet '${definition.id}': import '${id}' is already owned by the set.`
+			);
+		}
+	}
+	for (const id of locallyOperationlessFeatureIds) {
+		if (!ownedFeatureIds.has(id)) {
+			throw new Error(
+				`ABFeatureSet '${definition.id}': locally operationless feature '${id}' is not owned by the set.`
+			);
+		}
+	}
+	for (const entry of setOperations) {
+		for (const dependency of entry.operation.spec.features ?? []) {
+			if (!ownedFeatureIds.has(dependency) && !imports.has(dependency)) {
+				throw new Error(
+					`ABFeatureSet '${definition.id}': operation '${entry.operation.spec.id}' reads '${dependency}' but the set neither owns nor imports it.`
+				);
+			}
+		}
+	}
 
 	for (const id of Object.keys(overrides)) {
 		if (!definition.features.some((feature) => feature.id === id)) {
@@ -104,8 +165,12 @@ export function compileABFeatureSet(
 		bindings[feature.id] = resolved;
 		if (!resolved.enabled) continue;
 
-		const featureOps = feature.operations;
+		const featureOps = feature.operations ?? [];
 		if (!featureOps || featureOps.length === 0) {
+			if (locallyOperationlessFeatureIds.has(feature.id) || locallyReadFeatureIds.has(feature.id)) {
+				enabledFeatureIds.push(feature.id);
+				continue;
+			}
 			throw new Error(
 				`ABFeatureSet '${definition.id}': enabled feature '${feature.id}' has no operations.`
 			);
@@ -130,6 +195,22 @@ export function compileABFeatureSet(
 		}
 	}
 
+	// Set-owned operations are a complete production composition and run in
+	// the declaration's fixed order, independent of feature enablement. The
+	// saved config remains the sole source of execution scheduling.
+	for (const { operation } of setOperations) {
+		if (operationIds.has(operation.spec.id)) {
+			throw new Error(
+				`ABFeatureSet '${definition.id}': duplicate operation '${operation.spec.id}'.`
+			);
+		}
+		operationIds.add(operation.spec.id);
+		ops.push(operation.spec);
+		implementations.set(operation.spec.id, operation.run);
+		if (operation.extractArtifacts)
+			artifactExtractors[operation.spec.id] = operation.extractArtifacts;
+	}
+
 	validateOperationOrder(
 		ops,
 		definition.seededSlots ?? [],
@@ -142,6 +223,8 @@ export function compileABFeatureSet(
 				id: feature.id,
 				resolved: bindings[feature.id]
 			})),
+			imports: definition.imports ?? [],
+			locallyOperationlessFeatureIds: definition.locallyOperationlessFeatureIds ?? [],
 			operations: ops,
 			seededSlots: definition.seededSlots ?? []
 		})
@@ -184,7 +267,10 @@ export async function executeABFeatureSet(
 	const semanticReceipt = {
 		setId: compiled.definition.id,
 		planFingerprint: compiled.plan.planFingerprint,
+		ownedFeatureIds: compiled.definition.features.map((feature) => feature.id),
 		enabledFeatureIds: compiled.enabledFeatureIds,
+		importedFeatureIds: compiled.definition.imports ?? [],
+		locallyOperationlessFeatureIds: compiled.definition.locallyOperationlessFeatureIds ?? [],
 		operations: operations.map(
 			({ startedAtMs: _startedAtMs, durationMs: _durationMs, ...receipt }) => receipt
 		)
@@ -213,7 +299,10 @@ export function formatABFeatureSetManifestMarkdown(manifest: ABFeatureSetManifes
 		`- set: \`${manifest.setId}\``,
 		`- plan fingerprint: \`${manifest.planFingerprint}\``,
 		`- manifest hash: \`${manifest.manifestHash}\``,
+		`- owned features: ${list(manifest.ownedFeatureIds.map((id) => `\`${id}\``))}`,
 		`- enabled features: ${list(manifest.enabledFeatureIds.map((id) => `\`${id}\``))}`,
+		`- imported features: ${list(manifest.importedFeatureIds.map((id) => `\`${id}\``))}`,
+		`- locally operationless features: ${list(manifest.locallyOperationlessFeatureIds.map((id) => `\`${id}\``))}`,
 		`- total time: ${manifest.durationMs.toFixed(3)} ms`,
 		''
 	];

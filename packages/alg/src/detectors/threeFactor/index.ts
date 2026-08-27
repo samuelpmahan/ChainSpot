@@ -124,6 +124,7 @@ export { DEFAULT_EXECUTION, ENGINE_UNITS } from './engine';
 export { parseConfig, resolveConfig, validateExecution, type ResolvedConfig, type ThreeFactorConfig } from './config';
 export { canonicalJson, sha256Hex } from './hash';
 export type { RunTrace, Drawable, UnitTrace } from './features/types';
+export * from './gate-sets';
 
 function badgeConfidence(badge: BadgeEvidence): number {
 	return clamp01(badge.confidence);
