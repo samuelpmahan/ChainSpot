@@ -47,6 +47,12 @@ describe('LAB cold-checkout discoverability', () => {
 		});
 	}
 
+	test('cold sweep help advertises the batch census entry point', () => {
+		const result = runColdHelp('sweep');
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain('lab sweep batch [--through GATE] CONFIG.json SELECTOR...');
+	});
+
 	test('course selection itself works cold and persists DT -> DashsTrack', () => {
 		const { launcher, root } = coldLauncher();
 		const config = join(root, 'config.json');

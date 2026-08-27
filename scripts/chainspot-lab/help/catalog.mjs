@@ -201,7 +201,7 @@ export const HELP_CATALOG = Object.freeze([
   record('compile', { kind: 'command', group: 'RUN', title: 'COMPILE — inspect a sweep config', summary: 'Resolve and compile an algorithm config without raster execution.', forms: ['lab compile CONFIG.json'], examples: ['lab compile packages/alg/src/detectors/threeFactor/configs/default.json'], availability: AVAILABILITY.CLI_ONLY, outputs: ['Resolved plan only.'], caveats: ['Compile does not read raster inputs or execute the algorithm plan.'] }),
   record('sweep', {
     kind: 'command', group: 'RUN', title: 'SWEEP — StripChrome/AutoStitch + only algorithm execution path', summary: 'The only LAB command that executes the algorithm plan.',
-    forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through GATE CONFIG.json INPUT... [TRUTH.json]'],
+    forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through GATE CONFIG.json INPUT... [TRUTH.json]', 'lab sweep batch [--through GATE] CONFIG.json SELECTOR...'],
     options: [option('--through', 'Execute the dependency-valid plan slice through this gate.', { value: 'G1|G2|G3', constraints: 'Only G1-G3 currently form valid prefixes; G4/ST/G5 depend on later shared operations and are rejected; there is no --stop-after' })],
     examples: ['lab sweep CONFIG.json course.png', 'lab sweep --through G3 CONFIG.json course.png'],
     sideEffects: ['Canonicalizes inputs, executes the plan, and writes algorithm artifacts.'],
@@ -209,6 +209,16 @@ export const HELP_CATALOG = Object.freeze([
     caveats: ['INPUT is one or more PNG/JPG/JPEG captures. Optional TRUTH.json is evaluation-only. CLI has no --out-dir even though the operation accepts one.']
   }),
   record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — dependency-valid slice', summary: 'Execute from the plan start through a supported gate prefix.', forms: ['lab sweep --through G1|G2|G3 CONFIG.json INPUT... [TRUTH.json]'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Only G1-G3 currently form dependency-complete prefixes. G4, ST, G5, and `shared` are engine vocabulary but not valid cutoffs. There is no --stop-after.'] }),
+  record('sweep/batch', {
+    parent: 'sweep', aliases: ['sweep/batches'], title: 'SWEEP BATCH — manifest-backed corpus census',
+    summary: 'Run the same dependency-valid Sweep slice across named dev/demo course cases.',
+    forms: ['lab sweep batch [--through G1|G2|G3] CONFIG.json all', 'lab sweep batch [--through G1|G2|G3] CONFIG.json dev', 'lab sweep batch [--through G1|G2|G3] CONFIG.json demo', 'lab sweep batch [--through G1|G2|G3] CONFIG.json COURSE...'],
+    options: [option('--through', 'Execute the dependency-valid plan slice for every selected case.', { value: 'G1|G2|G3', defaultValue: 'G3', constraints: 'Optional; only G1-G3 are valid batch cutoffs.' })],
+		examples: ['lab sweep batch --through G3 CONFIG.json dev demo', 'lab sweep batch --through G3 CONFIG.json all', 'lab sweep batch --through G3 CONFIG.json Dashs TheRec'],
+    sideEffects: ['Runs one real Sweep operation per manifest-backed case and writes per-case artifacts plus compact aggregate text/JSON receipts.', 'Continues after an individual case failure; exits nonzero if any case failed.'],
+		outputs: ['Per-case Sweep artifacts under artifacts/sweep/<config>/batches/<course>/<case>/, plus summary.txt and summary.json in the batches directory.', 'START and DONE/FAIL progress lines for every case, followed by the stable aggregate summary.'],
+    caveats: ['Omit `--through` to use the batch default `G3`; `dev` and `demo` are selector groups; `all` expands both. Course aliases are resolved only when unambiguous.', 'The REC L/R captures are one stitched multi-input case; clean-full and thrown-full remain separate cases.', 'No truth is loaded implicitly. Batch selectors name raster cases, not Annotation JSON. Single-image `lab sweep` behavior is unchanged.']
+  }),
   record('orient', { kind: 'command', group: 'PROVENANCE', title: 'ORIENT — frozen-reference auditor', summary: 'Run the machine-bound 3fd72 reference auditor.', forms: ['lab orient 3fd72 [--verbose]'], options: [option('--verbose', 'Print additional auditor detail.')], examples: ['lab orient 3fd72'], availability: AVAILABILITY.CLI_ONLY, caveats: ['The 3fd72 auditor has hardcoded/stale evidence paths. This help labels that existing state; it does not repair it.'] }),
 
   record('shell/help', { kind: 'shell', title: 'SHELL HELP', summary: 'Show catalog-backed help from the interactive LAB shell.', forms: ['help [COMMAND | TOPIC]', 'help --all', 'help here'], availability: AVAILABILITY.CLI_ONLY }),
@@ -284,7 +294,7 @@ export const RECOGNIZED_EXECUTION_SURFACE = Object.freeze({
     'search/page': ['new', 'use', 'list', 'show', 'clear'],
     'search/pin': ['here', 'style', 'keep', 'release', 'pins'],
     traverse: ['start', 'go', 'back', 'show', 'log', 'list'],
-    sweep: ['through']
+    sweep: ['through', 'batch']
   })
 });
 

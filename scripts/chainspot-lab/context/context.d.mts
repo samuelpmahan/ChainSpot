@@ -2,9 +2,13 @@ export interface LabCourseManifest {
   readonly version: number;
   readonly course: string;
   readonly aliases?: readonly string[];
+  readonly set?: string;
   readonly devDir: string;
+  /** Corpus partition containing devDir; legacy manifests default to dev. */
+  readonly corpusDir?: string;
   readonly image: string;
   readonly annotation?: string;
+  readonly sweepCases?: readonly { readonly name: string; readonly inputs: readonly string[] }[];
   readonly holes?: Readonly<Record<string, { readonly sourceBox: readonly [number, number, number, number] }>>;
 }
 

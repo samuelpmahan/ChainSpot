@@ -9,6 +9,7 @@ import { printGroundingComparisons, printScoreboard } from './truthScoring';
 import { printPlan, printTimeline } from './timeline';
 import { printFeatureRenders } from './featureRenders';
 import { isSweepThroughGate, type SweepThroughGate } from './gateVocabulary';
+import { runSweepBatch } from './batch';
 
 function usage(): never {
 	console.error(
@@ -17,6 +18,7 @@ function usage(): never {
 			'  lab compile CONFIG.json',
 			'  lab sweep CONFIG.json INPUT... [TRUTH.json]',
 			'  lab sweep --through GATE CONFIG.json INPUT... [TRUTH.json]',
+			'  lab sweep batch [--through GATE] CONFIG.json [dev|demo|all|COURSE]...',
 			'',
 			'INPUT is one or more .png/.jpg/.jpeg captures. Sweep canonicalizes the set:',
 			'  decode -> StripChrome -> AutoStitch (when N>1) -> canonical raster -> algorithm',
@@ -40,6 +42,10 @@ async function runCompile(args: readonly string[]): Promise<void> {
 }
 
 async function runSweep(args: readonly string[]): Promise<void> {
+	if (args[0] === 'batch') {
+		process.exitCode = await runSweepBatch(args);
+		return;
+	}
 	const restArgs = [...args];
 	let throughGate: SweepThroughGate | undefined;
 	const throughIndex = restArgs.indexOf('--through');

@@ -207,9 +207,17 @@ Assisted starts may use explicit Annotation anchors:
 ```bash
 ./lab compile CONFIG.json
 ./lab sweep CONFIG.json IMAGE.png [TRUTH.json]
+./lab sweep batch CONFIG.json dev
+./lab sweep batch --through G3 CONFIG.json demo
+./lab sweep batch --through G3 CONFIG.json all
+LAB_BLIND_TEST=1 ./lab sweep batch --through G3 packages/alg/src/detectors/threeFactor/configs/default.json dev demo
 ```
 
 `compile` is inspection-only. `sweep` remains the only LAB operation that executes the algorithm plan against raster input. `lab sweep` and the Sweep tab in `lab ui` both call `sweep/operation.ts`; there is no frontend algorithm implementation.
+
+Batch defaults to `--through G3`; `G1`, `G2`, and `G3` are the valid cutoffs. It expands `dev`, `demo`, `all`, individual course names, and unambiguous course aliases into manifest-backed cases; omitted selectors mean `dev`, and multiple selectors are deduplicated. It calls the same Sweep operation once per case. The REC's `TheRec-L.PNG` and `TheRec-R.PNG` captures are grouped into one `stitched` StripChrome → AutoStitch multi-input case; `clean-full` and `thrown-full` are separate single-input cases. Batch prints a deterministic `START` and `DONE`/`FAIL` line for every case, then the stable aggregate. It continues after failures and exits nonzero if any case failed. It never loads Annotation truth implicitly. A normal single-image Sweep remains unchanged.
+
+Each case writes normal Sweep evidence below `artifacts/sweep/<config>/batches/<course>/<case>/`; the batch root receives compact `summary.txt` and machine-readable `summary.json` receipts. These are generated run evidence, not source files to commit. The ordered aggregate fields are course/case/inputs, badges, baskets, raw rings, pre-family tees, visible tees, visible deficit, operation count, runtime, conformance drift, and status. Provenance appears in both receipts: badge/basket counts are accepted drawables from their named trace units; raw rings are accepted plus rejected `tees` drawables; pre-family tees are accepted `tees` drawables after G3 exclusion; visible tees are accepted `teeFamily` drawables; visible deficit is `max(0, badges - visible tees)`; operations are engine receipt count; runtime is summed receipt `durationMs`; conformance drift counts receipts whose actual consumes/produces omit a declared slot. `durationMs` is volatile by design.
 
 ## KNOW / PROVENANCE
 

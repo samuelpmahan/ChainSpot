@@ -123,6 +123,7 @@ export function printUnknownCommand(name) {
 }
 
 export function helpTopicForInvocation(command, args) {
+  if (command === 'sweep' && args.some((arg) => arg === 'batch')) return ['sweep', 'batch'];
   if (command === 'sweep' && args.includes('--through')) return ['sweep', 'through'];
   const winner = [command];
   const candidate = [command];

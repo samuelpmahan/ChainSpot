@@ -96,7 +96,7 @@ export function resolveCourseContext(config = loadLabConfig()) {
   if (!config.course) throw new Error('lab: no course selected. Run: lab set DT (or another course)');
   const manifest = resolveCourseManifest(config.course);
   const corpusRoot = resolve(config.corpusRoot ?? DEFAULT_CORPUS_ROOT);
-  const devDir = resolve(corpusRoot, 'dev', manifest.devDir);
+  const devDir = resolve(corpusRoot, manifest.corpusDir ?? 'dev', manifest.devDir);
   return {
     config,
     manifest,
@@ -151,7 +151,7 @@ export function runSetCommand(args) {
   if (args[0] === 'courses') {
     for (const manifest of listCourseManifests()) {
       const short = initials(manifest.course).toUpperCase();
-      console.log(`${short.padEnd(4)} ${manifest.course.padEnd(18)} dev/${manifest.devDir}`);
+      console.log(`${short.padEnd(4)} ${manifest.course.padEnd(18)} ${manifest.corpusDir ?? 'dev'}/${manifest.devDir}`);
     }
     return 0;
   }

@@ -90,6 +90,22 @@ Image-coordinate headings are `0 deg` right, `90 deg` down, `180 deg` left, `270
 - An official scoreboard requires verified truth in the canonical execution frame. Dimensions-only or unmapped truth is skipped with an explicit reason.
 - Repeating the same config/input normally reuses the same artifact directory, so copy evidence you need to preserve before another run.
 
+For a corpus census, use the batch command. It expands selectors into manifest-backed cases and invokes the real Sweep once per case:
+
+```bash
+./lab sweep batch CONFIG.json dev                 # defaults to G3
+./lab sweep batch --through G3 CONFIG.json demo
+./lab sweep batch --through G3 CONFIG.json all
+./lab sweep batch --through G3 CONFIG.json Dashs TheRec
+LAB_BLIND_TEST=1 ./lab sweep batch --through G3 packages/alg/src/detectors/threeFactor/configs/default.json dev demo
+```
+
+`--through` is optional for batch and defaults to `G3`; only `G1`, `G2`, and `G3` are valid. `dev`, `demo`, and `all` are selector groups; individual course names and unambiguous aliases are also accepted, and omitting selectors means `dev`. Multiple selectors are combined without duplicate courses. The REC's `TheRec-L.PNG` and `TheRec-R.PNG` captures are one `stitched` multi-input case that runs StripChrome → AutoStitch; `clean-full` and `thrown-full` are separate single-input cases. Batch never loads Annotation truth implicitly, continues after a case failure, exits nonzero if any case fails, and prints deterministic per-case `START` and `DONE`/`FAIL` progress before the final aggregate. A normal single-image `./lab sweep` is unchanged.
+
+Each case writes normal Sweep evidence below `artifacts/sweep/<config>/batches/<course>/<case>/`. The batch root also receives compact `summary.txt` and machine-readable `summary.json` aggregate receipts; these generated artifacts are run evidence and are not source files to commit.
+
+The aggregate schema is stable and ordered: course, case, inputs, badges, baskets, raw rings, pre-family tees, visible tees, visible deficit, operations/runtime, conformance drift, and status. Metric provenance is printed in `summary.txt` and repeated per successful row in `summary.json`: badge/basket counts are accepted drawables from their named trace units; raw rings are accepted plus rejected `tees` drawables; pre-family tees are accepted `tees` drawables after G3 exclusion; visible tees are accepted `teeFamily` drawables; visible deficit is `max(0, badges - visible tees)`; operations are engine receipt count; runtime is the sum of receipt `durationMs`; conformance drift counts receipts whose actual consumes/produces omit a declared slot. `durationMs` is deliberately volatile and should be compared only as a run measurement.
+
 Read the engine-produced receipt and render together. A useful receipt answers: what object was considered, where it is in original and canonical frames, measurements, verdict/reason, detected/expected counts, FP/FN when truth exists, and unowned detections separately.
 
 ## Pixel-work tips and traps

@@ -103,9 +103,19 @@ describe('LAB contextual help catalog', () => {
 		expect(gateHelp.stdout).toContain('LAB knowledge catalog');
 		expect(gateHelp.stdout).toContain('Engine execution');
 		expect(run(['help', 'sweep', 'through']).stdout).toContain('CLI_ONLY');
+		const batch = run(['help', 'sweep', 'batch']);
+		expect(batch.status).toBe(0);
+		expect(batch.stdout).toContain('SWEEP BATCH');
+		expect(batch.stdout).toContain('lab sweep batch --through G3 CONFIG.json all');
+		expect(batch.stdout).toContain('(default G3)');
+		expect(batch.stdout).toContain('The REC L/R captures are one stitched multi-input case');
+		const localBatch = run(['sweep', 'batch', '--through', 'G3', '--help']);
+		expect(localBatch.status).toBe(0);
+		expect(localBatch.stdout).toBe(batch.stdout);
 		expect(run(['sweep', '--through', 'G3', '--help']).stdout).toContain('SWEEP THROUGH');
 		expect(run(['help', 'fourLaneSensor']).stdout).toContain('REGISTERED_NONEXECUTING');
 		expect(completionCandidates('help scope p')).toEqual(expect.arrayContaining(['path', 'point']));
+		expect(completionCandidates('help sweep b')).toContain('batch');
 		expect(completionCandidates('search page n')).toContain('new');
 	});
 
