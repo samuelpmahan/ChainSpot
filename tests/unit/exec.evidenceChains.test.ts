@@ -125,7 +125,7 @@ describe('exec evidence chain 2 — family-on.json', () => {
 		const opIds = receipts.map((r) => r.opId);
 		expect(opIds).toContain('cleanBasketFamily');
 		expect(opIds).toContain('teeFamily');
-		expect(plan.ops.length).toBe(19); // visible teeFamily + explicit G7 Z-fit are baseline; this plan adds cleanBasketFamily
+		expect(plan.ops.length).toBe(20); // frozen teeFamily + teeRecovery + G7 Z-fit; this plan adds cleanBasketFamily
 	});
 });
 

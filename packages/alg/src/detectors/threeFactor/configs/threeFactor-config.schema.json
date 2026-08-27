@@ -584,11 +584,11 @@
 						"teeRecovery": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal.",
+							"description": "Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
-									"default": false
+									"default": true
 								},
 								"knobs": {
 									"type": "object",

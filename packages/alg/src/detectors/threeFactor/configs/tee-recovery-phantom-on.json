@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "tee-recovery-phantom-on",
-	"note": "G4 post-assignment tee-shard recovery followed by G4 phantom tee assignment completion. Both deviations are deliberately after normal assignment, so G3-only sweeps exclude them without invalid dependencies.",
+	"note": "Frozen G4 post-assignment tee-shard recovery followed by the default-OFF G4 phantom tee assignment-completion experiment; G3-only sweeps exclude both late operations without invalid dependencies.",
 	"execution": [
 		"badgeStage",
 		"badges",

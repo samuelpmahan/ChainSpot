@@ -20,13 +20,20 @@ The algorithm is an ordered list of **units** running over a shared
 **evidence board** (named slots: `stage`, `badges`, `supportField`,
 `sprites`, `baskets`, `tees`, `rawPairs`, `measurement`, `recoveredTees`,
 `assignment`). The order comes from the config's `execution` array —
-`configs/default.json` IS the frozen dev72 algorithm, readable top to
+`configs/default.json` IS the frozen production algorithm, readable top to
 bottom. **ABFeatures** are behavior with an A/B easy-off: `baseline` features
 ship default-ON; `deviation` features default-OFF, so the default config
 reproduces frozen behavior byte-for-byte (pinned by
 `tests/unit/threeFactorParity.test.ts`). Every run under a config carries a
 `paramsHash` (sha256 of the canonical resolved config) stamped on the trace
 and every emission.
+
+Until the detector has accepted 54-hole and 72-hole corpus results, an
+approved feature flip is promoted immediately into this frozen baseline:
+change it to `baseline`, make its registry default ON, schedule its unit in
+`DEFAULT_EXECUTION`/`default.json`, and re-pin the parity receipts in the same
+commit. `phantomTee` is explicitly excluded and remains a default-OFF
+deviation until complete invisibility makes it necessary.
 
 ## Porting a new behavior: the 3-file recipe
 

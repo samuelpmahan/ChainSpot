@@ -217,12 +217,9 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		if (!receivedIds.has(op.id)) warnings.push(`planned operation '${op.id}' has no receipt`);
 	}
 
-	let priorRank = -1;
 	for (const operation of operations) {
 		const rank = (CANONICAL_GATE_ORDER as readonly string[]).indexOf(operation.gate);
 		if (rank < 0) warnings.push(`operation '${operation.id}' has noncanonical gate '${operation.gate}'`);
-		else if (rank < priorRank) warnings.push(`gate order regressed at operation '${operation.id}' (${operation.gate})`);
-		else priorRank = rank;
 	}
 
 	const gates: RunReceiptGate[] = CANONICAL_GATE_ORDER.map((gate) => {

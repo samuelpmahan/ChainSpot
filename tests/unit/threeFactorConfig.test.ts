@@ -16,6 +16,8 @@ import { zfitFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.zf
 import { g5RibbonFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.ribbon';
 import { g5RoutingFeature } from '@chainspot/alg/detectors/threeFactor/features/g5.routing';
 import { g3EndpointsFeature } from '@chainspot/alg/detectors/threeFactor/features/g3.endpoints';
+import { teeRecoveryFeature } from '@chainspot/alg/detectors/threeFactor/features/g3.teeRecovery';
+import { phantomTeeFeature } from '@chainspot/alg/detectors/threeFactor/features/g3.phantomTee';
 import { g2SpriteFeature } from '@chainspot/alg/detectors/threeFactor/features/g2.sprite';
 import { g1BadgesFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.badges';
 import { g1DigitsFeature } from '@chainspot/alg/detectors/threeFactor/features/g1.digits';
@@ -106,8 +108,16 @@ describe('validateExecution', () => {
 			'rawPairs',
 			'measurement',
 			'assignment',
+			'teeRecovery',
 			'zfit'
 		]);
+	});
+
+	test('frozen baseline includes shard recovery but not phantom completion', () => {
+		expect(teeRecoveryFeature).toMatchObject({ kind: 'baseline', defaultEnabled: true });
+		expect(phantomTeeFeature).toMatchObject({ kind: 'deviation', defaultEnabled: false });
+		expect(DEFAULT_EXECUTION).toContain('teeRecovery');
+		expect(DEFAULT_EXECUTION).not.toContain('phantomTee');
 	});
 
 	test('reordered-but-valid passes; dependency violations fail with the slot named', () => {
@@ -227,7 +237,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('6c80731fe0448c8599836d45cd20bd23e5dd4e31d10b3bb2d5ba27c62cdf31d5');
+		expect(hash).toBe('cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

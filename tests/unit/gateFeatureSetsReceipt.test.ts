@@ -198,6 +198,7 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.scoring',
 			'assignment.ranking',
 			'assignment.selection',
+			'teeRecovery',
 			'zfit'
 		]);
 	});

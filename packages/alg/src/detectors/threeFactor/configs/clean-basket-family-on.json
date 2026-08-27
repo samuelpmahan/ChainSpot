@@ -15,6 +15,7 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
+		"teeRecovery",
 		"zfit"
 	],
 	"gates": {

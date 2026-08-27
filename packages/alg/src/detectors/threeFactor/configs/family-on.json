@@ -2,7 +2,7 @@
 	"$schema": "./threeFactor-config.schema.json",
 	"schema": "threeFactor-config@1",
 	"name": "family-on",
-	"note": "G2 cleanBasketFamily deviation with the baseline G3 intact visible tee family kept explicit in the plan. Shard recovery remains separate.",
+	"note": "G2 cleanBasketFamily deviation composed over the frozen baseline, including G3 intact visible tees and G4 shard recovery.",
 	"execution": [
 		"badgeStage",
 		"badges",
@@ -15,6 +15,7 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
+		"teeRecovery",
 		"zfit"
 	],
 	"gates": {

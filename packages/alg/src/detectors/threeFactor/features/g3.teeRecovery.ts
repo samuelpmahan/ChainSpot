@@ -124,9 +124,9 @@ function connectedPixelShards(points: readonly (readonly [number, number])[]): r
 export const teeRecoveryFeature = {
 	id: 'teeRecovery',
 	gate: 'G4',
-	kind: 'deviation',
-	defaultEnabled: false,
-	note: 'Recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal.',
+	kind: 'baseline',
+	defaultEnabled: true,
+	note: 'Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.',
 	render: teeRecoveryRender,
 	knobs: {}
 } satisfies ABFeature;

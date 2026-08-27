@@ -1,6 +1,6 @@
 # Intake engine handoff
 
-Current as of 2026-08-26. This is the transfer note for the local
+Current as of 2026-08-27. This is the transfer note for the local
 `continuation/intake-engine` line. `docs/CLOUD-BRIEF.md` and
 `docs/WORKFLOW.md` describe an earlier orchestration phase and are not the
 current branch or accuracy contract.
@@ -23,12 +23,16 @@ current branch or accuracy contract.
   recovery evidence.
 - G3 ring-only visible-tee detection followed by the default-ON `teeFamily`
   selector and oriented full-pad geometry.
+- G4 default-ON shard recovery for assignment-missing tees, using every
+  fitting visible white component and the badge-axis geometry contract.
+- `phantomTee` remains a default-OFF deviation and is not scheduled by the
+  frozen production config.
 - Config/schema/operation-DAG integration.
 - Trace-driven Sweep renders, receipts, truth grounding, and regression tests.
 - Contextual CLI and browser help generated from one catalog.
 
-This is a coherent visible-baseline checkpoint. It is not an occluded-tee
-recovery implementation.
+This is a coherent endpoint baseline: easy visible tees are found at G3 and
+occluded shard-supported tees are completed at G4.
 
 ## Hardened contracts
 
@@ -54,6 +58,20 @@ recovery implementation.
    skipped.
 
 ## Validation receipt
+
+The 2026-08-27 frozen promotion ran the full default config on DashsTrack:
+
+- Config hash: `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`.
+- Plan: 19 chronological operations; `assignment.selection → teeRecovery → zfit`.
+- Results: 18 badges, 18 baskets, 16 visible tees, 2 recovered tees,
+  18 total tees, 18 assignments, and 5,184 raw pairs.
+- G4: 2 accepted recovery hypotheses, 0 rejected; H3 uses two visible shards
+  and H5 uses one.
+- Phantom completion: disabled and unscheduled.
+- Receipt warnings: 0; operation conformance drift: 0.
+
+Machine and human receipts are written by the repro command below to
+`artifacts/sweep/dev72-recovered-default/DashsTrack-full/run.receipt.{json,txt}`.
 
 Run from the repository root after building `packages/alg`:
 
@@ -99,9 +117,11 @@ Default DashsTrack G3 artifact hashes after hardening:
 
 ## Known gaps that remain honest
 
-- Occluded tee recovery is absent. The strict closure tests must remain red
-  until a real recovery stage localizes the missing pads; do not weaken them or
-  relabel visible-family detections as recovered.
+- The frozen recovery baseline has one accepted 18-hole proof. Keep promoting
+  approved flips directly into frozen until both a 54-hole (three-course) and
+  72-hole (four-course) result exist, or the owner changes that policy.
+- Complete-invisibility fallback remains intentionally absent from production:
+  `phantomTee` stays OFF until an observed course needs it.
 - Ownership is a downstream conclusion. A localized tee with
   `ownership: UNKNOWN` is not an ownership success or failure.
 - SmartBasket's bbox-tolerance behavior and the recovered candidate's
@@ -122,7 +142,7 @@ git status --short --branch
 git log --oneline origin/continuation/intake-engine..HEAD
 npm run build --workspace @chainspot/alg
 ./lab help here
-./lab sweep --through G3 \
+./lab sweep \
   packages/alg/src/detectors/threeFactor/configs/default.json \
   ../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg
 ```

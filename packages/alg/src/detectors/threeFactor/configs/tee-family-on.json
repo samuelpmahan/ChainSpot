@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "tee-family-on",
-	"note": "Compatibility config with the now-baseline G3 intact visible tee family stated explicitly. Shard recovery remains separate.",
+	"note": "Compatibility config with the frozen G3 intact visible tee family stated explicitly and frozen G4 shard recovery retained.",
 	"execution": [
 		"badgeStage",
 		"badges",
@@ -13,6 +13,7 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
+		"teeRecovery",
 		"zfit"
 	],
 	"gates": {

@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "dev72-recovered-default",
-	"note": "Recovered production baseline: G2 uses the surviving two-pass renderer-family basket detector; G3 visible tees use the intact hollow-glyph family and leave shard recovery to a separate phase. The execution list follows semantic gate order and IS the algorithm — read it top to bottom.",
+	"note": "Frozen production baseline: G2 uses the surviving two-pass renderer-family basket detector; G3 finds intact hollow-glyph tees; G4 then recovers assignment-missing tees from every fitting visible shard. Phantom tee completion remains OFF. The execution list is compiler chronology, while gate ownership is semantic rather than a waterfall.",
 	"execution": [
 		"badgeStage",
 		"badges",
@@ -13,6 +13,7 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
+		"teeRecovery",
 		"zfit"
 	],
 	"gates": {}

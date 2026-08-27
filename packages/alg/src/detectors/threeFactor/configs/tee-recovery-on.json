@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "tee-recovery-on",
-	"note": "G4 post-assignment tee-shard recovery enabled; fully missing tees remain terminal phantom assignment completion.",
+	"note": "Compatibility/reproduction config stating the frozen G4 tee-shard recovery baseline explicitly; fully missing tees remain unresolved because phantom completion is OFF.",
 	"execution": [
 		"badgeStage",
 		"badges",
