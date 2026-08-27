@@ -7,14 +7,15 @@ const expectedMembership = {
 	'shared-set': ['hsv'],
 	'g1-set': ['badges', 'digits'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
-	'g3-set': ['endpoints', 'teeFamily', 'phantomTee'],
-	'g4-set': ['scoring', 'search'],
-	'st-set': ['fourLaneSensor'],
-	'g5-set': ['ribbon', 'routing', 'zfit']
+	'g3-set': ['endpoints', 'teeFamily'],
+	'g4-set': ['teeRecovery', 'phantomTee'],
+	'g5-set': ['fourLaneSensor'],
+	'g6-set': ['scoring', 'search'],
+	'g7-set': ['ribbon', 'routing', 'zfit']
 } as const;
 
-describe('threeFactor production gate ABFeatureSets', () => {
-	test('declares all seven gate sets with the exact active feature ownership', () => {
+describe('threeFactor production semantic ABFeatureSets', () => {
+	test('declares all semantic sets with the exact active feature ownership', () => {
 		expect(Object.keys(GATE_FEATURE_SETS).sort()).toEqual(Object.keys(expectedMembership).sort());
 		for (const [setId, featureIds] of Object.entries(expectedMembership) as [
 			keyof typeof expectedMembership,

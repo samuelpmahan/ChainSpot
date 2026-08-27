@@ -12,6 +12,8 @@ import {
 import {
 	DEFAULT_EXECUTION,
 	GATE_CROSS_GATE_DEPENDENCIES,
+	GATE_FEATURE_DECLARATION_DIVERGENCES,
+	GATE_OPERATION_DECLARATION_DIVERGENCES,
 	GATE_FEATURE_SETS,
 	resolveConfig,
 	type ThreeFactorConfig
@@ -22,16 +24,18 @@ import { seedBoard } from '@chainspot/alg/detectors/threeFactor/measure';
 import type { EvidenceBoard } from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor/types';
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
+import { THREE_FACTOR_SHARED_SERVICES } from '@chainspot/alg/detectors/threeFactor/shared-services';
 import { OPERATION_UNIVERSE } from '@chainspot/alg/exec/operations';
 
 const membership: Record<string, readonly string[]> = {
 	'shared-set': ['hsv'],
 	'g1-set': ['badges', 'digits'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
-	'g3-set': ['endpoints', 'teeFamily', 'phantomTee'],
-	'g4-set': ['scoring', 'search'],
-	'st-set': ['fourLaneSensor'],
-	'g5-set': ['ribbon', 'routing', 'zfit']
+	'g3-set': ['endpoints', 'teeFamily'],
+	'g4-set': ['teeRecovery', 'phantomTee'],
+	'g5-set': ['fourLaneSensor'],
+	'g6-set': ['scoring', 'search'],
+	'g7-set': ['ribbon', 'routing', 'zfit']
 };
 
 type PublicSet = ABFeatureSet & {
@@ -70,6 +74,16 @@ describe('production gate ABFeatureSet receipts', () => {
 				.flatMap((set) => set.features.map((feature) => feature.id))
 				.sort()
 		).toEqual(ALL_FEATURES.map((feature) => feature.id).sort());
+		expect(GATE_FEATURE_SETS['shared-set'].services?.map((service) => service.id)).toEqual([
+			'occlusion'
+		]);
+		const ownedServiceIds = Object.values(GATE_FEATURE_SETS).flatMap((set) =>
+			(set.services ?? []).map((service) => service.id)
+		);
+		expect(new Set(ownedServiceIds).size).toBe(ownedServiceIds.length);
+		expect(ownedServiceIds.sort()).toEqual(
+			THREE_FACTOR_SHARED_SERVICES.map((service) => service.id).sort()
+		);
 	});
 
 	test('set composition covers each operation exactly once and preserves explicit feature reads', () => {
@@ -101,6 +115,28 @@ describe('production gate ABFeatureSet receipts', () => {
 			'ribbon',
 			'routing'
 		]);
+		// The operation declarations retain historical engine aliases. The
+		// semantic set boundary is authoritative and the divergence is explicit.
+		expect(GATE_OPERATION_DECLARATION_DIVERGENCES).toEqual({
+			'assignment.pairs': { declaredGate: 'G4', semanticSet: 'g6-set' },
+			'assignment.scoring': { declaredGate: 'G4', semanticSet: 'g6-set' },
+			'assignment.ranking': { declaredGate: 'G4', semanticSet: 'g6-set' },
+			'assignment.selection': { declaredGate: 'G4', semanticSet: 'g6-set' },
+			supportField: { declaredGate: 'G5', semanticSet: 'g7-set' },
+			badgeOcclusionPatch: { declaredGate: 'G5', semanticSet: 'g7-set' },
+			rawPairs: { declaredGate: 'G5', semanticSet: 'g7-set' }
+		});
+		expect(GATE_FEATURE_DECLARATION_DIVERGENCES).toEqual({
+			scoring: { declaredGate: 'G4', semanticSet: 'g6-set' },
+			search: { declaredGate: 'G4', semanticSet: 'g6-set' },
+			ribbon: { declaredGate: 'G5', semanticSet: 'g7-set' },
+			routing: { declaredGate: 'G5', semanticSet: 'g7-set' },
+			zfit: { declaredGate: 'G5', semanticSet: 'g7-set' }
+		});
+		expect(GATE_FEATURE_SETS['g4-set'].operations?.map(({ operation }) => operation.spec.id)).toEqual([
+			'teeRecovery',
+			'phantomTee'
+		]);
 		for (const set of Object.values(GATE_FEATURE_SETS)) {
 			const owned = new Set(set.features.map((feature) => feature.id));
 			const crossGateReads = new Set(
@@ -115,10 +151,10 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect((GATE_FEATURE_SETS['shared-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
 			'hsv'
 		);
-		expect((GATE_FEATURE_SETS['g5-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
+		expect((GATE_FEATURE_SETS['g7-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
 			'zfit'
 		);
-		expect((GATE_FEATURE_SETS['st-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
+		expect((GATE_FEATURE_SETS['g5-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
 			'fourLaneSensor'
 		);
 	});
@@ -144,14 +180,14 @@ describe('production gate ABFeatureSet receipts', () => {
 			expect(receipt.durationMs).toBeGreaterThanOrEqual(0);
 			expect(receipt.manifestHash).toMatch(/^[0-9a-f]{64}$/);
 		}
-		const st = compileABFeatureSet(GATE_FEATURE_SETS['st-set']);
+		const st = compileABFeatureSet(GATE_FEATURE_SETS['g5-set']);
 		expect(st.plan.ops).toEqual([]);
 		const stReceipt = await executeABFeatureSet(st, createExecBoard(), nullFeatureContext, {
 			runId: 'receipt-st-empty',
 			invocation: 'vitest gateFeatureSetsReceipt'
 		});
 		expect(stReceipt.operations).toEqual([]);
-		const zfit = compileABFeatureSet(GATE_FEATURE_SETS['g5-set'], { zfit: { enabled: true } });
+		const zfit = compileABFeatureSet(GATE_FEATURE_SETS['g7-set'], { zfit: { enabled: true } });
 		expect(zfit.enabledFeatureIds).toContain('zfit');
 	});
 

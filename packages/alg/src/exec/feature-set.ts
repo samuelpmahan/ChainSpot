@@ -33,10 +33,32 @@ export interface ABFeatureSetOperation {
 	readonly operation: ABFeatureOperation;
 }
 
+/**
+ * A named piece of set-owned infrastructure. Services are intentionally
+ * descriptors only: the set records semantic ownership, while the production
+ * runtime owns construction/lifetime of any corresponding run-scoped object.
+ * In particular, this is not an ABFeature and cannot become an execution
+ * operation by appearing in a set.
+ */
+export interface ABFeatureSetServiceDescriptor {
+	/** Stable inventory id (for example, `occlusion`). */
+	readonly id: string;
+	/** Human/tooling vocabulary for the service; never an execution stage id. */
+	readonly kind: string;
+	/** Services used by one detector run are explicitly marked run-scoped. */
+	readonly scope?: 'run';
+	readonly note?: string;
+}
+
+/** Short name for callers that do not need to spell out "descriptor". */
+export type ABFeatureSetService = ABFeatureSetServiceDescriptor;
+
 /** An ordered, executable composition. List order is execution intent. */
 export interface ABFeatureSet {
 	readonly id: string;
 	readonly features: readonly ABFeature[];
+	/** Set-owned infrastructure inventory; descriptors do not create runtime objects. */
+	readonly services?: readonly ABFeatureSetServiceDescriptor[];
 	/**
 	 * Feature ids read by this set's operations but owned by another set.
 	 * This is an explicit composition contract, distinct from execution order.
@@ -67,6 +89,8 @@ export interface CompiledABFeatureSet {
 	readonly plan: CompiledExecutionPlan;
 	readonly runtime: OperationRuntime;
 	readonly enabledFeatureIds: readonly string[];
+	/** Stable ids of infrastructure descriptors owned by this set. */
+	readonly ownedServiceIds: readonly string[];
 }
 
 export interface ABFeatureSetManifest {
@@ -75,6 +99,8 @@ export interface ABFeatureSetManifest {
 	readonly setId: string;
 	readonly planFingerprint: string;
 	readonly ownedFeatureIds: readonly string[];
+	/** Stable ids of set-owned infrastructure descriptors. */
+	readonly ownedServiceIds: readonly string[];
 	readonly enabledFeatureIds: readonly string[];
 	readonly importedFeatureIds: readonly string[];
 	readonly locallyOperationlessFeatureIds: readonly string[];
@@ -118,6 +144,29 @@ export function compileABFeatureSet(
 	const bindings: Record<string, ResolvedFeature> = {};
 	const enabledFeatureIds: string[] = [];
 	const setOperations = definition.operations ?? [];
+	const services = definition.services ?? [];
+	const serviceIds = new Set<string>();
+	for (const service of services) {
+		if (!service || typeof service.id !== 'string' || service.id.length === 0) {
+			throw new Error(`ABFeatureSet '${definition.id}': service id must be a non-empty string.`);
+		}
+		if (service.id.trim() !== service.id) {
+			throw new Error(`ABFeatureSet '${definition.id}': service id '${service.id}' must not have surrounding whitespace.`);
+		}
+		if (typeof service.kind !== 'string' || service.kind.length === 0) {
+			throw new Error(`ABFeatureSet '${definition.id}': service '${service.id}' kind must be a non-empty string.`);
+		}
+		if (service.kind.trim() !== service.kind) {
+			throw new Error(`ABFeatureSet '${definition.id}': service '${service.id}' kind must not have surrounding whitespace.`);
+		}
+		if (service.scope !== undefined && service.scope !== 'run') {
+			throw new Error(`ABFeatureSet '${definition.id}': service '${service.id}' has unsupported scope '${service.scope}'.`);
+		}
+		if (serviceIds.has(service.id)) {
+			throw new Error(`ABFeatureSet '${definition.id}': duplicate service '${service.id}'.`);
+		}
+		serviceIds.add(service.id);
+	}
 	const ownedFeatureIds = new Set(definition.features.map((feature) => feature.id));
 	const locallyReadFeatureIds = new Set(
 		setOperations
@@ -223,6 +272,16 @@ export function compileABFeatureSet(
 				id: feature.id,
 				resolved: bindings[feature.id]
 			})),
+			...(services.length
+				? {
+						services: services.map((service) => ({
+							id: service.id,
+							kind: service.kind,
+							...(service.scope ? { scope: service.scope } : {}),
+							...(service.note ? { note: service.note } : {})
+						}))
+				}
+				: {}),
 			imports: definition.imports ?? [],
 			locallyOperationlessFeatureIds: definition.locallyOperationlessFeatureIds ?? [],
 			operations: ops,
@@ -240,7 +299,8 @@ export function compileABFeatureSet(
 		definition,
 		plan,
 		runtime: { implementations, artifactExtractors },
-		enabledFeatureIds
+		enabledFeatureIds,
+		ownedServiceIds: [...serviceIds]
 	};
 }
 
@@ -268,6 +328,9 @@ export async function executeABFeatureSet(
 		setId: compiled.definition.id,
 		planFingerprint: compiled.plan.planFingerprint,
 		ownedFeatureIds: compiled.definition.features.map((feature) => feature.id),
+		...(compiled.ownedServiceIds.length
+			? { ownedServiceIds: compiled.ownedServiceIds }
+			: {}),
 		enabledFeatureIds: compiled.enabledFeatureIds,
 		importedFeatureIds: compiled.definition.imports ?? [],
 		locallyOperationlessFeatureIds: compiled.definition.locallyOperationlessFeatureIds ?? [],
@@ -279,6 +342,7 @@ export async function executeABFeatureSet(
 		runId: run.runId,
 		invocation: run.invocation,
 		...semanticReceipt,
+		ownedServiceIds: compiled.ownedServiceIds,
 		startedAtMs,
 		durationMs,
 		operations,
@@ -300,6 +364,7 @@ export function formatABFeatureSetManifestMarkdown(manifest: ABFeatureSetManifes
 		`- plan fingerprint: \`${manifest.planFingerprint}\``,
 		`- manifest hash: \`${manifest.manifestHash}\``,
 		`- owned features: ${list(manifest.ownedFeatureIds.map((id) => `\`${id}\``))}`,
+		`- owned services: ${list(manifest.ownedServiceIds.map((id) => `\`${id}\``))}`,
 		`- enabled features: ${list(manifest.enabledFeatureIds.map((id) => `\`${id}\``))}`,
 		`- imported features: ${list(manifest.importedFeatureIds.map((id) => `\`${id}\``))}`,
 		`- locally operationless features: ${list(manifest.locallyOperationlessFeatureIds.map((id) => `\`${id}\``))}`,
