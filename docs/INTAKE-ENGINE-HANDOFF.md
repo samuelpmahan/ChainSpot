@@ -43,9 +43,10 @@ recovery implementation.
    the canonical composite; completely unmatched truth produces neither a
    scoreboard nor grounding evidence, and unmapped truth is never scored in
    raw coordinates.
-3. `lab sweep --through` accepts only dependency-complete prefixes `G1`, `G2`,
-   and `G3`. `G4`, `ST`, `G5`, and `shared` remain engine vocabulary, and a full
-   unsliced Sweep can still execute later operations.
+3. `lab sweep --through` currently accepts only `G1`, `G2`, and `G3`. The one
+   canonical order continues through `G4` Endpoint Recovery, `G5` Straight
+   Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is
+   infrastructure rather than a scheduled gate.
 4. Each `UnitTrace` records all operation-bound feature IDs and names the
    primary feature supplying its legacy enabled/knob fields. `baskets` now
    reports `sprite`; `tees` reports `endpoints`.
@@ -112,7 +113,7 @@ Default DashsTrack G3 artifact hashes after hardening:
   API payload wiring, and static DOM wiring assertions; there is no browser
   DOM end-to-end test yet.
 - Later-gate cutoff slicing needs an explicit dependency-complete design; do
-  not re-advertise `G4`, `ST`, or `G5` merely by widening the CLI parser.
+  not widen the CLI parser beyond `G3` without adding those valid prefixes.
 
 ## Resume safely
 

@@ -32,7 +32,7 @@ const positiveFinite = (name: string) => (value: unknown): string | null =>
 
 export const fourLaneSensorFeature = {
 	id: 'fourLaneSensor',
-	gate: 'ST',
+	gate: 'G5',
 	kind: 'deviation',
 	defaultEnabled: false,
 	note: 'Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.',

@@ -159,9 +159,9 @@ describe('DashsTrack bottom-up gate sweep (deterministic E2E vs frozen truth)', 
 		expect(matched).toBe(truthTees.length);
 	}, 30000);
 
-	// G4's assertion is structured to compute + log BEFORE asserting, so the
+	// G6's assertion is structured to compute + log BEFORE asserting, so the
 	// scoreboard line always prints even when the final assert fails/xfails.
-	test('G4 — tee->badge assignment (ASSIGNED exact match count)', async () => {
+	test('G6 — endpoint assignment (ASSIGNED exact match count)', async () => {
 		const { run: r } = await getRun();
 		const assignments = r.assignment.assignments;
 		const teesByDetId = new Map(r.assignment.tees.map((t) => [t.detId, t]));
@@ -199,14 +199,14 @@ describe('DashsTrack bottom-up gate sweep (deterministic E2E vs frozen truth)', 
 
 		// Scoreboard prints unconditionally, before the assert can throw.
 		console.log(
-			`[G4] ASSIGNED exact=${assignedExact}/${truth.holes.length} maxDeviation=${maxDeviation.toFixed(2)}px | misses=[${misses.join(' ')}]`
+			`[G6] ASSIGNED exact=${assignedExact}/${truth.holes.length} maxDeviation=${maxDeviation.toFixed(2)}px | misses=[${misses.join(' ')}]`
 		);
 
 		expect(assignedExact).toBe(truth.holes.length);
 	}, 30000);
 
 	test.todo(
-		'G5 — path truth (no frozen ground truth exists: corridorBends in the ' +
+		'G7 — path truth (no frozen ground truth exists: corridorBends in the ' +
 			'annotation are not validated path truth; scripts/chainspot-lab/cases.ts ' +
 			'flags DashsTrack H4-H6 renderer density as an open, unproven question)'
 	);

@@ -44,7 +44,7 @@ const commonProvenance = [
 export const LAB_GATES: readonly LabGate[] = [
 	{
 		id: 0,
-		title: 'Crop + Stitch',
+		title: 'Intake',
 		detectors: ['D00-map-viewport-crop', 'D01-stitch-pipeline'],
 		description:
 			'Convert one or more source screenshots into one canonical map raster. UI chrome and source-tile coordinates end here; every later measurement uses crop-local pixels in the flattened raster.',
@@ -277,7 +277,7 @@ export const LAB_GATES: readonly LabGate[] = [
 	},
 	{
 		id: 3,
-		title: 'Tees',
+		title: 'Visible Tees',
 		detectors: ['D04-tee-candidates'],
 		description:
 			'Detect visible tee-pad glyphs from enclosed rings and component-family evidence. Preserve the measured component geometry because orientation and shape can later separate a real pad from nearby furniture; do not assign holes here.',

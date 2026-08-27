@@ -633,6 +633,7 @@ export const measureUnits: readonly EngineUnit[] = [
 		run(board, ctx) {
 			const stop = ctx.span('badgeOcclusionPatch');
 			const parameters = board.get<CorridorParams>('params');
+			const supportField = board.get<SupportFieldEvidence>('supportField');
 			if (parameters.patchBadges) {
 				const { topPx } = board.get<ViewportSeed>('viewport');
 				const badges = board.get<BadgeEvidence[]>('badges');
@@ -648,13 +649,16 @@ export const measureUnits: readonly EngineUnit[] = [
 				}));
 				const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 				patchBadgeOcclusion(
-					board.get<SupportFieldEvidence>('supportField'),
+					supportField,
 					board.get<RgbaImage>('localImage'),
 					localBadges,
 					parameters.corridorWidthPx,
 					ribbonKnobs
 				);
 			}
+			// The operation is a transform even when patching is disabled: publish
+			// the unchanged field so declared/actual slot testimony stays exact.
+			board.set('supportField', supportField);
 			stop();
 		}
 	},
@@ -827,7 +831,7 @@ export const measureUnits: readonly EngineUnit[] = [
 	},
 	{
 		id: 'measurement',
-		gate: 'shared',
+		gate: 'G5',
 		consumes: [
 			'image',
 			'viewport',

@@ -6,7 +6,7 @@
 import { assignThreeFactor, type SearchKnobs } from './assignment';
 import type { RibbonKnobs } from './ribbon';
 import type { RoutingKnobs } from './routing';
-import type { ScoringKnobs, ZfitKnobs } from './scoring';
+import type { ScoringKnobs } from './scoring';
 import { type ResolvedConfig } from './config';
 import { measureUnits, seedBoard, DEFAULT_MEASURE_EXECUTION } from './measure';
 import { createExecBoard } from '../../exec/board';
@@ -47,24 +47,25 @@ import type {
 
 const assignmentUnit: EngineUnit = {
 	id: 'assignment',
-	gate: 'G4',
+	gate: 'G6',
 	consumes: ['measurement', 'recoveredTees'],
 	produces: ['assignment'],
-	note: 'pair scoring (zfit salvage when enabled) + global one-to-one ownership',
+	note: 'straight-route pair scoring + global one-to-one ownership',
 	run(board, ctx) {
 		const stop = ctx.span('assignment');
 		const measurement = board.get<ThreeFactorMeasurement>('measurement');
 		const recovered = board.get<readonly RecoveredTeeInput[]>('recoveredTees');
-		const zfit = ctx.resolve(zfitFeature);
-		const zfitKnobs = zfit.knobs as unknown as ZfitKnobs;
+		const straightMeasurement = measurement.parameters.zfit
+			? { ...measurement, parameters: { ...measurement.parameters, zfit: false } }
+			: measurement;
 		const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 		const ribbonKnobs = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 		const routingKnobs = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
 		const assignment = assignThreeFactor(
-			measurement,
+			straightMeasurement,
 			recovered,
-			zfitKnobs,
+			undefined,
 			scoringKnobs,
 			searchKnobs,
 			ribbonKnobs,
@@ -78,9 +79,23 @@ const assignmentUnit: EngineUnit = {
 	}
 };
 
+const zfitUnit: EngineUnit = {
+	id: 'zfit',
+	gate: 'G7',
+	consumes: ['measurement', 'assignment'],
+	produces: ['assignment'],
+	note: 'optional bent-path Z-fit refinement after straight assignment',
+	run(board) {
+		// The operation-level implementation owns execution; this unit declaration
+		// exists for config validation and schema generation.
+		board.set('assignment', board.get<ThreeFactorAssignment>('assignment'));
+	}
+};
+
 export const ENGINE_UNITS: readonly EngineUnit[] = [
 	...measureUnits,
 	assignmentUnit,
+	zfitUnit,
 	phantomTeeUnit,
 	teeFamilyUnit,
 	teeRecoveryUnit,
@@ -91,7 +106,8 @@ export const DEFAULT_EXECUTION: readonly string[] = [
 	...DEFAULT_MEASURE_EXECUTION.slice(0, DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
 	'teeFamily',
 	...DEFAULT_MEASURE_EXECUTION.slice(DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
-	'assignment'
+	'assignment',
+	'zfit'
 ];
 
 /** Slots the engine seeds before any unit runs. */

@@ -9,7 +9,7 @@ import type { ABFeature } from './types';
 
 export const g4SearchFeature = {
 	id: 'search',
-	gate: 'G4',
+	gate: 'G6',
 	kind: 'baseline',
 	defaultEnabled: true,
 	note: 'Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.',

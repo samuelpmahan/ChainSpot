@@ -36,6 +36,7 @@
 					"rawPairs",
 					"measurement",
 					"assignment",
+					"zfit",
 					"phantomTee",
 					"teeFamily",
 					"teeRecovery",
@@ -549,12 +550,12 @@
 											"default": 1.5
 										}
 									}
+								}
+							}
+						}
 					}
-					}
-					}
-				}
-			},
-			"G4": {
+				},
+				"G4": {
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
@@ -595,208 +596,6 @@
 									"properties": {}
 								}
 							}
-						},
-						"scoring": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.",
-							"properties": {
-								"enabled": {
-									"type": "boolean",
-									"default": true
-								},
-								"knobs": {
-									"type": "object",
-									"additionalProperties": false,
-									"properties": {
-										"fallbackTeeBboxOffset": {
-											"type": "number",
-											"description": "fallback tee bbox half-size when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
-											"default": 6
-										},
-										"fallbackTeeBboxSize": {
-											"type": "number",
-											"description": "fallback tee bbox dimension (size x size) when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
-											"default": 12
-										},
-										"ringDistance": {
-											"type": "number",
-											"description": "basket-to-tee ring membership distance (shared: assignment.ts recoveredTee onRing, measure.ts makeTees onRing, scoring.ts zoneFactor primary ring)",
-											"default": 84
-										},
-										"ringTolerance": {
-											"type": "number",
-											"description": "tolerance band around ringDistance for the basket-to-tee ring check (shared: assignment.ts, measure.ts, scoring.ts)",
-											"default": 12
-										},
-										"zoneFactorDistance": {
-											"type": "number",
-											"description": "close-proximity threshold for the zone factor penalty around a non-owning basket",
-											"default": 35
-										},
-										"secondaryRingDistance": {
-											"type": "number",
-											"description": "secondary ring distance for the zone factor radial check",
-											"default": 44
-										},
-										"secondaryRingTolerance": {
-											"type": "number",
-											"description": "tolerance band around secondaryRingDistance for the zone factor radial check",
-											"default": 8
-										},
-										"radialTolerance": {
-											"type": "number",
-											"description": "radial alignment fraction threshold for the zone factor penalty",
-											"default": 0.5
-										},
-										"teeOrientationSigma": {
-											"type": "number",
-											"description": "gaussian sigma (degrees) for the tee-to-badge angle penalty",
-											"default": 12
-										},
-										"badgeFractionTarget": {
-											"type": "number",
-											"description": "optimal fractional position of the badge along the tee-basket chord",
-											"default": 0.36
-										},
-										"badgeFractionTolerance": {
-											"type": "number",
-											"description": "acceptable deviation from badgeFractionTarget before the fraction penalty kicks in",
-											"default": 0.19
-										},
-										"badgeFractionSigma": {
-											"type": "number",
-											"description": "gaussian sigma for the badge-fraction penalty",
-											"default": 0.15
-										},
-										"collinearityWeight": {
-											"type": "number",
-											"description": "upward factor for the collinearity bonus",
-											"default": 0.6
-										},
-										"collinearitySigma": {
-											"type": "number",
-											"description": "gaussian sigma (degrees) for the collinearity angle penalty",
-											"default": 2
-										},
-										"basketIdentityFloor": {
-											"type": "number",
-											"description": "minimum score factor for the basket identity prior",
-											"default": 0.4
-										},
-										"basketScoreOffset": {
-											"type": "number",
-											"description": "offset subtracted from basket.score in the basket identity calculation",
-											"default": 0.2
-										},
-										"basketScoreScale": {
-											"type": "number",
-											"description": "divisor for basket.score normalization in the basket identity calculation",
-											"default": 0.5
-										},
-										"endpointSupportSampleCount": {
-											"type": "number",
-											"description": "number of trailing leg-path points averaged for RawPairEvidence.endpointSupportTee/endpointSupportBasket (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-											"default": 3
-										},
-										"badgeOverlapWaiverRadius": {
-											"type": "number",
-											"description": "distance (field cells) from the badge center within which a leg point is exempt from the tee/basket path-overlap penalty (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-											"default": 8
-										},
-										"recoveredTeePrior": {
-											"type": "number",
-											"description": "confidence discount applied to a pair score when the tee is a recovered (synthesized) tee rather than a directly-detected one (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-											"default": 0.7
-										},
-										"minWindowCells": {
-											"type": "number",
-											"description": "minimum window size (field cells) for the weakWindow sliding-window worst-case score, shared by zfitFactor/makeRawPairEvidence/scorePair (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-											"default": 3
-										}
-									}
-								}
-							}
-						},
-						"search": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.",
-							"properties": {
-								"enabled": {
-									"type": "boolean",
-									"default": true
-								},
-								"knobs": {
-									"type": "object",
-									"additionalProperties": false,
-									"properties": {
-										"assignTopRows": {
-											"type": "number",
-											"description": "window size (top-N by score) of candidate pairs per badge kept for the search (was ASSIGN_TOP_ROWS)",
-											"default": 60
-										},
-										"exchangeTopK": {
-											"type": "number",
-											"description": "top-k limit per badge for pairwise exchange optimization (was EXCHANGE_TOP_K)",
-											"default": 12
-										},
-										"maxAssignPasses": {
-											"type": "number",
-											"description": "iteration limit for the assignment optimization loop (was MAX_ASSIGN_PASSES)",
-											"default": 60
-										},
-										"recoveredTeeDedupeDistance": {
-											"type": "number",
-											"description": "minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate",
-											"default": 14
-										}
-									}
-								}
-							}
-						}
-					}
-				},
-				"ST": {
-					"type": "object",
-					"additionalProperties": false,
-					"properties": {
-						"fourLaneSensor": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.",
-							"properties": {
-								"enabled": {
-									"type": "boolean",
-									"default": false
-								},
-								"knobs": {
-									"type": "object",
-									"additionalProperties": false,
-									"properties": {
-										"edgeDeltaPx": {
-											"type": "number",
-											"description": "normal-distance offset on each side of an expected rail used for inside-vs-outside grayscale lift",
-											"default": 2.5
-										},
-										"liftReference": {
-											"type": "number",
-											"description": "inside-minus-outside grayscale lift that maps to score 1.0",
-											"default": 45
-										},
-										"tangentHalfPx": {
-											"type": "number",
-											"description": "half-length in source pixels sampled along the tangent for each band observation",
-											"default": 4
-										},
-										"tangentSamples": {
-											"type": "number",
-											"description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
-											"default": 5
-										}
-									}
-								}
-							}
 						}
 					}
 				},
@@ -804,103 +603,6 @@
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
-						"zfit": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
-							"properties": {
-								"enabled": {
-									"type": "boolean",
-									"default": false
-								},
-								"knobs": {
-									"type": "object",
-									"additionalProperties": false,
-									"properties": {
-										"topK": {
-											"type": "number",
-											"description": "assignment rows eligible for the salvage re-score (was ZFIT_TOP_K)",
-											"default": 80
-										},
-										"alignedWorstCeiling": {
-											"type": "number",
-											"description": "skip salvage when the aligned worst-window support is already at/above this (also the zfitFactor early-return ceiling — same check, same value)",
-											"default": 0.28
-										},
-										"distanceStartOffset": {
-											"type": "number",
-											"description": "pixel offset past the first leg length where zfit waypoint search begins",
-											"default": 8
-										},
-										"distanceStepPx": {
-											"type": "number",
-											"description": "spacing between successive waypoint distances tried in the zfit search",
-											"default": 14
-										},
-										"maxChordFraction": {
-											"type": "number",
-											"description": "maximum detour ratio (of the tee-basket chord) allowed in zfit path search",
-											"default": 0.85
-										},
-										"maxAdditionalDistance": {
-											"type": "number",
-											"description": "maximum extra distance beyond the first leg for zfit waypoint searches",
-											"default": 220
-										},
-										"bendAngles": {
-											"type": "array",
-											"description": "bend angle samples (degrees) tried at each zfit waypoint",
-											"default": [
-												-60,
-												-45,
-												-30,
-												-20,
-												0,
-												20,
-												30,
-												45,
-												60
-											]
-										},
-										"bendLengthShort": {
-											"type": "number",
-											"description": "shortest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-											"default": 0.8
-										},
-										"bendLengthMedium": {
-											"type": "number",
-											"description": "middle bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-											"default": 1.6
-										},
-										"bendLengthLong": {
-											"type": "number",
-											"description": "longest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-											"default": 3
-										},
-										"maxPathOvershootFraction": {
-											"type": "number",
-											"description": "maximum total bent-path length, as a multiple of the direct tee-basket chord, before a candidate waypoint/bend is rejected (missed by the original inventory sweep)",
-											"default": 1.4
-										},
-										"bendFactorWithSegment": {
-											"type": "number",
-											"description": "score multiplier when the bent path has a non-zero second segment",
-											"default": 0.8
-										},
-										"bendFactorWithoutSegment": {
-											"type": "number",
-											"description": "score multiplier when the bent path has no second segment (angle bends immediately into the basket leg)",
-											"default": 0.9
-										},
-										"scoreMultiplier": {
-											"type": "number",
-											"description": "final multiplier applied to every zfit candidate score, on top of the bend factor",
-											"default": 0.9
-										}
-									}
-								}
-							}
-						},
 						"ribbon": {
 							"type": "object",
 							"additionalProperties": false,
@@ -1072,6 +774,311 @@
 											"type": "number",
 											"description": "worst-case search window size in pixels (was measure.ts DEFAULT_WORST_WINDOW; rides CorridorParams, see file header)",
 											"default": 90
+										}
+									}
+								}
+							}
+						},
+						"fourLaneSensor": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"edgeDeltaPx": {
+											"type": "number",
+											"description": "normal-distance offset on each side of an expected rail used for inside-vs-outside grayscale lift",
+											"default": 2.5
+										},
+										"liftReference": {
+											"type": "number",
+											"description": "inside-minus-outside grayscale lift that maps to score 1.0",
+											"default": 45
+										},
+										"tangentHalfPx": {
+											"type": "number",
+											"description": "half-length in source pixels sampled along the tangent for each band observation",
+											"default": 4
+										},
+										"tangentSamples": {
+											"type": "number",
+											"description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
+											"default": 5
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G6": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"scoring": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"fallbackTeeBboxOffset": {
+											"type": "number",
+											"description": "fallback tee bbox half-size when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 6
+										},
+										"fallbackTeeBboxSize": {
+											"type": "number",
+											"description": "fallback tee bbox dimension (size x size) when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 12
+										},
+										"ringDistance": {
+											"type": "number",
+											"description": "basket-to-tee ring membership distance (shared: assignment.ts recoveredTee onRing, measure.ts makeTees onRing, scoring.ts zoneFactor primary ring)",
+											"default": 84
+										},
+										"ringTolerance": {
+											"type": "number",
+											"description": "tolerance band around ringDistance for the basket-to-tee ring check (shared: assignment.ts, measure.ts, scoring.ts)",
+											"default": 12
+										},
+										"zoneFactorDistance": {
+											"type": "number",
+											"description": "close-proximity threshold for the zone factor penalty around a non-owning basket",
+											"default": 35
+										},
+										"secondaryRingDistance": {
+											"type": "number",
+											"description": "secondary ring distance for the zone factor radial check",
+											"default": 44
+										},
+										"secondaryRingTolerance": {
+											"type": "number",
+											"description": "tolerance band around secondaryRingDistance for the zone factor radial check",
+											"default": 8
+										},
+										"radialTolerance": {
+											"type": "number",
+											"description": "radial alignment fraction threshold for the zone factor penalty",
+											"default": 0.5
+										},
+										"teeOrientationSigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the tee-to-badge angle penalty",
+											"default": 12
+										},
+										"badgeFractionTarget": {
+											"type": "number",
+											"description": "optimal fractional position of the badge along the tee-basket chord",
+											"default": 0.36
+										},
+										"badgeFractionTolerance": {
+											"type": "number",
+											"description": "acceptable deviation from badgeFractionTarget before the fraction penalty kicks in",
+											"default": 0.19
+										},
+										"badgeFractionSigma": {
+											"type": "number",
+											"description": "gaussian sigma for the badge-fraction penalty",
+											"default": 0.15
+										},
+										"collinearityWeight": {
+											"type": "number",
+											"description": "upward factor for the collinearity bonus",
+											"default": 0.6
+										},
+										"collinearitySigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the collinearity angle penalty",
+											"default": 2
+										},
+										"basketIdentityFloor": {
+											"type": "number",
+											"description": "minimum score factor for the basket identity prior",
+											"default": 0.4
+										},
+										"basketScoreOffset": {
+											"type": "number",
+											"description": "offset subtracted from basket.score in the basket identity calculation",
+											"default": 0.2
+										},
+										"basketScoreScale": {
+											"type": "number",
+											"description": "divisor for basket.score normalization in the basket identity calculation",
+											"default": 0.5
+										},
+										"endpointSupportSampleCount": {
+											"type": "number",
+											"description": "number of trailing leg-path points averaged for RawPairEvidence.endpointSupportTee/endpointSupportBasket (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 3
+										},
+										"badgeOverlapWaiverRadius": {
+											"type": "number",
+											"description": "distance (field cells) from the badge center within which a leg point is exempt from the tee/basket path-overlap penalty (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 8
+										},
+										"recoveredTeePrior": {
+											"type": "number",
+											"description": "confidence discount applied to a pair score when the tee is a recovered (synthesized) tee rather than a directly-detected one (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 0.7
+										},
+										"minWindowCells": {
+											"type": "number",
+											"description": "minimum window size (field cells) for the weakWindow sliding-window worst-case score, shared by zfitFactor/makeRawPairEvidence/scorePair (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 3
+										}
+									}
+								}
+							}
+						},
+						"search": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"assignTopRows": {
+											"type": "number",
+											"description": "window size (top-N by score) of candidate pairs per badge kept for the search (was ASSIGN_TOP_ROWS)",
+											"default": 60
+										},
+										"exchangeTopK": {
+											"type": "number",
+											"description": "top-k limit per badge for pairwise exchange optimization (was EXCHANGE_TOP_K)",
+											"default": 12
+										},
+										"maxAssignPasses": {
+											"type": "number",
+											"description": "iteration limit for the assignment optimization loop (was MAX_ASSIGN_PASSES)",
+											"default": 60
+										},
+										"recoveredTeeDedupeDistance": {
+											"type": "number",
+											"description": "minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate",
+											"default": 14
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G7": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"zfit": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"topK": {
+											"type": "number",
+											"description": "assignment rows eligible for the salvage re-score (was ZFIT_TOP_K)",
+											"default": 80
+										},
+										"alignedWorstCeiling": {
+											"type": "number",
+											"description": "skip salvage when the aligned worst-window support is already at/above this (also the zfitFactor early-return ceiling — same check, same value)",
+											"default": 0.28
+										},
+										"distanceStartOffset": {
+											"type": "number",
+											"description": "pixel offset past the first leg length where zfit waypoint search begins",
+											"default": 8
+										},
+										"distanceStepPx": {
+											"type": "number",
+											"description": "spacing between successive waypoint distances tried in the zfit search",
+											"default": 14
+										},
+										"maxChordFraction": {
+											"type": "number",
+											"description": "maximum detour ratio (of the tee-basket chord) allowed in zfit path search",
+											"default": 0.85
+										},
+										"maxAdditionalDistance": {
+											"type": "number",
+											"description": "maximum extra distance beyond the first leg for zfit waypoint searches",
+											"default": 220
+										},
+										"bendAngles": {
+											"type": "array",
+											"description": "bend angle samples (degrees) tried at each zfit waypoint",
+											"default": [
+												-60,
+												-45,
+												-30,
+												-20,
+												0,
+												20,
+												30,
+												45,
+												60
+											]
+										},
+										"bendLengthShort": {
+											"type": "number",
+											"description": "shortest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 0.8
+										},
+										"bendLengthMedium": {
+											"type": "number",
+											"description": "middle bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 1.6
+										},
+										"bendLengthLong": {
+											"type": "number",
+											"description": "longest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 3
+										},
+										"maxPathOvershootFraction": {
+											"type": "number",
+											"description": "maximum total bent-path length, as a multiple of the direct tee-basket chord, before a candidate waypoint/bend is rejected (missed by the original inventory sweep)",
+											"default": 1.4
+										},
+										"bendFactorWithSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has a non-zero second segment",
+											"default": 0.8
+										},
+										"bendFactorWithoutSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has no second segment (angle bends immediately into the basket leg)",
+											"default": 0.9
+										},
+										"scoreMultiplier": {
+											"type": "number",
+											"description": "final multiplier applied to every zfit candidate score, on top of the bend factor",
+											"default": 0.9
 										}
 									}
 								}

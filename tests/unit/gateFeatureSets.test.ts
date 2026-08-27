@@ -9,9 +9,9 @@ const expectedMembership = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily'],
 	'g4-set': ['teeRecovery', 'phantomTee'],
-	'g5-set': ['fourLaneSensor'],
+	'g5-set': ['fourLaneSensor', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
-	'g7-set': ['ribbon', 'routing', 'zfit']
+	'g7-set': ['zfit']
 } as const;
 
 describe('threeFactor production semantic ABFeatureSets', () => {

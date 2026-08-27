@@ -13,14 +13,14 @@
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
-		"assignment"
+		"assignment",
+		"zfit"
 	],
 	"gates": {
 		"G2": {
 			"cleanBasketFamily": { "enabled": true }
 		},
 		"G5": {
-			"zfit": { "enabled": true },
 			"ribbon": {
 				"knobs": {
 					"fieldScale": 4,
@@ -36,6 +36,9 @@
 					"worstWindowSrcPx": 84
 				}
 			}
+		},
+		"G7": {
+			"zfit": { "enabled": true }
 		}
 	}
 }

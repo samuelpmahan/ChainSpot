@@ -31,7 +31,7 @@ import type { ABFeature } from './types';
 
 export const g4ScoringFeature = {
 	id: 'scoring',
-	gate: 'G4',
+	gate: 'G6',
 	kind: 'baseline',
 	defaultEnabled: true,
 	note: 'Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.',

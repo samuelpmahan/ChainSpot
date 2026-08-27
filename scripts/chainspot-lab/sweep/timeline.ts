@@ -41,40 +41,57 @@ function checkConformance(receipt: Receipt): ConformanceResult {
 	return { ok: missingConsumes.length === 0 && missingProduces.length === 0, missingConsumes, missingProduces };
 }
 
-/** Prints the operation timeline, grouped by gate in GATE_ORDER, in the
- * SAME order the operations actually ran (receipts[i] corresponds to
- * plan.ops[i] -- executeCompiledPlan guarantees this). Returns the receipts
- * with a conformance drift, for the caller's summary line. */
+/** Prints the operation timeline in execution order. The receipt at index i
+ * is evidence for plan.ops[i]; receipt ids are checked, never used to remap
+ * the timeline. Returns receipts with conformance or ordering drift, for the
+ * caller's summary line. */
 export function printTimeline(plan: CompiledExecutionPlan, receipts: readonly Receipt[]): readonly Receipt[] {
-	const receiptByOpId = new Map(receipts.map((r) => [r.opId, r]));
 	const drifted: Receipt[] = [];
 
-	console.log('--- Operation timeline (grouped by gate, chronological within gate) ---');
-	for (const gate of GATE_ORDER) {
-		const ops = plan.ops.filter((op) => op.gate === gate);
-		if (ops.length === 0) continue;
-		console.log(`  ${gateLabel(gate)}:`);
-		for (const op of ops) {
-			const receipt = receiptByOpId.get(op.id);
-			if (!receipt) {
-				console.log(`    ${op.id}: NO RECEIPT (did not run)`);
-				continue;
-			}
-			const conformance = checkConformance(receipt);
-			if (!conformance.ok) drifted.push(receipt);
-			const conformanceNote = conformance.ok
-				? 'OK'
-				: `DRIFT (missing consumes=[${conformance.missingConsumes.join(',')}] produces=[${conformance.missingProduces.join(',')}])`;
-			console.log(`    ${op.id}  ${receipt.durationMs.toFixed(2)}ms  conformance=${conformanceNote}`);
-			if (receipt.probes.length > 0) {
-				console.log(`      probes: ${receipt.probes.map((p) => `${p.name}=${p.value}`).join(', ')}`);
-			}
-			if (receipt.artifacts.length > 0) {
-				for (const a of receipt.artifacts) {
-					console.log(`      artifact: [${a.kind}] ${a.id} sha256=${a.sha256.slice(0, 12)}... -> ${a.uri}`);
-				}
+	console.log('--- Operation timeline (chronological) ---');
+	let previousGate: string | undefined;
+	for (const [index, op] of plan.ops.entries()) {
+		if (op.gate !== previousGate) {
+			console.log(`  ${gateLabel(op.gate)}:`);
+			previousGate = op.gate;
+		}
+
+		const receipt = receipts[index];
+		if (!receipt) {
+			console.log(`    ${op.id}: NO RECEIPT (did not run)`);
+			continue;
+		}
+		if (receipt.opId !== op.id) {
+			console.log(
+				`    !!! RECEIPT MISMATCH at index ${index}: expected '${op.id}', got '${receipt.opId}' !!!`
+			);
+			console.log(`    ${op.id}: NO RECEIPT (index evidence belongs to '${receipt.opId}')`);
+			drifted.push(receipt);
+			continue;
+		}
+
+		const conformance = checkConformance(receipt);
+		if (!conformance.ok) drifted.push(receipt);
+		const conformanceNote = conformance.ok
+			? 'OK'
+			: `DRIFT (missing consumes=[${conformance.missingConsumes.join(',')}] produces=[${conformance.missingProduces.join(',')}])`;
+		console.log(`    ${op.id}  ${receipt.durationMs.toFixed(2)}ms  conformance=${conformanceNote}`);
+		if (receipt.probes.length > 0) {
+			console.log(`      probes: ${receipt.probes.map((p) => `${p.name}=${p.value}`).join(', ')}`);
+		}
+		if (receipt.artifacts.length > 0) {
+			for (const a of receipt.artifacts) {
+				console.log(`      artifact: [${a.kind}] ${a.id} sha256=${a.sha256.slice(0, 12)}... -> ${a.uri}`);
 			}
 		}
+	}
+
+	for (let index = plan.ops.length; index < receipts.length; index++) {
+		const receipt = receipts[index];
+		console.log(
+			`    !!! RECEIPT MISMATCH at index ${index}: no planned operation, got '${receipt.opId}' !!!`
+		);
+		drifted.push(receipt);
 	}
 
 	const totalMs = receipts.reduce((n, r) => n + r.durationMs, 0);

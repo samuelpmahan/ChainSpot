@@ -79,6 +79,7 @@ async function runSweep(args: readonly string[]): Promise<void> {
 		`--- Renderer inventory: ${result.renderedCount} rendered, ${result.stubbedCount} stubbed -- outDir: ${result.outDir} ---`
 	);
 	printFeatureRenders(result.featureRenders);
+	console.log(`--- Full run receipt: ${result.runReceiptPaths.join(', ')} ---`);
 	if (truthPaths[0]) {
 		printGroundingComparisons(result.groundingComparisons);
 		if (result.truthScoringSkipped)

@@ -523,6 +523,8 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
 				receipts: result.receipts.map((receipt) => ({ opId: receipt.opId, artifactCount: receipt.artifacts.length, artifacts: receipt.artifacts })),
 				artifactRenders: result.artifactRenders,
 				featureRenders: result.featureRenders,
+				runReceipt: result.runReceipt,
+				runReceiptPaths: result.runReceiptPaths,
 				files: listArtifacts(result.outDir)
 			});
 			return true;

@@ -13,7 +13,8 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery"
+		"teeRecovery",
+		"zfit"
 	],
 	"gates": {
 		"G4": {

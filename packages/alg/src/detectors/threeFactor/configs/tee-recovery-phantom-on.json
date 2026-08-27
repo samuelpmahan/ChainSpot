@@ -14,7 +14,8 @@
 		"measurement",
 		"assignment",
 		"teeRecovery",
-		"phantomTee"
+		"phantomTee",
+		"zfit"
 	],
 	"gates": {
 		"G4": {

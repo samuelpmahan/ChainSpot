@@ -32,7 +32,7 @@ export interface ResolvedConfig {
 	readonly features: Readonly<Record<string, ResolvedFeature>>;
 }
 
-const GATE_IDS: readonly GateId[] = ['G1', 'G2', 'G3', 'G4', 'ST', 'G5', 'shared'];
+const GATE_IDS: readonly GateId[] = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'shared'];
 
 function fail(message: string): never {
 	throw new Error(`threeFactor config: ${message}`);

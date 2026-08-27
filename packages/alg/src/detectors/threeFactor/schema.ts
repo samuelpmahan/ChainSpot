@@ -8,7 +8,7 @@ import { ALL_FEATURES } from './features/registry';
 import { CONFIG_SCHEMA } from './config';
 import type { ABFeature, GateId } from './features/types';
 
-const GATE_IDS: readonly GateId[] = ['G1', 'G2', 'G3', 'G4', 'ST', 'G5', 'shared'];
+const GATE_IDS: readonly GateId[] = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'shared'];
 
 function knobSchema(defaultValue: unknown): Record<string, unknown> {
 	switch (typeof defaultValue) {

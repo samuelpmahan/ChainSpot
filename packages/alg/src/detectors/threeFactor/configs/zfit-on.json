@@ -3,7 +3,7 @@
 	"name": "zfit-on",
 	"note": "Example experiment: enable the z-fit pair-rescue deviation. This sparse diff against default.json IS the experiment.",
 	"gates": {
-		"G5": {
+		"G7": {
 			"zfit": { "enabled": true, "knobs": { "topK": 80, "alignedWorstCeiling": 0.28 } }
 		}
 	}

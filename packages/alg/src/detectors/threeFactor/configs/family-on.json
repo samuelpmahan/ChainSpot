@@ -14,7 +14,8 @@
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
-		"assignment"
+		"assignment",
+		"zfit"
 	],
 	"gates": {
 		"G2": {

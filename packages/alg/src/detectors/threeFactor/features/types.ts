@@ -11,19 +11,22 @@ import type { ABFeatureOperation } from '../../../exec/feature-set';
 import { OcclusionDetector } from '../occlusion';
 
 // ---------------------------------------------------------------------------
-// Gates — the human taxonomy over the DAG (organizes config/trace/UI; does
-// NOT define execution order, which the config's execution list carries).
-// Owner ruling: Straight Test (ST) sits between G4 and G5.
-export type GateId = 'G1' | 'G2' | 'G3' | 'G4' | 'ST' | 'G5' | 'shared';
+// Gates — one canonical knowledge order. The compiler still flattens units
+// into operations, but every operation/feature belongs to exactly one phase.
+// `shared` is infrastructure ownership, never an extra scheduled gate.
+export type GateId = 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6' | 'G7' | 'shared';
+
+export const CANONICAL_GATE_ORDER = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'] as const;
 
 export const GATE_TITLES: Record<GateId, string> = {
 	G1: 'Badges',
 	G2: 'Baskets',
-	G3: 'Tees',
-	G4: 'Tee→Badge',
-	ST: 'Straight Test',
-	G5: 'Path',
-	shared: 'Shared (masks/field)'
+	G3: 'Visible Tees',
+	G4: 'Endpoint Recovery',
+	G5: 'Straight Test',
+	G6: 'Assignment',
+	G7: 'Bend Refinement',
+	shared: 'Shared Infrastructure'
 };
 
 /**
@@ -35,10 +38,10 @@ export const LAB_GATE_MAPPING: Record<number, GateId | 'pre-detector'> = {
 	1: 'G1',
 	2: 'G2',
 	3: 'G3',
-	4: 'G3', // Endpoint Recovery
-	5: 'ST', // Straight Test
-	6: 'G4', // Assignment
-	7: 'G5' // Bend Refinement
+	4: 'G4',
+	5: 'G5',
+	6: 'G6',
+	7: 'G7'
 };
 
 // ---------------------------------------------------------------------------

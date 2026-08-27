@@ -27,8 +27,7 @@ import { ARTIFACT_EXTRACTORS, OPERATION_DEFS, operationImpls } from '../../exec/
  *
  * The LAB has seven knowledge gates: G1 badges, G2 baskets, G3 visible tees,
  * G4 endpoint recovery, G5 straight-test, G6 assignment, and G7 bend/path
- * refinement. `GateId` remains the engine's older execution vocabulary; the
- * set ids intentionally retain the semantic phases instead of aliasing G4/G5.
+ * refinement. There is no second engine vocabulary.
  */
 export type GateFeatureSetId =
 	| 'shared-set'
@@ -47,9 +46,9 @@ export const GATE_FEATURE_IDS = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily'],
 	'g4-set': ['teeRecovery', 'phantomTee'],
-	'g5-set': ['fourLaneSensor'],
+	'g5-set': ['fourLaneSensor', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
-	'g7-set': ['ribbon', 'routing', 'zfit']
+	'g7-set': ['zfit']
 } as const satisfies Record<GateFeatureSetId, readonly string[]>;
 
 const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
@@ -58,9 +57,9 @@ const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 	'g2-set': [g2SpriteFeature, cleanBasketFamilyFeature],
 	'g3-set': [g3EndpointsFeature, teeFamilyFeature],
 	'g4-set': [teeRecoveryFeature, phantomTeeFeature],
-	'g5-set': [fourLaneSensorFeature],
+	'g5-set': [fourLaneSensorFeature, g5RibbonFeature, g5RoutingFeature],
 	'g6-set': [g4ScoringFeature, g4SearchFeature],
-	'g7-set': [g5RibbonFeature, g5RoutingFeature, zfitFeature]
+	'g7-set': [zfitFeature]
 };
 
 /** The semantic production compositions, in the required feature order. */
@@ -71,17 +70,7 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 		services: THREE_FACTOR_SHARED_SERVICES,
 		imports: [],
 		locallyOperationlessFeatureIds: ['hsv'],
-		seededSlots: [
-			'image',
-			'viewport',
-			'params',
-			'stage',
-			'badges',
-			'baskets',
-			'tees',
-			'supportField',
-			'rawPairs'
-		],
+		seededSlots: [],
 		note: 'Shared cross-gate infrastructure.'
 	},
 	'g1-set': {
@@ -105,7 +94,7 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 	'g4-set': {
 		id: 'g4-set',
 		features: FEATURES['g4-set'],
-		imports: ['zfit', 'scoring', 'search', 'ribbon', 'routing'],
+		imports: ['scoring', 'search', 'ribbon', 'routing', 'zfit'],
 		seededSlots: [
 			'stage',
 			'badges',
@@ -122,29 +111,21 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 	'g5-set': {
 		id: 'g5-set',
 		features: FEATURES['g5-set'],
-		imports: [],
+		imports: ['scoring'],
 		locallyOperationlessFeatureIds: ['fourLaneSensor'],
-		seededSlots: []
+		seededSlots: ['image', 'localImage', 'params', 'viewport', 'stage', 'badges', 'baskets', 'tees']
 	},
 	'g6-set': {
 		id: 'g6-set',
 		features: FEATURES['g6-set'],
-		imports: ['zfit', 'ribbon', 'routing'],
+		imports: ['ribbon', 'routing'],
 		seededSlots: ['measurement', 'recoveredTees']
 	},
 	'g7-set': {
 		id: 'g7-set',
 		features: FEATURES['g7-set'],
-		imports: ['scoring'],
-		locallyOperationlessFeatureIds: ['zfit'],
-		seededSlots: [
-			'localImage',
-			'params',
-			'badges',
-			'viewport',
-			'tees',
-			'baskets'
-		]
+		imports: ['scoring', 'search'],
+		seededSlots: ['measurement', 'assignment.tees', 'assignment.rawPairs', 'assignment']
 	}
 };
 
@@ -153,12 +134,10 @@ const SET_BY_GATE: Record<GateId, GateFeatureSetId> = {
 	G1: 'g1-set',
 	G2: 'g2-set',
 	G3: 'g3-set',
-	// The engine labels G4 as Tee→Badge and G5 as Path. G4 is retained as the
-	// default projection here so assignment operations can expose their stale
-	// G4 declaration as a semantic G6 divergence below.
 	G4: 'g4-set',
-	ST: 'g5-set',
-	G5: 'g5-set'
+	G5: 'g5-set',
+	G6: 'g6-set',
+	G7: 'g7-set'
 };
 
 /** Feature ownership is semantic too. Several feature declarations retain
@@ -174,11 +153,12 @@ const FEATURE_SET_BY_ID: Readonly<Record<string, GateFeatureSetId>> =
 /** Canonical semantic operation order, independent of stale engine gate labels.
  *
  * Endpoint recovery is represented by teeRecovery followed by phantomTee.
- * Assignment is owned by G6 and path construction by G7; sets are never
+ * Straight evidence is owned by G5, assignment by G6, and Z-fit pathfinding
+ * by G7; sets are never
  * consulted by production scheduling.
  */
 const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
-	'shared-set': ['measurement'],
+	'shared-set': [],
 	'g1-set': [
 		'badgeStage.masks',
 		'badgeStage.components',
@@ -189,9 +169,9 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 	'g2-set': ['baskets', 'cleanBasketFamily'],
 	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily'],
 	'g4-set': ['teeRecovery', 'phantomTee'],
-	'g5-set': [],
+	'g5-set': ['supportField', 'badgeOcclusionPatch', 'rawPairs', 'measurement'],
 	'g6-set': ['assignment.pairs', 'assignment.scoring', 'assignment.ranking', 'assignment.selection'],
-	'g7-set': ['supportField', 'badgeOcclusionPatch', 'rawPairs']
+	'g7-set': ['zfit']
 };
 
 const OPERATION_DEF_BY_ID = new Map(OPERATION_DEFS.map((definition) => [definition.spec.id, definition]));
@@ -344,7 +324,8 @@ export const GATE_CROSS_GATE_DEPENDENCIES: Readonly<Record<string, readonly stri
 			imports.some((id) => !expectedImports.has(id) || !registryIds.has(id))
 		) {
 			throw new Error(
-				`Gate ABFeatureSet '${setId}': explicit imports drifted from operation reads.`
+				`Gate ABFeatureSet '${setId}': explicit imports drifted from operation reads ` +
+				`(declared=${imports.join(',') || 'none'}; expected=${[...expectedImports].join(',') || 'none'}).`
 			);
 		}
 

@@ -33,9 +33,9 @@ const membership: Record<string, readonly string[]> = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily'],
 	'g4-set': ['teeRecovery', 'phantomTee'],
-	'g5-set': ['fourLaneSensor'],
+	'g5-set': ['fourLaneSensor', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
-	'g7-set': ['ribbon', 'routing', 'zfit']
+	'g7-set': ['zfit']
 };
 
 type PublicSet = ABFeatureSet & {
@@ -115,24 +115,10 @@ describe('production gate ABFeatureSet receipts', () => {
 			'ribbon',
 			'routing'
 		]);
-		// The operation declarations retain historical engine aliases. The
-		// semantic set boundary is authoritative and the divergence is explicit.
-		expect(GATE_OPERATION_DECLARATION_DIVERGENCES).toEqual({
-			'assignment.pairs': { declaredGate: 'G4', semanticSet: 'g6-set' },
-			'assignment.scoring': { declaredGate: 'G4', semanticSet: 'g6-set' },
-			'assignment.ranking': { declaredGate: 'G4', semanticSet: 'g6-set' },
-			'assignment.selection': { declaredGate: 'G4', semanticSet: 'g6-set' },
-			supportField: { declaredGate: 'G5', semanticSet: 'g7-set' },
-			badgeOcclusionPatch: { declaredGate: 'G5', semanticSet: 'g7-set' },
-			rawPairs: { declaredGate: 'G5', semanticSet: 'g7-set' }
-		});
-		expect(GATE_FEATURE_DECLARATION_DIVERGENCES).toEqual({
-			scoring: { declaredGate: 'G4', semanticSet: 'g6-set' },
-			search: { declaredGate: 'G4', semanticSet: 'g6-set' },
-			ribbon: { declaredGate: 'G5', semanticSet: 'g7-set' },
-			routing: { declaredGate: 'G5', semanticSet: 'g7-set' },
-			zfit: { declaredGate: 'G5', semanticSet: 'g7-set' }
-		});
+		// The canonical vocabulary is shared by feature and operation
+		// declarations and semantic set ownership; no aliases remain.
+		expect(GATE_OPERATION_DECLARATION_DIVERGENCES).toEqual({});
+		expect(GATE_FEATURE_DECLARATION_DIVERGENCES).toEqual({});
 		expect(GATE_FEATURE_SETS['g4-set'].operations?.map(({ operation }) => operation.spec.id)).toEqual([
 			'teeRecovery',
 			'phantomTee'
@@ -151,9 +137,7 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect((GATE_FEATURE_SETS['shared-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
 			'hsv'
 		);
-		expect((GATE_FEATURE_SETS['g7-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
-			'zfit'
-		);
+		expect((GATE_FEATURE_SETS['g7-set'] as PublicSet).locallyOperationlessFeatureIds).toBeUndefined();
 		expect((GATE_FEATURE_SETS['g5-set'] as PublicSet).locallyOperationlessFeatureIds).toContain(
 			'fourLaneSensor'
 		);
@@ -180,18 +164,19 @@ describe('production gate ABFeatureSet receipts', () => {
 			expect(receipt.durationMs).toBeGreaterThanOrEqual(0);
 			expect(receipt.manifestHash).toMatch(/^[0-9a-f]{64}$/);
 		}
-		const st = compileABFeatureSet(GATE_FEATURE_SETS['g5-set']);
-		expect(st.plan.ops).toEqual([]);
-		const stReceipt = await executeABFeatureSet(st, createExecBoard(), nullFeatureContext, {
-			runId: 'receipt-st-empty',
-			invocation: 'vitest gateFeatureSetsReceipt'
-		});
-		expect(stReceipt.operations).toEqual([]);
-		const zfit = compileABFeatureSet(GATE_FEATURE_SETS['g7-set'], { zfit: { enabled: true } });
-		expect(zfit.enabledFeatureIds).toContain('zfit');
+		const g5 = compileABFeatureSet(GATE_FEATURE_SETS['g5-set']);
+		expect(g5.plan.ops.map((operation) => operation.id)).toEqual([
+			'supportField',
+			'badgeOcclusionPatch',
+			'rawPairs',
+			'measurement'
+		]);
+		const g7 = compileABFeatureSet(GATE_FEATURE_SETS['g7-set'], { zfit: { enabled: true } });
+		expect(g7.plan.ops.map((operation) => operation.id)).toEqual(['zfit']);
+		expect(g7.enabledFeatureIds).toContain('zfit');
 	});
 
-	test('default config execution and compiled operation order remain unchanged', () => {
+	test('default config execution follows the canonical operation order through G7', () => {
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
 		expect(resolved.execution).toEqual(DEFAULT_EXECUTION);
 		const plan = compileExecutionPlan(resolved);
@@ -212,7 +197,8 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
-			'assignment.selection'
+			'assignment.selection',
+			'zfit'
 		]);
 	});
 });

@@ -13,7 +13,8 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"phantomTee"
+		"phantomTee",
+		"zfit"
 	],
 	"gates": {
 		"G4": {

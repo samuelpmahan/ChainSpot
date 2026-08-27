@@ -26,8 +26,8 @@ const familyOnResolved = resolveConfig(familyOnConfigJson as ThreeFactorConfig, 
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(13); // 12 legacy units + default-OFF teeRecovery
-		expect(OPERATION_UNIVERSE.length).toBe(20); // 10 x 1-op units + badgeStage(4) + visible tees(2) + assignment(4)
+		expect(UNIT_OPERATIONS.size).toBe(14); // 13 prior units + explicit G7 Z-fit refinement
+		expect(OPERATION_UNIVERSE.length).toBe(21); // prior 20 operations + Z-fit
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
@@ -41,6 +41,7 @@ describe('operation universe (R2 inventory)', () => {
 			'assignment.ranking',
 			'assignment.selection'
 		]);
+		expect(UNIT_OPERATIONS.get('zfit')).toEqual(['zfit']);
 	});
 
 	test('all five OperationKinds are represented', () => {

@@ -24,7 +24,8 @@ import {
 	DEFAULT_SCORING_KNOBS,
 	DEFAULT_ZFIT_KNOBS
 } from '@chainspot/alg/detectors/threeFactor/scoring';
-import { DEFAULT_SEARCH_KNOBS } from '@chainspot/alg/detectors/threeFactor/assignment';
+import { assignThreeFactor, DEFAULT_SEARCH_KNOBS } from '@chainspot/alg/detectors/threeFactor/assignment';
+import type { ZfitKnobs } from '@chainspot/alg/detectors/threeFactor/scoring';
 import { DEFAULT_RIBBON_KNOBS } from '@chainspot/alg/detectors/threeFactor/ribbon';
 import { DEFAULT_ROUTING_KNOBS } from '@chainspot/alg/detectors/threeFactor/routing';
 import { DEFAULT_ENDPOINTS_KNOBS } from '@chainspot/alg/detectors/threeFactor/endpoints';
@@ -79,11 +80,11 @@ describe('parseConfig', () => {
 		const base = { schema: 'threeFactor-config@1', name: 'x' };
 		expect(() => parseConfig({ ...base, gates: { G9: {} } })).toThrow(/unknown gate/);
 		expect(() => parseConfig({ ...base, gates: { G5: { nope: {} } } })).toThrow(/unknown feature/);
-		expect(() => parseConfig({ ...base, gates: { G5: { zfit: { knobs: { nope: 1 } } } } })).toThrow(
+		expect(() => parseConfig({ ...base, gates: { G7: { zfit: { knobs: { nope: 1 } } } } })).toThrow(
 			/unknown knob/
 		);
 		expect(() =>
-			parseConfig({ ...base, gates: { G5: { zfit: { knobs: { topK: -1 } } } } })
+			parseConfig({ ...base, gates: { G7: { zfit: { knobs: { topK: -1 } } } } })
 		).toThrow(/positive integer/);
 		expect(() => parseConfig({ ...base, gates: { G3: { zfit: { enabled: true } } } })).toThrow(
 			/belongs to gate/
@@ -104,7 +105,8 @@ describe('validateExecution', () => {
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
-			'assignment'
+			'assignment',
+			'zfit'
 		]);
 	});
 
@@ -225,7 +227,7 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('e41e4be485b30ae40a72fe429b37989224eebaafb4fe4482709e46fccacc899d');
+		expect(hash).toBe('6c80731fe0448c8599836d45cd20bd23e5dd4e31d10b3bb2d5ba27c62cdf31d5');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {
@@ -249,6 +251,18 @@ describe('resolveConfig + engine', () => {
 		const resolved = resolveConfig(parseConfig(zfitOnJson), DEFAULT_EXECUTION);
 		const run = runThreeFactor(tinyRaster(), { config: resolved, zfit: false });
 		expect(run.measurement.parameters.zfit).toBe(true);
+	});
+
+	test('G7 Z-fit preserves the legacy pure assignment result', () => {
+		const resolved = resolveConfig(parseConfig(zfitOnJson), DEFAULT_EXECUTION);
+		const run = runThreeFactor(tinyRaster(), { config: resolved });
+		const legacy = assignThreeFactor(
+			run.measurement,
+			[],
+			resolved.features.zfit?.knobs as unknown as ZfitKnobs
+		);
+		expect(run.assignment).toEqual(legacy);
+		expect(run.trace?.execution.at(-1)).toBe('zfit');
 	});
 
 	test('trace collects unit spans and paramsHash lands on emissions', async () => {

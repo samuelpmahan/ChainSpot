@@ -3,7 +3,7 @@
 	"name": "tbs-four-lane-sensor-on",
 	"note": "Enable the bounded four-lane cross-section sensor primitive. No tracker/unit wiring is implied; this config exposes the exact LAB sensor knobs for TBS callers.",
 	"gates": {
-		"ST": {
+		"G5": {
 			"fourLaneSensor": {
 				"enabled": true,
 				"knobs": {

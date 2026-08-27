@@ -55,7 +55,7 @@ pixels: hole-number badges, baskets, tee pads, walk paths.
   `tests/unit/threeFactorParity.test.ts` pins it. Every run carries a
   `paramsHash` of the resolved config.
 - `tests/unit/dashsTrackSweep.test.ts` is the oracle: G1 18/18 digits,
-  G2 18/18 baskets, G3 18/18 tees, G4 18/18 assignment.
+  G2 18/18 baskets, G3 18/18 visible tees, G4 endpoint recovery, G6 18/18 assignment.
 - `scripts/chainspot-lab` — LAB, the CV workbench. `./lab --help`.
 
 **Read `docs/WORKFLOW.md` first.** It defines the lanes, the receipt, the

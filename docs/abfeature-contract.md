@@ -35,7 +35,7 @@ C01 predecessor-basket rule) and proves the workflow end to end.
 
 1. **One feature file** `features/<gate>.<id>.ts` exporting:
    - an `ABFeature` (`satisfies ABFeature`): `id`, `gate`
-     (`G1|G2|G3|G4|ST|G5|shared`), `kind: 'deviation'`,
+     (`G1|G2|G3|G4|G5|G6|G7|shared`), `kind: 'deviation'`,
      `defaultEnabled: false` (the registry THROWS at import if a deviation
      defaults on), `knobs` with `default` + `note` + `validate` per knob.
    - if the behavior is its own pipeline step: an `EngineUnit` with

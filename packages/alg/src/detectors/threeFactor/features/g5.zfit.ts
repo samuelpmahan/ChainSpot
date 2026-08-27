@@ -22,7 +22,7 @@ import type { ABFeature } from './types';
 
 export const zfitFeature = {
 	id: 'zfit',
-	gate: 'G5',
+	gate: 'G7',
 	kind: 'deviation',
 	defaultEnabled: false,
 	note: 'Z-shaped route salvage for top-K assignment rows whose corridor support is weak.',

@@ -447,11 +447,11 @@ function scoreG3(
 	};
 }
 
-/** G4: full tee->badge->basket assignment, exact-match convention from
- * tests/unit/dashsTrackSweep.test.ts's G4 case -- both endpoints of the
+/** G6: full tee->badge->basket assignment, exact-match convention from
+ * tests/unit/dashsTrackSweep.test.ts's G6 case -- both endpoints of the
  * assignment claimed for a hole's badge number must land within
  * ASSOCIATION_TOLERANCE_PX of that hole's truth. */
-function scoreG4(
+function scoreG6(
 	measurement: ThreeFactorMeasurement,
 	assignment: ThreeFactorAssignment,
 	truth: CanonicalTruth
@@ -489,12 +489,12 @@ function scoreG4(
 			misses.push(`H${hole.number}:tee=${teeD.toFixed(1)}px,basket=${basketD.toFixed(1)}px`);
 		}
 	}
-	return { gate: 'G4', matched, expected: truth.holes.length, maxDeviationPx, misses };
+	return { gate: 'G6', matched, expected: truth.holes.length, maxDeviationPx, misses };
 }
 
 /** Reads 'measurement' and 'assignment' straight off the board
  * executeCompiledPlan just ran against -- the algorithm's own final
- * output, not a recomputation. G5 (path) has no frozen ground truth in the
+ * output, not a recomputation. G7 (path/bend refinement) has no frozen ground truth in the
  * Annotation schema (corridorBends are unvalidated -- see
  * tests/unit/dashsTrackSweep.test.ts's header), so it is not scored here,
  * matching that suite's test.todo rather than fabricating an assertion. */
@@ -515,7 +515,7 @@ export function scoreTruth(
 	if (board.has('measurement') && board.has('assignment')) {
 		const measurement = board.get<ThreeFactorMeasurement>('measurement');
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
-		scores.push(scoreG4(measurement, assignment, truth));
+		scores.push(scoreG6(measurement, assignment, truth));
 	}
 	return {
 		expectedHoles: truth.holes.length,

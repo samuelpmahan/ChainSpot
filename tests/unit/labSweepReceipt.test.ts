@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -158,6 +158,16 @@ describe('LAB sweep receipt seam', () => {
 			);
 			expect(result.scoreboard).toBeUndefined();
 			expect(result.groundingComparisons).toEqual([]);
+			expect(result.runReceiptPaths).toHaveLength(2);
+			expect(result.runReceiptPaths.every(existsSync)).toBe(true);
+			const persisted = JSON.parse(readFileSync(result.runReceiptPaths[0], 'utf8'));
+			expect(persisted.schema).toBe('chainspot-lab-run-receipt@1');
+			expect(persisted.operations.map((operation: { id: string }) => operation.id)).toEqual(
+				result.receipts.map((receipt) => receipt.opId)
+			);
+			expect(readFileSync(result.runReceiptPaths[1], 'utf8')).toContain(
+				'OPERATIONS (CHRONOLOGICAL)'
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -333,7 +333,7 @@ const assignmentOps: OperationDef[] = [
 		spec: {
 			id: 'assignment.pairs',
 			kind: 'transform',
-			gate: 'G4',
+			gate: 'G6',
 			unit: 'assignment',
 			consumes: ['measurement', 'recoveredTees'],
 			produces: ['assignment.tees', 'assignment.rawPairs'],
@@ -379,23 +379,25 @@ const assignmentOps: OperationDef[] = [
 		spec: {
 			id: 'assignment.scoring',
 			kind: 'compute',
-			gate: 'G4',
+			gate: 'G6',
 			unit: 'assignment',
 			consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
 			produces: ['assignment.scoredPairs'],
-			features: [zfitFeature.id, g4ScoringFeature.id],
-			note: 'score every pair (zfit salvage pass over the top-K when enabled)'
+			features: [g4ScoringFeature.id],
+			note: 'score every pair on the straight-route evidence; bent-path salvage belongs to G7'
 		},
 		run(board, ctx) {
 			const stop = ctx.span('assignment');
 			const measurement = board.get<ThreeFactorMeasurement>('measurement');
 			const tees = board.get<TeeEvidence[]>('assignment.tees');
 			const rawPairs = board.get<readonly RawPairEvidence[]>('assignment.rawPairs');
-			const zfitKnobs = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
+			const straightMeasurement = measurement.parameters.zfit
+				? { ...measurement, parameters: { ...measurement.parameters, zfit: false } }
+				: measurement;
 			board.set(
 				'assignment.scoredPairs',
-				scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs)
+				scoreRawPairs(straightMeasurement, tees, rawPairs, undefined, scoringKnobs)
 			);
 			stop();
 		}
@@ -404,7 +406,7 @@ const assignmentOps: OperationDef[] = [
 		spec: {
 			id: 'assignment.ranking',
 			kind: 'compute',
-			gate: 'G4',
+			gate: 'G6',
 			unit: 'assignment',
 			consumes: ['assignment.scoredPairs'],
 			produces: ['assignment.rankedByBadge'],
@@ -421,7 +423,7 @@ const assignmentOps: OperationDef[] = [
 		spec: {
 			id: 'assignment.selection',
 			kind: 'decide',
-			gate: 'G4',
+			gate: 'G6',
 			unit: 'assignment',
 			consumes: ['assignment.rankedByBadge', 'measurement', 'assignment.tees'],
 			produces: ['assignment'],
@@ -464,6 +466,68 @@ const assignmentOps: OperationDef[] = [
 	}
 ];
 
+const zfitOps: OperationDef[] = [
+	{
+		spec: {
+			id: 'zfit',
+			kind: 'compute',
+			gate: 'G7',
+			unit: 'zfit',
+			consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs', 'assignment'],
+			produces: ['assignment'],
+			features: [zfitFeature.id, g4ScoringFeature.id, g4SearchFeature.id],
+			note: 'when enabled, rescore the top-K weak straight routes with bent-path Z-fit and reselect ownership'
+		},
+		run(board, ctx) {
+			const stop = ctx.span('zfit');
+			const state = ctx.resolve(zfitFeature);
+			const measurement = board.get<ThreeFactorMeasurement>('measurement');
+			const tees = board.get<readonly TeeEvidence[]>('assignment.tees');
+			const rawPairs = board.get<readonly RawPairEvidence[]>('assignment.rawPairs');
+			const prior = board.get<ThreeFactorAssignment>('assignment');
+			if (!state.enabled) {
+				board.set('assignment', prior);
+				stop();
+				return;
+			}
+			const zfitKnobs = state.knobs as unknown as ZfitKnobs;
+			const scoringKnobs = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
+			const searchKnobs =
+				(ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs) ?? DEFAULT_SEARCH_KNOBS;
+			const scored = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
+			const byBadge = rankPairsByBadge(scored);
+			const selected = selectAssignments(byBadge, searchKnobs);
+			const assignments: AssignmentEvidence[] = [...selected.entries()]
+				.filter((entry): entry is [string, ScoredPairEvidence] => entry[1] !== null)
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([badgeId, pair]) => ({
+					badgeId,
+					teeId: pair.raw.teeId,
+					basketId: pair.raw.basketId,
+					score: pair.score,
+					rank: pair.rank,
+					ownership: 'selected' as const,
+					alternatives: (byBadge.get(badgeId) ?? [])
+						.filter((candidate) => pairKey(candidate) !== pairKey(pair))
+						.slice(0, 3)
+						.map((candidate) => ({
+							teeId: candidate.raw.teeId,
+							basketId: candidate.raw.basketId,
+							score: candidate.score
+						}))
+				}));
+			for (const own of assignments) ctx.measure('zfit', 'score', own.score);
+			board.set('assignment', {
+				measurement,
+				tees,
+				scoredPairs: [...byBadge.values()].flat(),
+				assignments
+			});
+			stop();
+		}
+	}
+];
+
 // ---------------------------------------------------------------------------
 // The nine units that keep a single operation — real DAG nodes, just not
 // decomposed further (R2: "your judgment on the exact cut").
@@ -478,7 +542,7 @@ const reusedOps: OperationDef[] = [
 		g5RoutingFeature.id,
 		g4ScoringFeature.id
 	]),
-	wrapLegacy('measurement', 'materialize', 'shared'),
+	wrapLegacy('measurement', 'materialize', 'G5'),
 	{
 		spec: {
 			id: 'phantomTee',
@@ -544,6 +608,7 @@ const allOpDefs: readonly OperationDef[] = [
 	...badgeStageOps,
 	...teesOps,
 	...assignmentOps,
+	...zfitOps,
 	...reusedOps
 ];
 const opDefById = new Map(allOpDefs.map((def) => [def.spec.id, def]));
@@ -569,6 +634,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['rawPairs', ['rawPairs']],
 	['measurement', ['measurement']],
 	['assignment', assignmentOps.map((op) => op.spec.id)],
+	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
 	['teeFamily', ['teeFamily']],
 	['teeRecovery', ['teeRecovery']],
@@ -682,6 +748,16 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 			{
 				kind: 'measurementTable',
 				id: 'assignment.selection.table',
+				bytes: jsonBytes(assignment.assignments)
+			}
+		];
+	},
+	zfit(board) {
+		const assignment = board.get<ThreeFactorAssignment>('assignment');
+		return [
+			{
+				kind: 'measurementTable',
+				id: 'zfit.finalAssignment.table',
 				bytes: jsonBytes(assignment.assignments)
 			}
 		];
