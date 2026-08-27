@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
-	"name": "phantom-tee-on",
-	"note": "C01 complete-occlusion fallback enabled: after assignment, tee-less holes get a tee synthesized at the predecessor hole's assigned basket tip, then assignment re-runs. Note the execution list gains the phantomTee unit — the order IS part of the experiment.",
+	"name": "tee-recovery-phantom-on",
+	"note": "G4 post-assignment tee-shard recovery followed by G4 phantom tee assignment completion. Both deviations are deliberately after normal assignment, so G3-only sweeps exclude them without invalid dependencies.",
 	"execution": [
 		"badgeStage",
 		"badges",
@@ -13,10 +13,12 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
+		"teeRecovery",
 		"phantomTee"
 	],
 	"gates": {
 		"G4": {
+			"teeRecovery": { "enabled": true },
 			"phantomTee": { "enabled": true, "knobs": { "minViableScore": 0 } }
 		}
 	}

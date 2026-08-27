@@ -72,29 +72,59 @@ export interface TeeFamilyKnobs {
 }
 
 function positiveNumber(name: string): (value: unknown) => string | null {
-	return (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? null : `${name} must be a positive number`);
+	return (value: unknown) =>
+		typeof value === 'number' && Number.isFinite(value) && value > 0
+			? null
+			: `${name} must be a positive number`;
 }
 
 function toleranceFactor(name: string): (value: unknown) => string | null {
-	return (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 1 ? null : `${name} must be a number > 1`);
+	return (value: unknown) =>
+		typeof value === 'number' && Number.isFinite(value) && value > 1
+			? null
+			: `${name} must be a number > 1`;
 }
 
 const TEE_FAMILY_RENDER: FeatureRender = {
 	units: ['teeFamily'],
 	draw(unit: UnitTrace, run: RunTrace) {
 		const accepted = unit.drawables.filter((drawable) => drawable.verdict === 'accepted');
+		const acceptedBorders = accepted.filter((drawable) => drawable.type === 'polyline');
 		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
 		const info = unit.drawables.filter((drawable) => drawable.verdict === 'info');
-		const padAabbs = info.filter((drawable) => drawable.ref?.endsWith(':pad-aabb'));
-		const ringInteriors = info.filter((drawable) => drawable.ref?.endsWith(':ring-interior'));
-		const passthrough = info.filter(
-			(drawable) =>
-				!drawable.ref?.endsWith(':pad-aabb') && !drawable.ref?.endsWith(':ring-interior')
-		);
+		// The center is already measured on each accepted border drawable. Add a
+		// presentation-only marker to this plan without mutating the trace or
+		// inflating semantic accepted counts.
+		const centerMarkers = acceptedBorders.flatMap((drawable) => {
+			const x = drawable.values?.orientedCenterX;
+			const y = drawable.values?.orientedCenterY;
+			return drawable.type === 'polyline' &&
+				typeof x === 'number' &&
+				Number.isFinite(x) &&
+				typeof y === 'number' &&
+				Number.isFinite(y)
+				? [
+						{
+							type: 'point' as const,
+							xPx: x,
+							yPx: y,
+							verdict: 'info' as const,
+							ref: `${drawable.ref ?? 'UNKNOWN'}:center`,
+							visualRole: 'tee-center' as const,
+							reason: 'center indicator derived from the accepted border drawable values',
+							values: { centerXPx: x, centerYPx: y }
+						}
+					]
+				: [];
+		});
+		const acceptedVisual = [...acceptedBorders, ...centerMarkers];
 		const badgeUnit = run.units.find((candidate) => candidate.id === 'badges');
-		const detectedBadgeCount =
-			badgeUnit?.drawables.filter((drawable) => drawable.verdict === 'accepted').length;
-		const acceptedVisibleTeeCount = accepted.length;
+		const detectedBadgeCount = badgeUnit?.drawables.filter(
+			(drawable) => drawable.verdict === 'accepted'
+		).length;
+		const acceptedVisibleTeeCount = accepted.filter(
+			(drawable) => drawable.type === 'polyline'
+		).length;
 		const expectedRecoverNum =
 			detectedBadgeCount === undefined
 				? undefined
@@ -108,44 +138,17 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 					note: 'ring candidates rejected by enclosing-frame family consistency',
 					drawables: rejected
 				},
-				...(padAabbs.length
-					? [
-							{
-								name: 'visible tee pad raster AABBs (G3)',
-								note: 'axis-aligned component bounds retained as secondary evidence, not drawn as the oriented object boundary',
-								drawables: padAabbs
-							}
-						]
-					: []),
-				...(ringInteriors.length
-					? [
-							{
-								name: 'visible tee hollow-interior detector bounds (G3)',
-								note: 'tight ring-hole boxes retained separately; never represented as full tee-pad bounds',
-								drawables: ringInteriors
-							}
-						]
-					: []),
-				...(passthrough.length
-					? [
-							{
-								name: 'non-visible-tier passthrough (G3)',
-								note: 'not decided by visible family; recovery remains a separate phase',
-								drawables: passthrough
-							}
-						]
-					: []),
 				{
 					name: 'visible tee oriented full-pad bounds accepted (G3)',
-					note: 'component-derived quadrilateral drawn last so the semantic object perimeter remains visually primary',
-					drawables: accepted
+					note: 'exact oriented detected border, with a tiny center cross; secondary raster/interior evidence is kept in the trace but omitted here',
+					drawables: acceptedVisual
 				}
 			],
 			notes: [
 				`feature: teeFamily (visible tees) -- ${unit.gate}, trace unit '${unit.id}'`,
 				'accepted object geometry: closed oriented quadrilateral from the enclosing bright-mask component PCA center/angle/major/minor.',
 				'corner math: retain the component projection extrema (axisMajorMin/Max and axisMinorMin/Max), expand each by 0.5px to cover whole raster cells, then rotate all four extrema intersections back into canonical image coordinates.',
-				'preserved secondary geometry: component raster AABB plus hollow-interior ring bbox; neither is substituted for the oriented pad boundary.',
+				`secondary trace drawables omitted from the primary receipt: ${info.length} (raw trace remains available; no AABB, hollow-ring box, or passthrough marker is drawn here).`,
 				'pair-scoring angle remains the original hollow-ring angle in TeeEvidence.angleRad; this geometry repair does not change assignment math.',
 				`acceptedVisibleTeeCount: ${acceptedVisibleTeeCount}  (source: accepted UnitTrace.drawables for teeFamily)`,
 				`detectedBadgeCount: ${detectedBadgeCount ?? 'UNKNOWN'}  (source: accepted RunTrace unit 'badges' drawables)`,
@@ -188,7 +191,7 @@ export const teeFamilyFeature = {
 		},
 		majorRatioToleranceFactor: {
 			default: 1.25,
-			note: 'a family member\'s frame major must satisfy |log(f.major/s.major)| <= log(this) vs the anchor frame (LAB: log(1.25))',
+			note: "a family member's frame major must satisfy |log(f.major/s.major)| <= log(this) vs the anchor frame (LAB: log(1.25))",
 			validate: toleranceFactor('majorRatioToleranceFactor')
 		},
 		minorRatioToleranceFactor: {
@@ -246,9 +249,7 @@ export interface TeeFamilySelection {
 /** Oriented rectangle centered on the already-measured component centroid.
  * Component PCA already paid for angle + projected major/minor extents; this
  * function only converts those retained measurements into four corners. */
-export function orientedPadCorners(
-	frame: TeeFamilyFrame
-): TeePadEvidence['orientedCorners'] {
+export function orientedPadCorners(frame: TeeFamilyFrame): TeePadEvidence['orientedCorners'] {
 	const majorX = Math.cos(frame.angleRad);
 	const majorY = Math.sin(frame.angleRad);
 	const minorX = -majorY;
@@ -288,10 +289,8 @@ function teePadEvidence(frame: TeeFamilyFrame): TeePadEvidence {
 		bbox: [frame.bboxX, frame.bboxY, frame.bboxW, frame.bboxH],
 		componentCentroidXPx: frame.componentCentroidXPx,
 		componentCentroidYPx: frame.componentCentroidYPx,
-		centerXPx:
-			frame.componentCentroidXPx + 0.5 + majorX * majorMid + minorX * minorMid,
-		centerYPx:
-			frame.componentCentroidYPx + 0.5 + majorY * majorMid + minorY * minorMid,
+		centerXPx: frame.componentCentroidXPx + 0.5 + majorX * majorMid + minorX * minorMid,
+		centerYPx: frame.componentCentroidYPx + 0.5 + majorY * majorMid + minorY * minorMid,
 		angleRad: frame.angleRad,
 		majorPx: frame.major,
 		minorPx: frame.minor,
@@ -327,7 +326,9 @@ export function findEnclosingFrame(
 			ring.cy <= f.bboxY + f.bboxH
 	);
 	if (!candidates.length) return null;
-	return candidates.slice().sort((a, b) => a.bboxW * a.bboxH - b.bboxW * b.bboxH || b.area - a.area)[0];
+	return candidates
+		.slice()
+		.sort((a, b) => a.bboxW * a.bboxH - b.bboxW * b.bboxH || b.area - a.area)[0];
 }
 
 /**
@@ -337,7 +338,10 @@ export function findEnclosingFrame(
  * family, ties broken by minimum summed spread. Output (and the winning
  * anchor, for trace reporting) sorted deterministically by ring cy then cx.
  */
-export function selectTeeFamily(measures: readonly TeeFamilyMeasure[], knobs: TeeFamilyKnobs): TeeFamilySelection {
+export function selectTeeFamily(
+	measures: readonly TeeFamilyMeasure[],
+	knobs: TeeFamilyKnobs
+): TeeFamilySelection {
 	const majorTol = Math.log(knobs.majorRatioToleranceFactor);
 	const minorTol = Math.log(knobs.minorRatioToleranceFactor);
 	const areaTol = Math.log(knobs.areaRatioToleranceFactor);
@@ -442,7 +446,11 @@ export const teeFamilyUnit: EngineUnit = {
 
 			const frames = stage.brightComponents.map((component) => toFrame(component, topPx));
 			const sizeEligibleCount = frames.filter(
-				(f) => f.area >= knobs.frameAreaMin && f.area <= knobs.frameAreaMax && f.bboxW <= knobs.frameMaxWidth && f.bboxH <= knobs.frameMaxHeight
+				(f) =>
+					f.area >= knobs.frameAreaMin &&
+					f.area <= knobs.frameAreaMax &&
+					f.bboxW <= knobs.frameMaxWidth &&
+					f.bboxH <= knobs.frameMaxHeight
 			).length;
 
 			const ringTees = tees.filter((tee) => tee.tier === 'ring');
@@ -532,7 +540,8 @@ export const teeFamilyUnit: EngineUnit = {
 						bbox: pad.bbox,
 						verdict: 'info',
 						ref: `${detId}:pad-aabb`,
-						reason: 'enclosing bright component raster AABB retained as secondary evidence; not the oriented object boundary',
+						reason:
+							'enclosing bright component raster AABB retained as secondary evidence; not the oriented object boundary',
 						values: {
 							componentLabel: pad.componentLabel,
 							bboxWidth: pad.bbox[2],
@@ -545,7 +554,8 @@ export const teeFamilyUnit: EngineUnit = {
 							bbox: tee.ring.bbox,
 							verdict: 'info',
 							ref: `${detId}:ring-interior`,
-							reason: 'hollow-interior detector bbox retained separately; never the full tee-pad boundary',
+							reason:
+								'hollow-interior detector bbox retained separately; never the full tee-pad boundary',
 							values: {
 								ringArea: tee.ring.area,
 								ringElongation: tee.ring.elongation,
@@ -576,7 +586,14 @@ export const teeFamilyUnit: EngineUnit = {
 					verdict: 'rejected',
 					ref: detId,
 					reason: `excluded from winning family (anchor ${anchor?.ring.id ?? 'none'}): failing ${failing.length ? failing.join(', ') : 'unknown'} log-ratio(s) — |Δlog major|=${dMajor.toFixed(4)} (tol ${majorTol.toFixed(4)}), |Δlog minor|=${dMinor.toFixed(4)} (tol ${minorTol.toFixed(4)}), |Δlog area|=${dArea.toFixed(4)} (tol ${areaTol.toFixed(4)})`,
-					values: { dLogMajor: dMajor, dLogMinor: dMinor, dLogArea: dArea, majorTol, minorTol, areaTol }
+					values: {
+						dLogMajor: dMajor,
+						dLogMinor: dMinor,
+						dLogArea: dArea,
+						majorTol,
+						minorTol,
+						areaTol
+					}
 				});
 			}
 

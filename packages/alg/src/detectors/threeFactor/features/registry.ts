@@ -18,6 +18,7 @@ import { g1BadgesFeature } from './g1.badges';
 import { g1DigitsFeature } from './g1.digits';
 import { sharedHsvFeature } from './shared.hsv';
 import { teeFamilyFeature } from './g3.teeFamily';
+import { teeRecoveryFeature } from './g3.teeRecovery';
 import { fourLaneSensorFeature } from './st.fourLaneSensor';
 
 export const ALL_FEATURES: readonly ABFeature[] = [
@@ -34,6 +35,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	g1DigitsFeature,
 	sharedHsvFeature,
 	teeFamilyFeature,
+	teeRecoveryFeature,
 	fourLaneSensorFeature
 ];
 

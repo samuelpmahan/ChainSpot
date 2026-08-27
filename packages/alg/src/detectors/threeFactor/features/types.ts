@@ -8,6 +8,7 @@
 // remains the explicit recovered production behavior.
 
 import type { ABFeatureOperation } from '../../../exec/feature-set';
+import { OcclusionDetector } from '../occlusion';
 
 // ---------------------------------------------------------------------------
 // Gates — the human taxonomy over the DAG (organizes config/trace/UI; does
@@ -109,6 +110,15 @@ export interface DrawableBase {
 	readonly ref?: string;
 	/** small numeric payload rendered in tooltips */
 	readonly values?: Record<string, number>;
+	/** Presentation intent carried by the detector trace, never inferred from
+	 * a magic ref string. It cannot change a verdict or semantic cardinality. */
+	readonly visualRole?:
+		| 'tee-border'
+		| 'tee-center'
+		| 'tee-shard'
+		| 'tee-corner-tick'
+		| 'tee-rejection'
+		| 'phantom-center';
 }
 
 export interface PointDrawable extends DrawableBase {
@@ -241,10 +251,13 @@ export interface FeatureContext {
 	heatmap(unitId: string, key: string, data: Float32Array): void;
 	/** returns a stop function that records elapsed ms on the unit trace */
 	span(unitId: string): () => void;
+	/** Stable per-run known-occlusion service. */
+	readonly occlusion: OcclusionDetector;
 }
 
 /** No-op context: legacy callers pay nothing and change nothing. */
 export const nullFeatureContext: FeatureContext = {
+	occlusion: new OcclusionDetector(),
 	resolve(feature) {
 		return { enabled: feature.defaultEnabled, knobs: defaultKnobs(feature) };
 	},

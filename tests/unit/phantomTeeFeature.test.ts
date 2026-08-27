@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { synthesizePhantomTees } from '@chainspot/alg/detectors/threeFactor/features/g3.phantomTee';
+import { phantomTeeUnit, synthesizePhantomTees } from '@chainspot/alg/detectors/threeFactor/features/g3.phantomTee';
 import { parseConfig } from '@chainspot/alg/detectors/threeFactor';
 import phantomOnJson from '@chainspot/alg/detectors/threeFactor/configs/phantom-tee-on.json';
 import type {
 	AssignmentEvidence,
+	ThreeFactorAssignment,
 	ThreeFactorMeasurement
 } from '@chainspot/alg/detectors/threeFactor';
+import { createBoard } from '@chainspot/alg/detectors/threeFactor/measure';
+import { defaultKnobs, type FeatureContext } from '@chainspot/alg/detectors/threeFactor/features/types';
+import { OcclusionDetector } from '@chainspot/alg/detectors/threeFactor/occlusion';
 
 function badge(detId: string, label: string, cx: number, cy: number) {
 	return {
@@ -63,10 +67,10 @@ function measurementFixture(): ThreeFactorMeasurement {
 			width: 67,
 			height: 67,
 			scale: 3,
-			support: new Float32Array(67 * 67),
-			orientation: new Float32Array(67 * 67),
-			parameters: { percentile: 0.995, gamma: 0.7 }
-		} as unknown as ThreeFactorMeasurement['field'],
+			support: new Float32Array(67 * 67).fill(1),
+			bestTheta: new Float32Array(67 * 67),
+			parameters: { orientations: 12, widthsSrc: [24], gaussianSigma: 0.8, normalizationPercentile: 0.995, gamma: 0.7 }
+		},
 		rawPairs: []
 	};
 }
@@ -98,14 +102,59 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 		expect(phantoms[0].provenance.note).toContain('B1');
 	});
 
-	test('hole 1 never gets a phantom; missing predecessor blocks synthesis', () => {
-		// hole 2 assigned, hole 1 missing -> nothing (T1 has no predecessor)
+	test('completes hole 1 and chain gaps with deterministic finite fallback locations', () => {
+		// Hole 1 has no predecessor; it must still receive a deterministic,
+		// finite placement rather than silently remaining unassigned. Hole 2
+		// receives the normal predecessor-basket placement even if hole 1 was
+		// initially missing.
 		const phantoms = synthesizePhantomTees(
 			measurementFixture(),
 			[assignment('badge-1', 'basket-1', 0.8)],
 			0
 		);
-		expect(phantoms).toHaveLength(0);
+		expect(phantoms).toHaveLength(1);
+		expect(Number.isFinite(phantoms[0].xPx)).toBe(true);
+		expect(Number.isFinite(phantoms[0].yPx)).toBe(true);
+		expect(phantoms[0].provenance.note).toContain('hole 1');
+		expect(phantoms[0].provenance.note).toContain('fallback');
+	});
+
+	test('fills all numbered holes deterministically when none received an assignment', () => {
+		const fixture = measurementFixture();
+		const first = synthesizePhantomTees(fixture, [], 0);
+		const second = synthesizePhantomTees(fixture, [], 0);
+		expect(first).toHaveLength(2);
+		expect(first).toEqual(second);
+		for (const phantom of first) {
+			expect(Number.isFinite(phantom.xPx)).toBe(true);
+			expect(Number.isFinite(phantom.yPx)).toBe(true);
+			expect(phantom.provenance.note).toMatch(/fallback|B\d+ tip/);
+		}
+	});
+
+	test('unit completion reruns normal assignment then covers every finite numbered badge', () => {
+		const measurement = measurementFixture();
+		const board = createBoard();
+		board.set('measurement', measurement);
+		board.set('recoveredTees', []);
+		board.set('assignment', { measurement, tees: [], scoredPairs: [], assignments: [] } satisfies ThreeFactorAssignment);
+		const context: FeatureContext = {
+			occlusion: new OcclusionDetector(),
+			resolve: (feature) =>
+				feature.id === 'phantomTee'
+					? { enabled: true, knobs: { minViableScore: 0 } }
+					: { enabled: feature.defaultEnabled, knobs: defaultKnobs(feature) },
+			measure() {},
+			overlay() {},
+			heatmap() {},
+			span: () => () => {}
+		};
+		phantomTeeUnit.run(board, context);
+		const result = board.get<ThreeFactorAssignment>('assignment');
+		expect(result.assignments.map((row) => row.badgeId).sort()).toEqual(['badge-0', 'badge-1']);
+		expect(result.assignments.every((row) => row.score >= 0)).toBe(true);
+		expect(new Set(result.assignments.map((row) => row.teeId)).size).toBe(result.assignments.length);
+		expect(new Set(result.assignments.map((row) => row.basketId)).size).toBe(result.assignments.length);
 	});
 
 	test('a hole with a viable assignment gets no phantom', () => {
@@ -120,6 +169,6 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 	test('phantom-tee-on config parses and lists the unit in execution', () => {
 		const config = parseConfig(phantomOnJson);
 		expect(config.execution).toContain('phantomTee');
-		expect(config.gates?.G3?.phantomTee?.enabled).toBe(true);
+		expect(config.gates?.G4?.phantomTee?.enabled).toBe(true);
 	});
 });

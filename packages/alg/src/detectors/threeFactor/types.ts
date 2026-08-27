@@ -94,7 +94,9 @@ export interface BasketEvidence {
 export type TeeTier = 'ring' | 'component' | 'recovered';
 
 export interface RecoveryProvenance {
-	readonly source: 'manual' | 'historical-fixture' | 'explicit-injected';
+	/** `tee-shard-recovery` is detector-derived; phantom assignment fallbacks
+	 * remain explicit injections because no tee pixels were observed. */
+	readonly source: 'manual' | 'historical-fixture' | 'explicit-injected' | 'tee-shard-recovery';
 	readonly note: string;
 	readonly score?: number;
 }

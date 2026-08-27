@@ -21,6 +21,8 @@ import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import { teeFamilyUnit } from './features/g3.teeFamily';
+import { teeRecoveryUnit } from './features/g3.teeRecovery';
+import { OcclusionDetector } from './occlusion';
 import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
 	defaultKnobs,
@@ -81,6 +83,7 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	assignmentUnit,
 	phantomTeeUnit,
 	teeFamilyUnit,
+	teeRecoveryUnit,
 	cleanBasketFamilyUnit
 ];
 
@@ -170,6 +173,7 @@ export function createTraceContext(
 	};
 
 	const ctx: FeatureContext = {
+		occlusion: new OcclusionDetector(),
 		resolve(feature) {
 			return (
 				resolved.features[feature.id] ?? {

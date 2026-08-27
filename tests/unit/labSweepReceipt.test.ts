@@ -113,6 +113,19 @@ describe('LAB sweep receipt seam', () => {
 		);
 	});
 
+	test('G3 slices exclude the post-assignment tee recovery and terminal phantom completion', async () => {
+		const { plan } = compileSweepConfig(
+			resolve(
+				REPO_ROOT,
+				'packages/alg/src/detectors/threeFactor/configs/tee-recovery-phantom-on.json'
+			)
+		);
+		const sliced = await slicePlanThroughGate(plan, 'G3');
+		expect(sliced.ops.map((operation) => operation.id)).not.toContain('teeRecovery');
+		expect(sliced.ops.map((operation) => operation.id)).not.toContain('phantomTee');
+		expect(sliced.ops.every((operation) => operation.gate !== 'G4')).toBe(true);
+	});
+
 	test('multi-input unverified truth is skipped end-to-end with an exact reason', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'lab-sweep-truth-'));
 		try {

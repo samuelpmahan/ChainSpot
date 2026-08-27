@@ -38,6 +38,7 @@
 					"assignment",
 					"phantomTee",
 					"teeFamily",
+					"teeRecovery",
 					"cleanBasketFamily"
 				]
 			},
@@ -387,28 +388,6 @@
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
-						"phantomTee": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "C01 complete-occlusion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
-							"properties": {
-								"enabled": {
-									"type": "boolean",
-									"default": false
-								},
-								"knobs": {
-									"type": "object",
-									"additionalProperties": false,
-									"properties": {
-										"minViableScore": {
-											"type": "number",
-											"description": "a hole whose best assignment score is at or below this counts as tee-less",
-											"default": 0
-										}
-									}
-								}
-							}
-						},
 						"endpoints": {
 							"type": "object",
 							"additionalProperties": false,
@@ -570,15 +549,53 @@
 											"default": 1.5
 										}
 									}
-								}
-							}
-						}
 					}
-				},
-				"G4": {
+					}
+					}
+				}
+			},
+			"G4": {
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
+						"phantomTee": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Assignment-completion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minViableScore": {
+											"type": "number",
+											"description": "a hole whose best assignment score is at or below this counts as tee-less",
+											"default": 0
+										}
+									}
+								}
+							}
+						},
+						"teeRecovery": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Recover assignment-missing tees from bounded predecessor-basket white-component anomalies; phantom completion remains terminal.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
+								}
+							}
+						},
 						"scoring": {
 							"type": "object",
 							"additionalProperties": false,

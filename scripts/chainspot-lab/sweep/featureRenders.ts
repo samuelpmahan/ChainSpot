@@ -444,6 +444,43 @@ const STYLE: Record<Drawable['verdict'], { stroke: string; fill: string; dash: s
 	info: { stroke: '#4dd2ff', fill: 'none', dash: '5 4' }
 };
 
+const TEE_CENTER_STYLE = { stroke: '#39ff7a', fill: 'none', dash: 'none' };
+const PHANTOM_STYLE = { stroke: '#c56bff', fill: 'rgba(197,107,255,0.12)', dash: 'none' };
+
+function isCenterMarker(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'tee-center';
+}
+
+function isTeeBorderMarker(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'tee-border';
+}
+
+function isTeeFamilyPoint(drawable: Drawable, layerName?: string): boolean {
+	return drawable.type === 'point' && (layerName?.includes('tee-family') ?? false);
+}
+
+function isRejectedTeeRecoveryPoint(drawable: Drawable, layerName?: string): boolean {
+	const role = (drawable as Drawable & { readonly visualRole?: string }).visualRole;
+	return (
+		drawable.type === 'point' &&
+		(role === 'tee-rejection' || (layerName?.includes('tee recovery candidates rejected') ?? false))
+	);
+}
+
+function isCornerMarker(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'tee-corner-tick';
+}
+
+function isPhantomMarker(drawable: Drawable): boolean {
+	return drawable.type === 'point' && drawable.visualRole === 'phantom-center';
+}
+
+function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: string } {
+	if (isPhantomMarker(drawable)) return PHANTOM_STYLE;
+	if (isCenterMarker(drawable)) return TEE_CENTER_STYLE;
+	return STYLE[drawable.verdict];
+}
+
 function esc(text: string): string {
 	return text
 		.replace(/&/g, '&amp;')
@@ -534,10 +571,30 @@ function drawableExtent(plan: FeatureRenderPlan): { widthPx: number; heightPx: n
 }
 
 function drawableSvg(d: Drawable, layerName: string): string {
-	const s = STYLE[d.verdict];
+	const s = styleFor(d);
 	const title = `<title>${esc(tooltip(d, layerName))}</title>`;
 	const common = `stroke="${s.stroke}" stroke-width="2" stroke-dasharray="${s.dash}" fill="${s.fill}" vector-effect="non-scaling-stroke"`;
 	if (d.type === 'point') {
+		if (isPhantomMarker(d)) {
+			const r = 6;
+			return `<g>${title}<path d="M${d.xPx} ${d.yPx - r} L${d.xPx + r} ${d.yPx} L${d.xPx} ${d.yPx + r} L${d.xPx - r} ${d.yPx} Z" ${common}/><path d="M${d.xPx - 4} ${d.yPx} L${d.xPx + 4} ${d.yPx} M${d.xPx} ${d.yPx - 4} L${d.xPx} ${d.yPx + 4}" stroke="${s.stroke}" stroke-width="2" fill="none"/></g>`;
+		}
+		if (isCenterMarker(d)) {
+			const r = 4;
+			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
+		}
+		if (isCornerMarker(d)) {
+			const r = 3;
+			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
+		}
+		if (
+			isTeeBorderMarker(d) ||
+			isTeeFamilyPoint(d, layerName) ||
+			isRejectedTeeRecoveryPoint(d, layerName)
+		) {
+			const r = 5;
+			return `<g>${title}<path d="M${d.xPx - r} ${d.yPx} L${d.xPx + r} ${d.yPx} M${d.xPx} ${d.yPx - r} L${d.xPx} ${d.yPx + r}" ${common} fill="none"/></g>`;
+		}
 		// A rejection gets a cross as well as a circle so accepted vs rejected
 		// survives a greyscale print and a colour-blind reader.
 		const cross =
@@ -604,14 +661,18 @@ function rasterDrawable(
 	data: Uint8Array,
 	width: number,
 	height: number,
-	drawable: Drawable
+	drawable: Drawable,
+	layerName?: string
 ): void {
-	const color: readonly [number, number, number] =
-		drawable.verdict === 'accepted'
-			? [30, 255, 95]
-			: drawable.verdict === 'rejected'
-				? [255, 45, 45]
-				: [30, 210, 255];
+	const color: readonly [number, number, number] = isPhantomMarker(drawable)
+		? [197, 107, 255]
+		: isCenterMarker(drawable)
+			? [57, 255, 122]
+			: drawable.verdict === 'accepted'
+				? [30, 255, 95]
+				: drawable.verdict === 'rejected'
+					? [255, 45, 45]
+					: [30, 210, 255];
 	if (drawable.type === 'box') {
 		const [x, y, w, h] = drawable.bbox;
 		rasterLine(data, width, height, x, y, x + w, y, color);
@@ -621,6 +682,61 @@ function rasterDrawable(
 		return;
 	}
 	if (drawable.type === 'point') {
+		if (isPhantomMarker(drawable)) {
+			const r = 6;
+			rasterLine(
+				data,
+				width,
+				height,
+				drawable.xPx,
+				drawable.yPx - r,
+				drawable.xPx + r,
+				drawable.yPx,
+				color
+			);
+			rasterLine(
+				data,
+				width,
+				height,
+				drawable.xPx + r,
+				drawable.yPx,
+				drawable.xPx,
+				drawable.yPx + r,
+				color
+			);
+			rasterLine(
+				data,
+				width,
+				height,
+				drawable.xPx,
+				drawable.yPx + r,
+				drawable.xPx - r,
+				drawable.yPx,
+				color
+			);
+			rasterLine(
+				data,
+				width,
+				height,
+				drawable.xPx - r,
+				drawable.yPx,
+				drawable.xPx,
+				drawable.yPx - r,
+				color
+			);
+			rasterCross(data, width, height, drawable.xPx, drawable.yPx, color);
+			return;
+		}
+		if (
+			isCenterMarker(drawable) ||
+			isCornerMarker(drawable) ||
+			isTeeBorderMarker(drawable) ||
+			isTeeFamilyPoint(drawable, layerName) ||
+			isRejectedTeeRecoveryPoint(drawable, layerName)
+		) {
+			rasterCross(data, width, height, drawable.xPx, drawable.yPx, color);
+			return;
+		}
 		for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 24) {
 			rasterPixel(
 				data,
@@ -656,7 +772,8 @@ function writeRasterProof(
 		);
 	}
 	for (const layer of plan.layers) {
-		for (const drawable of layer.drawables) rasterDrawable(png.data, width, height, drawable);
+		for (const drawable of layer.drawables)
+			rasterDrawable(png.data, width, height, drawable, layer.name);
 	}
 	writeFileSync(path, PNG.sync.write(png));
 }
@@ -712,13 +829,12 @@ function writeTruthProof(
 		);
 	}
 	for (const layer of plan.layers) {
-		for (const drawable of layer.drawables) rasterDrawable(png.data, width, height, drawable);
+		for (const drawable of layer.drawables)
+			rasterDrawable(png.data, width, height, drawable, layer.name);
 	}
 	const best = comparison
 		? [...comparison.hypotheses].sort(
-				(a, b) =>
-					a.medianDeviationPx - b.medianDeviationPx ||
-					a.meanDeviationPx - b.meanDeviationPx
+				(a, b) => a.medianDeviationPx - b.medianDeviationPx || a.meanDeviationPx - b.meanDeviationPx
 			)[0]
 		: undefined;
 	for (const match of score?.objectMatches ?? []) {
@@ -759,11 +875,7 @@ function writeTruthProof(
 	writeFileSync(path, PNG.sync.write(png));
 }
 
-function writeTruthCropSheet(
-	truthProofPath: string,
-	score: GateScore,
-	path: string
-): void {
+function writeTruthCropSheet(truthProofPath: string, score: GateScore, path: string): void {
 	const source = PNG.sync.read(readFileSync(truthProofPath));
 	const matches = score.objectMatches ?? [];
 	const sourceSize = 72;
@@ -795,10 +907,46 @@ function writeTruthCropSheet(
 			}
 		}
 		const border: readonly [number, number, number] = [255, 225, 30];
-		rasterLine(sheet.data, sheet.width, sheet.height, tileX, tileY, tileX + tileSize - 1, tileY, border);
-		rasterLine(sheet.data, sheet.width, sheet.height, tileX + tileSize - 1, tileY, tileX + tileSize - 1, tileY + tileSize - 1, border);
-		rasterLine(sheet.data, sheet.width, sheet.height, tileX + tileSize - 1, tileY + tileSize - 1, tileX, tileY + tileSize - 1, border);
-		rasterLine(sheet.data, sheet.width, sheet.height, tileX, tileY + tileSize - 1, tileX, tileY, border);
+		rasterLine(
+			sheet.data,
+			sheet.width,
+			sheet.height,
+			tileX,
+			tileY,
+			tileX + tileSize - 1,
+			tileY,
+			border
+		);
+		rasterLine(
+			sheet.data,
+			sheet.width,
+			sheet.height,
+			tileX + tileSize - 1,
+			tileY,
+			tileX + tileSize - 1,
+			tileY + tileSize - 1,
+			border
+		);
+		rasterLine(
+			sheet.data,
+			sheet.width,
+			sheet.height,
+			tileX + tileSize - 1,
+			tileY + tileSize - 1,
+			tileX,
+			tileY + tileSize - 1,
+			border
+		);
+		rasterLine(
+			sheet.data,
+			sheet.width,
+			sheet.height,
+			tileX,
+			tileY + tileSize - 1,
+			tileX,
+			tileY,
+			border
+		);
 	}
 	writeFileSync(path, PNG.sync.write(sheet));
 }
@@ -827,9 +975,9 @@ function truthReceiptLines(unit: UnitTrace, input: RenderTraceFeaturesInput): st
 		for (const match of score.objectMatches ?? []) {
 			lines.push(
 				`    MATCH ${match.truthIdentity} <- ${match.detection.identity} ` +
-				`detection=(${match.detection.xPx.toFixed(2)},${match.detection.yPx.toFixed(2)}) ` +
-				`truth=(${match.truthCanonical.xPx.toFixed(2)},${match.truthCanonical.yPx.toFixed(2)}) ` +
-				`delta=${match.deviationPx.toFixed(2)}px`
+					`detection=(${match.detection.xPx.toFixed(2)},${match.detection.yPx.toFixed(2)}) ` +
+					`truth=(${match.truthCanonical.xPx.toFixed(2)},${match.truthCanonical.yPx.toFixed(2)}) ` +
+					`delta=${match.deviationPx.toFixed(2)}px`
 			);
 		}
 		for (const target of score.unmatchedTruth ?? []) {
@@ -843,24 +991,24 @@ function truthReceiptLines(unit: UnitTrace, input: RenderTraceFeaturesInput): st
 			);
 		}
 	} else {
-		lines.push('  official/as-emitted: UNKNOWN -- annotation source provenance did not pass the truth firewall');
+		lines.push(
+			'  official/as-emitted: UNKNOWN -- annotation source provenance did not pass the truth firewall'
+		);
 	}
 	if (comparison) {
 		lines.push(
 			`  grounding hypotheses: ${comparison.provenanceTrusted ? 'source provenance MATCHED' : 'DIAGNOSTIC ONLY -- source provenance UNMATCHED'}`
 		);
 		const ranked = [...comparison.hypotheses].sort(
-			(a, b) =>
-				a.medianDeviationPx - b.medianDeviationPx ||
-				a.meanDeviationPx - b.meanDeviationPx
+			(a, b) => a.medianDeviationPx - b.medianDeviationPx || a.meanDeviationPx - b.meanDeviationPx
 		);
 		for (const [index, hypothesis] of ranked.entries()) {
 			lines.push(
 				`    ${index === 0 ? 'LOWEST_RESIDUAL ' : ''}${hypothesis.id}: detectionY+=${hypothesis.yShiftPx}px ` +
-				`matched=${hypothesis.matchedWithinTolerance} falsePositives=${hypothesis.falsePositiveCount} ` +
-				`falseNegatives=${hypothesis.falseNegativeCount} median=${hypothesis.medianDeviationPx.toFixed(2)}px ` +
-				`mean=${hypothesis.meanDeviationPx.toFixed(2)}px max=${hypothesis.maxDeviationPx.toFixed(2)}px ` +
-				`provenance="${hypothesis.provenance}"`
+					`matched=${hypothesis.matchedWithinTolerance} falsePositives=${hypothesis.falsePositiveCount} ` +
+					`falseNegatives=${hypothesis.falseNegativeCount} median=${hypothesis.medianDeviationPx.toFixed(2)}px ` +
+					`mean=${hypothesis.meanDeviationPx.toFixed(2)}px max=${hypothesis.maxDeviationPx.toFixed(2)}px ` +
+					`provenance="${hypothesis.provenance}"`
 			);
 		}
 	}
@@ -1042,15 +1190,7 @@ function writePlan(
 	writeFileSync(svgPath, svg);
 	for (const proof of pngProofs) writeRasterProof(plan, proof.base, width, height, proof.path);
 	if (truthProofPath && base)
-		writeTruthProof(
-			plan,
-			base,
-			truthScore,
-			groundingComparison,
-			width,
-			height,
-			truthProofPath
-		);
+		writeTruthProof(plan, base, truthScore, groundingComparison, width, height, truthProofPath);
 	if (truthCropSheetPath && truthProofPath && truthScore)
 		writeTruthCropSheet(truthProofPath, truthScore, truthCropSheetPath);
 	writeFileSync(receiptPath, `${receiptText}\n`);

@@ -26,6 +26,7 @@ import type {
 import { measureUnits } from '../detectors/threeFactor/measure';
 import { phantomTeeUnit, phantomTeeFeature } from '../detectors/threeFactor/features/g3.phantomTee';
 import { teeFamilyUnit, teeFamilyFeature } from '../detectors/threeFactor/features/g3.teeFamily';
+import { teeRecoveryUnit, teeRecoveryFeature } from '../detectors/threeFactor/features/g3.teeRecovery';
 import {
 	cleanBasketFamilyUnit,
 	cleanBasketFamilyFeature
@@ -482,7 +483,7 @@ const reusedOps: OperationDef[] = [
 		spec: {
 			id: 'phantomTee',
 			kind: 'decide',
-			gate: 'G3',
+			gate: 'G4',
 			unit: 'phantomTee',
 			consumes: phantomTeeUnit.consumes,
 			produces: phantomTeeUnit.produces,
@@ -510,6 +511,19 @@ const reusedOps: OperationDef[] = [
 			note: teeFamilyUnit.note
 		},
 		run: (board, ctx) => teeFamilyUnit.run(asLegacyBoard(board), ctx)
+	},
+	{
+		spec: {
+			id: 'teeRecovery',
+			kind: 'decide',
+			gate: 'G4',
+			unit: 'teeRecovery',
+			consumes: teeRecoveryUnit.consumes,
+			produces: teeRecoveryUnit.produces,
+			features: [teeRecoveryFeature.id],
+			note: teeRecoveryUnit.note
+		},
+		run: (board, ctx) => teeRecoveryUnit.run(asLegacyBoard(board), ctx)
 	},
 	{
 		spec: {
@@ -557,6 +571,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
 	['teeFamily', ['teeFamily']],
+	['teeRecovery', ['teeRecovery']],
 	['cleanBasketFamily', ['cleanBasketFamily']]
 ]);
 

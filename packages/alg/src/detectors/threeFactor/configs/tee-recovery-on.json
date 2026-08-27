@@ -1,0 +1,23 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-recovery-on",
+	"note": "G4 post-assignment tee-shard recovery enabled; fully missing tees remain terminal phantom assignment completion.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery"
+	],
+	"gates": {
+		"G4": {
+			"teeRecovery": { "enabled": true }
+		}
+	}
+}
