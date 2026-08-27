@@ -529,6 +529,14 @@ function drawableCoordinates(
 				: 'UNKNOWN'
 		};
 	}
+	if (drawable.type === 'pixelSet') {
+		return {
+			canonical: `pixels=${JSON.stringify(drawable.pixels)}`,
+			original: offset
+				? `pixels=${JSON.stringify(drawable.pixels.map(([x, y]) => [x - offset.xPx, y - offset.yPx]))}`
+				: 'UNKNOWN'
+		};
+	}
 	return {
 		canonical: `origin=(${drawable.originXPx.toFixed(2)},${drawable.originYPx.toFixed(2)}) cells=${drawable.widthCells}x${drawable.heightCells} cellPx=${drawable.cellPx}`,
 		original: shift(drawable.originXPx, drawable.originYPx)
@@ -558,6 +566,11 @@ function drawableExtent(plan: FeatureRenderPlan): { widthPx: number; heightPx: n
 				maxY = Math.max(maxY, d.bbox[1] + d.bbox[3]);
 			} else if (d.type === 'polyline') {
 				for (const [x, y] of d.path) {
+					maxX = Math.max(maxX, x);
+					maxY = Math.max(maxY, y);
+				}
+			} else if (d.type === 'pixelSet') {
+				for (const [x, y] of d.pixels) {
 					maxX = Math.max(maxX, x);
 					maxY = Math.max(maxY, y);
 				}
@@ -610,6 +623,12 @@ function drawableSvg(d: Drawable, layerName: string): string {
 	if (d.type === 'polyline') {
 		const points = d.path.map(([x, y]) => `${x},${y}`).join(' ');
 		return `<g>${title}<polyline points="${points}" ${common} fill="none"/></g>`;
+	}
+	if (d.type === 'pixelSet') {
+		const cells = d.pixels
+			.map(([x, y]) => `M${x - 0.5} ${y - 0.5}h1v1h-1z`)
+			.join('');
+		return `<g>${title}<path d="${cells}" fill="${s.stroke}" stroke="none"/></g>`;
 	}
 	// Heatmap payloads ride RunTrace.heatmaps out of band. Drawing the cells
 	// would mean reading a buffer this module was not handed, so only the
@@ -727,14 +746,20 @@ function rasterDrawable(
 			rasterCross(data, width, height, drawable.xPx, drawable.yPx, color);
 			return;
 		}
+		if (isCornerMarker(drawable)) {
+			rasterCrossRadius(data, width, height, drawable.xPx, drawable.yPx, 3, color);
+			return;
+		}
+		if (isCenterMarker(drawable)) {
+			rasterCrossRadius(data, width, height, drawable.xPx, drawable.yPx, 4, color);
+			return;
+		}
 		if (
-			isCenterMarker(drawable) ||
-			isCornerMarker(drawable) ||
 			isTeeBorderMarker(drawable) ||
 			isTeeFamilyPoint(drawable, layerName) ||
 			isRejectedTeeRecoveryPoint(drawable, layerName)
 		) {
-			rasterCross(data, width, height, drawable.xPx, drawable.yPx, color);
+			rasterCrossRadius(data, width, height, drawable.xPx, drawable.yPx, 5, color);
 			return;
 		}
 		for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 24) {
@@ -755,6 +780,10 @@ function rasterDrawable(
 			const [x1, y1] = drawable.path[index];
 			rasterLine(data, width, height, x0, y0, x1, y1, color);
 		}
+		return;
+	}
+	if (drawable.type === 'pixelSet') {
+		for (const [x, y] of drawable.pixels) rasterPixel(data, width, height, x, y, color);
 	}
 }
 
@@ -809,8 +838,20 @@ function rasterCross(
 	y: number,
 	color: readonly [number, number, number]
 ): void {
-	rasterLine(data, width, height, x - 8, y - 8, x + 8, y + 8, color);
-	rasterLine(data, width, height, x + 8, y - 8, x - 8, y + 8, color);
+	rasterCrossRadius(data, width, height, x, y, 8, color);
+}
+
+function rasterCrossRadius(
+	data: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	radius: number,
+	color: readonly [number, number, number]
+): void {
+	rasterLine(data, width, height, x - radius, y - radius, x + radius, y + radius, color);
+	rasterLine(data, width, height, x + radius, y - radius, x - radius, y + radius, color);
 }
 
 function writeTruthProof(

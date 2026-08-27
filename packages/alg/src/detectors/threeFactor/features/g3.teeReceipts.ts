@@ -44,13 +44,17 @@ export const TEE_RECOVERY_RENDER: FeatureRender = {
 		const corners = info.filter(isCorner);
 		const otherInfo = info.filter((drawable) => !isCorner(drawable));
 		const shard = accepted.filter((drawable) => drawable.visualRole === 'tee-shard');
+		const visibleShardGroups = shard.reduce(
+			(sum, drawable) => sum + (drawable.values?.supportingComponents ?? 0),
+			0
+		);
 		return {
 			title: `G4 teeRecovery -- post-assignment shard recovery (${run.configName})`,
 			base: 'badgeStage.masks.bright',
 			layers: [
 				{
 					name: 'visible shard highlighted (G4 post-assignment recovery)',
-					note: 'exact owned-white-pixel BFS remainder/extension emitted by teeRecovery; this layer does not imply the shard is hidden',
+					note: 'exact non-occluded white pixels; disconnected shards are counted separately and are never bridged by the renderer',
 					drawables: shard
 				},
 				{
@@ -76,12 +80,15 @@ export const TEE_RECOVERY_RENDER: FeatureRender = {
 			notes: [
 				...runNotes('teeRecovery', unit, run),
 				`accepted drawables: ${accepted.length} (source: UnitTrace.drawables verdict='accepted')`,
-				`visible shard drawables: ${shard.length} (source: accepted trace drawables with visualRole='tee-shard')`,
+				`recovered tee pixel sets: ${shard.length} (source: accepted trace drawables with visualRole='tee-shard')`,
+				`visible connected shards: ${visibleShardGroups} (source: detector-emitted supportingComponents values after ownership/occlusion subtraction)`,
 				`corner drawables: ${corners.length} (source: info trace drawables with visualRole='tee-corner-tick'; expected four when recovery completes)`,
 				`rejected candidates: ${rejected.length} (source: UnitTrace.drawables verdict='rejected')`,
 				'phase: G4 post-assignment recovery; normal assignment evidence is consumed before this unit and rerun after accepted shards.',
 				'C1S=solid 10m; C2D=dashed 20m. Traversed local-component fields: UNKNOWN -- none were emitted in this trace.',
-				'appearance: UNKNOWN -- a recovered shard is an unowned white-pixel remainder/extension, not an appearance-model claim.',
+				'acceptance: every non-occluded visible component pixel must contribute to one course-local hollow tee support whose major axis is within 3 degrees of the numbered badge ray.',
+				'missing expected tee pixels are UNKNOWN and neutral; OPAQUE pixels are excluded, while ALPHA pixels remain evidence.',
+				'appearance: UNKNOWN beyond the accepted visible white component and calculated tee corners.',
 				'recovery display is trace-driven: no pixels, fit, border, or corner is recomputed by this renderer.',
 				'ownership: unowned remainder/extension as reported by G4; assignment is rerun after accepted recovery.'
 			]

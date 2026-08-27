@@ -1,9 +1,9 @@
-// G4 tee-shard recovery. The detector starts from an assignment-missing
-// numbered badge and its assigned predecessor basket, then searches only a
-// bounded white-component graph for an unowned remainder/extension.
+// G4 tee-shard recovery. The predecessor basket bounds discovery only. Each
+// encountered non-occluded white component is accepted exactly when every
+// visible pixel can contribute to a course-local tee pointing at the badge.
 
 import type { BadgeEvidence, BasketEvidence, RecoveredTeeInput, TeeEvidence, OrientedQuad, ThreeFactorAssignment } from '../types';
-import { extractComponents, type ComponentStats } from '../components';
+import type { ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
 import basketSpriteData from '../assets/basket-sprite.json';
@@ -26,6 +26,9 @@ export interface RecoveryFit {
 	readonly halfWidthPx: number;
 	readonly halfHeightPx: number;
 	readonly angleRad: number;
+	/** Width of the observed course-local support band.  This is derived from
+	 * the intact pads' area, not from a renderer/template constant. */
+	readonly supportThicknessPx?: number;
 }
 
 export interface TeeRecoveryCandidate {
@@ -53,6 +56,7 @@ export interface TeeRecoveryValues {
 	readonly badgeAxisAlignment?: number;
 	readonly coordinateFrame: 'original-image';
 	readonly badgeAxisErrorRad?: number;
+	readonly unexplainedVisiblePixels?: number;
 }
 
 interface RecoveryGeometryOptions {
@@ -84,23 +88,37 @@ function numericTraceValues(values: TeeRecoveryValues): Record<string, number> {
 	);
 }
 
-/** A compact boundary walk for receipt-only shard highlighting. Keeping the
- * trace drawable as one accepted semantic object preserves candidate counts;
- * unlike row-sorting raw pixels it cannot zig-zag through the component. */
-function shardContour(points: readonly (readonly [number, number])[]): readonly (readonly [number, number])[] {
-	if (points.length <= 2) return points;
-	const occupied = new Set(points.map(([x, y]) => `${x},${y}`));
-	const boundary = points.filter(([x, y]) =>
-		[[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !occupied.has(`${x + dx},${y + dy}`))
+/** Split the evidence remaining after ownership/occlusion subtraction. The
+ * source bright component can legitimately become several visible shards. */
+function connectedPixelShards(points: readonly (readonly [number, number])[]): readonly (readonly (readonly [number, number])[])[] {
+	const byKey = new Map<string, readonly [number, number]>(
+		points.map((point) => [`${point[0]},${point[1]}`, point])
 	);
-	const source = boundary.length >= 2 ? boundary : points;
-	const cx = source.reduce((sum, [x]) => sum + x, 0) / source.length;
-	const cy = source.reduce((sum, [, y]) => sum + y, 0) / source.length;
-	const ordered = source.slice().sort(([ax, ay], [bx, by]) =>
-		Math.atan2(ay - cy, ax - cx) - Math.atan2(by - cy, bx - cx) ||
-		Math.hypot(ax - cx, ay - cy) - Math.hypot(bx - cx, by - cy) || ay - by || ax - bx
-	);
-	return [...ordered, ordered[0]!];
+	const unseen = new Set<string>(byKey.keys());
+	const shards: (readonly [number, number])[][] = [];
+	for (const start of [...unseen].sort((a, b) => {
+		const [ax, ay] = a.split(',').map(Number);
+		const [bx, by] = b.split(',').map(Number);
+		return ay - by || ax - bx;
+	})) {
+		if (!unseen.delete(start)) continue;
+		const queue = [start];
+		const shard: (readonly [number, number])[] = [];
+		for (let index = 0; index < queue.length; index++) {
+			const key = queue[index]!;
+			const point = byKey.get(key);
+			if (!point) continue;
+			shard.push(point);
+			for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+				if (dx === 0 && dy === 0) continue;
+				const neighbor = `${point[0] + dx},${point[1] + dy}`;
+				if (unseen.delete(neighbor)) queue.push(neighbor);
+			}
+		}
+		shard.sort(([ax, ay], [bx, by]) => ay - by || ax - bx);
+		shards.push(shard);
+	}
+	return shards;
 }
 
 export const teeRecoveryFeature = {
@@ -108,7 +126,7 @@ export const teeRecoveryFeature = {
 	gate: 'G4',
 	kind: 'deviation',
 	defaultEnabled: false,
-	note: 'Recover assignment-missing tees from bounded predecessor-basket white-component anomalies; phantom completion remains terminal.',
+	note: 'Recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal.',
 	render: teeRecoveryRender,
 	knobs: {}
 } satisfies ABFeature;
@@ -148,6 +166,175 @@ function badgeAxisError(candidate: TeeRecoveryCandidate): number | undefined {
 	return Math.abs(delta);
 }
 
+// Half a raster cell plus its diagonal quantization allowance. The fitted
+// course dimensions describe continuous geometry while evidence arrives as
+// integer cell centers.
+const RASTER_TOLERANCE_PX = 1.25;
+const BADGE_AXIS_LIMIT_RAD = 3 * Math.PI / 180;
+const MIN_SHARD_SUPPORT_PIXELS = 8;
+
+/** The tee is a hollow outline, so membership means being in the outer
+ * rectangle and in its border/support band.  The band width is estimated from
+ * an intact pad's measured area using A = 2t(W+H)-4t². */
+function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): boolean {
+	const dx = point[0] - fit.centerXPx;
+	const dy = point[1] - fit.centerYPx;
+	const c = Math.cos(fit.angleRad);
+	const s = Math.sin(fit.angleRad);
+	const u = dx * c + dy * s;
+	const v = -dx * s + dy * c;
+	const hw = fit.halfWidthPx + RASTER_TOLERANCE_PX;
+	const hh = fit.halfHeightPx + RASTER_TOLERANCE_PX;
+	if (Math.abs(u) > hw || Math.abs(v) > hh) return false;
+	const thickness = Math.max(0, fit.supportThicknessPx ?? Math.min(fit.halfWidthPx, fit.halfHeightPx));
+	return Math.abs(u) >= fit.halfWidthPx - thickness - RASTER_TOLERANCE_PX ||
+		Math.abs(v) >= fit.halfHeightPx - thickness - RASTER_TOLERANCE_PX;
+}
+
+function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
+	return candidate.fragmentPixels.filter((point) => !pointExplainsTee(point, candidate.fit));
+}
+
+function supportResidual(point: readonly [number, number], fit: RecoveryFit): number {
+	const dx = point[0] - fit.centerXPx;
+	const dy = point[1] - fit.centerYPx;
+	const c = Math.cos(fit.angleRad);
+	const s = Math.sin(fit.angleRad);
+	const u = dx * c + dy * s;
+	const v = -dx * s + dy * c;
+	const outer = Math.hypot(
+		Math.max(0, Math.abs(u) - fit.halfWidthPx),
+		Math.max(0, Math.abs(v) - fit.halfHeightPx)
+	);
+	const edgeDistance = Math.min(
+		Math.abs(Math.abs(u) - fit.halfWidthPx),
+		Math.abs(Math.abs(v) - fit.halfHeightPx)
+	);
+	return outer * 4 + edgeDistance;
+}
+
+function supportThickness(pads: readonly TeeEvidence[]): number {
+	const values = pads.map((tee) => {
+		const pad = tee.pad;
+		if (!pad || !finite(pad.majorPx) || !finite(pad.minorPx) || !finite(pad.area)) return undefined;
+		const width = Math.max(pad.majorPx, pad.minorPx);
+		const height = Math.min(pad.majorPx, pad.minorPx);
+		// A solid bright fallback pad contains no evidence for a hollow border;
+		// keep only the one-pixel raster tolerance in that case.
+		if (pad.area >= width * height * 0.95) return 0;
+		const discriminant = Math.max(0, (width + height) ** 2 - 4 * pad.area);
+		// Solve the smaller root of the rectangular border-area equation.
+		return Math.max(0, Math.min(height / 2, (width + height - Math.sqrt(discriminant)) / 4));
+	}).filter((value): value is number => value !== undefined && finite(value));
+	if (values.length === 0) return 0;
+	values.sort((a, b) => a - b);
+	return values[Math.floor(values.length / 2)] ?? 0;
+}
+
+function fitComponent(
+	pixels: readonly [number, number][],
+	component: ComponentStats,
+	target: BadgeEvidence,
+	viewportTopPx: number,
+	halfWidth: number,
+	halfHeight: number,
+	thickness: number
+): RecoveryFit {
+	// A shard centroid is not a tee center. Solve the actual existence question:
+	// search the small center region capable of containing every visible pixel;
+	// at each center, constrain the tee major axis to within three degrees of
+	// the center-to-badge ray and test every pixel against the hollow support.
+	const outerRadius = Math.hypot(
+		halfWidth + RASTER_TOLERANCE_PX,
+		halfHeight + RASTER_TOLERANCE_PX
+	);
+	let minCenterX = -Infinity, maxCenterX = Infinity;
+	let minCenterY = -Infinity, maxCenterY = Infinity;
+	for (const [x, y] of pixels) {
+		minCenterX = Math.max(minCenterX, x - outerRadius);
+		maxCenterX = Math.min(maxCenterX, x + outerRadius);
+		minCenterY = Math.max(minCenterY, y - outerRadius);
+		maxCenterY = Math.min(maxCenterY, y + outerRadius);
+	}
+	const badgeX = target.cxPx;
+	const badgeY = target.cyPx - viewportTopPx;
+	const fallback: RecoveryFit = {
+		centerXPx: component.cx,
+		centerYPx: component.cy,
+		halfWidthPx: halfWidth,
+		halfHeightPx: halfHeight,
+		angleRad: Math.atan2(badgeY - component.cy, badgeX - component.cx),
+		supportThicknessPx: thickness
+	};
+	if (minCenterX > maxCenterX || minCenterY > maxCenterY) return fallback;
+
+	let best = fallback;
+	let bestUnexplained = Infinity;
+	let bestResidual = Infinity;
+	let bestAxisOffset = Infinity;
+	const consider = (centerX: number, centerY: number, axisOffset: number) => {
+		const badgeRay = Math.atan2(badgeY - centerY, badgeX - centerX);
+		const fit: RecoveryFit = {
+			centerXPx: centerX,
+			centerYPx: centerY,
+			halfWidthPx: halfWidth,
+			halfHeightPx: halfHeight,
+			angleRad: badgeRay + axisOffset,
+			supportThicknessPx: thickness
+		};
+		let unexplained = 0;
+		let residual = 0;
+		for (const point of pixels) {
+			if (!pointExplainsTee(point, fit)) unexplained++;
+			residual += supportResidual(point, fit);
+			if (unexplained > bestUnexplained) break;
+		}
+		const absOffset = Math.abs(axisOffset);
+		if (
+			unexplained < bestUnexplained ||
+			(unexplained === bestUnexplained && residual < bestResidual) ||
+			(unexplained === bestUnexplained && residual === bestResidual && absOffset < bestAxisOffset)
+		) {
+			best = fit;
+			bestUnexplained = unexplained;
+			bestResidual = residual;
+			bestAxisOffset = absOffset;
+		}
+	};
+	const scan = (
+		x0: number,
+		x1: number,
+		y0: number,
+		y1: number,
+		centerStep: number,
+		angleStepDeg: number
+	) => {
+		for (let y = y0; y <= y1 + 1e-9; y += centerStep) {
+			for (let x = x0; x <= x1 + 1e-9; x += centerStep) {
+				for (let degrees = -2.5; degrees <= 2.5 + 1e-9; degrees += angleStepDeg) {
+					consider(x, y, degrees * Math.PI / 180);
+				}
+			}
+		}
+	};
+	// The intersection above is already tiny: a complete H3/H5-sized component
+	// leaves only a handful of possible centers. Search it on the native
+	// half-pixel centroid lattice so a coarse local optimum cannot hide a valid
+	// all-pixels explanation.
+	scan(minCenterX, maxCenterX, minCenterY, maxCenterY, 0.5, 0.5);
+	return best;
+}
+
+function componentPixels(stage: RecoveryStage, component: ComponentStats): [number, number][] {
+	const pixels: [number, number][] = [];
+	for (let y = component.bboxY; y < component.bboxY + component.bboxH; y++) {
+		for (let x = component.bboxX; x < component.bboxX + component.bboxW; x++) {
+			if (stage.brightLabels[y * stage.width + x] === component.label) pixels.push([x, y]);
+		}
+	}
+	return pixels;
+}
+
 interface RecoveryStage {
 	readonly brightLabels: Int32Array;
 	readonly brightComponents: readonly ComponentStats[];
@@ -171,14 +358,6 @@ export interface TeeRecoverySearchContext {
 	/** The run-scoped service is queried only for exact OPAQUE sprite pixels.
 	 * ALPHA and UNKNOWN never remove white evidence. */
 	readonly occlusion?: OpaqueDetector;
-}
-
-function bboxAsOpaque(bbox: readonly [number, number, number, number]) {
-	return { x0: bbox[0], y0: bbox[1], x1: bbox[0] + bbox[2] - 1, y1: bbox[1] + bbox[3] - 1 };
-}
-
-function bboxDistance(x: number, y: number, box: ReturnType<typeof bboxAsOpaque>): number {
-	return Math.hypot(Math.max(box.x0 - x, 0, x - box.x1), Math.max(box.y0 - y, 0, y - box.y1));
 }
 
 function numberLabel(badge: BadgeEvidence): number | undefined {
@@ -280,56 +459,24 @@ function targetPredecessors(
 }
 
 
-interface RecoveryCluster {
-	readonly labels: readonly number[];
-	readonly pixels: readonly [number, number][];
-	readonly area: number;
-	readonly cx: number;
-	readonly cy: number;
-	readonly bboxW: number;
-	readonly bboxH: number;
-}
-
-/** Bounded BFS over white-mask components, with a one-pixel gap bridge. */
-function boundedComponentGraph(labels: Int32Array, width: number, components: readonly ComponentStats[]): readonly RecoveryCluster[] {
-	const entries = components.map((component) => {
-		const pixels: [number, number][] = [];
-		for (let y = component.bboxY; y < component.bboxY + component.bboxH; y++) for (let x = component.bboxX; x < component.bboxX + component.bboxW; x++) if (labels[y * width + x] === component.label) pixels.push([x, y]);
-		return { component, pixels };
-	});
-	const gap = (a: ComponentStats, b: ComponentStats) => {
-		const ax = a.bboxX + a.bboxW - 1, ay = a.bboxY + a.bboxH - 1;
-		const bx = b.bboxX + b.bboxW - 1, by = b.bboxY + b.bboxH - 1;
-		return Math.hypot(Math.max(a.bboxX - bx - 1, b.bboxX - ax - 1, 0), Math.max(a.bboxY - by - 1, b.bboxY - ay - 1, 0));
-	};
-	const seen = new Set<number>(), out: RecoveryCluster[] = [];
-	for (let start = 0; start < entries.length; start++) {
-		if (seen.has(start)) continue;
-		const queue = [start], members: number[] = [];
-		seen.add(start);
-		while (queue.length) {
-			const index = queue.shift()!;
-			members.push(index);
-			for (let next = 0; next < entries.length; next++) if (!seen.has(next) && gap(entries[index]!.component, entries[next]!.component) <= 1) { seen.add(next); queue.push(next); }
-		}
-		const pixels = members.flatMap((index) => entries[index]!.pixels);
-		const xs = pixels.map(([x]) => x), ys = pixels.map(([, y]) => y);
-		out.push({ labels: members.map((index) => entries[index]!.component.label).sort((a, b) => a - b), pixels, area: pixels.length, cx: pixels.reduce((sum, [x]) => sum + x, 0) / Math.max(1, pixels.length), cy: pixels.reduce((sum, [, y]) => sum + y, 0) / Math.max(1, pixels.length), bboxW: Math.max(...xs) - Math.min(...xs) + 1, bboxH: Math.max(...ys) - Math.min(...ys) + 1 });
-	}
-	return out;
-}
-
 function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResult {
 	const support = candidate.fragmentPixels.length;
 	const componentCount = candidate.supportingComponentIds.length;
 	const axisError = badgeAxisError(candidate);
-	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= 3 * Math.PI / 180;
-	const accepted = support >= 8 && componentCount <= 2 && !axisRejected;
+	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= BADGE_AXIS_LIMIT_RAD;
+	const unexplained = unexplainedPixels(candidate);
+	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
+	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected;
+	const pixelEvidence = unexplained.length
+		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
+		: '';
 	const reason = accepted
-		? `accepted unowned white remainder from predecessor-basket BFS; seed ${candidate.seedSource ?? 'UNKNOWN'}`
-		: axisRejected
-			? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° >= 3°`
-			: support < 8 ? `white-component support ${support} < 8` : `supporting components ${componentCount} > 2`;
+		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; search seed ${candidate.seedSource ?? 'UNKNOWN'}`
+		: insufficientSupport
+			? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
+			: `${axisRejected
+				? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < 3°`
+				: 'no hollow tee support fit within 3° of the badge ray explains every visible component pixel'}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
@@ -338,17 +485,17 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 			supportingPixels: support,
 			supportingComponents: componentCount,
 			coordinateFrame: 'original-image',
-			...(axisError === undefined ? {} : { badgeAxisAlignment: Math.cos(axisError), badgeAxisErrorRad: axisError })
+			...(axisError === undefined ? {} : { badgeAxisAlignment: Math.cos(axisError), badgeAxisErrorRad: axisError }),
+			...(unexplained.length ? { unexplainedVisiblePixels: unexplained.length } : {})
 		},
 		corners: cornersFor(candidate, {})
 	};
 }
 
 /**
- * Produce hypotheses from a tiny component graph rooted at B(n-1).  There is
- * no global pose/template search: each missing badge contributes one bounded
- * window, components are joined only while touching that window, and one
- * edge fit is derived from the anomaly axis.
+ * Use B(n-1) only to bound discovery. Once a global source component is
+ * encountered, evaluate its complete non-occluded pixel set with geometric
+ * tee support; basket contact and raster templates are not acceptance rules.
  */
 export function buildTeeRecoveryCandidates(
 	stage: RecoveryStage,
@@ -364,6 +511,7 @@ export function buildTeeRecoveryCandidates(
 	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
+	const thickness = supportThickness(tees);
 	const targets = targetPredecessors(badges, baskets, search.assignment);
 	for (const target of targets) {
 		const anchorX = target.basket.tipXPx;
@@ -374,45 +522,84 @@ export function buildTeeRecoveryCandidates(
 		const maxX = Math.min(stage.width - 1, Math.ceil(anchorX + radius));
 		const minY = Math.max(0, Math.floor(anchorY - radius));
 		const maxY = Math.min(stage.height - 1, Math.ceil(anchorY + radius));
-		const owned = exactKnownPixels(stage, badges, tees, target.basket, search.sprites, viewportTopPx, [minX, minY, maxX, maxY]);
-		const bounded = new Uint8Array((maxX - minX + 1) * (maxY - minY + 1));
-		for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
-			const opaque = search.occlusion?.kindAt(x, y + viewportTopPx) === 'OPAQUE';
-			if (stage.brightMask.data[y * stage.width + x] && !owned.has(`${x},${y}`) && !opaque) bounded[(y - minY) * (maxX - minX + 1) + x - minX] = 1;
+		// The basket tip only supplies a bounded search origin.  Once a global
+		// component intersects that origin, retain every pixel carrying its label;
+		// clipping here would turn an unsupported tail into a false tee.
+		const targetCandidates: TeeRecoveryCandidate[] = [];
+		const owned = exactKnownPixels(
+			stage,
+			badges,
+			tees,
+			target.basket,
+			search.sprites,
+			viewportTopPx
+		);
+		const visibleComponents = stage.brightComponents.flatMap((component) => {
+			const componentPixelsAll = componentPixels(stage, component);
+			const pixels = componentPixelsAll.filter(([x, y]) =>
+				!owned.has(`${x},${y}`) &&
+				search.occlusion?.kindAt(x, y + viewportTopPx) !== 'OPAQUE'
+			);
+			if (pixels.length === 0) return [];
+			if (!pixels.some(([x, y]) => x >= minX && x <= maxX && y >= minY && y <= maxY)) return [];
+			return [{ component, pixels }];
+		});
+		const seenGroups = new Set<string>();
+		for (const seed of visibleComponents) {
+			let fit = fitComponent(seed.pixels, seed.component, target.badge, viewportTopPx, halfWidth, halfHeight, thickness);
+			const compatibleWith = (candidateFit: RecoveryFit) => visibleComponents.filter((entry) =>
+				entry.component.label === seed.component.label ||
+				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
+			);
+			let compatible = compatibleWith(fit);
+			// The first pose may be underdetermined by a tiny shard. Refit the union,
+			// then retain only complete components that still fit the shared pose.
+			for (let pass = 0; pass < 2; pass++) {
+				const union = compatible.flatMap((entry) => entry.pixels);
+				if (union.length === 0) break;
+				fit = fitComponent(union, seed.component, target.badge, viewportTopPx, halfWidth, halfHeight, thickness);
+				const next = compatibleWith(fit);
+				if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
+				compatible = next;
+			}
+			if (compatible.length === 0) continue;
+			const groupKey = compatible.map((entry) => entry.component.label).sort((a, b) => a - b).join('+');
+			if (!groupKey || seenGroups.has(groupKey)) continue;
+			seenGroups.add(groupKey);
+			const pixels = compatible.flatMap((entry) => entry.pixels);
+			const visibleShards = compatible.flatMap((entry) => connectedPixelShards(entry.pixels));
+			const teeToBadgeAngleRad = Math.atan2(
+				target.badge.cyPx - (fit.centerYPx + viewportTopPx),
+				target.badge.cxPx - fit.centerXPx
+			);
+			targetCandidates.push({
+				id: `tee-shard-${target.badge.detId}-${groupKey}`,
+				fit,
+				fragmentPixels: pixels,
+				supportingComponentIds: visibleShards.map((_, index) => `${groupKey}:${index + 1}`),
+				viewportTopPx,
+				seedSource: target.basket.detId,
+				bfsComponentsVisited: stage.brightComponents.length,
+				badgeAxisAngleRad: fit.angleRad,
+				teeToBadgeAngleRad,
+				badgeId: target.badge.detId,
+				badgeLabel: target.badge.label
+			});
 		}
-		const local = extractComponents({ width: maxX - minX + 1, height: maxY - minY + 1, data: bounded });
-		for (const cluster of boundedComponentGraph(local.labels, maxX - minX + 1, local.components)) {
-			if (cluster.area < 8 || cluster.area > 300 || cluster.bboxW > 34 || cluster.bboxH > 34) continue;
-			const pixels: [number, number][] = cluster.pixels.map(([x, y]) => [x + minX, y + minY]);
-			if (pixels.length < 8 || !pixels.some(([x, y]) => bboxDistance(x, y + viewportTopPx, bboxAsOpaque(target.basket.bbox)) <= 3)) continue;
-			// The numbered-badge ray gives the inferred tee major axis after an
-			// anomaly is discovered. Component shape is support evidence only,
-			// never a global pose/template search.
-			const angleRad = search.assignment
-				? Math.atan2(target.badge.cyPx - (anchorY + viewportTopPx), target.badge.cxPx - anchorX)
-				: (finite(pads[0]?.angleRad ?? NaN) ? (pads[0]?.angleRad as number) : 0);
-			const c = Math.cos(angleRad), s = Math.sin(angleRad);
-			const dx = cluster.cx - anchorX;
-			const dy = cluster.cy - anchorY;
-			const u = dx * c + dy * s;
-			const v = -dx * s + dy * c;
-			const edgeU = Math.abs(halfWidth - Math.abs(u)) <= Math.abs(halfHeight - Math.abs(v)) ? Math.sign(u || 1) * halfWidth : 0;
-			const edgeV = edgeU === 0 ? Math.sign(v || 1) * halfHeight : 0;
-			let centerX = cluster.cx - edgeU * c + edgeV * s;
-			let centerY = cluster.cy - edgeU * s - edgeV * c;
-			// Keep the tangent coordinate in the predecessor-rooted local span.
-			// This is the bounded graph's single fit, and prevents a long vertical
-			// shard from moving the inferred tee away from the predecessor basket.
-			const tangent = -(centerX - anchorX) * s + (centerY - anchorY) * c;
-			const tangentClamped = Math.max(-halfHeight, Math.min(halfHeight, tangent));
-			const tangentDelta = tangentClamped - tangent;
-			centerX -= s * tangentDelta;
-			centerY += c * tangentDelta;
-			const probe: TeeRecoveryCandidate = { id: `tee-shard-${target.badge.detId}-${cluster.labels.join('-')}`, fit: { centerXPx: centerX, centerYPx: centerY, halfWidthPx: halfWidth, halfHeightPx: halfHeight, angleRad }, fragmentPixels: pixels, supportingComponentIds: cluster.labels.map(String), viewportTopPx, seedSource: target.basket.detId, bfsComponentsVisited: local.components.length };
-			const teeToBadgeAngleRad = Math.atan2(target.badge.cyPx - (centerY + viewportTopPx), target.badge.cxPx - centerX);
-			const badgeAxisAngleRad = angleRad;
-			candidates.push({ ...probe, supportingComponentIds: cluster.labels.map(String), badgeAxisAngleRad, teeToBadgeAngleRad, badgeId: target.badge.detId, badgeLabel: target.badge.label });
-		}
+		// Evaluate the predicate before choosing. A large basket/badge component
+		// must never hide a smaller component whose every visible pixel fits.
+		targetCandidates.sort((a, b) => {
+			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
+			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
+			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < BADGE_AXIS_LIMIT_RAD;
+			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < BADGE_AXIS_LIMIT_RAD;
+			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
+			if (aAccepted) return b.fragmentPixels.length - a.fragmentPixels.length || aa - ba || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
+			const aFraction = ar / a.fragmentPixels.length;
+			const bFraction = br / b.fragmentPixels.length;
+			return aFraction - bFraction || ar - br || b.fragmentPixels.length - a.fragmentPixels.length || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
+		});
+		if (targetCandidates[0]) candidates.push(targetCandidates[0]);
 	}
 	return { candidates };
 }
@@ -422,7 +609,7 @@ export const teeRecoveryUnit: EngineUnit = {
 	gate: 'G4',
 	consumes: ['stage', 'badges', 'baskets', 'tees', 'sprites', 'viewport', 'recoveredTees', 'assignment', 'measurement'],
 	produces: ['recoveredTees', 'assignment'],
-	note: 'visible tee-shard recovery from predecessor-basket white-component graphs with exact opaque sprite ownership',
+	note: 'visible tee-shard recovery by all-visible-pixels badge-pointing tee-support feasibility with exact opaque ownership',
 	run(board: EvidenceBoard, ctx: FeatureContext) {
 		const stop = ctx.span('teeRecovery');
 		const state = ctx.resolve(teeRecoveryFeature);
@@ -464,8 +651,8 @@ export const teeRecoveryUnit: EngineUnit = {
 		ctx.measure('teeRecovery', 'seedFragments', new Set(built.candidates.map((candidate) => candidate.id.match(/^tee-shard-[^-]+/)?.[0] ?? candidate.id)).size);
 		ctx.measure('teeRecovery', 'componentHypotheses', allResults.length);
 		for (const candidate of built.candidates) ctx.measure('teeRecovery', 'bfsComponentsVisited', candidate.bfsComponentsVisited ?? 0);
-		// The bounded component graph is internal evidence. Keep one deterministic
-		// promoted verdict per source fragment, so trace/CLI/render stay inspectable.
+		// Keep one deterministic component verdict per missing numbered badge so
+		// trace, CLI, and visual receipt remain one-to-one.
 		const badgeSupportStop = ctx.span('teeRecovery.badgeSupport');
 		const promoted = promoteGraphResults(built.candidates, allResults);
 		badgeSupportStop();
@@ -483,24 +670,27 @@ export const teeRecoveryUnit: EngineUnit = {
 				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: 'recovery center within 14px of an existing tee; duplicate suppressed', values: numericTraceValues(result.values) });
 				continue;
 			}
-			const shardPath = shardContour(candidate.fragmentPixels).map((point) => localPoint(candidate, point, {}));
-			if (result.verdict === 'accepted') ctx.overlay('teeRecovery', { type: 'polyline', path: shardPath, verdict: 'accepted', visualRole: 'tee-shard', ref: `${result.id}:tee-shard`, reason: result.reason, values: numericTraceValues(result.values) });
+			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
+			if (result.verdict === 'accepted') ctx.overlay('teeRecovery', { type: 'pixelSet', pixels: shardPixels, verdict: 'accepted', visualRole: 'tee-shard', ref: `${result.id}:tee-shard`, reason: result.reason, values: numericTraceValues(result.values) });
 			else ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: result.id, reason: result.reason, values: numericTraceValues(result.values) });
 			if (result.verdict !== 'accepted') continue;
 			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
-			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery graph fit ${result.id}: unowned visible shard from ${candidate.seedSource ?? 'UNKNOWN'}; appearance UNKNOWN` } });
+			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}` } });
 		}
 		board.set('recoveredTees', [...existing, ...additions]);
-		if (additions.length > 0) {
+		if (additions.length > 0 && measurement.rawPairs.length > 0) {
 			const zfit = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const search = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
 			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, search, ribbon, routing));
-		} else board.set('assignment', assignment);
+		} else {
+			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
+			board.set('assignment', assignment);
+		}
 		ctx.measure('teeRecovery', 'candidates', allResults.length);
 		ctx.measure('teeRecovery', 'accepted', additions.length);
 		ctx.measure('teeRecovery', 'promoted', results.length);

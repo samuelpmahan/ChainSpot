@@ -137,6 +137,13 @@ export interface PolylineDrawable extends DrawableBase {
 	readonly path: readonly (readonly [number, number])[];
 }
 
+/** Exact raster evidence. Unlike a polyline, a pixel set has no implied
+ * connectivity and the renderer must not interpolate between its cells. */
+export interface PixelSetDrawable extends DrawableBase {
+	readonly type: 'pixelSet';
+	readonly pixels: readonly (readonly [number, number])[];
+}
+
 /**
  * Heatmaps carry their Float32Array OUT OF BAND (transferable across the
  * worker boundary, zero copy); the drawable holds dims + a key into
@@ -153,7 +160,7 @@ export interface HeatmapDrawable extends DrawableBase {
 	readonly originYPx: number;
 }
 
-export type Drawable = PointDrawable | BoxDrawable | PolylineDrawable | HeatmapDrawable;
+export type Drawable = PointDrawable | BoxDrawable | PolylineDrawable | PixelSetDrawable | HeatmapDrawable;
 
 export interface MeasurementAggregate {
 	readonly name: string;
