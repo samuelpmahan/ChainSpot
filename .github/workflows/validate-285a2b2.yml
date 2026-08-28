@@ -8,7 +8,7 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout exact ChainSpot commit
         uses: actions/checkout@v4
@@ -32,40 +32,36 @@ jobs:
           cache: npm
           cache-dependency-path: ChainSpot/package-lock.json
 
-      - name: Install root dependencies
+      - name: Install
         working-directory: ChainSpot
-        run: npm ci
+        run: |
+          npm ci
+          ./lab setup
 
-      - name: Install LAB runtime
+      - name: Run NorthPark through G4
         working-directory: ChainSpot
-        run: ./lab setup
+        run: ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
 
-      - name: Build algorithm
-        working-directory: ChainSpot
-        run: npm run build --workspace @chainspot/alg
-
-      - name: Typecheck app
-        working-directory: ChainSpot
-        run: npm run check
-
-      - name: Focused tee-recovery unit suite
-        working-directory: ChainSpot
-        run: npx vitest run tests/unit/teeRecoveryFeature.test.ts --reporter=verbose
-
-      - name: Run actual Dev6 LAB sweep through G4
-        working-directory: ChainSpot
-        run: ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev
-
-      - name: Print Dev6 batch summary
+      - name: Profile emitted artifacts
         working-directory: ChainSpot
         if: always()
         run: |
-          echo '=== BATCH SUMMARY ==='
-          find artifacts/sweep -path '*/batches/summary.txt' -print -exec cat {} \; || true
-          echo '=== PER-COURSE RESULT COUNTS ==='
-          find artifacts/sweep -name 'run.receipt.txt' -print0 | while IFS= read -r -d '' f; do
-            echo "--- $f"
-            grep -E 'results\.(badges|baskets|tees|visibleTees|recoveredTees|phantomTees|assignments)|HOLE ASSIGNMENTS' "$f" || true
-            echo 'assignment rows:'
-            awk '/HOLE ASSIGNMENTS/{flag=1;next} flag && /^H[0-9]+[[:space:]]*\|/{print}' "$f" || true
-          done
+          echo '=== FILES ==='
+          find artifacts/sweep -type f -printf '%p\n' | sort
+          echo '=== BATCH ==='
+          find artifacts/sweep -path '*/batches/summary.txt' -exec cat {} \;
+          echo '=== DURATION FIELDS ==='
+          grep -R -n 'durationMs' artifacts/sweep || true
+          echo '=== OPERATION / TIMING LINES ==='
+          grep -R -n -E 'operation|duration|elapsed|ms=' artifacts/sweep --include='*.txt' --include='*.json' | head -1000 || true
+          echo '=== NORTHPARK RECEIPT ==='
+          find artifacts/sweep -path '*/NorthPark/full/run.receipt.txt' -exec cat {} \;
+
+      - name: Upload NorthPark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northpark-285a2b2-g4
+          path: ChainSpot/artifacts/sweep
+          if-no-files-found: error
+          retention-days: 1
