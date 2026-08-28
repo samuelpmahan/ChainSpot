@@ -245,7 +245,9 @@ const badgeStageOps: OperationDef[] = [
 				badges,
 				badgeSources,
 				plateBboxes,
-				badgeCount: badges.length
+				badgeCount: badges.length,
+				plateInteriorMarginPx: knobs.plateInteriorMargin,
+				plateFrameTolerancePx: knobs.plateFrameTolerancePx
 			};
 			board.set('stage', stage);
 			stop();

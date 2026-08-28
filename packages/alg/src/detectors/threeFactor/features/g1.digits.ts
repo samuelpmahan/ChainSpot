@@ -103,6 +103,14 @@ export const g1DigitsFeature = {
 				value === 32
 					? null
 					: `digitH must equal 32 — the trained digit classifier (assets/logistic.json, ${MODEL_FEATURE_COUNT}-length weight rows = 24x32 flattened) was trained on exactly this size; changing it requires retraining the model.`
+		},
+		confidenceFloorDivisor: {
+			default: 8,
+			note: 'C4 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: the label-acceptance confidence floor is DERIVED per run, never a bare literal — floor = median(this run\'s finite per-badge classifier margins) / confidenceFloorDivisor. The 7 known-garbage reads span margin 0.0015-0.0756 and the 47 healthy reads span 0.978-0.994, three orders of magnitude apart, so this divisor has wide headroom; provenance (the run\'s own median and this divisor) is printed on every badge via BadgeEvidence.confidenceFloor.'
+		},
+		labelAmbiguityMargin: {
+			default: 0.045,
+			note: 'C4 fix contract: minimum gap between the top-2 labelCandidates posterior confidences before a read is accepted rather than abstained as \'ambiguous\' — inherited from old-stuff\'s badgeGlyphClassifier.ts minMargin (0.045), which operated on a comparable bounded posterior; restores the old classifier\'s ambiguity abstention that the per-digit-concatenation rebuild dropped.'
 		}
 	}
 } satisfies ABFeature;

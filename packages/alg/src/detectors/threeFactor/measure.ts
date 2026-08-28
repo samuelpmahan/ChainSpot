@@ -31,6 +31,7 @@ import { DEFAULT_ROUTING_KNOBS, routeBadgeLegs, type RoutingKnobs } from './rout
 import { DEFAULT_SCORING_KNOBS, makeRawPairEvidence, type ScoringKnobs } from './scoring';
 import { detectScreenChromeRegions, pointInScreenChrome } from './screenChrome';
 import type {
+	BadgeAbstentionReason,
 	BadgeEvidence,
 	BasketEvidence,
 	CorridorParams,
@@ -198,11 +199,103 @@ function digitEvidence(reading: BadgeReading, yOffsetPx: number): DigitEvidence[
 	}));
 }
 
+function median(values: readonly number[]): number {
+	if (!values.length) return 0;
+	const sorted = [...values].sort((a, b) => a - b);
+	const mid = Math.floor(sorted.length / 2);
+	return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Fix contract C2/C4/C5 (docs/seven-whys/g1-badge-digit-garbage.md):
+ * classify one badge's raw digit reading into a final label plus a named
+ * abstention reason, WITHOUT deciding collisions yet (that needs every
+ * badge's classification first — see the caller).
+ */
+export function classifyReading(
+	rawLabel: string,
+	digitCount: number,
+	confidence: number,
+	candidates: { label: number; confidence: number }[],
+	floor: number,
+	ambiguityMargin: number
+): { label: string | null; bestLabel: string | null; abstentionReason: BadgeAbstentionReason | null } {
+	const bestLabel = candidates[0] ? String(candidates[0].label) : null;
+	// C2 — structural rejection, unconditional: a hole label is 1 or 2 digits,
+	// never assembled from more, and never leads with '0' (no hole 0 exists).
+	// Checked BEFORE any confidence-based path so a well-formed-looking
+	// in-vocabulary posterior over garbage segmentation (Mode B, the
+	// HeritagePark height-filter case) can never launder through.
+	if (digitCount === 0) return { label: null, bestLabel, abstentionReason: 'empty-glyph' };
+	if (digitCount > 2) return { label: null, bestLabel, abstentionReason: 'too-many-digits' };
+	if (rawLabel[0] === '0') return { label: null, bestLabel, abstentionReason: 'leading-zero' };
+	// C4 — derived confidence floor, restoring old-stuff's first-class
+	// abstention. bestLabel is retained either way so the receipt can show
+	// what the detector would have said.
+	if (confidence < floor) return { label: null, bestLabel, abstentionReason: 'low-score' };
+	if (
+		candidates.length >= 2 &&
+		candidates[0].confidence - candidates[1].confidence < ambiguityMargin
+	) {
+		return { label: null, bestLabel, abstentionReason: 'ambiguous' };
+	}
+	return { label: bestLabel, bestLabel, abstentionReason: null };
+}
+
+/**
+ * Fix contract C5 (docs/seven-whys/g1-badge-digit-garbage.md): restore
+ * `badgeGlyphBatchIsComplete`'s uniqueness property
+ * (`old-stuff/badgeGlyphClassifier.ts:420-426`) — two or more badges landing
+ * on the same in-vocabulary label is a CONFLICT, receipt-visible on every
+ * party named, never silent. Resolution keeps the higher-confidence claimant
+ * (deterministic tie-break: lower `index`) and marks the rest UNREAD
+ * 'collision', but records `conflictWith` on BOTH the winner and the
+ * loser(s) so a resolved collision is still visible in the receipt.
+ * Set-completion (picking a label by elimination) is explicitly NOT used
+ * here — see the forensics doc's C5 warning: this function only ever
+ * REMOVES a duplicate label, it never assigns one.
+ *
+ * Pure function over the minimal shape needed, independent of BadgeReading /
+ * BadgeEvidence, so the collision rule itself is unit-testable in isolation.
+ */
+export function resolveBadgeCollisions(
+	entries: readonly { detId: string; index: number; label: string | null; confidence: number }[]
+): Map<string, { label: string | null; abstentionReason: 'collision' | null; conflictWith: string[] }> {
+	const byLabel = new Map<string, typeof entries[number][]>();
+	for (const entry of entries) {
+		if (entry.label === null) continue;
+		const group = byLabel.get(entry.label);
+		if (group) group.push(entry);
+		else byLabel.set(entry.label, [entry]);
+	}
+	const result = new Map<
+		string,
+		{ label: string | null; abstentionReason: 'collision' | null; conflictWith: string[] }
+	>();
+	for (const group of byLabel.values()) {
+		if (group.length < 2) continue;
+		const sorted = [...group].sort((a, b) => b.confidence - a.confidence || a.index - b.index);
+		const [winner, ...losers] = sorted;
+		const loserIds = losers.map((entry) => entry.detId);
+		result.set(winner.detId, { label: winner.label, abstentionReason: null, conflictWith: loserIds });
+		for (const loser of losers) {
+			result.set(loser.detId, {
+				label: null,
+				abstentionReason: 'collision',
+				conflictWith: [winner.detId, ...loserIds.filter((id) => id !== loser.detId)]
+			});
+		}
+	}
+	return result;
+}
+
 function makeBadges(
 	stage: ReturnType<typeof runBadgeStage>,
 	yOffsetPx: number,
 	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
 ): BadgeEvidence[] {
+	const confidenceFloorDivisor = knobs.confidenceFloorDivisor;
+	const ambiguityMargin = knobs.labelAmbiguityMargin;
 	const readings = readCourseBadges(stage, digitScorer, knobs);
 	const entries = readings.map((reading, index) => ({
 		reading,
@@ -217,7 +310,65 @@ function makeBadges(
 			a.reading.badge.cx - b.reading.badge.cx ||
 			a.index - b.index
 	);
-	return entries.map((entry, index) => {
+
+	// C4 — floor derived from THIS run's own margin distribution (footgun
+	// law: no absolute literal). Median of every badge that actually
+	// produced a classifier margin (finite confidence), divided by a named
+	// knob. The 7 known failures span 0.0015-0.0756 and the healthy
+	// population spans 0.978-0.994 — three orders of magnitude apart, so any
+	// divisor in a wide range separates them; the divisor itself is a knob
+	// with printed provenance rather than a bare literal.
+	const finiteConfidences = entries
+		.map((entry) => entry.reading.confidence)
+		.filter((value) => Number.isFinite(value));
+	const floor = median(finiteConfidences) / confidenceFloorDivisor;
+
+	type Prelim = (typeof entries)[number] & {
+		detId: string;
+		rawLabel: string;
+		digitCount: number;
+		candidates: { label: number; confidence: number }[];
+		confidence: number;
+		fillFraction?: number;
+		label: string | null;
+		bestLabel: string | null;
+		abstentionReason: BadgeAbstentionReason | null;
+	};
+
+	const prelim: Prelim[] = entries.map((entry, index) => {
+		const rawLabel = entry.reading.label;
+		const digitCount = entry.reading.digits.length;
+		const candidates = labelCandidates(entry.reading);
+		const isEmpty = entry.reading.confidence === Infinity;
+		const confidence = isEmpty ? 0 : clamp01(entry.reading.confidence);
+		const fillFraction = isEmpty ? darkFraction(entry.component, stage.darkMask) : undefined;
+		const classified = classifyReading(rawLabel, digitCount, confidence, candidates, floor, ambiguityMargin);
+		return {
+			...entry,
+			detId: `badge-${index}`,
+			rawLabel,
+			digitCount,
+			candidates,
+			confidence,
+			fillFraction,
+			...classified
+		};
+	});
+
+	// C5 — collisions are receipt-visible, never silent.
+	const resolutions = resolveBadgeCollisions(
+		prelim.map((entry) => ({ detId: entry.detId, index: entry.index, label: entry.label, confidence: entry.confidence }))
+	);
+	const conflictWith = new Map<string, string[]>();
+	for (const entry of prelim) {
+		const resolution = resolutions.get(entry.detId);
+		if (!resolution) continue;
+		if (resolution.label === null) entry.label = null;
+		if (resolution.abstentionReason) entry.abstentionReason = resolution.abstentionReason;
+		if (resolution.conflictWith.length) conflictWith.set(entry.detId, resolution.conflictWith);
+	}
+
+	return prelim.map((entry) => {
 		const component = shiftedComponent(entry.component, yOffsetPx);
 		const bbox: readonly [number, number, number, number] = [
 			component.bboxX,
@@ -233,13 +384,8 @@ function makeBadges(
 					entry.plateBbox[3]
 				] as const)
 			: undefined;
-		const candidates = labelCandidates(entry.reading);
-		const confidence =
-			entry.reading.confidence === Infinity
-				? darkFraction(entry.component, stage.darkMask)
-				: clamp01(entry.reading.confidence);
 		return {
-			detId: `badge-${index}`,
+			detId: entry.detId,
 			component,
 			cxPx: entry.component.cx,
 			cyPx: entry.component.cy + yOffsetPx,
@@ -247,9 +393,17 @@ function makeBadges(
 			plateBbox,
 			source: entry.source,
 			digits: digitEvidence(entry.reading, yOffsetPx),
-			label: candidates[0] ? String(candidates[0].label) : entry.reading.label || null,
-			labelCandidates: candidates,
-			confidence
+			rawLabel: entry.rawLabel,
+			digitCount: entry.digitCount,
+			label: entry.label,
+			bestLabel: entry.bestLabel,
+			labelCandidates: entry.candidates,
+			confidence: entry.confidence,
+			...(entry.fillFraction !== undefined ? { fillFraction: entry.fillFraction } : {}),
+			abstentionReason: entry.abstentionReason,
+			confidenceFloor: floor,
+			conflictWith: conflictWith.get(entry.detId) ?? [],
+			notes: entry.reading.notes
 		};
 	});
 }

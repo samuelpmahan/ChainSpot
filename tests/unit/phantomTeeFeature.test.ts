@@ -20,9 +20,16 @@ function badge(detId: string, label: string, cx: number, cy: number) {
 		bbox: [cx - 5, cy - 5, 10, 10] as const,
 		source: 'bright-family' as const,
 		digits: [],
+		rawLabel: label,
+		digitCount: label.length,
 		label,
+		bestLabel: label,
 		labelCandidates: [{ label: Number(label), confidence: 0.9 }],
-		confidence: 0.9
+		confidence: 0.9,
+		abstentionReason: null,
+		confidenceFloor: 0.1,
+		conflictWith: [],
+		notes: []
 	};
 }
 
