@@ -21,7 +21,7 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 describe('LAB contextual help catalog', () => {
 	test('covers the supported root, shell, option, and documented leaf surface', () => {
 		const coverage = coverageForCatalog();
-		expect(coverage.commandCount).toBe(14);
+		expect(coverage.commandCount).toBe(15);
 		expect(coverage.shellCount).toBe(4);
 		expect(coverage.missingRoots).toEqual([]);
 		expect(coverage.missingShell).toEqual([]);
