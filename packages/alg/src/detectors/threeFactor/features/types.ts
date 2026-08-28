@@ -19,11 +19,25 @@ export type GateId = 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6' | 'G7' | 'shared';
 
 export const CANONICAL_GATE_ORDER = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'] as const;
 
+/**
+ * Owner's phase model (2026-08-28): G4 is Recovery (Tee + Basket) and carries
+ * the endpoints-complete contract — after the G4 phase, every endpoint the run
+ * will ever have is on the board (visible G3 tees plus recovered ones; phantom
+ * completion stays a default-OFF deviation). G5 Straight Test has two parts:
+ * part 1 is straight evidence (support field, raw pairs, measurement), part 2
+ * is assignment/completion of straight holes — delivered by the G6-owned
+ * assignment operations, which the `--through G5` cutoff therefore schedules.
+ * G6 is the bent-pathfinding + refinement phase (anything left has one or more
+ * bends); its terminal refinement is Z-fit, which stays in the G7 slot as the
+ * terminal operation rather than being folded into g6-set — the least invasive
+ * encoding, because set membership, imports, and ownership tests stay intact
+ * while the `--through G6` cutoff folds the terminal slot into the phase.
+ */
 export const GATE_TITLES: Record<GateId, string> = {
 	G1: 'Badges',
 	G2: 'Baskets',
 	G3: 'Visible Tees',
-	G4: 'Endpoint Recovery',
+	G4: 'Recovery (Tee + Basket)',
 	G5: 'Straight Test',
 	G6: 'Assignment',
 	G7: 'Bend Refinement',
