@@ -6,9 +6,9 @@ on:
       - validation/run-285a2b2
 
 jobs:
-  validate:
+  inspect-hot-loops:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - name: Checkout exact ChainSpot commit
         uses: actions/checkout@v4
@@ -17,51 +17,17 @@ jobs:
           path: ChainSpot
           fetch-depth: 1
 
-      - name: Checkout corpus sibling
-        uses: actions/checkout@v4
-        with:
-          repository: samuelpmahan/chainspot-corpus
-          path: chainspot-corpus
-          lfs: true
-          fetch-depth: 1
-
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ChainSpot/package-lock.json
-
-      - name: Install
+      - name: Locate and print hot-loop source
         working-directory: ChainSpot
         run: |
-          npm ci
-          ./lab setup
-
-      - name: Run NorthPark through G4
-        working-directory: ChainSpot
-        run: ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
-
-      - name: Profile emitted artifacts
-        working-directory: ChainSpot
-        if: always()
-        run: |
-          echo '=== FILES ==='
-          find artifacts/sweep -type f -printf '%p\n' | sort
-          echo '=== BATCH ==='
-          find artifacts/sweep -path '*/batches/summary.txt' -exec cat {} \;
-          echo '=== DURATION FIELDS ==='
-          grep -R -n 'durationMs' artifacts/sweep || true
-          echo '=== OPERATION / TIMING LINES ==='
-          grep -R -n -E 'operation|duration|elapsed|ms=' artifacts/sweep --include='*.txt' --include='*.json' | head -1000 || true
-          echo '=== NORTHPARK RECEIPT ==='
-          find artifacts/sweep -path '*/NorthPark/full/run.receipt.txt' -exec cat {} \;
-
-      - name: Upload NorthPark artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: northpark-285a2b2-g4
-          path: ChainSpot/artifacts/sweep
-          if-no-files-found: error
-          retention-days: 1
+          set -euo pipefail
+          echo '=== SUPPORT FIELD MATCHES ==='
+          grep -R -n -E 'supportField|bestTheta|scalarField' packages/alg/src/detectors/threeFactor packages/alg/src/detectors/labEndpoint scripts/chainspot-lab 2>/dev/null | head -200 || true
+          echo '=== TEE RECOVERY MATCHES ==='
+          grep -R -n -E 'shardDiscovery|global bright mask|no spatial prefilter|axisToleranceDeg|bfsComponentsVisited|runnerUpsBeyondReceiptCap' packages/alg/src/detectors/threeFactor packages/alg/src/detectors/labEndpoint 2>/dev/null | head -300 || true
+          echo '=== HOT SOURCE FILES ==='
+          files=$(grep -R -l -E 'supportField|shardDiscovery|global bright mask|no spatial prefilter|bfsComponentsVisited' packages/alg/src/detectors/threeFactor packages/alg/src/detectors/labEndpoint 2>/dev/null | sort -u)
+          for f in $files; do
+            echo "===== $f ====="
+            sed -n '1,1200p' "$f"
+          done
