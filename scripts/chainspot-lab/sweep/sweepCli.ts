@@ -22,7 +22,8 @@ function usage(): never {
 			'  decode -> StripChrome -> AutoStitch (when N>1) -> canonical raster -> algorithm',
 			'',
 			'TRUTH is optional evaluation-only Annotation JSON.',
-			'--through G2 executes only the dependency-valid G1+G2 gate slice.',
+			'--through GATE (G1-G7) executes the dependency-complete chronological',
+			'prefix through that gate; the receipt states what was not scheduled and why.',
 			'',
 			'Clickable workbench:',
 			'  lab ui'
@@ -50,7 +51,7 @@ async function runSweep(args: readonly string[]): Promise<void> {
 	if (throughIndex >= 0) {
 		const value = restArgs[throughIndex + 1];
 		if (!value || !isSweepThroughGate(value)) {
-			throw new Error(`lab sweep: --through requires a gate such as G1, G2, or G3.`);
+			throw new Error(`lab sweep: --through requires a gate cutoff G1 through G7.`);
 		}
 		throughGate = value;
 		restArgs.splice(throughIndex, 2);

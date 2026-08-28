@@ -101,13 +101,114 @@ describe('LAB sweep receipt seam', () => {
 		]);
 	});
 
-	test('later gate names are vocabulary, not executable cutoff promises', async () => {
+	test('through G4 runs the endpoints-complete prefix, naming later-gate prerequisites and the unscheduled tail', async () => {
 		const { plan } = compileSweepConfig(
 			resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/default.json')
 		);
-		await expect(slicePlanThroughGate(plan, 'G4' as never)).rejects.toThrow(
-			/only dependency-complete cutoffs G1, G2, or G3/
+		const sliced = await slicePlanThroughGate(plan, 'G4');
+		// zfit left the default schedule on 2026-08-28 (owner directive), so
+		// the endpoints-complete prefix is now the whole 18-operation plan.
+		expect(sliced.ops).toHaveLength(18);
+		expect(sliced.ops[sliced.ops.length - 1].id).toBe('teeRecovery');
+		expect(sliced.ops.map((operation) => operation.id)).not.toContain('zfit');
+		expect(sliced.slice.notScheduled).toEqual([]);
+		expect(sliced.slice.prerequisites.map((operation) => operation.id)).toEqual([
+			'supportField',
+			'badgeOcclusionPatch',
+			'rawPairs',
+			'measurement',
+			'assignment.pairs',
+			'assignment.scoring',
+			'assignment.ranking',
+			'assignment.selection'
+		]);
+		expect(sliced.slice.prerequisites.at(-1)).toEqual({
+			id: 'assignment.selection',
+			ownerGate: 'G6',
+			reason: "produces 'assignment' consumed by 'teeRecovery'"
+		});
+	});
+
+	test('through G5, G4, and G6 share the default prefix but stay distinguishable; G7 rejects without scheduled zfit', async () => {
+		const { plan } = compileSweepConfig(
+			resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/default.json')
 		);
+		const g4 = await slicePlanThroughGate(plan, 'G4');
+		const g5 = await slicePlanThroughGate(plan, 'G5');
+		const g6 = await slicePlanThroughGate(plan, 'G6');
+		// teeRecovery consumes the first assignment pass, so the G4 prefix
+		// already contains every straight-test/assignment operation.
+		expect(g5.ops.map((operation) => operation.id)).toEqual(
+			g4.ops.map((operation) => operation.id)
+		);
+		expect(g5.slice.prerequisites).toEqual([]);
+		expect(g5.planFingerprint).not.toBe(g4.planFingerprint);
+		expect(g6.ops.map((operation) => operation.id)).toEqual(plan.ops.map((operation) => operation.id));
+		expect(g6.slice.notScheduled).toEqual([]);
+		// zfit left the default schedule (owner directive 2026-08-28), so the
+		// terminal-slot alias has nothing to demonstrate on this config.
+		await expect(slicePlanThroughGate(plan, 'G7')).rejects.toThrow(/schedules none of zfit/);
+		// Monotone: each cutoff schedules at least everything the previous one did.
+		const lengths = [g4.ops.length, g5.ops.length, g6.ops.length];
+		expect([...lengths].sort((a, b) => a - b)).toEqual(lengths);
+	});
+
+	test('with zfit scheduled (zfit-on), G4/G5 exclude the terminal slot and G6/G7 fold it in', async () => {
+		const { plan } = compileSweepConfig(
+			resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/zfit-on.json')
+		);
+		expect(plan.ops.at(-1)?.id).toBe('zfit');
+		const g4 = await slicePlanThroughGate(plan, 'G4');
+		expect(g4.ops.at(-1)?.id).toBe('teeRecovery');
+		expect(g4.slice.notScheduled).toEqual([
+			{ id: 'zfit', ownerGate: 'G7', reason: 'not scheduled (--through G4)' }
+		]);
+		const g5 = await slicePlanThroughGate(plan, 'G5');
+		expect(g5.ops.map((operation) => operation.id)).toEqual(g4.ops.map((operation) => operation.id));
+		const g6 = await slicePlanThroughGate(plan, 'G6');
+		const g7 = await slicePlanThroughGate(plan, 'G7');
+		expect(g6.ops.map((operation) => operation.id)).toEqual(plan.ops.map((operation) => operation.id));
+		expect(g7.ops.map((operation) => operation.id)).toEqual(plan.ops.map((operation) => operation.id));
+		expect(g6.slice.notScheduled).toEqual([]);
+	});
+
+	test('a cutoff whose own phase owns no scheduled operation is rejected in plain language', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'lab-sweep-slice-'));
+		try {
+			const configPath = join(root, 'no-recovery.json');
+			writeFileSync(
+				configPath,
+				JSON.stringify({
+					schema: 'threeFactor-config@1',
+					name: 'no-recovery',
+					execution: [
+						'badgeStage',
+						'badges',
+						'baskets',
+						'tees',
+						'teeFamily',
+						'supportField',
+						'badgeOcclusionPatch',
+						'rawPairs',
+						'measurement',
+						'assignment'
+					],
+					gates: {}
+				})
+			);
+			const { plan } = compileSweepConfig(configPath);
+			await expect(slicePlanThroughGate(plan, 'G4')).rejects.toThrow(
+				/--through G4 \(G4 Recovery \(Tee \+ Basket\)\) selects no scheduled operation: this config schedules none of teeRecovery, phantomTee/
+			);
+			await expect(slicePlanThroughGate(plan, 'G7')).rejects.toThrow(
+				/schedules none of zfit/
+			);
+			// G6 still stands on its scheduled assignment operations.
+			const g6 = await slicePlanThroughGate(plan, 'G6');
+			expect(g6.ops[g6.ops.length - 1].id).toBe('assignment.selection');
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	test('G3 slices exclude the post-assignment tee recovery and terminal phantom completion', async () => {
@@ -288,6 +389,39 @@ describe('LAB sweep receipt seam', () => {
 		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.png'))).toBe(true);
 		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.receipt.txt'))).toBe(true);
 	}, 60_000);
+
+	test('through G4 runs endpoints-complete on DashsTrack and the receipt tells the slice story', async () => {
+		const result = await runSweepOperation({
+			configPath: resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/default.json'),
+			inputPaths: [resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.jpg')],
+			outDir: resolve(REPO_ROOT, 'artifacts/test/lab-sweep-through-g4'),
+			throughGate: 'G4'
+		});
+
+		expect(result.runReceipt.results).toMatchObject({
+			badges: 18,
+			baskets: 18,
+			visibleTees: 16,
+			recoveredTees: 2,
+			totalTees: 18,
+			assignments: 18
+		});
+		expect(result.runReceipt.slice?.scheduledOperationCount).toBe(18);
+		expect(result.runReceipt.slice?.parentOperationCount).toBe(18);
+		expect(result.runReceipt.slice?.notScheduled).toEqual([]);
+		expect(result.runReceipt.slice?.straightStory?.[0]).toContain(
+			'assignment.selection assigned 16 of 18 badges straight from visible tees'
+		);
+		expect(result.runReceipt.warnings).toEqual([]);
+		const text = readFileSync(result.runReceiptPaths[1], 'utf8');
+		expect(text).toContain('SLICE (--through G4)');
+		expect(text).toContain(
+			"  prerequisite assignment.selection (G6): produces 'assignment' consumed by 'teeRecovery'"
+		);
+		// zfit is config-dropped, not slice-cut: the receipt must NOT emit a
+		// "not scheduled" omission line for it.
+		expect(text).not.toContain('zfit');
+	}, 120_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {
 		expect(g2SpriteFeature.render?.units).toEqual(['baskets']);

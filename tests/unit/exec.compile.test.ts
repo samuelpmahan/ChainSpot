@@ -32,8 +32,11 @@ const straightTestOnResolved = resolveConfig(
 	straightTestOnConfigJson as ThreeFactorConfig,
 	DEFAULT_EXECUTION
 );
+// 2026-08-28: zfit dropped from the default schedule by owner directive; the
+// previous 19-operation fingerprint was
+// fdff6359168b52179ecf3ed3ca159fc1c61ccdc9881497af850035263f743d51.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'fdff6359168b52179ecf3ed3ca159fc1c61ccdc9881497af850035263f743d51';
+	'1bd2666c180b02301aaf2f11f0cbceed0c4d3587728542d77971bea0ec4d6ed7';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

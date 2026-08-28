@@ -50,7 +50,10 @@ const REPO_ROOT = resolve(__dirname, '../..');
 const CORPUS_ROOT = resolve(REPO_ROOT, '../chainspot-corpus');
 const DASHS_IMAGE = resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.jpg');
 const DASHS_TRUTH = resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.annotation.json');
-const DEFAULT_SHA256 = '9762044ddfa243010466da423ade733e7902b1877620b40e1581cd904b45ae5b';
+// 2026-08-28: zfit dropped from the default schedule by owner directive; the
+// previous byte hash was
+// 9762044ddfa243010466da423ade733e7902b1877620b40e1581cd904b45ae5b.
+const DEFAULT_SHA256 = '71d88bc2bf44b4a1a10934636acda61aa8fb7563cf6417dc1ae4c7f36a3e1c45';
 
 function candidate(
 	overrides: Partial<StraightTestCandidateInput> = {}

@@ -14,8 +14,7 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery",
-		"zfit"
+		"teeRecovery"
 	],
 	"gates": { "G5": { "straightTest": { "enabled": true, "knobs": { "truthAssisted": true } } } }
 }

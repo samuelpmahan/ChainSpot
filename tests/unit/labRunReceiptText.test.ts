@@ -227,6 +227,46 @@ artifact[2].uri: artifact://first
 `);
 	});
 
+	test('a sliced receipt prints the SLICE section and not-scheduled FINAL RESULTS lines verbatim', () => {
+		const sliced: RunReceipt = {
+			...receipt,
+			slice: {
+				throughGate: 'G2',
+				phase: 'Baskets known',
+				parentOperationCount: 19,
+				scheduledOperationCount: 2,
+				prerequisites: [
+					{ id: 'later.op', ownerGate: 'G5', reason: "produces 'x' consumed by 'y'" }
+				],
+				notScheduled: [
+					{ id: 'teeRecovery', ownerGate: 'G4', reason: 'not scheduled (--through G2)' }
+				],
+				finalResultsNotScheduled: {
+					visibleTees: 'not scheduled (--through G2)',
+					recoveredTees: 'not scheduled (--through G2)'
+				},
+				straightStory: ['story line one']
+			}
+		};
+		const text = formatRunReceiptText(sliced);
+		expect(text).toContain(
+			[
+				'SLICE (--through G2)',
+				'slice.phase: Baskets known',
+				'slice.scheduledOperations: 2 of 19 (contiguous chronological prefix of the frozen plan)',
+				"  prerequisite later.op (G5): produces 'x' consumed by 'y'",
+				'  not scheduled teeRecovery (G4): not scheduled (--through G2)',
+				'slice.straightAssignmentStory:',
+				'  story line one'
+			].join('\n')
+		);
+		expect(text).toContain('results.visibleTees: not scheduled (--through G2)');
+		expect(text).toContain('results.recoveredTees: not scheduled (--through G2)');
+		// "not seen", "not there", and "not scheduled" stay different lines:
+		// a metric absent for another reason still prints UNKNOWN.
+		expect(text).toContain('results.phantomTees: UNKNOWN');
+	});
+
 	test('preserves chronological receipt order and prints warnings and artifact URIs', () => {
 		const text = formatRunReceiptText(receipt);
 		expect(text.indexOf('2 | G2 | second')).toBeLessThan(text.indexOf('1 | G1 | first'));

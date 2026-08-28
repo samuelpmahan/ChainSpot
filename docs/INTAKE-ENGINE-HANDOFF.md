@@ -47,10 +47,22 @@ occluded shard-supported tees are completed at G4.
    the canonical composite; completely unmatched truth produces neither a
    scoreboard nor grounding evidence, and unmapped truth is never scored in
    raw coordinates.
-3. `lab sweep --through` currently accepts only `G1`, `G2`, and `G3`. The one
-   canonical order continues through `G4` Endpoint Recovery, `G5` Straight
-   Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is
-   infrastructure rather than a scheduled gate.
+3. `lab sweep --through` accepts every gate `G1`-`G7` (2026-08-28). A cutoff
+   is the contiguous chronological prefix of the frozen compiled plan ending
+   at the last scheduled operation semantically owned by the cutoff's
+   cumulative phase — a prefix of a validated order is dependency-complete by
+   construction and leaves every operation's board input byte-identical to
+   the full run (non-contiguous subsets would skip in-place slot rewriters).
+   `G4` is Recovery (Tee + Basket) with the endpoints-complete contract; the
+   `G5` Straight Test cutoff folds in the G6-owned straight-hole assignment
+   operations (the owner's part 2); the `G6` cutoff folds in the terminal
+   `G7` zfit slot (bent pathfinding + refinement). Later-gate operations
+   inside a prefix run as named prerequisites and the receipt says, per
+   FINAL RESULTS metric, `not scheduled (--through GN)` when its producers
+   were cut. The design note lives at the top of
+   `scripts/chainspot-lab/sweep/gateVocabulary.ts`; the slicer is
+   `slicePlanThroughGate` in `scripts/chainspot-lab/sweep/operation.ts`.
+   `shared-set` remains infrastructure rather than a scheduled gate.
 4. Each `UnitTrace` records all operation-bound feature IDs and names the
    primary feature supplying its legacy enabled/knob fields. `baskets` now
    reports `sprite`; `tees` reports `endpoints`.
@@ -59,10 +71,17 @@ occluded shard-supported tees are completed at G4.
 
 ## Validation receipt
 
-The 2026-08-27 frozen promotion ran the full default config on DashsTrack:
+The 2026-08-27 frozen promotion ran the full default config on DashsTrack.
+Amended 2026-08-28 by owner directive: `zfit` was dropped from the default
+schedule (still one flip away via `zfit-on.json`; the engine-level
+`DEFAULT_EXECUTION` fallback that sparse configs inherit still ends with
+`zfit`). The config hash changed accordingly; every result number below was
+re-verified identical before and after the drop.
 
-- Config hash: `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`.
-- Plan: 19 chronological operations; `assignment.selection → teeRecovery → zfit`.
+- Config hash: `cb9b82be4dede236a4236352ac331ff1812f69ee781887934c148f4c1542fd93`
+  (was `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`
+  with zfit scheduled).
+- Plan: 18 chronological operations; `assignment.selection → teeRecovery`.
 - Results: 18 badges, 18 baskets, 16 visible tees, 2 recovered tees,
   18 total tees, 18 assignments, and 5,184 raw pairs.
 - G4: 2 accepted recovery hypotheses, 0 rejected; H3 uses two visible shards
@@ -140,8 +159,14 @@ Default DashsTrack G3 artifact hashes after hardening:
 - Browser truth-status coverage combines an operation-level provenance test,
   API payload wiring, and static DOM wiring assertions; there is no browser
   DOM end-to-end test yet.
-- Later-gate cutoff slicing needs an explicit dependency-complete design; do
-  not widen the CLI parser beyond `G3` without adding those valid prefixes.
+- Later-gate cutoff slicing now has its dependency-complete design (hardened
+  contract 3 above). In the frozen default plan the `G4`, `G5`, and `G6`
+  cutoffs all run the full 18-operation plan (teeRecovery consumes the first
+  assignment pass and is the terminal operation now that zfit left the
+  schedule); their receipts and sliced plan fingerprints stay distinct. A
+  cutoff whose own phase owns no scheduled operation is rejected with an
+  error naming the operations that would demonstrate it — on the default
+  config that now includes `--through G7`, since no zfit is scheduled.
 
 ## Resume safely
 

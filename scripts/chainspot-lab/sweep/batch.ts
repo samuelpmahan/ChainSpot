@@ -279,7 +279,7 @@ export function parseBatchArgs(args: readonly string[]): { throughGate: SweepThr
 	const throughIndex = rest.indexOf('--through');
 	if (throughIndex >= 0) {
 		const value = rest[throughIndex + 1];
-		if (!value || !isSweepThroughGate(value)) throw new Error(`lab sweep batch: --through requires a gate such as G1, G2, or G3.`);
+		if (!value || !isSweepThroughGate(value)) throw new Error(`lab sweep batch: --through requires a gate cutoff G1 through G7.`);
 		throughGate = value;
 		rest.splice(throughIndex, 2);
 	}

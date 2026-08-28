@@ -236,8 +236,10 @@ describe('resolveConfig + engine', () => {
 		});
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
-		// force a conscious update here.
-		expect(hash).toBe('cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7');
+		// force a conscious update here. 2026-08-28: zfit dropped from the
+		// default schedule by owner directive; the previous pin was
+		// cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7.
+		expect(hash).toBe('cb9b82be4dede236a4236352ac331ff1812f69ee781887934c148f4c1542fd93');
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {
@@ -248,7 +250,13 @@ describe('resolveConfig + engine', () => {
 		expect(configured.measurement).toEqual(bare.measurement);
 		expect(configured.assignment).toEqual(bare.assignment);
 		expect(configured.trace).toBeDefined();
-		expect(configured.trace?.execution).toEqual(DEFAULT_EXECUTION);
+		// default.json's schedule drops zfit (owner directive 2026-08-28); the
+		// engine-level DEFAULT_EXECUTION fallback still ends with it. The
+		// measurement/assignment equality above is the proof the disabled
+		// zfit operation was a byte-exact no-op.
+		expect(configured.trace?.execution).toEqual(
+			DEFAULT_EXECUTION.filter((id) => id !== 'zfit')
+		);
 	});
 
 	test('zfit-on config flips measurement.parameters.zfit', () => {
