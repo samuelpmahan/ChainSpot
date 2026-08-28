@@ -232,70 +232,83 @@ async function main(): Promise<void> {
 		const rest = args.slice(1);
 		const out = option(rest, '--out');
 		const view = consumeViewOptions(rest);
+		const config = loadLabConfig();
+		const corpusRoot = resolve(config.corpusRoot ?? DEFAULT_CORPUS_ROOT);
+		const courseForQuery = (query: string) => {
+			const manifest = resolveCourseManifest(query);
+			const devDir = resolve(corpusRoot, manifest.corpusDir ?? 'dev', manifest.devDir);
+			return { manifest, imagePath: resolve(devDir, manifest.image) };
+		};
+		// Two token forms, combinable into ONE sheet (the whole point is a
+		// single image an agent can read in one turn):
+		//   COURSE:h5,h6,h17   per-course hole lists
+		//   COURSE... hN...    cartesian: every named hole on every named course
+		const pairs: { course: ReturnType<typeof courseForQuery>; hole: number }[] = [];
 		const holes: number[] = [];
 		const courseQueries: string[] = [];
 		for (const token of rest) {
+			const pairToken = /^([^:]+):(h?\d+(?:,h?\d+)*)$/i.exec(token);
+			if (pairToken) {
+				const course = courseForQuery(pairToken[1]);
+				for (const part of pairToken[2].split(',')) {
+					pairs.push({ course, hole: Number(part.replace(/^h/i, '')) });
+				}
+				continue;
+			}
 			const holeToken = /^h(\d+)$/i.exec(token);
 			if (holeToken) holes.push(Number(holeToken[1]));
 			else courseQueries.push(token);
 		}
-		if (holes.length === 0) throw new Error('lab scope batch: name at least one hole (h14 h16 ...).');
-		const config = loadLabConfig();
-		const corpusRoot = resolve(config.corpusRoot ?? DEFAULT_CORPUS_ROOT);
-		const courses =
-			courseQueries.length > 0
-				? courseQueries.map((query) => {
-						const manifest = resolveCourseManifest(query);
-						const devDir = resolve(corpusRoot, manifest.corpusDir ?? 'dev', manifest.devDir);
-						return {
-							manifest,
-							imagePath: resolve(devDir, manifest.image)
-						};
-					})
-				: [resolveCourseContext()];
+		if (pairs.length === 0 && holes.length === 0) {
+			throw new Error('lab scope batch: name at least one hole (h14 h16 ... or Course:h14,h16 ...).');
+		}
+		const cartesianCourses =
+			holes.length === 0
+				? []
+				: courseQueries.length > 0
+					? courseQueries.map(courseForQuery)
+					: [resolveCourseContext()];
+		for (const course of cartesianCourses) for (const hole of holes) pairs.push({ course, hole });
 		const failures: string[] = [];
 		const tiles: { path: string; label: string; crop?: { x: number; y: number; w: number; h: number } }[] = [];
-		for (const course of courses) {
-			for (const hole of holes) {
+		for (const { course, hole } of pairs) {
+			try {
+				const path = await scopeConfiguredHole(course, hole, view, out, [
+					'scope',
+					'batch',
+					course.manifest.course,
+					`h${hole}`
+				]);
+				// The combined sheet shows just each render's FIRST panel
+				// (the context view); the full per-hole sheets stay on disk.
+				let crop: { x: number; y: number; w: number; h: number } | undefined;
 				try {
-					const path = await scopeConfiguredHole(course, hole, view, out, [
-						'scope',
-						'batch',
-						course.manifest.course,
-						`h${hole}`
-					]);
-					// The combined sheet shows just each render's FIRST panel
-					// (the context view); the full per-hole sheets stay on disk.
-					let crop: { x: number; y: number; w: number; h: number } | undefined;
-					try {
-						const meta = JSON.parse(readFileSync(`${path}.json`, 'utf8'));
-						const firstPanel = meta?.panels?.[0];
-						if (firstPanel?.outputPx) crop = firstPanelCrop(firstPanel.outputPx);
-					} catch {
-						// No sidecar: fall back to the full sheet as the tile.
-					}
-					tiles.push({ path, label: `${course.manifest.course.toUpperCase()} H${hole}`, ...(crop ? { crop } : {}) });
-				} catch (error) {
-					const line = `${course.manifest.course} H${hole}: ${(error as Error).message}`;
-					failures.push(line);
-					console.log(`FAILED · ${line}`);
+					const meta = JSON.parse(readFileSync(`${path}.json`, 'utf8'));
+					const firstPanel = meta?.panels?.[0];
+					if (firstPanel?.outputPx) crop = firstPanelCrop(firstPanel.outputPx);
+				} catch {
+					// No sidecar: fall back to the full sheet as the tile.
 				}
+				tiles.push({ path, label: `${course.manifest.course.toUpperCase()} H${hole}`, ...(crop ? { crop } : {}) });
+			} catch (error) {
+				const line = `${course.manifest.course} H${hole}: ${(error as Error).message}`;
+				failures.push(line);
+				console.log(`FAILED · ${line}`);
 			}
 		}
 		if (tiles.length > 0) {
+			// ONE image regardless of how many courses/holes: the point of batch
+			// is letting a vision agent read everything in a single turn.
 			const slug = [
 				...new Set(tiles.map((tile) => tile.label.split(' ')[0].toLowerCase()))
 			].join('-');
-			const sheetPath = resolve(
-				out ?? DEFAULT_SCOPE_OUT,
-				'batch',
-				`${slug}-${holes.map((hole) => `h${hole}`).join('-')}.png`
-			);
+			const holeSlug = [...new Set(pairs.map(({ hole }) => `h${hole}`))].join('-');
+			const sheetPath = resolve(out ?? DEFAULT_SCOPE_OUT, 'batch', `${slug}-${holeSlug}.png`);
 			makeLabeledContactSheet(tiles, sheetPath);
-			console.log(`\nBATCH SHEET · ${tiles.length} labeled tile(s) -> ${sheetPath}`);
+			console.log(`\nBATCH SHEET · ${tiles.length} labeled tile(s) in ONE image -> ${sheetPath}`);
 		}
 		console.log(
-			`SCOPE BATCH — ${tiles.length} rendered, ${failures.length} failed of ${courses.length * holes.length} requested`
+			`SCOPE BATCH — ${tiles.length} rendered, ${failures.length} failed of ${pairs.length} requested`
 		);
 		for (const line of failures) console.log(`  failed: ${line}`);
 		if (failures.length > 0) process.exitCode = 1;
