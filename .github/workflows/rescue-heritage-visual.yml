@@ -1,0 +1,60 @@
+name: Rescue Heritage Visual
+
+on:
+  push:
+    branches:
+      - repair/tee-recovery-control-ef120
+    paths:
+      - .github/workflows/rescue-heritage-visual.yml
+
+jobs:
+  heritage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          path: ChainSpot
+          lfs: true
+
+      - name: Checkout corpus
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ChainSpot/package-lock.json
+            ChainSpot/scripts/chainspot-lab/package-lock.json
+
+      - name: LAB setup
+        working-directory: ChainSpot
+        run: ./lab setup
+
+      - name: Run Heritage full Sweep
+        working-directory: ChainSpot
+        run: ./lab sweep packages/alg/src/detectors/threeFactor/configs/default.json ../chainspot-corpus/dev/Heritage/HeritagePark-full.png
+
+      - name: Locate visual receipt
+        working-directory: ChainSpot
+        run: |
+          echo '--- visual outputs ---'
+          find artifacts -type f \( -name 'run.visual.png' -o -name 'run.visual.receipt.txt' -o -name 'run.receipt.txt' -o -name 'run.receipt.json' \) -print
+
+      - name: Upload Heritage receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: heritage-run-visual
+          if-no-files-found: error
+          path: |
+            ChainSpot/artifacts/**/run.visual.png
+            ChainSpot/artifacts/**/run.visual.receipt.txt
+            ChainSpot/artifacts/**/run.receipt.txt
+            ChainSpot/artifacts/**/run.receipt.json
