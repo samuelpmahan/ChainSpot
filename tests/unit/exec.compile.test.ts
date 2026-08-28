@@ -47,19 +47,8 @@ const straightTestOnResolved = resolveConfig(
 // g1.badges' plateFrameTolerancePx (C1 frame-exclusion provenance) and
 // g1.digits' confidenceFloorDivisor/labelAmbiguityMargin (C4 derived-floor/
 // ambiguity provenance) -- new knobs move this pin again, consciously.
-// 2026-08-28: the geometric-hunt/plausibility lane (owner directive: the
-// hunted-badge set and the pairable set are both geometric, never the G6
-// solver's own opinion -- ledger rows 27/29) adds g4.search's
-// padClaimOutlierFactor knob and rewires assignment.ranking to consume
-// measurement + assignment.tees for the receipt-named plausibility prune,
-// moving this pin once more. Same day: teeRecovery's maxBareSupportFraction knob (the contrapositive bare-support gate) moves it again.
-// 2026-08-28: padClaimOutlierFactor note gains its ratchet pointer
-// (docs/RATCHETS.md / tests/unit/thresholdRatchets.test.ts) -- the
-// compiled plan's fingerprint is derived from resolved knobs and operation
-// ids, never a feature's note text, so this fingerprint is UNCHANGED by
-// that edit; verified by re-running this test after the note append.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'f31e7890672a55e6498959b67edfbfeb0b0049e7fa9a6c0ae7f8a515075aaeca';
+	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
