@@ -8,7 +8,8 @@ import {
 	resolveCourseManifest
 } from '../context/context.mjs';
 import { loadScopeManifest, resolveManifestCasePaths } from './manifest';
-import { makeContactSheet } from './render';
+import { firstPanelCrop, makeContactSheet, makeLabeledContactSheet } from './render';
+import { readFileSync } from 'node:fs';
 import { DEFAULT_SCOPE_OUT, loadScopeInput, runScopeOperation, scopeSlug } from './operation';
 import { SCOPE_TEMPLATES } from './templates';
 import { consumeViewOptions } from './viewOptions';
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
 		view: ReturnType<typeof consumeViewOptions>,
 		out: string | undefined,
 		commandArgv: readonly string[]
-	): Promise<void> {
+	): Promise<string> {
 		const loaded = await loadScopeInput(course.imagePath);
 		if (loaded.decoded.report.autoStitch.sourceCount !== 1) {
 			throw new Error('lab scope: source-frame hole viewports currently require a single-source course raster.');
@@ -172,8 +173,7 @@ async function main(): Promise<void> {
 			const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
 			appendLabCommand({ argv: [...commandArgv], taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
 			console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
-			await renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
-			return;
+			return renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
 		}
 		// No manifest viewport: derive one from the detector's own G1 badge
 		// digits. Truth-free by construction — the same digits a blind run
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
 				`box is badge-centered, ${sourceViewport[2]}x${sourceViewport[3]} (manifest-shaped default, not detector geometry)`
 		);
 		for (const warning of derived.warnings) console.log(`  WARNING: ${warning}`);
-		await renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
+		return renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
 	}
 
 	const configuredHole = /^h(\d+)$/i.exec(args[0]);
@@ -254,17 +254,27 @@ async function main(): Promise<void> {
 					})
 				: [resolveCourseContext()];
 		const failures: string[] = [];
-		let rendered = 0;
+		const tiles: { path: string; label: string; crop?: { x: number; y: number; w: number; h: number } }[] = [];
 		for (const course of courses) {
 			for (const hole of holes) {
 				try {
-					await scopeConfiguredHole(course, hole, view, out, [
+					const path = await scopeConfiguredHole(course, hole, view, out, [
 						'scope',
 						'batch',
 						course.manifest.course,
 						`h${hole}`
 					]);
-					rendered++;
+					// The combined sheet shows just each render's FIRST panel
+					// (the context view); the full per-hole sheets stay on disk.
+					let crop: { x: number; y: number; w: number; h: number } | undefined;
+					try {
+						const meta = JSON.parse(readFileSync(`${path}.json`, 'utf8'));
+						const firstPanel = meta?.panels?.[0];
+						if (firstPanel?.outputPx) crop = firstPanelCrop(firstPanel.outputPx);
+					} catch {
+						// No sidecar: fall back to the full sheet as the tile.
+					}
+					tiles.push({ path, label: `${course.manifest.course.toUpperCase()} H${hole}`, ...(crop ? { crop } : {}) });
 				} catch (error) {
 					const line = `${course.manifest.course} H${hole}: ${(error as Error).message}`;
 					failures.push(line);
@@ -272,8 +282,20 @@ async function main(): Promise<void> {
 				}
 			}
 		}
+		if (tiles.length > 0) {
+			const slug = [
+				...new Set(tiles.map((tile) => tile.label.split(' ')[0].toLowerCase()))
+			].join('-');
+			const sheetPath = resolve(
+				out ?? DEFAULT_SCOPE_OUT,
+				'batch',
+				`${slug}-${holes.map((hole) => `h${hole}`).join('-')}.png`
+			);
+			makeLabeledContactSheet(tiles, sheetPath);
+			console.log(`\nBATCH SHEET · ${tiles.length} labeled tile(s) -> ${sheetPath}`);
+		}
 		console.log(
-			`\nSCOPE BATCH — ${rendered} rendered, ${failures.length} failed of ${courses.length * holes.length} requested`
+			`SCOPE BATCH — ${tiles.length} rendered, ${failures.length} failed of ${courses.length * holes.length} requested`
 		);
 		for (const line of failures) console.log(`  failed: ${line}`);
 		if (failures.length > 0) process.exitCode = 1;

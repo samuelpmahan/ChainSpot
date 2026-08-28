@@ -204,6 +204,67 @@ export function renderScope(input:RenderScopeInput):ScopeRenderMeta{
 	return meta;
 }
 
+export interface LabeledSheetEntry {
+	readonly path: string;
+	/** Human label drawn in the tile's header bar, e.g. "NORTHPARK H14". */
+	readonly label: string;
+	/** Optional source crop (e.g. just the first panel of a full sheet). */
+	readonly crop?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+}
+
+/** First-panel geometry of a rendered scope sheet: the leading main panel is
+ * painted at (0,0) with a LABEL_H header and CHROME borders. */
+export function firstPanelCrop(firstPanelOutputPx: number): { x: number; y: number; w: number; h: number } {
+	return { x: 0, y: 0, w: firstPanelOutputPx + CHROME * 2, h: LABEL_H + firstPanelOutputPx + CHROME * 2 };
+}
+
+/** One sheet, one labeled tile per entry — a batch of holes a human can read
+ * at a glance without opening N files. */
+export function makeLabeledContactSheet(entries: readonly LabeledSheetEntry[], outputPath: string): void {
+	if (!entries.length) throw new Error('lab scope: labeled contact-sheet has no entries.');
+	const images = entries.map((entry) => {
+		const png = PNG.sync.read(readFileSync(entry.path));
+		const crop = entry.crop ?? { x: 0, y: 0, w: png.width, h: png.height };
+		return { entry, png, crop: {
+			x: Math.max(0, crop.x),
+			y: Math.max(0, crop.y),
+			w: Math.min(crop.w, png.width - Math.max(0, crop.x)),
+			h: Math.min(crop.h, png.height - Math.max(0, crop.y))
+		} };
+	});
+	const tileW = Math.max(...images.map((i) => i.crop.w));
+	const headerH = LABEL_H + 6;
+	const tileH = headerH + Math.max(...images.map((i) => i.crop.h));
+	const cols = Math.max(1, Math.ceil(Math.sqrt(images.length)));
+	const rows = Math.ceil(images.length / cols);
+	const gap = 14;
+	const width = cols * tileW + (cols - 1) * gap;
+	const height = rows * tileH + (rows - 1) * gap;
+	const sheet = new PNG({ width, height });
+	const out = sheet.data as Uint8Array;
+	fill(out, width, height, BG);
+	for (let i = 0; i < images.length; i++) {
+		const col = i % cols, row = Math.floor(i / cols);
+		const dx = col * (tileW + gap), dy = row * (tileH + gap);
+		fillRect(out, width, height, dx, dy, tileW, LABEL_H, LABEL_BG);
+		drawText(out, width, height, dx + 8, dy + 5, images[i].entry.label, 2, TEXT);
+		const { png, crop } = images[i];
+		for (let y = 0; y < crop.h; y++) for (let x = 0; x < crop.w; x++) {
+			const si = rgbaIndex(png.width, crop.x + x, crop.y + y);
+			const di = rgbaIndex(width, dx + x, dy + headerH + y);
+			out[di] = png.data[si]; out[di + 1] = png.data[si + 1];
+			out[di + 2] = png.data[si + 2]; out[di + 3] = png.data[si + 3];
+		}
+	}
+	mkdirSync(dirname(outputPath), { recursive: true });
+	writeFileSync(outputPath, PNG.sync.write(sheet));
+	writeFileSync(`${outputPath}.json`, JSON.stringify({
+		schemaVersion: 1,
+		tiles: images.map((image, index) => ({ index: index + 1, label: image.entry.label, path: image.entry.path, crop: image.crop })),
+		output: outputPath
+	}, null, 2) + '\n');
+}
+
 export function makeContactSheet(renderedPaths:readonly string[],outputPath:string):void{if(!renderedPaths.length)throw new Error('lab scope: contact-sheet has no rendered scopes.');const images=renderedPaths.map(path=>({path,png:PNG.sync.read(readFileSync(path))})),tileW=Math.max(...images.map(i=>i.png.width)),tileH=Math.max(...images.map(i=>i.png.height)),cols=Math.max(1,Math.ceil(Math.sqrt(images.length))),rows=Math.ceil(images.length/cols),gap=14,width=cols*tileW+(cols-1)*gap,height=rows*tileH+(rows-1)*gap,sheet=new PNG({width,height}),out=sheet.data as Uint8Array;fill(out,width,height,BG);for(let i=0;i<images.length;i++){const col=i%cols,row=Math.floor(i/cols),dx=col*(tileW+gap),dy=row*(tileH+gap),src=images[i].png;for(let y=0;y<src.height;y++)for(let x=0;x<src.width;x++){const si=rgbaIndex(src.width,x,y),di=rgbaIndex(width,dx+x,dy+y);out[di]=src.data[si];out[di+1]=src.data[si+1];out[di+2]=src.data[si+2];out[di+3]=src.data[si+3];}drawRing(out,width,height,dx+18,dy+18,14,FRAME);drawNumber(out,width,height,dx+18,dy+18,i+1);}mkdirSync(dirname(outputPath),{recursive:true});writeFileSync(outputPath,PNG.sync.write(sheet));writeFileSync(`${outputPath}.json`,JSON.stringify({schemaVersion:1,scopes:renderedPaths.map((path,index)=>({index:index+1,path})),output:outputPath},null,2)+'\n');}
 
 export const TRAVERSE_DIRECTIONS = [
