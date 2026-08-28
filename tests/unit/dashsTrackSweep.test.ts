@@ -160,8 +160,18 @@ describe('DashsTrack bottom-up gate sweep (deterministic E2E vs frozen truth)', 
 	}, 30000);
 
 	// G6's assertion is structured to compute + log BEFORE asserting, so the
-	// scoreboard line always prints even when the final assert fails/xfails.
-		test.fails('G6 — endpoint assignment (measured: ASSIGNED exact 13/18)', async () => {
+	// scoreboard line always prints even if the assert ever regresses again.
+	// Owner directive 2026-08-28 (discovery de-footgun lane): G4 teeRecovery's
+	// predecessor-basket-radius search box was replaced with a global,
+	// no-spatial-prefilter search (every unowned, non-occluded bright
+	// component is a candidate; the strict predicate is the only filter).
+	// That recovered DashsTrack's three assignment-missing tees, and the
+	// resulting bigger tee pool let G5/G6 reassignment also correct an
+	// unrelated near-zero-score mis-pairing. Measured now: ASSIGNED exact
+	// 18/18, maxDeviation 5.02px, zero misses -- this flips from
+	// `test.fails` to a real assertion because the gap it documented is
+	// closed, not because the bar was loosened.
+		test('G6 — endpoint assignment (measured: ASSIGNED exact 18/18)', async () => {
 		const { run: r } = await getRun();
 		const assignments = r.assignment.assignments;
 		const teesByDetId = new Map(r.assignment.tees.map((t) => [t.detId, t]));
