@@ -452,7 +452,9 @@ export async function runSweepOperation(
 			truthScoringSkipped = true;
 			truthScoringReason = truthDecision.reason;
 		} else {
-			scoreboard = scoreTruth(board, canonicalTruth!, report.singleSourceOffset);
+			scoreboard = scoreTruth(board, canonicalTruth!, report.singleSourceOffset, {
+				recoveryRan: plan.ops.some((operation) => operation.gate === 'G4')
+			});
 		}
 	} else {
 		// "Not attempted" is a different line from "attempted and skipped for

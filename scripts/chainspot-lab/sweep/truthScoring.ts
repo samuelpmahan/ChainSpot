@@ -15,7 +15,6 @@ import type {
 	BadgeEvidence,
 	BasketEvidence,
 	TeeEvidence,
-	ThreeFactorMeasurement,
 	ThreeFactorAssignment
 } from '@chainspot/alg/detectors/threeFactor/types';
 
@@ -50,11 +49,53 @@ export interface GateScore {
 	readonly objectMatches?: readonly ObjectMatch[];
 	readonly unownedDetections?: readonly LocatedDetection[];
 	readonly unmatchedTruth?: readonly TruthTarget[];
+	readonly associationFailures?: readonly AssociationFailure[];
 }
 
 export interface TruthScoreboard {
 	readonly expectedHoles: number;
 	readonly scores: readonly GateScore[];
+}
+
+export interface TruthFailureRow {
+	readonly rowId: string;
+	readonly runId: string;
+	readonly imageId: string;
+	readonly paramsHash: string;
+	readonly traceHash: string;
+	readonly gate: 'G1' | 'G2' | 'G3' | 'G4' | 'G6';
+	readonly verdict:
+		| 'FALSE_NEGATIVE'
+		| 'FALSE_POSITIVE'
+		| 'ASSOCIATION_MISSING'
+		| 'ASSOCIATION_MISMATCH'
+		| 'ASSOCIATION_INVALID';
+	readonly objectKind: 'badge' | 'basket' | 'tee' | 'association';
+	readonly truthIdentity?: string;
+	readonly detectionIdentity?: string;
+	readonly label: string;
+	readonly reason: string;
+	readonly canonical: Point;
+	readonly original?: Point;
+	readonly coordinateFrame: 'g0-canonical';
+	readonly evaluationOnly: true;
+	readonly association?: AssociationFailure;
+	readonly scopeRequests: readonly TruthFailureScope[];
+}
+
+export interface TruthFailureScope {
+	readonly label: string;
+	readonly request: {
+		readonly name: string;
+		readonly point: readonly [number, number];
+	};
+}
+
+export interface TruthFailureIdentity {
+	readonly runId: string;
+	readonly imageId: string;
+	readonly paramsHash: string;
+	readonly traceHash: string;
 }
 
 export interface GroundingHypothesisScore {
@@ -85,9 +126,22 @@ export interface Point {
 	readonly yPx: number;
 }
 
+export interface AssociationFailure {
+	readonly kind: 'ASSOCIATION_MISSING' | 'ASSOCIATION_MISMATCH' | 'ASSOCIATION_INVALID';
+	readonly truthIdentity: string;
+	readonly badgeId?: string;
+	readonly teeId?: string;
+	readonly basketId?: string;
+	readonly truthTeeCanonical: Point;
+	readonly truthBasketCanonical: Point;
+	readonly detectedTeeCanonical?: Point;
+	readonly detectedBasketCanonical?: Point;
+	readonly reason: string;
+}
+
 export interface LocatedDetection extends Point {
 	readonly id: string;
-	readonly spriteType: 'basket' | 'tee';
+	readonly spriteType: 'badge' | 'basket' | 'tee';
 	readonly identity: string;
 	readonly measurements: Readonly<Record<string, string | number | boolean>>;
 	readonly original?: Point;
@@ -116,6 +170,119 @@ export interface FrameOffset {
 
 function originalPoint(point: Point, offset?: FrameOffset): Point | undefined {
 	return offset ? { xPx: point.xPx - offset.xPx, yPx: point.yPx - offset.yPx } : undefined;
+}
+
+/** Project localizable post-run truth failures into one receipt contract.
+ * G1 rows require an explicit badge point; G6 rows label each known endpoint.
+ * Truth never crosses back into the engine. */
+export function buildTruthFailureRows(
+	board: TruthScoreboard,
+	identity: TruthFailureIdentity,
+	offset?: FrameOffset
+): TruthFailureRow[] {
+	const rows: TruthFailureRow[] = [];
+	for (const score of board.scores) {
+		if (
+			score.gate !== 'G1' &&
+			score.gate !== 'G2' &&
+			score.gate !== 'G3' &&
+			score.gate !== 'G4' &&
+			score.gate !== 'G6'
+		)
+			continue;
+		const gate = score.gate;
+		const objectKind = gate === 'G1' ? 'badge' : gate === 'G2' ? 'basket' : 'tee';
+		for (const target of score.unmatchedTruth ?? []) {
+			const rowId = `${gate}:FALSE_NEGATIVE:${target.identity}`;
+			const original = originalPoint(target.point, offset);
+			rows.push({
+				...identity,
+				rowId,
+				gate,
+				verdict: 'FALSE_NEGATIVE',
+				objectKind,
+				truthIdentity: target.identity,
+				label: `${target.identity} ${objectKind} false negative`,
+				reason:
+					score.misses.find((miss) => miss.startsWith(`${target.identity}:`)) ??
+					`${target.identity}:no unclaimed detection within ${ASSOCIATION_TOLERANCE_PX}px`,
+				canonical: target.point,
+				...(original ? { original } : {}),
+				coordinateFrame: 'g0-canonical',
+				evaluationOnly: true,
+				scopeRequests: [
+					{
+						label: `truth ${objectKind}`,
+						request: { name: rowId, point: [target.point.xPx, target.point.yPx] }
+					}
+				]
+			});
+		}
+		for (const detection of score.unownedDetections ?? []) {
+			const rowId = `${gate}:FALSE_POSITIVE:${detection.identity}`;
+			const original = detection.original ?? originalPoint(detection, offset);
+			rows.push({
+				...identity,
+				rowId,
+				gate,
+				verdict: 'FALSE_POSITIVE',
+				objectKind,
+				detectionIdentity: detection.identity,
+				label: `${detection.identity} ${objectKind} false positive`,
+				reason: `no unclaimed truth object within ${ASSOCIATION_TOLERANCE_PX}px`,
+				canonical: { xPx: detection.xPx, yPx: detection.yPx },
+				...(original ? { original } : {}),
+				coordinateFrame: 'g0-canonical',
+				evaluationOnly: true,
+				scopeRequests: [
+					{
+						label: `detected ${objectKind}`,
+						request: { name: rowId, point: [detection.xPx, detection.yPx] }
+					}
+				]
+			});
+		}
+		for (const failure of score.associationFailures ?? []) {
+			const rowId = `G6:${failure.kind}:${failure.truthIdentity}`;
+			const scopes = [
+				{ label: 'truth tee', point: failure.truthTeeCanonical },
+				{ label: 'truth basket', point: failure.truthBasketCanonical },
+				...(failure.detectedTeeCanonical
+					? [{ label: 'detected tee', point: failure.detectedTeeCanonical }]
+					: []),
+				...(failure.detectedBasketCanonical
+					? [{ label: 'detected basket', point: failure.detectedBasketCanonical }]
+					: [])
+			];
+			const original = originalPoint(failure.truthTeeCanonical, offset);
+			rows.push({
+				...identity,
+				rowId,
+				gate: 'G6',
+				verdict: failure.kind,
+				objectKind: 'association',
+				truthIdentity: failure.truthIdentity,
+				...(failure.teeId || failure.basketId
+					? { detectionIdentity: `${failure.teeId ?? 'UNKNOWN'}->${failure.basketId ?? 'UNKNOWN'}` }
+					: {}),
+				label: `${failure.truthIdentity} association ${failure.kind.toLowerCase().replace('association_', '')}`,
+				reason: failure.reason,
+				canonical: failure.truthTeeCanonical,
+				...(original ? { original } : {}),
+				coordinateFrame: 'g0-canonical',
+				evaluationOnly: true,
+				association: failure,
+				scopeRequests: scopes.map((scope) => ({
+					label: scope.label,
+					request: {
+						name: `${rowId}:${scope.label.replace(' ', '-')}`,
+						point: [scope.point.xPx, scope.point.yPx]
+					}
+				}))
+			});
+		}
+	}
+	return rows;
 }
 
 function median(values: readonly number[]): number {
@@ -278,12 +445,18 @@ function scoreG1(badges: readonly BadgeEvidence[], truth: CanonicalTruth): GateS
 	const misses = expectedNumbers
 		.filter((n) => !readNumbers.includes(n))
 		.map((n) => `H${n}:no-digit-read`);
+	const unmatchedTruth = truth.holes.flatMap((hole) => {
+		if (readNumbers.includes(hole.number)) return [];
+		const point = hole.numberBadge ?? hole.badge;
+		return point ? [{ identity: `H${hole.number}`, point }] : [];
+	});
 	return {
 		gate: 'G1',
 		matched: matchedNumbers.length,
 		expected: expectedNumbers.length,
 		maxDeviationPx: 0,
-		misses
+		misses,
+		...(unmatchedTruth.length > 0 ? { unmatchedTruth } : {})
 	};
 }
 
@@ -417,12 +590,8 @@ export function compareTruthGrounding(
 	return comparisons;
 }
 
-function scoreG3(
-	tees: readonly TeeEvidence[],
-	truth: CanonicalTruth,
-	offset?: FrameOffset
-): GateScore {
-	const detections: LocatedDetection[] = tees.map((tee) => ({
+function teeDetections(tees: readonly TeeEvidence[]): LocatedDetection[] {
+	return tees.map((tee) => ({
 		id: tee.detId,
 		spriteType: 'tee',
 		identity: `${tee.detId}:${tee.tier}`,
@@ -435,8 +604,17 @@ function scoreG3(
 			onRing: tee.onRing
 		}
 	}));
+}
+
+function scoreTees(
+	gate: 'G3' | 'G4',
+	tees: readonly TeeEvidence[],
+	truth: CanonicalTruth,
+	offset?: FrameOffset
+): GateScore {
+	const detections = teeDetections(tees);
 	return {
-		gate: 'G3',
+		gate,
 		expected: truth.holes.length,
 		detected: detections.length,
 		...associateDetections(
@@ -447,15 +625,23 @@ function scoreG3(
 	};
 }
 
+function scoreG3(tees: readonly TeeEvidence[], truth: CanonicalTruth, offset?: FrameOffset): GateScore {
+	return scoreTees('G3', tees, truth, offset);
+}
+
+function scoreG4(tees: readonly TeeEvidence[], truth: CanonicalTruth, offset?: FrameOffset): GateScore {
+	return scoreTees('G4', tees, truth, offset);
+}
+
 /** G6: full tee->badge->basket assignment, exact-match convention from
  * tests/unit/dashsTrackSweep.test.ts's G6 case -- both endpoints of the
  * assignment claimed for a hole's badge number must land within
  * ASSOCIATION_TOLERANCE_PX of that hole's truth. */
 function scoreG6(
-	measurement: ThreeFactorMeasurement,
 	assignment: ThreeFactorAssignment,
 	truth: CanonicalTruth
 ): GateScore {
+	const measurement = assignment.measurement;
 	// Assignment may contain G4-recovered tees that deliberately are not
 	// retroactively inserted into the immutable G5 measurement. Resolve the
 	// selected IDs against the final assignment inventory, not the pre-recovery
@@ -470,17 +656,42 @@ function scoreG6(
 	let matched = 0;
 	let maxDeviationPx = 0;
 	const misses: string[] = [];
+	const associationFailures: AssociationFailure[] = [];
 	for (const hole of truth.holes) {
 		const badgeId = badgesByLabel.get(hole.number);
 		const found = badgeId ? assignment.assignments.find((a) => a.badgeId === badgeId) : undefined;
 		if (!found) {
-			misses.push(`H${hole.number}:no-assignment`);
+			const reason = `H${hole.number}:no-assignment`;
+			misses.push(reason);
+			associationFailures.push({
+				kind: 'ASSOCIATION_MISSING',
+				truthIdentity: `H${hole.number}`,
+				...(badgeId ? { badgeId } : {}),
+				truthTeeCanonical: hole.tee,
+				truthBasketCanonical: hole.basket,
+				reason
+			});
 			continue;
 		}
 		const tee = teesById.get(found.teeId);
 		const basket = basketsById.get(found.basketId);
 		if (!tee || !basket) {
-			misses.push(`H${hole.number}:dangling-ids`);
+			const reason = `H${hole.number}:dangling-ids`;
+			misses.push(reason);
+			associationFailures.push({
+				kind: 'ASSOCIATION_INVALID',
+				truthIdentity: `H${hole.number}`,
+				badgeId: found.badgeId,
+				teeId: found.teeId,
+				basketId: found.basketId,
+				truthTeeCanonical: hole.tee,
+				truthBasketCanonical: hole.basket,
+				...(tee ? { detectedTeeCanonical: { xPx: tee.xPx, yPx: tee.yPx } } : {}),
+				...(basket
+					? { detectedBasketCanonical: { xPx: basket.tipXPx, yPx: basket.tipYPx } }
+					: {}),
+				reason
+			});
 			continue;
 		}
 		const teeD = dist(hole.tee, tee);
@@ -490,10 +701,34 @@ function scoreG6(
 			matched++;
 			if (worst > maxDeviationPx) maxDeviationPx = worst;
 		} else {
-			misses.push(`H${hole.number}:tee=${teeD.toFixed(1)}px,basket=${basketD.toFixed(1)}px`);
+			const reason = `H${hole.number}:tee=${teeD.toFixed(1)}px,basket=${basketD.toFixed(1)}px`;
+			misses.push(reason);
+			associationFailures.push({
+				kind: 'ASSOCIATION_MISMATCH',
+				truthIdentity: `H${hole.number}`,
+				badgeId: found.badgeId,
+				teeId: found.teeId,
+				basketId: found.basketId,
+				truthTeeCanonical: hole.tee,
+				truthBasketCanonical: hole.basket,
+				detectedTeeCanonical: { xPx: tee.xPx, yPx: tee.yPx },
+				detectedBasketCanonical: { xPx: basket.tipXPx, yPx: basket.tipYPx },
+				reason
+			});
 		}
 	}
-	return { gate: 'G6', matched, expected: truth.holes.length, maxDeviationPx, misses };
+	return {
+		gate: 'G6',
+		matched,
+		expected: truth.holes.length,
+		maxDeviationPx,
+		misses,
+		associationFailures
+	};
+}
+
+export interface TruthScoringOptions {
+	readonly recoveryRan?: boolean;
 }
 
 /** Reads 'measurement' and 'assignment' straight off the board
@@ -505,7 +740,8 @@ function scoreG6(
 export function scoreTruth(
 	board: ExecBoard,
 	truth: CanonicalTruth,
-	frameOffset?: FrameOffset
+	frameOffset?: FrameOffset,
+	options: TruthScoringOptions = {}
 ): TruthScoreboard {
 	const scores: GateScore[] = [];
 	if (board.has('badges'))
@@ -516,10 +752,14 @@ export function scoreTruth(
 	if (board.has('tees')) {
 		scores.push(scoreG3(board.get<readonly TeeEvidence[]>('tees'), truth, frameOffset));
 	}
-	if (board.has('measurement') && board.has('assignment')) {
-		const measurement = board.get<ThreeFactorMeasurement>('measurement');
+	if (options.recoveryRan && board.has('assignment')) {
+		scores.push(
+			scoreG4(board.get<ThreeFactorAssignment>('assignment').tees, truth, frameOffset)
+		);
+	}
+	if (board.has('assignment')) {
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
-		scores.push(scoreG6(measurement, assignment, truth));
+		scores.push(scoreG6(assignment, truth));
 	}
 	return {
 		expectedHoles: truth.holes.length,

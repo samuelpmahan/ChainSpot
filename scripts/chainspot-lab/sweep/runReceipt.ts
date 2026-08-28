@@ -11,6 +11,11 @@ import {
 	GATE_TITLES
 } from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { G0Report } from './inputShim';
+import {
+	buildTruthFailureRows,
+	type TruthFailureRow,
+	type TruthScoreboard
+} from './truthScoring';
 
 export const RUN_RECEIPT_SCHEMA = 'chainspot-lab-run-receipt@1' as const;
 
@@ -175,7 +180,8 @@ export interface RunReceipt {
 		readonly truthSupplied: boolean;
 		readonly skipped: boolean;
 		readonly reason?: string;
-		readonly scoreboard?: unknown;
+		readonly scoreboard?: TruthScoreboard;
+		readonly failureRows: readonly TruthFailureRow[];
 	};
 	readonly warnings: readonly string[];
 }
@@ -201,7 +207,7 @@ export interface BuildRunReceiptInput {
 	readonly truthSupplied: boolean;
 	readonly truthScoringSkipped: boolean;
 	readonly truthScoringReason?: string;
-	readonly scoreboard?: unknown;
+	readonly scoreboard?: TruthScoreboard;
 }
 
 function round(value: number): number {
@@ -399,6 +405,18 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		paramsHash: input.trace.paramsHash || 'UNKNOWN',
 		traceHash: input.trace.traceHash ?? 'UNKNOWN'
 	};
+	const failureRows = input.scoreboard
+		? buildTruthFailureRows(
+				input.scoreboard,
+				{
+					runId: input.trace.runId ?? 'UNKNOWN',
+					imageId: input.trace.imageId ?? input.report.imageId,
+					paramsHash: input.trace.paramsHash || 'UNKNOWN',
+					traceHash: input.trace.traceHash ?? 'UNKNOWN'
+				},
+				input.report.singleSourceOffset
+			)
+		: [];
 	return {
 		schema: RUN_RECEIPT_SCHEMA,
 		generatedAt: input.generatedAt,
@@ -442,7 +460,8 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 			truthSupplied: input.truthSupplied,
 			skipped: input.truthScoringSkipped,
 			...(input.truthScoringReason ? { reason: input.truthScoringReason } : {}),
-			...(input.scoreboard ? { scoreboard: input.scoreboard } : {})
+			...(input.scoreboard ? { scoreboard: input.scoreboard } : {}),
+			failureRows
 		},
 		warnings
 	};
