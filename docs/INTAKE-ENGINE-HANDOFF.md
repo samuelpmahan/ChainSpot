@@ -71,10 +71,17 @@ occluded shard-supported tees are completed at G4.
 
 ## Validation receipt
 
-The 2026-08-27 frozen promotion ran the full default config on DashsTrack:
+The 2026-08-27 frozen promotion ran the full default config on DashsTrack.
+Amended 2026-08-28 by owner directive: `zfit` was dropped from the default
+schedule (still one flip away via `zfit-on.json`; the engine-level
+`DEFAULT_EXECUTION` fallback that sparse configs inherit still ends with
+`zfit`). The config hash changed accordingly; every result number below was
+re-verified identical before and after the drop.
 
-- Config hash: `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`.
-- Plan: 19 chronological operations; `assignment.selection → teeRecovery → zfit`.
+- Config hash: `cb9b82be4dede236a4236352ac331ff1812f69ee781887934c148f4c1542fd93`
+  (was `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`
+  with zfit scheduled).
+- Plan: 18 chronological operations; `assignment.selection → teeRecovery`.
 - Results: 18 badges, 18 baskets, 16 visible tees, 2 recovered tees,
   18 total tees, 18 assignments, and 5,184 raw pairs.
 - G4: 2 accepted recovery hypotheses, 0 rejected; H3 uses two visible shards
@@ -153,12 +160,13 @@ Default DashsTrack G3 artifact hashes after hardening:
   API payload wiring, and static DOM wiring assertions; there is no browser
   DOM end-to-end test yet.
 - Later-gate cutoff slicing now has its dependency-complete design (hardened
-  contract 3 above). In the frozen default plan the `G4` and `G5` cutoffs run
-  the same 18-operation prefix (teeRecovery consumes the first assignment
-  pass, so endpoint completion already needs every straight-test/assignment
-  operation); their receipts and sliced plan fingerprints stay distinct. A
+  contract 3 above). In the frozen default plan the `G4`, `G5`, and `G6`
+  cutoffs all run the full 18-operation plan (teeRecovery consumes the first
+  assignment pass and is the terminal operation now that zfit left the
+  schedule); their receipts and sliced plan fingerprints stay distinct. A
   cutoff whose own phase owns no scheduled operation is rejected with an
-  error naming the operations that would demonstrate it.
+  error naming the operations that would demonstrate it — on the default
+  config that now includes `--through G7`, since no zfit is scheduled.
 
 ## Resume safely
 

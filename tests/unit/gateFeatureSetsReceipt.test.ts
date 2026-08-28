@@ -177,9 +177,11 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(g7.enabledFeatureIds).toContain('zfit');
 	});
 
-	test('default config execution follows the canonical operation order through G7', () => {
+	test('default config execution follows the canonical operation order, ending at G4 teeRecovery', () => {
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
-		expect(resolved.execution).toEqual(DEFAULT_EXECUTION);
+		// zfit left the default schedule by owner directive (2026-08-28); the
+		// engine-level DEFAULT_EXECUTION fallback still ends with it.
+		expect(resolved.execution).toEqual(DEFAULT_EXECUTION.filter((id) => id !== 'zfit'));
 		const plan = compileExecutionPlan(resolved);
 		expect(plan.ops.map((operation) => operation.id)).toEqual([
 			'badgeStage.masks',
@@ -199,8 +201,7 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.scoring',
 			'assignment.ranking',
 			'assignment.selection',
-			'teeRecovery',
-			'zfit'
+			'teeRecovery'
 		]);
 	});
 });

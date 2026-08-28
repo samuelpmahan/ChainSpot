@@ -343,6 +343,9 @@ export async function runSweepOperation(
 	const intakeStartedAtMs = performance.now();
 	const { report, image, canonicalTruth } = await canonicalizeInputs(inputPaths, truth);
 	const intakeMs = performance.now() - intakeStartedAtMs;
+	// A sliced run gets its own deterministic directory so stale full-run
+	// artifacts can never sit beside a --through receipt and masquerade as
+	// part of the sliced run.
 	const outDir = input.outDir
 		? resolve(input.outDir)
 		: resolve(
@@ -350,7 +353,9 @@ export async function runSweepOperation(
 				'artifacts',
 				'sweep',
 				loaded.resolved.name,
-				canonicalSweepRunName(inputPaths)
+				input.throughGate
+					? `${canonicalSweepRunName(inputPaths)}-through-${input.throughGate}`
+					: canonicalSweepRunName(inputPaths)
 			);
 	mkdirSync(outDir, { recursive: true });
 	// Runs reuse a deterministic output directory. Remove only the obsolete
