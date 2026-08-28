@@ -150,9 +150,13 @@ Default DashsTrack G3 artifact hashes after hardening:
 
 ## Known gaps that remain honest
 
-- The frozen recovery baseline has one accepted 18-hole proof. Keep promoting
-  approved flips directly into frozen until both a 54-hole (three-course) and
-  72-hole (four-course) result exist, or the owner changes that policy.
+- The frozen recovery baseline has one accepted 18-hole proof. Owner policy
+  (2026-08-28): the frozen-baseline ceremony RELAXES until both a 54-hole
+  (three-course) and 72-hole (four-course) result exist — do what it takes to
+  get there. Promote approved flips directly into frozen, re-pin hashes as
+  needed with lineage noted, and skip promotion ceremony beyond the receipts
+  themselves. The receipt contract (provenance, no silent drops) does NOT
+  relax; only the promotion process does. Full ceremony resumes at 54/72.
 - Complete-invisibility fallback remains intentionally absent from production:
   `phantomTee` stays OFF until an observed course needs it.
 - Ownership is a downstream conclusion. A localized tee with
