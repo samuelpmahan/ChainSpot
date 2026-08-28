@@ -13,6 +13,32 @@ Reconciliation means walking a claim back to pixels a human can look at.
 
 ## The procedure
 
+0. **Ground yourself with a Frame first** (Minsky frames — owner-adopted
+   reusable pattern, 2026-08-28). Before touching pixels, fill the slots
+   OUT LOUD in your working notes:
+
+   - **Looking for X**: the object class (e.g. "hole 16's tee pad").
+   - **It looks like Y**: appearance filler, from measurement not memory
+     (e.g. "a white rotated-rectangle OUTLINE, ~20×14px at this course's
+     zoom — the median of the 15 pads G3 already measured here").
+   - **I know that because ABC**: the evidence basis for Y (the course's
+     own measured pads; the render standard in the receipts; the chrome
+     signature table in `chainspot-cv-engrams`).
+   - **It may be near DEF**: expected context, held loosely (e.g. "near
+     badge 16, beside hole 15's basket, possibly ON TOP of the C2D ring
+     per this course's z-order") — context guides the search, but per the
+     owner's footgun law it must NEVER become a hard spatial filter.
+
+   Defaults come from the engram tables (chrome signatures fill the
+   "what else might Y be confused with" slot automatically); course
+   frames specialize object frames (NorthPark's pad-over-C2D z-order
+   overrides the generic default). An unfilled slot is a finding: if you
+   cannot say what X looks like from measured evidence, you are not ready
+   to reconcile — you are guessing. The 2026-08-28 chrome retraction
+   happened exactly because this frame was never filled: "it looks like a
+   7×21 vertical bar" should have triggered "…which is the digit-glyph
+   filler, not the pad filler."
+
 1. **Quote the claim verbatim** — the exact receipt line(s), with path. A
    paraphrase is already an interpretation.
 

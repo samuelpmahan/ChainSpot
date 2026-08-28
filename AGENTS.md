@@ -17,6 +17,23 @@ Browser-only SvelteKit app (Svelte 5 runes, static adapter, Node >= 22). No back
 - Before making changes, inspect `git status --short` and preserve unrelated user changes.
 - Try not to run E2E tests or tests involving browser control for now unless they are the highest-value proof for the task. This is still a build-out and the user frequently performs manual browser acceptance. Never substitute unit/type checks for a browser interaction that they cannot prove.
 
+## The Engram Table (read this before non-trivial work)
+
+`.claude/skills/` is the repo's agent memory — plain-markdown "engrams"
+that Claude sessions auto-load and every OTHER agent must read at task
+start as if they were part of this file:
+
+- `.claude/skills/chainspot-engrams/SKILL.md` — process memory (receipts,
+  claims ledger, gate model, owner policies, operational quirks).
+- `.claude/skills/chainspot-cv-engrams/SKILL.md` — vision memory (chrome
+  signatures, C1S/C2D rings and z-order, the completeness invariant).
+- `.claude/skills/receipt-reconcile/SKILL.md` — how to reconcile a receipt
+  against its rendering, grounded in a Minsky Frame (looking-for X /
+  looks-like Y / because ABC / may-be-near DEF).
+
+An engram is written the day it is earned, in the same commit as the work.
+Load-bearing diagnoses go to `docs/CLAIMS-LEDGER.md` with receipts.
+
 ## How work gets done — small demonstrable progress
 
 The full definition lives in [`docs/WORKFLOW.md`](./docs/WORKFLOW.md). Read it
