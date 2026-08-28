@@ -480,10 +480,16 @@ function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[]
 	const owned = exactBasketPixels(stage, basket, sprites, viewportTopPx);
 	const [x0, y0, x1, y1] = bounds ?? [0, 0, stage.width - 1, stage.height - 1];
 	for (const badge of badges) {
-		const label = badge.component.label;
+		// Own EVERY bright pixel inside the badge bbox, not only the plate
+		// outline's own component: the digit glyphs are separate bright
+		// components inside the plate's dark interior, and un-owned they
+		// masquerade as "visible tee shards" (observed on NorthPark: H14's
+		// rejected recovery candidate was badge 15's "5" glyph, H16's was
+		// badge 16's own "1"). G3 already excludes rings inside badge bboxes
+		// as chrome; recovery must treat badge interiors the same way.
 		const bx0 = Math.max(x0, badge.bbox[0]), bx1 = Math.min(x1, badge.bbox[0] + badge.bbox[2] - 1);
 		const by0 = Math.max(y0, badge.bbox[1] - viewportTopPx), by1 = Math.min(y1, badge.bbox[1] - viewportTopPx + badge.bbox[3] - 1);
-		for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (stage.brightLabels[y * stage.width + x] === label) owned.add(`${x},${y}`);
+		for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (stage.brightLabels[y * stage.width + x] > 0) owned.add(`${x},${y}`);
 	}
 	for (const tee of tees) {
 		const label = tee.pad?.componentLabel;
