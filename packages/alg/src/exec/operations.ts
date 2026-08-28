@@ -64,6 +64,7 @@ import {
 	scoreRawPairs,
 	rankPairsByBadge,
 	selectAssignments,
+	pruneImplausiblePairs,
 	DEFAULT_SEARCH_KNOBS,
 	type SearchKnobs
 } from '../detectors/threeFactor/assignment';
@@ -414,14 +415,34 @@ const assignmentOps: OperationDef[] = [
 			kind: 'compute',
 			gate: 'G6',
 			unit: 'assignment',
-			consumes: ['assignment.scoredPairs'],
+			consumes: ['assignment.scoredPairs', 'measurement', 'assignment.tees'],
 			produces: ['assignment.rankedByBadge'],
-			note: 'rank scored pairs within each badge'
+			features: [g4SearchFeature.id],
+			note: 'geometric plausibility prune (course-derived claim bound; every dropped pairing receipt-named), then rank scored pairs within each badge'
 		},
 		run(board, ctx) {
 			const stop = ctx.span('assignment');
 			const scored = board.get<ScoredPairEvidence[]>('assignment.scoredPairs');
-			board.set('assignment.rankedByBadge', rankPairsByBadge(scored));
+			const measurement = board.get<ThreeFactorMeasurement>('measurement');
+			const tees = board.get<readonly TeeEvidence[]>('assignment.tees');
+			const searchKnobs =
+				(ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs) ?? DEFAULT_SEARCH_KNOBS;
+			// Owner directive 2026-08-28: a scarcity-driven far pairing (Heritage
+			// H5 <- tee-12 at 317px, rank 1) must lose to an empty slot the G4
+			// hunt can see -- and every pruned pairing is named, because
+			// provenance tracks candidates OUT of the pool, not just survivors.
+			const prune = pruneImplausiblePairs(measurement.badges, tees, scored, Number.isFinite(searchKnobs.padClaimOutlierFactor) ? searchKnobs.padClaimOutlierFactor : DEFAULT_SEARCH_KNOBS.padClaimOutlierFactor);
+			ctx.measure('assignment', 'prunedPairings', prune.dropped.length);
+			if (prune.claimSet.claimBoundPx !== null) ctx.measure('assignment', 'claimBoundPx', prune.claimSet.claimBoundPx);
+			if (prune.claimSet.medianClaimDistancePx !== null) ctx.measure('assignment', 'claimMedianPx', prune.claimSet.medianClaimDistancePx);
+			const PRUNE_RECEIPT_CAP = 24;
+			for (const drop of [...prune.dropped].sort((a, b) => b.bestScore - a.bestScore).slice(0, PRUNE_RECEIPT_CAP)) {
+				const badge = measurement.badges.find((entry) => entry.detId === drop.badgeId);
+				const holeName = badge?.label && /^\d+$/.test(badge.label) ? `badge ${badge.label}` : drop.badgeId;
+				ctx.overlay('assignment', { type: 'point', xPx: badge?.cxPx ?? 0, yPx: badge?.cyPx ?? 0, verdict: 'rejected', ref: `assignment-prune-${drop.badgeId}-${drop.teeId}`, reason: `${holeName}: pairing with ${drop.teeId} removed before selection (${drop.rule === 'recovered-tee-bound-elsewhere' ? 'recovered tee is bound to the badge whose predicate accepted it' : `tee-badge distance ${drop.distancePx.toFixed(1)}px exceeds the course-derived claim bound ${prune.claimSet.claimBoundPx?.toFixed(1)}px = median ${prune.claimSet.medianClaimDistancePx?.toFixed(1)}px x ${prune.padClaimOutlierFactor} (knob padClaimOutlierFactor)`}; best dropped score ${drop.bestScore.toFixed(4)} over ${drop.pairCount} pair${drop.pairCount === 1 ? '' : 's'})` });
+			}
+			if (prune.dropped.length > PRUNE_RECEIPT_CAP) ctx.measure('assignment', 'prunedBeyondReceiptCap', prune.dropped.length - PRUNE_RECEIPT_CAP);
+			board.set('assignment.rankedByBadge', rankPairsByBadge(prune.kept));
 			stop();
 		}
 	},
@@ -501,7 +522,11 @@ const zfitOps: OperationDef[] = [
 			const searchKnobs =
 				(ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs) ?? DEFAULT_SEARCH_KNOBS;
 			const scored = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
-			const byBadge = rankPairsByBadge(scored);
+			// Same geometric plausibility prune as assignment.ranking -- zfit
+			// rescoring must not resurrect a pairing geometry already refused.
+			const prune = pruneImplausiblePairs(measurement.badges, tees, scored, Number.isFinite(searchKnobs.padClaimOutlierFactor) ? searchKnobs.padClaimOutlierFactor : DEFAULT_SEARCH_KNOBS.padClaimOutlierFactor);
+			ctx.measure('zfit', 'prunedPairings', prune.dropped.length);
+			const byBadge = rankPairsByBadge(prune.kept);
 			const selected = selectAssignments(byBadge, searchKnobs);
 			const assignments: AssignmentEvidence[] = [...selected.entries()]
 				.filter((entry): entry is [string, ScoredPairEvidence] => entry[1] !== null)

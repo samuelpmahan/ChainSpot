@@ -47,8 +47,14 @@ const straightTestOnResolved = resolveConfig(
 // g1.badges' plateFrameTolerancePx (C1 frame-exclusion provenance) and
 // g1.digits' confidenceFloorDivisor/labelAmbiguityMargin (C4 derived-floor/
 // ambiguity provenance) -- new knobs move this pin again, consciously.
+// 2026-08-28: the geometric-hunt/plausibility lane (owner directive: the
+// hunted-badge set and the pairable set are both geometric, never the G6
+// solver's own opinion -- ledger rows 27/29) adds g4.search's
+// padClaimOutlierFactor knob and rewires assignment.ranking to consume
+// measurement + assignment.tees for the receipt-named plausibility prune,
+// moving this pin once more.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
+	'a60669eb5844efbac8bdcdb06cfdc189666eafcabdfd6c8e1f71b69c49c35bf6';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

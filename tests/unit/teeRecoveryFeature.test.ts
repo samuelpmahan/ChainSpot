@@ -137,10 +137,16 @@ function recoveryFixture(mode: FixtureMode = 'full') {
 		score: 1
 	};
 	const padComponent = componentAt(110, 90);
+	// The known tee is badge-1's pad per this fixture's own assignment row, so
+	// it must also sit geometrically at badge-1: the op now derives its hunted
+	// set from badge<->tee geometry (deriveHuntTargets), and the old position
+	// (115.5, 93.5) was nearer badge-2 than badge-1 -- an accident of fixture
+	// authorship that would satisfy the wrong badge. The pad-geometry block
+	// below keeps its original bbox: only size medians are read from it.
 	const knownTee: TeeEvidence = {
 		detId: 'tee-known',
-		xPx: 115.5,
-		yPx: 93.5,
+		xPx: 12,
+		yPx: 12,
 		tier: 'component',
 		angleRad: 0.6,
 		bbox: [110, 90, 12, 8],
@@ -307,7 +313,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]?.fragmentPixels).toHaveLength((12 + 15) * 8);
 
-		const receipt = runRecovery(fixture, new OcclusionDetector()).drawables.find((drawable) => drawable.verdict === 'rejected');
+		const receipt = runRecovery(fixture, new OcclusionDetector()).drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|footprint|visible|component/i);
 	});
@@ -388,7 +394,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 	test('rejects one non-occluded bright pixel outside the hollow support band and names the evidence', () => {
 		const fixture = recoveryFixture('hollow-extra');
 		const { drawables } = runRecovery(fixture, new OcclusionDetector());
-		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
+		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|outside|footprint|visible/i);
 	});
@@ -415,7 +421,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 
 	test('rejects a rigid hollow component when no support fit lies within 3 degrees of the badge ray', () => {
 		const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
-		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
+		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/badge ray|3.?°|support fit/i);
 	});
@@ -437,7 +443,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 			const fixture = recoveryFixture('hollow-misaligned');
 
 			const tight = runRecovery(fixture, new OcclusionDetector(), 10);
-			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected');
+			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
 			expect(tightReceipt).toBeDefined();
 			// The rejection text must name the CONFIGURED limit (the knob), not a
 			// hardcoded literal, so a reader can tell this was a soft-ceiling call.
@@ -460,7 +466,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		test('a resolver that supplies an incomplete knobs object (legacy/test double) does not corrupt the active tolerance with NaN', () => {
 			setActiveAxisToleranceDeg(3);
 			const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
-			const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
+			const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
 			expect(receipt?.reason).not.toMatch(/NaN/);
 			expect(receipt?.reason).toMatch(/within 3°/);
 		});

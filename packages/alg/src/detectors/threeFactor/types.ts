@@ -144,6 +144,12 @@ export interface RecoveryProvenance {
 	readonly source: 'manual' | 'historical-fixture' | 'explicit-injected' | 'tee-shard-recovery';
 	readonly note: string;
 	readonly score?: number;
+	/** The badge whose strict recovery predicate this tee satisfied (every
+	 * visible pixel fits a pose pointing at THIS badge). Assignment treats it
+	 * as binding: a recovered tee is never paired with any other badge, so
+	 * the solver cannot reshuffle recovery's evidence away from the hole that
+	 * earned it (owner directive 2026-08-28; ledger rows 27/29). */
+	readonly badgeId?: string;
 }
 
 export type OrientedQuad = readonly [

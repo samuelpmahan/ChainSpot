@@ -254,7 +254,10 @@ describe('resolveConfig + engine', () => {
 		// provenance) and g1.digits' confidenceFloorDivisor/labelAmbiguityMargin
 		// (C4 derived-floor/ambiguity provenance) -- new knobs move this pin
 		// again, consciously, per the resolved-config-bytes-changed rule.
-		expect(hash).toBe('54e871cfd0320078c32af0502b2fc5e9877f5230152cdf23ec65d4e458b5b85c');
+		// 2026-08-28: g4.search's padClaimOutlierFactor knob (owner directive:
+		// hunted-badge set AND pairable set derived geometrically, never from
+		// the G6 solver -- ledger rows 27/29) moves this pin once more.
+		expect(hash).toBe('4421f9310242d7ac86ab0bc689c6e0c9f252afa451a7e9271f5fc4bdf2195f92');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {

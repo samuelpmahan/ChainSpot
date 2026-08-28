@@ -7,7 +7,7 @@ import { statsForPixels, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
 import basketSpriteData from '../assets/basket-sprite.json';
-import { assignThreeFactor, type SearchKnobs } from '../assignment';
+import { DEFAULT_SEARCH_KNOBS, assignThreeFactor, deriveGeometricClaims, type PlausibilityPrune, type SearchKnobs } from '../assignment';
 import type { RibbonKnobs } from '../ribbon';
 import type { RoutingKnobs } from '../routing';
 import type { ScoringKnobs, ZfitKnobs } from '../scoring';
@@ -141,6 +141,62 @@ function connectedPixelShards(points: readonly (readonly [number, number])[]): r
 		shards.push(shard);
 	}
 	return shards;
+}
+
+export interface GeometricPadClaim {
+	readonly badgeId: string;
+	readonly badgeLabel: string | null;
+	readonly teeId: string;
+	readonly distancePx: number;
+	readonly withinBound: boolean;
+}
+
+export interface HuntTargetDerivation {
+	readonly targets: readonly BadgeEvidence[];
+	readonly claims: readonly GeometricPadClaim[];
+	readonly medianClaimDistancePx: number | null;
+	readonly claimBoundPx: number | null;
+}
+
+/** Owner directive 2026-08-28 ("the step-4 input must never come from step
+ * 6"): the hunted-badge set is derived from DETECTION GEOMETRY alone --
+ * greedy nearest badge<->visible-tee claiming -- never from the G6
+ * assignment solver, whose scarcity mis-pairings previously masked missing
+ * tees from this very hunt (docs/CLAIMS-LEDGER.md row 27: Heritage badge-5
+ * "held" H4's pad from 317px away at rank 1, so the hunt never visited it
+ * while its 50px pad remnant sat unexamined beside the basket sprite).
+ *
+ * A badge is satisfied only when a visible tee claims it at a distance
+ * within the course-derived bound: median claimed distance on THIS run x
+ * padClaimOutlierFactor. No absolute pixel literal anywhere (150ft holes
+ * and 1700ft holes exist); with zero claims the bound is null and every
+ * numbered badge is hunted. Over-hunting is safe by construction -- the
+ * strict predicate plus recoveredTeeDedupeDistance suppress a re-found
+ * visible pad. Under-hunting is the failure mode this function exists to
+ * make impossible: every unowned, non-chrome component already reaches the
+ * candidate pool (no spatial prefilter), so a badge that gets hunted
+ * always sees the full evidence. */
+export function deriveHuntTargets(
+	badges: readonly BadgeEvidence[],
+	tees: readonly TeeEvidence[],
+	padClaimOutlierFactor: number
+): HuntTargetDerivation {
+	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
+	// One geometric ground truth: the same greedy claim set assignment uses
+	// for its pair-plausibility prune (deriveGeometricClaims, assignment.ts),
+	// so "who is missing" and "what is pairable" can never disagree.
+	const claimSet = deriveGeometricClaims(numbered, tees, padClaimOutlierFactor);
+	const claims = claimSet.claims.map((claim) => ({
+		...claim,
+		withinBound: claimSet.claimBoundPx !== null && claim.distancePx <= claimSet.claimBoundPx
+	}));
+	const satisfied = new Set(claims.filter((claim) => claim.withinBound).map((claim) => claim.badgeId));
+	return {
+		targets: numbered.filter((badge) => !satisfied.has(badge.detId)),
+		claims,
+		medianClaimDistancePx: claimSet.medianClaimDistancePx,
+		claimBoundPx: claimSet.claimBoundPx
+	};
 }
 
 export const teeRecoveryFeature = {
@@ -462,6 +518,12 @@ export interface TeeRecoverySearchContext {
 	/** The run-scoped service is queried only for exact OPAQUE sprite pixels.
 	 * ALPHA and UNKNOWN never remove white evidence. */
 	readonly occlusion?: OpaqueDetector;
+	/** Explicit hunted-badge set. The engine op ALWAYS passes this, derived
+	 * geometrically by deriveHuntTargets -- never from the G6 solver. The
+	 * assignment-derived fallback below exists only for direct callers that
+	 * predate the derivation (owner directive 2026-08-28, ledger row 27: a
+	 * solver mis-pairing must never decide which badges get hunted). */
+	readonly targets?: readonly BadgeEvidence[];
 }
 
 function numberLabel(badge: BadgeEvidence): number | undefined {
@@ -762,7 +824,7 @@ export function buildTeeRecoveryCandidates(
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
 	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	const targets = search.targets ?? badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -934,9 +996,54 @@ export const teeRecoveryUnit: EngineUnit = {
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
 		const measurement = board.get<import('../types').ThreeFactorMeasurement>('measurement');
-		const badgeIds = new Set(badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId));
-		const assignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
-		if ([...badgeIds].every((badgeId) => assignedBadgeIds.has(badgeId))) {
+		// Owner directive 2026-08-28: the hunted set comes from DETECTION
+		// GEOMETRY, never from the G6 solver (whose Heritage H5 mis-pairing
+		// masked a missing tee from this hunt -- ledger row 27). The solver's
+		// output is consumed below ONLY as the baseline to re-assign over.
+		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
+		// Same incomplete-knobs tolerance as axisToleranceDeg above: a
+		// config-unaware legacy caller falls back to the registry default.
+		const padClaimOutlierFactor = typeof searchKnobs?.padClaimOutlierFactor === 'number' && Number.isFinite(searchKnobs.padClaimOutlierFactor)
+			? searchKnobs.padClaimOutlierFactor
+			: DEFAULT_SEARCH_KNOBS.padClaimOutlierFactor;
+		const derivation = deriveHuntTargets(badges, tees, padClaimOutlierFactor);
+		// The solver may WIDEN the hunt, never shrink it: a badge can hold a
+		// geometric claim yet have zero surviving pairings after the
+		// plausibility prune (claimed-but-unroutable). Union in every numbered
+		// badge without a pre-recovery assignment row so neither view can hide
+		// a hole from the hunt.
+		const preAssignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
+		const geometricTargetIds = new Set(derivation.targets.map((entry) => entry.detId));
+		const solverAddedTargets = badges.filter((badge) =>
+			/^\d+$/.test(badge.label ?? '') && !preAssignedBadgeIds.has(badge.detId) && !geometricTargetIds.has(badge.detId)
+		);
+		const huntTargets = [...derivation.targets, ...solverAddedTargets];
+		for (const claim of derivation.claims) ctx.measure('teeRecovery', 'padClaimDistancePx', claim.distancePx);
+		if (derivation.medianClaimDistancePx !== null) ctx.measure('teeRecovery', 'padClaimMedianPx', derivation.medianClaimDistancePx);
+		if (derivation.claimBoundPx !== null) ctx.measure('teeRecovery', 'padClaimBoundPx', derivation.claimBoundPx);
+		ctx.measure('teeRecovery', 'huntedBadges', huntTargets.length);
+		ctx.measure('teeRecovery', 'huntedBadgesSolverAdded', solverAddedTargets.length);
+		const boundProvenance = derivation.claimBoundPx !== null && derivation.medianClaimDistancePx !== null
+			? `course-derived bound ${derivation.claimBoundPx.toFixed(1)}px = median claimed distance ${derivation.medianClaimDistancePx.toFixed(1)}px x ${padClaimOutlierFactor} (knob padClaimOutlierFactor)`
+			: 'no geometric claims exist on this run, so no bound could be derived and every numbered badge is hunted';
+		for (const target of huntTargets) {
+			const solverAdded = !geometricTargetIds.has(target.detId);
+			const outlierClaim = derivation.claims.find((claim) => claim.badgeId === target.detId);
+			ctx.overlay('teeRecovery', {
+				type: 'point',
+				xPx: target.cxPx,
+				yPx: target.cyPx - viewportTopPx,
+				verdict: 'rejected',
+				visualRole: 'tee-rejection',
+				ref: `tee-recovery-hunt-${target.detId}`,
+				reason: `${target.label && /^\d+$/.test(target.label) ? `badge ${target.label}: ` : ''}hunted -- ${solverAdded
+					? `holds a geometric claim ${outlierClaim ? `(${outlierClaim.teeId} at ${outlierClaim.distancePx.toFixed(1)}px)` : ''} but NO pre-recovery assignment row survived the plausibility prune (claimed-but-unroutable); the solver may widen the hunt, never shrink it`
+					: outlierClaim
+						? `nearest unclaimed visible tee ${outlierClaim.teeId} is ${outlierClaim.distancePx.toFixed(1)}px away, beyond the ${boundProvenance}`
+						: `no visible tee could claim this badge (greedy nearest badge<->tee matching over ${tees.length} visible tee${tees.length === 1 ? '' : 's'}); ${boundProvenance}`}; hunted-set derivation is geometric (deriveHuntTargets) plus pairability, never solver preference`
+			});
+		}
+		if (huntTargets.length === 0) {
 			ctx.measure('teeRecovery', 'missingNumberedTees', 0);
 			board.set('recoveredTees', board.get<readonly RecoveredTeeInput[]>('recoveredTees'));
 			board.set('assignment', assignment);
@@ -946,7 +1053,7 @@ export const teeRecoveryUnit: EngineUnit = {
 		const shardDiscoveryStop = ctx.span('teeRecovery.shardDiscovery');
 		const sprites = board.has('sprites') ? board.get<readonly SpriteMatch[]>('sprites') : undefined;
 		ctx.occlusion.registerOpaque(basketOpaqueProvider(stage, baskets, sprites, viewportTopPx));
-		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion });
+		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion, targets: huntTargets });
 		shardDiscoveryStop();
 		// Known-occluder pixel subtraction (screen chrome) is never a silent cut:
 		// name the component, the exact pixel count removed, and what remains.
@@ -1024,7 +1131,6 @@ export const teeRecoveryUnit: EngineUnit = {
 		// default 14) that was resolved further below for reassignment but never
 		// actually consumed here -- the literal `14` was live instead. Resolve
 		// once, up front, and use it for every check below.
-		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 		const dedupeDistancePx = searchKnobs.recoveredTeeDedupeDistance;
 		for (const { candidate, result } of promoted) {
 			const centerX = result.corners.reduce((sum, point) => sum + point[0], 0) / 4;
@@ -1034,7 +1140,17 @@ export const teeRecoveryUnit: EngineUnit = {
 				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx);
 			if (duplicate && result.verdict === 'accepted') {
 				ctx.measure('teeRecovery', 'duplicateSuppressed', 1);
-				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`, values: numericTraceValues(result.values) });
+				// Provenance tracks the candidate OUT of the pool by name: whose
+				// hunt died, against which tee, at what distance -- an aggregated
+				// anonymous "2 suppressed" is how the Heritage H6 drop hid.
+				const collisions = [
+					...tees.map((tee) => ({ id: tee.detId, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) })),
+					...existing.map((tee, index) => ({ id: `recovered-existing-${index}`, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) })),
+					...additions.map((tee, index) => ({ id: `recovered-addition-${index}`, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) }))
+				].filter((entry) => entry.distancePx < dedupeDistancePx).sort((a, b) => a.distancePx - b.distancePx);
+				const nearest = collisions[0];
+				const holeName = candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel) ? `badge ${candidate.badgeLabel}` : candidate.badgeId ?? 'UNKNOWN badge';
+				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `${holeName}: accepted recovery at (${centerX.toFixed(0)},${centerY.toFixed(0)}) suppressed as duplicate of ${nearest ? `${nearest.id} at ${nearest.distancePx.toFixed(1)}px` : 'an existing tee'} (knob recoveredTeeDedupeDistance ${dedupeDistancePx}px); this badge keeps NO recovered tee from this hunt`, values: numericTraceValues(result.values) });
 				continue;
 			}
 			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
@@ -1045,16 +1161,55 @@ export const teeRecoveryUnit: EngineUnit = {
 			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
-			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}` } });
+			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}; bound to ${candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel) ? `badge ${candidate.badgeLabel}` : candidate.badgeId ?? 'UNKNOWN'} (the acceptance predicate is badge-specific, so assignment honors the binding)`, ...(candidate.badgeId ? { badgeId: candidate.badgeId } : {}) } });
 		}
-		board.set('recoveredTees', [...existing, ...additions]);
 		if (additions.length > 0 && measurement.rawPairs.length > 0) {
 			const zfit = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
-			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing));
+			const onPrune = (prune: PlausibilityPrune) => {
+				ctx.measure('teeRecovery', 'reassignPrunedPairings', prune.dropped.length);
+				if (prune.claimSet.claimBoundPx !== null) ctx.measure('teeRecovery', 'reassignClaimBoundPx', prune.claimSet.claimBoundPx);
+				const PRUNE_RECEIPT_CAP = 24;
+				for (const drop of [...prune.dropped].sort((a, b) => b.bestScore - a.bestScore).slice(0, PRUNE_RECEIPT_CAP)) {
+					const badge = badges.find((entry) => entry.detId === drop.badgeId);
+					const holeName = badge?.label && /^\d+$/.test(badge.label) ? `badge ${badge.label}` : drop.badgeId;
+					ctx.overlay('teeRecovery', { type: 'point', xPx: badge?.cxPx ?? 0, yPx: (badge?.cyPx ?? 0) - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-reassign-prune-${drop.badgeId}-${drop.teeId}`, reason: `${holeName}: pairing with ${drop.teeId} removed before selection (${drop.rule === 'recovered-tee-bound-elsewhere' ? `recovered tee is bound to the badge whose predicate accepted it` : `tee-badge distance ${drop.distancePx.toFixed(1)}px exceeds the course-derived claim bound ${prune.claimSet.claimBoundPx?.toFixed(1)}px = median ${prune.claimSet.medianClaimDistancePx?.toFixed(1)}px x ${prune.padClaimOutlierFactor} (knob padClaimOutlierFactor)`}; best dropped score ${drop.bestScore.toFixed(4)} over ${drop.pairCount} pair${drop.pairCount === 1 ? '' : 's'})` });
+				}
+				if (prune.dropped.length > PRUNE_RECEIPT_CAP) ctx.measure('teeRecovery', 'reassignPrunedBeyondReceiptCap', prune.dropped.length - PRUNE_RECEIPT_CAP);
+			};
+			const reassigned = assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing, onPrune);
+			// Redundant-recovery discard: a hunted badge that ultimately chose a
+			// VISIBLE tee proves its recovery was superfluous -- keep the roster
+			// truthful by discarding that bound recovery WITH a named receipt
+			// line. A bound recovery whose badge got NOTHING is evidence, never
+			// redundant: it stays, and the mismatch is receipt-loud.
+			const chosenTeeByBadge = new Map(reassigned.assignments.map((row) => [row.badgeId, row.teeId]));
+			const usedRecoveredTeeIds = new Set(reassigned.assignments.map((row) => row.teeId).filter((teeId) => teeId.startsWith('tee-recovered-')));
+			const recoveredByPosition = reassigned.tees.filter((tee) => tee.tier === 'recovered');
+			const redundant = new Set<RecoveredTeeInput>();
+			for (const tee of recoveredByPosition) {
+				const boundBadgeId = tee.recovery?.badgeId;
+				if (boundBadgeId === undefined || usedRecoveredTeeIds.has(tee.detId)) continue;
+				const badgeChoice = chosenTeeByBadge.get(boundBadgeId);
+				const badge = badges.find((entry) => entry.detId === boundBadgeId);
+				const holeName = badge?.label && /^\d+$/.test(badge.label) ? `badge ${badge.label}` : boundBadgeId;
+				if (badgeChoice !== undefined && badgeChoice !== tee.detId) {
+					const source = [...existing, ...additions].find((input) => input.xPx === tee.xPx && input.yPx === tee.yPx);
+					if (source) redundant.add(source);
+					ctx.measure('teeRecovery', 'redundantRecoveryDiscarded', 1);
+					ctx.overlay('teeRecovery', { type: 'point', xPx: tee.xPx, yPx: tee.yPx - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-redundant-${boundBadgeId}`, reason: `${holeName}: bound recovery at (${tee.xPx.toFixed(0)},${tee.yPx.toFixed(0)}) discarded as redundant -- the badge selected visible ${badgeChoice} instead; recovery output never pads the roster with tees no hole stands on` });
+				} else if (badgeChoice === undefined) {
+					ctx.measure('teeRecovery', 'boundRecoveryUnroutable', 1);
+					ctx.overlay('teeRecovery', { type: 'point', xPx: tee.xPx, yPx: tee.yPx - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-unroutable-${boundBadgeId}`, reason: `${holeName}: bound recovery at (${tee.xPx.toFixed(0)},${tee.yPx.toFixed(0)}) exists but NO routable pairing with its badge survived scoring -- the hole stays unassigned while its pad evidence stands; this is a routing/scoring gap, not a detection one` });
+				}
+			}
+			const keptRecovered = [...existing, ...additions].filter((input) => !redundant.has(input));
+			board.set('recoveredTees', keptRecovered);
+			board.set('assignment', redundant.size === 0 ? reassigned : assignThreeFactor(measurement, keptRecovered, zfit, scoring, searchKnobs, ribbon, routing));
 		} else {
+			board.set('recoveredTees', [...existing, ...additions]);
 			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
 			board.set('assignment', assignment);
 		}

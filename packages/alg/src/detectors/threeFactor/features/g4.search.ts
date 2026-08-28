@@ -29,6 +29,14 @@ export const g4SearchFeature = {
 		recoveredTeeDedupeDistance: {
 			default: 14,
 			note: 'minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate'
+		},
+		padClaimOutlierFactor: {
+			default: 3,
+			note: 'Owner directive 2026-08-28 ("the step-4 input must never come from step 6"): one course-derived geometric bound -- median greedy badge<->tee claim distance on THIS run x this factor, never an absolute pixel literal (150ft holes and 1700ft holes exist) -- shared by BOTH consumers of badge/tee geometry: (1) teeRecovery derives its hunted-badge set from these claims instead of the G6 solver output, whose Heritage H5 mis-pairing (ledger row 27: badge-5 held H4\'s pad from 317px at rank 1) masked a missing tee from the hunt entirely; (2) assignment prunes (badge, tee) pairings beyond the bound before selection, so a scarcity-driven far pairing loses to an empty slot the hunt can then see, with every dropped pairing receipt-named (never a silent prune). Recovered tees are exempt from the distance rule and instead hard-bound to the badge whose strict predicate accepted them.',
+			validate: (value: unknown) =>
+				typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 20
+					? null
+					: 'padClaimOutlierFactor must be a finite number between 1 and 20'
 		}
 	}
 } satisfies ABFeature;
