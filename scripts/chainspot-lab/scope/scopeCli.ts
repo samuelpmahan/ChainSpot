@@ -1,5 +1,12 @@
 import { basename, extname, resolve } from 'node:path';
-import { appendLabCommand, guardTruthTaint, resolveCourseContext } from '../context/context.mjs';
+import {
+	DEFAULT_CORPUS_ROOT,
+	appendLabCommand,
+	guardTruthTaint,
+	loadLabConfig,
+	resolveCourseContext,
+	resolveCourseManifest
+} from '../context/context.mjs';
 import { loadScopeManifest, resolveManifestCasePaths } from './manifest';
 import { makeContactSheet } from './render';
 import { DEFAULT_SCOPE_OUT, loadScopeInput, runScopeOperation, scopeSlug } from './operation';
@@ -139,34 +146,33 @@ async function main(): Promise<void> {
 	const args = raw[0] === 'scope' ? raw.slice(1) : raw;
 	if (!args.length || args.includes('--help') || args.includes('-h')) usage(0);
 
-	const configuredHole = /^h(\d+)$/i.exec(args[0]);
-	if (configuredHole) {
-		const hole = Number(configuredHole[1]);
-		const rest = args.slice(1);
-		const truth = flag(rest, '--truth');
-		const out = option(rest, '--out');
-		const view = consumeViewOptions(rest);
-		if (rest.length) throw new Error(`lab scope: unexpected args: ${rest.join(' ')}`);
-		const course = resolveCourseContext();
-		const commandArgv = ['scope', ...args];
-		if (truth) {
-			if (!course.annotationPath) throw new Error(`lab scope: ${course.manifest.course} has no Annotation truth configured.`);
-			guardTruthTaint(commandArgv);
-			console.log(`TRUTH-TAINT · ${course.manifest.course} · H${hole}`);
-			await renderOne(course.imagePath, course.annotationPath, { name: `h${hole}-truth`, hole, view }, out);
-			return;
-		}
+	interface ScopeCourse {
+		readonly manifest: ReturnType<typeof resolveCourseManifest>;
+		readonly imagePath: string;
+	}
+
+	/** One configured-hole render: manifest viewport when the course has one,
+	 * digit-derived truth-free viewport otherwise. The render name carries the
+	 * course so no contact sheet is ever ambiguous about what it shows. */
+	async function scopeConfiguredHole(
+		course: ScopeCourse,
+		hole: number,
+		view: ReturnType<typeof consumeViewOptions>,
+		out: string | undefined,
+		commandArgv: readonly string[]
+	): Promise<void> {
 		const loaded = await loadScopeInput(course.imagePath);
 		if (loaded.decoded.report.autoStitch.sourceCount !== 1) {
 			throw new Error('lab scope: source-frame hole viewports currently require a single-source course raster.');
 		}
 		const offset = loaded.decoded.report.singleSourceOffset ?? { xPx: 0, yPx: 0 };
+		const renderName = `${course.manifest.course}-h${hole}`;
 		let sourceViewport = course.manifest.holes?.[String(hole)]?.sourceBox as BoxTuple | undefined;
 		if (sourceViewport) {
 			const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
-			appendLabCommand({ argv: commandArgv, taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
+			appendLabCommand({ argv: [...commandArgv], taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
 			console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
-			await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
+			await renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
 			return;
 		}
 		// No manifest viewport: derive one from the detector's own G1 badge
@@ -180,7 +186,7 @@ async function main(): Promise<void> {
 		const derived = deriveHoleSourceBox(readings, hole, originalDims, offset);
 		sourceViewport = derived.sourceBox;
 		const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
-		appendLabCommand({ argv: commandArgv, taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
+		appendLabCommand({ argv: [...commandArgv], taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
 		console.log(`DIGIT-DERIVED VIEWPORT (truth-free) · ${course.manifest.course} · H${hole}`);
 		console.log(
 			`  badge ${derived.reading.detId} read label ${derived.reading.label} at confidence ${derived.reading.confidence.toFixed(3)} ` +
@@ -191,7 +197,86 @@ async function main(): Promise<void> {
 				`box is badge-centered, ${sourceViewport[2]}x${sourceViewport[3]} (manifest-shaped default, not detector geometry)`
 		);
 		for (const warning of derived.warnings) console.log(`  WARNING: ${warning}`);
-		await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
+		await renderOne(course.imagePath, undefined, { name: renderName, box: viewport, view }, out);
+	}
+
+	const configuredHole = /^h(\d+)$/i.exec(args[0]);
+	if (configuredHole) {
+		const hole = Number(configuredHole[1]);
+		const rest = args.slice(1);
+		const truth = flag(rest, '--truth');
+		const out = option(rest, '--out');
+		const view = consumeViewOptions(rest);
+		if (rest.length) throw new Error(`lab scope: unexpected args: ${rest.join(' ')}`);
+		const course = resolveCourseContext();
+		const commandArgv = ['scope', ...args];
+		if (!truth) {
+			await scopeConfiguredHole(course, hole, view, out, commandArgv);
+			return;
+		}
+		if (!course.annotationPath) throw new Error(`lab scope: ${course.manifest.course} has no Annotation truth configured.`);
+		guardTruthTaint(commandArgv);
+		console.log(`TRUTH-TAINT · ${course.manifest.course} · H${hole}`);
+		await renderOne(
+			course.imagePath,
+			course.annotationPath,
+			{ name: `${course.manifest.course}-h${hole}-truth`, hole, view },
+			out
+		);
+		return;
+	}
+
+	if (args[0] === 'batch') {
+		// lab scope batch [COURSE ...] hN [hN ...] — every named hole on every
+		// named course (default: the selected course), manifest or digit-derived.
+		const rest = args.slice(1);
+		const out = option(rest, '--out');
+		const view = consumeViewOptions(rest);
+		const holes: number[] = [];
+		const courseQueries: string[] = [];
+		for (const token of rest) {
+			const holeToken = /^h(\d+)$/i.exec(token);
+			if (holeToken) holes.push(Number(holeToken[1]));
+			else courseQueries.push(token);
+		}
+		if (holes.length === 0) throw new Error('lab scope batch: name at least one hole (h14 h16 ...).');
+		const config = loadLabConfig();
+		const corpusRoot = resolve(config.corpusRoot ?? DEFAULT_CORPUS_ROOT);
+		const courses =
+			courseQueries.length > 0
+				? courseQueries.map((query) => {
+						const manifest = resolveCourseManifest(query);
+						const devDir = resolve(corpusRoot, manifest.corpusDir ?? 'dev', manifest.devDir);
+						return {
+							manifest,
+							imagePath: resolve(devDir, manifest.image)
+						};
+					})
+				: [resolveCourseContext()];
+		const failures: string[] = [];
+		let rendered = 0;
+		for (const course of courses) {
+			for (const hole of holes) {
+				try {
+					await scopeConfiguredHole(course, hole, view, out, [
+						'scope',
+						'batch',
+						course.manifest.course,
+						`h${hole}`
+					]);
+					rendered++;
+				} catch (error) {
+					const line = `${course.manifest.course} H${hole}: ${(error as Error).message}`;
+					failures.push(line);
+					console.log(`FAILED · ${line}`);
+				}
+			}
+		}
+		console.log(
+			`\nSCOPE BATCH — ${rendered} rendered, ${failures.length} failed of ${courses.length * holes.length} requested`
+		);
+		for (const line of failures) console.log(`  failed: ${line}`);
+		if (failures.length > 0) process.exitCode = 1;
 		return;
 	}
 
