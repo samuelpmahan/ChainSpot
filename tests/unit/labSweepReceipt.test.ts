@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { PNG } from 'pngjs';
@@ -162,9 +162,20 @@ describe('LAB sweep receipt seam', () => {
 			expect(persisted.operations.map((operation: { id: string }) => operation.id)).toEqual(
 				result.receipts.map((receipt) => receipt.opId)
 			);
-			expect(persisted.visualRenders).toHaveLength(1);
+			// The inventory now names every render file the run wrote: the exact
+			// canonical raster, one entry per artifact render (rendered or stub,
+			// truthfully), and the endpoint feature receipt.
 			expect(persisted.visualRenders[0]).toMatchObject({
-				kind: 'feature',
+				kind: 'canonical',
+				gate: 'G0',
+				id: 'g0.canonical',
+				status: 'rendered'
+			});
+			const featureRenders = persisted.visualRenders.filter(
+				(render: { kind: string }) => render.kind === 'feature'
+			);
+			expect(featureRenders).toHaveLength(1);
+			expect(featureRenders[0]).toMatchObject({
 				gate: 'G0-G1',
 				id: 'run.endpoint-summary',
 				status: 'rendered'
@@ -178,6 +189,59 @@ describe('LAB sweep receipt seam', () => {
 				'OPERATIONS (CHRONOLOGICAL)'
 			);
 			expect(readFileSync(result.runReceiptPaths[1], 'utf8')).toContain('VISUAL RENDERS');
+
+			// Conformance: the human text restates the machine receipt exactly.
+			const text = readFileSync(result.runReceiptPaths[1], 'utf8');
+			for (const name of [
+				'badges',
+				'baskets',
+				'visibleTees',
+				'recoveredTees',
+				'phantomTees',
+				'totalTees',
+				'assignments',
+				'rawPairs'
+			] as const) {
+				const line = text.split('\n').find((row) => row.startsWith(`results.${name}: `));
+				expect(line, `missing results.${name} line`).toBeTruthy();
+				const printed = line!.slice(`results.${name}: `.length).split('  (')[0];
+				const machine = persisted.results[name];
+				expect(printed).toBe(machine === undefined || machine === null ? 'UNKNOWN' : String(machine));
+				// Every FINAL RESULTS line carries provenance or a reasoned absence.
+				expect(persisted.resultsProvenance[name], `no provenance for results.${name}`).toBeTruthy();
+				expect(line).toContain(`(${persisted.resultsProvenance[name]}`);
+			}
+			// Conformance: per-unit rejected count equals the sum of its reason lines.
+			for (const unitReceipt of persisted.units) {
+				const reasonSum = unitReceipt.rejectionReasons.reduce(
+					(sum: number, reason: { count: number }) => sum + reason.count,
+					0
+				);
+				expect(unitReceipt.rejected).toBe(reasonSum);
+			}
+			// Conformance: the VISUAL RENDERS inventory names exactly the render
+			// files on disk — nothing silently absent, nothing claimed but missing.
+			const inventoried = persisted.visualRenders
+				.flatMap((render: { files: string[] }) => render.files)
+				.sort();
+			const walk = (dir: string): string[] =>
+				readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+					entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]
+				);
+			const onDisk = walk(join(result.outDir, 'renders'))
+				.map((path) => relative(result.outDir, path).split('\\').join('/'))
+				.sort();
+			expect(inventoried).toEqual(onDisk);
+			// Conformance: rendered/stub statuses are truthful — a stub entry's
+			// files are stub notes, a rendered entry's files are real renders.
+			for (const render of persisted.visualRenders) {
+				if (render.kind !== 'artifact') continue;
+				const allStubs = render.files.every((file: string) => file.endsWith('.stub.txt'));
+				expect(render.status).toBe(allStubs ? 'stub' : 'rendered');
+			}
+			// No truth was scorable here, and the receipt says why instead of
+			// leaving a bare UNKNOWN.
+			expect(text).toContain('evaluation.reason: Dimensions-only truth correspondence');
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -287,6 +351,30 @@ describe('LAB sweep receipt seam', () => {
 		expect(teeVisualReceipt?.files).toHaveLength(2);
 		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.png'))).toBe(true);
 		expect(teeVisualReceipt?.files.some((path) => path.endsWith('.receipt.txt'))).toBe(true);
+
+		// Receipt truth for the slice: G4 recovery never ran, so the receipt must
+		// not claim "ran and found 0". The number is absent WITH a stated reason.
+		expect(result.runReceipt.results.recoveredTees).toBeUndefined();
+		expect(result.runReceipt.results.totalTees).toBeUndefined();
+		expect(result.runReceipt.resultsProvenance.recoveredTees).toContain('not-scheduled');
+		expect(result.runReceipt.resultsProvenance.totalTees).toContain('not-computable');
+		expect(result.runReceipt.resultsProvenance.totalTees).toContain('visible tees alone = 16');
+		const g3Text = readFileSync(
+			resolve(result.outDir, 'run.receipt.txt'),
+			'utf8'
+		);
+		expect(g3Text).toMatch(/results\.recoveredTees: UNKNOWN {2}\(not-scheduled:/);
+		expect(g3Text).not.toContain('results.recoveredTees: 0');
+		// The visual receipt draws the same line between "never ran" and "0".
+		const g3Visual = readFileSync(
+			resolve(result.outDir, 'renders/run/run.visual.receipt.txt'),
+			'utf8'
+		);
+		expect(g3Visual).toContain('recoveredTeePoses: NOT-SCHEDULED');
+		expect(g3Visual).toContain("G4 teeRecovery: NOT-SCHEDULED");
+		expect(g3Visual).toContain("G4 phantomTee: NOT-SCHEDULED");
+		expect(g3Visual).not.toMatch(/recoveredTeePoses: \d/);
+		expect(teeVisualReceipt?.summary).toContain('recovery not-scheduled');
 	}, 60_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {
