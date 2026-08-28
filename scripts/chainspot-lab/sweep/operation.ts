@@ -35,7 +35,11 @@ import { renderArtifact, type ArtifactRenderResult } from './artifactIo';
 import { renderRunEndpointReceipt, type RenderTraceFeaturesOutput } from './featureRenders';
 import {
 	GATE_ORDER,
+	THROUGH_CUTOFF_CONTRACTS,
+	gateLabel,
+	gateRank,
 	isSweepThroughGate,
+	operationOwnerGate,
 	type EngineGateId,
 	type SweepThroughGate
 } from './gateVocabulary';
@@ -43,6 +47,8 @@ import {
 	buildRunReceipt,
 	writeRunReceiptJson,
 	type RunReceipt,
+	type RunReceiptSliceInput,
+	type RunReceiptSliceOperation,
 	type RunReceiptVisualRender,
 	type RunPhaseTimings
 } from './runReceipt';
@@ -196,21 +202,60 @@ export function decideTruthScoring(
 	return { eligible: true, provenanceTrusted: true };
 }
 
+/** What a `--through` cutoff scheduled, what it pulled in as prerequisites,
+ * and what it left out — the receipt prints this verbatim. The shape is the
+ * receipt's (runReceipt.ts) so the two files cannot drift. */
+export type PlanSliceOperationNote = RunReceiptSliceOperation;
+export type PlanSlice = RunReceiptSliceInput;
+
+export interface SlicedExecutionPlan extends CompiledExecutionPlan {
+	readonly slice: PlanSlice;
+}
+
+/**
+ * Dependency-complete cutoff semantics (design note: gateVocabulary.ts).
+ *
+ * The slice is the contiguous chronological PREFIX of the compiled plan
+ * ending at the last scheduled operation semantically owned by any gate of
+ * the cutoff's cumulative phase (gates at or below the cutoff, plus the
+ * phase's declared forward reach: G5 folds in the G6-owned straight-hole
+ * assignment, G6 folds in the terminal G7 zfit slot). A prefix of a
+ * dependency-validated order is dependency-complete by construction, and —
+ * unlike any non-contiguous subset — leaves every operation's board input
+ * byte-identical to the full run, because in-place slot rewriters
+ * (badgeOcclusionPatch, teeFamily, teeRecovery) are never skipped over.
+ */
 export async function slicePlanThroughGate(
 	plan: CompiledExecutionPlan,
 	throughGate: SweepThroughGate
-): Promise<CompiledExecutionPlan> {
+): Promise<SlicedExecutionPlan> {
 	if (!isSweepThroughGate(throughGate)) {
 		throw new Error(
-			'lab sweep: --through supports only dependency-complete cutoffs G1, G2, or G3.'
+			`lab sweep: --through supports only the dependency-complete cutoffs ${GATE_ORDER.join(', ')}.`
 		);
 	}
-	const limit = GATE_ORDER.indexOf(throughGate);
-	if (limit < 0) throw new Error('lab sweep: unknown --through cutoff.');
-	const ops = plan.ops.filter((op) => {
-		const index = GATE_ORDER.indexOf(op.gate as EngineGateId);
-		return index >= 0 && index <= limit;
+	const contract = THROUGH_CUTOFF_CONTRACTS[throughGate];
+	const cutoffRank = gateRank(throughGate);
+	const includedGates = new Set<EngineGateId>(
+		GATE_ORDER.filter((gate) => gateRank(gate) <= cutoffRank)
+	);
+	for (const gate of contract.ownGates) includedGates.add(gate);
+
+	const scheduledIds = new Set(plan.ops.map((op) => op.id));
+	if (!contract.demonstratedBy.some((id) => scheduledIds.has(id))) {
+		throw new Error(
+			`lab sweep: --through ${throughGate} (${gateLabel(throughGate)}) selects no scheduled operation: ` +
+				`this config schedules none of ${contract.demonstratedBy.join(', ')}, ` +
+				`so the phase '${contract.phase}' cannot be demonstrated. Use an earlier cutoff.`
+		);
+	}
+
+	let lastIndex = -1;
+	plan.ops.forEach((op, index) => {
+		const owner = operationOwnerGate(op.id);
+		if (owner !== 'shared' && includedGates.has(owner)) lastIndex = index;
 	});
+	const ops = plan.ops.slice(0, lastIndex + 1);
 	try {
 		validateOperationOrder(ops);
 	} catch (error) {
@@ -219,10 +264,43 @@ export async function slicePlanThroughGate(
 			{ cause: error }
 		);
 	}
+
+	const prerequisites: PlanSliceOperationNote[] = [];
+	ops.forEach((op, index) => {
+		const owner = operationOwnerGate(op.id);
+		if (owner === 'shared' || includedGates.has(owner)) return;
+		let reason = 'scheduled between cutoff-owned operations in the frozen chronological plan';
+		for (let later = index + 1; later < ops.length; later++) {
+			const consumer = ops[later];
+			const slot = op.produces.find((produced) => consumer.consumes.includes(produced));
+			if (slot) {
+				reason = `produces '${slot}' consumed by '${consumer.id}'`;
+				break;
+			}
+		}
+		prerequisites.push({ id: op.id, ownerGate: owner, reason });
+	});
+	const notScheduled: PlanSliceOperationNote[] = plan.ops.slice(lastIndex + 1).map((op) => ({
+		id: op.id,
+		ownerGate: operationOwnerGate(op.id),
+		reason: `not scheduled (--through ${throughGate})`
+	}));
+
 	const planFingerprint = await sha256Hex(
 		canonicalJson({ parentPlanFingerprint: plan.planFingerprint, throughGate, ops })
 	);
-	return { ...plan, ops, planFingerprint };
+	return {
+		...plan,
+		ops,
+		planFingerprint,
+		slice: {
+			throughGate,
+			phase: contract.phase,
+			parentOperationCount: plan.ops.length,
+			prerequisites,
+			notScheduled
+		}
+	};
 }
 
 export async function runSweepOperation(
@@ -243,9 +321,10 @@ export async function runSweepOperation(
 	const firstLoad = loadConfig(configPath);
 	const paramsHash = await sha256Hex(canonicalJson(firstLoad.resolved));
 	const loaded = loadConfig(configPath, paramsHash);
-	const plan = input.throughGate
+	const slicedPlan = input.throughGate
 		? await slicePlanThroughGate(loaded.plan, input.throughGate)
-		: loaded.plan;
+		: undefined;
+	const plan = slicedPlan ?? loaded.plan;
 	const straightState = loaded.resolved.features['straightTest'];
 	const truthAssisted =
 		straightState?.enabled === true && straightState.knobs['truthAssisted'] === true;
@@ -472,6 +551,7 @@ export async function runSweepOperation(
 		configName: loaded.resolved.name,
 		configPath,
 		...(input.throughGate ? { throughGate: input.throughGate } : {}),
+		...(slicedPlan ? { slice: slicedPlan.slice } : {}),
 		plan,
 		receipts,
 		report,
