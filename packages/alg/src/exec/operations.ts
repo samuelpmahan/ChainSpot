@@ -73,6 +73,7 @@ import type { ScoringKnobs, ZfitKnobs } from '../detectors/threeFactor/scoring';
 import { straightTestFeature, straightTestUnit } from '../detectors/threeFactor/features/st.straightTest';
 import type {
 	AssignmentEvidence,
+	BadgeEvidence,
 	RawPairEvidence,
 	RecoveredTeeInput,
 	RgbaImage,
@@ -715,6 +716,33 @@ function floatBytes(data: Float32Array): Uint8Array {
 	return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
+/** A `badge-N` id is a detector ordinal, not a hole number -- it carries no
+ * meaning a human can read on sight. Every assignment/measurement table row
+ * that names a badgeId also carries the G1-read hole label (BadgeEvidence's
+ * `label`, e.g. "14") and the confidence that read earned, so the row is
+ * legible without cross-referencing the badges artifact. `badgeId` is kept
+ * for traceability; `hole` is the human-facing field. A badge whose digit
+ * read failed prints the loud `UNREAD`, never a guess. */
+export interface HoleLabeledAssignment extends AssignmentEvidence {
+	readonly hole: string;
+	readonly holeConfidence: number | null;
+}
+
+export function withHoleLabels(
+	assignments: readonly AssignmentEvidence[],
+	badges: readonly BadgeEvidence[]
+): readonly HoleLabeledAssignment[] {
+	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
+	return assignments.map((row) => {
+		const badge = badgeById.get(row.badgeId);
+		return {
+			...row,
+			hole: badge?.label ?? 'UNREAD',
+			holeConfidence: badge ? badge.confidence : null
+		};
+	});
+}
+
 export interface ArtifactExtraction {
 	readonly kind: ArtifactKind;
 	readonly id: string;
@@ -783,21 +811,23 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 	},
 	'assignment.selection'(board) {
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
+		const measurement = board.get<ThreeFactorMeasurement>('measurement');
 		return [
 			{
 				kind: 'measurementTable',
 				id: 'assignment.selection.table',
-				bytes: jsonBytes(assignment.assignments)
+				bytes: jsonBytes(withHoleLabels(assignment.assignments, measurement.badges))
 			}
 		];
 	},
 	zfit(board) {
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
+		const measurement = board.get<ThreeFactorMeasurement>('measurement');
 		return [
 			{
 				kind: 'measurementTable',
 				id: 'zfit.finalAssignment.table',
-				bytes: jsonBytes(assignment.assignments)
+				bytes: jsonBytes(withHoleLabels(assignment.assignments, measurement.badges))
 			}
 		];
 	},

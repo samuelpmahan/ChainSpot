@@ -22,7 +22,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { PNG } from 'pngjs';
-import { OPERATION_UNIVERSE } from '@chainspot/alg/exec';
+import { OPERATION_UNIVERSE, type HoleLabeledAssignment } from '@chainspot/alg/exec';
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
 import { buildTeeMinAreaPoseReceipt } from '@chainspot/alg/detectors/threeFactor/features/g3.teeMinAreaPoseReceipt';
 import { buildTeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
@@ -353,6 +353,14 @@ export interface RenderTraceFeaturesInput {
 		readonly yPx: number;
 		readonly source: string;
 	};
+	/** Final board 'assignment' rows, hole-labeled via the shared
+	 * withHoleLabels() mapping (@chainspot/alg/exec) -- the same rows
+	 * run.receipt.txt's HOLE ASSIGNMENTS section prints. Only
+	 * renderRunEndpointReceipt reads this; the per-unit feature loop above
+	 * does not. Omitted (not empty-array) when assignment.selection was not
+	 * scheduled, so the endpoint receipt can say NOT-SCHEDULED rather than a
+	 * misleading empty table. */
+	readonly assignmentRows?: readonly HoleLabeledAssignment[];
 }
 
 export interface FeatureRenderResult {
@@ -478,6 +486,40 @@ function rejectionReceiptLines(
 		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
 		lines.push(`  ${unit.gate} ${unit.id}: ${rejected.length}`);
 		for (const [reason, count] of countByReason(rejected)) lines.push(`    ${count} x ${reason}`);
+	}
+	return lines;
+}
+
+/** A `badge-N`/`tee-N`/`basket-N` id is a detector ordinal, not a hole
+ * number -- printed alone it is useless to a human reading this receipt.
+ * Every row here also carries the G1-read hole label (`hole`, e.g. "14", or
+ * the loud `UNREAD` when the digit read failed) and its confidence, sourced
+ * verbatim from `withHoleLabels()` (@chainspot/alg/exec) -- the same mapping
+ * run.receipt.txt's HOLE ASSIGNMENTS section and the
+ * assignment.selection.table/zfit.finalAssignment.table artifacts use. */
+function holeAssignmentLines(rows: readonly HoleLabeledAssignment[] | undefined): string[] {
+	if (rows === undefined) {
+		return [
+			'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
+			"NOT-SCHEDULED (no 'assignment.selection' operation ran in this run; 'never ran' is not zero rows)"
+		];
+	}
+	const lines = [
+		'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
+		"(provenance: board 'assignment' rows via withHoleLabels(); UNREAD means the G1 digit read failed, never a guess)",
+		'hole | badgeId | teeId -> basketId | score | hole confidence'
+	];
+	if (rows.length === 0) {
+		lines.push("(none -- 'assignment.selection' ran and produced zero rows)");
+		return lines;
+	}
+	for (const row of rows) {
+		const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
+		const confidence =
+			row.holeConfidence === null ? 'UNKNOWN' : Number(row.holeConfidence.toFixed(3));
+		lines.push(
+			`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${Number(row.score.toFixed(3))} | ${confidence}`
+		);
 	}
 	return lines;
 }
@@ -811,6 +853,8 @@ export function renderRunEndpointReceipt(
 		`teeCornerMarks: ${visibleCorners.length + recoveryCorners.length}`,
 		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
 		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
+		'',
+		...holeAssignmentLines(input.assignmentRows),
 		'',
 		'VISUAL CONTRACT',
 		'yellow: exact detector-known white/bright badge pixels only (pixelSet; black badge pixels untouched)',

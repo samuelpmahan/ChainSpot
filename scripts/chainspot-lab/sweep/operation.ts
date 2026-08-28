@@ -7,7 +7,9 @@ import {
 	createExecBoard,
 	executeCompiledPlan,
 	validateOperationOrder,
-	type CompiledExecutionPlan
+	withHoleLabels,
+	type CompiledExecutionPlan,
+	type HoleLabeledAssignment
 } from '@chainspot/alg/exec';
 import { createNodeSink } from '@chainspot/alg/exec/node-sink';
 import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor';
@@ -477,10 +479,29 @@ export async function runSweepOperation(
 		: undefined;
 	const runId = makeTraceRunId(report.imageId, plan.paramsHash ?? '', plan.planFingerprint);
 	const sealedTrace = sealTrace(trace, { runId, imageId: report.imageId });
+	// Scheduling is read off the sliced plan, never off board slot presence:
+	// LAB itself seeds board defaults before the gateway, so a board read
+	// alone cannot distinguish "ran and found nothing" from "never scheduled".
+	const scheduledUnits = new Set(plan.ops.map((op) => op.unit));
+	const assignmentScheduled = scheduledUnits.has('assignment');
+	// The receipt's per-badge assignment listing (RunReceipt.assignments, and
+	// the endpoint receipt's HOLE ASSIGNMENTS section): empty when
+	// assignment.selection never ran, otherwise the exact board rows with the
+	// G1-read hole label attached via the same withHoleLabels() mapping the
+	// assignment.selection.table/zfit.finalAssignment.table artifacts use, so
+	// no two surfaces can ever disagree on a hole.
+	const assignmentRows: readonly HoleLabeledAssignment[] =
+		assignmentScheduled && board.has('assignment') && board.has('measurement')
+			? withHoleLabels(
+					board.get<ThreeFactorAssignment>('assignment').assignments,
+					board.get<ThreeFactorMeasurement>('measurement').badges
+				)
+			: [];
 	const featureRenderStartedAtMs = performance.now();
 	const featureRenders = renderRunEndpointReceipt({
 		run: sealedTrace,
 		outDir: resolve(outDir, 'renders', 'run'),
+		assignmentRows: assignmentScheduled ? assignmentRows : undefined,
 		canvas: {
 			widthPx: image.width,
 			heightPx: image.height,
@@ -511,12 +532,11 @@ export async function runSweepOperation(
 		sealedTrace.units
 			.find((unit) => unit.id === unitId)
 			?.drawables.filter((drawable) => drawable.verdict === 'accepted').length;
-	// Scheduling is read off the sliced plan, never off board slot presence:
-	// LAB itself seeds 'recoveredTees' with [] before the gateway, so a board
-	// read alone cannot distinguish "G4 ran and recovered nothing" from "G4
-	// was never in this run's plan". A count is only claimed for work that
-	// was actually scheduled; everything else gets a reason instead.
-	const scheduledUnits = new Set(plan.ops.map((op) => op.unit));
+	// scheduledUnits: computed above (before renderRunEndpointReceipt), reused
+	// here. LAB itself seeds 'recoveredTees' with [] before the gateway, so a
+	// board read alone cannot distinguish "G4 ran and recovered nothing" from
+	// "G4 was never in this run's plan". A count is only claimed for work
+	// that was actually scheduled; everything else gets a reason instead.
 	const cutoffNote = input.throughGate ? ` (--through ${input.throughGate})` : '';
 	const notScheduled = (unitId: string, gate: string) =>
 		`not-scheduled: no '${unitId}' operation (${gate}) is in this run's plan${cutoffNote}; ` +
@@ -534,7 +554,7 @@ export async function runSweepOperation(
 	const visibleTees =
 		teeFamilyAccepted ??
 		(board.has('tees') ? board.get<readonly unknown[]>('tees').length : undefined);
-	const assignmentScheduled = scheduledUnits.has('assignment');
+	// assignmentScheduled/assignmentRows: computed above, reused here.
 	const assignmentCount =
 		assignmentScheduled && board.has('assignment')
 			? board.get<ThreeFactorAssignment>('assignment').assignments.length
@@ -682,6 +702,7 @@ export async function runSweepOperation(
 			assignments: assignmentCount,
 			rawPairs: rawPairCount
 		},
+		assignments: assignmentRows,
 		resultsProvenance,
 		visualRenders,
 		renderWarnings,
