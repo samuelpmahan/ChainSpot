@@ -157,6 +157,16 @@ Default DashsTrack G3 artifact hashes after hardening:
   needed with lineage noted, and skip promotion ceremony beyond the receipts
   themselves. The receipt contract (provenance, no silent drops) does NOT
   relax; only the promotion process does. Full ceremony resumes at 54/72.
+- The **Dev6** (owner moniker, 2026-08-28) is the six dev-corpus courses:
+  DashsTrack, Lenard, TowneLake, NorthPark, HeritagePark, AlexClark. The demo
+  courses (TheRec FULL, and a stitch of TheRec L+R) join the scoreboard
+  **gated behind 18 assignments on every Dev6 course**. Current Dev6 standing
+  (2026-08-28, default config, truth-free counts): DashsTrack, Lenard, and
+  TowneLake at 18/18 assignments; NorthPark 16 (H14, H16 missed — both have
+  G4-rejected shards failing the 3° badge-ray rule; H7's badge digit reads
+  as garbage "787"@0.002), HeritagePark 15 (H5, H6, H17 missed; H17's digit
+  read is ambiguous 17@0.198 vs 12@0.193), AlexClark 15 (H8, H12, H13
+  missed). Lessons learned here carry into the TheRec challenge.
 - Complete-invisibility fallback remains intentionally absent from production:
   `phantomTee` stays OFF until an observed course needs it.
 - Ownership is a downstream conclusion. A localized tee with

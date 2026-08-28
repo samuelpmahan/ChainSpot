@@ -5,6 +5,7 @@ import { makeContactSheet } from './render';
 import { DEFAULT_SCOPE_OUT, loadScopeInput, runScopeOperation, scopeSlug } from './operation';
 import { SCOPE_TEMPLATES } from './templates';
 import { consumeViewOptions } from './viewOptions';
+import { deriveHoleSourceBox, readDigitViewports } from './digitViewport';
 import type { BoxTuple, PointTuple, ScopeRequest } from './types';
 
 function usage(exitCode = 0): never {
@@ -13,9 +14,12 @@ function usage(exitCode = 0): never {
 		'',
 		'Configured course shortcut:',
 		'  lab scope hN [--truth] [view flags]',
-		'    hN       uses the selected course manifest viewport (no Annotation truth)',
+		'    hN       uses the selected course manifest viewport when one exists; otherwise derives a',
+		'             truth-free viewport from the detector\'s own G1 badge digits (runs the badge stage)',
 		'    --truth  explicitly uses Annotation geometry; logs TRUTH-TAINT and is forbidden in blind/test runs',
 		'    select a course first with: lab set DT',
+		'  lab scope holes',
+		'    lists every hole the G1 digits can read on the selected course (truth-free), with centers + confidence',
 		'',
 		'Raster contract:',
 		'  raw capture(s) -> Sweep StripChrome -> Sweep AutoStitch -> canonical raster -> Scope AutoCrop',
@@ -152,19 +156,91 @@ async function main(): Promise<void> {
 			await renderOne(course.imagePath, course.annotationPath, { name: `h${hole}-truth`, hole, view }, out);
 			return;
 		}
-		const sourceViewport = course.manifest.holes?.[String(hole)]?.sourceBox as BoxTuple | undefined;
-		if (!sourceViewport) {
-			throw new Error(`lab scope: ${course.manifest.course} manifest has no blind viewport for H${hole}. --truth will not be used implicitly.`);
-		}
 		const loaded = await loadScopeInput(course.imagePath);
 		if (loaded.decoded.report.autoStitch.sourceCount !== 1) {
 			throw new Error('lab scope: source-frame hole viewports currently require a single-source course raster.');
 		}
 		const offset = loaded.decoded.report.singleSourceOffset ?? { xPx: 0, yPx: 0 };
+		let sourceViewport = course.manifest.holes?.[String(hole)]?.sourceBox as BoxTuple | undefined;
+		if (sourceViewport) {
+			const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
+			appendLabCommand({ argv: commandArgv, taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
+			console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
+			await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
+			return;
+		}
+		// No manifest viewport: derive one from the detector's own G1 badge
+		// digits. Truth-free by construction — the same digits a blind run
+		// reads; Annotation truth is never consulted on this path.
+		const readings = readDigitViewports(loaded.decoded.image);
+		const originalDims = {
+			width: loaded.decoded.image.width - offset.xPx,
+			height: loaded.decoded.image.height - offset.yPx
+		};
+		const derived = deriveHoleSourceBox(readings, hole, originalDims, offset);
+		sourceViewport = derived.sourceBox;
 		const viewport = canonicalBoxFromSourceBox(sourceViewport, offset, loaded.decoded.image.width, loaded.decoded.image.height);
 		appendLabCommand({ argv: commandArgv, taints: [], sourceBox: sourceViewport, canonicalBox: viewport });
-		console.log(`MANIFEST VIEWPORT · ${course.manifest.course} · H${hole}`);
+		console.log(`DIGIT-DERIVED VIEWPORT (truth-free) · ${course.manifest.course} · H${hole}`);
+		console.log(
+			`  badge ${derived.reading.detId} read label ${derived.reading.label} at confidence ${derived.reading.confidence.toFixed(3)} ` +
+				`(provenance: G1 badge stage + digit reading on the canonical raster; no Annotation truth consulted)`
+		);
+		console.log(
+			`  center canonical (${Math.round(derived.reading.cxPx)},${Math.round(derived.reading.cyPx)}); ` +
+				`box is badge-centered, ${sourceViewport[2]}x${sourceViewport[3]} (manifest-shaped default, not detector geometry)`
+		);
+		for (const warning of derived.warnings) console.log(`  WARNING: ${warning}`);
 		await renderOne(course.imagePath, undefined, { name: `h${hole}`, box: viewport, view }, out);
+		return;
+	}
+
+	if (args[0] === 'holes') {
+		const rest = args.slice(1);
+		const out = option(rest, '--out');
+		if (rest.length) throw new Error(`lab scope: unexpected args: ${rest.join(' ')}`);
+		void out;
+		const course = resolveCourseContext();
+		const loaded = await loadScopeInput(course.imagePath);
+		if (loaded.decoded.report.autoStitch.sourceCount !== 1) {
+			throw new Error('lab scope: digit-derived hole listing currently requires a single-source course raster.');
+		}
+		const offset = loaded.decoded.report.singleSourceOffset ?? { xPx: 0, yPx: 0 };
+		const readings = readDigitViewports(loaded.decoded.image);
+		appendLabCommand({ argv: ['scope', ...args], taints: [] });
+		console.log(`DIGIT-DERIVED HOLE LISTING (truth-free) · ${course.manifest.course}`);
+		console.log(
+			'provenance: G1 badge stage + digit reading on the canonical raster; no Annotation truth consulted'
+		);
+		console.log('hole | badge | confidence | canonical center | original center | manifest viewport?');
+		const sorted = [...readings].sort((a, b) => {
+			const holeA = a.label === null ? Number.POSITIVE_INFINITY : Number(a.label);
+			const holeB = b.label === null ? Number.POSITIVE_INFINITY : Number(b.label);
+			return holeA - holeB || a.cyPx - b.cyPx;
+		});
+		for (const reading of sorted) {
+			const manifestBox = reading.label ? course.manifest.holes?.[reading.label] : undefined;
+			const ambiguous =
+				reading.runnerUp && reading.confidence - reading.runnerUp.confidence < 0.1
+					? `  AMBIGUOUS vs ${reading.runnerUp.label}@${reading.runnerUp.confidence.toFixed(3)}`
+					: '';
+			console.log(
+				`${reading.label ?? 'UNREAD'} | ${reading.detId} | ${reading.confidence.toFixed(3)} | ` +
+					`(${Math.round(reading.cxPx)},${Math.round(reading.cyPx)}) | ` +
+					`(${Math.round(reading.cxPx - offset.xPx)},${Math.round(reading.cyPx - offset.yPx)}) | ` +
+					`${manifestBox ? 'manifest' : 'digit-derived'}${ambiguous}`
+			);
+		}
+		const seen = new Map<string, number>();
+		for (const reading of readings) {
+			if (reading.label) seen.set(reading.label, (seen.get(reading.label) ?? 0) + 1);
+		}
+		const duplicates = [...seen].filter(([, count]) => count > 1);
+		for (const [label, count] of duplicates) {
+			console.log(`WARNING: label ${label} was read on ${count} badges`);
+		}
+		const unread = readings.filter((reading) => reading.label === null).length;
+		if (unread > 0) console.log(`WARNING: ${unread} badge(s) with unreadable digits (listed as UNREAD)`);
 		return;
 	}
 

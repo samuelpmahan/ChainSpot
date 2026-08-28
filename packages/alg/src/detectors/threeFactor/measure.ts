@@ -255,6 +255,24 @@ function makeBadges(
 }
 
 /**
+ * Truth-free badge detection with digit reading, as a standalone public seam
+ * for LAB tooling (digit-derived hole viewports in `lab scope`). Runs ONLY
+ * the G1 badge stage plus digit reading — no baskets, tees, support field,
+ * or assignment — so it stays fast enough for interactive scoping.
+ * Coordinates leave in the supplied image's frame shifted by `yOffsetPx`,
+ * exactly like the engine's `badges` unit output.
+ */
+export function detectBadges(
+	image: RgbaImage,
+	yOffsetPx = 0,
+	digitsKnobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS,
+	badgeStageKnobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS,
+	hsvKnobs: HsvKnobs = DEFAULT_HSV_KNOBS
+): BadgeEvidence[] {
+	return makeBadges(runBadgeStage(image, badgeStageKnobs, hsvKnobs), yOffsetPx, digitsKnobs);
+}
+
+/**
  * Return only the detector-known bright pixels belonging to one accepted
  * badge. Bright-family badges have an exact connected-component label; a
  * dark-plate recovery has no bright component of its own, so its exact white
