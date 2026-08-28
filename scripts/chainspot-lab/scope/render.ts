@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, extname } from 'node:path';
 import { PNG } from 'pngjs';
 import { resolveScopeView } from './viewOptions';
 import type { PointTuple, RasterImage, Rect, ScopeCanonicalMeta, ScopePanelMeta, ScopePinOverlay, ScopeRenderMeta, ScopeResolvedRequest } from './types';
@@ -110,6 +110,9 @@ function readoutLines(input:RenderScopeInput,request:ScopeResolvedRequest,panels
 	const ins=c.stripChrome.insets;
 	const lines=[
 		'INPUT',
+		// The source name leads: a contact sheet must never be ambiguous about
+		// which course/image it shows (hash identity alone is not human-legible).
+		`  SOURCE  ${basename(input.imagePath,extname(input.imagePath)).slice(0,26).toUpperCase()}`,
 		`  ID      ${c.imageId.slice(0,16).toUpperCase()}`,
 		`  MODE    ${input.annotationPath?'TRUTH':'BLIND'}`,
 		`  SIZE    ${c.widthPx}X${c.heightPx}`,
