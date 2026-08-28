@@ -5,7 +5,10 @@
 	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
 	"type": "object",
 	"additionalProperties": false,
-	"required": ["schema", "name"],
+	"required": [
+		"schema",
+		"name"
+	],
 	"properties": {
 		"$schema": {
 			"type": "string"
@@ -430,7 +433,12 @@
 										"dilationRadii": {
 											"type": "array",
 											"description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
-											"default": [0, 1, 2, 3]
+											"default": [
+												0,
+												1,
+												2,
+												3
+											]
 										},
 										"largeRadiiThreshold": {
 											"type": "number",
@@ -609,7 +617,13 @@
 								"knobs": {
 									"type": "object",
 									"additionalProperties": false,
-									"properties": {}
+									"properties": {
+										"axisToleranceDeg": {
+											"type": "number",
+											"description": "Soft ceiling per owner policy 2026-08-28: the strict 3° badge-axis gate (BADGE_AXIS_TARGET_DEG) stays the debugging TARGET, and this knob is the OPERATIVE limit a config can widen past it. NULL RESULT on the current corpus, recorded honestly rather than chased: after dc96000 (\"Recovery owns every bright pixel inside badge bboxes\") stopped badge-digit-glyph chrome from masquerading as tee-shard evidence, a sweep ladder (3/5/10/20/30/45/88°) across NorthPark/HeritagePark/AlexClark/DashsTrack found every hole the mechanism can currently capture is ALREADY captured at the strict 3° target -- HeritagePark recovers H10, AlexClark recovers H10+H11, DashsTrack holds 18/18 (H3/H5/H12 via recovery) with IDENTICAL fitted centers and axis errors (well under 2°) at every rung from 3° to 88°. NorthPark recovers zero tees at any tolerance: its real pads sit outside the current discovery search bounds, a separate bug this knob cannot fix. Because widening buys nothing real here, the default stays at the strict target (3°) rather than moving; the knob is landed and validated (0.5-90°) so a future corpus that genuinely needs slack is one config edit away, with the achieved axis-error distribution always visible via the teeRecovery/axisErrorDeg receipt measurement. See docs/INTAKE-ENGINE-HANDOFF.md and artifacts/orchestration/axis-ceiling-progress.md for the full ladder table and per-hypothesis center/badge-bbox-containment check.",
+											"default": 3
+										}
+									}
 								}
 							}
 						},
@@ -635,18 +649,6 @@
 					"type": "object",
 					"additionalProperties": false,
 					"properties": {
-						"straightTest": {
-							"type": "object",
-							"additionalProperties": false,
-							"description": "Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.",
-							"properties": {
-								"enabled": { "type": "boolean", "default": false },
-								"knobs": {
-									"type": "object", "additionalProperties": false,
-									"properties": { "truthAssisted": { "type": "boolean", "description": "Use verified canonical endpoint coordinates for explicitly tainted comparison only.", "default": false } }
-								}
-							}
-						},
 						"ribbon": {
 							"type": "object",
 							"additionalProperties": false,
@@ -800,7 +802,14 @@
 										"widthsSrc": {
 											"type": "array",
 											"description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
-											"default": [24, 32, 40, 48, 56, 64]
+											"default": [
+												24,
+												32,
+												40,
+												48,
+												56,
+												64
+											]
 										},
 										"alignmentPower": {
 											"type": "number",
@@ -848,6 +857,28 @@
 											"type": "number",
 											"description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
 											"default": 5
+										}
+									}
+								}
+							}
+						},
+						"straightTest": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"truthAssisted": {
+											"type": "boolean",
+											"description": "Use verified canonical endpoint coordinates for explicitly tainted comparison only.",
+											"default": false
 										}
 									}
 								}
@@ -1070,7 +1101,17 @@
 										"bendAngles": {
 											"type": "array",
 											"description": "bend angle samples (degrees) tried at each zfit waypoint",
-											"default": [-60, -45, -30, -20, 0, 20, 30, 45, 60]
+											"default": [
+												-60,
+												-45,
+												-30,
+												-20,
+												0,
+												20,
+												30,
+												45,
+												60
+											]
 										},
 										"bendLengthShort": {
 											"type": "number",
