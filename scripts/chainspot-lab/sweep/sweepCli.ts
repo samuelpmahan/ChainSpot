@@ -8,6 +8,7 @@ import { compileSweepConfig, runSweepOperation } from './operation';
 import { printPlan } from './timeline';
 import { isSweepThroughGate, type SweepThroughGate } from './gateVocabulary';
 import { runSweepBatch } from './batch';
+import { numberRunVisualEndpoints } from './endpointNumbering';
 
 function usage(): never {
 	console.error(
@@ -67,6 +68,11 @@ async function runSweep(args: readonly string[]): Promise<void> {
 		inputPaths,
 		truthPath: truthPaths[0],
 		...(throughGate ? { throughGate } : {})
+	});
+	numberRunVisualEndpoints({
+		run: result.trace,
+		assignments: result.runReceipt.assignments,
+		outDir: result.outDir
 	});
 	console.log(readFileSync(result.runReceiptPaths[1], 'utf8').trimEnd());
 }
