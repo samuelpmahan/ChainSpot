@@ -180,7 +180,23 @@ function badgeAxisError(candidate: TeeRecoveryCandidate): number | undefined {
 // course dimensions describe continuous geometry while evidence arrives as
 // integer cell centers.
 const RASTER_TOLERANCE_PX = 1.25;
-const BADGE_AXIS_LIMIT_RAD = 3 * Math.PI / 180;
+/** The original hard gate: tee major axis within 3° of the center-to-badge
+ * ray. Owner policy 2026-08-28: this becomes a SOFT CEILING while the pad
+ * rectangle detection underperforms in places — the configured knob below
+ * sets the operative limit, with a tightening roadmap of corpus P100 <= 5°
+ * and then back to 3° as the rectangle improves. The strict gate stays the
+ * target because it debugs like a greedy algorithm: it exposes every bad
+ * assumption loudly. */
+const BADGE_AXIS_TARGET_DEG = 3;
+let activeAxisLimitRad = BADGE_AXIS_TARGET_DEG * Math.PI / 180;
+let activeAxisLimitDeg = BADGE_AXIS_TARGET_DEG;
+
+/** Set per run from the resolved teeRecovery knobs (single-threaded engine;
+ * the unit run installs this before any candidate is built or judged). */
+export function setActiveAxisToleranceDeg(deg: number): void {
+	activeAxisLimitDeg = deg;
+	activeAxisLimitRad = deg * Math.PI / 180;
+}
 const MIN_SHARD_SUPPORT_PIXELS = 8;
 
 /** The tee is a hollow outline, so membership means being in the outer
@@ -321,7 +337,8 @@ function fitComponent(
 	) => {
 		for (let y = y0; y <= y1 + 1e-9; y += centerStep) {
 			for (let x = x0; x <= x1 + 1e-9; x += centerStep) {
-				for (let degrees = -2.5; degrees <= 2.5 + 1e-9; degrees += angleStepDeg) {
+				const scanRangeDeg = Math.max(0.5, activeAxisLimitDeg - 0.5);
+				for (let degrees = -scanRangeDeg; degrees <= scanRangeDeg + 1e-9; degrees += angleStepDeg) {
 					consider(x, y, degrees * Math.PI / 180);
 				}
 			}
@@ -529,7 +546,7 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const support = candidate.fragmentPixels.length;
 	const componentCount = candidate.supportingComponentIds.length;
 	const axisError = badgeAxisError(candidate);
-	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= BADGE_AXIS_LIMIT_RAD;
+	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= activeAxisLimitRad;
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected;
@@ -553,8 +570,8 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 		: `${holePrefix}${insufficientSupport
 			? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 			: `${axisRejected
-				? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < 3°`
-				: 'no hollow tee support fit within 3° of the badge ray explains every visible component pixel'}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
+				? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
+				: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
@@ -682,8 +699,8 @@ export function buildTeeRecoveryCandidates(
 		targetCandidates.sort((a, b) => {
 			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
 			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
-			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < BADGE_AXIS_LIMIT_RAD;
-			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < BADGE_AXIS_LIMIT_RAD;
+			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < activeAxisLimitRad;
+			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < activeAxisLimitRad;
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
 			if (aAccepted) return b.fragmentPixels.length - a.fragmentPixels.length || aa - ba || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 			const aFraction = ar / a.fragmentPixels.length;
