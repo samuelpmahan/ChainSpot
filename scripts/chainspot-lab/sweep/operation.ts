@@ -429,12 +429,13 @@ export async function runSweepOperation(
 	const operationBodyMs = receipts.reduce((sum, receipt) => sum + receipt.durationMs, 0);
 	const gateByOpId = new Map(plan.ops.map((op) => [op.id, op.gate]));
 	const artifactRenders: ArtifactRenderResult[] = [];
+	const artifactRenderOwners: { readonly opId: string; readonly gate: string }[] = [];
 	const artifactRenderStartedAtMs = performance.now();
 	for (const receipt of receipts) {
 		for (const artifactRef of receipt.artifacts) {
-			artifactRenders.push(
-				renderArtifact(outDir, receipt.opId, gateByOpId.get(receipt.opId) ?? 'shared', artifactRef)
-			);
+			const gate = gateByOpId.get(receipt.opId) ?? 'shared';
+			artifactRenders.push(renderArtifact(outDir, receipt.opId, gate, artifactRef));
+			artifactRenderOwners.push({ opId: receipt.opId, gate });
 		}
 	}
 	const artifactRenderMs = performance.now() - artifactRenderStartedAtMs;
@@ -450,6 +451,12 @@ export async function runSweepOperation(
 		} else {
 			scoreboard = scoreTruth(board, canonicalTruth!, report.singleSourceOffset);
 		}
+	} else {
+		// "Not attempted" is a different line from "attempted and skipped for
+		// cause". Without this, the receipt reads skipped=false + no scoreboard
+		// with no reason, which is exactly the silence the receipt rule forbids.
+		truthScoringSkipped = true;
+		truthScoringReason = 'no truth annotation was supplied to this run; truth evaluation was not attempted';
 	}
 	const groundingComparisons = canonicalTruth
 		? compareTruthGrounding(
@@ -499,19 +506,76 @@ export async function runSweepOperation(
 		sealedTrace.units
 			.find((unit) => unit.id === unitId)
 			?.drawables.filter((drawable) => drawable.verdict === 'accepted').length;
-	const recoveredTees = board.has('recoveredTees')
-		? board.get<readonly RecoveredTeeInput[]>('recoveredTees').length
-		: undefined;
-	const phantomTees = acceptedByUnit('phantomTee');
+	// Scheduling is read off the sliced plan, never off board slot presence:
+	// LAB itself seeds 'recoveredTees' with [] before the gateway, so a board
+	// read alone cannot distinguish "G4 ran and recovered nothing" from "G4
+	// was never in this run's plan". A count is only claimed for work that
+	// was actually scheduled; everything else gets a reason instead.
+	const scheduledUnits = new Set(plan.ops.map((op) => op.unit));
+	const cutoffNote = input.throughGate ? ` (--through ${input.throughGate})` : '';
+	const notScheduled = (unitId: string, gate: string) =>
+		`not-scheduled: no '${unitId}' operation (${gate}) is in this run's plan${cutoffNote}; ` +
+		`'never ran' is a different fact from 'ran and found 0'`;
+
+	const teeRecoveryScheduled = scheduledUnits.has('teeRecovery');
+	const recoveredTees =
+		teeRecoveryScheduled && board.has('recoveredTees')
+			? board.get<readonly RecoveredTeeInput[]>('recoveredTees').length
+			: undefined;
+	const phantomEnabled = loaded.resolved.features['phantomTee']?.enabled === true;
+	const phantomScheduled = scheduledUnits.has('phantomTee');
+	const phantomTees = phantomScheduled ? acceptedByUnit('phantomTee') : undefined;
+	const teeFamilyAccepted = acceptedByUnit('teeFamily');
 	const visibleTees =
-		acceptedByUnit('teeFamily') ??
+		teeFamilyAccepted ??
 		(board.has('tees') ? board.get<readonly unknown[]>('tees').length : undefined);
-	const assignmentCount = board.has('assignment')
-		? board.get<ThreeFactorAssignment>('assignment').assignments.length
-		: undefined;
-	const rawPairCount = board.has('rawPairs')
-		? board.get<readonly RawPairEvidence[]>('rawPairs').length
-		: undefined;
+	const assignmentScheduled = scheduledUnits.has('assignment');
+	const assignmentCount =
+		assignmentScheduled && board.has('assignment')
+			? board.get<ThreeFactorAssignment>('assignment').assignments.length
+			: undefined;
+	const rawPairsScheduled = scheduledUnits.has('rawPairs');
+	const rawPairCount =
+		rawPairsScheduled && board.has('rawPairs')
+			? board.get<readonly RawPairEvidence[]>('rawPairs').length
+			: undefined;
+	const resultsProvenance = {
+		badges: scheduledUnits.has('badges')
+			? "accepted drawables in trace unit 'badges'"
+			: notScheduled('badges', 'G1'),
+		baskets: scheduledUnits.has('baskets')
+			? "accepted drawables in trace unit 'baskets'"
+			: notScheduled('baskets', 'G2'),
+		visibleTees:
+			teeFamilyAccepted !== undefined
+				? "accepted drawables in trace unit 'teeFamily'"
+				: visibleTees !== undefined
+					? "board slot 'tees' length; trace unit 'teeFamily' absent from this run"
+					: notScheduled('teeFamily', 'G3'),
+		recoveredTees: teeRecoveryScheduled
+			? "board slot 'recoveredTees' length after the scheduled G4 teeRecovery operation ran"
+			: notScheduled('teeRecovery', 'G4'),
+		phantomTees: !phantomEnabled
+			? "not-enabled: feature 'phantomTee' is disabled in this config; phantom completion never ran"
+			: phantomScheduled
+				? "accepted drawables in trace unit 'phantomTee'"
+				: notScheduled('phantomTee', 'G4'),
+		totalTees:
+			visibleTees !== undefined && recoveredTees !== undefined
+				? 'visibleTees + recoveredTees'
+				: teeRecoveryScheduled
+					? 'not-computable: visibleTees is unavailable'
+					: `not-computable: no 'teeRecovery' operation (G4) is in this run's plan${cutoffNote}` +
+						(visibleTees !== undefined ? `; visible tees alone = ${visibleTees}` : ''),
+		assignments: assignmentScheduled
+			? "final board slot 'assignment' rows (includes any re-assignment written by a scheduled " +
+				"post-G6 recovery/phantom operation; the 'assignment.selection.table' artifact is the " +
+				'pre-recovery G6 table)'
+			: notScheduled('assignment', 'G6'),
+		rawPairs: rawPairsScheduled
+			? "board slot 'rawPairs' length produced by the G5 rawPairs operation"
+			: notScheduled('rawPairs', 'G5')
+	};
 	const timings: RunPhaseTimings = {
 		configMs,
 		intakeMs,
@@ -525,16 +589,49 @@ export async function runSweepOperation(
 		observedTotalMs: performance.now() - runStartedAtMs
 	};
 	const runRelativePath = (path: string) => relative(outDir, path).split('\\').join('/');
-	const visualRenders: RunReceiptVisualRender[] = featureRenders.results.map(
-		(render): RunReceiptVisualRender => ({
-			kind: 'feature',
-			gate: render.gate,
-			id: 'run.endpoint-summary',
-			owner: `${render.featureId}@${render.unitId}`,
-			status: 'rendered',
+	// The inventory lists EVERY render file this run wrote: the canonical
+	// input raster, each kind-keyed artifact render (with a truthful
+	// rendered/stub status), and the feature-owned endpoint receipt. A file
+	// on disk that the inventory does not name is a silent absence.
+	const canonicalVisualRender: RunReceiptVisualRender = {
+		kind: 'canonical',
+		gate: 'G0',
+		id: 'g0.canonical',
+		owner: 'G0 intake (StripChrome + AutoStitch)',
+		status: 'rendered',
+		summary: `exact ${image.width}x${image.height} canonical raster executed by this run`,
+		files: [runRelativePath(canonicalPngPath)]
+	};
+	const artifactVisualRenders: RunReceiptVisualRender[] = artifactRenders.map(
+		(render, index): RunReceiptVisualRender => ({
+			kind: 'artifact',
+			gate: artifactRenderOwners[index]?.gate ?? 'shared',
+			id: render.artifactRef.id,
+			owner: `${render.artifactRef.kind}@${artifactRenderOwners[index]?.opId ?? 'UNKNOWN'}`,
+			status: render.rendered ? 'rendered' : 'stub',
 			summary: render.summary,
 			files: render.filesWritten.map(runRelativePath)
 		})
+	);
+	const visualRenders: RunReceiptVisualRender[] = [
+		canonicalVisualRender,
+		...artifactVisualRenders,
+		...featureRenders.results.map(
+			(render): RunReceiptVisualRender => ({
+				kind: 'feature',
+				gate: render.gate,
+				id: 'run.endpoint-summary',
+				owner: `${render.featureId}@${render.unitId}`,
+				status: 'rendered',
+				summary: render.summary,
+				files: render.filesWritten.map(runRelativePath)
+			})
+		)
+	];
+	const renderWarnings = featureRenders.results.flatMap((render) =>
+		render.warnings.map(
+			(warning) => `visual render ${render.featureId}@${render.unitId}: ${warning}`
+		)
 	);
 	let revision = 'UNKNOWN';
 	try {
@@ -575,7 +672,9 @@ export async function runSweepOperation(
 			assignments: assignmentCount,
 			rawPairs: rawPairCount
 		},
+		resultsProvenance,
 		visualRenders,
+		renderWarnings,
 		truthSupplied: Boolean(truthPath),
 		truthScoringSkipped,
 		...(truthScoringReason ? { truthScoringReason } : {}),

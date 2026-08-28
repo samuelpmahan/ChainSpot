@@ -276,6 +276,14 @@ describe('canonical tee VisualRender', () => {
 				[6, 6]
 			] as const)
 				expect(rgb(png, x, y)).toEqual([255, 225, 30]);
+			// The badgeBrightPixels number in the receipt is the exact count of
+			// pure-yellow pixels painted — no more (nothing else is yellow) and
+			// no fewer (no later layer overwrote badge evidence here).
+			let yellowPixels = 0;
+			for (let y = 0; y < png.height; y++)
+				for (let x = 0; x < png.width; x++)
+					if (rgb(png, x, y).join(',') === '255,225,30') yellowPixels++;
+			expect(result.receiptText).toContain(`badgeBrightPixels: ${yellowPixels} `);
 			expect(result.warnings.length).toBeGreaterThanOrEqual(2);
 			expect(result.warnings.join('\n')).toMatch(/orphan|unmatched|accepted badge/i);
 			expect(result.warnings.join('\n')).toMatch(/empty|no exact|pixel set/i);
@@ -292,6 +300,51 @@ describe('canonical tee VisualRender', () => {
 			expect(rgb(png, 52, 49)).toEqual([255, 40, 220]);
 			expect(rgb(png, 33, 26)).toEqual([30, 255, 95]);
 			expect(rgb(png, 30, 30)).toEqual([255, 32, 32]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test('a run without recovery or phantom units says NOT-SCHEDULED, never 0', () => {
+		const root = mkdtempSync(join(tmpdir(), 'endpoint-visual-noscheduled-'));
+		try {
+			const basePath = join(root, 'base.png');
+			const base = new PNG({ width: 64, height: 64 });
+			base.data.fill(0);
+			writeFileSync(basePath, PNG.sync.write(base));
+			const full = unifiedFixtureTrace();
+			const sliced: RunTrace = {
+				...full,
+				execution: full.execution.filter((id) => id !== 'teeRecovery'),
+				units: full.units.filter((candidate) => candidate.id !== 'teeRecovery')
+			};
+			const output = renderRunEndpointReceipt({
+				run: sliced,
+				outDir: join(root, 'renders'),
+				canvas: { widthPx: 64, heightPx: 64, source: 'test canvas' },
+				bases: [{ id: 'original', pngPath: basePath, source: 'test base' }]
+			});
+			const [result] = output.results;
+			// "Never ran" and "ran and found 0" are different receipt lines.
+			expect(result.receiptText).toContain(
+				"recoveredTeePoses: NOT-SCHEDULED (no 'teeRecovery' unit in this run; 'never ran' is not 0)"
+			);
+			expect(result.receiptText).toContain(
+				"recoveredVisibleComponents: NOT-SCHEDULED (no 'teeRecovery' unit in this run)"
+			);
+			expect(result.receiptText).toContain(
+				"phantomTeeCenters: NOT-SCHEDULED (no 'phantomTee' unit in this run; the feature is default-OFF)"
+			);
+			expect(result.receiptText).not.toMatch(/recoveredTeePoses: \d/);
+			// The rejections block names the absent units instead of skipping them.
+			expect(result.receiptText).toContain(
+				"G4 teeRecovery: NOT-SCHEDULED (no trace unit exists in this run; 'never ran' is different from '0 rejections')"
+			);
+			expect(result.receiptText).toContain('G4 phantomTee: NOT-SCHEDULED');
+			// Scheduled units keep truthful zero/positive counts.
+			expect(result.receiptText).toContain('visibleTeeBorders: 1');
+			expect(result.summary).toContain('recovery not-scheduled');
+			expect(result.gate).toBe('G0-G3');
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

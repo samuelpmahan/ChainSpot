@@ -458,11 +458,21 @@ function planDrawables(plan: FeatureRenderPlan | undefined): Drawable[] {
 	return plan?.layers.flatMap((layer) => layer.drawables) ?? [];
 }
 
-function rejectionReceiptLines(run: RunTrace, unitIds: readonly string[]): string[] {
+function rejectionReceiptLines(
+	run: RunTrace,
+	units: readonly { readonly id: string; readonly gate: string }[]
+): string[] {
 	const lines: string[] = [];
-	for (const unitId of unitIds) {
-		const unit = run.units.find((candidate) => candidate.id === unitId);
-		if (!unit) continue;
+	for (const requested of units) {
+		const unit = run.units.find((candidate) => candidate.id === requested.id);
+		if (!unit) {
+			// A unit that never ran gets its own line: silently skipping it would
+			// make "not scheduled" indistinguishable from "0 rejections".
+			lines.push(
+				`  ${requested.gate} ${requested.id}: NOT-SCHEDULED (no trace unit exists in this run; 'never ran' is different from '0 rejections')`
+			);
+			continue;
+		}
 		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
 		lines.push(`  ${unit.gate} ${unit.id}: ${rejected.length}`);
 		for (const [reason, count] of countByReason(rejected)) lines.push(`    ${count} x ${reason}`);
@@ -663,12 +673,14 @@ export function renderRunEndpointReceipt(
 	const expectedRecoverNum = visiblePlan
 		? Math.max(0, acceptedBadges.length - visibleBorders.length)
 		: undefined;
+	const recoveryScheduled = run.units.some((candidate) => candidate.id === 'teeRecovery');
+	const phantomScheduled = run.units.some((candidate) => candidate.id === 'phantomTee');
 	const rejectedLines = rejectionReceiptLines(run, [
-		'baskets',
-		'tees',
-		'teeFamily',
-		'teeRecovery',
-		'phantomTee'
+		{ id: 'baskets', gate: 'G2' },
+		{ id: 'tees', gate: 'G3' },
+		{ id: 'teeFamily', gate: 'G3' },
+		{ id: 'teeRecovery', gate: 'G4' },
+		{ id: 'phantomTee', gate: 'G4' }
 	]);
 	const receiptText = [
 		'VISUAL RENDER RECEIPT',
@@ -682,7 +694,7 @@ export function renderRunEndpointReceipt(
 			: []),
 		`paramsHash: ${run.paramsHash || 'UNKNOWN'}`,
 		...(run.straightTest ? [`traceHash: ${run.traceHash ?? 'UNKNOWN'}`] : []),
-		`gateSpan: ${endpointGateSpan(run)}`,
+		`gateSpan: ${endpointGateSpan(run)} (highest gate with drawn endpoint testimony; later analysis gates in the run draw nothing here)`,
 		`base: ${base.pngPath}`,
 		`canvas: ${canvas.widthPx}x${canvas.heightPx} (${canvas.source})`,
 		`coordinateTransform: ${
@@ -702,9 +714,21 @@ export function renderRunEndpointReceipt(
 				? 'UNKNOWN -- visible tee gate was not scheduled'
 				: `${expectedRecoverNum} (math: max(0, badges - visibleTeeBorders))`
 		}`,
-		`recoveredTeePoses: ${recoveredShards.length}`,
-		`recoveredVisibleComponents: ${recoveredVisibleComponents}`,
-		`phantomTeeCenters: ${phantomCenters.length}`,
+		`recoveredTeePoses: ${
+			recoveryScheduled
+				? recoveredShards.length
+				: "NOT-SCHEDULED (no 'teeRecovery' unit in this run; 'never ran' is not 0)"
+		}`,
+		`recoveredVisibleComponents: ${
+			recoveryScheduled
+				? recoveredVisibleComponents
+				: "NOT-SCHEDULED (no 'teeRecovery' unit in this run)"
+		}`,
+		`phantomTeeCenters: ${
+			phantomScheduled
+				? phantomCenters.length
+				: "NOT-SCHEDULED (no 'phantomTee' unit in this run; the feature is default-OFF)"
+		}`,
 		`teeCornerMarks: ${visibleCorners.length + recoveryCorners.length}`,
 		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
 		'',
@@ -754,7 +778,8 @@ export function renderRunEndpointReceipt(
 				receiptText,
 				summary:
 					`${acceptedBadges.length} badges + ${basketTips.length} baskets + ` +
-					`${visibleBorders.length} visible tees + ${recoveredShards.length} recovered tees in one endpoint image`,
+					`${visibleBorders.length} visible tees + ` +
+					`${recoveryScheduled ? `${recoveredShards.length} recovered tees` : 'recovery not-scheduled'} in one endpoint image`,
 				warnings
 			}
 		],

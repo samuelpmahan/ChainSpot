@@ -106,6 +106,11 @@ const receipt: RunReceipt = {
 		}
 	],
 	results: { badges: 1, baskets: 1 },
+	resultsProvenance: {
+		badges: "accepted drawables in trace unit 'badges'",
+		recoveredTees:
+			"not-scheduled: no 'teeRecovery' operation (G4) is in this run's plan (--through G2); 'never ran' is a different fact from 'ran and found 0'"
+	},
 	visualRenders: [
 		{
 			kind: 'canonical',
@@ -161,9 +166,12 @@ intake.autoStitch.sourceCount: 1
 intake.autoStitch.hadFallback: false
 intake.autoStitch.placements: [{"x":0,"y":0}]
 intake.ledger: {}
-intake.truthMatch: UNKNOWN
+intake.truthMatch: not-supplied (no truth JSON was given to this run)
 
 TIMING BREAKDOWN
+(provenance: wall-clock performance.now() spans measured by the LAB sweep runner;
+ artifactPersistenceMs = max(0, gatewayMs - operationBodyMs), an attribution estimate;
+ volatile run measurements, never detector output)
 timings.configMs: 1
 timings.intakeMs: 2
 timings.canonicalWriteMs: 3
@@ -192,14 +200,15 @@ unit baskets gate=G2 durationMs=7 accepted=1 rejected=1 info=1
   rejectionReason below-threshold: 1
 
 FINAL RESULTS
-results.badges: 1
+results.badges: 1  (accepted drawables in trace unit 'badges')
 results.baskets: 1
 results.visibleTees: UNKNOWN
-results.recoveredTees: UNKNOWN
+results.recoveredTees: UNKNOWN  (not-scheduled: no 'teeRecovery' operation (G4) is in this run's plan (--through G2); 'never ran' is a different fact from 'ran and found 0')
 results.phantomTees: UNKNOWN
 results.totalTees: UNKNOWN
 results.assignments: UNKNOWN
 results.rawPairs: UNKNOWN
+baselineComparison: UNKNOWN (not-implemented: no frozen baseline receipt is stored for this config, so this run cannot honestly state "changed" or "no change" vs a baseline)
 
 TRUTH EVALUATION
 evaluation.truthSupplied: false

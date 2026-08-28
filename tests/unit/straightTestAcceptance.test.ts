@@ -432,7 +432,7 @@ describe.skipIf(!existsSync(DASHS_IMAGE))(
 				expect(trace.traceHash).toMatch(/^[0-9a-f]{64}$/);
 				expect(trace.straightTest?.featureId).toBe(STRAIGHT_TEST_FEATURE_ID);
 				expect(trace.straightTest?.coordinateFrame).toBe(STRAIGHT_TEST_COORDINATE_FRAME);
-				expect(result.runReceipt.visualRenders).toHaveLength(1);
+				expect(result.runReceipt.visualRenders.filter((render) => render.kind === 'feature')).toHaveLength(1);
 				expect(result.runReceipt.straightTest?.traceHash).toBe(trace.traceHash);
 				expect(result.runReceipt.straightTest?.runId).toBe(trace.runId);
 				expect(result.runReceipt.straightTest?.imageId).toBe(trace.imageId);
@@ -501,7 +501,7 @@ describe.skipIf(!existsSync(DASHS_IMAGE))(
 						mode: 'verified-canonical',
 						taint: 'TRUTH-TAINT'
 					});
-					expect(result.runReceipt.visualRenders).toHaveLength(1);
+					expect(result.runReceipt.visualRenders.filter((render) => render.kind === 'feature')).toHaveLength(1);
 					const locks = straight?.truthAssistance.locks ?? [];
 					const selected = (straight?.proposals ?? []).filter((proposal) => proposal.selected);
 					expect(selected).toHaveLength(locks.length);

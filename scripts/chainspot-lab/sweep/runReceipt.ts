@@ -107,6 +107,16 @@ export interface RunReceiptSlice extends RunReceiptSliceInput {
 	readonly straightStory?: readonly string[];
 }
 
+export type RunReceiptResultName = keyof RunReceiptResults & string;
+
+/** One provenance line per FINAL RESULTS number. For a present number it says
+ * where the value was read from; for an absent number it says WHY it is
+ * absent (not-scheduled vs not-enabled vs not-computed), because "never ran"
+ * and "ran and found 0" are different receipt lines. */
+export type RunReceiptResultsProvenance = Readonly<
+	Partial<Record<RunReceiptResultName, string>>
+>;
+
 export interface RunReceiptVisualRender {
 	readonly kind: 'canonical' | 'artifact' | 'feature';
 	readonly gate: string;
@@ -158,6 +168,7 @@ export interface RunReceipt {
 	readonly units: readonly RunReceiptUnit[];
 	readonly results: RunReceiptResults;
 	readonly slice?: RunReceiptSlice;
+	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
 	readonly straightTest?: RunReceiptStraightTest;
 	readonly evaluation: {
@@ -182,7 +193,11 @@ export interface BuildRunReceiptInput {
 	readonly trace: RunTrace;
 	readonly timings: RunPhaseTimings;
 	readonly results: RunReceiptResults;
+	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
+	/** Loud problems the visual-render composers found while drawing. Appended
+	 * to the receipt's WARNINGS so they cannot be silently dropped. */
+	readonly renderWarnings?: readonly string[];
 	readonly truthSupplied: boolean;
 	readonly truthScoringSkipped: boolean;
 	readonly truthScoringReason?: string;
@@ -311,7 +326,7 @@ function deriveSlice(
 }
 
 export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
-	const warnings: string[] = [];
+	const warnings: string[] = [...(input.renderWarnings ?? [])];
 	if (input.plan.ops.length !== input.receipts.length) {
 		warnings.push(
 			`plan/receipt length mismatch: ${input.plan.ops.length} planned, ${input.receipts.length} received`
@@ -419,6 +434,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		gates,
 		units,
 		results,
+		resultsProvenance: input.resultsProvenance,
 		...(slice ? { slice } : {}),
 		visualRenders: input.visualRenders,
 		...(straightTest ? { straightTest } : {}),
