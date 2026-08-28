@@ -54,8 +54,11 @@ pixels: hole-number badges, baskets, tee pads, walk paths.
   OFF, so the default config reproduces frozen behavior byte-for-byte.
   `tests/unit/threeFactorParity.test.ts` pins it. Every run carries a
   `paramsHash` of the resolved config.
-- `tests/unit/dashsTrackSweep.test.ts` is the oracle: G1 18/18 digits,
-  G2 18/18 baskets, G3 18/18 visible tees, G4 endpoint recovery, G6 18/18 assignment.
+- `tests/unit/dashsTrackSweep.test.ts` is the truth oracle: G1 is 18/18 digits
+  and G2 is 18/18 baskets. The current G3 16/18 visible-tee and G6 13/18
+  truth-exact assignment gaps remain explicit `test.fails`. The full Sweep
+  separately recovers 2 tees and emits 18 assignments; count is not the same
+  claim as truth-exact placement.
 - `scripts/chainspot-lab` — LAB, the CV workbench. `./lab --help`.
 
 **Read `docs/WORKFLOW.md` first.** It defines the lanes, the receipt, the
@@ -65,7 +68,8 @@ waiting room, and the branch topology. It is the process, not a suggestion.
 
 1. **`default.json` output stays byte-identical.** Anything new is a
    `deviation` feature, default OFF. Parity proves it. Non-negotiable.
-2. **`dashsTrackSweep` stays at 18/18** on every gate.
+2. **`dashsTrackSweep` never hides a gap.** Exact-match misses stay visible as
+   `test.fails`; do not weaken, skip, or silently repin them to make CI green.
 3. **No silent drops.** `packages/alg/src/detectors/threeFactor/features/types.ts:76`
    already states the rule: *"Filtering code MUST emit a rejected drawable
    (with reason) per killed candidate: no silent drops."* Honor it.

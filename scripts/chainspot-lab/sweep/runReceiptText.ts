@@ -41,7 +41,7 @@ function conformance(operation: RunReceipt['operations'][number]): string {
 	return `DRIFT missingConsumes=${list(operation.conformance.missingConsumes)} missingProduces=${list(operation.conformance.missingProduces)}`;
 }
 
-/** Render a RunReceipt without emitting binary payloads or object rows. */
+/** Render a RunReceipt without emitting binary payloads or recomputing evidence. */
 export function formatRunReceiptText(receipt: RunReceipt): string {
 	const lines: string[] = [
 		'RUN RECEIPT',
@@ -189,6 +189,10 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	lines.push(`evaluation.skipped: ${receipt.evaluation.skipped}`);
 	lines.push(`evaluation.reason: ${value(receipt.evaluation.reason)}`);
 	lines.push(`evaluation.scoreboard: ${json(receipt.evaluation.scoreboard)}`);
+	lines.push(`evaluation.failureRowCount: ${receipt.evaluation.failureRows.length}`);
+	for (const [index, row] of receipt.evaluation.failureRows.entries()) {
+		lines.push(`failureRow[${index + 1}]: ${json(row)}`);
+	}
 
 	if (receipt.straightTest) {
 		lines.push('', 'G5 STRAIGHT TEST (SEALED TRACE)');

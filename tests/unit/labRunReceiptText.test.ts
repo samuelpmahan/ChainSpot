@@ -134,7 +134,7 @@ const receipt: RunReceipt = {
 			]
 		}
 	],
-	evaluation: { truthSupplied: false, skipped: true, reason: 'no truth' },
+	evaluation: { truthSupplied: false, skipped: true, reason: 'no truth', failureRows: [] },
 	warnings: ['first warning', 'second warning']
 };
 
@@ -215,6 +215,7 @@ evaluation.truthSupplied: false
 evaluation.skipped: true
 evaluation.reason: no truth
 evaluation.scoreboard: UNKNOWN
+evaluation.failureRowCount: 0
 
 VISUAL RENDERS
 visualRenderCount: 2
@@ -285,5 +286,37 @@ artifact[2].uri: artifact://first
 		expect(text).toContain('1 | G0 | canonical | StripChrome + AutoStitch');
 		expect(text).toContain('artifact[1].uri: artifact://second');
 		expect(text).not.toContain('sha256');
+	});
+
+	test('serializes each failure row without recomputing it', () => {
+		const row: RunReceipt['evaluation']['failureRows'][number] = {
+			rowId: 'G3:FALSE_NEGATIVE:H5',
+			runId: 'run-id',
+			imageId: 'canonical-id',
+			paramsHash: 'params-hash',
+			traceHash: 'trace-hash',
+			gate: 'G3',
+			verdict: 'FALSE_NEGATIVE',
+			objectKind: 'tee',
+			truthIdentity: 'H5',
+			label: 'H5 tee false negative',
+			reason: 'H5:no unclaimed detection within 26px',
+			canonical: { xPx: 10, yPx: 20 },
+			coordinateFrame: 'g0-canonical',
+			evaluationOnly: true,
+			scopeRequests: [
+				{
+					label: 'truth tee',
+					request: { name: 'G3:FALSE_NEGATIVE:H5', point: [10, 20] }
+				}
+			]
+		};
+		const text = formatRunReceiptText({
+			...receipt,
+			evaluation: { ...receipt.evaluation, failureRows: [row] }
+		});
+
+		expect(text).toContain('evaluation.failureRowCount: 1');
+		expect(text).toContain(`failureRow[1]: ${JSON.stringify(row)}`);
 	});
 });

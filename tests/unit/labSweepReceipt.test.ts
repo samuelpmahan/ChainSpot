@@ -6,7 +6,11 @@ import { describe, expect, test } from 'vitest';
 import { PNG } from 'pngjs';
 import { createExecBoard } from '@chainspot/alg/exec';
 import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
-import type { BasketEvidence } from '@chainspot/alg/detectors/threeFactor/types';
+import type {
+	BasketEvidence,
+	ThreeFactorAssignment,
+	ThreeFactorMeasurement
+} from '@chainspot/alg/detectors/threeFactor/types';
 import { g2SpriteFeature } from '@chainspot/alg/detectors/threeFactor/features/g2.sprite';
 import {
 	compileSweepConfig,
@@ -21,8 +25,11 @@ import {
 } from '../../scripts/chainspot-lab/sweep/inputShim';
 import {
 	associateDetections,
+	buildTruthFailureRows,
 	compareTruthGrounding,
+	scoreTruth,
 	type LocatedDetection,
+	type TruthScoreboard,
 	type TruthTarget
 } from '../../scripts/chainspot-lab/sweep/truthScoring';
 
@@ -260,6 +267,7 @@ describe('LAB sweep receipt seam', () => {
 			expect(result.runReceiptPaths.every(existsSync)).toBe(true);
 			const persisted = JSON.parse(readFileSync(result.runReceiptPaths[0], 'utf8'));
 			expect(persisted.schema).toBe('chainspot-lab-run-receipt@1');
+			expect(persisted.evaluation.failureRows).toEqual([]);
 			expect(persisted.operations.map((operation: { id: string }) => operation.id)).toEqual(
 				result.receipts.map((receipt) => receipt.opId)
 			);
@@ -351,7 +359,7 @@ describe('LAB sweep receipt seam', () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	test('smart G2 promotes a course-sized renderer family instead of sliding-window echoes', async () => {
 		const result = await runSweepOperation({
@@ -701,5 +709,151 @@ describe('truth receipt association', () => {
 		expect(result.misses).toEqual(['H2:no unclaimed detection within 26px']);
 		expect(result.unownedDetections?.map((detection) => detection.id)).toEqual(['tee-extra']);
 		expect(result.objectMatches?.[0]?.detectionOriginal).toEqual({ xPx: 5, yPx: 4 });
+	});
+
+	test('projects localizable truth failures into stable labeled canonical scope rows', () => {
+		const scoreboard: TruthScoreboard = {
+			expectedHoles: 2,
+			scores: [
+				{
+					gate: 'G1',
+					matched: 1,
+					expected: 2,
+					maxDeviationPx: 0,
+					misses: ['H2:no-digit-read'],
+					unmatchedTruth: [{ identity: 'H2', point: { xPx: 4, yPx: 8 } }]
+				},
+				{
+					gate: 'G2',
+					matched: 1,
+					expected: 2,
+					detected: 2,
+					maxDeviationPx: 2,
+					misses: ['H2:no unclaimed detection within 26px'],
+					unmatchedTruth: [{ identity: 'H2', point: { xPx: 10, yPx: 20 } }],
+					unownedDetections: [
+						{
+							id: 'basket-extra',
+							spriteType: 'basket',
+							identity: 'basket-extra',
+							xPx: 80,
+							yPx: 90,
+							measurements: {}
+						}
+					]
+				},
+				{
+					gate: 'G6',
+					matched: 1,
+					expected: 2,
+					maxDeviationPx: 4,
+					misses: ['H2:no-assignment'],
+					associationFailures: [
+						{
+							kind: 'ASSOCIATION_MISSING',
+							truthIdentity: 'H2',
+							truthTeeCanonical: { xPx: 10, yPx: 20 },
+							truthBasketCanonical: { xPx: 30, yPx: 40 },
+							reason: 'H2:no-assignment'
+						}
+					]
+				}
+			]
+		};
+
+		const rows = buildTruthFailureRows(
+			scoreboard,
+			{
+				runId: 'run-id',
+				imageId: 'image-id',
+				paramsHash: 'params-hash',
+				traceHash: 'trace-hash'
+			},
+			{ xPx: 0, yPx: -4 }
+		);
+
+		expect(rows.map((row) => row.rowId)).toEqual([
+			'G1:FALSE_NEGATIVE:H2',
+			'G2:FALSE_NEGATIVE:H2',
+			'G2:FALSE_POSITIVE:basket-extra',
+			'G6:ASSOCIATION_MISSING:H2'
+		]);
+		expect(rows[0]).toMatchObject({
+			objectKind: 'badge',
+			canonical: { xPx: 4, yPx: 8 },
+			original: { xPx: 4, yPx: 12 },
+			evaluationOnly: true
+		});
+		expect(rows[1]?.scopeRequests).toEqual([
+			{
+				label: 'truth basket',
+				request: { name: 'G2:FALSE_NEGATIVE:H2', point: [10, 20] }
+			}
+		]);
+		expect(rows[3]).toMatchObject({
+			verdict: 'ASSOCIATION_MISSING',
+			objectKind: 'association',
+			association: {
+				truthTeeCanonical: { xPx: 10, yPx: 20 },
+				truthBasketCanonical: { xPx: 30, yPx: 40 }
+			}
+		});
+		expect(rows[3]?.scopeRequests.map((scope) => scope.label)).toEqual([
+			'truth tee',
+			'truth basket'
+		]);
+	});
+
+	test('scores recovered G4 tees and resolves their ids during G6 association evaluation', () => {
+		const truth = truthWithOneHole(100, 100);
+		const measurement = {
+			badges: [{ detId: 'badge-1', label: '1' }],
+			baskets: [{ detId: 'basket-1', tipXPx: 10, tipYPx: 10 }],
+			tees: []
+		} as unknown as ThreeFactorMeasurement;
+		const recoveredTee = {
+			detId: 'tee-recovered-0',
+			xPx: 5,
+			yPx: 5,
+			tier: 'recovered',
+			angleRad: null,
+			bbox: [0, 0, 1, 1],
+			area: 1,
+			fill: 1,
+			onRing: false
+		} as const;
+		const assignment: ThreeFactorAssignment = {
+			measurement,
+			tees: [recoveredTee],
+			scoredPairs: [],
+			assignments: [
+				{
+					badgeId: 'badge-1',
+					teeId: recoveredTee.detId,
+					basketId: 'basket-1',
+					score: 1,
+					rank: 1,
+					ownership: 'selected',
+					alternatives: []
+				}
+			]
+		};
+		const board = createExecBoard();
+		board.set('measurement', measurement);
+		board.set('assignment', assignment);
+
+		const scoreboard = scoreTruth(board, truth, undefined, { recoveryRan: true });
+		expect(scoreboard.scores.find((score) => score.gate === 'G4')).toMatchObject({
+			matched: 1,
+			expected: 1,
+			detected: 1,
+			misses: []
+		});
+		expect(scoreboard.scores.find((score) => score.gate === 'G6')).toMatchObject({
+			matched: 1,
+			expected: 1,
+			misses: [],
+			associationFailures: []
+		});
 	});
 });

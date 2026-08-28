@@ -82,4 +82,3 @@ describe('ABFeatureSet shared-service enclosure', () => {
 		).toThrow(/unsupported scope 'process'/);
 	});
 });
-
