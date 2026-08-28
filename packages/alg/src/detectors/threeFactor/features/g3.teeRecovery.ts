@@ -19,6 +19,7 @@ import { g5RoutingFeature } from './g5.routing';
 import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
 import { teeRecoveryRender } from './g3.teeReceipts';
 import type { OpaqueDetector } from '../occlusion';
+import { detectScreenChromeRegions, pointInScreenChrome } from '../screenChrome';
 
 export interface RecoveryFit {
 	readonly centerXPx: number;
@@ -53,6 +54,17 @@ export interface TeeRecoveryCandidate {
 	readonly badgeLabel?: string | null;
 	readonly seedSource?: string;
 	readonly bfsComponentsVisited?: number;
+	/** Total unowned, non-occluded bright components considered for this
+	 * candidate's target badge (the whole canonical raster; no spatial
+	 * prefilter). Carried on the candidate so the receipt can honestly state
+	 * the searched scope next to the accept/reject verdict. */
+	readonly consideredComponentsGlobal?: number;
+	/** Set when this exact component set also satisfies the strict predicate
+	 * for another missing badge that wins the axis-error tiebreak. Forces
+	 * rejection here so a genuine ambiguity is never silently resolved by
+	 * loop order -- the winner's badge label is named so the trade-off is
+	 * visible. */
+	readonly ambiguityLostToBadgeLabel?: string | null;
 }
 
 export interface TeeRecoveryValues {
@@ -476,9 +488,14 @@ function exactBasketPixels(
 	return owned;
 }
 
-function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[], tees: readonly TeeEvidence[], basket: BasketEvidence, sprites: readonly SpriteMatch[] | undefined, viewportTopPx: number, bounds?: readonly [number, number, number, number]): Set<string> {
-	const owned = exactBasketPixels(stage, basket, sprites, viewportTopPx);
-	const [x0, y0, x1, y1] = bounds ?? [0, 0, stage.width - 1, stage.height - 1];
+/** Every bright pixel already spoken for: basket sprites, badge interiors,
+ * and known tee pads. Recovery discovery never claims spatial bounds of its
+ * own -- ownership always spans the whole canonical raster, for every
+ * basket, not only the one the caller happens to be near. */
+function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[], tees: readonly TeeEvidence[], baskets: readonly BasketEvidence[], sprites: readonly SpriteMatch[] | undefined, viewportTopPx: number): Set<string> {
+	const owned = new Set<string>();
+	for (const basket of baskets) for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) owned.add(pixel);
+	const [x0, y0, x1, y1] = [0, 0, stage.width - 1, stage.height - 1];
 	for (const badge of badges) {
 		// Own EVERY bright pixel inside the badge bbox, not only the plate
 		// outline's own component: the digit glyphs are separate bright
@@ -525,6 +542,45 @@ function basketOpaqueProvider(
 	};
 }
 
+/**
+ * FORENSIC HISTORY (2026-08-28), kept for the diagnostic measure below, no
+ * longer used to gate discovery:
+ *
+ * Root-cause finding for "NorthPark H16/H14 candidates=0": traced
+ * buildTeeRecoveryCandidates on the real NorthPark canonical raster with the
+ * predecessor-basket-radius box that used to gate discovery.
+ *   - H16 (badge 16): its own tee pad IS the 19x14/area-153 bright component
+ *     at (798,1169), right next to badge 16's own bbox [870,1143,55,42]. That
+ *     component's coordinate math DOES land inside the old ~89px predecessor
+ *     radius box (distance to basket-9's tip (764,1123) = 57px < radius
+ *     88.59px). It was excluded anyway: `ownership`, not the region test,
+ *     killed it. G3 had already registered this exact component as
+ *     `tee-11`'s pad (componentLabel 306), and G5/G6 assignment/scoring had
+ *     mis-paired tee-11 to badge-4 (hole 12) with a near-zero garbage score
+ *     (2.4e-13) instead of hole 16. `exactKnownPixels` correctly owns every
+ *     pixel of any already-known tee pad (by design -- G4 must never
+ *     re-discover a G3-visible tee as a "stray" shard), so the component
+ *     never reaches `visibleComponents` regardless of box size. This is an
+ *     assignment/scoring bug (a tee stolen by a near-zero-score row), not a
+ *     discovery-region bug; no widening of the search region can fix it.
+ *   - H14 (badge 14): no bright component anywhere near badge 14's own bbox
+ *     [674,946,56,42] was ever registered as a tee pad by G3 at all -- this
+ *     is a genuine "tee not yet discovered" case. Its predecessor's basket
+ *     (basket-8, hole 13's basket, tip (919,1095)) sits ~245px from badge
+ *     14's own position, well outside the ~89px predecessor-anchored box, so
+ *     the old box structurally could never search where H14's evidence (if
+ *     any survives on the raster) would be. This is the genuine discovery
+ *     footgun the owner's law names: a search bound baked to "touches basket
+ *     N-1" cannot see a hole whose course geometry does not chain that way.
+ *
+ * Fix direction taken: discovery now has NO spatial prefilter at all (see
+ * buildTeeRecoveryCandidates) -- every unowned, non-occluded bright
+ * component on the whole canonical raster is a candidate for every missing
+ * badge, and the strict acceptance predicate is the only filter. That
+ * structurally covers the H14 shape of bug. It cannot fix the H16 shape of
+ * bug (an already-known tee stolen by assignment/scoring), which is out of
+ * scope for this lane.
+ */
 function targetPredecessors(
 	badges: readonly BadgeEvidence[],
 	baskets: readonly BasketEvidence[],
@@ -555,7 +611,8 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= activeAxisLimitRad;
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
-	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected;
+	const ambiguityLost = candidate.ambiguityLostToBadgeLabel != null;
+	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost;
 	const localized = candidate.localizationFit ?? candidate.fit;
 	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
 	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
@@ -571,13 +628,22 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const holePrefix = candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel)
 		? `badge ${candidate.badgeLabel}: `
 		: '';
+	// Owner policy 2026-08-28: discovery has no spatial prefilter of any kind
+	// (no predecessor-basket radius, no course-derived distribution box). Every
+	// unowned, non-occluded bright component on the whole canonical raster is a
+	// candidate; the strict acceptance predicate below is the only filter. This
+	// line states that scope so a rejection or acceptance is never mistaken for
+	// "outside the searched region" -- there is no region.
+	const searchScope = `considered all ${candidate.consideredComponentsGlobal ?? 0} unowned, non-occluded bright component${candidate.consideredComponentsGlobal === 1 ? '' : 's'} on the whole canonical raster (global bright mask; no spatial prefilter)`;
 	const reason = accepted
-		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; search seed ${candidate.seedSource ?? 'UNKNOWN'}${localizationEvidence}`
-		: `${holePrefix}${insufficientSupport
-			? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
-			: `${axisRejected
-				? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
-				: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
+		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}`
+		: ambiguityLost
+			? `${holePrefix}${searchScope}; this exact component set also satisfies the strict predicate for badge ${candidate.ambiguityLostToBadgeLabel}, whose badge-axis angular error is smaller; ambiguity resolved in that badge's favor, never silently dropped`
+			: `${holePrefix}${searchScope}; ${insufficientSupport
+				? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
+				: `${axisRejected
+					? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
+					: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
@@ -598,10 +664,76 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	};
 }
 
+/** One badge's best-fit candidate plus the runners-up considered for it,
+ * kept so a candidate-less or ambiguous target still prints exactly what was
+ * searched instead of vanishing silently. */
+interface TargetSearchOutcome {
+	readonly badgeId: string;
+	readonly badgeLabel: string | null;
+	readonly consideredComponents: number;
+	readonly winner?: TeeRecoveryCandidate;
+	/** Every other component group considered for this badge, most-supported
+	 * first. Not capped here -- the receipt caller caps what it prints. */
+	readonly runnerUps: readonly TeeRecoveryCandidate[];
+}
+
+/** Records that a component was NOT dropped whole but had K of its pixels
+ * subtracted as a known screen-chrome occluder, so the exclusion is always
+ * receipt-visible ("no silent cuts"). */
+interface ChromeSubtractionNote {
+	readonly componentLabel: number;
+	readonly subtractedPixels: number;
+	readonly remainingPixels: number;
+	readonly regionCount: number;
+}
+
 /**
- * Use B(n-1) only to bound discovery. Once a global source component is
- * encountered, evaluate its complete non-occluded pixel set with geometric
- * tee support; basket contact and raster templates are not acceptance rules.
+ * DESIGN NOTE, designed-but-deferred (owner request 2026-08-28): C1S/C2D
+ * range-circle dash subtraction.
+ *
+ * Every basket renders a solid C1S ring (10m real radius) and a dashed C2D
+ * ring (20m real radius) around its tip. Each dash is a small bright
+ * component lying on a common circle, and their fragments can satisfy the
+ * hollow-tee-support predicate the same way a screen-chrome glyph can. The
+ * z-order is NOT fixed: NorthPark's T16 pad renders ON TOP of its C2D (the
+ * pad is the non-occluded case -- see targetPredecessors' forensic note and
+ * the classification table in the final report), while DashsTrack's T5 pad
+ * renders UNDER its C2D (the genuinely occluded case). Either way, the fix
+ * must be PIXEL subtraction, never whole-component removal: dropping any
+ * component that touches a range-circle dash would eat a merged pad.
+ *
+ * Shape of the fix (not yet implemented -- flagged for a follow-up lane):
+ * 1. Per course, per basket, collect small bright components near the
+ *    basket tip within a generous radius (course-observed span, same
+ *    provenance discipline as this file's fitted geometry -- never an
+ *    absolute pixel literal).
+ * 2. Fit a circle (least-squares) to those components' centroids; a good
+ *    fit (low residual, count consistent with a dashed/solid ring) yields a
+ *    MEASURED radius in pixels for that specific course and basket. Never
+ *    assume a radius -- it is zoom-dependent and must come from the fit.
+ * 3. Subtract only the pixels within one raster-tolerance band of that
+ *    fitted circle from every component, mirroring the screen-chrome
+ *    pattern above (component keeps its remnant).
+ * 4. Bonus measurement (record only, do not gate anything on it): the
+ *    C1S/C2D fitted pixel radii imply a per-course metersPerPixel figure
+ *    from their known real-world radii (10m/20m) -- this is the
+ *    course-derived ruler the owner wants to eventually replace absolute-
+ *    pixel literals elsewhere (see the footgun inventory in the final
+ *    report). Emit it once the circle fit lands; not emitted by this lane.
+ */
+
+/**
+ * Owner policy 2026-08-28: discovery has NO spatial prefilter of any kind --
+ * no predecessor-basket radius, no anchor, no course-derived distribution
+ * box. "A recoverable tee touches basket N-1" was a baked-in worldview that
+ * missed courses whose layout does not chain that way (see the forensic
+ * history on targetPredecessors above). Every unowned, non-occluded bright
+ * component on the whole canonical raster is a candidate for every missing
+ * numbered badge; the strict acceptance predicate (every visible pixel
+ * explained, support >= MIN_SHARD_SUPPORT_PIXELS, axis gate) is the only
+ * filter, and it is unchanged. The predicate's own center-intersection bound
+ * in fitComponent already rejects an oversized/impossible component almost
+ * immediately, so this stays cheap despite visiting every component.
  */
 export function buildTeeRecoveryCandidates(
 	stage: RecoveryStage,
@@ -610,49 +742,60 @@ export function buildTeeRecoveryCandidates(
 	tees: readonly TeeEvidence[],
 	viewportTopPx = 0,
 	search: TeeRecoverySearchContext = {}
-): { readonly candidates: readonly TeeRecoveryCandidate[] } {
+): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[] } {
 	const candidates: TeeRecoveryCandidate[] = [];
+	const searchOutcomes: TargetSearchOutcome[] = [];
+	const chromeSubtractionNotes: ChromeSubtractionNote[] = [];
 	const pads = tees.map((tee) => tee.pad).filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
-	if (pads.length === 0) return { candidates };
+	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
-	const targets = targetPredecessors(badges, baskets, search.assignment);
-	for (const target of targets) {
-		const anchorX = target.basket.tipXPx;
-		const anchorY = target.basket.tipYPx - viewportTopPx;
-		const observedSpan = Math.max(target.basket.bbox[2], target.basket.bbox[3], ...pads.map((pad) => Math.max(pad.majorPx, pad.minorPx)));
-		const radius = Math.hypot(halfWidth, halfHeight) + observedSpan + 4;
-		const minX = Math.max(0, Math.floor(anchorX - radius));
-		const maxX = Math.min(stage.width - 1, Math.ceil(anchorX + radius));
-		const minY = Math.max(0, Math.floor(anchorY - radius));
-		const maxY = Math.min(stage.height - 1, Math.ceil(anchorY + radius));
-		// The basket tip only supplies a bounded search origin.  Once a global
-		// component intersects that origin, retain every pixel carrying its label;
-		// clipping here would turn an unsupported tail into a false tee.
-		const targetCandidates: TeeRecoveryCandidate[] = [];
-		const owned = exactKnownPixels(
-			stage,
-			badges,
-			tees,
-			target.basket,
-			search.sprites,
-			viewportTopPx
+	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
+	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
+
+	// Ownership and occlusion are properties of the raster, not of any one
+	// target, so they are computed exactly once for every missing badge.
+	const owned = exactKnownPixels(stage, badges, tees, baskets, search.sprites, viewportTopPx);
+	// Known-occluder PIXEL subtraction (owner invariant, 2026-08-28): every
+	// tee is either non-occluded (G3 must have found it) or occluded by a
+	// known, named occluder (badge/basket/screen-chrome/[C1S-C2D deferred] --
+	// see the design note above fitComponent) that G4 recovers from the
+	// remaining pixels. Screen chrome (Apple Maps attribution, MAP/SAT pill)
+	// is the one additional known occluder wired in here: its glyph
+	// fragments are UI, never course geometry, but they are NOT whole
+	// components to drop -- only the pixels actually inside the detected
+	// chrome region are subtracted, so a component that is legitimately part
+	// tee-pad and part accidental chrome overlap keeps its remnant alive.
+	const chromeRegions = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
+	const visibleComponents = stage.brightComponents.flatMap((component) => {
+		const afterOwnership = componentPixels(stage, component).filter(([x, y]) =>
+			!owned.has(`${x},${y}`) &&
+			search.occlusion?.kindAt(x, y + viewportTopPx) !== 'OPAQUE'
 		);
-		const visibleComponents = stage.brightComponents.flatMap((component) => {
-			const componentPixelsAll = componentPixels(stage, component);
-			const pixels = componentPixelsAll.filter(([x, y]) =>
-				!owned.has(`${x},${y}`) &&
-				search.occlusion?.kindAt(x, y + viewportTopPx) !== 'OPAQUE'
-			);
-			if (pixels.length === 0) return [];
-			if (!pixels.some(([x, y]) => x >= minX && x <= maxX && y >= minY && y <= maxY)) return [];
-			return [{ component, pixels }];
-		});
+		if (afterOwnership.length === 0) return [];
+		const pixels = chromeRegions.length === 0
+			? afterOwnership
+			: afterOwnership.filter(([x, y]) => !pointInScreenChrome(x, y, chromeRegions));
+		const subtracted = afterOwnership.length - pixels.length;
+		if (subtracted > 0) {
+			chromeSubtractionNotes.push({
+				componentLabel: component.label,
+				subtractedPixels: subtracted,
+				remainingPixels: pixels.length,
+				regionCount: chromeRegions.length
+			});
+		}
+		return pixels.length ? [{ component, pixels }] : [];
+	});
+
+	for (const target of targets) {
+		const targetCandidates: TeeRecoveryCandidate[] = [];
 		const seenGroups = new Set<string>();
 		for (const seed of visibleComponents) {
-			let fit = fitComponent(seed.pixels, seed.component, target.badge, viewportTopPx, halfWidth, halfHeight, thickness);
+			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
 			const compatibleWith = (candidateFit: RecoveryFit) => visibleComponents.filter((entry) =>
 				entry.component.label === seed.component.label ||
 				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
@@ -663,7 +806,7 @@ export function buildTeeRecoveryCandidates(
 			for (let pass = 0; pass < 2; pass++) {
 				const union = compatible.flatMap((entry) => entry.pixels);
 				if (union.length === 0) break;
-				fit = fitComponent(union, seed.component, target.badge, viewportTopPx, halfWidth, halfHeight, thickness);
+				fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
 				const next = compatibleWith(fit);
 				if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
 				compatible = next;
@@ -681,23 +824,24 @@ export function buildTeeRecoveryCandidates(
 				? fullSpanComponentLocalization(localizationStats, halfWidth, halfHeight, thickness)
 				: undefined;
 			const teeToBadgeAngleRad = Math.atan2(
-				target.badge.cyPx - (fit.centerYPx + viewportTopPx),
-				target.badge.cxPx - fit.centerXPx
+				target.cyPx - (fit.centerYPx + viewportTopPx),
+				target.cxPx - fit.centerXPx
 			);
 			targetCandidates.push({
-				id: `tee-shard-${target.badge.detId}-${groupKey}`,
+				id: `tee-shard-${target.detId}-${groupKey}`,
 				fit,
 				...(localizationFit ? { localizationFit } : {}),
 				localizationSource: localizationFit ? 'full-span-component-pca' : 'support-fit',
 				fragmentPixels: pixels,
 				supportingComponentIds: visibleShards.map((_, index) => `${groupKey}:${index + 1}`),
 				viewportTopPx,
-				seedSource: target.basket.detId,
+				seedSource: 'global-bright-mask',
 				bfsComponentsVisited: stage.brightComponents.length,
+				consideredComponentsGlobal: visibleComponents.length,
 				badgeAxisAngleRad: fit.angleRad,
 				teeToBadgeAngleRad,
-				badgeId: target.badge.detId,
-				badgeLabel: target.badge.label
+				badgeId: target.detId,
+				badgeLabel: target.label
 			});
 		}
 		// Evaluate the predicate before choosing. A large basket/badge component
@@ -713,9 +857,46 @@ export function buildTeeRecoveryCandidates(
 			const bFraction = br / b.fragmentPixels.length;
 			return aFraction - bFraction || ar - br || b.fragmentPixels.length - a.fragmentPixels.length || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 		});
-		if (targetCandidates[0]) candidates.push(targetCandidates[0]);
+		const [winner, ...runnerUps] = targetCandidates;
+		if (winner) candidates.push(winner);
+		searchOutcomes.push({
+			badgeId: target.detId,
+			badgeLabel: target.label ?? null,
+			consideredComponents: visibleComponents.length,
+			winner,
+			runnerUps
+		});
 	}
-	return { candidates };
+
+	// Cross-target ambiguity: with no spatial prefilter, the exact same bright
+	// component can independently satisfy the strict predicate for more than
+	// one missing badge (each target refits its own badge-pointing pose). This
+	// is never resolved by loop order/silent drop -- the badge with the
+	// smaller badge-axis angular error keeps the accepted candidate; every
+	// other claimant is forced to a named rejection in graphCandidateResult.
+	const accepted = candidates.filter((candidate) => {
+		const support = candidate.fragmentPixels.length;
+		return support >= MIN_SHARD_SUPPORT_PIXELS &&
+			unexplainedPixels(candidate).length === 0 &&
+			(badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad;
+	});
+	const byComponentSet = new Map<string, TeeRecoveryCandidate[]>();
+	for (const candidate of accepted) {
+		const key = candidate.supportingComponentIds.map((id) => id.split(':')[0]).sort().join('+');
+		const bucket = byComponentSet.get(key);
+		if (bucket) bucket.push(candidate); else byComponentSet.set(key, [candidate]);
+	}
+	for (const bucket of byComponentSet.values()) {
+		if (bucket.length < 2) continue;
+		const ranked = [...bucket].sort((a, b) => (badgeAxisError(a) ?? Infinity) - (badgeAxisError(b) ?? Infinity));
+		const winner = ranked[0]!;
+		for (const loser of ranked.slice(1)) {
+			const index = candidates.indexOf(loser);
+			if (index >= 0) candidates[index] = { ...loser, ambiguityLostToBadgeLabel: winner.badgeLabel ?? winner.badgeId ?? null };
+		}
+	}
+
+	return { candidates, searchOutcomes, chromeSubtractionNotes };
 }
 
 export const teeRecoveryUnit: EngineUnit = {
@@ -749,10 +930,57 @@ export const teeRecoveryUnit: EngineUnit = {
 		ctx.occlusion.registerOpaque(basketOpaqueProvider(stage, baskets, sprites, viewportTopPx));
 		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion });
 		shardDiscoveryStop();
-		const missingNumbered = badges.filter((badge) => /^\d+$/.test(badge.label ?? '') && !assignedBadgeIds.has(badge.detId));
-		if (missingNumbered.length > 0 && built.candidates.length === 0) {
-			const hasPredecessor = targetPredecessors(badges, baskets, assignment).length > 0;
-			if (!hasPredecessor) ctx.measure('teeRecovery', 'noPredecessorAssignment', missingNumbered.length);
+		// Known-occluder pixel subtraction (screen chrome) is never a silent cut:
+		// name the component, the exact pixel count removed, and what remains.
+		for (const note of built.chromeSubtractionNotes) {
+			const component = stage.brightComponents.find((entry) => entry.label === note.componentLabel);
+			ctx.overlay('teeRecovery', {
+				type: 'point',
+				xPx: component?.cx ?? 0,
+				yPx: component?.cy ?? 0,
+				verdict: 'info',
+				ref: `tee-recovery-chrome-subtraction-${note.componentLabel}`,
+				reason: `component ${note.componentLabel}: ${note.subtractedPixels} pixel${note.subtractedPixels === 1 ? '' : 's'} subtracted as screen chrome (${note.regionCount} detected chrome region${note.regionCount === 1 ? '' : 's'}); ${note.remainingPixels} pixel${note.remainingPixels === 1 ? '' : 's'} remain${note.remainingPixels === 1 ? 's' : ''} as live candidate evidence`
+			});
+		}
+		ctx.measure('teeRecovery', 'chromeSubtractedComponents', built.chromeSubtractionNotes.length);
+		// No spatial prefilter means "candidates=0 for a missing badge" now only
+		// happens when the whole canonical raster has zero unowned, non-occluded
+		// bright components left to consider -- print that fact explicitly so
+		// the target never just vanishes from the trace.
+		const RUNNER_UP_RECEIPT_CAP = 10;
+		for (const outcome of built.searchOutcomes) {
+			if (outcome.winner) continue;
+			const holePrefix = outcome.badgeLabel ? `badge ${outcome.badgeLabel}: ` : '';
+			const badge = badges.find((entry) => entry.detId === outcome.badgeId);
+			ctx.overlay('teeRecovery', {
+				type: 'point',
+				xPx: badge?.cxPx ?? 0,
+				yPx: (badge?.cyPx ?? 0) - viewportTopPx,
+				verdict: 'rejected',
+				visualRole: 'tee-rejection',
+				ref: `tee-recovery-no-candidate-${outcome.badgeId}`,
+				reason: `${holePrefix}considered all ${outcome.consideredComponents} unowned, non-occluded bright component${outcome.consideredComponents === 1 ? '' : 's'} on the whole canonical raster (global bright mask; no spatial prefilter); none survived even a degenerate single-component fit`
+			});
+		}
+		for (const outcome of built.searchOutcomes) {
+			if (outcome.runnerUps.length === 0) continue;
+			const byNames = [...outcome.runnerUps].sort((a, b) => b.fragmentPixels.length - a.fragmentPixels.length);
+			for (const runnerUp of byNames.slice(0, RUNNER_UP_RECEIPT_CAP)) {
+				const runnerUpResult = graphCandidateResult(runnerUp);
+				ctx.overlay('teeRecovery', {
+					type: 'point',
+					xPx: runnerUp.fit.centerXPx,
+					yPx: runnerUp.fit.centerYPx + (runnerUp.coordinateFrame === 'original' ? 0 : runnerUp.viewportTopPx ?? 0),
+					verdict: 'rejected',
+					visualRole: 'tee-rejection',
+					ref: `${runnerUpResult.id}:considered`,
+					reason: `also considered (not chosen): ${runnerUpResult.reason}`
+				});
+			}
+			if (byNames.length > RUNNER_UP_RECEIPT_CAP) {
+				ctx.measure('teeRecovery', 'runnerUpsBeyondReceiptCap', byNames.length - RUNNER_UP_RECEIPT_CAP);
+			}
 		}
 		if (!tees.some((tee) => tee.pad)) {
 			ctx.measure('teeRecovery', 'noCourseLocalPadGeometry', 1);
@@ -773,15 +1001,22 @@ export const teeRecoveryUnit: EngineUnit = {
 		const results = promoted.map((entry) => entry.result);
 		const existing = board.get<readonly RecoveredTeeInput[]>('recoveredTees');
 		const additions: RecoveredTeeInput[] = [];
+		// Footgun fix (2026-08-28 inventory): this dedupe distance already has a
+		// config-provenanced knob (g4.search.ts's `recoveredTeeDedupeDistance`,
+		// default 14) that was resolved further below for reassignment but never
+		// actually consumed here -- the literal `14` was live instead. Resolve
+		// once, up front, and use it for every check below.
+		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
+		const dedupeDistancePx = searchKnobs.recoveredTeeDedupeDistance;
 		for (const { candidate, result } of promoted) {
 			const centerX = result.corners.reduce((sum, point) => sum + point[0], 0) / 4;
 			const centerY = result.corners.reduce((sum, point) => sum + point[1], 0) / 4;
-			const duplicate = tees.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < 14) ||
-				existing.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < 14) ||
-				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < 14);
+			const duplicate = tees.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
+				existing.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
+				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx);
 			if (duplicate && result.verdict === 'accepted') {
 				ctx.measure('teeRecovery', 'duplicateSuppressed', 1);
-				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: 'recovery center within 14px of an existing tee; duplicate suppressed', values: numericTraceValues(result.values) });
+				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`, values: numericTraceValues(result.values) });
 				continue;
 			}
 			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
@@ -797,10 +1032,9 @@ export const teeRecoveryUnit: EngineUnit = {
 		if (additions.length > 0 && measurement.rawPairs.length > 0) {
 			const zfit = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
-			const search = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
-			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, search, ribbon, routing));
+			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing));
 		} else {
 			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
 			board.set('assignment', assignment);

@@ -386,3 +386,186 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(receipt?.reason).toMatch(/badge ray|3.?°|support fit/i);
 	});
 });
+
+describe('teeRecovery discovery has no spatial prefilter (owner design, 2026-08-28)', () => {
+	test('considers a component far from its badge with no predecessor basket at all', () => {
+		// No basket is on this canvas and the missing badge has no predecessor
+		// -- the old design could never even form a search target here (it
+		// required a predecessor's basket tip to anchor a radius box). The new
+		// design has no anchor and no radius: every unowned bright component on
+		// the whole canonical raster is a candidate for every missing badge.
+		const width = 300;
+		const height = 200;
+		const bright = new Uint8Array(width * height);
+		const mark = (x: number, y: number) => { bright[y * width + x] = 1; };
+		const fill = (x0: number, y0: number, w: number, h: number) => {
+			for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) mark(x, y);
+		};
+		fill(10, 10, 3, 3); // badge #5 plate stand-in
+		fill(10, 190 - 8, 12, 8); // an already-known tee pad, far away, seeds course-local pad geometry
+		fill(250, 150, 12, 8); // badge #5's own true (undiscovered) pad, 260+px from the badge, no basket anywhere
+
+		const mask = { width, height, data: bright };
+		const labeled = extractComponents(mask);
+		const componentAt = (x: number, y: number): ComponentStats => {
+			const label = labeled.labels[y * width + x];
+			const component = labeled.components.find((entry) => entry.label === label);
+			if (!component) throw new Error(`missing synthetic component at ${x},${y}`);
+			return component;
+		};
+
+		const badgeComponent = componentAt(11, 11);
+		const badge: BadgeEvidence = {
+			detId: 'badge-5',
+			component: badgeComponent,
+			cxPx: badgeComponent.cx,
+			cyPx: badgeComponent.cy,
+			bbox: [badgeComponent.bboxX, badgeComponent.bboxY, badgeComponent.bboxW, badgeComponent.bboxH],
+			source: 'bright-family',
+			digits: [],
+			label: '5',
+			labelCandidates: [{ label: 5, confidence: 1 }],
+			confidence: 1
+		};
+		const knownPadComponent = componentAt(15, 185);
+		const knownTee: TeeEvidence = {
+			detId: 'tee-known-far',
+			xPx: knownPadComponent.cx,
+			yPx: knownPadComponent.cy,
+			tier: 'component',
+			angleRad: 0,
+			bbox: [knownPadComponent.bboxX, knownPadComponent.bboxY, knownPadComponent.bboxW, knownPadComponent.bboxH],
+			pad: {
+				source: 'bright-mask-component',
+				componentLabel: knownPadComponent.label,
+				bbox: [knownPadComponent.bboxX, knownPadComponent.bboxY, knownPadComponent.bboxW, knownPadComponent.bboxH],
+				componentCentroidXPx: knownPadComponent.cx,
+				componentCentroidYPx: knownPadComponent.cy,
+				centerXPx: knownPadComponent.cx,
+				centerYPx: knownPadComponent.cy,
+				angleRad: 0,
+				majorPx: 12,
+				minorPx: 8,
+				area: knownPadComponent.area,
+				fill: knownPadComponent.fill,
+				axisMajorMin: -6,
+				axisMajorMax: 6,
+				axisMinorMin: -4,
+				axisMinorMax: 4,
+				orientedCorners: [[10, 182], [22, 182], [22, 190], [10, 190]]
+			},
+			area: knownPadComponent.area,
+			fill: knownPadComponent.fill,
+			onRing: true
+		};
+
+		const stage = { brightLabels: labeled.labels, brightComponents: labeled.components, brightMask: mask, width, height };
+		const { candidates } = buildTeeRecoveryCandidates(
+			stage,
+			[badge],
+			[],
+			[knownTee],
+			0,
+			{ assignment: { assignments: [] }, occlusion: new OcclusionDetector() }
+		);
+
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0]?.fragmentPixels).toHaveLength(12 * 8);
+		expect(candidates[0]?.badgeLabel).toBe('5');
+	});
+
+	test('subtracts screen-chrome pixels from candidates without dropping a merged remnant, and names the cut', () => {
+		// A bottom-right UI cluster (Apple Maps attribution / MAP-SAT pill
+		// shape): several small components, wide and short, edge- and
+		// bottom-anchored. detectScreenChromeRegions must classify it as chrome
+		// so its pixels never masquerade as tee-shard evidence -- but the
+		// exclusion must be PIXEL subtraction, never a whole-component drop.
+		const width = 300;
+		const height = 150;
+		const bright = new Uint8Array(width * height);
+		const mark = (x: number, y: number) => { bright[y * width + x] = 1; };
+		const fill = (x0: number, y0: number, w: number, h: number) => {
+			for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) mark(x, y);
+		};
+		fill(10, 10, 3, 3); // badge stand-in (unused target here; chrome subtraction is target-independent)
+		fill(10, 140 - 8, 12, 8); // an already-known tee pad seeding course-local pad geometry
+		// Eight small squares along one screen-space baseline near the bottom
+		// right corner -- wide (>140px expanded), short, edge+bottom anchored.
+		for (let i = 0; i < 8; i++) fill(100 + i * 25, 130, 10, 14);
+
+		const mask = { width, height, data: bright };
+		const labeled = extractComponents(mask);
+		const componentAt = (x: number, y: number): ComponentStats => {
+			const label = labeled.labels[y * width + x];
+			const component = labeled.components.find((entry) => entry.label === label);
+			if (!component) throw new Error(`missing synthetic component at ${x},${y}`);
+			return component;
+		};
+		const badgeComponent = componentAt(11, 11);
+		const badge: BadgeEvidence = {
+			detId: 'badge-9',
+			component: badgeComponent,
+			cxPx: badgeComponent.cx,
+			cyPx: badgeComponent.cy,
+			bbox: [badgeComponent.bboxX, badgeComponent.bboxY, badgeComponent.bboxW, badgeComponent.bboxH],
+			source: 'bright-family',
+			digits: [],
+			label: '9',
+			labelCandidates: [{ label: 9, confidence: 1 }],
+			confidence: 1
+		};
+		const knownPadComponent = componentAt(15, 135);
+		const knownTee: TeeEvidence = {
+			detId: 'tee-known-far-2',
+			xPx: knownPadComponent.cx,
+			yPx: knownPadComponent.cy,
+			tier: 'component',
+			angleRad: 0,
+			bbox: [knownPadComponent.bboxX, knownPadComponent.bboxY, knownPadComponent.bboxW, knownPadComponent.bboxH],
+			pad: {
+				source: 'bright-mask-component',
+				componentLabel: knownPadComponent.label,
+				bbox: [knownPadComponent.bboxX, knownPadComponent.bboxY, knownPadComponent.bboxW, knownPadComponent.bboxH],
+				componentCentroidXPx: knownPadComponent.cx,
+				componentCentroidYPx: knownPadComponent.cy,
+				centerXPx: knownPadComponent.cx,
+				centerYPx: knownPadComponent.cy,
+				angleRad: 0,
+				majorPx: 12,
+				minorPx: 8,
+				area: knownPadComponent.area,
+				fill: knownPadComponent.fill,
+				axisMajorMin: -6,
+				axisMajorMax: 6,
+				axisMinorMin: -4,
+				axisMinorMax: 4,
+				orientedCorners: [[10, 132], [22, 132], [22, 140], [10, 140]]
+			},
+			area: knownPadComponent.area,
+			fill: knownPadComponent.fill,
+			onRing: true
+		};
+
+		const stage = { brightLabels: labeled.labels, brightComponents: labeled.components, brightMask: mask, width, height };
+		const { candidates, chromeSubtractionNotes } = buildTeeRecoveryCandidates(
+			stage,
+			[badge],
+			[],
+			[knownTee],
+			0,
+			{ assignment: { assignments: [] }, occlusion: new OcclusionDetector() }
+		);
+
+		// Every chrome square lost every one of its pixels (a whole-square cut
+		// here is correct because nothing else shares its component), and the
+		// cut is receipt-visible per component, never silent.
+		expect(chromeSubtractionNotes.length).toBe(8);
+		for (const note of chromeSubtractionNotes) {
+			expect(note.subtractedPixels).toBe(10 * 14);
+			expect(note.remainingPixels).toBe(0);
+		}
+		// No chrome square's pixels survive to masquerade as tee-shard evidence
+		// for the lone badge on this canvas.
+		expect(candidates).toHaveLength(0);
+	});
+});
