@@ -88,3 +88,14 @@ for edit-build-test loops.
 - Internal ordinals (`badge-7`) are NOT hole numbers. Map through
   `BadgeEvidence.label` (G1 digit read + confidence); print UNREAD when the
   read is garbage; never guess.
+
+## The ratchet
+
+A confirmed-real case breaking a course-derived threshold is a footgun
+firing, full stop, after verifying the MEASUREMENT itself — a bad
+rectangle is a measurement defect, not a threshold firing — the gate was
+wrong, not the hole. Registry: docs/RATCHETS.md. Teeth:
+tests/unit/thresholdRatchets.test.ts. Never logic'd upon — the mandatory
+response is mechanical (verify the measurement, record the extreme, then
+widen the threshold's derivation to admit it), never a per-case exception
+argued in the moment.
