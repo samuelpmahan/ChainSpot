@@ -7,7 +7,7 @@ import { statsForPixels, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
 import basketSpriteData from '../assets/basket-sprite.json';
-import { DEFAULT_SEARCH_KNOBS, assignThreeFactor, deriveGeometricClaims, type PlausibilityPrune, type SearchKnobs } from '../assignment';
+import { assignThreeFactor, type SearchKnobs } from '../assignment';
 import type { RibbonKnobs } from '../ribbon';
 import type { RoutingKnobs } from '../routing';
 import type { ScoringKnobs, ZfitKnobs } from '../scoring';
@@ -19,7 +19,7 @@ import { g5RoutingFeature } from './g5.routing';
 import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
 import { teeRecoveryRender } from './g3.teeReceipts';
 import type { OpaqueDetector } from '../occlusion';
-import { detectScreenChromeRegions, pointInScreenChrome, type ScreenChromeRegion } from '../screenChrome';
+import { detectScreenChromeRegions, pointInScreenChrome } from '../screenChrome';
 
 export interface RecoveryFit {
 	readonly centerXPx: number;
@@ -65,9 +65,6 @@ export interface TeeRecoveryCandidate {
 	 * loop order -- the winner's badge label is named so the trade-off is
 	 * visible. */
 	readonly ambiguityLostToBadgeLabel?: string | null;
-	/** Contrapositive audit of the fitted support band: white / occluded /
-	 * bare pixel counts over the full hypothesized footprint. */
-	readonly footprintAudit?: SupportFootprintAudit;
 }
 
 export interface TeeRecoveryValues {
@@ -146,62 +143,6 @@ function connectedPixelShards(points: readonly (readonly [number, number])[]): r
 	return shards;
 }
 
-export interface GeometricPadClaim {
-	readonly badgeId: string;
-	readonly badgeLabel: string | null;
-	readonly teeId: string;
-	readonly distancePx: number;
-	readonly withinBound: boolean;
-}
-
-export interface HuntTargetDerivation {
-	readonly targets: readonly BadgeEvidence[];
-	readonly claims: readonly GeometricPadClaim[];
-	readonly medianClaimDistancePx: number | null;
-	readonly claimBoundPx: number | null;
-}
-
-/** Owner directive 2026-08-28 ("the step-4 input must never come from step
- * 6"): the hunted-badge set is derived from DETECTION GEOMETRY alone --
- * greedy nearest badge<->visible-tee claiming -- never from the G6
- * assignment solver, whose scarcity mis-pairings previously masked missing
- * tees from this very hunt (docs/CLAIMS-LEDGER.md row 27: Heritage badge-5
- * "held" H4's pad from 317px away at rank 1, so the hunt never visited it
- * while its 50px pad remnant sat unexamined beside the basket sprite).
- *
- * A badge is satisfied only when a visible tee claims it at a distance
- * within the course-derived bound: median claimed distance on THIS run x
- * padClaimOutlierFactor. No absolute pixel literal anywhere (150ft holes
- * and 1700ft holes exist); with zero claims the bound is null and every
- * numbered badge is hunted. Over-hunting is safe by construction -- the
- * strict predicate plus recoveredTeeDedupeDistance suppress a re-found
- * visible pad. Under-hunting is the failure mode this function exists to
- * make impossible: every unowned, non-chrome component already reaches the
- * candidate pool (no spatial prefilter), so a badge that gets hunted
- * always sees the full evidence. */
-export function deriveHuntTargets(
-	badges: readonly BadgeEvidence[],
-	tees: readonly TeeEvidence[],
-	padClaimOutlierFactor: number
-): HuntTargetDerivation {
-	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
-	// One geometric ground truth: the same greedy claim set assignment uses
-	// for its pair-plausibility prune (deriveGeometricClaims, assignment.ts),
-	// so "who is missing" and "what is pairable" can never disagree.
-	const claimSet = deriveGeometricClaims(numbered, tees, padClaimOutlierFactor);
-	const claims = claimSet.claims.map((claim) => ({
-		...claim,
-		withinBound: claimSet.claimBoundPx !== null && claim.distancePx <= claimSet.claimBoundPx
-	}));
-	const satisfied = new Set(claims.filter((claim) => claim.withinBound).map((claim) => claim.badgeId));
-	return {
-		targets: numbered.filter((badge) => !satisfied.has(badge.detId)),
-		claims,
-		medianClaimDistancePx: claimSet.medianClaimDistancePx,
-		claimBoundPx: claimSet.claimBoundPx
-	};
-}
-
 export const teeRecoveryFeature = {
 	id: 'teeRecovery',
 	gate: 'G4',
@@ -210,14 +151,6 @@ export const teeRecoveryFeature = {
 	note: 'Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.',
 	render: teeRecoveryRender,
 	knobs: {
-		maxBareSupportFraction: {
-			default: 0.7,
-			note: 'Contrapositive gate (owner invariant 2026-08-28: "if a pad is non-occluded it should come up normally; if occluded, recoverable" -- there is no third state where the outline is simply absent). Recovery enumerates the FULL hypothesized support band and classifies every pixel: white evidence, occluded by a NAMED known occluder (owned badge/basket/chrome pixels, OPAQUE sprite occlusion, screen chrome, off-raster), or BARE -- open course ground where the outline should be visible and is not. Bare pixels are contradiction, not absence: without this gate one 50px fragment at (277,910) on HeritagePark satisfied the strict fit for badges 5, 6 AND 10 simultaneously ("the tip of a 1 inside a badge could totally be a tee pad"). A candidate is rejected when bare/total exceeds this fraction. Default 0.7 is EMPIRICAL AND INTERIM, from the 2026-08-28 Dev6 audit distribution: known-real recovered pads measured 0.42-0.63 bare while every observed garbage fragment measured 0.860-0.966, so 0.7 keeps every real pad with 0.07 headroom and rejects all observed garbage with 0.16 margin -- both margins visible in every printed audit line, so erosion of the separation is receipt-detectable, never silent. WHY real pads carry 0.42-0.63 bare is UNVERIFIED (retraction 2026-08-28: an earlier canopy explanation was invented without looking; the DashsTrack H3 render shows open fairway with the renderer\'s translucent corridor ribbons crossing the pad area -- candidate causes are the ribbon washing pad pixels out of the bright mask, an unnamed occluder class, or footprint mislocalization; settling it is the docketed next act, by pixels, not narrative). When a canopy/shadow classifier lands as a named occluder, this default should tighten toward the raster-noise floor (~0.15). Scale-free by construction (a fraction, never a pixel literal). Receipt prints the full audit (white/occluded/bare counts and the fraction) on every accept AND every contrapositive reject.',
-			validate: (value: unknown) =>
-				typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
-					? null
-					: 'maxBareSupportFraction must be a finite fraction between 0 and 1'
-		},
 		axisToleranceDeg: {
 			default: 3,
 			note: 'Soft ceiling per owner policy 2026-08-28: the strict 3° badge-axis gate (BADGE_AXIS_TARGET_DEG) stays the debugging TARGET, and this knob is the OPERATIVE limit a config can widen past it. NULL RESULT on the current corpus, recorded honestly rather than chased: after dc96000 ("Recovery owns every bright pixel inside badge bboxes") stopped badge-digit-glyph chrome from masquerading as tee-shard evidence, a sweep ladder (3/5/10/20/30/45/88°) across NorthPark/HeritagePark/AlexClark/DashsTrack found every hole the mechanism can currently capture is ALREADY captured at the strict 3° target -- HeritagePark recovers H10, AlexClark recovers H10+H11, DashsTrack holds 18/18 (H3/H5/H12 via recovery) with IDENTICAL fitted centers and axis errors (well under 2°) at every rung from 3° to 88°. NorthPark recovers zero tees at any tolerance: its real pads sit outside the current discovery search bounds, a separate bug this knob cannot fix. Because widening buys nothing real here, the default stays at the strict target (3°) rather than moving; the knob is landed and validated (0.5-90°) so a future corpus that genuinely needs slack is one config edit away, with the achieved axis-error distribution always visible via the teeRecovery/axisErrorDeg receipt measurement. See docs/INTAKE-ENGINE-HANDOFF.md and artifacts/orchestration/axis-ceiling-progress.md for the full ladder table and per-hypothesis center/badge-bbox-containment check.',
@@ -287,31 +220,6 @@ export function setActiveAxisToleranceDeg(deg: number): void {
 }
 const MIN_SHARD_SUPPORT_PIXELS = 8;
 
-/** Contrapositive gate (owner invariant, 2026-08-28): a hypothesized pad's
- * support band must be EXPLAINED everywhere -- each footprint pixel is either
- * white (evidence) or under a named known occluder. A bare pixel (neither) is
- * CONTRADICTION: "the tip of a 1 inside a badge" fits any pose, but the rest
- * of the outline it implies is visibly absent on open grass. Default lives on
- * the maxBareSupportFraction knob; the op mirrors it here like the axis gate. */
-const BARE_SUPPORT_FRACTION_DEFAULT = 0.7;
-let activeBareSupportFraction = BARE_SUPPORT_FRACTION_DEFAULT;
-export function setActiveBareSupportFraction(fraction: number): void {
-	activeBareSupportFraction = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : BARE_SUPPORT_FRACTION_DEFAULT;
-}
-
-export interface SupportFootprintAudit {
-	readonly total: number;
-	readonly white: number;
-	readonly occluded: number;
-	readonly bare: number;
-}
-
-function bareFraction(candidate: TeeRecoveryCandidate): number {
-	const audit = candidate.footprintAudit;
-	if (!audit || audit.total === 0) return 0;
-	return audit.bare / audit.total;
-}
-
 /** The tee is a hollow outline, so membership means being in the outer
  * rectangle and in its border/support band.  The band width is estimated from
  * an intact pad's measured area using A = 2t(W+H)-4t². */
@@ -332,40 +240,6 @@ function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): b
 
 function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
 	return candidate.fragmentPixels.filter((point) => !pointExplainsTee(point, candidate.fit));
-}
-
-/** Enumerate the fitted support band and classify every pixel: white
- * (evidence), occluded (named known occluder: owned chrome/badge/basket
- * pixels, OPAQUE sprite occlusion, screen chrome), or BARE -- visible course
- * ground where the hypothesized outline should be but is not. Off-raster
- * pixels count as occluded (no evidence is expectable there). */
-function auditSupportFootprint(
-	stage: RecoveryStage,
-	fit: RecoveryFit,
-	owned: ReadonlySet<string>,
-	chromeRegions: readonly ScreenChromeRegion[],
-	occlusion: OpaqueDetector | undefined,
-	viewportTopPx: number
-): SupportFootprintAudit {
-	const radius = Math.ceil(Math.hypot(fit.halfWidthPx, fit.halfHeightPx) + RASTER_TOLERANCE_PX + 1);
-	const x0 = Math.floor(fit.centerXPx) - radius;
-	const x1 = Math.ceil(fit.centerXPx) + radius;
-	const y0 = Math.floor(fit.centerYPx) - radius;
-	const y1 = Math.ceil(fit.centerYPx) + radius;
-	let total = 0, white = 0, occluded = 0, bare = 0;
-	for (let y = y0; y <= y1; y++) {
-		for (let x = x0; x <= x1; x++) {
-			if (!pointExplainsTee([x, y], fit)) continue;
-			total++;
-			if (x < 0 || y < 0 || x >= stage.width || y >= stage.height) { occluded++; continue; }
-			if (stage.brightMask.data[y * stage.width + x]) { white++; continue; }
-			if (owned.has(`${x},${y}`) ||
-				occlusion?.kindAt(x, y + viewportTopPx) === 'OPAQUE' ||
-				(chromeRegions.length > 0 && pointInScreenChrome(x, y, chromeRegions))) { occluded++; continue; }
-			bare++;
-		}
-	}
-	return { total, white, occluded, bare };
 }
 
 function supportResidual(point: readonly [number, number], fit: RecoveryFit): number {
@@ -588,12 +462,6 @@ export interface TeeRecoverySearchContext {
 	/** The run-scoped service is queried only for exact OPAQUE sprite pixels.
 	 * ALPHA and UNKNOWN never remove white evidence. */
 	readonly occlusion?: OpaqueDetector;
-	/** Explicit hunted-badge set. The engine op ALWAYS passes this, derived
-	 * geometrically by deriveHuntTargets -- never from the G6 solver. The
-	 * assignment-derived fallback below exists only for direct callers that
-	 * predate the derivation (owner directive 2026-08-28, ledger row 27: a
-	 * solver mis-pairing must never decide which badges get hunted). */
-	readonly targets?: readonly BadgeEvidence[];
 }
 
 function numberLabel(badge: BadgeEvidence): number | undefined {
@@ -753,9 +621,7 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const ambiguityLost = candidate.ambiguityLostToBadgeLabel != null;
-	const bare = bareFraction(candidate);
-	const bareRejected = bare > activeBareSupportFraction;
-	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost && !bareRejected;
+	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost;
 	const localized = candidate.localizationFit ?? candidate.fit;
 	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
 	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
@@ -778,17 +644,11 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	// line states that scope so a rejection or acceptance is never mistaken for
 	// "outside the searched region" -- there is no region.
 	const searchScope = `considered all ${candidate.consideredComponentsGlobal ?? 0} unowned, non-occluded bright component${candidate.consideredComponentsGlobal === 1 ? '' : 's'} on the whole canonical raster (global bright mask; no spatial prefilter)`;
-	const audit = candidate.footprintAudit;
-	const auditSummary = audit
-		? `; support footprint ${audit.total}px: ${audit.white} white + ${audit.occluded} occluded by named occluders + ${audit.bare} bare (bare fraction ${audit.total ? (audit.bare / audit.total).toFixed(3) : '0'} vs maxBareSupportFraction ${activeBareSupportFraction})`
-		: '';
 	const reason = accepted
-		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${auditSummary}${localizationEvidence}`
+		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}`
 		: ambiguityLost
 			? `${holePrefix}${searchScope}; this exact component set also satisfies the strict predicate for badge ${candidate.ambiguityLostToBadgeLabel}, whose badge-axis angular error is smaller; ambiguity resolved in that badge's favor, never silently dropped`
-			: bareRejected && !insufficientSupport && unexplained.length === 0 && !axisRejected
-				? `${holePrefix}${searchScope}; CONTRAPOSITIVE: the hypothesized pad outline is visibly absent where nothing occludes it${auditSummary} -- a fragment counts only when the rest of its outline is white or under a named occluder (owner invariant)`
-				: `${holePrefix}${searchScope}; ${insufficientSupport
+			: `${holePrefix}${searchScope}; ${insufficientSupport
 				? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 				: `${axisRejected
 					? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
@@ -902,7 +762,7 @@ export function buildTeeRecoveryCandidates(
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
 	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = search.targets ?? badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -979,7 +839,6 @@ export function buildTeeRecoveryCandidates(
 			targetCandidates.push({
 				id: `tee-shard-${target.detId}-${groupKey}`,
 				fit,
-				footprintAudit: auditSupportFootprint(stage, fit, owned, chromeRegions, search.occlusion, viewportTopPx),
 				...(localizationFit ? { localizationFit } : {}),
 				localizationSource: localizationFit ? 'full-span-component-pca' : 'support-fit',
 				fragmentPixels: pixels,
@@ -999,8 +858,8 @@ export function buildTeeRecoveryCandidates(
 		targetCandidates.sort((a, b) => {
 			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
 			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
-			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < activeAxisLimitRad && bareFraction(a) <= activeBareSupportFraction;
-			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < activeAxisLimitRad && bareFraction(b) <= activeBareSupportFraction;
+			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < activeAxisLimitRad;
+			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < activeAxisLimitRad;
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
 			if (aAccepted) return b.fragmentPixels.length - a.fragmentPixels.length || aa - ba || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 			const aFraction = ar / a.fragmentPixels.length;
@@ -1028,8 +887,7 @@ export function buildTeeRecoveryCandidates(
 		const support = candidate.fragmentPixels.length;
 		return support >= MIN_SHARD_SUPPORT_PIXELS &&
 			unexplainedPixels(candidate).length === 0 &&
-			(badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad &&
-			bareFraction(candidate) <= activeBareSupportFraction;
+			(badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad;
 	});
 	const byComponentSet = new Map<string, TeeRecoveryCandidate[]>();
 	for (const candidate of accepted) {
@@ -1068,10 +926,6 @@ export const teeRecoveryUnit: EngineUnit = {
 		if (typeof configuredAxisToleranceDeg === 'number' && Number.isFinite(configuredAxisToleranceDeg)) {
 			setActiveAxisToleranceDeg(configuredAxisToleranceDeg);
 		}
-		const configuredBareFraction = state.knobs.maxBareSupportFraction;
-		if (typeof configuredBareFraction === 'number' && Number.isFinite(configuredBareFraction)) {
-			setActiveBareSupportFraction(configuredBareFraction);
-		}
 		if (!state.enabled) { stop(); return; }
 		const stage = board.get<RecoveryStage>('stage');
 		const viewportTopPx = board.get<RecoveryViewport>('viewport').topPx;
@@ -1080,54 +934,9 @@ export const teeRecoveryUnit: EngineUnit = {
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
 		const measurement = board.get<import('../types').ThreeFactorMeasurement>('measurement');
-		// Owner directive 2026-08-28: the hunted set comes from DETECTION
-		// GEOMETRY, never from the G6 solver (whose Heritage H5 mis-pairing
-		// masked a missing tee from this hunt -- ledger row 27). The solver's
-		// output is consumed below ONLY as the baseline to re-assign over.
-		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
-		// Same incomplete-knobs tolerance as axisToleranceDeg above: a
-		// config-unaware legacy caller falls back to the registry default.
-		const padClaimOutlierFactor = typeof searchKnobs?.padClaimOutlierFactor === 'number' && Number.isFinite(searchKnobs.padClaimOutlierFactor)
-			? searchKnobs.padClaimOutlierFactor
-			: DEFAULT_SEARCH_KNOBS.padClaimOutlierFactor;
-		const derivation = deriveHuntTargets(badges, tees, padClaimOutlierFactor);
-		// The solver may WIDEN the hunt, never shrink it: a badge can hold a
-		// geometric claim yet have zero surviving pairings after the
-		// plausibility prune (claimed-but-unroutable). Union in every numbered
-		// badge without a pre-recovery assignment row so neither view can hide
-		// a hole from the hunt.
-		const preAssignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
-		const geometricTargetIds = new Set(derivation.targets.map((entry) => entry.detId));
-		const solverAddedTargets = badges.filter((badge) =>
-			/^\d+$/.test(badge.label ?? '') && !preAssignedBadgeIds.has(badge.detId) && !geometricTargetIds.has(badge.detId)
-		);
-		const huntTargets = [...derivation.targets, ...solverAddedTargets];
-		for (const claim of derivation.claims) ctx.measure('teeRecovery', 'padClaimDistancePx', claim.distancePx);
-		if (derivation.medianClaimDistancePx !== null) ctx.measure('teeRecovery', 'padClaimMedianPx', derivation.medianClaimDistancePx);
-		if (derivation.claimBoundPx !== null) ctx.measure('teeRecovery', 'padClaimBoundPx', derivation.claimBoundPx);
-		ctx.measure('teeRecovery', 'huntedBadges', huntTargets.length);
-		ctx.measure('teeRecovery', 'huntedBadgesSolverAdded', solverAddedTargets.length);
-		const boundProvenance = derivation.claimBoundPx !== null && derivation.medianClaimDistancePx !== null
-			? `course-derived bound ${derivation.claimBoundPx.toFixed(1)}px = median claimed distance ${derivation.medianClaimDistancePx.toFixed(1)}px x ${padClaimOutlierFactor} (knob padClaimOutlierFactor)`
-			: 'no geometric claims exist on this run, so no bound could be derived and every numbered badge is hunted';
-		for (const target of huntTargets) {
-			const solverAdded = !geometricTargetIds.has(target.detId);
-			const outlierClaim = derivation.claims.find((claim) => claim.badgeId === target.detId);
-			ctx.overlay('teeRecovery', {
-				type: 'point',
-				xPx: target.cxPx,
-				yPx: target.cyPx - viewportTopPx,
-				verdict: 'rejected',
-				visualRole: 'tee-rejection',
-				ref: `tee-recovery-hunt-${target.detId}`,
-				reason: `${target.label && /^\d+$/.test(target.label) ? `badge ${target.label}: ` : ''}hunted -- ${solverAdded
-					? `holds a geometric claim ${outlierClaim ? `(${outlierClaim.teeId} at ${outlierClaim.distancePx.toFixed(1)}px)` : ''} but NO pre-recovery assignment row survived the plausibility prune (claimed-but-unroutable); the solver may widen the hunt, never shrink it`
-					: outlierClaim
-						? `nearest unclaimed visible tee ${outlierClaim.teeId} is ${outlierClaim.distancePx.toFixed(1)}px away, beyond the ${boundProvenance}`
-						: `no visible tee could claim this badge (greedy nearest badge<->tee matching over ${tees.length} visible tee${tees.length === 1 ? '' : 's'}); ${boundProvenance}`}; hunted-set derivation is geometric (deriveHuntTargets) plus pairability, never solver preference`
-			});
-		}
-		if (huntTargets.length === 0) {
+		const badgeIds = new Set(badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId));
+		const assignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
+		if ([...badgeIds].every((badgeId) => assignedBadgeIds.has(badgeId))) {
 			ctx.measure('teeRecovery', 'missingNumberedTees', 0);
 			board.set('recoveredTees', board.get<readonly RecoveredTeeInput[]>('recoveredTees'));
 			board.set('assignment', assignment);
@@ -1137,7 +946,7 @@ export const teeRecoveryUnit: EngineUnit = {
 		const shardDiscoveryStop = ctx.span('teeRecovery.shardDiscovery');
 		const sprites = board.has('sprites') ? board.get<readonly SpriteMatch[]>('sprites') : undefined;
 		ctx.occlusion.registerOpaque(basketOpaqueProvider(stage, baskets, sprites, viewportTopPx));
-		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion, targets: huntTargets });
+		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion });
 		shardDiscoveryStop();
 		// Known-occluder pixel subtraction (screen chrome) is never a silent cut:
 		// name the component, the exact pixel count removed, and what remains.
@@ -1215,6 +1024,7 @@ export const teeRecoveryUnit: EngineUnit = {
 		// default 14) that was resolved further below for reassignment but never
 		// actually consumed here -- the literal `14` was live instead. Resolve
 		// once, up front, and use it for every check below.
+		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
 		const dedupeDistancePx = searchKnobs.recoveredTeeDedupeDistance;
 		for (const { candidate, result } of promoted) {
 			const centerX = result.corners.reduce((sum, point) => sum + point[0], 0) / 4;
@@ -1224,17 +1034,7 @@ export const teeRecoveryUnit: EngineUnit = {
 				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx);
 			if (duplicate && result.verdict === 'accepted') {
 				ctx.measure('teeRecovery', 'duplicateSuppressed', 1);
-				// Provenance tracks the candidate OUT of the pool by name: whose
-				// hunt died, against which tee, at what distance -- an aggregated
-				// anonymous "2 suppressed" is how the Heritage H6 drop hid.
-				const collisions = [
-					...tees.map((tee) => ({ id: tee.detId, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) })),
-					...existing.map((tee, index) => ({ id: `recovered-existing-${index}`, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) })),
-					...additions.map((tee, index) => ({ id: `recovered-addition-${index}`, distancePx: Math.hypot(tee.xPx - centerX, tee.yPx - centerY) }))
-				].filter((entry) => entry.distancePx < dedupeDistancePx).sort((a, b) => a.distancePx - b.distancePx);
-				const nearest = collisions[0];
-				const holeName = candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel) ? `badge ${candidate.badgeLabel}` : candidate.badgeId ?? 'UNKNOWN badge';
-				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `${holeName}: accepted recovery at (${centerX.toFixed(0)},${centerY.toFixed(0)}) suppressed as duplicate of ${nearest ? `${nearest.id} at ${nearest.distancePx.toFixed(1)}px` : 'an existing tee'} (knob recoveredTeeDedupeDistance ${dedupeDistancePx}px); this badge keeps NO recovered tee from this hunt`, values: numericTraceValues(result.values) });
+				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`, values: numericTraceValues(result.values) });
 				continue;
 			}
 			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
@@ -1245,55 +1045,16 @@ export const teeRecoveryUnit: EngineUnit = {
 			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
-			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}; bound to ${candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel) ? `badge ${candidate.badgeLabel}` : candidate.badgeId ?? 'UNKNOWN'} (the acceptance predicate is badge-specific, so assignment honors the binding)`, ...(candidate.badgeId ? { badgeId: candidate.badgeId } : {}) } });
+			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}` } });
 		}
+		board.set('recoveredTees', [...existing, ...additions]);
 		if (additions.length > 0 && measurement.rawPairs.length > 0) {
 			const zfit = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
 			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
-			const onPrune = (prune: PlausibilityPrune) => {
-				ctx.measure('teeRecovery', 'reassignPrunedPairings', prune.dropped.length);
-				if (prune.claimSet.claimBoundPx !== null) ctx.measure('teeRecovery', 'reassignClaimBoundPx', prune.claimSet.claimBoundPx);
-				const PRUNE_RECEIPT_CAP = 24;
-				for (const drop of [...prune.dropped].sort((a, b) => b.bestScore - a.bestScore).slice(0, PRUNE_RECEIPT_CAP)) {
-					const badge = badges.find((entry) => entry.detId === drop.badgeId);
-					const holeName = badge?.label && /^\d+$/.test(badge.label) ? `badge ${badge.label}` : drop.badgeId;
-					ctx.overlay('teeRecovery', { type: 'point', xPx: badge?.cxPx ?? 0, yPx: (badge?.cyPx ?? 0) - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-reassign-prune-${drop.badgeId}-${drop.teeId}`, reason: `${holeName}: pairing with ${drop.teeId} removed before selection (${drop.rule === 'recovered-tee-bound-elsewhere' ? `recovered tee is bound to the badge whose predicate accepted it` : `tee-badge distance ${drop.distancePx.toFixed(1)}px exceeds the course-derived claim bound ${prune.claimSet.claimBoundPx?.toFixed(1)}px = median ${prune.claimSet.medianClaimDistancePx?.toFixed(1)}px x ${prune.padClaimOutlierFactor} (knob padClaimOutlierFactor)`}; best dropped score ${drop.bestScore.toFixed(4)} over ${drop.pairCount} pair${drop.pairCount === 1 ? '' : 's'})` });
-				}
-				if (prune.dropped.length > PRUNE_RECEIPT_CAP) ctx.measure('teeRecovery', 'reassignPrunedBeyondReceiptCap', prune.dropped.length - PRUNE_RECEIPT_CAP);
-			};
-			const reassigned = assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing, onPrune);
-			// Redundant-recovery discard: a hunted badge that ultimately chose a
-			// VISIBLE tee proves its recovery was superfluous -- keep the roster
-			// truthful by discarding that bound recovery WITH a named receipt
-			// line. A bound recovery whose badge got NOTHING is evidence, never
-			// redundant: it stays, and the mismatch is receipt-loud.
-			const chosenTeeByBadge = new Map(reassigned.assignments.map((row) => [row.badgeId, row.teeId]));
-			const usedRecoveredTeeIds = new Set(reassigned.assignments.map((row) => row.teeId).filter((teeId) => teeId.startsWith('tee-recovered-')));
-			const recoveredByPosition = reassigned.tees.filter((tee) => tee.tier === 'recovered');
-			const redundant = new Set<RecoveredTeeInput>();
-			for (const tee of recoveredByPosition) {
-				const boundBadgeId = tee.recovery?.badgeId;
-				if (boundBadgeId === undefined || usedRecoveredTeeIds.has(tee.detId)) continue;
-				const badgeChoice = chosenTeeByBadge.get(boundBadgeId);
-				const badge = badges.find((entry) => entry.detId === boundBadgeId);
-				const holeName = badge?.label && /^\d+$/.test(badge.label) ? `badge ${badge.label}` : boundBadgeId;
-				if (badgeChoice !== undefined && badgeChoice !== tee.detId) {
-					const source = [...existing, ...additions].find((input) => input.xPx === tee.xPx && input.yPx === tee.yPx);
-					if (source) redundant.add(source);
-					ctx.measure('teeRecovery', 'redundantRecoveryDiscarded', 1);
-					ctx.overlay('teeRecovery', { type: 'point', xPx: tee.xPx, yPx: tee.yPx - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-redundant-${boundBadgeId}`, reason: `${holeName}: bound recovery at (${tee.xPx.toFixed(0)},${tee.yPx.toFixed(0)}) discarded as redundant -- the badge selected visible ${badgeChoice} instead; recovery output never pads the roster with tees no hole stands on` });
-				} else if (badgeChoice === undefined) {
-					ctx.measure('teeRecovery', 'boundRecoveryUnroutable', 1);
-					ctx.overlay('teeRecovery', { type: 'point', xPx: tee.xPx, yPx: tee.yPx - viewportTopPx, verdict: 'rejected', visualRole: 'tee-rejection', ref: `tee-recovery-unroutable-${boundBadgeId}`, reason: `${holeName}: bound recovery at (${tee.xPx.toFixed(0)},${tee.yPx.toFixed(0)}) exists but NO routable pairing with its badge survived scoring -- the hole stays unassigned while its pad evidence stands; this is a routing/scoring gap, not a detection one` });
-				}
-			}
-			const keptRecovered = [...existing, ...additions].filter((input) => !redundant.has(input));
-			board.set('recoveredTees', keptRecovered);
-			board.set('assignment', redundant.size === 0 ? reassigned : assignThreeFactor(measurement, keptRecovered, zfit, scoring, searchKnobs, ribbon, routing));
+			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing));
 		} else {
-			board.set('recoveredTees', [...existing, ...additions]);
 			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
 			board.set('assignment', assignment);
 		}

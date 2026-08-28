@@ -27,140 +27,14 @@ export interface SearchKnobs {
 	readonly exchangeTopK: number;
 	readonly maxAssignPasses: number;
 	readonly recoveredTeeDedupeDistance: number;
-	readonly padClaimOutlierFactor: number;
 }
 
 export const DEFAULT_SEARCH_KNOBS: SearchKnobs = {
 	assignTopRows: 60,
 	exchangeTopK: 12,
 	maxAssignPasses: 60,
-	recoveredTeeDedupeDistance: 14,
-	padClaimOutlierFactor: 3
+	recoveredTeeDedupeDistance: 14
 };
-
-export interface GeometricClaim {
-	readonly badgeId: string;
-	readonly badgeLabel: string | null;
-	readonly teeId: string;
-	readonly distancePx: number;
-}
-
-export interface GeometricClaimSet {
-	readonly claims: readonly GeometricClaim[];
-	readonly medianClaimDistancePx: number | null;
-	/** medianClaimDistancePx x padClaimOutlierFactor; null when no claims
-	 * exist to derive it from (then nothing may be pruned by it). */
-	readonly claimBoundPx: number | null;
-}
-
-/** Greedy nearest badge<->tee claiming, the single geometric ground truth
- * shared by teeRecovery's hunted-set derivation AND assignment's pair
- * plausibility prune (owner directive 2026-08-28: detection geometry decides
- * who is missing and what is pairable, never the solver's own scores). The
- * bound is course-derived -- median claimed distance on THIS run x factor --
- * never an absolute pixel literal (150ft holes and 1700ft holes exist). */
-export function deriveGeometricClaims(
-	badges: readonly { readonly detId: string; readonly label?: string | null; readonly cxPx: number; readonly cyPx: number }[],
-	tees: readonly TeeEvidence[],
-	padClaimOutlierFactor: number
-): GeometricClaimSet {
-	const pairs = badges
-		.flatMap((badge) => tees.map((tee) => ({
-			badge,
-			tee,
-			distancePx: Math.hypot(tee.xPx - badge.cxPx, tee.yPx - badge.cyPx)
-		})))
-		.sort((a, b) =>
-			a.distancePx - b.distancePx ||
-			a.badge.detId.localeCompare(b.badge.detId) ||
-			a.tee.detId.localeCompare(b.tee.detId)
-		);
-	const claimedBadges = new Set<string>();
-	const claimedTees = new Set<string>();
-	const claims: GeometricClaim[] = [];
-	for (const pair of pairs) {
-		if (claimedBadges.has(pair.badge.detId) || claimedTees.has(pair.tee.detId)) continue;
-		claimedBadges.add(pair.badge.detId);
-		claimedTees.add(pair.tee.detId);
-		claims.push({
-			badgeId: pair.badge.detId,
-			badgeLabel: pair.badge.label ?? null,
-			teeId: pair.tee.detId,
-			distancePx: pair.distancePx
-		});
-	}
-	const distances = claims.map((claim) => claim.distancePx).sort((a, b) => a - b);
-	const medianClaimDistancePx = distances.length ? distances[Math.floor(distances.length / 2)]! : null;
-	const claimBoundPx = medianClaimDistancePx === null ? null : medianClaimDistancePx * padClaimOutlierFactor;
-	return { claims, medianClaimDistancePx, claimBoundPx };
-}
-
-export interface PlausibilityDropRecord {
-	readonly badgeId: string;
-	readonly teeId: string;
-	readonly distancePx: number;
-	readonly pairCount: number;
-	readonly bestScore: number;
-	readonly rule: 'beyond-claim-bound' | 'recovered-tee-bound-elsewhere';
-}
-
-export interface PlausibilityPrune {
-	readonly kept: readonly ScoredPairEvidence[];
-	/** One record per dropped (badge, tee) pairing -- provenance exists to
-	 * track candidates and name every drop-out, never to celebrate the
-	 * survivors. Callers must surface these in receipts. */
-	readonly dropped: readonly PlausibilityDropRecord[];
-	readonly claimSet: GeometricClaimSet;
-	readonly padClaimOutlierFactor: number;
-}
-
-/** Remove geometrically implausible (badge, tee) pairings before selection.
- * Two rules, each named on every drop record:
- * - 'recovered-tee-bound-elsewhere': a recovered tee was accepted BECAUSE
- *   every visible pixel fits a pose pointing at one specific badge; pairing
- *   it with any other badge discards that proof (the Heritage H18/H6 swap).
- * - 'beyond-claim-bound': the tee sits farther from the badge than the
- *   course-derived claim bound (median greedy-claim distance x
- *   padClaimOutlierFactor); a scarcity-driven 317px "rank 1" pairing
- *   (Heritage H5 <- tee-12, ledger row 27) must lose to an empty slot the
- *   recovery hunt can then see. With no derivable bound nothing is pruned
- *   by distance. */
-export function pruneImplausiblePairs(
-	badges: readonly { readonly detId: string; readonly label?: string | null; readonly cxPx: number; readonly cyPx: number }[],
-	tees: readonly TeeEvidence[],
-	scored: readonly ScoredPairEvidence[],
-	padClaimOutlierFactor: number
-): PlausibilityPrune {
-	const claimSet = deriveGeometricClaims(badges, tees, padClaimOutlierFactor);
-	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
-	const teeById = new Map(tees.map((tee) => [tee.detId, tee]));
-	const kept: ScoredPairEvidence[] = [];
-	const droppedByPairing = new Map<string, { badgeId: string; teeId: string; distancePx: number; pairCount: number; bestScore: number; rule: PlausibilityDropRecord['rule'] }>();
-	for (const pair of scored) {
-		const badge = badgeById.get(pair.raw.badgeId);
-		const tee = teeById.get(pair.raw.teeId);
-		const boundBadgeId = tee?.tier === 'recovered' ? tee.recovery?.badgeId : undefined;
-		const distancePx = badge && tee ? Math.hypot(tee.xPx - badge.cxPx, tee.yPx - badge.cyPx) : Number.NaN;
-		let rule: PlausibilityDropRecord['rule'] | null = null;
-		if (boundBadgeId !== undefined && boundBadgeId !== pair.raw.badgeId) rule = 'recovered-tee-bound-elsewhere';
-		else if (
-			boundBadgeId === undefined &&
-			claimSet.claimBoundPx !== null &&
-			Number.isFinite(distancePx) &&
-			distancePx > claimSet.claimBoundPx
-		) rule = 'beyond-claim-bound';
-		if (rule === null) { kept.push(pair); continue; }
-		const key = `${pair.raw.badgeId}|${pair.raw.teeId}`;
-		const record = droppedByPairing.get(key);
-		if (record) {
-			record.pairCount += 1;
-			record.bestScore = Math.max(record.bestScore, pair.score);
-		} else {
-			droppedByPairing.set(key, { badgeId: pair.raw.badgeId, teeId: pair.raw.teeId, distancePx, pairCount: 1, bestScore: pair.score, rule });
-		}
-	}
-	return { kept, dropped: [...droppedByPairing.values()], claimSet, padClaimOutlierFactor };
-}
 
 export function recoveredTee(
 	input: RecoveredTeeInput,
@@ -467,11 +341,7 @@ export function assignThreeFactor(
 	scoringKnobs: ScoringKnobs = DEFAULT_SCORING_KNOBS,
 	searchKnobs: SearchKnobs = DEFAULT_SEARCH_KNOBS,
 	ribbonKnobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS,
-	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS,
-	/** Receipt seam: every geometrically pruned (badge, tee) pairing is
-	 * reported here so the caller can surface the drop-outs -- provenance
-	 * tracks candidates leaving the pool, not just the survivors. */
-	onPrune?: (prune: PlausibilityPrune) => void
+	routingKnobs: RoutingKnobs = DEFAULT_ROUTING_KNOBS
 ): ThreeFactorAssignment {
 	const sortedRecovered = [...recoveredTees].sort(
 		(a, b) =>
@@ -491,15 +361,7 @@ export function assignThreeFactor(
 		? rerouteRawPairs(measurement, tees, ribbonKnobs, routingKnobs, scoringKnobs)
 		: measurement.rawPairs;
 	const scoredUnranked = scoreRawPairs(measurement, tees, rawPairs, zfitKnobs, scoringKnobs);
-	const configuredFactor = searchKnobs?.padClaimOutlierFactor;
-	const prune = pruneImplausiblePairs(
-		measurement.badges,
-		tees,
-		scoredUnranked,
-		typeof configuredFactor === 'number' && Number.isFinite(configuredFactor) ? configuredFactor : DEFAULT_SEARCH_KNOBS.padClaimOutlierFactor
-	);
-	onPrune?.(prune);
-	const byBadge = rankPairsByBadge(prune.kept);
+	const byBadge = rankPairsByBadge(scoredUnranked);
 	const scoredPairs = [...byBadge.values()].flat();
 	const selected = selectAssignments(byBadge, searchKnobs);
 	const assignments: AssignmentEvidence[] = [...selected.entries()]

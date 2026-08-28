@@ -3,7 +3,6 @@ import { extractComponents, type ComponentStats } from '@chainspot/alg/detectors
 import {
 	buildTeeRecoveryCandidates,
 	setActiveAxisToleranceDeg,
-	setActiveBareSupportFraction,
 	teeRecoveryFeature,
 	teeRecoveryUnit
 } from '@chainspot/alg/detectors/threeFactor/features/g3.teeRecovery';
@@ -138,16 +137,10 @@ function recoveryFixture(mode: FixtureMode = 'full') {
 		score: 1
 	};
 	const padComponent = componentAt(110, 90);
-	// The known tee is badge-1's pad per this fixture's own assignment row, so
-	// it must also sit geometrically at badge-1: the op now derives its hunted
-	// set from badge<->tee geometry (deriveHuntTargets), and the old position
-	// (115.5, 93.5) was nearer badge-2 than badge-1 -- an accident of fixture
-	// authorship that would satisfy the wrong badge. The pad-geometry block
-	// below keeps its original bbox: only size medians are read from it.
 	const knownTee: TeeEvidence = {
 		detId: 'tee-known',
-		xPx: 12,
-		yPx: 12,
+		xPx: 115.5,
+		yPx: 93.5,
 		tier: 'component',
 		angleRad: 0.6,
 		bbox: [110, 90, 12, 8],
@@ -293,11 +286,6 @@ describe('teeRecovery visible-component evidence contract', () => {
 	// strict-target default (3°, BADGE_AXIS_TARGET_DEG in g3.teeRecovery.ts).
 	beforeEach(() => {
 		setActiveAxisToleranceDeg(3);
-		// These fixtures exercise shard grouping / pixel-fit / axis semantics
-		// with fragments whose implied outline sits on synthetic open ground;
-		// the contrapositive bare-support gate (owner invariant 2026-08-28) is
-		// disabled here and has its own dedicated tests below at the default.
-		setActiveBareSupportFraction(1);
 	});
 
 	test('retains a complete global tee component even without basket contact', () => {
@@ -319,7 +307,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]?.fragmentPixels).toHaveLength((12 + 15) * 8);
 
-		const receipt = runRecovery(fixture, new OcclusionDetector()).drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
+		const receipt = runRecovery(fixture, new OcclusionDetector()).drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|footprint|visible|component/i);
 	});
@@ -400,7 +388,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 	test('rejects one non-occluded bright pixel outside the hollow support band and names the evidence', () => {
 		const fixture = recoveryFixture('hollow-extra');
 		const { drawables } = runRecovery(fixture, new OcclusionDetector());
-		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
+		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|outside|footprint|visible/i);
 	});
@@ -427,7 +415,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 
 	test('rejects a rigid hollow component when no support fit lies within 3 degrees of the badge ray', () => {
 		const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
-		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
+		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/badge ray|3.?°|support fit/i);
 	});
@@ -449,7 +437,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 			const fixture = recoveryFixture('hollow-misaligned');
 
 			const tight = runRecovery(fixture, new OcclusionDetector(), 10);
-			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
+			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected');
 			expect(tightReceipt).toBeDefined();
 			// The rejection text must name the CONFIGURED limit (the knob), not a
 			// hardcoded literal, so a reader can tell this was a soft-ceiling call.
@@ -472,7 +460,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		test('a resolver that supplies an incomplete knobs object (legacy/test double) does not corrupt the active tolerance with NaN', () => {
 			setActiveAxisToleranceDeg(3);
 			const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
-			const receipt = drawables.find((drawable) => drawable.verdict === 'rejected' && !/hunted --|removed before selection/.test(drawable.reason ?? ''));
+			const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
 			expect(receipt?.reason).not.toMatch(/NaN/);
 			expect(receipt?.reason).toMatch(/within 3°/);
 		});
@@ -673,52 +661,5 @@ describe('teeRecovery discovery has no spatial prefilter (owner design, 2026-08-
 		// No chrome square's pixels survive to masquerade as tee-shard evidence
 		// for the lone badge on this canvas.
 		expect(candidates).toHaveLength(0);
-	});
-});
-
-
-describe('contrapositive bare-support gate (owner invariant 2026-08-28)', () => {
-	beforeEach(() => {
-		setActiveAxisToleranceDeg(3);
-		setActiveBareSupportFraction(0.7);
-	});
-
-	test('a bare 9-pixel shard on open ground is REJECTED: the outline it implies is visibly absent', () => {
-		const fixture = recoveryFixture('hollow');
-		const { candidates, searchOutcomes } = buildTeeRecoveryCandidates(
-			fixture.stage,
-			fixture.badges,
-			fixture.baskets,
-			fixture.tees,
-			fixture.viewportTopPx,
-			{ assignment: fixture.assignment, occlusion: new OcclusionDetector() }
-		);
-		const winner = searchOutcomes.find((outcome) => outcome.badgeId === 'badge-2')?.winner ?? candidates[0];
-		expect(winner).toBeDefined();
-		expect(winner!.footprintAudit).toBeDefined();
-		expect(winner!.footprintAudit!.bare / winner!.footprintAudit!.total).toBeGreaterThan(0.7);
-	});
-
-	test('the same shard is ACCEPTED when everything else in its band is under a named OPAQUE occluder, and the receipt prints the audit', () => {
-		const fixture = recoveryFixture('hollow');
-		const occlusion = new OcclusionDetector();
-		// A named occluder covers all non-shard band pixels: the invariant's
-		// "heavily occluded" case -- the fragment is the only visible remnant.
-		const shardPixels = new Set<string>();
-		for (let y = 0; y < 120; y++) for (let x = 0; x < 140; x++) {
-			if (fixture.stage.brightMask.data[y * 140 + x]) shardPixels.add(`${x},${y}`);
-		}
-		occlusion.registerOpaque({ kindAt: (x, y) => (shardPixels.has(`${x},${y}`) ? 'UNKNOWN' : 'OPAQUE') });
-		const { candidates } = buildTeeRecoveryCandidates(
-			fixture.stage,
-			fixture.badges,
-			fixture.baskets,
-			fixture.tees,
-			fixture.viewportTopPx,
-			{ assignment: fixture.assignment, occlusion }
-		);
-		const winner = candidates.find((candidate) => candidate.badgeId === 'badge-2');
-		expect(winner?.footprintAudit).toBeDefined();
-		expect(winner!.footprintAudit!.bare / winner!.footprintAudit!.total).toBeLessThanOrEqual(0.7);
 	});
 });
