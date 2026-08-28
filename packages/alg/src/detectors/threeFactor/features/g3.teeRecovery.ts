@@ -138,7 +138,16 @@ export const teeRecoveryFeature = {
 	defaultEnabled: true,
 	note: 'Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.',
 	render: teeRecoveryRender,
-	knobs: {}
+	knobs: {
+		axisToleranceDeg: {
+			default: 3,
+			note: 'Soft ceiling per owner policy 2026-08-28: the strict 3° badge-axis gate (BADGE_AXIS_TARGET_DEG) stays the debugging TARGET, and this knob is the OPERATIVE limit a config can widen past it. NULL RESULT on the current corpus, recorded honestly rather than chased: after dc96000 ("Recovery owns every bright pixel inside badge bboxes") stopped badge-digit-glyph chrome from masquerading as tee-shard evidence, a sweep ladder (3/5/10/20/30/45/88°) across NorthPark/HeritagePark/AlexClark/DashsTrack found every hole the mechanism can currently capture is ALREADY captured at the strict 3° target -- HeritagePark recovers H10, AlexClark recovers H10+H11, DashsTrack holds 18/18 (H3/H5/H12 via recovery) with IDENTICAL fitted centers and axis errors (well under 2°) at every rung from 3° to 88°. NorthPark recovers zero tees at any tolerance: its real pads sit outside the current discovery search bounds, a separate bug this knob cannot fix. Because widening buys nothing real here, the default stays at the strict target (3°) rather than moving; the knob is landed and validated (0.5-90°) so a future corpus that genuinely needs slack is one config edit away, with the achieved axis-error distribution always visible via the teeRecovery/axisErrorDeg receipt measurement. See docs/INTAKE-ENGINE-HANDOFF.md and artifacts/orchestration/axis-ceiling-progress.md for the full ladder table and per-hypothesis center/badge-bbox-containment check.',
+			validate: (value: unknown) =>
+				typeof value === 'number' && Number.isFinite(value) && value >= 0.5 && value <= 90
+					? null
+					: 'axisToleranceDeg must be a finite number between 0.5 and 90'
+		}
+	}
 } satisfies ABFeature;
 
 function finite(value: number): boolean {
@@ -727,6 +736,15 @@ export const teeRecoveryUnit: EngineUnit = {
 	run(board: EvidenceBoard, ctx: FeatureContext) {
 		const stop = ctx.span('teeRecovery');
 		const state = ctx.resolve(teeRecoveryFeature);
+		// Legacy/unit-test resolvers may supply an incomplete knobs object
+		// (e.g. `knobs: {}`); only install a configured value when it is an
+		// actual finite number, so a caller that never threads this knob keeps
+		// the module's own default rather than corrupting shared module state
+		// with NaN for every run in the process.
+		const configuredAxisToleranceDeg = state.knobs.axisToleranceDeg;
+		if (typeof configuredAxisToleranceDeg === 'number' && Number.isFinite(configuredAxisToleranceDeg)) {
+			setActiveAxisToleranceDeg(configuredAxisToleranceDeg);
+		}
 		if (!state.enabled) { stop(); return; }
 		const stage = board.get<RecoveryStage>('stage');
 		const viewportTopPx = board.get<RecoveryViewport>('viewport').topPx;
@@ -788,6 +806,7 @@ export const teeRecoveryUnit: EngineUnit = {
 			if (result.verdict === 'accepted') ctx.overlay('teeRecovery', { type: 'pixelSet', pixels: shardPixels, verdict: 'accepted', visualRole: 'tee-shard', ref: `${result.id}:tee-shard`, reason: result.reason, values: numericTraceValues(result.values) });
 			else ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: result.id, reason: result.reason, values: numericTraceValues(result.values) });
 			if (result.verdict !== 'accepted') continue;
+			if (result.values.badgeAxisErrorRad !== undefined) ctx.measure('teeRecovery', 'axisErrorDeg', result.values.badgeAxisErrorRad * 180 / Math.PI);
 			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
