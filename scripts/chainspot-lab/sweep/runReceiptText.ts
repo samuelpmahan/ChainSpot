@@ -8,6 +8,10 @@ import type { RunReceipt } from './runReceipt';
  * apart from the artifact count (the receipt stores artifacts per operation).
  */
 
+function round(value: number): number {
+	return Number(value.toFixed(3));
+}
+
 function value(value: unknown): string {
 	return value === undefined || value === null ? 'UNKNOWN' : String(value);
 }
@@ -183,6 +187,32 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		'baselineComparison: UNKNOWN (not-implemented: no frozen baseline receipt is stored for this config, ' +
 			'so this run cannot honestly state "changed" or "no change" vs a baseline)'
 	);
+
+	lines.push(
+		'',
+		'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
+		"(provenance: board 'assignment' rows, hole read from BadgeEvidence.label by the shared " +
+			"withHoleLabels() mapping in @chainspot/alg/exec -- the same mapping this run's final " +
+			"measurementTable assignment artifact uses; an unreadable digit prints UNREAD, never a guess)",
+		'hole | badgeId | teeId -> basketId | score | rank | hole confidence'
+	);
+	if (receipt.assignments.length === 0) {
+		const provenance = receipt.resultsProvenance?.assignments;
+		lines.push(
+			provenance?.startsWith('not-scheduled')
+				? provenance
+				: "(none -- 'assignment.selection' ran and produced zero rows)"
+		);
+	} else {
+		for (const row of receipt.assignments) {
+			const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
+			const confidence =
+				row.holeConfidence === null ? 'UNKNOWN' : round(row.holeConfidence).toString();
+			lines.push(
+				`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${round(row.score)} | ${row.rank} | ${confidence}`
+			);
+		}
+	}
 
 	lines.push('', 'TRUTH EVALUATION');
 	lines.push(`evaluation.truthSupplied: ${receipt.evaluation.truthSupplied}`);

@@ -6,6 +6,7 @@ import type {
 	RunTrace
 } from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { StraightTestTrace } from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
+import type { HoleLabeledAssignment } from '@chainspot/alg/exec';
 import {
 	CANONICAL_GATE_ORDER,
 	GATE_TITLES
@@ -75,6 +76,16 @@ export interface RunReceiptResults {
 	readonly assignments?: number;
 	readonly rawPairs?: number;
 }
+
+/** One row of the final hole-labeled assignment table: badgeId is kept for
+ * traceability, but `hole` (the G1-read digit, e.g. "14", or the loud
+ * `UNREAD` when the digit read failed) is the field a human reads. Sourced
+ * verbatim from the board's final `assignment` slot via
+ * `withHoleLabels(assignment.assignments, measurement.badges)`
+ * (`@chainspot/alg/exec`) -- the same mapping the assignment.selection.table
+ * and zfit.finalAssignment.table artifacts use, so the receipt and the
+ * artifact can never say different holes for the same badge. */
+export type RunReceiptAssignmentRow = HoleLabeledAssignment;
 
 export interface RunReceiptSliceOperation {
 	readonly id: string;
@@ -167,6 +178,10 @@ export interface RunReceipt {
 	readonly gates: readonly RunReceiptGate[];
 	readonly units: readonly RunReceiptUnit[];
 	readonly results: RunReceiptResults;
+	/** Empty when 'assignment.selection' was not scheduled (e.g. a `--through`
+	 * cutoff before G6); a scheduled selection with zero rows is a real empty
+	 * array, never omitted. */
+	readonly assignments: readonly RunReceiptAssignmentRow[];
 	readonly slice?: RunReceiptSlice;
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
@@ -193,6 +208,9 @@ export interface BuildRunReceiptInput {
 	readonly trace: RunTrace;
 	readonly timings: RunPhaseTimings;
 	readonly results: RunReceiptResults;
+	/** See RunReceipt.assignments. Empty (not omitted) when nothing was
+	 * scheduled to produce it. */
+	readonly assignments: readonly RunReceiptAssignmentRow[];
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
 	/** Loud problems the visual-render composers found while drawing. Appended
@@ -434,6 +452,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		gates,
 		units,
 		results,
+		assignments: input.assignments,
 		resultsProvenance: input.resultsProvenance,
 		...(slice ? { slice } : {}),
 		visualRenders: input.visualRenders,
