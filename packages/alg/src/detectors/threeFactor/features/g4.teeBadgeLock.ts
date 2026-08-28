@@ -124,13 +124,21 @@ function numericLockValues(
 function emitDrawables(ctx: FeatureContext, evidence: TeeBadgeLockEvidence): void {
 	for (const lock of evidence.locks) {
 		const ref = `teeBadgeLock:${encodeURIComponent(lock.badgeId)}:${encodeURIComponent(lock.teeId)}`;
+		// lock.hole is the exact-label hole number this lock is already tied to
+		// (buildTeeBadgeLockEvidence copies it from the badge's G1 digit read).
+		// The CLI receipt (g4.teeBadgeLockReceipt.ts) surfaces it as its own
+		// `hole` column, but this reason string is what a human actually reads
+		// on hover in the LAB SVG viewer (src/routes/lab/+page.svelte renders
+		// `<title>{unit.id} {d.verdict}: {d.reason} {d.ref}</title>` verbatim),
+		// so it must not leave the raw badge/tee detector ids unexplained there.
+		const holeNote = typeof lock.hole === 'number' ? `hole=H${lock.hole}; ` : '';
 		ctx.overlay('teeBadgeLock', {
 			type: 'polyline',
 			path: lock.teeBadgePath,
 			verdict: 'accepted',
 			visualRole: 'tee-badge-path',
 			ref,
-			reason: 'max-weight lock; exact routed testimony; no basket evidence read',
+			reason: `${holeNote}max-weight lock; exact routed testimony; no basket evidence read`,
 			values: numericLockValues(lock)
 		});
 	}
