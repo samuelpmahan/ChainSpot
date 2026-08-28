@@ -128,16 +128,49 @@ function blurRgb(image: Float32Array, width: number, height: number, knobs: Ribb
 	return output;
 }
 
-function sampleRgb(image: Float32Array, width: number, height: number, x: number, y: number, channel: number): number {
-	const x0 = Math.floor(x);
-	const y0 = Math.floor(y);
-	const ax = x - x0;
-	const ay = y - y0;
-	const p00 = (reflect(y0, height) * width + reflect(x0, width)) * 3 + channel;
-	const p10 = (reflect(y0, height) * width + reflect(x0 + 1, width)) * 3 + channel;
-	const p01 = (reflect(y0 + 1, height) * width + reflect(x0, width)) * 3 + channel;
-	const p11 = (reflect(y0 + 1, height) * width + reflect(x0 + 1, width)) * 3 + channel;
-	return image[p00] * (1 - ax) * (1 - ay) + image[p10] * ax * (1 - ay) + image[p01] * (1 - ax) * ay + image[p11] * ax * ay;
+interface AxisSampleMap {
+	readonly lo: Int32Array;
+	readonly hi: Int32Array;
+	readonly fraction: Float64Array;
+}
+
+/** Precompute the exact floor/reflection/fraction result for integer cell
+ * coordinates translated by one fixed sample offset. The original support
+ * loop recomputed these values for every cell even though x sampling is
+ * independent of y and y sampling is independent of x. */
+function axisSampleMap(size: number, offset: number): AxisSampleMap {
+	const lo = new Int32Array(size);
+	const hi = new Int32Array(size);
+	const fraction = new Float64Array(size);
+	for (let index = 0; index < size; index++) {
+		const coordinate = index + offset;
+		const base = Math.floor(coordinate);
+		lo[index] = reflect(base, size);
+		hi[index] = reflect(base + 1, size);
+		fraction[index] = coordinate - base;
+	}
+	return { lo, hi, fraction };
+}
+
+function sampleRgbMappedInto(
+	image: Float32Array,
+	width: number,
+	xMap: AxisSampleMap,
+	yMap: AxisSampleMap,
+	x: number,
+	y: number,
+	out: Float64Array,
+	offset: number
+): void {
+	const ax = xMap.fraction[x];
+	const ay = yMap.fraction[y];
+	const p00 = (yMap.lo[y] * width + xMap.lo[x]) * 3;
+	const p10 = (yMap.lo[y] * width + xMap.hi[x]) * 3;
+	const p01 = (yMap.hi[y] * width + xMap.lo[x]) * 3;
+	const p11 = (yMap.hi[y] * width + xMap.hi[x]) * 3;
+	for (let channel = 0; channel < 3; channel++) {
+		out[offset + channel] = image[p00 + channel] * (1 - ax) * (1 - ay) + image[p10 + channel] * ax * (1 - ay) + image[p01 + channel] * (1 - ax) * ay + image[p11 + channel] * ax * ay;
+	}
 }
 
 function percentile(values: number[], fraction: number): number {
@@ -154,32 +187,40 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 	const raw = new Float32Array(width * height);
 	const bestTheta = new Float32Array(width * height);
 	const delta = Math.max(1, knobs.gradientDeltaMultiplier / scale);
+	const samples = new Float64Array(12);
 	for (let orientation = 0; orientation < parameters.orientations; orientation++) {
 		const theta = (Math.PI * orientation) / parameters.orientations;
 		const nx = -Math.sin(theta);
 		const ny = Math.cos(theta);
 		for (const widthSrc of parameters.widthsSrc) {
 			const radius = widthSrc / (2 * scale);
+			const distanceA = -(radius - delta);
+			const distanceB = -(radius + delta);
+			const distanceC = radius - delta;
+			const distanceD = radius + delta;
+			const xA = axisSampleMap(width, nx * distanceA);
+			const yA = axisSampleMap(height, ny * distanceA);
+			const xB = axisSampleMap(width, nx * distanceB);
+			const yB = axisSampleMap(height, ny * distanceB);
+			const xC = axisSampleMap(width, nx * distanceC);
+			const yC = axisSampleMap(height, ny * distanceC);
+			const xD = axisSampleMap(width, nx * distanceD);
+			const yD = axisSampleMap(height, ny * distanceD);
 			for (let y = 0; y < height; y++) {
 				for (let x = 0; x < width; x++) {
-					const sample = (distance: number): [number, number, number] => {
-						const sx = x + nx * distance;
-						const sy = y + ny * distance;
-						return [
-							sampleRgb(blurred, width, height, sx, sy, 0),
-							sampleRgb(blurred, width, height, sx, sy, 1),
-							sampleRgb(blurred, width, height, sx, sy, 2)
-						];
-					};
-					const a = sample(-(radius - delta));
-					const b = sample(-(radius + delta));
-					const c = sample(radius - delta);
-					const d = sample(radius + delta);
-					const d1 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-					const d2 = [c[0] - d[0], c[1] - d[1], c[2] - d[2]];
-					const n1 = Math.hypot(...d1);
-					const n2 = Math.hypot(...d2);
-					const dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+					sampleRgbMappedInto(blurred, width, xA, yA, x, y, samples, 0);
+					sampleRgbMappedInto(blurred, width, xB, yB, x, y, samples, 3);
+					sampleRgbMappedInto(blurred, width, xC, yC, x, y, samples, 6);
+					sampleRgbMappedInto(blurred, width, xD, yD, x, y, samples, 9);
+					const d1r = samples[0] - samples[3];
+					const d1g = samples[1] - samples[4];
+					const d1b = samples[2] - samples[5];
+					const d2r = samples[6] - samples[9];
+					const d2g = samples[7] - samples[10];
+					const d2b = samples[8] - samples[11];
+					const n1 = Math.hypot(d1r, d1g, d1b);
+					const n2 = Math.hypot(d2r, d2g, d2b);
+					const dot = d1r * d2r + d1g * d2g + d1b * d2b;
 					if (dot <= 0) continue;
 					const score = Math.min(n1, n2) * Math.min(1, dot / (n1 * n2 + 1e-6));
 					const cell = y * width + x;
