@@ -52,9 +52,14 @@ const straightTestOnResolved = resolveConfig(
 // solver's own opinion -- ledger rows 27/29) adds g4.search's
 // padClaimOutlierFactor knob and rewires assignment.ranking to consume
 // measurement + assignment.tees for the receipt-named plausibility prune,
-// moving this pin once more.
+// moving this pin once more. Same day: teeRecovery's maxBareSupportFraction knob (the contrapositive bare-support gate) moves it again.
+// 2026-08-28: padClaimOutlierFactor note gains its ratchet pointer
+// (docs/RATCHETS.md / tests/unit/thresholdRatchets.test.ts) -- the
+// compiled plan's fingerprint is derived from resolved knobs and operation
+// ids, never a feature's note text, so this fingerprint is UNCHANGED by
+// that edit; verified by re-running this test after the note append.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'a60669eb5844efbac8bdcdb06cfdc189666eafcabdfd6c8e1f71b69c49c35bf6';
+	'f31e7890672a55e6498959b67edfbfeb0b0049e7fa9a6c0ae7f8a515075aaeca';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

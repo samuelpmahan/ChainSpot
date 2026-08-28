@@ -256,8 +256,14 @@ describe('resolveConfig + engine', () => {
 		// again, consciously, per the resolved-config-bytes-changed rule.
 		// 2026-08-28: g4.search's padClaimOutlierFactor knob (owner directive:
 		// hunted-badge set AND pairable set derived geometrically, never from
-		// the G6 solver -- ledger rows 27/29) moves this pin once more.
-		expect(hash).toBe('4421f9310242d7ac86ab0bc689c6e0c9f252afa451a7e9271f5fc4bdf2195f92');
+		// the G6 solver -- ledger rows 27/29) moves this pin once more. Same day: teeRecovery's maxBareSupportFraction contrapositive knob moves it again.
+		// 2026-08-28: padClaimOutlierFactor note gains its ratchet pointer
+		// (docs/RATCHETS.md / tests/unit/thresholdRatchets.test.ts) --
+		// resolveConfig only carries {enabled, knobs}, never a feature's note
+		// text, so this hash is UNCHANGED by that edit; verified by re-running
+		// this test after the note append. Regenerated + re-verified per the
+		// same-day g4.search.ts note-append instruction.
+		expect(hash).toBe('f1609dbdf5fa9a8d64293b90828f020c6ae16c8b0e9951559517bfa0a5637d62');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {

@@ -3,6 +3,7 @@ import { extractComponents, type ComponentStats } from '@chainspot/alg/detectors
 import {
 	buildTeeRecoveryCandidates,
 	setActiveAxisToleranceDeg,
+	setActiveBareSupportFraction,
 	teeRecoveryFeature,
 	teeRecoveryUnit
 } from '@chainspot/alg/detectors/threeFactor/features/g3.teeRecovery';
@@ -292,6 +293,11 @@ describe('teeRecovery visible-component evidence contract', () => {
 	// strict-target default (3°, BADGE_AXIS_TARGET_DEG in g3.teeRecovery.ts).
 	beforeEach(() => {
 		setActiveAxisToleranceDeg(3);
+		// These fixtures exercise shard grouping / pixel-fit / axis semantics
+		// with fragments whose implied outline sits on synthetic open ground;
+		// the contrapositive bare-support gate (owner invariant 2026-08-28) is
+		// disabled here and has its own dedicated tests below at the default.
+		setActiveBareSupportFraction(1);
 	});
 
 	test('retains a complete global tee component even without basket contact', () => {
@@ -667,5 +673,52 @@ describe('teeRecovery discovery has no spatial prefilter (owner design, 2026-08-
 		// No chrome square's pixels survive to masquerade as tee-shard evidence
 		// for the lone badge on this canvas.
 		expect(candidates).toHaveLength(0);
+	});
+});
+
+
+describe('contrapositive bare-support gate (owner invariant 2026-08-28)', () => {
+	beforeEach(() => {
+		setActiveAxisToleranceDeg(3);
+		setActiveBareSupportFraction(0.7);
+	});
+
+	test('a bare 9-pixel shard on open ground is REJECTED: the outline it implies is visibly absent', () => {
+		const fixture = recoveryFixture('hollow');
+		const { candidates, searchOutcomes } = buildTeeRecoveryCandidates(
+			fixture.stage,
+			fixture.badges,
+			fixture.baskets,
+			fixture.tees,
+			fixture.viewportTopPx,
+			{ assignment: fixture.assignment, occlusion: new OcclusionDetector() }
+		);
+		const winner = searchOutcomes.find((outcome) => outcome.badgeId === 'badge-2')?.winner ?? candidates[0];
+		expect(winner).toBeDefined();
+		expect(winner!.footprintAudit).toBeDefined();
+		expect(winner!.footprintAudit!.bare / winner!.footprintAudit!.total).toBeGreaterThan(0.7);
+	});
+
+	test('the same shard is ACCEPTED when everything else in its band is under a named OPAQUE occluder, and the receipt prints the audit', () => {
+		const fixture = recoveryFixture('hollow');
+		const occlusion = new OcclusionDetector();
+		// A named occluder covers all non-shard band pixels: the invariant's
+		// "heavily occluded" case -- the fragment is the only visible remnant.
+		const shardPixels = new Set<string>();
+		for (let y = 0; y < 120; y++) for (let x = 0; x < 140; x++) {
+			if (fixture.stage.brightMask.data[y * 140 + x]) shardPixels.add(`${x},${y}`);
+		}
+		occlusion.registerOpaque({ kindAt: (x, y) => (shardPixels.has(`${x},${y}`) ? 'UNKNOWN' : 'OPAQUE') });
+		const { candidates } = buildTeeRecoveryCandidates(
+			fixture.stage,
+			fixture.badges,
+			fixture.baskets,
+			fixture.tees,
+			fixture.viewportTopPx,
+			{ assignment: fixture.assignment, occlusion }
+		);
+		const winner = candidates.find((candidate) => candidate.badgeId === 'badge-2');
+		expect(winner?.footprintAudit).toBeDefined();
+		expect(winner!.footprintAudit!.bare / winner!.footprintAudit!.total).toBeLessThanOrEqual(0.7);
 	});
 });
