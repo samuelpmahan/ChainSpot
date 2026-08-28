@@ -14,7 +14,7 @@
 import type { Mask } from '../raster';
 import type { ComponentStats } from '../components';
 import { extractBadgeGlyph } from './badgeGlyph';
-import type { BadgeGlyph } from './badgeGlyph';
+import type { BadgeGlyph, PlateFrameGeometry } from './badgeGlyph';
 import { DEFAULT_DIGITS_KNOBS, segmentDigits, type DigitsKnobs } from './segment';
 import type { DigitCandidate } from './segment';
 import { normalizeDigitMask } from './normalize';
@@ -47,24 +47,49 @@ export interface BadgeReading {
 	label: string;
 	/** Minimum per-digit margin (Infinity when no digits). */
 	confidence: number;
+	/** segmentDigits' internal notes (dropped-blob lines, valley splits) —
+	 * fix contract C6: computed but previously discarded before anything
+	 * human-readable saw them. */
+	notes: readonly string[];
 }
 
 /** Minimal context readBadge needs — satisfied by NuThingP1Result and the
- * fast BadgeStageResult alike. */
+ * fast BadgeStageResult alike. `plateBboxes`/`plateInteriorMarginPx`/
+ * `plateFrameTolerancePx` are optional so callers with no plate-recovery
+ * concept (e.g. labEndpoint) keep working unchanged; when supplied, C1's
+ * frame exclusion applies to `dark-plate-recovery` badges. */
 export interface BadgeReadContext {
 	brightMask: Mask;
 	darkMask: Mask;
 	brightLabels: Int32Array;
 	badges: ComponentStats[];
+	plateBboxes?: (readonly [number, number, number, number] | null)[];
+	plateInteriorMarginPx?: number;
+	plateFrameTolerancePx?: number;
 }
 
 export function readBadge(
 	badge: ComponentStats,
 	result: BadgeReadContext,
 	scorer: DigitScorer,
-	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
+	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS,
+	plateBbox?: readonly [number, number, number, number] | null
 ): BadgeReading {
-	const glyph = extractBadgeGlyph(badge, result.brightMask, result.darkMask, result.brightLabels);
+	const plateFrame: PlateFrameGeometry | null =
+		plateBbox && result.plateInteriorMarginPx !== undefined && result.plateFrameTolerancePx !== undefined
+			? {
+					plateBbox,
+					plateInteriorMarginPx: result.plateInteriorMarginPx,
+					plateFrameTolerancePx: result.plateFrameTolerancePx
+				}
+			: null;
+	const glyph = extractBadgeGlyph(
+		badge,
+		result.brightMask,
+		result.darkMask,
+		result.brightLabels,
+		plateFrame
+	);
 	const segmented = glyph.mask.width > 0 ? segmentDigits(glyph.mask, knobs) : { digits: [], notes: [] };
 	const digits: DigitReading[] = [];
 	for (const candidate of segmented.digits) {
@@ -94,7 +119,8 @@ export function readBadge(
 		glyph,
 		digits,
 		label: digits.map((d) => d.predicted).join(''),
-		confidence: digits.length ? Math.min(...digits.map((d) => d.margin)) : Infinity
+		confidence: digits.length ? Math.min(...digits.map((d) => d.margin)) : Infinity,
+		notes: segmented.notes
 	};
 }
 
@@ -104,5 +130,7 @@ export function readCourseBadges(
 	scorer: DigitScorer,
 	knobs: DigitsKnobs = DEFAULT_DIGITS_KNOBS
 ): BadgeReading[] {
-	return result.badges.map((badge) => readBadge(badge, result, scorer, knobs));
+	return result.badges.map((badge, index) =>
+		readBadge(badge, result, scorer, knobs, result.plateBboxes?.[index] ?? null)
+	);
 }

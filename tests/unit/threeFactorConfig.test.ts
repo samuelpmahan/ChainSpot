@@ -249,7 +249,12 @@ describe('resolveConfig + engine', () => {
 		// default 3 -- the strict target itself: see g3.teeRecovery.ts for the
 		// null-result empirical finding on the post-dc96000 corpus) moves this
 		// pin again.
-		expect(hash).toBe('c69a9c5815fbb75070e773a80bf44d2d150860e73e62b564e53d150fb5a09f04');
+		// 2026-08-28: G1 OCR fix contract (docs/seven-whys/g1-badge-digit-garbage
+		// .md) adds g1.badges' plateFrameTolerancePx (C1 frame-exclusion
+		// provenance) and g1.digits' confidenceFloorDivisor/labelAmbiguityMargin
+		// (C4 derived-floor/ambiguity provenance) -- new knobs move this pin
+		// again, consciously, per the resolved-config-bytes-changed rule.
+		expect(hash).toBe('54e871cfd0320078c32af0502b2fc5e9877f5230152cdf23ec65d4e458b5b85c');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {

@@ -111,9 +111,16 @@ function recoveryFixture(mode: FixtureMode = 'full') {
 			bbox: [component.bboxX, component.bboxY, component.bboxW, component.bboxH],
 			source: 'bright-family',
 			digits: [],
+			rawLabel: label,
+			digitCount: label.length,
 			label,
+			bestLabel: label,
 			labelCandidates: [{ label: Number(label), confidence: 1 }],
-			confidence: 1
+			confidence: 1,
+			abstentionReason: null,
+			confidenceFloor: 0.1,
+			conflictWith: [],
+			notes: []
 		};
 	};
 	const badges = [badgeEvidence('badge-1', '1', 10, 10), badgeEvidence('badge-2', '2', 69, 36)];
@@ -496,9 +503,16 @@ describe('teeRecovery discovery has no spatial prefilter (owner design, 2026-08-
 			bbox: [badgeComponent.bboxX, badgeComponent.bboxY, badgeComponent.bboxW, badgeComponent.bboxH],
 			source: 'bright-family',
 			digits: [],
+			rawLabel: '5',
+			digitCount: 1,
 			label: '5',
+			bestLabel: '5',
 			labelCandidates: [{ label: 5, confidence: 1 }],
-			confidence: 1
+			confidence: 1,
+			abstentionReason: null,
+			confidenceFloor: 0.1,
+			conflictWith: [],
+			notes: []
 		};
 		const knownPadComponent = componentAt(15, 185);
 		const knownTee: TeeEvidence = {
@@ -583,9 +597,16 @@ describe('teeRecovery discovery has no spatial prefilter (owner design, 2026-08-
 			bbox: [badgeComponent.bboxX, badgeComponent.bboxY, badgeComponent.bboxW, badgeComponent.bboxH],
 			source: 'bright-family',
 			digits: [],
+			rawLabel: '9',
+			digitCount: 1,
 			label: '9',
+			bestLabel: '9',
 			labelCandidates: [{ label: 9, confidence: 1 }],
-			confidence: 1
+			confidence: 1,
+			abstentionReason: null,
+			confidenceFloor: 0.1,
+			conflictWith: [],
+			notes: []
 		};
 		const knownPadComponent = componentAt(15, 135);
 		const knownTee: TeeEvidence = {

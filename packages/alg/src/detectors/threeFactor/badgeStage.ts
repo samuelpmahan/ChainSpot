@@ -49,6 +49,7 @@ export interface BadgeStageKnobs {
 	readonly plateProximityThreshold: number;
 	readonly plateBboxMargin: number;
 	readonly badgeInsidePadding: number;
+	readonly plateFrameTolerancePx: number;
 }
 
 export const DEFAULT_BADGE_STAGE_KNOBS: BadgeStageKnobs = {
@@ -68,7 +69,14 @@ export const DEFAULT_BADGE_STAGE_KNOBS: BadgeStageKnobs = {
 	plateGlyphFractionMax: 0.4,
 	plateProximityThreshold: 22,
 	plateBboxMargin: 4,
-	badgeInsidePadding: 3
+	badgeInsidePadding: 3,
+	// C1 (docs/seven-whys/g1-badge-digit-garbage.md): raster-cell allowance for
+	// "a bright component reaches all 4 edges of the measured plate interior"
+	// -- a digit glyph never spans the full interior on every axis, only the
+	// plate's own printed rim does. Raster geometry, not a size threshold
+	// (footgun law): 2px covers anti-aliasing without ever letting a genuine
+	// digit (inset 3-4px per the forensic table) qualify as the frame.
+	plateFrameTolerancePx: 2
 };
 
 export interface BadgeStageResult {
@@ -82,6 +90,11 @@ export interface BadgeStageResult {
 	badgeSources: ('bright-family' | 'dark-plate-recovery')[];
 	plateBboxes: (readonly [number, number, number, number] | null)[];
 	badgeCount: number;
+	/** C1 provenance: the exact plate-geometry knobs used to measure each
+	 * `plateBbox`'s interior, threaded down so glyph extraction can
+	 * positively identify the plate's own frame (see digits/badgeGlyph.ts). */
+	plateInteriorMarginPx: number;
+	plateFrameTolerancePx: number;
 }
 
 /** Existing badge-family decision over already materialized mask/component evidence. */
@@ -204,6 +217,8 @@ export function runBadgeStage(
 		badges,
 		badgeSources,
 		plateBboxes,
-		badgeCount: badges.length
+		badgeCount: badges.length,
+		plateInteriorMarginPx: knobs.plateInteriorMargin,
+		plateFrameTolerancePx: knobs.plateFrameTolerancePx
 	};
 }

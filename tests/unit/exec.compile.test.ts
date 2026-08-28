@@ -42,9 +42,13 @@ const straightTestOnResolved = resolveConfig(
 // axisToleranceDeg knob (soft ceiling, default 3 -- the strict target itself:
 // see g3.teeRecovery.ts for the null-result empirical finding on the
 // post-dc96000 corpus) moves this pin again. 2026-08-28: phantomTee's
-// maxCompletions knob (owner one-hole budget) moves it once more.
+// maxCompletions knob (owner one-hole budget) moves it once more. 2026-08-28:
+// the G1 OCR fix contract (docs/seven-whys/g1-badge-digit-garbage.md) adds
+// g1.badges' plateFrameTolerancePx (C1 frame-exclusion provenance) and
+// g1.digits' confidenceFloorDivisor/labelAmbiguityMargin (C4 derived-floor/
+// ambiguity provenance) -- new knobs move this pin again, consciously.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'16f7113a4858770aea70ea922526468520c23e1093922698564273446f935823';
+	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

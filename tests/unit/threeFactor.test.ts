@@ -112,12 +112,19 @@ function badge(): BadgeEvidence {
 		bbox: [6, 6, 5, 5],
 		source: 'bright-family',
 		digits: [],
+		rawLabel: '1',
+		digitCount: 1,
 		label: '1',
+		bestLabel: '1',
 		labelCandidates: [
 			{ label: 1, confidence: 0.9 },
 			{ label: 7, confidence: 0.1 }
 		],
-		confidence: 0.9
+		confidence: 0.9,
+		abstentionReason: null,
+		confidenceFloor: 0.1,
+		conflictWith: [],
+		notes: []
 	};
 }
 

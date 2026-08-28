@@ -52,6 +52,18 @@ export interface DigitEvidence {
 	readonly normalized: Uint8Array;
 }
 
+/** Fix contract C4 (docs/seven-whys/g1-badge-digit-garbage.md): named,
+ * machine-readable reasons a badge read is not emitted as a label, mirroring
+ * old-stuff's `BadgeGlyphAbstention` plus the two failure modes this contract
+ * closes (`too-many-digits`, `leading-zero`) and C5's `collision`. */
+export type BadgeAbstentionReason =
+	| 'empty-glyph'
+	| 'low-score'
+	| 'ambiguous'
+	| 'too-many-digits'
+	| 'leading-zero'
+	| 'collision';
+
 export interface BadgeEvidence {
 	readonly detId: string;
 	readonly component: ComponentStats;
@@ -61,9 +73,42 @@ export interface BadgeEvidence {
 	readonly plateBbox?: readonly [number, number, number, number];
 	readonly source: 'bright-family' | 'dark-plate-recovery';
 	readonly digits: readonly DigitEvidence[];
+	/** Raw concatenated digit predictions before any rejection (C2/C3), e.g.
+	 * `"1868"`, `"03"` — preserved for the receipt even when rejected. */
+	readonly rawLabel: string;
+	/** Segmented digit count before any rejection (receipt `digits` column). */
+	readonly digitCount: number;
+	/** Final emitted hole label, or `null` when UNREAD/CONFLICT (C2/C3/C5) —
+	 * never a guess, never the raw out-of-vocabulary string. */
 	readonly label: string | null;
+	/** The label the detector WOULD have emitted absent abstention/collision
+	 * (old-stuff's `bestLabel`, C4) — retained so the receipt can show what a
+	 * rejected read would have said. Null only when no candidate exists at all
+	 * (e.g. empty glyph). */
+	readonly bestLabel: string | null;
 	readonly labelCandidates: readonly { label: number; confidence: number }[];
+	/** Classifier margin (Math.min per-digit margin), NOT overloaded with a
+	 * geometric fill fraction (C4) — Infinity when there were no digits to
+	 * score, in which case see `fillFraction`. */
 	readonly confidence: number;
+	/** Geometric dark-mask fill fraction for a no-digit dark-plate badge; a
+	 * fill ratio and a classifier margin are different quantities and must
+	 * not share the `confidence` field (C4). Undefined when digits were
+	 * segmented (confidence is a real margin in that case). */
+	readonly fillFraction?: number;
+	/** Null when the read stands (verdict OK); named reason otherwise (C4). */
+	readonly abstentionReason: BadgeAbstentionReason | null;
+	/** The derived confidence floor applied to THIS run (C4 provenance) —
+	 * same value on every badge in one `makeBadges` call. */
+	readonly confidenceFloor: number;
+	/** Other badges' detIds this badge's (would-be) label collides with (C5);
+	 * empty when no collision. Populated on BOTH the winner and the loser(s)
+	 * so the receipt never silently ships a resolved collision. */
+	readonly conflictWith: readonly string[];
+	/** segmentDigits' notes (dropped-blob lines, valley-split lines) that
+	 * apply to this badge's glyph — forwarded verbatim so a non-OK verdict
+	 * always carries its own explanation (C6). */
+	readonly notes: readonly string[];
 }
 
 export interface BasketEvidence {

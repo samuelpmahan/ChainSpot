@@ -262,15 +262,24 @@ describe('Heritage gate sweep', () => {
 });
 
 // ---------------------------------------------------------------------
-// Lenard — measured: G1 16/18, G2 18/18, G3 17/18, G4 16/18.
+// Lenard — measured (post G1 OCR fix, docs/seven-whys/g1-badge-digit-garbage
+// .md, 2026-08-28): G1 18/18, G2 18/18, G3 17/18, G4 18/18.
 // The "documented falsifier" per old codex port specs, but on THIS engine
-// it clears G2 cleanly; G1, G3, and G4 show real misses.
+// it clears G2 cleanly; G3 still shows a real miss (unrelated to OCR — a
+// tee-position gap, not a badge-digit gap). G1 and G4 were PINNED here as
+// `test.fails` documenting the exact garbage this OCR fix repairs: badge-3's
+// raw "17" collided with badge-15's genuine "17", and badge-9 misread as a
+// spurious 4-digit "2912" — both silently dropped H5 and H12 from every
+// downstream gate. Consciously updated to real assertions now that the fix
+// (C1-C6) repairs both to 18/18, matching the ledger's row 16 lesson: count
+// coverage, not row counts, and prove it against real assertions once the
+// underlying defect is gone rather than leaving them pinned as `test.fails`.
 // ---------------------------------------------------------------------
 describe('Lenard gate sweep', () => {
 	const spec = findSpec('Lenard');
 
-	test.fails(
-		'G1 — badge count + digit reads (measured: digits 16/18, missing H5,H12; one badge misread as a spurious 4-digit label)',
+	test(
+		'G1 — badge count + digit reads (post-fix: 18/18, no collision, no out-of-vocab label)',
 		async () => {
 			const { run, truth } = await getCourseRun(spec);
 			const s = g1Scoreboard(spec.name, run, truth);
@@ -292,8 +301,8 @@ describe('Lenard gate sweep', () => {
 		expect(s.matched).toBe(s.expected);
 	}, 30000);
 
-	test.fails(
-		'G4 — tee->badge assignment (measured: assignedExact 16/18, misses H5,H12 — both no-assignment)',
+	test(
+		'G4 — tee->badge assignment (post-fix: assignedExact 18/18, no misses)',
 		async () => {
 			const { run, truth } = await getCourseRun(spec);
 			const s = g4Scoreboard(spec.name, run, truth);

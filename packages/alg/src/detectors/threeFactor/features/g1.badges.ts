@@ -95,6 +95,10 @@ export const g1BadgesFeature = {
 		badgeInsidePadding: {
 			default: 3,
 			note: 'padding (px) around a badge bbox for the tee-candidate exclusion test in measure.ts makeTees; the rejection reason string is templated from this value (was hard-coded "+3px pad" — see file header)'
+		},
+		plateFrameTolerancePx: {
+			default: 2,
+			note: 'C1 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: raster-cell allowance for a dark-plate badge\'s bright component to count as "reaching" an edge of the measured plate interior (plateBbox inset by plateInteriorMargin) when digits/badgeGlyph.ts positively identifies the plate\'s own printed frame; digit glyphs are inset 3-4px so 2px never admits a real digit'
 		}
 	}
 } satisfies ABFeature;

@@ -78,6 +78,15 @@ export interface DigitsKnobs {
 	readonly valleySearchHi: number;
 	readonly digitW: number;
 	readonly digitH: number;
+	/** Not read by any function in this file — measure.ts's makeBadges reads
+	 * it (C4 fix contract: derived confidence-floor divisor). Bundled here
+	 * anyway, same precedent as digitW/digitH, so one shared g1.digits knobs
+	 * object mirrors the feature's full knob set (see threeFactorConfig.test
+	 * .ts's DEFAULT_*_KNOBS mirror invariant). */
+	readonly confidenceFloorDivisor: number;
+	/** Not read by any function in this file — measure.ts's makeBadges reads
+	 * it (C4 fix contract: ambiguity-abstention margin). Same as above. */
+	readonly labelAmbiguityMargin: number;
 }
 
 export const DEFAULT_DIGITS_KNOBS: DigitsKnobs = {
@@ -87,7 +96,9 @@ export const DEFAULT_DIGITS_KNOBS: DigitsKnobs = {
 	valleySearchLo: 0.3,
 	valleySearchHi: 0.7,
 	digitW: 24,
-	digitH: 32
+	digitH: 32,
+	confidenceFloorDivisor: 8,
+	labelAmbiguityMargin: 0.045
 };
 
 export interface DigitCandidate {
