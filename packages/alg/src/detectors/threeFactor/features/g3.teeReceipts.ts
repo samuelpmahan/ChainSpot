@@ -135,6 +135,7 @@ export const TEE_RECOVERY_RENDER: FeatureRender = {
 				'phase: G4 post-assignment recovery; normal assignment evidence is consumed before this unit and rerun after accepted shards.',
 				'C1S=solid 10m; C2D=dashed 20m. Traversed local-component fields: UNKNOWN -- none were emitted in this trace.',
 				'acceptance: every non-occluded visible component pixel must contribute to one course-local hollow tee support whose major axis is within 3 degrees of the numbered badge ray.',
+				'localization is separate from acceptance: a single detector-owned component spanning both course-local pad axes owns the displayed center/axis through its exact PCA testimony; small or split shards retain the badge-constrained support fit.',
 				'missing expected tee pixels are UNKNOWN and neutral; OPAQUE pixels are excluded, while ALPHA pixels remain evidence.',
 				'appearance: UNKNOWN beyond the accepted visible white component and calculated tee corners.',
 				'visual standard: exact green shard pixels, four pad-axis-aligned cyan corner plus signs, and two one-pixel red corner diagonals whose intersection exposes the fitted center.',

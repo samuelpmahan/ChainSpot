@@ -244,7 +244,7 @@ describe('LAB sweep receipt seam', () => {
 			teeFamilyUnit?.drawables.filter((drawable) => drawable.ref?.endsWith(':ring-interior')) ?? [];
 
 		expect(detectedBadgeCount).toBe(18);
-		expect(acceptedVisibleTeeCount).toBe(16);
+		expect(acceptedVisibleTeeCount).toBe(15);
 		expect(basketUnit).toMatchObject({ featureId: 'sprite' });
 		expect(basketUnit?.featureIds).toContain('sprite');
 		expect(teeUnit).toMatchObject({ featureId: 'endpoints' });
@@ -260,11 +260,11 @@ describe('LAB sweep receipt seam', () => {
 					typeof drawable.values?.frameAngleRad === 'number'
 			)
 		).toBe(true);
-		expect(padAabbs).toHaveLength(16);
-		expect(ringInteriors).toHaveLength(16);
+		expect(padAabbs).toHaveLength(15);
+		expect(ringInteriors).toHaveLength(15);
 		expect(
 			teeFamilyUnit?.drawables.filter((drawable) => drawable.verdict === 'rejected')
-		).toHaveLength(1);
+		).toHaveLength(2);
 		expect(result.trace.execution).toEqual([
 			'badgeStage',
 			'badges',
@@ -276,9 +276,9 @@ describe('LAB sweep receipt seam', () => {
 		expect(result.featureRenders.results).toHaveLength(1);
 		expect(endpointRender?.receiptText).toContain('badges: 18');
 		expect(endpointRender?.receiptText).toContain('basketSemanticTips: 18');
-		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 16');
+		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 15');
 		expect(endpointRender?.receiptText).toContain(
-			'expectedRecoverNum: 2 (math: max(0, badges - visibleTeeBorders))'
+			'expectedRecoverNum: 3 (math: max(0, badges - visibleTeeBorders))'
 		);
 		const teeVisualReceipt = result.runReceipt.visualRenders.find(
 			(render) => render.kind === 'feature' && render.id === 'run.endpoint-summary'
@@ -328,7 +328,7 @@ describe('LAB sweep receipt seam', () => {
 		expect(endpointRender?.filesWritten).toHaveLength(2);
 		expect(endpointRender?.filesWritten.every(existsSync)).toBe(true);
 		expect(endpointRender?.receiptText).toContain('basketSemanticTips: 18');
-		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 16');
+		expect(endpointRender?.receiptText).toContain('visibleTeeBorders: 15');
 		expect(endpointRender?.receiptText).toContain(
 			'coordinateTransform: canonical = original + (0,-4)'
 		);

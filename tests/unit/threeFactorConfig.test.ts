@@ -26,7 +26,10 @@ import {
 	DEFAULT_SCORING_KNOBS,
 	DEFAULT_ZFIT_KNOBS
 } from '@chainspot/alg/detectors/threeFactor/scoring';
-import { assignThreeFactor, DEFAULT_SEARCH_KNOBS } from '@chainspot/alg/detectors/threeFactor/assignment';
+import {
+	assignThreeFactor,
+	DEFAULT_SEARCH_KNOBS
+} from '@chainspot/alg/detectors/threeFactor/assignment';
 import type { ZfitKnobs } from '@chainspot/alg/detectors/threeFactor/scoring';
 import { DEFAULT_RIBBON_KNOBS } from '@chainspot/alg/detectors/threeFactor/ribbon';
 import { DEFAULT_ROUTING_KNOBS } from '@chainspot/alg/detectors/threeFactor/routing';
@@ -37,6 +40,7 @@ import { DEFAULT_DIGITS_KNOBS } from '@chainspot/alg/detectors/threeFactor/digit
 import { DEFAULT_HSV_KNOBS } from '@chainspot/alg/detectors/threeFactor/raster';
 import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 import zfitOnJson from '@chainspot/alg/detectors/threeFactor/configs/zfit-on.json';
+import minAreaPoseOnJson from '@chainspot/alg/detectors/threeFactor/configs/tee-min-area-pose-on.json';
 import type { RgbaRaster } from '@chainspot/alg/detect';
 
 function tinyRaster(): RgbaRaster {
@@ -70,6 +74,7 @@ describe('parseConfig', () => {
 	test('accepts the shipped configs', () => {
 		expect(() => parseConfig(defaultConfigJson)).not.toThrow();
 		expect(() => parseConfig(zfitOnJson)).not.toThrow();
+		expect(() => parseConfig(minAreaPoseOnJson)).not.toThrow();
 	});
 
 	test('rejects unknown top-level keys (typo protection)', () => {
@@ -215,6 +220,7 @@ describe('validateRoutingRingQuantum (g5.routing / g5.ribbon cross-feature invar
 describe('resolveConfig + engine', () => {
 	test('default config resolves to registry defaults and PINNED hash', async () => {
 		const resolved = resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION);
+		expect(resolved.features.teeMinAreaPose).toBeUndefined();
 		expect(resolved.features['zfit']).toEqual({
 			enabled: false,
 			knobs: {
@@ -237,7 +243,13 @@ describe('resolveConfig + engine', () => {
 		const hash = await sha256Hex(canonicalJson(resolved));
 		// Pinned: changing any registry default or the execution list must
 		// force a conscious update here.
-		expect(hash).toBe('cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7');
+		expect(hash).toBe('bb53203cbf82cd9b68471251d6fadbb9d515a00e2b18241e0982c10a51d3e2d9');
+	});
+
+	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {
+		const on = resolveConfig(parseConfig(minAreaPoseOnJson), DEFAULT_EXECUTION);
+		expect(on.execution).toContain('teeMinAreaPose');
+		expect(on.features.teeMinAreaPose).toEqual({ enabled: true, knobs: {} });
 	});
 
 	test('config path is byte-identical to the bare path on defaults', async () => {

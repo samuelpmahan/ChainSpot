@@ -1,0 +1,25 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-badge-lock-on",
+	"note": "A/B deviation: independently lock each numbered badge to at most one tee from exact reversed teeLeg testimony. Frozen execution remains unchanged when omitted; this opt-in inserts teeBadgeLock after teeRecovery and before zfit.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery",
+		"teeBadgeLock",
+		"zfit"
+	],
+	"gates": {
+		"G4": {
+			"teeBadgeLock": { "enabled": true }
+		}
+	}
+}

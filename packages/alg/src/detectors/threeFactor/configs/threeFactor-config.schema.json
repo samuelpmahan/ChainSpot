@@ -5,10 +5,7 @@
 	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
 	"type": "object",
 	"additionalProperties": false,
-	"required": [
-		"schema",
-		"name"
-	],
+	"required": ["schema", "name"],
 	"properties": {
 		"$schema": {
 			"type": "string"
@@ -39,7 +36,9 @@
 					"zfit",
 					"phantomTee",
 					"teeFamily",
+					"teeMinAreaPose",
 					"teeRecovery",
+					"teeBadgeLock",
 					"cleanBasketFamily",
 					"straightTest"
 				]
@@ -431,12 +430,7 @@
 										"dilationRadii": {
 											"type": "array",
 											"description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
-											"default": [
-												0,
-												1,
-												2,
-												3
-											]
+											"default": [0, 1, 2, 3]
 										},
 										"largeRadiiThreshold": {
 											"type": "number",
@@ -505,7 +499,7 @@
 						"teeFamily": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area. Shard recovery is a separate phase.",
+							"description": "Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area/fill. Incomplete frames remain missing for shard recovery.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
@@ -549,8 +543,29 @@
 											"type": "number",
 											"description": "same tolerance, applied to frame area (LAB: log(1.5))",
 											"default": 1.5
+										},
+										"fillRatioToleranceFactor": {
+											"type": "number",
+											"description": "course-local intactness tolerance for bright-component fill; calibrated on Dashs H12 to reject the basket-occluded 0.611 frame while retaining the next-lowest visible frame at 0.711 (dataset-fit estimate, not physics)",
+											"default": 1.25
 										}
 									}
+								}
+							}
+						},
+						"teeMinAreaPose": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Blind G3 intact-visible tee pose from the minimum-area rectangle enclosing exact detector-owned unit cells. It is not a literal OpenCV contour result: the unit-cell envelope intentionally differs from contour-point extents.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
 								}
 							}
 						}
@@ -590,6 +605,22 @@
 								"enabled": {
 									"type": "boolean",
 									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
+								}
+							}
+						},
+						"teeBadgeLock": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
 								},
 								"knobs": {
 									"type": "object",
@@ -769,14 +800,7 @@
 										"widthsSrc": {
 											"type": "array",
 											"description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
-											"default": [
-												24,
-												32,
-												40,
-												48,
-												56,
-												64
-											]
+											"default": [24, 32, 40, 48, 56, 64]
 										},
 										"alignmentPower": {
 											"type": "number",
@@ -1046,17 +1070,7 @@
 										"bendAngles": {
 											"type": "array",
 											"description": "bend angle samples (degrees) tried at each zfit waypoint",
-											"default": [
-												-60,
-												-45,
-												-30,
-												-20,
-												0,
-												20,
-												30,
-												45,
-												60
-											]
+											"default": [-60, -45, -30, -20, 0, 20, 30, 45, 60]
 										},
 										"bendLengthShort": {
 											"type": "number",

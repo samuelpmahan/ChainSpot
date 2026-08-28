@@ -21,8 +21,10 @@ import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
 import { phantomTeeUnit } from './features/g3.phantomTee';
 import { teeFamilyUnit } from './features/g3.teeFamily';
+import { teeMinAreaPoseUnit } from './features/g3.teeMinAreaPose';
 import { teeRecoveryUnit } from './features/g3.teeRecovery';
 import { straightTestUnit } from './features/st.straightTest';
+import { teeBadgeLockUnit } from './features/g4.teeBadgeLock';
 import { OcclusionDetector } from './occlusion';
 import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
@@ -103,7 +105,9 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	zfitUnit,
 	phantomTeeUnit,
 	teeFamilyUnit,
+	teeMinAreaPoseUnit,
 	teeRecoveryUnit,
+	teeBadgeLockUnit,
 	cleanBasketFamilyUnit,
 	straightTestUnit
 ];
@@ -133,7 +137,8 @@ export const SEEDED_SLOTS: readonly string[] = [
 export function createTraceContext(
 	resolved: ResolvedConfig,
 	paramsHash: string,
-	operations: readonly OperationSpec[] = []
+	operations: readonly OperationSpec[] = [],
+	metadata: Pick<RunTrace, 'runId' | 'imageId' | 'traceHash' | 'canonicalFrame'> = {}
 ): {
 	ctx: FeatureContext;
 	trace: RunTrace;
@@ -194,6 +199,7 @@ export function createTraceContext(
 	const trace: RunTrace = {
 		configName: resolved.name,
 		paramsHash,
+		...metadata,
 		execution: resolved.execution,
 		features: resolved.features,
 		units: [],

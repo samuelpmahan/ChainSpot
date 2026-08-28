@@ -121,18 +121,24 @@ export interface DrawableBase {
 	readonly ref?: string;
 	/** small numeric payload rendered in tooltips */
 	readonly values?: Record<string, number>;
+	/** Literal producer provenance that is not a measurement (for example,
+	 * contributor references or an explicit UNKNOWN). Render selectors forward
+	 * this verbatim and must not synthesize or reinterpret it. */
+	readonly metadata?: Readonly<Record<string, string>>;
 	/** Presentation intent carried by the detector trace, never inferred from
 	 * a magic ref string. It cannot change a verdict or semantic cardinality. */
 	readonly visualRole?:
 		| 'badge-pixels'
 		| 'basket-tip'
+		| 'tee-visible-pixels'
 		| 'tee-border'
 		| 'tee-center'
 		| 'tee-shard'
 		| 'tee-corner-tick'
 		| 'tee-diagonal'
 		| 'tee-rejection'
-		| 'phantom-center';
+		| 'phantom-center'
+		| 'tee-badge-path';
 }
 
 export interface PointDrawable extends DrawableBase {
@@ -210,6 +216,7 @@ export interface RunTrace {
 	/** Deterministic semantic trace digest. It intentionally excludes timers
 	 * and heatmap payload bytes so equivalent reviewed testimony hashes alike. */
 	readonly traceHash?: string;
+	readonly canonicalFrame?: string;
 	readonly execution: readonly string[];
 	/** Exact feature states used by the run. Unit ids are not feature ids: the
 	 * `tees` unit, for example, reads the `endpoints` feature's knobs. */
@@ -328,7 +335,8 @@ export type EvidenceSlot =
 	| 'recoveredTees'
 	| 'straightProposals'
 	| 'straightTestTruthAssistance'
-	| 'assignment';
+	| 'assignment'
+	| 'teeBadgeLock';
 
 export interface EvidenceBoard {
 	get<T>(slot: EvidenceSlot): T;

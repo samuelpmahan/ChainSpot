@@ -32,13 +32,17 @@ const straightTestOnResolved = resolveConfig(
 	straightTestOnConfigJson as ThreeFactorConfig,
 	DEFAULT_EXECUTION
 );
+// Intentional baseline evolution: teeRecovery now republishes its final
+// assignment tee/route inventory for downstream G7 custody. The default-OFF
+// straightTest, teeMinAreaPose, and teeBadgeLock operations remain excluded
+// from this fingerprint until explicitly configured.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'fdff6359168b52179ecf3ed3ca159fc1c61ccdc9881497af850035263f743d51';
+	'f8b788089a0b2072c8e75bf5f741ded82186b2b0bd84539cb36f76b8edf98302';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(15); // prior inventory + early G5 straightTest unit
-		expect(OPERATION_UNIVERSE.length).toBe(22); // prior universe + one S0 operation
+		expect(UNIT_OPERATIONS.size).toBe(17); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock
+		expect(OPERATION_UNIVERSE.length).toBe(24); // prior universe + three single-operation units
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
