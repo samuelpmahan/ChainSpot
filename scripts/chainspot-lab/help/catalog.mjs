@@ -121,6 +121,20 @@ export const HELP_CATALOG = Object.freeze([
     caveats: ['Raw capture(s) are canonicalized through StripChrome/AutoStitch first. `scope full` is canonical, not raw.'],
     subtopics: ['scope/hole', 'scope/full', 'scope/mark', 'scope/dots', 'scope/path', 'scope/manifest', 'scope/contact-sheet', 'scope/templates']
   }),
+  record('digits', {
+    kind: 'command', group: 'LOOK', title: 'DIGITS — Dev6 digit-read scoreboard (truth-free)',
+    summary: 'Run the fast public detectBadges seam and print a per-badge verdict table: OK/GARBAGE-LABEL/LOW-CONFIDENCE/COLLISION/UNREAD.',
+    forms: ['lab digits', 'lab digits COURSE', 'lab digits all', 'lab digits [...] --crops'],
+    options: [
+      option('--crops', 'Write a labeled contact sheet of every FAILING badge crop, one image per course.'),
+      option('--floor', 'Override the advisory LOW-CONFIDENCE floor.', { value: 'N', defaultValue: '0.5', constraints: 'number in [0, 1]; see scoreboard/verdict.ts for provenance' }),
+      option('--out', 'Write crop sheets under this directory.', { value: 'DIR', defaultValue: 'artifacts/digits' })
+    ],
+    examples: ['lab digits', 'lab digits AlexClark', 'lab digits all --crops'],
+    sideEffects: ['With --crops, writes rendered PNG crops and a labeled contact-sheet PNG per course under the output directory.'],
+    outputs: ['Per-badge verdict table and per-course summary line to stdout; nonzero exit code if any requested badge is non-OK.'],
+    caveats: ['Runs ONLY the G1 badge stage plus digit reading (no baskets/tees/support field/assignment) — fast, but not the full pipeline. No Annotation truth is ever consulted.']
+  }),
   record('scope/hole', {
     parent: 'scope', aliases: ['scope/hn'], title: 'SCOPE HN — configured blind viewport', summary: 'Inspect a selected course hole; blind by default.', availability: AVAILABILITY.CLI_ONLY,
     forms: ['lab scope hN [--truth] [view flags]', 'lab scope --hole N IMAGE ANNOTATION.json [view flags]'],
@@ -283,6 +297,7 @@ export const RECOGNIZED_EXECUTION_SURFACE = Object.freeze({
   options: Object.freeze({
     ui: ['--port', '--no-open'],
     scope: ['--truth', '--out', '--name', '--template', '--color', '--hole', '--manifest', '--case', '--out-dir', ...scopeViewOptions.map((entry) => entry.name)],
+    digits: ['--crops', '--floor', '--out'],
     search: ['--page', '--color', '--ttl', '--style', ...searchViewOptions.map((entry) => entry.name)],
     traverse: ['--radius', '--page', '--annotation', '--start', '--xy', '--polar', '--tile-out', '--no-grid'],
     sweep: ['--through'],
