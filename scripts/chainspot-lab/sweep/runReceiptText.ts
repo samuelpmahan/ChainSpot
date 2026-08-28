@@ -27,6 +27,15 @@ function probes(receipt: RunReceipt['operations'][number]): string {
 		: receipt.probes.map((probe) => `${probe.name}=${value(probe.value)}`).join(', ');
 }
 
+function truthMatchLine(receipt: RunReceipt): string {
+	if (receipt.intake.truthMatch !== undefined && receipt.intake.truthMatch !== null) {
+		return JSON.stringify(receipt.intake.truthMatch);
+	}
+	return receipt.evaluation.truthSupplied
+		? 'no-match (supplied truth does not correspond to the canonical raster)'
+		: 'not-supplied (no truth JSON was given to this run)';
+}
+
 function conformance(operation: RunReceipt['operations'][number]): string {
 	if (operation.conformance.ok) return 'OK';
 	return `DRIFT missingConsumes=${list(operation.conformance.missingConsumes)} missingProduces=${list(operation.conformance.missingProduces)}`;
@@ -45,7 +54,7 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		`config.path: ${receipt.config.path}`,
 		`config.paramsHash: ${receipt.config.paramsHash}`,
 		`config.planFingerprint: ${receipt.config.planFingerprint}`,
-		`config.throughGate: ${value(receipt.config.throughGate)}`,
+		`config.throughGate: ${receipt.config.throughGate ?? 'full plan (no --through cutoff was requested)'}`,
 		`config.enabledFeatures: ${list(receipt.config.enabledFeatures)}`,
 		`config.deviatingFeatures: ${list(receipt.config.deviatingFeatures)}`,
 		`intake.sources: ${list(receipt.intake.sources)}`,
@@ -60,9 +69,12 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		`intake.autoStitch.hadFallback: ${receipt.intake.autoStitch.hadFallback}`,
 		`intake.autoStitch.placements: ${json(receipt.intake.autoStitch.placements)}`,
 		`intake.ledger: ${json(receipt.intake.ledger)}`,
-		`intake.truthMatch: ${json(receipt.intake.truthMatch)}`,
+		`intake.truthMatch: ${truthMatchLine(receipt)}`,
 		'',
-		'TIMING BREAKDOWN'
+		'TIMING BREAKDOWN',
+		'(provenance: wall-clock performance.now() spans measured by the LAB sweep runner;',
+		' artifactPersistenceMs = max(0, gatewayMs - operationBodyMs), an attribution estimate;',
+		' volatile run measurements, never detector output)'
 	];
 
 	for (const name of [
@@ -136,8 +148,15 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		'assignments',
 		'rawPairs'
 	] as const) {
-		lines.push(`results.${name}: ${value(receipt.results[name])}`);
+		const provenance = receipt.resultsProvenance?.[name];
+		lines.push(
+			`results.${name}: ${value(receipt.results[name])}${provenance ? `  (${provenance})` : ''}`
+		);
 	}
+	lines.push(
+		'baselineComparison: UNKNOWN (not-implemented: no frozen baseline receipt is stored for this config, ' +
+			'so this run cannot honestly state "changed" or "no change" vs a baseline)'
+	);
 
 	lines.push('', 'TRUTH EVALUATION');
 	lines.push(`evaluation.truthSupplied: ${receipt.evaluation.truthSupplied}`);
