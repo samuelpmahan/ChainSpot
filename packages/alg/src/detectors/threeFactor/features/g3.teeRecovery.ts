@@ -148,7 +148,7 @@ export const teeRecoveryFeature = {
 	gate: 'G4',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.',
+	note: 'Frozen baseline geometry: recover tees for numbered badges unclaimed by any visible tee axis when every visible component pixel fits a course-local hollow tee support pointing at that badge; phantom completion remains terminal and default-OFF.',
 	render: teeRecoveryRender,
 	knobs: {
 		axisToleranceDeg: {
@@ -449,9 +449,9 @@ interface RecoveryStage {
 
 interface RecoveryViewport { readonly topPx: number }
 
-/** The recovery producer is deliberately assignment anchored.  These are
- * structural views so callers can pass the normal assignment object without
- * coupling this deviation to the assignment implementation. */
+/** The recovery producer may still re-run assignment after promotion, but
+ * discovery itself no longer trusts assignment ownership to decide which
+ * numbered badges deserve a hunt. */
 export interface TeeRecoveryAssignmentContext {
 	readonly assignments: readonly { readonly badgeId: string; readonly basketId: string }[];
 }
@@ -468,6 +468,80 @@ function numberLabel(badge: BadgeEvidence): number | undefined {
 	if (!/^\d+$/.test(badge.label ?? '')) return undefined;
 	const n = Number(badge.label);
 	return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export interface TeeAimClaim {
+	readonly teeId: string;
+	readonly badgeId: string;
+	readonly axisErrorRad: number;
+	readonly distancePx: number;
+}
+
+/** Tee-pad PCA is an axis, not a directed vector: 0° and 180° are the same
+ * testimony. Keep this definition identical to teeBadgeLock's math. */
+function axialAngleDelta(aRad: number, bRad: number): number {
+	const period = Math.PI;
+	const normalized = (value: number) => {
+		const result = value % period;
+		return result < 0 ? result + period : result;
+	};
+	const delta = normalized(aRad) - normalized(bRad);
+	const wrapped = ((((delta + Math.PI / 2) % period) + period) % period) - Math.PI / 2;
+	return Math.abs(wrapped);
+}
+
+/** Same source priority as teeBadgeLock: presentation min-area pose first,
+ * then TeeEvidence.angleRad, then the enclosing component PCA. */
+function teeAxisRad(tee: TeeEvidence): number | undefined {
+	const candidates = [tee.pad?.minAreaPose?.angleRad, tee.angleRad, tee.pad?.angleRad];
+	return candidates.find((value): value is number => typeof value === 'number' && Number.isFinite(value));
+}
+
+/**
+ * Detector-side visible-tee ownership for recovery targeting.
+ *
+ * Each visible tee independently names the numbered badge its own measured
+ * axis best points at. Duplicate claims are intentionally allowed: forcing a
+ * one-to-one matching here would manufacture coverage and could hide the
+ * very orphan recovery is supposed to find. There is no distance cutoff and
+ * no G6 score/ownership input; distance only breaks an exact angular tie.
+ */
+export function deriveTeeAimClaims(
+	badges: readonly BadgeEvidence[],
+	tees: readonly TeeEvidence[]
+): readonly TeeAimClaim[] {
+	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
+	return tees.flatMap((tee) => {
+		const axis = teeAxisRad(tee);
+		if (axis === undefined) return [];
+		const ranked = numbered.map((badge) => {
+			const dx = badge.cxPx - tee.xPx;
+			const dy = badge.cyPx - tee.yPx;
+			const distancePx = Math.hypot(dx, dy);
+			return {
+				teeId: tee.detId,
+				badgeId: badge.detId,
+				axisErrorRad: distancePx === 0 ? Infinity : axialAngleDelta(axis, Math.atan2(dy, dx)),
+				distancePx,
+				hole: numberLabel(badge) ?? Number.MAX_SAFE_INTEGER
+			};
+		}).sort((a, b) =>
+			a.axisErrorRad - b.axisErrorRad ||
+			a.distancePx - b.distancePx ||
+			a.hole - b.hole ||
+			a.badgeId.localeCompare(b.badgeId)
+		);
+		const winner = ranked[0];
+		return winner ? [{ teeId: winner.teeId, badgeId: winner.badgeId, axisErrorRad: winner.axisErrorRad, distancePx: winner.distancePx }] : [];
+	});
+}
+
+export function deriveTeeRecoveryTargets(
+	badges: readonly BadgeEvidence[],
+	tees: readonly TeeEvidence[]
+): readonly BadgeEvidence[] {
+	const claimedBadgeIds = new Set(deriveTeeAimClaims(badges, tees).map((claim) => claim.badgeId));
+	return badges.filter((badge) => numberLabel(badge) !== undefined && !claimedBadgeIds.has(badge.detId));
 }
 
 function exactBasketPixels(
@@ -737,7 +811,7 @@ interface ChromeSubtractionNote {
  * box. "A recoverable tee touches basket N-1" was a baked-in worldview that
  * missed courses whose layout does not chain that way (see the forensic
  * history on targetPredecessors above). Every unowned, non-occluded bright
- * component on the whole canonical raster is a candidate for every missing
+ * component on the whole canonical raster is a candidate for every orphaned
  * numbered badge; the strict acceptance predicate (every visible pixel
  * explained, support >= MIN_SHARD_SUPPORT_PIXELS, axis gate) is the only
  * filter, and it is unchanged. The predicate's own center-intersection bound
@@ -761,8 +835,7 @@ export function buildTeeRecoveryCandidates(
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
-	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	const targets = deriveTeeRecoveryTargets(badges, tees);
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -913,7 +986,7 @@ export const teeRecoveryUnit: EngineUnit = {
 	gate: 'G4',
 	consumes: ['stage', 'badges', 'baskets', 'tees', 'sprites', 'viewport', 'recoveredTees', 'assignment', 'measurement'],
 	produces: ['recoveredTees', 'assignment'],
-	note: 'visible tee-shard recovery by all-visible-pixels badge-pointing tee-support feasibility with exact opaque ownership',
+	note: 'visible tee-shard recovery by all-visible-pixels badge-pointing tee-support feasibility with exact opaque ownership; hunt targets are visible-tee-axis orphans, never G6 ownership gaps',
 	run(board: EvidenceBoard, ctx: FeatureContext) {
 		const stop = ctx.span('teeRecovery');
 		const state = ctx.resolve(teeRecoveryFeature);
@@ -934,10 +1007,10 @@ export const teeRecoveryUnit: EngineUnit = {
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
 		const measurement = board.get<import('../types').ThreeFactorMeasurement>('measurement');
-		const badgeIds = new Set(badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId));
-		const assignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
-		if ([...badgeIds].every((badgeId) => assignedBadgeIds.has(badgeId))) {
-			ctx.measure('teeRecovery', 'missingNumberedTees', 0);
+		const recoveryTargets = deriveTeeRecoveryTargets(badges, tees);
+		ctx.measure('teeRecovery', 'missingNumberedTees', recoveryTargets.length);
+		ctx.measure('teeRecovery', 'visibleAimClaims', deriveTeeAimClaims(badges, tees).length);
+		if (recoveryTargets.length === 0) {
 			board.set('recoveredTees', board.get<readonly RecoveredTeeInput[]>('recoveredTees'));
 			board.set('assignment', assignment);
 			stop();
