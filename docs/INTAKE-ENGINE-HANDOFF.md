@@ -169,11 +169,16 @@ retractions first-class. Agents: update it in the same commit as the work.
   courses (TheRec FULL, and a stitch of TheRec L+R) join the scoreboard
   **gated behind 18 assignments on every Dev6 course**. Current Dev6 standing
   (2026-08-28, default config, truth-free counts): DashsTrack, Lenard, and
-  TowneLake at 18/18 assignments; NorthPark 16 (H14, H16 missed — both have
-  G4-rejected shards failing the 3° badge-ray rule; H7's badge digit reads
-  as garbage "787"@0.002), HeritagePark 15 (H5, H6, H17 missed; H17's digit
-  read is ambiguous 17@0.198 vs 12@0.193), AlexClark 15 (H8, H12, H13
-  missed). Lessons learned here carry into the TheRec challenge.
+  TowneLake at 18/18 assignments; NorthPark 16 (H14, H16 missed; H7's badge
+  digit reads as garbage "787"@0.002), HeritagePark 15 (H5, H6, H17 missed;
+  H17's digit read is ambiguous 17@0.198 vs 12@0.193), AlexClark 15 (H8, H12,
+  H13 missed). Lessons learned here carry into the TheRec challenge.
+  **Superseded (2026-08-28, see Claims Ledger #1/#2):** NorthPark's H14/H16
+  misses are NOT the 3° badge-ray rule rejecting real shards — the rejected
+  candidates were badge digit glyphs (chrome), fixed by `dc96000`; post-fix,
+  NorthPark recovers zero tees at any axis tolerance because the real pads
+  sit outside G4's discovery search bounds (Claims Ledger #3/#5), a separate,
+  still-open bug.
 - Complete-invisibility fallback remains intentionally absent from production:
   `phantomTee` stays OFF until an observed course needs it.
 - Ownership is a downstream conclusion. A localized tee with
@@ -186,6 +191,30 @@ retractions first-class. Agents: update it in the same commit as the work.
 - Browser truth-status coverage combines an operation-level provenance test,
   API payload wiring, and static DOM wiring assertions; there is no browser
   DOM end-to-end test yet.
+- **G4 `teeRecovery` axis-tolerance soft ceiling** (owner policy 2026-08-28,
+  target P100 5° then back to 3°): `teeRecoveryFeature` now carries an
+  `axisToleranceDeg` knob (`packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts`,
+  validated finite number in `[0.5, 90]`) that the strict 3° badge-axis gate
+  (`BADGE_AXIS_TARGET_DEG`, still the debugging TARGET) reads as its operative
+  limit; every run also measures `teeRecovery/axisErrorDeg` per accepted
+  recovery so the receipt shows the achieved distribution the roadmap
+  tightens against. **Empirical finding: NULL RESULT on the current corpus.**
+  A sweep ladder (3/5/10/20/30/45/88°, `./lab sweep`, full table in
+  `artifacts/orchestration/axis-ceiling-progress.md`) across
+  NorthPark/HeritagePark/AlexClark/DashsTrack, run AFTER `dc96000` stopped
+  badge-digit-glyph chrome from masquerading as tee-shard evidence, found
+  every hole the mechanism can currently capture is already captured at the
+  strict 3° target itself — HeritagePark (H10), AlexClark (H10+H11), and
+  DashsTrack (18/18, H3/H5/H12 via recovery) all produce byte-identical
+  recoveredTees/assignments/fitted-centers/axis-errors from 3° through 88°;
+  a direct-engine per-hypothesis check confirmed no accepted center ever
+  falls inside a badge bbox at any tolerance. NorthPark recovers zero tees at
+  every rung (its real pads sit outside G4's discovery search bounds, a
+  separate bug — Claims Ledger #3/#5). Because widening buys nothing real
+  here, **the knob's default stays at 3° (the strict target)** rather than
+  moving; it is landed, validated, wired, and receipted so a future corpus
+  that genuinely needs slack is one config edit away. See Claims Ledger #10
+  for the full claim/receipt/fate row.
 - Later-gate cutoff slicing now has its dependency-complete design (hardened
   contract 3 above). In the frozen default plan the `G4`, `G5`, and `G6`
   cutoffs all run the full 18-operation plan (teeRecovery consumes the first
