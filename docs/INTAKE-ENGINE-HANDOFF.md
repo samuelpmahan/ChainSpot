@@ -47,10 +47,22 @@ occluded shard-supported tees are completed at G4.
    the canonical composite; completely unmatched truth produces neither a
    scoreboard nor grounding evidence, and unmapped truth is never scored in
    raw coordinates.
-3. `lab sweep --through` currently accepts only `G1`, `G2`, and `G3`. The one
-   canonical order continues through `G4` Endpoint Recovery, `G5` Straight
-   Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is
-   infrastructure rather than a scheduled gate.
+3. `lab sweep --through` accepts every gate `G1`-`G7` (2026-08-28). A cutoff
+   is the contiguous chronological prefix of the frozen compiled plan ending
+   at the last scheduled operation semantically owned by the cutoff's
+   cumulative phase — a prefix of a validated order is dependency-complete by
+   construction and leaves every operation's board input byte-identical to
+   the full run (non-contiguous subsets would skip in-place slot rewriters).
+   `G4` is Recovery (Tee + Basket) with the endpoints-complete contract; the
+   `G5` Straight Test cutoff folds in the G6-owned straight-hole assignment
+   operations (the owner's part 2); the `G6` cutoff folds in the terminal
+   `G7` zfit slot (bent pathfinding + refinement). Later-gate operations
+   inside a prefix run as named prerequisites and the receipt says, per
+   FINAL RESULTS metric, `not scheduled (--through GN)` when its producers
+   were cut. The design note lives at the top of
+   `scripts/chainspot-lab/sweep/gateVocabulary.ts`; the slicer is
+   `slicePlanThroughGate` in `scripts/chainspot-lab/sweep/operation.ts`.
+   `shared-set` remains infrastructure rather than a scheduled gate.
 4. Each `UnitTrace` records all operation-bound feature IDs and names the
    primary feature supplying its legacy enabled/knob fields. `baskets` now
    reports `sprite`; `tees` reports `endpoints`.
@@ -140,8 +152,13 @@ Default DashsTrack G3 artifact hashes after hardening:
 - Browser truth-status coverage combines an operation-level provenance test,
   API payload wiring, and static DOM wiring assertions; there is no browser
   DOM end-to-end test yet.
-- Later-gate cutoff slicing needs an explicit dependency-complete design; do
-  not widen the CLI parser beyond `G3` without adding those valid prefixes.
+- Later-gate cutoff slicing now has its dependency-complete design (hardened
+  contract 3 above). In the frozen default plan the `G4` and `G5` cutoffs run
+  the same 18-operation prefix (teeRecovery consumes the first assignment
+  pass, so endpoint completion already needs every straight-test/assignment
+  operation); their receipts and sliced plan fingerprints stay distinct. A
+  cutoff whose own phase owns no scheduled operation is rejected with an
+  error naming the operations that would demonstrate it.
 
 ## Resume safely
 
