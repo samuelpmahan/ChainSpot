@@ -32,16 +32,20 @@ const straightTestOnResolved = resolveConfig(
 	straightTestOnConfigJson as ThreeFactorConfig,
 	DEFAULT_EXECUTION
 );
-// 2026-08-28: zfit dropped from the default schedule by owner directive; the
-// previous 19-operation fingerprint was
-// fdff6359168b52179ecf3ed3ca159fc1c61ccdc9881497af850035263f743d51.
+// 2026-08-28: two deliberate baseline evolutions meet in this pin. zfit was
+// dropped from the default schedule by owner directive (the 19-operation
+// fingerprint was fdff6359...; the zfit-free one was 1bd2666c...), and
+// teeRecovery now republishes its final assignment tee/route inventory for
+// downstream G7 custody (PR #61). The default-OFF straightTest,
+// teeMinAreaPose, and teeBadgeLock operations remain excluded from this
+// fingerprint until explicitly configured.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'1bd2666c180b02301aaf2f11f0cbceed0c4d3587728542d77971bea0ec4d6ed7';
+	'a49f48611ba32c8f1b432a7c88954390ba050d016f1f216c0d23cd775346caf5';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(15); // prior inventory + early G5 straightTest unit
-		expect(OPERATION_UNIVERSE.length).toBe(22); // prior universe + one S0 operation
+		expect(UNIT_OPERATIONS.size).toBe(17); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock
+		expect(OPERATION_UNIVERSE.length).toBe(24); // prior universe + three single-operation units
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',

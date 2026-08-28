@@ -26,7 +26,9 @@ import type {
 import { measureUnits } from '../detectors/threeFactor/measure';
 import { phantomTeeUnit, phantomTeeFeature } from '../detectors/threeFactor/features/g3.phantomTee';
 import { teeFamilyUnit, teeFamilyFeature } from '../detectors/threeFactor/features/g3.teeFamily';
+import { teeMinAreaPoseUnit, teeMinAreaPoseFeature } from '../detectors/threeFactor/features/g3.teeMinAreaPose';
 import { teeRecoveryUnit, teeRecoveryFeature } from '../detectors/threeFactor/features/g3.teeRecovery';
+import { teeBadgeLockOperation } from '../detectors/threeFactor/features/g4.teeBadgeLock';
 import {
 	cleanBasketFamilyUnit,
 	cleanBasketFamilyFeature
@@ -569,6 +571,10 @@ const reusedOps: OperationDef[] = [
 		run: (board, ctx) => phantomTeeUnit.run(asLegacyBoard(board), ctx)
 	},
 	{
+		spec: teeBadgeLockOperation.spec,
+		run: teeBadgeLockOperation.run
+	},
+	{
 		spec: {
 			id: 'teeFamily',
 			kind: 'decide',
@@ -583,16 +589,41 @@ const reusedOps: OperationDef[] = [
 	},
 	{
 		spec: {
+			id: 'teeMinAreaPose',
+			kind: 'decide',
+			gate: 'G3',
+			unit: 'teeMinAreaPose',
+			consumes: teeMinAreaPoseUnit.consumes,
+			produces: teeMinAreaPoseUnit.produces,
+			features: [teeMinAreaPoseFeature.id],
+			note: teeMinAreaPoseUnit.note
+		},
+		run: (board, ctx) => teeMinAreaPoseUnit.run(asLegacyBoard(board), ctx)
+	},
+	{
+		spec: {
 			id: 'teeRecovery',
 			kind: 'decide',
 			gate: 'G4',
 			unit: 'teeRecovery',
 			consumes: teeRecoveryUnit.consumes,
-			produces: teeRecoveryUnit.produces,
+			produces: [...teeRecoveryUnit.produces, 'assignment.tees', 'assignment.rawPairs'],
 			features: [teeRecoveryFeature.id],
 			note: teeRecoveryUnit.note
 		},
-		run: (board, ctx) => teeRecoveryUnit.run(asLegacyBoard(board), ctx)
+		run(board, ctx) {
+			teeRecoveryUnit.run(asLegacyBoard(board), ctx);
+			// Recovery reruns assignment without mutating the immutable G5
+			// measurement. Republish its final inventory and routes into the
+			// downstream assignment slots so G7 never reads the pre-recovery 15-tee
+			// state after G4 has produced an 18-tee assignment.
+			const assignment = board.get<ThreeFactorAssignment>('assignment');
+			board.set('assignment.tees', assignment.tees);
+			board.set(
+				'assignment.rawPairs',
+				assignment.scoredPairs.map((pair) => pair.raw)
+			);
+		}
 	},
 	{
 		spec: {
@@ -642,7 +673,9 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
+	['teeBadgeLock', ['teeBadgeLock']],
 	['teeFamily', ['teeFamily']],
+	['teeMinAreaPose', ['teeMinAreaPose']],
 	['teeRecovery', ['teeRecovery']],
 	['cleanBasketFamily', ['cleanBasketFamily']]
 ]);
@@ -767,5 +800,8 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 				bytes: jsonBytes(assignment.assignments)
 			}
 		];
+	},
+	teeBadgeLock(board) {
+		return [...(teeBadgeLockOperation.extractArtifacts?.(board) ?? [])];
 	}
 };

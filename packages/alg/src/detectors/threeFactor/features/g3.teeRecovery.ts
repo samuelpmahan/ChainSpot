@@ -3,7 +3,7 @@
 // visible pixel can contribute to a course-local tee pointing at the badge.
 
 import type { BadgeEvidence, BasketEvidence, RecoveredTeeInput, TeeEvidence, OrientedQuad, ThreeFactorAssignment } from '../types';
-import type { ComponentStats } from '../components';
+import { statsForPixels, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
 import basketSpriteData from '../assets/basket-sprite.json';
@@ -33,7 +33,12 @@ export interface RecoveryFit {
 
 export interface TeeRecoveryCandidate {
 	readonly id: string;
+	/** Badge-constrained feasibility fit used only for the recovery predicate. */
 	readonly fit: RecoveryFit;
+	/** Independent localization testimony used for corners/center when one
+	 * detector-owned component spans both course-local pad axes. */
+	readonly localizationFit?: RecoveryFit;
+	readonly localizationSource?: 'support-fit' | 'full-span-component-pca';
 	/** Bright pixels belonging to the surviving shard, in candidate coordinates. */
 	readonly fragmentPixels: readonly (readonly [number, number])[];
 	readonly supportingComponentIds: readonly string[];
@@ -57,6 +62,11 @@ export interface TeeRecoveryValues {
 	readonly coordinateFrame: 'original-image';
 	readonly badgeAxisErrorRad?: number;
 	readonly unexplainedVisiblePixels?: number;
+	readonly supportFitCenterXPx?: number;
+	readonly supportFitCenterYPx?: number;
+	readonly localizedCenterXPx?: number;
+	readonly localizedCenterYPx?: number;
+	readonly fullSpanComponentLocalization?: number;
 }
 
 interface RecoveryGeometryOptions {
@@ -147,7 +157,7 @@ function rotate(ring: RecoveryFit, x: number, y: number): readonly [number, numb
 }
 
 function cornersFor(candidate: TeeRecoveryCandidate, options: RecoveryGeometryOptions): OrientedQuad {
-	const ring = candidate.fit;
+	const ring = candidate.localizationFit ?? candidate.fit;
 	const offset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? options.viewportTopPx ?? 0;
 	const raw = [
 		rotate(ring, -ring.halfWidthPx, -ring.halfHeightPx),
@@ -325,6 +335,62 @@ function fitComponent(
 	return best;
 }
 
+/** A component whose measured PCA span covers both course-local pad axes owns
+ * useful center/angle testimony even when its area/fill proves it incomplete.
+ * Smaller or split shards stay on the badge-constrained support fit: their
+ * centroids are not tee centers. The three-cell allowance is raster geometry,
+ * not a course-specific offset. */
+function fullSpanComponentLocalization(
+	component: ComponentStats,
+	halfWidth: number,
+	halfHeight: number,
+	thickness: number
+): RecoveryFit | undefined {
+	const spanAllowance = 3 * RASTER_TOLERANCE_PX;
+	if (
+		component.major + spanAllowance < halfWidth * 2 ||
+		component.minor + spanAllowance < halfHeight * 2
+	) return undefined;
+	return {
+		centerXPx: component.cx,
+		centerYPx: component.cy,
+		halfWidthPx: halfWidth,
+		halfHeightPx: halfHeight,
+		angleRad: component.angle,
+		supportThicknessPx: thickness
+	};
+}
+
+/** Recompute PCA after ownership/occlusion subtraction. ComponentStats from
+ * the global mask may still include pixels now owned by another object, and
+ * those pixels must never influence recovered localization. */
+function exactVisibleStats(
+	label: number,
+	pixels: readonly (readonly [number, number])[]
+): ComponentStats | undefined {
+	if (pixels.length < 2) return undefined;
+	const xs = new Float64Array(pixels.length);
+	const ys = new Float64Array(pixels.length);
+	let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+	for (let index = 0; index < pixels.length; index++) {
+		const [x, y] = pixels[index]!;
+		xs[index] = x;
+		ys[index] = y;
+		minX = Math.min(minX, x);
+		maxX = Math.max(maxX, x);
+		minY = Math.min(minY, y);
+		maxY = Math.max(maxY, y);
+	}
+	return statsForPixels(
+		label,
+		{ xs, ys, count: pixels.length },
+		minX,
+		minY,
+		maxX - minX + 1,
+		maxY - minY + 1
+	) ?? undefined;
+}
+
 function componentPixels(stage: RecoveryStage, component: ComponentStats): [number, number][] {
 	const pixels: [number, number][] = [];
 	for (let y = component.bboxY; y < component.bboxY + component.bboxH; y++) {
@@ -467,11 +533,16 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected;
+	const localized = candidate.localizationFit ?? candidate.fit;
+	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
+	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
+		? '; localization uses the exact centroid/axis of the single detector-owned component spanning both course-local pad axes'
+		: '; localization uses the badge-constrained support fit because the visible evidence is small or split';
 	const pixelEvidence = unexplained.length
 		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
 		: '';
 	const reason = accepted
-		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; search seed ${candidate.seedSource ?? 'UNKNOWN'}`
+		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; search seed ${candidate.seedSource ?? 'UNKNOWN'}${localizationEvidence}`
 		: insufficientSupport
 			? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 			: `${axisRejected
@@ -485,6 +556,11 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 			supportingPixels: support,
 			supportingComponents: componentCount,
 			coordinateFrame: 'original-image',
+			supportFitCenterXPx: candidate.fit.centerXPx,
+			supportFitCenterYPx: candidate.fit.centerYPx + coordinateOffset,
+			localizedCenterXPx: localized.centerXPx,
+			localizedCenterYPx: localized.centerYPx + coordinateOffset,
+			fullSpanComponentLocalization: candidate.localizationSource === 'full-span-component-pca' ? 1 : 0,
 			...(axisError === undefined ? {} : { badgeAxisAlignment: Math.cos(axisError), badgeAxisErrorRad: axisError }),
 			...(unexplained.length ? { unexplainedVisiblePixels: unexplained.length } : {})
 		},
@@ -568,6 +644,12 @@ export function buildTeeRecoveryCandidates(
 			seenGroups.add(groupKey);
 			const pixels = compatible.flatMap((entry) => entry.pixels);
 			const visibleShards = compatible.flatMap((entry) => connectedPixelShards(entry.pixels));
+			const localizationStats = compatible.length === 1 && visibleShards.length === 1
+				? exactVisibleStats(compatible[0]!.component.label, compatible[0]!.pixels)
+				: undefined;
+			const localizationFit = localizationStats
+				? fullSpanComponentLocalization(localizationStats, halfWidth, halfHeight, thickness)
+				: undefined;
 			const teeToBadgeAngleRad = Math.atan2(
 				target.badge.cyPx - (fit.centerYPx + viewportTopPx),
 				target.badge.cxPx - fit.centerXPx
@@ -575,6 +657,8 @@ export function buildTeeRecoveryCandidates(
 			targetCandidates.push({
 				id: `tee-shard-${target.badge.detId}-${groupKey}`,
 				fit,
+				...(localizationFit ? { localizationFit } : {}),
+				localizationSource: localizationFit ? 'full-span-component-pca' : 'support-fit',
 				fragmentPixels: pixels,
 				supportingComponentIds: visibleShards.map((_, index) => `${groupKey}:${index + 1}`),
 				viewportTopPx,

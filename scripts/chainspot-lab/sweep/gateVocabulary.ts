@@ -110,12 +110,12 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 	G3: {
 		phase: 'Visible tees known',
 		ownGates: ['G3'],
-		demonstratedBy: ['tees.ringMeasure', 'tees.exclusion', 'teeFamily']
+		demonstratedBy: ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose']
 	},
 	G4: {
 		phase: 'Recovery (Tee + Basket): all endpoints the run will ever have are on the board',
 		ownGates: ['G4'],
-		demonstratedBy: ['teeRecovery', 'phantomTee']
+		demonstratedBy: ['teeRecovery', 'phantomTee', 'teeBadgeLock']
 	},
 	G5: {
 		phase:

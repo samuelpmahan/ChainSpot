@@ -456,7 +456,11 @@ function scoreG6(
 	assignment: ThreeFactorAssignment,
 	truth: CanonicalTruth
 ): GateScore {
-	const teesById = new Map(measurement.tees.map((t) => [t.detId, t]));
+	// Assignment may contain G4-recovered tees that deliberately are not
+	// retroactively inserted into the immutable G5 measurement. Resolve the
+	// selected IDs against the final assignment inventory, not the pre-recovery
+	// measurement inventory.
+	const teesById = new Map(assignment.tees.map((t) => [t.detId, t]));
 	const basketsById = new Map(measurement.baskets.map((b) => [b.detId, b]));
 	const badgesByLabel = new Map<number, string>();
 	for (const b of measurement.badges) {

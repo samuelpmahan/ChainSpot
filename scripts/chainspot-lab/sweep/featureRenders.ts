@@ -24,6 +24,8 @@ import { dirname, relative, resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { OPERATION_UNIVERSE } from '@chainspot/alg/exec';
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
+import { buildTeeMinAreaPoseReceipt } from '@chainspot/alg/detectors/threeFactor/features/g3.teeMinAreaPoseReceipt';
+import { buildTeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
 import type {
 	ABFeature,
 	Drawable,
@@ -534,7 +536,9 @@ export function renderRunEndpointReceipt(
 	const acceptedBadgeRefs = new Set<string>();
 	for (const badge of acceptedBadges) {
 		if (badge.ref === undefined)
-			warnings.push('accepted badge has no defined ref; exact bright-mask pixels cannot be associated');
+			warnings.push(
+				'accepted badge has no defined ref; exact bright-mask pixels cannot be associated'
+			);
 		else acceptedBadgeRefs.add(badge.ref);
 	}
 	const badgePixels: Drawable[] = [];
@@ -550,11 +554,15 @@ export function renderRunEndpointReceipt(
 			continue;
 		}
 		if (drawable.pixels.length === 0) {
-			warnings.push(`badge pixel set '${drawable.ref}' omitted: trace contains an empty exact pixel set`);
+			warnings.push(
+				`badge pixel set '${drawable.ref}' omitted: trace contains an empty exact pixel set`
+			);
 			continue;
 		}
 		if (!acceptedBadgeRefs.has(drawable.ref)) {
-			warnings.push(`badge pixel set '${drawable.ref}' omitted: ref does not match a defined accepted badge`);
+			warnings.push(
+				`badge pixel set '${drawable.ref}' omitted: ref does not match a defined accepted badge`
+			);
 			continue;
 		}
 		badgePixels.push(drawable);
@@ -562,7 +570,9 @@ export function renderRunEndpointReceipt(
 	const survivingBadgeRefs = new Set(badgePixels.map((drawable) => drawable.ref));
 	for (const badge of acceptedBadges) {
 		if (badge.ref !== undefined && !survivingBadgeRefs.has(badge.ref))
-			warnings.push(`accepted badge '${badge.ref}' omitted: no surviving exact bright-mask pixel set`);
+			warnings.push(
+				`accepted badge '${badge.ref}' omitted: no surviving exact bright-mask pixel set`
+			);
 	}
 
 	const basketUnit = run.units.find((unit) => unit.id === 'baskets');
@@ -577,11 +587,61 @@ export function renderRunEndpointReceipt(
 			visualRole: 'basket-tip'
 		}));
 
+	// Exact visible tee pixels and membership remain teeFamily testimony.  The
+	// default-OFF min-area pose may replace only the cyan/red
+	// presentation pose; a rejected fit therefore cannot make an accepted tee
+	// disappear.
 	const visiblePlan = planForRunFeature(run, 'teeFamily', 'teeFamily');
-	const visible = planDrawables(visiblePlan);
-	const visibleBorders = visible.filter(
+	const minAreaPoseEnabled = run.features.teeMinAreaPose?.enabled === true;
+	const visiblePosePlan = minAreaPoseEnabled
+		? planForRunFeature(run, 'teeMinAreaPose', 'teeMinAreaPose')
+		: visiblePlan;
+	const visible = planDrawables(visiblePosePlan);
+	const visibleTestimony = run.units.find((unit) => unit.id === 'teeFamily')?.drawables ?? [];
+	const visibleBorders = visibleTestimony.filter(
 		(drawable) => drawable.visualRole === 'tee-border' && drawable.verdict === 'accepted'
 	);
+	const acceptedVisibleRefs = new Set<string>();
+	for (const border of visibleBorders) {
+		if (border.ref === undefined)
+			warnings.push(
+				'accepted visible tee has no defined ref; exact white-component pixels cannot be associated'
+			);
+		else acceptedVisibleRefs.add(border.ref);
+	}
+	const visiblePixels: Drawable[] = [];
+	for (const drawable of visibleTestimony) {
+		if (
+			drawable.type !== 'pixelSet' ||
+			drawable.verdict !== 'info' ||
+			drawable.visualRole !== 'tee-visible-pixels'
+		)
+			continue;
+		if (drawable.ref === undefined) {
+			warnings.push('visible tee pixel set omitted: trace has no defined tee ref');
+			continue;
+		}
+		if (drawable.pixels.length === 0) {
+			warnings.push(
+				`visible tee pixel set '${drawable.ref}' omitted: trace contains an empty exact pixel set`
+			);
+			continue;
+		}
+		if (!acceptedVisibleRefs.has(drawable.ref)) {
+			warnings.push(
+				`visible tee pixel set '${drawable.ref}' omitted: ref does not match a defined accepted visible tee`
+			);
+			continue;
+		}
+		visiblePixels.push(drawable);
+	}
+	const survivingVisibleRefs = new Set(visiblePixels.map((drawable) => drawable.ref));
+	for (const border of visibleBorders) {
+		if (border.ref !== undefined && !survivingVisibleRefs.has(border.ref))
+			warnings.push(
+				`accepted visible tee '${border.ref}' omitted: no surviving exact white-component pixel set`
+			);
+	}
 	const visibleDiagonals = visible.filter((drawable) => drawable.visualRole === 'tee-diagonal');
 	const visibleCorners = visible.filter((drawable) => drawable.visualRole === 'tee-corner-tick');
 
@@ -599,6 +659,14 @@ export function renderRunEndpointReceipt(
 	);
 	const straight = straightDrawables(run);
 	const straightAccepted = straight.filter((drawable) => drawable.verdict === 'accepted');
+	const teeBadgeLockUnit = run.units.find((unit) => unit.id === 'teeBadgeLock');
+	const teeBadgeLockReceipt = teeBadgeLockUnit
+		? buildTeeBadgeLockReceipt(teeBadgeLockUnit, run)
+		: undefined;
+	// The producer receipt has already selected accepted tee-badge polylines.
+	// Forward those exact objects as the first unified visual layer; no path
+	// geometry, IDs, or candidate state is reconstructed in Sweep.
+	const teeBadgePaths = teeBadgeLockReceipt?.plan.layers.flatMap((layer) => layer.drawables) ?? [];
 	const gate = endpointGateSpan(run);
 
 	const plan: FeatureRenderPlan = {
@@ -615,6 +683,11 @@ export function renderRunEndpointReceipt(
 					]
 				: []),
 			{
+				name: 'tee→badge ownership locks (G4)',
+				note: 'thin #00a2ff accepted producer-emitted tee→badge paths; exact routed testimony only',
+				drawables: teeBadgePaths
+			},
+			{
 				name: 'badge white pixels (G1)',
 				note: 'yellow exact bright-mask pixels emitted by the badge detector; black badge pixels remain untouched',
 				drawables: badgePixels
@@ -625,9 +698,9 @@ export function renderRunEndpointReceipt(
 				drawables: basketTips
 			},
 			{
-				name: 'visible tee borders (G3)',
-				note: 'exact accepted oriented pad borders, recolored green',
-				drawables: visibleBorders
+				name: 'visible tee white components (G3)',
+				note: 'exact accepted detector-owned bright-mask component pixels, recolored green',
+				drawables: visiblePixels
 			},
 			{
 				name: 'recovered tee visible shards (G4)',
@@ -679,8 +752,11 @@ export function renderRunEndpointReceipt(
 		{ id: 'baskets', gate: 'G2' },
 		{ id: 'tees', gate: 'G3' },
 		{ id: 'teeFamily', gate: 'G3' },
+		{ id: 'teeMinAreaPose', gate: 'G3' },
 		{ id: 'teeRecovery', gate: 'G4' },
-		{ id: 'phantomTee', gate: 'G4' }
+		{ id: 'phantomTee', gate: 'G4' },
+		{ id: 'teeBadgeLock', gate: 'G4' },
+		{ id: 'straightTest', gate: 'G5' }
 	]);
 	const receiptText = [
 		'VISUAL RENDER RECEIPT',
@@ -704,11 +780,14 @@ export function renderRunEndpointReceipt(
 		}`,
 		'',
 		'ACCEPTED ENDPOINT TESTIMONY',
+		`teeBadgeLocks: ${teeBadgePaths.length} (source: accepted producer-emitted tee-badge-path polylines)`,
 		`badges: ${acceptedBadges.length} (source: accepted badge boxes in trace unit 'badges')`,
 		`badgeBrightPixelSets: ${badgePixels.length} (source: info pixelSet drawables with visualRole='badge-pixels')`,
 		`badgeBrightPixels: ${badgePixels.reduce((sum, drawable) => sum + (drawable.type === 'pixelSet' ? drawable.pixels.length : 0), 0)} (source: total cells in surviving exact badge pixel sets)`,
 		`basketSemanticTips: ${basketTips.length}`,
 		`visibleTeeBorders: ${visibleBorders.length}`,
+		`visibleTeePixelSets: ${visiblePixels.length}`,
+		`visibleTeePixels: ${visiblePixels.reduce((sum, drawable) => sum + (drawable.type === 'pixelSet' ? drawable.pixels.length : 0), 0)}`,
 		`expectedRecoverNum: ${
 			expectedRecoverNum === undefined
 				? 'UNKNOWN -- visible tee gate was not scheduled'
@@ -731,14 +810,16 @@ export function renderRunEndpointReceipt(
 		}`,
 		`teeCornerMarks: ${visibleCorners.length + recoveryCorners.length}`,
 		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
+		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
 		'',
 		'VISUAL CONTRACT',
 		'yellow: exact detector-known white/bright badge pixels only (pixelSet; black badge pixels untouched)',
 		'magenta: basket semantic tip (tiny diamond)',
-		'green: exact visible tee border or exact recovered shard pixels',
+		'green: exact detector-owned visible tee white-component pixels or exact recovered shard pixels',
 		'cyan: four pose-aligned tee corner pluses',
 		'red: thinnest opposite-corner X; intersection is fitted center',
 		'violet: assignment-only phantom center; appearance UNKNOWN',
+		'blue: exact accepted tee→badge lock path emitted by teeBadgeLock; thin #00a2ff, no geometry recomputation',
 		'rejections: text only, never drawn over accepted geometry',
 		'',
 		'REJECTIONS RETAINED IN TRACE',
@@ -753,7 +834,16 @@ export function renderRunEndpointReceipt(
 	const all = plan.layers.flatMap((layer) => layer.drawables);
 	const rejectedCount = run.units
 		.filter((unit) =>
-			['baskets', 'tees', 'teeFamily', 'teeRecovery', 'phantomTee', 'straightTest'].includes(unit.id)
+			[
+				'baskets',
+				'tees',
+				'teeFamily',
+				'teeMinAreaPose',
+				'teeRecovery',
+				'phantomTee',
+				'teeBadgeLock',
+				'straightTest'
+			].includes(unit.id)
 		)
 		.flatMap((unit) => unit.drawables)
 		.filter((drawable) => drawable.verdict === 'rejected').length;
@@ -764,25 +854,51 @@ export function renderRunEndpointReceipt(
 		visibleBorders.length +
 		recoveredShards.length +
 		phantomCenters.length;
+	const endpointResult: FeatureRenderResult = {
+		featureId: 'endpointReceipt',
+		unitId: 'run',
+		gate,
+		title: plan.title,
+		drawableCount: all.length,
+		acceptedCount: semanticAcceptedCount,
+		rejectedCount,
+		filesWritten: [pngPath, receiptPath],
+		receiptText,
+		// Union of the receipts-hardening truth ("never ran" is not 0) and the
+		// PR #61 tee→badge lock testimony.
+		summary:
+			`${acceptedBadges.length} badges + ${basketTips.length} baskets + ` +
+			`${visibleBorders.length} visible tees + ` +
+			`${recoveryScheduled ? `${recoveredShards.length} recovered tees` : 'recovery not-scheduled'} + ` +
+			`${teeBadgePaths.length} tee→badge locks in one endpoint image`,
+		warnings
+	};
+	const minAreaPoseUnit = run.units.find((unit) => unit.id === 'teeMinAreaPose');
+	const minAreaPoseFeature = ALL_FEATURES.find((feature) => feature.id === 'teeMinAreaPose');
+	const minAreaPoseResults: FeatureRenderResult[] = [];
+	if (minAreaPoseUnit && run.features.teeMinAreaPose?.enabled && minAreaPoseFeature?.render) {
+		// The unified endpoint poster intentionally carries many endpoints. This
+		// dedicated A/B sidecar is the one-to-one feature proof: its plan and
+		// CLI are both selector projections of the same actual G3 drawables.
+		const minAreaPoseReceipt = buildTeeMinAreaPoseReceipt(minAreaPoseUnit, run);
+		const featureResult = writePlan(
+			minAreaPoseFeature.render.draw(minAreaPoseUnit, run),
+			minAreaPoseFeature,
+			minAreaPoseUnit,
+			input,
+			[]
+		);
+		const cliPath = resolve(outDir, 'feature.teeMinAreaPose.teeMinAreaPose.cli.txt');
+		writeFileSync(cliPath, `${minAreaPoseReceipt.cliText}\n`);
+		minAreaPoseResults.push({
+			...featureResult,
+			filesWritten: [...featureResult.filesWritten, cliPath],
+			receiptText: `${featureResult.receiptText}\nmatched CLI receipt: ${cliPath}`,
+			summary: `${featureResult.summary}; matched CLI receipt uses the same ${minAreaPoseReceipt.rows.length} producer drawables`
+		});
+	}
 	return {
-		results: [
-			{
-				featureId: 'endpointReceipt',
-				unitId: 'run',
-				gate,
-				title: plan.title,
-				drawableCount: all.length,
-				acceptedCount: semanticAcceptedCount,
-				rejectedCount,
-				filesWritten: [pngPath, receiptPath],
-				receiptText,
-				summary:
-					`${acceptedBadges.length} badges + ${basketTips.length} baskets + ` +
-					`${visibleBorders.length} visible tees + ` +
-					`${recoveryScheduled ? `${recoveredShards.length} recovered tees` : 'recovery not-scheduled'} in one endpoint image`,
-				warnings
-			}
-		],
+		results: [endpointResult, ...minAreaPoseResults],
 		unrenderedUnits: [],
 		unmatchedRenders: []
 	};
@@ -806,6 +922,8 @@ const TEE_DIAGONAL_STYLE = { stroke: '#ff2020', fill: 'none', dash: 'none' };
 const PHANTOM_STYLE = { stroke: '#c56bff', fill: 'rgba(197,107,255,0.12)', dash: 'none' };
 const BADGE_PIXELS_STYLE = { stroke: '#ffe11e', fill: 'none', dash: 'none' };
 const BASKET_TIP_STYLE = { stroke: '#ff28dc', fill: 'none', dash: 'none' };
+const TEE_PIXELS_STYLE = { stroke: '#1eff5f', fill: 'none', dash: 'none' };
+const TEE_BADGE_PATH_STYLE = { stroke: '#00a2ff', fill: 'none', dash: 'none' };
 
 function isBadgePixels(drawable: Drawable): boolean {
 	return drawable.type === 'pixelSet' && drawable.visualRole === 'badge-pixels';
@@ -813,6 +931,10 @@ function isBadgePixels(drawable: Drawable): boolean {
 
 function isBasketTip(drawable: Drawable): boolean {
 	return drawable.type === 'point' && drawable.visualRole === 'basket-tip';
+}
+
+function isTeePixels(drawable: Drawable): boolean {
+	return drawable.type === 'pixelSet' && drawable.visualRole === 'tee-visible-pixels';
 }
 
 function isCenterMarker(drawable: Drawable): boolean {
@@ -843,6 +965,10 @@ function isTeeDiagonal(drawable: Drawable): boolean {
 	return drawable.type === 'polyline' && drawable.visualRole === 'tee-diagonal';
 }
 
+function isTeeBadgePath(drawable: Drawable): boolean {
+	return drawable.type === 'polyline' && drawable.visualRole === 'tee-badge-path';
+}
+
 function isPhantomMarker(drawable: Drawable): boolean {
 	return drawable.type === 'point' && drawable.visualRole === 'phantom-center';
 }
@@ -850,19 +976,17 @@ function isPhantomMarker(drawable: Drawable): boolean {
 function styleFor(drawable: Drawable): { stroke: string; fill: string; dash: string } {
 	if (isBadgePixels(drawable)) return BADGE_PIXELS_STYLE;
 	if (isBasketTip(drawable)) return BASKET_TIP_STYLE;
+	if (isTeePixels(drawable)) return TEE_PIXELS_STYLE;
 	if (isPhantomMarker(drawable)) return PHANTOM_STYLE;
 	if (isCenterMarker(drawable)) return TEE_CENTER_STYLE;
 	if (isCornerMarker(drawable)) return TEE_CORNER_STYLE;
 	if (isTeeDiagonal(drawable)) return TEE_DIAGONAL_STYLE;
+	if (isTeeBadgePath(drawable)) return TEE_BADGE_PATH_STYLE;
 	return STYLE[drawable.verdict];
 }
 
 function strokeWidthFor(drawable: Drawable): number {
-	return isBasketTip(drawable) ||
-		isCornerMarker(drawable) ||
-		isTeeDiagonal(drawable)
-		? 1
-		: 2;
+	return isBasketTip(drawable) || isCornerMarker(drawable) || isTeeDiagonal(drawable) || isTeeBadgePath(drawable) ? 1 : 2;
 }
 
 function svgNumber(value: number): string {
@@ -1121,11 +1245,15 @@ function rasterDrawable(
 ): void {
 	const color: readonly [number, number, number] = isPhantomMarker(drawable)
 		? [197, 107, 255]
-			: isBadgePixels(drawable)
-				? [255, 225, 30]
-				: isBasketTip(drawable)
-					? [255, 40, 220]
-					: isTeeDiagonal(drawable)
+		: isBadgePixels(drawable)
+			? [255, 225, 30]
+			: isBasketTip(drawable)
+				? [255, 40, 220]
+				: isTeePixels(drawable)
+					? [30, 255, 95]
+					: isTeeBadgePath(drawable)
+						? [0, 162, 255]
+						: isTeeDiagonal(drawable)
 						? [255, 32, 32]
 						: isCenterMarker(drawable)
 							? [57, 255, 122]
@@ -1273,7 +1401,7 @@ function rasterDrawable(
 		for (let index = 1; index < drawable.path.length; index++) {
 			const [x0, y0] = drawable.path[index - 1];
 			const [x1, y1] = drawable.path[index];
-			if (isTeeDiagonal(drawable)) rasterLineThin(data, width, height, x0, y0, x1, y1, color);
+			if (isTeeDiagonal(drawable) || isTeeBadgePath(drawable)) rasterLineThin(data, width, height, x0, y0, x1, y1, color);
 			else rasterLine(data, width, height, x0, y0, x1, y1, color);
 		}
 		return;

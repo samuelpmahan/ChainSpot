@@ -1,0 +1,27 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-min-area-pose-on",
+	"note": "A/B deviation: retain frozen teeFamily and G4 recovery, then apply a blind exact-component unit-cell minimum-area pose only to accepted intact visible components. This is not literal OpenCV contour parity: unit-cell-envelope extents may differ. Default execution/configuration remains unchanged when omitted.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"teeMinAreaPose",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery",
+		"zfit"
+	],
+	"gates": {
+		"G3": {
+			"teeMinAreaPose": {
+				"enabled": true
+			}
+		}
+	}
+}

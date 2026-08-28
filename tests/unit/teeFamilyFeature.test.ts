@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
 	findEnclosingFrame,
+	exactBrightComponentPixels,
 	orientedPadCorners,
 	selectTeeFamily,
 	teeFamilyFeature,
@@ -23,14 +24,33 @@ const KNOBS: TeeFamilyKnobs = {
 	frameMaxHeight: 50,
 	majorRatioToleranceFactor: 1.25,
 	minorRatioToleranceFactor: 1.25,
-	areaRatioToleranceFactor: 1.5
+	areaRatioToleranceFactor: 1.5,
+	fillRatioToleranceFactor: 1.25
 };
+
+test('exactBrightComponentPixels returns only owned cells with the viewport Y shift', () => {
+	const labels = new Int32Array([0, 7, 7, 3, 0, 7]);
+	expect(exactBrightComponentPixels(labels, 3, 2, 7, 11)).toEqual([
+		[1, 11],
+		[2, 11],
+		[2, 12]
+	]);
+});
 
 function ring(id: string, cx: number, cy: number): TeeFamilyRingPoint {
 	return { id, cx, cy };
 }
 
-function frame(bboxX: number, bboxY: number, bboxW: number, bboxH: number, area: number, major: number, minor: number): TeeFamilyFrame {
+function frame(
+	bboxX: number,
+	bboxY: number,
+	bboxW: number,
+	bboxH: number,
+	area: number,
+	major: number,
+	minor: number,
+	fill = 0.8
+): TeeFamilyFrame {
 	return {
 		componentLabel: 1,
 		bboxX,
@@ -40,7 +60,7 @@ function frame(bboxX: number, bboxY: number, bboxW: number, bboxH: number, area:
 		componentCentroidXPx: bboxX + bboxW / 2 - 0.5,
 		componentCentroidYPx: bboxY + bboxH / 2 - 0.5,
 		area,
-		fill: area / Math.max(1, major * minor),
+		fill,
 		major,
 		minor,
 		angleRad: 0,
@@ -66,10 +86,7 @@ describe('findEnclosingFrame (LAB frameForRing)', () => {
 	});
 
 	test('equal-bbox tie-break: larger area wins', () => {
-		const candidates = [
-			frame(0, 0, 20, 20, 100, 20, 20),
-			frame(0, 0, 20, 20, 150, 20, 20)
-		];
+		const candidates = [frame(0, 0, 20, 20, 100, 20, 20), frame(0, 0, 20, 20, 150, 20, 20)];
 		const picked = findEnclosingFrame(ring('r', 10, 10), candidates, KNOBS);
 		expect(picked?.area).toBe(150);
 	});
@@ -128,6 +145,27 @@ describe('selectTeeFamily (LAB selectTeeFamily) - exact ratio boundaries', () =>
 		expect(family.map((m) => m.ring.id).sort()).toEqual(['b', 's']);
 	});
 
+	test('exactly AT the fill-ratio tolerance boundary (log(1.25)) is IN', () => {
+		const seedFrame = frame(0, 0, 30, 30, 100, 40, 20, 0.8);
+		const boundaryFrame = frame(0, 0, 30, 30, 100, 40, 20, 0.8 / 1.25);
+		const measures = [measure('s', 5, 5, seedFrame), measure('b', 5, 5, boundaryFrame)];
+		const { family } = selectTeeFamily(measures, KNOBS);
+		expect(family.map((m) => m.ring.id).sort()).toEqual(['b', 's']);
+	});
+
+	test('refuses to promote an incomplete frame outside the intact family fill range', () => {
+		const intactA = frame(0, 0, 30, 30, 340, 38, 28, 0.82);
+		const intactB = frame(0, 0, 30, 30, 342, 39, 28, 0.8);
+		const occluded = frame(0, 0, 30, 30, 295, 38, 28, 0.611);
+		const measures = [
+			measure('intact-a', 5, 5, intactA),
+			measure('intact-b', 6, 5, intactB),
+			measure('occluded', 7, 5, occluded)
+		];
+		const { family } = selectTeeFamily(measures, KNOBS);
+		expect(family.map((m) => m.ring.id).sort()).toEqual(['intact-a', 'intact-b']);
+	});
+
 	test('largest-family choice: a bigger family beats a smaller one regardless of spread', () => {
 		// Seed A: only itself qualifies as a tight family of 1.
 		const a = frame(0, 0, 10, 10, 100, 40, 20);
@@ -173,7 +211,12 @@ describe('selectTeeFamily (LAB selectTeeFamily) - exact ratio boundaries', () =>
 			measure('bottom-left', 5, 20, f)
 		];
 		const { family } = selectTeeFamily(measures, KNOBS);
-		expect(family.map((m) => m.ring.id)).toEqual(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+		expect(family.map((m) => m.ring.id)).toEqual([
+			'top-left',
+			'top-right',
+			'bottom-left',
+			'bottom-right'
+		]);
 	});
 
 	test('empty measures -> empty family, null anchor', () => {
@@ -225,6 +268,9 @@ describe('visible tee-pad geometry promotion', () => {
 			onRing: false
 		};
 		board.set('stage', {
+			width: 30,
+			height: 20,
+			brightLabels: Int32Array.from({ length: 30 * 20 }, (_, index) => (index < 220 ? 7 : 0)),
 			brightComponents: [
 				{
 					label: 7,
@@ -273,7 +319,7 @@ describe('visible tee-pad geometry promotion', () => {
 });
 
 describe('teeFamilyFeature registration', () => {
-	test('visible-detection baseline, default ON, all 7 knobs at recovered defaults', () => {
+	test('visible-detection baseline, default ON, all 8 knobs at recovered defaults', () => {
 		expect(teeFamilyFeature.kind).toBe('baseline');
 		expect(teeFamilyFeature.defaultEnabled).toBe(true);
 		expect(Object.keys(teeFamilyFeature.knobs).sort()).toEqual(
@@ -283,6 +329,7 @@ describe('teeFamilyFeature registration', () => {
 				'frameAreaMin',
 				'frameMaxHeight',
 				'frameMaxWidth',
+				'fillRatioToleranceFactor',
 				'majorRatioToleranceFactor',
 				'minorRatioToleranceFactor'
 			].sort()
@@ -294,6 +341,7 @@ describe('teeFamilyFeature registration', () => {
 		expect(teeFamilyFeature.knobs.majorRatioToleranceFactor.default).toBe(1.25);
 		expect(teeFamilyFeature.knobs.minorRatioToleranceFactor.default).toBe(1.25);
 		expect(teeFamilyFeature.knobs.areaRatioToleranceFactor.default).toBe(1.5);
+		expect(teeFamilyFeature.knobs.fillRatioToleranceFactor.default).toBe(1.25);
 	});
 
 	test('validate() rejects non-positive frame knobs and tolerance factors <= 1', () => {
@@ -303,6 +351,8 @@ describe('teeFamilyFeature registration', () => {
 		expect(teeFamilyFeature.knobs.majorRatioToleranceFactor.validate?.(1)).not.toBeNull();
 		expect(teeFamilyFeature.knobs.majorRatioToleranceFactor.validate?.(0.9)).not.toBeNull();
 		expect(teeFamilyFeature.knobs.majorRatioToleranceFactor.validate?.(1.25)).toBeNull();
+		expect(teeFamilyFeature.knobs.fillRatioToleranceFactor.validate?.(1)).not.toBeNull();
+		expect(teeFamilyFeature.knobs.fillRatioToleranceFactor.validate?.(1.25)).toBeNull();
 	});
 
 	test('tee-family-on config parses, inserts teeFamily right after tees, and enables the feature', () => {

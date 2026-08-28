@@ -280,12 +280,41 @@ describe('teeRecovery visible-component evidence contract', () => {
 
 	test('accepts a 9-pixel shard wholly on a fitted hollow tee support band', () => {
 		const fixture = recoveryFixture('hollow');
+		const { candidates } = build(fixture);
+		expect(candidates[0]?.localizationSource).toBe('support-fit');
+		expect(candidates[0]?.localizationFit).toBeUndefined();
 		const drawables = runRecovery(fixture, new OcclusionDetector());
 		const shard = drawables.find((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard');
 		expect(shard?.type).toBe('pixelSet');
 		if (shard?.type !== 'pixelSet') throw new Error('accepted shard did not retain exact pixels');
 		expect(shard.pixels).toHaveLength(9);
 		expect(drawables.filter((drawable) => drawable.verdict === 'info' && drawable.visualRole === 'tee-corner-tick')).toHaveLength(4);
+	});
+
+	test('localizes one full-span incomplete component from its exact PCA testimony', () => {
+		const fixture = recoveryFixture('hollow-border');
+		const { candidates } = build(fixture);
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0]?.localizationSource).toBe('full-span-component-pca');
+		expect(candidates[0]?.localizationFit?.centerXPx).toBeCloseTo(35, 6);
+		expect(candidates[0]?.localizationFit?.centerYPx).toBeCloseTo(37, 6);
+	});
+
+	test('excludes exact OPAQUE ownership before full-span PCA localization', () => {
+		const fixture = recoveryFixture('hollow-border');
+		const occlusion = new OcclusionDetector();
+		occlusion.registerOpaque({
+			kindAt: (x, y) => (x === 35 && y === 33 ? 'OPAQUE' : 'UNKNOWN')
+		});
+		const { candidates } = build(fixture, occlusion);
+		const candidate = candidates[0];
+		expect(candidate?.localizationSource).toBe('full-span-component-pca');
+		const visibleCx = candidate!.fragmentPixels.reduce((sum, point) => sum + point[0], 0) /
+			candidate!.fragmentPixels.length;
+		const visibleCy = candidate!.fragmentPixels.reduce((sum, point) => sum + point[1], 0) /
+			candidate!.fragmentPixels.length;
+		expect(candidate?.localizationFit?.centerXPx).toBeCloseTo(visibleCx, 10);
+		expect(candidate?.localizationFit?.centerYPx).toBeCloseTo(visibleCy, 10);
 	});
 
 	test('retains disconnected visible shards without drawing an interpolated bridge', () => {

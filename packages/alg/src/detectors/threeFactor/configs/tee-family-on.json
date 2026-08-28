@@ -27,7 +27,8 @@
 					"frameMaxHeight": 50,
 					"majorRatioToleranceFactor": 1.25,
 					"minorRatioToleranceFactor": 1.25,
-					"areaRatioToleranceFactor": 1.5
+					"areaRatioToleranceFactor": 1.5,
+					"fillRatioToleranceFactor": 1.25
 				}
 			}
 		}

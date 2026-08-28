@@ -78,18 +78,22 @@ schedule (still one flip away via `zfit-on.json`; the engine-level
 `zfit`). The config hash changed accordingly; every result number below was
 re-verified identical before and after the drop.
 
-- Config hash: `cb9b82be4dede236a4236352ac331ff1812f69ee781887934c148f4c1542fd93`
-  (was `cac326d6c75be363e07f7dffc178ae9418e519db841c332c4634b246fff5e6e7`
-  with zfit scheduled).
-- Plan: 18 chronological operations; `assignment.selection → teeRecovery`.
-- Results: 18 badges, 18 baskets, 16 visible tees, 2 recovered tees,
-  18 total tees, 18 assignments, and 5,184 raw pairs.
-- G4: 2 accepted recovery hypotheses, 0 rejected; H3 uses two visible shards
-  and H5 uses one.
+- Config hash: `d63c4ec8a27fa840224d411e3740bbc22fe8edf70858f69cea32b3f94bb43ed4`
+  (lineage: `cac326d6…` with zfit scheduled → `cb9b82be…` after the
+  2026-08-28 zfit drop → this value after PR #61's teeRecovery inventory
+  republish).
+- Plan: 18 chronological operations; `assignment.selection → teeRecovery`
+  (zfit-free by owner directive; PR #61 merged on top).
+- Results: 18 badges, 18 baskets, 15 visible tees, 3 recovered tees,
+  18 total tees, 18 assignments, and 4,860 raw pairs.
+- G4: 3 accepted recovery hypotheses, 0 rejected; H3 uses two visible shards,
+  while H5 and the basket-occluded H12 each use one. Full-span
+  single-component recoveries localize from their exact component PCA
+  testimony; on the pre-merge PR base, H12 landed 0.095 px from frozen truth
+  instead of the prior 5.96 px support-fit offset.
 - Phantom completion: disabled and unscheduled.
 - Receipt warnings: 0; operation conformance drift: 0.
-- The run receipt inventories 15 visual outputs/statuses, including G0 and
-  every existing G1-G4 artifact or semantic FeatureRender, using portable
+- The run receipt emits one unified endpoint VisualRender with portable
   run-relative paths.
 - Visible and recovered tees share one render standard: exact green
   border/shard evidence, four pad-axis-aligned cyan corner plus signs, and
@@ -108,6 +112,8 @@ node_modules/.bin/vitest run \
   tests/unit/labRunReceiptText.test.ts \
   tests/unit/labSweepReceipt.test.ts \
   tests/unit/threeFactorConfig.test.ts \
+  tests/unit/teeFamilyFeature.test.ts \
+  tests/unit/teeRecoveryFeature.test.ts \
   tests/unit/exec.compile.test.ts \
   tests/unit/exec.evidenceChains.test.ts \
   tests/unit/labHelp.test.ts \
@@ -119,7 +125,7 @@ Observed on this handoff:
 
 - Algorithm package build: PASS.
 - App type check: 0 errors, 0 warnings.
-- Focused execution/help/render tests: 63/63 PASS.
+- Focused execution/help/render/recovery tests: 95/95 PASS.
 - Full corpus suite with sibling corpus detached at
   `origin/codex/lab-scope-validation@e98724d`: 318 pass, 7 fail,
   5 expected-fail, 3 skip, 1 todo.
@@ -131,7 +137,7 @@ Observed on this handoff:
   Lenard, and TowneLake.
 - A real blind CLI run through G3 completes with 0 conformance drift:
   18 badges, 18 baskets, 32 raw tee rings, 17 post-exclusion tees, and
-  16 accepted visible tee-family members.
+  15 accepted visible tee-family members, with H3/H5/H12 reserved for G4.
 
 Default DashsTrack G3 artifact hashes after hardening:
 

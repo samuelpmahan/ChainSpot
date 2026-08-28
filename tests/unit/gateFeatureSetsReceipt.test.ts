@@ -31,8 +31,8 @@ const membership: Record<string, readonly string[]> = {
 	'shared-set': ['hsv'],
 	'g1-set': ['badges', 'digits'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
-	'g3-set': ['endpoints', 'teeFamily'],
-	'g4-set': ['teeRecovery', 'phantomTee'],
+	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -121,7 +121,8 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(GATE_FEATURE_DECLARATION_DIVERGENCES).toEqual({});
 		expect(GATE_FEATURE_SETS['g4-set'].operations?.map(({ operation }) => operation.spec.id)).toEqual([
 			'teeRecovery',
-			'phantomTee'
+			'phantomTee',
+			'teeBadgeLock'
 		]);
 		for (const set of Object.values(GATE_FEATURE_SETS)) {
 			const owned = new Set(set.features.map((feature) => feature.id));

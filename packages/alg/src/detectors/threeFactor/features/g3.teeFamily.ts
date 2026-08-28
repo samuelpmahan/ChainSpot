@@ -6,7 +6,7 @@
 // LAB shape: for every tee-rect ring, find the smallest enclosing bright
 // component ("frame") inside a size window; then, treating each measured
 // (ring, frame) pair as a candidate anchor, pick the largest family of
-// measures whose frame major/minor/area all sit within a log-ratio tolerance
+// measures whose frame major/minor/area/fill all sit within a log-ratio tolerance
 // of the anchor's frame (ties broken by minimum summed spread). The LAB's
 // grayStats (145<=max(R,G,B)<=175) check was DIAGNOSTIC ONLY and is
 // deliberately NOT ported — no gray-payload gate exists anywhere below.
@@ -70,6 +70,7 @@ export interface TeeFamilyKnobs {
 	readonly majorRatioToleranceFactor: number;
 	readonly minorRatioToleranceFactor: number;
 	readonly areaRatioToleranceFactor: number;
+	readonly fillRatioToleranceFactor: number;
 }
 
 function positiveNumber(name: string): (value: unknown) => string | null {
@@ -93,6 +94,9 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 		const acceptedBorders = accepted.filter((drawable) => drawable.type === 'polyline');
 		const rejected = unit.drawables.filter((drawable) => drawable.verdict === 'rejected');
 		const info = unit.drawables.filter((drawable) => drawable.verdict === 'info');
+		const visiblePixels = info.filter(
+			(drawable) => drawable.type === 'pixelSet' && drawable.visualRole === 'tee-visible-pixels'
+		);
 		const poseDecorations = acceptedBorders.map((drawable) =>
 			teePoseDecoration(
 				drawable.path.slice(0, 4),
@@ -123,9 +127,9 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 					drawables: rejected
 				},
 				{
-					name: 'visible tee oriented full-pad bounds accepted (G3)',
-					note: 'exact oriented detected border; secondary raster/interior evidence is kept in the trace but omitted here',
-					drawables: acceptedBorders
+					name: 'visible tee exact white components accepted (G3)',
+					note: 'exact detector-owned bright-mask component pixels; fitted bounds remain trace geometry and are not painted as appearance',
+					drawables: visiblePixels
 				},
 				{
 					name: 'tee pose center guides (G3)',
@@ -140,11 +144,11 @@ const TEE_FAMILY_RENDER: FeatureRender = {
 			],
 			notes: [
 				`feature: teeFamily (visible tees) -- ${unit.gate}, trace unit '${unit.id}'`,
-				'accepted object geometry: closed oriented quadrilateral from the enclosing bright-mask component PCA center/angle/major/minor.',
+				'accepted object geometry: closed oriented quadrilateral from an enclosing bright-mask component whose major/minor/area/fill match the course-local intact family.',
 				'corner math: retain the component projection extrema (axisMajorMin/Max and axisMinorMin/Max), expand each by 0.5px to cover whole raster cells, then rotate all four extrema intersections back into canonical image coordinates.',
-				'visual standard: exact green border, four pad-axis-aligned cyan corner plus signs, and two one-pixel red corner diagonals whose intersection exposes the fitted center.',
+				'visual standard: exact green detector-owned white component pixels, four pad-axis-aligned cyan corner plus signs, and two one-pixel red corner diagonals whose intersection exposes the fitted center.',
 				`secondary trace drawables omitted from the primary receipt: ${info.length} (raw trace remains available; no AABB, hollow-ring box, or passthrough marker is drawn here).`,
-				'pair-scoring angle remains the original hollow-ring angle in TeeEvidence.angleRad; this geometry repair does not change assignment math.',
+				'pair-scoring angle remains the original hollow-ring angle in TeeEvidence.angleRad; intact-frame promotion does not change assignment math.',
 				`acceptedVisibleTeeCount: ${acceptedVisibleTeeCount}  (source: accepted UnitTrace.drawables for teeFamily)`,
 				`detectedBadgeCount: ${detectedBadgeCount ?? 'UNKNOWN'}  (source: accepted RunTrace unit 'badges' drawables)`,
 				`expectedRecoverNum: ${expectedRecoverNum ?? 'UNKNOWN'}  (math: max(0, detectedBadgeCount - acceptedVisibleTeeCount))`,
@@ -161,7 +165,7 @@ export const teeFamilyFeature = {
 	gate: 'G3',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area. Shard recovery is a separate phase.',
+	note: 'Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area/fill. Incomplete frames remain missing for shard recovery.',
 	render: TEE_FAMILY_RENDER,
 	knobs: {
 		frameAreaMin: {
@@ -198,6 +202,11 @@ export const teeFamilyFeature = {
 			default: 1.5,
 			note: 'same tolerance, applied to frame area (LAB: log(1.5))',
 			validate: toleranceFactor('areaRatioToleranceFactor')
+		},
+		fillRatioToleranceFactor: {
+			default: 1.25,
+			note: 'course-local intactness tolerance for bright-component fill; calibrated on Dashs H12 to reject the basket-occluded 0.611 frame while retaining the next-lowest visible frame at 0.711 (dataset-fit estimate, not physics)',
+			validate: toleranceFactor('fillRatioToleranceFactor')
 		}
 	}
 } satisfies ABFeature;
@@ -328,7 +337,7 @@ export function findEnclosingFrame(
 
 /**
  * LAB selectTeeFamily: for every measure as a candidate anchor, the family
- * is every measure whose frame major/minor/area all sit within the
+ * is every measure whose frame major/minor/area/fill all sit within the
  * configured log-ratio tolerance of the anchor's frame; keep the largest
  * family, ties broken by minimum summed spread. Output (and the winning
  * anchor, for trace reporting) sorted deterministically by ring cy then cx.
@@ -340,6 +349,7 @@ export function selectTeeFamily(
 	const majorTol = Math.log(knobs.majorRatioToleranceFactor);
 	const minorTol = Math.log(knobs.minorRatioToleranceFactor);
 	const areaTol = Math.log(knobs.areaRatioToleranceFactor);
+	const fillTol = Math.log(knobs.fillRatioToleranceFactor);
 
 	let best: TeeFamilyMeasure[] = [];
 	let bestSpread = Infinity;
@@ -352,7 +362,9 @@ export function selectTeeFamily(
 			return (
 				Math.abs(Math.log(Math.max(f.major, 1) / Math.max(s.major, 1))) <= majorTol &&
 				Math.abs(Math.log(Math.max(f.minor, 1) / Math.max(s.minor, 1))) <= minorTol &&
-				Math.abs(Math.log(Math.max(f.area, 1) / Math.max(s.area, 1))) <= areaTol
+				Math.abs(Math.log(Math.max(f.area, 1) / Math.max(s.area, 1))) <= areaTol &&
+				Math.abs(Math.log(Math.max(f.fill, Number.EPSILON) / Math.max(s.fill, Number.EPSILON))) <=
+					fillTol
 			);
 		});
 		const spread = family.reduce(
@@ -360,7 +372,10 @@ export function selectTeeFamily(
 				sum +
 				Math.abs(Math.log(Math.max(m.frame.major, 1) / Math.max(s.major, 1))) +
 				Math.abs(Math.log(Math.max(m.frame.minor, 1) / Math.max(s.minor, 1))) +
-				Math.abs(Math.log(Math.max(m.frame.area, 1) / Math.max(s.area, 1))),
+				Math.abs(Math.log(Math.max(m.frame.area, 1) / Math.max(s.area, 1))) +
+				Math.abs(
+					Math.log(Math.max(m.frame.fill, Number.EPSILON) / Math.max(s.fill, Number.EPSILON))
+				),
 			0
 		);
 		if (family.length > best.length || (family.length === best.length && spread < bestSpread)) {
@@ -382,10 +397,35 @@ export function selectTeeFamily(
 
 interface StageSlot {
 	readonly brightComponents: readonly ComponentStats[];
+	readonly brightLabels: Int32Array;
+	readonly width: number;
+	readonly height: number;
 }
 
 interface ViewportSlot {
 	readonly topPx: number;
+}
+
+/** Exact bright-mask cells owned by one connected component, shifted from
+ * badge-stage-local Y into the detector's original-image coordinate frame. */
+export function exactBrightComponentPixels(
+	labels: Int32Array,
+	width: number,
+	height: number,
+	componentLabel: number,
+	topPx: number
+): readonly (readonly [number, number])[] {
+	if (labels.length !== width * height)
+		throw new Error(
+			`teeFamily: bright label raster length ${labels.length} does not match ${width}x${height}`
+		);
+	const pixels: (readonly [number, number])[] = [];
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			if (labels[y * width + x] === componentLabel) pixels.push([x, y + topPx]);
+		}
+	}
+	return pixels;
 }
 
 function toFrame(component: ComponentStats, topPx: number): TeeFamilyFrame {
@@ -500,13 +540,33 @@ export const teeFamilyUnit: EngineUnit = {
 				if (familyIds.has(detId)) {
 					const tee = teeById.get(detId);
 					const pad = teePadEvidence(measure.frame);
+					const whitePixels = exactBrightComponentPixels(
+						stage.brightLabels,
+						stage.width,
+						stage.height,
+						pad.componentLabel,
+						topPx
+					);
+					if (whitePixels.length !== pad.area)
+						throw new Error(
+							`teeFamily: bright component ${pad.componentLabel} owns ${whitePixels.length} raster cells but reports area ${pad.area}`
+						);
+					ctx.overlay('teeFamily', {
+						type: 'pixelSet',
+						pixels: whitePixels,
+						verdict: 'info',
+						visualRole: 'tee-visible-pixels',
+						ref: detId,
+						reason: `exact accepted bright-mask component pixels (badgeStage.brightLabels[label=${pad.componentLabel}]); no fitted boundary or bbox fill`,
+						values: { componentLabel: pad.componentLabel, pixelCount: whitePixels.length }
+					});
 					ctx.overlay('teeFamily', {
 						type: 'polyline',
 						path: [...pad.orientedCorners, pad.orientedCorners[0]],
 						verdict: 'accepted',
 						visualRole: 'tee-border',
 						ref: detId,
-						reason: `accepted intact visible tee family; oriented bounds from bright component ${pad.componentLabel}`,
+						reason: `accepted intact visible tee family; oriented bounds from course-local fill-consistent bright component ${pad.componentLabel}`,
 						values: {
 							componentLabel: pad.componentLabel,
 							frameMajor: pad.majorPx,
@@ -568,27 +628,34 @@ export const teeFamilyUnit: EngineUnit = {
 				const dMajor = s ? logRatioDelta(f.major, s.major) : NaN;
 				const dMinor = s ? logRatioDelta(f.minor, s.minor) : NaN;
 				const dArea = s ? logRatioDelta(f.area, s.area) : NaN;
+				const dFill = s
+					? Math.abs(Math.log(Math.max(f.fill, Number.EPSILON) / Math.max(s.fill, Number.EPSILON)))
+					: NaN;
 				const majorTol = Math.log(knobs.majorRatioToleranceFactor);
 				const minorTol = Math.log(knobs.minorRatioToleranceFactor);
 				const areaTol = Math.log(knobs.areaRatioToleranceFactor);
+				const fillTol = Math.log(knobs.fillRatioToleranceFactor);
 				const failing: string[] = [];
 				if (s && dMajor > majorTol) failing.push('major');
 				if (s && dMinor > minorTol) failing.push('minor');
 				if (s && dArea > areaTol) failing.push('area');
+				if (s && dFill > fillTol) failing.push('fill');
 				const orientedCorners = orientedPadCorners(f);
 				ctx.overlay('teeFamily', {
 					type: 'polyline',
 					path: [...orientedCorners, orientedCorners[0]],
 					verdict: 'rejected',
 					ref: detId,
-					reason: `excluded from winning family (anchor ${anchor?.ring.id ?? 'none'}): failing ${failing.length ? failing.join(', ') : 'unknown'} log-ratio(s) — |Δlog major|=${dMajor.toFixed(4)} (tol ${majorTol.toFixed(4)}), |Δlog minor|=${dMinor.toFixed(4)} (tol ${minorTol.toFixed(4)}), |Δlog area|=${dArea.toFixed(4)} (tol ${areaTol.toFixed(4)})`,
+					reason: `excluded from winning family (anchor ${anchor?.ring.id ?? 'none'}): failing ${failing.length ? failing.join(', ') : 'unknown'} log-ratio(s) — |Δlog major|=${dMajor.toFixed(4)} (tol ${majorTol.toFixed(4)}), |Δlog minor|=${dMinor.toFixed(4)} (tol ${minorTol.toFixed(4)}), |Δlog area|=${dArea.toFixed(4)} (tol ${areaTol.toFixed(4)}), |Δlog fill|=${dFill.toFixed(4)} (tol ${fillTol.toFixed(4)})`,
 					values: {
 						dLogMajor: dMajor,
 						dLogMinor: dMinor,
 						dLogArea: dArea,
+						dLogFill: dFill,
 						majorTol,
 						minorTol,
-						areaTol
+						areaTol,
+						fillTol
 					}
 				});
 			}

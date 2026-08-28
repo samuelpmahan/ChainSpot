@@ -388,7 +388,10 @@ export async function runSweepOperation(
 				execution: [...new Set(plan.ops.map((op) => op.unit))]
 			}
 		: loaded.resolved;
-	const { ctx, trace } = createTraceContext(traceResolved, plan.paramsHash ?? '', plan.ops);
+	const { ctx, trace } = createTraceContext(traceResolved, plan.paramsHash ?? '', plan.ops, {
+		imageId: report.imageId,
+		canonicalFrame: 'G0 canonical detector-input pixels'
+	});
 	const gatewayStartedAtMs = performance.now();
 	let receipts: ReturnType<typeof executeCompiledPlan> = [];
 	const straightIndex = plan.ops.findIndex((operation) => operation.id === 'straightTest');
@@ -620,7 +623,12 @@ export async function runSweepOperation(
 			(render): RunReceiptVisualRender => ({
 				kind: 'feature',
 				gate: render.gate,
-				id: 'run.endpoint-summary',
+				// PR #61 adds per-feature sidecar renders beside the endpoint
+				// poster; only the endpoint receipt keeps the run-level id.
+				id:
+					render.featureId === 'endpointReceipt'
+						? 'run.endpoint-summary'
+						: `${render.featureId}.${render.unitId}`,
 				owner: `${render.featureId}@${render.unitId}`,
 				status: 'rendered',
 				summary: render.summary,

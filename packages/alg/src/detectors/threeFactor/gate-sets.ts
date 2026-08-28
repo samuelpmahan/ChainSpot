@@ -5,8 +5,10 @@ import { g2SpriteFeature } from './features/g2.sprite';
 import { cleanBasketFamilyFeature } from './features/g2.cleanBasketFamily';
 import { g3EndpointsFeature } from './features/g3.endpoints';
 import { teeFamilyFeature } from './features/g3.teeFamily';
+import { teeMinAreaPoseFeature } from './features/g3.teeMinAreaPose';
 import { teeRecoveryFeature } from './features/g3.teeRecovery';
 import { phantomTeeFeature } from './features/g3.phantomTee';
+import { teeBadgeLockFeature } from './features/g4.teeBadgeLock';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g4SearchFeature } from './features/g4.search';
 import { fourLaneSensorFeature } from './features/st.fourLaneSensor';
@@ -45,8 +47,8 @@ export const GATE_FEATURE_IDS = {
 	'shared-set': ['hsv'],
 	'g1-set': ['badges', 'digits'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
-	'g3-set': ['endpoints', 'teeFamily'],
-	'g4-set': ['teeRecovery', 'phantomTee'],
+	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -56,8 +58,8 @@ const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 	'shared-set': [sharedHsvFeature],
 	'g1-set': [g1BadgesFeature, digitsFeature],
 	'g2-set': [g2SpriteFeature, cleanBasketFamilyFeature],
-	'g3-set': [g3EndpointsFeature, teeFamilyFeature],
-	'g4-set': [teeRecoveryFeature, phantomTeeFeature],
+	'g3-set': [g3EndpointsFeature, teeFamilyFeature, teeMinAreaPoseFeature],
+	'g4-set': [teeRecoveryFeature, phantomTeeFeature, teeBadgeLockFeature],
 	'g5-set': [fourLaneSensorFeature, straightTestFeature, g5RibbonFeature, g5RoutingFeature],
 	'g6-set': [g4ScoringFeature, g4SearchFeature],
 	'g7-set': [zfitFeature]
@@ -168,8 +170,8 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 		'badges'
 	],
 	'g2-set': ['baskets', 'cleanBasketFamily'],
-	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily'],
-	'g4-set': ['teeRecovery', 'phantomTee'],
+	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
 	'g5-set': ['straightTest', 'supportField', 'badgeOcclusionPatch', 'rawPairs', 'measurement'],
 	'g6-set': ['assignment.pairs', 'assignment.scoring', 'assignment.ranking', 'assignment.selection'],
 	'g7-set': ['zfit']

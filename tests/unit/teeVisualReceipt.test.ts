@@ -45,6 +45,18 @@ function unit(
 function fixtureTrace(): RunTrace {
 	const visible = unit('teeFamily', 'G3', 'teeFamily', [
 		{
+			type: 'pixelSet',
+			pixels: [
+				[40, 20],
+				[40, 21],
+				[39, 21]
+			],
+			verdict: 'info',
+			visualRole: 'tee-visible-pixels',
+			ref: 'visible-tee',
+			values: { componentLabel: 7, pixelCount: 3 }
+		},
+		{
 			type: 'polyline',
 			path: [...corners, corners[0]],
 			verdict: 'accepted',
@@ -149,15 +161,45 @@ function unifiedFixtureTrace(): RunTrace {
 			ref: 'basket-1:semantic-tip'
 		}
 	]);
+	const teeBadgeLock = {
+		...unit('teeBadgeLock', 'G4', 'teeBadgeLock', [
+			{
+				type: 'polyline',
+				path: [[60, 60], [56, 56]],
+				verdict: 'accepted',
+				visualRole: 'tee-badge-path',
+				ref: 'teeBadgeLock:badge-1:tee-1',
+				reason: 'exact producer-emitted routed testimony',
+				values: { hole: 1, tierCode: 0, score: 1, weakAligned: 1, efficiency: 1, axisSourceCode: 1, pathPoints: 2 }
+			},
+			{
+				type: 'polyline',
+				path: [[2, 60], [5, 60]],
+				verdict: 'rejected',
+				visualRole: 'tee-badge-path',
+				ref: 'teeBadgeLock:badge-1:tee-2',
+				reason: 'candidate retained but not selected'
+			}
+		]),
+		measurements: [
+			{ name: 'candidates', count: 2, min: 2, max: 2, sum: 2 },
+			{ name: 'locks', count: 1, min: 1, max: 1, sum: 1 },
+			{ name: 'visibleLocks', count: 1, min: 1, max: 1, sum: 1 },
+			{ name: 'recoveredLocks', count: 0, min: 0, max: 0, sum: 0 },
+			{ name: 'unmatchedBadges', count: 0, min: 0, max: 0, sum: 0 },
+			{ name: 'unusedTees', count: 0, min: 0, max: 0, sum: 0 }
+		]
+	};
 	return {
 		...trace,
-		execution: ['badges', 'baskets', ...trace.execution],
+		execution: ['badges', 'baskets', ...trace.execution, 'teeBadgeLock'],
 		features: {
 			...trace.features,
 			badges: { enabled: true, knobs: {} },
-			sprite: { enabled: true, knobs: {} }
+			sprite: { enabled: true, knobs: {} },
+			teeBadgeLock: { enabled: true, knobs: {} }
 		},
-		units: [badges, baskets, ...trace.units]
+		units: [badges, baskets, ...trace.units, teeBadgeLock]
 	};
 }
 
@@ -267,7 +309,12 @@ describe('canonical tee VisualRender', () => {
 			expect(result.receiptText).toContain('badgeBrightPixels: 3');
 			expect(result.receiptText).toContain('basketSemanticTips: 1');
 			expect(result.receiptText).toContain('visibleTeeBorders: 1');
+			expect(result.receiptText).toContain('visibleTeePixelSets: 1');
+			expect(result.receiptText).toContain('visibleTeePixels: 3');
 			expect(result.receiptText).toContain('recoveredTeePoses: 1');
+			expect(result.receiptText).toContain('teeBadgeLocks: 1');
+			expect(result.receiptText).toContain('TEE→BADGE LOCK');
+			expect(result.receiptText).toContain('blue: exact accepted tee→badge lock path');
 
 			const png = PNG.sync.read(readFileSync(result.filesWritten[0]));
 			for (const [x, y] of [
@@ -298,8 +345,12 @@ describe('canonical tee VisualRender', () => {
 			// Black badge pixels remain untouched.
 			expect(rgb(png, 7, 7)).toEqual([0, 0, 0]);
 			expect(rgb(png, 52, 49)).toEqual([255, 40, 220]);
-			expect(rgb(png, 33, 26)).toEqual([30, 255, 95]);
+			expect(rgb(png, 40, 20)).toEqual([30, 255, 95]);
+			// The old fitted border painted this base pixel green despite the
+			// detector not owning it. Exact component testimony leaves it alone.
+			expect(rgb(png, 33, 26)).toEqual([0, 0, 0]);
 			expect(rgb(png, 30, 30)).toEqual([255, 32, 32]);
+			expect(rgb(png, 60, 60)).toEqual([0, 162, 255]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -344,7 +395,8 @@ describe('canonical tee VisualRender', () => {
 			// Scheduled units keep truthful zero/positive counts.
 			expect(result.receiptText).toContain('visibleTeeBorders: 1');
 			expect(result.summary).toContain('recovery not-scheduled');
-			expect(result.gate).toBe('G0-G3');
+			// teeBadgeLock (G4) draws lock testimony in this fixture, so the truthful span is G0-G4 even with teeRecovery not-scheduled.
+			expect(result.gate).toBe('G0-G4');
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

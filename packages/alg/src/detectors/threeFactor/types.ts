@@ -129,6 +129,21 @@ export interface TeePadEvidence {
 	readonly axisMinorMin: number;
 	readonly axisMinorMax: number;
 	readonly orientedCorners: OrientedQuad;
+	/**
+	 * Optional G3 presentation/localization pose.  The enclosing-component PCA
+	 * fields above are deliberately immutable baseline geometry: G4 recovery
+	 * still consumes those metrics, while teeMinAreaPose owns this
+	 * separate blind minimum-area exact-component pose for visible-pad
+	 * consumers and its trace receipt.
+	 */
+	readonly minAreaPose?: {
+		readonly centerXPx: number;
+		readonly centerYPx: number;
+		readonly angleRad: number;
+		readonly majorPx: number;
+		readonly minorPx: number;
+		readonly orientedCorners: OrientedQuad;
+	};
 }
 
 export interface TeeEvidence {
