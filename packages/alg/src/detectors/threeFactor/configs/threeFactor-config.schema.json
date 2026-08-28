@@ -600,6 +600,11 @@
 											"type": "number",
 											"description": "a hole whose best assignment score is at or below this counts as tee-less",
 											"default": 0
+										},
+										"maxCompletions": {
+											"type": "number",
+											"description": "owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.",
+											"default": 1
 										}
 									}
 								}

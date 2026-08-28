@@ -41,6 +41,12 @@ export const phantomTeeFeature = {
 			default: 0,
 			note: 'a hole whose best assignment score is at or below this counts as tee-less',
 			validate: (value: unknown) => (typeof value === 'number' ? null : 'minViableScore must be a number')
+		},
+		maxCompletions: {
+			default: 1,
+			note: 'owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.',
+			validate: (value: unknown) =>
+				Number.isInteger(value) && (value as number) >= 1 ? null : 'maxCompletions must be a positive integer'
 		}
 	}
 } satisfies ABFeature;
@@ -92,7 +98,8 @@ function fallbackForBadge(
 function synthesizePhantomTeeResult(
 	measurement: ThreeFactorMeasurement,
 	assignments: readonly AssignmentEvidence[],
-	minViableScore: number
+	minViableScore: number,
+	maxCompletions = 1
 ): PhantomSynthesis {
 	const badgeById = new Map(measurement.badges.map((badge) => [badge.detId, badge]));
 	const basketById = new Map(measurement.baskets.map((basket) => [basket.detId, basket]));
@@ -115,6 +122,12 @@ function synthesizePhantomTeeResult(
 	const phantomHoles: number[] = [];
 	const unresolvedHoles: number[] = [];
 	for (const hole of [...missing].sort((a, b) => a - b)) {
+		// Owner budget (maxCompletions knob): phantom completion is a scalpel.
+		// Holes beyond the budget stay loudly unresolved rather than sprayed.
+		if (phantoms.length >= maxCompletions) {
+			unresolvedHoles.push(hole);
+			continue;
+		}
 		const badge = measurement.badges.find((candidate) => Number(candidate.label) === hole);
 		const predecessor = assignmentByHole.get(hole - 1);
 		if (!predecessor || missing.has(hole - 1)) {
@@ -197,9 +210,10 @@ function completePhantomAssignments(
 export function synthesizePhantomTees(
 	measurement: ThreeFactorMeasurement,
 	assignments: readonly AssignmentEvidence[],
-	minViableScore: number
+	minViableScore: number,
+	maxCompletions = 1
 ): RecoveredTeeInput[] {
-	return [...synthesizePhantomTeeResult(measurement, assignments, minViableScore).phantoms];
+	return [...synthesizePhantomTeeResult(measurement, assignments, minViableScore, maxCompletions).phantoms];
 }
 
 export const phantomTeeUnit: EngineUnit = {
@@ -218,7 +232,8 @@ export const phantomTeeUnit: EngineUnit = {
 			const synthesis = synthesizePhantomTeeResult(
 				measurement,
 				assignment.assignments,
-				state.knobs['minViableScore'] as number
+				state.knobs['minViableScore'] as number,
+				state.knobs['maxCompletions'] as number
 			);
 			for (const phantom of synthesis.phantoms) {
 				ctx.overlay('phantomTee', {

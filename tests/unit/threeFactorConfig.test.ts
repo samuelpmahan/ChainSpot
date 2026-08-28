@@ -249,7 +249,7 @@ describe('resolveConfig + engine', () => {
 		// default 3 -- the strict target itself: see g3.teeRecovery.ts for the
 		// null-result empirical finding on the post-dc96000 corpus) moves this
 		// pin again.
-		expect(hash).toBe('a48ec945b7cd19f5f792b48255775aa630e745d2adf12cbe2431d5576b9f948f');
+		expect(hash).toBe('c69a9c5815fbb75070e773a80bf44d2d150860e73e62b564e53d150fb5a09f04');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {

@@ -55,3 +55,11 @@ Format: `date | claim | receipt | status | fate`.
 - The 8 missed Dev6 holes, classified per the invariant (claim 8).
 - Minesweeper Index HIGH items (docs/minesweeper/): each fix must enter
   here with its before/after receipt.
+
+## 2026-08-28 — phantom budget + seven-whys additions
+
+| # | Claim | Receipt | Status | Fate |
+|---|---|---|---|---|
+| 14 | AlexClark reaches 18/18 assignments with phantomTee enabled, spending exactly ONE phantom (owner mandate: one hole). | tee-recovery-phantom-on A/B on AlexClark: 13 visible + 5 recovered = 18 total, `phantomTee synthesized: 1, unresolved: 0`, 18 assignments, 0 warnings. Budget now ENFORCED: `phantomTee.maxCompletions` knob (default 1), holes beyond budget stay loudly unresolved; config pins maxCompletions: 1. | **UPHELD** | Owner policy encoded as a knob, not a hope. Follow-up docket: the HOLE ASSIGNMENTS table does not yet mark WHICH recovered row is the phantom (assignment-only, appearance UNKNOWN) — labeling gap for the next receipts pass. |
+| 15 | The tee-11 mis-pairing (2.4e-13) has a systemic root cause: count-completeness metrics pay for silence. | Seven-whys analysis with per-level receipts and a 7-rung corrective ladder: docs/seven-whys/2026-08-28-tee11-mispairing.md. Rung 1 landed (`ae68617`); rungs 3-7 open (selection viability floor, effectively-unreachable verdict, receipt anomaly line, plausibility-as-receipt-content policy, viable/forced assignment split). | ADOPTED | Standing docket: implement rungs 3-7. |
+

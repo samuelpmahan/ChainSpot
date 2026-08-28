@@ -19,8 +19,16 @@
 	],
 	"gates": {
 		"G4": {
-			"teeRecovery": { "enabled": true },
-			"phantomTee": { "enabled": true, "knobs": { "minViableScore": 0 } }
+			"teeRecovery": {
+				"enabled": true
+			},
+			"phantomTee": {
+				"enabled": true,
+				"knobs": {
+					"minViableScore": 0,
+					"maxCompletions": 1
+				}
+			}
 		}
 	}
 }

@@ -121,8 +121,11 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 
 	test('fills all numbered holes deterministically when none received an assignment', () => {
 		const fixture = measurementFixture();
-		const first = synthesizePhantomTees(fixture, [], 0);
-		const second = synthesizePhantomTees(fixture, [], 0);
+		// maxCompletions raised explicitly: this test exercises deterministic
+		// multi-hole synthesis; the production default budget is 1 (owner
+		// policy: phantom is a scalpel, not a spray).
+		const first = synthesizePhantomTees(fixture, [], 0, 18);
+		const second = synthesizePhantomTees(fixture, [], 0, 18);
 		expect(first).toHaveLength(2);
 		expect(first).toEqual(second);
 		for (const phantom of first) {
@@ -142,7 +145,7 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 			occlusion: new OcclusionDetector(),
 			resolve: (feature) =>
 				feature.id === 'phantomTee'
-					? { enabled: true, knobs: { minViableScore: 0 } }
+					? { enabled: true, knobs: { minViableScore: 0, maxCompletions: 18 } }
 					: { enabled: feature.defaultEnabled, knobs: defaultKnobs(feature) },
 			measure() {},
 			overlay() {},

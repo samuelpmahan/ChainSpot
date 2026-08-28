@@ -41,9 +41,10 @@ const straightTestOnResolved = resolveConfig(
 // fingerprint until explicitly configured. 2026-08-28: teeRecovery's new
 // axisToleranceDeg knob (soft ceiling, default 3 -- the strict target itself:
 // see g3.teeRecovery.ts for the null-result empirical finding on the
-// post-dc96000 corpus) moves this pin again.
+// post-dc96000 corpus) moves this pin again. 2026-08-28: phantomTee's
+// maxCompletions knob (owner one-hole budget) moves it once more.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'7c4cfb3465ccfc87885999c2c6eeb323e1a63106a21cefe259fd663aaa151039';
+	'16f7113a4858770aea70ea922526468520c23e1093922698564273446f935823';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
