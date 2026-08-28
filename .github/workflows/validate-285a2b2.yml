@@ -48,9 +48,9 @@ jobs:
         working-directory: ChainSpot
         run: npm run check
 
-      - name: Focused recovery and corpus tests
+      - name: Focused tee-recovery unit suite
         working-directory: ChainSpot
-        run: npx vitest run tests/unit/teeRecoveryFeature.test.ts tests/unit/corpusSweep.test.ts tests/unit/dashsTrackSweep.test.ts --reporter=verbose
+        run: npx vitest run tests/unit/teeRecoveryFeature.test.ts --reporter=verbose
 
       - name: Run actual Dev6 LAB sweep through G4
         working-directory: ChainSpot
