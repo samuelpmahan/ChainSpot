@@ -125,6 +125,29 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	}
 	if (receipt.units.length === 0) lines.push('(none)');
 
+	if (receipt.slice) {
+		const slice = receipt.slice;
+		lines.push('', `SLICE (--through ${slice.throughGate})`);
+		lines.push(`slice.phase: ${slice.phase}`);
+		lines.push(
+			`slice.scheduledOperations: ${slice.scheduledOperationCount} of ${slice.parentOperationCount} (contiguous chronological prefix of the frozen plan)`
+		);
+		if (slice.prerequisites.length === 0) lines.push('slice.prerequisites: []');
+		for (const operation of slice.prerequisites) {
+			lines.push(
+				`  prerequisite ${operation.id} (${operation.ownerGate}): ${operation.reason}`
+			);
+		}
+		if (slice.notScheduled.length === 0) lines.push('slice.notScheduled: []');
+		for (const operation of slice.notScheduled) {
+			lines.push(`  not scheduled ${operation.id} (${operation.ownerGate}): ${operation.reason}`);
+		}
+		if (slice.straightStory) {
+			lines.push('slice.straightAssignmentStory:');
+			for (const storyLine of slice.straightStory) lines.push(`  ${storyLine}`);
+		}
+	}
+
 	lines.push('', 'FINAL RESULTS');
 	for (const name of [
 		'badges',
@@ -136,7 +159,8 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		'assignments',
 		'rawPairs'
 	] as const) {
-		lines.push(`results.${name}: ${value(receipt.results[name])}`);
+		const omission = receipt.slice?.finalResultsNotScheduled[name];
+		lines.push(`results.${name}: ${omission ?? value(receipt.results[name])}`);
 	}
 
 	lines.push('', 'TRUTH EVALUATION');

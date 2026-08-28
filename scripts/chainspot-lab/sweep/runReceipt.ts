@@ -76,6 +76,37 @@ export interface RunReceiptResults {
 	readonly rawPairs?: number;
 }
 
+export interface RunReceiptSliceOperation {
+	readonly id: string;
+	readonly ownerGate: string;
+	readonly reason: string;
+}
+
+/** Slice facts handed in by slicePlanThroughGate (operation.ts). */
+export interface RunReceiptSliceInput {
+	readonly throughGate: string;
+	readonly phase: string;
+	readonly parentOperationCount: number;
+	/** Operations inside the sliced prefix owned by a later gate, each with
+	 * the slot-level reason it had to run. */
+	readonly prerequisites: readonly RunReceiptSliceOperation[];
+	/** Parent-plan operations after the prefix; not run by this slice. */
+	readonly notScheduled: readonly RunReceiptSliceOperation[];
+}
+
+/** The receipt's slice section: the input facts plus what this module
+ * derives from them (final-result omissions and the straight-hole
+ * assignment story). Present only on `--through` runs. */
+export interface RunReceiptSlice extends RunReceiptSliceInput {
+	readonly scheduledOperationCount: number;
+	/** FINAL RESULTS metrics whose producing operations were cut by the
+	 * slice, with the line the text receipt prints instead of a number. */
+	readonly finalResultsNotScheduled: Readonly<Partial<Record<keyof RunReceiptResults, string>>>;
+	/** Straight-hole assignment story, present when the slice scheduled
+	 * assignment.selection — every count carries its trace provenance. */
+	readonly straightStory?: readonly string[];
+}
+
 export interface RunReceiptVisualRender {
 	readonly kind: 'canonical' | 'artifact' | 'feature';
 	readonly gate: string;
@@ -126,6 +157,7 @@ export interface RunReceipt {
 	readonly gates: readonly RunReceiptGate[];
 	readonly units: readonly RunReceiptUnit[];
 	readonly results: RunReceiptResults;
+	readonly slice?: RunReceiptSlice;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
 	readonly straightTest?: RunReceiptStraightTest;
 	readonly evaluation: {
@@ -143,6 +175,7 @@ export interface BuildRunReceiptInput {
 	readonly configName: string;
 	readonly configPath: string;
 	readonly throughGate?: string;
+	readonly slice?: RunReceiptSliceInput;
 	readonly plan: CompiledExecutionPlan;
 	readonly receipts: readonly Receipt[];
 	readonly report: G0Report;
@@ -200,6 +233,81 @@ function unitReceipt(trace: RunTrace): RunReceiptUnit[] {
 				.map(([reason, count]) => ({ reason, count }))
 		};
 	});
+}
+
+/** Operations whose run is what gives each FINAL RESULTS metric a value.
+ * A metric whose producers were all cut by a `--through` slice prints
+ * `not scheduled (--through GN)` instead of a bare 0 or UNKNOWN — a
+ * board-seeded default (e.g. recoveredTees = 0) is not a result. */
+const FINAL_RESULT_PRODUCERS: Record<keyof RunReceiptResults, readonly string[]> = {
+	badges: ['badges'],
+	baskets: ['baskets', 'cleanBasketFamily'],
+	visibleTees: ['teeFamily', 'tees.exclusion'],
+	recoveredTees: ['teeRecovery', 'phantomTee'],
+	phantomTees: ['phantomTee'],
+	totalTees: ['teeRecovery', 'phantomTee'],
+	assignments: ['assignment.selection', 'zfit'],
+	rawPairs: ['rawPairs']
+};
+
+function deriveSlice(
+	input: BuildRunReceiptInput,
+	units: readonly RunReceiptUnit[]
+): { slice?: RunReceiptSlice; results: RunReceiptResults } {
+	if (!input.slice) return { results: input.results };
+	const slice = input.slice;
+	const scheduled = new Set(input.plan.ops.map((operation) => operation.id));
+	const cut = new Set(slice.notScheduled.map((operation) => operation.id));
+	const finalResultsNotScheduled: Partial<Record<keyof RunReceiptResults, string>> = {};
+	const results: Record<string, number | undefined> = { ...input.results };
+	for (const metric of Object.keys(FINAL_RESULT_PRODUCERS) as (keyof RunReceiptResults)[]) {
+		const producers = FINAL_RESULT_PRODUCERS[metric];
+		if (producers.some((id) => scheduled.has(id))) continue;
+		if (!producers.some((id) => cut.has(id))) continue; // absent from the config, not cut by the slice
+		if (metric === 'totalTees' && input.results.visibleTees !== undefined) {
+			finalResultsNotScheduled[metric] = `not final: ${input.results.visibleTees} visible; tee recovery not scheduled (--through ${slice.throughGate})`;
+		} else {
+			finalResultsNotScheduled[metric] = `not scheduled (--through ${slice.throughGate})`;
+		}
+		results[metric] = undefined;
+	}
+
+	let straightStory: string[] | undefined;
+	if (scheduled.has('assignment.selection')) {
+		const unit = (id: string) => units.find((candidate) => candidate.id === id);
+		const selection = unit('assignment');
+		const recovery = unit('teeRecovery');
+		const selectedCount = selection?.measurements.find(
+			(measurement) => measurement.name === 'score'
+		)?.count;
+		straightStory = [];
+		straightStory.push(
+			`assignment.selection assigned ${selectedCount ?? 'UNKNOWN'} of ${input.results.badges ?? 'UNKNOWN'} badges straight from visible tees (provenance: unit 'assignment' measurement 'score' count — one score per selected assignment)`
+		);
+		if (recovery) {
+			straightStory.push(
+				`teeRecovery then recovered ${recovery.accepted} occluded tee(s) and completed their holes (provenance: unit 'teeRecovery' accepted drawables)`
+			);
+		} else if (cut.has('teeRecovery')) {
+			straightStory.push(`teeRecovery not scheduled (--through ${slice.throughGate})`);
+		}
+		straightStory.push(
+			`assignments on the board at this cutoff: ${input.results.assignments ?? 'UNKNOWN'} (provenance: board 'assignment' slot after the last scheduled operation)`
+		);
+		if (cut.has('zfit')) {
+			straightStory.push(`zfit bend refinement not scheduled (--through ${slice.throughGate})`);
+		}
+	}
+
+	return {
+		slice: {
+			...slice,
+			scheduledOperationCount: input.plan.ops.length,
+			finalResultsNotScheduled,
+			...(straightStory ? { straightStory } : {})
+		},
+		results: results as RunReceiptResults
+	};
 }
 
 export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
@@ -266,6 +374,8 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		};
 	});
 
+	const units = unitReceipt(input.trace);
+	const { slice, results } = deriveSlice(input, units);
 	const featureStates = Object.entries(input.trace.features);
 	const straightTest = input.trace.straightTest && {
 		...input.trace.straightTest,
@@ -307,8 +417,9 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		) as unknown as RunPhaseTimings,
 		operations,
 		gates,
-		units: unitReceipt(input.trace),
-		results: input.results,
+		units,
+		results,
+		...(slice ? { slice } : {}),
 		visualRenders: input.visualRenders,
 		...(straightTest ? { straightTest } : {}),
 		evaluation: {
