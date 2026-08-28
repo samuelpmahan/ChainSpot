@@ -38,9 +38,12 @@ const straightTestOnResolved = resolveConfig(
 // teeRecovery now republishes its final assignment tee/route inventory for
 // downstream G7 custody (PR #61). The default-OFF straightTest,
 // teeMinAreaPose, and teeBadgeLock operations remain excluded from this
-// fingerprint until explicitly configured.
+// fingerprint until explicitly configured. 2026-08-28: teeRecovery's new
+// axisToleranceDeg knob (soft ceiling, default 3 -- the strict target itself:
+// see g3.teeRecovery.ts for the null-result empirical finding on the
+// post-dc96000 corpus) moves this pin again.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'a49f48611ba32c8f1b432a7c88954390ba050d016f1f216c0d23cd775346caf5';
+	'7c4cfb3465ccfc87885999c2c6eeb323e1a63106a21cefe259fd663aaa151039';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

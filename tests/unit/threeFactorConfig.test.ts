@@ -245,7 +245,11 @@ describe('resolveConfig + engine', () => {
 		// force a conscious update here. 2026-08-28: zfit dropped from the
 		// default schedule by owner directive (prior pins cac326d6... then
 		// cb9b82be...); PR #61's teeRecovery inventory republish moves it again.
-		expect(hash).toBe('d63c4ec8a27fa840224d411e3740bbc22fe8edf70858f69cea32b3f94bb43ed4');
+		// 2026-08-28: teeRecovery's new axisToleranceDeg knob (soft ceiling,
+		// default 3 -- the strict target itself: see g3.teeRecovery.ts for the
+		// null-result empirical finding on the post-dc96000 corpus) moves this
+		// pin again.
+		expect(hash).toBe('a48ec945b7cd19f5f792b48255775aa630e745d2adf12cbe2431d5576b9f948f');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {

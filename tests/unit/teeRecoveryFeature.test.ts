@@ -1,7 +1,9 @@
-import { describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { extractComponents, type ComponentStats } from '@chainspot/alg/detectors/threeFactor/components';
 import {
 	buildTeeRecoveryCandidates,
+	setActiveAxisToleranceDeg,
+	teeRecoveryFeature,
 	teeRecoveryUnit
 } from '@chainspot/alg/detectors/threeFactor/features/g3.teeRecovery';
 import { createBoard } from '@chainspot/alg/detectors/threeFactor/measure';
@@ -227,7 +229,11 @@ function build(fixture: ReturnType<typeof recoveryFixture>, occlusion = new Occl
 	);
 }
 
-function runRecovery(fixture: ReturnType<typeof recoveryFixture>, occlusion: OcclusionDetector) {
+function runRecovery(
+	fixture: ReturnType<typeof recoveryFixture>,
+	occlusion: OcclusionDetector,
+	axisToleranceDeg?: number
+) {
 	const board = createBoard();
 	board.set('stage', fixture.stage);
 	board.set('viewport', { topPx: 0 });
@@ -238,10 +244,22 @@ function runRecovery(fixture: ReturnType<typeof recoveryFixture>, occlusion: Occ
 	board.set('measurement', fixture.assignment.measurement);
 	board.set('recoveredTees', []);
 	const drawables: Drawable[] = [];
+	const measurements: { name: string; value: number }[] = [];
 	teeRecoveryUnit.run(board, {
 		occlusion,
-		resolve: (feature) => ({ enabled: feature.id === 'teeRecovery', knobs: {} }),
-		measure() {},
+		// Most fixtures in this file test axis-independent behavior and
+		// deliberately supply an incomplete knobs object (as a config-unaware
+		// legacy caller would): the unit falls back to the module's own
+		// default rather than corrupting the shared axis-tolerance state with
+		// NaN (see the `typeof ... === 'number'` guard in teeRecoveryUnit.run).
+		// Tests that care about the knob pass axisToleranceDeg explicitly.
+		resolve: (feature) => ({
+			enabled: feature.id === 'teeRecovery',
+			knobs: axisToleranceDeg === undefined ? {} : { axisToleranceDeg }
+		}),
+		measure(_unitId, name, value) {
+			measurements.push({ name, value });
+		},
 		overlay(_unitId, drawable) {
 			drawables.push(drawable);
 		},
@@ -250,10 +268,19 @@ function runRecovery(fixture: ReturnType<typeof recoveryFixture>, occlusion: Occ
 			return () => {};
 		}
 	});
-	return drawables;
+	return { drawables, measurements };
 }
 
 describe('teeRecovery visible-component evidence contract', () => {
+	// Reset the module-scoped active axis tolerance before every test. It is
+	// shared mutable state (single-threaded engine assumption, see
+	// setActiveAxisToleranceDeg's doc comment); tests that install a specific
+	// knob value must not leak it into a sibling test that expects the
+	// strict-target default (3°, BADGE_AXIS_TARGET_DEG in g3.teeRecovery.ts).
+	beforeEach(() => {
+		setActiveAxisToleranceDeg(3);
+	});
+
 	test('retains a complete global tee component even without basket contact', () => {
 		const fixture = recoveryFixture();
 		const { candidates } = build(fixture);
@@ -273,7 +300,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]?.fragmentPixels).toHaveLength((12 + 15) * 8);
 
-		const receipt = runRecovery(fixture, new OcclusionDetector()).find((drawable) => drawable.verdict === 'rejected');
+		const receipt = runRecovery(fixture, new OcclusionDetector()).drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|footprint|visible|component/i);
 	});
@@ -283,7 +310,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		const { candidates } = build(fixture);
 		expect(candidates[0]?.localizationSource).toBe('support-fit');
 		expect(candidates[0]?.localizationFit).toBeUndefined();
-		const drawables = runRecovery(fixture, new OcclusionDetector());
+		const { drawables } = runRecovery(fixture, new OcclusionDetector());
 		const shard = drawables.find((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard');
 		expect(shard?.type).toBe('pixelSet');
 		if (shard?.type !== 'pixelSet') throw new Error('accepted shard did not retain exact pixels');
@@ -327,7 +354,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		const { candidates } = build(fixture, occlusion);
 		expect(candidates[0]?.supportingComponentIds).toHaveLength(2);
 
-		const drawables = runRecovery(fixture, occlusion);
+		const { drawables } = runRecovery(fixture, occlusion);
 		const shard = drawables.find((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard');
 		expect(shard?.type).toBe('pixelSet');
 		if (shard?.type !== 'pixelSet') throw new Error('accepted shard did not retain exact pixels');
@@ -343,7 +370,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(candidates[0]?.supportingComponentIds).toHaveLength(2);
 		expect(candidates[0]?.fragmentPixels).toHaveLength(13);
 
-		const drawables = runRecovery(fixture, new OcclusionDetector());
+		const { drawables } = runRecovery(fixture, new OcclusionDetector());
 		const shard = drawables.find((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard');
 		expect(shard?.type).toBe('pixelSet');
 		if (shard?.type !== 'pixelSet') throw new Error('accepted shard did not retain exact pixels');
@@ -353,7 +380,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 
 	test('rejects one non-occluded bright pixel outside the hollow support band and names the evidence', () => {
 		const fixture = recoveryFixture('hollow-extra');
-		const drawables = runRecovery(fixture, new OcclusionDetector());
+		const { drawables } = runRecovery(fixture, new OcclusionDetector());
 		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|outside|footprint|visible/i);
@@ -365,7 +392,7 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(opaquePoint).toBeDefined();
 		const opaque = new OcclusionDetector();
 		opaque.registerOpaque({ kindAt: (x, y) => (x === opaquePoint?.[0] && y === opaquePoint?.[1] ? 'OPAQUE' : 'UNKNOWN') });
-		const accepted = runRecovery(opaqueFixture, opaque);
+		const { drawables: accepted } = runRecovery(opaqueFixture, opaque);
 		expect(accepted.some((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard')).toBe(true);
 
 		const alphaFixture = recoveryFixture('hollow-alpha');
@@ -373,16 +400,62 @@ describe('teeRecovery visible-component evidence contract', () => {
 		expect(alphaPoint).toBeDefined();
 		const alpha = new OcclusionDetector();
 		alpha.registerAlpha({ kindAt: (x, y) => (x === alphaPoint?.[0] && y === alphaPoint?.[1] ? 'ALPHA' : 'UNKNOWN') });
-		const rejected = runRecovery(alphaFixture, alpha);
+		const { drawables: rejected } = runRecovery(alphaFixture, alpha);
 		const receipt = rejected.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/unexplained|outside|footprint|visible|alpha/i);
 	});
 
 	test('rejects a rigid hollow component when no support fit lies within 3 degrees of the badge ray', () => {
-		const drawables = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
+		const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
 		const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
 		expect(receipt).toBeDefined();
 		expect(receipt?.reason).toMatch(/badge ray|3.?°|support fit/i);
+	});
+
+	describe('axisToleranceDeg soft ceiling (owner policy 2026-08-28)', () => {
+		test('feature declares the knob with a validated default', () => {
+			expect(teeRecoveryFeature.knobs.axisToleranceDeg.default).toBeGreaterThanOrEqual(0.5);
+			expect(teeRecoveryFeature.knobs.axisToleranceDeg.default).toBeLessThanOrEqual(90);
+			const validate = teeRecoveryFeature.knobs.axisToleranceDeg.validate!;
+			expect(validate(10)).toBeNull();
+			expect(validate(0.1)).toMatch(/finite number between 0.5 and 90/);
+			expect(validate(91)).toMatch(/finite number between 0.5 and 90/);
+			expect(validate(Number.NaN)).toMatch(/finite number between 0.5 and 90/);
+		});
+
+		test('a candidate whose axis offset exceeds a tight knob is rejected, and the same candidate is accepted once the knob widens past it', () => {
+			// hollow-misaligned's shard is rotated 0.5 rad (~28.65°) off the badge
+			// ray -- a fixed, known offset independent of the configured knob.
+			const fixture = recoveryFixture('hollow-misaligned');
+
+			const tight = runRecovery(fixture, new OcclusionDetector(), 10);
+			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected');
+			expect(tightReceipt).toBeDefined();
+			// The rejection text must name the CONFIGURED limit (the knob), not a
+			// hardcoded literal, so a reader can tell this was a soft-ceiling call.
+			expect(tightReceipt?.reason).toMatch(/within 10°/);
+			expect(tightReceipt?.reason).toMatch(/axisToleranceDeg/);
+			expect(tight.drawables.some((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard')).toBe(false);
+
+			const wide = runRecovery(fixture, new OcclusionDetector(), 45);
+			const wideShard = wide.drawables.find((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard');
+			expect(wideShard).toBeDefined();
+			const axisErrorMeasurement = wide.measurements.find((entry) => entry.name === 'axisErrorDeg');
+			expect(axisErrorMeasurement).toBeDefined();
+			// The discrete center/angle search (0.5° steps) does not reproduce the
+			// exact 0.5 rad (~28.65°) synthetic offset bit-for-bit; it must land
+			// close to it and safely under the 45° ceiling that let it through.
+			expect(axisErrorMeasurement?.value).toBeGreaterThan(20);
+			expect(axisErrorMeasurement?.value).toBeLessThan(45);
+		});
+
+		test('a resolver that supplies an incomplete knobs object (legacy/test double) does not corrupt the active tolerance with NaN', () => {
+			setActiveAxisToleranceDeg(3);
+			const { drawables } = runRecovery(recoveryFixture('hollow-misaligned'), new OcclusionDetector());
+			const receipt = drawables.find((drawable) => drawable.verdict === 'rejected');
+			expect(receipt?.reason).not.toMatch(/NaN/);
+			expect(receipt?.reason).toMatch(/within 3°/);
+		});
 	});
 });
