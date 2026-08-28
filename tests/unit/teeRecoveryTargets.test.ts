@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	buildTeeRecoveryCandidates,
 	deriveTeeAimClaims,
 	deriveTeeRecoveryTargets
 } from '@chainspot/alg/detectors/threeFactor/features/g3.teeRecovery';
@@ -9,7 +10,7 @@ import type {
 } from '@chainspot/alg/detectors/threeFactor/types';
 
 function badge(detId: string, label: string, cxPx: number, cyPx: number): BadgeEvidence {
-	return { detId, label, cxPx, cyPx } as BadgeEvidence;
+	return { detId, label, cxPx, cyPx, bbox: [cxPx, cyPx, 1, 1] } as BadgeEvidence;
 }
 
 function tee(
@@ -37,6 +38,42 @@ describe('teeRecovery visible-aim target derivation', () => {
 			expect.objectContaining({ teeId: 'tee-12', badgeId: 'badge-8' })
 		]);
 		expect(deriveTeeRecoveryTargets([h4, h5], tees).map((entry) => entry.detId)).toEqual(['badge-5']);
+	});
+
+	test('production candidate discovery ignores a lying G6 all-badges-owned table', () => {
+		const badges = [
+			badge('badge-1', '1', 100, 10),
+			badge('badge-2', '2', 10, 100)
+		];
+		const tees = [tee('tee-a', 10, 10, 0, {
+			componentLabel: 99,
+			bbox: [10, 10, 12, 8],
+			angleRad: 0,
+			majorPx: 12,
+			minorPx: 8,
+			area: 36
+		})];
+		const width = 140;
+		const height = 120;
+		const stage = {
+			brightLabels: new Int32Array(width * height),
+			brightComponents: [],
+			brightMask: { width, height, data: new Uint8Array(width * height) },
+			width,
+			height
+		};
+		const result = buildTeeRecoveryCandidates(stage, badges, [], tees, 0, {
+			assignment: {
+				// This is the exact failure class: G6 says there is no missing badge.
+				// G4 must still hunt badge-2 because the only visible tee aims at badge-1.
+				assignments: [
+					{ badgeId: 'badge-1', basketId: 'basket-stale' },
+					{ badgeId: 'badge-2', basketId: 'basket-stale' }
+				]
+			}
+		});
+
+		expect(result.searchOutcomes.map((outcome) => outcome.badgeId)).toEqual(['badge-2']);
 	});
 
 	test('duplicate tee claims are not force-matched into fake badge coverage', () => {
