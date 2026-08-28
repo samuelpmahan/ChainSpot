@@ -541,13 +541,20 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const pixelEvidence = unexplained.length
 		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
 		: '';
+	// This candidate is already anchored to one specific badge (target.badge in
+	// buildTeeRecoveryCandidates), so the real hole number is known whenever an
+	// exact digit read exists — surface it so a rejection is legible without
+	// cross-referencing the raw badgeId embedded in candidate.id/ref.
+	const holePrefix = candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel)
+		? `badge ${candidate.badgeLabel}: `
+		: '';
 	const reason = accepted
 		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; search seed ${candidate.seedSource ?? 'UNKNOWN'}${localizationEvidence}`
-		: insufficientSupport
+		: `${holePrefix}${insufficientSupport
 			? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 			: `${axisRejected
 				? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < 3°`
-				: 'no hollow tee support fit within 3° of the badge ray explains every visible component pixel'}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`;
+				: 'no hollow tee support fit within 3° of the badge ray explains every visible component pixel'}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
