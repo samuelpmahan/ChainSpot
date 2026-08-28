@@ -22,15 +22,19 @@ const CANONICAL = {
 function panelCenters(outputSizes: readonly number[]): readonly (readonly [number, number])[] {
 	const CHROME = 8;
 	const LABEL_H = 24;
-	const centers: [number, number][] = [];
-	let x = 0;
-	for (let i = 0; i < outputSizes.length; i++) {
-		const size = outputSizes[i];
-		centers.push([x + CHROME + size / 2, LABEL_H + CHROME + size / 2]);
-		const currentForensic = i >= 2;
-		const nextForensic = i + 1 >= 2;
-		const gap = i === outputSizes.length - 1 ? 0 : currentForensic && nextForensic ? 6 : 18;
-		x += size + CHROME * 2 + gap;
+	const MAIN_GAP = 18;
+	const FORENSIC_GAP = 6;
+	const main = outputSizes.slice(0, 2);
+	const forensic = outputSizes.slice(2);
+	const centers: [number, number][] = main.map((size, index) => [
+		main.slice(0, index).reduce((x, prior) => x + prior + CHROME * 2 + MAIN_GAP, 0) + CHROME + size / 2,
+		LABEL_H + CHROME + size / 2
+	]);
+	const forensicX = main.reduce((x, size, index) => x + size + CHROME * 2 + (index < main.length - 1 ? MAIN_GAP : 0), 0) + MAIN_GAP;
+	let forensicY = 0;
+	for (const size of forensic) {
+		centers.push([forensicX + CHROME + size / 2, forensicY + LABEL_H + CHROME + size / 2]);
+		forensicY += LABEL_H + size + CHROME * 2 + FORENSIC_GAP;
 	}
 	return centers;
 }

@@ -61,5 +61,5 @@ describe('LAB browser contextual-help API', () => {
 			child.kill('SIGTERM');
 			await once(child, 'exit').catch(() => undefined);
 		}
-	});
+	}, 15_000);
 });

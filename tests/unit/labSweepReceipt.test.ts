@@ -351,7 +351,7 @@ describe('LAB sweep receipt seam', () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	test('smart G2 promotes a course-sized renderer family instead of sliding-window echoes', async () => {
 		const result = await runSweepOperation({

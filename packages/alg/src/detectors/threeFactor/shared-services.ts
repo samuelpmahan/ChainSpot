@@ -18,4 +18,3 @@ export const THREE_FACTOR_SHARED_SERVICES = [
 ] as const satisfies readonly ABFeatureSetServiceDescriptor[];
 
 export type ThreeFactorSharedServiceId = (typeof THREE_FACTOR_SHARED_SERVICES)[number]['id'];
-

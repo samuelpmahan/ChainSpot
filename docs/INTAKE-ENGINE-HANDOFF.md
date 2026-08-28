@@ -93,8 +93,9 @@ re-verified identical before and after the drop.
   instead of the prior 5.96 px support-fit offset.
 - Phantom completion: disabled and unscheduled.
 - Receipt warnings: 0; operation conformance drift: 0.
-- The run receipt emits one unified endpoint VisualRender with portable
-  run-relative paths.
+- The run receipt inventories one unified `run.endpoint-summary` VisualRender
+  covering the current G0-G4 endpoint evidence. Its PNG and text receipt use
+  portable run-relative paths.
 - Visible and recovered tees share one render standard: exact green
   border/shard evidence, four pad-axis-aligned cyan corner plus signs, and
   two one-pixel red diagonals whose intersection is the fitted center.
