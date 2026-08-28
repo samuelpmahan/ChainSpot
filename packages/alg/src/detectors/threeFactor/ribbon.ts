@@ -89,7 +89,12 @@ function areaResizeRgb(image: RgbaImage, width: number, height: number): Float32
 	return out;
 }
 
-function blurRgb(image: Float32Array, width: number, height: number, knobs: RibbonKnobs): Float32Array {
+function blurRgb(
+	image: Float32Array,
+	width: number,
+	height: number,
+	knobs: RibbonKnobs
+): Float32Array {
 	const radius = Math.max(1, Math.round(knobs.blurRadiusSigmas * knobs.gaussianSigma));
 	const kernel: number[] = [];
 	let total = 0;
@@ -128,16 +133,34 @@ function blurRgb(image: Float32Array, width: number, height: number, knobs: Ribb
 	return output;
 }
 
-function sampleRgb(image: Float32Array, width: number, height: number, x: number, y: number, channel: number): number {
+function sampleRgbInto(
+	image: Float32Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	out: Float64Array,
+	offset: number
+): void {
 	const x0 = Math.floor(x);
 	const y0 = Math.floor(y);
 	const ax = x - x0;
 	const ay = y - y0;
-	const p00 = (reflect(y0, height) * width + reflect(x0, width)) * 3 + channel;
-	const p10 = (reflect(y0, height) * width + reflect(x0 + 1, width)) * 3 + channel;
-	const p01 = (reflect(y0 + 1, height) * width + reflect(x0, width)) * 3 + channel;
-	const p11 = (reflect(y0 + 1, height) * width + reflect(x0 + 1, width)) * 3 + channel;
-	return image[p00] * (1 - ax) * (1 - ay) + image[p10] * ax * (1 - ay) + image[p01] * (1 - ax) * ay + image[p11] * ax * ay;
+	const rx0 = reflect(x0, width);
+	const rx1 = reflect(x0 + 1, width);
+	const ry0 = reflect(y0, height);
+	const ry1 = reflect(y0 + 1, height);
+	const p00 = (ry0 * width + rx0) * 3;
+	const p10 = (ry0 * width + rx1) * 3;
+	const p01 = (ry1 * width + rx0) * 3;
+	const p11 = (ry1 * width + rx1) * 3;
+	for (let channel = 0; channel < 3; channel++) {
+		out[offset + channel] =
+			image[p00 + channel] * (1 - ax) * (1 - ay) +
+			image[p10 + channel] * ax * (1 - ay) +
+			image[p01 + channel] * (1 - ax) * ay +
+			image[p11 + channel] * ax * ay;
+	}
 }
 
 function percentile(values: number[], fraction: number): number {
@@ -146,7 +169,11 @@ function percentile(values: number[], fraction: number): number {
 	return values[Math.min(values.length - 1, Math.floor(fraction * (values.length - 1)))];
 }
 
-export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParams, knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS): SupportFieldEvidence {
+export function computeRibbonSupport(
+	image: RgbaImage,
+	parameters: CorridorParams,
+	knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
+): SupportFieldEvidence {
 	const scale = parameters.fieldScale;
 	const width = Math.max(1, Math.floor(image.width / scale));
 	const height = Math.max(1, Math.floor(image.height / scale));
@@ -154,32 +181,40 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 	const raw = new Float32Array(width * height);
 	const bestTheta = new Float32Array(width * height);
 	const delta = Math.max(1, knobs.gradientDeltaMultiplier / scale);
+	const samples = new Float64Array(12);
 	for (let orientation = 0; orientation < parameters.orientations; orientation++) {
 		const theta = (Math.PI * orientation) / parameters.orientations;
 		const nx = -Math.sin(theta);
 		const ny = Math.cos(theta);
 		for (const widthSrc of parameters.widthsSrc) {
 			const radius = widthSrc / (2 * scale);
+			const distance0 = -(radius - delta);
+			const distance1 = -(radius + delta);
+			const distance2 = radius - delta;
+			const distance3 = radius + delta;
+			const ox0 = nx * distance0,
+				oy0 = ny * distance0;
+			const ox1 = nx * distance1,
+				oy1 = ny * distance1;
+			const ox2 = nx * distance2,
+				oy2 = ny * distance2;
+			const ox3 = nx * distance3,
+				oy3 = ny * distance3;
 			for (let y = 0; y < height; y++) {
 				for (let x = 0; x < width; x++) {
-					const sample = (distance: number): [number, number, number] => {
-						const sx = x + nx * distance;
-						const sy = y + ny * distance;
-						return [
-							sampleRgb(blurred, width, height, sx, sy, 0),
-							sampleRgb(blurred, width, height, sx, sy, 1),
-							sampleRgb(blurred, width, height, sx, sy, 2)
-						];
-					};
-					const a = sample(-(radius - delta));
-					const b = sample(-(radius + delta));
-					const c = sample(radius - delta);
-					const d = sample(radius + delta);
-					const d1 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-					const d2 = [c[0] - d[0], c[1] - d[1], c[2] - d[2]];
-					const n1 = Math.hypot(...d1);
-					const n2 = Math.hypot(...d2);
-					const dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+					sampleRgbInto(blurred, width, height, x + ox0, y + oy0, samples, 0);
+					sampleRgbInto(blurred, width, height, x + ox1, y + oy1, samples, 3);
+					sampleRgbInto(blurred, width, height, x + ox2, y + oy2, samples, 6);
+					sampleRgbInto(blurred, width, height, x + ox3, y + oy3, samples, 9);
+					const d1r = samples[0] - samples[3];
+					const d1g = samples[1] - samples[4];
+					const d1b = samples[2] - samples[5];
+					const d2r = samples[6] - samples[9];
+					const d2g = samples[7] - samples[10];
+					const d2b = samples[8] - samples[11];
+					const n1 = Math.hypot(d1r, d1g, d1b);
+					const n2 = Math.hypot(d2r, d2g, d2b);
+					const dot = d1r * d2r + d1g * d2g + d1b * d2b;
 					if (dot <= 0) continue;
 					const score = Math.min(n1, n2) * Math.min(1, dot / (n1 * n2 + 1e-6));
 					const cell = y * width + x;
@@ -191,9 +226,16 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 			}
 		}
 	}
-	const norm = Math.max(percentile(Array.from(raw).filter((value) => value > 0), knobs.normalizationPercentile), 1e-6);
+	const norm = Math.max(
+		percentile(
+			Array.from(raw).filter((value) => value > 0),
+			knobs.normalizationPercentile
+		),
+		1e-6
+	);
 	const support = new Float32Array(raw.length);
-	for (let i = 0; i < raw.length; i++) support[i] = Math.pow(Math.min(1, raw[i] / norm), knobs.supportGamma);
+	for (let i = 0; i < raw.length; i++)
+		support[i] = Math.pow(Math.min(1, raw[i] / norm), knobs.supportGamma);
 	return {
 		width,
 		height,
@@ -210,7 +252,10 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 	};
 }
 
-export function buildSupportCost(field: SupportFieldEvidence, knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS): Float32Array {
+export function buildSupportCost(
+	field: SupportFieldEvidence,
+	knobs: RibbonKnobs = DEFAULT_RIBBON_KNOBS
+): Float32Array {
 	const cost = new Float32Array(field.support.length);
 	for (let i = 0; i < cost.length; i++) {
 		const support = field.support[i];
@@ -236,27 +281,45 @@ export function patchBadgeOcclusion(
 		const p = (iy * image.width + ix) * 4;
 		return (image.data[p] + image.data[p + 1] + image.data[p + 2]) / 3;
 	};
-	const inside = (x: number, y: number): boolean => badges.some((badge) => {
-		const [bx, by, bw, bh] = badge.bbox;
-		return x >= bx - knobs.insideBadgeMargin && x <= bx + bw + knobs.insideBadgeMargin && y >= by - knobs.insideBadgeMargin && y <= by + bh + knobs.insideBadgeMargin;
-	});
+	const inside = (x: number, y: number): boolean =>
+		badges.some((badge) => {
+			const [bx, by, bw, bh] = badge.bbox;
+			return (
+				x >= bx - knobs.insideBadgeMargin &&
+				x <= bx + bw + knobs.insideBadgeMargin &&
+				y >= by - knobs.insideBadgeMargin &&
+				y <= by + bh + knobs.insideBadgeMargin
+			);
+		});
 	for (const badge of badges) {
 		const [bx, by, bw, bh] = badge.bbox;
 		const x0 = Math.max(0, Math.floor((bx - knobs.haloBboxMargin) / field.scale));
 		const x1 = Math.min(field.width - 1, Math.ceil((bx + bw + knobs.haloBboxMargin) / field.scale));
 		const y0 = Math.max(0, Math.floor((by - knobs.haloBboxMargin) / field.scale));
-		const y1 = Math.min(field.height - 1, Math.ceil((by + bh + knobs.haloBboxMargin) / field.scale));
-		for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-			const cell = y * field.width + x;
-			if (field.support[cell] > knobs.haloSupportThreshold) {
-				field.support[cell] = knobs.haloSupportThreshold;
-				haloCells++;
+		const y1 = Math.min(
+			field.height - 1,
+			Math.ceil((by + bh + knobs.haloBboxMargin) / field.scale)
+		);
+		for (let y = y0; y <= y1; y++)
+			for (let x = x0; x <= x1; x++) {
+				const cell = y * field.width + x;
+				if (field.support[cell] > knobs.haloSupportThreshold) {
+					field.support[cell] = knobs.haloSupportThreshold;
+					haloCells++;
+				}
 			}
-		}
 		if (!widthPx) continue;
 		const reach = half + knobs.patchReachMargin;
-		for (let y = Math.max(0, Math.floor((by - reach) / field.scale)); y <= Math.min(field.height - 1, Math.ceil((by + bh + reach) / field.scale)); y++) {
-			for (let x = Math.max(0, Math.floor((bx - reach) / field.scale)); x <= Math.min(field.width - 1, Math.ceil((bx + bw + reach) / field.scale)); x++) {
+		for (
+			let y = Math.max(0, Math.floor((by - reach) / field.scale));
+			y <= Math.min(field.height - 1, Math.ceil((by + bh + reach) / field.scale));
+			y++
+		) {
+			for (
+				let x = Math.max(0, Math.floor((bx - reach) / field.scale));
+				x <= Math.min(field.width - 1, Math.ceil((bx + bw + reach) / field.scale));
+				x++
+			) {
 				const sx = x * field.scale + field.scale / 2;
 				const sy = y * field.scale + field.scale / 2;
 				let best = 0;
@@ -264,18 +327,32 @@ export function patchBadgeOcclusion(
 					const theta = (orientation * Math.PI) / knobs.patchOrientations;
 					const nx = -Math.sin(theta);
 					const ny = Math.cos(theta);
-					const points = [[sx - nx * (half - knobs.sampleOffsetPx), sy - ny * (half - knobs.sampleOffsetPx)], [sx - nx * (half + knobs.sampleOffsetPx), sy - ny * (half + knobs.sampleOffsetPx)], [sx + nx * (half - knobs.sampleOffsetPx), sy + ny * (half - knobs.sampleOffsetPx)], [sx + nx * (half + knobs.sampleOffsetPx), sy + ny * (half + knobs.sampleOffsetPx)]];
-					const leftBlocked = inside(points[0][0], points[0][1]) || inside(points[1][0], points[1][1]);
-					const rightBlocked = inside(points[2][0], points[2][1]) || inside(points[3][0], points[3][1]);
+					const points = [
+						[sx - nx * (half - knobs.sampleOffsetPx), sy - ny * (half - knobs.sampleOffsetPx)],
+						[sx - nx * (half + knobs.sampleOffsetPx), sy - ny * (half + knobs.sampleOffsetPx)],
+						[sx + nx * (half - knobs.sampleOffsetPx), sy + ny * (half - knobs.sampleOffsetPx)],
+						[sx + nx * (half + knobs.sampleOffsetPx), sy + ny * (half + knobs.sampleOffsetPx)]
+					];
+					const leftBlocked =
+						inside(points[0][0], points[0][1]) || inside(points[1][0], points[1][1]);
+					const rightBlocked =
+						inside(points[2][0], points[2][1]) || inside(points[3][0], points[3][1]);
 					if (leftBlocked === rightBlocked) continue;
 					const side = leftBlocked ? [2, 3] : [0, 1];
 					const inner = gray(points[side[0]][0], points[side[0]][1]);
 					const outer = gray(points[side[1]][0], points[side[1]][1]);
-					if (inner === null || outer === null || inside(points[side[0]][0], points[side[0]][1]) || inside(points[side[1]][0], points[side[1]][1])) continue;
+					if (
+						inner === null ||
+						outer === null ||
+						inside(points[side[0]][0], points[side[0]][1]) ||
+						inside(points[side[1]][0], points[side[1]][1])
+					)
+						continue;
 					const lift = inner - outer;
 					if (lift <= 0) continue;
 					const center = gray(sx, sy);
-					if (center !== null && !inside(sx, sy) && center - outer < -knobs.centerOuterGrayMargin) continue;
+					if (center !== null && !inside(sx, sy) && center - outer < -knobs.centerOuterGrayMargin)
+						continue;
 					best = Math.max(best, Math.min(1, lift / knobs.liftThreshold));
 				}
 				if (best >= knobs.patchAcceptanceThreshold) {

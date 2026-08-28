@@ -2,7 +2,14 @@
 // encountered non-occluded white component is accepted exactly when every
 // visible pixel can contribute to a course-local tee pointing at the badge.
 
-import type { BadgeEvidence, BasketEvidence, RecoveredTeeInput, TeeEvidence, OrientedQuad, ThreeFactorAssignment } from '../types';
+import type {
+	BadgeEvidence,
+	BasketEvidence,
+	RecoveredTeeInput,
+	TeeEvidence,
+	OrientedQuad,
+	ThreeFactorAssignment
+} from '../types';
 import { statsForPixels, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
@@ -106,13 +113,17 @@ function promoteGraphResults(
 
 function numericTraceValues(values: TeeRecoveryValues): Record<string, number> {
 	return Object.fromEntries(
-		Object.entries(values).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+		Object.entries(values).filter(
+			(entry): entry is [string, number] => typeof entry[1] === 'number'
+		)
 	);
 }
 
 /** Split the evidence remaining after ownership/occlusion subtraction. The
  * source bright component can legitimately become several visible shards. */
-function connectedPixelShards(points: readonly (readonly [number, number])[]): readonly (readonly (readonly [number, number])[])[] {
+function connectedPixelShards(
+	points: readonly (readonly [number, number])[]
+): readonly (readonly (readonly [number, number])[])[] {
 	const byKey = new Map<string, readonly [number, number]>(
 		points.map((point) => [`${point[0]},${point[1]}`, point])
 	);
@@ -131,11 +142,12 @@ function connectedPixelShards(points: readonly (readonly [number, number])[]): r
 			const point = byKey.get(key);
 			if (!point) continue;
 			shard.push(point);
-			for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-				if (dx === 0 && dy === 0) continue;
-				const neighbor = `${point[0] + dx},${point[1] + dy}`;
-				if (unseen.delete(neighbor)) queue.push(neighbor);
-			}
+			for (let dy = -1; dy <= 1; dy++)
+				for (let dx = -1; dx <= 1; dx++) {
+					if (dx === 0 && dy === 0) continue;
+					const neighbor = `${point[0] + dx},${point[1] + dy}`;
+					if (unseen.delete(neighbor)) queue.push(neighbor);
+				}
 		}
 		shard.sort(([ax, ay], [bx, by]) => ay - by || ax - bx);
 		shards.push(shard);
@@ -166,8 +178,15 @@ function finite(value: number): boolean {
 	return Number.isFinite(value);
 }
 
-function localPoint(candidate: TeeRecoveryCandidate, point: readonly [number, number], options: RecoveryGeometryOptions): readonly [number, number] {
-	const offset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? options.viewportTopPx ?? 0;
+function localPoint(
+	candidate: TeeRecoveryCandidate,
+	point: readonly [number, number],
+	options: RecoveryGeometryOptions
+): readonly [number, number] {
+	const offset =
+		candidate.coordinateFrame === 'original'
+			? 0
+			: (candidate.viewportTopPx ?? options.viewportTopPx ?? 0);
 	return [point[0], point[1] + offset];
 }
 
@@ -177,9 +196,15 @@ function rotate(ring: RecoveryFit, x: number, y: number): readonly [number, numb
 	return [ring.centerXPx + x * c - y * s, ring.centerYPx + x * s + y * c];
 }
 
-function cornersFor(candidate: TeeRecoveryCandidate, options: RecoveryGeometryOptions): OrientedQuad {
+function cornersFor(
+	candidate: TeeRecoveryCandidate,
+	options: RecoveryGeometryOptions
+): OrientedQuad {
 	const ring = candidate.localizationFit ?? candidate.fit;
-	const offset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? options.viewportTopPx ?? 0;
+	const offset =
+		candidate.coordinateFrame === 'original'
+			? 0
+			: (candidate.viewportTopPx ?? options.viewportTopPx ?? 0);
 	const raw = [
 		rotate(ring, -ring.halfWidthPx, -ring.halfHeightPx),
 		rotate(ring, ring.halfWidthPx, -ring.halfHeightPx),
@@ -193,7 +218,10 @@ function badgeAxisError(candidate: TeeRecoveryCandidate): number | undefined {
 	const a = candidate.badgeAxisAngleRad;
 	const b = candidate.teeToBadgeAngleRad;
 	if (!finite(a ?? NaN) || !finite(b ?? NaN)) return undefined;
-	const delta = Math.atan2(Math.sin((a as number) - (b as number)), Math.cos((a as number) - (b as number)));
+	const delta = Math.atan2(
+		Math.sin((a as number) - (b as number)),
+		Math.cos((a as number) - (b as number))
+	);
 	return Math.abs(delta);
 }
 
@@ -209,14 +237,14 @@ const RASTER_TOLERANCE_PX = 1.25;
  * target because it debugs like a greedy algorithm: it exposes every bad
  * assumption loudly. */
 const BADGE_AXIS_TARGET_DEG = 3;
-let activeAxisLimitRad = BADGE_AXIS_TARGET_DEG * Math.PI / 180;
+let activeAxisLimitRad = (BADGE_AXIS_TARGET_DEG * Math.PI) / 180;
 let activeAxisLimitDeg = BADGE_AXIS_TARGET_DEG;
 
 /** Set per run from the resolved teeRecovery knobs (single-threaded engine;
  * the unit run installs this before any candidate is built or judged). */
 export function setActiveAxisToleranceDeg(deg: number): void {
 	activeAxisLimitDeg = deg;
-	activeAxisLimitRad = deg * Math.PI / 180;
+	activeAxisLimitRad = (deg * Math.PI) / 180;
 }
 const MIN_SHARD_SUPPORT_PIXELS = 8;
 
@@ -233,12 +261,19 @@ function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): b
 	const hw = fit.halfWidthPx + RASTER_TOLERANCE_PX;
 	const hh = fit.halfHeightPx + RASTER_TOLERANCE_PX;
 	if (Math.abs(u) > hw || Math.abs(v) > hh) return false;
-	const thickness = Math.max(0, fit.supportThicknessPx ?? Math.min(fit.halfWidthPx, fit.halfHeightPx));
-	return Math.abs(u) >= fit.halfWidthPx - thickness - RASTER_TOLERANCE_PX ||
-		Math.abs(v) >= fit.halfHeightPx - thickness - RASTER_TOLERANCE_PX;
+	const thickness = Math.max(
+		0,
+		fit.supportThicknessPx ?? Math.min(fit.halfWidthPx, fit.halfHeightPx)
+	);
+	return (
+		Math.abs(u) >= fit.halfWidthPx - thickness - RASTER_TOLERANCE_PX ||
+		Math.abs(v) >= fit.halfHeightPx - thickness - RASTER_TOLERANCE_PX
+	);
 }
 
-function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
+function unexplainedPixels(
+	candidate: TeeRecoveryCandidate
+): readonly (readonly [number, number])[] {
 	return candidate.fragmentPixels.filter((point) => !pointExplainsTee(point, candidate.fit));
 }
 
@@ -261,18 +296,21 @@ function supportResidual(point: readonly [number, number], fit: RecoveryFit): nu
 }
 
 function supportThickness(pads: readonly TeeEvidence[]): number {
-	const values = pads.map((tee) => {
-		const pad = tee.pad;
-		if (!pad || !finite(pad.majorPx) || !finite(pad.minorPx) || !finite(pad.area)) return undefined;
-		const width = Math.max(pad.majorPx, pad.minorPx);
-		const height = Math.min(pad.majorPx, pad.minorPx);
-		// A solid bright fallback pad contains no evidence for a hollow border;
-		// keep only the one-pixel raster tolerance in that case.
-		if (pad.area >= width * height * 0.95) return 0;
-		const discriminant = Math.max(0, (width + height) ** 2 - 4 * pad.area);
-		// Solve the smaller root of the rectangular border-area equation.
-		return Math.max(0, Math.min(height / 2, (width + height - Math.sqrt(discriminant)) / 4));
-	}).filter((value): value is number => value !== undefined && finite(value));
+	const values = pads
+		.map((tee) => {
+			const pad = tee.pad;
+			if (!pad || !finite(pad.majorPx) || !finite(pad.minorPx) || !finite(pad.area))
+				return undefined;
+			const width = Math.max(pad.majorPx, pad.minorPx);
+			const height = Math.min(pad.majorPx, pad.minorPx);
+			// A solid bright fallback pad contains no evidence for a hollow border;
+			// keep only the one-pixel raster tolerance in that case.
+			if (pad.area >= width * height * 0.95) return 0;
+			const discriminant = Math.max(0, (width + height) ** 2 - 4 * pad.area);
+			// Solve the smaller root of the rectangular border-area equation.
+			return Math.max(0, Math.min(height / 2, (width + height - Math.sqrt(discriminant)) / 4));
+		})
+		.filter((value): value is number => value !== undefined && finite(value));
 	if (values.length === 0) return 0;
 	values.sort((a, b) => a - b);
 	return values[Math.floor(values.length / 2)] ?? 0;
@@ -291,12 +329,11 @@ function fitComponent(
 	// search the small center region capable of containing every visible pixel;
 	// at each center, constrain the tee major axis to within three degrees of
 	// the center-to-badge ray and test every pixel against the hollow support.
-	const outerRadius = Math.hypot(
-		halfWidth + RASTER_TOLERANCE_PX,
-		halfHeight + RASTER_TOLERANCE_PX
-	);
-	let minCenterX = -Infinity, maxCenterX = Infinity;
-	let minCenterY = -Infinity, maxCenterY = Infinity;
+	const outerRadius = Math.hypot(halfWidth + RASTER_TOLERANCE_PX, halfHeight + RASTER_TOLERANCE_PX);
+	let minCenterX = -Infinity,
+		maxCenterX = Infinity;
+	let minCenterY = -Infinity,
+		maxCenterY = Infinity;
 	for (const [x, y] of pixels) {
 		minCenterX = Math.max(minCenterX, x - outerRadius);
 		maxCenterX = Math.min(maxCenterX, x + outerRadius);
@@ -321,19 +358,39 @@ function fitComponent(
 	let bestAxisOffset = Infinity;
 	const consider = (centerX: number, centerY: number, axisOffset: number) => {
 		const badgeRay = Math.atan2(badgeY - centerY, badgeX - centerX);
+		const angleRad = badgeRay + axisOffset;
 		const fit: RecoveryFit = {
 			centerXPx: centerX,
 			centerYPx: centerY,
 			halfWidthPx: halfWidth,
 			halfHeightPx: halfHeight,
-			angleRad: badgeRay + axisOffset,
+			angleRad,
 			supportThicknessPx: thickness
 		};
+		const c = Math.cos(angleRad);
+		const s = Math.sin(angleRad);
+		const outerHalfWidth = halfWidth + RASTER_TOLERANCE_PX;
+		const outerHalfHeight = halfHeight + RASTER_TOLERANCE_PX;
+		const effectiveThickness = Math.max(0, thickness);
+		const innerEdgeU = halfWidth - effectiveThickness - RASTER_TOLERANCE_PX;
+		const innerEdgeV = halfHeight - effectiveThickness - RASTER_TOLERANCE_PX;
 		let unexplained = 0;
 		let residual = 0;
 		for (const point of pixels) {
-			if (!pointExplainsTee(point, fit)) unexplained++;
-			residual += supportResidual(point, fit);
+			const dx = point[0] - centerX;
+			const dy = point[1] - centerY;
+			const u = dx * c + dy * s;
+			const v = -dx * s + dy * c;
+			const absU = Math.abs(u);
+			const absV = Math.abs(v);
+			const explained =
+				absU <= outerHalfWidth &&
+				absV <= outerHalfHeight &&
+				(absU >= innerEdgeU || absV >= innerEdgeV);
+			if (!explained) unexplained++;
+			const outer = Math.hypot(Math.max(0, absU - halfWidth), Math.max(0, absV - halfHeight));
+			const edgeDistance = Math.min(Math.abs(absU - halfWidth), Math.abs(absV - halfHeight));
+			residual += outer * 4 + edgeDistance;
 			if (unexplained > bestUnexplained) break;
 		}
 		const absOffset = Math.abs(axisOffset);
@@ -348,20 +405,15 @@ function fitComponent(
 			bestAxisOffset = absOffset;
 		}
 	};
-	const scan = (
-		x0: number,
-		x1: number,
-		y0: number,
-		y1: number,
-		centerStep: number,
-		angleStepDeg: number
-	) => {
+	const scanRangeDeg = Math.max(0.5, activeAxisLimitDeg - 0.5);
+	const axisOffsets: number[] = [];
+	for (let degrees = -scanRangeDeg; degrees <= scanRangeDeg + 1e-9; degrees += 0.5) {
+		axisOffsets.push((degrees * Math.PI) / 180);
+	}
+	const scan = (x0: number, x1: number, y0: number, y1: number, centerStep: number) => {
 		for (let y = y0; y <= y1 + 1e-9; y += centerStep) {
 			for (let x = x0; x <= x1 + 1e-9; x += centerStep) {
-				const scanRangeDeg = Math.max(0.5, activeAxisLimitDeg - 0.5);
-				for (let degrees = -scanRangeDeg; degrees <= scanRangeDeg + 1e-9; degrees += angleStepDeg) {
-					consider(x, y, degrees * Math.PI / 180);
-				}
+				for (const axisOffset of axisOffsets) consider(x, y, axisOffset);
 			}
 		}
 	};
@@ -369,7 +421,7 @@ function fitComponent(
 	// leaves only a handful of possible centers. Search it on the native
 	// half-pixel centroid lattice so a coarse local optimum cannot hide a valid
 	// all-pixels explanation.
-	scan(minCenterX, maxCenterX, minCenterY, maxCenterY, 0.5, 0.5);
+	scan(minCenterX, maxCenterX, minCenterY, maxCenterY, 0.5);
 	return best;
 }
 
@@ -388,7 +440,8 @@ function fullSpanComponentLocalization(
 	if (
 		component.major + spanAllowance < halfWidth * 2 ||
 		component.minor + spanAllowance < halfHeight * 2
-	) return undefined;
+	)
+		return undefined;
 	return {
 		centerXPx: component.cx,
 		centerYPx: component.cy,
@@ -409,7 +462,10 @@ function exactVisibleStats(
 	if (pixels.length < 2) return undefined;
 	const xs = new Float64Array(pixels.length);
 	const ys = new Float64Array(pixels.length);
-	let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+	let minX = Infinity,
+		maxX = -Infinity,
+		minY = Infinity,
+		maxY = -Infinity;
 	for (let index = 0; index < pixels.length; index++) {
 		const [x, y] = pixels[index]!;
 		xs[index] = x;
@@ -419,14 +475,16 @@ function exactVisibleStats(
 		minY = Math.min(minY, y);
 		maxY = Math.max(maxY, y);
 	}
-	return statsForPixels(
-		label,
-		{ xs, ys, count: pixels.length },
-		minX,
-		minY,
-		maxX - minX + 1,
-		maxY - minY + 1
-	) ?? undefined;
+	return (
+		statsForPixels(
+			label,
+			{ xs, ys, count: pixels.length },
+			minX,
+			minY,
+			maxX - minX + 1,
+			maxY - minY + 1
+		) ?? undefined
+	);
 }
 
 function componentPixels(stage: RecoveryStage, component: ComponentStats): [number, number][] {
@@ -447,7 +505,9 @@ interface RecoveryStage {
 	readonly height: number;
 }
 
-interface RecoveryViewport { readonly topPx: number }
+interface RecoveryViewport {
+	readonly topPx: number;
+}
 
 /** The recovery producer is deliberately assignment anchored.  These are
  * structural views so callers can pass the normal assignment object without
@@ -477,20 +537,30 @@ function exactBasketPixels(
 	viewportTopPx: number
 ): Set<string> {
 	const owned = new Set<string>();
-	const source = sprites?.find((sprite) =>
-		Math.abs(sprite.cx - basket.centerXPx) < 3 && Math.abs(sprite.cy + viewportTopPx - basket.centerYPx) < 3
+	const source = sprites?.find(
+		(sprite) =>
+			Math.abs(sprite.cx - basket.centerXPx) < 3 &&
+			Math.abs(sprite.cy + viewportTopPx - basket.centerYPx) < 3
 	);
 	if (source) {
 		// The asset's 1-cells are the fixed renderer-owned white rows.  A bright
 		// anomaly in the semantic bbox is not removed unless it is one of these
 		// exact owned cells.
 		const rows = (basketSpriteData as { readonly rows: readonly string[] }).rows;
-		for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y]!.length; x++) {
-			if (rows[y]![x] !== '1') continue;
-			const gx = source.x + x;
-			const gy = source.y + y;
-			if (gx >= 0 && gx < stage.width && gy >= 0 && gy < stage.height && stage.brightMask.data[gy * stage.width + gx]) owned.add(`${gx},${gy}`);
-		}
+		for (let y = 0; y < rows.length; y++)
+			for (let x = 0; x < rows[y]!.length; x++) {
+				if (rows[y]![x] !== '1') continue;
+				const gx = source.x + x;
+				const gy = source.y + y;
+				if (
+					gx >= 0 &&
+					gx < stage.width &&
+					gy >= 0 &&
+					gy < stage.height &&
+					stage.brightMask.data[gy * stage.width + gx]
+				)
+					owned.add(`${gx},${gy}`);
+			}
 	}
 	// Without a matched sprite we cannot honestly attribute any basket pixel.
 	// The semantic bbox only bounds the local graph; it is never ownership.
@@ -501,9 +571,17 @@ function exactBasketPixels(
  * and known tee pads. Recovery discovery never claims spatial bounds of its
  * own -- ownership always spans the whole canonical raster, for every
  * basket, not only the one the caller happens to be near. */
-function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[], tees: readonly TeeEvidence[], baskets: readonly BasketEvidence[], sprites: readonly SpriteMatch[] | undefined, viewportTopPx: number): Set<string> {
+function exactKnownPixels(
+	stage: RecoveryStage,
+	badges: readonly BadgeEvidence[],
+	tees: readonly TeeEvidence[],
+	baskets: readonly BasketEvidence[],
+	sprites: readonly SpriteMatch[] | undefined,
+	viewportTopPx: number
+): Set<string> {
 	const owned = new Set<string>();
-	for (const basket of baskets) for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) owned.add(pixel);
+	for (const basket of baskets)
+		for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) owned.add(pixel);
 	const [x0, y0, x1, y1] = [0, 0, stage.width - 1, stage.height - 1];
 	for (const badge of badges) {
 		// Own EVERY bright pixel inside the badge bbox, not only the plate
@@ -513,18 +591,26 @@ function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[]
 		// rejected recovery candidate was badge 15's "5" glyph, H16's was
 		// badge 16's own "1"). G3 already excludes rings inside badge bboxes
 		// as chrome; recovery must treat badge interiors the same way.
-		const bx0 = Math.max(x0, badge.bbox[0]), bx1 = Math.min(x1, badge.bbox[0] + badge.bbox[2] - 1);
-		const by0 = Math.max(y0, badge.bbox[1] - viewportTopPx), by1 = Math.min(y1, badge.bbox[1] - viewportTopPx + badge.bbox[3] - 1);
-		for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (stage.brightLabels[y * stage.width + x] > 0) owned.add(`${x},${y}`);
+		const bx0 = Math.max(x0, badge.bbox[0]),
+			bx1 = Math.min(x1, badge.bbox[0] + badge.bbox[2] - 1);
+		const by0 = Math.max(y0, badge.bbox[1] - viewportTopPx),
+			by1 = Math.min(y1, badge.bbox[1] - viewportTopPx + badge.bbox[3] - 1);
+		for (let y = by0; y <= by1; y++)
+			for (let x = bx0; x <= bx1; x++)
+				if (stage.brightLabels[y * stage.width + x] > 0) owned.add(`${x},${y}`);
 	}
 	for (const tee of tees) {
 		const label = tee.pad?.componentLabel;
 		if (label === undefined) continue;
 		const tb = tee.pad?.bbox;
 		if (!tb) continue;
-		const tx0 = Math.max(x0, tb[0]), tx1 = Math.min(x1, tb[0] + tb[2] - 1);
-		const ty0 = Math.max(y0, tb[1] - viewportTopPx), ty1 = Math.min(y1, tb[1] - viewportTopPx + tb[3] - 1);
-		for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) if (stage.brightLabels[y * stage.width + x] === label) owned.add(`${x},${y}`);
+		const tx0 = Math.max(x0, tb[0]),
+			tx1 = Math.min(x1, tb[0] + tb[2] - 1);
+		const ty0 = Math.max(y0, tb[1] - viewportTopPx),
+			ty1 = Math.min(y1, tb[1] - viewportTopPx + tb[3] - 1);
+		for (let y = ty0; y <= ty1; y++)
+			for (let x = tx0; x <= tx1; x++)
+				if (stage.brightLabels[y * stage.width + x] === label) owned.add(`${x},${y}`);
 	}
 	return owned;
 }
@@ -612,31 +698,41 @@ function targetPredecessors(
 	return out;
 }
 
-
 function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResult {
 	const support = candidate.fragmentPixels.length;
 	const componentCount = candidate.supportingComponentIds.length;
 	const axisError = badgeAxisError(candidate);
-	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (axisError ?? Infinity) >= activeAxisLimitRad;
+	const axisRejected =
+		candidate.badgeLabel !== null &&
+		candidate.badgeLabel !== undefined &&
+		/^\d+$/.test(candidate.badgeLabel) &&
+		(axisError ?? Infinity) >= activeAxisLimitRad;
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const ambiguityLost = candidate.ambiguityLostToBadgeLabel != null;
-	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost;
+	const accepted =
+		!insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost;
 	const localized = candidate.localizationFit ?? candidate.fit;
-	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
-	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
-		? '; localization uses the exact centroid/axis of the single detector-owned component spanning both course-local pad axes'
-		: '; localization uses the badge-constrained support fit because the visible evidence is small or split';
+	const coordinateOffset =
+		candidate.coordinateFrame === 'original' ? 0 : (candidate.viewportTopPx ?? 0);
+	const localizationEvidence =
+		candidate.localizationSource === 'full-span-component-pca'
+			? '; localization uses the exact centroid/axis of the single detector-owned component spanning both course-local pad axes'
+			: '; localization uses the badge-constrained support fit because the visible evidence is small or split';
 	const pixelEvidence = unexplained.length
-		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
+		? `; unexplained visible component pixels: ${unexplained
+				.slice(0, 8)
+				.map(([x, y]) => `(${x},${y})`)
+				.join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
 		: '';
 	// This candidate is already anchored to one specific badge (target.badge in
 	// buildTeeRecoveryCandidates), so the real hole number is known whenever an
 	// exact digit read exists — surface it so a rejection is legible without
 	// cross-referencing the raw badgeId embedded in candidate.id/ref.
-	const holePrefix = candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel)
-		? `badge ${candidate.badgeLabel}: `
-		: '';
+	const holePrefix =
+		candidate.badgeLabel && /^\d+$/.test(candidate.badgeLabel)
+			? `badge ${candidate.badgeLabel}: `
+			: '';
 	// Owner policy 2026-08-28: discovery has no spatial prefilter of any kind
 	// (no predecessor-basket radius, no course-derived distribution box). Every
 	// unowned, non-occluded bright component on the whole canonical raster is a
@@ -648,11 +744,15 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}`
 		: ambiguityLost
 			? `${holePrefix}${searchScope}; this exact component set also satisfies the strict predicate for badge ${candidate.ambiguityLostToBadgeLabel}, whose badge-axis angular error is smaller; ambiguity resolved in that badge's favor, never silently dropped`
-			: `${holePrefix}${searchScope}; ${insufficientSupport
-				? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
-				: `${axisRejected
-					? `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
-					: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
+			: `${holePrefix}${searchScope}; ${
+					insufficientSupport
+						? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
+						: `${
+								axisRejected
+									? `badge-axis angular error ${((axisError! * 180) / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
+									: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (knob axisToleranceDeg; soft ceiling, target P100 5° then ${BADGE_AXIS_TARGET_DEG}°)`
+							}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`
+				}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
@@ -665,8 +765,11 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 			supportFitCenterYPx: candidate.fit.centerYPx + coordinateOffset,
 			localizedCenterXPx: localized.centerXPx,
 			localizedCenterYPx: localized.centerYPx + coordinateOffset,
-			fullSpanComponentLocalization: candidate.localizationSource === 'full-span-component-pca' ? 1 : 0,
-			...(axisError === undefined ? {} : { badgeAxisAlignment: Math.cos(axisError), badgeAxisErrorRad: axisError }),
+			fullSpanComponentLocalization:
+				candidate.localizationSource === 'full-span-component-pca' ? 1 : 0,
+			...(axisError === undefined
+				? {}
+				: { badgeAxisAlignment: Math.cos(axisError), badgeAxisErrorRad: axisError }),
 			...(unexplained.length ? { unexplainedVisiblePixels: unexplained.length } : {})
 		},
 		corners: cornersFor(candidate, {})
@@ -751,18 +854,27 @@ export function buildTeeRecoveryCandidates(
 	tees: readonly TeeEvidence[],
 	viewportTopPx = 0,
 	search: TeeRecoverySearchContext = {}
-): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[] } {
+): {
+	readonly candidates: readonly TeeRecoveryCandidate[];
+	readonly searchOutcomes: readonly TargetSearchOutcome[];
+	readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[];
+} {
 	const candidates: TeeRecoveryCandidate[] = [];
 	const searchOutcomes: TargetSearchOutcome[] = [];
 	const chromeSubtractionNotes: ChromeSubtractionNote[] = [];
-	const pads = tees.map((tee) => tee.pad).filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
+	const pads = tees
+		.map((tee) => tee.pad)
+		.filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
 	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
-	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+	const median = (values: readonly number[]) =>
+		[...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
 	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	const targets = badges.filter(
+		(badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId)
+	);
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -778,16 +890,21 @@ export function buildTeeRecoveryCandidates(
 	// components to drop -- only the pixels actually inside the detected
 	// chrome region are subtracted, so a component that is legitimately part
 	// tee-pad and part accidental chrome overlap keeps its remnant alive.
-	const chromeRegions = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
+	const chromeRegions = detectScreenChromeRegions(
+		stage.brightComponents,
+		stage.width,
+		stage.height
+	);
 	const visibleComponents = stage.brightComponents.flatMap((component) => {
-		const afterOwnership = componentPixels(stage, component).filter(([x, y]) =>
-			!owned.has(`${x},${y}`) &&
-			search.occlusion?.kindAt(x, y + viewportTopPx) !== 'OPAQUE'
+		const afterOwnership = componentPixels(stage, component).filter(
+			([x, y]) =>
+				!owned.has(`${x},${y}`) && search.occlusion?.kindAt(x, y + viewportTopPx) !== 'OPAQUE'
 		);
 		if (afterOwnership.length === 0) return [];
-		const pixels = chromeRegions.length === 0
-			? afterOwnership
-			: afterOwnership.filter(([x, y]) => !pointInScreenChrome(x, y, chromeRegions));
+		const pixels =
+			chromeRegions.length === 0
+				? afterOwnership
+				: afterOwnership.filter(([x, y]) => !pointInScreenChrome(x, y, chromeRegions));
 		const subtracted = afterOwnership.length - pixels.length;
 		if (subtracted > 0) {
 			chromeSubtractionNotes.push({
@@ -797,38 +914,91 @@ export function buildTeeRecoveryCandidates(
 				regionCount: chromeRegions.length
 			});
 		}
-		return pixels.length ? [{ component, pixels }] : [];
+		if (pixels.length === 0) return [];
+		let minX = Infinity,
+			maxX = -Infinity,
+			minY = Infinity,
+			maxY = -Infinity;
+		for (const [x, y] of pixels) {
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+		}
+		return [{ component, pixels, minX, maxX, minY, maxY }];
 	});
 
 	for (const target of targets) {
 		const targetCandidates: TeeRecoveryCandidate[] = [];
 		const seenGroups = new Set<string>();
 		for (const seed of visibleComponents) {
-			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
-			const compatibleWith = (candidateFit: RecoveryFit) => visibleComponents.filter((entry) =>
-				entry.component.label === seed.component.label ||
-				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
+			let fit = fitComponent(
+				seed.pixels,
+				seed.component,
+				target,
+				viewportTopPx,
+				halfWidth,
+				halfHeight,
+				thickness
 			);
+			const compatibleWith = (candidateFit: RecoveryFit) => {
+				const c = Math.cos(candidateFit.angleRad);
+				const s = Math.sin(candidateFit.angleRad);
+				const hw = candidateFit.halfWidthPx + RASTER_TOLERANCE_PX;
+				const hh = candidateFit.halfHeightPx + RASTER_TOLERANCE_PX;
+				const extentX = Math.abs(c) * hw + Math.abs(s) * hh;
+				const extentY = Math.abs(s) * hw + Math.abs(c) * hh;
+				const minX = candidateFit.centerXPx - extentX;
+				const maxX = candidateFit.centerXPx + extentX;
+				const minY = candidateFit.centerYPx - extentY;
+				const maxY = candidateFit.centerYPx + extentY;
+				const epsilon = 1e-9;
+				return visibleComponents.filter(
+					(entry) =>
+						entry.component.label === seed.component.label ||
+						(entry.minX >= minX - epsilon &&
+							entry.maxX <= maxX + epsilon &&
+							entry.minY >= minY - epsilon &&
+							entry.maxY <= maxY + epsilon &&
+							entry.pixels.every((point) => pointExplainsTee(point, candidateFit)))
+				);
+			};
 			let compatible = compatibleWith(fit);
 			// The first pose may be underdetermined by a tiny shard. Refit the union,
 			// then retain only complete components that still fit the shared pose.
 			for (let pass = 0; pass < 2; pass++) {
 				const union = compatible.flatMap((entry) => entry.pixels);
 				if (union.length === 0) break;
-				fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+				fit = fitComponent(
+					union,
+					seed.component,
+					target,
+					viewportTopPx,
+					halfWidth,
+					halfHeight,
+					thickness
+				);
 				const next = compatibleWith(fit);
-				if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
+				if (
+					next.map((entry) => entry.component.label).join(',') ===
+					compatible.map((entry) => entry.component.label).join(',')
+				)
+					break;
 				compatible = next;
 			}
 			if (compatible.length === 0) continue;
-			const groupKey = compatible.map((entry) => entry.component.label).sort((a, b) => a - b).join('+');
+			const groupKey = compatible
+				.map((entry) => entry.component.label)
+				.sort((a, b) => a - b)
+				.join('+');
 			if (!groupKey || seenGroups.has(groupKey)) continue;
 			seenGroups.add(groupKey);
 			const pixels = compatible.flatMap((entry) => entry.pixels);
 			const visibleShards = compatible.flatMap((entry) => connectedPixelShards(entry.pixels));
-			const localizationStats = compatible.length === 1 && visibleShards.length === 1
-				? exactVisibleStats(compatible[0]!.component.label, compatible[0]!.pixels)
-				: undefined;
+			const localizationStats =
+				compatible.length === 1 && visibleShards.length === 1
+					? exactVisibleStats(compatible[0]!.component.label, compatible[0]!.pixels)
+					: undefined;
 			const localizationFit = localizationStats
 				? fullSpanComponentLocalization(localizationStats, halfWidth, halfHeight, thickness)
 				: undefined;
@@ -856,15 +1026,29 @@ export function buildTeeRecoveryCandidates(
 		// Evaluate the predicate before choosing. A large basket/badge component
 		// must never hide a smaller component whose every visible pixel fits.
 		targetCandidates.sort((a, b) => {
-			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
-			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
-			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < activeAxisLimitRad;
-			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < activeAxisLimitRad;
+			const ar = unexplainedPixels(a).length,
+				br = unexplainedPixels(b).length;
+			const aa = badgeAxisError(a) ?? Infinity,
+				ba = badgeAxisError(b) ?? Infinity;
+			const aAccepted =
+				a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && aa < activeAxisLimitRad;
+			const bAccepted =
+				b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && ba < activeAxisLimitRad;
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
-			if (aAccepted) return b.fragmentPixels.length - a.fragmentPixels.length || aa - ba || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
+			if (aAccepted)
+				return (
+					b.fragmentPixels.length - a.fragmentPixels.length ||
+					aa - ba ||
+					a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!)
+				);
 			const aFraction = ar / a.fragmentPixels.length;
 			const bFraction = br / b.fragmentPixels.length;
-			return aFraction - bFraction || ar - br || b.fragmentPixels.length - a.fragmentPixels.length || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
+			return (
+				aFraction - bFraction ||
+				ar - br ||
+				b.fragmentPixels.length - a.fragmentPixels.length ||
+				a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!)
+			);
 		});
 		const [winner, ...runnerUps] = targetCandidates;
 		if (winner) candidates.push(winner);
@@ -885,23 +1069,35 @@ export function buildTeeRecoveryCandidates(
 	// other claimant is forced to a named rejection in graphCandidateResult.
 	const accepted = candidates.filter((candidate) => {
 		const support = candidate.fragmentPixels.length;
-		return support >= MIN_SHARD_SUPPORT_PIXELS &&
+		return (
+			support >= MIN_SHARD_SUPPORT_PIXELS &&
 			unexplainedPixels(candidate).length === 0 &&
-			(badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad;
+			(badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad
+		);
 	});
 	const byComponentSet = new Map<string, TeeRecoveryCandidate[]>();
 	for (const candidate of accepted) {
-		const key = candidate.supportingComponentIds.map((id) => id.split(':')[0]).sort().join('+');
+		const key = candidate.supportingComponentIds
+			.map((id) => id.split(':')[0])
+			.sort()
+			.join('+');
 		const bucket = byComponentSet.get(key);
-		if (bucket) bucket.push(candidate); else byComponentSet.set(key, [candidate]);
+		if (bucket) bucket.push(candidate);
+		else byComponentSet.set(key, [candidate]);
 	}
 	for (const bucket of byComponentSet.values()) {
 		if (bucket.length < 2) continue;
-		const ranked = [...bucket].sort((a, b) => (badgeAxisError(a) ?? Infinity) - (badgeAxisError(b) ?? Infinity));
+		const ranked = [...bucket].sort(
+			(a, b) => (badgeAxisError(a) ?? Infinity) - (badgeAxisError(b) ?? Infinity)
+		);
 		const winner = ranked[0]!;
 		for (const loser of ranked.slice(1)) {
 			const index = candidates.indexOf(loser);
-			if (index >= 0) candidates[index] = { ...loser, ambiguityLostToBadgeLabel: winner.badgeLabel ?? winner.badgeId ?? null };
+			if (index >= 0)
+				candidates[index] = {
+					...loser,
+					ambiguityLostToBadgeLabel: winner.badgeLabel ?? winner.badgeId ?? null
+				};
 		}
 	}
 
@@ -911,7 +1107,17 @@ export function buildTeeRecoveryCandidates(
 export const teeRecoveryUnit: EngineUnit = {
 	id: 'teeRecovery',
 	gate: 'G4',
-	consumes: ['stage', 'badges', 'baskets', 'tees', 'sprites', 'viewport', 'recoveredTees', 'assignment', 'measurement'],
+	consumes: [
+		'stage',
+		'badges',
+		'baskets',
+		'tees',
+		'sprites',
+		'viewport',
+		'recoveredTees',
+		'assignment',
+		'measurement'
+	],
 	produces: ['recoveredTees', 'assignment'],
 	note: 'visible tee-shard recovery by all-visible-pixels badge-pointing tee-support feasibility with exact opaque ownership',
 	run(board: EvidenceBoard, ctx: FeatureContext) {
@@ -923,10 +1129,16 @@ export const teeRecoveryUnit: EngineUnit = {
 		// the module's own default rather than corrupting shared module state
 		// with NaN for every run in the process.
 		const configuredAxisToleranceDeg = state.knobs.axisToleranceDeg;
-		if (typeof configuredAxisToleranceDeg === 'number' && Number.isFinite(configuredAxisToleranceDeg)) {
+		if (
+			typeof configuredAxisToleranceDeg === 'number' &&
+			Number.isFinite(configuredAxisToleranceDeg)
+		) {
 			setActiveAxisToleranceDeg(configuredAxisToleranceDeg);
 		}
-		if (!state.enabled) { stop(); return; }
+		if (!state.enabled) {
+			stop();
+			return;
+		}
 		const stage = board.get<RecoveryStage>('stage');
 		const viewportTopPx = board.get<RecoveryViewport>('viewport').topPx;
 		const badges = board.get<readonly BadgeEvidence[]>('badges');
@@ -934,7 +1146,9 @@ export const teeRecoveryUnit: EngineUnit = {
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const assignment = board.get<ThreeFactorAssignment>('assignment');
 		const measurement = board.get<import('../types').ThreeFactorMeasurement>('measurement');
-		const badgeIds = new Set(badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId));
+		const badgeIds = new Set(
+			badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId)
+		);
 		const assignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
 		if ([...badgeIds].every((badgeId) => assignedBadgeIds.has(badgeId))) {
 			ctx.measure('teeRecovery', 'missingNumberedTees', 0);
@@ -946,7 +1160,11 @@ export const teeRecoveryUnit: EngineUnit = {
 		const shardDiscoveryStop = ctx.span('teeRecovery.shardDiscovery');
 		const sprites = board.has('sprites') ? board.get<readonly SpriteMatch[]>('sprites') : undefined;
 		ctx.occlusion.registerOpaque(basketOpaqueProvider(stage, baskets, sprites, viewportTopPx));
-		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion });
+		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, {
+			assignment,
+			sprites,
+			occlusion: ctx.occlusion
+		});
 		shardDiscoveryStop();
 		// Known-occluder pixel subtraction (screen chrome) is never a silent cut:
 		// name the component, the exact pixel count removed, and what remains.
@@ -983,13 +1201,17 @@ export const teeRecoveryUnit: EngineUnit = {
 		}
 		for (const outcome of built.searchOutcomes) {
 			if (outcome.runnerUps.length === 0) continue;
-			const byNames = [...outcome.runnerUps].sort((a, b) => b.fragmentPixels.length - a.fragmentPixels.length);
+			const byNames = [...outcome.runnerUps].sort(
+				(a, b) => b.fragmentPixels.length - a.fragmentPixels.length
+			);
 			for (const runnerUp of byNames.slice(0, RUNNER_UP_RECEIPT_CAP)) {
 				const runnerUpResult = graphCandidateResult(runnerUp);
 				ctx.overlay('teeRecovery', {
 					type: 'point',
 					xPx: runnerUp.fit.centerXPx,
-					yPx: runnerUp.fit.centerYPx + (runnerUp.coordinateFrame === 'original' ? 0 : runnerUp.viewportTopPx ?? 0),
+					yPx:
+						runnerUp.fit.centerYPx +
+						(runnerUp.coordinateFrame === 'original' ? 0 : (runnerUp.viewportTopPx ?? 0)),
 					verdict: 'rejected',
 					visualRole: 'tee-rejection',
 					ref: `${runnerUpResult.id}:considered`,
@@ -997,7 +1219,11 @@ export const teeRecoveryUnit: EngineUnit = {
 				});
 			}
 			if (byNames.length > RUNNER_UP_RECEIPT_CAP) {
-				ctx.measure('teeRecovery', 'runnerUpsBeyondReceiptCap', byNames.length - RUNNER_UP_RECEIPT_CAP);
+				ctx.measure(
+					'teeRecovery',
+					'runnerUpsBeyondReceiptCap',
+					byNames.length - RUNNER_UP_RECEIPT_CAP
+				);
 			}
 		}
 		if (!tees.some((tee) => tee.pad)) {
@@ -1008,9 +1234,18 @@ export const teeRecoveryUnit: EngineUnit = {
 		const geometryFittingStop = ctx.span('teeRecovery.geometryFitting');
 		const allResults = built.candidates.map(graphCandidateResult);
 		geometryFittingStop();
-		ctx.measure('teeRecovery', 'seedFragments', new Set(built.candidates.map((candidate) => candidate.id.match(/^tee-shard-[^-]+/)?.[0] ?? candidate.id)).size);
+		ctx.measure(
+			'teeRecovery',
+			'seedFragments',
+			new Set(
+				built.candidates.map(
+					(candidate) => candidate.id.match(/^tee-shard-[^-]+/)?.[0] ?? candidate.id
+				)
+			).size
+		);
 		ctx.measure('teeRecovery', 'componentHypotheses', allResults.length);
-		for (const candidate of built.candidates) ctx.measure('teeRecovery', 'bfsComponentsVisited', candidate.bfsComponentsVisited ?? 0);
+		for (const candidate of built.candidates)
+			ctx.measure('teeRecovery', 'bfsComponentsVisited', candidate.bfsComponentsVisited ?? 0);
 		// Keep one deterministic component verdict per missing numbered badge so
 		// trace, CLI, and visual receipt remain one-to-one.
 		const badgeSupportStop = ctx.span('teeRecovery.badgeSupport');
@@ -1029,23 +1264,83 @@ export const teeRecoveryUnit: EngineUnit = {
 		for (const { candidate, result } of promoted) {
 			const centerX = result.corners.reduce((sum, point) => sum + point[0], 0) / 4;
 			const centerY = result.corners.reduce((sum, point) => sum + point[1], 0) / 4;
-			const duplicate = tees.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
-				existing.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
-				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx);
+			const duplicate =
+				tees.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
+				existing.some(
+					(tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx
+				) ||
+				additions.some(
+					(tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx
+				);
 			if (duplicate && result.verdict === 'accepted') {
 				ctx.measure('teeRecovery', 'duplicateSuppressed', 1);
-				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`, values: numericTraceValues(result.values) });
+				ctx.overlay('teeRecovery', {
+					type: 'point',
+					xPx: centerX,
+					yPx: centerY,
+					verdict: 'rejected',
+					visualRole: 'tee-rejection',
+					ref: `${result.id}:duplicate`,
+					reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`,
+					values: numericTraceValues(result.values)
+				});
 				continue;
 			}
 			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
-			if (result.verdict === 'accepted') ctx.overlay('teeRecovery', { type: 'pixelSet', pixels: shardPixels, verdict: 'accepted', visualRole: 'tee-shard', ref: `${result.id}:tee-shard`, reason: result.reason, values: numericTraceValues(result.values) });
-			else ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: result.id, reason: result.reason, values: numericTraceValues(result.values) });
+			if (result.verdict === 'accepted')
+				ctx.overlay('teeRecovery', {
+					type: 'pixelSet',
+					pixels: shardPixels,
+					verdict: 'accepted',
+					visualRole: 'tee-shard',
+					ref: `${result.id}:tee-shard`,
+					reason: result.reason,
+					values: numericTraceValues(result.values)
+				});
+			else
+				ctx.overlay('teeRecovery', {
+					type: 'point',
+					xPx: centerX,
+					yPx: centerY,
+					verdict: 'rejected',
+					visualRole: 'tee-rejection',
+					ref: result.id,
+					reason: result.reason,
+					values: numericTraceValues(result.values)
+				});
 			if (result.verdict !== 'accepted') continue;
-			if (result.values.badgeAxisErrorRad !== undefined) ctx.measure('teeRecovery', 'axisErrorDeg', result.values.badgeAxisErrorRad * 180 / Math.PI);
-			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
+			if (result.values.badgeAxisErrorRad !== undefined)
+				ctx.measure(
+					'teeRecovery',
+					'axisErrorDeg',
+					(result.values.badgeAxisErrorRad * 180) / Math.PI
+				);
+			for (const [index, corner] of result.corners.entries())
+				ctx.overlay('teeRecovery', {
+					type: 'point',
+					xPx: corner[0],
+					yPx: corner[1],
+					verdict: 'info',
+					visualRole: 'tee-corner-tick',
+					ref: `${result.id}:tee-corner-tick-${index}`,
+					reason: 'calculated tee recovery corner'
+				});
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
-			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}` } });
+			additions.push({
+				xPx: centerX,
+				yPx: centerY,
+				bbox: [
+					Math.floor(Math.min(...xs)),
+					Math.floor(Math.min(...ys)),
+					Math.ceil(Math.max(...xs) - Math.min(...xs)),
+					Math.ceil(Math.max(...ys) - Math.min(...ys))
+				],
+				provenance: {
+					source: 'tee-shard-recovery',
+					note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}`
+				}
+			});
 		}
 		board.set('recoveredTees', [...existing, ...additions]);
 		if (additions.length > 0 && measurement.rawPairs.length > 0) {
@@ -1053,7 +1348,18 @@ export const teeRecoveryUnit: EngineUnit = {
 			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
 			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
 			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
-			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing));
+			board.set(
+				'assignment',
+				assignThreeFactor(
+					measurement,
+					[...existing, ...additions],
+					zfit,
+					scoring,
+					searchKnobs,
+					ribbon,
+					routing
+				)
+			);
 		} else {
 			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
 			board.set('assignment', assignment);
