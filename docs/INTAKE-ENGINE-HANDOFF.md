@@ -149,6 +149,12 @@ Default DashsTrack G3 artifact hashes after hardening:
 | bright components       | `cc2f6f69eedf77f46b43077067219040f4568f9170ab6f090b3f6e3549a5dda5` |
 | retained tee candidates | `c2569ee020c33ec4ccbe95be33292a1040567226983684513c421f12569832a2` |
 
+## The Claims Ledger
+
+Load-bearing diagnostic claims and their fates live in
+[`docs/CLAIMS-LEDGER.md`](./CLAIMS-LEDGER.md) — every claim with its receipt,
+retractions first-class. Agents: update it in the same commit as the work.
+
 ## Known gaps that remain honest
 
 - The frozen recovery baseline has one accepted 18-hole proof. Owner policy
