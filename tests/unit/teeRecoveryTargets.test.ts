@@ -23,17 +23,20 @@ function tee(
 }
 
 describe('teeRecovery visible-aim target derivation', () => {
-	test('a stale solver ownership cannot make an H4 tee claim H5', () => {
-		const badges = [
-			badge('badge-4', '4', 100, 100),
-			badge('badge-5', '5', 300, 100)
-		];
-		const tees = [tee('tee-h4', 0, 100, 0)];
+	test('Heritage H5 stays huntable when G6 temporarily assigns H4 tee-12 to it', () => {
+		// Claims-ledger row 27: pre-recovery G6 had badge-5 -> tee-12, but
+		// tee-12 is physically H4's pad at (708,1394). H4's badge center is
+		// (718,1343); H5's is (721,1078). Recovery targeting must read the tee's
+		// own axis, not that stale ownership row.
+		const h4 = badge('badge-8', '4', 718, 1343);
+		const h5 = badge('badge-5', '5', 721, 1078);
+		const tee12Axis = Math.atan2(h4.cyPx - 1394, h4.cxPx - 708);
+		const tees = [tee('tee-12', 708, 1394, tee12Axis)];
 
-		expect(deriveTeeAimClaims(badges, tees)).toEqual([
-			expect.objectContaining({ teeId: 'tee-h4', badgeId: 'badge-4' })
+		expect(deriveTeeAimClaims([h4, h5], tees)).toEqual([
+			expect.objectContaining({ teeId: 'tee-12', badgeId: 'badge-8' })
 		]);
-		expect(deriveTeeRecoveryTargets(badges, tees).map((entry) => entry.detId)).toEqual(['badge-5']);
+		expect(deriveTeeRecoveryTargets([h4, h5], tees).map((entry) => entry.detId)).toEqual(['badge-5']);
 	});
 
 	test('duplicate tee claims are not force-matched into fake badge coverage', () => {
