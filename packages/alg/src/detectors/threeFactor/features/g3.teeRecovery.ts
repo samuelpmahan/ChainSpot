@@ -319,57 +319,143 @@ function fitComponent(
 	let bestUnexplained = Infinity;
 	let bestResidual = Infinity;
 	let bestAxisOffset = Infinity;
-	const consider = (centerX: number, centerY: number, axisOffset: number) => {
-		const badgeRay = Math.atan2(badgeY - centerY, badgeX - centerX);
-		const fit: RecoveryFit = {
-			centerXPx: centerX,
-			centerYPx: centerY,
-			halfWidthPx: halfWidth,
-			halfHeightPx: halfHeight,
-			angleRad: badgeRay + axisOffset,
-			supportThicknessPx: thickness
-		};
+
+	const outerHalfWidth = halfWidth + RASTER_TOLERANCE_PX;
+	const outerHalfHeight = halfHeight + RASTER_TOLERANCE_PX;
+	const effectiveThickness = Math.max(0, thickness);
+	const innerEdgeU = halfWidth - effectiveThickness - RASTER_TOLERANCE_PX;
+	const innerEdgeV = halfHeight - effectiveThickness - RASTER_TOLERANCE_PX;
+	const scanRangeDeg = Math.max(0.5, activeAxisLimitDeg - 0.5);
+	const axisOffsets: { rad: number; c: number; s: number }[] = [];
+	for (let degrees = -scanRangeDeg; degrees <= scanRangeDeg + 1e-9; degrees += 0.5) {
+		const rad = degrees * Math.PI / 180;
+		axisOffsets.push({ rad, c: Math.cos(rad), s: Math.sin(rad) });
+	}
+
+	const consider = (
+		centerX: number,
+		centerY: number,
+		rayC: number,
+		rayS: number,
+		axisOffset: { rad: number; c: number; s: number }
+	) => {
+		// cos(ray + offset), sin(ray + offset), with the tiny offset trig cached
+		// once per fit call instead of invoking sin/cos for every pose.
+		const c = rayC * axisOffset.c - rayS * axisOffset.s;
+		const s = rayS * axisOffset.c + rayC * axisOffset.s;
 		let unexplained = 0;
+		for (const point of pixels) {
+			const dx = point[0] - centerX;
+			const dy = point[1] - centerY;
+			const u = dx * c + dy * s;
+			const v = -dx * s + dy * c;
+			const absU = Math.abs(u);
+			const absV = Math.abs(v);
+			if (
+				absU > outerHalfWidth ||
+				absV > outerHalfHeight ||
+				(absU < innerEdgeU && absV < innerEdgeV)
+			) {
+				unexplained++;
+				if (unexplained > bestUnexplained) break;
+			}
+		}
+		if (unexplained > bestUnexplained) return;
+
 		let residual = 0;
 		for (const point of pixels) {
-			if (!pointExplainsTee(point, fit)) unexplained++;
-			residual += supportResidual(point, fit);
-			if (unexplained > bestUnexplained) break;
+			const dx = point[0] - centerX;
+			const dy = point[1] - centerY;
+			const u = dx * c + dy * s;
+			const v = -dx * s + dy * c;
+			const absU = Math.abs(u);
+			const absV = Math.abs(v);
+			const outer = Math.hypot(
+				Math.max(0, absU - halfWidth),
+				Math.max(0, absV - halfHeight)
+			);
+			const edgeDistance = Math.min(
+				Math.abs(absU - halfWidth),
+				Math.abs(absV - halfHeight)
+			);
+			residual += outer * 4 + edgeDistance;
 		}
-		const absOffset = Math.abs(axisOffset);
+		const absOffset = Math.abs(axisOffset.rad);
 		if (
 			unexplained < bestUnexplained ||
 			(unexplained === bestUnexplained && residual < bestResidual) ||
 			(unexplained === bestUnexplained && residual === bestResidual && absOffset < bestAxisOffset)
 		) {
-			best = fit;
+			// Preserve the detector's original stored angle expression exactly;
+			// vector arithmetic is only the hot-loop evaluator.
+			const badgeRay = Math.atan2(badgeY - centerY, badgeX - centerX);
+			best = {
+				centerXPx: centerX,
+				centerYPx: centerY,
+				halfWidthPx: halfWidth,
+				halfHeightPx: halfHeight,
+				angleRad: badgeRay + axisOffset.rad,
+				supportThicknessPx: thickness
+			};
 			bestUnexplained = unexplained;
 			bestResidual = residual;
 			bestAxisOffset = absOffset;
 		}
 	};
-	const scan = (
-		x0: number,
-		x1: number,
-		y0: number,
-		y1: number,
-		centerStep: number,
-		angleStepDeg: number
-	) => {
-		for (let y = y0; y <= y1 + 1e-9; y += centerStep) {
-			for (let x = x0; x <= x1 + 1e-9; x += centerStep) {
-				const scanRangeDeg = Math.max(0.5, activeAxisLimitDeg - 0.5);
-				for (let degrees = -scanRangeDeg; degrees <= scanRangeDeg + 1e-9; degrees += angleStepDeg) {
-					consider(x, y, degrees * Math.PI / 180);
+
+	// Exact broad phase over the SAME center lattice. Every pixel of any legal
+	// rotated tee must satisfy both necessary bounds below. They only prove a
+	// center impossible; they never remove a component, badge, or legal pose.
+	const outerRadiusSq = outerRadius * outerRadius;
+	let rayFrameHalfWidth = 0;
+	let rayFrameHalfHeight = 0;
+	for (const axisOffset of axisOffsets) {
+		rayFrameHalfWidth = Math.max(
+			rayFrameHalfWidth,
+			outerHalfWidth * Math.abs(axisOffset.c) + outerHalfHeight * Math.abs(axisOffset.s)
+		);
+		rayFrameHalfHeight = Math.max(
+			rayFrameHalfHeight,
+			outerHalfWidth * Math.abs(axisOffset.s) + outerHalfHeight * Math.abs(axisOffset.c)
+		);
+	}
+	const broadPhaseEpsilon = 1e-9;
+	for (let y = minCenterY; y <= maxCenterY + 1e-9; y += 0.5) {
+		for (let x = minCenterX; x <= maxCenterX + 1e-9; x += 0.5) {
+			let possible = true;
+			for (const point of pixels) {
+				const dx = point[0] - x;
+				const dy = point[1] - y;
+				if (dx * dx + dy * dy > outerRadiusSq + broadPhaseEpsilon) {
+					possible = false;
+					break;
 				}
 			}
+			if (!possible) continue;
+
+			const rayX = badgeX - x;
+			const rayY = badgeY - y;
+			const rayLength = Math.hypot(rayX, rayY);
+			const rayC = rayLength === 0 ? 1 : rayX / rayLength;
+			const rayS = rayLength === 0 ? 0 : rayY / rayLength;
+			for (const point of pixels) {
+				const dx = point[0] - x;
+				const dy = point[1] - y;
+				const u = dx * rayC + dy * rayS;
+				const v = -dx * rayS + dy * rayC;
+				if (
+					Math.abs(u) > rayFrameHalfWidth + broadPhaseEpsilon ||
+					Math.abs(v) > rayFrameHalfHeight + broadPhaseEpsilon
+				) {
+					possible = false;
+					break;
+				}
+			}
+			if (!possible) continue;
+
+			for (const axisOffset of axisOffsets) consider(x, y, rayC, rayS, axisOffset);
 		}
-	};
-	// The intersection above is already tiny: a complete H3/H5-sized component
-	// leaves only a handful of possible centers. Search it on the native
-	// half-pixel centroid lattice so a coarse local optimum cannot hide a valid
-	// all-pixels explanation.
-	scan(minCenterX, maxCenterX, minCenterY, maxCenterY, 0.5, 0.5);
+	}
 	return best;
 }
 
@@ -810,15 +896,18 @@ export function buildTeeRecoveryCandidates(
 				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
 			);
 			let compatible = compatibleWith(fit);
-			// The first pose may be underdetermined by a tiny shard. Refit the union,
-			// then retain only complete components that still fit the shared pose.
-			for (let pass = 0; pass < 2; pass++) {
-				const union = compatible.flatMap((entry) => entry.pixels);
-				if (union.length === 0) break;
-				fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
-				const next = compatibleWith(fit);
-				if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
-				compatible = next;
+			// Refit only when the first pose actually attracted another component.
+			// If compatible is just the seed, union is byte-for-byte the exact pixels
+			// fit above, so solving the same exhaustive optimization again is a no-op.
+			if (compatible.length > 1) {
+				for (let pass = 0; pass < 2; pass++) {
+					const union = compatible.flatMap((entry) => entry.pixels);
+					if (union.length === 0) break;
+					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+					const next = compatibleWith(fit);
+					if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
+					compatible = next;
+				}
 			}
 			if (compatible.length === 0) continue;
 			const groupKey = compatible.map((entry) => entry.component.label).sort((a, b) => a - b).join('+');
