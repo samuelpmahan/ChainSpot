@@ -36,8 +36,12 @@ function recoveryFixture(mode: FixtureMode = 'full') {
 	const fill = (x0: number, y0: number, w: number, h: number) => {
 		for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) mark(x, y);
 	};
-	// Badge #1 (predecessor), badge #2 (target), and one known tee pad.
-	fill(10, 10, 3, 3);
+	// Badge #1 (predecessor), badge #2 (target), and one known tee pad. Badge 1
+	// sits well off the shard family's major-axis line (badgeRay 0 or 0.5 rad,
+	// centered near (35,37)) so the no-spatial-prefilter search (owner design,
+	// 2026-08-28) never finds it a plausible coincidental alternate claimant --
+	// tests below isolate a single target badge's axis-tolerance behavior.
+	fill(10, 90, 3, 3);
 	fill(69, 36, 3, 3);
 	// Reference pad: one-pixel hollow 12x8 border (36 pixels), not a solid
 	// rectangle. Recovery must derive its support-band thickness from this
@@ -123,7 +127,7 @@ function recoveryFixture(mode: FixtureMode = 'full') {
 			notes: []
 		};
 	};
-	const badges = [badgeEvidence('badge-1', '1', 10, 10), badgeEvidence('badge-2', '2', 69, 36)];
+	const badges = [badgeEvidence('badge-1', '1', 10, 90), badgeEvidence('badge-2', '2', 69, 36)];
 	const basket: BasketEvidence = {
 		detId: 'basket-0',
 		bbox: [20, 20, 6, 8],
@@ -439,10 +443,13 @@ describe('teeRecovery visible-component evidence contract', () => {
 			const tight = runRecovery(fixture, new OcclusionDetector(), 10);
 			const tightReceipt = tight.drawables.find((drawable) => drawable.verdict === 'rejected');
 			expect(tightReceipt).toBeDefined();
-			// The rejection text must name the CONFIGURED limit (the knob), not a
-			// hardcoded literal, so a reader can tell this was a soft-ceiling call.
+			// The rejection text must name the CONFIGURED limit (the knob's
+			// resolved value), not a hardcoded literal, so a reader can tell this
+			// was a soft-ceiling call. 2026-08-29: the g4-ray-only/g4-rail wording
+			// (cd77412 lineage) prints the resolved degree value directly
+			// ("within 10°") rather than the knob's identifier name -- still the
+			// configured limit, just rendered as its value instead of its name.
 			expect(tightReceipt?.reason).toMatch(/within 10°/);
-			expect(tightReceipt?.reason).toMatch(/axisToleranceDeg/);
 			expect(tight.drawables.some((drawable) => drawable.verdict === 'accepted' && drawable.visualRole === 'tee-shard')).toBe(false);
 
 			const wide = runRecovery(fixture, new OcclusionDetector(), 45);

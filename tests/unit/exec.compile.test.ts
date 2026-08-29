@@ -56,8 +56,18 @@ const straightTestOnResolved = resolveConfig(
 // disabled" contract as teeMinAreaPose/teeBadgeLock), so the FROZEN default
 // plan fingerprint itself does NOT move and is intentionally left unchanged
 // below -- verified by re-running this suite after the change.
+// 2026-08-29: teeRecovery moved before assignment (gate reorg; owner-measured
+// ray work, cd77412 lineage) -- teeRecovery's G5/G6 dependency on assignment
+// output is removed, and it now runs right after teeFamily in
+// DEFAULT_EXECUTION instead of just before zfit. The compiled plan's op
+// order changes, moving this pin again (1649c2b1... -> 0ceb1ed0...).
+// 2026-08-29: a concurrent sibling lane's phantomTee whitelist knob
+// (owner-curated hole whitelist for phantom injection) landed on this branch
+// (merge 8fdf6cf) while this file was being updated for the teeRecovery
+// reorder above -- unrelated to this task's own change, but it moves the
+// operation universe's fingerprint content again (0ceb1ed0... -> f3e705aa...).
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
+	'f3e705aa36d9ba7c8f25a7e4e0e36b7dd3a99f0b77be611c9b5faf096b039659';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

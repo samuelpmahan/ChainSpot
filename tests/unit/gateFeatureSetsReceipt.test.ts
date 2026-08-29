@@ -178,7 +178,11 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(g7.enabledFeatureIds).toContain('zfit');
 	});
 
-	test('default config execution follows the canonical operation order, ending at G4 teeRecovery', () => {
+	// 2026-08-29: teeRecovery moved before assignment (gate reorg; owner-measured
+	// ray work, cd77412 lineage) -- teeRecovery now runs right after teeFamily,
+	// ahead of assignment, not "ending at" it. The test title and body below
+	// are updated to describe the new order.
+	test('default config execution follows the canonical operation order, ending at assignment.selection', () => {
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
 		// zfit left the default schedule by owner directive (2026-08-28); the
 		// engine-level DEFAULT_EXECUTION fallback still ends with it.
@@ -194,6 +198,7 @@ describe('production gate ABFeatureSet receipts', () => {
 			'tees.ringMeasure',
 			'tees.exclusion',
 			'teeFamily',
+			'teeRecovery',
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
@@ -201,8 +206,7 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
-			'assignment.selection',
-			'teeRecovery'
+			'assignment.selection'
 		]);
 	});
 });

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type {
-	RawPairEvidence,
-	ThreeFactorAssignment,
+	RecoveredTeeInput,
 	ThreeFactorMeasurement
 } from '../../packages/alg/src/detectors/threeFactor/types';
 import { nullFeatureContext } from '../../packages/alg/src/detectors/threeFactor/features/types';
@@ -12,44 +11,41 @@ import { teeRecoveryUnit } from '../../packages/alg/src/detectors/threeFactor/fe
 describe('teeRecovery operation adapter', () => {
 	afterEach(() => vi.restoreAllMocks());
 
-	test('publishes the final recovered inventory and routes without mutating measurement', () => {
+	// 2026-08-29: teeRecovery moved before assignment (gate reorg;
+	// owner-measured ray work, cd77412 lineage), removing its G5/G6
+	// dependency on 'assignment' entirely. The operation used to rerun
+	// assignment internally and republish its final tee/rawPairs inventory
+	// into the downstream 'assignment.tees'/'assignment.rawPairs' slots (PR
+	// #61); that republish is now GONE -- teeRecoveryUnit only produces
+	// 'recoveredTees' (a seeded slot merged in later by 'assignment.pairs',
+	// the G6 operation), and the adapter is a pure passthrough to
+	// teeRecoveryUnit.run with no post-processing of its own.
+	test('is a pure passthrough to teeRecoveryUnit.run, touching no slot of its own', () => {
 		const measurement = { tees: [{ detId: 'tee-visible' }] } as unknown as ThreeFactorMeasurement;
-		const recoveredRaw = {
-			pairId: 'badge-3:tee-recovered-0:basket-3',
-			badgeId: 'badge-3',
-			teeId: 'tee-recovered-0',
-			basketId: 'basket-3'
-		} as RawPairEvidence;
-		const finalAssignment = {
-			measurement,
-			tees: [{ detId: 'tee-visible' }, { detId: 'tee-recovered-0' }],
-			scoredPairs: [{ raw: recoveredRaw }],
-			assignments: [
-				{
-					badgeId: 'badge-3',
-					teeId: 'tee-recovered-0',
-					basketId: 'basket-3'
-				}
-			]
-		} as unknown as ThreeFactorAssignment;
-		vi.spyOn(teeRecoveryUnit, 'run').mockImplementation((board) => {
-			board.set('assignment', finalAssignment);
+		const recovered: RecoveredTeeInput[] = [
+			{
+				xPx: 12,
+				yPx: 34,
+				provenance: { note: 'recovered-0' }
+			} as unknown as RecoveredTeeInput
+		];
+		const runSpy = vi.spyOn(teeRecoveryUnit, 'run').mockImplementation((board) => {
+			board.set('recoveredTees', recovered);
 		});
 		const board = createExecBoard();
 		board.set('measurement', measurement);
-		board.set('assignment.tees', measurement.tees);
-		board.set('assignment.rawPairs', []);
+		board.set('recoveredTees', []);
 
 		operationImpls.get('teeRecovery')!(board, nullFeatureContext);
 
-		const finalTees = board.get<ThreeFactorAssignment['tees']>('assignment.tees');
-		const finalRawPairs = board.get<readonly RawPairEvidence[]>('assignment.rawPairs');
-		const finalTeeIds = new Set(finalTees.map((tee) => tee.detId));
-		expect(finalTees).toBe(finalAssignment.tees);
-		expect(finalRawPairs).toEqual([recoveredRaw]);
-		expect(finalAssignment.assignments.every((row) => finalTeeIds.has(row.teeId))).toBe(true);
-		expect(finalRawPairs.every((raw) => finalTeeIds.has(raw.teeId))).toBe(true);
-		expect(finalRawPairs.some((raw) => raw.teeId.startsWith('tee-recovered-'))).toBe(true);
+		expect(runSpy).toHaveBeenCalledTimes(1);
 		expect(board.get('measurement')).toBe(measurement);
+		expect(board.get<readonly RecoveredTeeInput[]>('recoveredTees')).toBe(recovered);
+		// No republish: the adapter never sets or reads 'assignment' or its
+		// dotted slots -- that merge is 'assignment.pairs' (G6) reading
+		// 'recoveredTees', now downstream of this operation, never the reverse.
+		expect(board.has('assignment')).toBe(false);
+		expect(board.has('assignment.tees')).toBe(false);
+		expect(board.has('assignment.rawPairs')).toBe(false);
 	});
 });

@@ -53,7 +53,11 @@ const DASHS_TRUTH = resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.annotat
 // 2026-08-28: zfit dropped from the default schedule by owner directive; the
 // previous byte hash was
 // 9762044ddfa243010466da423ade733e7902b1877620b40e1581cd904b45ae5b.
-const DEFAULT_SHA256 = '71d88bc2bf44b4a1a10934636acda61aa8fb7563cf6417dc1ae4c7f36a3e1c45';
+// 2026-08-29: teeRecovery moved before assignment (gate reorg; owner-measured
+// ray work, cd77412 lineage) -- default.json's execution array reorders
+// (teeRecovery now sits right after teeFamily), moving this pin again
+// (71d88bc2... -> e133a01a...).
+const DEFAULT_SHA256 = 'e133a01ab8ada15234a6a9dac52a6bf95d6361743e0e510668fce8c7d4bf563d';
 
 function candidate(
 	overrides: Partial<StraightTestCandidateInput> = {}
@@ -394,7 +398,12 @@ describe('straightTest production composition and frozen-off parity', () => {
 		const baseline = runThreeFactor(raster);
 		const onResolved = resolveConfig(parseConfig(straightOn), DEFAULT_EXECUTION);
 		const expectedExecution = [...(defaultConfig as ThreeFactorConfig).execution!];
-		expectedExecution.splice(expectedExecution.indexOf('teeFamily') + 1, 0, 'straightTest');
+		// 2026-08-29: teeRecovery moved before assignment (gate reorg;
+		// owner-measured ray work, cd77412 lineage) -- default.json's execution
+		// array now runs teeFamily, teeRecovery, ... , and straight-test-on.json
+		// (also updated by that landed work) inserts straightTest right after
+		// teeRecovery, not right after teeFamily.
+		expectedExecution.splice(expectedExecution.indexOf('teeRecovery') + 1, 0, 'straightTest');
 		expect(onResolved.execution).toEqual(expectedExecution);
 		expect(onResolved.execution.indexOf('straightTest')).toBeLessThan(
 			onResolved.execution.indexOf('supportField')

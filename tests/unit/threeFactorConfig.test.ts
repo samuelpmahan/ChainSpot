@@ -102,18 +102,25 @@ describe('parseConfig', () => {
 describe('validateExecution', () => {
 	test('default order is valid', () => {
 		expect(() => validateExecution(DEFAULT_EXECUTION, ENGINE_UNITS, SEEDED_SLOTS)).not.toThrow();
+		// 2026-08-29: teeRecovery moved before assignment (gate reorg;
+		// owner-measured ray work, cd77412 lineage). teeRecovery now runs
+		// right after teeFamily -- ahead of supportField/rawPairs/measurement
+		// AND assignment -- because recovery's G5/G6 dependency on assignment
+		// output was removed (docs/contracts/2026-08-29-gate-reorg.md): recovery
+		// lives inside G4 and consumes badges + rays + shard/rail evidence only,
+		// never baskets/assignment.
 		expect(DEFAULT_EXECUTION).toEqual([
 			'badgeStage',
 			'badges',
 			'baskets',
 			'tees',
 			'teeFamily',
+			'teeRecovery',
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
 			'assignment',
-			'teeRecovery',
 			'zfit'
 		]);
 	});
@@ -254,7 +261,15 @@ describe('resolveConfig + engine', () => {
 		// provenance) and g1.digits' confidenceFloorDivisor/labelAmbiguityMargin
 		// (C4 derived-floor/ambiguity provenance) -- new knobs move this pin
 		// again, consciously, per the resolved-config-bytes-changed rule.
-		expect(hash).toBe('54e871cfd0320078c32af0502b2fc5e9877f5230152cdf23ec65d4e458b5b85c');
+		// 2026-08-29: teeRecovery moved before assignment (gate reorg; owner-measured
+		// ray work, cd77412 lineage) -- resolved.execution's byte order changes,
+		// moving this pin again (54e871cf... -> 90b9f924...).
+		// 2026-08-29: a concurrent sibling lane's phantomTee whitelist knob
+			// landed on this branch (merge 8fdf6cf) while this file was being
+			// updated for the reorder above -- unrelated to this task's own
+			// change, but it moves the resolved-config pin again (90b9f924... ->
+			// 8860bdb7...).
+			expect(hash).toBe('8860bdb7aebc148cae042a66af78eeff64c514968b7a4cfdb3151d872883ead7');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {
