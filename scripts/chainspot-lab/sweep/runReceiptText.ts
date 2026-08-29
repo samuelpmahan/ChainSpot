@@ -4,6 +4,7 @@ import {
 	scoreAnomalyNote,
 	type RunReceipt
 } from './runReceipt';
+import { notFoundReceiptLines, sortByHole } from './notFoundRows';
 
 /**
  * Render the persisted run receipt as a compact, deterministic text report.
@@ -208,12 +209,15 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 		);
 	}
 
+	lines.push('', ...notFoundReceiptLines(receipt.notFoundBadges));
+
 	lines.push(
 		'',
 		'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
 		"(provenance: board 'assignment' rows, hole read from BadgeEvidence.label by the shared " +
 			"withHoleLabels() mapping in @chainspot/alg/exec -- the same mapping this run's final " +
-			"measurementTable assignment artifact uses; an unreadable digit prints UNREAD, never a guess)",
+			"measurementTable assignment artifact uses; an unreadable digit prints UNREAD, never a guess; " +
+			'sorted by numeric hole, not by badge id)',
 		'hole | badgeId | teeId -> basketId | score | rank | hole confidence'
 	);
 	if (receipt.assignments.length === 0) {
@@ -226,7 +230,7 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	} else {
 		const median = assignmentScoreMedian(receipt.assignments);
 		let flagged = 0;
-		for (const row of receipt.assignments) {
+		for (const row of sortByHole(receipt.assignments)) {
 			const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
 			const confidence =
 				row.holeConfidence === null ? 'UNKNOWN' : round(row.holeConfidence).toString();
