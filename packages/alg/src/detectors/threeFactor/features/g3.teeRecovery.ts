@@ -221,7 +221,7 @@ function cornersFor(candidate: TeeRecoveryCandidate, options: RecoveryGeometryOp
 	return raw.map(([x, y]) => [x, y + offset] as const) as unknown as OrientedQuad;
 }
 
-function badgeAxisError(candidate: TeeRecoveryCandidate): number | undefined {
+export function badgeAxisError(candidate: TeeRecoveryCandidate): number | undefined {
 	const a = candidate.badgeAxisAngleRad;
 	const b = candidate.teeToBadgeAngleRad;
 	if (!finite(a ?? NaN) || !finite(b ?? NaN)) return undefined;
@@ -270,15 +270,15 @@ function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): b
 		Math.abs(v) >= fit.halfHeightPx - thickness - RASTER_TOLERANCE_PX;
 }
 
-function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
+export function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
 	// TEMP POKE (env-gated): owner hypothesis test -- if the few bright pixels
 	// inside the ring interior were not white, would the C-solved pad accept?
 	const EAT_INTERIOR = process.env.CHAINSPOT_POKE_INTERIOR === '1' && candidate.fit.fitKind === 'rail-extracted';
 	if (EAT_INTERIOR) {
 		const f = candidate.fit;
 		const c = Math.cos(f.angleRad), sn = Math.sin(f.angleRad);
-		const innerU = f.halfWidthPx - Math.max(0, f.supportThicknessPx) - RASTER_TOLERANCE_PX;
-		const innerV = f.halfHeightPx - Math.max(0, f.supportThicknessPx) - RASTER_TOLERANCE_PX;
+		const innerU = f.halfWidthPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
+		const innerV = f.halfHeightPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
 		const base = rawUnexplainedPixels(candidate);
 		return base.filter(([x, y]) => {
 			const dx = x - f.centerXPx, dy = y - f.centerYPx;
@@ -546,12 +546,6 @@ function fitComponent(
 	if (occluders && occluders.length > 0) {
 		const pxArray: Px[] = pixels.map(([x, y]) => [x, y]);
 		const railCandidates = extractRailCandidates(pxArray, occluders);
-		if (process.env.CHAINSPOT_DBG_COMP && component.label === Number(process.env.CHAINSPOT_DBG_COMP)) {
-			for (const rc of railCandidates.slice(0, 5)) {
-				const p0 = rc.points[0]; const p1 = rc.points[rc.points.length - 1];
-				console.error(`DBGRAIL c${component.label} b${target.label} angle=${rc.angleRad.toFixed(3)} len=${rc.lengthPx.toFixed(1)} q=${rc.qualityScore.toFixed(2)} occ=${rc.occludedFractionPx.toFixed(2)} (${p0![0]},${p0![1]})->(${p1![0]},${p1![1]})`);
-			}
-		}
 		if (railCandidates.length > 0) {
 			// Use the first (best-ranked) rail candidate. The extractor returns
 			// candidates ranked by quality; we take the top one.
@@ -631,9 +625,6 @@ function fitComponent(
 				};
 				return fit;
 			})();
-			if (process.env.CHAINSPOT_DBG_COMP && component.label === Number(process.env.CHAINSPOT_DBG_COMP)) {
-				console.error(`DBGSOLVE c${component.label} b${target.label} solved=${solved ? `(${solved.centerXPx.toFixed(1)},${solved.centerYPx.toFixed(1)}) angle=${solved.angleRad.toFixed(3)}` : 'no'}`);
-			}
 			if (solved) {
 				const occluderKinds = new Set(occluders.map(f => f.kind));
 				return {
@@ -1179,11 +1170,11 @@ function basketOpaqueProvider(
  * bug (an already-known tee stolen by assignment/scoring), which is out of
  * scope for this lane.
  */
-function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResult {
+export function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResult {
 	const support = candidate.fragmentPixels.length;
 	const componentCount = candidate.supportingComponentIds.length;
 	const axisError = badgeAxisError(candidate);
-	const railMissPx = candidate.fit.fitKind === 'rail-projection' ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
+	const railMissPx = (candidate.fit.fitKind === 'rail-projection' || candidate.fit.fitKind === 'rail-extracted') ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
 	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (
 		railMissPx !== undefined ? railMissPx > 0 : (axisError ?? Infinity) >= activeAxisLimitRad
 	);
@@ -1296,6 +1287,15 @@ interface ChromeSubtractionNote {
 	readonly regionCount: number;
 }
 
+/** Records that a component group was silently dropped as a duplicate, so every
+ * drop is receipt-visible. */
+interface SilentDuplicateDropNote {
+	readonly badgeId: string;
+	readonly badgeLabel: string | null;
+	readonly groupKey: string;
+	readonly duplicateOfGroupKey: string;
+}
+
 /**
  * DESIGN NOTE, designed-but-deferred (owner request 2026-08-28): C1S/C2D
  * range-circle dash subtraction.
@@ -1351,12 +1351,13 @@ export function buildTeeRecoveryCandidates(
 	tees: readonly TeeEvidence[],
 	viewportTopPx = 0,
 	search: TeeRecoverySearchContext = {}
-): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[] } {
+): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[]; readonly silentDrops: readonly SilentDuplicateDropNote[] } {
 	const candidates: TeeRecoveryCandidate[] = [];
 	const searchOutcomes: TargetSearchOutcome[] = [];
 	const chromeSubtractionNotes: ChromeSubtractionNote[] = [];
+	const silentDrops: SilentDuplicateDropNote[] = [];
 	const pads = tees.map((tee) => tee.pad).filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
-	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
+	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes, silentDrops };
 	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const minorWidths = pads.map((pad) => pad.minorPx);
@@ -1370,7 +1371,7 @@ export function buildTeeRecoveryCandidates(
 	const thickness = supportThickness(tees);
 	const coveredBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
 	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !coveredBadgeIds.has(badge.detId));
-	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
+	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes, silentDrops };
 
 	// Ownership and occlusion are properties of the raster, not of any one
 	// target, so they are computed exactly once for every missing badge.
@@ -1411,6 +1412,7 @@ export function buildTeeRecoveryCandidates(
 		return pixels.length ? [{ component, pixels }] : [];
 	});
 
+	const globalSeenGroups = new Map<string, { badgeId: string; badgeLabel: string | null }>();
 	for (const target of targets) {
 		const targetCandidates: TeeRecoveryCandidate[] = [];
 		const seenGroups = new Set<string>();
@@ -1436,8 +1438,25 @@ export function buildTeeRecoveryCandidates(
 			}
 			if (compatible.length === 0) continue;
 			const groupKey = compatible.map((entry) => entry.component.label).sort((a, b) => a - b).join('+');
-			if (!groupKey || seenGroups.has(groupKey)) continue;
+			if (!groupKey) continue;
+			if (seenGroups.has(groupKey)) {
+				// Silently dropped as a duplicate within this badge's search.
+				// Record it so the receipt is never silent.
+				const prior = globalSeenGroups.get(groupKey);
+				if (prior) {
+					silentDrops.push({
+						badgeId: target.detId,
+						badgeLabel: target.label ?? null,
+						groupKey,
+						duplicateOfGroupKey: prior.badgeId
+					});
+				}
+				continue;
+			}
 			seenGroups.add(groupKey);
+			if (!globalSeenGroups.has(groupKey)) {
+				globalSeenGroups.set(groupKey, { badgeId: target.detId, badgeLabel: target.label ?? null });
+			}
 			const pixels = compatible.flatMap((entry) => entry.pixels);
 			const visibleShards = compatible.flatMap((entry) => connectedPixelShards(entry.pixels));
 			const localizationStats = compatible.length === 1 && visibleShards.length === 1
@@ -1486,11 +1505,6 @@ export function buildTeeRecoveryCandidates(
 			const bFraction = br / b.fragmentPixels.length;
 			return aFraction - bFraction || ar - br || b.fragmentPixels.length - a.fragmentPixels.length || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 		});
-		if (process.env.CHAINSPOT_DBG_BADGE && target.label === process.env.CHAINSPOT_DBG_BADGE) {
-			for (const cnd of targetCandidates.filter((c2, i2) => i2 < 4 || c2.id.includes('-36'))) {
-				console.error(`DBGWIN b${target.label} id=${cnd.id} px=${cnd.fragmentPixels.length} unexpl=${unexplainedPixels(cnd).length} kind=${cnd.fit.fitKind} c=(${cnd.fit.centerXPx.toFixed(1)},${cnd.fit.centerYPx.toFixed(1)}) miss=${cnd.fit.badgePerpendicularMissPx ?? 'n/a'}`);
-			}
-		}
 		const [winner, ...runnerUps] = targetCandidates;
 		if (winner) candidates.push(winner);
 		searchOutcomes.push({
@@ -1508,7 +1522,7 @@ export function buildTeeRecoveryCandidates(
 	// resolve the relation without erasing what the shard actually testified.
 	const accepted = candidates.filter((candidate) => {
 		const support = candidate.fragmentPixels.length;
-		const railMiss = candidate.fit.fitKind === 'rail-projection' ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
+		const railMiss = (candidate.fit.fitKind === 'rail-projection' || candidate.fit.fitKind === 'rail-extracted') ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
 		return support >= MIN_SHARD_SUPPORT_PIXELS &&
 			unexplainedPixels(candidate).length === 0 &&
 			(railMiss !== undefined ? railMiss === 0 : (badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad);
@@ -1531,7 +1545,7 @@ export function buildTeeRecoveryCandidates(
 		}
 	}
 
-	return { candidates, searchOutcomes, chromeSubtractionNotes };
+	return { candidates, searchOutcomes, chromeSubtractionNotes, silentDrops };
 }
 
 export const teeRecoveryUnit: EngineUnit = {
@@ -1611,6 +1625,21 @@ export const teeRecoveryUnit: EngineUnit = {
 			});
 		}
 		ctx.measure('teeRecovery', 'chromeSubtractedComponents', built.chromeSubtractionNotes.length);
+		// Component group duplicates: the same groupKey was silently dropped because
+		// it had already been claimed by an earlier badge's search. Each drop gets
+		// a receipt line so nothing is silent.
+		for (const drop of built.silentDrops) {
+			const badge = badges.find((entry) => entry.detId === drop.badgeId);
+			ctx.overlay('teeRecovery', {
+				type: 'point',
+				xPx: badge?.cxPx ?? 0,
+				yPx: (badge?.cyPx ?? 0) - viewportTopPx,
+				verdict: 'info',
+				ref: `tee-recovery-silent-drop-${drop.badgeId}-${drop.groupKey}`,
+				reason: `badge ${drop.badgeLabel ?? drop.badgeId}: component group (${drop.groupKey}) was silently dropped as a duplicate; it was previously claimed for badge ${drop.duplicateOfGroupKey}`
+			});
+		}
+		ctx.measure('teeRecovery', 'silentlyDroppedGroupsWithDuplicates', built.silentDrops.length);
 		// No spatial prefilter means "candidates=0 for a missing badge" now only
 		// happens when the whole canonical raster has zero unowned, non-occluded
 		// bright components left to consider -- print that fact explicitly so
@@ -1648,6 +1677,32 @@ export const teeRecoveryUnit: EngineUnit = {
 			if (byNames.length > RUNNER_UP_RECEIPT_CAP) {
 				ctx.measure('teeRecovery', 'runnerUpsBeyondReceiptCap', byNames.length - RUNNER_UP_RECEIPT_CAP);
 			}
+		}
+		// Permanent ranked candidate table per badge: unconditional, no env vars.
+		// Shows all candidates considered for each badge in ranked order (winner first if exists).
+		for (const outcome of built.searchOutcomes) {
+			const allCandidatesForBadge = outcome.winner ? [outcome.winner, ...outcome.runnerUps] : outcome.runnerUps;
+			if (allCandidatesForBadge.length === 0) continue;
+			const badge = badges.find((entry) => entry.detId === outcome.badgeId);
+			const rows: string[] = [];
+			for (let i = 0; i < allCandidatesForBadge.length; i++) {
+				const cnd = allCandidatesForBadge[i]!;
+				const unexplained = unexplainedPixels(cnd).length;
+				const axisErr = badgeAxisError(cnd);
+				const miss = (cnd.fit.fitKind === 'rail-projection' || cnd.fit.fitKind === 'rail-extracted')
+					? cnd.fit.badgePerpendicularMissPx ?? Infinity
+					: axisErr ?? Infinity;
+				const rank = i === 0 && outcome.winner ? '★' : `${i + 1}`;
+				rows.push(`${rank}. id=${cnd.id} px=${cnd.fragmentPixels.length} unexpl=${unexplained} kind=${cnd.fit.fitKind ?? 'support-search'} c=(${cnd.fit.centerXPx.toFixed(1)},${cnd.fit.centerYPx.toFixed(1)}) miss=${typeof miss === 'number' ? miss.toFixed(3) : miss}`);
+			}
+			ctx.overlay('teeRecovery', {
+				type: 'point',
+				xPx: badge?.cxPx ?? 0,
+				yPx: (badge?.cyPx ?? 0) - viewportTopPx,
+				verdict: 'info',
+				ref: `tee-recovery-ranked-candidates-${outcome.badgeId}`,
+				reason: `Badge ${outcome.badgeLabel ?? outcome.badgeId}: ranked candidate table (${allCandidatesForBadge.length} total considered):\n${rows.join('\n')}`
+			});
 		}
 		if (!tees.some((tee) => tee.pad)) {
 			ctx.measure('teeRecovery', 'noCourseLocalPadGeometry', 1);
