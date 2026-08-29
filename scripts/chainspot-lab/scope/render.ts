@@ -118,6 +118,10 @@ function readoutLines(input:RenderScopeInput,request:ScopeResolvedRequest,panels
 		`  SIZE    ${c.widthPx}X${c.heightPx}`,
 		`  STRIP   ${c.stripChrome.source.toUpperCase()}`,
 		`  INSETS  ${ins?`${ins.top}/${ins.right}/${ins.bottom}/${ins.left}`:'NONE'}`,
+		// Names exactly what this render started from, so a re-crop of an
+		// already-canonical raster (the 4px-frame-lie bug) can never hide
+		// behind an ambiguous INSETS line again.
+		`  FRAME   ${c.alreadyCanonicalInput?'CANONICAL (sidecar-proven; StripChrome skipped)':'ORIGINAL-IMAGE'}  INSETS ${c.alreadyCanonicalInput?'none: input already canonical':(ins?`${ins.top}/${ins.right}/${ins.bottom}/${ins.left}`:'none')}`,
 		`  STITCH  ${c.autoStitch.sourceCount} SRC${c.autoStitch.hadFallback?' FALLBACK':''}`,
 		'',
 		'ANCHOR PIXEL',
