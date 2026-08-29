@@ -47,6 +47,7 @@ export function scopeCanonicalMeta(report: G0Report): ScopeCanonicalMeta {
 		widthPx: report.widthPx,
 		heightPx: report.heightPx,
 		stripChrome: report.stripChrome,
+		alreadyCanonicalInput: report.alreadyCanonicalInput,
 		autoStitch: {
 			sourceCount: report.autoStitch.sourceCount,
 			hadFallback: report.autoStitch.hadFallback
