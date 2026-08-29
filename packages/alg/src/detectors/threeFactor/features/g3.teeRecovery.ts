@@ -2,20 +2,11 @@
 // encountered non-occluded white component is accepted exactly when every
 // visible pixel can contribute to a course-local tee pointing at the badge.
 
-import type { BadgeEvidence, BasketEvidence, RecoveredTeeInput, TeeEvidence, OrientedQuad, ThreeFactorAssignment } from '../types';
+import type { BadgeEvidence, BasketEvidence, RecoveredTeeInput, TeeEvidence, OrientedQuad } from '../types';
 import { statsForPixels, type ComponentStats } from '../components';
 import type { Mask } from '../raster';
 import type { SpriteMatch } from '../endpoints';
 import basketSpriteData from '../assets/basket-sprite.json';
-import { assignThreeFactor, type SearchKnobs } from '../assignment';
-import type { RibbonKnobs } from '../ribbon';
-import type { RoutingKnobs } from '../routing';
-import type { ScoringKnobs, ZfitKnobs } from '../scoring';
-import { zfitFeature } from './g5.zfit';
-import { g4ScoringFeature } from './g4.scoring';
-import { g4SearchFeature } from './g4.search';
-import { g5RibbonFeature } from './g5.ribbon';
-import { g5RoutingFeature } from './g5.routing';
 import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
 import { teeRecoveryRender } from './g3.teeReceipts';
 import type { OpaqueDetector } from '../occlusion';
@@ -148,7 +139,7 @@ export const teeRecoveryFeature = {
 	gate: 'G4',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.',
+	note: 'G4 endpoint completion: visible tees claim numbered badges by their own pad axis; only ray-unclaimed badges enter shard recovery, and a shard becomes a recovered tee only when every visible pixel fits a course-local hollow tee support pointing at that badge. No path, basket assignment, or G6 decision is consulted.',
 	render: teeRecoveryRender,
 	knobs: {
 		axisToleranceDeg: {
@@ -535,9 +526,10 @@ interface RecoveryStage {
 
 interface RecoveryViewport { readonly topPx: number }
 
-/** The recovery producer is deliberately assignment anchored.  These are
- * structural views so callers can pass the normal assignment object without
- * coupling this deviation to the assignment implementation. */
+/** Legacy-shaped internal adapter telling the existing candidate builder
+ * which numbered badges are already claimed. These rows are produced locally
+ * from G3 tee-pad axes; they are NOT G6 assignments. basketId is a compatibility
+ * placeholder and is never read by shard recovery. */
 export interface TeeRecoveryAssignmentContext {
 	readonly assignments: readonly { readonly badgeId: string; readonly basketId: string }[];
 }
@@ -554,6 +546,80 @@ function numberLabel(badge: BadgeEvidence): number | undefined {
 	if (!/^\d+$/.test(badge.label ?? '')) return undefined;
 	const n = Number(badge.label);
 	return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+
+export interface VisibleTeeBadgeRayClaim {
+	readonly teeId: string;
+	readonly badgeId: string;
+	readonly badgeLabel: string | null;
+	readonly axisErrorRad: number;
+}
+
+export interface VisibleTeeBadgeRayResolution {
+	readonly claims: readonly VisibleTeeBadgeRayClaim[];
+	readonly ambiguousTeeIds: readonly string[];
+	readonly conflictedBadgeIds: readonly string[];
+}
+
+/** Tee-pad major axes are undirected: theta and theta+pi are identical. */
+function undirectedAxisError(axisRad: number, rayRad: number): number {
+	const delta = Math.abs(Math.atan2(Math.sin(axisRad - rayRad), Math.cos(axisRad - rayRad)));
+	return Math.min(delta, Math.PI - delta);
+}
+
+/**
+ * Cheap G4 testimony for already-visible tees. A tee claims a numbered badge
+ * only when exactly one badge lies on its own measured pad axis within the
+ * same strict tolerance used by recovery, and that badge has exactly one tee
+ * claimant. Any ambiguity stays unclaimed and therefore widens recovery.
+ */
+export function resolveVisibleTeeBadgeRays(
+	tees: readonly TeeEvidence[],
+	badges: readonly BadgeEvidence[]
+): VisibleTeeBadgeRayResolution {
+	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
+	const proposals: VisibleTeeBadgeRayClaim[] = [];
+	const ambiguousTeeIds: string[] = [];
+
+	for (const tee of tees) {
+		const pose = tee.pad?.minAreaPose;
+		const axisRad = pose?.angleRad ?? tee.pad?.angleRad ?? tee.angleRad;
+		const xPx = pose?.centerXPx ?? tee.pad?.centerXPx ?? tee.xPx;
+		const yPx = pose?.centerYPx ?? tee.pad?.centerYPx ?? tee.yPx;
+		if (!tee.pad || axisRad === null || !Number.isFinite(axisRad)) continue;
+		const candidates = numbered
+			.map((badge) => ({
+				teeId: tee.detId,
+				badgeId: badge.detId,
+				badgeLabel: badge.label,
+				axisErrorRad: undirectedAxisError(
+					axisRad,
+					Math.atan2(badge.cyPx - yPx, badge.cxPx - xPx)
+				)
+			}))
+			.filter((candidate) => candidate.axisErrorRad < activeAxisLimitRad)
+			.sort((a, b) => a.axisErrorRad - b.axisErrorRad || a.badgeId.localeCompare(b.badgeId));
+		if (candidates.length === 1) proposals.push(candidates[0]!);
+		else if (candidates.length > 1) ambiguousTeeIds.push(tee.detId);
+	}
+
+	const byBadge = new Map<string, VisibleTeeBadgeRayClaim[]>();
+	for (const proposal of proposals) {
+		const bucket = byBadge.get(proposal.badgeId);
+		if (bucket) bucket.push(proposal);
+		else byBadge.set(proposal.badgeId, [proposal]);
+	}
+	const claims: VisibleTeeBadgeRayClaim[] = [];
+	const conflictedBadgeIds: string[] = [];
+	for (const [badgeId, bucket] of byBadge) {
+		if (bucket.length === 1) claims.push(bucket[0]!);
+		else conflictedBadgeIds.push(badgeId);
+	}
+	claims.sort((a, b) => a.badgeId.localeCompare(b.badgeId) || a.teeId.localeCompare(b.teeId));
+	ambiguousTeeIds.sort();
+	conflictedBadgeIds.sort();
+	return { claims, ambiguousTeeIds, conflictedBadgeIds };
 }
 
 function exactBasketPixels(
@@ -676,29 +742,6 @@ function basketOpaqueProvider(
  * bug (an already-known tee stolen by assignment/scoring), which is out of
  * scope for this lane.
  */
-function targetPredecessors(
-	badges: readonly BadgeEvidence[],
-	baskets: readonly BasketEvidence[],
-	assignment: TeeRecoveryAssignmentContext | undefined
-): readonly { badge: BadgeEvidence; basket: BasketEvidence }[] {
-	const byBadge = new Map(badges.map((badge) => [badge.detId, badge]));
-	const byBasket = new Map(baskets.map((basket) => [basket.detId, basket]));
-	const assigned = new Set(assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const rows = assignment?.assignments ?? [];
-	const out: { badge: BadgeEvidence; basket: BasketEvidence }[] = [];
-	for (const badge of badges) {
-		const hole = numberLabel(badge);
-		if (hole === undefined || assigned.has(badge.detId)) continue;
-		const predecessor = badges.find((candidate) => numberLabel(candidate) === hole - 1);
-		if (!predecessor) continue;
-		const row = rows.find((candidate) => candidate.badgeId === predecessor.detId);
-		const basket = row ? byBasket.get(row.basketId) : undefined;
-		if (basket) out.push({ badge, basket });
-	}
-	return out;
-}
-
-
 function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResult {
 	const support = candidate.fragmentPixels.length;
 	const componentCount = candidate.supportingComponentIds.length;
@@ -847,8 +890,8 @@ export function buildTeeRecoveryCandidates(
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
 	const thickness = supportThickness(tees);
-	const assignedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !assignedBadgeIds.has(badge.detId));
+	const claimedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
+	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !claimedBadgeIds.has(badge.detId));
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -1000,8 +1043,8 @@ export function buildTeeRecoveryCandidates(
 export const teeRecoveryUnit: EngineUnit = {
 	id: 'teeRecovery',
 	gate: 'G4',
-	consumes: ['stage', 'badges', 'baskets', 'tees', 'sprites', 'viewport', 'recoveredTees', 'assignment', 'measurement'],
-	produces: ['recoveredTees', 'assignment'],
+	consumes: ['stage', 'badges', 'baskets', 'tees', 'sprites', 'viewport', 'recoveredTees'],
+	produces: ['recoveredTees'],
 	note: 'visible tee-shard recovery by all-visible-pixels badge-pointing tee-support feasibility with exact opaque ownership',
 	run(board: EvidenceBoard, ctx: FeatureContext) {
 		const stop = ctx.span('teeRecovery');
@@ -1021,21 +1064,38 @@ export const teeRecoveryUnit: EngineUnit = {
 		const badges = board.get<readonly BadgeEvidence[]>('badges');
 		const baskets = board.get<readonly BasketEvidence[]>('baskets');
 		const tees = board.get<readonly TeeEvidence[]>('tees');
-		const assignment = board.get<ThreeFactorAssignment>('assignment');
-		const measurement = board.get<import('../types').ThreeFactorMeasurement>('measurement');
-		const badgeIds = new Set(badges.filter((badge) => /^\d+$/.test(badge.label ?? '')).map((badge) => badge.detId));
-		const assignedBadgeIds = new Set(assignment.assignments.map((entry) => entry.badgeId));
-		if ([...badgeIds].every((badgeId) => assignedBadgeIds.has(badgeId))) {
-			ctx.measure('teeRecovery', 'missingNumberedTees', 0);
+		const rayResolution = resolveVisibleTeeBadgeRays(tees, badges);
+		const claimedBadgeIds = new Set(rayResolution.claims.map((claim) => claim.badgeId));
+		const numberedBadges = badges.filter((badge) => numberLabel(badge) !== undefined);
+		ctx.measure('teeRecovery', 'visibleRayClaims', rayResolution.claims.length);
+		ctx.measure('teeRecovery', 'visibleRayAmbiguousTees', rayResolution.ambiguousTeeIds.length);
+		ctx.measure('teeRecovery', 'visibleRayConflictedBadges', rayResolution.conflictedBadgeIds.length);
+		ctx.measure('teeRecovery', 'missingNumberedTees', numberedBadges.length - claimedBadgeIds.size);
+		for (const claim of rayResolution.claims) {
+			const tee = tees.find((candidate) => candidate.detId === claim.teeId);
+			const badge = badges.find((candidate) => candidate.detId === claim.badgeId);
+			if (!tee || !badge) continue;
+			ctx.overlay('teeRecovery', {
+				type: 'polyline',
+				path: [[tee.xPx, tee.yPx], [badge.cxPx, badge.cyPx]],
+				verdict: 'info',
+				visualRole: 'tee-badge-path',
+				ref: `visible-ray-${tee.detId}-${badge.detId}`,
+				reason: `visible ${tee.detId} uniquely claims badge ${badge.label ?? badge.detId} by its own undirected pad axis (${(claim.axisErrorRad * 180 / Math.PI).toFixed(3)}° < ${activeAxisLimitDeg}°); no pathfinding or assignment testimony read`
+			});
+		}
+		if (claimedBadgeIds.size === numberedBadges.length) {
 			board.set('recoveredTees', board.get<readonly RecoveredTeeInput[]>('recoveredTees'));
-			board.set('assignment', assignment);
 			stop();
 			return;
 		}
+		const localRayClaims: TeeRecoveryAssignmentContext = {
+			assignments: [...claimedBadgeIds].sort().map((badgeId) => ({ badgeId, basketId: 'G4-visible-ray' }))
+		};
 		const shardDiscoveryStop = ctx.span('teeRecovery.shardDiscovery');
 		const sprites = board.has('sprites') ? board.get<readonly SpriteMatch[]>('sprites') : undefined;
 		ctx.occlusion.registerOpaque(basketOpaqueProvider(stage, baskets, sprites, viewportTopPx));
-		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment, sprites, occlusion: ctx.occlusion });
+		const built = buildTeeRecoveryCandidates(stage, badges, baskets, tees, viewportTopPx, { assignment: localRayClaims, sprites, occlusion: ctx.occlusion });
 		shardDiscoveryStop();
 		// Known-occluder pixel subtraction (screen chrome) is never a silent cut:
 		// name the component, the exact pixel count removed, and what remains.
@@ -1108,22 +1168,17 @@ export const teeRecoveryUnit: EngineUnit = {
 		const results = promoted.map((entry) => entry.result);
 		const existing = board.get<readonly RecoveredTeeInput[]>('recoveredTees');
 		const additions: RecoveredTeeInput[] = [];
-		// Footgun fix (2026-08-28 inventory): this dedupe distance already has a
-		// config-provenanced knob (g4.search.ts's `recoveredTeeDedupeDistance`,
-		// default 14) that was resolved further below for reassignment but never
-		// actually consumed here -- the literal `14` was live instead. Resolve
-		// once, up front, and use it for every check below.
-		const searchKnobs = ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs;
-		const dedupeDistancePx = searchKnobs.recoveredTeeDedupeDistance;
+		// No G6 search knob may decide whether G4 observed a tee. Cross-target
+		// source-component ambiguity is settled above; only exact repeated
+		// recovery centers are deduplicated here.
 		for (const { candidate, result } of promoted) {
 			const centerX = result.corners.reduce((sum, point) => sum + point[0], 0) / 4;
 			const centerY = result.corners.reduce((sum, point) => sum + point[1], 0) / 4;
-			const duplicate = tees.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
-				existing.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx) ||
-				additions.some((tee) => Math.hypot(tee.xPx - centerX, tee.yPx - centerY) < dedupeDistancePx);
+			const duplicate = existing.some((tee) => tee.xPx === centerX && tee.yPx === centerY) ||
+				additions.some((tee) => tee.xPx === centerX && tee.yPx === centerY);
 			if (duplicate && result.verdict === 'accepted') {
 				ctx.measure('teeRecovery', 'duplicateSuppressed', 1);
-				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: `recovery center within ${dedupeDistancePx}px of an existing tee (knob recoveredTeeDedupeDistance); duplicate suppressed`, values: numericTraceValues(result.values) });
+				ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: `${result.id}:duplicate`, reason: 'exact recovered center already exists; duplicate suppressed without a proximity/search heuristic', values: numericTraceValues(result.values) });
 				continue;
 			}
 			const shardPixels = candidate.fragmentPixels.map((point) => localPoint(candidate, point, {}));
@@ -1137,16 +1192,6 @@ export const teeRecoveryUnit: EngineUnit = {
 			additions.push({ xPx: centerX, yPx: centerY, bbox: [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs) - Math.min(...xs)), Math.ceil(Math.max(...ys) - Math.min(...ys))], provenance: { source: 'tee-shard-recovery', note: `teeRecovery support fit ${result.id}: every non-occluded visible component pixel contributes; discovery seed ${candidate.seedSource ?? 'UNKNOWN'}` } });
 		}
 		board.set('recoveredTees', [...existing, ...additions]);
-		if (additions.length > 0 && measurement.rawPairs.length > 0) {
-			const zfit = ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs;
-			const scoring = ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs;
-			const ribbon = ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs;
-			const routing = ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs;
-			board.set('assignment', assignThreeFactor(measurement, [...existing, ...additions], zfit, scoring, searchKnobs, ribbon, routing));
-		} else {
-			if (additions.length > 0) ctx.measure('teeRecovery', 'reassignmentSkippedNoRawPairs', 1);
-			board.set('assignment', assignment);
-		}
 		ctx.measure('teeRecovery', 'candidates', allResults.length);
 		ctx.measure('teeRecovery', 'accepted', additions.length);
 		ctx.measure('teeRecovery', 'promoted', results.length);
