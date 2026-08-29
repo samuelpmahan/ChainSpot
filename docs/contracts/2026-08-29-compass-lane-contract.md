@@ -48,11 +48,24 @@ center error tilts the ray more when the badge is close (owner-verified:
 ~1.6 degrees of DT12's 9.66 came from a 3.9 px shift). Short-badge-distance
 tees get honestly wider tolerance, not false precision.
 
-**CL-6 — Ray first, route corroborates.** teeBadgeLock candidate selection
-and ranking are driven by the pad axis ray (with CL-4 sigma and CL-5
-uncertainty). Path efficiency / weak-aligned support demote to
-corroboration and tie-breaking. The all-Hn resolver shell (lock / named
-orphan / named conflict, multiclaim, abstention) is preserved unchanged.
+**CL-6a — Ray first for tee→badge.** teeBadgeLock candidate selection and
+ranking are driven by the pad axis ray (with CL-4 sigma and CL-5
+uncertainty). Route factors demote to corroboration and tie-breaking. The
+all-Hn resolver shell (lock / named orphan / named conflict, multiclaim,
+abstention) is preserved unchanged.
+
+**CL-6b — Follow the path for badge→basket (owner directive 2026-08-29:
+"trace, don't shop" made structural).** Once a badge is claimed by a tee,
+the basket is DISCOVERED by following the painted hole path onward from
+the badge — away from the tee side — through the support field's testimony
+until the path terminates; the object it terminates at is the claimed
+basket. The known-basket assumption dies inside this feature: no
+enumerating candidate baskets and grading pre-drawn connections between
+assumed endpoints. A path that cannot be followed to a credible
+terminus is a loud UNKNOWN carrying its partial trace as drawable
+evidence — never a proximity-shaped guess (proximity-as-matchmaker stays
+banned). One plain sentence per claim: "followed the path from badge N for
+X px; it ends at this basket."
 
 **CL-7 — Default-path changes are measured, not smuggled.** teeBadgeLock is
 default-OFF; its scoring rewrite ships freely behind its config. Any change
