@@ -49,10 +49,74 @@ export interface CompiledExecutionPlan {
 	readonly bindings: Readonly<Record<string, { enabled: boolean; knobs: Record<string, unknown> }>>;
 	/** C4's image/params hash; carried through untouched, never derived here */
 	readonly paramsHash?: string;
+	/**
+	 * 2026-08-29: TIER 2 drift warnings — one-sided-but-functional drift detected
+	 * at compile time. Never thrown, always emitted to receipt for visibility.
+	 * Format: plain sentence, no punctuation needed (receipts add it).
+	 */
+	readonly warnings?: readonly string[];
 }
 
 function fail(message: string): never {
 	throw new Error(`exec compile: ${message}`);
+}
+
+/**
+ * Feature registry consistency: operations reference features that must exist.
+ * Every feature mentioned in an operation's spec must be registered and
+ * available in the resolved config.
+ */
+function validateOperationFeatures(
+	ops: readonly OperationSpec[],
+	resolved: ResolvedConfig
+): void {
+	const resolvedFeatures = new Set(Object.keys(resolved.features));
+	for (const op of ops) {
+		const features = op.features ?? [];
+		for (const featureId of features) {
+			if (!resolvedFeatures.has(featureId)) {
+				fail(
+					`operation '${op.id}' references feature '${featureId}' but it is not in the resolved config (feature may be resolve-only and not explicitly configured).`
+				);
+			}
+		}
+	}
+}
+
+/**
+ * TIER 2 drift detection: collect warnings for one-sided-but-functional
+ * mismatches. These never throw; they are emitted as compile-time warnings
+ * and carried in the plan for receipt visibility. Example: a feature added a
+ * new knob that existing ON-configs don't yet know about (but will use the
+ * default value, so behavior is still correct).
+ */
+function detectTier2Warnings(resolved: ResolvedConfig): string[] {
+	const warnings: string[] = [];
+	const registry = new Map(ALL_FEATURES.map((f) => [f.id, f]));
+	for (const [featureId, resolvedState] of Object.entries(resolved.features)) {
+		const feature = registry.get(featureId);
+		if (!feature) continue;
+		// Only check deviation features (baseline features default ON by design).
+		// If a deviation is enabled, its config should explicitly cover its knobs.
+		if (!resolvedState.enabled || feature.kind !== 'deviation') continue;
+		// Collect knobs using defaults (not explicitly configured in this config).
+		const defaultedKnobs: string[] = [];
+		for (const [knobName, knobValue] of Object.entries(resolvedState.knobs)) {
+			const knobSpec = feature.knobs[knobName];
+			if (knobSpec && knobValue === knobSpec.default) {
+				defaultedKnobs.push(knobName);
+			}
+		}
+		// If any knobs are defaulted for an enabled deviation, emit a single
+		// consolidated warning per feature (not per knob, to keep noise down).
+		if (defaultedKnobs.length > 0) {
+			const knobList = defaultedKnobs.join(', ');
+			warnings.push(
+				`feature '${featureId}' has ${defaultedKnobs.length} knob(s) using defaults (${knobList}) — if this feature was recently added or updated, ensure your config explicitly sets all knobs`
+			);
+		}
+	}
+	return warnings;
 }
 
 export function validateOperationOrder(
@@ -119,6 +183,7 @@ export function compileExecutionPlan(
 	// internal decomposition is a genuine, satisfiable dependency chain,
 	// not just decorative labels (R2).
 	validateOperationOrder(ops);
+	validateOperationFeatures(ops, resolved);
 
 	const bindings: Record<string, { enabled: boolean; knobs: Record<string, unknown> }> = {};
 	for (const [id, state] of Object.entries(resolved.features)) bindings[id] = state;
@@ -130,10 +195,15 @@ export function compileExecutionPlan(
 		canonicalJson({ resolvedConfig: resolved, opUniverse: fingerprintUniverse })
 	);
 
+	// 2026-08-29: TIER 2 warnings for one-sided-but-functional drift.
+	// Never throw; always emit for receipt visibility.
+	const tier2Warnings = detectTier2Warnings(resolved);
+
 	return {
 		ops,
 		planFingerprint,
 		bindings,
-		...(paramsHash ? { paramsHash } : {})
+		...(paramsHash ? { paramsHash } : {}),
+		...(tier2Warnings.length > 0 ? { warnings: tier2Warnings } : {})
 	};
 }

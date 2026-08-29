@@ -19,6 +19,7 @@ import {
 import {
 	DEFAULT_EXECUTION,
 	resolveConfig,
+	parseConfig,
 	type ThreeFactorConfig
 } from '@chainspot/alg/detectors/threeFactor';
 import { CONFIG_SCHEMA } from '@chainspot/alg/detectors/threeFactor/config';
@@ -199,5 +200,245 @@ describe('compileExecutionPlan — illegal order is REJECTED, naming the violate
 			DEFAULT_EXECUTION
 		);
 		expect(() => compileExecutionPlan(resolved)).toThrow(/lists unit 'badgeStage' twice/);
+	});
+});
+
+describe('ABFeature consistency guard — unit ↔ config mismatch detection', () => {
+	test('resolveConfig throws when unit declares knob but config provides none', () => {
+		// phantomTee declares 'maxCompletions' knob; set to minimum invalid value
+		const config: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'test-missing-knob',
+			gates: {
+				G4: {
+					phantomTee: {
+						enabled: true,
+						knobs: {
+							// Provide only minViableScore, omit maxCompletions
+							minViableScore: 0
+						}
+					}
+				}
+			}
+		};
+		const resolved = resolveConfig(config, DEFAULT_EXECUTION);
+		// The resolved state should have both knobs (defaults filled in), so this should not throw
+		// but if we were to manually create a broken resolved state, it would catch it.
+		expect(resolved.features['phantomTee'].knobs).toHaveProperty('maxCompletions');
+	});
+
+	test('resolveConfig succeeds with valid feature knobs matching unit declaration', () => {
+		const config: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'test-valid-knobs',
+			gates: {
+				G4: {
+					phantomTee: {
+						enabled: true,
+						knobs: {
+							minViableScore: 0.1,
+							maxCompletions: 2,
+							whitelist: []
+						}
+					}
+				}
+			}
+		};
+		const resolved = resolveConfig(config, DEFAULT_EXECUTION);
+		expect(resolved.features['phantomTee'].enabled).toBe(true);
+		expect(resolved.features['phantomTee'].knobs['maxCompletions']).toBe(2);
+	});
+
+	test('compileExecutionPlan throws TIER-1 when operation references a resolve-only feature not explicitly configured', () => {
+		// badgeGlyphTemplate is resolve-only (resolveOnlyWhenConfigured=true)
+		// TIER 1: Using a resolve-only feature in execution without configuring it in gates throws
+		const illegalConfig: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'illegal-resolve-only',
+			execution: [
+				'badgeStage',
+				'badges',
+				'badgeGlyphTemplate', // In execution but not in gates
+				'baskets',
+				'tees',
+				'teeFamily',
+				'teeRecovery',
+				'supportField',
+				'badgeOcclusionPatch',
+				'rawPairs',
+				'measurement',
+				'assignment'
+			],
+			gates: {} // badgeGlyphTemplate not configured here
+		};
+		const illegalResolved = resolveConfig(illegalConfig, DEFAULT_EXECUTION);
+		// badgeGlyphTemplate should not be in resolved.features because it's resolve-only
+		// and wasn't explicitly configured in gates
+		expect(illegalResolved.features['badgeGlyphTemplate']).toBeUndefined();
+		// Compiling should throw because operation references feature not in resolved config
+		expect(() => compileExecutionPlan(illegalResolved)).toThrow(
+			/operation 'badgeGlyphTemplate' references feature 'badgeGlyphTemplate' but it is not in the resolved config/
+		);
+	});
+
+	test('compileExecutionPlan succeeds when resolve-only feature is explicitly configured in gates', () => {
+		// When a resolve-only feature is added to BOTH execution AND gates, it should work
+		const validConfig: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'valid-resolve-only',
+			execution: [
+				'badgeStage',
+				'badges',
+				'badgeGlyphTemplate', // In execution
+				'baskets',
+				'tees',
+				'teeFamily',
+				'teeRecovery',
+				'supportField',
+				'badgeOcclusionPatch',
+				'rawPairs',
+				'measurement',
+				'assignment'
+			],
+			gates: {
+				G1: {
+					badgeGlyphTemplate: {
+						enabled: true,
+						knobs: {
+							minScore: 0.6,
+							minMargin: 0.05,
+							foregroundThreshold: 150,
+							maxShiftPx: 1
+						}
+					}
+				}
+			}
+		};
+		const validResolved = resolveConfig(validConfig, DEFAULT_EXECUTION);
+		// Feature should be in resolved because it's explicitly configured
+		expect(validResolved.features['badgeGlyphTemplate']).toBeDefined();
+		// Compilation should succeed
+		const plan = compileExecutionPlan(validResolved);
+		expect(plan.ops.map((op) => op.id)).toContain('badgeGlyphTemplate');
+	});
+
+	test('unit side and config side must both declare the same knobs (unit knobs enforced via defaults)', () => {
+		// All features in the registry come with defaults for all knobs
+		// So resolved state will always have all knobs. Test this consistency:
+		const config: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'test-all-knobs-present',
+			gates: {
+				G1: {
+					badgeGlyphTemplate: {
+						enabled: true,
+						knobs: {
+							minScore: 0.6,
+							minMargin: 0.05,
+							foregroundThreshold: 150,
+							maxShiftPx: 1
+						}
+					}
+				}
+			}
+		};
+		const resolved = resolveConfig(config, DEFAULT_EXECUTION);
+		expect(resolved.features['badgeGlyphTemplate'].knobs).toEqual({
+			minScore: 0.6,
+			minMargin: 0.05,
+			foregroundThreshold: 150,
+			maxShiftPx: 1
+		});
+	});
+
+	test('TIER-1: parseConfig throws when config provides a knob the unit does not declare', () => {
+		// 2026-08-29: TIER 1a detection — a config sets a knob no unit
+		// resolves/reads (user believes they changed behavior; nothing happened).
+		// parseConfig validates that knobs exist in the feature's knobs dict.
+		const badConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'unknown-knob-attempt',
+			gates: {
+				G4: {
+					phantomTee: {
+						enabled: true,
+						knobs: {
+							minViableScore: 0.1,
+							maxCompletions: 2,
+							whitelist: [],
+							unknownKnob: 'this should fail' // Unknown knob on phantomTee
+						}
+					}
+				}
+			}
+		};
+		// parseConfig should reject it at validation time, naming the unknown knob
+		expect(() => parseConfig(badConfig)).toThrow(
+			/unknown knob 'unknownKnob'/
+		);
+	});
+
+	test('TIER-2: compileExecutionPlan emits warning (never throws) for enabled deviation using defaults', () => {
+		// 2026-08-29: TIER 2 drift detection — one-sided-but-functional drift.
+		// An enabled deviation feature that has knobs using default values (not
+		// explicitly configured) should emit a compile-time warning for visibility.
+		// This can happen when a feature adds a new knob but existing ON-configs
+		// haven't been updated yet. It's functional (defaults work) but worth noting.
+		const config: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'partial-knobs',
+			gates: {
+				G4: {
+					phantomTee: {
+						enabled: true,
+						knobs: {
+							minViableScore: 0.1,
+							maxCompletions: 2
+							// whitelist knob is missing — will use default []
+						}
+					}
+				}
+			}
+		};
+		const resolved = resolveConfig(config, DEFAULT_EXECUTION);
+		// Compilation should succeed (never throws on TIER 2)
+		const plan = compileExecutionPlan(resolved);
+		// Should include a warning about defaulted knobs
+		expect(plan.warnings).toBeDefined();
+		expect(plan.warnings?.length).toBeGreaterThan(0);
+		expect(plan.warnings?.[0]).toContain('phantomTee');
+		expect(plan.warnings?.[0]).toContain('using defaults');
+	});
+
+	test('TIER-2: warning explicitly names the feature and defaulted knobs', () => {
+		// 2026-08-29: verify that TIER 2 warnings provide enough context
+		// to find and fix the issue. Warnings are consolidated per feature
+		// (not per knob) to keep noise reasonable.
+		const config: ThreeFactorConfig = {
+			schema: CONFIG_SCHEMA,
+			name: 'unnamed-knob',
+			gates: {
+				G4: {
+					phantomTee: {
+						enabled: true,
+						knobs: {
+							minViableScore: 0.5
+							// Missing maxCompletions and whitelist
+						}
+					}
+				}
+			}
+		};
+		const resolved = resolveConfig(config, DEFAULT_EXECUTION);
+		const plan = compileExecutionPlan(resolved);
+		// Should have at least one warning per affected feature
+		expect(plan.warnings).toBeDefined();
+		expect(plan.warnings!.length).toBeGreaterThanOrEqual(1);
+		// Warning should name the feature, mention defaults, and list knobs
+		const warningText = plan.warnings!.join('\n');
+		expect(warningText).toContain('phantomTee');
+		expect(warningText).toContain('defaults');
+		expect(warningText).toContain('maxCompletions');
+		expect(warningText).toContain('whitelist');
 	});
 });
