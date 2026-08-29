@@ -44,6 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
+          npx svelte-kit sync
           npm --workspace @chainspot/alg run build
           FILES=$(find tests/unit -maxdepth 1 -type f \( -iname '*threeFactor*.test.ts' -o -iname '*recovery*.test.ts' \) -print | tr '\n' ' ')
           echo "focused tests: ${FILES:-NONE}"
