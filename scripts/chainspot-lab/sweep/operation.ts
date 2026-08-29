@@ -678,7 +678,7 @@ export async function runSweepOperation(
 		owner: 'G0 intake (StripChrome + AutoStitch)',
 		status: 'rendered',
 		summary: `exact ${image.width}x${image.height} canonical raster executed by this run`,
-		files: [runRelativePath(canonicalPngPath)]
+		files: [runRelativePath(canonicalPngPath), runRelativePath(`${canonicalPngPath}.json`)]
 	};
 	const artifactVisualRenders: RunReceiptVisualRender[] = artifactRenders.map(
 		(render, index): RunReceiptVisualRender => ({
