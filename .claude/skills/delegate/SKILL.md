@@ -40,6 +40,9 @@ The tiny structure that is insanely powerful:
 - **Opus final review** — one pass over the combined result, with the authority to bounce either half.
 Every edge of the triangle is a context that cannot influence what it judges.
 
+## ABFeature builds run the OSS Triangle (owner policy 2026-08-29)
+Any new ABFeature (a default-OFF config-toggled deviation: new feature module + registry/gate-sets/schema wiring + config JSON + receipt section + fingerprint-pin update) is built under the OSS Triangle as STANDARD, not as an escalation. The whole point of ABF is trustworthy comparison, so the build itself gets the structure where no lane grades its own work: split builder halves on context bounds (typical pairing: feature+wiring | tests+receipts), cross-review, Opus contract/final review before the config is trusted. A single-Sonnet ABFeature build is the exception and must be followed by the review half of the triangle (independent adversarial review + contract check) before its receipts are treated as evidence.
+
 ## Supporting patterns (each caught real bugs on 2026-08-28)
 1. **Instrument before fix** — the measuring lane lands first, pins exact defect counts, and the fix lane is forbidden from touching the instrument. (The ./lab digits scoreboard found two unknown failures mid-build this way.)
 2. **Contract, not vibes** — the lead does forensics and issues a binding contract; the builder builds to it; disagreements become contract amendments, never silent divergence.
