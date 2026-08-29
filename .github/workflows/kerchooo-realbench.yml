@@ -1,0 +1,91 @@
+name: KERCHOOOOO rebuilt benchmark
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-realbench
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-realbench
+          path: ChainSpot
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and build BASELINE
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          git checkout 26135bbf2dd2480cd09492c36b546d42eb6433ad -- packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts packages/alg/src/detectors/threeFactor/ribbon.ts
+          ./lab setup
+
+      - name: Baseline NorthPark
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/baseline.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' > /tmp/baseline.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' > /tmp/baseline.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' > /tmp/baseline.theta.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' > /tmp/baseline.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/baseline.receipt.txt
+          echo "BASELINE_WALL=$(cat /tmp/baseline.wall)s"
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' /tmp/baseline.receipt.txt || true
+
+      - name: Restore V4 source and REBUILD alg
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          git checkout 64586858aa7a4add4215ffad00e35b44ac7a6453 -- packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts packages/alg/src/detectors/threeFactor/ribbon.ts
+          npm run build --workspace=@chainspot/alg
+          npm run check
+          npx vitest run tests/unit/teeRecoveryFeature.test.ts
+
+      - name: V4 NorthPark exact output parity
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/optimized.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' > /tmp/optimized.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' > /tmp/optimized.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' > /tmp/optimized.theta.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' > /tmp/optimized.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/optimized.receipt.txt
+          diff -u /tmp/baseline.visual.sha /tmp/optimized.visual.sha
+          diff -u /tmp/baseline.support.sha /tmp/optimized.support.sha
+          diff -u /tmp/baseline.theta.sha /tmp/optimized.theta.sha
+          diff -u /tmp/baseline.assignment.sha /tmp/optimized.assignment.sha
+          python3 - <<'PY'
+          base=float(open('/tmp/baseline.wall').read())
+          opt=float(open('/tmp/optimized.wall').read())
+          print(f'KERCHOOOOO REBUILT V4: {base:.2f}s -> {opt:.2f}s = {base/opt:.2f}x, {(1-opt/base)*100:.1f}% faster')
+          PY
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' /tmp/optimized.receipt.txt || true
+
+      - name: Dev6 with rebuilt V4
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev
+          find artifacts/sweep -path '*/batches/summary.txt' -exec cat {} \;
