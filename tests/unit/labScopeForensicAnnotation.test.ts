@@ -16,6 +16,7 @@ const CANONICAL = {
 	widthPx: 200,
 	heightPx: 200,
 	stripChrome: { source: 'none', insets: null },
+	alreadyCanonicalInput: false,
 	autoStitch: { sourceCount: 1, hadFallback: false }
 } as const;
 
@@ -38,6 +39,40 @@ function panelCenters(outputSizes: readonly number[]): readonly (readonly [numbe
 	}
 	return centers;
 }
+
+describe('LAB scope READOUT frame line', () => {
+	test('an already-canonical input carries alreadyCanonicalInput into the render meta the FRAME line reads', () => {
+		const width = 64;
+		const height = 64;
+		const data = new Uint8Array(width * height * 4).fill(10);
+		const request: ScopeResolvedRequest = {
+			name: 'frame-check',
+			kind: 'point',
+			focus: { x: 10, y: 10, w: 1, h: 1 },
+			points: [[10, 10]],
+			template: 'default',
+			color: 0
+		};
+		const dir = mkdtempSync(join(tmpdir(), 'lab-scope-frame-'));
+		const canonicalOutput = renderScope({
+			raster: { width, height, data },
+			imagePath: '/tmp/raster.png',
+			canonical: { ...CANONICAL, alreadyCanonicalInput: true, stripChrome: { source: 'none', insets: null } },
+			request,
+			outputPath: join(dir, 'already-canonical.png')
+		});
+		expect(canonicalOutput.canonical.alreadyCanonicalInput).toBe(true);
+
+		const originalOutput = renderScope({
+			raster: { width, height, data },
+			imagePath: '/tmp/raster.png',
+			canonical: CANONICAL,
+			request,
+			outputPath: join(dir, 'original-image.png')
+		});
+		expect(originalOutput.canonical.alreadyCanonicalInput).toBe(false);
+	});
+});
 
 describe('LAB scope forensic annotation', () => {
 	test('hairline target points at evidence without painting over the exact anchor pixel', () => {

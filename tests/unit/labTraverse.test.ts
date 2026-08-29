@@ -11,6 +11,7 @@ const CANONICAL = {
 	widthPx: 600,
 	heightPx: 600,
 	stripChrome: { source: 'none', insets: null },
+	alreadyCanonicalInput: false,
 	autoStitch: { sourceCount: 1, hadFallback: false }
 } as const;
 
