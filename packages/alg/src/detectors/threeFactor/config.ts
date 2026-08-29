@@ -123,6 +123,38 @@ export function validateExecution(
 }
 
 /**
+ * ABFeature knob consistency: both sides of an ABFeature must align.
+ * A feature's declared knobs (unit side) and its schema entry (config side)
+ * must match — neither can silently drift. This guard catches both directions:
+ * unit declares a knob the config schema doesn't expose, or vice versa.
+ */
+function validateABFeatureConsistency(features: Readonly<Record<string, ResolvedFeature>>): void {
+	const featureRegistry = new Map(ALL_FEATURES.map((f) => [f.id, f]));
+	for (const [featureId, resolved] of Object.entries(features)) {
+		const registeredFeature = featureRegistry.get(featureId);
+		if (!registeredFeature) {
+			fail(`feature '${featureId}' is resolved but not registered in ALL_FEATURES.`);
+		}
+		// Check that every knob in the resolved state exists in the registered feature.
+		for (const knobName of Object.keys(resolved.knobs)) {
+			if (!(knobName in registeredFeature.knobs)) {
+				fail(
+					`unit '${featureId}' consumes knob '${knobName}' but the registered feature declares no such knob.`
+				);
+			}
+		}
+		// Check that every knob declared in the registered feature is present in resolved.
+		for (const knobName of Object.keys(registeredFeature.knobs)) {
+			if (!(knobName in resolved.knobs)) {
+				fail(
+					`unit '${featureId}' declares knob '${knobName}' but no configured value exists for it.`
+				);
+			}
+		}
+	}
+}
+
+/**
  * Cross-feature invariant: routing.ts's `flood` uses a bucketed priority
  * queue (ring buffer of `ring` buckets, each `quantum` wide). Correctness
  * requires `ring * quantum` to exceed the maximum possible single-step edge
@@ -165,6 +197,7 @@ export function resolveConfig(config: ThreeFactorConfig, defaultExecution: reado
 			knobs: { ...defaultKnobs(feature), ...(deviation?.knobs ?? {}) }
 		};
 	}
+	validateABFeatureConsistency(features);
 	validateRoutingRingQuantum(features);
 	return {
 		name: config.name,
