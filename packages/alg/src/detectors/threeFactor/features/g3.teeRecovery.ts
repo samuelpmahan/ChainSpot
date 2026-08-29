@@ -798,8 +798,12 @@ export interface VisibleTeeBadgeRayClaim {
 	readonly teeId: string;
 	readonly badgeId: string;
 	readonly badgeLabel: string | null;
+	/** Kept as presentation testimony only; no degree threshold gates visible ownership. */
 	readonly axisErrorRad: number;
 	readonly perpendicularErrorPx: number;
+	/** Measured geometry-derived allowance at this badge distance. */
+	readonly perpendicularBoundPx: number;
+	readonly angleBoundRad: number;
 	readonly alongPx: number;
 	readonly direction: -1 | 1;
 }
@@ -823,70 +827,14 @@ function undirectedAxisError(axisRad: number, rayRad: number): number {
 }
 
 /**
- * Cheap G4 testimony for already-visible tees. A tee claims a numbered badge
- * only when exactly one badge lies on its own measured pad axis within the
- * same strict tolerance used by recovery, and that badge has exactly one tee
- * claimant. Any ambiguity stays unclaimed and therefore widens recovery.
+ * Cheap G4 testimony for already-visible tees.
+ *
+ * The badge target is its semantic CENTER, not its generous bbox. A visible
+ * pad supplies a measured centerline plus a built-in uncertainty envelope:
+ * raster center uncertainty + the course-local P100 pad-width spread + the
+ * finite major-span orientation uncertainty projected out to badge distance.
+ * No degree threshold, pathfinding, or assignment evidence participates.
  */
-interface LocalUvPoint { readonly u: number; readonly v: number }
-
-function clipLocalPolygon(
-	polygon: readonly LocalUvPoint[],
-	a: number,
-	b: number,
-	c: number
-): LocalUvPoint[] {
-	if (polygon.length === 0) return [];
-	const output: LocalUvPoint[] = [];
-	const value = (point: LocalUvPoint) => a * point.u + b * point.v + c;
-	for (let index = 0; index < polygon.length; index++) {
-		const current = polygon[index]!;
-		const previous = polygon[(index + polygon.length - 1) % polygon.length]!;
-		const cv = value(current), pv = value(previous);
-		const currentInside = cv >= -1e-9, previousInside = pv >= -1e-9;
-		if (currentInside !== previousInside) {
-			const t = pv / (pv - cv);
-			output.push({
-				u: previous.u + t * (current.u - previous.u),
-				v: previous.v + t * (current.v - previous.v)
-			});
-		}
-		if (currentInside) output.push(current);
-	}
-	return output;
-}
-
-/** Exact convex intersection of a tee's finite-width half-rail with the badge
- * bbox. Returns where that rectangle first enters the half-rail. */
-function badgeHalfRailIntersection(
-	badge: BadgeEvidence,
-	originX: number,
-	originY: number,
-	c: number,
-	s: number,
-	halfLane: number,
-	halfPad: number,
-	direction: -1 | 1
-): { readonly alongPx: number; readonly perpendicularErrorPx: number } | undefined {
-	const [bx, by, bw, bh] = badge.bbox;
-	const corners = [
-		[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]
-	] as const;
-	const local = corners.map(([x, y]) => {
-		const dx = x - originX, dy = y - originY;
-		return { u: dx * c + dy * s, v: -dx * s + dy * c };
-	});
-	let clipped = clipLocalPolygon(local, 0, -1, halfLane); // v <= halfLane
-	clipped = clipLocalPolygon(clipped, 0, 1, halfLane);     // v >= -halfLane
-	clipped = clipLocalPolygon(clipped, direction, 0, -halfPad); // dir*u >= halfPad
-	if (clipped.length === 0) return undefined;
-	const alongPx = Math.min(...clipped.map((point) => direction * point.u));
-	const minV = Math.min(...local.map((point) => point.v));
-	const maxV = Math.max(...local.map((point) => point.v));
-	const perpendicularErrorPx = minV <= 0 && maxV >= 0 ? 0 : Math.min(Math.abs(minV), Math.abs(maxV));
-	return { alongPx, perpendicularErrorPx };
-}
-
 export function resolveVisibleTeeBadgeRays(
 	tees: readonly TeeEvidence[],
 	badges: readonly BadgeEvidence[]
@@ -894,6 +842,14 @@ export function resolveVisibleTeeBadgeRays(
 	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
 	const claims: VisibleTeeBadgeRayClaim[] = [];
 	const ambiguousTeeIds: string[] = [];
+	const measuredWidths = tees
+		.map((tee) => tee.pad?.minorPx)
+		.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+		.sort((a, b) => a - b);
+	const knownPadWidthPx = measuredWidths[Math.floor(measuredWidths.length / 2)] ?? 0;
+	const knownHalfWidthErrorPx = measuredWidths.length === 0
+		? 0
+		: Math.max(...measuredWidths.map((width) => Math.abs(width - knownPadWidthPx))) / 2;
 
 	for (const tee of tees) {
 		const pose = tee.pad?.minAreaPose;
@@ -904,25 +860,37 @@ export function resolveVisibleTeeBadgeRays(
 		const minorPx = pose?.minorPx ?? tee.pad?.minorPx;
 		if (!tee.pad || axisRad === null || !Number.isFinite(axisRad) || !majorPx || !minorPx) continue;
 		const c = Math.cos(axisRad), ss = Math.sin(axisRad);
-		const halfLane = minorPx / 2 + RASTER_TOLERANCE_PX;
 		const halfPad = majorPx / 2;
+		// A full visible pad's centerline is bracketed by its own rails. The only
+		// normal-position allowance is raster quantization plus the measured
+		// course-local width spread; orientation uncertainty is independently
+		// derived from finite observed major span.
+		const centerNormalBoundPx = RASTER_TOLERANCE_PX + knownHalfWidthErrorPx;
+		const angleBoundRad = Math.atan2(RASTER_TOLERANCE_PX, Math.max(RASTER_TOLERANCE_PX, majorPx / 2));
 		const firstIntercepts: VisibleTeeBadgeRayClaim[] = [];
 		for (const direction of [-1, 1] as const) {
 			const hits = numbered.flatMap((badge) => {
-				const hit = badgeHalfRailIntersection(badge, xPx, yPx, c, ss, halfLane, halfPad, direction);
-				if (!hit) return [];
 				const dx = badge.cxPx - xPx, dy = badge.cyPx - yPx;
+				const alongSigned = dx * c + dy * ss;
+				const alongPx = direction * alongSigned;
+				if (alongPx <= halfPad) return [];
+				const perpendicularErrorPx = Math.abs(-dx * ss + dy * c);
+				const orientationBoundPx = alongPx * Math.sin(angleBoundRad);
+				const perpendicularBoundPx = centerNormalBoundPx + orientationBoundPx;
+				if (perpendicularErrorPx > perpendicularBoundPx) return [];
 				return [{
 					claim: {
 						teeId: tee.detId,
 						badgeId: badge.detId,
 						badgeLabel: badge.label,
 						axisErrorRad: undirectedAxisError(axisRad, Math.atan2(dy, dx)),
-						perpendicularErrorPx: hit.perpendicularErrorPx,
-						alongPx: hit.alongPx,
+						perpendicularErrorPx,
+						perpendicularBoundPx,
+						angleBoundRad,
+						alongPx,
 						direction
 					} satisfies VisibleTeeBadgeRayClaim,
-					alongPx: hit.alongPx
+					alongPx
 				}];
 			}).sort((a, b) => a.alongPx - b.alongPx || a.claim.badgeId.localeCompare(b.claim.badgeId));
 			if (hits[0]) firstIntercepts.push(hits[0].claim);
@@ -1442,6 +1410,11 @@ export const teeRecoveryUnit: EngineUnit = {
 		const numberedBadges = badges.filter((badge) => numberLabel(badge) !== undefined);
 		ctx.measure('teeRecovery', 'visibleRayClaims', rayResolution.claims.length);
 		ctx.measure('teeRecovery', 'visibleRayLocks', rayResolution.locks.length);
+		for (const claim of rayResolution.claims) {
+			ctx.measure('teeRecovery', 'visibleRayPerpendicularErrorPx', claim.perpendicularErrorPx);
+			ctx.measure('teeRecovery', 'visibleRayPerpendicularBoundPx', claim.perpendicularBoundPx);
+			ctx.measure('teeRecovery', 'visibleRayAngleBoundDeg', claim.angleBoundRad * 180 / Math.PI);
+		}
 		ctx.measure('teeRecovery', 'visibleRayCoveredBadges', coveredBadgeIds.size);
 		ctx.measure('teeRecovery', 'visibleRayAmbiguousTees', rayResolution.ambiguousTeeIds.length);
 		ctx.measure('teeRecovery', 'visibleRayConflictedBadges', rayResolution.conflictedBadgeIds.length);
@@ -1458,8 +1431,8 @@ export const teeRecoveryUnit: EngineUnit = {
 				visualRole: 'tee-badge-path',
 				ref: `visible-ray-${tee.detId}-${badge.detId}`,
 				reason: locked
-					? `LOCK: visible ${tee.detId} has one first-intercept badge and badge ${badge.label ?? badge.detId} has one visible-tee claimant; perpendicular corridor error ${claim.perpendicularErrorPx.toFixed(3)}px; no pathfinding or assignment testimony read`
-					: `POSSIBLE: visible ${tee.detId} supplies first-intercept testimony for badge ${badge.label ?? badge.detId} (perpendicular corridor error ${claim.perpendicularErrorPx.toFixed(3)}px); multiclaim/conflict is preserved as coverage, not erased into a false recovery target`
+					? `LOCK: visible ${tee.detId} has one first-intercept badge and badge ${badge.label ?? badge.detId} has one visible-tee claimant; projected centerline miss ${claim.perpendicularErrorPx.toFixed(3)}px <= built-in ${claim.perpendicularBoundPx.toFixed(3)}px bound; no pathfinding or assignment testimony read`
+					: `POSSIBLE: visible ${tee.detId} supplies first-intercept testimony for badge ${badge.label ?? badge.detId}; projected centerline miss ${claim.perpendicularErrorPx.toFixed(3)}px <= built-in ${claim.perpendicularBoundPx.toFixed(3)}px bound; multiclaim/conflict is preserved as coverage, not erased into a false recovery target`
 			});
 		}
 		if (coveredBadgeIds.size === numberedBadges.length) {
