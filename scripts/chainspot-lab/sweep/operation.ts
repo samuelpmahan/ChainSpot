@@ -36,7 +36,8 @@ import type { LocatedDetection } from './truthScoring';
 import type { StraightTestTruthAssistance, StraightTestTruthLock } from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
 import { makeTraceRunId, sealTrace } from '@chainspot/alg/detectors/threeFactor/features/traceIdentity';
 import { loadConfig } from './configIo';
-import { canonicalizeInputs } from './inputShim';
+import { canonicalizeInputs, canonicalProvenanceSidecarJson } from './inputShim';
+import { findUnassignedBadges, type NotFoundBadgeRow } from './notFoundRows';
 import { associateDetections, compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
 import { renderArtifact, type ArtifactRenderResult } from './artifactIo';
 import { renderRunEndpointReceipt, type RenderTraceFeaturesOutput } from './featureRenders';
@@ -377,6 +378,16 @@ export async function runSweepOperation(
 	const canonicalPng = new PNG({ width: image.width, height: image.height });
 	canonicalPng.data.set(image.data);
 	writeFileSync(canonicalPngPath, PNG.sync.write(canonicalPng));
+	// Provenance sidecar (BUG: Scope re-crops canonical rasters): a LATER
+	// single-file load of this exact PNG (Scope/Search/Traverse all funnel
+	// through canonicalizeInputs()) hashes its freshly-decoded pixels the same
+	// way and, on a match, skips StripChrome instead of re-cropping an
+	// already-canonical raster. report.imageId is this composite's exact
+	// content-addressed id (g0/composite.ts's compositeIdBytes definition).
+	writeFileSync(
+		`${canonicalPngPath}.json`,
+		canonicalProvenanceSidecarJson(report.imageId, image.width, image.height)
+	);
 	const canonicalWriteMs = performance.now() - canonicalWriteStartedAtMs;
 
 	const board = createExecBoard();
