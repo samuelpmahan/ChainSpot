@@ -58,34 +58,29 @@ export function extractRailCandidates(
     return [];
   }
 
-  // Trace boundary as an ordered chain and detect corners to segment into runs.
-  const chain = traceOrderedBoundaryChain(boundaryPixels);
-  if (chain.length < MIN_RAIL_PIXELS) {
-    return [];
-  }
-
-  // Find corner indices by detecting sharp direction changes in the chain.
-  const cornerIndices = detectCornerIndices(chain);
-
-  // Segment chain into runs at corners.
+  // Trace EVERY boundary loop (outer edge, inner ring, bite fragments) and
+  // segment each at its corners; a hollow pad's long edge lives on one loop
+  // and must not be lost because another loop was traced first.
   const runs: Px[][] = [];
-  let start = 0;
-
-  for (const cornerIdx of cornerIndices) {
-    if (cornerIdx - start >= MIN_RAIL_PIXELS) {
-      runs.push(chain.slice(start, cornerIdx) as Px[]);
+  for (const chain of traceOrderedBoundaryChains(boundaryPixels)) {
+    if (chain.length < MIN_RAIL_PIXELS) continue;
+    const cornerIndices = detectCornerIndices(chain);
+    let start = 0;
+    let pushed = false;
+    for (const cornerIdx of cornerIndices) {
+      if (cornerIdx - start >= MIN_RAIL_PIXELS) {
+        runs.push(chain.slice(start, cornerIdx) as Px[]);
+        pushed = true;
+      }
+      start = cornerIdx;
     }
-    start = cornerIdx;
-  }
-
-  // Add final segment from last corner to chain end.
-  if (chain.length - start >= MIN_RAIL_PIXELS) {
-    runs.push(chain.slice(start) as Px[]);
-  }
-
-  // If no runs created, try whole chain.
-  if (runs.length === 0 && chain.length >= MIN_RAIL_PIXELS) {
-    runs.push(chain as Px[]);
+    if (chain.length - start >= MIN_RAIL_PIXELS) {
+      runs.push(chain.slice(start) as Px[]);
+      pushed = true;
+    }
+    if (!pushed && chain.length >= MIN_RAIL_PIXELS) {
+      runs.push(chain as Px[]);
+    }
   }
 
   // Fit line to each run to create rail candidates.
@@ -147,8 +142,23 @@ function extractBoundaryPixels(
 }
 
 
-/** Trace boundary pixels into an ordered chain via 8-connectivity. */
-function traceOrderedBoundaryChain(boundaryPixels: readonly Px[]): Px[] {
+/** Trace boundary pixels into ordered chains via 8-connectivity. A hollow
+ *  pad's boundary is several separate loops (outer edge, inner ring edge,
+ *  occluder bites), so tracing must restart after each dead end instead of
+ *  discarding everything it has not reached yet. */
+function traceOrderedBoundaryChains(boundaryPixels: readonly Px[]): Px[][] {
+  const chains: Px[][] = [];
+  let remaining = boundaryPixels;
+  while (remaining.length > 0) {
+    const chain = traceOneChain(remaining);
+    chains.push(chain);
+    const eaten = new Set(chain.map(([x, y]) => `${x},${y}`));
+    remaining = remaining.filter(([x, y]) => !eaten.has(`${x},${y}`));
+  }
+  return chains;
+}
+
+function traceOneChain(boundaryPixels: readonly Px[]): Px[] {
   if (boundaryPixels.length === 0) return [];
 
   // Sort pixels for determinism.
@@ -197,12 +207,17 @@ function detectCornerIndices(chain: readonly Px[]): number[] {
 
   if (chain.length < 3) return corners;
 
-  for (let i = 1; i < chain.length - 1; i++) {
-    const prev = chain[i - 1];
+  // Direction is judged over a 3-pixel window, not pixel-to-pixel, because a
+  // raster stair-step diagonal alternates unit steps 90 degrees apart while
+  // the painted edge itself runs straight; per-pixel vectors called every
+  // stair a corner and shredded tilted edges into crumbs.
+  const W = 3;
+  for (let i = W; i < chain.length - W; i++) {
+    const prev = chain[i - W];
     const curr = chain[i];
-    const next = chain[i + 1];
+    const next = chain[i + W];
 
-    // Compute direction vectors.
+    // Compute windowed direction vectors.
     const dir1 = [curr[0] - prev[0], curr[1] - prev[1]];
     const dir2 = [next[0] - curr[0], next[1] - curr[1]];
 
@@ -322,9 +337,13 @@ function fitRailToRun(
   const occludedFractionPx = run.length > 0 ? occludedCount / run.length : 0;
 
   // Quality score: product of net length (accounting for interruption) and straightness.
-  // Higher is better for longer, straighter, less-interrupted rails.
+  // Higher is better for longer, straighter, less-interrupted rails -- and a
+  // rail is only as good as its uninterrupted, UNOCCLUDED self: an edge with
+  // something standing on part of it (a broken-ring side) must lose to a
+  // shorter clean edge, because the clean edge is the one whose direction
+  // the paint actually vouches for.
   const netLengthPx = Math.max(1, lengthPx - interruptionPx);
-  const qualityScore = netLengthPx * straightnessScore;
+  const qualityScore = netLengthPx * straightnessScore * (1 - occludedFractionPx);
 
   // Sort run points for deterministic output.
   const sortedRun = run.slice() as Px[];
