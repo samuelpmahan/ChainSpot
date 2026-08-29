@@ -1,0 +1,43 @@
+name: KERCHOOOOO support-bound profile
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-supportbound-profile
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-supportbound-profile
+          path: ChainSpot
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install patch rebuild
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          ./lab setup
+          python3 .github/kerchooo_supportbound_profile.py
+          npm run build --workspace=@chainspot/alg
+
+      - name: Measure NorthPark
+        working-directory: ChainSpot
+        run: |
+          set -o pipefail
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark 2>&1 | tee /tmp/bound.log
+          echo '=== KERCHOOOOO SUPPORT BOUND ==='
+          grep '^KERCH_BOUND' /tmp/bound.log
