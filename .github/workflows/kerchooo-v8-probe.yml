@@ -1,0 +1,70 @@
+name: KERCHOOOOO v8 probe
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-v8-probe
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-v8-probe
+          path: ChainSpot
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and V5 baseline
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          ./lab setup
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/v5.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' >/tmp/v5.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' >/tmp/v5.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' >/tmp/v5.theta.sha
+          cp "$root/run.receipt.txt" /tmp/v5.receipt.txt
+          echo "V5_WALL=$(cat /tmp/v5.wall)s"
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' /tmp/v5.receipt.txt || true
+
+      - name: Apply V8 rebuild and test
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          python3 .github/kerchooo_v8_patch.py
+          npm run build --workspace=@chainspot/alg
+          npm run check
+
+      - name: V8 NorthPark exact support parity
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/v8.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' >/tmp/v8.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' >/tmp/v8.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' >/tmp/v8.theta.sha
+          diff -u /tmp/v5.visual.sha /tmp/v8.visual.sha
+          diff -u /tmp/v5.support.sha /tmp/v8.support.sha
+          diff -u /tmp/v5.theta.sha /tmp/v8.theta.sha
+          python3 - <<'PY'
+          base=float(open('/tmp/v5.wall').read())
+          opt=float(open('/tmp/v8.wall').read())
+          print(f'KERCHOOOOO V8 probe: {base:.2f}s -> {opt:.2f}s = {base/opt:.2f}x, {(1-opt/base)*100:.1f}% faster than V5')
+          PY
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' "$root/run.receipt.txt" || true
