@@ -552,6 +552,39 @@ function holeAssignmentLines(
 	return lines;
 }
 
+/** BUG (2026-08-29 audit): the TEE→BADGE LOCK table above and HOLE
+ * ASSIGNMENTS below share the same three headers (hole|badgeId|teeId) and
+ * can name different tees for the same badge, with nothing telling a reader
+ * which one shipped. teeBadgeLock is a default-OFF ALTERNATIVE matcher --
+ * its result is never written back to the assignment board -- so this fixes
+ * the RECEIPT, not the mechanism: every lock row gets an explicit agreement
+ * marker against the one table that IS shipped (HOLE ASSIGNMENTS). */
+function teeBadgeLockReconciliationLines(
+	receipt: TeeBadgeLockReceipt | undefined,
+	assignmentRows: readonly HoleLabeledAssignment[] | undefined
+): string[] {
+	if (!receipt || receipt.rows.length === 0) return [];
+	const shippedByBadge = new Map((assignmentRows ?? []).map((row) => [row.badgeId, row]));
+	const lines = [
+		'TEE→BADGE LOCK RECONCILIATION',
+		'ALTERNATIVE HYPOTHESIS ONLY: teeBadgeLock is a default-OFF matcher whose result is never written back to the assignment board; HOLE ASSIGNMENTS below is the only shipped assignment.',
+		'hole | badgeId | teeId (teeBadgeLock, alternative) | teeId (assignment, shipped) | agreement'
+	];
+	for (const row of receipt.rows) {
+		const holeLabel = row.hole === 'UNKNOWN' ? 'UNKNOWN' : `H${row.hole}`;
+		const shipped = shippedByBadge.get(String(row.badgeId));
+		const agreement = !shipped
+			? 'DIFFERS: assignment has no shipped row for this badge'
+			: shipped.teeId === row.teeId
+				? 'agrees'
+				: `DIFFERS: assignment says ${shipped.teeId}`;
+		lines.push(
+			`${holeLabel} | ${row.badgeId} | ${row.teeId} | ${shipped ? shipped.teeId : '(none)'} | ${agreement}`
+		);
+	}
+	return lines;
+}
+
 function endpointGateSpan(run: RunTrace): string {
 	if (run.units.some((unit) => unit.id === 'straightTest')) return 'G0-G5';
 	if (run.units.some((unit) => unit.gate === 'G4')) return 'G0-G4';
@@ -942,7 +975,14 @@ export function renderRunEndpointReceipt(
 					? 'UNKNOWN (assignment rows exist but no endpoint positions were supplied to the renderer)'
 					: `${holeLabelDrawables.length} (source: final post-G6 hole-labeled assignment rows; one orange label per assigned tee and per assigned basket tip)`
 		}`,
-		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
+		...(teeBadgeLockReceipt
+			? [
+					'',
+					teeBadgeLockReceipt.cliText,
+					'',
+					...teeBadgeLockReconciliationLines(teeBadgeLockReceipt, input.assignmentRows)
+				]
+			: []),
 		...(badgeGlyphTemplateReceipt ? ['', badgeGlyphTemplateReceipt.cliText] : []),
 		'',
 		...holeAssignmentLines(input.assignmentRows, input.notFoundRows),
