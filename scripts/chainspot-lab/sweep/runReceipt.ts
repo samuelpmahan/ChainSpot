@@ -12,6 +12,7 @@ import {
 	GATE_TITLES
 } from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { G0Report } from './inputShim';
+import type { NotFoundBadgeRow } from './notFoundRows';
 import {
 	buildTruthFailureRows,
 	type TruthFailureRow,
@@ -91,6 +92,9 @@ export interface RunReceiptResults {
  * and zfit.finalAssignment.table artifacts use, so the receipt and the
  * artifact can never say different holes for the same badge. */
 export type RunReceiptAssignmentRow = HoleLabeledAssignment;
+
+/** One badge with no shipped assignment row: see notFoundRows.ts. */
+export type RunReceiptNotFoundRow = NotFoundBadgeRow;
 
 export interface RunReceiptSliceOperation {
 	readonly id: string;
@@ -187,6 +191,10 @@ export interface RunReceipt {
 	 * cutoff before G6); a scheduled selection with zero rows is a real empty
 	 * array, never omitted. */
 	readonly assignments: readonly RunReceiptAssignmentRow[];
+	/** Every G1-read badge absent from `assignments` above (empty array when
+	 * every badge has a shipped row, or when assignment.selection was never
+	 * scheduled -- same "empty, not omitted" convention as `assignments`). */
+	readonly notFoundBadges: readonly RunReceiptNotFoundRow[];
 	readonly slice?: RunReceiptSlice;
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
@@ -311,6 +319,7 @@ export interface BuildRunReceiptInput {
 	/** See RunReceipt.assignments. Empty (not omitted) when nothing was
 	 * scheduled to produce it. */
 	readonly assignments: readonly RunReceiptAssignmentRow[];
+	readonly notFoundBadges: readonly RunReceiptNotFoundRow[];
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
 	/** Loud problems the visual-render composers found while drawing. Appended
@@ -565,6 +574,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		units,
 		results,
 		assignments: input.assignments,
+		notFoundBadges: input.notFoundBadges,
 		resultsProvenance: input.resultsProvenance,
 		...(slice ? { slice } : {}),
 		visualRenders: input.visualRenders,
