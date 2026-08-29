@@ -356,6 +356,81 @@ describe('canonical tee VisualRender', () => {
 		}
 	});
 
+	test('BUG2/BUG3: NOT FOUND names the missing badge and TEE→BADGE LOCK reconciles against the shipped assignment', () => {
+		const root = mkdtempSync(join(tmpdir(), 'endpoint-visual-reconcile-'));
+		try {
+			const basePath = join(root, 'base.png');
+			const base = new PNG({ width: 64, height: 64 });
+			base.data.fill(0);
+			writeFileSync(basePath, PNG.sync.write(base));
+
+			// The fixture's only badge (badge-1) never got a shipped row --
+			// this is the exact "18 badges, 17 assignments" shape, minimized.
+			const output = renderRunEndpointReceipt({
+				run: unifiedFixtureTrace(),
+				outDir: join(root, 'renders'),
+				canvas: { widthPx: 64, heightPx: 64, source: 'test canvas' },
+				bases: [{ id: 'original', pngPath: basePath, source: 'test base' }],
+				assignmentRows: [],
+				notFoundRows: [
+					{ hole: '1', holeConfidence: 0.9, badgeId: 'badge-1', breadcrumb: 'no rejected-tee evidence for this badge is carried in this trace' }
+				]
+			});
+			const [result] = output.results;
+			expect(result.receiptText).toContain('NOT FOUND (badges with no shipped assignment)');
+			expect(result.receiptText).toContain('H1 | badge-1 | no tee assigned -- no rejected-tee evidence');
+			// teeBadgeLock's own lock for badge-1 (tee-1) has nothing to agree
+			// with -- the reconciliation must say so plainly, never silently.
+			expect(result.receiptText).toContain('TEE→BADGE LOCK RECONCILIATION');
+			expect(result.receiptText).toContain('ALTERNATIVE HYPOTHESIS ONLY');
+			expect(result.receiptText).toContain('H1 | badge-1 | tee-1 | (none) | DIFFERS: assignment has no shipped row for this badge');
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test('BUG3: an agreeing shipped assignment is marked "agrees"; a differing one names the shipped tee', () => {
+		const root = mkdtempSync(join(tmpdir(), 'endpoint-visual-agree-'));
+		try {
+			const basePath = join(root, 'base.png');
+			const base = new PNG({ width: 64, height: 64 });
+			base.data.fill(0);
+			writeFileSync(basePath, PNG.sync.write(base));
+			const shippedRow = {
+				badgeId: 'badge-1',
+				teeId: 'tee-1',
+				basketId: 'basket-1',
+				score: 1,
+				rank: 1,
+				ownership: 'selected' as const,
+				alternatives: [],
+				hole: '1',
+				holeConfidence: 0.9
+			};
+			const agreeing = renderRunEndpointReceipt({
+				run: unifiedFixtureTrace(),
+				outDir: join(root, 'renders', 'agree'),
+				canvas: { widthPx: 64, heightPx: 64, source: 'test canvas' },
+				bases: [{ id: 'original', pngPath: basePath, source: 'test base' }],
+				assignmentRows: [shippedRow]
+			});
+			expect(agreeing.results[0].receiptText).toContain('H1 | badge-1 | tee-1 | tee-1 | agrees');
+
+			const differing = renderRunEndpointReceipt({
+				run: unifiedFixtureTrace(),
+				outDir: join(root, 'renders', 'differ'),
+				canvas: { widthPx: 64, heightPx: 64, source: 'test canvas' },
+				bases: [{ id: 'original', pngPath: basePath, source: 'test base' }],
+				assignmentRows: [{ ...shippedRow, teeId: 'tee-recovered-0' }]
+			});
+			expect(differing.results[0].receiptText).toContain(
+				'H1 | badge-1 | tee-1 | tee-recovered-0 | DIFFERS: assignment says tee-recovered-0'
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test('a run without recovery or phantom units says NOT-SCHEDULED, never 0', () => {
 		const root = mkdtempSync(join(tmpdir(), 'endpoint-visual-noscheduled-'));
 		try {
