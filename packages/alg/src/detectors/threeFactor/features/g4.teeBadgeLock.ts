@@ -414,25 +414,27 @@ export const teeBadgeLockUnit: EngineUnit = {
 	}
 };
 
-/** Semantic-set operation.  It reads exactly the three declared dotted slots,
- * including while OFF, and writes only `teeBadgeLock`. */
+/** Semantic-set operation.  It reads measurement and assignment,
+ * including while OFF for gateway receipt custody tracking, and writes only `teeBadgeLock`.
+ * 2026-08-29: gate-reorg reads 'assignment' (seeded in g4-set) not dotted slots. */
 export const teeBadgeLockOperation: ABFeatureOperation = {
 	spec: {
 		id: 'teeBadgeLock',
 		kind: 'decide',
 		gate: 'G4',
 		unit: 'teeBadgeLock',
-		consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
+		consumes: ['measurement', 'assignment'],
 		produces: ['teeBadgeLock'],
 		features: ['teeBadgeLock', 'scoring'],
 		note: 'maximum-weight independent tee↔badge matching over exact reversed routed testimony; no basket evidence is read'
 	},
 	run(board, ctx) {
 		const measurement = board.get<TeeBadgeLockMeasurement>('measurement');
-		const tees = board.get<readonly TeeEvidence[]>('assignment.tees');
-		const rawPairs = board.get<readonly RawPairEvidence[]>('assignment.rawPairs');
-		// Reads above are intentionally unconditional: the gateway receipt can
-		// prove OFF custody rather than hiding a missing dependency.
+		const assignment = board.get<ThreeFactorAssignment>('assignment');
+		const tees = assignment.tees;
+		const rawPairs = assignment.scoredPairs.map((pair) => pair.raw);
+		// Reads above are unconditional: the gateway receipt can prove OFF
+		// custody rather than hiding a missing dependency.
 		executeTeeBadgeLock(board, ctx, measurement, tees, rawPairs);
 	},
 	extractArtifacts: measurementTable

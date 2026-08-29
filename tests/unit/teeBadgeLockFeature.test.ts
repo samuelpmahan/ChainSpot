@@ -18,7 +18,7 @@ const set: ABFeatureSet = {
 	id: 'tee-badge-lock-public-contract',
 	features: [teeBadgeLockFeature],
 	imports: ['scoring'],
-	seededSlots: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
+	seededSlots: ['measurement', 'assignment'],
 	operations: [{ operation: teeBadgeLockOperation }]
 };
 
@@ -42,7 +42,7 @@ describe('teeBadgeLock ABFeature production contract', () => {
 		const operation = compiled.plan.ops.find((entry) => entry.id === 'teeBadgeLock');
 		expect(operation).toMatchObject({
 			gate: 'G4',
-			consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
+			consumes: ['measurement', 'assignment'],
 			produces: ['teeBadgeLock'],
 			features: ['teeBadgeLock', 'scoring']
 		});
@@ -58,8 +58,7 @@ describe('teeBadgeLock ABFeature production contract', () => {
 			},
 			viewport: { topPx: 0 }
 		});
-		board.set('assignment.tees', []);
-		board.set('assignment.rawPairs', []);
+		board.set('assignment', { tees: [], scoredPairs: [] });
 		const manifest = await executeABFeatureSet(compiled, board, nullFeatureContext, {
 			runId: 'tee-badge-lock-gateway',
 			invocation: 'teeBadgeLockFeature.test'
@@ -67,18 +66,17 @@ describe('teeBadgeLock ABFeature production contract', () => {
 		const receipt = manifest.operations.find((entry) => entry.opId === 'teeBadgeLock');
 		expect(receipt?.declaredConsumes).toEqual([
 			'measurement',
-			'assignment.tees',
-			'assignment.rawPairs'
+			'assignment'
 		]);
 		expect(receipt?.declaredProduces).toEqual(['teeBadgeLock']);
 		expect(receipt?.actualConsumes).toEqual(
-			expect.arrayContaining(['measurement', 'assignment.tees', 'assignment.rawPairs'])
+			expect.arrayContaining(['measurement', 'assignment'])
 		);
 		expect(receipt?.actualProduces).toEqual(expect.arrayContaining(['teeBadgeLock']));
 		expect(receipt?.durationMs).toBeGreaterThanOrEqual(0);
 		expect(receipt?.artifacts.some((artifact) => artifact.kind === 'measurementTable')).toBe(true);
 		expect(board.has('teeBadgeLock')).toBe(true);
-		expect(board.has('assignment')).toBe(false);
+		expect(board.has('assignment')).toBe(true);
 		expect(manifest).toMatchObject({ runId: 'tee-badge-lock-gateway' });
 		expect(JSON.stringify(manifest)).toMatch(/checkpoint|teeBadgeLock/i);
 	});
@@ -96,8 +94,7 @@ describe('teeBadgeLock ABFeature production contract', () => {
 			},
 			viewport: { topPx: 0 }
 		});
-		board.set('assignment.tees', [{ detId: 'tee-forbidden-while-off' }]);
-		board.set('assignment.rawPairs', [{ badgeId: 'forbidden-while-off' }]);
+		board.set('assignment', { tees: [{ detId: 'tee-forbidden-while-off' }], scoredPairs: [{ raw: { badgeId: 'forbidden-while-off' } }] });
 
 		const manifest = await executeABFeatureSet(compiled, board, nullFeatureContext, {
 			runId: 'tee-badge-lock-off',
@@ -106,8 +103,7 @@ describe('teeBadgeLock ABFeature production contract', () => {
 		const receipt = manifest.operations.find((entry) => entry.opId === 'teeBadgeLock');
 		expect(receipt?.actualConsumes).toEqual([
 			'measurement',
-			'assignment.tees',
-			'assignment.rawPairs'
+			'assignment'
 		]);
 		expect(receipt?.actualProduces).toEqual(['teeBadgeLock']);
 		expect(board.get('teeBadgeLock')).toMatchObject({

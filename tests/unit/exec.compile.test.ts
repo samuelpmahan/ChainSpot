@@ -66,8 +66,13 @@ const straightTestOnResolved = resolveConfig(
 // (merge 8fdf6cf) while this file was being updated for the teeRecovery
 // reorder above -- unrelated to this task's own change, but it moves the
 // operation universe's fingerprint content again (0ceb1ed0... -> f3e705aa...).
+// 2026-08-29: teeBadgeLockOperation.consumes changed from dotted slots
+// ['measurement', 'assignment.tees', 'assignment.rawPairs'] to full object
+// ['measurement', 'assignment'] to work in g4-set where only full assignment is
+// seeded (fix-intake-engine: spec-exact one-issue fix for g4-set compilation).
+// Fingerprint moved: f3e705aa... -> f2739303...
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'f3e705aa36d9ba7c8f25a7e4e0e36b7dd3a99f0b77be611c9b5faf096b039659';
+	'f2739303d4ca9d6fe6fb444cb8f39272b0955171144d5a9e7d0f4113ab4944f9';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
