@@ -1,4 +1,4 @@
-name: G4 BBox + Two Rail Run
+name: G4 Projected Visible Bound Run
 
 on:
   push:
@@ -24,19 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Patch
+      - name: Patch projected visible bound
         working-directory: ChainSpot
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('scripts/experiments/g4-bbox-two-rail-patch.py')
-          s=p.read_text()
-          old="if n != 1:\n        raise SystemExit(f'{label}: expected 1 anchor, got {n}')"
-          new="if n < 1:\n        raise SystemExit(f'{label}: expected at least 1 anchor, got {n}')"
-          if old not in s: raise SystemExit('patch helper drifted')
-          p.write_text(s.replace(old,new,1))
-          PY
-          python scripts/experiments/g4-bbox-two-rail-patch.py
+        run: python scripts/experiments/g4-visible-bound-patch.py
       - name: Build and tee-recovery geometry tests
         working-directory: ChainSpot
         run: |
@@ -54,7 +44,7 @@ jobs:
           git config user.name 'ChainSpot G4 Experiment'
           git config user.email 'actions@users.noreply.github.com'
           git add packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts
-          git commit -m '[g4-two-rail] Intersect badge boxes and bracket tee rails'
+          git commit -m '[g4-visible-bound] Project measured tee error to badge centers'
           echo "EXPERIMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: G4-only Dev6
         working-directory: ChainSpot
@@ -72,7 +62,7 @@ jobs:
           const fs=require('fs');
           const d=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const u=(d.units||[]).find(x=>x.id==='teeRecovery')||{};
-          const names=new Set(['visibleRayClaims','visibleRayLocks','visibleRayCoveredBadges','visibleRayAmbiguousTees','visibleRayConflictedBadges','missingNumberedTees','accepted','badgePerpendicularErrorPx','badgePerpendicularBoundPx','badgePerpendicularMissPx','railAngleBoundDeg','railSeparationErrorPx','railSeparationBoundPx']);
+          const names=new Set(['visibleRayClaims','visibleRayLocks','visibleRayCoveredBadges','visibleRayAmbiguousTees','visibleRayConflictedBadges','missingNumberedTees','visibleRayPerpendicularErrorPx','visibleRayPerpendicularBoundPx','visibleRayAngleBoundDeg','accepted','badgePerpendicularErrorPx','badgePerpendicularBoundPx','badgePerpendicularMissPx','railAngleBoundDeg','railSeparationErrorPx','railSeparationBoundPx']);
           console.log(JSON.stringify({results:d.results,recovery:(u.measurements||[]).filter(m=>names.has(m.name))},null,2));
           NODE
           done
