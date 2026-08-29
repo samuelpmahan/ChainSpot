@@ -1199,12 +1199,15 @@ export function buildTeeRecoveryCandidates(
 	tees: readonly TeeEvidence[],
 	viewportTopPx = 0,
 	search: TeeRecoverySearchContext = {}
-): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[] } {
+): { readonly candidates: readonly TeeRecoveryCandidate[]; readonly claimCandidates: readonly TeeRecoveryCandidate[]; readonly searchOutcomes: readonly TargetSearchOutcome[]; readonly chromeSubtractionNotes: readonly ChromeSubtractionNote[] } {
+	/** Receipt/debug winners only. Never used as the semantic claim universe. */
 	const candidates: TeeRecoveryCandidate[] = [];
+	/** Every shard→badge hypothesis that independently satisfies G4 local geometry. */
+	const claimCandidates: TeeRecoveryCandidate[] = [];
 	const searchOutcomes: TargetSearchOutcome[] = [];
 	const chromeSubtractionNotes: ChromeSubtractionNote[] = [];
 	const pads = tees.map((tee) => tee.pad).filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
-	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
+	if (pads.length === 0) return { candidates, claimCandidates, searchOutcomes, chromeSubtractionNotes };
 	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
 	const minorWidths = pads.map((pad) => pad.minorPx);
@@ -1218,7 +1221,7 @@ export function buildTeeRecoveryCandidates(
 	const thickness = supportThickness(tees);
 	const coveredBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
 	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !coveredBadgeIds.has(badge.detId));
-	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
+	if (targets.length === 0) return { candidates, claimCandidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
 	// target, so they are computed exactly once for every missing badge.
@@ -1320,6 +1323,16 @@ export function buildTeeRecoveryCandidates(
 		}
 		// Evaluate the predicate before choosing. A large basket/badge component
 		// must never hide a smaller component whose every visible pixel fits.
+		for (const candidate of targetCandidates) {
+			const unexplained = unexplainedPixels(candidate).length;
+			const axisError = badgeAxisError(candidate) ?? Infinity;
+			const railMiss = isRailProjectionFit(candidate.fit) ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
+			const locallyValid = candidate.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS &&
+				unexplained === 0 &&
+				(railMiss !== undefined ? railMiss === 0 : axisError < activeAxisLimitRad);
+			if (locallyValid) claimCandidates.push(candidate);
+		}
+		// Presentation ordering only. It must never decide which claim exists.
 		targetCandidates.sort((a, b) => {
 			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
 			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
@@ -1352,7 +1365,7 @@ export function buildTeeRecoveryCandidates(
 	// numbered badge. G4 has no authority to turn a smaller residual into object
 	// identity. Preserve every claimant and DEFER them all; later evidence may
 	// resolve the relation without erasing what the shard actually testified.
-	const accepted = candidates.filter((candidate) => {
+	const accepted = claimCandidates.filter((candidate) => {
 		const support = candidate.fragmentPixels.length;
 		const railMiss = isRailProjectionFit(candidate.fit) ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
 		return support >= MIN_SHARD_SUPPORT_PIXELS &&
@@ -1372,12 +1385,12 @@ export function buildTeeRecoveryCandidates(
 				.filter((other) => other !== candidate)
 				.map((other) => other.badgeLabel ?? other.badgeId ?? 'UNKNOWN')
 				.sort();
-			const index = candidates.indexOf(candidate);
-			if (index >= 0) candidates[index] = { ...candidate, ambiguityWithBadgeLabels: others };
+			const index = claimCandidates.indexOf(candidate);
+			if (index >= 0) claimCandidates[index] = { ...candidate, ambiguityWithBadgeLabels: others };
 		}
 	}
 
-	return { candidates, searchOutcomes, chromeSubtractionNotes };
+	return { candidates, claimCandidates, searchOutcomes, chromeSubtractionNotes };
 }
 
 
@@ -1385,8 +1398,9 @@ interface G4ClaimRow {
 	readonly id: string;
 	readonly kind: 'visible' | 'recovery';
 	readonly badgeIds: readonly string[];
-	/** Candidate index per recovery edge; visible edges have no candidate. */
-	readonly candidateByBadge?: ReadonlyMap<string, number>;
+	/** Every pose witness for a physical recovery-object→badge edge. Identity
+	 * consensus never chooses among these. */
+	readonly candidateIndexesByBadge?: ReadonlyMap<string, readonly number[]>;
 }
 
 interface G4MatchingSolution {
@@ -1397,8 +1411,12 @@ interface G4MatchingSolution {
 }
 
 interface G4ClaimConsensus {
+	/** One localization witness selected AFTER each identity edge is proven forced. */
 	readonly forcedCandidateIndexes: ReadonlySet<number>;
+	/** Locally valid identity edges that remain genuinely ambiguous. */
 	readonly deferredCandidateIndexes: ReadonlySet<number>;
+	/** Alternative pose testimony for an already-forced identity edge. */
+	readonly alternateWitnessCandidateIndexes: ReadonlySet<number>;
 	readonly base: G4MatchingSolution;
 	readonly recoveryRows: number;
 	readonly forcedEdges: number;
@@ -1417,6 +1435,26 @@ function candidateLocallySupportsBadge(candidate: TeeRecoveryCandidate): boolean
 	if (unexplainedPixels(candidate).length !== 0) return false;
 	if (isRailProjectionFit(candidate.fit)) return (candidate.fit.badgePerpendicularMissPx ?? Infinity) === 0;
 	return (badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad;
+}
+
+
+function localizationWitnessRank(candidate: TeeRecoveryCandidate): number {
+	if (candidate.fit.fitKind === 'rail-pair-projection') return 0;
+	if (candidate.localizationSource === 'full-span-component-pca') return 1;
+	if (candidate.fit.fitKind === 'rail-projection') return 2;
+	return 3;
+}
+
+function selectForcedLocalizationWitness(
+	indexes: readonly number[],
+	candidates: readonly TeeRecoveryCandidate[]
+): number | undefined {
+	return [...indexes].sort((a, b) => {
+		const ca = candidates[a]!, cb = candidates[b]!;
+		return localizationWitnessRank(ca) - localizationWitnessRank(cb) ||
+			cb.fragmentPixels.length - ca.fragmentPixels.length ||
+			ca.id.localeCompare(cb.id);
+	})[0];
 }
 
 /**
@@ -1539,29 +1577,41 @@ function resolveG4ClaimConsensus(
 		const root = find(i); const bucket = members.get(root); if (bucket) bucket.push(localIndexes[i]!); else members.set(root, [localIndexes[i]!]);
 	}
 	const recoveryRows: G4ClaimRow[] = [...members.entries()].map(([root, bucket]) => {
-		const candidateByBadge = new Map<string, number>();
-		for (const { candidate, index } of bucket) if (candidate.badgeId) candidateByBadge.set(candidate.badgeId, index);
+		const candidateIndexesByBadge = new Map<string, number[]>();
+		for (const { candidate, index } of bucket) {
+			if (!candidate.badgeId) continue;
+			const witnesses = candidateIndexesByBadge.get(candidate.badgeId);
+			if (witnesses) witnesses.push(index); else candidateIndexesByBadge.set(candidate.badgeId, [index]);
+		}
 		return {
 			id: `recovery:${[...new Set(bucket.flatMap(({ candidate }) => physicalComponentLabels(candidate)))].sort().join('+') || root}`,
 			kind: 'recovery',
-			badgeIds: [...candidateByBadge.keys()].sort(),
-			candidateByBadge
+			badgeIds: [...candidateIndexesByBadge.keys()].sort(),
+			candidateIndexesByBadge
 		};
 	});
 	const rows = [...visibleRows, ...recoveryRows];
 	const base = solveG4ClaimMatching(rows, badgeIds);
 	const forcedCandidateIndexes = new Set<number>();
+	const forcedRelationCandidateIndexes = new Set<number>();
+	const alternateWitnessCandidateIndexes = new Set<number>();
 	const allLocalCandidateIndexes = new Set(localIndexes.map(({ index }) => index));
+	let forcedEdges = 0;
 	for (const row of recoveryRows) {
 		for (const badgeId of row.badgeIds) {
-			const candidateIndex = row.candidateByBadge?.get(badgeId);
-			if (candidateIndex === undefined) continue;
+			const witnessIndexes = row.candidateIndexesByBadge?.get(badgeId) ?? [];
+			if (witnessIndexes.length === 0) continue;
 			const without = solveG4ClaimMatching(rows, badgeIds, `${row.id}|${badgeId}`);
-			if (without.score < base.score) forcedCandidateIndexes.add(candidateIndex);
+			if (without.score >= base.score) continue;
+			forcedEdges++;
+			for (const index of witnessIndexes) forcedRelationCandidateIndexes.add(index);
+			const selected = selectForcedLocalizationWitness(witnessIndexes, candidates);
+			if (selected !== undefined) forcedCandidateIndexes.add(selected);
+			for (const index of witnessIndexes) if (index !== selected) alternateWitnessCandidateIndexes.add(index);
 		}
 	}
-	const deferredCandidateIndexes = new Set([...allLocalCandidateIndexes].filter((index) => !forcedCandidateIndexes.has(index)));
-	return { forcedCandidateIndexes, deferredCandidateIndexes, base, recoveryRows: recoveryRows.length, forcedEdges: forcedCandidateIndexes.size };
+	const deferredCandidateIndexes = new Set([...allLocalCandidateIndexes].filter((index) => !forcedRelationCandidateIndexes.has(index)));
+	return { forcedCandidateIndexes, deferredCandidateIndexes, alternateWitnessCandidateIndexes, base, recoveryRows: recoveryRows.length, forcedEdges };
 }
 
 export const teeRecoveryUnit: EngineUnit = {
@@ -1691,21 +1741,24 @@ export const teeRecoveryUnit: EngineUnit = {
 			return;
 		}
 		const geometryFittingStop = ctx.span('teeRecovery.geometryFitting');
-		const allResults = built.candidates.map(graphCandidateResult);
+		const allResults = built.claimCandidates.map(graphCandidateResult);
 		geometryFittingStop();
-		ctx.measure('teeRecovery', 'seedFragments', new Set(built.candidates.map((candidate) => candidate.id.match(/^tee-shard-[^-]+/)?.[0] ?? candidate.id)).size);
+		ctx.measure('teeRecovery', 'localClaimEdges', built.claimCandidates.length);
+		ctx.measure('teeRecovery', 'presentationWinners', built.candidates.length);
+		ctx.measure('teeRecovery', 'seedFragments', new Set(built.claimCandidates.map((candidate) => candidate.id.match(/^tee-shard-[^-]+/)?.[0] ?? candidate.id)).size);
 		ctx.measure('teeRecovery', 'componentHypotheses', allResults.length);
-		for (const candidate of built.candidates) ctx.measure('teeRecovery', 'bfsComponentsVisited', candidate.bfsComponentsVisited ?? 0);
+		for (const candidate of built.claimCandidates) ctx.measure('teeRecovery', 'bfsComponentsVisited', candidate.bfsComponentsVisited ?? 0);
 		const badgeSupportStop = ctx.span('teeRecovery.badgeSupport');
-		const consensus = resolveG4ClaimConsensus(tees, rayResolution.claims, built.candidates, numberedBadges);
+		const consensus = resolveG4ClaimConsensus(tees, rayResolution.claims, built.claimCandidates, numberedBadges);
 		badgeSupportStop();
 		ctx.measure('teeRecovery', 'claimConsensusVisibleMatched', consensus.base.visibleMatched);
 		ctx.measure('teeRecovery', 'claimConsensusRecoveryMatched', consensus.base.recoveryMatched);
 		ctx.measure('teeRecovery', 'claimConsensusRecoveryObjects', consensus.recoveryRows);
 		ctx.measure('teeRecovery', 'claimConsensusForcedEdges', consensus.forcedEdges);
 		ctx.measure('teeRecovery', 'claimConsensusDeferredEdges', consensus.deferredCandidateIndexes.size);
+		ctx.measure('teeRecovery', 'claimConsensusAlternateWitnesses', consensus.alternateWitnessCandidateIndexes.size);
 		const promoted = [...consensus.forcedCandidateIndexes].sort((a, b) => a - b).map((index) => {
-			const candidate = built.candidates[index]!;
+			const candidate = built.claimCandidates[index]!;
 			const baseResult = allResults[index]!;
 			return {
 				candidate,
@@ -1718,12 +1771,18 @@ export const teeRecoveryUnit: EngineUnit = {
 		});
 		const results = promoted.map((entry) => entry.result);
 		for (let index = 0; index < built.candidates.length; index++) {
-			const candidate = built.candidates[index]!;
+			const candidate = built.claimCandidates[index]!;
 			if (consensus.forcedCandidateIndexes.has(index)) continue;
 			const baseResult = allResults[index]!;
 			const xPx = candidate.fit.centerXPx;
 			const yPx = candidate.fit.centerYPx + (candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0);
-			if (consensus.deferredCandidateIndexes.has(index)) {
+			if (consensus.alternateWitnessCandidateIndexes.has(index)) {
+				ctx.overlay('teeRecovery', {
+					type: 'point', xPx, yPx, verdict: 'info', visualRole: 'tee-rejection', ref: `${candidate.id}:alternate-witness`,
+					reason: `ALTERNATE WITNESS: shard→badge identity is already forced by consensus; this independently valid pose witness is preserved but is less constrained than the selected localization witness`,
+					values: numericTraceValues(baseResult.values)
+				});
+			} else if (consensus.deferredCandidateIndexes.has(index)) {
 				ctx.overlay('teeRecovery', {
 					type: 'point', xPx, yPx, verdict: 'info', visualRole: 'tee-rejection', ref: `${candidate.id}:consensus-defer`,
 					reason: `DEFER: local shard→badge testimony survives, but this edge is not present in every maximum-consistency G4 mapping; no residual score, pathfinding, or loop order may select it`,
