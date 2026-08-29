@@ -1,0 +1,79 @@
+name: G4 Rail Projection Run
+
+on:
+  push:
+    branches:
+      - experiment/g4-shard-ray-only
+    paths:
+      - .github/workflows/g4-rail-projection-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    env:
+      BASE_SHA: e13f4a72ad6e41bf39133f177f4e8c20a32242e0
+      BRANCH: experiment/g4-shard-ray-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ChainSpot
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch
+        working-directory: ChainSpot
+        run: python scripts/experiments/g4-rail-projection-patch.py
+      - name: Build
+        working-directory: ChainSpot
+        run: |
+          npm ci
+          npm --workspace @chainspot/alg run build
+      - name: Commit
+        working-directory: ChainSpot
+        run: |
+          git config user.name 'ChainSpot G4 Experiment'
+          git config user.email 'actions@users.noreply.github.com'
+          git add packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts
+          git commit -m '[g4-rail] Project known tee width from observed rails'
+          echo "EXPERIMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Baseline
+        working-directory: ChainSpot
+        run: |
+          git checkout --force "$BASE_SHA"
+          ./lab setup >/tmp/base-setup.log 2>&1
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G6 packages/alg/src/detectors/threeFactor/configs/default.json dev > /tmp/base.log 2>&1
+          cp artifacts/sweep/dev72-recovered-default/batches/summary.json /tmp/base-summary.json
+      - name: Rail projection
+        working-directory: ChainSpot
+        run: |
+          git checkout --force "$EXPERIMENT_SHA"
+          ./lab setup >/tmp/rail-setup.log 2>&1
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G6 packages/alg/src/detectors/threeFactor/configs/default.json dev > /tmp/rail.log 2>&1
+          echo '=== RAIL BATCH SUMMARY ==='
+          cat artifacts/sweep/dev72-recovered-default/batches/summary.json
+          echo '=== RAIL RECOVERY RECEIPTS ==='
+          for f in $(find artifacts/sweep -name run.receipt.json | sort); do
+            echo "--- $f"
+            node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const u=(d.units||[]).find(x=>x.id==="teeRecovery")||{}; console.log(JSON.stringify({results:d.results,assignments:(d.assignments||[]).map(a=>({hole:a.hole,teeId:a.teeId,basketId:a.basketId,score:a.score})),recovery:(u.measurements||[]).filter(m=>["visibleRayClaims","visibleRayAmbiguousTees","visibleRayConflictedBadges","missingNumberedTees","accepted","badgePerpendicularErrorPx","badgePerpendicularMissPx","railProjection"].includes(m.name))},null,2));' "$f"
+          done
+          echo '=== RAIL LOG TAIL ==='
+          tail -n 100 /tmp/rail.log
+      - name: Push
+        if: always()
+        working-directory: ChainSpot
+        run: |
+          if [ -n "${EXPERIMENT_SHA:-}" ]; then
+            git checkout --force "$EXPERIMENT_SHA"
+            git push origin "$EXPERIMENT_SHA:refs/heads/$BRANCH"
+          fi
