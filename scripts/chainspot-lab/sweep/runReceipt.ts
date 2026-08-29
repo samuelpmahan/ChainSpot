@@ -199,6 +199,100 @@ export interface RunReceipt {
 		readonly failureRows: readonly TruthFailureRow[];
 	};
 	readonly warnings: readonly string[];
+	/** Comparison against the previous run of this same config+course output
+	 * slot (the run.receipt.json this run overwrote), so a flipped HOLE
+	 * ASSIGNMENTS row is never silent across runs. Absent when no previous
+	 * receipt existed on disk -- the text receipt then prints the honest
+	 * UNKNOWN line instead. */
+	readonly previousRun?: RunReceiptPreviousRun;
+}
+
+export interface RunReceiptPreviousRun {
+	readonly generatedAt: string;
+	readonly revision: string;
+	readonly paramsHash: string;
+	/** True when revision AND paramsHash match the current run -- any change
+	 * below is then nondeterminism or an input change, never a code delta. */
+	readonly sameCodeAndConfig: boolean;
+	/** One line per HOLE ASSIGNMENTS row that differs from the previous run;
+	 * empty means every row is identical ("no change", stated explicitly). */
+	readonly changes: readonly string[];
+}
+
+/** Diff this run's HOLE ASSIGNMENTS against the previous run.receipt.json of
+ * the same output slot (receipt contract item 6, docs/WORKFLOW.md: "what
+ * changed vs the frozen baseline -- or 'no change', explicitly"). Defensive
+ * about the previous file's shape: anything unparseable yields undefined and
+ * the honest UNKNOWN line stands. */
+export function compareToPreviousRun(previousRaw: unknown, current: RunReceipt): RunReceiptPreviousRun | undefined {
+	if (typeof previousRaw !== 'object' || previousRaw === null) return undefined;
+	const prev = previousRaw as {
+		generatedAt?: unknown;
+		revision?: unknown;
+		config?: { paramsHash?: unknown };
+		assignments?: unknown;
+	};
+	if (typeof prev.generatedAt !== 'string' || typeof prev.revision !== 'string' || !Array.isArray(prev.assignments)) {
+		return undefined;
+	}
+	const prevHash = typeof prev.config?.paramsHash === 'string' ? prev.config.paramsHash : 'UNKNOWN';
+	const label = (row: RunReceiptAssignmentRow) => (row.hole === 'UNREAD' ? `UNREAD(${row.badgeId})` : `H${row.hole}`);
+	const prevRows = new Map<string, RunReceiptAssignmentRow>();
+	for (const row of prev.assignments as RunReceiptAssignmentRow[]) {
+		if (row && typeof row.badgeId === 'string') prevRows.set(row.badgeId, row);
+	}
+	const currRows = new Map(current.assignments.map((row) => [row.badgeId, row]));
+	const changes: string[] = [];
+	for (const badgeId of [...new Set([...prevRows.keys(), ...currRows.keys()])].sort()) {
+		const before = prevRows.get(badgeId);
+		const after = currRows.get(badgeId);
+		if (before && after) {
+			if (before.teeId === after.teeId && before.basketId === after.basketId && before.score === after.score) continue;
+			changes.push(
+				before.teeId === after.teeId && before.basketId === after.basketId
+					? `${label(after)} (${badgeId}): score changed ${before.score} -> ${after.score} (same tee and basket)`
+					: `${label(after)} (${badgeId}): flipped ${before.teeId} -> ${before.basketId} (score ${before.score}) INTO ${after.teeId} -> ${after.basketId} (score ${after.score})`
+			);
+		} else if (before) {
+			changes.push(`${label(before)} (${badgeId}): REMOVED -- was ${before.teeId} -> ${before.basketId} (score ${before.score})`);
+		} else if (after) {
+			changes.push(`${label(after)} (${badgeId}): ADDED -- ${after.teeId} -> ${after.basketId} (score ${after.score})`);
+		}
+	}
+	return {
+		generatedAt: prev.generatedAt,
+		revision: prev.revision,
+		paramsHash: prevHash,
+		sameCodeAndConfig: prev.revision === current.revision && prevHash === current.config.paramsHash,
+		changes
+	};
+}
+
+/** Rung 5 of docs/seven-whys/2026-08-28-tee11-mispairing.md, receipt-only:
+ * flag any assignment score this many orders of magnitude (or more) below the
+ * median sibling score. 3 is a dataset-fit estimate, not physics (Dev6
+ * 2026-08-28: healthy rows span about one order, 0.114-0.595, while observed
+ * garbage sat >= 12 orders below at 2.4e-13, or at exactly 0; 3 leaves ~2
+ * orders of margin on each side). Advisory only -- NEVER a filter; a flagged
+ * row still stands. */
+export const SCORE_ANOMALY_ORDERS_BELOW_MEDIAN = 3;
+
+/** Upper-middle median, the same convention deriveGeometricClaims uses. */
+export function assignmentScoreMedian(rows: ReadonlyArray<{ readonly score: number }>): number | null {
+	if (rows.length === 0) return null;
+	const scores = rows.map((row) => row.score).sort((a, b) => a - b);
+	return scores[Math.floor(scores.length / 2)];
+}
+
+/** The advisory suffix for one assignment row, or null when unremarkable. */
+export function scoreAnomalyNote(score: number, median: number | null): string | null {
+	if (median === null || median <= 0) return null;
+	if (score <= 0) {
+		return `  << SCORE ANOMALY: 0 is unboundedly below the median sibling score ${median} (advisory only, never a filter; rung 5 of docs/seven-whys/2026-08-28-tee11-mispairing.md)`;
+	}
+	const orders = Math.log10(median / score);
+	if (orders < SCORE_ANOMALY_ORDERS_BELOW_MEDIAN) return null;
+	return `  << SCORE ANOMALY: ${orders.toFixed(1)} orders of magnitude below the median sibling score ${median} (advisory only, never a filter; rung 5 of docs/seven-whys/2026-08-28-tee11-mispairing.md)`;
 }
 
 export interface BuildRunReceiptInput {

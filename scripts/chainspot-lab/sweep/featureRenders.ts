@@ -26,6 +26,7 @@ import { OPERATION_UNIVERSE, type HoleLabeledAssignment } from '@chainspot/alg/e
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
 import { buildTeeMinAreaPoseReceipt } from '@chainspot/alg/detectors/threeFactor/features/g3.teeMinAreaPoseReceipt';
 import { buildTeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
+import { SCORE_ANOMALY_ORDERS_BELOW_MEDIAN, assignmentScoreMedian, scoreAnomalyNote } from './runReceipt';
 import type {
 	ABFeature,
 	Drawable,
@@ -361,6 +362,15 @@ export interface RenderTraceFeaturesInput {
 	 * scheduled, so the endpoint receipt can say NOT-SCHEDULED rather than a
 	 * misleading empty table. */
 	readonly assignmentRows?: readonly HoleLabeledAssignment[];
+	/** Canonical positions for the endpoints named by assignmentRows, so the
+	 * endpoint image can annotate each ASSIGNED tee and basket with its
+	 * post-assignment hole number. Sourced from the final board 'assignment'
+	 * slot's own tee inventory and the measurement's baskets -- never
+	 * recomputed geometry. */
+	readonly endpointPositions?: {
+		readonly tees: readonly { readonly id: string; readonly xPx: number; readonly yPx: number }[];
+		readonly baskets: readonly { readonly id: string; readonly xPx: number; readonly yPx: number }[];
+	};
 }
 
 export interface FeatureRenderResult {
@@ -513,14 +523,18 @@ function holeAssignmentLines(rows: readonly HoleLabeledAssignment[] | undefined)
 		lines.push("(none -- 'assignment.selection' ran and produced zero rows)");
 		return lines;
 	}
+	const median = assignmentScoreMedian(rows);
 	for (const row of rows) {
 		const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
 		const confidence =
 			row.holeConfidence === null ? 'UNKNOWN' : Number(row.holeConfidence.toFixed(3));
 		lines.push(
-			`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${Number(row.score.toFixed(3))} | ${confidence}`
+			`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${Number(row.score.toFixed(3))} | ${confidence}${scoreAnomalyNote(row.score, median) ?? ''}`
 		);
 	}
+	lines.push(
+		`SCORE DISTRIBUTION: median ${median === null ? 'UNKNOWN' : Number(median.toFixed(3))}, min ${Number(Math.min(...rows.map((row) => row.score)).toFixed(3))} -- advisory anomaly rule: >= ${SCORE_ANOMALY_ORDERS_BELOW_MEDIAN} orders of magnitude below median, never a filter`
+	);
 	return lines;
 }
 
@@ -711,6 +725,52 @@ export function renderRunEndpointReceipt(
 	const teeBadgePaths = teeBadgeLockReceipt?.plan.layers.flatMap((layer) => layer.drawables) ?? [];
 	const gate = endpointGateSpan(run);
 
+	// Post-assignment hole numbers, drawn beside each ASSIGNED tee and basket.
+	// Labels come verbatim from the final hole-labeled assignment rows (the
+	// same rows the HOLE ASSIGNMENTS table prints), so the image and the table
+	// can never disagree. Painted as the LAST layer for visibility, but the
+	// hole-label painter refuses to overwrite any exact testimony color, so
+	// pixel counts (badge/tee pixel sets etc.) are never corrupted.
+	const holeLabelDrawables: Drawable[] = [];
+	if (input.assignmentRows && input.endpointPositions) {
+		const teePosition = new Map(input.endpointPositions.tees.map((tee) => [tee.id, tee]));
+		const basketPosition = new Map(
+			input.endpointPositions.baskets.map((basket) => [basket.id, basket])
+		);
+		const LABEL_SCALE = 3;
+		for (const row of input.assignmentRows) {
+			const label = row.hole === 'UNREAD' ? '?' : row.hole;
+			const tee = teePosition.get(row.teeId);
+			if (tee) {
+				holeLabelDrawables.push({
+					type: 'pixelSet',
+					verdict: 'info',
+					visualRole: 'hole-label',
+					ref: `hole-label:${row.teeId}`,
+					pixels: holeLabelPixels(label, tee.xPx + 13, tee.yPx - 11, LABEL_SCALE)
+				});
+			} else {
+				warnings.push(
+					`hole label for ${row.teeId} (hole ${label}) omitted: no canonical tee position was supplied`
+				);
+			}
+			const basket = basketPosition.get(row.basketId);
+			if (basket) {
+				holeLabelDrawables.push({
+					type: 'pixelSet',
+					verdict: 'info',
+					visualRole: 'hole-label',
+					ref: `hole-label:${row.basketId}`,
+					pixels: holeLabelPixels(label, basket.xPx + 7, basket.yPx + 3, LABEL_SCALE)
+				});
+			} else {
+				warnings.push(
+					`hole label for ${row.basketId} (hole ${label}) omitted: no canonical basket position was supplied`
+				);
+			}
+		}
+	}
+
 	const plan: FeatureRenderPlan = {
 		title: `${gate} endpoint receipt (${run.configName})`,
 		base: 'g0.canonical',
@@ -767,7 +827,12 @@ export function renderRunEndpointReceipt(
 							drawables: phantomCenters
 						}
 					]
-				: [])
+				: []),
+			{
+				name: 'assigned hole numbers (post-G6, final assignment rows)',
+				note: 'orange bitmap hole number with 1px black outline beside each assigned tee and basket tip; painted last for visibility but never over an exact testimony color',
+				drawables: holeLabelDrawables
+			}
 		],
 		notes: []
 	};
@@ -852,6 +917,13 @@ export function renderRunEndpointReceipt(
 		}`,
 		`teeCornerMarks: ${visibleCorners.length + recoveryCorners.length}`,
 		`teeCenterDiagonals: ${visibleDiagonals.length + recoveryDiagonals.length}`,
+		`holeNumberAnnotations: ${
+			input.assignmentRows === undefined
+				? "NOT-SCHEDULED (no final assignment rows; 'never ran' is not 0)"
+				: input.endpointPositions === undefined
+					? 'UNKNOWN (assignment rows exist but no endpoint positions were supplied to the renderer)'
+					: `${holeLabelDrawables.length} (source: final post-G6 hole-labeled assignment rows; one orange label per assigned tee and per assigned basket tip)`
+		}`,
 		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
 		'',
 		...holeAssignmentLines(input.assignmentRows),
@@ -864,6 +936,7 @@ export function renderRunEndpointReceipt(
 		'red: thinnest opposite-corner X; intersection is fitted center',
 		'violet: assignment-only phantom center; appearance UNKNOWN',
 		'blue: exact accepted tee→badge lock path emitted by teeBadgeLock; thin #00a2ff, no geometry recomputation',
+		'orange: assigned hole number (post-G6 final assignment rows, same mapping as HOLE ASSIGNMENTS; ? = UNREAD digit) beside each assigned tee and basket tip; black-outlined, painted last for visibility but never overwriting an exact testimony color, so pixel counts stay uncorrupted',
 		'rejections: text only, never drawn over accepted geometry',
 		'',
 		'REJECTIONS RETAINED IN TRACE',
@@ -971,6 +1044,71 @@ const TEE_BADGE_PATH_STYLE = { stroke: '#00a2ff', fill: 'none', dash: 'none' };
 
 function isBadgePixels(drawable: Drawable): boolean {
 	return drawable.type === 'pixelSet' && drawable.visualRole === 'badge-pixels';
+}
+
+function isHoleLabel(drawable: Drawable): boolean {
+	return drawable.type === 'pixelSet' && drawable.visualRole === 'hole-label';
+}
+
+/** Exact testimony colors a hole-number label must NEVER overwrite: receipt
+ * pixel counts (badge/tee pixel sets etc.) are verified against these exact
+ * colors in the written PNG, so annotation paints around them. */
+const HOLE_LABEL_PROTECTED_COLORS: ReadonlySet<number> = new Set(
+	[
+		[255, 225, 30], // badge bright pixels (yellow)
+		[255, 40, 220], // basket semantic tip (magenta)
+		[30, 255, 95], // tee visible/shard pixels (green)
+		[0, 162, 255], // tee-badge lock path (blue)
+		[255, 32, 32], // tee fitted-center diagonal (red)
+		[57, 255, 122], // tee center marker
+		[30, 210, 255], // corner ticks / info (cyan)
+		[197, 107, 255], // phantom center (violet)
+		[255, 45, 45] // rejected marks (red)
+	].map(([r, g, b]) => (r << 16) | (g << 8) | b)
+);
+
+/** 3x5 bitmap glyphs for hole-number annotation (digits plus '?' for UNREAD).
+ * Rendered at integer scale as a pixelSet, so the label paints through the
+ * exact same rasterDrawable path as every other testimony pixel. */
+const HOLE_LABEL_GLYPHS: Readonly<Record<string, readonly string[]>> = {
+	'0': ['111', '101', '101', '101', '111'],
+	'1': ['010', '110', '010', '010', '111'],
+	'2': ['111', '001', '111', '100', '111'],
+	'3': ['111', '001', '111', '001', '111'],
+	'4': ['101', '101', '111', '001', '001'],
+	'5': ['111', '100', '111', '001', '111'],
+	'6': ['111', '100', '111', '101', '111'],
+	'7': ['111', '001', '010', '010', '010'],
+	'8': ['111', '101', '111', '101', '111'],
+	'9': ['111', '101', '111', '001', '111'],
+	'?': ['111', '001', '011', '000', '010']
+};
+
+/** Pixel cells for `text` drawn with its glyph top-left at (xPx, yPx). */
+function holeLabelPixels(
+	text: string,
+	xPx: number,
+	yPx: number,
+	scale: number
+): [number, number][] {
+	const cells: [number, number][] = [];
+	let cursorX = Math.round(xPx);
+	const top = Math.round(yPx);
+	for (const character of text) {
+		const glyph = HOLE_LABEL_GLYPHS[character] ?? HOLE_LABEL_GLYPHS['?'];
+		for (let row = 0; row < glyph.length; row++) {
+			for (let column = 0; column < glyph[row].length; column++) {
+				if (glyph[row][column] !== '1') continue;
+				for (let dy = 0; dy < scale; dy++) {
+					for (let dx = 0; dx < scale; dx++) {
+						cells.push([cursorX + column * scale + dx, top + row * scale + dy]);
+					}
+				}
+			}
+		}
+		cursorX += (3 + 1) * scale;
+	}
+	return cells;
 }
 
 function isBasketTip(drawable: Drawable): boolean {
@@ -1287,7 +1425,31 @@ function rasterDrawable(
 	drawable: Drawable,
 	layerName?: string
 ): void {
-	const color: readonly [number, number, number] = isPhantomMarker(drawable)
+	if (isHoleLabel(drawable) && drawable.type === 'pixelSet') {
+		// Hole-number labels paint OVER the scene for visibility, with a 1px
+		// black outline for contrast -- but never overwrite an exact testimony
+		// color, so every receipt pixel count stays byte-accurate.
+		const paint = (x: number, y: number, c: readonly [number, number, number]) => {
+			const xi = Math.round(x);
+			const yi = Math.round(y);
+			if (xi < 0 || yi < 0 || xi >= width || yi >= height) return;
+			const i = (yi * width + xi) * 4;
+			if (HOLE_LABEL_PROTECTED_COLORS.has((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]))
+				return;
+			data[i] = c[0];
+			data[i + 1] = c[1];
+			data[i + 2] = c[2];
+			data[i + 3] = 255;
+		};
+		for (const [x, y] of drawable.pixels)
+			for (let oy = -1; oy <= 1; oy++)
+				for (let ox = -1; ox <= 1; ox++) paint(x + ox, y + oy, [0, 0, 0]);
+		for (const [x, y] of drawable.pixels) paint(x, y, [255, 150, 40]);
+		return;
+	}
+	const color: readonly [number, number, number] = isHoleLabel(drawable)
+		? [255, 150, 40]
+		: isPhantomMarker(drawable)
 		? [197, 107, 255]
 		: isBadgePixels(drawable)
 			? [255, 225, 30]

@@ -232,13 +232,14 @@ results.phantomTees: UNKNOWN
 results.totalTees: UNKNOWN
 results.assignments: UNKNOWN
 results.rawPairs: UNKNOWN
-baselineComparison: UNKNOWN (not-implemented: no frozen baseline receipt is stored for this config, so this run cannot honestly state "changed" or "no change" vs a baseline)
+baselineComparison: UNKNOWN (no previous run.receipt.json existed in this output slot before this run, so this run cannot honestly state "changed" or "no change" vs a previous run)
 
 HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)
 (provenance: board 'assignment' rows, hole read from BadgeEvidence.label by the shared withHoleLabels() mapping in @chainspot/alg/exec -- the same mapping this run's final measurementTable assignment artifact uses; an unreadable digit prints UNREAD, never a guess)
 hole | badgeId | teeId -> basketId | score | rank | hole confidence
 H14 | badge-13 | tee-14 -> basket-12 | 0.212 | 1 | 0.993
 UNREAD | badge-9 | tee-7 -> basket-8 | 0.368 | 1 | UNKNOWN
+SCORE DISTRIBUTION: median 0.368, min 0.212 -- 0 row(s) flagged (rule: >= 3 orders of magnitude below median; advisory only, never a filter)
 
 TRUTH EVALUATION
 evaluation.truthSupplied: false

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +52,7 @@ import {
 } from './gateVocabulary';
 import {
 	buildRunReceipt,
+	compareToPreviousRun,
 	writeRunReceiptJson,
 	type RunReceipt,
 	type RunReceiptSliceInput,
@@ -503,11 +504,30 @@ export async function runSweepOperation(
 					board.get<ThreeFactorMeasurement>('measurement').badges
 				)
 			: [];
+	// Canonical endpoint positions for the hole-number annotation layer: the
+	// final assignment slot's own tee inventory (visible + recovered) and the
+	// measurement's basket tips -- the exact objects the assignment rows name.
+	const endpointPositions =
+		assignmentScheduled && board.has('assignment') && board.has('measurement')
+			? {
+					tees: board
+						.get<ThreeFactorAssignment>('assignment')
+						.tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx })),
+					baskets: board
+						.get<ThreeFactorMeasurement>('measurement')
+						.baskets.map((basket) => ({
+							id: basket.detId,
+							xPx: basket.tipXPx,
+							yPx: basket.tipYPx
+						}))
+				}
+			: undefined;
 	const featureRenderStartedAtMs = performance.now();
 	const featureRenders = renderRunEndpointReceipt({
 		run: sealedTrace,
 		outDir: resolve(outDir, 'renders', 'run'),
 		assignmentRows: assignmentScheduled ? assignmentRows : undefined,
+		endpointPositions,
 		canvas: {
 			widthPx: image.width,
 			heightPx: image.height,
@@ -717,9 +737,21 @@ export async function runSweepOperation(
 		...(truthScoringReason ? { truthScoringReason } : {}),
 		...(scoreboard ? { scoreboard } : {})
 	});
-	const runReceiptJsonPath = writeRunReceiptJson(outDir, runReceipt);
+	// Read the previous run's receipt from this same output slot BEFORE
+	// overwriting it, so the new receipt can state per-hole what changed vs
+	// the previous run -- or "no change", explicitly (receipt contract item
+	// 6; a flipped HOLE ASSIGNMENTS row must never be silent across runs).
+	let previousReceiptRaw: unknown;
+	try {
+		previousReceiptRaw = JSON.parse(readFileSync(resolve(outDir, 'run.receipt.json'), 'utf8'));
+	} catch {
+		previousReceiptRaw = undefined;
+	}
+	const previousRun = previousReceiptRaw === undefined ? undefined : compareToPreviousRun(previousReceiptRaw, runReceipt);
+	const finalRunReceipt: RunReceipt = { ...runReceipt, ...(previousRun ? { previousRun } : {}) };
+	const runReceiptJsonPath = writeRunReceiptJson(outDir, finalRunReceipt);
 	const runReceiptTextPath = resolve(outDir, 'run.receipt.txt');
-	writeFileSync(runReceiptTextPath, formatRunReceiptText(runReceipt));
+	writeFileSync(runReceiptTextPath, formatRunReceiptText(finalRunReceipt));
 	const runReceiptPaths = [runReceiptJsonPath, runReceiptTextPath];
 	// Chain-of-custody is observability derived from the same final assignment
 	// + sealed trace every other receipt reads. When a sliced run never

@@ -153,7 +153,8 @@ export interface DrawableBase {
 		| 'tee-rejection'
 		| 'phantom-center'
 		| 'tee-badge-path'
-		| 'tee-badge-abstention';
+		| 'tee-badge-abstention'
+		| 'hole-label';
 }
 
 export interface PointDrawable extends DrawableBase {
@@ -351,7 +352,8 @@ export type EvidenceSlot =
 	| 'straightProposals'
 	| 'straightTestTruthAssistance'
 	| 'assignment'
-	| 'teeBadgeLock';
+	| 'teeBadgeLock'
+	| 'teeBadgeCompass';
 
 export interface EvidenceBoard {
 	get<T>(slot: EvidenceSlot): T;

@@ -1,4 +1,9 @@
-import type { RunReceipt } from './runReceipt';
+import {
+	SCORE_ANOMALY_ORDERS_BELOW_MEDIAN,
+	assignmentScoreMedian,
+	scoreAnomalyNote,
+	type RunReceipt
+} from './runReceipt';
 
 /**
  * Render the persisted run receipt as a compact, deterministic text report.
@@ -183,10 +188,25 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 			`results.${name}: ${omission ?? value(receipt.results[name])}${provenance ? `  (${provenance})` : ''}`
 		);
 	}
-	lines.push(
-		'baselineComparison: UNKNOWN (not-implemented: no frozen baseline receipt is stored for this config, ' +
-			'so this run cannot honestly state "changed" or "no change" vs a baseline)'
-	);
+	if (receipt.previousRun) {
+		const prev = receipt.previousRun;
+		lines.push('', 'CHANGES VS PREVIOUS RUN (same config, same course, same output slot)');
+		lines.push(`previous: generatedAt ${prev.generatedAt} revision ${prev.revision} paramsHash ${prev.paramsHash}`);
+		lines.push(
+			prev.sameCodeAndConfig
+				? '(same revision AND paramsHash as this run: any change below is nondeterminism or an input change -- investigate loudly)'
+				: '(different revision or paramsHash: changes below are attributable to the code/config delta)'
+		);
+		if (prev.changes.length === 0) {
+			lines.push('(no change -- every HOLE ASSIGNMENTS row identical to the previous run)');
+		}
+		for (const change of prev.changes) lines.push(change);
+	} else {
+		lines.push(
+			'baselineComparison: UNKNOWN (no previous run.receipt.json existed in this output slot before this run, ' +
+				'so this run cannot honestly state "changed" or "no change" vs a previous run)'
+		);
+	}
 
 	lines.push(
 		'',
@@ -204,14 +224,21 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 				: "(none -- 'assignment.selection' ran and produced zero rows)"
 		);
 	} else {
+		const median = assignmentScoreMedian(receipt.assignments);
+		let flagged = 0;
 		for (const row of receipt.assignments) {
 			const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
 			const confidence =
 				row.holeConfidence === null ? 'UNKNOWN' : round(row.holeConfidence).toString();
+			const anomaly = scoreAnomalyNote(row.score, median);
+			if (anomaly !== null) flagged += 1;
 			lines.push(
-				`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${round(row.score)} | ${row.rank} | ${confidence}`
+				`${holeLabel} | ${row.badgeId} | ${row.teeId} -> ${row.basketId} | ${round(row.score)} | ${row.rank} | ${confidence}${anomaly ?? ''}`
 			);
 		}
+		lines.push(
+			`SCORE DISTRIBUTION: median ${median === null ? 'UNKNOWN' : round(median)}, min ${round(Math.min(...receipt.assignments.map((row) => row.score)))} -- ${flagged} row(s) flagged (rule: >= ${SCORE_ANOMALY_ORDERS_BELOW_MEDIAN} orders of magnitude below median; advisory only, never a filter)`
+		);
 	}
 
 	lines.push('', 'TRUTH EVALUATION');
