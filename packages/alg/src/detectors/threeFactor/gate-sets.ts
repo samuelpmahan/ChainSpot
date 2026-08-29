@@ -1,6 +1,7 @@
 import type { ABFeature, GateId } from './features/types';
 import { g1BadgesFeature } from './features/g1.badges';
 import { g1DigitsFeature as digitsFeature } from './features/g1.digits';
+import { badgeGlyphTemplateFeature } from './features/g1.badgeGlyphTemplate';
 import { g2SpriteFeature } from './features/g2.sprite';
 import { cleanBasketFamilyFeature } from './features/g2.cleanBasketFamily';
 import { g3EndpointsFeature } from './features/g3.endpoints';
@@ -45,7 +46,7 @@ export type GateFeatureSetId =
 /** Explicit owned feature membership, intentionally excluding parked supportRoi. */
 export const GATE_FEATURE_IDS = {
 	'shared-set': ['hsv'],
-	'g1-set': ['badges', 'digits'],
+	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
@@ -56,7 +57,7 @@ export const GATE_FEATURE_IDS = {
 
 const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 	'shared-set': [sharedHsvFeature],
-	'g1-set': [g1BadgesFeature, digitsFeature],
+	'g1-set': [g1BadgesFeature, digitsFeature, badgeGlyphTemplateFeature],
 	'g2-set': [g2SpriteFeature, cleanBasketFamilyFeature],
 	'g3-set': [g3EndpointsFeature, teeFamilyFeature, teeMinAreaPoseFeature],
 	'g4-set': [teeRecoveryFeature, phantomTeeFeature, teeBadgeLockFeature],
@@ -167,7 +168,8 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 		'badgeStage.components',
 		'badgeStage.family',
 		'badgeStage.badges',
-		'badges'
+		'badges',
+		'badgeGlyphTemplate'
 	],
 	'g2-set': ['baskets', 'cleanBasketFamily'],
 	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose'],

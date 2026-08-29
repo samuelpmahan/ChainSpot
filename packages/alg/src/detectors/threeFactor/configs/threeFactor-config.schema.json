@@ -1,1218 +1,1256 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "chainspot://threeFactor-config@1",
-  "title": "threeFactor engine config",
-  "description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema",
-    "name"
-  ],
-  "properties": {
-    "$schema": {
-      "type": "string"
-    },
-    "schema": {
-      "const": "threeFactor-config@1"
-    },
-    "name": {
-      "type": "string",
-      "minLength": 1
-    },
-    "note": {
-      "type": "string"
-    },
-    "execution": {
-      "type": "array",
-      "items": {
-        "enum": [
-          "badgeStage",
-          "badges",
-          "supportField",
-          "badgeOcclusionPatch",
-          "baskets",
-          "tees",
-          "rawPairs",
-          "measurement",
-          "assignment",
-          "zfit",
-          "phantomTee",
-          "teeFamily",
-          "teeMinAreaPose",
-          "teeRecovery",
-          "teeBadgeLock",
-          "cleanBasketFamily",
-          "straightTest"
-        ]
-      },
-      "uniqueItems": true,
-      "description": "Full unit order; omit to inherit the default order."
-    },
-    "gates": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "G1": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "badges": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Badge-family detection (aspect/dark-interior/size gates) plus dark-plate glyph recovery.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "badgeAspectMin": {
-                      "type": "number",
-                      "description": "minimum aspect ratio for bright badge candidates (was BADGE_ASPECT_MIN)",
-                      "default": 1.15
-                    },
-                    "badgeAspectMax": {
-                      "type": "number",
-                      "description": "maximum aspect ratio for bright badge candidates (was BADGE_ASPECT_MAX)",
-                      "default": 1.8
-                    },
-                    "badgeDarkInteriorMin": {
-                      "type": "number",
-                      "description": "minimum dark pixel fraction for badge interior (was BADGE_DARK_INTERIOR_MIN)",
-                      "default": 0.45
-                    },
-                    "badgeSizeTolFactor": {
-                      "type": "number",
-                      "description": "size tolerance for badge family clustering, in linear space; Math.log(...) is applied at the anchoredFamilies use site (was BADGE_SIZE_TOL = Math.log(1.15), per merge note 4)",
-                      "default": 1.15
-                    },
-                    "plateMinWidth": {
-                      "type": "number",
-                      "description": "minimum width for dark-plate badge recovery candidates",
-                      "default": 34
-                    },
-                    "plateMaxWidth": {
-                      "type": "number",
-                      "description": "maximum width for dark-plate badge recovery candidates",
-                      "default": 78
-                    },
-                    "plateMinHeight": {
-                      "type": "number",
-                      "description": "minimum height for dark-plate badge recovery candidates",
-                      "default": 24
-                    },
-                    "plateMaxHeight": {
-                      "type": "number",
-                      "description": "maximum height for dark-plate badge recovery candidates",
-                      "default": 54
-                    },
-                    "plateAspectMin": {
-                      "type": "number",
-                      "description": "minimum aspect ratio for dark-plate candidates",
-                      "default": 1
-                    },
-                    "plateAspectMax": {
-                      "type": "number",
-                      "description": "maximum aspect ratio for dark-plate candidates",
-                      "default": 2.4
-                    },
-                    "plateFillMin": {
-                      "type": "number",
-                      "description": "minimum fill fraction (area/bbox) for dark-plate candidates",
-                      "default": 0.55
-                    },
-                    "plateInteriorMargin": {
-                      "type": "number",
-                      "description": "pixel margin for interior glyph fraction measurement (coincidentally also 4, but a distinct knob from plateBboxMargin)",
-                      "default": 4
-                    },
-                    "plateGlyphFractionMin": {
-                      "type": "number",
-                      "description": "minimum bright pixel fraction in plate interior",
-                      "default": 0.04
-                    },
-                    "plateGlyphFractionMax": {
-                      "type": "number",
-                      "description": "maximum bright pixel fraction in plate interior",
-                      "default": 0.4
-                    },
-                    "plateProximityThreshold": {
-                      "type": "number",
-                      "description": "distance threshold: a dark-plate candidate must not be near an already-accepted bright badge",
-                      "default": 22
-                    },
-                    "plateBboxMargin": {
-                      "type": "number",
-                      "description": "margin for expanding the dark-plate badge bounding box (coincidentally also 4, but a distinct knob from plateInteriorMargin)",
-                      "default": 4
-                    },
-                    "badgeInsidePadding": {
-                      "type": "number",
-                      "description": "padding (px) around a badge bbox for the tee-candidate exclusion test in measure.ts makeTees; the rejection reason string is templated from this value (was hard-coded \"+3px pad\" — see file header)",
-                      "default": 3
-                    },
-                    "plateFrameTolerancePx": {
-                      "type": "number",
-                      "description": "C1 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: raster-cell allowance for a dark-plate badge's bright component to count as \"reaching\" an edge of the measured plate interior (plateBbox inset by plateInteriorMargin) when digits/badgeGlyph.ts positively identifies the plate's own printed frame; digit glyphs are inset 3-4px so 2px never admits a real digit",
-                      "default": 2
-                    }
-                  }
-                }
-              }
-            },
-            "digits": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Badge digit segmentation (noise/height/wide-merge gates) and canonical digit-mask normalization.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "minComponentArea": {
-                      "type": "number",
-                      "description": "minimum pixel area for a connected component to be a digit candidate (was MIN_COMPONENT_AREA)",
-                      "default": 6
-                    },
-                    "heightRatioMin": {
-                      "type": "number",
-                      "description": "minimum height, as a fraction of the tallest surviving component, for a digit candidate (was HEIGHT_RATIO_MIN)",
-                      "default": 0.5
-                    },
-                    "wideRatio": {
-                      "type": "number",
-                      "description": "width-to-height ratio threshold for detecting a merged (touching) digit pair (was WIDE_RATIO)",
-                      "default": 0.95
-                    },
-                    "valleySearchLo": {
-                      "type": "number",
-                      "description": "lower bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_LO); see file header — an inverted pair vs. valleySearchHi is safe, not corrupting",
-                      "default": 0.3
-                    },
-                    "valleySearchHi": {
-                      "type": "number",
-                      "description": "upper bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_HI); see file header — an inverted pair vs. valleySearchLo is safe, not corrupting",
-                      "default": 0.7
-                    },
-                    "digitW": {
-                      "type": "number",
-                      "description": "normalized digit mask width fed to the trained classifier (was DIGIT_W) — see file header on the model coupling",
-                      "default": 24
-                    },
-                    "digitH": {
-                      "type": "number",
-                      "description": "normalized digit mask height fed to the trained classifier (was DIGIT_H) — see file header on the model coupling",
-                      "default": 32
-                    },
-                    "confidenceFloorDivisor": {
-                      "type": "number",
-                      "description": "C4 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: the label-acceptance confidence floor is DERIVED per run, never a bare literal — floor = median(this run's finite per-badge classifier margins) / confidenceFloorDivisor. The 7 known-garbage reads span margin 0.0015-0.0756 and the 47 healthy reads span 0.978-0.994, three orders of magnitude apart, so this divisor has wide headroom; provenance (the run's own median and this divisor) is printed on every badge via BadgeEvidence.confidenceFloor.",
-                      "default": 8
-                    },
-                    "labelAmbiguityMargin": {
-                      "type": "number",
-                      "description": "C4 fix contract: minimum gap between the top-2 labelCandidates posterior confidences before a read is accepted rather than abstained as 'ambiguous' — inherited from old-stuff's badgeGlyphClassifier.ts minMargin (0.045), which operated on a comparable bounded posterior; restores the old classifier's ambiguity abstention that the per-digit-concatenation rebuild dropped.",
-                      "default": 0.045
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "G2": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "sprite": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Two-pass basket renderer-family detection: intact connected components, then occlusion recovery seeded by known renderer objects.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "bboxTolerancePx": {
-                      "type": "number",
-                      "description": "allowed difference from the 42x66 connected-component family bbox",
-                      "default": 2
-                    },
-                    "areaRatioMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.96
-                    },
-                    "areaRatioMax": {
-                      "type": "number",
-                      "description": "",
-                      "default": 1.03
-                    },
-                    "cleanWhiteCoverageMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.96
-                    },
-                    "cleanDarkShellMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.5
-                    },
-                    "cleanDarkCoherenceMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.8
-                    },
-                    "shellRadiusPx": {
-                      "type": "number",
-                      "description": "",
-                      "default": 2
-                    },
-                    "blackConsensusFraction": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.75
-                    },
-                    "blackConsensusMarginPx": {
-                      "type": "number",
-                      "description": "",
-                      "default": 4
-                    },
-                    "recoveryIdentityMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.9
-                    },
-                    "recoveryWhiteCoverageMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.9
-                    },
-                    "recoveryBlackSupportMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.8
-                    },
-                    "recoveryVisibilityMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.25
-                    },
-                    "highVisibilityMin": {
-                      "type": "number",
-                      "description": "",
-                      "default": 0.5
-                    },
-                    "dedupeRadiusPx": {
-                      "type": "number",
-                      "description": "",
-                      "default": 14
-                    },
-                    "semanticTipOffsetPx": {
-                      "type": "number",
-                      "description": "offset below the 42x66 family bbox to the pole-tip endpoint",
-                      "default": 4
-                    },
-                    "maxChildrenPerSeed": {
-                      "type": "number",
-                      "description": "",
-                      "default": 2
-                    },
-                    "spriteWidth": {
-                      "type": "number",
-                      "description": "",
-                      "default": 42
-                    },
-                    "spriteHeight": {
-                      "type": "number",
-                      "description": "",
-                      "default": 66
-                    }
-                  }
-                }
-              }
-            },
-            "cleanBasketFamily": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Refine baseline basket matches to intact renderer-family members using basket-shape white coverage plus a coherent local dark shell.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "bboxTolerancePx": {
-                      "type": "number",
-                      "description": "allowed difference between the bright component bbox and the 42x66 renderer-family bbox",
-                      "default": 0
-                    },
-                    "positionTolerancePx": {
-                      "type": "number",
-                      "description": "maximum top-left displacement between a baseline sprite match and its bright connected component",
-                      "default": 2
-                    },
-                    "areaRatioMin": {
-                      "type": "number",
-                      "description": "minimum connected bright-component area divided by the basket template white-pixel count",
-                      "default": 0.96
-                    },
-                    "areaRatioMax": {
-                      "type": "number",
-                      "description": "maximum connected bright-component area divided by the basket template white-pixel count",
-                      "default": 1.03
-                    },
-                    "whiteCoverageMin": {
-                      "type": "number",
-                      "description": "minimum fraction of expected basket-shape white pixels owned by the matched bright component; bbox-off pixels are ignored",
-                      "default": 0.96
-                    },
-                    "shellRadiusPx": {
-                      "type": "number",
-                      "description": "8-neighbor dilation radius used to form the local shell around the actual bright basket component shape",
-                      "default": 2
-                    },
-                    "darkShellMin": {
-                      "type": "number",
-                      "description": "minimum fraction of the shape-local shell occupied by dark-mask pixels",
-                      "default": 0.5
-                    },
-                    "darkCoherenceMin": {
-                      "type": "number",
-                      "description": "minimum fraction of dark shell pixels belonging to one connected dark component",
-                      "default": 0.8
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "G3": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "endpoints": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Visible tee candidate generation from enclosed hollow-glyph rings. Shard/component recovery is a separate G3 phase.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "holeAreaMin": {
-                      "type": "number",
-                      "description": "minimum enclosed dark hole area for tee detection (was HOLE_AREA_MIN)",
-                      "default": 10
-                    },
-                    "holeAreaMax": {
-                      "type": "number",
-                      "description": "maximum enclosed dark hole area for tee detection (was HOLE_AREA_MAX)",
-                      "default": 480
-                    },
-                    "holeDimMax": {
-                      "type": "number",
-                      "description": "maximum hole bbox dimension, width or height (was HOLE_DIM_MAX)",
-                      "default": 44
-                    },
-                    "ringBand": {
-                      "type": "number",
-                      "description": "ring band width (px) for bright-fraction measurement around the hole, and the dilation radius used to grow it (was RING_BAND)",
-                      "default": 3
-                    },
-                    "ringFracMin": {
-                      "type": "number",
-                      "description": "minimum bright fraction in the enclosing ring band (was RING_FRAC_MIN)",
-                      "default": 0.6
-                    },
-                    "dilationRadii": {
-                      "type": "array",
-                      "description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
-                      "default": [
-                        0,
-                        1,
-                        2,
-                        3
-                      ]
-                    },
-                    "largeRadiiThreshold": {
-                      "type": "number",
-                      "description": "dilation radius at/above which the coarser (largeRadiiAreaMin) hole-area floor applies instead of holeAreaMin (missed by the original inventory sweep — only the resulting area floor, 40, was recorded, not this threshold)",
-                      "default": 2
-                    },
-                    "largeRadiiAreaMin": {
-                      "type": "number",
-                      "description": "minimum hole area required for the larger dilation radii (radius >= largeRadiiThreshold)",
-                      "default": 40
-                    },
-                    "ringMergeProximity": {
-                      "type": "number",
-                      "description": "distance threshold for merging ring detections found at different dilation radii",
-                      "default": 10
-                    },
-                    "elongationThreshold": {
-                      "type": "number",
-                      "description": "principal-axis elongation ratio threshold distinguishing tee-rect from diamond (near-square) hole shape",
-                      "default": 1.18
-                    },
-                    "componentMinDim": {
-                      "type": "number",
-                      "description": "minimum component width or height for the bright-component tee fallback tier",
-                      "default": 8
-                    },
-                    "componentMaxDim": {
-                      "type": "number",
-                      "description": "maximum component width or height for the bright-component tee fallback tier",
-                      "default": 42
-                    },
-                    "componentMinArea": {
-                      "type": "number",
-                      "description": "minimum component area for the bright-component tee fallback tier",
-                      "default": 80
-                    },
-                    "componentMaxArea": {
-                      "type": "number",
-                      "description": "maximum component area for the bright-component tee fallback tier",
-                      "default": 350
-                    },
-                    "componentMinFill": {
-                      "type": "number",
-                      "description": "minimum component fill (area/bbox) for the bright-component tee fallback tier",
-                      "default": 0.2
-                    },
-                    "componentMaxFill": {
-                      "type": "number",
-                      "description": "maximum component fill (area/bbox) for the bright-component tee fallback tier",
-                      "default": 0.85
-                    },
-                    "teeRingDedupDistance": {
-                      "type": "number",
-                      "description": "distance threshold excluding a component-tee candidate near an already-accepted ring-tee (coincidentally also 12, but distinct from g4.scoring.ringTolerance — see file header)",
-                      "default": 12
-                    },
-                    "teeSpriteExclusionDistance": {
-                      "type": "number",
-                      "description": "distance threshold excluding a component-tee candidate near a matched basket-sprite center",
-                      "default": 24
-                    }
-                  }
-                }
-              }
-            },
-            "teeFamily": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area/fill. Incomplete frames remain missing for shard recovery.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "frameAreaMin": {
-                      "type": "number",
-                      "description": "minimum enclosing bright-component area to count as a frame candidate (LAB: area >= 10)",
-                      "default": 10
-                    },
-                    "frameAreaMax": {
-                      "type": "number",
-                      "description": "maximum enclosing bright-component area to count as a frame candidate (LAB: area <= 500)",
-                      "default": 500
-                    },
-                    "frameMaxWidth": {
-                      "type": "number",
-                      "description": "maximum frame bbox width (LAB: bboxW <= 50)",
-                      "default": 50
-                    },
-                    "frameMaxHeight": {
-                      "type": "number",
-                      "description": "maximum frame bbox height (LAB: bboxH <= 50)",
-                      "default": 50
-                    },
-                    "majorRatioToleranceFactor": {
-                      "type": "number",
-                      "description": "a family member's frame major must satisfy |log(f.major/s.major)| <= log(this) vs the anchor frame (LAB: log(1.25))",
-                      "default": 1.25
-                    },
-                    "minorRatioToleranceFactor": {
-                      "type": "number",
-                      "description": "same tolerance, applied to frame minor (LAB: log(1.25))",
-                      "default": 1.25
-                    },
-                    "areaRatioToleranceFactor": {
-                      "type": "number",
-                      "description": "same tolerance, applied to frame area (LAB: log(1.5))",
-                      "default": 1.5
-                    },
-                    "fillRatioToleranceFactor": {
-                      "type": "number",
-                      "description": "course-local intactness tolerance for bright-component fill; calibrated on Dashs H12 to reject the basket-occluded 0.611 frame while retaining the next-lowest visible frame at 0.711 (dataset-fit estimate, not physics)",
-                      "default": 1.25
-                    }
-                  }
-                }
-              }
-            },
-            "teeMinAreaPose": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Blind G3 intact-visible tee pose from the minimum-area rectangle enclosing exact detector-owned unit cells. It is not a literal OpenCV contour result: the unit-cell envelope intentionally differs from contour-point extents.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {}
-                }
-              }
-            }
-          }
-        },
-        "G4": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "phantomTee": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Assignment-completion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "minViableScore": {
-                      "type": "number",
-                      "description": "a hole whose best assignment score is at or below this counts as tee-less",
-                      "default": 0
-                    },
-                    "maxCompletions": {
-                      "type": "number",
-                      "description": "owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.",
-                      "default": 1
-                    }
-                  }
-                }
-              }
-            },
-            "teeRecovery": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "axisToleranceDeg": {
-                      "type": "number",
-                      "description": "Soft ceiling per owner policy 2026-08-28: the strict 3° badge-axis gate (BADGE_AXIS_TARGET_DEG) stays the debugging TARGET, and this knob is the OPERATIVE limit a config can widen past it. NULL RESULT on the current corpus, recorded honestly rather than chased: after dc96000 (\"Recovery owns every bright pixel inside badge bboxes\") stopped badge-digit-glyph chrome from masquerading as tee-shard evidence, a sweep ladder (3/5/10/20/30/45/88°) across NorthPark/HeritagePark/AlexClark/DashsTrack found every hole the mechanism can currently capture is ALREADY captured at the strict 3° target -- HeritagePark recovers H10, AlexClark recovers H10+H11, DashsTrack holds 18/18 (H3/H5/H12 via recovery) with IDENTICAL fitted centers and axis errors (well under 2°) at every rung from 3° to 88°. NorthPark recovers zero tees at any tolerance: its real pads sit outside the current discovery search bounds, a separate bug this knob cannot fix. Because widening buys nothing real here, the default stays at the strict target (3°) rather than moving; the knob is landed and validated (0.5-90°) so a future corpus that genuinely needs slack is one config edit away, with the achieved axis-error distribution always visible via the teeRecovery/axisErrorDeg receipt measurement. See docs/INTAKE-ENGINE-HANDOFF.md and artifacts/orchestration/axis-ceiling-progress.md for the full ladder table and per-hypothesis center/badge-bbox-containment check.",
-                      "default": 3
-                    }
-                  }
-                }
-              }
-            },
-            "teeBadgeLock": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {}
-                }
-              }
-            }
-          }
-        },
-        "G5": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "ribbon": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Support-field construction (blur, gradient ribbon sampling, normalization) and badge-occlusion patching.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "fieldScale": {
-                      "type": "number",
-                      "description": "support-field downsampling scale factor (was measure.ts DEFAULT_FIELD_SCALE; rides CorridorParams, see file header)",
-                      "default": 3
-                    },
-                    "supportTau": {
-                      "type": "number",
-                      "description": "support-field gradient percentile threshold (was measure.ts DEFAULT_SUPPORT_TAU; rides CorridorParams, see file header)",
-                      "default": 0.5
-                    },
-                    "gaussianSigma": {
-                      "type": "number",
-                      "description": "sigma for the initial gaussian blur of the support field (was GAUSSIAN_SIGMA)",
-                      "default": 0.8
-                    },
-                    "blurRadiusSigmas": {
-                      "type": "number",
-                      "description": "blur kernel radius, as a multiple of gaussianSigma (missed by the original inventory sweep: a THIRD distinct literal \"4\" in this file, alongside gradientDeltaMultiplier and costMultiplier)",
-                      "default": 4
-                    },
-                    "gradientDeltaMultiplier": {
-                      "type": "number",
-                      "description": "multiplier scaling ribbon half-width for edge-difference (gradient) sampling — coincidentally also 4, but a distinct knob from blurRadiusSigmas/costMultiplier",
-                      "default": 4
-                    },
-                    "normalizationPercentile": {
-                      "type": "number",
-                      "description": "percentile of raw support magnitude used for normalization",
-                      "default": 0.995
-                    },
-                    "supportGamma": {
-                      "type": "number",
-                      "description": "gamma exponent for support-field power normalization",
-                      "default": 0.7
-                    },
-                    "costMultiplier": {
-                      "type": "number",
-                      "description": "multiplicative boost to unsupported regions in the routing cost field — coincidentally also 4, but a distinct knob from gradientDeltaMultiplier/blurRadiusSigmas",
-                      "default": 4
-                    },
-                    "haloSupportThreshold": {
-                      "type": "number",
-                      "description": "support level capped for cells under a badge (halo occlusion) — separate from patchAcceptanceThreshold despite the same value",
-                      "default": 0.5
-                    },
-                    "patchReachMargin": {
-                      "type": "number",
-                      "description": "pixel margin added to badge half-width for patch-search expansion",
-                      "default": 6
-                    },
-                    "sampleOffsetPx": {
-                      "type": "number",
-                      "description": "symmetric inner/outer offset from ribbon half-width for edge-patch orientation sampling (one knob: the code uses the same value on both sides, half-2.5 and half+2.5)",
-                      "default": 2.5
-                    },
-                    "patchOrientations": {
-                      "type": "number",
-                      "description": "number of angles sampled when testing badge-edge patching",
-                      "default": 24
-                    },
-                    "centerOuterGrayMargin": {
-                      "type": "number",
-                      "description": "grayscale difference threshold used to reject a badge-edge patch candidate",
-                      "default": 8
-                    },
-                    "liftThreshold": {
-                      "type": "number",
-                      "description": "grayscale lift (inner-outer difference) that normalizes to a full-strength patch score",
-                      "default": 45
-                    },
-                    "patchAcceptanceThreshold": {
-                      "type": "number",
-                      "description": "minimum patch score (from liftThreshold normalization) before a cell is patched at all (missed by the original inventory sweep — coincidentally also 0.5, but a distinct knob from haloSupportThreshold)",
-                      "default": 0.5
-                    },
-                    "patchedCellSupportCap": {
-                      "type": "number",
-                      "description": "maximum support value assigned to a patched cell",
-                      "default": 0.85
-                    },
-                    "haloBboxMargin": {
-                      "type": "number",
-                      "description": "pixel margin expanding a badge bbox for the halo-capping scan (missed by the original inventory sweep; distinct from insideBadgeMargin and from patchReachMargin)",
-                      "default": 3
-                    },
-                    "insideBadgeMargin": {
-                      "type": "number",
-                      "description": "pixel margin used by the \"is this point inside a badge\" occlusion test during patch search (missed by the original inventory sweep; distinct from haloBboxMargin)",
-                      "default": 2
-                    }
-                  }
-                }
-              }
-            },
-            "routing": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Bucketed-priority-queue pathfinding geometry plus the corridor/route-search parameters.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "quantum": {
-                      "type": "number",
-                      "description": "distance quantum (bucket width) for the bucketed priority queue in pathfinding (was QUANTUM)",
-                      "default": 0.125
-                    },
-                    "ring": {
-                      "type": "number",
-                      "description": "ring buffer size (bucket count) for the pathfinding queue (was RING); see validateRoutingRingQuantum for the cross-feature relationship to quantum and ribbon.costMultiplier",
-                      "default": 64
-                    },
-                    "seedCostClamp": {
-                      "type": "number",
-                      "description": "local cost cap applied to the seed neighborhood in pathfinding",
-                      "default": 1.4
-                    },
-                    "seedClampRadiusCells": {
-                      "type": "number",
-                      "description": "radius (field cells) of the seed neighborhood that gets seedCostClamp applied (missed by the original inventory sweep — only the clamp value was recorded, not this radius)",
-                      "default": 6
-                    },
-                    "corridorWidthPx": {
-                      "type": "number",
-                      "description": "corridor width in pixels for leg search (was measure.ts DEFAULT_CORRIDOR_WIDTH; rides CorridorParams, see file header)",
-                      "default": 37
-                    },
-                    "orientations": {
-                      "type": "number",
-                      "description": "number of angle orientations sampled for routing (was measure.ts DEFAULT_ORIENTATIONS; rides CorridorParams, see file header)",
-                      "default": 12
-                    },
-                    "widthsSrc": {
-                      "type": "array",
-                      "description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
-                      "default": [
-                        24,
-                        32,
-                        40,
-                        48,
-                        56,
-                        64
-                      ]
-                    },
-                    "alignmentPower": {
-                      "type": "number",
-                      "description": "alignment weighting power for routing (was measure.ts DEFAULT_ALIGNMENT_POWER; rides CorridorParams, see file header)",
-                      "default": 2
-                    },
-                    "worstWindowSrcPx": {
-                      "type": "number",
-                      "description": "worst-case search window size in pixels (was measure.ts DEFAULT_WORST_WINDOW; rides CorridorParams, see file header)",
-                      "default": 90
-                    }
-                  }
-                }
-              }
-            },
-            "fourLaneSensor": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "edgeDeltaPx": {
-                      "type": "number",
-                      "description": "normal-distance offset on each side of an expected rail used for inside-vs-outside grayscale lift",
-                      "default": 2.5
-                    },
-                    "liftReference": {
-                      "type": "number",
-                      "description": "inside-minus-outside grayscale lift that maps to score 1.0",
-                      "default": 45
-                    },
-                    "tangentHalfPx": {
-                      "type": "number",
-                      "description": "half-length in source pixels sampled along the tangent for each band observation",
-                      "default": 4
-                    },
-                    "tangentSamples": {
-                      "type": "number",
-                      "description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
-                      "default": 5
-                    }
-                  }
-                }
-              }
-            },
-            "straightTest": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "truthAssisted": {
-                      "type": "boolean",
-                      "description": "Use verified canonical endpoint coordinates for explicitly tainted comparison only.",
-                      "default": false
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "G6": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "scoring": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "fallbackTeeBboxOffset": {
-                      "type": "number",
-                      "description": "fallback tee bbox half-size when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
-                      "default": 6
-                    },
-                    "fallbackTeeBboxSize": {
-                      "type": "number",
-                      "description": "fallback tee bbox dimension (size x size) when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
-                      "default": 12
-                    },
-                    "ringDistance": {
-                      "type": "number",
-                      "description": "basket-to-tee ring membership distance (shared: assignment.ts recoveredTee onRing, measure.ts makeTees onRing, scoring.ts zoneFactor primary ring)",
-                      "default": 84
-                    },
-                    "ringTolerance": {
-                      "type": "number",
-                      "description": "tolerance band around ringDistance for the basket-to-tee ring check (shared: assignment.ts, measure.ts, scoring.ts)",
-                      "default": 12
-                    },
-                    "zoneFactorDistance": {
-                      "type": "number",
-                      "description": "close-proximity threshold for the zone factor penalty around a non-owning basket",
-                      "default": 35
-                    },
-                    "secondaryRingDistance": {
-                      "type": "number",
-                      "description": "secondary ring distance for the zone factor radial check",
-                      "default": 44
-                    },
-                    "secondaryRingTolerance": {
-                      "type": "number",
-                      "description": "tolerance band around secondaryRingDistance for the zone factor radial check",
-                      "default": 8
-                    },
-                    "radialTolerance": {
-                      "type": "number",
-                      "description": "radial alignment fraction threshold for the zone factor penalty",
-                      "default": 0.5
-                    },
-                    "teeOrientationSigma": {
-                      "type": "number",
-                      "description": "gaussian sigma (degrees) for the tee-to-badge angle penalty",
-                      "default": 12
-                    },
-                    "badgeFractionTarget": {
-                      "type": "number",
-                      "description": "optimal fractional position of the badge along the tee-basket chord",
-                      "default": 0.36
-                    },
-                    "badgeFractionTolerance": {
-                      "type": "number",
-                      "description": "acceptable deviation from badgeFractionTarget before the fraction penalty kicks in",
-                      "default": 0.19
-                    },
-                    "badgeFractionSigma": {
-                      "type": "number",
-                      "description": "gaussian sigma for the badge-fraction penalty",
-                      "default": 0.15
-                    },
-                    "collinearityWeight": {
-                      "type": "number",
-                      "description": "upward factor for the collinearity bonus",
-                      "default": 0.6
-                    },
-                    "collinearitySigma": {
-                      "type": "number",
-                      "description": "gaussian sigma (degrees) for the collinearity angle penalty",
-                      "default": 2
-                    },
-                    "basketIdentityFloor": {
-                      "type": "number",
-                      "description": "minimum score factor for the basket identity prior",
-                      "default": 0.4
-                    },
-                    "basketScoreOffset": {
-                      "type": "number",
-                      "description": "offset subtracted from basket.score in the basket identity calculation",
-                      "default": 0.2
-                    },
-                    "basketScoreScale": {
-                      "type": "number",
-                      "description": "divisor for basket.score normalization in the basket identity calculation",
-                      "default": 0.5
-                    },
-                    "endpointSupportSampleCount": {
-                      "type": "number",
-                      "description": "number of trailing leg-path points averaged for RawPairEvidence.endpointSupportTee/endpointSupportBasket (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-                      "default": 3
-                    },
-                    "badgeOverlapWaiverRadius": {
-                      "type": "number",
-                      "description": "distance (field cells) from the badge center within which a leg point is exempt from the tee/basket path-overlap penalty (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-                      "default": 8
-                    },
-                    "recoveredTeePrior": {
-                      "type": "number",
-                      "description": "confidence discount applied to a pair score when the tee is a recovered (synthesized) tee rather than a directly-detected one (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-                      "default": 0.7
-                    },
-                    "minWindowCells": {
-                      "type": "number",
-                      "description": "minimum window size (field cells) for the weakWindow sliding-window worst-case score, shared by zfitFactor/makeRawPairEvidence/scorePair (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
-                      "default": 3
-                    }
-                  }
-                }
-              }
-            },
-            "search": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "assignTopRows": {
-                      "type": "number",
-                      "description": "window size (top-N by score) of candidate pairs per badge kept for the search (was ASSIGN_TOP_ROWS)",
-                      "default": 60
-                    },
-                    "exchangeTopK": {
-                      "type": "number",
-                      "description": "top-k limit per badge for pairwise exchange optimization (was EXCHANGE_TOP_K)",
-                      "default": 12
-                    },
-                    "maxAssignPasses": {
-                      "type": "number",
-                      "description": "iteration limit for the assignment optimization loop (was MAX_ASSIGN_PASSES)",
-                      "default": 60
-                    },
-                    "recoveredTeeDedupeDistance": {
-                      "type": "number",
-                      "description": "minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate",
-                      "default": 14
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "G7": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "zfit": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": false
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "topK": {
-                      "type": "number",
-                      "description": "assignment rows eligible for the salvage re-score (was ZFIT_TOP_K)",
-                      "default": 80
-                    },
-                    "alignedWorstCeiling": {
-                      "type": "number",
-                      "description": "skip salvage when the aligned worst-window support is already at/above this (also the zfitFactor early-return ceiling — same check, same value)",
-                      "default": 0.28
-                    },
-                    "distanceStartOffset": {
-                      "type": "number",
-                      "description": "pixel offset past the first leg length where zfit waypoint search begins",
-                      "default": 8
-                    },
-                    "distanceStepPx": {
-                      "type": "number",
-                      "description": "spacing between successive waypoint distances tried in the zfit search",
-                      "default": 14
-                    },
-                    "maxChordFraction": {
-                      "type": "number",
-                      "description": "maximum detour ratio (of the tee-basket chord) allowed in zfit path search",
-                      "default": 0.85
-                    },
-                    "maxAdditionalDistance": {
-                      "type": "number",
-                      "description": "maximum extra distance beyond the first leg for zfit waypoint searches",
-                      "default": 220
-                    },
-                    "bendAngles": {
-                      "type": "array",
-                      "description": "bend angle samples (degrees) tried at each zfit waypoint",
-                      "default": [
-                        -60,
-                        -45,
-                        -30,
-                        -20,
-                        0,
-                        20,
-                        30,
-                        45,
-                        60
-                      ]
-                    },
-                    "bendLengthShort": {
-                      "type": "number",
-                      "description": "shortest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-                      "default": 0.8
-                    },
-                    "bendLengthMedium": {
-                      "type": "number",
-                      "description": "middle bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-                      "default": 1.6
-                    },
-                    "bendLengthLong": {
-                      "type": "number",
-                      "description": "longest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
-                      "default": 3
-                    },
-                    "maxPathOvershootFraction": {
-                      "type": "number",
-                      "description": "maximum total bent-path length, as a multiple of the direct tee-basket chord, before a candidate waypoint/bend is rejected (missed by the original inventory sweep)",
-                      "default": 1.4
-                    },
-                    "bendFactorWithSegment": {
-                      "type": "number",
-                      "description": "score multiplier when the bent path has a non-zero second segment",
-                      "default": 0.8
-                    },
-                    "bendFactorWithoutSegment": {
-                      "type": "number",
-                      "description": "score multiplier when the bent path has no second segment (angle bends immediately into the basket leg)",
-                      "default": 0.9
-                    },
-                    "scoreMultiplier": {
-                      "type": "number",
-                      "description": "final multiplier applied to every zfit candidate score, on top of the bend factor",
-                      "default": 0.9
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "shared": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "hsv": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Bright/dark pixel-mask HSV thresholds feeding every downstream gate.",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "default": true
-                },
-                "knobs": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "brightVMin": {
-                      "type": "number",
-                      "description": "minimum V (brightness) for bright-pixel classification (was BRIGHT_V_MIN)",
-                      "default": 210
-                    },
-                    "brightSMax": {
-                      "type": "number",
-                      "description": "maximum S (saturation — colorfulness) for bright-pixel classification (was BRIGHT_S_MAX); coincidentally also 45, but a different HSV axis from darkVMax — see file header",
-                      "default": 45
-                    },
-                    "darkVMax": {
-                      "type": "number",
-                      "description": "maximum V (brightness) for dark-pixel classification (was DARK_V_MAX); coincidentally also 45, but a different HSV axis from brightSMax — see file header",
-                      "default": 45
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "chainspot://threeFactor-config@1",
+	"title": "threeFactor engine config",
+	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"schema",
+		"name"
+	],
+	"properties": {
+		"$schema": {
+			"type": "string"
+		},
+		"schema": {
+			"const": "threeFactor-config@1"
+		},
+		"name": {
+			"type": "string",
+			"minLength": 1
+		},
+		"note": {
+			"type": "string"
+		},
+		"execution": {
+			"type": "array",
+			"items": {
+				"enum": [
+					"badgeStage",
+					"badges",
+					"supportField",
+					"badgeOcclusionPatch",
+					"baskets",
+					"tees",
+					"rawPairs",
+					"measurement",
+					"assignment",
+					"zfit",
+					"phantomTee",
+					"teeFamily",
+					"teeMinAreaPose",
+					"teeRecovery",
+					"teeBadgeLock",
+					"badgeGlyphTemplate",
+					"cleanBasketFamily",
+					"straightTest"
+				]
+			},
+			"uniqueItems": true,
+			"description": "Full unit order; omit to inherit the default order."
+		},
+		"gates": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"G1": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"badges": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Badge-family detection (aspect/dark-interior/size gates) plus dark-plate glyph recovery.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"badgeAspectMin": {
+											"type": "number",
+											"description": "minimum aspect ratio for bright badge candidates (was BADGE_ASPECT_MIN)",
+											"default": 1.15
+										},
+										"badgeAspectMax": {
+											"type": "number",
+											"description": "maximum aspect ratio for bright badge candidates (was BADGE_ASPECT_MAX)",
+											"default": 1.8
+										},
+										"badgeDarkInteriorMin": {
+											"type": "number",
+											"description": "minimum dark pixel fraction for badge interior (was BADGE_DARK_INTERIOR_MIN)",
+											"default": 0.45
+										},
+										"badgeSizeTolFactor": {
+											"type": "number",
+											"description": "size tolerance for badge family clustering, in linear space; Math.log(...) is applied at the anchoredFamilies use site (was BADGE_SIZE_TOL = Math.log(1.15), per merge note 4)",
+											"default": 1.15
+										},
+										"plateMinWidth": {
+											"type": "number",
+											"description": "minimum width for dark-plate badge recovery candidates",
+											"default": 34
+										},
+										"plateMaxWidth": {
+											"type": "number",
+											"description": "maximum width for dark-plate badge recovery candidates",
+											"default": 78
+										},
+										"plateMinHeight": {
+											"type": "number",
+											"description": "minimum height for dark-plate badge recovery candidates",
+											"default": 24
+										},
+										"plateMaxHeight": {
+											"type": "number",
+											"description": "maximum height for dark-plate badge recovery candidates",
+											"default": 54
+										},
+										"plateAspectMin": {
+											"type": "number",
+											"description": "minimum aspect ratio for dark-plate candidates",
+											"default": 1
+										},
+										"plateAspectMax": {
+											"type": "number",
+											"description": "maximum aspect ratio for dark-plate candidates",
+											"default": 2.4
+										},
+										"plateFillMin": {
+											"type": "number",
+											"description": "minimum fill fraction (area/bbox) for dark-plate candidates",
+											"default": 0.55
+										},
+										"plateInteriorMargin": {
+											"type": "number",
+											"description": "pixel margin for interior glyph fraction measurement (coincidentally also 4, but a distinct knob from plateBboxMargin)",
+											"default": 4
+										},
+										"plateGlyphFractionMin": {
+											"type": "number",
+											"description": "minimum bright pixel fraction in plate interior",
+											"default": 0.04
+										},
+										"plateGlyphFractionMax": {
+											"type": "number",
+											"description": "maximum bright pixel fraction in plate interior",
+											"default": 0.4
+										},
+										"plateProximityThreshold": {
+											"type": "number",
+											"description": "distance threshold: a dark-plate candidate must not be near an already-accepted bright badge",
+											"default": 22
+										},
+										"plateBboxMargin": {
+											"type": "number",
+											"description": "margin for expanding the dark-plate badge bounding box (coincidentally also 4, but a distinct knob from plateInteriorMargin)",
+											"default": 4
+										},
+										"badgeInsidePadding": {
+											"type": "number",
+											"description": "padding (px) around a badge bbox for the tee-candidate exclusion test in measure.ts makeTees; the rejection reason string is templated from this value (was hard-coded \"+3px pad\" — see file header)",
+											"default": 3
+										},
+										"plateFrameTolerancePx": {
+											"type": "number",
+											"description": "C1 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: raster-cell allowance for a dark-plate badge's bright component to count as \"reaching\" an edge of the measured plate interior (plateBbox inset by plateInteriorMargin) when digits/badgeGlyph.ts positively identifies the plate's own printed frame; digit glyphs are inset 3-4px so 2px never admits a real digit",
+											"default": 2
+										}
+									}
+								}
+							}
+						},
+						"digits": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Badge digit segmentation (noise/height/wide-merge gates) and canonical digit-mask normalization.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minComponentArea": {
+											"type": "number",
+											"description": "minimum pixel area for a connected component to be a digit candidate (was MIN_COMPONENT_AREA)",
+											"default": 6
+										},
+										"heightRatioMin": {
+											"type": "number",
+											"description": "minimum height, as a fraction of the tallest surviving component, for a digit candidate (was HEIGHT_RATIO_MIN)",
+											"default": 0.5
+										},
+										"wideRatio": {
+											"type": "number",
+											"description": "width-to-height ratio threshold for detecting a merged (touching) digit pair (was WIDE_RATIO)",
+											"default": 0.95
+										},
+										"valleySearchLo": {
+											"type": "number",
+											"description": "lower bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_LO); see file header — an inverted pair vs. valleySearchHi is safe, not corrupting",
+											"default": 0.3
+										},
+										"valleySearchHi": {
+											"type": "number",
+											"description": "upper bound (fraction of width) for the interior valley-search window (was VALLEY_SEARCH_HI); see file header — an inverted pair vs. valleySearchLo is safe, not corrupting",
+											"default": 0.7
+										},
+										"digitW": {
+											"type": "number",
+											"description": "normalized digit mask width fed to the trained classifier (was DIGIT_W) — see file header on the model coupling",
+											"default": 24
+										},
+										"digitH": {
+											"type": "number",
+											"description": "normalized digit mask height fed to the trained classifier (was DIGIT_H) — see file header on the model coupling",
+											"default": 32
+										},
+										"confidenceFloorDivisor": {
+											"type": "number",
+											"description": "C4 (docs/seven-whys/g1-badge-digit-garbage.md) fix contract: the label-acceptance confidence floor is DERIVED per run, never a bare literal — floor = median(this run's finite per-badge classifier margins) / confidenceFloorDivisor. The 7 known-garbage reads span margin 0.0015-0.0756 and the 47 healthy reads span 0.978-0.994, three orders of magnitude apart, so this divisor has wide headroom; provenance (the run's own median and this divisor) is printed on every badge via BadgeEvidence.confidenceFloor.",
+											"default": 8
+										},
+										"labelAmbiguityMargin": {
+											"type": "number",
+											"description": "C4 fix contract: minimum gap between the top-2 labelCandidates posterior confidences before a read is accepted rather than abstained as 'ambiguous' — inherited from old-stuff's badgeGlyphClassifier.ts minMargin (0.045), which operated on a comparable bounded posterior; restores the old classifier's ambiguity abstention that the per-digit-concatenation rebuild dropped.",
+											"default": 0.045
+										}
+									}
+								}
+							}
+						},
+						"badgeGlyphTemplate": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Whole-glyph Dice-coefficient template classifier (docs/CLAIMS-LEDGER.md row 23) run alongside the current per-digit reader for comparison; never overwrites BadgeEvidence.label.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minScore": {
+											"type": "number",
+											"description": "old system's empirical value (badgeGlyphClassifier.ts DEFAULTS.minScore) carried as-is; proven on the full Dev6 corpus by the ledger row 23 head-to-head. Below this Dice score the best-matching template is rejected outright ('low-score' abstention).",
+											"default": 0.58
+										},
+										"minMargin": {
+											"type": "number",
+											"description": "old system's empirical value (DEFAULTS.minMargin), same provenance as g1.digits' labelAmbiguityMargin (inherited from this same source). Below this Dice-score gap between the best and second-best template, the read abstains as 'ambiguous' rather than guessing.",
+											"default": 0.045
+										},
+										"foregroundThreshold": {
+											"type": "number",
+											"description": "old system's empirical value (DEFAULTS.foregroundThreshold): minimum grayscale channel value for a sampled pixel to count as bright/printed-glyph foreground.",
+											"default": 150
+										},
+										"maxShiftPx": {
+											"type": "number",
+											"description": "old system's empirical value (DEFAULTS.maxShiftPx): integer-pixel search window for the best translation alignment before scoring Dice against each template.",
+											"default": 1
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G2": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"sprite": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Two-pass basket renderer-family detection: intact connected components, then occlusion recovery seeded by known renderer objects.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"bboxTolerancePx": {
+											"type": "number",
+											"description": "allowed difference from the 42x66 connected-component family bbox",
+											"default": 2
+										},
+										"areaRatioMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.96
+										},
+										"areaRatioMax": {
+											"type": "number",
+											"description": "",
+											"default": 1.03
+										},
+										"cleanWhiteCoverageMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.96
+										},
+										"cleanDarkShellMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.5
+										},
+										"cleanDarkCoherenceMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.8
+										},
+										"shellRadiusPx": {
+											"type": "number",
+											"description": "",
+											"default": 2
+										},
+										"blackConsensusFraction": {
+											"type": "number",
+											"description": "",
+											"default": 0.75
+										},
+										"blackConsensusMarginPx": {
+											"type": "number",
+											"description": "",
+											"default": 4
+										},
+										"recoveryIdentityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.9
+										},
+										"recoveryWhiteCoverageMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.9
+										},
+										"recoveryBlackSupportMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.8
+										},
+										"recoveryVisibilityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.25
+										},
+										"highVisibilityMin": {
+											"type": "number",
+											"description": "",
+											"default": 0.5
+										},
+										"dedupeRadiusPx": {
+											"type": "number",
+											"description": "",
+											"default": 14
+										},
+										"semanticTipOffsetPx": {
+											"type": "number",
+											"description": "offset below the 42x66 family bbox to the pole-tip endpoint",
+											"default": 4
+										},
+										"maxChildrenPerSeed": {
+											"type": "number",
+											"description": "",
+											"default": 2
+										},
+										"spriteWidth": {
+											"type": "number",
+											"description": "",
+											"default": 42
+										},
+										"spriteHeight": {
+											"type": "number",
+											"description": "",
+											"default": 66
+										}
+									}
+								}
+							}
+						},
+						"cleanBasketFamily": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Refine baseline basket matches to intact renderer-family members using basket-shape white coverage plus a coherent local dark shell.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"bboxTolerancePx": {
+											"type": "number",
+											"description": "allowed difference between the bright component bbox and the 42x66 renderer-family bbox",
+											"default": 0
+										},
+										"positionTolerancePx": {
+											"type": "number",
+											"description": "maximum top-left displacement between a baseline sprite match and its bright connected component",
+											"default": 2
+										},
+										"areaRatioMin": {
+											"type": "number",
+											"description": "minimum connected bright-component area divided by the basket template white-pixel count",
+											"default": 0.96
+										},
+										"areaRatioMax": {
+											"type": "number",
+											"description": "maximum connected bright-component area divided by the basket template white-pixel count",
+											"default": 1.03
+										},
+										"whiteCoverageMin": {
+											"type": "number",
+											"description": "minimum fraction of expected basket-shape white pixels owned by the matched bright component; bbox-off pixels are ignored",
+											"default": 0.96
+										},
+										"shellRadiusPx": {
+											"type": "number",
+											"description": "8-neighbor dilation radius used to form the local shell around the actual bright basket component shape",
+											"default": 2
+										},
+										"darkShellMin": {
+											"type": "number",
+											"description": "minimum fraction of the shape-local shell occupied by dark-mask pixels",
+											"default": 0.5
+										},
+										"darkCoherenceMin": {
+											"type": "number",
+											"description": "minimum fraction of dark shell pixels belonging to one connected dark component",
+											"default": 0.8
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G3": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"endpoints": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Visible tee candidate generation from enclosed hollow-glyph rings. Shard/component recovery is a separate G3 phase.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"holeAreaMin": {
+											"type": "number",
+											"description": "minimum enclosed dark hole area for tee detection (was HOLE_AREA_MIN)",
+											"default": 10
+										},
+										"holeAreaMax": {
+											"type": "number",
+											"description": "maximum enclosed dark hole area for tee detection (was HOLE_AREA_MAX)",
+											"default": 480
+										},
+										"holeDimMax": {
+											"type": "number",
+											"description": "maximum hole bbox dimension, width or height (was HOLE_DIM_MAX)",
+											"default": 44
+										},
+										"ringBand": {
+											"type": "number",
+											"description": "ring band width (px) for bright-fraction measurement around the hole, and the dilation radius used to grow it (was RING_BAND)",
+											"default": 3
+										},
+										"ringFracMin": {
+											"type": "number",
+											"description": "minimum bright fraction in the enclosing ring band (was RING_FRAC_MIN)",
+											"default": 0.6
+										},
+										"dilationRadii": {
+											"type": "array",
+											"description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
+											"default": [
+												0,
+												1,
+												2,
+												3
+											]
+										},
+										"largeRadiiThreshold": {
+											"type": "number",
+											"description": "dilation radius at/above which the coarser (largeRadiiAreaMin) hole-area floor applies instead of holeAreaMin (missed by the original inventory sweep — only the resulting area floor, 40, was recorded, not this threshold)",
+											"default": 2
+										},
+										"largeRadiiAreaMin": {
+											"type": "number",
+											"description": "minimum hole area required for the larger dilation radii (radius >= largeRadiiThreshold)",
+											"default": 40
+										},
+										"ringMergeProximity": {
+											"type": "number",
+											"description": "distance threshold for merging ring detections found at different dilation radii",
+											"default": 10
+										},
+										"elongationThreshold": {
+											"type": "number",
+											"description": "principal-axis elongation ratio threshold distinguishing tee-rect from diamond (near-square) hole shape",
+											"default": 1.18
+										},
+										"componentMinDim": {
+											"type": "number",
+											"description": "minimum component width or height for the bright-component tee fallback tier",
+											"default": 8
+										},
+										"componentMaxDim": {
+											"type": "number",
+											"description": "maximum component width or height for the bright-component tee fallback tier",
+											"default": 42
+										},
+										"componentMinArea": {
+											"type": "number",
+											"description": "minimum component area for the bright-component tee fallback tier",
+											"default": 80
+										},
+										"componentMaxArea": {
+											"type": "number",
+											"description": "maximum component area for the bright-component tee fallback tier",
+											"default": 350
+										},
+										"componentMinFill": {
+											"type": "number",
+											"description": "minimum component fill (area/bbox) for the bright-component tee fallback tier",
+											"default": 0.2
+										},
+										"componentMaxFill": {
+											"type": "number",
+											"description": "maximum component fill (area/bbox) for the bright-component tee fallback tier",
+											"default": 0.85
+										},
+										"teeRingDedupDistance": {
+											"type": "number",
+											"description": "distance threshold excluding a component-tee candidate near an already-accepted ring-tee (coincidentally also 12, but distinct from g4.scoring.ringTolerance — see file header)",
+											"default": 12
+										},
+										"teeSpriteExclusionDistance": {
+											"type": "number",
+											"description": "distance threshold excluding a component-tee candidate near a matched basket-sprite center",
+											"default": 24
+										}
+									}
+								}
+							}
+						},
+						"teeFamily": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Visible tee detection: keep only the largest mutually-consistent intact hollow-glyph family by enclosing-frame major/minor/area/fill. Incomplete frames remain missing for shard recovery.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"frameAreaMin": {
+											"type": "number",
+											"description": "minimum enclosing bright-component area to count as a frame candidate (LAB: area >= 10)",
+											"default": 10
+										},
+										"frameAreaMax": {
+											"type": "number",
+											"description": "maximum enclosing bright-component area to count as a frame candidate (LAB: area <= 500)",
+											"default": 500
+										},
+										"frameMaxWidth": {
+											"type": "number",
+											"description": "maximum frame bbox width (LAB: bboxW <= 50)",
+											"default": 50
+										},
+										"frameMaxHeight": {
+											"type": "number",
+											"description": "maximum frame bbox height (LAB: bboxH <= 50)",
+											"default": 50
+										},
+										"majorRatioToleranceFactor": {
+											"type": "number",
+											"description": "a family member's frame major must satisfy |log(f.major/s.major)| <= log(this) vs the anchor frame (LAB: log(1.25))",
+											"default": 1.25
+										},
+										"minorRatioToleranceFactor": {
+											"type": "number",
+											"description": "same tolerance, applied to frame minor (LAB: log(1.25))",
+											"default": 1.25
+										},
+										"areaRatioToleranceFactor": {
+											"type": "number",
+											"description": "same tolerance, applied to frame area (LAB: log(1.5))",
+											"default": 1.5
+										},
+										"fillRatioToleranceFactor": {
+											"type": "number",
+											"description": "course-local intactness tolerance for bright-component fill; calibrated on Dashs H12 to reject the basket-occluded 0.611 frame while retaining the next-lowest visible frame at 0.711 (dataset-fit estimate, not physics)",
+											"default": 1.25
+										}
+									}
+								}
+							}
+						},
+						"teeMinAreaPose": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Blind G3 intact-visible tee pose from the minimum-area rectangle enclosing exact detector-owned unit cells. It is not a literal OpenCV contour result: the unit-cell envelope intentionally differs from contour-point extents.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
+								}
+							}
+						}
+					}
+				},
+				"G4": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"phantomTee": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Assignment-completion fallback: synthesize a missing tee at the predecessor hole's assigned basket tip.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minViableScore": {
+											"type": "number",
+											"description": "a hole whose best assignment score is at or below this counts as tee-less",
+											"default": 0
+										},
+										"maxCompletions": {
+											"type": "number",
+											"description": "owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.",
+											"default": 1
+										}
+									}
+								}
+							}
+						},
+						"teeRecovery": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"axisToleranceDeg": {
+											"type": "number",
+											"description": "Soft ceiling per owner policy 2026-08-28: the strict 3° badge-axis gate (BADGE_AXIS_TARGET_DEG) stays the debugging TARGET, and this knob is the OPERATIVE limit a config can widen past it. NULL RESULT on the current corpus, recorded honestly rather than chased: after dc96000 (\"Recovery owns every bright pixel inside badge bboxes\") stopped badge-digit-glyph chrome from masquerading as tee-shard evidence, a sweep ladder (3/5/10/20/30/45/88°) across NorthPark/HeritagePark/AlexClark/DashsTrack found every hole the mechanism can currently capture is ALREADY captured at the strict 3° target -- HeritagePark recovers H10, AlexClark recovers H10+H11, DashsTrack holds 18/18 (H3/H5/H12 via recovery) with IDENTICAL fitted centers and axis errors (well under 2°) at every rung from 3° to 88°. NorthPark recovers zero tees at any tolerance: its real pads sit outside the current discovery search bounds, a separate bug this knob cannot fix. Because widening buys nothing real here, the default stays at the strict target (3°) rather than moving; the knob is landed and validated (0.5-90°) so a future corpus that genuinely needs slack is one config edit away, with the achieved axis-error distribution always visible via the teeRecovery/axisErrorDeg receipt measurement. See docs/INTAKE-ENGINE-HANDOFF.md and artifacts/orchestration/axis-ceiling-progress.md for the full ladder table and per-hypothesis center/badge-bbox-containment check.",
+											"default": 3
+										}
+									}
+								}
+							}
+						},
+						"teeBadgeLock": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
+								}
+							}
+						}
+					}
+				},
+				"G5": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"ribbon": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Support-field construction (blur, gradient ribbon sampling, normalization) and badge-occlusion patching.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"fieldScale": {
+											"type": "number",
+											"description": "support-field downsampling scale factor (was measure.ts DEFAULT_FIELD_SCALE; rides CorridorParams, see file header)",
+											"default": 3
+										},
+										"supportTau": {
+											"type": "number",
+											"description": "support-field gradient percentile threshold (was measure.ts DEFAULT_SUPPORT_TAU; rides CorridorParams, see file header)",
+											"default": 0.5
+										},
+										"gaussianSigma": {
+											"type": "number",
+											"description": "sigma for the initial gaussian blur of the support field (was GAUSSIAN_SIGMA)",
+											"default": 0.8
+										},
+										"blurRadiusSigmas": {
+											"type": "number",
+											"description": "blur kernel radius, as a multiple of gaussianSigma (missed by the original inventory sweep: a THIRD distinct literal \"4\" in this file, alongside gradientDeltaMultiplier and costMultiplier)",
+											"default": 4
+										},
+										"gradientDeltaMultiplier": {
+											"type": "number",
+											"description": "multiplier scaling ribbon half-width for edge-difference (gradient) sampling — coincidentally also 4, but a distinct knob from blurRadiusSigmas/costMultiplier",
+											"default": 4
+										},
+										"normalizationPercentile": {
+											"type": "number",
+											"description": "percentile of raw support magnitude used for normalization",
+											"default": 0.995
+										},
+										"supportGamma": {
+											"type": "number",
+											"description": "gamma exponent for support-field power normalization",
+											"default": 0.7
+										},
+										"costMultiplier": {
+											"type": "number",
+											"description": "multiplicative boost to unsupported regions in the routing cost field — coincidentally also 4, but a distinct knob from gradientDeltaMultiplier/blurRadiusSigmas",
+											"default": 4
+										},
+										"haloSupportThreshold": {
+											"type": "number",
+											"description": "support level capped for cells under a badge (halo occlusion) — separate from patchAcceptanceThreshold despite the same value",
+											"default": 0.5
+										},
+										"patchReachMargin": {
+											"type": "number",
+											"description": "pixel margin added to badge half-width for patch-search expansion",
+											"default": 6
+										},
+										"sampleOffsetPx": {
+											"type": "number",
+											"description": "symmetric inner/outer offset from ribbon half-width for edge-patch orientation sampling (one knob: the code uses the same value on both sides, half-2.5 and half+2.5)",
+											"default": 2.5
+										},
+										"patchOrientations": {
+											"type": "number",
+											"description": "number of angles sampled when testing badge-edge patching",
+											"default": 24
+										},
+										"centerOuterGrayMargin": {
+											"type": "number",
+											"description": "grayscale difference threshold used to reject a badge-edge patch candidate",
+											"default": 8
+										},
+										"liftThreshold": {
+											"type": "number",
+											"description": "grayscale lift (inner-outer difference) that normalizes to a full-strength patch score",
+											"default": 45
+										},
+										"patchAcceptanceThreshold": {
+											"type": "number",
+											"description": "minimum patch score (from liftThreshold normalization) before a cell is patched at all (missed by the original inventory sweep — coincidentally also 0.5, but a distinct knob from haloSupportThreshold)",
+											"default": 0.5
+										},
+										"patchedCellSupportCap": {
+											"type": "number",
+											"description": "maximum support value assigned to a patched cell",
+											"default": 0.85
+										},
+										"haloBboxMargin": {
+											"type": "number",
+											"description": "pixel margin expanding a badge bbox for the halo-capping scan (missed by the original inventory sweep; distinct from insideBadgeMargin and from patchReachMargin)",
+											"default": 3
+										},
+										"insideBadgeMargin": {
+											"type": "number",
+											"description": "pixel margin used by the \"is this point inside a badge\" occlusion test during patch search (missed by the original inventory sweep; distinct from haloBboxMargin)",
+											"default": 2
+										}
+									}
+								}
+							}
+						},
+						"routing": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Bucketed-priority-queue pathfinding geometry plus the corridor/route-search parameters.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"quantum": {
+											"type": "number",
+											"description": "distance quantum (bucket width) for the bucketed priority queue in pathfinding (was QUANTUM)",
+											"default": 0.125
+										},
+										"ring": {
+											"type": "number",
+											"description": "ring buffer size (bucket count) for the pathfinding queue (was RING); see validateRoutingRingQuantum for the cross-feature relationship to quantum and ribbon.costMultiplier",
+											"default": 64
+										},
+										"seedCostClamp": {
+											"type": "number",
+											"description": "local cost cap applied to the seed neighborhood in pathfinding",
+											"default": 1.4
+										},
+										"seedClampRadiusCells": {
+											"type": "number",
+											"description": "radius (field cells) of the seed neighborhood that gets seedCostClamp applied (missed by the original inventory sweep — only the clamp value was recorded, not this radius)",
+											"default": 6
+										},
+										"corridorWidthPx": {
+											"type": "number",
+											"description": "corridor width in pixels for leg search (was measure.ts DEFAULT_CORRIDOR_WIDTH; rides CorridorParams, see file header)",
+											"default": 37
+										},
+										"orientations": {
+											"type": "number",
+											"description": "number of angle orientations sampled for routing (was measure.ts DEFAULT_ORIENTATIONS; rides CorridorParams, see file header)",
+											"default": 12
+										},
+										"widthsSrc": {
+											"type": "array",
+											"description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
+											"default": [
+												24,
+												32,
+												40,
+												48,
+												56,
+												64
+											]
+										},
+										"alignmentPower": {
+											"type": "number",
+											"description": "alignment weighting power for routing (was measure.ts DEFAULT_ALIGNMENT_POWER; rides CorridorParams, see file header)",
+											"default": 2
+										},
+										"worstWindowSrcPx": {
+											"type": "number",
+											"description": "worst-case search window size in pixels (was measure.ts DEFAULT_WORST_WINDOW; rides CorridorParams, see file header)",
+											"default": 90
+										}
+									}
+								}
+							}
+						},
+						"fourLaneSensor": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Four-lane ribbon cross-section sensor: paired/one-sided rails plus corridor-interior evidence with known occluders treated as UNKNOWN.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"edgeDeltaPx": {
+											"type": "number",
+											"description": "normal-distance offset on each side of an expected rail used for inside-vs-outside grayscale lift",
+											"default": 2.5
+										},
+										"liftReference": {
+											"type": "number",
+											"description": "inside-minus-outside grayscale lift that maps to score 1.0",
+											"default": 45
+										},
+										"tangentHalfPx": {
+											"type": "number",
+											"description": "half-length in source pixels sampled along the tangent for each band observation",
+											"default": 4
+										},
+										"tangentSamples": {
+											"type": "number",
+											"description": "number of uniformly spaced tangent samples per band; majority-blocked means UNKNOWN",
+											"default": 5
+										}
+									}
+								}
+							}
+						},
+						"straightTest": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"truthAssisted": {
+											"type": "boolean",
+											"description": "Use verified canonical endpoint coordinates for explicitly tainted comparison only.",
+											"default": false
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G6": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"scoring": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Tee-badge-basket pair scoring geometry: zone/ring proximity, orientation, collinearity, basket identity.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"fallbackTeeBboxOffset": {
+											"type": "number",
+											"description": "fallback tee bbox half-size when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 6
+										},
+										"fallbackTeeBboxSize": {
+											"type": "number",
+											"description": "fallback tee bbox dimension (size x size) when no ring/component geometry exists (shared: assignment.ts recoveredTee, measure.ts makeTees)",
+											"default": 12
+										},
+										"ringDistance": {
+											"type": "number",
+											"description": "basket-to-tee ring membership distance (shared: assignment.ts recoveredTee onRing, measure.ts makeTees onRing, scoring.ts zoneFactor primary ring)",
+											"default": 84
+										},
+										"ringTolerance": {
+											"type": "number",
+											"description": "tolerance band around ringDistance for the basket-to-tee ring check (shared: assignment.ts, measure.ts, scoring.ts)",
+											"default": 12
+										},
+										"zoneFactorDistance": {
+											"type": "number",
+											"description": "close-proximity threshold for the zone factor penalty around a non-owning basket",
+											"default": 35
+										},
+										"secondaryRingDistance": {
+											"type": "number",
+											"description": "secondary ring distance for the zone factor radial check",
+											"default": 44
+										},
+										"secondaryRingTolerance": {
+											"type": "number",
+											"description": "tolerance band around secondaryRingDistance for the zone factor radial check",
+											"default": 8
+										},
+										"radialTolerance": {
+											"type": "number",
+											"description": "radial alignment fraction threshold for the zone factor penalty",
+											"default": 0.5
+										},
+										"teeOrientationSigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the tee-to-badge angle penalty",
+											"default": 12
+										},
+										"badgeFractionTarget": {
+											"type": "number",
+											"description": "optimal fractional position of the badge along the tee-basket chord",
+											"default": 0.36
+										},
+										"badgeFractionTolerance": {
+											"type": "number",
+											"description": "acceptable deviation from badgeFractionTarget before the fraction penalty kicks in",
+											"default": 0.19
+										},
+										"badgeFractionSigma": {
+											"type": "number",
+											"description": "gaussian sigma for the badge-fraction penalty",
+											"default": 0.15
+										},
+										"collinearityWeight": {
+											"type": "number",
+											"description": "upward factor for the collinearity bonus",
+											"default": 0.6
+										},
+										"collinearitySigma": {
+											"type": "number",
+											"description": "gaussian sigma (degrees) for the collinearity angle penalty",
+											"default": 2
+										},
+										"basketIdentityFloor": {
+											"type": "number",
+											"description": "minimum score factor for the basket identity prior",
+											"default": 0.4
+										},
+										"basketScoreOffset": {
+											"type": "number",
+											"description": "offset subtracted from basket.score in the basket identity calculation",
+											"default": 0.2
+										},
+										"basketScoreScale": {
+											"type": "number",
+											"description": "divisor for basket.score normalization in the basket identity calculation",
+											"default": 0.5
+										},
+										"endpointSupportSampleCount": {
+											"type": "number",
+											"description": "number of trailing leg-path points averaged for RawPairEvidence.endpointSupportTee/endpointSupportBasket (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 3
+										},
+										"badgeOverlapWaiverRadius": {
+											"type": "number",
+											"description": "distance (field cells) from the badge center within which a leg point is exempt from the tee/basket path-overlap penalty (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 8
+										},
+										"recoveredTeePrior": {
+											"type": "number",
+											"description": "confidence discount applied to a pair score when the tee is a recovered (synthesized) tee rather than a directly-detected one (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 0.7
+										},
+										"minWindowCells": {
+											"type": "number",
+											"description": "minimum window size (field cells) for the weakWindow sliding-window worst-case score, shared by zfitFactor/makeRawPairEvidence/scorePair (missed by the per-cluster over-report re-scans; caught in the phase-3 sign-off sweep)",
+											"default": 3
+										}
+									}
+								}
+							}
+						},
+						"search": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Assignment local search: candidate-row windows, pairwise exchange passes, recovered-tee dedupe.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"assignTopRows": {
+											"type": "number",
+											"description": "window size (top-N by score) of candidate pairs per badge kept for the search (was ASSIGN_TOP_ROWS)",
+											"default": 60
+										},
+										"exchangeTopK": {
+											"type": "number",
+											"description": "top-k limit per badge for pairwise exchange optimization (was EXCHANGE_TOP_K)",
+											"default": 12
+										},
+										"maxAssignPasses": {
+											"type": "number",
+											"description": "iteration limit for the assignment optimization loop (was MAX_ASSIGN_PASSES)",
+											"default": 60
+										},
+										"recoveredTeeDedupeDistance": {
+											"type": "number",
+											"description": "minimum separation (px) between a recovered tee and an existing tee before it is dropped as a duplicate",
+											"default": 14
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"G7": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"zfit": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Z-shaped route salvage for top-K assignment rows whose corridor support is weak.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"topK": {
+											"type": "number",
+											"description": "assignment rows eligible for the salvage re-score (was ZFIT_TOP_K)",
+											"default": 80
+										},
+										"alignedWorstCeiling": {
+											"type": "number",
+											"description": "skip salvage when the aligned worst-window support is already at/above this (also the zfitFactor early-return ceiling — same check, same value)",
+											"default": 0.28
+										},
+										"distanceStartOffset": {
+											"type": "number",
+											"description": "pixel offset past the first leg length where zfit waypoint search begins",
+											"default": 8
+										},
+										"distanceStepPx": {
+											"type": "number",
+											"description": "spacing between successive waypoint distances tried in the zfit search",
+											"default": 14
+										},
+										"maxChordFraction": {
+											"type": "number",
+											"description": "maximum detour ratio (of the tee-basket chord) allowed in zfit path search",
+											"default": 0.85
+										},
+										"maxAdditionalDistance": {
+											"type": "number",
+											"description": "maximum extra distance beyond the first leg for zfit waypoint searches",
+											"default": 220
+										},
+										"bendAngles": {
+											"type": "array",
+											"description": "bend angle samples (degrees) tried at each zfit waypoint",
+											"default": [
+												-60,
+												-45,
+												-30,
+												-20,
+												0,
+												20,
+												30,
+												45,
+												60
+											]
+										},
+										"bendLengthShort": {
+											"type": "number",
+											"description": "shortest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 0.8
+										},
+										"bendLengthMedium": {
+											"type": "number",
+											"description": "middle bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 1.6
+										},
+										"bendLengthLong": {
+											"type": "number",
+											"description": "longest bend-segment length, as a multiple of corridor width, tried at each non-zero bend angle",
+											"default": 3
+										},
+										"maxPathOvershootFraction": {
+											"type": "number",
+											"description": "maximum total bent-path length, as a multiple of the direct tee-basket chord, before a candidate waypoint/bend is rejected (missed by the original inventory sweep)",
+											"default": 1.4
+										},
+										"bendFactorWithSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has a non-zero second segment",
+											"default": 0.8
+										},
+										"bendFactorWithoutSegment": {
+											"type": "number",
+											"description": "score multiplier when the bent path has no second segment (angle bends immediately into the basket leg)",
+											"default": 0.9
+										},
+										"scoreMultiplier": {
+											"type": "number",
+											"description": "final multiplier applied to every zfit candidate score, on top of the bend factor",
+											"default": 0.9
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+				"shared": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"hsv": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Bright/dark pixel-mask HSV thresholds feeding every downstream gate.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": true
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"brightVMin": {
+											"type": "number",
+											"description": "minimum V (brightness) for bright-pixel classification (was BRIGHT_V_MIN)",
+											"default": 210
+										},
+										"brightSMax": {
+											"type": "number",
+											"description": "maximum S (saturation — colorfulness) for bright-pixel classification (was BRIGHT_S_MAX); coincidentally also 45, but a different HSV axis from darkVMax — see file header",
+											"default": 45
+										},
+										"darkVMax": {
+											"type": "number",
+											"description": "maximum V (brightness) for dark-pixel classification (was DARK_V_MAX); coincidentally also 45, but a different HSV axis from brightSMax — see file header",
+											"default": 45
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }

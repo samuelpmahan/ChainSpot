@@ -25,6 +25,7 @@ import { teeMinAreaPoseUnit } from './features/g3.teeMinAreaPose';
 import { teeRecoveryUnit } from './features/g3.teeRecovery';
 import { straightTestUnit } from './features/st.straightTest';
 import { teeBadgeLockUnit } from './features/g4.teeBadgeLock';
+import { badgeGlyphTemplateUnit } from './features/g1.badgeGlyphTemplate';
 import { OcclusionDetector } from './occlusion';
 import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
@@ -108,6 +109,7 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	teeMinAreaPoseUnit,
 	teeRecoveryUnit,
 	teeBadgeLockUnit,
+	badgeGlyphTemplateUnit,
 	cleanBasketFamilyUnit,
 	straightTestUnit
 ];

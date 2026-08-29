@@ -16,6 +16,7 @@ import { g2SpriteFeature } from './g2.sprite';
 import { cleanBasketFamilyFeature } from './g2.cleanBasketFamily';
 import { g1BadgesFeature } from './g1.badges';
 import { g1DigitsFeature } from './g1.digits';
+import { badgeGlyphTemplateFeature } from './g1.badgeGlyphTemplate';
 import { sharedHsvFeature } from './shared.hsv';
 import { teeFamilyFeature } from './g3.teeFamily';
 import { teeMinAreaPoseFeature } from './g3.teeMinAreaPose';
@@ -36,6 +37,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	cleanBasketFamilyFeature,
 	g1BadgesFeature,
 	g1DigitsFeature,
+	badgeGlyphTemplateFeature,
 	sharedHsvFeature,
 	teeFamilyFeature,
 	teeMinAreaPoseFeature,

@@ -35,6 +35,10 @@ import {
 } from '../detectors/threeFactor/features/g2.cleanBasketFamily';
 import { g1BadgesFeature } from '../detectors/threeFactor/features/g1.badges';
 import { g1DigitsFeature } from '../detectors/threeFactor/features/g1.digits';
+import {
+	badgeGlyphTemplateUnit,
+	badgeGlyphTemplateFeature
+} from '../detectors/threeFactor/features/g1.badgeGlyphTemplate';
 import { sharedHsvFeature } from '../detectors/threeFactor/features/shared.hsv';
 import { g2SpriteFeature } from '../detectors/threeFactor/features/g2.sprite';
 import { g3EndpointsFeature } from '../detectors/threeFactor/features/g3.endpoints';
@@ -544,6 +548,19 @@ const reusedOps: OperationDef[] = [
 		run: (board, ctx) => straightTestUnit.run(asLegacyBoard(board), ctx)
 	},
 	wrapLegacy('badges', 'compute', 'G1', [g1DigitsFeature.id]),
+	{
+		spec: {
+			id: 'badgeGlyphTemplate',
+			kind: 'decide',
+			gate: 'G1',
+			unit: 'badgeGlyphTemplate',
+			consumes: badgeGlyphTemplateUnit.consumes,
+			produces: badgeGlyphTemplateUnit.produces,
+			features: [badgeGlyphTemplateFeature.id],
+			note: badgeGlyphTemplateUnit.note
+		},
+		run: (board, ctx) => badgeGlyphTemplateUnit.run(asLegacyBoard(board), ctx)
+	},
 	wrapLegacy('supportField', 'measure', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('badgeOcclusionPatch', 'transform', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('baskets', 'compute', 'G2', [g2SpriteFeature.id]),
@@ -667,6 +684,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['straightTest', ['straightTest']],
 	['badgeStage', badgeStageOps.map((op) => op.spec.id)],
 	['badges', ['badges']],
+	['badgeGlyphTemplate', ['badgeGlyphTemplate']],
 	['supportField', ['supportField']],
 	['badgeOcclusionPatch', ['badgeOcclusionPatch']],
 	['baskets', ['baskets']],

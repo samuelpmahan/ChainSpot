@@ -1,0 +1,26 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "badge-glyph-template-on",
+	"note": "A/B deviation: run the pre-rebuild whole-glyph Dice-template classifier (docs/CLAIMS-LEDGER.md row 23) alongside the current per-digit reader at G1. It never overwrites BadgeEvidence.label; it publishes an independent read plus an agreement verdict for comparison. Default execution/configuration remains unchanged when omitted.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"badgeGlyphTemplate",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery"
+	],
+	"gates": {
+		"G1": {
+			"badgeGlyphTemplate": {
+				"enabled": true
+			}
+		}
+	}
+}
