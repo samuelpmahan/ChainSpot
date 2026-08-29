@@ -4,16 +4,90 @@
 // solves multi-tile placement, and only the resulting canonical raster crosses
 // the boundary into presentation or algorithm code.
 
+import { existsSync, readFileSync } from 'node:fs';
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
 import { toGrayRaster, type InputAsset } from '@chainspot/alg/g0/inputAsset';
 import { stripChromeProposal, type StripChromeResult } from '@chainspot/alg/g0/stripChrome';
 import { cropRaster } from '@chainspot/alg/raster';
 import { solvePixelStitch } from '@chainspot/alg/g0/stitchSolve';
-import { materializeComposite } from '@chainspot/alg/g0/composite';
+import { materializeComposite, compositeIdBytes } from '@chainspot/alg/g0/composite';
+import { sha256Hex } from '@chainspot/alg/g0/hash';
 import { appendEntries, createLedger, type CoordinateTransformLedger, type LedgerEntry } from '@chainspot/alg/g0/ledger';
 import { matchTruth, type AnnotationPoint, type CanonicalTruth, type TruthMatch } from '@chainspot/alg/g0/truth';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor/types';
 import type { Placement } from '@chainspot/alg/g0/types';
+
+// BUG (2026-08-29 audit): Scope/Search/Traverse all funnel a single-file
+// input through this same canonicalizeInputs() -- including a file that IS
+// ALREADY a G0 canonical output (e.g. a sweep's own
+// renders/input/g0.canonical.png), because nothing here ever asked "have I
+// already done this?" StripChrome would then re-detect a few rows of
+// (mis-taken) chrome in the already-clean raster and crop it AGAIN, so every
+// y-coordinate a second pass prints is off by the crop it silently redid.
+//
+// Fix: when Sweep writes a canonical PNG, it writes a `<path>.json` sidecar
+// beside it (the same "render + .json sidecar" convention scope/render.ts
+// already uses) recording the exact content-addressed composite imageId that
+// PNG carries. On a later single-file load, if that sidecar exists AND the
+// freshly-decoded pixels re-hash (via the SAME compositeIdBytes definition
+// materializeComposite uses -- never the raw-file-bytes InputAsset.imageId,
+// which a lossless PNG re-encode would not reproduce) to the sidecar's
+// recorded id, this is provably the literal bytes G0 already canonicalized:
+// StripChrome is skipped entirely. Dimensions alone are never the check --
+// a coincidentally same-size raw capture must still be stripped.
+const CANONICAL_PROVENANCE_KIND = 'g0-canonical-provenance' as const;
+
+export interface CanonicalProvenanceSidecar {
+	readonly kind: typeof CANONICAL_PROVENANCE_KIND;
+	readonly imageId: string;
+	readonly widthPx: number;
+	readonly heightPx: number;
+}
+
+export function canonicalProvenanceSidecarPath(canonicalPngPath: string): string {
+	return `${canonicalPngPath}.json`;
+}
+
+/** Pure builder for the sidecar's bytes; operation.ts (the node-bound half
+ * that already owns writing g0.canonical.png) does the actual write. */
+export function canonicalProvenanceSidecarJson(imageId: string, widthPx: number, heightPx: number): string {
+	const sidecar: CanonicalProvenanceSidecar = { kind: CANONICAL_PROVENANCE_KIND, imageId, widthPx, heightPx };
+	return `${JSON.stringify(sidecar, null, 2)}\n`;
+}
+
+function readCanonicalProvenance(filePath: string): CanonicalProvenanceSidecar | undefined {
+	const sidecarPath = canonicalProvenanceSidecarPath(filePath);
+	if (!existsSync(sidecarPath)) return undefined;
+	try {
+		const parsed = JSON.parse(readFileSync(sidecarPath, 'utf8'));
+		if (
+			parsed?.kind === CANONICAL_PROVENANCE_KIND &&
+			typeof parsed.imageId === 'string' &&
+			typeof parsed.widthPx === 'number' &&
+			typeof parsed.heightPx === 'number'
+		) {
+			return parsed as CanonicalProvenanceSidecar;
+		}
+	} catch {
+		// A malformed/foreign sidecar is not proof of anything -- fall through
+		// to the normal StripChrome path rather than trust it.
+	}
+	return undefined;
+}
+
+async function detectAlreadyCanonical(
+	filePaths: readonly string[],
+	assets: readonly InputAsset[]
+): Promise<boolean> {
+	if (filePaths.length !== 1 || assets.length !== 1) return false;
+	const provenance = readCanonicalProvenance(filePaths[0]);
+	if (!provenance) return false;
+	if (provenance.widthPx !== assets[0].widthPx || provenance.heightPx !== assets[0].heightPx) return false;
+	const recomputedId = await sha256Hex(
+		compositeIdBytes(assets[0].widthPx, assets[0].heightPx, assets[0].rgba)
+	);
+	return recomputedId === provenance.imageId;
+}
 
 export interface G0Report {
 	readonly shimmed: false;
@@ -24,6 +98,12 @@ export interface G0Report {
 	readonly heightPx: number;
 	readonly sourceByteLength: number;
 	readonly stripChrome: StripChromeResult;
+	/** True when intake proved (via canonicalProvenanceSidecarJson provenance,
+	 * never dimensions alone) that the single supplied file is already the
+	 * literal bytes a prior G0 canonicalization produced, and skipped
+	 * StripChrome entirely rather than re-cropping an already-canonical
+	 * raster. Always false for a raw capture or a multi-source stitch. */
+	readonly alreadyCanonicalInput: boolean;
 	readonly autoStitch: {
 		readonly sourceCount: number;
 		readonly hadFallback: boolean;
@@ -91,7 +171,17 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 	if (assets.length > 1 && !sameDimensions(assets)) throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
 
 	const gray = assets.map(toGrayRaster);
-	const stripChrome = stripChromeProposal(gray);
+	const alreadyCanonicalInput = await detectAlreadyCanonical(filePaths, assets);
+	// An already-canonical raster gets NO StripChrome pass -- not even a
+	// second "found no chrome" no-op pass, because the point being fixed is
+	// that a second pass over a genuinely canonical image is not idempotent
+	// (JPEG-derived entropy near the true frame can look like a few more rows
+	// of chrome). source: 'none' here is the honest, already-existing
+	// "insets: null" shape; alreadyCanonicalInput is the field that
+	// distinguishes it from "StripChrome ran and found nothing".
+	const stripChrome: StripChromeResult = alreadyCanonicalInput
+		? { insets: null, source: 'none' }
+		: stripChromeProposal(gray);
 	const croppedGray = stripChrome.insets ? gray.map((raster) => cropRaster(raster, stripChrome.insets!)) : gray;
 
 	let placements: readonly Placement[];
@@ -137,6 +227,7 @@ export async function canonicalizeInputs(filePaths: readonly string[], truth?: C
 		heightPx: composite.heightPx,
 		sourceByteLength: assets.reduce((sum, asset) => sum + asset.sourceByteLength, 0),
 		stripChrome,
+		alreadyCanonicalInput,
 		autoStitch: { sourceCount: assets.length, hadFallback, placements },
 		ledger,
 		singleSourceOffset: assets.length === 1 ? { xPx: -left, yPx: -top } : undefined,
@@ -154,7 +245,13 @@ export function printG0Report(report: G0Report): void {
 	console.log('--- G0 canonical intake ---');
 	console.log(`  source(s):    ${report.filePaths.length}`);
 	for (const path of report.filePaths) console.log(`                ${path}`);
-	console.log(`  StripChrome:  ${report.stripChrome.source}${report.stripChrome.insets ? ` ${JSON.stringify(report.stripChrome.insets)}` : ' (no chrome detected)'}`);
+	console.log(
+		`  StripChrome:  ${
+			report.alreadyCanonicalInput
+				? 'SKIPPED (sidecar provenance proved this input is already a G0 canonical output)'
+				: `${report.stripChrome.source}${report.stripChrome.insets ? ` ${JSON.stringify(report.stripChrome.insets)}` : ' (no chrome detected)'}`
+		}`
+	);
 	console.log(`  AutoStitch:   ${report.autoStitch.sourceCount > 1 ? `${report.autoStitch.sourceCount} tiles${report.autoStitch.hadFallback ? ' (fallback used)' : ''}` : 'single source'}`);
 	console.log(`  canonical id: ${report.imageId}`);
 	console.log(`  canonical:    ${report.widthPx}x${report.heightPx}px`);
