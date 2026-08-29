@@ -199,8 +199,18 @@ function rotate(ring: RecoveryFit, x: number, y: number): readonly [number, numb
 	return [ring.centerXPx + x * c - y * s, ring.centerYPx + x * s + y * c];
 }
 
+function poseOf(candidate: TeeRecoveryCandidate): RecoveryFit {
+	// CL-1: what gated is what persists. A rail-kind fit won acceptance from
+	// constrained geometry (centerline within a derived bound), so its pose IS
+	// the tee's pose; fragment PCA localization is only trusted for
+	// support-search fits, where a full-span single component earned it.
+	const fk = candidate.fit.fitKind as string;
+	if (fk === 'rail-projection' || fk === 'rail-extracted') return candidate.fit;
+	return candidate.localizationFit ?? candidate.fit;
+}
+
 function cornersFor(candidate: TeeRecoveryCandidate, options: RecoveryGeometryOptions): OrientedQuad {
-	const ring = candidate.localizationFit ?? candidate.fit;
+	const ring = poseOf(candidate);
 	const offset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? options.viewportTopPx ?? 0;
 	const raw = [
 		rotate(ring, -ring.halfWidthPx, -ring.halfHeightPx),
@@ -261,6 +271,25 @@ function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): b
 }
 
 function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
+	// TEMP POKE (env-gated): owner hypothesis test -- if the few bright pixels
+	// inside the ring interior were not white, would the C-solved pad accept?
+	const EAT_INTERIOR = process.env.CHAINSPOT_POKE_INTERIOR === '1' && candidate.fit.fitKind === 'rail-extracted';
+	if (EAT_INTERIOR) {
+		const f = candidate.fit;
+		const c = Math.cos(f.angleRad), sn = Math.sin(f.angleRad);
+		const innerU = f.halfWidthPx - Math.max(0, f.supportThicknessPx) - RASTER_TOLERANCE_PX;
+		const innerV = f.halfHeightPx - Math.max(0, f.supportThicknessPx) - RASTER_TOLERANCE_PX;
+		const base = rawUnexplainedPixels(candidate);
+		return base.filter(([x, y]) => {
+			const dx = x - f.centerXPx, dy = y - f.centerYPx;
+			const u = dx * c + dy * sn, v = -dx * sn + dy * c;
+			return !(Math.abs(u) < innerU && Math.abs(v) < innerV);
+		});
+	}
+	return rawUnexplainedPixels(candidate);
+}
+
+function rawUnexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
 	return candidate.fragmentPixels.filter((point) => !pointExplainsTee(point, candidate.fit));
 }
 
@@ -517,11 +546,126 @@ function fitComponent(
 	if (occluders && occluders.length > 0) {
 		const pxArray: Px[] = pixels.map(([x, y]) => [x, y]);
 		const railCandidates = extractRailCandidates(pxArray, occluders);
+		if (process.env.CHAINSPOT_DBG_COMP && component.label === Number(process.env.CHAINSPOT_DBG_COMP)) {
+			for (const rc of railCandidates.slice(0, 5)) {
+				const p0 = rc.points[0]; const p1 = rc.points[rc.points.length - 1];
+				console.error(`DBGRAIL c${component.label} b${target.label} angle=${rc.angleRad.toFixed(3)} len=${rc.lengthPx.toFixed(1)} q=${rc.qualityScore.toFixed(2)} occ=${rc.occludedFractionPx.toFixed(2)} (${p0![0]},${p0![1]})->(${p1![0]},${p1![1]})`);
+			}
+		}
 		if (railCandidates.length > 0) {
 			// Use the first (best-ranked) rail candidate. The extractor returns
 			// candidates ranked by quality; we take the top one.
+			// C-SOLVE: three sides of a broken ring pin the pose jointly -- a
+			// parallel pair's midline is the pad's long axis (no side guess),
+			// and an end rail fixes where along that axis the pad sits. The
+			// pad points at its badge, so the aim is judged as an ANGLE.
+			const solved = (() => {
+				const long = railCandidates[0]!;
+				const midOf = (pts: readonly (readonly [number, number])[]) => {
+					let sx = 0, sy = 0; for (const [px2, py2] of pts) { sx += px2; sy += py2; }
+					return [sx / pts.length, sy / pts.length] as const;
+				};
+				const [lmx, lmy] = midOf(long.points);
+				const pnX = -Math.sin(long.angleRad), pnY = Math.cos(long.angleRad);
+				// A true opposite side sits the pad's own short width away; a twin
+				// edge of the same border band sits only a border thickness away
+				// and must not be mistaken for the other side of the pad.
+				const par = railCandidates.find((r) => {
+					if (r === long) return false;
+					const dAng = Math.abs(Math.atan2(Math.sin(r.angleRad - long.angleRad), Math.cos(r.angleRad - long.angleRad)));
+					if (Math.min(dAng, Math.PI - dAng) > 0.18) return false;
+					if (r.lengthPx < long.lengthPx * 0.4) return false;
+					const [rmx, rmy] = midOf(r.points);
+					const sep = Math.abs((rmx - lmx) * pnX + (rmy - lmy) * pnY);
+					const want = 2 * halfHeight;
+					return Math.abs(sep - want) <= Math.max(0, thickness) + 2 * RASTER_TOLERANCE_PX + 1;
+				});
+				const perp = railCandidates.find((r) =>
+					Math.abs(Math.abs(Math.atan2(Math.sin(r.angleRad - long.angleRad), Math.cos(r.angleRad - long.angleRad))) - Math.PI / 2) < 0.35);
+				if (!par && !perp) return undefined;
+				const mid = midOf;
+				const [lx, ly] = [lmx, lmy];
+				const dirX = Math.cos(long.angleRad), dirY = Math.sin(long.angleRad);
+				const nX = -dirY, nY = dirX;
+				let cX: number, cY: number;
+				if (par) {
+					const [px2, py2] = mid(par.points);
+					cX = (lx + px2) / 2; cY = (ly + py2) / 2;
+				} else {
+					// single long edge: center sits half the short width inward,
+					// on whichever side holds more of the component's pixels.
+					let side = 0;
+					for (const [qx, qy] of pixels) side += Math.sign((qx - lx) * nX + (qy - ly) * nY);
+					const sgn = side >= 0 ? 1 : -1;
+					const inward = Math.max(0, halfHeight - Math.max(0, thickness) / 2);
+					cX = lx + sgn * nX * inward; cY = ly + sgn * nY * inward;
+				}
+				if (perp) {
+					const [ex, ey] = mid(perp.points);
+					const along = (cX - ex) * dirX + (cY - ey) * dirY;
+					const sgnA = along >= 0 ? 1 : -1;
+					const inwardA = Math.max(0, halfWidth - Math.max(0, thickness) / 2);
+					cX = ex + sgnA * dirX * inwardA; cY = ey + sgnA * dirY * inwardA;
+				}
+				const bX = target.cxPx, bY = target.cyPx - viewportTopPx;
+				const aim = Math.atan2(bY - cY, bX - cX);
+				const axisErr = Math.abs(Math.atan2(Math.sin(aim - long.angleRad), Math.cos(aim - long.angleRad)));
+				const axisErrFolded = Math.min(axisErr, Math.PI - axisErr);
+				if (axisErrFolded > activeAxisLimitRad) return undefined;
+				// The solve enforced the aim angle, so its lane numbers are stated
+				// honestly: error = how far the badge sits off the aim axis,
+				// bound = the window that same angular tolerance sweeps at this
+				// range, miss = 0 by construction (error <= bound always here).
+				const rangePx = Math.hypot(bX - cX, bY - cY);
+				const perpErrPx = Math.sin(axisErrFolded) * rangePx;
+				const perpBoundPx = Math.tan(activeAxisLimitRad) * rangePx + RASTER_TOLERANCE_PX;
+				const fit: RecoveryFit = {
+					centerXPx: cX, centerYPx: cY,
+					halfWidthPx: halfWidth, halfHeightPx: halfHeight,
+					angleRad: aim,
+					supportThicknessPx: Math.max(0, thickness),
+					fitKind: 'rail-extracted',
+					badgePerpendicularErrorPx: perpErrPx,
+					badgePerpendicularBoundPx: perpBoundPx,
+					badgePerpendicularMissPx: 0
+				};
+				return fit;
+			})();
+			if (process.env.CHAINSPOT_DBG_COMP && component.label === Number(process.env.CHAINSPOT_DBG_COMP)) {
+				console.error(`DBGSOLVE c${component.label} b${target.label} solved=${solved ? `(${solved.centerXPx.toFixed(1)},${solved.centerYPx.toFixed(1)}) angle=${solved.angleRad.toFixed(3)}` : 'no'}`);
+			}
+			if (solved) {
+				const occluderKinds = new Set(occluders.map(f => f.kind));
+				return {
+					...solved,
+					railCandidatesConsidered: railCandidates.length,
+					occluderKindsSubtracted: Array.from(occluderKinds).sort()
+				};
+			}
 			const bestRail = railCandidates[0]!;
-			const railFit = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness, bestRail);
+			// An extracted rail is a boundary EDGE of the painted border, but the
+			// projection math expects the border band's CENTERLINE (the same line
+			// whether the chain came from the band's outer or inner edge -- which
+			// is what makes a broken-ring fragment safe). Re-center each rail
+			// point onto the midpoint of the bright run found along the rail's
+			// normal within one border thickness.
+			const nx = -Math.sin(bestRail.angleRad);
+			const ny = Math.cos(bestRail.angleRad);
+			const reach = Math.max(1, Math.ceil(Math.max(0, thickness)) + 1);
+			const pixelKeySet = new Set(pixels.map(([px2, py2]) => `${px2},${py2}`));
+			const centered: [number, number][] = bestRail.points.map(([rx, ry]) => {
+				let lo = 0, hi = 0;
+				for (let d = 1; d <= reach; d++) {
+					if (pixelKeySet.has(`${Math.round(rx + nx * d)},${Math.round(ry + ny * d)}`)) hi = d; else break;
+				}
+				for (let d = 1; d <= reach; d++) {
+					if (pixelKeySet.has(`${Math.round(rx - nx * d)},${Math.round(ry - ny * d)}`)) lo = d; else break;
+				}
+				const mid = (hi - lo) / 2;
+				return [rx + nx * mid, ry + ny * mid];
+			});
+			const centeredRail = { ...bestRail, points: centered as readonly (readonly [number, number])[] };
+			const railFit = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness, centeredRail);
 			if (railFit) {
 				// Track extraction metadata for receipts.
 				const occluderKinds = new Set(occluders.map(f => f.kind));
@@ -1047,7 +1191,7 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const ambiguity = (candidate.ambiguityWithBadgeLabels?.length ?? 0) > 0;
 	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguity;
-	const localized = candidate.localizationFit ?? candidate.fit;
+	const localized = poseOf(candidate);
 	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
 	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
 		? '; localization uses the exact centroid/axis of the single detector-owned component spanning both course-local pad axes'
@@ -1342,6 +1486,11 @@ export function buildTeeRecoveryCandidates(
 			const bFraction = br / b.fragmentPixels.length;
 			return aFraction - bFraction || ar - br || b.fragmentPixels.length - a.fragmentPixels.length || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 		});
+		if (process.env.CHAINSPOT_DBG_BADGE && target.label === process.env.CHAINSPOT_DBG_BADGE) {
+			for (const cnd of targetCandidates.filter((c2, i2) => i2 < 4 || c2.id.includes('-36'))) {
+				console.error(`DBGWIN b${target.label} id=${cnd.id} px=${cnd.fragmentPixels.length} unexpl=${unexplainedPixels(cnd).length} kind=${cnd.fit.fitKind} c=(${cnd.fit.centerXPx.toFixed(1)},${cnd.fit.centerYPx.toFixed(1)}) miss=${cnd.fit.badgePerpendicularMissPx ?? 'n/a'}`);
+			}
+		}
 		const [winner, ...runnerUps] = targetCandidates;
 		if (winner) candidates.push(winner);
 		searchOutcomes.push({
