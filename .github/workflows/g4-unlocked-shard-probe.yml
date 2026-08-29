@@ -1,4 +1,4 @@
-name: G4 Unlocked Shard Probe
+name: G4 Unlocked Claim Graph Probe
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Search every badge not already LOCKED
+      - name: Search unlocked badges and dump claim graph
         working-directory: ChainSpot
         run: |
           set -euo pipefail
@@ -47,25 +47,25 @@ jobs:
           \t\t};
           """
           if s.count(old)!=1: raise SystemExit('search target adapter drifted')
-          p.write_text(s.replace(old,new,1))
+          s=s.replace(old,new,1)
+          anchor="""\t\tconst allResults = built.candidates.map(graphCandidateResult);
+          \t\tgeometryFittingStop();
+          """
+          inject="""\t\tconst allResults = built.candidates.map(graphCandidateResult);
+          \t\tconsole.log('G4_CLAIM_GRAPH ' + JSON.stringify({
+          \t\t\tvisible: rayResolution.claims.map((claim) => ({ tee: claim.teeId, badge: claim.badgeLabel ?? claim.badgeId, badgeId: claim.badgeId, error: claim.perpendicularErrorPx, bound: claim.perpendicularBoundPx, direction: claim.direction, lock: rayResolution.locks.some((locked) => locked.teeId === claim.teeId && locked.badgeId === claim.badgeId) })),
+          \t\t\tshards: built.candidates.map((candidate, index) => ({ badge: candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN', badgeId: candidate.badgeId, physical: candidate.supportingComponentIds.map((id) => id.split(':')[0]).sort().join('+'), verdict: allResults[index]?.verdict, fitKind: candidate.fit.fitKind, error: candidate.fit.badgePerpendicularErrorPx, bound: candidate.fit.badgePerpendicularBoundPx, miss: candidate.fit.badgePerpendicularMissPx, sepError: candidate.fit.railSeparationErrorPx, sepBound: candidate.fit.railSeparationBoundPx, support: candidate.fragmentPixels.length, ambiguity: candidate.ambiguityWithBadgeLabels ?? [] }))
+          \t\t}));
+          \t\tgeometryFittingStop();
+          """
+          if s.count(anchor)!=1: raise SystemExit('graph dump anchor drifted')
+          p.write_text(s.replace(anchor,inject,1))
           PY
           npm ci >/dev/null
           ./lab setup >/tmp/setup.log 2>&1
           rm -rf artifacts/sweep
           ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev >/tmp/probe.log 2>&1
-          echo '=== UNLOCKED SHARD TESTIMONY ==='
-          for f in $(find artifacts/sweep -name run.receipt.json | sort); do
-            echo "--- $f"
-            node - "$f" <<'NODE'
-          const fs=require('fs');
-          const d=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-          const u=(d.units||[]).find(x=>x.id==='teeRecovery')||{};
-          const visible=(u.drawables||[]).filter(x=>String(x.ref||'').startsWith('visible-ray-')).map(x=>x.reason);
-          const shard=(u.drawables||[]).filter(x=>{
-            const r=String(x.reason||''); const ref=String(x.ref||'');
-            return ref.includes('tee-recovery') || r.includes('observed rail') || r.includes('multiclaim') || r.includes('badge ');
-          }).map(x=>({verdict:x.verdict,ref:x.ref,reason:x.reason,values:x.values}));
-          console.log(JSON.stringify({results:d.results,visible,shard},null,2));
-          NODE
-          done
-          echo '=== TAIL ==='; tail -n 50 /tmp/probe.log
+          echo '=== CLAIM GRAPHS ==='
+          grep '^G4_CLAIM_GRAPH ' /tmp/probe.log || true
+          echo '=== BATCH TAIL ==='
+          tail -n 60 /tmp/probe.log
