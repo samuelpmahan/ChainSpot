@@ -25,12 +25,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install and patch
+      - name: Install patch and rebuild
         working-directory: ChainSpot
         run: |
+          set -euo pipefail
           npm ci
           ./lab setup
           python3 .github/kerchooo_profile_patch.py
+          npm run build --workspace=@chainspot/alg
 
       - name: Profile NorthPark
         working-directory: ChainSpot
