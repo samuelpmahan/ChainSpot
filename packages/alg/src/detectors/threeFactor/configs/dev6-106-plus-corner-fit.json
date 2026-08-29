@@ -1,0 +1,26 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "dev6-106-plus-corner-fit",
+	"note": "ONE-FLIP EXPERIMENT on the frozen dev6-106-default control (2026-08-29): identical schedule and gates, plus teeBorderCornerFit scheduled between measurement and assignment so its border-adjacency corner claims enter the assignment pool. Compare lab score against the control; progress keeps the flip, regress deletes this file.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"teeBorderCornerFit",
+		"assignment",
+		"teeRecovery",
+		"teeBadgeLock"
+	],
+	"gates": {
+		"G4": {
+			"teeBadgeLock": { "enabled": true },
+			"teeBorderCornerFit": { "enabled": true }
+		}
+	}
+}
