@@ -38,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
+          npx svelte-kit sync
           ./lab setup
           npm run build --workspace @chainspot/alg
 
