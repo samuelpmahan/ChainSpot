@@ -26,6 +26,7 @@ import { OPERATION_UNIVERSE, type HoleLabeledAssignment } from '@chainspot/alg/e
 import { ALL_FEATURES } from '@chainspot/alg/detectors/threeFactor/features/registry';
 import { buildTeeMinAreaPoseReceipt } from '@chainspot/alg/detectors/threeFactor/features/g3.teeMinAreaPoseReceipt';
 import { buildTeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
+import { buildBadgeGlyphTemplateReceipt } from '@chainspot/alg/detectors/threeFactor/features/g1.badgeGlyphTemplateReceipt';
 import { SCORE_ANOMALY_ORDERS_BELOW_MEDIAN, assignmentScoreMedian, scoreAnomalyNote } from './runReceipt';
 import type {
 	ABFeature,
@@ -723,6 +724,10 @@ export function renderRunEndpointReceipt(
 	// Forward those exact objects as the first unified visual layer; no path
 	// geometry, IDs, or candidate state is reconstructed in Sweep.
 	const teeBadgePaths = teeBadgeLockReceipt?.plan.layers.flatMap((layer) => layer.drawables) ?? [];
+	const badgeGlyphTemplateUnit = run.units.find((unit) => unit.id === 'badgeGlyphTemplate');
+	const badgeGlyphTemplateReceipt = badgeGlyphTemplateUnit
+		? buildBadgeGlyphTemplateReceipt(badgeGlyphTemplateUnit, run)
+		: undefined;
 	const gate = endpointGateSpan(run);
 
 	// Post-assignment hole numbers, drawn beside each ASSIGNED tee and basket.
@@ -925,6 +930,7 @@ export function renderRunEndpointReceipt(
 					: `${holeLabelDrawables.length} (source: final post-G6 hole-labeled assignment rows; one orange label per assigned tee and per assigned basket tip)`
 		}`,
 		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
+		...(badgeGlyphTemplateReceipt ? ['', badgeGlyphTemplateReceipt.cliText] : []),
 		'',
 		...holeAssignmentLines(input.assignmentRows),
 		'',

@@ -47,13 +47,22 @@ const straightTestOnResolved = resolveConfig(
 // g1.badges' plateFrameTolerancePx (C1 frame-exclusion provenance) and
 // g1.digits' confidenceFloorDivisor/labelAmbiguityMargin (C4 derived-floor/
 // ambiguity provenance) -- new knobs move this pin again, consciously.
+// 2026-08-29: the badgeGlyphTemplate ABFeature lands (docs/CLAIMS-LEDGER.md
+// row 23's whole-glyph Dice-template classifier, ported into a default-OFF
+// G1 ABFeature per the owner's "put the thing in an ABFeature and test it"
+// directive) -- it is a NEW default-OFF single-operation unit, so
+// UNIT_OPERATIONS/OPERATION_UNIVERSE counts move (17->18, 24->25), but it is
+// absent from default.json's execution list (same "absence, not merely
+// disabled" contract as teeMinAreaPose/teeBadgeLock), so the FROZEN default
+// plan fingerprint itself does NOT move and is intentionally left unchanged
+// below -- verified by re-running this suite after the change.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
 	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(17); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock
-		expect(OPERATION_UNIVERSE.length).toBe(24); // prior universe + three single-operation units
+		expect(UNIT_OPERATIONS.size).toBe(18); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate
+		expect(OPERATION_UNIVERSE.length).toBe(25); // prior universe + four single-operation units
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',

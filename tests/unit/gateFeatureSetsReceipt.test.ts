@@ -29,7 +29,7 @@ import { OPERATION_UNIVERSE } from '@chainspot/alg/exec/operations';
 
 const membership: Record<string, readonly string[]> = {
 	'shared-set': ['hsv'],
-	'g1-set': ['badges', 'digits'],
+	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],

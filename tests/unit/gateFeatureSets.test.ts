@@ -5,7 +5,7 @@ import type { ABFeature } from '@chainspot/alg/detectors/threeFactor/features/ty
 
 const expectedMembership = {
 	'shared-set': ['hsv'],
-	'g1-set': ['badges', 'digits'],
+	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],

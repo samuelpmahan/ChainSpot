@@ -100,7 +100,14 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 	G1: {
 		phase: 'Badges known',
 		ownGates: ['G1'],
-		demonstratedBy: ['badgeStage.masks', 'badgeStage.components', 'badgeStage.family', 'badgeStage.badges', 'badges']
+		demonstratedBy: [
+			'badgeStage.masks',
+			'badgeStage.components',
+			'badgeStage.family',
+			'badgeStage.badges',
+			'badges',
+			'badgeGlyphTemplate'
+		]
 	},
 	G2: {
 		phase: 'Baskets known',
