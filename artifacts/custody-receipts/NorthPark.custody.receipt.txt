@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — NorthPark
-schema=chainspot-chain-of-custody@1 runId=8067cc38848a0f15354f35707f5224fee590a1ccbf31dbfeca3dc01d520ab534 imageId=c2ecf6548cf051e9ee9055aeb0fb4782f157d75e9b3e5f7f68376962fc4b8dec
+CHAIN OF CUSTODY — NorthPark-full
+schema=chainspot-chain-of-custody@1 runId=6b6ec838f8ad26fdd537dc7c1d6ebbbb06cdde8d004ae87b66b20bce0d077e07 imageId=c2ecf6548cf051e9ee9055aeb0fb4782f157d75e9b3e5f7f68376962fc4b8dec
 traceAvailable=true
 totalTees=18
 

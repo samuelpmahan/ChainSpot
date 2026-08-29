@@ -263,6 +263,8 @@ describe('LAB sweep receipt seam', () => {
 			);
 			expect(result.scoreboard).toBeUndefined();
 			expect(result.groundingComparisons).toEqual([]);
+			// G1 never schedules 'assignment', so custody has nothing to join and
+			// is skipped silently: no run.custody.receipt.txt, no third path.
 			expect(result.runReceiptPaths).toHaveLength(2);
 			expect(result.runReceiptPaths.every(existsSync)).toBe(true);
 			const persisted = JSON.parse(readFileSync(result.runReceiptPaths[0], 'utf8'));
@@ -524,6 +526,24 @@ describe('LAB sweep receipt seam', () => {
 		// zfit is config-dropped, not slice-cut: the receipt must NOT emit a
 		// "not scheduled" omission line for it.
 		expect(text).not.toContain('zfit');
+
+		// assignment is scheduled in this slice, so the custody receipt is a
+		// third file alongside run.receipt.json/.txt — same output directory,
+		// same run, no separate command.
+		expect(result.runReceiptPaths).toHaveLength(3);
+		const custodyPath = result.runReceiptPaths[2];
+		expect(custodyPath.endsWith('run.custody.receipt.txt')).toBe(true);
+		expect(existsSync(custodyPath)).toBe(true);
+		const custodyText = readFileSync(custodyPath, 'utf8');
+		expect(custodyText).toContain('CHAIN OF CUSTODY — DashsTrack-full');
+		expect(custodyText).toContain('schema=chainspot-chain-of-custody@1');
+		expect(custodyText).toContain('totalTees=18');
+		expect(custodyText).toContain('tier=recovered');
+		expect(custodyText).toContain(
+			'GAP: recovery result identity survives only inside RecoveryProvenance.note'
+		);
+		expect(custodyText).toContain('total=18 visible=15 recovered=3');
+		expect(custodyText).toContain('assigned=18 unassigned=0');
 	}, 120_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {

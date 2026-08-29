@@ -12,7 +12,12 @@ import {
 	type HoleLabeledAssignment
 } from '@chainspot/alg/exec';
 import { createNodeSink } from '@chainspot/alg/exec/node-sink';
-import { canonicalJson, sha256Hex } from '@chainspot/alg/detectors/threeFactor';
+import {
+	buildChainOfCustody,
+	canonicalJson,
+	sha256Hex,
+	type ChainOfCustodyLedger
+} from '@chainspot/alg/detectors/threeFactor';
 import {
 	createTraceContext,
 	resolveConfiguredParams
@@ -55,6 +60,7 @@ import {
 	type RunPhaseTimings
 } from './runReceipt';
 import { formatRunReceiptText } from './runReceiptText';
+import { formatCustodyReceiptText } from './custodyReceiptText';
 import { guardTruthTaint } from '../context/context.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -715,6 +721,21 @@ export async function runSweepOperation(
 	const runReceiptTextPath = resolve(outDir, 'run.receipt.txt');
 	writeFileSync(runReceiptTextPath, formatRunReceiptText(runReceipt));
 	const runReceiptPaths = [runReceiptJsonPath, runReceiptTextPath];
+	// Chain-of-custody is observability derived from the same final assignment
+	// + sealed trace every other receipt reads. When a sliced run never
+	// scheduled 'assignment' (or the board slot is absent for any other
+	// reason), there is nothing honest to join, so the file is skipped —
+	// silently, the same way other results already distinguish "not
+	// scheduled" from "ran and found nothing" without emitting a stub.
+	if (assignmentScheduled && board.has('assignment')) {
+		const custody: ChainOfCustodyLedger = buildChainOfCustody(
+			board.get<ThreeFactorAssignment>('assignment'),
+			sealedTrace
+		);
+		const custodyReceiptPath = resolve(outDir, 'run.custody.receipt.txt');
+		writeFileSync(custodyReceiptPath, formatCustodyReceiptText(custody, canonicalSweepRunName(inputPaths)));
+		runReceiptPaths.push(custodyReceiptPath);
+	}
 
 	return {
 		configPath: loaded.path,

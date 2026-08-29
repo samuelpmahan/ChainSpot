@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — HeritagePark
-schema=chainspot-chain-of-custody@1 runId=fffe496ee341fb89f571a86afae33054bbcd9c62e2cf0d3727ec295bb3fc5ce8 imageId=118d46f96c6122d51a3b5056c665e5fdc18c8a7b6c45ef1b26f4ba7026704863
+CHAIN OF CUSTODY — HeritagePark-full
+schema=chainspot-chain-of-custody@1 runId=dcb64431ea4704a6fc188ff8e5def18a3ee9617acc83100cd01efdaa7ba09f34 imageId=118d46f96c6122d51a3b5056c665e5fdc18c8a7b6c45ef1b26f4ba7026704863
 traceAvailable=true
 totalTees=17
 

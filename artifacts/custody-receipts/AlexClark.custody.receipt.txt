@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — AlexClark
-schema=chainspot-chain-of-custody@1 runId=9a4558e82bfddd06fc9d4a865f772388fd34d50926116ecfb44764751198efa0 imageId=b4afc3a6f582ac14fc1aa021051c8c407998304b5d930bef4eafe84115808b0f
+CHAIN OF CUSTODY — AlexClark-full
+schema=chainspot-chain-of-custody@1 runId=76ca6c461e37b26897d56c88f98b5a38a55ef605447954779a1aef011e95944e imageId=b4afc3a6f582ac14fc1aa021051c8c407998304b5d930bef4eafe84115808b0f
 traceAvailable=true
 totalTees=17
 

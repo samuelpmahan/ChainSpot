@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — DashsTrack
-schema=chainspot-chain-of-custody@1 runId=bbf6a893fe68f16497279e71ce54554b272444ac14b19448be5ca4acaa8fdee0 imageId=91bdd8f4c7ce5674e45edf293df7e7e5633977d83b4d98de410cdb41fab6f741
+CHAIN OF CUSTODY — DashsTrack-full
+schema=chainspot-chain-of-custody@1 runId=43469e3ff1e344779b6c4e6c08ff209f214b1ce8b6904de33b3302a200bf4c17 imageId=91bdd8f4c7ce5674e45edf293df7e7e5633977d83b4d98de410cdb41fab6f741
 traceAvailable=true
 totalTees=18
 

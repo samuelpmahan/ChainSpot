@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — TowneLake
-schema=chainspot-chain-of-custody@1 runId=e534bb8a4fcf72fd0cb6c2a7e075c36f53c85e3818942c10c73fb5bbc5f1f674 imageId=7c13fc06a21e2638f005238c294577893df87b2e6f04ba0e74efb7660047fa42
+CHAIN OF CUSTODY — TowneLake-full
+schema=chainspot-chain-of-custody@1 runId=c2f885f03b63beb046d66db55c3eaa6a05b013f9ec9d3c21b358a7dd2b4bda5a imageId=7c13fc06a21e2638f005238c294577893df87b2e6f04ba0e74efb7660047fa42
 traceAvailable=true
 totalTees=18
 

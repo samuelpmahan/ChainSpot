@@ -1,5 +1,5 @@
-CHAIN OF CUSTODY — Lenard
-schema=chainspot-chain-of-custody@1 runId=5c37c01e349d8a5ff4e5f2d5291dfc3e68654b9ff397395b95439c47f40da476 imageId=4241ecec9f8bce373c165e905311cef895941bb7a5fc40332a7a8535643e42f5
+CHAIN OF CUSTODY — Lenard-full
+schema=chainspot-chain-of-custody@1 runId=99e61dbaffed50fcb21a91c86d3821941daf361d20120b7099a1b2d09afa4622 imageId=4241ecec9f8bce373c165e905311cef895941bb7a5fc40332a7a8535643e42f5
 traceAvailable=true
 totalTees=18
 
