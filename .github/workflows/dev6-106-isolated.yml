@@ -1,0 +1,107 @@
+name: Dev6 106 Isolated Proof
+
+on:
+  push:
+    branches:
+      - verify/dev6-106-actions
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove-106:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          path: ChainSpot
+
+      - name: Checkout pinned corpus
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          ref: 2b5913d3f1f6d8f97b0324721a4c5201bd3ed819
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ChainSpot/package-lock.json
+
+      - name: Setup semantic runtime
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          ./lab setup
+          npm run build --workspace @chainspot/alg
+
+      - name: Frozen-default focused tests
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npx vitest run \
+            tests/unit/threeFactorConfig.test.ts \
+            tests/unit/teeBadgeLockFeature.test.ts \
+            tests/unit/teeBadgeLockMath.test.ts \
+            tests/unit/teeBadgeLockReceipt.test.ts
+
+      - name: Run Dev6 through G4
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep/dev6-106-default
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev
+
+      - name: Assert 106 locks and 2 abstentions
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          function walk(dir) {
+            const out = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) out.push(...walk(p));
+              else out.push(p);
+            }
+            return out;
+          }
+          const root = 'artifacts/sweep/dev6-106-default/batches';
+          const receipts = walk(root).filter((p) => p.endsWith('run.receipt.json')).sort();
+          if (receipts.length !== 6) throw new Error(`expected 6 Dev6 receipts, found ${receipts.length}`);
+          let locks = 0;
+          let unmatched = 0;
+          const rows = [];
+          for (const file of receipts) {
+            const receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const unit = receipt.units.find((u) => u.id === 'teeBadgeLock');
+            if (!unit) throw new Error(`teeBadgeLock missing from ${file}`);
+            const m = Object.fromEntries(unit.measurements.map((x) => [x.name, x]));
+            const courseLocks = m.locks?.sum;
+            const courseUnmatched = m.unmatchedBadges?.sum;
+            if (!Number.isFinite(courseLocks) || !Number.isFinite(courseUnmatched)) throw new Error(`measurements missing from ${file}`);
+            locks += courseLocks;
+            unmatched += courseUnmatched;
+            rows.push({ file, locks: courseLocks, unmatchedBadges: courseUnmatched });
+          }
+          console.table(rows);
+          console.log(`DEV6_LOCKS=${locks}`);
+          console.log(`DEV6_UNMATCHED_BADGES=${unmatched}`);
+          if (locks !== 106 || unmatched !== 2) throw new Error(`baseline violated: ${locks} locks, ${unmatched} abstentions`);
+          NODE
+
+      - name: Upload Dev6 receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev6-106-isolated-receipts
+          path: ChainSpot/artifacts/sweep/dev6-106-default
+          if-no-files-found: warn
