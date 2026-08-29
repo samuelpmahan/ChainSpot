@@ -355,6 +355,7 @@ export type EvidenceSlot =
 	| 'assignment'
 	| 'teeBadgeLock'
 	| 'teeBadgeCompass'
+	| 'teeBorderCornerFit'
 	| 'badgeGlyphTemplate';
 
 export interface EvidenceBoard {

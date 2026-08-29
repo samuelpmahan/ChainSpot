@@ -44,6 +44,7 @@
 					"teeBadgeLock",
 					"badgeGlyphTemplate",
 					"teeBadgeCompass",
+					"teeBorderCornerFit",
 					"cleanBasketFamily",
 					"straightTest"
 				]
@@ -744,6 +745,53 @@
 											"type": "number",
 											"description": "a pad whose area sits more than this factor away from the course's own median area, in either direction (S8 uniformity), is flagged a weak/degraded fit.",
 											"default": 1.25
+										}
+									}
+								}
+							}
+						},
+						"teeBorderCornerFit": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "border-adjacency tee recovery: any unowned white component glued to a basket's black border anchors an axis-aligned corner/wall fit of the COURSE-MEASURED pad. The basket glyph's white fill is the named occluder and never pad evidence. Zero angular freedom, one integer slide; a placement with any bare outline pixel is never accepted, and every non-claim is a NAMED abstention. Orientation ties are broken by badge aim (S2: the tee is the compass), restricted to badges NO visible tee can serve -- computed tee-locally via resolveVisibleTeeBadgeRays, the same measurement-only eligibility contract teeRecovery states. Reads only `measurement`; runs before assignment/teeRecovery.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"minimumPadSampleSize": {
+											"type": "number",
+											"description": "below this many visible pads, the course pad size is not trusted at all -- the whole feature abstains loudly (course-pad-dims-unknown), never guesses a size.",
+											"default": 3
+										},
+										"borderMarginPx": {
+											"type": "number",
+											"description": "dark-ink adjacency margin around a basket's semantic bbox, in source pixels -- a raster allowance bounding where \"the basket's black border\" is looked for, never a course distance.",
+											"default": 2
+										},
+										"haloPx": {
+											"type": "number",
+											"description": "anti-alias halo: a pixel within this chebyshev distance of basket ink/fill classifies as a soft transition instead of a bare contradiction -- the same raster-quantization allowance class as rasterTolerancePx elsewhere.",
+											"default": 1
+										},
+										"candidateAreaCapFactor": {
+											"type": "number",
+											"description": "candidate area cap relative to THIS course's own pad area (long*short medians) -- the familiar 1.25 tolerance-factor convention; a component bigger than a whole pad cannot be a pad remnant.",
+											"default": 1.25
+										},
+										"evidenceFloorFactor": {
+											"type": "number",
+											"description": "minimum remnant evidence relative to one short wall run (wallPx*shortPx, both course-derived): below it an anti-alias speck could claim a fully-occluded placement with near-zero evidence. Excluded remnants are listed by name, never dropped.",
+											"default": 0.5
+										},
+										"axisOrthogonalToleranceDeg": {
+											"type": "number",
+											"description": "PCA of a tiny border remnant is quantization-coarse; within this many degrees of an image axis the remnant is treated as axis-aligned. A statistical parameter on small-component PCA stability, not physics -- non-orthogonal remnants are loudly abstained (rotated rails are a sibling lane), never guessed at.",
+											"default": 10
 										}
 									}
 								}

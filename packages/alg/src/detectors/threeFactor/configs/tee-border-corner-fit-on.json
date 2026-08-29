@@ -1,0 +1,24 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-border-corner-fit-on",
+	"note": "A/B candidate: recover tees buried under basket glyphs from the wall remnant glued to the basket's black border (owner directive 2026-08-29). Course-median pad anchored to the remnant with zero angular freedom; the glyph's white fill is the named occluder and never evidence; contradictions forbid acceptance and every non-claim is a NAMED abstention. Reads only 'measurement', so it is inserted directly after 'measurement' and before 'assignment'/'teeRecovery'. Frozen execution remains unchanged when omitted.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"teeBorderCornerFit",
+		"assignment",
+		"teeRecovery"
+	],
+	"gates": {
+		"G4": {
+			"teeBorderCornerFit": { "enabled": true }
+		}
+	}
+}

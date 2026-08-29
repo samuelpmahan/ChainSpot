@@ -27,6 +27,7 @@ import { straightTestUnit } from './features/st.straightTest';
 import { teeBadgeLockUnit } from './features/g4.teeBadgeLock';
 import { badgeGlyphTemplateUnit } from './features/g1.badgeGlyphTemplate';
 import { teeBadgeCompassUnit } from './features/g4.teeBadgeCompass';
+import { teeBorderCornerFitUnit } from './features/g4.teeBorderCornerFit';
 import { OcclusionDetector } from './occlusion';
 import { cleanBasketFamilyUnit } from './features/g2.cleanBasketFamily';
 import {
@@ -112,6 +113,7 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 	teeBadgeLockUnit,
 	badgeGlyphTemplateUnit,
 	teeBadgeCompassUnit,
+	teeBorderCornerFitUnit,
 	cleanBasketFamilyUnit,
 	straightTestUnit
 ];

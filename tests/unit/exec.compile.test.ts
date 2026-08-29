@@ -77,13 +77,21 @@ const straightTestOnResolved = resolveConfig(
 // unchanged, confirming the current computation is insensitive to
 // unconfigured resolve-only inventory (the compass op appears in neither
 // the default plan's ops nor its bindings).
+// 2026-08-29: teeBorderCornerFit lands (owner's border-adjacency corner-fit
+// recovery for tees buried under basket glyphs; manually validated on
+// Heritage T6 before the code was written -- see
+// g4.teeBorderCornerFitMath.ts's header). Another default-OFF resolve-only
+// single-operation unit: UNIT_OPERATIONS/OPERATION_UNIVERSE counts move
+// (19->20, 26->27) and, per the insensitivity property proven one entry up,
+// the frozen default plan fingerprint is expected to stay put -- verified by
+// re-running this suite after the change.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
 	'f2739303d4ca9d6fe6fb444cb8f39272b0955171144d5a9e7d0f4113ab4944f9';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(19); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate + teeBadgeCompass
-		expect(OPERATION_UNIVERSE.length).toBe(26); // prior universe + five single-operation units
+		expect(UNIT_OPERATIONS.size).toBe(20); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate + teeBadgeCompass + teeBorderCornerFit
+		expect(OPERATION_UNIVERSE.length).toBe(27); // prior universe + six single-operation units
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
