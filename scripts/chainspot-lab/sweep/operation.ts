@@ -515,6 +515,21 @@ export async function runSweepOperation(
 					board.get<ThreeFactorMeasurement>('measurement').badges
 				)
 			: [];
+	// The receipt's NOT FOUND block: every G1-read badge with no row above,
+	// by the exact same set difference so the two blocks can never disagree
+	// on which hole is missing. See notFoundRows.ts for the breadcrumb rule.
+	const notFoundBadges: readonly NotFoundBadgeRow[] =
+		assignmentScheduled && board.has('assignment') && board.has('measurement')
+			? findUnassignedBadges(
+					board.get<ThreeFactorMeasurement>('measurement').badges.map((badge) => ({
+						detId: badge.detId,
+						label: badge.label,
+						confidence: badge.confidence
+					})),
+					assignmentRows,
+					sealedTrace
+				)
+			: [];
 	// Canonical endpoint positions for the hole-number annotation layer: the
 	// final assignment slot's own tee inventory (visible + recovered) and the
 	// measurement's basket tips -- the exact objects the assignment rows name.
@@ -538,6 +553,7 @@ export async function runSweepOperation(
 		run: sealedTrace,
 		outDir: resolve(outDir, 'renders', 'run'),
 		assignmentRows: assignmentScheduled ? assignmentRows : undefined,
+		notFoundRows: assignmentScheduled ? notFoundBadges : undefined,
 		endpointPositions,
 		canvas: {
 			widthPx: image.width,
@@ -740,6 +756,7 @@ export async function runSweepOperation(
 			rawPairs: rawPairCount
 		},
 		assignments: assignmentRows,
+		notFoundBadges,
 		resultsProvenance,
 		visualRenders,
 		renderWarnings,
