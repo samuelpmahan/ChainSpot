@@ -30,40 +30,47 @@ jobs:
           npm ci
           ./lab setup
       - name: Observe Dashs recovery replay through custody
-        working-directory: ChainSpot
+        working-directory: ChainSpot/scripts/chainspot-lab
         run: |
           set -euo pipefail
-          IMG="$(find ../chainspot-corpus -type f \( -iname '*DashsTrack*.png' -o -iname '*dashs*track*.png' -o -iname '*dashs*.png' \) | sort | head -n 1)"
+          IMG="$(find ../../../chainspot-corpus -type f \( -iname '*DashsTrack*.jpg' -o -iname '*dashs*track*.jpg' -o -iname '*dashs*.jpg' \) | grep -v '/Annotated/' | sort | head -n 1)"
           if [ -z "$IMG" ]; then
-            echo 'DashsTrack PNG not found' >&2
-            find ../chainspot-corpus -maxdepth 4 -type f | sort | grep -i dash | head -n 100 || true
+            echo 'DashsTrack JPG not found' >&2
+            find ../../../chainspot-corpus -maxdepth 5 -type f | sort | grep -i dash | head -n 100 || true
             exit 2
           fi
+          IMG="$(realpath "$IMG")"
           echo "OBS_IMAGE=$IMG"
-          OBS_IMAGE="$IMG" node <<'NODE'
-          const fs = require('fs');
-          const { PNG } = require('pngjs');
-          const tf = require('./packages/alg/dist/detectors/threeFactor/index.js');
-          const defaultJson = require('./packages/alg/dist/detectors/threeFactor/configs/default.json');
+          OBS_IMAGE="$IMG" node --import tsx --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { canonicalizeInputs } from './sweep/inputShim.ts';
+          import {
+            runThreeFactor,
+            resolveConfig,
+            DEFAULT_EXECUTION
+          } from '@chainspot/alg/detectors/threeFactor';
 
-          const png = PNG.sync.read(fs.readFileSync(process.env.OBS_IMAGE));
+          const defaultJson = JSON.parse(
+            readFileSync('../../packages/alg/src/detectors/threeFactor/configs/default.json', 'utf8')
+          );
+          const { report, image } = await canonicalizeInputs([process.env.OBS_IMAGE]);
           const raster = {
-            imageId: 'dashs-custody-replay-observe',
-            widthPx: png.width,
-            heightPx: png.height,
-            rgba: new Uint8ClampedArray(png.data)
+            imageId: report.imageId,
+            widthPx: image.width,
+            heightPx: image.height,
+            rgba: new Uint8ClampedArray(image.data)
           };
 
-          const fullConfig = tf.resolveConfig(defaultJson, tf.DEFAULT_EXECUTION);
+          const fullConfig = resolveConfig(defaultJson, DEFAULT_EXECUTION);
           const preJson = {
             ...defaultJson,
             name: 'observe-before-teeRecovery',
             execution: defaultJson.execution.filter(id => id !== 'teeRecovery')
           };
-          const preConfig = tf.resolveConfig(preJson, tf.DEFAULT_EXECUTION);
+          const preConfig = resolveConfig(preJson, DEFAULT_EXECUTION);
 
-          const pre = tf.runThreeFactor(raster, { config: preConfig, paramsHash: 'observe-pre' });
-          const full = tf.runThreeFactor(raster, { config: fullConfig, paramsHash: 'observe-full' });
+          const pre = runThreeFactor(raster, { config: preConfig, paramsHash: 'observe-pre' });
+          const full = runThreeFactor(raster, { config: fullConfig, paramsHash: 'observe-full' });
 
           const assignmentMap = run => new Map(run.assignment.assignments.map(a => [a.badgeId, a]));
           const preMap = assignmentMap(pre);
@@ -74,7 +81,8 @@ jobs:
             const before = preMap.get(badgeId);
             if (!before || before.teeId !== row.teeId || before.basketId !== row.basketId) {
               changes.push({
-                hole: badgeLabel(full, badgeId), badgeId,
+                hole: badgeLabel(full, badgeId),
+                badgeId,
                 before: before ? `${before.teeId}->${before.basketId}` : 'UNASSIGNED',
                 after: `${row.teeId}->${row.basketId}`,
                 scoreBefore: before?.score ?? null,
@@ -84,6 +92,8 @@ jobs:
           }
 
           const recovered = full.custody.tees.filter(t => t.originKind === 'recovered');
+          console.log('=== CANONICAL ===');
+          console.log(JSON.stringify({ imageId: report.imageId, width: image.width, height: image.height, stripChrome: report.stripChrome }, null, 2));
           console.log('=== COUNTS ===');
           console.log(JSON.stringify({
             before: { tees: pre.assignment.tees.length, assignments: pre.assignment.assignments.length },
