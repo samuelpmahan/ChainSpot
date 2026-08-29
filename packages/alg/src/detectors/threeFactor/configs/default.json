@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
-	"name": "dev72-recovered-default",
-	"note": "Frozen production baseline: G2 uses the surviving two-pass renderer-family basket detector; G3 finds intact hollow-glyph tees; G4 then recovers assignment-missing tees from every fitting visible shard. Phantom tee completion remains OFF. Z-fit is a default-OFF deviation dropped from this schedule (owner directive 2026-08-28); it stays one flip away via zfit-on.json. The execution list is compiler chronology, while gate ownership is semantic rather than a waterfall.",
+	"name": "dev6-106-default",
+	"note": "Frozen Dev6 106/108 tee-to-badge baseline from daada50 (2026-08-29): G2/G3 endpoint detection, assignment, and post-assignment teeRecovery feed the ray-first teeBadgeLock lane. The two remaining locks stay named abstentions; 108/108 work is experimental on top of this baseline. Phantom tee completion and zfit remain out of the default schedule.",
 	"execution": [
 		"badgeStage",
 		"badges",
@@ -13,7 +13,14 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery"
+		"teeRecovery",
+		"teeBadgeLock"
 	],
-	"gates": {}
+	"gates": {
+		"G4": {
+			"teeBadgeLock": {
+				"enabled": true
+			}
+		}
+	}
 }
