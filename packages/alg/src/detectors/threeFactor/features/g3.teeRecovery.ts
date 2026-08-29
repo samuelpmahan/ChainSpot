@@ -853,15 +853,18 @@ export function buildTeeRecoveryCandidates(
 				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
 			);
 			let compatible = compatibleWith(fit);
-			// The first pose may be underdetermined by a tiny shard. Refit the union,
-			// then retain only complete components that still fit the shared pose.
-			for (let pass = 0; pass < 2; pass++) {
-				const union = compatible.flatMap((entry) => entry.pixels);
-				if (union.length === 0) break;
-				fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
-				const next = compatibleWith(fit);
-				if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
-				compatible = next;
+			// Refit only when the first pose actually attracted another component.
+			// If compatible is just the seed, union is byte-for-byte the exact pixels
+			// fit above, so solving the same exhaustive optimization again is a no-op.
+			if (compatible.length > 1) {
+				for (let pass = 0; pass < 2; pass++) {
+					const union = compatible.flatMap((entry) => entry.pixels);
+					if (union.length === 0) break;
+					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+					const next = compatibleWith(fit);
+					if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
+					compatible = next;
+				}
 			}
 			if (compatible.length === 0) continue;
 			const groupKey = compatible.map((entry) => entry.component.label).sort((a, b) => a - b).join('+');
