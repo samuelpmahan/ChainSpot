@@ -11,6 +11,7 @@ import type { OperationArtifact } from '../../../exec/gateway';
 import type { ExecBoard } from '../../../exec/board';
 import type {
 	BadgeEvidence,
+	BasketEvidence,
 	RawPairEvidence,
 	TeeEvidence,
 	ThreeFactorAssignment,
@@ -22,11 +23,16 @@ import {
 	buildTeeBadgeLockEvidence,
 	collapseTeeBadgePaths,
 	maximumWeightTeeBadgeMatching,
+	readImageSigma,
 	scoreTeeBadgeCandidates,
+	traceBadgeToBasket,
+	type BadgeBasketTraceOutcome,
+	type CompassImageSigma,
 	type TeeBadgeBadgeOrder,
 	type TeeBadgeLockEvidence,
 	type TeeBadgeLockMathKnobs,
 	type TeeBadgeLockScoredCandidate,
+	type TeeBadgeLockSupportField,
 	type TeeBadgeTeeOrder
 } from './g4.teeBadgeLockMath';
 import { TEE_BADGE_LOCK_RENDER } from './g4.teeBadgeLockReceipt';
@@ -43,27 +49,33 @@ function scoringKnobs(
 	ctx: FeatureContext,
 	measurement: TeeBadgeLockMeasurement
 ): TeeBadgeLockMathKnobs {
-	const configured = ctx.resolve(g4ScoringFeature).knobs as Record<string, unknown>;
+	// CL-7: g4ScoringFeature is the shared DEFAULT-ON scoring knob set and is
+	// never retuned by this lane; teeOrientationSigma/teeOrientationSigmaDeg
+	// on it is dead to this feature (CL-4) -- bearing uncertainty now comes
+	// from readImageSigma's per-image estimate (see executeTeeBadgeLock),
+	// with a named conservative fallback, never a borrowed configured knob.
+	void ctx.resolve(g4ScoringFeature); // keep the declared feature dependency honest
 	const alignmentPower = measurement.parameters?.alignmentPower;
 	const worstWindowSrcPx = measurement.parameters?.worstWindowSrcPx;
-	const minWindowCells = configured.minWindowCells;
-	const orientationSigma = configured.teeOrientationSigmaDeg ?? configured.teeOrientationSigma;
-	if (
-		!finite(alignmentPower) ||
-		!finite(worstWindowSrcPx) ||
-		!finite(minWindowCells) ||
-		!finite(orientationSigma)
-	) {
+	if (!finite(alignmentPower) || !finite(worstWindowSrcPx)) {
 		throw new Error(
-			'teeBadgeLock: scoring provenance is incomplete; alignmentPower and worstWindowSrcPx must come from measurement.parameters, while minWindowCells and teeOrientationSigmaDeg must come from resolved scoring.'
+			'teeBadgeLock: scoring provenance is incomplete; alignmentPower and worstWindowSrcPx must come from measurement.parameters.'
 		);
 	}
-	return {
-		alignmentPower,
-		worstWindowSrcPx,
-		minWindowCells,
-		teeOrientationSigmaDeg: orientationSigma
-	};
+	const configured = ctx.resolve(g4ScoringFeature).knobs as Record<string, unknown>;
+	const minWindowCells = configured.minWindowCells;
+	if (!finite(minWindowCells)) {
+		throw new Error('teeBadgeLock: minWindowCells must come from resolved scoring.');
+	}
+	return { alignmentPower, worstWindowSrcPx, minWindowCells };
+}
+
+function imageSigmaFor(measurement: TeeBadgeLockMeasurement): CompassImageSigma {
+	// CL-4: readImageSigma reads G3's published per-tee/per-image sigma when
+	// present; measurement itself does not carry it in this worktree yet
+	// (concurrent G3 build), so this degrades to the named conservative
+	// fallback until that board slot lands -- never a silent guess.
+	return readImageSigma(measurement);
 }
 
 function asBadgeOrder(badges: readonly BadgeEvidence[] | undefined): readonly TeeBadgeBadgeOrder[] {
@@ -100,10 +112,17 @@ function axisSourceCode(source: TeeBadgeLockScoredCandidate['axisSource']): numb
 	return 3;
 }
 
+function traceOutcomeCode(outcome: BadgeBasketTraceOutcome['outcome'] | undefined): number | undefined {
+	if (outcome === 'basket') return 0;
+	if (outcome === 'unknown') return 1;
+	return undefined;
+}
+
 function numericLockValues(
 	lock: TeeBadgeLockScoredCandidate & {
 		readonly tier?: 'visible' | 'recovered';
 		readonly hole?: number;
+		readonly basketTrace?: BadgeBasketTraceOutcome;
 	}
 ): Record<string, number> {
 	const values: Record<string, number> = {
@@ -118,6 +137,18 @@ function numericLockValues(
 	if (finite(lock.axisErrorDeg)) values.axisErrorDeg = lock.axisErrorDeg;
 	if (finite(lock.runnerUpMargin)) values.margin = lock.runnerUpMargin;
 	values.tierCode = lock.tier === 'recovered' ? 1 : 0;
+	values.rayDegraded = lock.rayDegraded ? 1 : 0;
+	if (lock.ray && finite(lock.ray.sigmaUsedDeg)) values.sigmaUsedDeg = lock.ray.sigmaUsedDeg;
+	if (lock.ray && finite(lock.ray.wideningDeg)) values.wideningDeg = lock.ray.wideningDeg;
+	if (lock.basketTrace) {
+		const code = traceOutcomeCode(lock.basketTrace.outcome);
+		if (finite(code)) values.traceOutcomeCode = code as number;
+		values.traceLengthPx = lock.basketTrace.lengthPx;
+		values.tunneledSegments = lock.basketTrace.tunneledSegments.length;
+		// 2026-08-29 gate-reorg: 0 = ran straight (new-G5-shaped), >0 = bent N
+		// times (new-G6-shaped) -- visible in the receipt ahead of re-homing.
+		values.bendCount = lock.basketTrace.bendCount;
+	}
 	return values;
 }
 
@@ -130,6 +161,36 @@ function abstentionValues(abstention: TeeBadgeLockEvidence['abstentions'][number
 	if (finite(abstention.winningHole)) values.winningHole = abstention.winningHole;
 	if (finite(abstention.winningScore)) values.winningScore = abstention.winningScore;
 	return values;
+}
+
+/**
+ * CL-9: one plain sentence a disc golfer could accept, covering both the
+ * stage-A TeeBadgeClaim (2026-08-29 gate-reorg: this stage is the new G4's
+ * mechanism -- a unique claim or a named abstention, no basket assignment)
+ * and, when it ran, the stage-B path trace (the new G5/G6 mechanism family:
+ * straight-to-basket vs bent N times, distinguished below so that split is
+ * visible in the evidence ahead of any unit/gate re-homing).
+ */
+function lockReasonSentence(
+	lock: TeeBadgeLockScoredCandidate & { readonly basketTrace?: BadgeBasketTraceOutcome }
+): string {
+	const rayPart = lock.rayDegraded
+		? `poor/no axis on this tee -- corroboration-only TeeBadgeClaim (route weakAligned=${lock.weakAlignedSupport.toFixed(3)}, efficiency=${lock.pathEfficiency.toFixed(3)})`
+		: `TeeBadgeClaim: points at its badge within ${finite(lock.axisErrorDeg) ? lock.axisErrorDeg.toFixed(1) : 'UNKNOWN'}°` +
+			`${lock.ray && finite(lock.ray.sigmaUsedDeg) ? ` (sigma ${lock.ray.sigmaUsedDeg.toFixed(2)}° -- ${lock.ray.sigmaProvenance})` : ''}`;
+	if (!lock.basketTrace) return `tee ${rayPart}; no basket path trace ran.`;
+	if (lock.basketTrace.outcome === 'basket') {
+		const shapeNote =
+			lock.basketTrace.bendCount === 0
+				? 'ran straight to the basket'
+				: `bent ${lock.basketTrace.bendCount} time${lock.basketTrace.bendCount === 1 ? '' : 's'} to the basket`;
+		const tunnelNote =
+			lock.basketTrace.tunneledSegments.length > 0
+				? `, tunneling under ${lock.basketTrace.tunneledSegments.map((s) => s.overId).join(', ')}`
+				: '';
+		return `tee ${rayPart}; followed the path ${lock.basketTrace.lengthPx.toFixed(0)}px from the badge and ${shapeNote}${tunnelNote}; it ends at ${lock.basketTrace.basketId}.`;
+	}
+	return `tee ${rayPart}; path traced ${lock.basketTrace.lengthPx.toFixed(0)}px from the badge (bent ${lock.basketTrace.bendCount} time${lock.basketTrace.bendCount === 1 ? '' : 's'} so far) then ${lock.basketTrace.reason} -- UNKNOWN basket, partial trace kept as evidence.`;
 }
 
 function emitDrawables(
@@ -168,10 +229,70 @@ function emitDrawables(
 			verdict: 'accepted',
 			visualRole: 'tee-badge-path',
 			ref,
-			reason: `${holeNote}max-weight lock; exact routed testimony; no basket evidence read`,
+			reason: `${holeNote}${lockReasonSentence(lock)}`,
 			values: numericLockValues(lock)
 		});
 	}
+}
+
+/**
+ * CL-6b: for each stage-A lock, trace the painted path onward from its badge
+ * -- away from the tee side -- to discover the basket it claims. Baskets are
+ * read here ONLY as footprint-arrival testimony (S6): they are never
+ * enumerated as candidates, never routed toward, never a "nearest" guess.
+ */
+function traceBasketsForLocks(
+	measurement: TeeBadgeLockMeasurement,
+	locks: readonly TeeBadgeLockScoredCandidate[]
+): Map<string, BadgeBasketTraceOutcome> {
+	const field = measurement.field as unknown as TeeBadgeLockSupportField;
+	const viewportTopPx = measurement.viewport?.topPx ?? 0;
+	const supportTau = measurement.parameters?.supportTau;
+	const corridorWidthPx = measurement.parameters?.corridorWidthPx;
+	const badgesByDetId = new Map((measurement.badges ?? []).map((badge) => [badge.detId, badge]));
+	const baskets = (measurement.baskets ?? []).map((basket: BasketEvidence) => ({
+		basketId: basket.detId,
+		bbox: basket.bbox
+	}));
+	if (!finite(supportTau) || !finite(corridorWidthPx)) return new Map();
+	const maxTraceLengthPx = Math.hypot(field.width * field.scale, field.height * field.scale);
+	const traces = new Map<string, BadgeBasketTraceOutcome>();
+	for (const lock of locks) {
+		const badge = badgesByDetId.get(lock.badgeId);
+		if (!badge || !finite(badge.cxPx) || !finite(badge.cyPx) || !badge.bbox) continue;
+		// Heading away from the tee side: continue the routed testimony's own
+		// final approach direction into the badge (teeBadgePath is already in
+		// tee->badge order -- see collapseTeeBadgePaths), rather than recomputing
+		// geometry this feature does not own.
+		const path = lock.teeBadgePath;
+		const last = path[path.length - 1];
+		const priorIndex = [...path.keys()].reverse().find((index) => {
+			const point = path[index];
+			return point[0] !== last?.[0] || point[1] !== last?.[1];
+		});
+		const prior = priorIndex !== undefined ? path[priorIndex] : undefined;
+		const dx = last && prior ? last[0] - prior[0] : 1;
+		const dy = last && prior ? last[1] - prior[1] : 0;
+		const headingRad = Math.hypot(dx, dy) > 0 ? Math.atan2(dy, dx) : 0;
+		const occluders = (measurement.badges ?? [])
+			.filter((other) => other.detId !== lock.badgeId)
+			.map((other) => ({ id: other.detId, bbox: other.bbox }));
+		const outcome = traceBadgeToBasket({
+			badgeId: lock.badgeId,
+			startPx: [badge.cxPx, badge.cyPx],
+			headingRad,
+			field,
+			viewportTopPx,
+			supportTau: supportTau as number,
+			corridorWidthPx: corridorWidthPx as number,
+			startBadgeBbox: badge.bbox,
+			occluders,
+			baskets,
+			maxTraceLengthPx
+		});
+		traces.set(lock.badgeId, outcome);
+	}
+	return traces;
 }
 
 function executeTeeBadgeLock(
@@ -199,7 +320,8 @@ function executeTeeBadgeLock(
 					tees: teeOrder,
 					badges,
 					viewportTopPx: measurement.viewport?.topPx ?? 0,
-					knobs: scoringKnobs(ctx, measurement)
+					knobs: scoringKnobs(ctx, measurement),
+					imageSigma: imageSigmaFor(measurement)
 				})
 			: [];
 	scoreStop();
@@ -210,9 +332,16 @@ function executeTeeBadgeLock(
 		: undefined;
 	matchStop();
 
+	const traceStop = ctx.span('teeBadgeLock.trace');
+	const basketTraces =
+		state.enabled && selected
+			? traceBasketsForLocks(measurement, selected.locks)
+			: new Map<string, BadgeBasketTraceOutcome>();
+	traceStop();
+
 	const publishStop = ctx.span('teeBadgeLock.publish');
 	const evidence = selected
-		? buildTeeBadgeLockEvidence(selected, { badges, tees: teeOrder, measurement })
+		? buildTeeBadgeLockEvidence(selected, { badges, tees: teeOrder, measurement, basketTraces })
 		: disabledEvidence(measurement);
 	if (state.enabled) emitDrawables(ctx, evidence, badges);
 	ctx.measure('teeBadgeLock', 'candidates', evidence.candidates.length);
@@ -229,6 +358,16 @@ function executeTeeBadgeLock(
 	);
 	ctx.measure('teeBadgeLock', 'unmatchedBadges', evidence.unmatchedBadgeIds.length);
 	ctx.measure('teeBadgeLock', 'unusedTees', evidence.unusedTeeIds.length);
+	ctx.measure(
+		'teeBadgeLock',
+		'basketsFollowed',
+		evidence.locks.filter((lock) => lock.basketTrace?.outcome === 'basket').length
+	);
+	ctx.measure(
+		'teeBadgeLock',
+		'basketsUnknown',
+		evidence.locks.filter((lock) => lock.basketTrace?.outcome === 'unknown').length
+	);
 	board.set('teeBadgeLock', evidence);
 	publishStop();
 	stop();
