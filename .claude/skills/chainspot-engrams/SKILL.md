@@ -40,6 +40,21 @@ terminal and OFF in the default schedule (zfit-on.json flips it).
   course-derived values with printed provenance; raster-cell allowances
   survive but are commented as raster geometry. Index of known offenders:
   docs/minesweeper/.
+- **phantomTee is a ripcord** (owner, 2026-08-29): a completion device,
+  probably not in MVP. It exists so a hole with a genuinely invisible tee
+  can complete; it is NOT detection and its placement guess is junk until
+  path following (G6) can hand it a followed path's far end. Never enable
+  it in a shared multi-course config — the engine is course-blind and a
+  whitelist entry fabricates on EVERY course with that hole open (2026-08-29:
+  five junk assignments across Dev6, receipts-verified). Course-specific
+  configs only, until whitelist entries carry a course scope.
+- **Basket ownership follows the drawn border, never the bbox** (owner,
+  2026-08-29): baskets are not square — the glyph is ink in a mostly-empty
+  bbox, and the empty margin is where occluded pads leave remnants. A
+  bbox-rectangle ownership silently ate Heritage T10's dim pad. If basket
+  furniture ever provably masquerades (receipt first), own the sprite-ink
+  enclosed interior only. Badge bbox ownership stays correct: plates fill
+  their bboxes.
 
 ## The delegation ladder (owner protocol, 2026-08-28 — learned the hard way)
 
