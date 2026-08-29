@@ -15,6 +15,7 @@ export type BadgeGlyphTemplateReceiptText = string | typeof UNKNOWN;
 export interface BadgeGlyphTemplateReceiptRow {
 	readonly badgeId: BadgeGlyphTemplateReceiptText;
 	readonly currentLabel: BadgeGlyphTemplateReceiptText;
+	readonly currentConfidence: BadgeGlyphTemplateReceiptText;
 	readonly templateLabel: BadgeGlyphTemplateReceiptText;
 	readonly templateBestLabel: BadgeGlyphTemplateReceiptText;
 	readonly templateScore: BadgeGlyphTemplateReceiptValue;
@@ -94,11 +95,37 @@ function agreementText(code: BadgeGlyphTemplateReceiptValue): BadgeGlyphTemplate
 	return UNKNOWN;
 }
 
+function readerConfidenceText(
+	confidence: number | undefined,
+	fillFraction: number | undefined
+): BadgeGlyphTemplateReceiptValue {
+	if (typeof confidence === 'number') {
+		if (Number.isFinite(confidence)) {
+			return confidence;
+		} else if (typeof fillFraction === 'number' && Number.isFinite(fillFraction)) {
+			return fillFraction;
+		}
+	}
+	return UNKNOWN;
+}
+
 function rowFor(drawable: Drawable): BadgeGlyphTemplateReceiptRow {
 	const metadata = drawable.metadata ?? {};
+	const readerConfidence = (drawable.values?.readerConfidence as number | undefined) ?? undefined;
+	const readerFillFraction = (drawable.values?.readerFillFraction as number | undefined) ?? undefined;
+	const confidenceValue = readerConfidenceText(readerConfidence, readerFillFraction);
+	const currentConfidence: BadgeGlyphTemplateReceiptText =
+		typeof confidenceValue === 'number'
+			? Number.isFinite(readerConfidence ?? NaN)
+				? String(Number(readerConfidence!.toFixed(6)))
+				: typeof readerFillFraction === 'number'
+					? `fill=${Number(readerFillFraction.toFixed(6))}`
+					: UNKNOWN
+			: UNKNOWN;
 	return {
 		badgeId: text(metadata.badgeId ?? drawable.ref),
 		currentLabel: text(metadata.currentLabel),
+		currentConfidence,
 		templateLabel: text(metadata.templateLabel),
 		templateBestLabel: text(metadata.templateBestLabel),
 		templateScore: finite(drawable.values, 'templateScore'),
@@ -140,7 +167,7 @@ function cliRows(
 	disagreements: readonly BadgeGlyphTemplateReceiptRow[]
 ): string[] {
 	const header =
-		'badgeId | currentLabel | templateLabel | templateBestLabel | score | margin | abstention | agreement | verdict | reason';
+		'badgeId | currentLabel | currentConfidence | templateLabel | templateBestLabel | score | margin | abstention | agreement | verdict | reason';
 	const lines = [
 		'G1 BADGE-GLYPH-TEMPLATE vs CURRENT READER',
 		`runId=${text(run.runId)}`,
@@ -161,6 +188,7 @@ function cliRows(
 			[
 				row.badgeId,
 				holeOrText(row.currentLabel),
+				row.currentConfidence,
 				holeOrText(row.templateLabel),
 				holeOrText(row.templateBestLabel),
 				valueText(row.templateScore),
@@ -180,7 +208,7 @@ function cliRows(
 		for (const row of disagreements) {
 			lines.push(
 				`  badge ${row.badgeId}: current reader says ${row.currentLabel} ` +
-					`(reader confidence not carried by this feature's trace -- see BadgeEvidence.confidence), ` +
+					`(confidence=${row.currentConfidence}), ` +
 					`template says ${row.templateLabel} at score=${valueText(row.templateScore)} ` +
 					`margin=${valueText(row.templateMargin)}`
 			);

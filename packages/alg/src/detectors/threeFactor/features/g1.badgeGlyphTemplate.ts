@@ -146,6 +146,12 @@ export interface BadgeGlyphTemplateVerdict {
 	readonly templateScore: number;
 	readonly templateMargin: number;
 	readonly templateAbstention: BadgeGlyphTemplateClassification['abstention'];
+	/** Current reader's classifier margin (BadgeEvidence.confidence), or Infinity
+	 * when no digits were scored (in which case readerFillFraction exists instead). */
+	readonly readerConfidence: number;
+	/** Current reader's geometric fill fraction (BadgeEvidence.fillFraction) when
+	 * readerConfidence is Infinity; undefined otherwise. */
+	readonly readerFillFraction?: number;
 	/**
 	 * 'agree'      both sides emitted the same label.
 	 * 'disagree'   both sides emitted a label and they differ -- loud finding.
@@ -233,6 +239,8 @@ export function classifyBadgeAgainstTemplates(
 		templateScore: classification.bestScore,
 		templateMargin: classification.ambiguityMargin,
 		templateAbstention: classification.abstention,
+		readerConfidence: badge.confidence,
+		readerFillFraction: badge.fillFraction,
 		agreement: agreementOf(badge.label, templateLabel)
 	};
 }
@@ -343,6 +351,8 @@ export const badgeGlyphTemplateUnit: EngineUnit = {
 					templateScore: verdict.templateScore,
 					templateMargin: verdict.templateMargin,
 					templateAbstentionCode: abstentionCode(verdict.templateAbstention),
+					readerConfidence: verdict.readerConfidence,
+					...(Number.isFinite(verdict.readerConfidence) ? {} : { readerFillFraction: verdict.readerFillFraction }),
 					...(verdict.currentLabel !== null ? { currentLabel: Number(verdict.currentLabel) } : {}),
 					...(verdict.templateLabel !== null ? { templateLabel: Number(verdict.templateLabel) } : {}),
 					...(verdict.templateBestLabel !== null
