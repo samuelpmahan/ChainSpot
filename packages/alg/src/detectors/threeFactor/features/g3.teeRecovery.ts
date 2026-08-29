@@ -1148,31 +1148,9 @@ export function buildTeeRecoveryCandidates(
 			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && (bRailMiss !== undefined ? bRailMiss === 0 : ba < activeAxisLimitRad);
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
 			if (aAccepted) {
-				// 2026-08-29 rail-projection lane, measurement-verified (HeritagePark
-				// H6: a genuine 3x7/21px rail sliver at the basket's occluded edge
-				// scored a clean rail fit -- 0.306px error against a 3.103px
-				// derived bound -- but a same-target "support-search" blob 4x its
-				// size won the old size-first tie-break and was then correctly
-				// killed by cross-target multiclaim, leaving H6 with zero published
-				// candidates even though the rail evidence was sitting right there).
-				// A rail-projection fit's accept bound comes from THIS course's own
-				// measured pad width projected onto an observed straight edge
-				// (CL-4/CL-5-style derived uncertainty); a support-search fit only
-				// confirms pixels sit inside a hypothesized box within a fixed
-				// angular tolerance, with no width/thickness cross-check at all --
-				// on a large canonical raster that coarser test is satisfied by
-				// accidental terrain (rooftops, driveway edges) far more often than
-				// by a real pad, and raw pixel count then rewards exactly the wrong
-				// candidate. Prefer the structurally stronger evidence kind before
-				// ever comparing size; this is a general ordering rule, not a
-				// carve-out for one hole -- most targets have no rail candidate at
-				// all, so this only ever changes the outcome where a rail fit is
-				// actually competing against a looser fallback fit.
-				const aRail = a.fit.fitKind === 'rail-projection' ? 0 : 1;
-				const bRail = b.fit.fitKind === 'rail-projection' ? 0 : 1;
 				const aResidual = a.fit.fitKind === 'rail-projection' ? a.fit.badgePerpendicularErrorPx ?? Infinity : aa;
 				const bResidual = b.fit.fitKind === 'rail-projection' ? b.fit.badgePerpendicularErrorPx ?? Infinity : ba;
-				return (aRail - bRail) || (b.fragmentPixels.length - a.fragmentPixels.length) || (aResidual - bResidual) || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
+				return b.fragmentPixels.length - a.fragmentPixels.length || aResidual - bResidual || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 			}
 			const aFraction = ar / a.fragmentPixels.length;
 			const bFraction = br / b.fragmentPixels.length;
