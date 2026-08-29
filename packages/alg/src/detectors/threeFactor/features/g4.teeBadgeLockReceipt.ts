@@ -1,9 +1,12 @@
 // Trace-only receipt and render seam for G4 tee↔badge ownership locks.
 //
-// The teeBadgeLock producer owns all matching, scoring, tiering, and path
-// sampling.  This module deliberately does not inspect pixels, read baskets,
-// rebuild IDs, or derive geometry from a path.  It carries the producer's
-// testimony into a literal CLI receipt and a declarative FeatureRender plan.
+// The teeBadgeLock producer owns all matching, scoring, tiering, path
+// sampling, and (CL-6b) badge->basket path tracing. This module deliberately
+// does not inspect pixels, re-read baskets itself, rebuild IDs, or derive
+// geometry from a path -- it carries the producer's testimony (including its
+// drawable `values.traceOutcomeCode`/`traceLengthPx`/`tunneledSegments` and
+// the CL-9 plain-sentence `reason`) into a literal CLI receipt and a
+// declarative FeatureRender plan.
 
 import type { Drawable, FeatureRender, FeatureRenderPlan, RunTrace, UnitTrace } from './types';
 
@@ -44,6 +47,19 @@ export interface TeeBadgeLockReceiptRow {
 	readonly margin: TeeBadgeLockValue;
 	readonly pathPoints: TeeBadgeLockValue;
 	readonly recovered: TeeBadgeLockValue;
+	/** CL-6a: this lock's axis was too poor/absent to drive a confident ray
+	 * lock and fell back to corroboration-only ranking. */
+	readonly rayDegraded: TeeBadgeLockValue;
+	readonly sigmaUsedDeg: TeeBadgeLockValue;
+	readonly wideningDeg: TeeBadgeLockValue;
+	/** CL-6b: 0=basket found, 1=UNKNOWN (partial trace kept as evidence),
+	 * UNKNOWN=stage B did not run for this lock. */
+	readonly traceOutcomeCode: TeeBadgeLockValue;
+	readonly traceLengthPx: TeeBadgeLockValue;
+	readonly tunneledSegments: TeeBadgeLockValue;
+	/** 2026-08-29 gate-reorg: 0 = path ran straight to the basket (new-G5
+	 * mechanism family), >0 = bent N times (new-G6 mechanism family). */
+	readonly bendCount: TeeBadgeLockValue;
 	readonly verdict: Drawable['verdict'];
 	/** Producer testimony is carried verbatim; absent testimony is UNKNOWN. */
 	readonly reason: string;
@@ -69,6 +85,10 @@ export interface TeeBadgeLockReceiptCounts {
 	readonly recoveredLocks: TeeBadgeLockValue;
 	readonly unmatchedBadges: TeeBadgeLockValue;
 	readonly unusedTees: TeeBadgeLockValue;
+	/** CL-6b: of the locks above, how many paths were followed to a credible
+	 * basket vs. ended in a loud UNKNOWN. */
+	readonly basketsFollowed: TeeBadgeLockValue;
+	readonly basketsUnknown: TeeBadgeLockValue;
 }
 
 export interface TeeBadgeLockCorrespondence {
@@ -239,6 +259,12 @@ function tierFor(code: TeeBadgeLockValue): TeeBadgeLockText {
 	return UNKNOWN;
 }
 
+function traceOutcomeText(code: TeeBadgeLockValue): TeeBadgeLockText {
+	if (code === 0) return 'basket';
+	if (code === 1) return 'unknown';
+	return UNKNOWN;
+}
+
 function axisSourceFor(code: TeeBadgeLockValue): TeeBadgeLockText {
 	if (code === 0) return 'tee.pad.minAreaPose.angleRad';
 	if (code === 1) return 'TeeEvidence.angleRad';
@@ -268,6 +294,13 @@ function rowFor(drawable: Drawable): TeeBadgeLockReceiptRow {
 		margin: finite(drawable.values, 'margin'),
 		pathPoints: finite(drawable.values, 'pathPoints'),
 		recovered: finite(drawable.values, 'recovered'),
+		rayDegraded: finite(drawable.values, 'rayDegraded'),
+		sigmaUsedDeg: finite(drawable.values, 'sigmaUsedDeg'),
+		wideningDeg: finite(drawable.values, 'wideningDeg'),
+		traceOutcomeCode: finite(drawable.values, 'traceOutcomeCode'),
+		traceLengthPx: finite(drawable.values, 'traceLengthPx'),
+		tunneledSegments: finite(drawable.values, 'tunneledSegments'),
+		bendCount: finite(drawable.values, 'bendCount'),
 		verdict: drawable.verdict,
 		reason: typeof drawable.reason === 'string' ? drawable.reason : UNKNOWN
 	};
@@ -287,7 +320,9 @@ function countsFor(unit: UnitTrace): TeeBadgeLockReceiptCounts {
 		visibleLocks: measurementValue(unit, 'visibleLocks'),
 		recoveredLocks: measurementValue(unit, 'recoveredLocks'),
 		unmatchedBadges: measurementValue(unit, 'unmatchedBadges'),
-		unusedTees: measurementValue(unit, 'unusedTees')
+		unusedTees: measurementValue(unit, 'unusedTees'),
+		basketsFollowed: measurementValue(unit, 'basketsFollowed'),
+		basketsUnknown: measurementValue(unit, 'basketsUnknown')
 	};
 }
 
@@ -371,7 +406,7 @@ function cliRows(
 	rows: readonly TeeBadgeLockReceiptRow[]
 ): string[] {
 	const header =
-		'lockId | hole | badgeId | teeId | tier | score | weakAligned | efficiency | axisErrorDeg | axisSource | margin | pathPoints | verdict | reason';
+		'lockId | hole | badgeId | teeId | tier | score | weakAligned | efficiency | axisErrorDeg | axisSource | sigmaUsedDeg | wideningDeg | rayDegraded | margin | pathPoints | traceOutcome | traceLengthPx | tunneledSegments | bendCount | verdict | reason';
 	const lines = [
 		'TEE→BADGE LOCK',
 		`runId=${metadata.runId}`,
@@ -380,13 +415,19 @@ function cliRows(
 		`featureId=${metadata.featureId}`,
 		`traceHash=${metadata.traceHash}`,
 		`frame=${metadata.canonicalFrame}`,
-		'basketEvidenceRead=0',
+		// CL-6b: baskets are read as footprint-arrival testimony for the
+		// badge->basket tracer whenever it ran (basketsFollowed+basketsUnknown
+		// > 0); stage A's tee<->badge lock itself still reads zero basket
+		// evidence either way.
+		`basketEvidenceRead=${(typeof counts.basketsFollowed === 'number' ? counts.basketsFollowed : 0) + (typeof counts.basketsUnknown === 'number' ? counts.basketsUnknown : 0) > 0 ? 1 : 0}`,
 		`candidates=${valueText(counts.candidates)}`,
 		`locks=${valueText(counts.locks)}`,
 		`visibleLocks=${valueText(counts.visibleLocks)}`,
 		`recoveredLocks=${valueText(counts.recoveredLocks)}`,
 		`unmatchedBadges=${valueText(counts.unmatchedBadges)}`,
 		`unusedTees=${valueText(counts.unusedTees)}`,
+		`basketsFollowed=${valueText(counts.basketsFollowed)}`,
+		`basketsUnknown=${valueText(counts.basketsUnknown)}`,
 		header
 	];
 	for (const row of rows) {
@@ -402,8 +443,15 @@ function cliRows(
 				valueText(row.efficiency),
 				valueText(row.axisErrorDeg),
 				row.axisSource,
+				valueText(row.sigmaUsedDeg),
+				valueText(row.wideningDeg),
+				valueText(row.rayDegraded),
 				valueText(row.margin),
 				valueText(row.pathPoints),
+				traceOutcomeText(row.traceOutcomeCode),
+				valueText(row.traceLengthPx),
+				valueText(row.tunneledSegments),
+				valueText(row.bendCount),
 				row.verdict,
 				row.reason
 			].join(' | ')
@@ -424,7 +472,7 @@ function planFor(
 		layers: [
 			{
 				name: 'Tee→Badge ownership locks (thin blue)',
-				note: '#00a2ff thin-blue layer: exact producer-emitted routed testimony; paths are forwarded unchanged; basketEvidenceRead=0',
+				note: '#00a2ff thin-blue layer: exact producer-emitted routed testimony (stage A tee<->badge lock); paths are forwarded unchanged; stage B (CL-6b) reads basket footprints only as path-termination testimony, never as a routing target',
 				drawables: acceptedPaths
 			}
 		],

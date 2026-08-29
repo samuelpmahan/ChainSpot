@@ -43,8 +43,13 @@ export interface TeeBadgeLockMathKnobs {
 	readonly worstWindowSrcPx: number;
 	/** Source provenance: resolved scoring.minWindowCells. */
 	readonly minWindowCells: number;
-	/** Source provenance: resolved scoring.teeOrientationSigmaDeg. */
-	readonly teeOrientationSigmaDeg: number;
+	// CL-4 (2026-08-29 compass-lane contract): the imported
+	// `teeOrientationSigmaDeg` knob (borrowed from DEFAULT_SCORING_KNOBS.
+	// teeOrientationSigma=12, convicted as "one imported number cannot
+	// describe every photo") is intentionally NOT a field here any more.
+	// Bearing uncertainty is now read per-image (readImageSigma) with a
+	// named conservative fallback (UNKNOWN_SIGMA_FALLBACK_DEG) -- see the
+	// "G3 compass interface" section below.
 }
 
 export interface TeeBadgeLockSupportField {
@@ -61,6 +66,160 @@ export type TeeBadgeAxisSource =
 	| 'TeeEvidence.pad.angleRad'
 	| 'UNKNOWN';
 
+/**
+ * ---- G3 compass interface (2026-08-29 compass-lane contract, final section) ----
+ *
+ * The sibling G3 lane publishes per-tee axis evidence and per-image bearing
+ * sigma on the board; this feature CONSUMES that shape and never recomputes
+ * it. G3's fields are not yet on `TeeEvidence`/`ThreeFactorMeasurement` in
+ * this worktree (concurrent build), so the two read* functions below are a
+ * typed, structural accessor: they read the exact contract shape off
+ * whatever object G3 eventually attaches it to, and degrade to a named
+ * UNKNOWN when a field is absent -- never a guess, never a thrown error for
+ * a lane still landing its half.
+ */
+export type CompassAxisQuality = 'good' | 'occluded-partial' | 'poor' | 'none';
+export type CompassAxisSource = 'constrained-fit' | 'component-pca-evidence-only' | 'UNKNOWN';
+
+export interface CompassTeeAxis {
+	readonly axisRad: number | null;
+	readonly axisQuality: CompassAxisQuality;
+	readonly axisSource: CompassAxisSource;
+	readonly excusedMaskRef: string | 'UNKNOWN';
+	readonly centerUncertaintyPx: number | 'UNKNOWN';
+}
+
+export interface CompassSigmaProvenance {
+	readonly goodFitCount?: number;
+	readonly method?: string;
+	readonly fallback?: string;
+}
+
+export interface CompassImageSigma {
+	readonly orientationSigmaDeg: number | 'UNKNOWN';
+	readonly sigmaProvenance: CompassSigmaProvenance;
+}
+
+/** CL-4's named conservative fallback: applied ONLY when an image publishes
+ * no per-image sigma (too few good-quality fits to estimate one). This is
+ * the owner-verified real-world compass extreme already on record in the
+ * signed 2026-08-28 render-stack contract ("compass median 1.1 degrees,
+ * p90 2.65", ratchet-tracked outlier at 11.3) -- a documented sanity anchor
+ * pressed into service as a worst-case fallback, not a re-imported tuning
+ * constant, and it is never used when a real per-image sigma exists. */
+export const UNKNOWN_SIGMA_FALLBACK_DEG = 11.3;
+export const UNKNOWN_SIGMA_FALLBACK_NAME =
+	'UNKNOWN_SIGMA_FALLBACK_DEG=11.3 (owner-verified compass p100 outlier, 2026-08-28 render-stack contract; applied only when this image published no per-image sigma)';
+
+function readCompassAxisQuality(value: unknown): CompassAxisQuality {
+	return value === 'good' || value === 'occluded-partial' || value === 'poor' || value === 'none'
+		? value
+		: 'none';
+}
+
+function readCompassAxisSource(value: unknown): CompassAxisSource {
+	return value === 'constrained-fit' || value === 'component-pca-evidence-only' ? value : 'UNKNOWN';
+}
+
+/** Typed, defensive read of one image's G3-published orientation sigma.
+ * (The tee-axis counterpart, readTeeAxis, is defined further below next to
+ * the legacy TeeBadgeTeeOrder fallback chain it also consults.) */
+export function readImageSigma(measurement: unknown): CompassImageSigma {
+	if (!measurement || typeof measurement !== 'object') {
+		return { orientationSigmaDeg: 'UNKNOWN', sigmaProvenance: { fallback: UNKNOWN_SIGMA_FALLBACK_NAME } };
+	}
+	const value = measurement as {
+		orientationSigmaDeg?: unknown;
+		sigmaProvenance?: unknown;
+	};
+	if (finite(value.orientationSigmaDeg)) {
+		const provenance =
+			value.sigmaProvenance && typeof value.sigmaProvenance === 'object'
+				? (value.sigmaProvenance as CompassSigmaProvenance)
+				: { method: 'measurement.orientationSigmaDeg (unstructured provenance)' };
+		return { orientationSigmaDeg: value.orientationSigmaDeg, sigmaProvenance: provenance };
+	}
+	return { orientationSigmaDeg: 'UNKNOWN', sigmaProvenance: { fallback: UNKNOWN_SIGMA_FALLBACK_NAME } };
+}
+
+export interface RayScoreResult {
+	/** In [0,1]; 1 exactly when `degraded` (the ray casts no vote). */
+	readonly rayFactor: number;
+	readonly rayErrorDeg: number | 'UNKNOWN';
+	/** The effective sigma actually used (image sigma combined with the
+	 * CL-5 center-uncertainty widening term), in degrees. */
+	readonly sigmaUsedDeg: number | 'UNKNOWN';
+	readonly sigmaProvenance: string;
+	/** atan(centerUncertaintyPx / badgeDistancePx) in degrees (CL-5). */
+	readonly wideningDeg: number | 'UNKNOWN';
+	/** true when this tee's axis cannot drive a confident ray lock
+	 * (axisQuality 'poor'/'none', or no accepted fit at all) -- ranking
+	 * degrades to corroboration-only for this candidate. */
+	readonly degraded: boolean;
+	readonly degradeReason?: string;
+}
+
+/**
+ * CL-6a + CL-4 + CL-5: score how well one tee's own compass axis points at
+ * one badge. Plain sentence: "the tee's pointing direction should land on
+ * the badge, within how much this photo's own fits wobble, widened a
+ * little more when the badge sits close (a small center error tilts the
+ * ray more at short range)."
+ */
+export function scoreTeeBadgeRay(
+	axis: CompassTeeAxis,
+	imageSigma: CompassImageSigma,
+	bearingRad: number,
+	badgeDistancePx: number
+): RayScoreResult {
+	if (axis.axisQuality === 'poor' || axis.axisQuality === 'none' || axis.axisRad === null) {
+		return {
+			rayFactor: 1,
+			rayErrorDeg: 'UNKNOWN',
+			sigmaUsedDeg: 'UNKNOWN',
+			sigmaProvenance: 'UNKNOWN (no confident ray to score)',
+			wideningDeg: 'UNKNOWN',
+			degraded: true,
+			degradeReason:
+				axis.axisRad === null
+					? 'no accepted axis fit for this tee (angleRad null) -- corroboration-only'
+					: `axisQuality='${axis.axisQuality}' cannot drive a confident ray lock -- corroboration-only`
+		};
+	}
+	const rayErrorDeg = (axialAngleDelta(axis.axisRad, bearingRad) * 180) / Math.PI;
+	let sigmaImageDeg: number;
+	let sigmaProvenance: string;
+	if (typeof imageSigma.orientationSigmaDeg === 'number') {
+		sigmaImageDeg = imageSigma.orientationSigmaDeg;
+		const p = imageSigma.sigmaProvenance;
+		sigmaProvenance =
+			typeof p.method === 'string'
+				? `${p.method}${finite(p.goodFitCount) ? ` (n=${p.goodFitCount})` : ''}`
+				: 'measurement-provided per-image sigma';
+	} else {
+		sigmaImageDeg = UNKNOWN_SIGMA_FALLBACK_DEG;
+		sigmaProvenance = UNKNOWN_SIGMA_FALLBACK_NAME;
+	}
+	// CL-5: a small center-position error tilts the ray more when the badge
+	// is close -- atan(centerShiftPx / badgeDistancePx), degenerate (maximal,
+	// 90deg) widening when the badge sits exactly at the tee's own center.
+	let wideningDeg = 0;
+	if (typeof axis.centerUncertaintyPx === 'number' && axis.centerUncertaintyPx > 0) {
+		wideningDeg =
+			badgeDistancePx > 0
+				? (Math.atan(axis.centerUncertaintyPx / badgeDistancePx) * 180) / Math.PI
+				: 90;
+	}
+	const sigmaUsedDeg = Math.sqrt(sigmaImageDeg ** 2 + wideningDeg ** 2);
+	const rayFactor = Math.exp(-((rayErrorDeg / sigmaUsedDeg) ** 2));
+	return { rayFactor, rayErrorDeg, sigmaUsedDeg, sigmaProvenance, wideningDeg, degraded: false };
+}
+
+/** CL-6a: route factors (weakAlignedSupport, pathEfficiency) demote to
+ * corroboration/tie-break -- they may only nudge a candidate's rank within
+ * floating-point precision of the ray term, never override it. */
+export const ROUTE_TIE_BREAK_EPSILON = 1e-6;
+
 export interface TeeBadgeLockScoredCandidate extends TeeBadgePathCandidate {
 	readonly score: number;
 	readonly weakAlignedSupport: number;
@@ -72,6 +231,13 @@ export interface TeeBadgeLockScoredCandidate extends TeeBadgePathCandidate {
 	readonly routedLengthPx: number;
 	readonly chordPx: number;
 	readonly runnerUpMargin: number | null;
+	/** CL-6a ray audit (CL-9: winners print this). Present whenever a tee
+	 * axis was consulted; absent only for isolated legacy callers that never
+	 * supplied axis/sigma context. */
+	readonly ray?: RayScoreResult;
+	/** true when this candidate's rank came from corroboration alone because
+	 * the tee's axis quality could not drive a confident ray lock. */
+	readonly rayDegraded?: boolean;
 }
 
 export interface TeeBadgeBadgeOrder {
@@ -103,6 +269,11 @@ export interface TeeBadgeLockResult {
 export interface TeeBadgeLockEvidenceLock extends TeeBadgeLockScoredCandidate {
 	readonly tier: 'visible' | 'recovered';
 	readonly hole?: number;
+	/** CL-6b: stage B's badge->basket trace outcome for this lock's badge,
+	 * when one was run (e.g. the caller had a support field and basket
+	 * footprints available). Absent, never a guessed value, when stage B
+	 * did not run for this lock. */
+	readonly basketTrace?: BadgeBasketTraceOutcome;
 }
 
 /**
@@ -134,13 +305,315 @@ export interface TeeBadgeLockAbstention {
 
 export interface TeeBadgeLockEvidence extends TeeBadgeLockResult {
 	readonly coordinateFrame: 'canonical-raster';
-	readonly basketEvidenceRead: false;
+	/** CL-6b: baskets ARE read now, but ONLY as arrival-footprint testimony
+	 * for the badge->basket tracer below -- never as a routing target, never
+	 * enumerated as candidates, never a "nearest basket" shortcut. Stage A's
+	 * tee->badge lock itself still reads zero basket evidence. */
+	readonly basketEvidenceRead: boolean;
 	readonly corridorWidthPx: number | 'UNKNOWN';
 	readonly corridorWidthPxProvenance: string;
 	readonly locks: readonly TeeBadgeLockEvidenceLock[];
 	/** Every unmatched badge, named with an orphan/conflict disposition.
 	 * length === unmatchedBadgeIds.length, always -- see buildTeeBadgeLockEvidence. */
 	readonly abstentions: readonly TeeBadgeLockAbstention[];
+}
+
+// ==================== CL-6b: badge -> basket path tracing ====================
+//
+// Stage B discovers each locked badge's basket by following the painted hole
+// path itself onward from the badge -- ridge-following along the support
+// field's own bestTheta testimony, away from the tee side -- rather than
+// enumerating candidate baskets and grading pre-drawn connections. The
+// known-basket assumption never enters here: no basket is a routing target;
+// arrival is recognized only when the trace lands inside a basket's own
+// rendered footprint (S5/S6: only stack members occlude, and the object the
+// path ends up inside is what it claims).
+
+export interface TraceOccluder {
+	readonly id: string;
+	readonly bbox: readonly [number, number, number, number];
+}
+
+export interface TraceBasketTarget {
+	readonly basketId: string;
+	readonly bbox: readonly [number, number, number, number];
+}
+
+export interface TunneledSegment {
+	readonly overId: string;
+	readonly lengthPx: number;
+}
+
+export interface BadgeBasketTraceInput {
+	readonly badgeId: string;
+	readonly startPx: TeeBadgePoint;
+	/** Initial heading, away from the tee side (continuing the tee->badge
+	 * chord's own bearing beyond the badge). */
+	readonly headingRad: number;
+	readonly field: TeeBadgeLockSupportField;
+	readonly viewportTopPx?: number;
+	/** On/off-path support threshold -- course-derived
+	 * (measurement.parameters.supportTau), never an imported literal. */
+	readonly supportTau: number;
+	/** Course-derived step/tunnel scale (measurement.parameters.corridorWidthPx). */
+	readonly corridorWidthPx: number;
+	/** The claimed badge's own footprint: still being inside it is not an
+	 * off-path gap -- the trace is still leaving the badge glyph itself. */
+	readonly startBadgeBbox: readonly [number, number, number, number];
+	/** Other stack members (other badges/baskets/chrome) eligible for
+	 * tunneling: pixels under them are excused from the petered-out judgment
+	 * (S5), for up to that member's OWN measured footprint plus a
+	 * half-corridor margin -- never a fixed pixel literal. */
+	readonly occluders: readonly TraceOccluder[];
+	/** Termination targets, tested by footprint membership only -- never used
+	 * to route toward, rank, or select a "nearest" candidate. */
+	readonly baskets: readonly TraceBasketTarget[];
+	/** Loop-safety cap only (e.g. the image diagonal) -- not a tuning knob. */
+	readonly maxTraceLengthPx: number;
+}
+
+export type BadgeBasketTraceOutcome =
+	| {
+			readonly outcome: 'basket';
+			readonly basketId: string;
+			readonly points: TeeBadgePath;
+			readonly lengthPx: number;
+			readonly tunneledSegments: readonly TunneledSegment[];
+			/** 2026-08-29 gate-reorg note: 0 means the path ran straight to the
+			 * basket (the new G5's mechanism family); >0 counts distinct
+			 * contiguous turning phases (the new G6's mechanism family) so that
+			 * split is visible in the evidence even before units are re-homed. */
+			readonly bendCount: number;
+	  }
+	| {
+			readonly outcome: 'unknown';
+			readonly reason: 'petered-out' | 'ambiguous-fork' | 'ran-off-image' | 'exceeded-max-length';
+			readonly points: TeeBadgePath;
+			readonly lengthPx: number;
+			readonly bendCount: number;
+			readonly tunneledSegments: readonly TunneledSegment[];
+	  };
+
+function insideBbox(point: TeeBadgePoint, bbox: readonly [number, number, number, number]): boolean {
+	const [x, y, w, h] = bbox;
+	return point[0] >= x && point[0] <= x + w && point[1] >= y && point[1] <= y + h;
+}
+
+function occluderAt(point: TeeBadgePoint, occluders: readonly TraceOccluder[]): TraceOccluder | undefined {
+	return occluders.find((occluder) => insideBbox(point, occluder.bbox));
+}
+
+function basketAt(point: TeeBadgePoint, baskets: readonly TraceBasketTarget[]): TraceBasketTarget | undefined {
+	return baskets.find((basket) => insideBbox(point, basket.bbox));
+}
+
+function angleDiff(fromRad: number, toRad: number): number {
+	return Math.atan2(Math.sin(toRad - fromRad), Math.cos(toRad - fromRad));
+}
+
+function angleLerp(fromRad: number, toRad: number, weight: number): number {
+	return fromRad + angleDiff(fromRad, toRad) * weight;
+}
+
+/** bestTheta is undirected (mod pi, per the ribbon field's own convention);
+ * pick whichever of theta/theta+pi keeps the trace moving the same way it
+ * was already headed. */
+function disambiguateTheta(theta: number, headingRad: number): number {
+	const a = theta;
+	const b = theta + Math.PI;
+	return Math.abs(angleDiff(headingRad, a)) <= Math.abs(angleDiff(headingRad, b)) ? a : b;
+}
+
+// A near-exact right-angle turn is a genuine tie between the two undirected
+// candidates (theta vs theta+pi are equidistant from the current heading);
+// floating-point noise, not the paint, would otherwise decide which way to
+// go -- including backward. Break a real tie by looking one step further
+// along each candidate and keeping whichever direction the paint actually
+// continues under.
+const HEADING_TIE_EPSILON_RAD = 1e-6;
+
+function disambiguateHeading(
+	theta: number,
+	headingRad: number,
+	fromPoint: TeeBadgePoint,
+	stepPx: number,
+	field: TeeBadgeLockSupportField,
+	viewportTopPx: number
+): number {
+	const a = theta;
+	const b = theta + Math.PI;
+	const diffA = Math.abs(angleDiff(headingRad, a));
+	const diffB = Math.abs(angleDiff(headingRad, b));
+	if (Math.abs(diffA - diffB) >= HEADING_TIE_EPSILON_RAD) return diffA <= diffB ? a : b;
+	const aheadA: TeeBadgePoint = [fromPoint[0] + Math.cos(a) * stepPx, fromPoint[1] + Math.sin(a) * stepPx];
+	const aheadB: TeeBadgePoint = [fromPoint[0] + Math.cos(b) * stepPx, fromPoint[1] + Math.sin(b) * stepPx];
+	const supportA = sampleField(field, aheadA, viewportTopPx).support;
+	const supportB = sampleField(field, aheadB, viewportTopPx).support;
+	return supportA >= supportB ? a : b;
+}
+
+function sampleField(
+	field: TeeBadgeLockSupportField,
+	point: TeeBadgePoint,
+	viewportTopPx: number
+): { readonly support: number; readonly theta: number } {
+	const [cx, cy] = cellFor(point, field, viewportTopPx);
+	const index = cy * field.width + cx;
+	return { support: fieldAt(field.support, index), theta: fieldAt(field.bestTheta, index) };
+}
+
+// Equal-weight ridge smoothing: a genuinely bent path is followed one step's
+// worth of turn at a time; single-cell quantization noise gets damped rather
+// than chased.
+const HEADING_BLEND_WEIGHT = 0.5;
+// Two credible ridges diverging by more than this from the current heading,
+// on opposite sides, is a structural fork -- comfortably above the noise a
+// single quantized best-orientation bin ever introduces along one ridge.
+const FORK_DIVERGENCE_DEG = 45;
+
+/**
+ * Follow the painted hole path from one claimed badge, away from the tee
+ * side, through the support field's own testimony -- ridge-following along
+ * bestTheta, tunneling short gaps under other stack members, and stopping
+ * the instant the trace lands inside a real basket's own footprint. A trace
+ * that runs off support with nothing to tunnel under, forks ambiguously, or
+ * exhausts its length budget without a credible terminus returns a loud
+ * UNKNOWN carrying its partial trace, never a proximity guess at "closest
+ * basket."
+ */
+// 2026-08-29 gate-reorg: a per-step heading drift under this is quantization
+// noise (single-cell bestTheta bins), not a real bend -- keeps "ran straight"
+// receipts honest for paths that are geometrically dead straight.
+const STRAIGHT_STEP_TOLERANCE_DEG = 2;
+
+export function traceBadgeToBasket(input: BadgeBasketTraceInput): BadgeBasketTraceOutcome {
+	const viewportTopPx = finite(input.viewportTopPx) ? input.viewportTopPx : 0;
+	const stepPx = Math.max(1, input.corridorWidthPx / 4);
+	const points: TeeBadgePoint[] = [input.startPx];
+	const tunneledSegments: TunneledSegment[] = [];
+	let heading = input.headingRad;
+	let current: TeeBadgePoint = input.startPx;
+	let lengthPx = 0;
+	let tunnelOverId: string | undefined;
+	let tunnelBudgetPx = 0;
+	let tunnelUsedPx = 0;
+	// bendCount: number of distinct contiguous turning phases (2026-08-29
+	// gate-reorg: 0 = "ran straight to the basket" (new-G5-shaped), >0 =
+	// "bent N times" (new-G6-shaped) -- visible in the evidence pre-migration.
+	let bendCount = 0;
+	let turning = false;
+
+	const withinField = (point: TeeBadgePoint): boolean => {
+		const x = point[0] / input.field.scale;
+		const y = (point[1] - viewportTopPx) / input.field.scale;
+		return x >= -1 && y >= -1 && x <= input.field.width && y <= input.field.height;
+	};
+
+	while (lengthPx < input.maxTraceLengthPx) {
+		const next: TeeBadgePoint = [
+			current[0] + Math.cos(heading) * stepPx,
+			current[1] + Math.sin(heading) * stepPx
+		];
+		if (!withinField(next)) {
+			return { outcome: 'unknown', reason: 'ran-off-image', points, lengthPx, tunneledSegments, bendCount };
+		}
+		const landedBasket = basketAt(next, input.baskets);
+		if (landedBasket) {
+			points.push(next);
+			lengthPx += stepPx;
+			return {
+				outcome: 'basket',
+				basketId: landedBasket.basketId,
+				points,
+				lengthPx,
+				tunneledSegments,
+				bendCount
+			};
+		}
+		const insideStartBadge = insideBbox(next, input.startBadgeBbox);
+		const { support, theta } = sampleField(input.field, next, viewportTopPx);
+		const onPath = support >= input.supportTau || insideStartBadge;
+		if (onPath) {
+			if (tunnelOverId !== undefined) {
+				tunneledSegments.push({ overId: tunnelOverId, lengthPx: tunnelUsedPx });
+				tunnelOverId = undefined;
+				tunnelUsedPx = 0;
+			}
+			if (!insideStartBadge) {
+				const chosen = disambiguateHeading(theta, heading, next, stepPx, input.field, viewportTopPx);
+				// Ambiguous fork: sample the two lateral directions a half-corridor
+				// off the ridge centerline; if both carry real on-path support and
+				// their own disambiguated headings diverge from the centerline on
+				// OPPOSITE sides by more than FORK_DIVERGENCE_DEG, the path forks
+				// here rather than continuing as one ridge.
+				const half = input.corridorWidthPx / 2;
+				const leftPoint: TeeBadgePoint = [
+					next[0] + Math.cos(heading + Math.PI / 2) * half,
+					next[1] + Math.sin(heading + Math.PI / 2) * half
+				];
+				const rightPoint: TeeBadgePoint = [
+					next[0] + Math.cos(heading - Math.PI / 2) * half,
+					next[1] + Math.sin(heading - Math.PI / 2) * half
+				];
+				const left = sampleField(input.field, leftPoint, viewportTopPx);
+				const right = sampleField(input.field, rightPoint, viewportTopPx);
+				if (left.support >= input.supportTau && right.support >= input.supportTau) {
+					const leftHeading = disambiguateTheta(left.theta, heading);
+					const rightHeading = disambiguateTheta(right.theta, heading);
+					const leftDeg = (angleDiff(heading, leftHeading) * 180) / Math.PI;
+					const rightDeg = (angleDiff(heading, rightHeading) * 180) / Math.PI;
+					if (
+						Math.abs(leftDeg) > FORK_DIVERGENCE_DEG &&
+						Math.abs(rightDeg) > FORK_DIVERGENCE_DEG &&
+						Math.sign(leftDeg) !== Math.sign(rightDeg)
+					) {
+						return {
+							outcome: 'unknown',
+							reason: 'ambiguous-fork',
+							points,
+							lengthPx,
+							tunneledSegments,
+							bendCount
+						};
+					}
+				}
+				const previousHeading = heading;
+				heading = angleLerp(heading, chosen, HEADING_BLEND_WEIGHT);
+				const stepTurnDeg = Math.abs((angleDiff(previousHeading, heading) * 180) / Math.PI);
+				if (stepTurnDeg > STRAIGHT_STEP_TOLERANCE_DEG) {
+					if (!turning) bendCount++;
+					turning = true;
+				} else {
+					turning = false;
+				}
+			}
+			points.push(next);
+			current = next;
+			lengthPx += stepPx;
+			continue;
+		}
+		// Off support. Only a known stack member excuses a gap (S5): tunnel
+		// straight through for up to that member's own measured footprint plus
+		// a half-corridor margin -- never a fixed pixel literal.
+		const occluder = occluderAt(next, input.occluders);
+		if (occluder) {
+			if (tunnelOverId !== occluder.id) {
+				tunnelOverId = occluder.id;
+				tunnelUsedPx = 0;
+				tunnelBudgetPx = Math.hypot(occluder.bbox[2], occluder.bbox[3]) + input.corridorWidthPx / 2;
+			}
+			tunnelUsedPx += stepPx;
+			if (tunnelUsedPx > tunnelBudgetPx) {
+				return { outcome: 'unknown', reason: 'petered-out', points, lengthPx, tunneledSegments, bendCount };
+			}
+			points.push(next);
+			current = next;
+			lengthPx += stepPx;
+			continue;
+		}
+		return { outcome: 'unknown', reason: 'petered-out', points, lengthPx, tunneledSegments, bendCount };
+	}
+	return { outcome: 'unknown', reason: 'exceeded-max-length', points, lengthPx, tunneledSegments, bendCount };
 }
 
 const UNKNOWN_AXIS: TeeBadgeAxisSource = 'UNKNOWN';
@@ -304,6 +777,13 @@ export interface ScoreTeeBadgePathInput {
 	readonly field: TeeBadgeLockSupportField;
 	readonly teeAxisRad?: number | null;
 	readonly teeAxisSource?: TeeBadgeAxisSource;
+	/** CL-6a/CL-4/CL-5: the G3-published compass axis for this tee. When
+	 * omitted, derived from teeAxisRad/teeAxisSource (legacy compatibility;
+	 * treated as axisQuality 'good'/'component-pca-evidence-only'). */
+	readonly compassAxis?: CompassTeeAxis;
+	/** CL-4: this image's own per-image bearing sigma. Omitted -> the named
+	 * UNKNOWN_SIGMA_FALLBACK_DEG conservative fallback applies. */
+	readonly imageSigma?: CompassImageSigma;
 	readonly teePoint?: TeeBadgePoint;
 	readonly badgePoint?: TeeBadgePoint;
 	readonly viewportTopPx?: number;
@@ -322,8 +802,6 @@ export function scoreTeeBadgePath(input: ScoreTeeBadgePathInput): TeeBadgeLockSc
 	) {
 		throw new Error('teeBadgeLock: support field dimensions must be positive integers.');
 	}
-	if (!positiveFinite(knobs.teeOrientationSigmaDeg))
-		throw new Error('teeBadgeLock: tee orientation sigma must be positive.');
 	if (!finite(knobs.alignmentPower) || knobs.alignmentPower < 0)
 		throw new Error('teeBadgeLock: alignmentPower must be finite and non-negative.');
 	if (!finite(knobs.worstWindowSrcPx) || knobs.worstWindowSrcPx < 0)
@@ -370,17 +848,49 @@ export function scoreTeeBadgePath(input: ScoreTeeBadgePathInput): TeeBadgeLockSc
 	const routedLengthPx = routeLength(path);
 	const pathEfficiency = chordPx === 0 ? 0 : chordPx / Math.max(chordPx, routedLengthPx);
 
+	// Legacy receipt provenance label: which TeeEvidence field the axis number
+	// itself came from (kept for the receipt's axisSource column regardless of
+	// which compass path fed the ray below).
 	let axisSource: TeeBadgeAxisSource = input.teeAxisSource ?? UNKNOWN_AXIS;
-	let axisErrorDeg: number | 'UNKNOWN' = 'UNKNOWN';
-	let axisFactor = 1;
-	if (finite(input.teeAxisRad) && chordPx > 0) {
-		if (input.teeAxisSource === undefined) axisSource = 'TeeEvidence.angleRad';
-		axisErrorDeg = (axialAngleDelta(input.teeAxisRad, Math.atan2(dy, dx)) * 180) / Math.PI;
-		axisFactor = Math.exp(-((axisErrorDeg / knobs.teeOrientationSigmaDeg) ** 2));
-	} else if (finite(input.teeAxisRad) && input.teeAxisSource === undefined) {
-		axisSource = 'TeeEvidence.angleRad';
-	}
-	const score = weakAlignedSupport * pathEfficiency * axisFactor;
+	if (finite(input.teeAxisRad) && input.teeAxisSource === undefined) axisSource = 'TeeEvidence.angleRad';
+
+	// CL-6a ray-first scoring: the compass axis (G3-published, or legacy
+	// fallback) selects/ranks candidates; weakAlignedSupport and
+	// pathEfficiency ("route factors") only corroborate and break ties.
+	const compassAxis: CompassTeeAxis =
+		input.compassAxis ??
+		(finite(input.teeAxisRad)
+			? {
+					axisRad: input.teeAxisRad,
+					axisQuality: 'good',
+					axisSource: 'component-pca-evidence-only',
+					excusedMaskRef: 'UNKNOWN',
+					centerUncertaintyPx: 'UNKNOWN'
+				}
+			: { axisRad: null, axisQuality: 'none', axisSource: 'UNKNOWN', excusedMaskRef: 'UNKNOWN', centerUncertaintyPx: 'UNKNOWN' });
+	const imageSigma: CompassImageSigma =
+		input.imageSigma ?? { orientationSigmaDeg: 'UNKNOWN', sigmaProvenance: { fallback: UNKNOWN_SIGMA_FALLBACK_NAME } };
+	const bearingRad = Math.atan2(dy, dx);
+	const ray: RayScoreResult =
+		chordPx > 0
+			? scoreTeeBadgeRay(compassAxis, imageSigma, bearingRad, chordPx)
+			: {
+					rayFactor: 1,
+					rayErrorDeg: 'UNKNOWN',
+					sigmaUsedDeg: 'UNKNOWN',
+					sigmaProvenance: 'UNKNOWN (zero-length tee-badge chord)',
+					wideningDeg: 'UNKNOWN',
+					degraded: true,
+					degradeReason: 'zero-length tee-badge chord'
+				};
+	const axisErrorDeg = ray.rayErrorDeg;
+	const axisFactor = ray.rayFactor;
+	// Corroboration: how well the routed testimony itself supports this
+	// candidate, only ever nudging rank within ROUTE_TIE_BREAK_EPSILON of the
+	// ray term -- unless the ray is degraded (poor/none axis quality, or no
+	// fit at all), in which case corroboration alone must carry the score.
+	const corroboration = weakAlignedSupport * pathEfficiency;
+	const score = ray.degraded ? corroboration : ray.rayFactor + ROUTE_TIE_BREAK_EPSILON * corroboration;
 	return {
 		...candidate,
 		score,
@@ -392,11 +902,13 @@ export function scoreTeeBadgePath(input: ScoreTeeBadgePathInput): TeeBadgeLockSc
 		windowCells,
 		routedLengthPx,
 		chordPx,
-		runnerUpMargin: null
+		runnerUpMargin: null,
+		ray,
+		rayDegraded: ray.degraded
 	};
 }
 
-function axisFromTee(tee: unknown): {
+function legacyAxisFromTeeOrder(tee: unknown): {
 	readonly rad: number | null;
 	readonly source: TeeBadgeAxisSource;
 } {
@@ -411,6 +923,44 @@ function axisFromTee(tee: unknown): {
 	return { rad: null, source: UNKNOWN_AXIS };
 }
 
+/**
+ * CL-6a/CL-4/CL-5 compass accessor over a G4-visible tee order row: prefers
+ * G3's own published axisRad/axisQuality/axisSource/centerUncertaintyPx
+ * (detected by the presence of `axisQuality` or `excusedMaskRef`, fields the
+ * legacy TeeBadgeTeeOrder shape never had) and falls back to the pre-existing
+ * angle chain (minAreaPose -> angleRad -> pad.angleRad), read as
+ * axisQuality='good'/axisSource='component-pca-evidence-only', when G3 has
+ * not (yet) published its own fields on this tee.
+ */
+export function readTeeAxis(tee: unknown): CompassTeeAxis {
+	if (tee && typeof tee === 'object') {
+		const value = tee as {
+			axisRad?: unknown;
+			axisQuality?: unknown;
+			axisSource?: unknown;
+			excusedMaskRef?: unknown;
+			centerUncertaintyPx?: unknown;
+		};
+		if (value.axisQuality !== undefined || value.excusedMaskRef !== undefined) {
+			return {
+				axisRad: finite(value.axisRad) ? value.axisRad : null,
+				axisQuality: readCompassAxisQuality(value.axisQuality),
+				axisSource: readCompassAxisSource(value.axisSource),
+				excusedMaskRef: typeof value.excusedMaskRef === 'string' ? value.excusedMaskRef : 'UNKNOWN',
+				centerUncertaintyPx: finite(value.centerUncertaintyPx) ? value.centerUncertaintyPx : 'UNKNOWN'
+			};
+		}
+	}
+	const legacy = legacyAxisFromTeeOrder(tee);
+	return {
+		axisRad: legacy.rad,
+		axisQuality: legacy.rad === null ? 'none' : 'good',
+		axisSource: legacy.rad === null ? 'UNKNOWN' : 'component-pca-evidence-only',
+		excusedMaskRef: 'UNKNOWN',
+		centerUncertaintyPx: 'UNKNOWN'
+	};
+}
+
 function pointFromEvidence(value: unknown): TeeBadgePoint | undefined {
 	return readPoint(value);
 }
@@ -422,6 +972,9 @@ export interface ScoreTeeBadgeCandidatesOptions {
 	readonly badges?: readonly TeeBadgeBadgeOrder[];
 	readonly viewportTopPx?: number;
 	readonly knobs: TeeBadgeLockMathKnobs;
+	/** CL-4: this image's own per-image bearing sigma, shared by every
+	 * candidate scored in this call. Omitted -> UNKNOWN_SIGMA_FALLBACK_DEG. */
+	readonly imageSigma?: CompassImageSigma;
 }
 
 function normalizeCandidateScoringArgs(args: readonly unknown[]): ScoreTeeBadgeCandidatesOptions {
@@ -452,12 +1005,15 @@ export function scoreTeeBadgeCandidates(...args: unknown[]): TeeBadgeLockScoredC
 	return options.candidates.map((candidate) => {
 		const tee = tees.get(candidate.teeId);
 		const badge = badges.get(candidate.badgeId);
-		const axis = axisFromTee(tee);
+		const legacyAxis = legacyAxisFromTeeOrder(tee);
+		const compassAxis = readTeeAxis(tee);
 		return scoreTeeBadgePath({
 			candidate,
 			field: options.field,
-			teeAxisRad: axis.rad,
-			teeAxisSource: axis.source,
+			teeAxisRad: legacyAxis.rad,
+			teeAxisSource: legacyAxis.source,
+			compassAxis,
+			imageSigma: options.imageSigma,
 			teePoint: pointFromEvidence(tee) ?? readPoint([candidate.teeXPx, candidate.teeYPx]),
 			badgePoint: pointFromEvidence(badge) ?? readPoint([candidate.badgeXPx, candidate.badgeYPx]),
 			viewportTopPx: options.viewportTopPx,
@@ -716,6 +1272,11 @@ export interface BuildTeeBadgeLockEvidenceOptions {
 		readonly parameters?: { readonly corridorWidthPx?: number };
 	};
 	readonly corridorWidthPx?: number;
+	/** CL-6b: stage B's per-badge trace outcomes, keyed by badgeId. Every
+	 * locked badge with an entry here gets its trace attached to its lock
+	 * row; a locked badge with no entry simply carries no basketTrace
+	 * (stage B was not run for it), never a fabricated one. */
+	readonly basketTraces?: ReadonlyMap<string, BadgeBasketTraceOutcome>;
 }
 
 /** Add the semantic, provenance-bearing envelope consumed by the operation
@@ -726,12 +1287,15 @@ export function buildTeeBadgeLockEvidence(
 ): TeeBadgeLockEvidence {
 	const badges = new Map((options.badges ?? []).map((badge) => [badge.detId, badge]));
 	const tees = new Map((options.tees ?? []).map((tee) => [tee.detId, tee]));
+	const basketTraces = options.basketTraces;
 	const locks = selected.locks.map((lock) => {
 		const hole = exactPositiveHole(badges.get(lock.badgeId)?.label);
+		const basketTrace = basketTraces?.get(lock.badgeId);
 		return {
 			...lock,
 			tier: normalizedTier(tees.get(lock.teeId)),
-			...(hole === undefined ? {} : { hole })
+			...(hole === undefined ? {} : { hole }),
+			...(basketTrace === undefined ? {} : { basketTrace })
 		};
 	});
 	// Evidence rows follow the same semantic badge order as matching whenever
@@ -751,7 +1315,10 @@ export function buildTeeBadgeLockEvidence(
 		locks,
 		abstentions,
 		coordinateFrame: 'canonical-raster',
-		basketEvidenceRead: false,
+		// CL-6b: true only when stage B actually ran (at least one trace was
+		// supplied) -- baskets are footprint-arrival testimony for the tracer,
+		// never a routing target, never consulted by stage A's tee<->badge lock.
+		basketEvidenceRead: (basketTraces?.size ?? 0) > 0,
 		corridorWidthPx: finite(corridorWidthPx) ? corridorWidthPx : 'UNKNOWN',
 		corridorWidthPxProvenance: finite(corridorWidthPx)
 			? 'measurement.parameters.corridorWidthPx'

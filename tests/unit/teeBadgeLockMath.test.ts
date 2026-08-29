@@ -4,9 +4,17 @@ import {
 	collapseTeeBadgePaths,
 	extractTeeBadgePaths,
 	maximumWeightTeeBadgeMatching,
+	readImageSigma,
+	readTeeAxis,
+	scoreTeeBadgeRay,
 	selectTeeBadgeLocks,
 	scoreTeeBadgeCandidates,
 	scoreTeeBadgePath,
+	traceBadgeToBasket,
+	UNKNOWN_SIGMA_FALLBACK_DEG,
+	type BadgeBasketTraceInput,
+	type CompassImageSigma,
+	type CompassTeeAxis,
 	type TeeBadgeLockMathKnobs,
 	type TeeBadgeLockRawPairRow,
 	type TeeBadgeLockScoredCandidate,
@@ -18,8 +26,7 @@ type Path = readonly (readonly [number, number])[];
 const KNOBS: TeeBadgeLockMathKnobs = {
 	alignmentPower: 2,
 	worstWindowSrcPx: 2,
-	minWindowCells: 2,
-	teeOrientationSigmaDeg: 45
+	minWindowCells: 2
 };
 
 function leg(path: Path) {
@@ -159,7 +166,7 @@ describe('teeBadgeLock pure candidate contract', () => {
 		).toThrow(/duplicate.*teeBadgePath|teeBadgePath.*duplicate/i);
 	});
 
-	test('uses the literal weak-window, route-efficiency, and detector-owned axial terms', () => {
+	test('CL-6a: uses the literal weak-window and route-efficiency terms as corroboration only, never the winning score', () => {
 		const candidate = {
 			badgeId: 'badge-1',
 			teeId: 'tee-1',
@@ -169,25 +176,33 @@ describe('teeBadgeLock pure candidate contract', () => {
 				[2, 0]
 			] as Path
 		};
+		const imageSigma = { orientationSigmaDeg: 45, sigmaProvenance: { method: 'test-fixture', goodFitCount: 9 } };
 		const aligned = scoreTeeBadgePath({
 			candidate,
 			field: field(3, 1, [1, 0.5, 0.2], [0, 0, 0]),
 			teeAxisRad: 0,
+			imageSigma,
 			knobs: KNOBS
 		});
-		// w=max(2, round(2 / 1))=2; min(mean(1,.5), mean(.5,.2))=.35.
+		// w=max(2, round(2 / 1))=2; min(mean(1,.5), mean(.5,.2))=.35 -- still
+		// computed and carried as corroboration, but CL-6a means it may only
+		// perturb the ray-dominated score within ROUTE_TIE_BREAK_EPSILON.
 		expect(aligned.windowCells).toBe(2);
 		expect(aligned.weakAlignedSupport).toBeCloseTo(0.35);
 		expect(aligned.pathEfficiency).toBe(1);
 		expect(aligned.axisErrorDeg).toBeCloseTo(0);
 		expect(aligned.axisFactor).toBeCloseTo(1);
-		expect(aligned.score).toBeCloseTo(0.35);
+		expect(aligned.rayDegraded).toBe(false);
+		expect(aligned.score).toBeCloseTo(1, 5); // ray dominates: perfect alignment -> ~1, not 0.35
+		expect(aligned.score).toBeGreaterThan(1); // corroboration only nudges upward, never overrides
+		expect(aligned.score - 1).toBeLessThan(1e-5); // and the nudge stays within tie-break precision
 		expect(aligned.axisSource).toBe('TeeEvidence.angleRad');
 
 		const oppositeAxis = scoreTeeBadgePath({
 			candidate,
 			field: field(3, 1, [1, 0.5, 0.2], [0, 0, 0]),
 			teeAxisRad: Math.PI,
+			imageSigma,
 			knobs: KNOBS
 		});
 		expect(oppositeAxis.axisErrorDeg).toBeCloseTo(0);
@@ -196,21 +211,28 @@ describe('teeBadgeLock pure candidate contract', () => {
 			candidate,
 			field: field(3, 1, [1, 0.5, 0.2], [0, 0, 0]),
 			teeAxisRad: Math.PI / 2,
+			imageSigma,
 			knobs: KNOBS
 		});
 		expect(perpendicular.axisErrorDeg).toBeCloseTo(90);
 		expect(perpendicular.axisFactor).toBeCloseTo(Math.exp(-4));
-		expect(perpendicular.score).toBeCloseTo(0.35 * Math.exp(-4));
+		// CL-6a: route factors only tie-break, so the poorly-aligned candidate's
+		// score still tracks its (tiny) ray factor, not the old product form.
+		expect(perpendicular.score).toBeCloseTo(Math.exp(-4), 5);
 
 		const unknownAxis = scoreTeeBadgePath({
 			candidate,
 			field: field(3, 1, [1, 0.5, 0.2], [0, 0, 0]),
 			teeAxisRad: null,
+			imageSigma,
 			knobs: KNOBS
 		});
 		expect(unknownAxis.axisErrorDeg).toBe('UNKNOWN');
 		expect(unknownAxis.axisSource).toBe('UNKNOWN');
 		expect(unknownAxis.axisFactor).toBe(1);
+		expect(unknownAxis.rayDegraded).toBe(true);
+		// Degraded (no accepted axis fit at all): the score IS the corroboration,
+		// unperturbed, since there is no ray term to dominate.
 		expect(unknownAxis.score).toBeCloseTo(0.35);
 
 		const routed = scoreTeeBadgePath({
@@ -229,7 +251,10 @@ describe('teeBadgeLock pure candidate contract', () => {
 		});
 		expect(routed.weakAlignedSupport).toBe(1);
 		expect(routed.pathEfficiency).toBeCloseTo(Math.SQRT2 / 2);
-		expect(routed.score).toBeCloseTo(Math.SQRT2 / 2);
+		// Perfect ray alignment (axis matches the chord exactly) -> rayFactor=1
+		// dominates; pathEfficiency is corroboration, visible only in the tiny
+		// tie-break term now, not as a multiplicative discount on the score.
+		expect(routed.score).toBeCloseTo(1, 5);
 	});
 
 	test('uses the visible min-area pose before baseline tee-angle compatibility fallbacks', () => {
@@ -417,5 +442,238 @@ describe('teeBadgeLock all-Hn resolver: every unmatched badge is named, never si
 		// and abstentions.length + locks.length accounts for every badge.
 		expect(evidence.locks.length + evidence.abstentions.length).toBe(2);
 		expect(evidence.locks.every((l) => Number.isFinite(l.score))).toBe(true);
+	});
+});
+
+describe('CL-6a/CL-4/CL-5: ray-first stage A scoring', () => {
+	test('the ray overrides a route-favored candidate: the badge the axis actually points at wins, and the audit says why', () => {
+		const width = 6;
+		const height = 6;
+		const support = new Float32Array(width * height).fill(0);
+		const bestTheta = new Float32Array(width * height).fill(0);
+		// Path A: straight up column x=0 -- strong route support (route favors A).
+		// bestTheta matches the column's own tangent (vertical) so alignment=1.
+		for (let y = 0; y <= 5; y++) {
+			support[y * width + 0] = 0.9;
+			bestTheta[y * width + 0] = Math.PI / 2;
+		}
+		// Path B: straight right row y=0 -- weak route support (route disfavors
+		// B); bestTheta 0 already matches the row's own (near-horizontal) tangent.
+		for (let x = 0; x <= 5; x++) support[0 * width + x] = Math.max(support[0 * width + x], 0.05);
+		const fixtureField: TeeBadgeLockSupportField = { width, height, scale: 1, support, bestTheta };
+		const candidates = [
+			{ badgeId: 'badge-A', teeId: 'tee-1', teeBadgePath: [[0, 0], [0, 5]] as Path },
+			{ badgeId: 'badge-B', teeId: 'tee-1', teeBadgePath: [[0, 0], [5, 0.2]] as Path }
+		];
+		// The tee's own axis points along +x (angleRad=0) -- straight at badge B,
+		// 90 degrees away from badge A.
+		const tees = [{ detId: 'tee-1', xPx: 0, yPx: 0, angleRad: 0 }];
+		const badges = [
+			{ detId: 'badge-A', label: '1', cxPx: 0, cyPx: 5 },
+			{ detId: 'badge-B', label: '2', cxPx: 5, cyPx: 0.2 }
+		];
+		const scored = scoreTeeBadgeCandidates({ candidates, field: fixtureField, tees, badges, knobs: KNOBS });
+		const a = scored.find((c) => c.badgeId === 'badge-A')!;
+		const b = scored.find((c) => c.badgeId === 'badge-B')!;
+		expect(a.weakAlignedSupport).toBeGreaterThan(b.weakAlignedSupport); // route favors A
+		expect(b.axisErrorDeg as number).toBeLessThan(a.axisErrorDeg as number); // ray favors B
+		expect(b.score).toBeGreaterThan(a.score); // ray wins despite weaker route corroboration
+
+		const selected = maximumWeightTeeBadgeMatching(scored, { badges, tees });
+		expect(selected.locks).toMatchObject([{ badgeId: 'badge-B', teeId: 'tee-1' }]);
+
+		const evidence = buildTeeBadgeLockEvidence(selected, { badges, tees });
+		const winner = evidence.locks[0];
+		expect(winner.badgeId).toBe('badge-B');
+		expect(winner.ray?.degraded).toBe(false);
+		expect((winner.axisErrorDeg as number) < 10).toBe(true);
+		// badge-A is a named conflict (it had real testimony, but lost) -- never silence.
+		const loser = evidence.abstentions.find((entry) => entry.badgeId === 'badge-A');
+		expect(loser).toMatchObject({ kind: 'conflict', winningBadgeId: 'badge-B' });
+	});
+
+	test('poor axis quality degrades the candidate to corroboration-only: route factors alone drive the score', () => {
+		const fixtureField = field(6, 1, [0.8, 0.8, 0.8, 0.8, 0.8, 0.8], [0, 0, 0, 0, 0, 0]);
+		const poorAxis: CompassTeeAxis = {
+			axisRad: Math.PI,
+			axisQuality: 'poor',
+			axisSource: 'constrained-fit',
+			excusedMaskRef: 'excusedMask:tee-1',
+			centerUncertaintyPx: 2
+		};
+		const result = scoreTeeBadgePath({
+			candidate: { badgeId: 'badge-1', teeId: 'tee-1', teeBadgePath: [[0, 0], [5, 0]] },
+			field: fixtureField,
+			compassAxis: poorAxis,
+			knobs: KNOBS
+		});
+		expect(result.rayDegraded).toBe(true);
+		expect(result.ray?.degradeReason).toMatch(/poor/i);
+		expect(result.axisErrorDeg).toBe('UNKNOWN');
+		expect(result.score).toBeCloseTo(result.weakAlignedSupport * result.pathEfficiency);
+
+		const noneAxis: CompassTeeAxis = { ...poorAxis, axisQuality: 'none', axisRad: null };
+		const noFit = scoreTeeBadgePath({
+			candidate: { badgeId: 'badge-1', teeId: 'tee-1', teeBadgePath: [[0, 0], [5, 0]] },
+			field: fixtureField,
+			compassAxis: noneAxis,
+			knobs: KNOBS
+		});
+		expect(noFit.rayDegraded).toBe(true);
+		expect(noFit.ray?.degradeReason).toMatch(/no accepted axis fit/i);
+	});
+
+	test('CL-4: no per-image sigma published -> the named conservative fallback is used, and it is receipted', () => {
+		const axis: CompassTeeAxis = {
+			axisRad: 0,
+			axisQuality: 'good',
+			axisSource: 'constrained-fit',
+			excusedMaskRef: 'excusedMask:tee-1',
+			centerUncertaintyPx: 'UNKNOWN'
+		};
+		const unknownSigma = readImageSigma(undefined);
+		expect(unknownSigma.orientationSigmaDeg).toBe('UNKNOWN');
+		const ray = scoreTeeBadgeRay(axis, unknownSigma, Math.PI / 6, 100);
+		expect(ray.sigmaUsedDeg).toBe(UNKNOWN_SIGMA_FALLBACK_DEG);
+		expect(ray.sigmaProvenance).toMatch(/UNKNOWN_SIGMA_FALLBACK_DEG/);
+
+		const realSigma: CompassImageSigma = readImageSigma({
+			orientationSigmaDeg: 2.5,
+			sigmaProvenance: { method: 'per-image-fit', goodFitCount: 12 }
+		});
+		expect(realSigma.orientationSigmaDeg).toBe(2.5);
+		const rayReal = scoreTeeBadgeRay(axis, realSigma, 0, 100);
+		expect(rayReal.sigmaUsedDeg).toBe(2.5);
+		expect(rayReal.sigmaProvenance).toMatch(/per-image-fit/);
+		expect(rayReal.sigmaProvenance).toMatch(/n=12/);
+	});
+
+	test('CL-5: a small center-uncertainty widens the effective sigma more when the badge is close', () => {
+		const axis: CompassTeeAxis = {
+			axisRad: 0,
+			axisQuality: 'good',
+			axisSource: 'constrained-fit',
+			excusedMaskRef: 'excusedMask:tee-1',
+			centerUncertaintyPx: 4
+		};
+		const imageSigma: CompassImageSigma = { orientationSigmaDeg: 2, sigmaProvenance: { method: 'test' } };
+		const near = scoreTeeBadgeRay(axis, imageSigma, 0.1, 10);
+		const far = scoreTeeBadgeRay(axis, imageSigma, 0.1, 1000);
+		expect(near.wideningDeg as number).toBeGreaterThan(far.wideningDeg as number);
+		expect(near.sigmaUsedDeg as number).toBeGreaterThan(far.sigmaUsedDeg as number);
+		expect(near.wideningDeg as number).toBeCloseTo((Math.atan(4 / 10) * 180) / Math.PI, 5);
+		const zeroDistance: CompassTeeAxis = axis;
+		const degenerate = scoreTeeBadgeRay(zeroDistance, imageSigma, 0, 0);
+		// A badge exactly at the tee's own center gets maximal (90deg), honest
+		// widening -- never false precision.
+		expect(degenerate.wideningDeg).toBe(90);
+	});
+});
+
+describe('CL-6b: badge -> basket path tracing', () => {
+	function buildGridField(
+		width: number,
+		height: number,
+		onPath: (x: number, y: number) => boolean,
+		thetaAt: (x: number, y: number) => number
+	): TeeBadgeLockSupportField {
+		const support = new Float32Array(width * height);
+		const bestTheta = new Float32Array(width * height);
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				const index = y * width + x;
+				support[index] = onPath(x, y) ? 1 : 0;
+				bestTheta[index] = thetaAt(x, y);
+			}
+		}
+		return { width, height, scale: 1, support, bestTheta };
+	}
+
+	test('a bent path is ridge-followed to the terminus around the bend, not a straight cast', () => {
+		const width = 16;
+		const height = 20;
+		const fixtureField = buildGridField(
+			width,
+			height,
+			(x, y) => (y >= 1 && y <= 3 && x >= 0 && x <= 10) || (x >= 9 && x <= 11 && y >= 2 && y <= 17),
+			(x, y) => (x < 10 ? 0 : Math.PI / 2)
+		);
+		const input: BadgeBasketTraceInput = {
+			badgeId: 'badge-1',
+			startPx: [1, 2],
+			headingRad: 0,
+			field: fixtureField,
+			supportTau: 0.5,
+			corridorWidthPx: 2,
+			startBadgeBbox: [0, 1, 2, 3],
+			occluders: [],
+			baskets: [{ basketId: 'basket-bend', bbox: [9, 15, 3, 3] }],
+			maxTraceLengthPx: 100
+		};
+		const outcome = traceBadgeToBasket(input);
+		expect(outcome.outcome).toBe('basket');
+		if (outcome.outcome === 'basket') {
+			expect(outcome.basketId).toBe('basket-bend');
+			// Proof the trace actually turned: it visited well past the bend row,
+			// not just the horizontal segment (a straight cast would never get here).
+			expect(outcome.points.some((p) => p[1] > 8)).toBe(true);
+		}
+	});
+
+	test('a gap under a badge bbox tunnels through instead of petering out', () => {
+		const width = 20;
+		const height = 6;
+		const fixtureField = buildGridField(
+			width,
+			height,
+			(x, y) => y >= 1 && y <= 3 && (x < 6 || x > 9) && x <= 15,
+			() => 0
+		);
+		const input: BadgeBasketTraceInput = {
+			badgeId: 'badge-1',
+			startPx: [1, 2],
+			headingRad: 0,
+			field: fixtureField,
+			supportTau: 0.5,
+			corridorWidthPx: 2,
+			startBadgeBbox: [0, 1, 2, 3],
+			occluders: [{ id: 'badge-other', bbox: [5, 0, 5, 5] }],
+			baskets: [{ basketId: 'basket-far', bbox: [13, 1, 3, 3] }],
+			maxTraceLengthPx: 50
+		};
+		const outcome = traceBadgeToBasket(input);
+		expect(outcome.outcome).toBe('basket');
+		if (outcome.outcome === 'basket') {
+			expect(outcome.basketId).toBe('basket-far');
+			expect(outcome.tunneledSegments.length).toBeGreaterThan(0);
+			expect(outcome.tunneledSegments[0].overId).toBe('badge-other');
+		}
+	});
+
+	test('a path that genuinely ends nowhere returns a loud UNKNOWN with its partial trace, never a proximity guess', () => {
+		const width = 20;
+		const height = 6;
+		const fixtureField = buildGridField(width, height, (x, y) => y >= 1 && y <= 3 && x <= 5, () => 0);
+		const input: BadgeBasketTraceInput = {
+			badgeId: 'badge-1',
+			startPx: [1, 2],
+			headingRad: 0,
+			field: fixtureField,
+			supportTau: 0.5,
+			corridorWidthPx: 2,
+			startBadgeBbox: [0, 1, 2, 3],
+			occluders: [],
+			// A basket exists far away, off this dead-end path entirely -- proving
+			// the tracer never falls back to "nearest basket" once it peters out.
+			baskets: [{ basketId: 'basket-irrelevant', bbox: [50, 50, 3, 3] }],
+			maxTraceLengthPx: 50
+		};
+		const outcome = traceBadgeToBasket(input);
+		expect(outcome.outcome).toBe('unknown');
+		if (outcome.outcome === 'unknown') {
+			expect(outcome.reason).toBe('petered-out');
+			expect(outcome.points.length).toBeGreaterThan(1);
+			expect(outcome.lengthPx).toBeGreaterThan(0);
+		}
 	});
 });
