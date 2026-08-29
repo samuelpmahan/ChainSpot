@@ -1,0 +1,74 @@
+name: KERCHOOOOO recovery dedup
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-recovery-dedup
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-recovery-dedup
+          path: ChainSpot
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and build V4 baseline
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          ./lab setup
+
+      - name: V4 NorthPark baseline
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/v4.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' >/tmp/v4.visual.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' >/tmp/v4.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/v4.receipt.txt
+          echo "V4_WALL=$(cat /tmp/v4.wall)s"
+          grep -E 'teeRecovery \||teeRecovery.shardDiscovery' /tmp/v4.receipt.txt || true
+
+      - name: Apply dedup and rebuild
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          python3 .github/kerchooo_recovery_dedup.py
+          npm run build --workspace=@chainspot/alg
+          npm run check
+          npx vitest run tests/unit/teeRecoveryFeature.test.ts
+
+      - name: Dedup NorthPark exact parity
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/dedup.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' >/tmp/dedup.visual.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' >/tmp/dedup.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/dedup.receipt.txt
+          diff -u /tmp/v4.visual.sha /tmp/dedup.visual.sha
+          diff -u /tmp/v4.assignment.sha /tmp/dedup.assignment.sha
+          python3 - <<'PY'
+          base=float(open('/tmp/v4.wall').read())
+          opt=float(open('/tmp/dedup.wall').read())
+          print(f'KERCHOOOOO recovery dedup: {base:.2f}s -> {opt:.2f}s = {base/opt:.2f}x, {(1-opt/base)*100:.1f}% faster than V4')
+          PY
+          grep -E 'teeRecovery \||teeRecovery.shardDiscovery' /tmp/dedup.receipt.txt || true
