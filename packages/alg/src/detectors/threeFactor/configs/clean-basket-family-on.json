@@ -10,12 +10,12 @@
 		"cleanBasketFamily",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery",
 		"zfit"
 	],
 	"gates": {

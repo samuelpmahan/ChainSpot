@@ -8,13 +8,19 @@
 		"baskets",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"straightTest",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
-		"assignment",
-		"teeRecovery"
+		"assignment"
 	],
-	"gates": { "G5": { "straightTest": { "enabled": true } } }
+	"gates": {
+		"G5": {
+			"straightTest": {
+				"enabled": true
+			}
+		}
+	}
 }

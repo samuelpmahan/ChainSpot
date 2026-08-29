@@ -610,23 +610,11 @@ const reusedOps: OperationDef[] = [
 			gate: 'G4',
 			unit: 'teeRecovery',
 			consumes: teeRecoveryUnit.consumes,
-			produces: [...teeRecoveryUnit.produces, 'assignment.tees', 'assignment.rawPairs'],
+			produces: teeRecoveryUnit.produces,
 			features: [teeRecoveryFeature.id],
 			note: teeRecoveryUnit.note
 		},
-		run(board, ctx) {
-			teeRecoveryUnit.run(asLegacyBoard(board), ctx);
-			// Recovery reruns assignment without mutating the immutable G5
-			// measurement. Republish its final inventory and routes into the
-			// downstream assignment slots so G7 never reads the pre-recovery 15-tee
-			// state after G4 has produced an 18-tee assignment.
-			const assignment = board.get<ThreeFactorAssignment>('assignment');
-			board.set('assignment.tees', assignment.tees);
-			board.set(
-				'assignment.rawPairs',
-				assignment.scoredPairs.map((pair) => pair.raw)
-			);
-		}
+		run: (board, ctx) => teeRecoveryUnit.run(asLegacyBoard(board), ctx)
 	},
 	{
 		spec: {

@@ -8,17 +8,19 @@
 		"baskets",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery",
 		"zfit"
 	],
 	"gates": {
 		"G4": {
-			"teeRecovery": { "enabled": true }
+			"teeRecovery": {
+				"enabled": true
+			}
 		}
 	}
 }

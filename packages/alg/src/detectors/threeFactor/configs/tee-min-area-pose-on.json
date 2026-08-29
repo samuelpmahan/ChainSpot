@@ -8,13 +8,13 @@
 		"baskets",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"teeMinAreaPose",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery",
 		"zfit"
 	],
 	"gates": {

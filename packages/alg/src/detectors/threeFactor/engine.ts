@@ -115,9 +115,9 @@ export const ENGINE_UNITS: readonly EngineUnit[] = [
 export const DEFAULT_EXECUTION: readonly string[] = [
 	...DEFAULT_MEASURE_EXECUTION.slice(0, DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
 	'teeFamily',
+	'teeRecovery',
 	...DEFAULT_MEASURE_EXECUTION.slice(DEFAULT_MEASURE_EXECUTION.indexOf('tees') + 1),
 	'assignment',
-	'teeRecovery',
 	'zfit'
 ];
 

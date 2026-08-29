@@ -1,19 +1,19 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "dev72-recovered-default",
-	"note": "Frozen production baseline: G2 uses the surviving two-pass renderer-family basket detector; G3 finds intact hollow-glyph tees; G4 then recovers assignment-missing tees from every fitting visible shard. Phantom tee completion remains OFF. Z-fit is a default-OFF deviation dropped from this schedule (owner directive 2026-08-28); it stays one flip away via zfit-on.json. The execution list is compiler chronology, while gate ownership is semantic rather than a waterfall.",
+	"note": "Frozen production baseline: G2 uses the surviving two-pass renderer-family basket detector; G3 finds intact hollow-glyph tees; G4 then ray-claims visible tees then recovers ray-unclaimed tees from every fitting visible shard. Phantom tee completion remains OFF. Z-fit is a default-OFF deviation dropped from this schedule (owner directive 2026-08-28); it stays one flip away via zfit-on.json. The execution list is compiler chronology, while gate ownership is semantic rather than a waterfall.",
 	"execution": [
 		"badgeStage",
 		"badges",
 		"baskets",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
-		"assignment",
-		"teeRecovery"
+		"assignment"
 	],
 	"gates": {}
 }
