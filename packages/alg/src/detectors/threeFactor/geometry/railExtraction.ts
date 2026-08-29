@@ -21,7 +21,7 @@ export interface RailCandidate {
 }
 
 /** Minimum pixels required to estimate a line direction at raster quantization tolerance.
- *  Derived from raster geometry: with ±1.25px quantization noise per pixel, 4 pixels yield ~2-degree
+ *  Derived from raster geometry: with ±1.25px quantization noise per pixel, 4 pixels yield ~12-22 degree
  *  direction precision, sufficient to distinguish a true edge from noise in boundary fragments.
  */
 const MIN_RAIL_PIXELS = 4;
@@ -211,6 +211,9 @@ function detectCornerIndices(chain: readonly Px[]): number[] {
   // raster stair-step diagonal alternates unit steps 90 degrees apart while
   // the painted edge itself runs straight; per-pixel vectors called every
   // stair a corner and shredded tilted edges into crumbs.
+  // Derived: with ±1.25px raster quantization per pixel, spanning 3 pixels on each side
+  // (6 pixels total) averages directional information enough to suppress the alternating
+  // 90° stair-step jitter in diagonal edges while preserving real 60°+ pad corners.
   const W = 3;
   for (let i = W; i < chain.length - W; i++) {
     const prev = chain[i - W];
@@ -233,6 +236,9 @@ function detectCornerIndices(chain: readonly Px[]): number[] {
     dir2[1] /= len2;
 
     // Dot product: if < 0.5, direction changed by > 60 degrees → corner.
+    // Derived: dot product < 0.5 means cos(angle) < cos(60°), so angle > 60°; rectangular pads
+    // have 90° corners, and W=3 windowing limits diagonal stair-step oscillation to ~60-90°;
+    // this threshold separates true pad corners from raster quantization jitter.
     const dot = dir1[0] * dir2[0] + dir1[1] * dir2[1];
     if (dot < 0.5) {
       corners.push(i);
@@ -322,7 +328,10 @@ function fitRailToRun(
   let interruptionPx = 0;
   for (let i = 1; i < sortedProj.length; i++) {
     const gap = sortedProj[i] - sortedProj[i - 1];
-    if (gap > 1.5) {  // Gap larger than ~1 pixel indicates a break.
+    // Derived: diagonal raster pixels are √2 ≈ 1.414 px apart in Euclidean distance;
+    // gaps > 1.5 in projection space exceed diagonal adjacency and indicate actual
+    // interruptions in the rail, not quantization artifacts.
+    if (gap > 1.5) {
       interruptionPx += gap - 1;
     }
   }

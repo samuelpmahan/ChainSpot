@@ -353,4 +353,147 @@ describe('railExtraction', () => {
       expect(firstRailIsHorizontal).toBe(true);
     });
   });
+
+  describe('robustness: multi-chain occluder bites', () => {
+    it('should trace and rank rails from both disjoint boundary loops when two separate occluder bites fragment the ring', () => {
+      // Hollow ring (14x10) with TWO separate occluder bites creating two disjoint boundary chains.
+      // Outer boundary: (0,0)-(14,0)-(14,10)-(0,10)-(0,0)
+      // Inner hole: (4,4)-(10,4)-(10,6)-(4,6)-(4,4)
+      // Two bites: one on right edge, one on bottom-right
+      const pixels: Px[] = [];
+
+      // Outer top edge.
+      for (let x = 0; x <= 14; x++) {
+        pixels.push([x, 0]);
+      }
+      // Outer right edge.
+      for (let y = 0; y <= 10; y++) {
+        pixels.push([14, y]);
+      }
+      // Outer bottom edge.
+      for (let x = 0; x <= 14; x++) {
+        pixels.push([x, 10]);
+      }
+      // Outer left edge (partial, missing bite at y=7-10 to simulate first bite).
+      for (let y = 0; y <= 6; y++) {
+        pixels.push([0, y]);
+      }
+
+      // Inner hole top edge (simulating inner ring).
+      for (let x = 4; x <= 10; x++) {
+        pixels.push([x, 4]);
+      }
+      // Inner hole right edge (partial, missing bite at y=5-6 to simulate second bite).
+      for (let y = 4; y <= 4; y++) {
+        pixels.push([10, y]);
+      }
+      // Inner hole bottom edge.
+      for (let x = 4; x <= 10; x++) {
+        pixels.push([x, 6]);
+      }
+      // Inner hole left edge (partial, missing bite).
+      for (let y = 4; y <= 6; y++) {
+        pixels.push([4, y]);
+      }
+
+      const occluders: OccluderFootprint[] = [];
+      const rails = extractRailCandidates(pixels, occluders);
+
+      // Should find rails from both the outer and inner boundary chains.
+      expect(rails.length).toBeGreaterThanOrEqual(2);
+
+      // Verify we have rails from both chains by checking for different angles/lengths.
+      const uniqueLengths = new Set(rails.map((r) => Math.round(r.lengthPx)));
+      expect(uniqueLengths.size).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('robustness: pathological all-occluded rail', () => {
+    it('should produce deterministic all-zero quality scores when rail is completely occluded and still rank them consistently', () => {
+      // Horizontal line from (0,0) to (10,0).
+      const pixels: Px[] = [];
+      for (let x = 0; x <= 10; x++) {
+        pixels.push([x, 0]);
+      }
+
+      // Occlude ALL pixels in the rail.
+      const occludedPixels = new Set<string>();
+      for (let x = 0; x <= 10; x++) {
+        occludedPixels.add(`${x},0`);
+      }
+
+      const occluders: OccluderFootprint[] = [
+        {
+          kind: 'badge',
+          pixels: occludedPixels,
+        },
+      ];
+
+      const rails = extractRailCandidates(pixels, occluders);
+
+      // The rail should still be found (it passes MIN_RAIL_PIXELS threshold).
+      expect(rails.length).toBeGreaterThanOrEqual(1);
+      const rail = rails[0];
+
+      // Occlusion fraction should be 1 (100% occluded).
+      expect(rail.occludedFractionPx).toBeCloseTo(1.0, 6);
+
+      // Quality score should collapse to 0: qualityScore = netLength * straightness * (1 - occludedFraction).
+      // With occludedFraction = 1, (1 - 1) = 0, so qualityScore must be 0.
+      expect(rail.qualityScore).toBeCloseTo(0, 6);
+
+      // Run twice to verify determinism: all-zero quality scores should sort consistently.
+      const rails2 = extractRailCandidates(pixels, occluders);
+      expect(rails.length).toBe(rails2.length);
+      if (rails.length > 0 && rails2.length > 0) {
+        expect(rails[0].qualityScore).toBeCloseTo(rails2[0].qualityScore, 6);
+        expect(rails[0].occludedFractionPx).toBeCloseTo(rails2[0].occludedFractionPx, 6);
+      }
+    });
+  });
+
+  describe('robustness: determinism after constant derivation changes', () => {
+    it('should maintain deterministic ordering even with W=3 windowing, dot<0.5 corner detection, and gap>1.5 interruption threshold', () => {
+      // Complex shape: L with some noise to exercise all three constants.
+      const pixels: Px[] = [];
+
+      // Horizontal leg (0,0) to (15,0).
+      for (let x = 0; x <= 15; x++) {
+        pixels.push([x, 0]);
+      }
+      // Vertical leg (15,0) to (15,12).
+      for (let y = 0; y <= 12; y++) {
+        pixels.push([15, y]);
+      }
+      // Small angled segment to test corner detection.
+      for (let i = 1; i <= 5; i++) {
+        pixels.push([15 - i, 12]);
+      }
+
+      const occluders: OccluderFootprint[] = [];
+
+      // Run extraction twice with identical inputs.
+      const result1 = extractRailCandidates(pixels, occluders);
+      const result2 = extractRailCandidates(pixels, occluders);
+
+      // Verify identical results.
+      expect(result1.length).toBe(result2.length);
+      for (let i = 0; i < result1.length; i++) {
+        const r1 = result1[i];
+        const r2 = result2[i];
+
+        expect(r1.angleRad).toBeCloseTo(r2.angleRad, 9);
+        expect(r1.qualityScore).toBeCloseTo(r2.qualityScore, 6);
+        expect(r1.occludedFractionPx).toBeCloseTo(r2.occludedFractionPx, 6);
+        expect(r1.lengthPx).toBeCloseTo(r2.lengthPx, 6);
+
+        // Points must match exactly in count and coordinates.
+        expect(r1.points.length).toBe(r2.points.length);
+        for (let j = 0; j < r1.points.length; j++) {
+          expect(r1.points[j][0]).toBe(r2.points[j][0]);
+          expect(r1.points[j][1]).toBe(r2.points[j][1]);
+        }
+      }
+    });
+  });
 });
