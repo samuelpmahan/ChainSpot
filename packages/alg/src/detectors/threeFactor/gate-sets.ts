@@ -10,6 +10,7 @@ import { teeMinAreaPoseFeature } from './features/g3.teeMinAreaPose';
 import { teeRecoveryFeature } from './features/g3.teeRecovery';
 import { phantomTeeFeature } from './features/g3.phantomTee';
 import { teeBadgeLockFeature } from './features/g4.teeBadgeLock';
+import { teeBadgeCompassFeature } from './features/g4.teeBadgeCompass';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g4SearchFeature } from './features/g4.search';
 import { fourLaneSensorFeature } from './features/st.fourLaneSensor';
@@ -49,7 +50,7 @@ export const GATE_FEATURE_IDS = {
 	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'teeBadgeCompass'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -60,7 +61,7 @@ const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 	'g1-set': [g1BadgesFeature, digitsFeature, badgeGlyphTemplateFeature],
 	'g2-set': [g2SpriteFeature, cleanBasketFamilyFeature],
 	'g3-set': [g3EndpointsFeature, teeFamilyFeature, teeMinAreaPoseFeature],
-	'g4-set': [teeRecoveryFeature, phantomTeeFeature, teeBadgeLockFeature],
+	'g4-set': [teeRecoveryFeature, phantomTeeFeature, teeBadgeLockFeature, teeBadgeCompassFeature],
 	'g5-set': [fourLaneSensorFeature, straightTestFeature, g5RibbonFeature, g5RoutingFeature],
 	'g6-set': [g4ScoringFeature, g4SearchFeature],
 	'g7-set': [zfitFeature]
@@ -173,7 +174,7 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 	],
 	'g2-set': ['baskets', 'cleanBasketFamily'],
 	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'teeBadgeCompass'],
 	'g5-set': ['straightTest', 'supportField', 'badgeOcclusionPatch', 'rawPairs', 'measurement'],
 	'g6-set': ['assignment.pairs', 'assignment.scoring', 'assignment.ranking', 'assignment.selection'],
 	'g7-set': ['zfit']

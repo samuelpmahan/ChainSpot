@@ -22,6 +22,7 @@ import { teeFamilyFeature } from './g3.teeFamily';
 import { teeMinAreaPoseFeature } from './g3.teeMinAreaPose';
 import { teeRecoveryFeature } from './g3.teeRecovery';
 import { teeBadgeLockFeature } from './g4.teeBadgeLock';
+import { teeBadgeCompassFeature } from './g4.teeBadgeCompass';
 import { fourLaneSensorFeature } from './st.fourLaneSensor';
 import { straightTestFeature } from './st.straightTest';
 
@@ -43,6 +44,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	teeMinAreaPoseFeature,
 	teeRecoveryFeature,
 	teeBadgeLockFeature,
+	teeBadgeCompassFeature,
 	fourLaneSensorFeature,
 	straightTestFeature
 ];

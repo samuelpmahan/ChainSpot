@@ -32,7 +32,7 @@ const membership: Record<string, readonly string[]> = {
 	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'teeBadgeCompass'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -122,7 +122,8 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(GATE_FEATURE_SETS['g4-set'].operations?.map(({ operation }) => operation.spec.id)).toEqual([
 			'teeRecovery',
 			'phantomTee',
-			'teeBadgeLock'
+			'teeBadgeLock',
+			'teeBadgeCompass'
 		]);
 		for (const set of Object.values(GATE_FEATURE_SETS)) {
 			const owned = new Set(set.features.map((feature) => feature.id));

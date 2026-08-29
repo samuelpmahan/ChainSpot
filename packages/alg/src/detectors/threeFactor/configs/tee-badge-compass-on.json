@@ -1,0 +1,24 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "tee-badge-compass-on",
+	"note": "A/B candidate: pair each VISIBLE tee to a badge using ONLY tee-local geometry (pad axis vs tee-badge bearing) -- no routing, no corridor support field, no baskets, no assignment output. Reads only measurement.badges/measurement.tees, so it is inserted directly after 'measurement' and before 'assignment'/'teeRecovery' -- nothing downstream of G3 tees + G1 badges. Frozen execution remains unchanged when omitted.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"teeBadgeCompass",
+		"assignment",
+		"teeRecovery"
+	],
+	"gates": {
+		"G4": {
+			"teeBadgeCompass": { "enabled": true }
+		}
+	}
+}

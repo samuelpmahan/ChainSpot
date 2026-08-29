@@ -29,6 +29,7 @@ import { teeFamilyUnit, teeFamilyFeature } from '../detectors/threeFactor/featur
 import { teeMinAreaPoseUnit, teeMinAreaPoseFeature } from '../detectors/threeFactor/features/g3.teeMinAreaPose';
 import { teeRecoveryUnit, teeRecoveryFeature } from '../detectors/threeFactor/features/g3.teeRecovery';
 import { teeBadgeLockOperation } from '../detectors/threeFactor/features/g4.teeBadgeLock';
+import { teeBadgeCompassOperation } from '../detectors/threeFactor/features/g4.teeBadgeCompass';
 import {
 	cleanBasketFamilyUnit,
 	cleanBasketFamilyFeature
@@ -595,6 +596,10 @@ const reusedOps: OperationDef[] = [
 		run: teeBadgeLockOperation.run
 	},
 	{
+		spec: teeBadgeCompassOperation.spec,
+		run: teeBadgeCompassOperation.run
+	},
+	{
 		spec: {
 			id: 'teeFamily',
 			kind: 'decide',
@@ -683,6 +688,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
 	['teeBadgeLock', ['teeBadgeLock']],
+	['teeBadgeCompass', ['teeBadgeCompass']],
 	['teeFamily', ['teeFamily']],
 	['teeMinAreaPose', ['teeMinAreaPose']],
 	['teeRecovery', ['teeRecovery']],
@@ -841,5 +847,8 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 	},
 	teeBadgeLock(board) {
 		return [...(teeBadgeLockOperation.extractArtifacts?.(board) ?? [])];
+	},
+	teeBadgeCompass(board) {
+		return [...(teeBadgeCompassOperation.extractArtifacts?.(board) ?? [])];
 	}
 };

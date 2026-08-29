@@ -8,7 +8,7 @@ const expectedMembership = {
 	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'teeBadgeCompass'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']

@@ -122,7 +122,7 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 	G4: {
 		phase: 'Recovery (Tee + Basket): all endpoints the run will ever have are on the board',
 		ownGates: ['G4'],
-		demonstratedBy: ['teeRecovery', 'phantomTee', 'teeBadgeLock']
+		demonstratedBy: ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'teeBadgeCompass']
 	},
 	G5: {
 		phase:

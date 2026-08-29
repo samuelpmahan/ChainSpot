@@ -76,8 +76,8 @@ const FROZEN_DEFAULT_PLAN_FINGERPRINT =
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(18); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate
-		expect(OPERATION_UNIVERSE.length).toBe(25); // prior universe + four single-operation units
+		expect(UNIT_OPERATIONS.size).toBe(19); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate + teeBadgeCompass
+		expect(OPERATION_UNIVERSE.length).toBe(26); // prior universe + five single-operation units
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',

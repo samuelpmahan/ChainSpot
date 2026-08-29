@@ -43,6 +43,7 @@
 					"teeRecovery",
 					"teeBadgeLock",
 					"badgeGlyphTemplate",
+					"teeBadgeCompass",
 					"cleanBasketFamily",
 					"straightTest"
 				]
@@ -703,6 +704,48 @@
 									"type": "object",
 									"additionalProperties": false,
 									"properties": {}
+								}
+							}
+						},
+						"teeBadgeCompass": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "tee-local-only compass: pairs each visible tee to a badge from the pad axis vs the tee-badge bearing alone (S2 -- the tee is the compass, the badge is what it points at). Reads only measurement.badges/measurement.tees; no routing, corridor, basket, or assignment evidence is read. sigma is derived per-course from the tees actually on the board, floored at raster quantization, with a loud UNKNOWN fallback when a course gives too few tees to trust a quantile. Pose-quality-aware: a tee whose pad is a course-relative outlier on fill or size cannot silently win a confident 'locked' verdict (owner mid-build amendment).",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"quantileFraction": {
+											"type": "number",
+											"description": "robust upper quantile (P90) applied to each eligible tee's best-badge angular error to derive sigma -- a statistical parameter, not a physics constant.",
+											"default": 0.9
+										},
+										"minimumSampleSize": {
+											"type": "number",
+											"description": "below this many non-degraded eligible tees, the quantile is not trusted at all -- sigma falls back loudly to the raster-quantization floor (isFallback: true), never silently.",
+											"default": 3
+										},
+										"rasterTolerancePx": {
+											"type": "number",
+											"description": "half a raster cell plus its diagonal quantization allowance, in source pixels -- the same value and rationale as g3.teeRecovery.ts's RASTER_TOLERANCE_PX. Converted to a degree-domain floor via THIS course's own measured tee-to-badge distances; never an imported degree constant.",
+											"default": 1.25
+										},
+										"fillToleranceFactor": {
+											"type": "number",
+											"description": "reuses g3.teeFamily's own intactness-tolerance convention (fillRatioToleranceFactor, also 1.25 there): a pad whose fill sits more than this factor below the course's own median fill is flagged a weak/partial fit (owner mid-build amendment).",
+											"default": 1.25
+										},
+										"areaToleranceFactor": {
+											"type": "number",
+											"description": "a pad whose area sits more than this factor away from the course's own median area, in either direction (S8 uniformity), is flagged a weak/degraded fit.",
+											"default": 1.25
+										}
+									}
 								}
 							}
 						}
