@@ -27,9 +27,12 @@ start as if they were part of this file:
   claims ledger, gate model, owner policies, operational quirks).
 - `.claude/skills/chainspot-cv-engrams/SKILL.md` — vision memory (chrome
   signatures, C1S/C2D rings and z-order, the completeness invariant).
-- `.claude/skills/receipt-reconcile/SKILL.md` — how to reconcile a receipt
-  against its rendering, grounded in a Minsky Frame (looking-for X /
-  looks-like Y / because ABC / may-be-near DEF).
+- `.claude/skills/gate-triage/SKILL.md` — first-line diagnosis for missing,
+  misplaced, misidentified, stolen, or nonsensical endpoint/assignment work.
+- `.claude/skills/receipt-reconcile/SKILL.md` — minimal human-checkable proof
+  for a challenged claim; identity before geometry and one-turn evidence.
+- `.claude/skills/lab-shock-collar/SKILL.md` — anti-throwaway-script law;
+  repeated investigative capability belongs in LAB, not a shadow CLI.
 
 An engram is written the day it is earned, in the same commit as the work.
 Load-bearing diagnoses go to `docs/CLAIMS-LEDGER.md` with receipts.
@@ -62,6 +65,54 @@ accept on sight — a real run, on real course data, printing a receipt. Not
 - **Any external write** — a push, a GitHub or Linear comment, a deploy —
   requires showing the user the verbatim content first and getting explicit
   approval.
+
+### LAB before throwaway code
+
+LAB is the canonical embodied inspection/execution interface.
+
+Do not create ad-hoc Python/JS/TS/shell analysis scripts when LAB can express
+the operation. If LAB genuinely cannot answer a diagnostic question, a one-shot
+script may be used once with its missing LAB capability stated explicitly.
+Before reusing that script or an equivalent one, stop and decide whether the
+capability belongs in LAB. Reusable diagnostic capability must be promoted into
+LAB; do not grow a shadow CLI. A third use of a throwaway script is prohibited.
+
+### Identify pixels before measuring them
+
+No component may be used as evidence about a tee/basket/badge merely because
+its geometry fits a downstream hypothesis. Establish object identity from the
+canonical raster/context first. `UNKNOWN` is valid. Badge digits and other
+renderer chrome are known confounders. If identity is ambiguous, do not continue
+with target-specific geometry as though the identity were established.
+
+### Human receipts are minimal
+
+Machine artifacts may be exhaustive. Human acceptance receipts are not.
+
+For a challenged claim, lead with one verdict and the smallest visual/table that
+lets the owner verify it. The correct number buried inside a comprehensive dump
+does not count as observable evidence.
+
+### Evidence is atomic across the conversation
+
+A claimed result and the evidence required to judge it must be delivered in the
+same owner-facing turn.
+
+Do not stage evidence as separate conversational rewards:
+
+- claim now, receipt later;
+- receipt now, image later;
+- ask whether the owner wants the visual;
+- drip-feed tables after the conclusion.
+
+For a visual claim, include the relevant visual immediately. For a numeric claim,
+include the minimal deciding numbers immediately. Always include provenance.
+
+If the complete proof does not fit comfortably, reduce the proof to the smallest
+sufficient acceptance surface and link the exhaustive artifact separately.
+
+Until that bundle is delivered together, the work is not presented and is not
+eligible for acceptance.
 
 ## Long-running tasks
 
