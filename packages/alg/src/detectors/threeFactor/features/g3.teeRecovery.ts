@@ -1135,6 +1135,14 @@ function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[]
 	const owned = new Set<string>();
 	for (const basket of baskets) for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) owned.add(pixel);
 	const [x0, y0, x1, y1] = [0, 0, stage.width - 1, stage.height - 1];
+	// NOTE (2026-08-29, integration night): do NOT own bright pixels inside
+	// basket semantic bboxes the way badges do below. It was tried, to kill
+	// basket furniture masquerading as remnants, and it silently ate REAL
+	// occluded-tee evidence -- Heritage T10's dim pad sits inside basket-7's
+	// bbox and vanished from candidacy (never rejected, never accepted).
+	// Basket bboxes CONTAIN tee remnants by design; that is the whole
+	// occluded-tee-recovery domain. Badge ownership is safe because badge
+	// plates are opaque chrome; basket glyphs are not.
 	for (const badge of badges) {
 		// Own EVERY bright pixel inside the badge bbox, not only the plate
 		// outline's own component: the digit glyphs are separate bright
@@ -1577,9 +1585,33 @@ export function buildTeeRecoveryCandidates(
 				const acrossSpanPx = pixels.length ? vMax - vMin + 1 : 0;
 				const alongFloorPx = minorBracket.lo;
 				const acrossCapPx = 2 * (Math.max(0, thickness) + RASTER_TOLERANCE_PX);
+				// Two escape shapes (2026-08-29, third pass -- the second pass
+				// judged rails per-shard for EVERY count, which readmitted an
+				// elongated Lenard roof blob):
+				//  (a) ONE thin shard whose GROUP extents are a rail -- the
+				//      original threshold-dimmed-pad survivor (Heritage T10);
+				//  (b) TWO to FOUR shards that are EACH a strict rail on their
+				//      own axis (span >= shortest pad side, across within ONE
+				//      wall + raster tolerance) -- the broken-ring pair the
+				//      C-solve exists for (AlexClark badge-10's 36+38px arms).
+				// Speck chains fail (b)'s per-shard span; single blobs fail
+				// (a)'s group across cap.
+				const oneWallCapPx = Math.max(0, thickness) + 2 * RASTER_TOLERANCE_PX;
+				const shardStats = visibleShards.map((shard) => exactVisibleStats(0, shard));
+				const everyShardIsStrictRail =
+					visibleShards.length >= 2 &&
+					visibleShards.length <= 4 &&
+					shardStats.every((stats) => {
+						if (!stats) return false;
+						const along = (stats.axisMajorMax ?? 0) - (stats.axisMajorMin ?? 0) + 1;
+						const across = (stats.axisMinorMax ?? 0) - (stats.axisMinorMin ?? 0) + 1;
+						return along >= alongFloorPx && across <= oneWallCapPx;
+					});
 				const singleShard = visibleShards.length === 1;
+				const singleThinRail =
+					singleShard && alongSpanPx >= alongFloorPx && acrossSpanPx <= acrossCapPx;
 				return {
-					qualifies: singleShard && alongSpanPx >= alongFloorPx && acrossSpanPx <= acrossCapPx,
+					qualifies: singleThinRail || (everyShardIsStrictRail && alongSpanPx >= alongFloorPx),
 					singleShard,
 					alongSpanPx,
 					alongFloorPx,

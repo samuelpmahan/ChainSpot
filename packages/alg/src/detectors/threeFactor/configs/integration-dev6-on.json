@@ -1,0 +1,24 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "integration-dev6-on",
+	"note": "The integration-night composition (2026-08-29): baseline + teeBorderCornerFit (border-adjacency corner claims into the shared recoveredTees pool, before assignment). phantomTee is deliberately ABSENT: the engine is course-blind, so a shared-config whitelist entry like AC12 fabricates a phantom on EVERY course whose listed hole is unassigned -- observed filling five holes with junk across Dev6. Phantom injection belongs only in a course-specific config (phantom-tee-whitelist-on) until whitelist entries can be scoped to a course.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"teeRecovery",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"teeBorderCornerFit",
+		"assignment"
+	],
+	"gates": {
+		"G4": {
+			"teeBorderCornerFit": { "enabled": true }
+		}
+	}
+}
