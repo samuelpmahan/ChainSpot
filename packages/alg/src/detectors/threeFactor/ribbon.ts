@@ -175,12 +175,16 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 					const b = sample(-(radius + delta));
 					const c = sample(radius - delta);
 					const d = sample(radius + delta);
-					const d1 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-					const d2 = [c[0] - d[0], c[1] - d[1], c[2] - d[2]];
-					const n1 = Math.hypot(...d1);
-					const n2 = Math.hypot(...d2);
-					const dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+					const d1r = a[0] - b[0];
+					const d1g = a[1] - b[1];
+					const d1b = a[2] - b[2];
+					const d2r = c[0] - d[0];
+					const d2g = c[1] - d[1];
+					const d2b = c[2] - d[2];
+					const dot = d1r * d2r + d1g * d2g + d1b * d2b;
 					if (dot <= 0) continue;
+					const n1 = Math.hypot(d1r, d1g, d1b);
+					const n2 = Math.hypot(d2r, d2g, d2b);
 					const score = Math.min(n1, n2) * Math.min(1, dot / (n1 * n2 + 1e-6));
 					const cell = y * width + x;
 					if (score > raw[cell]) {
