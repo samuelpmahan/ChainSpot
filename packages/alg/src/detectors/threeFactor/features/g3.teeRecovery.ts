@@ -1135,14 +1135,18 @@ function exactKnownPixels(stage: RecoveryStage, badges: readonly BadgeEvidence[]
 	const owned = new Set<string>();
 	for (const basket of baskets) for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) owned.add(pixel);
 	const [x0, y0, x1, y1] = [0, 0, stage.width - 1, stage.height - 1];
-	// NOTE (2026-08-29, integration night): do NOT own bright pixels inside
-	// basket semantic bboxes the way badges do below. It was tried, to kill
-	// basket furniture masquerading as remnants, and it silently ate REAL
-	// occluded-tee evidence -- Heritage T10's dim pad sits inside basket-7's
-	// bbox and vanished from candidacy (never rejected, never accepted).
-	// Basket bboxes CONTAIN tee remnants by design; that is the whole
-	// occluded-tee-recovery domain. Badge ownership is safe because badge
-	// plates are opaque chrome; basket glyphs are not.
+	// NOTE (2026-08-29, owner ruling): basket ownership follows the drawn
+	// BORDER, never the bbox. Baskets are not square -- the glyph is ~1746px
+	// of ink in a ~42x66 bbox, and the empty margin inside that rectangle is
+	// exactly where occluded pads leave their remnants (a pad merged into the
+	// basket component reappears only after sprite-cell subtraction). A tried
+	// bbox-rectangle ownership silently ate Heritage T10's dim pad from
+	// candidacy (never rejected, never accepted). Badge bbox ownership below
+	// is safe only because a badge plate is a rounded rect that FILLS its
+	// bbox (dc96000). If basket furniture ever provably masquerades as a
+	// remnant (receipt first), own the region enclosed by the sprite ink --
+	// the glyph border's interior, as in G3's enclosed-ring test -- not the
+	// rectangle. The exact sprite cells themselves are already owned above.
 	for (const badge of badges) {
 		// Own EVERY bright pixel inside the badge bbox, not only the plate
 		// outline's own component: the digit glyphs are separate bright
