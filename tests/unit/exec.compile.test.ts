@@ -71,6 +71,12 @@ const straightTestOnResolved = resolveConfig(
 // ['measurement', 'assignment'] to work in g4-set where only full assignment is
 // seeded (fix-intake-engine: spec-exact one-issue fix for g4-set compilation).
 // Fingerprint moved: f3e705aa... -> f2739303...
+// 2026-08-29: teeBadgeCompass (default-OFF, resolve-only) enters
+// OPERATION_UNIVERSE on rebase -- and the pin does NOT move: recomputed on
+// the merged tree by direct compile, the fingerprint equals the value below
+// unchanged, confirming the current computation is insensitive to
+// unconfigured resolve-only inventory (the compass op appears in neither
+// the default plan's ops nor its bindings).
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
 	'f2739303d4ca9d6fe6fb444cb8f39272b0955171144d5a9e7d0f4113ab4944f9';
 
