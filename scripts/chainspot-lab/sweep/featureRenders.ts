@@ -516,7 +516,10 @@ function rejectionReceiptLines(
  * verbatim from `withHoleLabels()` (@chainspot/alg/exec) -- the same mapping
  * run.receipt.txt's HOLE ASSIGNMENTS section and the
  * assignment.selection.table/zfit.finalAssignment.table artifacts use. */
-function holeAssignmentLines(rows: readonly HoleLabeledAssignment[] | undefined): string[] {
+function holeAssignmentLines(
+	rows: readonly HoleLabeledAssignment[] | undefined,
+	notFoundRows: readonly NotFoundBadgeRow[] | undefined
+): string[] {
 	if (rows === undefined) {
 		return [
 			'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
@@ -524,8 +527,10 @@ function holeAssignmentLines(rows: readonly HoleLabeledAssignment[] | undefined)
 		];
 	}
 	const lines = [
+		...notFoundReceiptLines(notFoundRows ?? []),
+		'',
 		'HOLE ASSIGNMENTS (badge -> hole -> tee -> basket)',
-		"(provenance: board 'assignment' rows via withHoleLabels(); UNREAD means the G1 digit read failed, never a guess)",
+		"(provenance: board 'assignment' rows via withHoleLabels(); UNREAD means the G1 digit read failed, never a guess; sorted by numeric hole, not by badge id)",
 		'hole | badgeId | teeId -> basketId | score | hole confidence'
 	];
 	if (rows.length === 0) {
@@ -533,7 +538,7 @@ function holeAssignmentLines(rows: readonly HoleLabeledAssignment[] | undefined)
 		return lines;
 	}
 	const median = assignmentScoreMedian(rows);
-	for (const row of rows) {
+	for (const row of sortByHole(rows)) {
 		const holeLabel = row.hole === 'UNREAD' ? 'UNREAD' : `H${row.hole}`;
 		const confidence =
 			row.holeConfidence === null ? 'UNKNOWN' : Number(row.holeConfidence.toFixed(3));
@@ -940,7 +945,7 @@ export function renderRunEndpointReceipt(
 		...(teeBadgeLockReceipt ? ['', teeBadgeLockReceipt.cliText] : []),
 		...(badgeGlyphTemplateReceipt ? ['', badgeGlyphTemplateReceipt.cliText] : []),
 		'',
-		...holeAssignmentLines(input.assignmentRows),
+		...holeAssignmentLines(input.assignmentRows, input.notFoundRows),
 		'',
 		'VISUAL CONTRACT',
 		'yellow: exact detector-known white/bright badge pixels only (pixelSet; black badge pixels untouched)',
