@@ -7,6 +7,8 @@ import type {
 	UiObjectDetected
 } from '../../detect';
 import { assignThreeFactor } from './assignment';
+import { buildChainOfCustody } from './custody';
+import type { ChainOfCustodyLedger } from './custody';
 import { runEngine } from './engine';
 import { objectGraph } from './objects';
 import type { ObjectGraph } from './objects';
@@ -30,6 +32,20 @@ import {
 export { THREE_FACTOR_ALGO, THREE_FACTOR_ALGO_VERSION } from './types';
 export { objectGraph, occlude } from './objects';
 export type { Badge, Basket, Tee, CourseObject, ObjectGraph, Occlusion, RasterOwnership } from './objects';
+export {
+	CHAIN_OF_CUSTODY_SCHEMA,
+	buildChainOfCustody,
+	findTeeCustody
+} from './custody';
+export type {
+	ChainOfCustodyLedger,
+	TeeCustodyAssignmentEvent,
+	TeeCustodyEvent,
+	TeeCustodyOriginKind,
+	TeeCustodyPhysicalSnapshot,
+	TeeCustodyRecord,
+	TeeCustodyTraceEvent
+} from './custody';
 export type {
 	AssignmentEvidence,
 	BadgeEvidence,
@@ -55,6 +71,12 @@ export interface ThreeFactorRun {
 	readonly assignment: ThreeFactorAssignment;
 	/** Root objects + explicit relations derived without mutating measurement evidence. */
 	readonly objects: ObjectGraph;
+	/**
+	 * Derived, read-only chain of custody for the final tee inventory.  This is
+	 * observability only: it joins retained TeeEvidence + sealed trace testimony
+	 * + the final ownership decision and cannot change detector behavior.
+	 */
+	readonly custody: ChainOfCustodyLedger;
 	readonly trace?: RunTrace;
 	readonly paramsHash?: string;
 }
@@ -115,6 +137,7 @@ export function runThreeFactor(
 		measurement: result.measurement,
 		assignment: result.assignment,
 		objects: objectGraph(result.measurement),
+		custody: buildChainOfCustody(result.assignment, result.trace),
 		...(result.trace ? { trace: result.trace } : {}),
 		...(paramsHash ? { paramsHash } : {})
 	};
