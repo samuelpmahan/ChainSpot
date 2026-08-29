@@ -21,7 +21,10 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 describe('LAB contextual help catalog', () => {
 	test('covers the supported root, shell, option, and documented leaf surface', () => {
 		const coverage = coverageForCatalog();
-		expect(coverage.commandCount).toBe(15);
+		// 2026-08-29: `lab score` and `lab crop` promoted from the integration
+		// night's scratchpad tools into the CLI (ed08fec), 15 -> 17. This pin
+		// should have moved in that commit; it moves here, consciously, now.
+		expect(coverage.commandCount).toBe(17);
 		expect(coverage.shellCount).toBe(4);
 		expect(coverage.missingRoots).toEqual([]);
 		expect(coverage.missingShell).toEqual([]);

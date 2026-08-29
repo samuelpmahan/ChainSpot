@@ -86,8 +86,14 @@ const straightTestOnResolved = resolveConfig(
 // (19->20, 26->27) and, per the insensitivity property proven one entry up,
 // the frozen default plan fingerprint is expected to stay put -- verified by
 // re-running this suite after the change.
+// 2026-08-29 (later the same day): the owner froze the Dev6 106/108
+// tee-to-badge baseline as the shipped default (dev6-106-default, commits
+// 0193ed3/0f593fd) -- default.json's name, note, execution order
+// (post-assignment teeRecovery + teeBadgeLock) and G4 gate block all
+// changed, so the resolved config inside the fingerprint moves
+// (f2739303... -> 18c3851a...).
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'f2739303d4ca9d6fe6fb444cb8f39272b0955171144d5a9e7d0f4113ab4944f9';
+	'18c3851ad30efcd5a923e59b1e53e79fc514d71139dbc020d4df6fcd312b5a6b';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

@@ -113,19 +113,20 @@ describe('LAB sweep receipt seam', () => {
 			resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/default.json')
 		);
 		const sliced = await slicePlanThroughGate(plan, 'G4');
-		// 2026-08-29: teeRecovery moved before assignment (gate reorg;
-		// owner-measured ray work, cd77412 lineage) and its G5/G6 dependency on
-		// assignment output was removed -- the old inversion (a --through G4
-		// slice dragging in the whole 18-op plan, assignment included) is GONE.
-		// teeRecovery now runs right after teeFamily, so a G4 slice is a genuine
-		// 10-op endpoints-complete prefix with no G5/G6 prerequisites at all;
-		// supportField/rawPairs/measurement/assignment.* are simply unscheduled
-		// (G4 "no basket assignment" per docs/contracts/2026-08-29-gate-reorg.md).
-		expect(sliced.ops).toHaveLength(10);
-		expect(sliced.ops[sliced.ops.length - 1].id).toBe('teeRecovery');
+		// 2026-08-29 (later the same day): the owner froze the Dev6 106/108
+		// tee-to-badge baseline as the shipped default (dev6-106-default,
+		// commits 0193ed3/0f593fd). In that schedule the G4 units teeRecovery
+		// and teeBadgeLock deliberately run AFTER assignment (post-assignment
+		// recovery feeding the ray-first lock), so a dependency-complete
+		// --through G4 slice once again carries the whole schedule, assignment
+		// included -- not as the old accidental inversion this comment's
+		// previous form celebrated removing, but as the frozen default's
+		// authored order. The 10-op tee-only prefix pin (gate-reorg era,
+		// cd77412 lineage) applies to configs on that order, not to default.
+		expect(sliced.ops).toHaveLength(19);
+		expect(sliced.ops[sliced.ops.length - 1].id).toBe('teeBadgeLock');
 		expect(sliced.ops.map((operation) => operation.id)).not.toContain('zfit');
-		expect(sliced.slice.prerequisites).toEqual([]);
-		expect(sliced.slice.notScheduled.map((entry) => entry.id)).toEqual([
+		expect(sliced.slice.prerequisites.map((entry) => entry.id)).toEqual([
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
@@ -135,6 +136,7 @@ describe('LAB sweep receipt seam', () => {
 			'assignment.ranking',
 			'assignment.selection'
 		]);
+		expect(sliced.slice.notScheduled).toEqual([]);
 	});
 
 	test('through G5, G4, and G6 share the default prefix but stay distinguishable; G7 rejects without scheduled zfit', async () => {
@@ -144,25 +146,17 @@ describe('LAB sweep receipt seam', () => {
 		const g4 = await slicePlanThroughGate(plan, 'G4');
 		const g5 = await slicePlanThroughGate(plan, 'G5');
 		const g6 = await slicePlanThroughGate(plan, 'G6');
-		// 2026-08-29: teeRecovery moved before assignment (gate reorg;
-		// owner-measured ray work, cd77412 lineage) -- it no longer consumes the
-		// first assignment pass, so G4 and G5 are no longer the same prefix. G5
-		// now runs its own straight-test/measurement chain past G4's tee-only
-		// endpoints, then folds in G6's straight-hole assignment (this cutoff's
-		// declared forward reach, unchanged by the reorg).
-		expect(g5.ops.map((operation) => operation.id)).toEqual([
-			...g4.ops.map((operation) => operation.id),
-			'supportField',
-			'badgeOcclusionPatch',
-			'rawPairs',
-			'measurement',
-			'assignment.pairs',
-			'assignment.scoring',
-			'assignment.ranking',
-			'assignment.selection'
-		]);
-		expect(g5.slice.prerequisites).toEqual([]);
-		expect(g5.planFingerprint).not.toBe(g4.planFingerprint);
+		// 2026-08-29 (later the same day): under the frozen dev6-106-default
+		// (owner commits 0193ed3/0f593fd) the G4 units run AFTER assignment, so
+		// a G4 slice already drags the whole schedule in as prerequisites and
+		// the G4/G5/G6 cutoffs collapse to the same 19-op list. They stay
+		// distinguishable by their slice STORY (which ops are prerequisites vs
+		// natively in-gate), not by op count -- the gate-reorg-era expectation
+		// that G5 strictly extends G4 belongs to configs on that order.
+		expect(g5.ops.map((operation) => operation.id)).toEqual(
+			g4.ops.map((operation) => operation.id)
+		);
+		expect(g5.slice.prerequisites.length).toBeLessThan(g4.slice.prerequisites.length);
 		expect(g6.ops.map((operation) => operation.id)).toEqual(plan.ops.map((operation) => operation.id));
 		expect(g6.slice.notScheduled).toEqual([]);
 		// zfit left the default schedule (owner directive 2026-08-28), so the
@@ -556,19 +550,22 @@ describe('LAB sweep receipt seam', () => {
 			throughGate: 'G4'
 		});
 
+		// 2026-08-29 (later the same day): the owner froze the Dev6 106/108
+		// tee-to-badge baseline as the shipped default (dev6-106-default,
+		// commits 0193ed3/0f593fd). Its G4 units (post-assignment teeRecovery +
+		// teeBadgeLock) run AFTER assignment, so a --through G4 slice on this
+		// config schedules the WHOLE 19-op plan, assignment as a named
+		// prerequisite -- the tee-only 10-op story above describes gate-reorg-
+		// order configs, not the frozen default. assignments is therefore a
+		// real number again, and custody has an assignment slot to join.
 		expect(result.runReceipt.results).toMatchObject({
 			badges: 18,
 			baskets: 18,
-			visibleTees: 15,
-			recoveredTees: 0,
-			totalTees: 15
+			assignments: 15
 		});
-		expect(result.runReceipt.results.assignments).toBeUndefined();
-		expect(result.runReceipt.resultsProvenance.assignments).toContain('not-scheduled');
-		expect(result.runReceipt.slice?.scheduledOperationCount).toBe(10);
-		expect(result.runReceipt.slice?.parentOperationCount).toBe(18);
-		expect(result.runReceipt.slice?.prerequisites).toEqual([]);
-		expect(result.runReceipt.slice?.notScheduled.map((entry) => entry.id)).toEqual([
+		expect(result.runReceipt.slice?.scheduledOperationCount).toBe(19);
+		expect(result.runReceipt.slice?.parentOperationCount).toBe(19);
+		expect(result.runReceipt.slice?.prerequisites.map((entry) => entry.id)).toEqual([
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
@@ -578,20 +575,22 @@ describe('LAB sweep receipt seam', () => {
 			'assignment.ranking',
 			'assignment.selection'
 		]);
-		expect(result.runReceipt.slice?.straightStory).toBeUndefined();
-		expect(result.runReceipt.warnings).toEqual([]);
+		expect(result.runReceipt.slice?.notScheduled).toEqual([]);
+		// With assignment scheduled, the slice carries its provenance story.
+		expect(result.runReceipt.slice?.straightStory).toEqual([
+			"assignment.selection assigned 15 of 18 badges straight from visible tees (provenance: unit 'assignment' measurement 'score' count — one score per selected assignment)",
+			"teeRecovery then recovered 0 occluded tee(s) and completed their holes (provenance: unit 'teeRecovery' accepted drawables)",
+			"assignments on the board at this cutoff: 15 (provenance: board 'assignment' slot after the last scheduled operation)"
+		]);
 		const text = readFileSync(result.runReceiptPaths[1], 'utf8');
 		expect(text).toContain('SLICE (--through G4)');
-		expect(text).not.toContain('prerequisite assignment.selection');
 		// zfit is config-dropped, not slice-cut: the receipt must NOT emit a
 		// "not scheduled" omission line for it.
 		expect(text).not.toContain('zfit');
 
-		// 2026-08-29: assignment is no longer scheduled in a --through G4 slice
-		// (gate reorg), so custody -- which joins against the board 'assignment'
-		// slot -- has nothing to join and is skipped silently, same contract as
-		// the G1/G3 slices above: no run.custody.receipt.txt, no third path.
-		expect(result.runReceiptPaths).toHaveLength(2);
+		// assignment IS scheduled under the frozen default's G4 slice, so the
+		// custody receipt joins and ships: three paths again.
+		expect(result.runReceiptPaths).toHaveLength(3);
 	}, 120_000);
 
 	test('enabled features receive the resolved context and tee evidence renders from that same sweep trace', async () => {

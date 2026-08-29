@@ -184,11 +184,15 @@ describe('production gate ABFeatureSet receipts', () => {
 	// ray work, cd77412 lineage) -- teeRecovery now runs right after teeFamily,
 	// ahead of assignment, not "ending at" it. The test title and body below
 	// are updated to describe the new order.
-	test('default config execution follows the canonical operation order, ending at assignment.selection', () => {
+	// 2026-08-29 (later the same day): the owner froze the Dev6 106/108
+	// tee-to-badge baseline as the shipped default (dev6-106-default, commits
+	// 0193ed3/0f593fd). Its authored execution runs assignment FIRST, then the
+	// G4 units teeRecovery and teeBadgeLock -- so the default no longer equals
+	// the engine-level DEFAULT_EXECUTION fallback minus zfit, and the plan
+	// ends at teeBadgeLock.
+	test('default config execution follows its authored frozen order, ending at teeBadgeLock', () => {
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
-		// zfit left the default schedule by owner directive (2026-08-28); the
-		// engine-level DEFAULT_EXECUTION fallback still ends with it.
-		expect(resolved.execution).toEqual(DEFAULT_EXECUTION.filter((id) => id !== 'zfit'));
+		expect(resolved.execution).toEqual((defaultConfig as ThreeFactorConfig).execution);
 		const plan = compileExecutionPlan(resolved);
 		expect(plan.ops.map((operation) => operation.id)).toEqual([
 			'badgeStage.masks',
@@ -200,7 +204,6 @@ describe('production gate ABFeatureSet receipts', () => {
 			'tees.ringMeasure',
 			'tees.exclusion',
 			'teeFamily',
-			'teeRecovery',
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
@@ -208,7 +211,9 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
-			'assignment.selection'
+			'assignment.selection',
+			'teeRecovery',
+			'teeBadgeLock'
 		]);
 	});
 });
