@@ -9,7 +9,7 @@ import type { Drawable, GateId, RunTrace, Verdict } from './features/types';
 /**
  * Chain-of-custody is observability, not detector behavior.
  *
- * Evidence is never re-scored here and no selection can change.  This module
+ * Evidence is never re-scored here and no selection can change. This module
  * only joins already-retained TeeEvidence, sealed trace testimony, and the
  * final assignment decision into one inspectable record keyed by the opaque
  * tee detId that downstream code already uses.
@@ -81,6 +81,11 @@ export interface TeeCustodyRecord {
 	readonly events: readonly TeeCustodyEvent[];
 }
 
+/**
+ * Intentionally starts with tees only. The schema is the system-wide custody
+ * envelope; badges, baskets, paths, and higher symbolic claims can be added as
+ * sibling collections without changing the tee record contract.
+ */
 export interface ChainOfCustodyLedger {
 	readonly schema: typeof CHAIN_OF_CUSTODY_SCHEMA;
 	readonly runId?: string;
@@ -105,7 +110,7 @@ function ringRef(tee: TeeEvidence): string | null {
 
 /**
  * Current G4 recovery retains the accepted recovery result id only in the
- * provenance note (`teeRecovery support fit <id>:`).  Parse it solely to join
+ * provenance note (`teeRecovery support fit <id>:`). Parse it solely to join
  * historical trace testimony, and report the representation gap loudly.
  * Once RecoveryProvenance grows a structured source ref, this compatibility
  * seam can disappear without changing the custody schema.
@@ -122,7 +127,7 @@ function originKind(tee: TeeEvidence): TeeCustodyOriginKind {
 	return 'visible-component';
 }
 
-function evidenceRefs(tee: TeeEvidence): string[] {
+function retainedEvidenceRefs(tee: TeeEvidence): string[] {
 	const refs = [`tee:${tee.detId}`, bboxRef(tee.bbox)];
 	const ring = ringRef(tee);
 	if (ring) refs.push(ring);
@@ -153,7 +158,7 @@ function custodyGaps(tee: TeeEvidence): string[] {
 	return gaps;
 }
 
-function summary(tee: TeeEvidence): string {
+function teeSummary(tee: TeeEvidence): string {
 	const center = `center=(${fixed(tee.xPx)},${fixed(tee.yPx)})`;
 	if (tee.tier === 'recovered') {
 		const resultRef = legacyRecoveryResultRef(tee) ?? 'UNKNOWN';
@@ -163,6 +168,30 @@ function summary(tee: TeeEvidence): string {
 		return `${tee.detId}: visible ${tee.tier} tee ${center} ${bboxRef(tee.bbox)}; brightComponent=${tee.pad.componentLabel}`;
 	}
 	return `${tee.detId}: visible ${tee.tier} tee ${center} ${bboxRef(tee.bbox)}; sourceComponent=UNKNOWN`;
+}
+
+function physicalSnapshot(tee: TeeEvidence): TeeCustodyPhysicalSnapshot {
+	const ring = tee.ring
+		? {
+				bbox: [...tee.ring.bbox] as readonly [number, number, number, number],
+				area: tee.ring.area,
+				elongation: tee.ring.elongation,
+				ringFrac: tee.ring.ringFrac
+			}
+		: undefined;
+	return {
+		tier: tee.tier,
+		centerXPx: tee.xPx,
+		centerYPx: tee.yPx,
+		bbox: [...tee.bbox] as readonly [number, number, number, number],
+		angleRad: tee.angleRad,
+		area: tee.area,
+		fill: tee.fill,
+		onRing: tee.onRing,
+		...(ring ? { ring } : {}),
+		...(tee.pad ? { pad: tee.pad } : {}),
+		...(tee.recovery ? { recovery: { ...tee.recovery } } : {})
+	};
 }
 
 function drawableMatchesRef(drawable: Drawable, ref: string): boolean {
@@ -252,22 +281,10 @@ export function buildChainOfCustody(
 			return {
 				teeId: tee.detId,
 				originKind: originKind(tee),
-				summary: summary(tee),
-				evidenceRefs: evidenceRefs(tee),
+				summary: teeSummary(tee),
+				evidenceRefs: retainedEvidenceRefs(tee),
 				gaps: custodyGaps(tee),
-				physical: {
-					tier: tee.tier,
-					centerXPx: tee.xPx,
-					centerYPx: tee.yPx,
-					bbox: [...tee.bbox] as TeeEvidence['bbox'],
-					angleRad: tee.angleRad,
-					area: tee.area,
-					fill: tee.fill,
-					onRing: tee.onRing,
-					...(tee.ring ? { ring: { ...tee.ring, bbox: [...tee.ring.bbox] as TeeEvidence['ring'] extends infer R ? R extends { bbox: infer B } ? B : never : never } } : {}),
-					...(tee.pad ? { pad: tee.pad } : {}),
-					...(tee.recovery ? { recovery: { ...tee.recovery } } : {})
-				},
+				physical: physicalSnapshot(tee),
 				events
 			} satisfies TeeCustodyRecord;
 		});
