@@ -1,33 +1,35 @@
 {
-	"name": "@chainspot/lab",
-	"version": "0.0.1",
-	"private": true,
-	"type": "module",
-	"description": "ChainSpot LAB — embodied CV tooling and algorithm inspection harness.",
-	"bin": {
-		"lab": "bin/lab.mjs"
-	},
-	"scripts": {
-		"postinstall": "node scripts/bootstrap-alg.mjs",
-		"lab": "node bin/lab.mjs",
-		"ui": "node --import tsx ui/server.ts",
-		"scope": "node --import tsx scope/scopeCli.ts",
-		"search": "node --import tsx search/searchCli.ts",
-		"traverse": "node --import tsx traverse/traverseCli.ts",
-		"invariants": "node --import tsx invariants.ts",
-		"detectors": "node --import tsx detectors.ts",
-		"gates": "node --import tsx gates.ts",
-		"cases": "node --import tsx cases.ts",
-		"compile": "node --import tsx sweep/sweepCli.ts compile",
-		"sweep": "node --import tsx sweep/sweepCli.ts sweep"
-	},
-	"dependencies": {
-		"@chainspot/alg": "file:../../packages/alg",
-		"jpeg-js": "^0.4.4",
-		"pngjs": "^7.0.0"
-	},
-	"devDependencies": {
-		"@types/pngjs": "^6.0.5",
-		"tsx": "^4.20.3"
-	}
+ "name": "@chainspot/lab",
+ "version": "0.0.1",
+ "private": true,
+ "type": "module",
+ "description": "ChainSpot LAB \u2014 embodied CV tooling and algorithm inspection harness.",
+ "bin": {
+  "lab": "bin/lab.mjs"
+ },
+ "scripts": {
+  "postinstall": "node scripts/bootstrap-alg.mjs",
+  "lab": "node bin/lab.mjs",
+  "ui": "node --import tsx ui/server.ts",
+  "scope": "node --import tsx scope/scopeCli.ts",
+  "search": "node --import tsx search/searchCli.ts",
+  "traverse": "node --import tsx traverse/traverseCli.ts",
+  "invariants": "node --import tsx invariants.ts",
+  "detectors": "node --import tsx detectors.ts",
+  "gates": "node --import tsx gates.ts",
+  "cases": "node --import tsx cases.ts",
+  "compile": "node --import tsx sweep/sweepCli.ts compile",
+  "sweep": "node --import tsx sweep/sweepCli.ts sweep",
+  "score": "node --import tsx sweep/truthScoreCli.ts",
+  "crop": "node --import tsx scope/cropCli.ts"
+ },
+ "dependencies": {
+  "@chainspot/alg": "file:../../packages/alg",
+  "jpeg-js": "^0.4.4",
+  "pngjs": "^7.0.0"
+ },
+ "devDependencies": {
+  "@types/pngjs": "^6.0.5",
+  "tsx": "^4.20.3"
+ }
 }

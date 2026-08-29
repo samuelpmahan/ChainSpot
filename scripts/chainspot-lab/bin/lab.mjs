@@ -67,6 +67,12 @@ const COMMANDS = {
   sweep: {
     run: (args) => runTs('sweep/sweepCli.ts', ['sweep', ...args]),
   },
+  score: {
+    run: (args) => runTs('sweep/truthScoreCli.ts', args),
+  },
+  crop: {
+    run: (args) => runTs('scope/cropCli.ts', args),
+  },
   orient: {
     run: (args) => runOrient(args),
   },

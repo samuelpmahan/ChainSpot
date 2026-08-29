@@ -233,6 +233,33 @@ export const HELP_CATALOG = Object.freeze([
 		outputs: ['Per-case Sweep artifacts under artifacts/sweep/<config>/batches/<course>/<case>/, including run.receipt.json as canonical machine testimony and run.receipt.txt as the chronological human report, plus summary.txt and summary.json in the batches directory.', 'START and DONE/FAIL progress lines for every case, followed by the stable aggregate summary.'],
     caveats: ['Omit `--through` to use the batch default `G3`; `dev` and `demo` are selector groups; `all` expands both. Course aliases are resolved only when unambiguous.', 'The REC L/R captures are one stitched multi-input case; clean-full and thrown-full remain separate cases.', 'No truth is loaded implicitly. Batch selectors name raster cases, not Annotation JSON. Single-image `lab sweep` behavior is unchanged.']
   }),
+  record('score', {
+    kind: 'command', group: 'RUN', title: 'SCORE — Dev6 truth scoreboard from shipped receipts',
+    summary: 'Score each course receipt (assignments + endpointPositions) against corpus Annotation truth, per hole: CORRECT / WRONG / UNASSIGNED / NO TRUTH.',
+    forms: ['lab score', 'lab score CONFIG_NAME', 'lab score CONFIG_NAME COURSE...', 'lab score [...] --tolerance N --annotations PATH'],
+    options: [
+      option('--tolerance', 'Annotation click-placement allowance in px; evaluation-only, never read by the detector.', { value: 'N', defaultValue: '26' }),
+      option('--annotations', 'Annotation source: an extracted directory or the corpus Annotated.zip.', { value: 'PATH', defaultValue: '../chainspot-corpus/dev/Annotated{,.zip}' })
+    ],
+    examples: ['lab score', 'lab score tee-border-corner-fit-on', 'lab score tee-border-corner-fit-on HeritagePark'],
+    outputs: ['Per-course lines with WRONG positions and UNASSIGNED holes, plus a truth-correct total; exit 0 only on a perfect scoreable board.'],
+    caveats: ['Reads ONLY shipped receipts -- no pixels are re-detected and no positions are decoded from rendered images; a receipt without endpointPositions must be re-swept. An annotation whose holes are mostly hundreds of px off is flagged FRAME SUSPECT and excluded from the total (known: the 3-hole AlexClark annotation), never reported as detector wrongs.']
+  }),
+  record('crop', {
+    kind: 'command', group: 'LOOK', title: 'CROP — magnified crop of a shipped run render',
+    summary: 'Write a nearest-neighbor magnified crop of the hole-labeled visual receipt (or the canonical raster) centered on a canonical coordinate.',
+    forms: ['lab crop COURSE X,Y', 'lab crop COURSE X,Y --image canonical', 'lab crop COURSE X,Y --config NAME --size WxH --scale N --out FILE'],
+    options: [
+      option('--config', 'Sweep config whose renders to crop.', { value: 'NAME', defaultValue: 'dev72-recovered-default' }),
+      option('--image', 'visual = hole-labeled visual receipt; canonical = the exact raster the sweep executed; or any PNG path.', { value: 'visual|canonical|PATH', defaultValue: 'visual' }),
+      option('--size', 'Crop window in source pixels.', { value: 'WxH', defaultValue: '140x120' }),
+      option('--scale', 'Integer nearest-neighbor magnification.', { value: 'N', defaultValue: '4' }),
+      option('--out', 'Output file.', { value: 'FILE', defaultValue: 'artifacts/crops/<course>-<image>-<x>x<y>-s<scale>.png' })
+    ],
+    examples: ['lab crop HeritagePark 738,898', 'lab crop Lenard 316,974 --image canonical --scale 6'],
+    sideEffects: ['Writes one PNG under artifacts/crops/ (or --out).'],
+    caveats: ['Coordinates are canonical raster pixels (the frame receipts and annotations share). Nearest-neighbor only -- upscaling never invents pixels that are not in the evidence; off-raster area renders dark.']
+  }),
   record('orient', { kind: 'command', group: 'PROVENANCE', title: 'ORIENT — frozen-reference auditor', summary: 'Run the machine-bound 3fd72 reference auditor.', forms: ['lab orient 3fd72 [--verbose]'], options: [option('--verbose', 'Print additional auditor detail.')], examples: ['lab orient 3fd72'], availability: AVAILABILITY.CLI_ONLY, caveats: ['The 3fd72 auditor has hardcoded/stale evidence paths. This help labels that existing state; it does not repair it.'] }),
 
   record('shell/help', { kind: 'shell', title: 'SHELL HELP', summary: 'Show catalog-backed help from the interactive LAB shell.', forms: ['help [COMMAND | TOPIC]', 'help --all', 'help here'], availability: AVAILABILITY.CLI_ONLY }),
