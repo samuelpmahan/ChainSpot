@@ -105,6 +105,11 @@ export interface ScopeCanonicalMeta {
 		readonly source: string;
 		readonly insets: { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number } | null;
 	};
+	/** True when intake proved (sidecar provenance, never dimensions alone)
+	 * that this exact input file is already a prior G0 canonical output, and
+	 * skipped StripChrome entirely rather than re-cropping it. See
+	 * sweep/inputShim.ts's canonicalizeInputs(). */
+	readonly alreadyCanonicalInput: boolean;
 	readonly autoStitch: {
 		readonly sourceCount: number;
 		readonly hadFallback: boolean;
