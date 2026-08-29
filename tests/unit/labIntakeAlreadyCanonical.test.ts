@@ -18,7 +18,7 @@ import {
  * and crops, a textured body it leaves alone -- the same shape
  * g0StripChrome.test.ts's fixture uses, encoded as an actual PNG file since
  * canonicalizeInputs() reads files, not raw GrayRaster arrays. */
-function writePhoneChromePng(path: string, width = 240, height = 480, chrome = 40): void {
+function writePhoneChromePng(path: string, width = 600, height = 1200, chrome = 90): void {
 	const png = new PNG({ width, height });
 	for (let y = 0; y < height; y++) {
 		for (let x = 0; x < width; x++) {
@@ -42,7 +42,7 @@ describe('LAB intake: already-canonical input detection', () => {
 		const { report } = await canonicalizeInputs([rawPath]);
 		expect(report.alreadyCanonicalInput).toBe(false);
 		expect(report.stripChrome.insets).not.toBeNull();
-		expect(report.heightPx).toBeLessThan(480);
+		expect(report.heightPx).toBeLessThan(1200);
 	});
 
 	test('re-feeding the canonical output WITH its provenance sidecar skips StripChrome and preserves dimensions', async () => {
