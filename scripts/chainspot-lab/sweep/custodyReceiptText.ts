@@ -6,6 +6,25 @@ import type { ChainOfCustodyLedger, TeeCustodyRecord } from '@chainspot/alg/dete
  * straight off the ledger `buildChainOfCustody()` already produced.
  */
 
+function assignmentHole(tee: TeeCustodyRecord): string | null {
+	return (
+		tee.events.find(
+			(event): event is Extract<typeof event, { kind: 'assignment' }> => event.kind === 'assignment'
+		)?.hole ?? null
+	);
+}
+
+/** Numeric ascending by hole; UNASSIGNED (no hole) sorts last -- the same
+ * "H7,H8,H18,H14..." string-sort-of-badge-id bug HOLE ASSIGNMENTS had. */
+function holeSortKey(hole: string | null): number {
+	const n = hole === null ? Number.NaN : Number(hole);
+	return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function sortedByHole(tees: readonly TeeCustodyRecord[]): readonly TeeCustodyRecord[] {
+	return [...tees].sort((a, b) => holeSortKey(assignmentHole(a)) - holeSortKey(assignmentHole(b)));
+}
+
 function tierLabel(originKind: TeeCustodyRecord['originKind']): string {
 	switch (originKind) {
 		case 'visible-ring':
@@ -64,7 +83,7 @@ export function formatCustodyReceiptText(custody: ChainOfCustodyLedger, runLabel
 	lines.push(`totalTees=${custody.tees.length}`);
 	lines.push('');
 
-	for (const tee of custody.tees) {
+	for (const tee of sortedByHole(custody.tees)) {
 		const assignmentEvent = tee.events.find(
 			(event): event is Extract<typeof event, { kind: 'assignment' }> => event.kind === 'assignment'
 		);
