@@ -1,0 +1,136 @@
+CHAIN OF CUSTODY — NorthPark
+schema=chainspot-chain-of-custody@1 runId=8067cc38848a0f15354f35707f5224fee590a1ccbf31dbfeca3dc01d520ab534 imageId=c2ecf6548cf051e9ee9055aeb0fb4782f157d75e9b3e5f7f68376962fc4b8dec
+traceAvailable=true
+totalTees=18
+
+tee=tee-1 tier=ring hole=8
+  summary: tee-1: visible ring tee center=(913.42,562.91) bbox:902,553,24,20; brightComponent=186
+  evidenceRefs: tee:tee-1, bbox:902,553,24,20, ring:907,557,14,13, bright-component:186
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-0 basket=basket-7 score=0.16755364832932462 rank=2 ownership=selected
+  events: 6
+
+tee=tee-10 tier=ring hole=6
+  summary: tee-10: visible ring tee center=(1083.65,1099.71) bbox:1074,1089,20,22; brightComponent=291
+  evidenceRefs: tee:tee-10, bbox:1074,1089,20,22, ring:1078,1093,12,14, bright-component:291
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-6 basket=basket-4 score=0.5318105493275601 rank=1 ownership=selected
+  events: 6
+
+tee=tee-11 tier=ring hole=16
+  summary: tee-11: visible ring tee center=(797.94,1168.53) bbox:789,1162,19,14; brightComponent=306
+  evidenceRefs: tee:tee-11, bbox:789,1162,19,14, ring:792,1165,13,8, bright-component:306
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-10 basket=basket-10 score=0.18282229659359636 rank=1 ownership=selected
+  events: 6
+
+tee=tee-12 tier=ring hole=17
+  summary: tee-12: visible ring tee center=(1058.11,1251.24) bbox:1048,1244,21,15; brightComponent=322
+  evidenceRefs: tee:tee-12, bbox:1048,1244,21,15, ring:1052,1247,13,9, bright-component:322
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-11 basket=basket-11 score=0.40039481769405283 rank=1 ownership=selected
+  events: 6
+
+tee=tee-14 tier=ring hole=4
+  summary: tee-14: visible ring tee center=(1185.79,1321.32) bbox:1175,1311,23,22; brightComponent=346
+  evidenceRefs: tee:tee-14, bbox:1175,1311,23,22, ring:1180,1315,13,14, bright-component:346
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-14 basket=basket-15 score=0.48396130303218515 rank=1 ownership=selected
+  events: 6
+
+tee=tee-15 tier=ring hole=2
+  summary: tee-15: visible ring tee center=(537.86,1581.71) bbox:529,1575,20,14; brightComponent=402
+  evidenceRefs: tee:tee-15, bbox:529,1575,20,14, ring:532,1578,13,8, bright-component:402
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-16 basket=basket-16 score=0.5954420638302738 rank=1 ownership=selected
+  events: 6
+
+tee=tee-16 tier=ring hole=3
+  summary: tee-16: visible ring tee center=(1052.71,1607.12) bbox:1042,1597,23,21; brightComponent=404
+  evidenceRefs: tee:tee-16, bbox:1042,1597,23,21, ring:1046,1601,14,13, bright-component:404
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-15 basket=basket-14 score=0.5311175304728247 rank=1 ownership=selected
+  events: 6
+
+tee=tee-17 tier=ring hole=1
+  summary: tee-17: visible ring tee center=(813.98,1639.16) bbox:805,1632,19,15; brightComponent=407
+  evidenceRefs: tee:tee-17, bbox:805,1632,19,15, ring:808,1635,13,9, bright-component:407
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-17 basket=basket-17 score=0.3414118211037914 rank=1 ownership=selected
+  events: 6
+
+tee=tee-2 tier=ring hole=9
+  summary: tee-2: visible ring tee center=(592.21,662.57) bbox:583,656,19,15; brightComponent=219
+  evidenceRefs: tee:tee-2, bbox:583,656,19,15, ring:586,659,13,8, bright-component:219
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-1 basket=basket-1 score=0.5172679850866192 rank=1 ownership=selected
+  events: 6
+
+tee=tee-3 tier=ring hole=10
+  summary: tee-3: visible ring tee center=(358.32,734.18) bbox:349,727,20,15; brightComponent=231
+  evidenceRefs: tee:tee-3, bbox:349,727,20,15, ring:352,730,13,9, bright-component:231
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-3 basket=basket-2 score=0.3737295666837442 rank=1 ownership=selected
+  events: 6
+
+tee=tee-4 tier=ring hole=12
+  summary: tee-4: visible ring tee center=(458.94,743.86) bbox:449,736,21,17; brightComponent=233
+  evidenceRefs: tee:tee-4, bbox:449,736,21,17, ring:453,739,13,10, bright-component:233
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-4 basket=basket-3 score=0.29395877135788223 rank=2 ownership=selected
+  events: 6
+
+tee=tee-5 tier=ring hole=11
+  summary: tee-5: visible ring tee center=(82.80,763.55) bbox:72,756,22,17; brightComponent=242
+  evidenceRefs: tee:tee-5, bbox:72,756,22,17, ring:76,759,14,10, bright-component:242
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-5 basket=basket-6 score=0.4663843991612617 rank=1 ownership=selected
+  events: 6
+
+tee=tee-6 tier=ring hole=7
+  summary: tee-6: visible ring tee center=(786.88,793.46) bbox:776,783,23,22; brightComponent=248
+  evidenceRefs: tee:tee-6, bbox:776,783,23,22, ring:781,787,13,14, bright-component:248
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-2 basket=basket-0 score=0.336426886010665 rank=1 ownership=selected
+  events: 6
+
+tee=tee-7 tier=ring hole=13
+  summary: tee-7: visible ring tee center=(836.06,847.18) bbox:827,837,19,22; brightComponent=254
+  evidenceRefs: tee:tee-7, bbox:827,837,19,22, ring:831,841,11,14, bright-component:254
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-8 basket=basket-8 score=0.44725983316720375 rank=1 ownership=selected
+  events: 6
+
+tee=tee-8 tier=ring hole=15
+  summary: tee-8: visible ring tee center=(586.05,943.95) bbox:576,933,22,23; brightComponent=261
+  evidenceRefs: tee:tee-8, bbox:576,933,22,23, ring:580,937,14,14, bright-component:261
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-9 basket=basket-9 score=0.547847379245845 rank=1 ownership=selected
+  events: 6
+
+tee=tee-9 tier=ring hole=5
+  summary: tee-9: visible ring tee center=(823.33,1067.24) bbox:813,1057,22,22; brightComponent=289
+  evidenceRefs: tee:tee-9, bbox:813,1057,22,22, ring:817,1061,14,13, bright-component:289
+  GAP: none (lineage complete)
+  assignment: producer=assignment badge=badge-13 basket=basket-12 score=0.00002394479024256258 rank=76 ownership=selected
+  events: 6
+
+tee=tee-recovered-0 tier=recovered hole=14
+  summary: tee-recovered-0: recovered tee center=(836.66,59.16) bbox:828,48,16,22 via tee-shard-recovery; recoveryResult=tee-shard-badge-10-16
+  evidenceRefs: tee:tee-recovered-0, bbox:828,48,16,22, tee-recovery-result:tee-shard-badge-10-16
+  GAP: recovery result identity survives only inside RecoveryProvenance.note; custody correlated the trace through the legacy note format rather than a structured source ref
+  assignment: producer=assignment badge=badge-7 basket=basket-5 score=0.000007094832779337275 rank=127 ownership=selected
+  events: 6
+
+tee=tee-recovered-1 tier=recovered hole=18
+  summary: tee-recovered-1: recovered tee center=(825.96,1224.87) bbox:814,1212,24,26 via tee-shard-recovery; recoveryResult=tee-shard-badge-7-313
+  evidenceRefs: tee:tee-recovered-1, bbox:814,1212,24,26, tee-recovery-result:tee-shard-badge-7-313
+  GAP: recovery result identity survives only inside RecoveryProvenance.note; custody correlated the trace through the legacy note format rather than a structured source ref
+  assignment: producer=assignment badge=badge-12 basket=basket-13 score=0.3839243234071041 rank=1 ownership=selected
+  events: 6
+
+COUNTS
+  total=18 visible=16 recovered=2
+  assigned=18 unassigned=0
+  chainsWithGaps=2
+
