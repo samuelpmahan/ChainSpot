@@ -121,7 +121,37 @@ function numericLockValues(
 	return values;
 }
 
-function emitDrawables(ctx: FeatureContext, evidence: TeeBadgeLockEvidence): void {
+function abstentionValues(abstention: TeeBadgeLockEvidence['abstentions'][number]): Record<string, number> {
+	const values: Record<string, number> = {
+		kindCode: abstention.kind === 'conflict' ? 1 : 0
+	};
+	if (finite(abstention.hole)) values.hole = abstention.hole;
+	if (finite(abstention.bestScore)) values.bestScore = abstention.bestScore;
+	if (finite(abstention.winningHole)) values.winningHole = abstention.winningHole;
+	if (finite(abstention.winningScore)) values.winningScore = abstention.winningScore;
+	return values;
+}
+
+function emitDrawables(
+	ctx: FeatureContext,
+	evidence: TeeBadgeLockEvidence,
+	badges: readonly TeeBadgeBadgeOrder[]
+): void {
+	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
+	for (const abstention of evidence.abstentions) {
+		const badge = badgeById.get(abstention.badgeId);
+		const ref = `teeBadgeLockAbstention:${encodeURIComponent(abstention.badgeId)}`;
+		ctx.overlay('teeBadgeLock', {
+			type: 'point',
+			xPx: badge?.cxPx ?? 0,
+			yPx: badge?.cyPx ?? 0,
+			verdict: 'rejected',
+			visualRole: 'tee-badge-abstention',
+			ref,
+			reason: abstention.reason,
+			values: abstentionValues(abstention)
+		});
+	}
 	for (const lock of evidence.locks) {
 		const ref = `teeBadgeLock:${encodeURIComponent(lock.badgeId)}:${encodeURIComponent(lock.teeId)}`;
 		// lock.hole is the exact-label hole number this lock is already tied to
@@ -184,7 +214,7 @@ function executeTeeBadgeLock(
 	const evidence = selected
 		? buildTeeBadgeLockEvidence(selected, { badges, tees: teeOrder, measurement })
 		: disabledEvidence(measurement);
-	if (state.enabled) emitDrawables(ctx, evidence);
+	if (state.enabled) emitDrawables(ctx, evidence, badges);
 	ctx.measure('teeBadgeLock', 'candidates', evidence.candidates.length);
 	ctx.measure('teeBadgeLock', 'locks', evidence.locks.length);
 	ctx.measure(
