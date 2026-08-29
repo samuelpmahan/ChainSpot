@@ -1,0 +1,114 @@
+name: G4 Shard Ray Only G6 Compare
+
+on:
+  push:
+    branches:
+      - experiment/g4-shard-ray-only
+    paths:
+      - .github/workflows/g4-shard-ray-only-g6-compare.yml
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    env:
+      BASE_SHA: e13f4a72ad6e41bf39133f177f4e8c20a32242e0
+      EXPERIMENT_SHA: c2e0164fa7dcd1268e7364ae531650a1141034a8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ChainSpot
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare exact baseline vs shard-ray-only through G6
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          summarize () {
+            label="$1"
+            python - "$label" <<'PY'
+          import json, sys
+          from pathlib import Path
+          label=sys.argv[1]
+          rows={}
+          for p in Path('artifacts/sweep').rglob('run.receipt.json'):
+              d=json.loads(p.read_text())
+              # Real run dir parent is named full; course is recoverable from intake path.
+              sources=d.get('intake',{}).get('sources',[])
+              course='UNKNOWN'
+              if sources:
+                  src=str(sources[0]).replace('\\','/')
+                  parts=src.split('/')
+                  for candidate in ['AlexClark','DashsTrack','HeritagePark','Lenard','NorthPark','TowneLake']:
+                      if candidate in parts or candidate in src:
+                          course=candidate; break
+              unit=next((u for u in d.get('units',[]) if u.get('id')=='teeRecovery'),None)
+              measures={}
+              if unit:
+                  for m in unit.get('measurements',[]):
+                      measures[m.get('name')]={k:m.get(k) for k in ('count','min','max','mean')}
+              rows[course]={
+                  'results':d.get('results',{}),
+                  'assignments':{str(a.get('hole')):[a.get('teeId'),a.get('basketId'),a.get('score')] for a in d.get('assignments',[])},
+                  'recoveryMeasurements':measures,
+                  'operationOrder':[f"{o.get('gate')}:{o.get('id')}" for o in d.get('operations',[])],
+              }
+          out=Path(f'/tmp/{label}.json')
+          out.write_text(json.dumps(rows,sort_keys=True,indent=2))
+          print(out.read_text())
+          PY
+          }
+
+          run_one () {
+            label="$1"; ref="$2"
+            echo "===== $label $ref ====="
+            git checkout --force "$ref"
+            ./lab setup >/tmp/${label}-setup.log 2>&1
+            rm -rf artifacts/sweep
+            set +e
+            ./lab sweep batch --through G6 packages/alg/src/detectors/threeFactor/configs/default.json dev > /tmp/${label}-sweep.log 2>&1
+            status=$?
+            set -e
+            echo "$label sweep status=$status"
+            summarize "$label"
+            echo "===== $label SWEEP TAIL ====="
+            tail -n 100 /tmp/${label}-sweep.log || true
+          }
+
+          run_one base "$BASE_SHA"
+          run_one experiment "$EXPERIMENT_SHA"
+
+          echo '===== SEMANTIC DIFF ====='
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          b=json.loads(Path('/tmp/base.json').read_text())
+          e=json.loads(Path('/tmp/experiment.json').read_text())
+          changed=[]
+          for course in sorted(set(b)|set(e)):
+              br=b.get(course,{}); er=e.get(course,{})
+              print(f'COURSE {course}')
+              print('  baseline results:', br.get('results'))
+              print('  experiment results:', er.get('results'))
+              print('  experiment G4 ray/recovery:', er.get('recoveryMeasurements'))
+              ba=br.get('assignments',{}); ea=er.get('assignments',{})
+              course_changed=False
+              for h in sorted(set(ba)|set(ea), key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else 999,x)):
+                  if ba.get(h)!=ea.get(h):
+                      course_changed=True
+                      print(f'    H{h}: {ba.get(h)} -> {ea.get(h)}')
+              if br.get('results')!=er.get('results') or course_changed:
+                  changed.append(course)
+              print('  experiment order:', ' -> '.join(er.get('operationOrder',[])))
+          print('CHANGED_COURSES=' + ','.join(changed))
+          PY
