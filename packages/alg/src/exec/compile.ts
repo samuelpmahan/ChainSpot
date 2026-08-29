@@ -154,7 +154,16 @@ function resolveOnlyWhenConfigured(spec: OperationSpec, resolved: ResolvedConfig
 
 export function compileExecutionPlan(
 	resolved: ResolvedConfig,
-	paramsHash?: string
+	paramsHash?: string,
+	opts?: {
+		/** True when `resolved` is the engine's empty-features stand-in for a
+		 * bare (no-config) run. TIER 1 feature validation is skipped: it
+		 * exists to catch CONFIG/registry drift, and a bare run has no config
+		 * to drift — the stand-in's empty feature map is the documented
+		 * frozen-default contract (see runEngine), not a broken resolution.
+		 * (2026-08-29: the guard lane's landing broke every bare caller.) */
+		readonly bareFrozenDefault?: boolean;
+	}
 ): CompiledExecutionPlan {
 	// Expand the config's unit-level execution order into the fixed
 	// per-unit operation chain (UNIT_OPERATIONS) — this is the config
@@ -183,7 +192,7 @@ export function compileExecutionPlan(
 	// internal decomposition is a genuine, satisfiable dependency chain,
 	// not just decorative labels (R2).
 	validateOperationOrder(ops);
-	validateOperationFeatures(ops, resolved);
+	if (!opts?.bareFrozenDefault) validateOperationFeatures(ops, resolved);
 
 	const bindings: Record<string, { enabled: boolean; knobs: Record<string, unknown> }> = {};
 	for (const [id, state] of Object.entries(resolved.features)) bindings[id] = state;

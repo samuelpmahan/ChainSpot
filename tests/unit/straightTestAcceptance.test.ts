@@ -57,7 +57,11 @@ const DASHS_TRUTH = resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.annotat
 // ray work, cd77412 lineage) -- default.json's execution array reorders
 // (teeRecovery now sits right after teeFamily), moving this pin again
 // (71d88bc2... -> e133a01a...).
-const DEFAULT_SHA256 = 'e133a01ab8ada15234a6a9dac52a6bf95d6361743e0e510668fce8c7d4bf563d';
+// 2026-08-29: owner froze the Dev6 106/108 tee-to-badge baseline as the
+// shipped default (dev6-106-default: post-assignment teeRecovery +
+// teeBadgeLock; commits 0193ed3/0f593fd), moving this pin again
+// (e133a01a... -> 934fb03f...).
+const DEFAULT_SHA256 = '934fb03f1b10ba488f0729e28a3873fd447790b9f0dfdbeb60c00270a84a7080';
 
 function candidate(
 	overrides: Partial<StraightTestCandidateInput> = {}
@@ -397,14 +401,17 @@ describe('straightTest production composition and frozen-off parity', () => {
 		const raster = tinyRaster();
 		const baseline = runThreeFactor(raster);
 		const onResolved = resolveConfig(parseConfig(straightOn), DEFAULT_EXECUTION);
-		const expectedExecution = [...(defaultConfig as ThreeFactorConfig).execution!];
-		// 2026-08-29: teeRecovery moved before assignment (gate reorg;
-		// owner-measured ray work, cd77412 lineage) -- default.json's execution
-		// array now runs teeFamily, teeRecovery, ... , and straight-test-on.json
-		// (also updated by that landed work) inserts straightTest right after
-		// teeRecovery, not right after teeFamily.
-		expectedExecution.splice(expectedExecution.indexOf('teeRecovery') + 1, 0, 'straightTest');
-		expect(onResolved.execution).toEqual(expectedExecution);
+		// 2026-08-29: the shipped default froze to the Dev6 106/108 tee-badge
+		// order (post-assignment teeRecovery + teeBadgeLock, commits
+		// 0193ed3/0f593fd), so straight-test-on is no longer default-plus-insert:
+		// it stays on the gate-reorg order it was authored and validated on
+		// (teeFamily, teeRecovery, straightTest, ...). Assert the insertion
+		// property itself -- straightTest right after teeRecovery, before the
+		// support field -- against the config's OWN execution, not equality
+		// with the frozen default's list.
+		expect(onResolved.execution.indexOf('straightTest')).toBe(
+			onResolved.execution.indexOf('teeRecovery') + 1
+		);
 		expect(onResolved.execution.indexOf('straightTest')).toBeLessThan(
 			onResolved.execution.indexOf('supportField')
 		);
@@ -414,7 +421,7 @@ describe('straightTest production composition and frozen-off parity', () => {
 		expect(on.trace?.straightTest?.truthAssistance.mode).toBe('blind');
 
 		const tainted = resolveConfig(parseConfig(straightTruthCompare), DEFAULT_EXECUTION);
-		expect(tainted.execution).toEqual(expectedExecution);
+		expect(tainted.execution).toEqual(onResolved.execution);
 		expect(() =>
 			runThreeFactor(raster, { config: tainted, paramsHash: 'must-refuse-blind' })
 		).toThrow(/verified canonical|TRUTH-TAINT|truth-assisted/i);

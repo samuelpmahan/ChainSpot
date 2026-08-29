@@ -363,7 +363,9 @@ export function runEngine(
 		execution,
 		features: {}
 	};
-	const plan = compileExecutionPlan(compileTarget, paramsHash);
+	const plan = compileExecutionPlan(compileTarget, paramsHash, {
+		bareFrozenDefault: resolved == null
+	});
 
 	const effectiveParams = resolveConfiguredParams(params, resolved);
 
