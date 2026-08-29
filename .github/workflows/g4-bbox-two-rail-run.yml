@@ -1,0 +1,72 @@
+name: G4 BBox + Two Rail Run
+
+on:
+  push:
+    branches: [experiment/g4-shard-ray-only]
+    paths: [.github/workflows/g4-bbox-two-rail-run.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ChainSpot
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch
+        working-directory: ChainSpot
+        run: python scripts/experiments/g4-bbox-two-rail-patch.py
+      - name: Build and tee-recovery geometry tests
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          npx svelte-kit sync
+          npm --workspace @chainspot/alg run build
+          set +e
+          npx vitest run tests/unit/teeRecoveryFeature.test.ts
+          echo "TEE_RECOVERY_TEST_STATUS=$?" >> "$GITHUB_ENV"
+          set -e
+      - name: Commit geometry source
+        working-directory: ChainSpot
+        run: |
+          git config user.name 'ChainSpot G4 Experiment'
+          git config user.email 'actions@users.noreply.github.com'
+          git add packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts
+          git commit -m '[g4-two-rail] Intersect badge boxes and bracket tee rails'
+          echo "EXPERIMENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: G4-only Dev6
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          ./lab setup >/tmp/setup.log 2>&1
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev >/tmp/g4.log 2>&1
+          echo '=== G4 ONLY SUMMARY ==='
+          cat artifacts/sweep/dev72-recovered-default/batches/summary.txt
+          echo '=== LOCAL COUNTS ==='
+          for f in $(find artifacts/sweep -name run.receipt.json | sort); do
+            echo "--- $f"
+            node - "$f" <<'NODE'
+          const fs=require('fs');
+          const d=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const u=(d.units||[]).find(x=>x.id==='teeRecovery')||{};
+          const names=new Set(['visibleRayClaims','visibleRayLocks','visibleRayCoveredBadges','visibleRayAmbiguousTees','visibleRayConflictedBadges','missingNumberedTees','accepted','badgePerpendicularErrorPx','badgePerpendicularBoundPx','badgePerpendicularMissPx','railAngleBoundDeg','railSeparationErrorPx','railSeparationBoundPx']);
+          console.log(JSON.stringify({results:d.results,recovery:(u.measurements||[]).filter(m=>names.has(m.name))},null,2));
+          NODE
+          done
+          echo '=== TAIL ==='; tail -n 80 /tmp/g4.log
+      - name: Push corpus-tested source
+        working-directory: ChainSpot
+        run: git push origin "$EXPERIMENT_SHA:refs/heads/experiment/g4-shard-ray-only"
