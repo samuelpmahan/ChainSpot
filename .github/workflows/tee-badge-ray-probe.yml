@@ -1,0 +1,47 @@
+name: Tee Badge Ray Probe
+
+on:
+  push:
+    branches: [feature/tee-badge-ray-lock]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tee-badge-ray-lock
+          path: ChainSpot
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Setup
+        working-directory: ChainSpot
+        run: |
+          npm ci
+          ./lab setup
+      - name: NorthPark tee-badge evidence
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/tee-badge-lock-on.json NorthPark
+          echo '--- teeBadgeLock files ---'
+          find artifacts/sweep -type f | sort | grep -i 'teeBadge\|assignment' || true
+          echo '--- matching evidence ---'
+          for f in $(find artifacts/sweep -type f | sort | grep -i 'teeBadgeLock'); do
+            echo "### $f"
+            cat "$f" || true
+            echo
+          done
+          echo '--- receipt snippets ---'
+          grep -R -n -E 'TEE.?BADGE|teeBadgeLock|axisErrorDeg|weakAligned' artifacts/sweep | head -n 500 || true
