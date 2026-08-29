@@ -1,0 +1,9 @@
+from pathlib import Path
+
+path = Path('packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts')
+text = path.read_text()
+old = '''\t\t\tlet compatible = compatibleWith(fit);\n\t\t\t// The first pose may be underdetermined by a tiny shard. Refit the union,\n\t\t\t// then retain only complete components that still fit the shared pose.\n\t\t\tfor (let pass = 0; pass < 2; pass++) {\n\t\t\t\tconst union = compatible.flatMap((entry) => entry.pixels);\n\t\t\t\tif (union.length === 0) break;\n\t\t\t\tfit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);\n\t\t\t\tconst next = compatibleWith(fit);\n\t\t\t\tif (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;\n\t\t\t\tcompatible = next;\n\t\t\t}\n'''
+new = '''\t\t\tlet compatible = compatibleWith(fit);\n\t\t\t// The first pose may be underdetermined by a tiny shard. Refit only when\n\t\t\t// it actually attracted another component. If `compatible` is just the\n\t\t\t// seed, `union` is byte-for-byte the exact pixels fit above; solving the\n\t\t\t// same exhaustive center/angle problem again cannot change `fit` or the\n\t\t\t// subsequent compatibility result.\n\t\t\tif (compatible.length > 1) {\n\t\t\t\tfor (let pass = 0; pass < 2; pass++) {\n\t\t\t\t\tconst union = compatible.flatMap((entry) => entry.pixels);\n\t\t\t\t\tif (union.length === 0) break;\n\t\t\t\t\tfit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);\n\t\t\t\t\tconst next = compatibleWith(fit);\n\t\t\t\t\tif (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;\n\t\t\t\t\tcompatible = next;\n\t\t\t\t}\n\t\t\t}\n'''
+if text.count(old) != 1:
+    raise SystemExit(f'expected one refit block, got {text.count(old)}')
+path.write_text(text.replace(old, new, 1))
