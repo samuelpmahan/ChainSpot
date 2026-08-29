@@ -25,6 +25,9 @@ export interface RecoveryFit {
 	readonly fitKind?: 'support-search' | 'rail-projection';
 	readonly badgePerpendicularErrorPx?: number;
 	readonly badgePerpendicularMissPx?: number;
+	/** Error budget implied by observed rail uncertainty + the observed spread
+	 * of already-known course-local pad widths + raster quantization. */
+	readonly badgePerpendicularBoundPx?: number;
 	readonly projectedLaneWidthPx?: number;
 	readonly observedRailSpanPx?: number;
 }
@@ -56,12 +59,11 @@ export interface TeeRecoveryCandidate {
 	 * prefilter). Carried on the candidate so the receipt can honestly state
 	 * the searched scope next to the accept/reject verdict. */
 	readonly consideredComponentsGlobal?: number;
-	/** Set when this exact component set also satisfies the strict predicate
-	 * for another missing badge that wins the axis-error tiebreak. Forces
-	 * rejection here so a genuine ambiguity is never silently resolved by
-	 * loop order -- the winner's badge label is named so the trade-off is
-	 * visible. */
-	readonly ambiguityLostToBadgeLabel?: string | null;
+	/** Other numbered badges supported by this exact component set. G4 is
+	 * deliberately nonmonotonic about belief but monotonic about evidence:
+	 * multiclaim is preserved and every claimant is deferred, never collapsed
+	 * to a local winner. */
+	readonly ambiguityWithBadgeLabels?: readonly string[];
 }
 
 export interface TeeRecoveryValues {
@@ -78,6 +80,7 @@ export interface TeeRecoveryValues {
 	readonly fullSpanComponentLocalization?: number;
 	readonly badgePerpendicularErrorPx?: number;
 	readonly badgePerpendicularMissPx?: number;
+	readonly badgePerpendicularBoundPx?: number;
 	readonly projectedLaneWidthPx?: number;
 	readonly observedRailSpanPx?: number;
 	readonly railProjection?: number;
@@ -150,7 +153,7 @@ export const teeRecoveryFeature = {
 	gate: 'G4',
 	kind: 'baseline',
 	defaultEnabled: true,
-	note: 'G4 endpoint completion: visible tees claim numbered badges by their own pad axis; only ray-unclaimed badges enter shard recovery, and a shard becomes a recovered tee only when every visible pixel fits a course-local hollow tee support pointing at that badge. No path, basket assignment, or G6 decision is consulted.',
+	note: 'G4 endpoint completion: visible tees claim numbered badges by their own pad axis; only badges with zero visible-tee ray coverage enter shard recovery, and a shard becomes a recovered tee only when every visible pixel fits a course-local hollow tee support pointing at that badge. No path, basket assignment, or G6 decision is consulted.',
 	render: teeRecoveryRender,
 	knobs: {
 		axisToleranceDeg: {
@@ -292,6 +295,7 @@ function projectRailFit(
 	viewportTopPx: number,
 	halfWidth: number,
 	halfHeight: number,
+	halfHeightErrorPx: number,
 	thickness: number
 ): RecoveryFit | undefined {
 	if (pixels.length < 2) return undefined;
@@ -324,15 +328,23 @@ function projectRailFit(
 	const badgeX = target.cxPx;
 	const badgeY = target.cyPx - viewportTopPx;
 	const badgeNormalFromRail = (badgeX - exact.cx) * nx + (badgeY - exact.cy) * ny;
-	const plusError = Math.abs(badgeNormalFromRail - halfHeight);
-	const minusError = Math.abs(badgeNormalFromRail + halfHeight);
+	// PCA is centered on the observed bright rail band, not its outer edge.
+	// The center-to-rail distance is therefore half the known outer pad width
+	// minus half the measured course-local border thickness.
+	const projectedCenterOffsetPx = Math.max(0, halfHeight - Math.max(0, thickness) / 2);
+	const plusError = Math.abs(badgeNormalFromRail - projectedCenterOffsetPx);
+	const minusError = Math.abs(badgeNormalFromRail + projectedCenterOffsetPx);
 	const side = plusError <= minusError ? 1 : -1;
 	const perpendicularError = Math.min(plusError, minusError);
-	const laneHalfWidth = halfHeight + RASTER_TOLERANCE_PX;
-	const perpendicularMiss = Math.max(0, perpendicularError - laneHalfWidth);
+	// BUILT-IN ERROR BOUND: already-known pad widths tell us how uncertain the
+	// half-width projection is; observed rail thickness bounds where its true
+	// center can lie; the final raster allowance covers cell quantization.
+	const railCenterUncertaintyPx = Math.max(RASTER_TOLERANCE_PX, railThickness / 2);
+	const perpendicularBoundPx = RASTER_TOLERANCE_PX + halfHeightErrorPx + railCenterUncertaintyPx;
+	const perpendicularMiss = Math.max(0, perpendicularError - perpendicularBoundPx);
 	return {
-		centerXPx: exact.cx + centerAlong * c + side * halfHeight * nx,
-		centerYPx: exact.cy + centerAlong * ss + side * halfHeight * ny,
+		centerXPx: exact.cx + centerAlong * c + side * projectedCenterOffsetPx * nx,
+		centerYPx: exact.cy + centerAlong * ss + side * projectedCenterOffsetPx * ny,
 		halfWidthPx: halfWidth,
 		halfHeightPx: halfHeight,
 		angleRad: angle,
@@ -340,6 +352,7 @@ function projectRailFit(
 		fitKind: 'rail-projection',
 		badgePerpendicularErrorPx: perpendicularError,
 		badgePerpendicularMissPx: perpendicularMiss,
+		badgePerpendicularBoundPx: perpendicularBoundPx,
 		projectedLaneWidthPx: halfHeight * 2,
 		observedRailSpanPx: railSpan
 	};
@@ -352,9 +365,10 @@ function fitComponent(
 	viewportTopPx: number,
 	halfWidth: number,
 	halfHeight: number,
+	halfHeightErrorPx: number,
 	thickness: number
 ): RecoveryFit {
-	const projectedRail = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+	const projectedRail = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
 	if (projectedRail) return projectedRail;
 	// Non-rail fragments retain the legacy full-support feasibility fallback.
 	const outerRadius = Math.hypot(
@@ -604,7 +618,7 @@ interface RecoveryStage {
 interface RecoveryViewport { readonly topPx: number }
 
 /** Legacy-shaped internal adapter telling the existing candidate builder
- * which numbered badges are already claimed. These rows are produced locally
+ * which numbered badges already have visible-tee coverage. These rows are produced locally
  * from G3 tee-pad axes; they are NOT G6 assignments. basketId is a compatibility
  * placeholder and is never read by shard recovery. */
 export interface TeeRecoveryAssignmentContext {
@@ -631,10 +645,19 @@ export interface VisibleTeeBadgeRayClaim {
 	readonly badgeId: string;
 	readonly badgeLabel: string | null;
 	readonly axisErrorRad: number;
+	readonly perpendicularErrorPx: number;
+	readonly alongPx: number;
+	readonly direction: -1 | 1;
 }
 
 export interface VisibleTeeBadgeRayResolution {
+	/** Every first-intercept claim supported by a visible tee half-rail. */
 	readonly claims: readonly VisibleTeeBadgeRayClaim[];
+	/** Strictly unique tee↔badge claims. Locks are belief; claims remain evidence. */
+	readonly locks: readonly VisibleTeeBadgeRayClaim[];
+	/** Union of every badge touched by POSSIBLE visible-tee testimony. Only a
+	 * numbered badge absent from this set is eligible for recovery. */
+	readonly coveredBadgeIds: readonly string[];
 	readonly ambiguousTeeIds: readonly string[];
 	readonly conflictedBadgeIds: readonly string[];
 }
@@ -656,7 +679,7 @@ export function resolveVisibleTeeBadgeRays(
 	badges: readonly BadgeEvidence[]
 ): VisibleTeeBadgeRayResolution {
 	const numbered = badges.filter((badge) => numberLabel(badge) !== undefined);
-	const proposals: VisibleTeeBadgeRayClaim[] = [];
+	const claims: VisibleTeeBadgeRayClaim[] = [];
 	const ambiguousTeeIds: string[] = [];
 
 	for (const tee of tees) {
@@ -668,6 +691,10 @@ export function resolveVisibleTeeBadgeRays(
 		const minorPx = pose?.minorPx ?? tee.pad?.minorPx;
 		if (!tee.pad || axisRad === null || !Number.isFinite(axisRad) || !majorPx || !minorPx) continue;
 		const c = Math.cos(axisRad), ss = Math.sin(axisRad);
+		// POSSIBLE testimony is intentionally a pad-width corridor, not a point
+		// winner. It exists only to answer "could this already-visible tee own
+		// this badge?" so G4 does not hallucinate a recovery on top of evidence
+		// it already has. Later stages may resolve the relation.
 		const halfLane = minorPx / 2 + RASTER_TOLERANCE_PX;
 		const halfPad = majorPx / 2;
 		const byDirection = new Map<-1 | 1, { claim: VisibleTeeBadgeRayClaim; alongPx: number }[]>();
@@ -684,7 +711,10 @@ export function resolveVisibleTeeBadgeRays(
 					teeId: tee.detId,
 					badgeId: badge.detId,
 					badgeLabel: badge.label,
-					axisErrorRad: undirectedAxisError(axisRad, Math.atan2(dy, dx))
+					axisErrorRad: undirectedAxisError(axisRad, Math.atan2(dy, dx)),
+					perpendicularErrorPx: perpendicular,
+					alongPx: Math.abs(along),
+					direction
 				},
 				alongPx: Math.abs(along)
 			});
@@ -695,26 +725,31 @@ export function resolveVisibleTeeBadgeRays(
 			bucket.sort((a, b) => a.alongPx - b.alongPx || a.claim.badgeId.localeCompare(b.claim.badgeId));
 			if (bucket[0]) firstIntercepts.push(bucket[0].claim);
 		}
-		if (firstIntercepts.length === 1) proposals.push(firstIntercepts[0]!);
-		else if (firstIntercepts.length > 1) ambiguousTeeIds.push(tee.detId);
+		claims.push(...firstIntercepts);
+		if (firstIntercepts.length > 1) ambiguousTeeIds.push(tee.detId);
 	}
 
+	const byTee = new Map<string, VisibleTeeBadgeRayClaim[]>();
 	const byBadge = new Map<string, VisibleTeeBadgeRayClaim[]>();
-	for (const proposal of proposals) {
-		const bucket = byBadge.get(proposal.badgeId);
-		if (bucket) bucket.push(proposal);
-		else byBadge.set(proposal.badgeId, [proposal]);
+	for (const claim of claims) {
+		const teeBucket = byTee.get(claim.teeId);
+		if (teeBucket) teeBucket.push(claim); else byTee.set(claim.teeId, [claim]);
+		const badgeBucket = byBadge.get(claim.badgeId);
+		if (badgeBucket) badgeBucket.push(claim); else byBadge.set(claim.badgeId, [claim]);
 	}
-	const claims: VisibleTeeBadgeRayClaim[] = [];
-	const conflictedBadgeIds: string[] = [];
-	for (const [badgeId, bucket] of byBadge) {
-		if (bucket.length === 1) claims.push(bucket[0]!);
-		else conflictedBadgeIds.push(badgeId);
-	}
+	const locks = claims.filter((claim) =>
+		(byTee.get(claim.teeId)?.length ?? 0) === 1 &&
+		(byBadge.get(claim.badgeId)?.length ?? 0) === 1
+	);
+	const conflictedBadgeIds = [...byBadge.entries()]
+		.filter(([, bucket]) => bucket.length > 1)
+		.map(([badgeId]) => badgeId)
+		.sort();
+	const coveredBadgeIds = [...new Set(claims.map((claim) => claim.badgeId))].sort();
 	claims.sort((a, b) => a.badgeId.localeCompare(b.badgeId) || a.teeId.localeCompare(b.teeId));
+	locks.sort((a, b) => a.badgeId.localeCompare(b.badgeId) || a.teeId.localeCompare(b.teeId));
 	ambiguousTeeIds.sort();
-	conflictedBadgeIds.sort();
-	return { claims, ambiguousTeeIds, conflictedBadgeIds };
+	return { claims, locks, coveredBadgeIds, ambiguousTeeIds, conflictedBadgeIds };
 }
 
 function exactBasketPixels(
@@ -847,8 +882,8 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	);
 	const unexplained = unexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
-	const ambiguityLost = candidate.ambiguityLostToBadgeLabel != null;
-	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguityLost;
+	const ambiguity = (candidate.ambiguityWithBadgeLabels?.length ?? 0) > 0;
+	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguity;
 	const localized = candidate.localizationFit ?? candidate.fit;
 	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
 	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
@@ -873,16 +908,16 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	const searchScope = `considered all ${candidate.consideredComponentsGlobal ?? 0} unowned, non-occluded bright component${candidate.consideredComponentsGlobal === 1 ? '' : 's'} on the whole canonical raster (global bright mask; no spatial prefilter)`;
 	const reason = accepted
 		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}`
-		: ambiguityLost
-			? `${holePrefix}${searchScope}; this exact component set also satisfies the strict predicate for badge ${candidate.ambiguityLostToBadgeLabel}, whose badge-axis angular error is smaller; ambiguity resolved in that badge's favor, never silently dropped`
+		: ambiguity
+			? `${holePrefix}${searchScope}; this exact component set also supports badge${candidate.ambiguityWithBadgeLabels!.length === 1 ? '' : 's'} ${candidate.ambiguityWithBadgeLabels!.join(', ')}; multiclaim preserved and every claimant is DEFERRED — G4 selects no local winner`
 			: `${holePrefix}${searchScope}; ${insufficientSupport
 				? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 				: `${axisRejected
 					? candidate.fit.fitKind === 'rail-projection'
-						? `observed rail projected at the known tee width misses the badge center by ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px beyond the legal lane (centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px)`
+						? `observed rail projected by the known pad width misses the inferred centerline bound by ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px (centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px > built-in ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px error bound)`
 						: `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (non-rail fallback only)`
 					: candidate.fit.fitKind === 'rail-projection'
-						? `rail projection passes: badge center lies inside the known tee-width lane; no badge-driven pose search was performed`
+						? `rail projection passes: centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px <= built-in ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px bound from known pad width + observed rail + raster error; no badge-driven pose search was performed`
 						: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (non-rail fallback only)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
 	return {
 		id: candidate.id,
@@ -901,6 +936,7 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 			...(candidate.fit.fitKind === 'rail-projection' ? {
 				badgePerpendicularErrorPx: candidate.fit.badgePerpendicularErrorPx ?? Infinity,
 				badgePerpendicularMissPx: candidate.fit.badgePerpendicularMissPx ?? Infinity,
+				badgePerpendicularBoundPx: candidate.fit.badgePerpendicularBoundPx ?? Infinity,
 				projectedLaneWidthPx: candidate.fit.projectedLaneWidthPx ?? 0,
 				observedRailSpanPx: candidate.fit.observedRailSpanPx ?? 0,
 				railProjection: 1
@@ -997,10 +1033,17 @@ export function buildTeeRecoveryCandidates(
 	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
-	const halfHeight = median(pads.map((pad) => pad.minorPx / 2));
+	const minorWidths = pads.map((pad) => pad.minorPx);
+	const knownPadWidthPx = median(minorWidths);
+	const halfHeight = knownPadWidthPx / 2;
+	// P100 deviation is intentionally a bound, not a fitted sigma: every pad
+	// already accepted by G3 is part of the course-local width contract.
+	const halfHeightErrorPx = minorWidths.length === 0
+		? 0
+		: Math.max(...minorWidths.map((width) => Math.abs(width - knownPadWidthPx))) / 2;
 	const thickness = supportThickness(tees);
-	const claimedBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
-	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !claimedBadgeIds.has(badge.detId));
+	const coveredBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
+	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !coveredBadgeIds.has(badge.detId));
 	if (targets.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes };
 
 	// Ownership and occlusion are properties of the raster, not of any one
@@ -1042,7 +1085,7 @@ export function buildTeeRecoveryCandidates(
 		const targetCandidates: TeeRecoveryCandidate[] = [];
 		const seenGroups = new Set<string>();
 		for (const seed of visibleComponents) {
-			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
 			const compatibleWith = (candidateFit: RecoveryFit) => visibleComponents.filter((entry) =>
 				entry.component.label === seed.component.label ||
 				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
@@ -1055,7 +1098,7 @@ export function buildTeeRecoveryCandidates(
 				for (let pass = 0; pass < 2; pass++) {
 					const union = compatible.flatMap((entry) => entry.pixels);
 					if (union.length === 0) break;
-					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, thickness);
+					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
 					const next = compatibleWith(fit);
 					if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
 					compatible = next;
@@ -1124,12 +1167,10 @@ export function buildTeeRecoveryCandidates(
 		});
 	}
 
-	// Cross-target ambiguity: with no spatial prefilter, the exact same bright
-	// component can independently satisfy the strict predicate for more than
-	// one missing badge (each target refits its own badge-pointing pose). This
-	// is never resolved by loop order/silent drop -- the badge with the
-	// smaller badge-axis angular error keeps the accepted candidate; every
-	// other claimant is forced to a named rejection in graphCandidateResult.
+	// Cross-target multiclaim: the same physical shard may satisfy more than one
+	// numbered badge. G4 has no authority to turn a smaller residual into object
+	// identity. Preserve every claimant and DEFER them all; later evidence may
+	// resolve the relation without erasing what the shard actually testified.
 	const accepted = candidates.filter((candidate) => {
 		const support = candidate.fragmentPixels.length;
 		const railMiss = candidate.fit.fitKind === 'rail-projection' ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
@@ -1145,15 +1186,13 @@ export function buildTeeRecoveryCandidates(
 	}
 	for (const bucket of byComponentSet.values()) {
 		if (bucket.length < 2) continue;
-		const ranked = [...bucket].sort((a, b) => {
-			const ar = a.fit.fitKind === 'rail-projection' ? a.fit.badgePerpendicularErrorPx ?? Infinity : badgeAxisError(a) ?? Infinity;
-			const br = b.fit.fitKind === 'rail-projection' ? b.fit.badgePerpendicularErrorPx ?? Infinity : badgeAxisError(b) ?? Infinity;
-			return ar - br;
-		});
-		const winner = ranked[0]!;
-		for (const loser of ranked.slice(1)) {
-			const index = candidates.indexOf(loser);
-			if (index >= 0) candidates[index] = { ...loser, ambiguityLostToBadgeLabel: winner.badgeLabel ?? winner.badgeId ?? null };
+		for (const candidate of bucket) {
+			const others = bucket
+				.filter((other) => other !== candidate)
+				.map((other) => other.badgeLabel ?? other.badgeId ?? 'UNKNOWN')
+				.sort();
+			const index = candidates.indexOf(candidate);
+			if (index >= 0) candidates[index] = { ...candidate, ambiguityWithBadgeLabels: others };
 		}
 	}
 
@@ -1185,32 +1224,38 @@ export const teeRecoveryUnit: EngineUnit = {
 		const baskets = board.get<readonly BasketEvidence[]>('baskets');
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const rayResolution = resolveVisibleTeeBadgeRays(tees, badges);
-		const claimedBadgeIds = new Set(rayResolution.claims.map((claim) => claim.badgeId));
+		const coveredBadgeIds = new Set(rayResolution.coveredBadgeIds);
+		const lockedKeys = new Set(rayResolution.locks.map((claim) => `${claim.teeId}|${claim.badgeId}`));
 		const numberedBadges = badges.filter((badge) => numberLabel(badge) !== undefined);
 		ctx.measure('teeRecovery', 'visibleRayClaims', rayResolution.claims.length);
+		ctx.measure('teeRecovery', 'visibleRayLocks', rayResolution.locks.length);
+		ctx.measure('teeRecovery', 'visibleRayCoveredBadges', coveredBadgeIds.size);
 		ctx.measure('teeRecovery', 'visibleRayAmbiguousTees', rayResolution.ambiguousTeeIds.length);
 		ctx.measure('teeRecovery', 'visibleRayConflictedBadges', rayResolution.conflictedBadgeIds.length);
-		ctx.measure('teeRecovery', 'missingNumberedTees', numberedBadges.length - claimedBadgeIds.size);
+		ctx.measure('teeRecovery', 'missingNumberedTees', numberedBadges.length - coveredBadgeIds.size);
 		for (const claim of rayResolution.claims) {
 			const tee = tees.find((candidate) => candidate.detId === claim.teeId);
 			const badge = badges.find((candidate) => candidate.detId === claim.badgeId);
 			if (!tee || !badge) continue;
+			const locked = lockedKeys.has(`${claim.teeId}|${claim.badgeId}`);
 			ctx.overlay('teeRecovery', {
 				type: 'polyline',
 				path: [[tee.xPx, tee.yPx], [badge.cxPx, badge.cyPx]],
 				verdict: 'info',
 				visualRole: 'tee-badge-path',
 				ref: `visible-ray-${tee.detId}-${badge.detId}`,
-				reason: `visible ${tee.detId} uniquely claims badge ${badge.label ?? badge.detId} by its own undirected pad axis (${(claim.axisErrorRad * 180 / Math.PI).toFixed(3)}° < ${activeAxisLimitDeg}°); no pathfinding or assignment testimony read`
+				reason: locked
+					? `LOCK: visible ${tee.detId} has one first-intercept badge and badge ${badge.label ?? badge.detId} has one visible-tee claimant; perpendicular corridor error ${claim.perpendicularErrorPx.toFixed(3)}px; no pathfinding or assignment testimony read`
+					: `POSSIBLE: visible ${tee.detId} supplies first-intercept testimony for badge ${badge.label ?? badge.detId} (perpendicular corridor error ${claim.perpendicularErrorPx.toFixed(3)}px); multiclaim/conflict is preserved as coverage, not erased into a false recovery target`
 			});
 		}
-		if (claimedBadgeIds.size === numberedBadges.length) {
+		if (coveredBadgeIds.size === numberedBadges.length) {
 			board.set('recoveredTees', board.get<readonly RecoveredTeeInput[]>('recoveredTees'));
 			stop();
 			return;
 		}
 		const localRayClaims: TeeRecoveryAssignmentContext = {
-			assignments: [...claimedBadgeIds].sort().map((badgeId) => ({ badgeId, basketId: 'G4-visible-ray' }))
+			assignments: [...coveredBadgeIds].sort().map((badgeId) => ({ badgeId, basketId: 'G4-visible-ray-coverage' }))
 		};
 		const shardDiscoveryStop = ctx.span('teeRecovery.shardDiscovery');
 		const sprites = board.has('sprites') ? board.get<readonly SpriteMatch[]>('sprites') : undefined;
@@ -1315,13 +1360,16 @@ export const teeRecoveryUnit: EngineUnit = {
 						const ox = side * candidate.fit.halfHeightPx * nx, oy = side * candidate.fit.halfHeightPx * ny;
 						ctx.overlay('teeRecovery', { type: 'polyline', path: [[candidate.fit.centerXPx + ox, fitY + oy], [foot[0] + ox, foot[1] + oy]], verdict: 'info', visualRole: 'tee-badge-path', ref: `${result.id}:projected-rail-${side}`, reason: `projected known tee-width boundary; perpendicular badge miss ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px` });
 					}
-					ctx.overlay('teeRecovery', { type: 'polyline', path: [foot, [badge.cxPx, badge.cyPx]], verdict: (candidate.fit.badgePerpendicularMissPx ?? Infinity) > 0 ? 'rejected' : 'info', visualRole: 'tee-badge-path', ref: `${result.id}:perpendicular-residual`, reason: `rail projection perpendicular centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px; outside-lane miss ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px` });
+					ctx.overlay('teeRecovery', { type: 'polyline', path: [foot, [badge.cxPx, badge.cyPx]], verdict: (candidate.fit.badgePerpendicularMissPx ?? Infinity) > 0 ? 'rejected' : 'info', visualRole: 'tee-badge-path', ref: `${result.id}:perpendicular-residual`, reason: `rail projection centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px vs built-in known-width error bound ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px; excess miss ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px` });
 				}
 			}
 			if (result.verdict === 'accepted') ctx.overlay('teeRecovery', { type: 'pixelSet', pixels: shardPixels, verdict: 'accepted', visualRole: 'tee-shard', ref: `${result.id}:tee-shard`, reason: result.reason, values: numericTraceValues(result.values) });
 			else ctx.overlay('teeRecovery', { type: 'point', xPx: centerX, yPx: centerY, verdict: 'rejected', visualRole: 'tee-rejection', ref: result.id, reason: result.reason, values: numericTraceValues(result.values) });
 			if (result.verdict !== 'accepted') continue;
 			if (result.values.badgeAxisErrorRad !== undefined) ctx.measure('teeRecovery', 'axisErrorDeg', result.values.badgeAxisErrorRad * 180 / Math.PI);
+			if (result.values.badgePerpendicularErrorPx !== undefined) ctx.measure('teeRecovery', 'badgePerpendicularErrorPx', result.values.badgePerpendicularErrorPx);
+			if (result.values.badgePerpendicularBoundPx !== undefined) ctx.measure('teeRecovery', 'badgePerpendicularBoundPx', result.values.badgePerpendicularBoundPx);
+			if (result.values.badgePerpendicularMissPx !== undefined) ctx.measure('teeRecovery', 'badgePerpendicularMissPx', result.values.badgePerpendicularMissPx);
 			for (const [index, corner] of result.corners.entries()) ctx.overlay('teeRecovery', { type: 'point', xPx: corner[0], yPx: corner[1], verdict: 'info', visualRole: 'tee-corner-tick', ref: `${result.id}:tee-corner-tick-${index}`, reason: 'calculated tee recovery corner' });
 			const xs = result.corners.map((point) => point[0]);
 			const ys = result.corners.map((point) => point[1]);
