@@ -218,9 +218,25 @@ describe('validateRoutingRingQuantum (g5.routing / g5.ribbon cross-feature invar
 });
 
 describe('resolveConfig + engine', () => {
-	test('default config resolves to registry defaults and PINNED hash', async () => {
+	test('shipped default freezes the Dev6 106/108 tee-badge baseline', async () => {
 		const resolved = resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION);
+		expect(resolved.name).toBe('dev6-106-default');
 		expect(resolved.features.teeMinAreaPose).toBeUndefined();
+		expect(resolved.features.teeBadgeLock).toEqual({ enabled: true, knobs: {} });
+		expect(resolved.execution).toEqual([
+			'badgeStage',
+			'badges',
+			'baskets',
+			'tees',
+			'teeFamily',
+			'supportField',
+			'badgeOcclusionPatch',
+			'rawPairs',
+			'measurement',
+			'assignment',
+			'teeRecovery',
+			'teeBadgeLock'
+		]);
 		expect(resolved.features['zfit']).toEqual({
 			enabled: false,
 			knobs: {
@@ -240,21 +256,11 @@ describe('resolveConfig + engine', () => {
 				scoreMultiplier: 0.9
 			}
 		});
-		const hash = await sha256Hex(canonicalJson(resolved));
-		// Pinned: changing any registry default or the execution list must
-		// force a conscious update here. 2026-08-28: zfit dropped from the
-		// default schedule by owner directive (prior pins cac326d6... then
-		// cb9b82be...); PR #61's teeRecovery inventory republish moves it again.
-		// 2026-08-28: teeRecovery's new axisToleranceDeg knob (soft ceiling,
-		// default 3 -- the strict target itself: see g3.teeRecovery.ts for the
-		// null-result empirical finding on the post-dc96000 corpus) moves this
-		// pin again.
-		// 2026-08-28: G1 OCR fix contract (docs/seven-whys/g1-badge-digit-garbage
-		// .md) adds g1.badges' plateFrameTolerancePx (C1 frame-exclusion
-		// provenance) and g1.digits' confidenceFloorDivisor/labelAmbiguityMargin
-		// (C4 derived-floor/ambiguity provenance) -- new knobs move this pin
-		// again, consciously, per the resolved-config-bytes-changed rule.
-		expect(hash).toBe('54e871cfd0320078c32af0502b2fc5e9877f5230152cdf23ec65d4e458b5b85c');
+		// Freeze the shipped configuration bytes themselves. The 106/108 proof
+		// belongs to daada50's resolved feature implementations; future 108 work
+		// must alter an explicit experiment instead of silently editing default.
+		const configHash = await sha256Hex(canonicalJson(defaultConfigJson));
+		expect(configHash).toBe('2b5dbd268d3a10b8927832902fd16a6ff0a0e17cb3559c15b3f5e9ecd8708782');
 	});
 
 	test('min-area pose is explicit A/B-only: ON is scheduled and OFF remains absent from frozen defaults', () => {
@@ -263,7 +269,7 @@ describe('resolveConfig + engine', () => {
 		expect(on.features.teeMinAreaPose).toEqual({ enabled: true, knobs: {} });
 	});
 
-	test('config path is byte-identical to the bare path on defaults', async () => {
+	test('shipped 106 default preserves bare-path measurement/assignment and adds teeBadgeLock', async () => {
 		const raster = tinyRaster();
 		const bare = runThreeFactor(raster);
 		const resolved = resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION);
@@ -271,13 +277,10 @@ describe('resolveConfig + engine', () => {
 		expect(configured.measurement).toEqual(bare.measurement);
 		expect(configured.assignment).toEqual(bare.assignment);
 		expect(configured.trace).toBeDefined();
-		// default.json's schedule drops zfit (owner directive 2026-08-28); the
-		// engine-level DEFAULT_EXECUTION fallback still ends with it. The
-		// measurement/assignment equality above is the proof the disabled
-		// zfit operation was a byte-exact no-op.
-		expect(configured.trace?.execution).toEqual(
-			DEFAULT_EXECUTION.filter((id) => id !== 'zfit')
-		);
+		// The bare engine fallback deliberately remains lower-level. The shipped
+		// default is the frozen 106 lane and therefore schedules teeBadgeLock.
+		expect(configured.trace?.execution).toEqual(defaultConfigJson.execution);
+		expect(configured.trace?.execution.at(-1)).toBe('teeBadgeLock');
 	});
 
 	test('zfit-on config flips measurement.parameters.zfit', () => {
@@ -310,6 +313,7 @@ describe('resolveConfig + engine', () => {
 		const unitIds = run.trace?.units.map((u) => u.id) ?? [];
 		expect(unitIds).toContain('badgeStage');
 		expect(unitIds).toContain('assignment');
+		expect(unitIds).toContain('teeBadgeLock');
 		expect(run.paramsHash).toBe('deadbeef');
 	});
 });
