@@ -49,6 +49,19 @@ export interface TeeBadgeLockReceiptRow {
 	readonly reason: string;
 }
 
+export interface TeeBadgeLockAbstentionRow {
+	readonly badgeId: TeeBadgeLockText;
+	readonly hole: TeeBadgeLockValue;
+	readonly kind: TeeBadgeLockText;
+	readonly bestTeeId: TeeBadgeLockText;
+	readonly bestScore: TeeBadgeLockValue;
+	readonly winningHole: TeeBadgeLockValue;
+	readonly winningScore: TeeBadgeLockValue;
+	readonly verdict: Drawable['verdict'];
+	/** Producer testimony verbatim -- the required one-human-sentence line. */
+	readonly reason: string;
+}
+
 export interface TeeBadgeLockReceiptCounts {
 	readonly candidates: TeeBadgeLockValue;
 	readonly locks: TeeBadgeLockValue;
@@ -77,6 +90,11 @@ export interface TeeBadgeLockCorrespondence {
 export interface TeeBadgeLockReceipt {
 	readonly plan: FeatureRenderPlan;
 	readonly rows: readonly TeeBadgeLockReceiptRow[];
+	/** All-Hn completion: one row per unmatched badge (orphan or conflict),
+	 * never silence. rows.length + abstentionRows.length === every G1-read
+	 * badge this feature was handed, whenever the producer's own bookkeeping
+	 * (locks + abstentions) is itself complete. */
+	readonly abstentionRows: readonly TeeBadgeLockAbstentionRow[];
 	readonly counts: TeeBadgeLockReceiptCounts;
 	readonly cliText: string;
 	readonly correspondence: TeeBadgeLockCorrespondence;
@@ -132,6 +150,52 @@ function isTeeBadgePath(drawable: Drawable): boolean {
 
 function teeBadgePaths(unit: UnitTrace): Drawable[] {
 	return unit.drawables.filter(isTeeBadgePath);
+}
+
+const TEE_BADGE_ABSTENTION_ROLE = 'tee-badge-abstention';
+
+function isTeeBadgeAbstention(drawable: Drawable): boolean {
+	return (
+		drawable.type === 'point' &&
+		(drawable as unknown as { readonly visualRole?: string }).visualRole ===
+			TEE_BADGE_ABSTENTION_ROLE
+	);
+}
+
+function teeBadgeAbstentions(unit: UnitTrace): Drawable[] {
+	return unit.drawables.filter(isTeeBadgeAbstention);
+}
+
+function decodeAbstentionBadgeId(ref: unknown): string {
+	if (typeof ref !== 'string') return UNKNOWN;
+	const prefix = 'teeBadgeLockAbstention:';
+	if (!ref.startsWith(prefix)) return UNKNOWN;
+	try {
+		const badgeId = decodeURIComponent(ref.slice(prefix.length));
+		return badgeId || UNKNOWN;
+	} catch {
+		return UNKNOWN;
+	}
+}
+
+function abstentionKindFor(code: TeeBadgeLockValue): TeeBadgeLockText {
+	if (code === 0) return 'orphan';
+	if (code === 1) return 'conflict';
+	return UNKNOWN;
+}
+
+function abstentionRowFor(drawable: Drawable): TeeBadgeLockAbstentionRow {
+	return {
+		badgeId: decodeAbstentionBadgeId(drawable.ref),
+		hole: finite(drawable.values, 'hole'),
+		kind: abstentionKindFor(finite(drawable.values, 'kindCode')),
+		bestTeeId: UNKNOWN, // pathless: the tee id lives only in the human reason string
+		bestScore: finite(drawable.values, 'bestScore'),
+		winningHole: finite(drawable.values, 'winningHole'),
+		winningScore: finite(drawable.values, 'winningScore'),
+		verdict: drawable.verdict,
+		reason: typeof drawable.reason === 'string' ? drawable.reason : UNKNOWN
+	};
 }
 
 interface DecodedLockRef {
@@ -277,6 +341,30 @@ function correspondence(
 	};
 }
 
+function abstentionCliRows(abstentions: readonly TeeBadgeLockAbstentionRow[]): string[] {
+	if (abstentions.length === 0) return [];
+	const lines = [
+		'',
+		'TEE→BADGE ABSTENTIONS (all-Hn: every unmatched badge named, never silent)',
+		'hole | badgeId | kind | bestScore | winningHole | winningScore | verdict | reason'
+	];
+	for (const row of abstentions) {
+		lines.push(
+			[
+				holeText(row.hole),
+				row.badgeId,
+				row.kind,
+				valueText(row.bestScore),
+				holeText(row.winningHole),
+				valueText(row.winningScore),
+				row.verdict,
+				row.reason
+			].join(' | ')
+		);
+	}
+	return lines;
+}
+
 function cliRows(
 	metadata: Required<TeeBadgeLockTraceMetadata>,
 	counts: TeeBadgeLockReceiptCounts,
@@ -353,12 +441,16 @@ function planFor(
 export function buildTeeBadgeLockReceipt(unit: UnitTrace, run: RunTrace): TeeBadgeLockReceipt {
 	const acceptedPaths = teeBadgePaths(unit);
 	const rows = acceptedPaths.map(rowFor);
+	const abstentionRows = teeBadgeAbstentions(unit).map(abstentionRowFor);
 	const counts = countsFor(unit);
 	const metadata = runMetadata(run, unit.featureId);
-	const cliText = cliRows(metadata, counts, rows).join('\n');
+	const cliText = [
+		...cliRows(metadata, counts, rows),
+		...abstentionCliRows(abstentionRows)
+	].join('\n');
 	const plan = planFor(unit, run, acceptedPaths, cliText);
 	const matched = correspondence(acceptedPaths, rows, acceptedPaths);
-	return { plan, rows, counts, cliText, correspondence: matched };
+	return { plan, rows, abstentionRows, counts, cliText, correspondence: matched };
 }
 
 /** FeatureRender seam: one exact forwarded layer over the bright-mask base. */

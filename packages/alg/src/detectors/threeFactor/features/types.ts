@@ -152,7 +152,8 @@ export interface DrawableBase {
 		| 'tee-diagonal'
 		| 'tee-rejection'
 		| 'phantom-center'
-		| 'tee-badge-path';
+		| 'tee-badge-path'
+		| 'tee-badge-abstention';
 }
 
 export interface PointDrawable extends DrawableBase {

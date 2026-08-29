@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	buildTeeBadgeLockEvidence,
 	collapseTeeBadgePaths,
 	extractTeeBadgePaths,
 	maximumWeightTeeBadgeMatching,
@@ -317,5 +318,104 @@ describe('teeBadgeLock pure candidate contract', () => {
 				.map((lock) => [lock.badgeId, lock.teeId])
 				.sort((a, b) => a.join(':').localeCompare(b.join(':')));
 		expect(pairs(permuted)).toEqual(pairs(first));
+	});
+});
+
+describe('teeBadgeLock all-Hn resolver: every unmatched badge is named, never silent', () => {
+	const badges = [
+		{ detId: 'badge-1', label: '1' },
+		{ detId: 'badge-2', label: '2' },
+		{ detId: 'badge-3', label: '3' }
+	];
+
+	test('two tees, one badge: the loser is named as a conflict with the winner it lost to', () => {
+		// badge-1 and badge-2 both reach tee-shared; badge-1 outscores badge-2.
+		// badge-3 has zero testimony (orphan).
+		const candidates = [
+			scored('badge-1', 'tee-shared', 0.9),
+			scored('badge-2', 'tee-shared', 0.4)
+		];
+		const selected = maximumWeightTeeBadgeMatching(candidates, {
+			badges,
+			tees: [{ detId: 'tee-shared' }]
+		});
+		expect(selected.locks).toMatchObject([{ badgeId: 'badge-1', teeId: 'tee-shared' }]);
+		expect(selected.unmatchedBadgeIds.sort()).toEqual(['badge-2', 'badge-3']);
+
+		const evidence = buildTeeBadgeLockEvidence(selected, { badges });
+		expect(evidence.abstentions).toHaveLength(2);
+
+		const conflict = evidence.abstentions.find((a) => a.badgeId === 'badge-2');
+		expect(conflict).toMatchObject({
+			hole: 2,
+			kind: 'conflict',
+			bestTeeId: 'tee-shared',
+			bestScore: 0.4,
+			winningBadgeId: 'badge-1',
+			winningHole: 1,
+			winningScore: 0.9
+		});
+		expect(conflict?.reason).toMatch(/H2/);
+		expect(conflict?.reason).toMatch(/tee-shared/);
+		expect(conflict?.reason).toMatch(/H1/);
+		expect(conflict?.reason).toMatch(/conflict/i);
+
+		const orphan = evidence.abstentions.find((a) => a.badgeId === 'badge-3');
+		expect(orphan).toMatchObject({ hole: 3, kind: 'orphan' });
+		expect(orphan?.bestTeeId).toBeUndefined();
+		expect(orphan?.reason).toMatch(/H3/);
+		expect(orphan?.reason).toMatch(/no tee testimony/i);
+
+		// Never silent: every unmatched badge id has exactly one abstention row.
+		expect(evidence.abstentions.map((a) => a.badgeId).sort()).toEqual(
+			selected.unmatchedBadgeIds.slice().sort()
+		);
+	});
+
+	test('one tee, three badges: the two losers are each a named conflict against the single winner, never silence', () => {
+		const candidates = [
+			scored('badge-1', 'tee-only', 0.9),
+			scored('badge-2', 'tee-only', 0.4),
+			scored('badge-3', 'tee-only', 0.1)
+		];
+		const selected = maximumWeightTeeBadgeMatching(candidates, {
+			badges,
+			tees: [{ detId: 'tee-only' }]
+		});
+		expect(selected.locks).toMatchObject([{ badgeId: 'badge-1', teeId: 'tee-only' }]);
+		const evidence = buildTeeBadgeLockEvidence(selected, { badges });
+		expect(evidence.abstentions.map((a) => a.badgeId).sort()).toEqual(['badge-2', 'badge-3']);
+		for (const a of evidence.abstentions) {
+			expect(a.kind).toBe('conflict');
+			expect(a.winningBadgeId).toBe('badge-1');
+			expect(a.reason.length).toBeGreaterThan(0);
+		}
+	});
+
+	test('degenerate calibration (all-zero support field): scores collapse to 0, never NaN, and every badge still gets a lock or a named abstention', () => {
+		const zeroField = field(2, 1, [0, 0], [0, 0]);
+		const scoredCandidates = scoreTeeBadgeCandidates({
+			candidates: [
+				{ badgeId: 'badge-1', teeId: 'tee-1', teeBadgePath: [[0, 0], [1, 0]] },
+				{ badgeId: 'badge-2', teeId: 'tee-2', teeBadgePath: [[0, 0], [1, 0]] }
+			],
+			field: zeroField,
+			knobs: KNOBS
+		});
+		for (const candidate of scoredCandidates) {
+			expect(Number.isFinite(candidate.score)).toBe(true);
+			expect(candidate.score).toBe(0);
+		}
+		const selected = maximumWeightTeeBadgeMatching(scoredCandidates, {
+			badges: badges.slice(0, 2),
+			tees: [{ detId: 'tee-1' }, { detId: 'tee-2' }]
+		});
+		const evidence = buildTeeBadgeLockEvidence(selected, { badges: badges.slice(0, 2) });
+		// No threshold means zero scores still lock; nothing is dropped for being
+		// "too weak" -- degenerate calibration widens nothing here because there
+		// was exactly one real edge per badge, so no NaN/Infinity ever appears
+		// and abstentions.length + locks.length accounts for every badge.
+		expect(evidence.locks.length + evidence.abstentions.length).toBe(2);
+		expect(evidence.locks.every((l) => Number.isFinite(l.score))).toBe(true);
 	});
 });
