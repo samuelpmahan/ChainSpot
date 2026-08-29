@@ -243,7 +243,7 @@ export const HELP_CATALOG = Object.freeze([
     ],
     examples: ['lab score', 'lab score tee-border-corner-fit-on', 'lab score tee-border-corner-fit-on HeritagePark'],
     outputs: ['Per-course lines with WRONG positions and UNASSIGNED holes, plus a truth-correct total; exit 0 only on a perfect scoreable board.'],
-    caveats: ['Reads ONLY shipped receipts -- no pixels are re-detected and no positions are decoded from rendered images; a receipt without endpointPositions must be re-swept. An annotation whose holes are mostly hundreds of px off is flagged FRAME SUSPECT and excluded from the total (known: the 3-hole AlexClark annotation), never reported as detector wrongs.']
+    caveats: ['Reads ONLY shipped receipts -- no pixels are re-detected and no positions are decoded from rendered images; a receipt without endpointPositions must be re-swept. Far misses always count as WRONG; when most of a course is wildly off the tool only prints an advisory to verify the annotation frame with lab crop (the 3-hole AlexClark annotation looked frame-broken but is real: it deliberately covers only the bent holes).']
   }),
   record('crop', {
     kind: 'command', group: 'LOOK', title: 'CROP — magnified crop of a shipped run render',

@@ -39,12 +39,15 @@ interface ReceiptShape {
  * run, never used anywhere in the detector. Override with --tolerance. */
 const DEFAULT_TOLERANCE_PX = 26;
 
-/** A truth hole whose nearest assigned tee sits beyond this many tolerances
- * is likelier to be an annotation-frame problem than a detector miss; when
- * at least half of a course's holes look like that, the whole annotation is
- * flagged FRAME SUSPECT instead of being reported as detector wrongs (the
- * AlexClark 3-hole annotation is the known case). */
-const FRAME_SUSPECT_FACTOR = 10;
+/** Advisory only (2026-08-29 lesson): the first cut of this tool EXCLUDED a
+ * course from the total when most holes were wildly off, guessing
+ * "annotation frame problem" -- and thereby hid three REAL wrong
+ * assignments on AlexClark's bent holes (the annotation deliberately covers
+ * only the bent holes; the crops at its truth points show real pads,
+ * on-frame). A scorer never gets to un-count a wrong on a guess: far misses
+ * now stay WRONG in the total, and this factor only triggers a printed
+ * suggestion to verify the frame with `lab crop`. */
+const FRAME_ADVISORY_FACTOR = 10;
 
 /** Dependency-free minimal ZIP reader (EOCD scan + central directory +
  * store/deflate entries) — enough for the corpus Annotated.zip; anything
@@ -219,7 +222,6 @@ function main(argv: readonly string[]): number {
 
 	let totalCorrect = 0;
 	let totalTruthHoles = 0;
-	let framesSuspect = 0;
 	for (const { course, path } of receipts) {
 		if (courseFilter.size > 0 && !courseFilter.has(course)) continue;
 		const receipt = JSON.parse(readFileSync(path, 'utf8')) as ReceiptShape;
@@ -256,7 +258,7 @@ function main(argv: readonly string[]): number {
 			const distance = Math.hypot(tee.xPx - hole.tee.xPx, tee.yPx - hole.tee.yPx);
 			if (distance <= tolerancePx) correct++;
 			else {
-				if (distance > tolerancePx * FRAME_SUSPECT_FACTOR) farMisses++;
+				if (distance > tolerancePx * FRAME_ADVISORY_FACTOR) farMisses++;
 				wrong.push(
 					`H${hole.number}: ${row.teeId}@(${tee.xPx.toFixed(0)},${tee.yPx.toFixed(0)}) off ` +
 						`${distance.toFixed(0)}px (truth ${hole.tee.xPx.toFixed(0)},${hole.tee.yPx.toFixed(0)})`
@@ -264,27 +266,21 @@ function main(argv: readonly string[]): number {
 			}
 		}
 		const holeCount = truth.holes.length;
-		const frameSuspect = holeCount > 0 && farMisses >= Math.ceil(holeCount / 2);
-		if (frameSuspect) framesSuspect++;
-		else {
-			totalCorrect += correct;
-			totalTruthHoles += holeCount;
-		}
-		const suffix = frameSuspect
-			? `  << ANNOTATION FRAME SUSPECT: ${farMisses}/${holeCount} holes are > ${tolerancePx * FRAME_SUSPECT_FACTOR}px off — the annotation likely lives in a different frame than the canonical raster; excluded from the total`
-			: '';
+		totalCorrect += correct;
+		totalTruthHoles += holeCount;
+		const advisory =
+			holeCount > 0 && farMisses >= Math.ceil(holeCount / 2)
+				? `  (note: ${farMisses}/${holeCount} holes are > ${tolerancePx * FRAME_ADVISORY_FACTOR}px off — if that is unexpected, verify the annotation frame with \`lab crop COURSE X,Y --image canonical\` before believing either side)`
+				: '';
 		console.log(`${course}: ${correct}/${holeCount} correct` +
-			(unassigned.length ? ` | UNASSIGNED: ${unassigned.join(',')}` : '') + suffix);
+			(unassigned.length ? ` | UNASSIGNED: ${unassigned.join(',')}` : '') + advisory);
 		for (const line of wrong) console.log(`   WRONG ${line}`);
 	}
 	if (courseFilter.size > 0 && ![...receipts].some((row) => courseFilter.has(row.course))) {
 		console.log(`(no receipts matched course filter ${[...courseFilter].join(', ')} — available: ${receipts.map((row) => row.course).join(', ')})`);
 	}
 	console.log('');
-	console.log(
-		`TOTAL: ${totalCorrect}/${totalTruthHoles} truth-correct across scoreable annotated courses` +
-			(framesSuspect ? ` (${framesSuspect} course annotation(s) excluded as FRAME SUSPECT)` : '')
-	);
+	console.log(`TOTAL: ${totalCorrect}/${totalTruthHoles} truth-correct across annotated holes`);
 	return totalCorrect === totalTruthHoles && totalTruthHoles > 0 ? 0 : 1;
 }
 
