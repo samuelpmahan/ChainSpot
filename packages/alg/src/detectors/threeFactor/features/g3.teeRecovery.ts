@@ -403,13 +403,56 @@ function fitComponent(
 		}
 	};
 
+	// Exact broad phase over the SAME center lattice. Every pixel of any legal
+	// rotated tee must satisfy both necessary bounds below. They only prove a
+	// center impossible; they never remove a component, badge, or legal pose.
+	const outerRadiusSq = outerRadius * outerRadius;
+	let rayFrameHalfWidth = 0;
+	let rayFrameHalfHeight = 0;
+	for (const axisOffset of axisOffsets) {
+		rayFrameHalfWidth = Math.max(
+			rayFrameHalfWidth,
+			outerHalfWidth * Math.abs(axisOffset.c) + outerHalfHeight * Math.abs(axisOffset.s)
+		);
+		rayFrameHalfHeight = Math.max(
+			rayFrameHalfHeight,
+			outerHalfWidth * Math.abs(axisOffset.s) + outerHalfHeight * Math.abs(axisOffset.c)
+		);
+	}
+	const broadPhaseEpsilon = 1e-9;
 	for (let y = minCenterY; y <= maxCenterY + 1e-9; y += 0.5) {
 		for (let x = minCenterX; x <= maxCenterX + 1e-9; x += 0.5) {
+			let possible = true;
+			for (const point of pixels) {
+				const dx = point[0] - x;
+				const dy = point[1] - y;
+				if (dx * dx + dy * dy > outerRadiusSq + broadPhaseEpsilon) {
+					possible = false;
+					break;
+				}
+			}
+			if (!possible) continue;
+
 			const rayX = badgeX - x;
 			const rayY = badgeY - y;
 			const rayLength = Math.hypot(rayX, rayY);
 			const rayC = rayLength === 0 ? 1 : rayX / rayLength;
 			const rayS = rayLength === 0 ? 0 : rayY / rayLength;
+			for (const point of pixels) {
+				const dx = point[0] - x;
+				const dy = point[1] - y;
+				const u = dx * rayC + dy * rayS;
+				const v = -dx * rayS + dy * rayC;
+				if (
+					Math.abs(u) > rayFrameHalfWidth + broadPhaseEpsilon ||
+					Math.abs(v) > rayFrameHalfHeight + broadPhaseEpsilon
+				) {
+					possible = false;
+					break;
+				}
+			}
+			if (!possible) continue;
+
 			for (const axisOffset of axisOffsets) consider(x, y, rayC, rayS, axisOffset);
 		}
 	}

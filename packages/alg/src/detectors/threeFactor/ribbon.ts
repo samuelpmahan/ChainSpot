@@ -153,24 +153,34 @@ function axisSampleMap(size: number, offset: number): AxisSampleMap {
 	return { lo, hi, fraction };
 }
 
-function sampleRgbMappedInto(
+function sampleRgbDifferenceMappedInto(
 	image: Float32Array,
 	width: number,
-	xMap: AxisSampleMap,
-	yMap: AxisSampleMap,
+	xMapA: AxisSampleMap,
+	yMapA: AxisSampleMap,
+	xMapB: AxisSampleMap,
+	yMapB: AxisSampleMap,
 	x: number,
 	y: number,
 	out: Float64Array,
 	offset: number
 ): void {
-	const ax = xMap.fraction[x];
-	const ay = yMap.fraction[y];
-	const p00 = (yMap.lo[y] * width + xMap.lo[x]) * 3;
-	const p10 = (yMap.lo[y] * width + xMap.hi[x]) * 3;
-	const p01 = (yMap.hi[y] * width + xMap.lo[x]) * 3;
-	const p11 = (yMap.hi[y] * width + xMap.hi[x]) * 3;
+	const axA = xMapA.fraction[x];
+	const ayA = yMapA.fraction[y];
+	const p00A = (yMapA.lo[y] * width + xMapA.lo[x]) * 3;
+	const p10A = (yMapA.lo[y] * width + xMapA.hi[x]) * 3;
+	const p01A = (yMapA.hi[y] * width + xMapA.lo[x]) * 3;
+	const p11A = (yMapA.hi[y] * width + xMapA.hi[x]) * 3;
+	const axB = xMapB.fraction[x];
+	const ayB = yMapB.fraction[y];
+	const p00B = (yMapB.lo[y] * width + xMapB.lo[x]) * 3;
+	const p10B = (yMapB.lo[y] * width + xMapB.hi[x]) * 3;
+	const p01B = (yMapB.hi[y] * width + xMapB.lo[x]) * 3;
+	const p11B = (yMapB.hi[y] * width + xMapB.hi[x]) * 3;
 	for (let channel = 0; channel < 3; channel++) {
-		out[offset + channel] = image[p00 + channel] * (1 - ax) * (1 - ay) + image[p10 + channel] * ax * (1 - ay) + image[p01 + channel] * (1 - ax) * ay + image[p11 + channel] * ax * ay;
+		const a = image[p00A + channel] * (1 - axA) * (1 - ayA) + image[p10A + channel] * axA * (1 - ayA) + image[p01A + channel] * (1 - axA) * ayA + image[p11A + channel] * axA * ayA;
+		const b = image[p00B + channel] * (1 - axB) * (1 - ayB) + image[p10B + channel] * axB * (1 - ayB) + image[p01B + channel] * (1 - axB) * ayB + image[p11B + channel] * axB * ayB;
+		out[offset + channel] = a - b;
 	}
 }
 
@@ -188,7 +198,7 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 	const raw = new Float32Array(width * height);
 	const bestTheta = new Float32Array(width * height);
 	const delta = Math.max(1, knobs.gradientDeltaMultiplier / scale);
-	const samples = new Float64Array(12);
+	const gradients = new Float64Array(6);
 	for (let orientation = 0; orientation < parameters.orientations; orientation++) {
 		const theta = (Math.PI * orientation) / parameters.orientations;
 		const nx = -Math.sin(theta);
@@ -209,16 +219,14 @@ export function computeRibbonSupport(image: RgbaImage, parameters: CorridorParam
 			const yD = axisSampleMap(height, ny * distanceD);
 			for (let y = 0; y < height; y++) {
 				for (let x = 0; x < width; x++) {
-					sampleRgbMappedInto(blurred, width, xA, yA, x, y, samples, 0);
-					sampleRgbMappedInto(blurred, width, xB, yB, x, y, samples, 3);
-					sampleRgbMappedInto(blurred, width, xC, yC, x, y, samples, 6);
-					sampleRgbMappedInto(blurred, width, xD, yD, x, y, samples, 9);
-					const d1r = samples[0] - samples[3];
-					const d1g = samples[1] - samples[4];
-					const d1b = samples[2] - samples[5];
-					const d2r = samples[6] - samples[9];
-					const d2g = samples[7] - samples[10];
-					const d2b = samples[8] - samples[11];
+					sampleRgbDifferenceMappedInto(blurred, width, xA, yA, xB, yB, x, y, gradients, 0);
+					sampleRgbDifferenceMappedInto(blurred, width, xC, yC, xD, yD, x, y, gradients, 3);
+					const d1r = gradients[0];
+					const d1g = gradients[1];
+					const d1b = gradients[2];
+					const d2r = gradients[3];
+					const d2g = gradients[4];
+					const d2b = gradients[5];
 					const dot = d1r * d2r + d1g * d2g + d1b * d2b;
 					if (dot <= 0) continue;
 					const n1 = Math.hypot(d1r, d1g, d1b);
