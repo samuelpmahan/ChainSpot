@@ -28,6 +28,8 @@ import { buildTeeMinAreaPoseReceipt } from '@chainspot/alg/detectors/threeFactor
 import { buildTeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
 import { buildBadgeGlyphTemplateReceipt } from '@chainspot/alg/detectors/threeFactor/features/g1.badgeGlyphTemplateReceipt';
 import { SCORE_ANOMALY_ORDERS_BELOW_MEDIAN, assignmentScoreMedian, scoreAnomalyNote } from './runReceipt';
+import { notFoundReceiptLines, sortByHole, type NotFoundBadgeRow } from './notFoundRows';
+import type { TeeBadgeLockReceipt } from '@chainspot/alg/detectors/threeFactor/features/g4.teeBadgeLockReceipt';
 import type {
 	ABFeature,
 	Drawable,
@@ -363,6 +365,12 @@ export interface RenderTraceFeaturesInput {
 	 * scheduled, so the endpoint receipt can say NOT-SCHEDULED rather than a
 	 * misleading empty table. */
 	readonly assignmentRows?: readonly HoleLabeledAssignment[];
+	/** Every G1-read badge absent from assignmentRows above -- computed once
+	 * (operation.ts, from the exact same assignmentRows set) and forwarded
+	 * verbatim here, so run.receipt.txt and run.visual.receipt.txt can never
+	 * name a different missing badge. Omitted (not empty) exactly when
+	 * assignmentRows is omitted. */
+	readonly notFoundRows?: readonly NotFoundBadgeRow[];
 	/** Canonical positions for the endpoints named by assignmentRows, so the
 	 * endpoint image can annotate each ASSIGNED tee and basket with its
 	 * post-assignment hole number. Sourced from the final board 'assignment'
