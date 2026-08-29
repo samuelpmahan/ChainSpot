@@ -105,12 +105,42 @@ export interface TeeBadgeLockEvidenceLock extends TeeBadgeLockScoredCandidate {
 	readonly hole?: number;
 }
 
+/**
+ * All-Hn resolver completion: every badge the max-weight match left
+ * unmatched gets one of these two named dispositions, never silence.
+ *
+ *  - 'orphan':   this badge had zero candidate testimony (no ray reached it
+ *                at all) -- there was nothing for the matcher to contest.
+ *  - 'conflict': this badge had candidate testimony, but its best-scoring
+ *                tee was awarded to a different badge's stronger claim (or
+ *                every candidate tee it reached was awarded elsewhere).
+ */
+export type TeeBadgeLockAbstentionKind = 'orphan' | 'conflict';
+
+export interface TeeBadgeLockAbstention {
+	readonly badgeId: string;
+	readonly hole?: number;
+	readonly kind: TeeBadgeLockAbstentionKind;
+	/** The best candidate this badge reached, when it reached any. */
+	readonly bestTeeId?: string;
+	readonly bestScore?: number;
+	/** Populated only for 'conflict': the badge that won the contested tee. */
+	readonly winningBadgeId?: string;
+	readonly winningHole?: number;
+	readonly winningScore?: number;
+	/** One human sentence per C5 -- never a machine-only code. */
+	readonly reason: string;
+}
+
 export interface TeeBadgeLockEvidence extends TeeBadgeLockResult {
 	readonly coordinateFrame: 'canonical-raster';
 	readonly basketEvidenceRead: false;
 	readonly corridorWidthPx: number | 'UNKNOWN';
 	readonly corridorWidthPxProvenance: string;
 	readonly locks: readonly TeeBadgeLockEvidenceLock[];
+	/** Every unmatched badge, named with an orphan/conflict disposition.
+	 * length === unmatchedBadgeIds.length, always -- see buildTeeBadgeLockEvidence. */
+	readonly abstentions: readonly TeeBadgeLockAbstention[];
 }
 
 const UNKNOWN_AXIS: TeeBadgeAxisSource = 'UNKNOWN';
@@ -619,6 +649,66 @@ function normalizedTier(tee: TeeBadgeTeeOrder | undefined): 'visible' | 'recover
 	return tee?.tier === 'recovered' ? 'recovered' : 'visible';
 }
 
+function holeLabel(hole: number | undefined, badgeId: string): string {
+	return hole === undefined ? `badge ${badgeId} (unread label)` : `H${hole}`;
+}
+
+/**
+ * All-Hn completion: classify every unmatched badge as 'orphan' (no
+ * candidate testimony reached it) or 'conflict' (its best candidate tee
+ * went to a stronger claim), and print the one required human sentence.
+ * Never invents a lock; only narrates the abstention already decided by
+ * maximumWeightTeeBadgeMatching.
+ */
+function buildAbstentions(
+	result: TeeBadgeLockResult,
+	badges: Map<string, TeeBadgeBadgeOrder>,
+	holeOf: (badgeId: string) => number | undefined
+): TeeBadgeLockAbstention[] {
+	const winnerByTee = new Map<string, TeeBadgeLockEvidenceLock | TeeBadgeLockScoredCandidate>();
+	for (const lock of result.locks) winnerByTee.set(lock.teeId, lock);
+	return result.unmatchedBadgeIds.map((badgeId) => {
+		const hole = holeOf(badgeId);
+		const label = holeLabel(hole, badgeId);
+		const own = result.candidates
+			.filter((candidate) => candidate.badgeId === badgeId)
+			.sort((a, b) => b.score - a.score);
+		const best = own[0];
+		if (!best) {
+			return {
+				badgeId,
+				...(hole === undefined ? {} : { hole }),
+				kind: 'orphan',
+				reason: `${label}: no tee testimony reaches this badge (zero candidate rays) -- abstaining.`
+			};
+		}
+		const winner = winnerByTee.get(best.teeId);
+		const winningBadgeId = winner?.badgeId;
+		const winningHole =
+			winningBadgeId === undefined ? undefined : holeOf(winningBadgeId);
+		const winningScore = winner?.score;
+		const winningLabel =
+			winningBadgeId === undefined
+				? 'another claim'
+				: holeLabel(winningHole, winningBadgeId);
+		return {
+			badgeId,
+			...(hole === undefined ? {} : { hole }),
+			kind: 'conflict',
+			bestTeeId: best.teeId,
+			bestScore: best.score,
+			...(winningBadgeId === undefined ? {} : { winningBadgeId }),
+			...(winningHole === undefined ? {} : { winningHole }),
+			...(winningScore === undefined ? {} : { winningScore }),
+			reason:
+				`${label}: best candidate tee ${best.teeId} (score ${best.score.toFixed(4)}) ` +
+				`was awarded to ${winningLabel}${
+					winningScore === undefined ? '' : ` (score ${winningScore.toFixed(4)})`
+				} by the max-weight match -- conflict, abstaining.`
+		} satisfies TeeBadgeLockAbstention;
+	});
+}
+
 export interface BuildTeeBadgeLockEvidenceOptions {
 	readonly badges?: readonly TeeBadgeBadgeOrder[];
 	readonly tees?: readonly TeeBadgeTeeOrder[];
@@ -654,9 +744,12 @@ export function buildTeeBadgeLockEvidence(
 	});
 	const corridorWidthPx =
 		options.corridorWidthPx ?? options.measurement?.parameters?.corridorWidthPx;
+	const holeOf = (badgeId: string): number | undefined => exactPositiveHole(badges.get(badgeId)?.label);
+	const abstentions = buildAbstentions(selected, badges, holeOf);
 	return {
 		...selected,
 		locks,
+		abstentions,
 		coordinateFrame: 'canonical-raster',
 		basketEvidenceRead: false,
 		corridorWidthPx: finite(corridorWidthPx) ? corridorWidthPx : 'UNKNOWN',
