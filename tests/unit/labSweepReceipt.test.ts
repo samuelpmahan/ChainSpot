@@ -538,16 +538,16 @@ describe('LAB sweep receipt seam', () => {
 	// correctly "not scheduled" rather than a stale number.
 	//
 	// Separately, on this real course the new ray-only/no-spatial-prefilter
-	// recovery (cd77412 lineage) now finds 4 recovered tees where it found 3
-	// before (recoveredTees 3->4, totalTees 18->19) -- one more than
-	// DashsTrack's 18 badges/holes. This is a real corpus-measured change from
-	// landed detector code, not a test-fixture staleness; pinned here as
-	// observed current behavior. FINDING for owner review: 19 tees against 18
-	// holes suggests the new recovery may be double-covering the one badge
-	// this run's own receipt flags as ambiguous (measurement
-	// visibleRayAmbiguousTees=1, visibleRayConflictedBadges=1) rather than a
-	// clean net-new find -- not verified against ground truth here, and no
-	// detector code was touched to investigate further per this task's scope.
+	// recovery (cd77412 lineage) once found 4 recovered tees (the 3->4 /
+	// 18->19 double-cover pinned here previously, flagged for owner review).
+	// 2026-08-29 integration night: the completeness-invariant occluder-
+	// adjacency rule + the dim-rail escape (g3.teeRecovery) kill ALL FOUR --
+	// each was scenery or a duplicate, none was a truth-correct tee (lab
+	// score: DashsTrack truth-correct is 15/18 both before and after, and the
+	// one recovery that ever WON an assignment row was H12's junk at 661px
+	// from truth). recoveredTees 4->0, totalTees 19->15; the double-cover
+	// finding above is thereby resolved: it was junk, not a net-new find.
+	// DashsTrack H3/H5/H12 remain loudly UNASSIGNED and need real evidence.
 	test('through G4 runs endpoints-complete on DashsTrack and the receipt tells the slice story', async () => {
 		const result = await runSweepOperation({
 			configPath: resolve(REPO_ROOT, 'packages/alg/src/detectors/threeFactor/configs/default.json'),
@@ -560,8 +560,8 @@ describe('LAB sweep receipt seam', () => {
 			badges: 18,
 			baskets: 18,
 			visibleTees: 15,
-			recoveredTees: 4,
-			totalTees: 19
+			recoveredTees: 0,
+			totalTees: 15
 		});
 		expect(result.runReceipt.results.assignments).toBeUndefined();
 		expect(result.runReceipt.resultsProvenance.assignments).toContain('not-scheduled');
