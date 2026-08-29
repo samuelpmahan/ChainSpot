@@ -1,0 +1,106 @@
+name: Tee Custody Perf
+
+on:
+  push:
+    branches:
+      - research/tee-custody-v0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ChainSpot
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install once
+        working-directory: ChainSpot
+        run: npm ci
+      - name: Compare exact parent vs custody head
+        working-directory: ChainSpot
+        env:
+          BASE_SHA: 91f4cd7ee17167d476cf5fdcfa2955e8482a54e6
+          HEAD_SHA: e678ef0b444eaf96c5ec26c0ea50ede47e73a2d3
+        run: |
+          set -euo pipefail
+          IMG="$(find ../chainspot-corpus -type f \( -iname '*NorthPark*.png' -o -iname '*north-park*.png' \) | sort | head -n 1)"
+          if [ -z "$IMG" ]; then
+            echo 'NorthPark PNG not found in corpus' >&2
+            find ../chainspot-corpus -maxdepth 4 -type f | sort | head -n 200
+            exit 2
+          fi
+          echo "BENCH_IMAGE=$IMG"
+
+          cat >/tmp/tee-custody-bench.cjs <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { performance } = require('perf_hooks');
+          const root = process.env.CHAINSPOT_ROOT;
+          const imagePath = process.env.BENCH_IMAGE;
+          const { PNG } = require(path.join(root, 'node_modules/pngjs'));
+          const tf = require(path.join(root, 'packages/alg/dist/detectors/threeFactor/index.js'));
+          const png = PNG.sync.read(fs.readFileSync(imagePath));
+          const raster = {
+            imageId: 'northpark-custody-perf',
+            widthPx: png.width,
+            heightPx: png.height,
+            rgba: new Uint8ClampedArray(png.data)
+          };
+          function runOne() {
+            const start = performance.now();
+            const result = tf.runThreeFactor(raster);
+            const ms = performance.now() - start;
+            return {
+              ms,
+              tees: result.assignment.tees.length,
+              assignments: result.assignment.assignments.length,
+              custodyTees: result.custody?.tees?.length ?? null
+            };
+          }
+          // One warm run, then two measured runs. Median of two == average; enough for a quick regression check.
+          const warm = runOne();
+          const samples = [runOne(), runOne()];
+          const avg = samples.reduce((s, x) => s + x.ms, 0) / samples.length;
+          console.log('WARM_JSON=' + JSON.stringify(warm));
+          console.log('BENCH_JSON=' + JSON.stringify({ avgMs: avg, samples }));
+          NODE
+
+          run_ref () {
+            label="$1"
+            ref="$2"
+            echo "=== $label $ref ==="
+            git checkout --force "$ref"
+            ./lab setup >/tmp/${label}-setup.log 2>&1
+            CHAINSPOT_ROOT="$PWD" BENCH_IMAGE="$IMG" node /tmp/tee-custody-bench.cjs | tee "/tmp/${label}.txt"
+          }
+
+          run_ref base "$BASE_SHA"
+          run_ref custody "$HEAD_SHA"
+
+          node <<'NODE'
+          const fs = require('fs');
+          function read(label) {
+            const text = fs.readFileSync(`/tmp/${label}.txt`, 'utf8');
+            const line = text.split(/\r?\n/).find(x => x.startsWith('BENCH_JSON='));
+            if (!line) throw new Error(`missing ${label} BENCH_JSON`);
+            return JSON.parse(line.slice('BENCH_JSON='.length));
+          }
+          const base = read('base');
+          const custody = read('custody');
+          const deltaMs = custody.avgMs - base.avgMs;
+          const deltaPct = base.avgMs ? deltaMs / base.avgMs * 100 : NaN;
+          console.log('=== RESULT ===');
+          console.log(JSON.stringify({ baseAvgMs: base.avgMs, custodyAvgMs: custody.avgMs, deltaMs, deltaPct }, null, 2));
+          NODE
