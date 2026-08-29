@@ -7,6 +7,7 @@ import {
 	deriveCompassSigma,
 	exactPositiveHole,
 	matchTeeBadgeCompass,
+	resolveClaimsByWavePeeling,
 	runTeeBadgeCompass,
 	scoreCompassGeometry,
 	type CompassBadge,
@@ -410,5 +411,120 @@ describe('exactPositiveHole and buildTeeBadgeCompassEvidence -- map through the 
 		expect(byBadge.get('badge-1')!.badgeLabel).toBe('14');
 		expect(byBadge.get('badge-2')!.hole).toBeUndefined();
 		expect(byBadge.get('badge-2')!.badgeLabel).toBe('UNREAD');
+	});
+});
+
+describe('resolveClaimsByWavePeeling -- Kahn-style toposort', () => {
+	test('single unique pair -> wave 1, empty forcedBy', () => {
+		const edges = [{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 1.5 }];
+		const result = resolveClaimsByWavePeeling(edges);
+		expect(result.locks).toHaveLength(1);
+		expect(result.locks[0]).toMatchObject({
+			teeId: 'tA',
+			badgeId: 'X',
+			wave: 1,
+			forcedBy: []
+		});
+		expect(result.contestedClusters).toHaveLength(0);
+	});
+
+	test('cascade: teeA->[X,Y], teeB->[X] => B->X wave 1, A->Y wave 2 with forcedBy [X]', () => {
+		const edges = [
+			{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 2.0 },
+			{ teeId: 'tA', badgeId: 'Y', angularErrorDeg: 3.0 },
+			{ teeId: 'tB', badgeId: 'X', angularErrorDeg: 1.5 }
+		];
+		const result = resolveClaimsByWavePeeling(edges);
+		expect(result.locks).toHaveLength(2);
+		// Wave 1: tB->X (B has degree 1, X has degree 2 -> degree 1 after B locks)
+		const wave1 = result.locks.filter((l) => l.wave === 1);
+		expect(wave1).toHaveLength(1);
+		expect(wave1[0]).toMatchObject({
+			teeId: 'tB',
+			badgeId: 'X',
+			wave: 1,
+			forcedBy: []
+		});
+		// Wave 2: tA->Y (A now has degree 1, Y has degree 1)
+		const wave2 = result.locks.filter((l) => l.wave === 2);
+		expect(wave2).toHaveLength(1);
+		expect(wave2[0]).toMatchObject({
+			teeId: 'tA',
+			badgeId: 'Y',
+			wave: 2,
+			forcedBy: ['X']
+		});
+		expect(result.contestedClusters).toHaveLength(0);
+	});
+
+	test('2x2 all-edges cluster -> zero locks, one cluster with 4 pairs', () => {
+		const edges = [
+			{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 1.0 },
+			{ teeId: 'tA', badgeId: 'Y', angularErrorDeg: 2.0 },
+			{ teeId: 'tB', badgeId: 'X', angularErrorDeg: 1.5 },
+			{ teeId: 'tB', badgeId: 'Y', angularErrorDeg: 2.5 }
+		];
+		const result = resolveClaimsByWavePeeling(edges);
+		expect(result.locks).toHaveLength(0);
+		expect(result.contestedClusters).toHaveLength(1);
+		const cluster = result.contestedClusters[0]!;
+		expect(cluster.teeIds.sort()).toEqual(['tA', 'tB']);
+		expect(cluster.badgeIds.sort()).toEqual(['X', 'Y']);
+		expect(cluster.pairs).toHaveLength(4);
+	});
+
+	test('determinism: shuffled input produces identical output', () => {
+		const baseEdges = [
+			{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 1.0 },
+			{ teeId: 'tB', badgeId: 'Y', angularErrorDeg: 2.0 }
+		];
+		const result1 = resolveClaimsByWavePeeling(baseEdges);
+		const result2 = resolveClaimsByWavePeeling([baseEdges[1]!, baseEdges[0]!]);
+		expect(result1.locks.map((l) => ({ ...l }))).toEqual(result2.locks.map((l) => ({ ...l })));
+		expect(result1.contestedClusters).toEqual(result2.contestedClusters);
+	});
+
+	test('two independent chains peel in parallel waves', () => {
+		const edges = [
+			// Chain 1: tA->[X, Z], tC->[X]
+			{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 1.0 },
+			{ teeId: 'tA', badgeId: 'Z', angularErrorDeg: 2.0 },
+			{ teeId: 'tC', badgeId: 'X', angularErrorDeg: 1.5 },
+			// Chain 2: tB->[Y, W], tD->[Y]
+			{ teeId: 'tB', badgeId: 'Y', angularErrorDeg: 2.0 },
+			{ teeId: 'tB', badgeId: 'W', angularErrorDeg: 3.0 },
+			{ teeId: 'tD', badgeId: 'Y', angularErrorDeg: 1.5 }
+		];
+		const result = resolveClaimsByWavePeeling(edges);
+		expect(result.locks).toHaveLength(4);
+		// Wave 1: both tC->X and tD->Y
+		const wave1 = result.locks.filter((l) => l.wave === 1);
+		expect(wave1).toHaveLength(2);
+		const wave1Pairs = wave1.map((l) => `${l.teeId}->${l.badgeId}`).sort();
+		expect(wave1Pairs).toEqual(['tC->X', 'tD->Y']);
+		// Wave 2: both tA->Z and tB->W
+		const wave2 = result.locks.filter((l) => l.wave === 2);
+		expect(wave2).toHaveLength(2);
+		const wave2Pairs = wave2.map((l) => `${l.teeId}->${l.badgeId}`).sort();
+		expect(wave2Pairs).toEqual(['tA->Z', 'tB->W']);
+		expect(result.contestedClusters).toHaveLength(0);
+	});
+
+	test('two tees whose edge sets are both exactly {X} -> zero locks, contested cluster containing both tees and X', () => {
+		const edges = [
+			{ teeId: 'tA', badgeId: 'X', angularErrorDeg: 1.0 },
+			{ teeId: 'tB', badgeId: 'X', angularErrorDeg: 1.5 }
+		];
+		const result = resolveClaimsByWavePeeling(edges);
+		// No locks since both tees compete for the same badge
+		expect(result.locks).toHaveLength(0);
+		// One contested cluster with both tees and the badge
+		expect(result.contestedClusters).toHaveLength(1);
+		const cluster = result.contestedClusters[0];
+		expect(cluster.teeIds.sort()).toEqual(['tA', 'tB']);
+		expect(cluster.badgeIds).toEqual(['X']);
+		expect(cluster.pairs).toHaveLength(2);
+		const pairStrings = cluster.pairs.map((p) => `${p.teeId}->${p.badgeId}`).sort();
+		expect(pairStrings).toEqual(['tA->X', 'tB->X']);
 	});
 });

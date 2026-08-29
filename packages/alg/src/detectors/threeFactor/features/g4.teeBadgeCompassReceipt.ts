@@ -8,7 +8,7 @@
 // mirroring g4.teeBadgeLockReceipt.ts's contract for its sibling feature.
 
 import type { Drawable, FeatureRender, FeatureRenderPlan, RunTrace, UnitTrace } from './types';
-import { RECOVERY_POSE_EXCLUSION_NOTE } from './g4.teeBadgeCompassMath';
+import { RECOVERY_POSE_EXCLUSION_NOTE, exactPositiveHole } from './g4.teeBadgeCompassMath';
 
 export const TEE_BADGE_COMPASS_FEATURE_ID = 'teeBadgeCompass' as const;
 const UNKNOWN = 'UNKNOWN' as const;
@@ -27,6 +27,8 @@ export interface TeeBadgeCompassLockRow {
 	readonly angularErrorDeg: CompassValue;
 	readonly distancePx: CompassValue;
 	readonly weight: CompassValue;
+	readonly waveNumber: CompassValue;
+	readonly forcedBy: CompassText;
 	readonly runnerUpHole: CompassValue;
 	readonly runnerUpHoleLabel: CompassText;
 	readonly runnerUpAngularErrorDeg: CompassValue;
@@ -57,12 +59,21 @@ export interface TeeBadgeCompassUnmatchedRow {
 	readonly why: CompassText;
 }
 
+export interface TeeBadgeCompassContestedClusterRow {
+	readonly clusterIndex: CompassValue;
+	readonly teeIds: readonly string[];
+	readonly badgeIds: readonly string[];
+	readonly badgeHoles: readonly CompassValue[];
+	readonly badgeLabels: readonly string[];
+	readonly pairCount: CompassValue;
+}
+
 export interface TeeBadgeCompassCounts {
 	readonly eligibleTees: CompassValue;
 	readonly noPadTees: CompassValue;
 	readonly locked: CompassValue;
 	readonly lockedWeakPose: CompassValue;
-	readonly ambiguous: CompassValue;
+	readonly abstainedContested: CompassValue;
 	readonly unmatchedBadges: CompassValue;
 	readonly unusedTees: CompassValue;
 }
@@ -86,6 +97,7 @@ export interface TeeBadgeCompassReceipt {
 	readonly lockRows: readonly TeeBadgeCompassLockRow[];
 	readonly noPadRows: readonly TeeBadgeCompassNoPadRow[];
 	readonly unmatchedRows: readonly TeeBadgeCompassUnmatchedRow[];
+	readonly contestedClusterRows: readonly TeeBadgeCompassContestedClusterRow[];
 	readonly counts: TeeBadgeCompassCounts;
 	readonly sigma: TeeBadgeCompassSigmaSummary;
 	readonly cliText: string;
@@ -150,6 +162,9 @@ function isUnmatchedBadge(drawable: Drawable): boolean {
 
 function lockRowFor(drawable: Drawable): TeeBadgeCompassLockRow {
 	const metadata = drawable.metadata ?? {};
+	const waveNumberStr = typeof metadata.waveNumber === 'string' ? metadata.waveNumber : UNKNOWN;
+	const waveNumber =
+		waveNumberStr !== UNKNOWN && /^\d+$/.test(waveNumberStr) ? Number(waveNumberStr) : UNKNOWN;
 	return {
 		ref: text(drawable.ref),
 		teeId: text(metadata.teeId),
@@ -159,6 +174,8 @@ function lockRowFor(drawable: Drawable): TeeBadgeCompassLockRow {
 		angularErrorDeg: numeric(drawable.values, 'angularErrorDeg'),
 		distancePx: numeric(drawable.values, 'distancePx'),
 		weight: numeric(drawable.values, 'weight'),
+		waveNumber,
+		forcedBy: text(metadata.forcedBy),
 		runnerUpHole: numeric(drawable.values, 'runnerUpHole'),
 		runnerUpHoleLabel: text(metadata.runnerUpBadgeLabel),
 		runnerUpAngularErrorDeg: numeric(drawable.values, 'runnerUpAngularErrorDeg'),
@@ -203,7 +220,7 @@ function countsFor(unit: UnitTrace): TeeBadgeCompassCounts {
 		noPadTees: measurementValue(unit, 'noPadTees'),
 		locked: measurementValue(unit, 'locked'),
 		lockedWeakPose: measurementValue(unit, 'lockedWeakPose'),
-		ambiguous: measurementValue(unit, 'ambiguous'),
+		abstainedContested: measurementValue(unit, 'abstainedContested'),
 		unmatchedBadges: measurementValue(unit, 'unmatchedBadges'),
 		unusedTees: measurementValue(unit, 'unusedTees')
 	};
@@ -234,7 +251,8 @@ function cliLines(
 	sigma: TeeBadgeCompassSigmaSummary,
 	lockRows: readonly TeeBadgeCompassLockRow[],
 	noPadRows: readonly TeeBadgeCompassNoPadRow[],
-	unmatchedRows: readonly TeeBadgeCompassUnmatchedRow[]
+	unmatchedRows: readonly TeeBadgeCompassUnmatchedRow[],
+	contestedClusterRows: readonly TeeBadgeCompassContestedClusterRow[]
 ): string[] {
 	const lines = [
 		'TEE→BADGE COMPASS',
@@ -257,17 +275,20 @@ function cliLines(
 		'',
 		`eligibleTees=${valueText(counts.eligibleTees)} noPadTees=${valueText(counts.noPadTees)} ` +
 			`locked=${valueText(counts.locked)} lockedWeakPose=${valueText(counts.lockedWeakPose)} ` +
-			`ambiguous=${valueText(counts.ambiguous)} unmatchedBadges=${valueText(counts.unmatchedBadges)} ` +
+			`abstainedContested=${valueText(counts.abstainedContested)} unmatchedBadges=${valueText(counts.unmatchedBadges)} ` +
 			`unusedTees=${valueText(counts.unusedTees)}`,
 		'',
 		'TEE ROWS',
-		'teeId | lockedHole | angularErrorDeg | distancePx | runnerUpHole | gapDeg | verdict | ' +
+		'teeId | wave | lockedHole | angularErrorDeg | distancePx | runnerUpHole | gapDeg | verdict | ' +
 			'supportPx | fill | majorPx | minorPx | courseMedianSupportPx | courseMedianFill | poseDegraded'
 	];
 	for (const row of lockRows) {
+		const waveStr = typeof row.waveNumber === 'number' ? String(row.waveNumber) : UNKNOWN;
+		const forcedByStr = row.forcedBy === UNKNOWN || row.forcedBy === '' ? '' : ` (forced: ${row.forcedBy})`;
 		lines.push(
 			[
 				row.teeId,
+				waveStr + forcedByStr,
 				holeText(row.hole, row.holeLabel),
 				valueText(row.angularErrorDeg),
 				valueText(row.distancePx),
@@ -294,6 +315,16 @@ function cliLines(
 		lines.push(`${row.badgeId} | ${holeText(row.hole, row.holeLabel)} | ${row.why}`);
 	}
 	if (unmatchedRows.length === 0) lines.push('(none)');
+
+	if (contestedClusterRows.length > 0) {
+		lines.push('', 'CONTESTED CLUSTERS', 'clusterIndex | teeIds | badgeIds | badgeHoles | pairCount');
+		for (const row of contestedClusterRows) {
+			const badgeHolesStr = row.badgeHoles.map((h) => valueText(h)).join(',');
+			lines.push(
+				`${valueText(row.clusterIndex)} | ${row.teeIds.join(',')} | ${row.badgeIds.join(',')} | ${badgeHolesStr} | ${valueText(row.pairCount)}`
+			);
+		}
+	}
 	return lines;
 }
 
@@ -331,12 +362,84 @@ export function buildTeeBadgeCompassReceipt(unit: UnitTrace, run: RunTrace): Tee
 	const lockRows = acceptedPaths.map(lockRowFor);
 	const noPadRows = unit.drawables.filter(isNoPadPoint).map(noPadRowFor);
 	const unmatchedRows = unit.drawables.filter(isUnmatchedBadge).map(unmatchedRowFor);
+
+	// Extract contested clusters from drawables with role='contested-tee'
+	const contestedDrawables = unit.drawables.filter(
+		(d) => d.type === 'point' && d.metadata?.role === 'contested-tee'
+	);
+	const contestedClusterMap = new Map<
+		number,
+		{
+			teeIds: Set<string>;
+			badgeIds: Set<string>;
+			badgeHoles: Map<string, CompassValue>;
+			badgeLabels: Map<string, string>;
+		}
+	>();
+
+	for (const drawable of contestedDrawables) {
+		const clusterIndexStr = drawable.metadata?.clusterIndex;
+		const clusterIndex =
+			typeof clusterIndexStr === 'string' && /^\d+$/.test(clusterIndexStr) ? Number(clusterIndexStr) : -1;
+		if (clusterIndex >= 0) {
+			if (!contestedClusterMap.has(clusterIndex)) {
+				contestedClusterMap.set(clusterIndex, {
+					teeIds: new Set(),
+					badgeIds: new Set(),
+					badgeHoles: new Map(),
+					badgeLabels: new Map()
+				});
+			}
+			const teeId = text(drawable.metadata?.teeId);
+			if (teeId !== UNKNOWN) {
+				contestedClusterMap.get(clusterIndex)!.teeIds.add(teeId);
+			}
+			// Extract badge IDs and holes from metadata
+			const badgeIdStr = typeof drawable.metadata?.clusterBadgeIds === 'string'
+				? drawable.metadata.clusterBadgeIds
+				: '';
+			const badgeLabelStr = typeof drawable.metadata?.clusterBadgeLabels === 'string'
+				? drawable.metadata.clusterBadgeLabels
+				: '';
+			if (badgeIdStr) {
+				const badgeIds = badgeIdStr.split(',');
+				const badgeLabels = badgeLabelStr.split(',');
+				for (let i = 0; i < badgeIds.length; i++) {
+					const badgeId = badgeIds[i];
+					const label = badgeLabels[i]?.trim() || UNKNOWN;
+					const hole = exactPositiveHole(label);
+					contestedClusterMap.get(clusterIndex)!.badgeIds.add(badgeId);
+					contestedClusterMap.get(clusterIndex)!.badgeHoles.set(badgeId, hole ?? UNKNOWN);
+					contestedClusterMap.get(clusterIndex)!.badgeLabels.set(badgeId, label);
+				}
+			}
+		}
+	}
+
+	const contestedClusterRows: TeeBadgeCompassContestedClusterRow[] = [];
+	for (const [clusterIndex, { teeIds, badgeIds, badgeHoles, badgeLabels }] of contestedClusterMap) {
+		const sortedTeeIds = [...teeIds].sort();
+		const sortedBadgeIds = [...badgeIds].sort();
+		const badgeHolesList = sortedBadgeIds.map((bid) => badgeHoles.get(bid) ?? UNKNOWN);
+		const badgeLabelsList = sortedBadgeIds.map((bid) => badgeLabels.get(bid) ?? UNKNOWN);
+		contestedClusterRows.push({
+			clusterIndex,
+			teeIds: sortedTeeIds,
+			badgeIds: sortedBadgeIds,
+			badgeHoles: badgeHolesList,
+			badgeLabels: badgeLabelsList,
+			pairCount: badgeIds.size
+		});
+	}
+	// Sort by clusterIndex for determinism
+	contestedClusterRows.sort((a, b) => (a.clusterIndex as number) - (b.clusterIndex as number));
+
 	const counts = countsFor(unit);
 	const sigma = sigmaSummary(unit);
 	const metadata = runMetadata(run, unit.featureId);
-	const cliText = cliLines(metadata, counts, sigma, lockRows, noPadRows, unmatchedRows).join('\n');
+	const cliText = cliLines(metadata, counts, sigma, lockRows, noPadRows, unmatchedRows, contestedClusterRows).join('\n');
 	const plan = planFor(unit, run, acceptedPaths, cliText);
-	return { plan, lockRows, noPadRows, unmatchedRows, counts, sigma, cliText };
+	return { plan, lockRows, noPadRows, unmatchedRows, contestedClusterRows, counts, sigma, cliText };
 }
 
 /** FeatureRender seam: one exact forwarded layer over the bright-mask base. */

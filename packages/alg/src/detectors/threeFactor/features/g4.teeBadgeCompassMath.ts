@@ -573,8 +573,15 @@ function hungarianMaximum(weights: readonly (readonly number[])[]): readonly [nu
  * 'ambiguous' pairs are never further downgraded by pose quality: they are
  * already the "not confident" bucket for a different reason (a close
  * runner-up), and pose quality does not change that.
+ * 'abstained-contested' (wave-peeling toposort resolver, see
+ * resolveClaimsByWavePeeling below): a tee that never became a forced
+ * "naked single" against any badge -- it and every badge it still competes
+ * for are named as one contested cluster and the resolver explicitly
+ * abstains rather than guess. Distinct from 'ambiguous' (the max-weight
+ * matcher's own runner-up-gap verdict): the two verdicts belong to
+ * different resolution strategies and are never produced by the same call.
  */
-export type CompassVerdict = 'locked' | 'locked-weak-pose' | 'ambiguous';
+export type CompassVerdict = 'locked' | 'locked-weak-pose' | 'ambiguous' | 'abstained-contested';
 
 export interface CompassRunnerUp {
 	readonly badgeId: string;
@@ -600,6 +607,23 @@ export interface CompassLock extends CompassGeometryRow {
 	 * is nonzero the endpoint visibly misses the badge by that amount,
 	 * rather than silently snapping onto it. */
 	readonly axisEndpointPx: readonly [number, number];
+	/** Wave-peeling only (resolveClaimsByWavePeeling): the pass number this
+	 * lock was resolved in -- 1 means it was a naked single from the start,
+	 * needing no other lock to force it. Absent (undefined) for locks
+	 * produced by the max-weight matcher (matchTeeBadgeCompass). */
+	readonly waveNumber?: number;
+	/** Wave-peeling only: badgeIds of earlier-wave locks whose removal from
+	 * the candidate graph is what forced this lock into a naked single.
+	 * Empty for a wave-1 lock. Absent for the max-weight matcher's locks. */
+	readonly forcedBy?: readonly string[];
+	/** Wave-peeling only, present when verdict is 'abstained-contested': the
+	 * full badgeId set of the contested cluster this tee belongs to. Absent
+	 * otherwise. */
+	readonly clusterBadgeIds?: readonly string[];
+	/** Wave-peeling only, present when verdict is 'abstained-contested': the
+	 * index of the contested cluster this tee belongs to (stable within one
+	 * run, not across runs). Absent otherwise. */
+	readonly clusterIndex?: number;
 }
 
 export interface CompassUnmatchedBadge {
@@ -879,5 +903,216 @@ export function buildTeeBadgeCompassEvidence(
 		assignmentRead: false,
 		locksHoleLabeled,
 		unmatchedBadgesHoleLabeled
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Wave-peeling toposort: pure claim resolution via iterated forced pairing.
+
+export interface WavePeelLock {
+	readonly teeId: string;
+	readonly badgeId: string;
+	readonly wave: number;
+	/** badgeIds of earlier locks whose removal forced this one; empty for wave 1 */
+	readonly forcedBy: readonly string[];
+}
+
+export interface ContestedCluster {
+	readonly teeIds: readonly string[];
+	readonly badgeIds: readonly string[];
+	readonly pairs: readonly {
+		readonly teeId: string;
+		readonly badgeId: string;
+		readonly angularErrorDeg: number;
+	}[];
+}
+
+export interface WavePeelResult {
+	readonly locks: readonly WavePeelLock[];
+	readonly contestedClusters: readonly ContestedCluster[];
+}
+
+/**
+ * Pure toposort wave-peeling claim resolver. Kahn-style: iteratively lock
+ * every pair where the tee has exactly one edge OR the badge has exactly one
+ * edge, removing locked tees/badges and their edges, until no forced pair
+ * remains. Remaining connected components become contested clusters.
+ *
+ * Deterministic: iteration sorted by teeId/badgeId. Weak-pose tees are
+ * assumed to be filtered by the caller (do not reach here).
+ */
+export function resolveClaimsByWavePeeling(
+	edges: readonly { teeId: string; badgeId: string; angularErrorDeg: number }[]
+): WavePeelResult {
+	const locks: WavePeelLock[] = [];
+	const edgesByKey = new Map<string, { teeId: string; badgeId: string; angularErrorDeg: number }>();
+	const teeAdj = new Map<string, Set<string>>();
+	const badgeAdj = new Map<string, Set<string>>();
+
+	for (const edge of edges) {
+		const key = `${edge.teeId} ${edge.badgeId}`;
+		edgesByKey.set(key, edge);
+		if (!teeAdj.has(edge.teeId)) teeAdj.set(edge.teeId, new Set());
+		if (!badgeAdj.has(edge.badgeId)) badgeAdj.set(edge.badgeId, new Set());
+		teeAdj.get(edge.teeId)!.add(edge.badgeId);
+		badgeAdj.get(edge.badgeId)!.add(edge.teeId);
+	}
+
+	const originalTeeNeighbors = new Map<string, Set<string>>();
+	const originalBadgeNeighbors = new Map<string, Set<string>>();
+	for (const edge of edges) {
+		if (!originalTeeNeighbors.has(edge.teeId)) originalTeeNeighbors.set(edge.teeId, new Set());
+		if (!originalBadgeNeighbors.has(edge.badgeId)) originalBadgeNeighbors.set(edge.badgeId, new Set());
+		originalTeeNeighbors.get(edge.teeId)!.add(edge.badgeId);
+		originalBadgeNeighbors.get(edge.badgeId)!.add(edge.teeId);
+	}
+
+	const locksByBadgeId = new Map<string, WavePeelLock>();
+	const locksByTeeId = new Map<string, WavePeelLock>();
+
+	let wave = 0;
+	let forcedAny = true;
+
+	while (forcedAny) {
+		forcedAny = false;
+		wave++;
+
+		// Find all pairs where tee's edge set = {badge} and no other tee has the same badge as sole option
+		const pairsToProcess: Array<{ teeId: string; badgeId: string; angularErrorDeg: number }> = [];
+		const badgeToSoleTees = new Map<string, string[]>(); // badge -> list of tees with only this badge
+
+		for (const [teeId, badgeIds] of teeAdj) {
+			if (badgeIds.size === 1) {
+				const badgeId = [...badgeIds][0]!;
+				if (!badgeToSoleTees.has(badgeId)) badgeToSoleTees.set(badgeId, []);
+				badgeToSoleTees.get(badgeId)!.push(teeId);
+			}
+		}
+
+		// Only lock if exactly one tee has this badge as sole option
+		for (const [badgeId, teeIds] of badgeToSoleTees) {
+			if (teeIds.length === 1) {
+				const teeId = teeIds[0]!;
+				pairsToProcess.push(edgesByKey.get(`${teeId} ${badgeId}`)!);
+			}
+		}
+
+		if (pairsToProcess.length === 0) break;
+
+		forcedAny = true;
+		pairsToProcess.sort((a, b) => a.teeId.localeCompare(b.teeId) || a.badgeId.localeCompare(b.badgeId));
+
+		for (const pair of pairsToProcess) {
+			const teeBadges = teeAdj.get(pair.teeId);
+			const badgeTees = badgeAdj.get(pair.badgeId);
+			if (!teeBadges?.has(pair.badgeId) || !badgeTees?.has(pair.teeId)) continue;
+
+			const forcedBySet = new Set<string>();
+			const teeOriginalBadges = originalTeeNeighbors.get(pair.teeId) || new Set();
+			for (const badgeId of teeOriginalBadges) {
+				if (badgeId !== pair.badgeId) {
+					const locked = locksByBadgeId.get(badgeId);
+					if (locked && locked.wave < wave) forcedBySet.add(badgeId);
+				}
+			}
+
+			const badgeOriginalTees = originalBadgeNeighbors.get(pair.badgeId) || new Set();
+			for (const teeId of badgeOriginalTees) {
+				if (teeId !== pair.teeId) {
+					const locked = locksByTeeId.get(teeId);
+					if (locked && locked.wave < wave) forcedBySet.add(locked.badgeId);
+				}
+			}
+
+			const lock: WavePeelLock = {
+				teeId: pair.teeId,
+				badgeId: pair.badgeId,
+				wave,
+				forcedBy: [...forcedBySet].sort()
+			};
+
+			locks.push(lock);
+			locksByBadgeId.set(pair.badgeId, lock);
+			locksByTeeId.set(pair.teeId, lock);
+
+			for (const badgeId of [...teeAdj.get(pair.teeId)!]) {
+				edgesByKey.delete(`${pair.teeId} ${badgeId}`);
+				teeAdj.get(pair.teeId)!.delete(badgeId);
+				badgeAdj.get(badgeId)!.delete(pair.teeId);
+			}
+
+			for (const teeId of [...badgeAdj.get(pair.badgeId)!]) {
+				edgesByKey.delete(`${teeId} ${pair.badgeId}`);
+				teeAdj.get(teeId)!.delete(pair.badgeId);
+				badgeAdj.get(pair.badgeId)!.delete(teeId);
+			}
+
+			if (teeAdj.get(pair.teeId)!.size === 0) teeAdj.delete(pair.teeId);
+			if (badgeAdj.get(pair.badgeId)!.size === 0) badgeAdj.delete(pair.badgeId);
+		}
+	}
+
+	const remainingTeeIds = new Set(teeAdj.keys());
+	const visitedTees = new Set<string>();
+	const visitedBadges = new Set<string>();
+	const contestedClusters: ContestedCluster[] = [];
+
+	for (const teeId of [...remainingTeeIds].sort()) {
+		if (visitedTees.has(teeId)) continue;
+
+		const componentTeeIds = new Set<string>();
+		const componentBadgeIds = new Set<string>();
+		const queue: { type: 'tee' | 'badge'; id: string }[] = [{ type: 'tee', id: teeId }];
+
+		while (queue.length > 0) {
+			const current = queue.shift()!;
+
+			if (current.type === 'tee') {
+				if (visitedTees.has(current.id)) continue;
+				visitedTees.add(current.id);
+				componentTeeIds.add(current.id);
+
+				const neighbors = teeAdj.get(current.id) || new Set();
+				for (const badgeId of neighbors) {
+					if (!visitedBadges.has(badgeId)) queue.push({ type: 'badge', id: badgeId });
+				}
+			} else {
+				if (visitedBadges.has(current.id)) continue;
+				visitedBadges.add(current.id);
+				componentBadgeIds.add(current.id);
+
+				const neighbors = badgeAdj.get(current.id) || new Set();
+				for (const teeId of neighbors) {
+					if (!visitedTees.has(teeId)) queue.push({ type: 'tee', id: teeId });
+				}
+			}
+		}
+
+		const pairs: Array<{
+			teeId: string;
+			badgeId: string;
+			angularErrorDeg: number;
+		}> = [];
+
+		for (const edge of edges) {
+			if (componentTeeIds.has(edge.teeId) && componentBadgeIds.has(edge.badgeId)) {
+				pairs.push(edge);
+			}
+		}
+
+		if (pairs.length > 0) {
+			contestedClusters.push({
+				teeIds: [...componentTeeIds].sort(),
+				badgeIds: [...componentBadgeIds].sort(),
+				pairs: pairs.sort((a, b) => a.teeId.localeCompare(b.teeId) || a.badgeId.localeCompare(b.badgeId))
+			});
+		}
+	}
+
+	locks.sort((a, b) => a.wave - b.wave || a.teeId.localeCompare(b.teeId));
+
+	return {
+		locks,
+		contestedClusters: contestedClusters.sort((a, b) => a.teeIds[0]?.localeCompare(b.teeIds[0] || '') || 0)
 	};
 }

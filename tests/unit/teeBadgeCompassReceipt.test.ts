@@ -15,7 +15,7 @@ const lockedDrawable: Drawable = {
 	verdict: 'accepted',
 	visualRole: 'tee-badge-path',
 	ref: lockedRef,
-	reason: 'hole=H14; verdict=locked; angularErrorDeg=1.200; distancePx=100.0; runner-up=9 gap=18.500deg; tee-local geometry only',
+	reason: 'wave 1; hole=H14; verdict=locked; angularErrorDeg=1.200; distancePx=100.0; runner-up=9 gap=18.500deg; tee-local geometry only',
 	values: {
 		hole: 14,
 		angularErrorDeg: 1.2,
@@ -39,7 +39,9 @@ const lockedDrawable: Drawable = {
 		runnerUpBadgeLabel: '9',
 		verdict: 'locked',
 		poseDegraded: 'false',
-		poseDegradedReason: 'n/a'
+		poseDegradedReason: 'n/a',
+		waveNumber: '1',
+		forcedBy: ''
 	}
 } as Drawable;
 
@@ -52,7 +54,7 @@ const weakPoseDrawable: Drawable = {
 	verdict: 'accepted',
 	visualRole: 'tee-badge-path',
 	ref: 'teeBadgeCompass:tee-2:badge-2',
-	reason: 'hole=H5; verdict=locked-weak-pose; angularErrorDeg=2.000; distancePx=50.0; POSE DEGRADED (fill too low)',
+	reason: 'wave 1; hole=H5; verdict=locked-weak-pose; angularErrorDeg=2.000; distancePx=50.0; POSE DEGRADED (fill too low)',
 	values: { hole: 5, angularErrorDeg: 2, distancePx: 50, weight: 0.9, supportPx: 40, fill: 0.2, majorPx: 15, minorPx: 6, courseMedianSupportPx: 120, courseMedianFill: 0.7 },
 	metadata: {
 		role: 'tee-lock',
@@ -62,7 +64,9 @@ const weakPoseDrawable: Drawable = {
 		runnerUpBadgeLabel: 'none',
 		verdict: 'locked-weak-pose',
 		poseDegraded: 'true',
-		poseDegradedReason: 'fill too low'
+		poseDegradedReason: 'fill too low',
+		waveNumber: '1',
+		forcedBy: ''
 	}
 } as Drawable;
 
@@ -125,7 +129,7 @@ function unit(drawables: Drawable[]): UnitTrace {
 			{ name: 'noPadTees', count: 1, min: 1, max: 1, sum: 1 },
 			{ name: 'locked', count: 1, min: 1, max: 1, sum: 1 },
 			{ name: 'lockedWeakPose', count: 1, min: 1, max: 1, sum: 1 },
-			{ name: 'ambiguous', count: 1, min: 0, max: 0, sum: 0 },
+			{ name: 'abstainedContested', count: 1, min: 0, max: 0, sum: 0 },
 			{ name: 'unmatchedBadges', count: 1, min: 1, max: 1, sum: 1 },
 			{ name: 'unusedTees', count: 1, min: 0, max: 0, sum: 0 }
 		]
@@ -181,6 +185,7 @@ describe('teeBadgeCompass acceptance receipt and render seam', () => {
 		expect(receipt.cliText).toContain('TEE ROWS');
 		for (const column of [
 			'teeId',
+			'wave',
 			'lockedHole',
 			'angularErrorDeg',
 			'distancePx',
@@ -197,7 +202,7 @@ describe('teeBadgeCompass acceptance receipt and render seam', () => {
 		]) {
 			expect(receipt.cliText).toContain(column);
 		}
-		expect(receipt.cliText).toContain('tee-1 | H14 |');
+		expect(receipt.cliText).toContain('tee-1 | 1 | H14 |');
 		expect(receipt.cliText).toContain('locked-weak-pose');
 		expect(receipt.cliText).toContain('DEGRADED (fill too low)');
 		expect(receipt.cliText).toContain('tee-3 | no-pad |');
@@ -211,9 +216,12 @@ describe('teeBadgeCompass acceptance receipt and render seam', () => {
 		expect(lockedRow.verdict).toBe('locked');
 		expect(lockedRow.runnerUpHole).toBe(9);
 		expect(lockedRow.gapDeg).toBe(18.5);
+		expect(lockedRow.waveNumber).toBe(1);
+		expect(lockedRow.forcedBy).toBe('UNKNOWN');
 		const weakRow = receipt.lockRows.find((row) => row.teeId === 'tee-2')!;
 		expect(weakRow.verdict).toBe('locked-weak-pose');
 		expect(weakRow.poseDegraded).toBe('true');
+		expect(weakRow.waveNumber).toBe(1);
 
 		expect(receipt.noPadRows).toEqual([
 			{ teeId: 'tee-3', reason: 'teeBadgeCompass: tee excluded -- no pad geometry' }
@@ -227,7 +235,7 @@ describe('teeBadgeCompass acceptance receipt and render seam', () => {
 			noPadTees: 1,
 			locked: 1,
 			lockedWeakPose: 1,
-			ambiguous: 0,
+			abstainedContested: 0,
 			unmatchedBadges: 1,
 			unusedTees: 0
 		});
