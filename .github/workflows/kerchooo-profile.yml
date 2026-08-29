@@ -1,0 +1,64 @@
+name: KERCHOOOOO recovery profile
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-profile
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-profile
+          path: ChainSpot
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and patch
+        working-directory: ChainSpot
+        run: |
+          npm ci
+          ./lab setup
+          python3 .github/kerchooo_profile_patch.py
+
+      - name: Profile NorthPark
+        working-directory: ChainSpot
+        run: |
+          set -o pipefail
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark 2>&1 | tee /tmp/profile.log
+          python3 - <<'PY'
+          import re
+          from collections import defaultdict
+          rows=[]
+          pattern=re.compile(r'KERCH_FIT pixels=(\d+) cols=(\d+) rows=(\d+) centers=(\d+) angles=(\d+) poses=(\d+) bbox=(\d+)x(\d+)')
+          for line in open('/tmp/profile.log', errors='replace'):
+              m=pattern.search(line)
+              if m:
+                  rows.append(tuple(map(int,m.groups())))
+          print('=== KERCHOOOOO FIT PROFILE ===')
+          print('fit calls:',len(rows))
+          print('center evaluations:',sum(r[3] for r in rows))
+          print('pose evaluations:',sum(r[5] for r in rows))
+          buckets=defaultdict(lambda:[0,0,0])
+          for r in rows:
+              pixels,_,_,centers,_,poses,_,_=r
+              key='1' if pixels==1 else '2-3' if pixels<=3 else '4-7' if pixels<=7 else '8-15' if pixels<=15 else '16+'
+              b=buckets[key]; b[0]+=1; b[1]+=centers; b[2]+=poses
+          for key in ['1','2-3','4-7','8-15','16+']:
+              calls,centers,poses=buckets[key]
+              print(f'pixels {key}: calls={calls} centers={centers} poses={poses}')
+          print('top 20 fits by poses:')
+          for r in sorted(rows,key=lambda r:r[5],reverse=True)[:20]:
+              print(f'  pixels={r[0]} bbox={r[6]}x{r[7]} centers={r[3]} poses={r[5]}')
+          PY
