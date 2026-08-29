@@ -1,0 +1,105 @@
+name: KERCHOOOOO v9 benchmark
+
+on:
+  push:
+    branches:
+      - perf/kerchooo-v9
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    if: ${{ !contains(github.event.head_commit.message, '[kerch-done]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/kerchooo-v9
+          path: ChainSpot
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and build V6 baseline
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          ./lab setup
+
+      - name: V6 NorthPark baseline
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/v6.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' > /tmp/v6.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' > /tmp/v6.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' > /tmp/v6.theta.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' > /tmp/v6.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/v6.receipt.txt
+          echo "V6_WALL=$(cat /tmp/v6.wall)s"
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' /tmp/v6.receipt.txt || true
+
+      - name: Apply V9 rebuild and test
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          python3 .github/kerchooo_v9_patch.py
+          npm run build --workspace=@chainspot/alg
+          npm run check
+          npx vitest run tests/unit/teeRecoveryFeature.test.ts
+
+      - name: V9 NorthPark exact evidence parity
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          /usr/bin/time -f '%e' -o /tmp/v9.wall ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json NorthPark
+          root=artifacts/sweep/dev72-recovered-default/batches/NorthPark/full
+          sha256sum "$root/renders/run/run.visual.png" | awk '{print $1}' > /tmp/v9.visual.sha
+          sha256sum "$root/artifacts/scalarField/supportField.support.bin" | awk '{print $1}' > /tmp/v9.support.sha
+          sha256sum "$root/artifacts/orientationField/supportField.bestTheta.bin" | awk '{print $1}' > /tmp/v9.theta.sha
+          sha256sum "$root/artifacts/measurementTable/assignment.selection.table.bin" | awk '{print $1}' > /tmp/v9.assignment.sha
+          cp "$root/run.receipt.txt" /tmp/v9.receipt.txt
+          diff -u /tmp/v6.visual.sha /tmp/v9.visual.sha
+          diff -u /tmp/v6.support.sha /tmp/v9.support.sha
+          diff -u /tmp/v6.theta.sha /tmp/v9.theta.sha
+          diff -u /tmp/v6.assignment.sha /tmp/v9.assignment.sha
+          python3 - <<'PY'
+          base=float(open('/tmp/v6.wall').read())
+          opt=float(open('/tmp/v9.wall').read())
+          print(f'KERCHOOOOO V9 incremental: {base:.2f}s -> {opt:.2f}s = {base/opt:.2f}x, {(1-opt/base)*100:.1f}% faster than V6')
+          PY
+          grep -E 'supportField \||teeRecovery \||teeRecovery.shardDiscovery' /tmp/v9.receipt.txt || true
+
+      - name: Dev6 rebuilt V9
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/sweep
+          ./lab sweep batch --through G4 packages/alg/src/detectors/threeFactor/configs/default.json dev
+          find artifacts/sweep -path '*/batches/summary.txt' -exec cat {} \;
+
+      - name: Commit proven V9 source only
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          git config user.name 'ChainSpot KERCHOOOOO'
+          git config user.email 'actions@users.noreply.github.com'
+          git add packages/alg/src/detectors/threeFactor/features/g3.teeRecovery.ts packages/alg/src/detectors/threeFactor/ribbon.ts
+          git rm .github/kerchooo_v9_patch.py .github/workflows/kerchooo-v9.yml
+          git commit -m 'KERCHOOOOO v9: prune impossible recovery poses and direct ribbon gradients [kerch-done]'
+          git push origin HEAD:perf/kerchooo-v9
