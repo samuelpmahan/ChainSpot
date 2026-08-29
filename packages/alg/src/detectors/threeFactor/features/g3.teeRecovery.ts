@@ -13,14 +13,10 @@ import type { OpaqueDetector } from '../occlusion';
 import { detectScreenChromeRegions, pointInScreenChrome } from '../screenChrome';
 
 /** Frozen seam interface for rail extraction (sibling worker A). Do not re-implement. */
-export type Px = readonly [number, number];
-export interface OccluderFootprint { readonly kind: 'badge'|'basket'|'c2-chrome'|'screen-chrome'; readonly pixels: ReadonlySet<string>; }
-export interface RailCandidate { readonly points: readonly Px[]; readonly angleRad: number; readonly lengthPx: number; readonly straightnessScore: number; readonly interruptionPx: number; readonly qualityScore: number; readonly occludedFractionPx: number; }
-// Placeholder export for local tests before sibling A lands
-export function extractRailCandidates(_pixels: readonly Px[], _occluders: readonly OccluderFootprint[]): readonly RailCandidate[] {
-	// Test double: will be replaced by sibling worker A's actual implementation
-	return [];
-}
+export type { Px, OccluderFootprint, RailCandidate } from '../geometry/railExtraction';
+export { extractRailCandidates } from '../geometry/railExtraction';
+import type { Px, OccluderFootprint, RailCandidate } from '../geometry/railExtraction';
+import { extractRailCandidates } from '../geometry/railExtraction';
 
 export interface RecoveryFit {
 	readonly centerXPx: number;
@@ -333,6 +329,7 @@ function projectRailFit(
 	let cx: number, cy: number;
 	let railSpan: number;
 	let railThickness: number;
+	let minAlong: number, maxAlong: number;
 
 	if (extractedRail) {
 		// Pre-identified rail: use its angle and points directly.
@@ -348,15 +345,21 @@ function projectRailFit(
 		cx = sumX / extractedRail.points.length;
 		cy = sumY / extractedRail.points.length;
 		railSpan = extractedRail.lengthPx;
-		// Rail thickness estimated from the extracted component's spread perpendicular
-		// to the identified line.
+		// Rail thickness AND along-axis extent estimated from the extracted
+		// rail's own points' spread relative to its own centroid -- same
+		// projection the thin-band branch performs on its pixels below, so
+		// the legacy along-axis center-bounds math applies unchanged.
 		const c = Math.cos(angle);
 		const ss = Math.sin(angle);
 		const nx = -ss, ny = c;
+		minAlong = Infinity; maxAlong = -Infinity;
 		let minNormal = Infinity, maxNormal = -Infinity;
 		for (const [x, y] of extractedRail.points) {
 			const dx = x - cx, dy = y - cy;
+			const along = dx * c + dy * ss;
 			const normal = dx * nx + dy * ny;
+			minAlong = Math.min(minAlong, along);
+			maxAlong = Math.max(maxAlong, along);
 			minNormal = Math.min(minNormal, normal);
 			maxNormal = Math.max(maxNormal, normal);
 		}
@@ -373,7 +376,7 @@ function projectRailFit(
 		const c = Math.cos(angle);
 		const ss = Math.sin(angle);
 		const nx = -ss, ny = c;
-		let minAlong = Infinity, maxAlong = -Infinity;
+		minAlong = Infinity; maxAlong = -Infinity;
 		let minNormal = Infinity, maxNormal = -Infinity;
 		for (const [x, y] of pixels) {
 			const dx = x - cx, dy = y - cy;
@@ -398,8 +401,8 @@ function projectRailFit(
 	const allowedRailThickness = Math.max(0, thickness) + 2 * RASTER_TOLERANCE_PX;
 	if (railThickness > allowedRailThickness || railSpan > 2 * halfWidth + 2 * RASTER_TOLERANCE_PX) return undefined;
 
-	const lowCenterAlong = (extractedRail ? 0 : 0) - halfWidth;  // Span is relative to fitted center
-	const highCenterAlong = (extractedRail ? 0 : 0) + halfWidth;
+	const lowCenterAlong = maxAlong - halfWidth;
+	const highCenterAlong = minAlong + halfWidth;
 	if (lowCenterAlong > highCenterAlong + RASTER_TOLERANCE_PX) return undefined;
 	const centerAlong = Math.max(lowCenterAlong, Math.min(highCenterAlong, 0));
 
