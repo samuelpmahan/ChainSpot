@@ -1,0 +1,36 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "phantom-tee-whitelist-on",
+	"note": "C01 complete-occlusion fallback with owner-curated whitelist: holes in the whitelist are explicitly authorized for phantom injection before heuristic fallback allocation. The AC12 entry documents the AlexClark H12 case where the tee is genuinely invisible and phantom injection is owner-endorsed.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"teeRecovery",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"phantomTee",
+		"zfit"
+	],
+	"gates": {
+		"G4": {
+			"phantomTee": {
+				"enabled": true,
+				"knobs": {
+					"minViableScore": 0,
+					"whitelist": [
+						{
+							"hole": "12",
+							"note": "AC12: tee genuinely invisible — owner-declared, the reason phantomTee exists"
+						}
+					]
+				}
+			}
+		}
+	}
+}

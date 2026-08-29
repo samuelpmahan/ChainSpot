@@ -658,6 +658,11 @@
 											"type": "number",
 											"description": "owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.",
 											"default": 1
+										},
+										"whitelist": {
+											"type": "array",
+											"description": "owner-curated whitelist of holes authorized for phantom injection: each entry { hole: \"12\", note: \"AC12: tee genuinely invisible — owner-declared\" } authorizes phantom synthesis for that specific hole; whitelisted holes are prioritized within the maxCompletions budget; non-whitelisted holes may still receive phantoms if budget allows. Empty list = no whitelist constraint, behavior unchanged.",
+											"default": []
 										}
 									}
 								}
@@ -666,7 +671,7 @@
 						"teeRecovery": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Frozen baseline: recover assignment-missing tees when every visible component pixel fits a course-local hollow tee support pointing at its numbered badge; phantom completion remains terminal and default-OFF.",
+							"description": "G4 endpoint completion: visible tees claim numbered badges by their own pad axis; only badges with zero visible-tee ray coverage enter shard recovery, and a shard becomes a recovered tee only when every visible pixel fits a course-local hollow tee support pointing at that badge. No path, basket assignment, or G6 decision is consulted.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",

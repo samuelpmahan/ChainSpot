@@ -27,6 +27,11 @@ import { g5RibbonFeature } from './g5.ribbon';
 import { g5RoutingFeature } from './g5.routing';
 import { phantomTeeRender } from './g3.teeReceipts';
 
+export interface WhitelistEntry {
+	readonly hole: string; // e.g., "12" — keyed on hole label since that's the runtime context available
+	readonly note: string; // e.g., "AC12: tee genuinely invisible — owner-declared, the reason phantomTee exists"
+}
+
 export const phantomTeeFeature = {
 	id: 'phantomTee',
 	// This consumes completed G4 assignment evidence, so it must not appear in
@@ -47,6 +52,20 @@ export const phantomTeeFeature = {
 			note: 'owner policy 2026-08-28: phantom completion is a scalpel, not a spray — synthesize at most this many phantom tees per run; holes beyond the budget stay loudly unresolved. A run wanting more phantoms has a detection problem, not a completion problem.',
 			validate: (value: unknown) =>
 				Number.isInteger(value) && (value as number) >= 1 ? null : 'maxCompletions must be a positive integer'
+		},
+		whitelist: {
+			default: [],
+			note: 'owner-curated whitelist of holes authorized for phantom injection: each entry { hole: "12", note: "AC12: tee genuinely invisible — owner-declared" } authorizes phantom synthesis for that specific hole; whitelisted holes are prioritized within the maxCompletions budget; non-whitelisted holes may still receive phantoms if budget allows. Empty list = no whitelist constraint, behavior unchanged.',
+			validate: (value: unknown) => {
+				if (!Array.isArray(value)) return 'whitelist must be an array';
+				for (const entry of value as unknown[]) {
+					if (typeof entry !== 'object' || entry === null) return 'whitelist entries must be objects';
+					const e = entry as Record<string, unknown>;
+					if (typeof e.hole !== 'string') return 'whitelist entry.hole must be a string';
+					if (typeof e.note !== 'string') return 'whitelist entry.note must be a string';
+				}
+				return null;
+			}
 		}
 	}
 } satisfies ABFeature;
@@ -99,10 +118,12 @@ function synthesizePhantomTeeResult(
 	measurement: ThreeFactorMeasurement,
 	assignments: readonly AssignmentEvidence[],
 	minViableScore: number,
-	maxCompletions = 1
+	maxCompletions = 1,
+	whitelist: readonly WhitelistEntry[] = []
 ): PhantomSynthesis {
 	const badgeById = new Map(measurement.badges.map((badge) => [badge.detId, badge]));
 	const basketById = new Map(measurement.baskets.map((basket) => [basket.detId, basket]));
+	const whitelistByHole = new Map(whitelist.map((entry) => [entry.hole, entry]));
 	const assignmentByHole = new Map<number, AssignmentEvidence>();
 	for (const assignment of assignments) {
 		const label = badgeById.get(assignment.badgeId)?.label;
@@ -118,10 +139,29 @@ function synthesizePhantomTeeResult(
 		if (!assignment || assignment.score <= minViableScore) missing.add(hole);
 	}
 
+	// Separate whitelisted from non-whitelisted missing holes. If whitelist is
+	// non-empty, prioritize whitelisted holes within maxCompletions budget;
+	// non-whitelisted holes fill the remainder. Empty whitelist = no prioritization.
+	const missingArray = [...missing].sort((a, b) => a - b);
+	const whitelistedMissing: number[] = [];
+	const nonWhitelistedMissing: number[] = [];
+	if (whitelistByHole.size > 0) {
+		for (const hole of missingArray) {
+			if (whitelistByHole.has(String(hole))) {
+				whitelistedMissing.push(hole);
+			} else {
+				nonWhitelistedMissing.push(hole);
+			}
+		}
+	} else {
+		nonWhitelistedMissing.push(...missingArray);
+	}
+	const holesToProcess = [...whitelistedMissing, ...nonWhitelistedMissing];
+
 	const phantoms: RecoveredTeeInput[] = [];
 	const phantomHoles: number[] = [];
 	const unresolvedHoles: number[] = [];
-	for (const hole of [...missing].sort((a, b) => a - b)) {
+	for (const hole of holesToProcess) {
 		// Owner budget (maxCompletions knob): phantom completion is a scalpel.
 		// Holes beyond the budget stay loudly unresolved rather than sprayed.
 		if (phantoms.length >= maxCompletions) {
@@ -129,11 +169,18 @@ function synthesizePhantomTeeResult(
 			continue;
 		}
 		const badge = measurement.badges.find((candidate) => Number(candidate.label) === hole);
+		const whitelistEntry = whitelistByHole.get(String(hole));
 		const predecessor = assignmentByHole.get(hole - 1);
 		if (!predecessor || missing.has(hole - 1)) {
 			const fallback = badge ? fallbackForBadge(hole, badge, measurement.baskets) : null;
 			if (fallback) {
-				phantoms.push(fallback);
+				const note = whitelistEntry
+					? `${fallback.provenance.note} [${whitelistEntry.note}]`
+					: fallback.provenance.note;
+				phantoms.push({
+					...fallback,
+					provenance: { ...fallback.provenance, note }
+				});
 				phantomHoles.push(hole);
 			}
 			else unresolvedHoles.push(hole);
@@ -141,12 +188,15 @@ function synthesizePhantomTeeResult(
 		}
 		const basket: BasketEvidence | undefined = basketById.get(predecessor.basketId);
 		if (basket && finitePoint(basket.tipXPx, basket.tipYPx)) {
+			const note = whitelistEntry
+				? `phantom-predecessor-basket hole ${hole} from B${hole - 1} tip [${whitelistEntry.note}]; appearance UNKNOWN`
+				: `phantom-predecessor-basket hole ${hole} from B${hole - 1} tip; appearance UNKNOWN`;
 			phantoms.push({
 				xPx: basket.tipXPx,
 				yPx: basket.tipYPx,
 				provenance: {
 					source: 'explicit-injected',
-					note: `phantom-predecessor-basket hole ${hole} from B${hole - 1} tip; appearance UNKNOWN`,
+					note,
 					score: 0.5
 				}
 			});
@@ -155,7 +205,13 @@ function synthesizePhantomTeeResult(
 		}
 		const fallback = badge ? fallbackForBadge(hole, badge, measurement.baskets) : null;
 		if (fallback) {
-			phantoms.push(fallback);
+			const note = whitelistEntry
+				? `${fallback.provenance.note} [${whitelistEntry.note}]`
+				: fallback.provenance.note;
+			phantoms.push({
+				...fallback,
+				provenance: { ...fallback.provenance, note }
+			});
 			phantomHoles.push(hole);
 		}
 		else unresolvedHoles.push(hole);
@@ -211,9 +267,10 @@ export function synthesizePhantomTees(
 	measurement: ThreeFactorMeasurement,
 	assignments: readonly AssignmentEvidence[],
 	minViableScore: number,
-	maxCompletions = 1
+	maxCompletions = 1,
+	whitelist: readonly WhitelistEntry[] = []
 ): RecoveredTeeInput[] {
-	return [...synthesizePhantomTeeResult(measurement, assignments, minViableScore, maxCompletions).phantoms];
+	return [...synthesizePhantomTeeResult(measurement, assignments, minViableScore, maxCompletions, whitelist).phantoms];
 }
 
 export const phantomTeeUnit: EngineUnit = {
@@ -233,7 +290,8 @@ export const phantomTeeUnit: EngineUnit = {
 				measurement,
 				assignment.assignments,
 				state.knobs['minViableScore'] as number,
-				state.knobs['maxCompletions'] as number
+				state.knobs['maxCompletions'] as number,
+				state.knobs['whitelist'] as WhitelistEntry[]
 			);
 			for (const phantom of synthesis.phantoms) {
 				ctx.overlay('phantomTee', {

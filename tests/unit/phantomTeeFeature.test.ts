@@ -181,4 +181,100 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 		expect(config.execution).toContain('phantomTee');
 		expect(config.gates?.G4?.phantomTee?.enabled).toBe(true);
 	});
+
+	test('empty whitelist produces identical behavior to no whitelist', () => {
+		const measurement = measurementFixture();
+		const assignments = [assignment('badge-0', 'basket-0', 0.8)];
+		const withoutWhitelist = synthesizePhantomTees(measurement, assignments, 0, 1);
+		const withEmptyWhitelist = synthesizePhantomTees(measurement, assignments, 0, 1, []);
+		expect(withoutWhitelist).toEqual(withEmptyWhitelist);
+	});
+
+	test('whitelisted hole gets phantom injection with whitelist note in provenance', () => {
+		const measurement = measurementFixture();
+		// Hole 2 is missing, hole 1 is assigned. Without whitelist, hole 2 gets normal predecessor phantom.
+		// With AC12 whitelist for hole 12, that's outside our fixture so no effect on hole 2.
+		// Create a fixture where hole 12 is missing but has a badge.
+		const extendedMeasurement = {
+			...measurement,
+			badges: [
+				...measurement.badges,
+				badge('badge-12', '12', 150, 150)
+			]
+		};
+		const whitelist = [{ hole: '12', note: 'AC12: tee genuinely invisible — owner-declared' }];
+		const phantoms = synthesizePhantomTees(
+			extendedMeasurement,
+			[assignment('badge-0', 'basket-0', 0.8)],
+			0,
+			18, // Raise budget to allow multiple phantoms
+			whitelist
+		);
+		// Should get phantoms for holes 2 and 12. Hole 12 should be prioritized and carry the whitelist note.
+		const hole12Phantom = phantoms.find((p) => p.provenance.note.includes('hole 12'));
+		expect(hole12Phantom).toBeDefined();
+		expect(hole12Phantom?.provenance.note).toContain('AC12: tee genuinely invisible');
+	});
+
+	test('whitelisted hole is prioritized within budget over non-whitelisted holes', () => {
+		const measurement = {
+			...measurementFixture(),
+			badges: [
+				badge('badge-0', '1', 30, 30),
+				badge('badge-1', '2', 120, 30),
+				badge('badge-12', '12', 150, 150),
+				badge('badge-13', '13', 160, 160)
+			]
+		};
+		// All holes 2, 12, 13 are missing. With budget of 1 and whitelist for hole 12,
+		// hole 12 should be allocated before holes 2 and 13.
+		const whitelist = [{ hole: '12', note: 'whitelisted hole' }];
+		const phantoms = synthesizePhantomTees(
+			measurement,
+			[assignment('badge-0', 'basket-0', 0.8)],
+			0,
+			1, // Budget of 1
+			whitelist
+		);
+		expect(phantoms).toHaveLength(1);
+		expect(phantoms[0].provenance.note).toContain('hole 12');
+		expect(phantoms[0].provenance.note).toContain('whitelisted hole');
+	});
+
+	test('non-whitelisted hole gets no phantom when whitelisted hole exhausts budget', () => {
+		const measurement = {
+			...measurementFixture(),
+			badges: [
+				badge('badge-0', '1', 30, 30),
+				badge('badge-2', '2', 120, 30),
+				badge('badge-12', '12', 150, 150)
+			]
+		};
+		const whitelist = [{ hole: '12', note: 'whitelisted' }];
+		const synthesis = synthesizePhantomTees(
+			measurement,
+			[assignment('badge-0', 'basket-0', 0.8)],
+			0,
+			1, // Budget of 1 — only hole 12 (whitelisted) should get phantom
+			whitelist
+		);
+		expect(synthesis).toHaveLength(1);
+		expect(synthesis[0].provenance.note).toContain('hole 12');
+	});
+
+	test('whitelisted hole that IS served gets no phantom (whitelist authorizes, never forces duplicate)', () => {
+		const measurement = measurementFixture();
+		const whitelist = [{ hole: '1', note: 'whitelisted but served' }];
+		// Hole 1 has a good assignment
+		const phantoms = synthesizePhantomTees(
+			measurement,
+			[assignment('badge-0', 'basket-0', 0.8)],
+			0,
+			1,
+			whitelist
+		);
+		// Should only get phantom for unserved hole 2, not duplicate for hole 1
+		expect(phantoms).toHaveLength(1);
+		expect(phantoms[0].provenance.note).toContain('hole 2');
+	});
 });
