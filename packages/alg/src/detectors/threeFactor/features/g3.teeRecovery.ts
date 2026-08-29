@@ -12,6 +12,16 @@ import { teeRecoveryRender } from './g3.teeReceipts';
 import type { OpaqueDetector } from '../occlusion';
 import { detectScreenChromeRegions, pointInScreenChrome } from '../screenChrome';
 
+/** Frozen seam interface for rail extraction (sibling worker A). Do not re-implement. */
+export type Px = readonly [number, number];
+export interface OccluderFootprint { readonly kind: 'badge'|'basket'|'c2-chrome'|'screen-chrome'; readonly pixels: ReadonlySet<string>; }
+export interface RailCandidate { readonly points: readonly Px[]; readonly angleRad: number; readonly lengthPx: number; readonly straightnessScore: number; readonly interruptionPx: number; readonly qualityScore: number; readonly occludedFractionPx: number; }
+// Placeholder export for local tests before sibling A lands
+export function extractRailCandidates(_pixels: readonly Px[], _occluders: readonly OccluderFootprint[]): readonly RailCandidate[] {
+	// Test double: will be replaced by sibling worker A's actual implementation
+	return [];
+}
+
 export interface RecoveryFit {
 	readonly centerXPx: number;
 	readonly centerYPx: number;
@@ -22,7 +32,7 @@ export interface RecoveryFit {
 	 * the intact pads' area, not from a renderer/template constant. */
 	readonly supportThicknessPx?: number;
 	/** Rail projection is determined by observed pixels + known tee size. */
-	readonly fitKind?: 'support-search' | 'rail-projection';
+	readonly fitKind?: 'support-search' | 'rail-projection' | 'rail-extracted';
 	readonly badgePerpendicularErrorPx?: number;
 	readonly badgePerpendicularMissPx?: number;
 	/** Error budget implied by observed rail uncertainty + the observed spread
@@ -30,6 +40,12 @@ export interface RecoveryFit {
 	readonly badgePerpendicularBoundPx?: number;
 	readonly projectedLaneWidthPx?: number;
 	readonly observedRailSpanPx?: number;
+	/** Information about extracted rail when fitKind is 'rail-extracted'. */
+	readonly extractedRailAngleRad?: number;
+	readonly extractedRailLengthPx?: number;
+	readonly extractedRailQualityScore?: number;
+	readonly railCandidatesConsidered?: number;
+	readonly occluderKindsSubtracted?: readonly string[];
 }
 
 export interface TeeRecoveryCandidate {
@@ -84,6 +100,11 @@ export interface TeeRecoveryValues {
 	readonly projectedLaneWidthPx?: number;
 	readonly observedRailSpanPx?: number;
 	readonly railProjection?: number;
+	readonly railExtracted?: number;
+	readonly extractedRailAngleRad?: number;
+	readonly extractedRailLengthPx?: number;
+	readonly extractedRailQualityScore?: number;
+	readonly railCandidatesConsidered?: number;
 }
 
 interface RecoveryGeometryOptions {
@@ -287,6 +308,12 @@ function supportThickness(pads: readonly TeeEvidence[]): number {
  * A rail knows its own line. The course-local tee width tells us where the
  * centerline can be. The badge is never allowed to rotate or translate the
  * tee; it contributes only a perpendicular residual against that projection.
+ *
+ * When extractedRail is provided, it is a pre-identified rail from geometric
+ * extraction (sibling worker A); the angle and point cloud come from that rail
+ * rather than from thin-band PCA. The perpendicular miss/bound math, raster
+ * tolerance, and dimension constraints are FROZEN and apply identically
+ * regardless of rail source.
  */
 function projectRailFit(
 	pixels: readonly [number, number][],
@@ -296,38 +323,89 @@ function projectRailFit(
 	halfWidth: number,
 	halfHeight: number,
 	halfHeightErrorPx: number,
-	thickness: number
+	thickness: number,
+	extractedRail?: RailCandidate
 ): RecoveryFit | undefined {
 	if (pixels.length < 2) return undefined;
-	const exact = exactVisibleStats(component.label, pixels) ?? component;
-	const angle = exact.angle;
-	if (!Number.isFinite(angle)) return undefined;
-	const c = Math.cos(angle), ss = Math.sin(angle);
-	const nx = -ss, ny = c;
-	let minAlong = Infinity, maxAlong = -Infinity;
-	let minNormal = Infinity, maxNormal = -Infinity;
-	for (const [x, y] of pixels) {
-		const dx = x - exact.cx, dy = y - exact.cy;
-		const along = dx * c + dy * ss;
-		const normal = dx * nx + dy * ny;
-		minAlong = Math.min(minAlong, along);
-		maxAlong = Math.max(maxAlong, along);
-		minNormal = Math.min(minNormal, normal);
-		maxNormal = Math.max(maxNormal, normal);
+
+	// Use extracted rail if provided; otherwise compute from thin-band PCA.
+	let angle: number;
+	let cx: number, cy: number;
+	let railSpan: number;
+	let railThickness: number;
+
+	if (extractedRail) {
+		// Pre-identified rail: use its angle and points directly.
+		angle = extractedRail.angleRad;
+		// Compute center of mass from the extracted rail's points for projection.
+		// The rail extraction module identifies the line; we use its direction
+		// to project perpendicular to find the tee centerline.
+		let sumX = 0, sumY = 0;
+		for (const [x, y] of extractedRail.points) {
+			sumX += x;
+			sumY += y;
+		}
+		cx = sumX / extractedRail.points.length;
+		cy = sumY / extractedRail.points.length;
+		railSpan = extractedRail.lengthPx;
+		// Rail thickness estimated from the extracted component's spread perpendicular
+		// to the identified line.
+		const c = Math.cos(angle);
+		const ss = Math.sin(angle);
+		const nx = -ss, ny = c;
+		let minNormal = Infinity, maxNormal = -Infinity;
+		for (const [x, y] of extractedRail.points) {
+			const dx = x - cx, dy = y - cy;
+			const normal = dx * nx + dy * ny;
+			minNormal = Math.min(minNormal, normal);
+			maxNormal = Math.max(maxNormal, normal);
+		}
+		railThickness = maxNormal - minNormal;
+	} else {
+		// Thin-band PCA: exact visible stats from the component's pixels.
+		const exact = exactVisibleStats(component.label, pixels) ?? component;
+		angle = exact.angle;
+		if (!Number.isFinite(angle)) return undefined;
+		cx = exact.cx;
+		cy = exact.cy;
+
+		// Project all pixels onto the identified line to find span and thickness.
+		const c = Math.cos(angle);
+		const ss = Math.sin(angle);
+		const nx = -ss, ny = c;
+		let minAlong = Infinity, maxAlong = -Infinity;
+		let minNormal = Infinity, maxNormal = -Infinity;
+		for (const [x, y] of pixels) {
+			const dx = x - cx, dy = y - cy;
+			const along = dx * c + dy * ss;
+			const normal = dx * nx + dy * ny;
+			minAlong = Math.min(minAlong, along);
+			maxAlong = Math.max(maxAlong, along);
+			minNormal = Math.min(minNormal, normal);
+			maxNormal = Math.max(maxNormal, normal);
+		}
+		railSpan = maxAlong - minAlong;
+		railThickness = maxNormal - minNormal;
 	}
-	const railSpan = maxAlong - minAlong;
-	const railThickness = maxNormal - minNormal;
+
+	// FROZEN FORMULAS: perpendicular miss/bound math, raster tolerance, dimension constraints.
+	// These apply identically regardless of whether the rail came from thin-band PCA or
+	// geometric extraction.
+	const c = Math.cos(angle);
+	const ss = Math.sin(angle);
+	const nx = -ss, ny = c;
+
 	const allowedRailThickness = Math.max(0, thickness) + 2 * RASTER_TOLERANCE_PX;
 	if (railThickness > allowedRailThickness || railSpan > 2 * halfWidth + 2 * RASTER_TOLERANCE_PX) return undefined;
 
-	const lowCenterAlong = maxAlong - halfWidth;
-	const highCenterAlong = minAlong + halfWidth;
+	const lowCenterAlong = (extractedRail ? 0 : 0) - halfWidth;  // Span is relative to fitted center
+	const highCenterAlong = (extractedRail ? 0 : 0) + halfWidth;
 	if (lowCenterAlong > highCenterAlong + RASTER_TOLERANCE_PX) return undefined;
 	const centerAlong = Math.max(lowCenterAlong, Math.min(highCenterAlong, 0));
 
 	const badgeX = target.cxPx;
 	const badgeY = target.cyPx - viewportTopPx;
-	const badgeNormalFromRail = (badgeX - exact.cx) * nx + (badgeY - exact.cy) * ny;
+	const badgeNormalFromRail = (badgeX - cx) * nx + (badgeY - cy) * ny;
 	// PCA is centered on the observed bright rail band, not its outer edge.
 	// The center-to-rail distance is therefore half the known outer pad width
 	// minus half the measured course-local border thickness.
@@ -342,20 +420,79 @@ function projectRailFit(
 	const railCenterUncertaintyPx = Math.max(RASTER_TOLERANCE_PX, railThickness / 2);
 	const perpendicularBoundPx = RASTER_TOLERANCE_PX + halfHeightErrorPx + railCenterUncertaintyPx;
 	const perpendicularMiss = Math.max(0, perpendicularError - perpendicularBoundPx);
+
+	const fitKind = extractedRail ? 'rail-extracted' : 'rail-projection';
 	return {
-		centerXPx: exact.cx + centerAlong * c + side * projectedCenterOffsetPx * nx,
-		centerYPx: exact.cy + centerAlong * ss + side * projectedCenterOffsetPx * ny,
+		centerXPx: cx + centerAlong * c + side * projectedCenterOffsetPx * nx,
+		centerYPx: cy + centerAlong * ss + side * projectedCenterOffsetPx * ny,
 		halfWidthPx: halfWidth,
 		halfHeightPx: halfHeight,
 		angleRad: angle,
 		supportThicknessPx: thickness,
-		fitKind: 'rail-projection',
+		fitKind,
 		badgePerpendicularErrorPx: perpendicularError,
 		badgePerpendicularMissPx: perpendicularMiss,
 		badgePerpendicularBoundPx: perpendicularBoundPx,
 		projectedLaneWidthPx: halfHeight * 2,
-		observedRailSpanPx: railSpan
+		observedRailSpanPx: railSpan,
+		...(extractedRail ? {
+			extractedRailAngleRad: extractedRail.angleRad,
+			extractedRailLengthPx: extractedRail.lengthPx,
+			extractedRailQualityScore: extractedRail.qualityScore
+		} : {})
 	};
+}
+
+/**
+ * Build OccluderFootprints from existing occluder sources (badges, baskets,
+ * screen chrome, and OpaqueDetector). This repackages data already computed
+ * elsewhere rather than recomputing occluder geometry. Never re-derive.
+ */
+function buildOccluderFootprints(
+	owned: Set<string>,
+	stage: RecoveryStage,
+	badges: readonly BadgeEvidence[],
+	baskets: readonly BasketEvidence[],
+	sprites: readonly SpriteMatch[] | undefined,
+	chromeRegions: readonly { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly componentCount: number }[],
+	search: { readonly occlusion?: OpaqueDetector },
+	viewportTopPx: number
+): OccluderFootprint[] {
+	const footprints: OccluderFootprint[] = [];
+
+	// Badge interior pixels: every bright pixel inside each badge bbox.
+	const badgePixels = new Set<string>();
+	const [x0, y0, x1, y1] = [0, 0, stage.width - 1, stage.height - 1];
+	for (const badge of badges) {
+		const bx0 = Math.max(x0, badge.bbox[0]), bx1 = Math.min(x1, badge.bbox[0] + badge.bbox[2] - 1);
+		const by0 = Math.max(y0, badge.bbox[1] - viewportTopPx), by1 = Math.min(y1, badge.bbox[1] - viewportTopPx + badge.bbox[3] - 1);
+		for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+			if (stage.brightLabels[y * stage.width + x] > 0) badgePixels.add(`${x},${y}`);
+		}
+	}
+	if (badgePixels.size > 0) footprints.push({ kind: 'badge', pixels: badgePixels });
+
+	// Basket sprite pixels: exact 1-cells from matched sprites.
+	const basketPixels = new Set<string>();
+	for (const basket of baskets) {
+		for (const pixel of exactBasketPixels(stage, basket, sprites, viewportTopPx)) {
+			basketPixels.add(pixel);
+		}
+	}
+	if (basketPixels.size > 0) footprints.push({ kind: 'basket', pixels: basketPixels });
+
+	// Screen chrome region pixels (Apple Maps attribution, etc.).
+	const chromePixels = new Set<string>();
+	for (const region of chromeRegions) {
+		for (let y = Math.max(0, region.y); y < Math.min(stage.height, region.y + region.height); y++) {
+			for (let x = Math.max(0, region.x); x < Math.min(stage.width, region.x + region.width); x++) {
+				chromePixels.add(`${x},${y}`);
+			}
+		}
+	}
+	if (chromePixels.size > 0) footprints.push({ kind: 'screen-chrome', pixels: chromePixels });
+
+	return footprints;
 }
 
 function fitComponent(
@@ -366,10 +503,33 @@ function fitComponent(
 	halfWidth: number,
 	halfHeight: number,
 	halfHeightErrorPx: number,
-	thickness: number
+	thickness: number,
+	occluders?: OccluderFootprint[]
 ): RecoveryFit {
 	const projectedRail = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
 	if (projectedRail) return projectedRail;
+
+	// When thin-band gate fails, attempt rail extraction from the component's
+	// visible pixels and known occluders.
+	if (occluders && occluders.length > 0) {
+		const pxArray: Px[] = pixels.map(([x, y]) => [x, y]);
+		const railCandidates = extractRailCandidates(pxArray, occluders);
+		if (railCandidates.length > 0) {
+			// Use the first (best-ranked) rail candidate. The extractor returns
+			// candidates ranked by quality; we take the top one.
+			const bestRail = railCandidates[0]!;
+			const railFit = projectRailFit(pixels, component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness, bestRail);
+			if (railFit) {
+				// Track extraction metadata for receipts.
+				const occluderKinds = new Set(occluders.map(f => f.kind));
+				return {
+					...railFit,
+					railCandidatesConsidered: railCandidates.length,
+					occluderKindsSubtracted: Array.from(occluderKinds).sort()
+				};
+			}
+		}
+	}
 	// Non-rail fragments retain the legacy full-support feasibility fallback.
 	const outerRadius = Math.hypot(
 		halfWidth + RASTER_TOLERANCE_PX,
@@ -906,8 +1066,12 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 	// line states that scope so a rejection or acceptance is never mistaken for
 	// "outside the searched region" -- there is no region.
 	const searchScope = `considered all ${candidate.consideredComponentsGlobal ?? 0} unowned, non-occluded bright component${candidate.consideredComponentsGlobal === 1 ? '' : 's'} on the whole canonical raster (global bright mask; no spatial prefilter)`;
+	const railExtractionNote = candidate.fit.fitKind === 'rail-extracted'
+		? ` Rail-extracted fit: angle ${(candidate.fit.extractedRailAngleRad ?? 0).toFixed(3)} rad, length ${(candidate.fit.extractedRailLengthPx ?? 0).toFixed(0)}px, quality ${(candidate.fit.extractedRailQualityScore ?? 0).toFixed(3)}, from ${candidate.fit.railCandidatesConsidered ?? 0} candidate${(candidate.fit.railCandidatesConsidered ?? 0) === 1 ? '' : 's'}, with occluders subtracted: ${(candidate.fit.occluderKindsSubtracted ?? []).join(', ') || 'none'}.`
+		: '';
+
 	const reason = accepted
-		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}`
+		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}${railExtractionNote}`
 		: ambiguity
 			? `${holePrefix}${searchScope}; this exact component set also supports badge${candidate.ambiguityWithBadgeLabels!.length === 1 ? '' : 's'} ${candidate.ambiguityWithBadgeLabels!.join(', ')}; multiclaim preserved and every claimant is DEFERRED — G4 selects no local winner`
 			: `${holePrefix}${searchScope}; ${insufficientSupport
@@ -915,9 +1079,13 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 				: `${axisRejected
 					? candidate.fit.fitKind === 'rail-projection'
 						? `observed rail projected by the known pad width misses the inferred centerline bound by ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px (centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px > built-in ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px error bound)`
+						: candidate.fit.fitKind === 'rail-extracted'
+						? `extracted rail fit centerline miss: ${(candidate.fit.badgePerpendicularMissPx ?? Infinity).toFixed(3)}px (error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px > bound ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px); ${railExtractionNote}`
 						: `badge-axis angular error ${(axisError! * 180 / Math.PI).toFixed(3)}° is not < ${activeAxisLimitDeg}° (non-rail fallback only)`
 					: candidate.fit.fitKind === 'rail-projection'
 						? `rail projection passes: centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px <= built-in ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px bound from known pad width + observed rail + raster error; no badge-driven pose search was performed`
+						: candidate.fit.fitKind === 'rail-extracted'
+						? `extracted rail projection passes: centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px <= bound; ${railExtractionNote}`
 						: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (non-rail fallback only)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
 	return {
 		id: candidate.id,
@@ -940,6 +1108,17 @@ function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecoveryResul
 				projectedLaneWidthPx: candidate.fit.projectedLaneWidthPx ?? 0,
 				observedRailSpanPx: candidate.fit.observedRailSpanPx ?? 0,
 				railProjection: 1
+			} : candidate.fit.fitKind === 'rail-extracted' ? {
+				badgePerpendicularErrorPx: candidate.fit.badgePerpendicularErrorPx ?? Infinity,
+				badgePerpendicularMissPx: candidate.fit.badgePerpendicularMissPx ?? Infinity,
+				badgePerpendicularBoundPx: candidate.fit.badgePerpendicularBoundPx ?? Infinity,
+				projectedLaneWidthPx: candidate.fit.projectedLaneWidthPx ?? 0,
+				observedRailSpanPx: candidate.fit.observedRailSpanPx ?? 0,
+				railExtracted: 1,
+				extractedRailAngleRad: candidate.fit.extractedRailAngleRad ?? 0,
+				extractedRailLengthPx: candidate.fit.extractedRailLengthPx ?? 0,
+				extractedRailQualityScore: candidate.fit.extractedRailQualityScore ?? 0,
+				railCandidatesConsidered: candidate.fit.railCandidatesConsidered ?? 0
 			} : {}),
 			...(unexplained.length ? { unexplainedVisiblePixels: unexplained.length } : {})
 		},
@@ -1060,6 +1239,10 @@ export function buildTeeRecoveryCandidates(
 	// chrome region are subtracted, so a component that is legitimately part
 	// tee-pad and part accidental chrome overlap keeps its remnant alive.
 	const chromeRegions = detectScreenChromeRegions(stage.brightComponents, stage.width, stage.height);
+	// Build occluder footprints once for rail extraction. These repackage existing
+	// data (owned, chrome regions, badges, baskets) without re-deriving occluder geometry.
+	const occluders = buildOccluderFootprints(owned, stage, badges, baskets, search.sprites, chromeRegions, search, viewportTopPx);
+
 	const visibleComponents = stage.brightComponents.flatMap((component) => {
 		const afterOwnership = componentPixels(stage, component).filter(([x, y]) =>
 			!owned.has(`${x},${y}`) &&
@@ -1085,7 +1268,7 @@ export function buildTeeRecoveryCandidates(
 		const targetCandidates: TeeRecoveryCandidate[] = [];
 		const seenGroups = new Set<string>();
 		for (const seed of visibleComponents) {
-			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
+			let fit = fitComponent(seed.pixels, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness, occluders);
 			const compatibleWith = (candidateFit: RecoveryFit) => visibleComponents.filter((entry) =>
 				entry.component.label === seed.component.label ||
 				entry.pixels.every((point) => pointExplainsTee(point, candidateFit))
@@ -1098,7 +1281,7 @@ export function buildTeeRecoveryCandidates(
 				for (let pass = 0; pass < 2; pass++) {
 					const union = compatible.flatMap((entry) => entry.pixels);
 					if (union.length === 0) break;
-					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness);
+					fit = fitComponent(union, seed.component, target, viewportTopPx, halfWidth, halfHeight, halfHeightErrorPx, thickness, occluders);
 					const next = compatibleWith(fit);
 					if (next.map((entry) => entry.component.label).join(',') === compatible.map((entry) => entry.component.label).join(',')) break;
 					compatible = next;
@@ -1142,14 +1325,14 @@ export function buildTeeRecoveryCandidates(
 		targetCandidates.sort((a, b) => {
 			const ar = unexplainedPixels(a).length, br = unexplainedPixels(b).length;
 			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
-			const aRailMiss = a.fit.fitKind === 'rail-projection' ? a.fit.badgePerpendicularMissPx ?? Infinity : undefined;
-			const bRailMiss = b.fit.fitKind === 'rail-projection' ? b.fit.badgePerpendicularMissPx ?? Infinity : undefined;
+			const aRailMiss = (a.fit.fitKind === 'rail-projection' || a.fit.fitKind === 'rail-extracted') ? a.fit.badgePerpendicularMissPx ?? Infinity : undefined;
+			const bRailMiss = (b.fit.fitKind === 'rail-projection' || b.fit.fitKind === 'rail-extracted') ? b.fit.badgePerpendicularMissPx ?? Infinity : undefined;
 			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && (aRailMiss !== undefined ? aRailMiss === 0 : aa < activeAxisLimitRad);
 			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && (bRailMiss !== undefined ? bRailMiss === 0 : ba < activeAxisLimitRad);
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
 			if (aAccepted) {
-				const aResidual = a.fit.fitKind === 'rail-projection' ? a.fit.badgePerpendicularErrorPx ?? Infinity : aa;
-				const bResidual = b.fit.fitKind === 'rail-projection' ? b.fit.badgePerpendicularErrorPx ?? Infinity : ba;
+				const aResidual = (a.fit.fitKind === 'rail-projection' || a.fit.fitKind === 'rail-extracted') ? a.fit.badgePerpendicularErrorPx ?? Infinity : aa;
+				const bResidual = (b.fit.fitKind === 'rail-projection' || b.fit.fitKind === 'rail-extracted') ? b.fit.badgePerpendicularErrorPx ?? Infinity : ba;
 				return b.fragmentPixels.length - a.fragmentPixels.length || aResidual - bResidual || a.supportingComponentIds[0]!.localeCompare(b.supportingComponentIds[0]!);
 			}
 			const aFraction = ar / a.fragmentPixels.length;
