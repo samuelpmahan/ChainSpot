@@ -5,7 +5,7 @@ import readline from 'node:readline';
 import { spawnSync } from 'node:child_process';
 
 const targetDir = 'C:\\Users\\tenni\\workspace\\ChainSpot-chspt-82';
-const outputRoot = 'D:\\ChainSpot-LAB\\orient';
+const outputRoot = path.resolve(process.cwd(), 'artifacts', 'lab', 'orient');
 const sourceDir = '/home/mahansa/workspace/ChainSpot-three-factor-dev72-lab';
 const evidenceDir = '/home/mahansa/workspace/chainspot-lab-evidence-nuthing-p2-6d7-20260819';
 const evidenceWinDir =
