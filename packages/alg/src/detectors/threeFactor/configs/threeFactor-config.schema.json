@@ -753,7 +753,7 @@
 						"teeBorderCornerFit": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "border-adjacency tee recovery: any unowned white component glued to a basket's black border anchors an axis-aligned corner/wall fit of the COURSE-MEASURED pad. The basket glyph's white fill is the named occluder and never pad evidence. Zero angular freedom, one integer slide; a placement with any bare outline pixel is never accepted, and every non-claim is a NAMED abstention. Orientation ties are broken by badge aim (S2: the tee is the compass), restricted to badges NO visible tee can serve -- computed tee-locally via resolveVisibleTeeBadgeRays, the same measurement-only eligibility contract teeRecovery states. Reads only `measurement`; runs before assignment/teeRecovery.",
+							"description": "border-adjacency tee recovery: any unowned white component glued to a basket's black border anchors an axis-aligned corner/wall fit of the COURSE-MEASURED pad. The basket glyph's white fill is the named occluder and never pad evidence. Zero angular freedom, one integer slide; a placement with any bare outline pixel is never accepted, and every non-claim is a NAMED abstention. Orientation ties are broken by badge aim (S2: the tee is the compass), restricted to badges NO visible tee can serve -- computed tee-locally via resolveVisibleTeeBadgeRays, the same measurement-only eligibility contract teeRecovery states; aims resolve FIRST-INTERCEPT along the pad axis (distance orders intercepts on a ray, never caps). Accepted claims publish into the shared recoveredTees pool assignment consumes; runs after measurement, before assignment.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",
@@ -790,7 +790,7 @@
 										},
 										"axisOrthogonalToleranceDeg": {
 											"type": "number",
-											"description": "PCA of a tiny border remnant is quantization-coarse; within this many degrees of an image axis the remnant is treated as axis-aligned. A statistical parameter on small-component PCA stability, not physics -- non-orthogonal remnants are loudly abstained (rotated rails are a sibling lane), never guessed at.",
+											"description": "RETIRED as a gate (2026-08-29): an L-shaped remnant's overall PCA is diagonal even with axis-aligned arms, so gating on it rejected the exact Heritage T5 evidence class this feature exists for. Rotated evidence is already loudly abstained by the outline accounting itself (no-contradiction-free-placement). Kept for config-schema stability; reads nothing.",
 											"default": 10
 										}
 									}

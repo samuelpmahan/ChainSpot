@@ -126,7 +126,7 @@ function referenceScene() {
 		centerXLocalPx: 47,
 		centerYLocalPx: 30
 	};
-	const badgeNorth: BorderFitBadge = { detId: 'badge-6', label: '6', cxLocalPx: 41, cyLocalPx: 4 };
+	const badgeNorth: BorderFitBadge = { detId: 'badge-6', label: '6', cxLocalPx: 41, cyLocalPx: 4, bboxLocal: [37, 1, 8, 6] };
 	return { scene, masks, components, visiblePads, basket, badgeNorth };
 }
 
@@ -223,7 +223,7 @@ describe('the corner fit (Heritage T6 shape)', () => {
 		expect(claim.angleRad).toBeCloseTo(Math.PI / 2, 10);
 		// single eligible badge => no runner-up => the aim is resolved
 		expect(claim.aimResolved).toBe(true);
-		expect(claim.aimResolutionBoundDeg).toBeCloseTo(Math.atan2(1, 9) * (180 / Math.PI), 10);
+		expect(claim.aimResolutionBoundPx).toBe(9); // one course pad length
 	});
 
 	test('two eligible badges within the axis-quantization bound carry an UNRESOLVED aim', () => {
@@ -231,8 +231,8 @@ describe('the corner fit (Heritage T6 shape)', () => {
 		// two unserved badges nearly collinear with the vertical axis: bearing
 		// difference from the pad center (41,28) is under atan(1/9)=6.34deg
 		const badges: BorderFitBadge[] = [
-			{ detId: 'badge-a', label: '5', cxLocalPx: 41, cyLocalPx: 4 },
-			{ detId: 'badge-b', label: '6', cxLocalPx: 43, cyLocalPx: 4 }
+			{ detId: 'badge-a', label: '5', cxLocalPx: 41, cyLocalPx: 4, bboxLocal: [37, 1, 8, 6] },
+			{ detId: 'badge-b', label: '6', cxLocalPx: 43, cyLocalPx: 4, bboxLocal: [39, 1, 8, 6] }
 		];
 		const result = runBorderCornerFit(masks, components, [basket], badges, visiblePads, KNOBS);
 		expect(result.claims).toHaveLength(1);
@@ -241,7 +241,9 @@ describe('the corner fit (Heritage T6 shape)', () => {
 		expect(claim.teeYPx).toBe(28);
 		expect(claim.aimResolved).toBe(false);
 		expect(claim.aimRunnerUpBadgeId).toBeTruthy();
-		expect(claim.aimRunnerUpGapDeg ?? Infinity).toBeLessThan(claim.aimResolutionBoundDeg);
+		expect((claim.aimRunnerUpRangePx ?? Infinity) - claim.aimRangePx).toBeLessThan(
+			claim.aimResolutionBoundPx
+		);
 	});
 
 	test('orientation tie is broken by badge aim: the same corner claims vertical for a north badge and horizontal for an east badge', () => {
@@ -285,8 +287,8 @@ describe('the corner fit (Heritage T6 shape)', () => {
 			];
 			return runBorderCornerFit(masks, components, [basket], [badge], visiblePads, knobs);
 		};
-		const north = runWith({ detId: 'badge-n', label: '6', cxLocalPx: 41, cyLocalPx: 2 });
-		const east = runWith({ detId: 'badge-e', label: '7', cxLocalPx: 79, cyLocalPx: 27 });
+		const north = runWith({ detId: 'badge-n', label: '6', cxLocalPx: 41, cyLocalPx: 2, bboxLocal: [37, -1, 8, 6] });
+		const east = runWith({ detId: 'badge-e', label: '7', cxLocalPx: 79, cyLocalPx: 27, bboxLocal: [75, 24, 8, 6] });
 		expect(north.claims).toHaveLength(1);
 		expect(north.claims[0].angleRad).toBeCloseTo(Math.PI / 2, 10);
 		expect(north.claims[0].aimBadgeId).toBe('badge-n');
@@ -327,8 +329,8 @@ describe('the corner fit (Heritage T6 shape)', () => {
 			centerYLocalPx: 30
 		};
 		const badges: BorderFitBadge[] = [
-			{ detId: 'badge-n', label: '6', cxLocalPx: 41, cyLocalPx: 2 },
-			{ detId: 'badge-e', label: '7', cxLocalPx: 79, cyLocalPx: 27 }
+			{ detId: 'badge-n', label: '6', cxLocalPx: 41, cyLocalPx: 2, bboxLocal: [37, -1, 8, 6] },
+			{ detId: 'badge-e', label: '7', cxLocalPx: 79, cyLocalPx: 27, bboxLocal: [75, 24, 8, 6] }
 		];
 		const knobs: BorderFitKnobs = { ...KNOBS, evidenceFloorFactor: 0.25 };
 		const result = runBorderCornerFit(masks, components, [basket], badges, visiblePads, knobs, [
@@ -347,9 +349,16 @@ describe('the corner fit (Heritage T6 shape)', () => {
 		drawHollowPad(scene, 20, 5, PAD_LONG, PAD_SHORT);
 		drawHollowPad(scene, 5, 40, PAD_SHORT, PAD_LONG);
 		drawGlyph(scene, 40, 20, 14, 20);
-		// an isolated 2x5 remnant glued to the glyph's LEFT outline with OPEN
-		// BACKGROUND all around it: every pad placement must contain bare px
-		for (let y = 25; y < 30; y++) for (let x = 38; x < 40; x++) scene.bright[y * scene.width + x] = 1;
+		// a 2px-wide bar THIRTY pixels tall glued to the glyph's left outline
+		// -- longer than any pad this course owns (long side 9), so every
+		// placement leaves an overhang of remnant pixels far off the wall
+		// band: the candidate must abstain loudly, never claim. This is the
+		// real path-segment-glued-to-a-basket class. (2026-08-29: this scene
+		// replaced a thin 2x5 remnant -- under the wall-smear +
+		// anti-alias-halo accounting a small glyph-adjacent remnant honestly
+		// ADMITS a pad tucked under the glyph, exactly the Heritage T6
+		// geometry, so it stopped being a contradiction case at all.)
+		for (let y = 8; y < 38; y++) for (let x = 38; x < 40; x++) scene.bright[y * scene.width + x] = 1;
 		const masks = masksFor(scene);
 		const components = componentsFor(scene);
 		const visiblePads: BorderFitVisiblePad[] = [
@@ -368,18 +377,16 @@ describe('the corner fit (Heritage T6 shape)', () => {
 			masks,
 			components,
 			[basket],
-			[{ detId: 'badge-6', label: '6', cxLocalPx: 41, cyLocalPx: 4 }],
+			[{ detId: 'badge-6', label: '6', cxLocalPx: 41, cyLocalPx: 4, bboxLocal: [37, 1, 8, 6] }],
 			visiblePads,
 			KNOBS
 		);
-		// the 2x5=10px remnant is exactly at the evidence floor (wall*short*0.5=7)
-		// so it is fitted -- and must FAIL loudly, not claim
 		expect(result.claims).toHaveLength(0);
 		const abstention = result.abstentions.find(
 			(row) => row.reason === 'no-contradiction-free-placement'
 		);
 		expect(abstention).toBeDefined();
-		expect(abstention?.detail).toContain('BARE');
+		expect(abstention?.detail).toContain('never accepted');
 	});
 
 	test('unknown course pad dims abstain for the whole feature', () => {

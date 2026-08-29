@@ -195,6 +195,17 @@ export interface RunReceipt {
 	 * every badge has a shipped row, or when assignment.selection was never
 	 * scheduled -- same "empty, not omitted" convention as `assignments`). */
 	readonly notFoundBadges: readonly RunReceiptNotFoundRow[];
+	/** Canonical-raster positions of every endpoint the assignment rows name
+	 * (the final assignment slot's tee inventory, visible + recovered, and
+	 * the measurement's basket tips) -- the exact objects the hole-label
+	 * annotation layer draws from, exported so a scorer never has to decode
+	 * positions back out of a rendered image. Absent when assignment was not
+	 * scheduled. 2026-08-29, integration lane: added for truth-scoring the
+	 * rail + border-corner-fit composition. */
+	readonly endpointPositions?: {
+		readonly tees: readonly { readonly id: string; readonly xPx: number; readonly yPx: number }[];
+		readonly baskets: readonly { readonly id: string; readonly xPx: number; readonly yPx: number }[];
+	};
 	readonly slice?: RunReceiptSlice;
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
@@ -320,6 +331,8 @@ export interface BuildRunReceiptInput {
 	 * scheduled to produce it. */
 	readonly assignments: readonly RunReceiptAssignmentRow[];
 	readonly notFoundBadges: readonly RunReceiptNotFoundRow[];
+	/** See RunReceipt.endpointPositions. */
+	readonly endpointPositions?: RunReceipt['endpointPositions'];
 	readonly resultsProvenance: RunReceiptResultsProvenance;
 	readonly visualRenders: readonly RunReceiptVisualRender[];
 	/** Loud problems the visual-render composers found while drawing. Appended
@@ -575,6 +588,7 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 		results,
 		assignments: input.assignments,
 		notFoundBadges: input.notFoundBadges,
+		...(input.endpointPositions ? { endpointPositions: input.endpointPositions } : {}),
 		resultsProvenance: input.resultsProvenance,
 		...(slice ? { slice } : {}),
 		visualRenders: input.visualRenders,

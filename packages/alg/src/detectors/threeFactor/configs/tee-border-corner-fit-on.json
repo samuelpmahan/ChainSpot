@@ -1,20 +1,20 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "tee-border-corner-fit-on",
-	"note": "A/B candidate: recover tees buried under basket glyphs from the wall remnant glued to the basket's black border (owner directive 2026-08-29). Course-median pad anchored to the remnant with zero angular freedom; the glyph's white fill is the named occluder and never evidence; contradictions forbid acceptance and every non-claim is a NAMED abstention. Reads only 'measurement', so it is inserted directly after 'measurement' and before 'assignment'/'teeRecovery'. Frozen execution remains unchanged when omitted.",
+	"note": "A/B candidate: recover tees buried under basket glyphs from the wall remnant glued to the basket's black border (owner directive 2026-08-29). Course-measured pad anchored to the remnant with zero angular freedom; the glyph's white fill and badge chrome are named exclusions; contradictions forbid acceptance and every non-claim is a NAMED abstention; aims resolve FIRST-INTERCEPT along the pad axis (distance orders intercepts on a ray, never caps). Runs after 'measurement' and BEFORE 'assignment', publishing accepted claims into the shared recoveredTees pool assignment consumes -- composition with baseline teeRecovery (which runs early, per the gate reorg) is by execution order, not by editing shared code. Frozen execution remains unchanged when omitted.",
 	"execution": [
 		"badgeStage",
 		"badges",
 		"baskets",
 		"tees",
 		"teeFamily",
+		"teeRecovery",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"teeBorderCornerFit",
-		"assignment",
-		"teeRecovery"
+		"assignment"
 	],
 	"gates": {
 		"G4": {

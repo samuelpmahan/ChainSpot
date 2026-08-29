@@ -140,8 +140,15 @@ export type TeeTier = 'ring' | 'component' | 'recovered';
 
 export interface RecoveryProvenance {
 	/** `tee-shard-recovery` is detector-derived; phantom assignment fallbacks
-	 * remain explicit injections because no tee pixels were observed. */
-	readonly source: 'manual' | 'historical-fixture' | 'explicit-injected' | 'tee-shard-recovery';
+	 * remain explicit injections because no tee pixels were observed.
+	 * `tee-border-corner-fit` is the G4 border-adjacency corner fit's claim
+	 * (zero-contradiction outline accounting; see g4.teeBorderCornerFit). */
+	readonly source:
+		| 'manual'
+		| 'historical-fixture'
+		| 'explicit-injected'
+		| 'tee-shard-recovery'
+		| 'tee-border-corner-fit';
 	readonly note: string;
 	readonly score?: number;
 }

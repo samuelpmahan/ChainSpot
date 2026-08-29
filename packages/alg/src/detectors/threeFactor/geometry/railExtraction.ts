@@ -23,8 +23,10 @@ export interface RailCandidate {
 /** Minimum pixels required to estimate a line direction at raster quantization tolerance.
  *  Derived from raster geometry: with ±1.25px quantization noise per pixel, 4 pixels yield ~12-22 degree
  *  direction precision, sufficient to distinguish a true edge from noise in boundary fragments.
+ *  Exported for the consumer-side degenerate-rail guard: a chain can carry this many POINTS while
+ *  spanning ~0px along its own axis (stacked perpendicular), and such a rail has no direction at all.
  */
-const MIN_RAIL_PIXELS = 4;
+export const MIN_RAIL_PIXELS = 4;
 
 /** Return every candidate straight rail the fragment offers, ranked
  *  best-first by qualityScore (ties: lowest occludedFractionPx, then

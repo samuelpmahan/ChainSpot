@@ -77,6 +77,10 @@ export interface BorderFitBadge {
 	readonly label: string | null;
 	readonly cxLocalPx: number;
 	readonly cyLocalPx: number;
+	/** Badge chip footprint, mask-local frame -- bright components inside it
+	 * are badge chrome (plate outline, digits) and are NEVER tee evidence
+	 * (the dc96000 lesson). */
+	readonly bboxLocal: readonly [number, number, number, number];
 }
 
 export interface BorderFitVisiblePad {
@@ -142,16 +146,23 @@ export interface BorderCornerClaim {
 	readonly angleRad: number;
 	readonly aimBadgeId: string;
 	readonly aimBadgeLabel: string | null;
+	/** Angular deviation of the aim badge's bearing from the pad axis ray. */
 	readonly aimErrorDeg: number;
+	/** Distance to the aim badge -- the FIRST intercept along the pad axis. */
+	readonly aimRangePx: number;
 	readonly aimRunnerUpBadgeId: string | null;
-	readonly aimRunnerUpGapDeg: number | null;
-	/** A quantized axis cannot separate bearings closer than
-	 * atan(1px / padLongPx); an aim whose runner-up gap sits under that bound
-	 * is carried as UNRESOLVED -- the tee stands, the badge identity does
-	 * not. Composition (e.g. a sibling lane recovering the runner-up's own
-	 * tee) is what collapses it. */
+	readonly aimRunnerUpErrorDeg: number | null;
+	readonly aimRunnerUpRangePx: number | null;
+	/** Two in-window claimants closer together along the rays than one pad
+	 * length are indistinguishable to a corner-anchored fit -- the aim is
+	 * carried UNRESOLVED (the tee stands, the badge identity does not) and
+	 * composition (a stronger remnant taking one of them) collapses it. */
 	readonly aimResolved: boolean;
-	readonly aimResolutionBoundDeg: number;
+	readonly aimResolutionBoundPx: number;
+	/** Set when a stronger remnant took this claim's best badge and the aim
+	 * fell to its runner-up (only ever done for an UNRESOLVED aim -- see the
+	 * uniqueness pass). */
+	readonly aimRetargetedFromBadgeId?: string | null;
 }
 
 export interface BorderCornerAbstention {
@@ -174,6 +185,7 @@ export interface BorderExcludedCandidate {
 	readonly reason:
 		| 'basket-glyph-fill'
 		| 'owned-by-visible-tee'
+		| 'badge-chrome'
 		| 'exceeds-course-pad-area-cap'
 		| 'below-course-evidence-floor';
 	readonly detail: string;
@@ -303,7 +315,8 @@ export function discoverBorderCandidates(
 	baskets: readonly BorderFitBasket[],
 	visiblePads: readonly BorderFitVisiblePad[],
 	padDims: BorderFitPadDims,
-	knobs: BorderFitKnobs
+	knobs: BorderFitKnobs,
+	badges: readonly BorderFitBadge[] = []
 ): BorderDiscovery {
 	const { width, height, dark, brightLabels } = masks;
 	const glyphFillLabels: (readonly [string, number | null])[] = baskets.map((basket) => [
@@ -394,6 +407,25 @@ export function discoverBorderCandidates(
 			});
 			continue;
 		}
+		const owningBadge = badges.find(
+			(badge) =>
+				component.bboxX >= badge.bboxLocal[0] - 1 &&
+				component.bboxY >= badge.bboxLocal[1] - 1 &&
+				component.bboxX + component.bboxW <= badge.bboxLocal[0] + badge.bboxLocal[2] + 1 &&
+				component.bboxY + component.bboxH <= badge.bboxLocal[1] + badge.bboxLocal[3] + 1
+		);
+		if (owningBadge) {
+			excluded.push({
+				anchorBasketIds,
+				componentLabel: label,
+				reason: 'badge-chrome',
+				detail:
+					`component ${label} lies inside badge ${owningBadge.detId}'s chip footprint -- badge ` +
+					'chrome (plate outline, digits) is owned, never tee evidence (the dc96000 lesson: ' +
+					'un-owned digits masquerading as tee shards).'
+			});
+			continue;
+		}
 		if (!padDims.isFallback && component.area > areaCap) {
 			excluded.push({
 				anchorBasketIds,
@@ -443,14 +475,24 @@ function classifierFor(
 		const index = y * width + x;
 		return dark[index] === 1 || glyphLabelSet.has(brightLabels[index]);
 	};
+	const isEvidence = (x: number, y: number): boolean => {
+		if (x < 0 || y < 0 || x >= width || y >= height) return false;
+		const index = y * width + x;
+		return bright[index] === 1 && !glyphLabelSet.has(brightLabels[index]);
+	};
 	return (x: number, y: number): PixelClass => {
 		if (x < 0 || y < 0 || x >= width || y >= height) return 'bare';
-		const index = y * width + x;
-		if (bright[index] === 1 && !glyphLabelSet.has(brightLabels[index])) return 'evidence';
+		if (isEvidence(x, y)) return 'evidence';
 		if (isOccluder(x, y)) return 'occluded';
+		// Anti-alias halo, on BOTH sides of the ink: next to an occluder, and
+		// next to evidence. A 1px-rendered rail (Heritage T5's right rail)
+		// leaves the wall band's outer cell empty because anti-aliasing shaved
+		// it below the bright threshold -- that cell borders real evidence and
+		// is the same raster-quantization class as the occluder halo, never a
+		// contradiction. Cells far from both stay BARE.
 		for (let dy = -haloPx; dy <= haloPx; dy++) {
 			for (let dx = -haloPx; dx <= haloPx; dx++) {
-				if (isOccluder(x + dx, y + dy)) return 'transition';
+				if (isOccluder(x + dx, y + dy) || isEvidence(x + dx, y + dy)) return 'transition';
 			}
 		}
 		return 'bare';
@@ -516,25 +558,16 @@ export function fitBorderCandidate(
 	knobs: BorderFitKnobs
 ): CandidateFit {
 	const { component, anchorBasketIds } = candidate;
-	const orthErr = axisOrthogonalityErrorDeg(component.angle);
-	if (orthErr > knobs.axisOrthogonalToleranceDeg) {
-		return {
-			accepted: null,
-			best: null,
-			acceptedTies: [],
-			abstention: {
-				anchorBasketIds,
-				componentLabel: component.label,
-				reason: 'non-orthogonal-axis',
-				detail:
-					`remnant PCA is ${orthErr.toFixed(1)}deg off the nearest image axis ` +
-					`(> axisOrthogonalToleranceDeg=${knobs.axisOrthogonalToleranceDeg}); the axis-aligned ` +
-					'corner fit does not apply and this landing abstains rather than rotating a fit ' +
-					'(rotated rails are a sibling lane).'
-			},
-			placementsScored: 0
-		};
-	}
+	// 2026-08-29 (integration night): the PCA orthogonality gate that stood
+	// here was removed. An L-shaped remnant -- the exact Heritage T5 shape
+	// this feature exists for -- has a DIAGONAL overall PCA (~38-45deg) even
+	// though both its arms are axis-aligned, so the gate rejected the very
+	// evidence class the owner named. The gate was also redundant: a truly
+	// rotated pad's remnant cannot survive the axis-aligned outline
+	// accounting (its pixels land off the wall band -> hard contradictions),
+	// so 'no-contradiction-free-placement' already abstains loudly on
+	// rotated evidence. axisOrthogonalToleranceDeg remains as a knob for
+	// schema stability but no longer gates anything.
 
 	const classify = classifierFor(masks, glyphLabelSet, knobs.haloPx);
 	const remnant = candidatePixels(masks, component);
@@ -585,14 +618,21 @@ export function fitBorderCandidate(
 			let candidateOnOutlinePx = 0;
 			let candidateWallAdjacentPx = 0;
 			let candidateOffOutlinePx = 0;
+			// Wall-smear allowance (course-derived): an occluded pad's rail can
+			// render up to a second wall thickness of smear (Heritage T5's
+			// bottom rail spans 4 rows against a derived 2px wall), so remnant
+			// pixels within one wall thickness of the band are smear, never
+			// contradictions. A blob's core sits deeper than that and stays a
+			// hard contradiction.
+			const smearPx = Math.max(knobs.haloPx, Math.ceil(padDims.wallPx));
 			for (const [x, y] of remnant) {
 				if (band.has(y * masks.width + x)) {
 					candidateOnOutlinePx++;
 					continue;
 				}
 				let nearBand = false;
-				for (let dy = -knobs.haloPx; dy <= knobs.haloPx && !nearBand; dy++) {
-					for (let dx = -knobs.haloPx; dx <= knobs.haloPx && !nearBand; dx++) {
+				for (let dy = -smearPx; dy <= smearPx && !nearBand; dy++) {
+					for (let dx = -smearPx; dx <= smearPx && !nearBand; dx++) {
 						if (band.has((y + dy) * masks.width + (x + dx))) nearBand = true;
 					}
 				}
@@ -671,33 +711,68 @@ interface AimReading {
 	readonly badgeId: string;
 	readonly badgeLabel: string | null;
 	readonly errorDeg: number;
-	readonly runnerUpBadgeId: string | null;
-	readonly runnerUpGapDeg: number | null;
+	readonly rangePx: number;
+	readonly runnerUp: {
+		readonly badgeId: string;
+		readonly badgeLabel: string | null;
+		readonly errorDeg: number;
+		readonly rangePx: number;
+	} | null;
 }
 
+/**
+ * FIRST-INTERCEPT aim (the same rule resolveVisibleTeeBadgeRays uses for
+ * visible tees): the pad's undirected axis is two rays; in each direction the
+ * candidate badge is the NEAREST one inside the aim window -- distance is
+ * used only to order intercepts along a ray, never as a cap. Without this, a
+ * far badge that happens to sit 0.3deg off the axis outvotes the hole's own
+ * badge 74px away (the receipted Heritage badge-2-over-badge-5 failure).
+ *
+ * The window is what the fit itself already tolerates: the outline
+ * accounting accepts up to one extra wall thickness of rail smear across the
+ * pad's long span, which is a true-axis deviation of atan(2*wall/long) --
+ * course-derived, printed, no degree constant.
+ */
 function aimFor(
 	placement: BorderFitPlacement,
-	badges: readonly BorderFitBadge[]
+	badges: readonly BorderFitBadge[],
+	padDims: BorderFitPadDims
 ): AimReading | null {
-	const readings = badges
-		.map((badge) => ({
-			badgeId: badge.detId,
-			badgeLabel: badge.label,
-			errorDeg: undirectedAxisErrorDeg(
-				placement.axisRad,
-				Math.atan2(badge.cyLocalPx - placement.centerYPx, badge.cxLocalPx - placement.centerXPx)
-			)
-		}))
-		.sort((a, b) => a.errorDeg - b.errorDeg || a.badgeId.localeCompare(b.badgeId));
-	const bestReading = readings[0];
-	if (!bestReading) return null;
-	const runnerUp = readings[1] ?? null;
+	const windowDeg = Math.atan2(2 * padDims.wallPx, padDims.longPx) * DEG;
+	const candidates: { badgeId: string; badgeLabel: string | null; errorDeg: number; rangePx: number }[] = [];
+	for (const rayRad of [placement.axisRad, placement.axisRad + Math.PI]) {
+		const inWindow: (typeof candidates)[number][] = [];
+		for (const badge of badges) {
+			const dx = badge.cxLocalPx - placement.centerXPx;
+			const dy = badge.cyLocalPx - placement.centerYPx;
+			const bearing = Math.atan2(dy, dx);
+			const dev = Math.abs(Math.atan2(Math.sin(bearing - rayRad), Math.cos(bearing - rayRad))) * DEG;
+			if (dev > windowDeg) continue;
+			inWindow.push({ badgeId: badge.detId, badgeLabel: badge.label, errorDeg: dev, rangePx: Math.hypot(dx, dy) });
+		}
+		inWindow.sort((a, b) => a.rangePx - b.rangePx || a.badgeId.localeCompare(b.badgeId));
+		const first = inWindow[0];
+		if (!first) continue;
+		// carry the intercept plus any claimant within one pad length behind
+		// it -- those are the genuinely indistinguishable ones the resolution
+		// bound must see; anything further is occluded by the first intercept
+		for (const entry of inWindow) {
+			if (entry.rangePx - first.rangePx < padDims.longPx) candidates.push(entry);
+		}
+	}
+	// Range-primary across the two rays: badges are placed near their own
+	// tees, so among in-window claimants the NEAREST intercept is the claim;
+	// distance orders intercepts, it never caps anything.
+	candidates.sort((a, b) => a.rangePx - b.rangePx || a.badgeId.localeCompare(b.badgeId));
+	const best = candidates[0];
+	if (!best) return null;
+	const second = candidates[1] ?? null;
 	return {
-		badgeId: bestReading.badgeId,
-		badgeLabel: bestReading.badgeLabel,
-		errorDeg: bestReading.errorDeg,
-		runnerUpBadgeId: runnerUp?.badgeId ?? null,
-		runnerUpGapDeg: runnerUp ? runnerUp.errorDeg - bestReading.errorDeg : null
+		badgeId: best.badgeId,
+		badgeLabel: best.badgeLabel,
+		errorDeg: best.errorDeg,
+		rangePx: best.rangePx,
+		runnerUp: second && second.badgeId !== best.badgeId ? second : null
 	};
 }
 
@@ -747,7 +822,7 @@ export function runBorderCornerFit(
 			}
 		};
 	}
-	const discovery = discoverBorderCandidates(masks, components, baskets, visiblePads, padDims, knobs);
+	const discovery = discoverBorderCandidates(masks, components, baskets, visiblePads, padDims, knobs, badges);
 	const glyphLabelSet = new Set<number>();
 	for (const [, label] of discovery.glyphFillLabels) if (label !== null) glyphLabelSet.add(label);
 
@@ -778,29 +853,42 @@ export function runBorderCornerFit(
 		}
 		let winner = accepted;
 		if (fit.acceptedTies.length > 0) {
-			const scored = [accepted, ...fit.acceptedTies]
-				.map((placement) => ({ placement, aim: aimFor(placement, eligibleBadges) }))
-				.sort((a, b) => (a.aim?.errorDeg ?? Infinity) - (b.aim?.errorDeg ?? Infinity));
-			const bestScored = scored[0];
-			const nextScored = scored[1];
-			if (
-				bestScored.aim &&
-				nextScored?.aim &&
-				bestScored.aim.errorDeg === nextScored.aim.errorDeg
-			) {
-				abstentions.push({
-					anchorBasketIds: candidate.anchorBasketIds,
-					componentLabel: candidate.component.label,
-					reason: 'orientation-unresolved',
-					detail:
-						'contradiction-free placements tie on evidence AND on badge-aim error ' +
-						`(${bestScored.aim.errorDeg.toFixed(3)}deg); no honest way to choose.`
-				});
-				continue;
+			// The badge aim distinguishes ORIENTATIONS, never slides: every
+			// slide along one axis aims identically, so only when the tied
+			// placements span BOTH orientations does the aim arbitrate -- one
+			// ranked-first placement per axis, smaller aim error wins. Slides
+			// within one axis are already deterministically ordered by the
+			// placement ranking (evidence, then position).
+			const ties = [accepted, ...fit.acceptedTies];
+			const firstPerAxis = new Map<number, BorderFitPlacement>();
+			for (const placement of ties) {
+				if (!firstPerAxis.has(placement.axisRad)) firstPerAxis.set(placement.axisRad, placement);
 			}
-			winner = bestScored.placement;
+			if (firstPerAxis.size > 1) {
+				const scored = [...firstPerAxis.values()]
+					.map((placement) => ({ placement, aim: aimFor(placement, eligibleBadges, padDims) }))
+					.sort((a, b) => (a.aim?.errorDeg ?? Infinity) - (b.aim?.errorDeg ?? Infinity));
+				const bestScored = scored[0];
+				const nextScored = scored[1];
+				if (
+					bestScored.aim &&
+					nextScored?.aim &&
+					bestScored.aim.errorDeg === nextScored.aim.errorDeg
+				) {
+					abstentions.push({
+						anchorBasketIds: candidate.anchorBasketIds,
+						componentLabel: candidate.component.label,
+						reason: 'orientation-unresolved',
+						detail:
+							'contradiction-free placements of BOTH orientations tie on evidence AND on ' +
+							`badge-aim error (${bestScored.aim.errorDeg.toFixed(3)}deg); no honest way to choose.`
+					});
+					continue;
+				}
+				winner = bestScored.placement;
+			}
 		}
-		const aim = aimFor(winner, eligibleBadges);
+		const aim = aimFor(winner, eligibleBadges, padDims);
 		if (!aim) {
 			abstentions.push({
 				anchorBasketIds: candidate.anchorBasketIds,
@@ -810,9 +898,9 @@ export function runBorderCornerFit(
 			});
 			continue;
 		}
-		// the axis is quantized to the image grid: bearings closer together
-		// than atan(1px over the pad's long side) are indistinguishable
-		const aimResolutionBoundDeg = Math.atan2(1, padDims.longPx) * DEG;
+		// two in-window claimants within one pad length of each other along
+		// the rays are indistinguishable to a corner-anchored fit
+		const aimResolutionBoundPx = padDims.longPx;
 		provisional.push({
 			anchorBasketIds: candidate.anchorBasketIds,
 			componentLabel: candidate.component.label,
@@ -830,52 +918,94 @@ export function runBorderCornerFit(
 			aimBadgeId: aim.badgeId,
 			aimBadgeLabel: aim.badgeLabel,
 			aimErrorDeg: aim.errorDeg,
-			aimRunnerUpBadgeId: aim.runnerUpBadgeId,
-			aimRunnerUpGapDeg: aim.runnerUpGapDeg,
-			aimResolved: aim.runnerUpGapDeg === null || aim.runnerUpGapDeg >= aimResolutionBoundDeg,
-			aimResolutionBoundDeg
+			aimRangePx: aim.rangePx,
+			aimRunnerUpBadgeId: aim.runnerUp?.badgeId ?? null,
+			aimRunnerUpErrorDeg: aim.runnerUp?.errorDeg ?? null,
+			aimRunnerUpRangePx: aim.runnerUp?.rangePx ?? null,
+			aimResolved:
+				aim.runnerUp === null || aim.runnerUp.rangePx - aim.rangePx >= aimResolutionBoundPx,
+			aimResolutionBoundPx
 		});
 	}
 
 	// G4 contract: a UNIQUE TeeBadgeClaim per badge, or a NAMED abstention.
-	const byBadge = new Map<string, BorderCornerClaim[]>();
-	for (const claim of provisional) {
-		const list = byBadge.get(claim.aimBadgeId) ?? [];
-		list.push(claim);
-		byBadge.set(claim.aimBadgeId, list);
-	}
+	// Resolution is iterative because an aim can be UNRESOLVED between two
+	// badges (T6's 5-vs-6 under the quantization bound): when a stronger
+	// remnant takes a loser's best badge, the loser RETARGETS to its
+	// runner-up instead of dying -- exactly how recovering T5 collapses T6's
+	// aim to badge 6 with no extra machinery.
+	let pending = [...provisional];
 	const claims: BorderCornerClaim[] = [];
-	for (const [badgeId, group] of byBadge) {
-		if (group.length === 1) {
-			claims.push(group[0]);
-			continue;
+	const lockedBadges = new Set<string>();
+	for (let pass = 0; pass < 2 && pending.length > 0; pass++) {
+		const byBadge = new Map<string, BorderCornerClaim[]>();
+		for (const claim of pending) {
+			const list = byBadge.get(claim.aimBadgeId) ?? [];
+			list.push(claim);
+			byBadge.set(claim.aimBadgeId, list);
 		}
-		const ranked = [...group].sort((a, b) => b.placement.evidencePx - a.placement.evidencePx);
-		if (ranked[0].placement.evidencePx > ranked[1].placement.evidencePx) {
-			claims.push(ranked[0]);
-			for (const loser of ranked.slice(1)) {
-				abstentions.push({
-					anchorBasketIds: loser.anchorBasketIds,
-					componentLabel: loser.componentLabel,
-					reason: 'lost-evidence-dominance',
-					detail:
-						`aims at ${badgeId} like component ${ranked[0].componentLabel}, but with ` +
-						`${loser.placement.evidencePx} evidence px vs the winner's ` +
-						`${ranked[0].placement.evidencePx}; the strictly stronger remnant keeps the claim.`
-				});
+		const next: BorderCornerClaim[] = [];
+		for (const [badgeId, group] of byBadge) {
+			const ranked = [...group].sort((a, b) => b.placement.evidencePx - a.placement.evidencePx);
+			const winner =
+				ranked.length === 1 || ranked[0].placement.evidencePx > ranked[1].placement.evidencePx
+					? ranked[0]
+					: null;
+			if (winner) {
+				claims.push(winner);
+				lockedBadges.add(badgeId);
 			}
-		} else {
-			for (const contested of ranked) {
-				abstentions.push({
-					anchorBasketIds: contested.anchorBasketIds,
-					componentLabel: contested.componentLabel,
-					reason: 'badge-contested',
-					detail:
-						`${ranked.length} remnants aim at ${badgeId} with equal-strength evidence ` +
-						`(${ranked[0].placement.evidencePx}px); no unique claim exists, so ALL abstain by name.`
-				});
+			for (const loser of ranked.filter((claim) => claim !== winner)) {
+				const retarget =
+					!loser.aimResolved &&
+					loser.aimRunnerUpBadgeId !== null &&
+					!lockedBadges.has(loser.aimRunnerUpBadgeId)
+						? loser.aimRunnerUpBadgeId
+						: null;
+				if (retarget) {
+					next.push({
+						...loser,
+						aimBadgeId: retarget,
+						aimBadgeLabel: badges.find((badge) => badge.detId === retarget)?.label ?? null,
+						aimErrorDeg: loser.aimRunnerUpErrorDeg ?? loser.aimErrorDeg,
+						aimRangePx: loser.aimRunnerUpRangePx ?? loser.aimRangePx,
+						aimRunnerUpBadgeId: loser.aimBadgeId,
+						aimRunnerUpErrorDeg: null,
+						aimRunnerUpRangePx: null,
+						aimRetargetedFromBadgeId: loser.aimBadgeId
+					});
+				} else if (winner) {
+					abstentions.push({
+						anchorBasketIds: loser.anchorBasketIds,
+						componentLabel: loser.componentLabel,
+						reason: 'lost-evidence-dominance',
+						detail:
+							`aims at ${badgeId} like component ${winner.componentLabel}, but with ` +
+							`${loser.placement.evidencePx} evidence px vs the winner's ` +
+							`${winner.placement.evidencePx}, and no un-taken runner-up aim exists to retarget to.`
+					});
+				} else {
+					abstentions.push({
+						anchorBasketIds: loser.anchorBasketIds,
+						componentLabel: loser.componentLabel,
+						reason: 'badge-contested',
+						detail:
+							`${ranked.length} remnants aim at ${badgeId} with equal-strength evidence ` +
+							`(${ranked[0].placement.evidencePx}px); no unique claim exists and no un-taken ` +
+							'runner-up aim exists, so this remnant abstains by name.'
+					});
+				}
 			}
 		}
+		pending = next;
+	}
+	for (const unplaced of pending) {
+		abstentions.push({
+			anchorBasketIds: unplaced.anchorBasketIds,
+			componentLabel: unplaced.componentLabel,
+			reason: 'badge-contested',
+			detail: 'retargeting did not converge within two passes; abstaining rather than looping.'
+		});
 	}
 	claims.sort((a, b) => a.aimBadgeId.localeCompare(b.aimBadgeId));
 

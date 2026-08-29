@@ -757,6 +757,7 @@ export async function runSweepOperation(
 		},
 		assignments: assignmentRows,
 		notFoundBadges,
+		endpointPositions,
 		resultsProvenance,
 		visualRenders,
 		renderWarnings,

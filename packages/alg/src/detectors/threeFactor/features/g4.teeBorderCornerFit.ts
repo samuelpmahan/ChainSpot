@@ -10,13 +10,14 @@
  * in g4.teeBorderCornerFitMath.ts's header: Heritage T6 recovered to 1.0px
  * from its truth annotation from the 21px corner alone.
  *
- * Reads exactly one board slot (`measurement`) -- baskets, badges, visible
- * tees, and both masks all live there -- and runs BEFORE assignment and
- * teeRecovery in its on.json, so nothing downstream is read. Emits
- * TeeBadgeClaims (per the 2026-08-29 gate-reorg contract: G4 output is a
- * unique claim or a NAMED abstention) on its own board slot; it does not
- * inject tees into the baseline recovery path. Composition with the rail
- * lane happens in staging, by config, never by editing a shared file.
+ * Reads `measurement` (baskets, badges, visible tees, both masks) plus the
+ * seeded `recoveredTees` pool, and runs AFTER measurement and BEFORE
+ * assignment in its on.json. Emits TeeBadgeClaims (per the 2026-08-29
+ * gate-reorg contract: G4 output is a unique claim or a NAMED abstention)
+ * on its own board slot AND publishes accepted claims into `recoveredTees`
+ * -- the pool baseline teeRecovery (which runs earlier, per the gate reorg)
+ * also appends to and assignment consumes. Composition with the rail lane
+ * is therefore pure execution order, never an edit to a shared file.
  *
  * File layout mirrors g4.teeBadgeCompass.ts exactly (feature + Math +
  * Receipt modules, registry entry, gate-sets ownership, default-OFF
@@ -28,7 +29,7 @@ import type { OperationArtifact } from '../../../exec/gateway';
 import type { ExecBoard } from '../../../exec/board';
 import { extractComponents } from '../components';
 import { resolveVisibleTeeBadgeRays } from './g3.teeRecovery';
-import type { ThreeFactorMeasurement } from '../types';
+import type { RecoveredTeeInput, ThreeFactorMeasurement } from '../types';
 import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
 import {
 	runBorderCornerFit,
@@ -87,7 +88,9 @@ export const teeBorderCornerFitFeature = {
 		'non-claim is a NAMED abstention. Orientation ties are broken by badge aim (S2: the tee ' +
 		'is the compass), restricted to badges NO visible tee can serve -- computed tee-locally ' +
 		'via resolveVisibleTeeBadgeRays, the same measurement-only eligibility contract ' +
-		'teeRecovery states. Reads only `measurement`; runs before assignment/teeRecovery.',
+		'teeRecovery states; aims resolve FIRST-INTERCEPT along the pad axis (distance orders ' +
+		'intercepts on a ray, never caps). Accepted claims publish into the shared recoveredTees ' +
+		'pool assignment consumes; runs after measurement, before assignment.',
 	render: TEE_BORDER_CORNER_FIT_RENDER,
 	knobs: {
 		minimumPadSampleSize: {
@@ -131,10 +134,11 @@ export const teeBorderCornerFitFeature = {
 		axisOrthogonalToleranceDeg: {
 			default: 10,
 			note:
-				'PCA of a tiny border remnant is quantization-coarse; within this many degrees of an ' +
-				'image axis the remnant is treated as axis-aligned. A statistical parameter on ' +
-				'small-component PCA stability, not physics -- non-orthogonal remnants are loudly ' +
-				'abstained (rotated rails are a sibling lane), never guessed at.',
+				'RETIRED as a gate (2026-08-29): an L-shaped remnant\'s overall PCA is diagonal even ' +
+				'with axis-aligned arms, so gating on it rejected the exact Heritage T5 evidence class ' +
+				'this feature exists for. Rotated evidence is already loudly abstained by the outline ' +
+				'accounting itself (no-contradiction-free-placement). Kept for config-schema stability; ' +
+				'reads nothing.',
 			validate: positiveNumberKnob('axisOrthogonalToleranceDeg')
 		}
 	}
@@ -296,10 +300,10 @@ function emitDrawables(ctx: FeatureContext, evidence: TeeBorderCornerFitEvidence
 				`err ${claim.aimErrorDeg.toFixed(2)}deg` +
 				(claim.aimResolved
 					? ''
-					: `; AIM UNRESOLVED: runner-up ${claim.aimRunnerUpBadgeId} gap ` +
-						`${claim.aimRunnerUpGapDeg?.toFixed(2)}deg under the axis-quantization bound ` +
-						`${claim.aimResolutionBoundDeg.toFixed(2)}deg (atan(1px/padLong)) -- the tee stands, ` +
-						'the badge identity does not'),
+					: `; AIM UNRESOLVED: runner-up ${claim.aimRunnerUpBadgeId} at ` +
+						`${claim.aimRunnerUpRangePx?.toFixed(1)}px vs ${claim.aimRangePx.toFixed(1)}px -- a range ` +
+						`gap under one pad length (${claim.aimResolutionBoundPx.toFixed(1)}px) is ` +
+						'indistinguishable to a corner-anchored fit; the tee stands, the badge identity does not'),
 			values: {
 				componentArea: claim.componentArea,
 				padX0: placement.x0,
@@ -310,8 +314,9 @@ function emitDrawables(ctx: FeatureContext, evidence: TeeBorderCornerFitEvidence
 				teeYPx: claim.teeYPx,
 				axisDeg: claim.angleRad * DEG,
 				aimErrorDeg: claim.aimErrorDeg,
-				aimResolutionBoundDeg: claim.aimResolutionBoundDeg,
-				...(claim.aimRunnerUpGapDeg !== null ? { aimRunnerUpGapDeg: claim.aimRunnerUpGapDeg } : {}),
+				aimRangePx: claim.aimRangePx,
+				aimResolutionBoundPx: claim.aimResolutionBoundPx,
+				...(claim.aimRunnerUpRangePx !== null ? { aimRunnerUpRangePx: claim.aimRunnerUpRangePx } : {}),
 				evidencePx: placement.evidencePx,
 				occludedPx: placement.occludedPx,
 				transitionPx: placement.transitionPx,
@@ -408,7 +413,8 @@ function executeTeeBorderCornerFit(
 			detId: badge.detId,
 			label: badge.label,
 			cxLocalPx: badge.cxPx,
-			cyLocalPx: badge.cyPx - topPx
+			cyLocalPx: badge.cyPx - topPx,
+			bboxLocal: [badge.bbox[0], badge.bbox[1] - topPx, badge.bbox[2], badge.bbox[3]] as const
 		}));
 		const visiblePads: BorderFitVisiblePad[] = measurement.tees
 			.filter((tee) => tee.tier !== 'recovered' && tee.pad !== undefined)
@@ -461,6 +467,39 @@ function executeTeeBorderCornerFit(
 	ctx.measure('teeBorderCornerFit', 'abstentions', evidence.abstentions.length);
 	ctx.measure('teeBorderCornerFit', 'excluded', evidence.excluded.length);
 	board.set('teeBorderCornerFit', evidence);
+
+	// Publish claims into the shared recovered-tee pool assignment consumes.
+	// Exact-center dedup only, mirroring teeRecovery ("without a
+	// proximity/search heuristic" -- owner sensitivity); the OFF path
+	// republishes the pool untouched so the produces contract holds either way.
+	const existing = board.get<readonly RecoveredTeeInput[]>('recoveredTees');
+	const additions: RecoveredTeeInput[] = [];
+	for (const claim of evidence.claims) {
+		const duplicate =
+			existing.some((tee) => tee.xPx === claim.teeXPx && tee.yPx === claim.teeYPx) ||
+			additions.some((tee) => tee.xPx === claim.teeXPx && tee.yPx === claim.teeYPx);
+		if (duplicate) {
+			ctx.measure('teeBorderCornerFit', 'duplicateSuppressed', 1);
+			continue;
+		}
+		additions.push({
+			xPx: claim.teeXPx,
+			yPx: claim.teeYPx,
+			bbox: [claim.placement.x0, claim.placement.y0, claim.placement.w, claim.placement.h],
+			provenance: {
+				source: 'tee-border-corner-fit',
+				note:
+					`border remnant ${claim.componentLabel} (${claim.componentArea}px, anchor basket(s) ` +
+					`${claim.anchorBasketIds.join('+')}); outline ${claim.placement.evidencePx} evidence + ` +
+					`${claim.placement.occludedPx} occluded + ${claim.placement.transitionPx} transition + ` +
+					`${claim.placement.barePx} bare; aims at ${claim.aimBadgeId} ` +
+					`(label ${claim.aimBadgeLabel ?? 'UNREAD'}) err ${claim.aimErrorDeg.toFixed(2)}deg` +
+					(claim.aimRetargetedFromBadgeId ? `, retargeted from ${claim.aimRetargetedFromBadgeId}` : '')
+			}
+		});
+	}
+	ctx.measure('teeBorderCornerFit', 'recoveredTeesPublished', additions.length);
+	board.set('recoveredTees', [...existing, ...additions]);
 	stop();
 }
 
@@ -480,8 +519,8 @@ function measurementTable(board: ExecBoard): readonly OperationArtifact[] {
 export const teeBorderCornerFitUnit: EngineUnit = {
 	id: 'teeBorderCornerFit',
 	gate: 'G4',
-	consumes: ['measurement'],
-	produces: ['teeBorderCornerFit'],
+	consumes: ['measurement', 'recoveredTees'],
+	produces: ['teeBorderCornerFit', 'recoveredTees'],
 	note:
 		'border-adjacency corner-fit tee recovery candidate; production custody is owned by ' +
 		'teeBorderCornerFitOperation',
@@ -500,8 +539,8 @@ export const teeBorderCornerFitOperation: ABFeatureOperation = {
 		kind: 'decide',
 		gate: 'G4',
 		unit: 'teeBorderCornerFit',
-		consumes: ['measurement'],
-		produces: ['teeBorderCornerFit'],
+		consumes: ['measurement', 'recoveredTees'],
+		produces: ['teeBorderCornerFit', 'recoveredTees'],
 		features: ['teeBorderCornerFit'],
 		note:
 			'border-adjacency corner fit: unowned white components glued to basket ink anchor the ' +

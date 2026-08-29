@@ -16,7 +16,7 @@ import { detectScreenChromeRegions, pointInScreenChrome } from '../screenChrome'
 export type { Px, OccluderFootprint, RailCandidate } from '../geometry/railExtraction';
 export { extractRailCandidates } from '../geometry/railExtraction';
 import type { Px, OccluderFootprint, RailCandidate } from '../geometry/railExtraction';
-import { extractRailCandidates } from '../geometry/railExtraction';
+import { extractRailCandidates, MIN_RAIL_PIXELS } from '../geometry/railExtraction';
 
 export interface RecoveryFit {
 	readonly centerXPx: number;
@@ -76,6 +76,28 @@ export interface TeeRecoveryCandidate {
 	 * multiclaim is preserved and every claimant is deferred, never collapsed
 	 * to a local winner. */
 	readonly ambiguityWithBadgeLabels?: readonly string[];
+	/** false when NO pixel of this candidate's component group lies within
+	 * the raster adjacency allowance of a known-occluder footprint -- by the
+	 * completeness invariant such a group cannot be a partially-occluded tee
+	 * (see the occluder-adjacency note in buildTeeRecoveryCandidates).
+	 * Undefined = not measured (legacy/synthetic callers); only an explicit
+	 * false rejects. */
+	readonly occluderAdjacent?: boolean;
+	/** The one honest exception to occluder adjacency: a threshold-DIMMED pad
+	 * (the fired brightVMin ratchet class) has no occluder, yet one painted
+	 * rail can still cross the brightness threshold. Such a survivor is ONE
+	 * connected shard, spans at least the course's own shortest pad side
+	 * along the fitted axis, and stays within a wall band (two thicknesses +
+	 * raster tolerance) across it -- a rail, never a blob or a speck chain.
+	 * All bounds course-derived; values carried for receipts. */
+	readonly dimRailEscape?: {
+		readonly qualifies: boolean;
+		readonly singleShard: boolean;
+		readonly alongSpanPx: number;
+		readonly alongFloorPx: number;
+		readonly acrossSpanPx: number;
+		readonly acrossCapPx: number;
+	};
 }
 
 export interface TeeRecoveryValues {
@@ -270,23 +292,42 @@ function pointExplainsTee(point: readonly [number, number], fit: RecoveryFit): b
 		Math.abs(v) >= fit.halfHeightPx - thickness - RASTER_TOLERANCE_PX;
 }
 
-export function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
-	// TEMP POKE (env-gated): owner hypothesis test -- if the few bright pixels
-	// inside the ring interior were not white, would the C-solved pad accept?
-	const EAT_INTERIOR = process.env.CHAINSPOT_POKE_INTERIOR === '1' && candidate.fit.fitKind === 'rail-extracted';
-	if (EAT_INTERIOR) {
-		const f = candidate.fit;
-		const c = Math.cos(f.angleRad), sn = Math.sin(f.angleRad);
-		const innerU = f.halfWidthPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
-		const innerV = f.halfHeightPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
-		const base = rawUnexplainedPixels(candidate);
-		return base.filter(([x, y]) => {
-			const dx = x - f.centerXPx, dy = y - f.centerYPx;
-			const u = dx * c + dy * sn, v = -dx * sn + dy * c;
-			return !(Math.abs(u) < innerU && Math.abs(v) < innerV);
-		});
+/** Split of a candidate's non-band pixels into the two classes the owner's
+ * 2026-08-29 holepath ruling names: interior brights (the hole path showing
+ * through the hollow -- excused, never evidence, never a contradiction) and
+ * true contradictions (bright outside the fitted footprint's support band
+ * AND outside its hollow). */
+export function partitionUnexplainedPixels(candidate: TeeRecoveryCandidate): {
+	readonly contradictions: readonly (readonly [number, number])[];
+	readonly interiorExcusedPx: number;
+} {
+	// Owner world-model ruling (2026-08-29, supersedes the env-gated
+	// CHAINSPOT_POKE_INTERIOR probe and A1's discarded INTERIOR_PIXEL_BOUND
+	// amnesty): the hole path is WIDER than the pad and runs beneath it, so a
+	// bright pixel inside the hollow is the path showing through -- it never
+	// contradicts a tee and never counts as evidence, for EVERY fit kind.
+	// Supporting measurement (same night): every accepted visible Dev6 pad
+	// has ZERO interior brights -- a ring only detects when the hollow
+	// happens to read dark, and recovery must not demand that luck from
+	// occluded pads.
+	const f = candidate.fit;
+	const c = Math.cos(f.angleRad), sn = Math.sin(f.angleRad);
+	const innerU = f.halfWidthPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
+	const innerV = f.halfHeightPx - Math.max(0, f.supportThicknessPx ?? 0) - RASTER_TOLERANCE_PX;
+	const base = rawUnexplainedPixels(candidate);
+	const contradictions: (readonly [number, number])[] = [];
+	let interiorExcusedPx = 0;
+	for (const point of base) {
+		const dx = point[0] - f.centerXPx, dy = point[1] - f.centerYPx;
+		const u = dx * c + dy * sn, v = -dx * sn + dy * c;
+		if (Math.abs(u) < innerU && Math.abs(v) < innerV) interiorExcusedPx++;
+		else contradictions.push(point);
 	}
-	return rawUnexplainedPixels(candidate);
+	return { contradictions, interiorExcusedPx };
+}
+
+export function unexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
+	return partitionUnexplainedPixels(candidate).contradictions;
 }
 
 function rawUnexplainedPixels(candidate: TeeRecoveryCandidate): readonly (readonly [number, number])[] {
@@ -545,7 +586,16 @@ function fitComponent(
 	// visible pixels and known occluders.
 	if (occluders && occluders.length > 0) {
 		const pxArray: Px[] = pixels.map(([x, y]) => [x, y]);
-		const railCandidates = extractRailCandidates(pxArray, occluders);
+		// Degenerate-rail guard (owner ruling 2026-08-29): a rail's direction
+		// comes from its span along its own axis. MIN_RAIL_PIXELS collinear
+		// cells span at least MIN_RAIL_PIXELS-1 px; a "rail" with less extent
+		// than that (the receipted 'length 0px, quality 0.000' rail once
+		// PASSED projection on Heritage) states no direction and must not
+		// drive a projection -- the candidate falls through to the
+		// support-search fallback instead of being decided by noise.
+		const railCandidates = extractRailCandidates(pxArray, occluders).filter(
+			(rail) => rail.lengthPx >= MIN_RAIL_PIXELS - 1 && rail.qualityScore > 0
+		);
 		if (railCandidates.length > 0) {
 			// Use the first (best-ranked) rail candidate. The extractor returns
 			// candidates ranked by quality; we take the top one.
@@ -1178,18 +1228,24 @@ export function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecove
 	const axisRejected = candidate.badgeLabel !== null && candidate.badgeLabel !== undefined && /^\d+$/.test(candidate.badgeLabel) && (
 		railMissPx !== undefined ? railMissPx > 0 : (axisError ?? Infinity) >= activeAxisLimitRad
 	);
-	const unexplained = unexplainedPixels(candidate);
+	const { contradictions: unexplained, interiorExcusedPx } = partitionUnexplainedPixels(candidate);
 	const insufficientSupport = support < MIN_SHARD_SUPPORT_PIXELS;
 	const ambiguity = (candidate.ambiguityWithBadgeLabels?.length ?? 0) > 0;
-	const accepted = !insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguity;
+	const notOccluderAdjacent =
+		candidate.occluderAdjacent === false && candidate.dimRailEscape?.qualifies !== true;
+	const accepted =
+		!insufficientSupport && unexplained.length === 0 && !axisRejected && !ambiguity && !notOccluderAdjacent;
 	const localized = poseOf(candidate);
 	const coordinateOffset = candidate.coordinateFrame === 'original' ? 0 : candidate.viewportTopPx ?? 0;
 	const localizationEvidence = candidate.localizationSource === 'full-span-component-pca'
 		? '; localization uses the exact centroid/axis of the single detector-owned component spanning both course-local pad axes'
 		: '; localization uses the badge-constrained support fit because the visible evidence is small or split';
-	const pixelEvidence = unexplained.length
-		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
+	const interiorNote = interiorExcusedPx > 0
+		? `; interiorExcusedPx=${interiorExcusedPx} (holepath ruling 2026-08-29: the hole path is wider than the pad and runs beneath it, so brights inside the hollow are the path showing through -- excused, never evidence, never a contradiction)`
 		: '';
+	const pixelEvidence = (unexplained.length
+		? `; unexplained visible component pixels: ${unexplained.slice(0, 8).map(([x, y]) => `(${x},${y})`).join(', ')}${unexplained.length > 8 ? ` (+${unexplained.length - 8} more)` : ''}`
+		: '') + interiorNote;
 	// This candidate is already anchored to one specific badge (target.badge in
 	// buildTeeRecoveryCandidates), so the real hole number is known whenever an
 	// exact digit read exists — surface it so a rejection is legible without
@@ -1208,10 +1264,18 @@ export function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecove
 		? ` Rail-extracted fit: angle ${(candidate.fit.extractedRailAngleRad ?? 0).toFixed(3)} rad, length ${(candidate.fit.extractedRailLengthPx ?? 0).toFixed(0)}px, quality ${(candidate.fit.extractedRailQualityScore ?? 0).toFixed(3)}, from ${candidate.fit.railCandidatesConsidered ?? 0} candidate${(candidate.fit.railCandidatesConsidered ?? 0) === 1 ? '' : 's'}, with occluders subtracted: ${(candidate.fit.occluderKindsSubtracted ?? []).join(', ') || 'none'}.`
 		: '';
 
+	// Every failed gate prints -- a rejection names ALL its reasons, so a
+	// reader never mistakes "adjacency failed" for "the fit was fine".
+	const adjacencyClause = notOccluderAdjacent
+		? `; component group touches NO known-occluder footprint within the 2px raster adjacency allowance -- by the completeness invariant a partially-occluded tee's remnant must touch its occluder, so this is scenery or a G3-owned miss, never a recovery claim` +
+			(candidate.dimRailEscape
+				? `; dim-rail escape refused: singleShard=${candidate.dimRailEscape.singleShard} alongSpanPx=${candidate.dimRailEscape.alongSpanPx.toFixed(1)} (floor ${candidate.dimRailEscape.alongFloorPx.toFixed(1)} = course's shortest pad side) acrossSpanPx=${candidate.dimRailEscape.acrossSpanPx.toFixed(1)} (cap ${candidate.dimRailEscape.acrossCapPx.toFixed(1)} = two wall thicknesses + raster tolerance)`
+				: '')
+		: '';
 	const reason = accepted
 		? `every non-occluded visible component pixel across ${componentCount} visible shard${componentCount === 1 ? '' : 's'} fits a course-local hollow tee support whose major axis points at badge ${candidate.badgeLabel ?? candidate.badgeId ?? 'UNKNOWN'}; ${searchScope}${localizationEvidence}${railExtractionNote}`
 		: ambiguity
-			? `${holePrefix}${searchScope}; this exact component set also supports badge${candidate.ambiguityWithBadgeLabels!.length === 1 ? '' : 's'} ${candidate.ambiguityWithBadgeLabels!.join(', ')}; multiclaim preserved and every claimant is DEFERRED — G4 selects no local winner`
+			? `${holePrefix}${searchScope}; this exact component set also supports badge${candidate.ambiguityWithBadgeLabels!.length === 1 ? '' : 's'} ${candidate.ambiguityWithBadgeLabels!.join(', ')}; multiclaim preserved and every claimant is DEFERRED — G4 selects no local winner${adjacencyClause}`
 			: `${holePrefix}${searchScope}; ${insufficientSupport
 				? `visible component support ${support} < ${MIN_SHARD_SUPPORT_PIXELS}`
 				: `${axisRejected
@@ -1224,7 +1288,7 @@ export function graphCandidateResult(candidate: TeeRecoveryCandidate): TeeRecove
 						? `rail projection passes: centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px <= built-in ${(candidate.fit.badgePerpendicularBoundPx ?? Infinity).toFixed(3)}px bound from known pad width + observed rail + raster error; no badge-driven pose search was performed`
 						: candidate.fit.fitKind === 'rail-extracted'
 						? `extracted rail projection passes: centerline error ${(candidate.fit.badgePerpendicularErrorPx ?? Infinity).toFixed(3)}px <= bound; ${railExtractionNote}`
-						: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (non-rail fallback only)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}`}`;
+						: `no hollow tee support fit within ${activeAxisLimitDeg}° of the badge ray explains every visible component pixel (non-rail fallback only)`}${unexplained.length ? pixelEvidence : '; visible component pixels otherwise lie on the fitted support footprint'}${adjacencyClause}`}`;
 	return {
 		id: candidate.id,
 		verdict: accepted ? 'accepted' : 'rejected',
@@ -1358,16 +1422,23 @@ export function buildTeeRecoveryCandidates(
 	const silentDrops: SilentDuplicateDropNote[] = [];
 	const pads = tees.map((tee) => tee.pad).filter((pad): pad is NonNullable<typeof pad> => pad !== undefined);
 	if (pads.length === 0) return { candidates, searchOutcomes, chromeSubtractionNotes, silentDrops };
-	const median = (values: readonly number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
-	const halfWidth = median(pads.map((pad) => pad.majorPx / 2));
-	const minorWidths = pads.map((pad) => pad.minorPx);
-	const knownPadWidthPx = median(minorWidths);
+	// Owner law (2026-08-29): NO central tendency for pad size. A median
+	// invents a "typical pad" no one measured; the observed BRACKET of this
+	// course's own accepted pads is the contract (the cd77412 P100 pattern):
+	// the window is centered on the bracket midpoint and is wide enough to
+	// admit every pad G3 already accepted -- min and max alike, so no real
+	// pad on this course can sit outside its own course's window.
+	const bracket = (values: readonly number[]) => {
+		let lo = Infinity, hi = -Infinity;
+		for (const value of values) { if (value < lo) lo = value; if (value > hi) hi = value; }
+		return { lo, hi, mid: (lo + hi) / 2, half: (hi - lo) / 2 };
+	};
+	const majorBracket = bracket(pads.map((pad) => pad.majorPx));
+	const minorBracket = bracket(pads.map((pad) => pad.minorPx));
+	const halfWidth = majorBracket.mid / 2;
+	const knownPadWidthPx = minorBracket.mid;
 	const halfHeight = knownPadWidthPx / 2;
-	// P100 deviation is intentionally a bound, not a fitted sigma: every pad
-	// already accepted by G3 is part of the course-local width contract.
-	const halfHeightErrorPx = minorWidths.length === 0
-		? 0
-		: Math.max(...minorWidths.map((width) => Math.abs(width - knownPadWidthPx))) / 2;
+	const halfHeightErrorPx = minorBracket.half / 2;
 	const thickness = supportThickness(tees);
 	const coveredBadgeIds = new Set(search.assignment?.assignments.map((row) => row.badgeId) ?? []);
 	const targets = badges.filter((badge) => numberLabel(badge) !== undefined && !coveredBadgeIds.has(badge.detId));
@@ -1391,6 +1462,35 @@ export function buildTeeRecoveryCandidates(
 	// data (owned, chrome regions, badges, baskets) without re-deriving occluder geometry.
 	const occluders = buildOccluderFootprints(owned, stage, badges, baskets, search.sprites, chromeRegions, search, viewportTopPx);
 
+	// Occluder-adjacency (owner completeness invariant, applied 2026-08-29):
+	// every missing tee is either non-occluded (then G3 owns the miss -- a
+	// defect to fix at G3, never recovery's to guess) or occluded by a KNOWN
+	// occluder -- in which case its visible remnant necessarily TOUCHES that
+	// occluder's footprint. A component nowhere near any known occluder
+	// therefore cannot be a partially-occluded tee; before this rule, distant
+	// scenery (a Lenard roof 774px from H3's truth, a Heritage shadow speck)
+	// won C-solves because a 3-degree aim window sweeps tens of pixels at
+	// long range. The adjacency allowance is 2px chebyshev -- the same
+	// raster-geometry margin class as RASTER_TOLERANCE_PX, not a course
+	// distance.
+	const OCCLUDER_ADJACENCY_PX = 2;
+	const occluderPixelSet = new Set<string>();
+	for (const footprint of occluders) for (const key of footprint.pixels) occluderPixelSet.add(key);
+	const touchesOccluder = (pixels: readonly (readonly [number, number])[]): boolean => {
+		for (const [x, y] of pixels) {
+			for (let dy = -OCCLUDER_ADJACENCY_PX; dy <= OCCLUDER_ADJACENCY_PX; dy++) {
+				for (let dx = -OCCLUDER_ADJACENCY_PX; dx <= OCCLUDER_ADJACENCY_PX; dx++) {
+					if (occluderPixelSet.has(`${x + dx},${y + dy}`)) return true;
+					// The run-scoped occlusion service's exact OPAQUE cells are
+					// known occluders too (sprite bodies etc.); the service is
+					// query-only, so probe it here rather than enumerating it.
+					if (search.occlusion?.kindAt(x + dx, y + dy + viewportTopPx) === 'OPAQUE') return true;
+				}
+			}
+		}
+		return false;
+	};
+
 	const visibleComponents = stage.brightComponents.flatMap((component) => {
 		const afterOwnership = componentPixels(stage, component).filter(([x, y]) =>
 			!owned.has(`${x},${y}`) &&
@@ -1409,7 +1509,9 @@ export function buildTeeRecoveryCandidates(
 				regionCount: chromeRegions.length
 			});
 		}
-		return pixels.length ? [{ component, pixels }] : [];
+		return pixels.length
+			? [{ component, pixels, occluderAdjacent: touchesOccluder(pixels) }]
+			: [];
 	});
 
 	const globalSeenGroups = new Map<string, { badgeId: string; badgeLabel: string | null }>();
@@ -1459,6 +1561,32 @@ export function buildTeeRecoveryCandidates(
 			}
 			const pixels = compatible.flatMap((entry) => entry.pixels);
 			const visibleShards = compatible.flatMap((entry) => connectedPixelShards(entry.pixels));
+			// Dim-rail escape measurement (see TeeRecoveryCandidate.dimRailEscape):
+			// extents of the group along/across the FITTED axis, judged against
+			// this course's own pad bracket and wall thickness.
+			const dimRailEscape = (() => {
+				const c = Math.cos(fit.angleRad), s = Math.sin(fit.angleRad);
+				let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+				for (const [px, py] of pixels) {
+					const u = px * c + py * s;
+					const v = -px * s + py * c;
+					if (u < uMin) uMin = u; if (u > uMax) uMax = u;
+					if (v < vMin) vMin = v; if (v > vMax) vMax = v;
+				}
+				const alongSpanPx = pixels.length ? uMax - uMin + 1 : 0;
+				const acrossSpanPx = pixels.length ? vMax - vMin + 1 : 0;
+				const alongFloorPx = minorBracket.lo;
+				const acrossCapPx = 2 * (Math.max(0, thickness) + RASTER_TOLERANCE_PX);
+				const singleShard = visibleShards.length === 1;
+				return {
+					qualifies: singleShard && alongSpanPx >= alongFloorPx && acrossSpanPx <= acrossCapPx,
+					singleShard,
+					alongSpanPx,
+					alongFloorPx,
+					acrossSpanPx,
+					acrossCapPx
+				};
+			})();
 			const localizationStats = compatible.length === 1 && visibleShards.length === 1
 				? exactVisibleStats(compatible[0]!.component.label, compatible[0]!.pixels)
 				: undefined;
@@ -1483,7 +1611,9 @@ export function buildTeeRecoveryCandidates(
 				badgeAxisAngleRad: fit.angleRad,
 				teeToBadgeAngleRad,
 				badgeId: target.detId,
-				badgeLabel: target.label
+				badgeLabel: target.label,
+				occluderAdjacent: compatible.some((entry) => entry.occluderAdjacent),
+				dimRailEscape
 			});
 		}
 		// Evaluate the predicate before choosing. A large basket/badge component
@@ -1493,8 +1623,10 @@ export function buildTeeRecoveryCandidates(
 			const aa = badgeAxisError(a) ?? Infinity, ba = badgeAxisError(b) ?? Infinity;
 			const aRailMiss = (a.fit.fitKind === 'rail-projection' || a.fit.fitKind === 'rail-extracted') ? a.fit.badgePerpendicularMissPx ?? Infinity : undefined;
 			const bRailMiss = (b.fit.fitKind === 'rail-projection' || b.fit.fitKind === 'rail-extracted') ? b.fit.badgePerpendicularMissPx ?? Infinity : undefined;
-			const aAccepted = a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && (aRailMiss !== undefined ? aRailMiss === 0 : aa < activeAxisLimitRad);
-			const bAccepted = b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && (bRailMiss !== undefined ? bRailMiss === 0 : ba < activeAxisLimitRad);
+			const aAdjacent = a.occluderAdjacent !== false || a.dimRailEscape?.qualifies === true;
+			const bAdjacent = b.occluderAdjacent !== false || b.dimRailEscape?.qualifies === true;
+			const aAccepted = aAdjacent && a.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && ar === 0 && (aRailMiss !== undefined ? aRailMiss === 0 : aa < activeAxisLimitRad);
+			const bAccepted = bAdjacent && b.fragmentPixels.length >= MIN_SHARD_SUPPORT_PIXELS && br === 0 && (bRailMiss !== undefined ? bRailMiss === 0 : ba < activeAxisLimitRad);
 			if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
 			if (aAccepted) {
 				const aResidual = (a.fit.fitKind === 'rail-projection' || a.fit.fitKind === 'rail-extracted') ? a.fit.badgePerpendicularErrorPx ?? Infinity : aa;
@@ -1523,7 +1655,8 @@ export function buildTeeRecoveryCandidates(
 	const accepted = candidates.filter((candidate) => {
 		const support = candidate.fragmentPixels.length;
 		const railMiss = (candidate.fit.fitKind === 'rail-projection' || candidate.fit.fitKind === 'rail-extracted') ? candidate.fit.badgePerpendicularMissPx ?? Infinity : undefined;
-		return support >= MIN_SHARD_SUPPORT_PIXELS &&
+		return (candidate.occluderAdjacent !== false || candidate.dimRailEscape?.qualifies === true) &&
+			support >= MIN_SHARD_SUPPORT_PIXELS &&
 			unexplainedPixels(candidate).length === 0 &&
 			(railMiss !== undefined ? railMiss === 0 : (badgeAxisError(candidate) ?? Infinity) < activeAxisLimitRad);
 	});

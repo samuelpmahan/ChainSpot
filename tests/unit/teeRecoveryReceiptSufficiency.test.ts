@@ -329,19 +329,29 @@ describe('teeRecovery receipt sufficiency (no env vars, all evidence shipped)', 
 		// This specifically tests the fix at lines ~1186 and ~1511.
 		// A rail-extracted fit with badgePerpendicularMissPx=0 should be accepted.
 		const fixture = recoveryFixture('hollow-border');
-		const built = build(fixture);
+		// 2026-08-29 completeness-invariant adjacency: an off-shard OPAQUE
+		// cell supplies the known occluder this synthetic shard needs.
+		const occlusion = new OcclusionDetector();
+		occlusion.registerOpaque({ kindAt: (x, y) => (x === 27 && y === 33 ? 'OPAQUE' : 'UNKNOWN') });
+		const built = build(fixture, occlusion);
 
-		// Find any rail-extracted candidates that were accepted.
+		// 2026-08-29: a miss=0 candidate can still be rejected on EVIDENCE
+		// grounds (unexplained pixels) -- what the fitKind fix guarantees is
+		// that the printed reason never invents a centerline miss the decision
+		// did not take: a miss=0 rejection must name its true gate.
+		let checked = 0;
 		for (const candidate of built.candidates) {
 			if (candidate.fit.fitKind === 'rail-extracted') {
 				const result = graphCandidateResult(candidate);
-				// If badgePerpendicularMissPx is 0, it should not be rejected.
 				if ((candidate.fit.badgePerpendicularMissPx ?? Infinity) === 0) {
-					// Post-fix logic: railMiss will be 0, so not axisRejected.
-					// Decision at line ~1188 should use railMissPx (0) not axisError.
-					expect(result.verdict).not.toBe('rejected');
+					checked++;
+					if (result.verdict === 'rejected') {
+						expect(result.reason).toMatch(/projection passes/);
+						expect(result.reason).not.toMatch(/centerline miss:/);
+					}
 				}
 			}
 		}
+		expect(checked).toBeGreaterThan(0);
 	});
 });

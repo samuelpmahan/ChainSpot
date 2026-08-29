@@ -26,10 +26,11 @@ export interface BorderFitClaimRow {
 	readonly aimBadgeId: BorderFitText;
 	readonly aimBadgeLabel: BorderFitText;
 	readonly aimErrorDeg: BorderFitValue;
-	readonly aimRunnerUpGapDeg: BorderFitValue;
+	readonly aimRangePx: BorderFitValue;
+	readonly aimRunnerUpRangePx: BorderFitValue;
 	readonly aimResolved: BorderFitText;
 	readonly aimRunnerUpBadgeId: BorderFitText;
-	readonly aimResolutionBoundDeg: BorderFitValue;
+	readonly aimResolutionBoundPx: BorderFitValue;
 	readonly evidencePx: BorderFitValue;
 	readonly occludedPx: BorderFitValue;
 	readonly transitionPx: BorderFitValue;
@@ -128,10 +129,11 @@ function claimRowFor(drawable: Drawable): BorderFitClaimRow {
 		aimBadgeId: text(metadata.aimBadgeId),
 		aimBadgeLabel: text(metadata.aimBadgeLabel),
 		aimErrorDeg: numeric(drawable.values, 'aimErrorDeg'),
-		aimRunnerUpGapDeg: numeric(drawable.values, 'aimRunnerUpGapDeg'),
+		aimRangePx: numeric(drawable.values, 'aimRangePx'),
+		aimRunnerUpRangePx: numeric(drawable.values, 'aimRunnerUpRangePx'),
 		aimResolved: text(metadata.aimResolved),
 		aimRunnerUpBadgeId: text(metadata.aimRunnerUpBadgeId),
-		aimResolutionBoundDeg: numeric(drawable.values, 'aimResolutionBoundDeg'),
+		aimResolutionBoundPx: numeric(drawable.values, 'aimResolutionBoundPx'),
 		evidencePx: numeric(drawable.values, 'evidencePx'),
 		occludedPx: numeric(drawable.values, 'occludedPx'),
 		transitionPx: numeric(drawable.values, 'transitionPx'),
@@ -264,9 +266,11 @@ function cliLines(
 				`${row.aimBadgeId}${row.aimBadgeLabel === UNKNOWN ? '' : `(label ${row.aimBadgeLabel})`}`,
 				valueText(row.aimErrorDeg),
 				row.aimResolved === 'false'
-					? `UNRESOLVED vs ${row.aimRunnerUpBadgeId}: gap ${valueText(row.aimRunnerUpGapDeg)} < ` +
-						`bound ${valueText(row.aimResolutionBoundDeg)} (atan(1px/padLong))`
-					: `resolved (gap ${valueText(row.aimRunnerUpGapDeg)} >= bound ${valueText(row.aimResolutionBoundDeg)})`,
+					? `UNRESOLVED vs ${row.aimRunnerUpBadgeId}: ranges ${valueText(row.aimRangePx)} / ` +
+						`${valueText(row.aimRunnerUpRangePx)}px, gap under one pad length ` +
+						`(${valueText(row.aimResolutionBoundPx)}px)`
+					: `resolved (range ${valueText(row.aimRangePx)}px, next claimant ` +
+						`${valueText(row.aimRunnerUpRangePx)}px)`,
 				`${valueText(row.evidencePx)}/${valueText(row.occludedPx)}/${valueText(row.transitionPx)}/` +
 					`${valueText(row.barePx)} of ${valueText(row.outlinePx)}`,
 				`${valueText(row.remnantOnOutlinePx)}/${valueText(row.remnantWallAdjacentPx)}`
