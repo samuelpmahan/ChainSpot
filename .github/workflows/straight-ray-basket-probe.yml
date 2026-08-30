@@ -38,6 +38,7 @@ jobs:
         run: |
           npm ci
           npx svelte-kit sync
+          npm run build --workspace @chainspot/alg
 
       - name: Probe Lenard
         working-directory: ChainSpot
