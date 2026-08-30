@@ -1,4 +1,4 @@
-name: Straight Ray Basket Probe
+name: Straight Test Lenard Proof
 
 on:
   push:
@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  lenard-ray-probe:
+  lenard-straight-test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout ChainSpot
         uses: actions/checkout@v4
@@ -43,14 +43,18 @@ jobs:
           npx svelte-kit sync
           npm run build --workspace @chainspot/alg
 
-      - name: Probe Lenard
+      - name: Frozen default remains frozen
         working-directory: ChainSpot
-        run: npx vitest run tests/unit/straightRayBasketProbe.test.ts --reporter=verbose
+        run: npx vitest run tests/unit/threeFactorConfig.test.ts --reporter=verbose
 
-      - name: Upload probe evidence
+      - name: Straight Test production + renderer proof
+        working-directory: ChainSpot
+        run: npx vitest run tests/unit/straightTestDirectedLenard.test.ts --reporter=verbose
+
+      - name: Upload Straight Test VisualRender
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lenard-straight-ray-basket-probe
-          path: ChainSpot/artifacts/sweep/straight-ray-basket-probe
-          if-no-files-found: warn
+          name: lenard-straight-test-visual
+          path: ChainSpot/artifacts/sweep/straight-test-lenard
+          if-no-files-found: error
