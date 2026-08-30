@@ -1,0 +1,41 @@
+--- a/packages/alg/src/detectors/threeFactor/componentAssembly.ts
++++ b/packages/alg/src/detectors/threeFactor/componentAssembly.ts
+@@
+-		conts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
++		counts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
+--- a/packages/alg/src/detectors/threeFactor/objects.ts
++++ b/packages/alg/src/detectors/threeFactor/objects.ts
+@@
+-		baskets: measurent.baskets.map((evidence) => {
++		baskets: measurement.baskets.map((evidence) => {
+--- a/packages/alg/src/exec/operations.ts
++++ b/packages/alg/src/exec/operations.ts
+@@
+ interface BadgeStageComponents {
+ 	readonly brightLabels: Int32Array;
+ 	readonly brightComponents: ComponentStats[];
++	readonly darkLabels: Int32Array;
++	readonly darkComponents: ComponentStats[];
+ }
+@@
+-			const { bright } = board.get<BadgeStageMasks>('badgeStage.masks');
+-			const { labels, components } = extractComponents(bright);
++			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
++			const { labels, components } = extractComponents(bright);
++			const { labels: darkLabels, components: darkComponents } = extractComponents(dark);
+ 			board.set('badgeStage.components', {
+ 				brightLabels: labels,
+-				brightComponents: components
++				brightComponents: components,
++				darkLabels,
++				darkComponents
+ 			} satisfies BadgeStageComponents);
+@@
+-			const { brightLabels, brightComponents } =
++			const { brightLabels, brightComponents, darkLabels, darkComponents } =
+ 				board.get<BadgeStageComponents>('badgeStage.components');
+@@
+ 				brightLabels,
+ 				brightComponents,
++				darkLabels,
++				darkComponents,
