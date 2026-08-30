@@ -64,17 +64,14 @@ jobs:
               subprocess.run(step['run'], shell=True, check=True, executable='/bin/bash', env=env)
           PY
 
-      - name: Commit implementation
+      - name: Commit source implementation only
         run: |
           set -euo pipefail
           rm -rf chainspot-corpus
           rm -f artifacts/spikes/posterior-tee-recovery/abfeature-dev6.json
-          git rm .github/workflows/posterior-tee-recovery-bootstrap.yml
-          git rm .github/workflows/posterior-tee-recovery-bootstrap-fixed.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add \
-            .github/workflows/posterior-tee-recovery-spike.yml \
             packages/alg/src/detectors/threeFactor/features/g4.posteriorTeeRecovery.ts \
             packages/alg/src/detectors/threeFactor/features/registry.ts \
             packages/alg/src/detectors/threeFactor/gate-sets.ts \
