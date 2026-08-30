@@ -4,9 +4,11 @@ import {
 	assembleBasketV1,
 	assembleTeeV1,
 	learnBasketShellFamilyV1,
-	type ComponentAssembly,
+	materializeComponentAssembly,
 	type ComponentAssemblyFailure,
-	type ComponentAssemblyResult
+	type ComponentAssemblyResult,
+	type ComponentRasterEvidence,
+	type MaterializedComponentAssembly
 } from './componentAssembly';
 import type { BadgeEvidence, BasketEvidence, TeeEvidence, ThreeFactorMeasurement } from './types';
 
@@ -19,7 +21,7 @@ export type RasterOwnership = {
 	 * first-class: downstream code must not quietly reinterpret detector/fitted
 	 * geometry as the physical object perimeter.
 	 */
-	readonly componentAssembly?: ComponentAssemblyResult;
+	readonly componentAssembly?: MaterializedComponentAssembly | ComponentAssemblyFailure;
 };
 
 export interface Badge {
@@ -66,11 +68,15 @@ export interface ObjectGraph {
 }
 
 /**
- * The component sets are stage evidence already computed by badgeStage. V1
- * explicitly requires callers to hand them in; acquisition never re-thresholds
- * pixels or re-extracts connected components behind the caller's back.
+ * Same-stage connected-component evidence already computed by badgeStage.
+ * Acquisition dereferences these labels exactly once, then stores the owned
+ * pixels on the root object so physical consumers never reconstruct masks.
  */
 export interface ObjectComponentEvidence {
+	readonly width: number;
+	readonly height: number;
+	readonly brightLabels: Int32Array;
+	readonly darkLabels: Int32Array;
 	readonly brightComponents: readonly ComponentStats[];
 	readonly darkComponents: readonly ComponentStats[];
 }
@@ -86,13 +92,18 @@ function rasterFromAssembly(
 	detectorId: string,
 	fallbackBbox: readonly [number, number, number, number],
 	fallbackKind: 'observed' | 'fitted',
-	assembly: ComponentAssemblyResult
+	assembly: ComponentAssemblyResult,
+	rasterEvidence: ComponentRasterEvidence
 ): RasterOwnership {
+	const canonical =
+		assembly.status === 'assembled'
+			? materializeComponentAssembly(assembly, rasterEvidence)
+			: assembly;
 	return {
 		detectorId,
-		bbox: assembly.status === 'assembled' ? assembly.bbox : fallbackBbox,
-		kind: assembly.status === 'assembled' ? 'observed' : fallbackKind,
-		componentAssembly: assembly
+		bbox: canonical.status === 'assembled' ? canonical.bbox : fallbackBbox,
+		kind: canonical.status === 'assembled' ? 'observed' : fallbackKind,
+		componentAssembly: canonical
 	};
 }
 
@@ -108,8 +119,8 @@ function sourceComponentLabel(source: string | undefined): number | null {
  * Clean badges/tees use their bright outer CC. Clean baskets use their bright
  * body plus the exact modal enclosing dark-shell CC. Recovery/overlap cases
  * remain root objects for detector testimony, but their componentAssembly is
- * FAILED instead of fabricating a perimeter. Consumers that need a physical
- * object must call requireComponentAssembly().
+ * FAILED instead of fabricating a perimeter. Successful acquisition stores
+ * the exact merged owned pixels + boundary pixels directly on the root object.
  */
 export function acquireObjectGraphV1(
 	measurement: ThreeFactorMeasurement,
@@ -118,6 +129,13 @@ export function acquireObjectGraphV1(
 	const { brightComponents, darkComponents } = components;
 	const brightByLabel = new Map(brightComponents.map((component) => [component.label, component] as const));
 	const topPx = measurement.viewport.topPx;
+	const rasterEvidence: ComponentRasterEvidence = {
+		width: components.width,
+		height: components.height,
+		topPx,
+		brightLabels: components.brightLabels,
+		darkLabels: components.darkLabels
+	};
 
 	const basketBodies = measurement.baskets.flatMap((evidence) => {
 		if (evidence.tier === 'occlusion-recovery') return [];
@@ -144,11 +162,11 @@ export function acquireObjectGraphV1(
 			return {
 				kind: 'badge' as const,
 				id: evidence.detId,
-				raster: rasterFromAssembly(evidence.detId, evidence.bbox, 'observed', assembly),
+				raster: rasterFromAssembly(evidence.detId, evidence.bbox, 'observed', assembly, rasterEvidence),
 				evidence
 			};
 		}),
-		baskets: measurement.baskets.map((evidence) => {
+		baskets: measurent.baskets.map((evidence) => {
 			let assembly: ComponentAssemblyResult;
 			const label = sourceComponentLabel(evidence.source);
 			const body = label === null ? undefined : brightByLabel.get(label);
@@ -165,7 +183,7 @@ export function acquireObjectGraphV1(
 			return {
 				kind: 'basket' as const,
 				id: evidence.detId,
-				raster: rasterFromAssembly(evidence.detId, evidence.bbox, 'fitted', assembly),
+				raster: rasterFromAssembly(evidence.detId, evidence.bbox, 'fitted', assembly, rasterEvidence),
 				evidence
 			};
 		}),
@@ -189,7 +207,8 @@ export function acquireObjectGraphV1(
 					evidence.detId,
 					evidence.bbox,
 					evidence.tier === 'recovered' ? 'fitted' : 'observed',
-					assembly
+					assembly,
+					rasterEvidence
 				),
 				evidence
 			};
@@ -231,7 +250,7 @@ export function objectGraph(measurement: ThreeFactorMeasurement): ObjectGraph {
 	};
 }
 
-export function requireComponentAssembly(object: CourseObject): ComponentAssembly {
+export function requireComponentAssembly(object: CourseObject): MaterializedComponentAssembly {
 	const assembly = object.raster.componentAssembly;
 	if (!assembly)
 		throw new Error(`${object.kind} ${object.id} has legacy detector geometry, not component-backed ownership.`);

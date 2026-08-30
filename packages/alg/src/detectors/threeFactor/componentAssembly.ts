@@ -83,8 +83,7 @@ export function assembleBadgeV1(
 	const darkChildren = darkComponents
 		.filter((component) => containsBbox(bboxOf(outerBright), bboxOf(component)))
 		.sort((a, b) => b.area - a.area || a.label - b.label);
-	if (!darkChildren.length)
-		return { status: 'failed', reason: 'no contained dark plate component', seedBbox: seed.bbox };
+	if (!darkChildren.length) return { status: 'failed', reason: 'no contained dark plate component', seedBbox: seed.bbox };
 	if (darkChildren.length > 1 && darkChildren[0].area === darkChildren[1].area)
 		return { status: 'failed', reason: 'ambiguous contained dark plate components', seedBbox: seed.bbox };
 	const plate = darkChildren[0];
@@ -94,11 +93,7 @@ export function assembleBadgeV1(
 	);
 	const outer = seed;
 	return merge(
-		[
-			outer,
-			componentRef('dark', plate, yOffsetPx),
-			...glyphs.map((component) => componentRef('bright', component, yOffsetPx))
-		],
+		[outer, componentRef('dark', plate, yOffsetPx), ...glyphs.map((component) => componentRef('bright', component, yOffsetPx))],
 		outer
 	);
 }
@@ -140,11 +135,9 @@ export function learnBasketShellFamilyV1(
 		const margins = basketShellMargins(shell, body);
 		const key = margins.join(',');
 		const prior = counts.get(key);
-		counts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
+		conts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
 	}
-	const ranked = [...counts.values()].sort(
-		(a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(','))
-	);
+	const ranked = [...counts.values()].sort((a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(',')));
 	if (!ranked.length) return null;
 	if (ranked.length > 1 && ranked[0].count === ranked[1].count) return null;
 	return ranked[0].margins;
@@ -175,4 +168,93 @@ export function assembleBasketV1(
 export function assembleTeeV1(outerBright: ComponentStats, yOffsetPx = 0): ComponentAssembly {
 	const outer = componentRef('bright', outerBright, yOffsetPx);
 	return merge([outer], outer);
+}
+
+export interface ComponentRasterEvidence {
+	readonly width: number;
+	readonly height: number;
+	readonly topPx: number;
+	readonly brightLabels: Int32Array;
+	readonly darkLabels: Int32Array;
+}
+
+export interface MaterializedComponentAssembly extends ComponentAssembly {
+	/** Original-image raster width used to decode packed pixel indices. */
+	readonly rasterWidth: number;
+	/** Exact union of every owned connected-component pixel, packed as y*width+x. */
+	readonly ownedPixels: Uint32Array;
+	
+/** Boundary pixels of the exact owned union, packed in the same frame. */
+	readonly perimeterPixels: Uint32Array;
+}
+
+/**
+ * Materialize an already-decided component union into self-contained physical
+ * ownership. No thresholding, dilation, filling, fitting, or component search
+ * occurs here: labels are only dereferenced for the component refs acquisition
+ * already selected.
+ */
+export function materializeComponentAssembly(
+	assembly: ComponentAssembly,
+	raster: ComponentRasterEvidence
+): MaterializedComponentAssembly {
+	const { width, height, topPx, brightLabels, darkLabels } = raster;
+	if (brightLabels.length !== width * height || darkLabels.length !== width * height)
+		throw new Error('component assembly label rasters do not match declared dimensions');
+	const ownedLocal = new Set<number>();
+	for (const part of assembly.components) {
+		const labels = part.polarity === 'bright' ? brightLabels : darkLabels;
+		const [x, originalY, w, h] = part.bbox;
+		const localY = originalY - topPx;
+		for (let yy = Math.max(0, localY); yy < Math.min(height, localY + h); yy++) {
+			const row = yy * width;
+			for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) {
+				const index = row + xx;
+				if (labels[index] === part.label) ownedLocal.add(index);
+			}
+		}
+	}
+	if (!ownedLocal.size) throw new Error('component assembly selected no raster pixels');
+
+	const ownedLocalSorted = [...ownedLocal].sort((a, b) => a - b);
+	const ownedPixels = new Uint32Array(ownedLocalSorted.length);
+	let minX = width;
+	let minY = height + topPx;
+	let maxX = -1;
+	let maxY = -1;
+	for (let i = 0; i < ownedLocalSorted.length; i++) {
+		const local = ownedLocalSorted[i];
+		const x = local % width;
+		const localY = (local - x) / width;
+		const y = localY + topPx;
+		ownedPixels[i] = y * width + x;
+		if (x < minX) minX = x;
+		if (x > maxX) maxX = x;
+		if (y < minY) minY = y;
+		if (y > maxY) maxY = y;
+	}
+
+	const perimeter: number[] = [];
+	for (const local of ownedLocalSorted) {
+		const x = local % width;
+		const y = (local - x) / width;
+		const exposed =
+			x === 0 ||
+			x === width - 1 ||
+			y === 0 ||
+			y === height - 1 ||
+			!ownedLocal.has(local - 1) ||
+			!ownedLocal.has(local + 1) ||
+			!ownedLocal.has(local - width) ||
+			!ownedLocal.has(local + width);
+		if (exposed) perimeter.push((y + topPx) * width + x);
+	}
+
+	return {
+		...assembly,
+		bbox: [minX, minY, maxX - minX + 1, maxY - minY + 1],
+		rasterWidth: width,
+		ownedPixels,
+		perimeterPixels: Uint32Array.from(perimeter)
+	};
 }
