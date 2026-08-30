@@ -8,7 +8,8 @@
  * sidecar opinion: a recovered tee is as valid as a visible one, it is just
  * recorded differently. That means a wrong pick shows up on the endpoint image
  * where a human sees it, instead of hiding in a table nobody renders.
- * It still does not rewrite `assignment` or the frozen teeBadgeLock locks.
+ * It rewrites `assignment` with those exact tee-to-badge decisions while
+ * leaving basket selection to the existing pair evidence.
  *
  * "Posterior" here means normalized model weight, not a calibrated real-
  * world probability. The receipt exposes every likelihood term and model
@@ -28,8 +29,17 @@ import type {
 	ThreeFactorMeasurement
 } from '../types';
 import type { SpriteMatch } from '../endpoints';
+import { assignThreeFactor, type SearchKnobs } from '../assignment';
+import type { RibbonKnobs } from '../ribbon';
+import type { RoutingKnobs } from '../routing';
+import type { ScoringKnobs, ZfitKnobs } from '../scoring';
 import { buildTeeRecoveryCandidates, type TeeRecoveryCandidate } from './g3.teeRecovery';
 import { synthesizePhantomTees } from './g3.phantomTee';
+import { g4ScoringFeature } from './g4.scoring';
+import { g4SearchFeature } from './g4.search';
+import { g5RibbonFeature } from './g5.ribbon';
+import { g5RoutingFeature } from './g5.routing';
+import { zfitFeature } from './g5.zfit';
 import type { ABFeature, FeatureContext } from './types';
 import { POSTERIOR_TEE_RECOVERY_RENDER } from './g4.posteriorTeeRecoveryReceipt';
 
@@ -572,7 +582,7 @@ function publishRecoveredTees(
 	ctx: FeatureContext,
 	evidence: PosteriorTeeRecoveryEvidence,
 	badges: readonly BadgeEvidence[]
-): void {
+): readonly RecoveredTeeInput[] {
 	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
 	// A reopened badge already owns a frozen RECOVERED tee, and that tee is
 	// exactly what the posterior just overruled. Appending without retiring it
@@ -705,9 +715,74 @@ function publishRecoveredTees(
 		});
 	}
 
-	board.set('recoveredTees', [...existing, ...additions]);
+	const recoveredTees = [...existing, ...additions];
+	board.set('recoveredTees', recoveredTees);
 	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesPublished', additions.length);
 	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesRetired', retired);
+	return recoveredTees;
+}
+
+function commitPosteriorAssignments(
+	assignment: ThreeFactorAssignment,
+	evidence: PosteriorTeeRecoveryEvidence
+): ThreeFactorAssignment {
+	const targets = [
+		...(evidence.jointTop[0]?.selections ?? []).flatMap((selection) =>
+			selection.kind === 'candidate'
+				? [{ badgeId: selection.badgeId, xPx: selection.centerXPx, yPx: selection.centerYPx }]
+				: []
+		),
+		...evidence.phantomProposals.map((phantom) => ({
+			badgeId: phantom.badgeId,
+			xPx: phantom.xPx,
+			yPx: phantom.yPx
+		}))
+	];
+	if (targets.length === 0) return assignment;
+
+	const committed: AssignmentEvidence[] = [];
+	const targetBadgeIds = new Set(targets.map((target) => target.badgeId));
+	const targetTeeIds = new Set<string>();
+	for (const target of targets) {
+		const tee = assignment.tees.find(
+			(candidate) =>
+				Math.abs(candidate.xPx - target.xPx) <= 0.5 && Math.abs(candidate.yPx - target.yPx) <= 0.5
+		);
+		if (!tee) throw new Error(`posterior assignment: published tee missing for ${target.badgeId}`);
+		targetTeeIds.add(tee.detId);
+		const ranked = assignment.scoredPairs
+			.filter((pair) => pair.raw.badgeId === target.badgeId && pair.raw.teeId === tee.detId)
+			.sort((a, b) => b.score - a.score || a.raw.basketId.localeCompare(b.raw.basketId));
+		const selected = ranked[0];
+		if (!selected) {
+			throw new Error(
+				`posterior assignment: no routed pair carries ${target.badgeId} -> ${tee.detId}`
+			);
+		}
+		committed.push({
+			badgeId: target.badgeId,
+			teeId: tee.detId,
+			basketId: selected.raw.basketId,
+			score: selected.score,
+			rank: selected.rank,
+			ownership: 'selected',
+			alternatives: ranked.slice(1, 4).map((pair) => ({
+				teeId: pair.raw.teeId,
+				basketId: pair.raw.basketId,
+				score: pair.score
+			}))
+		});
+	}
+
+	return {
+		...assignment,
+		assignments: [
+			...assignment.assignments.filter(
+				(row) => !targetBadgeIds.has(row.badgeId) && !targetTeeIds.has(row.teeId)
+			),
+			...committed
+		].sort((a, b) => a.badgeId.localeCompare(b.badgeId))
+	};
 }
 
 function executePosteriorTeeRecovery(board: ExecBoard, ctx: FeatureContext): void {
@@ -716,7 +791,31 @@ function executePosteriorTeeRecovery(board: ExecBoard, ctx: FeatureContext): voi
 	const evidence = state.enabled
 		? inferPosterior(board, ctx, state.knobs as unknown as PosteriorKnobs)
 		: disabledEvidence(false);
-	if (state.enabled) publishRecoveredTees(board, ctx, evidence, board.get<readonly BadgeEvidence[]>('badges'));
+	if (state.enabled) {
+		const recoveredTees = publishRecoveredTees(
+			board,
+			ctx,
+			evidence,
+			board.get<readonly BadgeEvidence[]>('badges')
+		);
+		const measurement = board.get<ThreeFactorMeasurement>('measurement');
+		const reassigned = assignThreeFactor(
+			measurement,
+			recoveredTees,
+			ctx.resolve(zfitFeature).knobs as unknown as ZfitKnobs,
+			ctx.resolve(g4ScoringFeature).knobs as unknown as ScoringKnobs,
+			ctx.resolve(g4SearchFeature).knobs as unknown as SearchKnobs,
+			ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs,
+			ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs
+		);
+		const assignment = commitPosteriorAssignments(reassigned, evidence);
+		board.set('assignment', assignment);
+		board.set('assignment.tees', assignment.tees);
+		board.set(
+			'assignment.rawPairs',
+			assignment.scoredPairs.map((pair) => pair.raw)
+		);
+	}
 	board.set(FEATURE_ID, evidence);
 	ctx.measure(UNIT_ID, 'posteriorTargets', evidence.targetBadgeIds.length);
 	ctx.measure(UNIT_ID, 'posteriorObservableCompletions', evidence.completions.observable);
@@ -755,9 +854,9 @@ export const posteriorTeeRecoveryOperation: ABFeatureOperation = {
 			'teeBadgeLock',
 			'recoveredTees'
 		],
-		produces: [FEATURE_ID, 'recoveredTees'],
+		produces: [FEATURE_ID, 'recoveredTees', 'assignment', 'assignment.tees', 'assignment.rawPairs'],
 		features: [FEATURE_ID],
-		note: 'posterior reconciliation over the evidence-derived tee-recovery conflict island; publishes selected hypotheses as real recovered tees'
+		note: 'posterior reconciliation over the evidence-derived tee-recovery conflict island; commits each selected tee to its chosen badge'
 	},
 	run(board, ctx) {
 		executePosteriorTeeRecovery(board, ctx);

@@ -1,7 +1,7 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "posterior-tee-recovery-on",
-	"note": "Spike comparison: frozen Dev6 106 schedule plus the default-OFF posteriorTeeRecovery G4 sidecar. It publishes joint shard/NULL decisions and does not rewrite the frozen assignment.",
+	"note": "Frozen Dev6 endpoint baseline with posteriorTeeRecovery enabled. It publishes each selected endpoint and commits that exact tee-to-badge decision to final assignment.",
 	"execution": [
 		"badgeStage",
 		"badges",

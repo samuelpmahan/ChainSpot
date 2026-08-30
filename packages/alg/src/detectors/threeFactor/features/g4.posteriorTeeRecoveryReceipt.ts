@@ -186,7 +186,7 @@ export function buildPosteriorTeeRecoveryPlan(unit: UnitTrace, run: RunTrace): F
 		],
 		notes: [
 			`feature: ${POSTERIOR_TEE_RECOVERY_FEATURE_ID} — ${unit.gate}, trace unit '${unit.id}'`,
-			'custody: selected hypotheses are appended to recoveredTees and the frozen recovered tees they overrule are retired. assignment and the teeBadgeLock locks are NOT rewritten.',
+			'custody: selected hypotheses are appended to recoveredTees, committed to their selected badges in assignment, and the frozen recovered tees they overrule are retired. teeBadgeLock testimony remains frozen.',
 			...cliTextFor(unit, run, drawables).split('\n')
 		]
 	};
