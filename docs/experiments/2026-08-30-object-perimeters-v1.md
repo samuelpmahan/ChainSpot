@@ -10,7 +10,8 @@ V1 does not infer, dilate, fit, or redraw object masks.
 - Tee outside is bright/white: accepted intact tee-family frame component is the outer component.
 - Basket outside is dark/black: accepted 42×66 bright body component merges with the smallest enclosing dark component only when that dark component belongs to the intact modal shell component family.
 - Overlap/recovery ambiguity is a named V1 failure. Do not split a fused connected component or synthesize missing perimeter pixels in V1.
-- Canonical bbox is the union of the owned connected components. Canonical perimeter is the connected perimeter of the designated outer component.
+- Canonical ownership is the exact union of the selected connected-component pixels. Canonical bbox and perimeter are derived once from that union and stored on the acquired root object.
+- Component refs remain provenance; downstream physical-object consumers do not re-threshold or rediscover masks.
 
 ## Local six-course probe
 
@@ -34,6 +35,19 @@ The useful breakage is overwhelmingly where expected:
 3. **Baskets expose the interesting component-fusion problem**: the 42×66 white body often survives while its black shell CC is fused into C1/C2 furniture or basemap darkness. The first naive pass proved why refusal matters by claiming huge unrelated dark regions as Basket. V1 now accepts only the exact modal intact shell component family and makes every fused/nonmodal shell a visible failure.
 
 The intact basket shell family emerged directly from the components as margins `[left=2, top=3, right=2, bottom=3]` around the 42×66 bright body (46×72 outer dark component). This is used as an exact family identity in V1, not a tolerance band.
+
+## Materialized ownership check
+
+The successful assemblies were then materialized from the already-computed bright/dark label rasters. This is a dereference step only: no thresholding, component search, dilation, filling, fitting, or recovery occurs.
+
+Across all six frozen courses:
+
+- 267 clean V1 root objects materialized successfully;
+- 383,729 exact owned component pixels were stored on those objects;
+- 91,884 exact union-boundary pixels were stored as their perimeter testimony;
+- every materialized bbox exactly matched the bounds of its stored owned-pixel union.
+
+The root object therefore carries the physical ownership used by renderers, occlusion, and future pathfinding consumers. Those consumers should not reconstruct an object from detector-local boxes or masks.
 
 ## What V2 is allowed to solve
 
