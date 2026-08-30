@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "sourceImage": {
+    "fileName": "IMG_5641.jpg",
+    "mimeType": "image/jpeg",
+    "widthPx": 1290,
+    "heightPx": 2091,
+    "sha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+    "bundlePath": "images/source-original.jpg"
+  },
+  "holes": [
+    {"id":"96d12122-4bbc-4878-a5fa-fa727f90bb0c","number":1,"shots":[],"corridorBends":[{"xPx":648.079039776498,"yPx":468.4382466014147}],"corridorWidthPx":40,"tee":{"xPx":879.7114624505929,"yPx":429.201581027668},"basket":{"xPx":516.5,"yPx":424}},
+    {"id":"b35b426e-33c0-4be5-a83e-c31af93ade1b","number":2,"shots":[],"corridorBends":[{"xPx":692.3003593654568,"yPx":591.1997101547106}],"corridorWidthPx":40,"tee":{"xPx":452.87132352941177,"yPx":574.9595588235294},"basket":{"xPx":763.5,"yPx":560}},
+    {"id":"f5d2d6bc-77a2-456d-a427-b67d28c32d9b","number":3,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":734.7499923706055,"yPx":715.2500076293945},"basket":{"xPx":492,"yPx":628.04}},
+    {"id":"64b85ef5-043e-4709-97d6-e9973bd3c885","number":4,"shots":[],"corridorBends":[{"xPx":461.6316628237957,"yPx":836.4308062356338}],"corridorWidthPx":40,"tee":{"xPx":428.5811320754717,"yPx":645.9169811320754},"basket":{"xPx":432.5,"yPx":862}},
+    {"id":"c5b9d283-1188-4e9e-a8ea-1e9c000501e4","number":5,"shots":[],"corridorBends":[{"xPx":604.3861281918528,"yPx":784.3955542725433}],"corridorWidthPx":40,"tee":{"xPx":483.59288537549406,"yPx":852.9288537549407},"basket":{"xPx":686.5,"yPx":796}},
+    {"id":"0dacfb97-e590-451b-a6ea-3154c51c3787","number":6,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":676.1454545454545,"yPx":847.7018181818182},"basket":{"xPx":438.5,"yPx":914}},
+    {"id":"b41e4475-12c8-4eb3-b348-752ab958ba42","number":7,"shots":[],"corridorBends":[{"xPx":517.0058352717707,"yPx":983.6334013069321}],"corridorWidthPx":40,"tee":{"xPx":367.2836363636364,"yPx":981.709090909091},"basket":{"xPx":617.5,"yPx":947}},
+    {"id":"76388e3f-3b60-42a7-8d68-ec8fbf254f46","number":8,"shots":[],"corridorBends":[{"xPx":412.0902107026663,"yPx":1114.4097809522732}],"corridorWidthPx":40,"tee":{"xPx":519.1818181818181,"yPx":1011.5833333333334},"basket":{"xPx":422.5,"yPx":1175}},
+    {"id":"db0f4b50-5aca-4a05-a47a-943d5e3d473e","number":9,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":372.211320754717,"yPx":1181.1962264150943},"basket":{"xPx":306.5,"yPx":1411}},
+    {"id":"fdb91168-3b91-456e-b042-8eff528dc166","number":10,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":257.9083969465649,"yPx":1456.206106870229},"basket":{"xPx":138.5,"yPx":1638}},
+    {"id":"6f1aea10-9c91-49eb-935f-1ae1c45abcdf","number":11,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":77.23320158102767,"yPx":1827.4308300395257},"basket":{"xPx":390.5,"yPx":1806}},
+    {"id":"df3fb7a5-0d7e-497b-84e4-2a145f326ca2","number":12,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":421.4,"yPx":1767.6823529411765},"basket":{"xPx":338.5,"yPx":1528}},
+    {"id":"0816c805-a3a-4316-bc84-0e966c7c325e","number":13,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":446.2916666666667,"yPx":1472.6363636363637},"basket":{"xPx":686.5,"yPx":1587}},
+    {"id":"e97be734-ae08-4516-bf47-05313c14c9dc","number":14,"shots":[],"corridorBends":[{"xPx":728.0061420801557,"yPx":1365.2956286617487}],"corridorWidthPx":40,"tee":{"xPx":676.4632352941177,"yPx":1501.0882352941176},"basket":{"xPx":814.5,"yPx":1319}},
+    {"id":"8b909bf6-4f0e-41da-ba86-200a2ce44d32","number":15,"shots":[],"corridorBends":[{"xPx":935.7099548232924,"yPx":1206.6216239161731}],"corridorWidthPx":40,"tee":{"xPx":871.6741573033707,"yPx":1361.943820224719},"basket":{"xPx":1032,"yPx":1086}},
+    {"id":"e889851d-c2a0-4696-b979-c01b15f8cf80","number":16,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":1154.7941176470588,"yPx":1178.7463235294117},"basket":{"xPx":1127.5,"yPx":761}},
+    {"id":"e2f346ba-afd5-4f0a-a8d5-d2ee4edc77f0","number":17,"shots":[],"corridorBends":[],"corridorWidthPx":40,"tee":{"xPx":1067.996282527881,"yPx":851.0669144981413},"basket":{"xPx":872.5,"yPx":982}},
+    {"id":"6687ef8f-56de-4d63-9616-2c290d484be8","number":18,"shots":[],"corridorBends":[{"xPx":913.7750000000001,"yPx":731.2750000000001},{"xPx":1001.55,"yPx":565.0500000000002}],"corridorWidthPx":40,"tee":{"xPx":788.0919540229885,"yPx":846.3141762452108},"basket":{"xPx":998.5,"yPx":436}}
+  ]
+}
