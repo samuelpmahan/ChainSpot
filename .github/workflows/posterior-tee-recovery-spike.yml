@@ -1,4 +1,4 @@
-name: Posterior Tee Recovery Spike
+name: Posterior Tee Recovery ABFeature
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  prove:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -42,97 +42,24 @@ jobs:
           ./lab setup
           npm run build --workspace @chainspot/alg
 
-      - name: Fix spike component identity bookkeeping
+      - name: Frozen OFF contract and schema
         working-directory: ChainSpot
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('tests/unit/posteriorTeeRecoveryInference.test.ts')
-          text = path.read_text()
-          old = """function componentLabels(candidate: TeeRecoveryCandidate): number[] {
-            const labels = new Set<number>();
-            for (const id of candidate.supportingComponentIds) {
-              for (const match of id.matchAll(/\\d+/g)) labels.add(Number(match[0]));
-            }
-            return [...labels].sort((a, b) => a - b);
-          }"""
-          new = """function componentLabels(candidate: TeeRecoveryCandidate): number[] {
-            const labels = new Set<number>();
-            for (const id of candidate.supportingComponentIds) {
-              const label = Number(id.split(':')[0]);
-              if (Number.isFinite(label)) labels.add(label);
-            }
-            return [...labels].sort((a, b) => a - b);
-          }"""
-          if old not in text:
-              raise SystemExit('expected componentLabels spike block not found')
-          path.write_text(text.replace(old, new))
-          PY
+          npx vitest run tests/unit/threeFactorConfig.test.ts tests/unit/threeFactorSchema.test.ts --reporter=verbose
 
-      - name: Run blind posterior inference
+      - name: Blind posterior ABFeature Dev6 proof
         working-directory: ChainSpot
         env:
           CHAINSPOT_CORPUS_ROOT: ../chainspot-corpus
         run: |
           set -euo pipefail
-          npx vitest run tests/unit/posteriorTeeRecoveryInference.test.ts --reporter=verbose
+          npx vitest run tests/unit/posteriorTeeRecoveryFeature.test.ts --reporter=verbose
 
-      - name: Assert posterior Dev6 completion is 108
-        working-directory: ChainSpot
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs = require('fs');
-          const receipt = JSON.parse(fs.readFileSync('artifacts/spikes/posterior-tee-recovery/posterior-inference-receipt.json', 'utf8'));
-
-          function courseCompletion(course, expectNullPhantom) {
-            const top = course.jointTop[0];
-            if (!top) throw new Error('posterior joint MAP missing');
-            const targets = new Set(course.targetBadgeIds);
-            const abstentions = new Set(course.frozenBaseline.abstentions.map((row) => row.badgeId));
-            const currentTargetLocks = [...targets].filter((badgeId) => !abstentions.has(badgeId)).length;
-            const unaffectedLocks = course.frozenBaseline.locks - currentTargetLocks;
-            const selections = top.selections;
-            if (selections.length !== targets.size) {
-              throw new Error(`joint MAP has ${selections.length} selections for ${targets.size} targets`);
-            }
-            const componentIds = selections.flatMap((row) => row.componentLabels ?? []);
-            if (new Set(componentIds).size !== componentIds.length) {
-              throw new Error(`joint MAP double-owns component evidence: ${componentIds.join(',')}`);
-            }
-            const nulls = selections.filter((row) => row.kind === 'null').length;
-            if (expectNullPhantom) {
-              if (nulls !== 1 || course.genericPhantomsForNullSelections.length !== 1) {
-                throw new Error(`expected exactly one NULL->phantom completion, got nulls=${nulls} phantoms=${course.genericPhantomsForNullSelections.length}`);
-              }
-            } else if (nulls !== 0) {
-              throw new Error(`expected recovered candidates for every conflict target, got ${nulls} NULL selection(s)`);
-            }
-            return unaffectedLocks + selections.length;
-          }
-
-          const heritage = courseCompletion(receipt.heritage, false);
-          const alex = courseCompletion(receipt.alex, true);
-          const unchangedFourCourses = 4 * 18; // frozen 106 proof: Dashs, Lenard, NorthPark, TowneLake are already 18/18
-          const total = unchangedFourCourses + heritage + alex;
-
-          console.log(`HERITAGE_POSTERIOR_COMPLETIONS=${heritage}`);
-          console.log(`ALEXCLARK_POSTERIOR_COMPLETIONS=${alex}`);
-          console.log(`DEV6_POSTERIOR_COMPLETIONS=${total}`);
-          console.log('HERITAGE_MAP=' + JSON.stringify(receipt.heritage.jointTop[0].selections));
-          console.log('ALEXCLARK_MAP=' + JSON.stringify(receipt.alex.jointTop[0].selections));
-          console.log('ALEXCLARK_PHANTOM=' + JSON.stringify(receipt.alex.genericPhantomsForNullSelections[0]));
-
-          if (heritage !== 18 || alex !== 18 || total !== 108) {
-            throw new Error(`posterior completion target missed: Heritage=${heritage}, AlexClark=${alex}, Dev6=${total}`);
-          }
-          NODE
-
-      - name: Upload spike evidence
+      - name: Upload posterior evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: posterior-tee-recovery-spike
-          path: ChainSpot/artifacts/spikes/posterior-tee-recovery
+          name: posterior-tee-recovery-abfeature
+          path: ChainSpot/artifacts/spikes/posterior-tee-recovery/abfeature-dev6.json
           if-no-files-found: warn
