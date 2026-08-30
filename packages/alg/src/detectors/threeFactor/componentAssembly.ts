@@ -67,12 +67,6 @@ function merge(parts: readonly RasterComponentRef[], outerComponent: RasterCompo
 	};
 }
 
-/**
- * V1 badge assembly: the detector's accepted bright badge-family component is
- * already the white outside. Own the largest contained dark component as the
- * plate, plus all bright components contained by that plate (glyphs).
- * Ambiguous/overlapped outer-white recovery is deliberately not rescued here.
- */
 export function assembleBadgeV1(
 	outerBright: ComponentStats,
 	brightComponents: readonly ComponentStats[],
@@ -135,7 +129,7 @@ export function learnBasketShellFamilyV1(
 		const margins = basketShellMargins(shell, body);
 		const key = margins.join(',');
 		const prior = counts.get(key);
-		conts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
+		counts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
 	}
 	const ranked = [...counts.values()].sort((a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(',')));
 	if (!ranked.length) return null;
@@ -164,7 +158,6 @@ export function assembleBasketV1(
 	return merge([body, outer], outer);
 }
 
-/** V1 intact tee: the enclosing bright component is already the white outside. */
 export function assembleTeeV1(outerBright: ComponentStats, yOffsetPx = 0): ComponentAssembly {
 	const outer = componentRef('bright', outerBright, yOffsetPx);
 	return merge([outer], outer);
@@ -179,21 +172,11 @@ export interface ComponentRasterEvidence {
 }
 
 export interface MaterializedComponentAssembly extends ComponentAssembly {
-	/** Original-image raster width used to decode packed pixel indices. */
 	readonly rasterWidth: number;
-	/** Exact union of every owned connected-component pixel, packed as y*width+x. */
 	readonly ownedPixels: Uint32Array;
-	
-/** Boundary pixels of the exact owned union, packed in the same frame. */
 	readonly perimeterPixels: Uint32Array;
 }
 
-/**
- * Materialize an already-decided component union into self-contained physical
- * ownership. No thresholding, dilation, filling, fitting, or component search
- * occurs here: labels are only dereferenced for the component refs acquisition
- * already selected.
- */
 export function materializeComponentAssembly(
 	assembly: ComponentAssembly,
 	raster: ComponentRasterEvidence
@@ -239,14 +222,9 @@ export function materializeComponentAssembly(
 		const x = local % width;
 		const y = (local - x) / width;
 		const exposed =
-			x === 0 ||
-			x === width - 1 ||
-			y === 0 ||
-			y === height - 1 ||
-			!ownedLocal.has(local - 1) ||
-			!ownedLocal.has(local + 1) ||
-			!ownedLocal.has(local - width) ||
-			!ownedLocal.has(local + width);
+			x === 0 || x === width - 1 || y === 0 || y === height - 1 ||
+			!ownedLocal.has(local - 1) || !ownedLocal.has(local + 1) ||
+			!ownedLocal.has(local - width) || !ownedLocal.has(local + width);
 		if (exposed) perimeter.push((y + topPx) * width + x);
 	}
 
