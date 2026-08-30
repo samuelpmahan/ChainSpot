@@ -1,7 +1,7 @@
 // Observational spike: for Lenard's known zero-bend holes, ask whether the
-// existing tee->badge ownership alone identifies the basket by extending that
-// direction forward. Truth is evaluator-only: it identifies which detected
-// basket is the correct one after all ray candidates have been scored.
+// accepted tee->badge lock alone identifies the basket by extending that
+// direction forward. Truth is evaluator-only: it labels the correct detected
+// basket after every blind geometry candidate has been scored.
 
 import { describe, expect, test } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -20,7 +20,7 @@ import { COURSES, loadCourseRaster, loadCourseTruth } from './helpers/courseFixt
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, '../../artifacts/sweep/straight-ray-basket-probe');
-const TRUE_BASKET_TOLERANCE_PX = 26;
+const TRUE_ENDPOINT_TOLERANCE_PX = 26;
 
 interface Point { readonly xPx: number; readonly yPx: number }
 
@@ -53,48 +53,66 @@ const lenard = COURSES.find((course) => course.name === 'Lenard');
 if (!lenard) throw new Error('Lenard fixture missing');
 
 describe('straight ray basket probe (Lenard; observational)', () => {
-  test('rank every basket from the known tee->badge direction', async () => {
+  test('first forward basket inside the existing tee-badge corridor is correct 18/18', async () => {
     const raster = loadCourseRaster(lenard);
     const truth = loadCourseTruth(lenard).holes;
     const paramsHash = await sha256Hex(canonicalJson(resolved));
     const run = runThreeFactor(raster, { config: resolved, paramsHash });
 
-    const badgesById = new Map(run.measurement.badges.map((b) => [b.detId, b]));
-    const teesById = new Map(run.assignment.tees.map((t) => [t.detId, t]));
-    const assignmentsByBadge = new Map(run.assignment.assignments.map((a) => [a.badgeId, a]));
+    const corridorWidthPx = run.measurement.parameters.corridorWidthPx;
+    if (!(typeof corridorWidthPx === 'number' && Number.isFinite(corridorWidthPx))) {
+      throw new Error('measurement.parameters.corridorWidthPx missing');
+    }
+    // Use half-width because corridorWidthPx is the already-published physical
+    // corridor width. This is not a fitted Lenard threshold.
+    const corridorHalfWidthPx = corridorWidthPx / 2;
+
+    const lockUnit = run.trace?.units.find((unit) => unit.id === 'teeBadgeLock');
+    const locks = (lockUnit?.drawables ?? []).filter((drawable) =>
+      drawable.type === 'polyline' &&
+      drawable.verdict === 'accepted' &&
+      drawable.visualRole === 'tee-badge-path' &&
+      Array.isArray(drawable.path) &&
+      typeof drawable.values?.hole === 'number'
+    );
 
     const rows = [] as Record<string, string | number | boolean>[];
     let angleRank1 = 0;
     let rayMissRank1 = 0;
+    let corridorFirstRank1 = 0;
     let forwardTrue = 0;
     let teeBadgeTruthMatched = 0;
 
     for (const hole of [...truth].sort((a, b) => a.number - b.number)) {
-      const badge = run.measurement.badges.find((b) => b.label !== null && Number(b.label) === hole.number);
-      if (!badge) throw new Error(`H${hole.number}: badge missing`);
-      const assignment = assignmentsByBadge.get(badge.detId);
-      if (!assignment) throw new Error(`H${hole.number}: assignment missing for ${badge.detId}`);
-      const tee = teesById.get(assignment.teeId);
-      if (!tee) throw new Error(`H${hole.number}: tee ${assignment.teeId} missing`);
+      const lock = locks.find((drawable) => drawable.values?.hole === hole.number);
+      if (!lock || lock.type !== 'polyline' || !Array.isArray(lock.path) || lock.path.length < 2) {
+        throw new Error(`H${hole.number}: accepted teeBadgeLock path missing`);
+      }
+      const first = lock.path[0];
+      const last = lock.path[lock.path.length - 1];
+      const tee = { xPx: first[0], yPx: first[1] };
+      const badge = { xPx: last[0], yPx: last[1] };
 
-      const teeTruthDistancePx = dist(hole.tee, { xPx: tee.xPx, yPx: tee.yPx });
-      if (teeTruthDistancePx <= TRUE_BASKET_TOLERANCE_PX) teeBadgeTruthMatched++;
+      const teeTruthDistancePx = dist(hole.tee, tee);
+      if (teeTruthDistancePx <= TRUE_ENDPOINT_TOLERANCE_PX) teeBadgeTruthMatched++;
 
       const scored = run.measurement.baskets.map((basket) => ({
         basket,
         ...rayGeometry(
-          { xPx: tee.xPx, yPx: tee.yPx },
-          { xPx: badge.cxPx, yPx: badge.cyPx },
+          tee,
+          badge,
           { xPx: basket.tipXPx, yPx: basket.tipYPx }
         ),
         truthDistancePx: dist(hole.basket, { xPx: basket.tipXPx, yPx: basket.tipYPx })
       }));
 
       const trueCandidate = [...scored].sort((a, b) => a.truthDistancePx - b.truthDistancePx)[0];
-      if (!trueCandidate || trueCandidate.truthDistancePx > TRUE_BASKET_TOLERANCE_PX) {
-        throw new Error(`H${hole.number}: no detected basket within ${TRUE_BASKET_TOLERANCE_PX}px of truth`);
+      if (!trueCandidate || trueCandidate.truthDistancePx > TRUE_ENDPOINT_TOLERANCE_PX) {
+        throw new Error(`H${hole.number}: no detected basket within ${TRUE_ENDPOINT_TOLERANCE_PX}px of truth`);
       }
 
+      // Baseline observations: nearest angle / nearest infinite-ray miss are
+      // deliberately retained so the refinement is visible rather than erased.
       const byAngle = [...scored].sort((a, b) =>
         Number(a.alongPx < 0) - Number(b.alongPx < 0) ||
         a.angleErrorDeg - b.angleErrorDeg ||
@@ -107,15 +125,22 @@ describe('straight ray basket probe (Lenard; observational)', () => {
       if (rayMissRank === 1) rayMissRank1++;
       if (trueCandidate.alongPx > 0) forwardTrue++;
 
-      const angleRunner = byAngle.find((x) => x.basket.detId !== trueCandidate.basket.detId)!;
-      const missRunner = byMiss.find((x) => x.basket.detId !== trueCandidate.basket.detId)!;
+      // Candidate rule under test: extend the accepted tee->badge direction;
+      // among detected basket tips that are forward and still inside the
+      // already-existing corridor, the first one encountered is the endpoint.
+      const corridorCandidates = scored
+        .filter((x) => x.alongPx > 0 && x.perpendicularPx <= corridorHalfWidthPx)
+        .sort((a, b) => a.alongPx - b.alongPx || a.perpendicularPx - b.perpendicularPx);
+      const corridorFirstRank = corridorCandidates.findIndex(
+        (x) => x.basket.detId === trueCandidate.basket.detId
+      ) + 1;
+      if (corridorFirstRank === 1) corridorFirstRank1++;
+      const corridorRunner = corridorCandidates[1];
 
       rows.push({
         hole: hole.number,
-        teeId: tee.detId,
-        badgeId: badge.detId,
+        lockRef: lock.ref ?? 'UNKNOWN',
         trueBasketId: trueCandidate.basket.detId,
-        currentBasketId: assignment.basketId,
         teeTruthDistancePx: Number(teeTruthDistancePx.toFixed(2)),
         trueBasketTruthDistancePx: Number(trueCandidate.truthDistancePx.toFixed(2)),
         forward: trueCandidate.alongPx > 0,
@@ -123,23 +148,25 @@ describe('straight ray basket probe (Lenard; observational)', () => {
         perpendicularPx: Number(trueCandidate.perpendicularPx.toFixed(2)),
         angleErrorDeg: Number(trueCandidate.angleErrorDeg.toFixed(3)),
         angleRank,
-        angleRunnerBasketId: angleRunner.basket.detId,
-        angleRunnerErrorDeg: Number(angleRunner.angleErrorDeg.toFixed(3)),
-        angleMarginDeg: Number((angleRunner.angleErrorDeg - trueCandidate.angleErrorDeg).toFixed(3)),
-        rayMissPx: Number(trueCandidate.rayMissPx.toFixed(2)),
         rayMissRank,
-        missRunnerBasketId: missRunner.basket.detId,
-        missRunnerPx: Number(missRunner.rayMissPx.toFixed(2)),
-        rayMissMarginPx: Number((missRunner.rayMissPx - trueCandidate.rayMissPx).toFixed(2))
+        corridorCandidates: corridorCandidates.length,
+        corridorFirstRank,
+        nextAlongMarginPx: corridorRunner
+          ? Number((corridorRunner.alongPx - corridorCandidates[0].alongPx).toFixed(2))
+          : -1
       });
     }
 
     console.table(rows);
     console.log(`LENARD_STRAIGHT_RAY_HOLES=${truth.length}`);
+    console.log(`LENARD_TEE_BADGE_LOCKS=${locks.length}`);
     console.log(`LENARD_TEE_BADGE_TRUTH_MATCHED=${teeBadgeTruthMatched}`);
     console.log(`LENARD_TRUE_BASKET_FORWARD=${forwardTrue}`);
     console.log(`LENARD_ANGLE_RANK1=${angleRank1}`);
     console.log(`LENARD_RAYMISS_RANK1=${rayMissRank1}`);
+    console.log(`LENARD_CORRIDOR_WIDTH_PX=${corridorWidthPx}`);
+    console.log(`LENARD_CORRIDOR_HALF_WIDTH_PX=${corridorHalfWidthPx}`);
+    console.log(`LENARD_CORRIDOR_FIRST_RANK1=${corridorFirstRank1}`);
 
     mkdirSync(OUT_DIR, { recursive: true });
     writeFileSync(resolve(OUT_DIR, 'Lenard.straight-ray-basket.json'), JSON.stringify({
@@ -148,21 +175,30 @@ describe('straight ray basket probe (Lenard; observational)', () => {
         imageId: raster.imageId,
         configName: resolved.name,
         paramsHash,
-        note: 'Truth is evaluator-only; candidate geometry uses current detected tee/badge/basket coordinates only.'
+        input: 'accepted teeBadgeLock polyline testimony + detected basket tips',
+        truthUse: 'evaluator only; labels the correct detected endpoint after blind scoring'
+      },
+      rule: {
+        description: 'first forward detected basket inside half of the already-published corridor width',
+        corridorWidthPx,
+        corridorHalfWidthPx
       },
       summary: {
         holes: truth.length,
+        teeBadgeLocks: locks.length,
         teeBadgeTruthMatched,
         trueBasketForward: forwardTrue,
         angleRank1,
-        rayMissRank1
+        rayMissRank1,
+        corridorFirstRank1
       },
       rows
     }, null, 2));
 
-    // These are baseline sanity checks, not acceptance thresholds for the shortcut.
     expect(truth).toHaveLength(18);
     expect(run.measurement.baskets).toHaveLength(18);
+    expect(locks).toHaveLength(18);
     expect(teeBadgeTruthMatched).toBe(18);
+    expect(corridorFirstRank1).toBe(18);
   }, 120000);
 });
