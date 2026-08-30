@@ -1,0 +1,59 @@
+name: Posterior Tee Recovery Spike
+
+on:
+  push:
+    branches:
+      - spike/posterior-tee-recovery
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          path: ChainSpot
+
+      - name: Checkout frozen corpus
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          ref: 2b5913d3f1f6d8f97b0324721a4c5201bd3ed819
+          path: chainspot-corpus
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ChainSpot/package-lock.json
+
+      - name: Setup
+        working-directory: ChainSpot
+        run: |
+          set -euo pipefail
+          npm ci
+          npx svelte-kit sync
+          ./lab setup
+          npm run build --workspace @chainspot/alg
+
+      - name: Probe posterior candidate surface
+        working-directory: ChainSpot
+        env:
+          CHAINSPOT_CORPUS_ROOT: ../chainspot-corpus
+        run: |
+          set -euo pipefail
+          npx vitest run tests/spike/posteriorTeeRecoveryProbe.test.ts --reporter=verbose
+
+      - name: Upload spike evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: posterior-tee-recovery-spike
+          path: ChainSpot/artifacts/spikes/posterior-tee-recovery
+          if-no-files-found: warn
