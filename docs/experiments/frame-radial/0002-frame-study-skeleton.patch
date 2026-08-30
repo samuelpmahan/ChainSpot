@@ -1,0 +1,124 @@
+--- /dev/null
++++ scripts/chainspot-lab/experiments/frameStudy.ts
+@@ -0,0 +1,153 @@
++export type FrameLogLevel = 'info' | 'warn';
++
++export interface FrameLog {
++  readonly frameId: string;
++  readonly level: FrameLogLevel;
++  readonly message: string;
++}
++
++export interface FrameContext {
++  readonly experimentId: string;
++  readonly subjectId?: string;
++}
++
++export interface FrameResult<T> {
++  readonly value: T;
++  readonly logs: readonly FrameLog[];
++}
++
++/**
++ * A Frame is one named, explainable way to re-express evidence before comparison.
++ * Skeleton contract only: current built-ins are intentional identity transforms.
++ */
++export interface Frame<T> {
++  readonly id: string;
++  readonly purpose: string;
++  readonly note?: string;
++  apply(input: T, context: FrameContext): FrameResult<T>;
++  explain(result: FrameResult<T>): string;
++}
++
++export function identityFrame<T>(spec: {
++  id: string;
++  purpose: string;
++  note?: string;
++}): Frame<T> {
++  return {
++    ...spec,
++    apply(input, context) {
++      return {
++        value: input,
++        logs: [{ frameId: spec.id, level: 'info', message: `${context.experimentId}: ${spec.id} default identity transform` }]
++      };
++    },
++    explain() {
++      return `${spec.id}: no-op skeleton; no interpretation yet.`;
++    }
++  };
++}
++
++export interface FramePipelineResult<T> {
++  readonly value: T;
++  readonly logs: readonly FrameLog[];
++  readonly explanations: readonly string[];
++}
++
++export function applyFrames<T>(input: T, frames: readonly Frame<T>[], context: FrameContext): FramePipelineResult<T> {
++  let value = input;
++  const logs: FrameLog[] = [];
++  const explanations: string[] = [];
++  for (const frame of frames) {
++    const result = frame.apply(value, context);
++    value = result.value;
++    logs.push(...result.logs);
++    explanations.push(frame.explain(result));
++  }
++  return { value, logs, explanations };
++}
++
++export const imageNorthFrame = identityFrame<unknown>({ id: 'imageNorth', purpose: 'Express directional evidence relative to image north.' });
++
++export const basketTipFrame = identityFrame<unknown>({
++  id: 'basketTip',
++  purpose: 'Express basket-local geometry from the semantic basket endpoint.',
++  note: 'Mistake prevented: the first PCA probe centered angles on the 42x66 body center instead of the documented bottom-center pole tip.'
++});
++
++export const incomingEvidenceFrame = identityFrame<unknown>({ id: 'incomingEvidence', purpose: 'Express evidence relative to its truth-blind observed incoming direction.' });
++export const rgbFrame = identityFrame<unknown>({ id: 'rgb', purpose: 'Express appearance as raw RGB evidence.' });
++export const lumaFrame = identityFrame<unknown>({ id: 'luma', purpose: 'Express appearance by luminance rather than full color.' });
++export const exactColorFrame = identityFrame<unknown>({ id: 'exactColor', purpose: 'Express appearance relative to exact known color classes without inventing ownership.' });
++export const courseResidualFrame = identityFrame<unknown>({ id: 'courseResidual', purpose: 'Express evidence as residual from the course-local clean-object baseline.' });
++
++export interface FrameStudyResult<T> {
++  readonly status: 'skeleton';
++  readonly baseline: T;
++  readonly framed: T;
++  readonly loss: null;
++  readonly factors: readonly never[];
++  readonly projection: null;
++  readonly logs: readonly FrameLog[];
++  readonly explanations: readonly string[];
++}
++
++/** Smoke-test checkpoint only: intentionally computes no scientific result. */
++export function runFrameStudySkeleton<T>(args: { experimentId: string; subjectId?: string; baseline: T; frames: readonly Frame<T>[] }): FrameStudyResult<T> {
++  const framed = applyFrames(args.baseline, args.frames, { experimentId: args.experimentId, subjectId: args.subjectId });
++  return { status: 'skeleton', baseline: args.baseline, framed: framed.value, loss: null, factors: [], projection: null, logs: framed.logs, explanations: framed.explanations };
++}
++--- /dev/null
+++++ scripts/chainspot-lab/experiments/frameStudy.smoke.ts
++@@ -0,0 +1,40 @@
+++import { basketTipFrame, courseResidualFrame, imageNorthFrame, incomingEvidenceFrame, runFrameStudySkeleton, type Frame } from './frameStudy.js';
+++
+++interface SmokeEvidence { readonly marker: 'unchanged'; }
+++
+++const frames = [imageNorthFrame, basketTipFrame, courseResidualFrame, incomingEvidenceFrame] as readonly Frame<SmokeEvidence>[];
+++const baseline: SmokeEvidence = { marker: 'unchanged' };
+++const result = runFrameStudySkeleton({ experimentId: 'frame-study-smoke', subjectId: 'basket-smoke', baseline, frames });
+++
+++console.log('FRAME STUDY SMOKE');
+++console.log(`status=${result.status}`);
+++console.log(`identityPreserved=${result.framed === baseline}`);
+++console.log(`loss=${String(result.loss)}`);
+++console.log(`factors=${result.factors.length}`);
+++console.log(`projection=${String(result.projection)}`);
+++for (const frame of frames) {
+++  console.log(`frame=${frame.id} purpose=${frame.purpose}`);
+++  if (frame.note) console.log(`note=${frame.note}`);
+++}
+++for (const log of result.logs) console.log(`log[${log.level}] ${log.message}`);
+++for (const explanation of result.explanations) console.log(`explain ${explanation}`);
