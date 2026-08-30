@@ -1,11 +1,14 @@
 /**
  * Experimental posterior tee-recovery reconciliation.
  *
- * This is intentionally a sidecar decision feature first: it consumes the
- * frozen G4 recovery + teeBadgeLock testimony, reopens only the conflict
- * island, and publishes a joint posterior over material shard hypotheses
- * plus NULL. It does NOT rewrite assignment/recoveredTees yet. That lets us
- * ablate and place the mechanism before granting it production custody.
+ * It consumes the frozen G4 recovery + teeBadgeLock testimony, reopens only
+ * the conflict island, and ranks material shard hypotheses against NULL.
+ *
+ * A selected hypothesis is then written down as a REAL recovered tee, not as a
+ * sidecar opinion: a recovered tee is as valid as a visible one, it is just
+ * recorded differently. That means a wrong pick shows up on the endpoint image
+ * where a human sees it, instead of hiding in a table nobody renders.
+ * It still does not rewrite `assignment` or the frozen teeBadgeLock locks.
  *
  * "Posterior" here means normalized model weight, not a calibrated real-
  * world probability. The receipt exposes every likelihood term and model
@@ -28,6 +31,7 @@ import type { SpriteMatch } from '../endpoints';
 import { buildTeeRecoveryCandidates, type TeeRecoveryCandidate } from './g3.teeRecovery';
 import { synthesizePhantomTees } from './g3.phantomTee';
 import type { ABFeature, FeatureContext } from './types';
+import { POSTERIOR_TEE_RECOVERY_RENDER } from './g4.posteriorTeeRecoveryReceipt';
 
 const FEATURE_ID = 'posteriorTeeRecovery';
 const UNIT_ID = 'teeBadgeLock';
@@ -552,12 +556,167 @@ function inferPosterior(
 	};
 }
 
+/** Publish the decision as REAL TEES.
+ *
+ * A recovered tee is just as valid as a visible one — it is written down
+ * differently, not believed less. So when the posterior selects a hypothesis it
+ * appends a genuine RecoveredTeeInput to `recoveredTees`, exactly as G3's
+ * teeRecovery and phantomTee do, and the run's endpoint image draws it with
+ * every other tee. If a pick is wrong it is wrong ON THE MAP, where a human
+ * sees it, instead of buried in a sidecar table nobody renders.
+ *
+ * Geometry is forwarded verbatim from the evidence; nothing is re-derived.
+ */
+function publishRecoveredTees(
+	board: ExecBoard,
+	ctx: FeatureContext,
+	evidence: PosteriorTeeRecoveryEvidence,
+	badges: readonly BadgeEvidence[]
+): void {
+	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
+	// A reopened badge already owns a frozen RECOVERED tee, and that tee is
+	// exactly what the posterior just overruled. Appending without retiring it
+	// would leave the badge owning two endpoints and the run reporting more
+	// locks than badges -- so the superseded tees are dropped by position here.
+	// Visible-tier tees are never touched: those were observed, not inferred.
+	const teeBadge = board.get<TeeBadgeLockLike>('teeBadgeLock');
+	const teeById = new Map(
+		board.get<readonly TeeEvidence[]>('assignment.tees').map((tee) => [tee.detId, tee])
+	);
+	const targets = new Set(evidence.targetBadgeIds);
+	const superseded: { x: number; y: number }[] = [];
+	for (const lock of teeBadge.locks) {
+		if (lock.tier !== 'recovered' || !targets.has(lock.badgeId)) continue;
+		const tee = teeById.get(lock.teeId);
+		if (tee && finite(tee.xPx) && finite(tee.yPx)) {
+			superseded.push({ x: tee.xPx, y: tee.yPx });
+			// The render layer must drop the G3 shard this overrules, or the
+			// badge shows two endpoints. Match by BADGE IDENTITY, not position:
+			// G3 draws its shards as `pixelSet` (no centre point) with a ref of
+			// `tee-shard-<badgeId>-<componentGroup>:tee-shard`, so the badge id
+			// is the only thing both sides reliably share.
+			ctx.overlay(UNIT_ID, {
+				type: 'point',
+				xPx: tee.xPx,
+				yPx: tee.yPx,
+				verdict: 'rejected',
+				visualRole: 'tee-rejection',
+				ref: `posteriorTeeRecovery:retired:${encodeURIComponent(lock.badgeId)}:${lock.teeId}`,
+				reason: `frozen recovered tee ${lock.teeId} for ${lock.badgeId} overruled by posterior selection`,
+				// Say which one plainly. `tee-recovered-N` is named by its index
+				// into G3's accepted-candidate list, so publishing N here means no
+				// consumer has to parse it back out of an id or guess by position.
+				values: {
+					teeIndex: Number(/tee-recovered-(\d+)$/.exec(lock.teeId)?.[1] ?? -1),
+					...(finite(lock.hole) ? { hole: lock.hole } : {})
+				}
+			});
+		}
+	}
+	const isSuperseded = (tee: RecoveredTeeInput) =>
+		superseded.some(
+			(point) => Math.abs(point.x - tee.xPx) < 0.5 && Math.abs(point.y - tee.yPx) < 0.5
+		);
+
+	const existing = board
+		.get<readonly RecoveredTeeInput[]>('recoveredTees')
+		.filter((tee) => !isSuperseded(tee));
+	const retired = board.get<readonly RecoveredTeeInput[]>('recoveredTees').length - existing.length;
+	const additions: RecoveredTeeInput[] = [];
+
+	for (const selection of evidence.jointTop[0]?.selections ?? []) {
+		if (selection.kind !== 'candidate') continue;
+		const hole = selection.hole ?? 'UNKNOWN';
+		additions.push({
+			xPx: selection.centerXPx,
+			yPx: selection.centerYPx,
+			score: selection.posteriorWithinTarget ?? 0,
+			provenance: {
+				source: 'tee-shard-recovery',
+				note: `posterior-selected shard ${selection.id} for hole ${hole}: ${selection.supportPixels}px support, ${selection.unexplainedPixels}px unexplained, ${selection.distancePx.toFixed(1)}px from badge`,
+				...(selection.posteriorWithinTarget === undefined
+					? {}
+					: { score: selection.posteriorWithinTarget })
+			}
+		});
+		// The endpoint is not complete until something OWNS it. teeBadgeLock has
+		// already run by now and will not re-lock, so a badge it abstained on
+		// would end up with a tee and no lock -- 18 tees but 17 locks. Emit the
+		// ownership edge here; featureRenders retires the lock this supersedes.
+		const badge = badgeById.get(selection.badgeId);
+		if (badge) {
+			ctx.overlay(UNIT_ID, {
+				type: 'polyline',
+				path: [
+					[badge.cxPx, badge.cyPx],
+					[selection.centerXPx, selection.centerYPx]
+				],
+				verdict: 'accepted',
+				visualRole: 'tee-badge-path',
+				ref: `${FEATURE_ID}:ray:${encodeURIComponent(selection.badgeId)}:${encodeURIComponent(selection.id)}`,
+				values: {
+					...(finite(Number(selection.hole)) ? { hole: Number(selection.hole) } : {}),
+					distancePx: selection.distancePx
+				}
+			});
+		}
+		ctx.overlay(UNIT_ID, {
+			type: 'point',
+			xPx: selection.centerXPx,
+			yPx: selection.centerYPx,
+			verdict: 'accepted',
+			visualRole: 'tee-shard',
+			ref: `${FEATURE_ID}:selected:${encodeURIComponent(selection.badgeId)}:${encodeURIComponent(selection.id)}`,
+			values: {
+				...(finite(Number(selection.hole)) ? { hole: Number(selection.hole) } : {}),
+				posterior: selection.posteriorWithinTarget ?? 0,
+				distancePx: selection.distancePx,
+				supportPixels: selection.supportPixels,
+				unexplainedPixels: selection.unexplainedPixels
+			}
+		});
+	}
+
+	for (const phantom of evidence.phantomProposals) {
+		additions.push({ xPx: phantom.xPx, yPx: phantom.yPx, provenance: phantom.provenance });
+		const phantomBadge = badgeById.get(phantom.badgeId);
+		if (phantomBadge) {
+			ctx.overlay(UNIT_ID, {
+				type: 'polyline',
+				path: [
+					[phantomBadge.cxPx, phantomBadge.cyPx],
+					[phantom.xPx, phantom.yPx]
+				],
+				verdict: 'accepted',
+				visualRole: 'tee-badge-path',
+				ref: `${FEATURE_ID}:ray:${encodeURIComponent(phantom.badgeId)}:hole-${phantom.hole}`,
+				values: { hole: phantom.hole }
+			});
+		}
+		ctx.overlay(UNIT_ID, {
+			type: 'point',
+			xPx: phantom.xPx,
+			yPx: phantom.yPx,
+			verdict: 'accepted',
+			visualRole: 'phantom-center',
+			ref: `${FEATURE_ID}:phantom:${encodeURIComponent(phantom.badgeId)}:hole-${phantom.hole}`,
+			reason: phantom.provenance.note,
+			values: { hole: phantom.hole }
+		});
+	}
+
+	board.set('recoveredTees', [...existing, ...additions]);
+	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesPublished', additions.length);
+	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesRetired', retired);
+}
+
 function executePosteriorTeeRecovery(board: ExecBoard, ctx: FeatureContext): void {
 	const stop = ctx.span(UNIT_ID);
 	const state = ctx.resolve(posteriorTeeRecoveryFeature);
 	const evidence = state.enabled
 		? inferPosterior(board, ctx, state.knobs as unknown as PosteriorKnobs)
 		: disabledEvidence(false);
+	if (state.enabled) publishRecoveredTees(board, ctx, evidence, board.get<readonly BadgeEvidence[]>('badges'));
 	board.set(FEATURE_ID, evidence);
 	ctx.measure(UNIT_ID, 'posteriorTargets', evidence.targetBadgeIds.length);
 	ctx.measure(UNIT_ID, 'posteriorObservableCompletions', evidence.completions.observable);
@@ -593,11 +752,12 @@ export const posteriorTeeRecoveryOperation: ABFeatureOperation = {
 			'viewport',
 			'measurement',
 			'assignment',
-			'teeBadgeLock'
+			'teeBadgeLock',
+			'recoveredTees'
 		],
-		produces: [FEATURE_ID],
+		produces: [FEATURE_ID, 'recoveredTees'],
 		features: [FEATURE_ID],
-		note: 'posterior reconciliation over the evidence-derived tee-recovery conflict island; publishes sidecar decisions only'
+		note: 'posterior reconciliation over the evidence-derived tee-recovery conflict island; publishes selected hypotheses as real recovered tees'
 	},
 	run(board, ctx) {
 		executePosteriorTeeRecovery(board, ctx);
@@ -611,7 +771,8 @@ export const posteriorTeeRecoveryFeature = {
 	kind: 'deviation',
 	defaultEnabled: false,
 	resolveOnlyWhenConfigured: true,
-	note: 'Experimental posterior tee recovery: jointly rank shard/NULL hypotheses using course-local evidence models. Sidecar only until ablation decides its proper G4 custody.',
+	note: 'Posterior tee recovery: jointly rank shard/NULL hypotheses using course-local evidence models, then publish the selected hypotheses as real recovered tees.',
+	render: POSTERIOR_TEE_RECOVERY_RENDER,
 	knobs: {
 		observableToNullPriorOdds: {
 			default: 17,

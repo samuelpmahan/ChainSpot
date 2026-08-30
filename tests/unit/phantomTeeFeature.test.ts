@@ -95,8 +95,15 @@ function assignment(badgeId: string, basketId: string, score: number): Assignmen
 }
 
 describe('phantomTee (C01 predecessor-basket fallback)', () => {
-	test('synthesizes at the predecessor hole basket tip for tee-less holes', () => {
-		// hole 1 assigned well; hole 2 has NO assignment -> phantom at B1 tip
+	test('synthesizes in the predecessor basket UPPER HALF, not at its pole tip', () => {
+		// hole 1 assigned well; hole 2 has NO assignment -> phantom rides B1.
+		//
+		// A basket's tipYPx is its pole-tip GROUND anchor (sprite bottom +
+		// offset), which sits below the drawn basket. A tee pad beside a basket
+		// reads in the basket's upper half, so the phantom rises off the tip by
+		// PHANTOM_TEE_RISE_FROM_BASKET_TIP (0.75) of the sprite height.
+		// Fixture basket-0: whiteBbox height 8, sprite top 72, tip 80.
+		//   80 - 0.75*8 = 74 == sprite top + h/4, i.e. the upper quarter.
 		const phantoms = synthesizePhantomTees(
 			measurementFixture(),
 			[assignment('badge-0', 'basket-0', 0.8)],
@@ -104,9 +111,19 @@ describe('phantomTee (C01 predecessor-basket fallback)', () => {
 		);
 		expect(phantoms).toHaveLength(1);
 		expect(phantoms[0].xPx).toBe(60);
-		expect(phantoms[0].yPx).toBe(80);
+		expect(phantoms[0].yPx).toBe(74);
+
+		// Stated as geometry too, so a future scale change cannot quietly put
+		// the phantom back under the basket while the magic number still passes.
+		const spriteTopPx = 72;
+		const spriteHeightPx = 8;
+		expect(phantoms[0].yPx).toBeLessThan(80); // above the pole tip
+		expect(phantoms[0].yPx).toBeGreaterThanOrEqual(spriteTopPx);
+		expect(phantoms[0].yPx).toBeLessThan(spriteTopPx + spriteHeightPx / 2); // upper half
+
 		expect(phantoms[0].provenance.note).toContain('hole 2');
 		expect(phantoms[0].provenance.note).toContain('B1');
+		expect(phantoms[0].provenance.note).toContain('risen');
 	});
 
 	test('completes hole 1 and chain gaps with deterministic finite fallback locations', () => {

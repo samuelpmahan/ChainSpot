@@ -696,7 +696,7 @@
 						"posteriorTeeRecovery": {
 							"type": "object",
 							"additionalProperties": false,
-							"description": "Experimental posterior tee recovery: jointly rank shard/NULL hypotheses using course-local evidence models. Sidecar only until ablation decides its proper G4 custody.",
+							"description": "Posterior tee recovery: jointly rank shard/NULL hypotheses using course-local evidence models, then publish the selected hypotheses as real recovered tees.",
 							"properties": {
 								"enabled": {
 									"type": "boolean",

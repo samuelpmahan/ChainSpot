@@ -54,15 +54,24 @@ const straightTestOnResolved = resolveConfig(
 // UNIT_OPERATIONS/OPERATION_UNIVERSE counts move (17->18, 24->25), but it is
 // absent from default.json's execution list (same "absence, not merely
 // disabled" contract as teeMinAreaPose/teeBadgeLock), so the FROZEN default
-// plan fingerprint itself does NOT move and is intentionally left unchanged
-// below -- verified by re-running this suite after the change.
+// plan fingerprint itself does NOT move when such a feature is registered.
+//
+// Value refreshed 2026-08-30. The previous constant
+// (1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3) went
+// stale when default.json adopted teeBadgeLock into the frozen schedule, and
+// had been failing on baseline/dev6-106 itself. The value below was verified
+// by compiling default.json on BOTH baseline/dev6-106 and this branch: both
+// produce 45a8167e..., i.e. registering posteriorTeeRecovery does not move it.
+// That equality is the property this test exists to defend.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'1649c2b1d8f366291010e51db600960b3f615054557f47673bde71c0cc891da3';
+	'45a8167e64474411aba4489d0182a7e58dd26828209827774dbb366a6a243380';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
 		expect(UNIT_OPERATIONS.size).toBe(18); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate
-		expect(OPERATION_UNIVERSE.length).toBe(25); // prior universe + four single-operation units
+		// 25 prior + posteriorTeeRecovery, which shares the teeBadgeLock unit
+		// rather than owning one -- so UNIT_OPERATIONS.size is unchanged at 18.
+		expect(OPERATION_UNIVERSE.length).toBe(26);
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',

@@ -27,6 +27,26 @@ import { g5RibbonFeature } from './g5.ribbon';
 import { g5RoutingFeature } from './g5.routing';
 import { phantomTeeRender } from './g3.teeReceipts';
 
+/** A basket's `tipYPx` is its POLE-TIP GROUND ANCHOR, not its body: the sprite
+ * matcher sets `tipY = spriteY + spriteHeight + tipOffset` (see endpoints.ts
+ * `tipY`, documented "Pole-tip annotation point"), so it lands BELOW the drawn
+ * basket. That is the right anchor for annotating where a basket meets the
+ * ground, and the wrong one for a tee: a tee pad beside a basket reads in the
+ * basket's UPPER half. Rise by three quarters of the sprite's own height to
+ * land there — expressed as a fraction of that height, not a pixel constant,
+ * so it survives capture scale. 0.75 puts the point at ~sprite top + h/4.
+ * Dataset-fit estimate from the Dev6 rasters, not physics. */
+const PHANTOM_TEE_RISE_FROM_BASKET_TIP = 0.75;
+
+/** whiteBbox is [x, y, widthPx, heightPx] (measure.ts). Falls back to no rise
+ * rather than guessing when the sprite height is unusable. */
+function basketTipRisePx(basket: BasketEvidence): number {
+	const heightPx = basket.whiteBbox?.[3];
+	return typeof heightPx === 'number' && Number.isFinite(heightPx) && heightPx > 0
+		? PHANTOM_TEE_RISE_FROM_BASKET_TIP * heightPx
+		: 0;
+}
+
 export const phantomTeeFeature = {
 	id: 'phantomTee',
 	// This consumes completed G4 assignment evidence, so it must not appear in
@@ -143,10 +163,10 @@ function synthesizePhantomTeeResult(
 		if (basket && finitePoint(basket.tipXPx, basket.tipYPx)) {
 			phantoms.push({
 				xPx: basket.tipXPx,
-				yPx: basket.tipYPx,
+				yPx: basket.tipYPx - basketTipRisePx(basket),
 				provenance: {
 					source: 'explicit-injected',
-					note: `phantom-predecessor-basket hole ${hole} from B${hole - 1} tip; appearance UNKNOWN`,
+					note: `phantom-predecessor-basket hole ${hole} from B${hole - 1} tip risen ${PHANTOM_TEE_RISE_FROM_BASKET_TIP} of sprite height; appearance UNKNOWN`,
 					score: 0.5
 				}
 			});

@@ -704,9 +704,47 @@ export function renderRunEndpointReceipt(
 
 	const recoveryPlan = planForRunFeature(run, 'teeRecovery', 'teeRecovery');
 	const recovery = planDrawables(recoveryPlan);
-	const recoveredShards = recovery.filter(
+	// posteriorTeeRecovery publishes REAL recovered tees, but it rides the
+	// teeBadgeLock unit rather than owning one, so its accepted shards would be
+	// invisible to a teeRecovery-only selector. A recovered tee is a tee no
+	// matter which feature wrote it down: draw it with the rest, so a wrong
+	// pick is wrong on the endpoint image where a human sees it.
+	const posteriorPlan = planForRunFeature(run, 'posteriorTeeRecovery', 'teeBadgeLock');
+	const posteriorDrawables = planDrawables(posteriorPlan);
+	const posteriorShards = posteriorDrawables.filter(
 		(drawable) => drawable.visualRole === 'tee-shard' && drawable.verdict === 'accepted'
 	);
+	// Collect retired tee positions to filter out superseded teeRecovery shards.
+	// When posteriorTeeRecovery reopens a badge, it retires the frozen RECOVERED tee
+	// by position match (< 0.5px tolerance), so the render layer must exclude matching
+	// teeRecovery shards to avoid double-counting.
+	// Retirement is matched by TEE INDEX, not badge.
+	//
+	// A recovered tee's owner is exactly what is in dispute here: G3 built the
+	// shards for badges 2/10/12 on Heritage, but teeBadgeLock locked those same
+	// recovered tees to badges 5/4/12. That disagreement is the conflict the
+	// posterior reopens, so the badge id on a G3 shard ref and the badge id on
+	// the lock are deliberately different and can never be matched.
+	//
+	// So the posterior publishes the index itself: `values.teeIndex` on each
+	// retirement drawable is N from `tee-recovered-N`, which is the position of
+	// the G3 accepted `tee-shard` drawable that produced it. Read the number,
+	// never re-derive it here.
+	const acceptedRecoveryShards = recovery.filter(
+		(drawable) => drawable.visualRole === 'tee-shard' && drawable.verdict === 'accepted'
+	);
+	const retiredTeeIndices = new Set(
+		posteriorDrawables.flatMap((drawable) => {
+			const ref = typeof drawable.ref === 'string' ? drawable.ref : '';
+			if (!ref.startsWith('posteriorTeeRecovery:retired:')) return [];
+			const index = drawable.values?.teeIndex;
+			return typeof index === 'number' && Number.isInteger(index) && index >= 0 ? [index] : [];
+		})
+	);
+	const recoveredShards = [
+		...acceptedRecoveryShards.filter((_, index) => !retiredTeeIndices.has(index)),
+		...posteriorShards
+	];
 	const recoveryDiagonals = recovery.filter((drawable) => drawable.visualRole === 'tee-diagonal');
 	const recoveryCorners = recovery.filter((drawable) => drawable.visualRole === 'tee-corner-tick');
 
@@ -723,7 +761,29 @@ export function renderRunEndpointReceipt(
 	// The producer receipt has already selected accepted tee-badge polylines.
 	// Forward those exact objects as the first unified visual layer; no path
 	// geometry, IDs, or candidate state is reconstructed in Sweep.
-	const teeBadgePaths = teeBadgeLockReceipt?.plan.layers.flatMap((layer) => layer.drawables) ?? [];
+	// The posterior emits its own ownership edge for every endpoint it
+	// establishes, and those land on the teeBadgeLock UnitTrace, so they arrive
+	// in this receipt alongside the frozen locks. For a badge the posterior
+	// reopened that ALREADY had a lock, both edges would now be present and the
+	// badge would read as owning two endpoints -- so the frozen edge is dropped
+	// wherever the posterior published a replacement for the same badge.
+	const posteriorOwnedBadgeIds = new Set(
+		posteriorDrawables.flatMap((drawable) => {
+			const ref = typeof drawable.ref === 'string' ? drawable.ref : '';
+			if (!ref.startsWith('posteriorTeeRecovery:ray:')) return [];
+			const badgeId = ref.split(':')[2];
+			return badgeId ? [decodeURIComponent(badgeId)] : [];
+		})
+	);
+	const supersededByPosterior = (drawable: Drawable): boolean => {
+		const ref = typeof drawable.ref === 'string' ? drawable.ref : '';
+		if (!ref.startsWith('teeBadgeLock:')) return false;
+		const badgeId = ref.split(':')[1];
+		return badgeId ? posteriorOwnedBadgeIds.has(decodeURIComponent(badgeId)) : false;
+	};
+	const teeBadgePaths = (
+		teeBadgeLockReceipt?.plan.layers.flatMap((layer) => layer.drawables) ?? []
+	).filter((drawable) => !supersededByPosterior(drawable));
 	const badgeGlyphTemplateUnit = run.units.find((unit) => unit.id === 'badgeGlyphTemplate');
 	const badgeGlyphTemplateReceipt = badgeGlyphTemplateUnit
 		? buildBadgeGlyphTemplateReceipt(badgeGlyphTemplateUnit, run)
@@ -858,7 +918,8 @@ export function renderRunEndpointReceipt(
 	const expectedRecoverNum = visiblePlan
 		? Math.max(0, acceptedBadges.length - visibleBorders.length)
 		: undefined;
-	const recoveryScheduled = run.units.some((candidate) => candidate.id === 'teeRecovery');
+	const recoveryScheduled =
+		run.units.some((candidate) => candidate.id === 'teeRecovery') || posteriorShards.length > 0;
 	const phantomScheduled = run.units.some((candidate) => candidate.id === 'phantomTee');
 	const rejectedLines = rejectionReceiptLines(run, [
 		{ id: 'baskets', gate: 'G2' },

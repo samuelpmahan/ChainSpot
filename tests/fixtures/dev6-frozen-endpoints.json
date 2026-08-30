@@ -1,0 +1,662 @@
+{
+  "AlexClark": [
+    {
+      "hole": 1,
+      "xPx": 616,
+      "yPx": 1593,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 633,
+      "yPx": 1286,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 363,
+      "yPx": 1741,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 369,
+      "yPx": 2056,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 472,
+      "yPx": 1887,
+      "source": "lock"
+    },
+    {
+      "hole": 6,
+      "xPx": 673,
+      "yPx": 1846,
+      "source": "lock"
+    },
+    {
+      "hole": 7,
+      "xPx": 454,
+      "yPx": 1403,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 454,
+      "yPx": 861,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 429,
+      "yPx": 655,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 381,
+      "yPx": 302,
+      "source": "lock"
+    },
+    {
+      "hole": 11,
+      "xPx": 542,
+      "yPx": 505,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 458,
+      "yPx": 224,
+      "source": "phantom"
+    },
+    {
+      "hole": 13,
+      "xPx": 736,
+      "yPx": 69,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 910,
+      "yPx": 304,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 706,
+      "yPx": 107,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 604,
+      "yPx": 434,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 675,
+      "yPx": 698,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 512,
+      "yPx": 1018,
+      "source": "lock"
+    }
+  ],
+  "DashsTrack": [
+    {
+      "hole": 1,
+      "xPx": 880,
+      "yPx": 425,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 452,
+      "yPx": 571,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 734,
+      "yPx": 712,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 429,
+      "yPx": 642,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 484,
+      "yPx": 849,
+      "source": "lock"
+    },
+    {
+      "hole": 6,
+      "xPx": 676,
+      "yPx": 844,
+      "source": "lock"
+    },
+    {
+      "hole": 7,
+      "xPx": 366,
+      "yPx": 978,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 519,
+      "yPx": 1008,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 372,
+      "yPx": 1177,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 258,
+      "yPx": 1452,
+      "source": "lock"
+    },
+    {
+      "hole": 11,
+      "xPx": 77,
+      "yPx": 1824,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 421,
+      "yPx": 1764,
+      "source": "lock"
+    },
+    {
+      "hole": 13,
+      "xPx": 446,
+      "yPx": 1468,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 676,
+      "yPx": 1497,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 871,
+      "yPx": 1358,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 1155,
+      "yPx": 1175,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 1068,
+      "yPx": 847,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 788,
+      "yPx": 842,
+      "source": "lock"
+    }
+  ],
+  "HeritagePark": [
+    {
+      "hole": 1,
+      "xPx": 684,
+      "yPx": 1631,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 396,
+      "yPx": 1530,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 581,
+      "yPx": 1534,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 708,
+      "yPx": 1395,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 729,
+      "yPx": 1154,
+      "source": "posterior"
+    },
+    {
+      "hole": 6,
+      "xPx": 729,
+      "yPx": 899,
+      "source": "posterior"
+    },
+    {
+      "hole": 7,
+      "xPx": 871,
+      "yPx": 713,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 1029,
+      "yPx": 743,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 1095,
+      "yPx": 1048,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 977,
+      "yPx": 1145,
+      "source": "posterior"
+    },
+    {
+      "hole": 11,
+      "xPx": 883,
+      "yPx": 850,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 798,
+      "yPx": 1152,
+      "source": "lock"
+    },
+    {
+      "hole": 13,
+      "xPx": 829,
+      "yPx": 1349,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 957,
+      "yPx": 1485,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 1224,
+      "yPx": 1513,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 1005,
+      "yPx": 1565,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 26,
+      "yPx": 1612,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 350,
+      "yPx": 1478,
+      "source": "lock"
+    }
+  ],
+  "Lenard": [
+    {
+      "hole": 1,
+      "xPx": 467,
+      "yPx": 1299,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 259,
+      "yPx": 1190,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 316,
+      "yPx": 972,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 441,
+      "yPx": 777,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 602,
+      "yPx": 458,
+      "source": "lock"
+    },
+    {
+      "hole": 6,
+      "xPx": 735,
+      "yPx": 156,
+      "source": "lock"
+    },
+    {
+      "hole": 7,
+      "xPx": 864,
+      "yPx": 226,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 1034,
+      "yPx": 260,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 895,
+      "yPx": 381,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 804,
+      "yPx": 453,
+      "source": "lock"
+    },
+    {
+      "hole": 11,
+      "xPx": 580,
+      "yPx": 684,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 405,
+      "yPx": 832,
+      "source": "lock"
+    },
+    {
+      "hole": 13,
+      "xPx": 282,
+      "yPx": 1250,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 262,
+      "yPx": 1394,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 241,
+      "yPx": 1751,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 309,
+      "yPx": 1798,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 354,
+      "yPx": 1481,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 438,
+      "yPx": 1676,
+      "source": "lock"
+    }
+  ],
+  "NorthPark": [
+    {
+      "hole": 1,
+      "xPx": 814,
+      "yPx": 1639,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 538,
+      "yPx": 1582,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 1053,
+      "yPx": 1607,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 1186,
+      "yPx": 1321,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 999,
+      "yPx": 1471,
+      "source": "posterior"
+    },
+    {
+      "hole": 6,
+      "xPx": 1084,
+      "yPx": 1100,
+      "source": "lock"
+    },
+    {
+      "hole": 7,
+      "xPx": 787,
+      "yPx": 793,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 913,
+      "yPx": 563,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 592,
+      "yPx": 663,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 358,
+      "yPx": 734,
+      "source": "lock"
+    },
+    {
+      "hole": 11,
+      "xPx": 83,
+      "yPx": 764,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 459,
+      "yPx": 744,
+      "source": "lock"
+    },
+    {
+      "hole": 13,
+      "xPx": 836,
+      "yPx": 847,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 823,
+      "yPx": 1067,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 586,
+      "yPx": 944,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 798,
+      "yPx": 1169,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 1058,
+      "yPx": 1251,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 826,
+      "yPx": 1225,
+      "source": "lock"
+    }
+  ],
+  "TowneLake": [
+    {
+      "hole": 1,
+      "xPx": 1178,
+      "yPx": 973,
+      "source": "lock"
+    },
+    {
+      "hole": 2,
+      "xPx": 912,
+      "yPx": 1064,
+      "source": "lock"
+    },
+    {
+      "hole": 3,
+      "xPx": 935,
+      "yPx": 1534,
+      "source": "lock"
+    },
+    {
+      "hole": 4,
+      "xPx": 601,
+      "yPx": 1372,
+      "source": "lock"
+    },
+    {
+      "hole": 5,
+      "xPx": 749,
+      "yPx": 1269,
+      "source": "lock"
+    },
+    {
+      "hole": 6,
+      "xPx": 605,
+      "yPx": 1207,
+      "source": "lock"
+    },
+    {
+      "hole": 7,
+      "xPx": 759,
+      "yPx": 1021,
+      "source": "lock"
+    },
+    {
+      "hole": 8,
+      "xPx": 769,
+      "yPx": 666,
+      "source": "lock"
+    },
+    {
+      "hole": 9,
+      "xPx": 757,
+      "yPx": 457,
+      "source": "lock"
+    },
+    {
+      "hole": 10,
+      "xPx": 547,
+      "yPx": 350,
+      "source": "lock"
+    },
+    {
+      "hole": 11,
+      "xPx": 709,
+      "yPx": 537,
+      "source": "lock"
+    },
+    {
+      "hole": 12,
+      "xPx": 696,
+      "yPx": 827,
+      "source": "lock"
+    },
+    {
+      "hole": 13,
+      "xPx": 388,
+      "yPx": 1044,
+      "source": "lock"
+    },
+    {
+      "hole": 14,
+      "xPx": 184,
+      "yPx": 1133,
+      "source": "lock"
+    },
+    {
+      "hole": 15,
+      "xPx": 373,
+      "yPx": 1178,
+      "source": "lock"
+    },
+    {
+      "hole": 16,
+      "xPx": 309,
+      "yPx": 1710,
+      "source": "lock"
+    },
+    {
+      "hole": 17,
+      "xPx": 845,
+      "yPx": 1725,
+      "source": "lock"
+    },
+    {
+      "hole": 18,
+      "xPx": 1019,
+      "yPx": 1415,
+      "source": "lock"
+    }
+  ]
+}

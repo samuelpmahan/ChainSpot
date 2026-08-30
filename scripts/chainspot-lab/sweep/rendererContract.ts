@@ -22,6 +22,7 @@
 
 import type { ArtifactKind, ArtifactRef } from '@chainspot/alg/exec';
 import { renderMask } from './renderers/mask';
+import { renderMeasurementTable } from './renderers/measurementTable';
 
 // ---------------------------------------------------------------------------
 // Per-kind payload formats, as actually written by operations.ts today.
@@ -162,5 +163,5 @@ export const RENDERERS: Partial<Record<ArtifactKind, RendererFn>> = {
 	// componentSet: renderComponentSet,
 	// candidateSet: renderCandidateSet,
 	// polyline: renderPolyline,
-	// measurementTable: renderMeasurementTable,
+	measurementTable: renderMeasurementTable,
 };

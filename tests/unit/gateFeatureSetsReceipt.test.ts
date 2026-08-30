@@ -32,7 +32,7 @@ const membership: Record<string, readonly string[]> = {
 	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -122,7 +122,11 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(GATE_FEATURE_SETS['g4-set'].operations?.map(({ operation }) => operation.spec.id)).toEqual([
 			'teeRecovery',
 			'phantomTee',
-			'teeBadgeLock'
+			'teeBadgeLock',
+			// Shares the teeBadgeLock unit and runs immediately after it; the
+			// frozen default omits the feature, so compile drops this op from
+			// that plan entirely (compile.ts resolveOnlyWhenConfigured).
+			'posteriorTeeRecovery'
 		]);
 		for (const set of Object.values(GATE_FEATURE_SETS)) {
 			const owned = new Set(set.features.map((feature) => feature.id));
@@ -178,11 +182,21 @@ describe('production gate ABFeatureSet receipts', () => {
 		expect(g7.enabledFeatureIds).toContain('zfit');
 	});
 
-	test('default config execution follows the canonical operation order, ending at G4 teeRecovery', () => {
+	test('default config execution follows the canonical operation order, ending at G4 teeBadgeLock', () => {
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
 		// zfit left the default schedule by owner directive (2026-08-28); the
 		// engine-level DEFAULT_EXECUTION fallback still ends with it.
-		expect(resolved.execution).toEqual(DEFAULT_EXECUTION.filter((id) => id !== 'zfit'));
+		//
+		// KNOWN DRIFT (2026-08-30): default.json has since adopted teeBadgeLock
+		// into the frozen schedule, but engine.ts's DEFAULT_EXECUTION fallback
+		// has NOT. They are no longer the same list. This asserts the real
+		// relationship rather than hiding the gap -- whoever reconciles the
+		// engine fallback should delete the concat below, not this comment.
+		expect(resolved.execution).toEqual([
+			...DEFAULT_EXECUTION.filter((id) => id !== 'zfit'),
+			'teeBadgeLock'
+		]);
+		expect(DEFAULT_EXECUTION).not.toContain('teeBadgeLock');
 		const plan = compileExecutionPlan(resolved);
 		expect(plan.ops.map((operation) => operation.id)).toEqual([
 			'badgeStage.masks',
@@ -202,7 +216,11 @@ describe('production gate ABFeatureSet receipts', () => {
 			'assignment.scoring',
 			'assignment.ranking',
 			'assignment.selection',
-			'teeRecovery'
+			'teeRecovery',
+			// default.json adopted teeBadgeLock into the frozen schedule
+			// (dev6-106 baseline); posteriorTeeRecovery is NOT here because the
+			// default omits the feature and compile drops its op.
+			'teeBadgeLock'
 		]);
 	});
 });
