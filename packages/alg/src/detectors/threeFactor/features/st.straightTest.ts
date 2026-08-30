@@ -1,5 +1,7 @@
 import type { BadgeEvidence, BasketEvidence, TeeEvidence } from '../types';
 import type { ABFeature, EngineUnit } from './types';
+import { runDirectedStraightTest } from './st.straightDirected';
+import { STRAIGHT_TEST_RENDER } from './st.straightTestReceipt';
 import {
 	STRAIGHT_TEST_COORDINATE_FRAME,
 	type StraightTestCandidateInput,
@@ -27,7 +29,7 @@ export const straightTestFeature = {
 	kind: 'deviation',
 	defaultEnabled: false,
 	resolveOnlyWhenConfigured: true,
-	note: 'Early geometry-only S0 straight-test testimony; never asserts ownership or bend truth.',
+	note: 'G5 straight-hole testimony: first semantic basket TIP encountered in the accepted Tee→Badge corridor; truth-assisted S0 comparison retained separately.',
 	knobs: {
 		truthAssisted: {
 			default: false,
@@ -35,7 +37,8 @@ export const straightTestFeature = {
 			validate: (value: unknown) =>
 				typeof value === 'boolean' ? null : 'truthAssisted must be a boolean'
 		}
-	}
+	},
+	render: STRAIGHT_TEST_RENDER
 } satisfies ABFeature;
 
 function vectors(candidate: StraightTestCandidateInput) {
@@ -300,9 +303,9 @@ function candidateFromEvidence(
 export const straightTestUnit: EngineUnit = {
 	id: 'straightTest',
 	gate: 'G5',
-	consumes: ['badges', 'baskets', 'tees', 'straightTestTruthAssistance'],
+	consumes: ['badges', 'baskets', 'tees', 'measurement', 'teeBadgeLock', 'straightTestTruthAssistance'],
 	produces: ['straightProposals'],
-	note: 'Geometry-only early S0; no assignment or bend refinement.',
+	note: 'Blind directed-corridor resolver over accepted Tee→Badge locks and semantic basket TIPs; no assignment mutation.',
 	run(board, ctx) {
 		if (!ctx.resolve(straightTestFeature).enabled) {
 			board.set('straightProposals', []);
@@ -319,6 +322,18 @@ export const straightTestUnit: EngineUnit = {
 		const badges = board.get<readonly BadgeEvidence[]>('badges');
 		const tees = board.get<readonly TeeEvidence[]>('tees');
 		const baskets = board.get<readonly BasketEvidence[]>('baskets');
+		if (assistance.mode === 'blind') {
+			const proposals = runDirectedStraightTest(board, ctx, baskets);
+			const trace: StraightTestTrace = {
+				featureId: 'straightTest',
+				coordinateFrame: STRAIGHT_TEST_COORDINATE_FRAME,
+				truthAssistance: assistance,
+				proposals
+			};
+			ctx.recordStraightTest?.(trace);
+			board.set('straightProposals', proposals);
+			return;
+		}
 		const proposals = badges.flatMap((badge) => {
 			const candidateCount =
 				tees.filter((tee) => tee.tier === 'ring').length *

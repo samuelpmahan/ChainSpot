@@ -126,6 +126,27 @@ export interface StraightTestMeasurements {
 	readonly collinearityResidualDeg: number | null;
 }
 
+export interface StraightTestBasketHypothesis {
+	readonly basketId: string;
+	readonly tipXPx: number;
+	readonly tipYPx: number;
+	readonly alongPx: number;
+	readonly perpendicularPx: number;
+	readonly forward: boolean;
+	readonly inCorridor: boolean;
+	readonly encounterRank: number | null;
+	readonly strongIdentity: boolean;
+}
+
+export interface StraightTestRayEvidence {
+	readonly corridorWidthPx: number | null;
+	readonly corridorHalfWidthPx: number | null;
+	readonly selectedAlongPx: number | null;
+	readonly selectedPerpendicularPx: number | null;
+	readonly corridorCandidateCount: number;
+	readonly nextTipMarginPx: number | null;
+}
+
 export interface StraightTestGateStatuses {
 	readonly identifiedBadge: StraightTestGateStatus;
 	readonly strongBasketIdentity: StraightTestGateStatus;
@@ -156,6 +177,8 @@ export interface StraightTestProposal {
 	readonly selected: boolean;
 	readonly runnerUpProposalId: string | null;
 	readonly measurements: StraightTestMeasurements;
+	readonly straightRay?: StraightTestRayEvidence;
+	readonly basketHypotheses?: readonly StraightTestBasketHypothesis[];
 	readonly gates: StraightTestGateStatuses;
 	readonly reasons: readonly string[];
 	readonly truthTainted: boolean;

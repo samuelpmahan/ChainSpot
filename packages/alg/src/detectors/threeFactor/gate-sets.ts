@@ -117,7 +117,7 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 		features: FEATURES['g5-set'],
 		imports: ['scoring'],
 		locallyOperationlessFeatureIds: ['fourLaneSensor'],
-		seededSlots: ['image', 'localImage', 'params', 'viewport', 'stage', 'badges', 'baskets', 'tees', 'straightTestTruthAssistance']
+		seededSlots: ['image', 'localImage', 'params', 'viewport', 'stage', 'badges', 'baskets', 'tees', 'measurement', 'teeBadgeLock', 'straightTestTruthAssistance']
 	},
 	'g6-set': {
 		id: 'g6-set',

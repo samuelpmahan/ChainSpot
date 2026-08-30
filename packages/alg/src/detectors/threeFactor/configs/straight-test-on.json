@@ -1,20 +1,27 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "straight-test-on",
-	"note": "Enable blind early S0 geometry testimony; soft factors remain UNKNOWN and no ownership/bend truth is asserted.",
+	"note": "Blind G5 Straight Test after the frozen 106 endpoint/teeBadgeLock chain: first semantic basket TIP encountered inside the directed Tee→Badge corridor; no assignment mutation.",
 	"execution": [
 		"badgeStage",
 		"badges",
 		"baskets",
 		"tees",
 		"teeFamily",
-		"straightTest",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery"
+		"teeRecovery",
+		"teeBadgeLock",
+		"straightTest"
 	],
-	"gates": { "G5": { "straightTest": { "enabled": true } } }
+	"gates": {
+		"G5": {
+			"straightTest": {
+				"enabled": true
+			}
+		}
+	}
 }

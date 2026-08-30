@@ -1,20 +1,30 @@
 {
 	"schema": "threeFactor-config@1",
 	"name": "straight-test-truth-assisted-compare",
-	"note": "Explicit TRUTH-TAINT S0 comparison; caller must provide verified-canonical assistance payload.",
+	"note": "Explicit TRUTH-TAINT comparison after the frozen 106 endpoint/teeBadgeLock chain; caller must provide verified-canonical assistance payload.",
 	"execution": [
 		"badgeStage",
 		"badges",
 		"baskets",
 		"tees",
 		"teeFamily",
-		"straightTest",
 		"supportField",
 		"badgeOcclusionPatch",
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery"
+		"teeRecovery",
+		"teeBadgeLock",
+		"straightTest"
 	],
-	"gates": { "G5": { "straightTest": { "enabled": true, "knobs": { "truthAssisted": true } } } }
+	"gates": {
+		"G5": {
+			"straightTest": {
+				"enabled": true,
+				"knobs": {
+					"truthAssisted": true
+				}
+			}
+		}
+	}
 }
