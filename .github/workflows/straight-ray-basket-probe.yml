@@ -1,0 +1,56 @@
+name: Straight Ray Basket Probe
+
+on:
+  push:
+    branches:
+      - spike/straight-ray-basket-106
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lenard-ray-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ChainSpot
+        uses: actions/checkout@v4
+        with:
+          path: ChainSpot
+
+      - name: Checkout pinned corpus
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          ref: 2b5913d3f1f6d8f97b0324721a4c5201bd3ed819
+          path: chainspot-corpus
+          lfs: true
+
+      - name: Install evaluator-only Lenard annotation
+        run: cp ChainSpot/tests/fixtures/straight-ray/Lenard-full.annotation.json chainspot-corpus/dev/Annotated/Lenard/Lenard-full.annotation.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ChainSpot/package-lock.json
+
+      - name: Setup
+        working-directory: ChainSpot
+        run: |
+          npm ci
+          npx svelte-kit sync
+          npm run build --workspace @chainspot/alg
+
+      - name: Probe Lenard
+        working-directory: ChainSpot
+        run: npx vitest run tests/unit/straightRayBasketProbe.test.ts --reporter=verbose
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lenard-straight-ray-basket-probe
+          path: ChainSpot/artifacts/sweep/straight-ray-basket-probe
+          if-no-files-found: warn
