@@ -86,6 +86,9 @@ export interface BadgeStageResult {
 	darkMask: Mask;
 	brightLabels: Int32Array;
 	brightComponents: ComponentStats[];
+	/** Same-stage dark CC evidence retained for object assembly; never recompute it downstream. */
+	darkLabels: Int32Array;
+	darkComponents: ComponentStats[];
 	badges: ComponentStats[];
 	badgeSources: ('bright-family' | 'dark-plate-recovery')[];
 	plateBboxes: (readonly [number, number, number, number] | null)[];
@@ -139,9 +142,10 @@ export function recoverDarkPlateBadges(
 	badges: ComponentStats[],
 	badgeSources: ('bright-family' | 'dark-plate-recovery')[],
 	plateBboxes: (readonly [number, number, number, number] | null)[],
-	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS
+	knobs: BadgeStageKnobs = DEFAULT_BADGE_STAGE_KNOBS,
+	darkComponentsInput?: readonly ComponentStats[]
 ): void {
-	const { components: darkComponents } = extractComponents(dark);
+	const darkComponents = darkComponentsInput ?? extractComponents(dark).components;
 	for (const component of darkComponents) {
 		if (
 			component.bboxW < knobs.plateMinWidth ||
@@ -155,16 +159,31 @@ export function recoverDarkPlateBadges(
 		if (component.area / (component.bboxW * component.bboxH) < knobs.plateFillMin) continue;
 		let glyphCount = 0;
 		let interior = 0;
-		for (let y = component.bboxY + knobs.plateInteriorMargin; y < component.bboxY + component.bboxH - knobs.plateInteriorMargin; y++) {
+		for (
+			let y = component.bboxY + knobs.plateInteriorMargin;
+			y < component.bboxY + component.bboxH - knobs.plateInteriorMargin;
+			y++
+		) {
 			const row = y * width;
-			for (let x = component.bboxX + knobs.plateInteriorMargin; x < component.bboxX + component.bboxW - knobs.plateInteriorMargin; x++) {
+			for (
+				let x = component.bboxX + knobs.plateInteriorMargin;
+				x < component.bboxX + component.bboxW - knobs.plateInteriorMargin;
+				x++
+			) {
 				interior++;
 				if (bright.data[row + x]) glyphCount++;
 			}
 		}
 		const glyphFraction = interior ? glyphCount / interior : 0;
-		if (glyphFraction < knobs.plateGlyphFractionMin || glyphFraction > knobs.plateGlyphFractionMax) continue;
-		if (badges.some((badge) => Math.hypot(badge.cx - component.cx, badge.cy - component.cy) < knobs.plateProximityThreshold)) continue;
+		if (glyphFraction < knobs.plateGlyphFractionMin || glyphFraction > knobs.plateGlyphFractionMax)
+			continue;
+		if (
+			badges.some(
+				(badge) =>
+					Math.hypot(badge.cx - component.cx, badge.cy - component.cy) < knobs.plateProximityThreshold
+			)
+		)
+			continue;
 		const margin = knobs.plateBboxMargin;
 		badges.push({
 			label: -1,
@@ -198,6 +217,7 @@ export function runBadgeStage(
 	const { width, height } = image;
 	const { bright, dark } = computeBrightDarkMasks(image, hsvKnobs);
 	const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
+	const { labels: darkLabels, components: darkComponents } = extractComponents(dark);
 
 	const badges = detectBadgeFamily(width, dark, brightComponents, knobs);
 	const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
@@ -206,7 +226,16 @@ export function runBadgeStage(
 	const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(
 		() => null
 	);
-	recoverDarkPlateBadges(width, bright, dark, badges, badgeSources, plateBboxes, knobs);
+	recoverDarkPlateBadges(
+		width,
+		bright,
+		dark,
+		badges,
+		badgeSources,
+		plateBboxes,
+		knobs,
+		darkComponents
+	);
 	return {
 		width,
 		height,
@@ -214,6 +243,8 @@ export function runBadgeStage(
 		darkMask: dark,
 		brightLabels,
 		brightComponents,
+		darkLabels,
+		darkComponents,
 		badges,
 		badgeSources,
 		plateBboxes,
