@@ -1,4 +1,4 @@
-name: Straight Test Lenard Proof
+name: Straight Test Course Proofs
 
 on:
   push:
@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  lenard-straight-test:
+  straight-test-courses:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout ChainSpot
         uses: actions/checkout@v4
@@ -27,8 +27,10 @@ jobs:
           path: chainspot-corpus
           lfs: true
 
-      - name: Install evaluator-only Lenard annotation
-        run: cp ChainSpot/tests/fixtures/straight-ray/Lenard-full.annotation.json chainspot-corpus/dev/Annotated/Lenard/Lenard-full.annotation.json
+      - name: Install evaluator-only annotations
+        run: |
+          cp ChainSpot/tests/fixtures/straight-ray/Lenard-full.annotation.json chainspot-corpus/dev/Annotated/Lenard/Lenard-full.annotation.json
+          cp ChainSpot/tests/fixtures/straight-ray/DashsTrack-full.annotation.json chainspot-corpus/dev/Annotated/DashsTrack/DashsTrack-full.annotation.json
 
       - uses: actions/setup-node@v4
         with:
@@ -47,14 +49,20 @@ jobs:
         working-directory: ChainSpot
         run: npx vitest run tests/unit/threeFactorConfig.test.ts --reporter=verbose
 
-      - name: Straight Test production + renderer proof
+      - name: Lenard Straight Test proof
         working-directory: ChainSpot
         run: npx vitest run tests/unit/straightTestDirectedLenard.test.ts --reporter=verbose
 
-      - name: Upload Straight Test VisualRender
+      - name: Dashs Straight Test observational sweep
+        working-directory: ChainSpot
+        run: npx vitest run tests/unit/straightTestDirectedDashs.test.ts --reporter=verbose
+
+      - name: Upload Straight Test VisualRenders
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lenard-straight-test-visual
-          path: ChainSpot/artifacts/sweep/straight-test-lenard
+          name: straight-test-course-visuals
+          path: |
+            ChainSpot/artifacts/sweep/straight-test-lenard
+            ChainSpot/artifacts/sweep/straight-test-dashs
           if-no-files-found: error
