@@ -1,0 +1,20 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "object-perimeters-v1",
+	"note": "V1 clean-object custody experiment: run only through visible tee-family identity, then materialize exact component-owned object unions/perimeters. Overlap/recovery remains a loud V2 failure.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"objectPerimetersV1"
+	],
+	"gates": {
+		"G3": {
+			"objectPerimetersV1": {
+				"enabled": true
+			}
+		}
+	}
+}
