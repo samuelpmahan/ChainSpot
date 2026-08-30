@@ -27,6 +27,9 @@ jobs:
           path: chainspot-corpus
           lfs: true
 
+      - name: Install evaluator-only Lenard annotation
+        run: cp ChainSpot/tests/fixtures/straight-ray/Lenard-full.annotation.json chainspot-corpus/dev/Annotated/Lenard/Lenard-full.annotation.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
