@@ -18,6 +18,11 @@
 		"straightTest"
 	],
 	"gates": {
+		"G4": {
+			"teeBadgeLock": {
+				"enabled": true
+			}
+		},
 		"G5": {
 			"straightTest": {
 				"enabled": true
