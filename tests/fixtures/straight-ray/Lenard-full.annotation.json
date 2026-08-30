@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "sourceImage": {
+    "fileName": "Lenard-full.PNG",
+    "mimeType": "image/png",
+    "widthPx": 1290,
+    "heightPx": 2089,
+    "sha256": "15cc47e1c956a486e51244b8ac4b26e6387050534b01964e4bf71644461e9dc2",
+    "bundlePath": "images/source-original.png"
+  },
+  "holes": [
+    {"id":"dc5f45f7-2e37-4280-8ec9-f65c8da8dc8b","number":1,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":466.75000762939453,"yPx":1301.25},"basket":{"xPx":341,"yPx":1255.04}},
+    {"id":"216b2cf2-bfcd-473c-a114-696b1c25c472","number":2,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":259.777629549124,"yPx":1192.7814893161699},"basket":{"xPx":328,"yPx":1060.04}},
+    {"id":"c439abe6-e8a0-4a62-b297-1981b433b0fc","number":3,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":315.6533056133478,"yPx":973.7500268035947},"basket":{"xPx":385.71665901152227,"yPx":779.9447589690091}},
+    {"id":"b4a55e93-24e0-4f11-84d0-c57f5f8d8b90","number":4,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":440.65882110595703,"yPx":778.5647125244141},"basket":{"xPx":535,"yPx":662.04}},
+    {"id":"2f323bd4-63d1-44bb-ae46-0cf31ee702e9","number":5,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":602.2500076293945,"yPx":459.75000762939453},"basket":{"xPx":767,"yPx":316.03999999999996}},
+    {"id":"dfeb0425-cc39-45b9-b804-9432c6307806","number":6,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":734.5961608886719,"yPx":157.98077392578125},"basket":{"xPx":978,"yPx":109.03999999999999}},
+    {"id":"6853f023-e8e1-4e1e-8374-48c18cb66fd4","number":7,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":864.1551742553711,"yPx":227.63793182373047},"basket":{"xPx":1129,"yPx":115.03999999999999}},
+    {"id":"47daf023-3eb6-4aef-ab83-91e358b312c8","number":8,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":1033.6730728149414,"yPx":262.3653793334961},"basket":{"xPx":809.4770313825038,"yPx":301.7163051057606}},
+    {"id":"e669d941-badf-43a5-a6dd-49f6a9e4ad08","number":9,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":895.3653869628906,"yPx":382.82691955566406},"basket":{"xPx":702.2164648791901,"yPx":419.9188387868876}},
+    {"id":"d685af13-65e6-403e-b30a-cc073a2b68f8","number":10,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":802.7200012207031,"yPx":454.45999908447266},"basket":{"xPx":583.2371999749307,"yPx":636.7726957489734}},
+    {"id":"80a82722-53d0-4a61-94be-48f9ddbef10b","number":11,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":579.9024429321289,"yPx":686.121955871582},"basket":{"xPx":435,"yPx":872.04}},
+    {"id":"60191de1-49ee-49d3-9e27-334561676061","number":12,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":406.228466717601,"yPx":833.6642059318594},"basket":{"xPx":355.61409730581886,"yPx":1002.8642688556142}},
+    {"id":"9f98b7a7-3613-4e50-909e-90fc4292dcca","number":13,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":281.7999954223633,"yPx":1251.900001525879},"basket":{"xPx":150,"yPx":1503}},
+    {"id":"0cb6639e-7819-4d9e-a742-42ac41895a3d","number":14,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":262.26470947265625,"yPx":1396.441177368164},"basket":{"xPx":188,"yPx":1712.04}},
+    {"id":"4fcc7c9e-f87b-41a5-9ee5-26fe38286b0d","number":15,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":242.9540636042403,"yPx":1753.4110823942317},"basket":{"xPx":176,"yPx":1955}},
+    {"id":"a4cbca39-7a74-4930-9908-b0c62059de9b","number":16,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":308.53047943115234,"yPx":1799.7743911743164},"basket":{"xPx":278,"yPx":1546.04}},
+    {"id":"b3a5a9f9-4391-410c-94cc-47a6cb17a5d3","number":17,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":353.78173065185547,"yPx":1482.9441604614258},"basket":{"xPx":374,"yPx":1787.04}},
+    {"id":"b86bd511-4aa5-4a24-86a8-6ce3cec72400","number":18,"shots":[],"corridorBends":[],"corridorWidthPx":37,"tee":{"xPx":438.18919372558594,"yPx":1677.635139465332},"basket":{"xPx":500,"yPx":1465}}
+  ]
+}
