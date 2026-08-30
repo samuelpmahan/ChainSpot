@@ -1,22 +1,13 @@
 import { acquireObjectGraphV1, type CourseObject } from '../objects';
 import type { BadgeStageResult } from '../badgeStage';
-import type { BadgeEvidence, BasketEvidence, TeeEvidence } from '../types';
-import type { ABFeature, EngineUnit, EvidenceBoard, FeatureContext } from './types';
+import type { BadgeEvidence, BasketEvidence, TeeEvidence, ThreeFactorMeasurement } from '../types';
+import type { ABFeature, FeatureContext } from './types';
+import type { ABFeatureOperation } from '../../../exec/feature-set';
 import { objectPerimetersV1Render } from './g3.objectPerimetersV1Receipt';
-
-export const objectPerimetersV1Feature = {
-	id: 'objectPerimetersV1',
-	gate: 'G3',
-	kind: 'deviation',
-	defaultEnabled: false,
-	resolveOnlyWhenConfigured: true,
-	note: 'V1 clean-object acquisition from already-computed masked connected components. Tee/badge outside is bright; basket outside is dark. Overlap/recovery fails loudly for V2.',
-	render: objectPerimetersV1Render,
-	knobs: {}
-} satisfies ABFeature;
 
 interface ViewportSlot {
 	readonly topPx: number;
+	readonly bottomPx?: number;
 }
 
 function decodePixels(packed: Uint32Array, width: number): readonly (readonly [number, number])[] {
@@ -25,24 +16,15 @@ function decodePixels(packed: Uint32Array, width: number): readonly (readonly [n
 
 function emitObject(ctx: FeatureContext, object: CourseObject): void {
 	const assembly = object.raster.componentAssembly;
-	if (!assembly) {
+	if (!assembly || assembly.status === 'failed') {
 		ctx.overlay('objectPerimetersV1', {
 			type: 'box',
-			bbox: object.raster.bbox,
+			bbox: assembly?.status === 'failed' ? assembly.seedBbox : object.raster.bbox,
 			verdict: 'rejected',
 			ref: object.id,
-			reason: 'V1 failure: component-backed object ownership is unavailable',
-			metadata: { role: 'v1-failure', objectKind: object.kind }
-		});
-		return;
-	}
-	if (assembly.status === 'failed') {
-		ctx.overlay('objectPerimetersV1', {
-			type: 'box',
-			bbox: assembly.seedBbox,
-			verdict: 'rejected',
-			ref: object.id,
-			reason: `V2: ${assembly.reason}`,
+			reason: assembly?.status === 'failed'
+				? `V2: ${assembly.reason}`
+				: 'V1 failure: component-backed object ownership is unavailable',
 			metadata: { role: 'v1-failure', objectKind: object.kind }
 		});
 		return;
@@ -50,45 +32,30 @@ function emitObject(ctx: FeatureContext, object: CourseObject): void {
 	const owned = decodePixels(assembly.ownedPixels, assembly.rasterWidth);
 	const perimeter = decodePixels(assembly.perimeterPixels, assembly.rasterWidth);
 	ctx.overlay('objectPerimetersV1', {
-		type: 'pixelSet',
-		pixels: owned,
-		verdict: 'info',
-		ref: object.id,
+		type: 'pixelSet', pixels: owned, verdict: 'info', ref: object.id,
 		values: { pixelCount: owned.length },
-		metadata: {
-			role: 'owned-union',
-			objectKind: object.kind,
-			outerPolarity: assembly.outerComponent.polarity
-		}
+		metadata: { role: 'owned-union', objectKind: object.kind, outerPolarity: assembly.outerComponent.polarity }
 	});
 	ctx.overlay('objectPerimetersV1', {
-		type: 'pixelSet',
-		pixels: perimeter,
-		verdict: 'accepted',
-		ref: object.id,
+		type: 'pixelSet', pixels: perimeter, verdict: 'accepted', ref: object.id,
 		values: { perimeterPixelCount: perimeter.length },
-		metadata: {
-			role: 'canonical-perimeter',
-			objectKind: object.kind,
-			outerPolarity: assembly.outerComponent.polarity
-		}
+		metadata: { role: 'canonical-perimeter', objectKind: object.kind, outerPolarity: assembly.outerComponent.polarity }
 	});
 }
 
-export const objectPerimetersV1Unit: EngineUnit = {
-	id: 'objectPerimetersV1',
-	gate: 'G3',
-	consumes: ['stage', 'badges', 'baskets', 'tees', 'viewport'],
-	produces: ['objectPerimetersV1'],
-	note: 'Materialize exact V1 object ownership from detector-stage bright/dark CC labels; no recovery, splitting, fitting, or re-thresholding.',
-	run(board: EvidenceBoard, ctx: FeatureContext) {
+export const objectPerimetersV1Operation: ABFeatureOperation = {
+	spec: {
+		id: 'objectPerimetersV1',
+		kind: 'materialize',
+		gate: 'G3',
+		unit: 'objectPerimetersV1',
+		consumes: ['stage', 'badges', 'baskets', 'tees', 'viewport'],
+		produces: ['objectPerimetersV1'],
+		features: ['objectPerimetersV1'],
+		note: 'Materialize exact V1 clean-object ownership from already-computed masked bright/dark CC labels; overlap/recovery fails loudly for V2.'
+	},
+	run(board, ctx) {
 		const stop = ctx.span('objectPerimetersV1');
-		const state = ctx.resolve(objectPerimetersV1Feature);
-		if (!state.enabled) {
-			board.set('objectPerimetersV1', null);
-			stop();
-			return;
-		}
 		const stage = board.get<BadgeStageResult>('stage');
 		const badges = board.get<readonly BadgeEvidence[]>('badges');
 		const baskets = board.get<readonly BasketEvidence[]>('baskets');
@@ -100,7 +67,7 @@ export const objectPerimetersV1Unit: EngineUnit = {
 			tees,
 			viewport,
 			parameters: {}
-		} as never;
+		} as unknown as ThreeFactorMeasurement;
 		const graph = acquireObjectGraphV1(measurement, {
 			width: stage.width,
 			height: stage.height,
@@ -113,10 +80,21 @@ export const objectPerimetersV1Unit: EngineUnit = {
 		const successes = [...graph.badges, ...graph.baskets, ...graph.tees].filter(
 			(object) => object.raster.componentAssembly?.status === 'assembled'
 		).length;
-		const failures = graph.badges.length + graph.baskets.length + graph.tees.length - successes;
 		ctx.measure('objectPerimetersV1', 'assembledObjects', successes);
-		ctx.measure('objectPerimetersV1', 'v1Failures', failures);
+		ctx.measure('objectPerimetersV1', 'v1Failures', graph.badges.length + graph.baskets.length + graph.tees.length - successes);
 		board.set('objectPerimetersV1', graph);
 		stop();
 	}
 };
+
+export const objectPerimetersV1Feature = {
+	id: 'objectPerimetersV1',
+	gate: 'G3',
+	kind: 'deviation',
+	defaultEnabled: false,
+	resolveOnlyWhenConfigured: true,
+	note: 'V1 clean-object acquisition from already-computed masked connected components. Tee/badge outside is bright; basket outside is dark. Overlap/recovery fails loudly for V2.',
+	render: objectPerimetersV1Render,
+	knobs: {},
+	operations: [objectPerimetersV1Operation]
+} satisfies ABFeature;
