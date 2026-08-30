@@ -1,0 +1,42 @@
+name: Straight Test Implementation Bootstrap
+
+on:
+  push:
+    branches:
+      - spike/straight-ray-basket-106
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.event.head_commit.message != 'Implement directed-corridor Straight Test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Setup
+        run: |
+          npm ci
+          npx svelte-kit sync
+      - name: Apply source patch
+        run: node scripts/spikes/apply-straight-test-directed.mjs
+      - name: Build algorithm
+        run: npm run build --workspace @chainspot/alg
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/alg/src/detectors/threeFactor/features/st.straightTest.ts \
+                  packages/alg/src/detectors/threeFactor/features/st.straightTest.contract.ts \
+                  packages/alg/src/detectors/threeFactor/gate-sets.ts \
+                  packages/alg/src/detectors/threeFactor/configs/straight-test-on.json \
+                  packages/alg/src/detectors/threeFactor/configs/straight-test-truth-assisted-compare.json
+          git commit -m 'Implement directed-corridor Straight Test'
+          git push origin HEAD:spike/straight-ray-basket-106
