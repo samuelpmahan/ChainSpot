@@ -10,6 +10,7 @@ import { teeMinAreaPoseFeature } from './features/g3.teeMinAreaPose';
 import { teeRecoveryFeature } from './features/g3.teeRecovery';
 import { phantomTeeFeature } from './features/g3.phantomTee';
 import { teeBadgeLockFeature } from './features/g4.teeBadgeLock';
+import { posteriorTeeRecoveryFeature } from './features/g4.posteriorTeeRecovery';
 import { g4ScoringFeature } from './features/g4.scoring';
 import { g4SearchFeature } from './features/g4.search';
 import { fourLaneSensorFeature } from './features/st.fourLaneSensor';
@@ -34,14 +35,7 @@ import { ARTIFACT_EXTRACTORS, OPERATION_DEFS, operationImpls } from '../../exec/
  * refinement. There is no second engine vocabulary.
  */
 export type GateFeatureSetId =
-	| 'shared-set'
-	| 'g1-set'
-	| 'g2-set'
-	| 'g3-set'
-	| 'g4-set'
-	| 'g5-set'
-	| 'g6-set'
-	| 'g7-set';
+	'shared-set' | 'g1-set' | 'g2-set' | 'g3-set' | 'g4-set' | 'g5-set' | 'g6-set' | 'g7-set';
 
 /** Explicit owned feature membership, intentionally excluding parked supportRoi. */
 export const GATE_FEATURE_IDS = {
@@ -49,7 +43,7 @@ export const GATE_FEATURE_IDS = {
 	'g1-set': ['badges', 'digits', 'badgeGlyphTemplate'],
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
 	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
@@ -60,7 +54,12 @@ const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 	'g1-set': [g1BadgesFeature, digitsFeature, badgeGlyphTemplateFeature],
 	'g2-set': [g2SpriteFeature, cleanBasketFamilyFeature],
 	'g3-set': [g3EndpointsFeature, teeFamilyFeature, teeMinAreaPoseFeature],
-	'g4-set': [teeRecoveryFeature, phantomTeeFeature, teeBadgeLockFeature],
+	'g4-set': [
+		teeRecoveryFeature,
+		phantomTeeFeature,
+		teeBadgeLockFeature,
+		posteriorTeeRecoveryFeature
+	],
 	'g5-set': [fourLaneSensorFeature, straightTestFeature, g5RibbonFeature, g5RoutingFeature],
 	'g6-set': [g4ScoringFeature, g4SearchFeature],
 	'g7-set': [zfitFeature]
@@ -117,7 +116,17 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 		features: FEATURES['g5-set'],
 		imports: ['scoring'],
 		locallyOperationlessFeatureIds: ['fourLaneSensor'],
-		seededSlots: ['image', 'localImage', 'params', 'viewport', 'stage', 'badges', 'baskets', 'tees', 'straightTestTruthAssistance']
+		seededSlots: [
+			'image',
+			'localImage',
+			'params',
+			'viewport',
+			'stage',
+			'badges',
+			'baskets',
+			'tees',
+			'straightTestTruthAssistance'
+		]
 	},
 	'g6-set': {
 		id: 'g6-set',
@@ -147,12 +156,11 @@ const SET_BY_GATE: Record<GateId, GateFeatureSetId> = {
 /** Feature ownership is semantic too. Several feature declarations retain
  * the engine gate needed by config parsing (G4/G5), so feature.gate cannot be
  * used as the set boundary for those cards. */
-const FEATURE_SET_BY_ID: Readonly<Record<string, GateFeatureSetId>> =
-	Object.fromEntries(
-		(Object.entries(GATE_FEATURE_IDS) as [GateFeatureSetId, readonly string[]][]).flatMap(
-			([setId, featureIds]) => featureIds.map((featureId) => [featureId, setId] as const)
-		)
-	);
+const FEATURE_SET_BY_ID: Readonly<Record<string, GateFeatureSetId>> = Object.fromEntries(
+	(Object.entries(GATE_FEATURE_IDS) as [GateFeatureSetId, readonly string[]][]).flatMap(
+		([setId, featureIds]) => featureIds.map((featureId) => [featureId, setId] as const)
+	)
+);
 
 /** Canonical semantic operation order, independent of stale engine gate labels.
  *
@@ -173,13 +181,20 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 	],
 	'g2-set': ['baskets', 'cleanBasketFamily'],
 	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose'],
-	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock'],
+	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
 	'g5-set': ['straightTest', 'supportField', 'badgeOcclusionPatch', 'rawPairs', 'measurement'],
-	'g6-set': ['assignment.pairs', 'assignment.scoring', 'assignment.ranking', 'assignment.selection'],
+	'g6-set': [
+		'assignment.pairs',
+		'assignment.scoring',
+		'assignment.ranking',
+		'assignment.selection'
+	],
 	'g7-set': ['zfit']
 };
 
-const OPERATION_DEF_BY_ID = new Map(OPERATION_DEFS.map((definition) => [definition.spec.id, definition]));
+const OPERATION_DEF_BY_ID = new Map(
+	OPERATION_DEFS.map((definition) => [definition.spec.id, definition])
+);
 
 /** Operation definitions grouped once by semantic composition order. */
 export const GATE_SET_OPERATIONS: Record<GateFeatureSetId, readonly ABFeatureSetOperation[]> =
@@ -232,28 +247,28 @@ export const GATE_OPERATION_OWNERSHIP: Readonly<Record<string, GateFeatureSetId>
 export const GATE_OPERATION_DECLARATION_DIVERGENCES: Readonly<
 	Record<string, { readonly declaredGate: GateId; readonly semanticSet: GateFeatureSetId }>
 > = Object.fromEntries(
-		OPERATION_DEFS.flatMap(({ spec }) => {
-			const semanticSet = GATE_OPERATION_OWNERSHIP[spec.id];
-			const declaredSet = SET_BY_GATE[spec.gate as GateId];
-			return declaredSet === semanticSet
-				? []
-				: [[spec.id, { declaredGate: spec.gate as GateId, semanticSet }] as const];
-		})
-	);
+	OPERATION_DEFS.flatMap(({ spec }) => {
+		const semanticSet = GATE_OPERATION_OWNERSHIP[spec.id];
+		const declaredSet = SET_BY_GATE[spec.gate as GateId];
+		return declaredSet === semanticSet
+			? []
+			: [[spec.id, { declaredGate: spec.gate as GateId, semanticSet }] as const];
+	})
+);
 
 /** Feature declarations that retain the engine gate vocabulary while their
  * authoritative semantic composition is a later LAB phase. */
 export const GATE_FEATURE_DECLARATION_DIVERGENCES: Readonly<
 	Record<string, { readonly declaredGate: GateId; readonly semanticSet: GateFeatureSetId }>
 > = Object.fromEntries(
-		ALL_FEATURES.flatMap((feature) => {
-			const semanticSet = FEATURE_SET_BY_ID[feature.id];
-			const declaredSet = SET_BY_GATE[feature.gate];
-			return declaredSet === semanticSet
-				? []
-				: [[feature.id, { declaredGate: feature.gate, semanticSet }] as const];
-		})
-	);
+	ALL_FEATURES.flatMap((feature) => {
+		const semanticSet = FEATURE_SET_BY_ID[feature.id];
+		const declaredSet = SET_BY_GATE[feature.gate];
+		return declaredSet === semanticSet
+			? []
+			: [[feature.id, { declaredGate: feature.gate, semanticSet }] as const];
+	})
+);
 
 /** Feature reads crossing the operation's owning gate, never inferred as membership. */
 export const GATE_CROSS_GATE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
@@ -330,7 +345,7 @@ export const GATE_CROSS_GATE_DEPENDENCIES: Readonly<Record<string, readonly stri
 		) {
 			throw new Error(
 				`Gate ABFeatureSet '${setId}': explicit imports drifted from operation reads ` +
-				`(declared=${imports.join(',') || 'none'}; expected=${[...expectedImports].join(',') || 'none'}).`
+					`(declared=${imports.join(',') || 'none'}; expected=${[...expectedImports].join(',') || 'none'}).`
 			);
 		}
 

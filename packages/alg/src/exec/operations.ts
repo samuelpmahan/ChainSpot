@@ -26,9 +26,16 @@ import type {
 import { measureUnits } from '../detectors/threeFactor/measure';
 import { phantomTeeUnit, phantomTeeFeature } from '../detectors/threeFactor/features/g3.phantomTee';
 import { teeFamilyUnit, teeFamilyFeature } from '../detectors/threeFactor/features/g3.teeFamily';
-import { teeMinAreaPoseUnit, teeMinAreaPoseFeature } from '../detectors/threeFactor/features/g3.teeMinAreaPose';
-import { teeRecoveryUnit, teeRecoveryFeature } from '../detectors/threeFactor/features/g3.teeRecovery';
+import {
+	teeMinAreaPoseUnit,
+	teeMinAreaPoseFeature
+} from '../detectors/threeFactor/features/g3.teeMinAreaPose';
+import {
+	teeRecoveryUnit,
+	teeRecoveryFeature
+} from '../detectors/threeFactor/features/g3.teeRecovery';
 import { teeBadgeLockOperation } from '../detectors/threeFactor/features/g4.teeBadgeLock';
+import { posteriorTeeRecoveryOperation } from '../detectors/threeFactor/features/g4.posteriorTeeRecovery';
 import {
 	cleanBasketFamilyUnit,
 	cleanBasketFamilyFeature
@@ -74,7 +81,10 @@ import {
 import type { RibbonKnobs } from '../detectors/threeFactor/ribbon';
 import type { RoutingKnobs } from '../detectors/threeFactor/routing';
 import type { ScoringKnobs, ZfitKnobs } from '../detectors/threeFactor/scoring';
-import { straightTestFeature, straightTestUnit } from '../detectors/threeFactor/features/st.straightTest';
+import {
+	straightTestFeature,
+	straightTestUnit
+} from '../detectors/threeFactor/features/st.straightTest';
 import type {
 	AssignmentEvidence,
 	BadgeEvidence,
@@ -544,7 +554,16 @@ const zfitOps: OperationDef[] = [
 
 const reusedOps: OperationDef[] = [
 	{
-		spec: { id: 'straightTest', kind: 'decide', gate: 'G5', unit: 'straightTest', consumes: straightTestUnit.consumes, produces: straightTestUnit.produces, features: [straightTestFeature.id], note: straightTestUnit.note },
+		spec: {
+			id: 'straightTest',
+			kind: 'decide',
+			gate: 'G5',
+			unit: 'straightTest',
+			consumes: straightTestUnit.consumes,
+			produces: straightTestUnit.produces,
+			features: [straightTestFeature.id],
+			note: straightTestUnit.note
+		},
 		run: (board, ctx) => straightTestUnit.run(asLegacyBoard(board), ctx)
 	},
 	wrapLegacy('badges', 'compute', 'G1', [g1DigitsFeature.id]),
@@ -593,6 +612,10 @@ const reusedOps: OperationDef[] = [
 	{
 		spec: teeBadgeLockOperation.spec,
 		run: teeBadgeLockOperation.run
+	},
+	{
+		spec: posteriorTeeRecoveryOperation.spec,
+		run: posteriorTeeRecoveryOperation.run
 	},
 	{
 		spec: {
@@ -694,7 +717,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
-	['teeBadgeLock', ['teeBadgeLock']],
+	['teeBadgeLock', ['teeBadgeLock', 'posteriorTeeRecovery']],
 	['teeFamily', ['teeFamily']],
 	['teeMinAreaPose', ['teeMinAreaPose']],
 	['teeRecovery', ['teeRecovery']],
@@ -853,5 +876,8 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 	},
 	teeBadgeLock(board) {
 		return [...(teeBadgeLockOperation.extractArtifacts?.(board) ?? [])];
+	},
+	posteriorTeeRecovery(board) {
+		return [...(posteriorTeeRecoveryOperation.extractArtifacts?.(board) ?? [])];
 	}
 };

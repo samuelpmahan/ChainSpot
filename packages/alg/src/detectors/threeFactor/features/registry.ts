@@ -22,6 +22,7 @@ import { teeFamilyFeature } from './g3.teeFamily';
 import { teeMinAreaPoseFeature } from './g3.teeMinAreaPose';
 import { teeRecoveryFeature } from './g3.teeRecovery';
 import { teeBadgeLockFeature } from './g4.teeBadgeLock';
+import { posteriorTeeRecoveryFeature } from './g4.posteriorTeeRecovery';
 import { fourLaneSensorFeature } from './st.fourLaneSensor';
 import { straightTestFeature } from './st.straightTest';
 
@@ -43,6 +44,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	teeMinAreaPoseFeature,
 	teeRecoveryFeature,
 	teeBadgeLockFeature,
+	posteriorTeeRecoveryFeature,
 	fourLaneSensorFeature,
 	straightTestFeature
 ];
@@ -58,9 +60,7 @@ export function featureById(id: string): ABFeature | undefined {
 		if (seen.has(feature.id)) throw new Error(`Duplicate ABFeature id: ${feature.id}`);
 		seen.add(feature.id);
 		if (feature.kind === 'deviation' && feature.defaultEnabled) {
-			throw new Error(
-				`ABFeature ${feature.id}: deviations must default OFF (frozen parity).`
-			);
+			throw new Error(`ABFeature ${feature.id}: deviations must default OFF (frozen parity).`);
 		}
 		for (const [name, spec] of Object.entries(feature.knobs)) {
 			if (spec.validate) {

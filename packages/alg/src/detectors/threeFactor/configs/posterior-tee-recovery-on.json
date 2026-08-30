@@ -1,0 +1,25 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "posterior-tee-recovery-on",
+	"note": "Spike comparison: frozen Dev6 106 schedule plus the default-OFF posteriorTeeRecovery G4 sidecar. It publishes joint shard/NULL decisions and does not rewrite the frozen assignment.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"assignment",
+		"teeRecovery",
+		"teeBadgeLock"
+	],
+	"gates": {
+		"G4": {
+			"teeBadgeLock": { "enabled": true },
+			"posteriorTeeRecovery": { "enabled": true }
+		}
+	}
+}

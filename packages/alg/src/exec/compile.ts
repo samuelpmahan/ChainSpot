@@ -106,6 +106,11 @@ export function compileExecutionPlan(
 		for (const opId of opIds) {
 			const spec = specById.get(opId);
 			if (!spec) fail(`unit '${unitId}' references unregistered operation '${opId}'.`);
+			// A resolve-only deviation may share an existing unit without changing
+			// the frozen unit execution list. If its feature is omitted from this
+			// config, omit its operation from the scheduled plan as well as from
+			// the fingerprint universe. Explicit OFF still schedules testimony.
+			if (resolveOnlyWhenConfigured(spec, resolved)) continue;
 			ops.push(spec);
 		}
 	}

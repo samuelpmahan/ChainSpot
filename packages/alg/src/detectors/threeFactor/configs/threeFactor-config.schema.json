@@ -5,10 +5,7 @@
 	"description": "Sparse deviations from registry defaults. The execution list is the algorithm order, validated against unit consumes/produces at load. Default config = recovered production behavior.",
 	"type": "object",
 	"additionalProperties": false,
-	"required": [
-		"schema",
-		"name"
-	],
+	"required": ["schema", "name"],
 	"properties": {
 		"$schema": {
 			"type": "string"
@@ -486,12 +483,7 @@
 										"dilationRadii": {
 											"type": "array",
 											"description": "dilation radii for the multi-scale hole detection passes; detections merge across radii, preferring the smallest",
-											"default": [
-												0,
-												1,
-												2,
-												3
-											]
+											"default": [0, 1, 2, 3]
 										},
 										"largeRadiiThreshold": {
 											"type": "number",
@@ -700,6 +692,68 @@
 									"properties": {}
 								}
 							}
+						},
+						"posteriorTeeRecovery": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Experimental posterior tee recovery: jointly rank shard/NULL hypotheses using course-local evidence models. Sidecar only until ablation decides its proper G4 custody.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {
+										"observableToNullPriorOdds": {
+											"type": "number",
+											"description": "Prior odds for some observable shard hypothesis versus NULL before candidate multiplicity; 17 is the spike prior of roughly one NULL slot per 18-hole card.",
+											"default": 17
+										},
+										"topKPerTarget": {
+											"type": "number",
+											"description": "Maximum normalized target hypotheses admitted to exact joint conflict enumeration.",
+											"default": 12
+										},
+										"maxConflictTargets": {
+											"type": "number",
+											"description": "Exact joint enumeration is intentionally limited to small ambiguity islands; larger islands abstain instead of approximating silently.",
+											"default": 4
+										},
+										"supportLogWeight": {
+											"type": "number",
+											"description": "Multiplier on log1p(visible supporting pixel count).",
+											"default": 2
+										},
+										"distanceTailWeight": {
+											"type": "number",
+											"description": "Weight of the heavy-tailed course-local badge-distance likelihood.",
+											"default": 2
+										},
+										"axisWeight": {
+											"type": "number",
+											"description": "Weight of the course-local robust axis-error likelihood.",
+											"default": 1
+										},
+										"distanceScaleFloorPx": {
+											"type": "number",
+											"description": "Numerical floor for the per-image median/MAD tee-to-badge distance model.",
+											"default": 1
+										},
+										"axisScaleFloorDeg": {
+											"type": "number",
+											"description": "Numerical floor for the per-image median/MAD axis-error model.",
+											"default": 0.5
+										},
+										"contradictionOddsPerPixel": {
+											"type": "number",
+											"description": "Likelihood multiplier for each visible candidate pixel not explained by the fitted tee support; smooth evidence, not a hard disqualifier.",
+											"default": 0.5
+										}
+									}
+								}
+							}
 						}
 					}
 				},
@@ -860,14 +914,7 @@
 										"widthsSrc": {
 											"type": "array",
 											"description": "width scales for tee-to-tee leg routing (was measure.ts DEFAULT_WIDTHS_SRC; rides CorridorParams, see file header)",
-											"default": [
-												24,
-												32,
-												40,
-												48,
-												56,
-												64
-											]
+											"default": [24, 32, 40, 48, 56, 64]
 										},
 										"alignmentPower": {
 											"type": "number",
@@ -1159,17 +1206,7 @@
 										"bendAngles": {
 											"type": "array",
 											"description": "bend angle samples (degrees) tried at each zfit waypoint",
-											"default": [
-												-60,
-												-45,
-												-30,
-												-20,
-												0,
-												20,
-												30,
-												45,
-												60
-											]
+											"default": [-60, -45, -30, -20, 0, 20, 30, 45, 60]
 										},
 										"bendLengthShort": {
 											"type": "number",
