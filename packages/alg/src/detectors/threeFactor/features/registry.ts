@@ -20,6 +20,7 @@ import { badgeGlyphTemplateFeature } from './g1.badgeGlyphTemplate';
 import { sharedHsvFeature } from './shared.hsv';
 import { teeFamilyFeature } from './g3.teeFamily';
 import { teeMinAreaPoseFeature } from './g3.teeMinAreaPose';
+import { objectPerimetersV1Feature } from './g3.objectPerimetersV1';
 import { teeRecoveryFeature } from './g3.teeRecovery';
 import { teeBadgeLockFeature } from './g4.teeBadgeLock';
 import { posteriorTeeRecoveryFeature } from './g4.posteriorTeeRecovery';
@@ -42,6 +43,7 @@ export const ALL_FEATURES: readonly ABFeature[] = [
 	sharedHsvFeature,
 	teeFamilyFeature,
 	teeMinAreaPoseFeature,
+	objectPerimetersV1Feature,
 	teeRecoveryFeature,
 	teeBadgeLockFeature,
 	posteriorTeeRecoveryFeature,
@@ -69,6 +71,5 @@ export function featureById(id: string): ABFeature | undefined {
 					throw new Error(`ABFeature ${feature.id}: default for knob '${name}' invalid: ${error}`);
 				}
 			}
-		}
 	}
 }
