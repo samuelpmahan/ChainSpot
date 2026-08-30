@@ -35,7 +35,9 @@ jobs:
 
       - name: Setup
         working-directory: ChainSpot
-        run: npm ci
+        run: |
+          npm ci
+          npx svelte-kit sync
 
       - name: Probe Lenard
         working-directory: ChainSpot
