@@ -35,6 +35,27 @@ baskets, C2 chrome) are excused from the fit, per the world model (only
 stack members occlude). A pad may not be penalized for pixels something
 else is standing on. The excused mask is drawable evidence.
 
+**CL-3a — "Visible" is defined, then best rail wins (owner directives
+2026-08-29).** Two parts:
+
+(1) DEFINITION: a pixel under a known stack member (badge, basket, C2
+chrome) is NOT VISIBLE. Full stop. "Explains every visible pixel" was
+always the right rule; the defect is any code that counts covered pixels
+as visible. Recovery's visibility mask subtracts stack-member footprints
+before any fit is judged.
+
+(2) MECHANISM for occluded/partial pads: extract the candidate straight
+edge segments (rails) the fragment offers, rank by quality (length,
+straightness, least interruption), take the BEST, LEAST-OCCLUDED rail, and
+run the existing rail projection from it — every occluded pad still shows
+at least one clean edge, and the clean edge is by definition where nothing
+stands. Visible pixels must never CONTRADICT teepad; the receipt names the
+chosen rail, its quality ranking, and the stack members subtracted from
+visibility. Convicted motivating case: AlexClark H10 (pad component alive,
+considered, rejected with 60-88 "unexplained" pixels that were largely
+under a basket sprite — i.e. never visible; the rail path never fired
+because the whole component is not a thin band).
+
 **CL-4 — Per-image sigma, no imported constants.** The orientation sigma
 used anywhere downstream is estimated per image from that image's own
 good-quality fits. `teeOrientationSigmaDeg = 12` (g4.teeBadgeLockMath.ts

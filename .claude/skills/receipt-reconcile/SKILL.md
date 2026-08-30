@@ -1,111 +1,175 @@
 ---
 name: receipt-reconcile
-description: Visually reconcile a ChainSpot receipt against its rendering and the raw evidence — verify that what a run.receipt.txt / run.visual.receipt.txt CLAIMS matches the pixels, components, and trace it points at. Use whenever a receipt line is challenged ("SHOW ME THE RECEIPT"), when diagnosing a missed/misplaced detection, before entering or resolving a row in docs/CLAIMS-LEDGER.md, or when a claim about angles/distances/support sounds plausible but hasn't touched pixels yet.
+description: >
+  Resolve one challenged ChainSpot claim by tracing it to the smallest human-
+  checkable pixel/trace evidence. Use when a receipt line, component identity,
+  angle, distance, support value, ownership statement, or diagnosis is challenged.
+  Reconciliation fails if the correct fact is merely buried inside a giant dump.
 ---
 
-# Receipt reconciliation
+# Receipt Reconcile — Minimal Proof
 
-The failure mode this skill exists to prevent, observed 2026-08-28: a claim
-("H14's pad is 19.8° off its badge ray") was computed correctly on the wrong
-pixels — the "shard" was a neighboring badge's digit glyph. The receipt's
-numbers were internally consistent and completely wrong about the world.
-Reconciliation means walking a claim back to pixels a human can look at.
+A receipt is an **acceptance surface**, not a data exhaust pipe.
 
-## The procedure
+The question is not:
 
-0. **Ground yourself with a Frame first** (Minsky frames — owner-adopted
-   reusable pattern, 2026-08-28). Before touching pixels, fill the slots
-   OUT LOUD in your working notes:
+> "Did we print every number we know?"
 
-   - **Looking for X**: the object class (e.g. "hole 16's tee pad").
-   - **It looks like Y**: appearance filler, from measurement not memory
-     (e.g. "a white rotated-rectangle OUTLINE, ~20×14px at this course's
-     zoom — the median of the 15 pads G3 already measured here").
-   - **I know that because ABC**: the evidence basis for Y (the course's
-     own measured pads; the render standard in the receipts; the chrome
-     signature table in `chainspot-cv-engrams`).
-   - **It may be near DEF**: expected context, held loosely (e.g. "near
-     badge 16, beside hole 15's basket, possibly ON TOP of the C2D ring
-     per this course's z-order") — context guides the search, but per the
-     owner's footgun law it must NEVER become a hard spatial filter.
+The question is:
 
-   Defaults come from the engram tables (chrome signatures fill the
-   "what else might Y be confused with" slot automatically); course
-   frames specialize object frames (NorthPark's pad-over-C2D z-order
-   overrides the generic default). An unfilled slot is a finding: if you
-   cannot say what X looks like from measured evidence, you are not ready
-   to reconcile — you are guessing. The 2026-08-28 chrome retraction
-   happened exactly because this frame was never filled: "it looks like a
-   7×21 vertical bar" should have triggered "…which is the digit-glyph
-   filler, not the pad filler."
+> "Can the owner verify the challenged claim quickly without opening source or
+> excavating a 200-line receipt?"
 
-1. **Quote the claim verbatim** — the exact receipt line(s), with path. A
-   paraphrase is already an interpretation.
+If the correct value is buried among every possible metric, **the receipt failed**.
 
-2. **Locate the evidence the claim rests on.** Every receipt line has a
-   provenance note; follow it: trace unit drawables, board slot, artifact
-   `.bin` + sidecar, rejection pixel coordinates. If the line has no
-   provenance, that is itself the finding (receipt contract violation).
+## 0 — State exactly one challenged claim
 
-3. **Rebuild the evidence independently from the canonical raster** —
-   never from the receipt's own intermediate numbers:
-   - Canonical PNG: `<run>/renders/input/g0.canonical.png`.
-   - Bright mask + components, via the real detector code (never a
-     re-implementation):
-     ```js
-     import { computeBrightDarkMasks } from '<repo>/packages/alg/dist/detectors/threeFactor/raster.js';
-     import { extractComponents } from '<repo>/packages/alg/dist/detectors/threeFactor/components.js';
-     ```
-     `ComponentStats` already carries `label, cx, cy, area, bbox*, major,
-     minor, angle` — look components up by `.label` (the array is NOT
-     indexed label-1).
+Write the claim verbatim.
 
-4. **Identify what each component actually IS before trusting any number
-   computed from it.** The chrome signatures (learn these cold):
-   - badge plate: ~450px, ~55×42 outline, centroid = badge center
-   - digit "1": ~78px, 7×21, PCA ~85° (vertical)
-   - other digits: ~155-170px, 14-16×21
-   - basket glyph: ~1746px, 42×66, PCA 90°
-   - C1S/C2D dashes: small segments lying on a circle around a basket tip
-     (solid 10m / dashed 20m rings; pixel radius is zoom-dependent —
-     measure, never assume; z-order vs the pad varies by course)
-   A number computed on chrome is not evidence about terrain.
+Examples:
 
-5. **Render the reconciliation image** — a crop around the disputed area
-   with bright-mask pixels tinted (green), 3x zoom, using pngjs. The human
-   accepts or rejects by LOOKING. Pair it with a component table:
-   `comp#label | area | bbox | centroid | dist-to-anchor | pca | ray |
-   axis-vs-ray`.
+- "H5 recovery used these visible tee pixels."
+- "G3 rejected H13 because axis error exceeded the gate."
+- "tee-11 was localized correctly but assigned to the wrong badge."
 
-6. **Check pixel-exact claims mechanically** where the receipt makes them
-   (e.g. `badgeBrightPixels: 8291` must equal the count of pure-yellow
-   pixels in `run.visual.png`) — count in the PNG, don't trust the text.
+One reconciliation handles one claim. Do not widen into a general audit unless
+the first evidence proves the issue is systemic.
 
-7. **Enter the outcome in `docs/CLAIMS-LEDGER.md`** in the same commit:
-   claim | receipt | status (UPHELD / RETRACTED / PENDING) | fate. A
-   retraction records what falsified it and what the truth turned out to
-   be. Append-only; never edit dead rows.
+## 1 — Identity gate before numeric proof
 
-## Interpretation guardrails
+Before trusting any number derived from a component, identify the component in
+the canonical raster.
 
-- "Never ran" ≠ "ran and found 0" ≠ "not scheduled" ≠ "not enabled" —
-  receipts distinguish these; so must your reading.
-- The owner's law: absolute course-distance/size assumptions are ALWAYS
-  footguns (150ft-1700ft holes). If a claim depends on one, check
-  `docs/minesweeper/` — it may already be indexed.
-- The completeness invariant: every tee is either non-occluded (G3 must
-  see it) or occluded by a known occluder (G4 must recover it). A missed
-  hole gets classified — G3-defect / recovered / recovery-rejected(reason)
-  / invisible — with pixel receipts, not vibes.
-- Detector ordinals (`badge-7`) are not hole numbers; map through
-  `BadgeEvidence.label` (digit read + confidence) and say UNREAD when the
-  read is garbage, never guess.
+Required result:
 
-## Useful one-liners
+`IDENTITY: TEE | BADGE | BASKET | RANGE-CHROME | SCREEN-CHROME | UNKNOWN`
 
-Truth-free per-hole viewport (works on every course):
-`./lab scope hN` · all holes: `./lab scope holes` ·
-batch to ONE image: `./lab scope batch Course:h5,h6 OtherCourse:h14`
+If `UNKNOWN`, no tee-specific geometric claim may proceed.
 
-Fresh receipts: `./lab sweep packages/alg/src/detectors/threeFactor/configs/default.json ../chainspot-corpus/dev/<Course>/<image>`
-(rebuild first: `npm run build --workspace @chainspot/alg` — LAB runs dist).
+Especially:
+
+- a component near a badge is not presumptively a tee;
+- a 5 px bright component is not "definitely the tee";
+- a beautiful PCA/ray agreement does not identify the pixels;
+- a constrained fit does not identify the pixels;
+- downstream usefulness is not object identity.
+
+When badge chrome is plausible, show the badge crop and disprove it before
+calling the component terrain evidence.
+
+## 2 — Use the smallest evidence surface
+
+Default reconciliation output:
+
+1. **ONE-LINE VERDICT**
+2. **ONE minimal crop/render** marking only the disputed object/evidence
+3. **ONE tiny table** with only fields necessary to adjudicate the claim
+
+Example:
+
+```text
+VERDICT: RETRACT — comp#304 is badge 16's "1", not tee evidence.
+
+comp   identity       bbox        area   why
+304    badge digit    7x21        78     inside badge plate; digit morphology
+306    tee pad        19x14       153    visible pad outline in canonical crop
+```
+
+Do **not** append every component, every gate metric, all 18 holes, or the full
+trace "for completeness."
+
+Completeness belongs in machine artifacts. Human acceptance is selective.
+
+## 3 — Progressive disclosure
+
+Only reveal a second layer when the first layer cannot settle the dispute.
+
+Layer A — verdict + crop + tiny table  
+Layer B — exact receipt/trace provenance  
+Layer C — broader component table / neighboring context  
+Layer D — source inspection
+
+Do not start at Layer D.
+
+## 4 — Independent reconstruction when necessary
+
+If the receipt's intermediate numbers themselves are disputed, reconstruct from
+the canonical raster using the real project implementation, not a parallel
+re-implementation.
+
+LAB is preferred. If LAB lacks the necessary forensic operation, follow
+`lab-shock-collar`: a one-shot warrant may answer the immediate question, but
+reuse must promote the capability into LAB.
+
+## 5 — Reconcile semantics, not only arithmetic
+
+These are distinct:
+
+- never ran;
+- not scheduled;
+- disabled;
+- ran and found zero;
+- ran and rejected;
+- localized but unowned;
+- owned but misassigned.
+
+A numerically correct receipt that collapses those distinctions is still wrong.
+
+Likewise, detector ordinal is not hole number.
+
+## 6 — Close the claim
+
+Update the claims ledger in the same commit as the work:
+
+- `UPHELD`
+- `RETRACTED`
+- `PENDING`
+
+A retraction must say what the pixels actually were.
+
+## Receipt minimization acceptance test
+
+Before presenting a receipt, ask:
+
+> If the owner knows the challenged question, can they find the answer in
+> roughly one glance without searching?
+
+If no, produce a smaller human receipt and keep the giant diagnostics only as
+machine/debug artifacts.
+
+**The right number hidden in noise does not count as observability.**
+
+## Atomic evidence delivery — one turn or no acceptance
+
+Evidence presentation is atomic.
+
+When you claim a result to the owner, the **same turn** must contain the complete
+human-verifiable proof bundle needed to accept or reject that claim:
+
+1. the verdict;
+2. the smallest relevant visual/render/crop when the claim is visual;
+3. the smallest relevant table/numbers;
+4. provenance / artifact path / command sufficient to reproduce it.
+
+Do not split these across conversational turns.
+
+Forbidden pattern:
+
+`I found the problem.`  
+→ later: `Want to see the receipt?`  
+→ later: `Here is the table.`  
+→ later: `Here is the image.`
+
+That is not progressive disclosure. It is incomplete evidence delivery.
+
+Progressive disclosure means the **first turn already contains sufficient proof**.
+Additional layers are optional only after acceptance can already happen.
+
+If the result is visual, do not ask whether the owner wants the image. Include
+the image in the same turn.
+
+If the proof is too large, minimize it until the sufficient proof fits. Link the
+full machine artifact separately.
+
+**No acceptance credit is earned for a partial proof bundle.**
+A discovery without its acceptance evidence is still unfinished work.

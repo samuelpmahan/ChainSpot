@@ -33,6 +33,33 @@ A number computed on chrome is not evidence about terrain. The retraction
 that taught this: "H14's pad is 19.8° off its badge ray" — measured on
 badge 15's "5" glyph (docs/CLAIMS-LEDGER.md rows 1-2).
 
+## Identity precedes geometry (owner correction, 2026-08-29)
+
+Object identity is a hard prerequisite to object-specific measurement.
+
+A bright component is `UNKNOWN` until the canonical raster/context establishes
+what rendered/physical object owns those pixels. Do not infer identity from a
+useful angle, fit, location, assignment improvement, or the fact that no better
+candidate exists.
+
+Known high-cost failure: badge digit glyphs have repeatedly been promoted to
+"tee shards" because their downstream geometry looked plausible. Therefore:
+
+- badge chrome is the default competing hypothesis for components inside/at a
+  badge until visually disproven;
+- `UNKNOWN` is a successful diagnostic classification;
+- tee-specific PCA/ray/support/fit reasoning starts only after tee/remnant
+  identity has been established;
+- tiny isolated brightness is not evidence of a tee by itself.
+
+The correct workflow is:
+
+`pixels -> identity -> measurement -> gate interpretation`
+
+never:
+
+`pixels -> useful measurement -> desired identity`.
+
 ## The completeness invariant (owner, 2026-08-28)
 
 Every tee is exactly one of:
