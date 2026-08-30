@@ -48,7 +48,10 @@ jobs:
           CHAINSPOT_CORPUS_ROOT: ../chainspot-corpus
         run: |
           set -euo pipefail
-          npx vitest run tests/unit/posteriorTeeRecoverySpike.test.ts --reporter=verbose
+          npx vitest run \
+            tests/unit/posteriorTeeRecoverySpike.test.ts \
+            tests/unit/posteriorTeeRecoverySurface2.test.ts \
+            --reporter=verbose
 
       - name: Upload spike evidence
         if: always()
