@@ -149,8 +149,43 @@ async function endpointsFor(id: (typeof COURSE_IDS)[number]): Promise<FrozenEndp
 	}
 }
 
+/** Fail on a broken ENVIRONMENT with a different, actionable message than a
+ * genuine endpoint drift. Without this the first symptom of a missing corpus
+ * is an ENOENT (or a garbage decode of a Git LFS pointer stub) thrown deep
+ * inside the image decoder -- which reads exactly like the algorithm broke.
+ * A freeze that cannot tell "your checkout is wrong" from "a tee moved" is
+ * worse than no freeze. */
+function preflight(): void {
+	if (!existsSync(CORPUS)) {
+		throw new Error(
+			`Dev6 corpus not found at ${CORPUS}. Set CHAINSPOT_CORPUS_ROOT to your ` +
+				`chainspot-corpus checkout (pinned revision 2b5913d3f1f6d8f97b0324721a4c5201bd3ed819). ` +
+				`This is an environment problem, NOT an endpoint drift.`
+		);
+	}
+	for (const id of COURSE_IDS) {
+		const course = JSON.parse(
+			readFileSync(resolve(ROOT, 'scripts/chainspot-lab/courses', `${id}.json`), 'utf8')
+		) as { devDir: string; image: string };
+		const path = resolve(CORPUS, 'dev', course.devDir, course.image);
+		if (!existsSync(path)) {
+			throw new Error(`Dev6 corpus is missing ${id} at ${path}. Environment problem, not drift.`);
+		}
+		// A Git LFS pointer is a ~130-byte text file starting with this line.
+		// Decoding one yields a meaningless failure far from here.
+		const head = readFileSync(path).subarray(0, 42).toString('utf8');
+		if (head.startsWith('version https://git-lfs.github.com')) {
+			throw new Error(
+				`${id} at ${path} is a Git LFS POINTER, not an image. Run \`git lfs pull\` in the ` +
+					`corpus checkout. Environment problem, NOT an endpoint drift.`
+			);
+		}
+	}
+}
+
 describe('Dev6 frozen 108 endpoint baseline', () => {
 	test('all 108 endpoints match the accepted baseline', async () => {
+		preflight();
 		const actual: Record<string, FrozenEndpoint[]> = {};
 		for (const id of COURSE_IDS) actual[id] = await endpointsFor(id);
 
