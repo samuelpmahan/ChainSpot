@@ -26,7 +26,7 @@ jobs:
           npm ci
           npx svelte-kit sync
       - name: Apply source patch
-        run: node scripts/spikes/apply-straight-test-directed.mjs
+        run: node scripts/spikes/apply-straight-test-directed-v2.mjs
       - name: Build algorithm
         run: npm run build --workspace @chainspot/alg
       - name: Commit implementation
