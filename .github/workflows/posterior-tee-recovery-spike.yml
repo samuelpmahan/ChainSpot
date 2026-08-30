@@ -51,6 +51,7 @@ jobs:
           npx vitest run \
             tests/unit/posteriorTeeRecoverySpike.test.ts \
             tests/unit/posteriorTeeRecoverySurface2.test.ts \
+            tests/unit/posteriorTeeRecoveryInference.test.ts \
             --reporter=verbose
 
       - name: Upload spike evidence
