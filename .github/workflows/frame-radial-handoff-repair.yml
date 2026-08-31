@@ -42,6 +42,8 @@ jobs:
           ops.write_text(s)
           PY
       - run: npm ci
+      - name: Generate SvelteKit tsconfig required by Vitest/Vite
+        run: npx svelte-kit sync
       - name: Compile algorithm package
         run: npm run --workspace @chainspot/alg build
       - name: Ownership smoke
