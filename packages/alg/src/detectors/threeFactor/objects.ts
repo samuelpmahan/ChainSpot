@@ -166,7 +166,7 @@ export function acquireObjectGraphV1(
 				evidence
 			};
 		}),
-		baskets: measurent.baskets.map((evidence) => {
+		baskets: measurement.baskets.map((evidence) => {
 			let assembly: ComponentAssemblyResult;
 			const label = sourceComponentLabel(evidence.source);
 			const body = label === null ? undefined : brightByLabel.get(label);

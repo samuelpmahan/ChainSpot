@@ -148,6 +148,8 @@ interface BadgeStageMasks {
 interface BadgeStageComponents {
 	readonly brightLabels: Int32Array;
 	readonly brightComponents: ComponentStats[];
+	readonly darkLabels: Int32Array;
+	readonly darkComponents: ComponentStats[];
 }
 
 const badgeStageOps: OperationDef[] = [
@@ -192,11 +194,14 @@ const badgeStageOps: OperationDef[] = [
 		},
 		run(board, ctx) {
 			const stop = ctx.span('badgeStage');
-			const { bright } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { labels, components } = extractComponents(bright);
+			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
+			const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
+			const { labels: darkLabels, components: darkComponents } = extractComponents(dark);
 			board.set('badgeStage.components', {
-				brightLabels: labels,
-				brightComponents: components
+				brightLabels,
+				brightComponents,
+				darkLabels,
+				darkComponents
 			} satisfies BadgeStageComponents);
 			stop();
 		}
@@ -238,7 +243,7 @@ const badgeStageOps: OperationDef[] = [
 			const knobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const image = board.get<RgbaImage>('localImage');
 			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { brightLabels, brightComponents } =
+			const { brightLabels, brightComponents, darkLabels, darkComponents } =
 				board.get<BadgeStageComponents>('badgeStage.components');
 			const family = board.get<ComponentStats[]>('badgeStage.family');
 			const badges = [...family];
@@ -248,7 +253,16 @@ const badgeStageOps: OperationDef[] = [
 			const plateBboxes: (readonly [number, number, number, number] | null)[] = badges.map(
 				() => null
 			);
-			recoverDarkPlateBadges(image.width, bright, dark, badges, badgeSources, plateBboxes, knobs);
+			recoverDarkPlateBadges(
+				image.width,
+				bright,
+				dark,
+				badges,
+				badgeSources,
+				plateBboxes,
+				knobs,
+				darkComponents
+			);
 			const stage: BadgeStageResult = {
 				width: image.width,
 				height: image.height,
@@ -256,6 +270,8 @@ const badgeStageOps: OperationDef[] = [
 				darkMask: dark,
 				brightLabels,
 				brightComponents,
+				darkLabels,
+				darkComponents,
 				badges,
 				badgeSources,
 				plateBboxes,

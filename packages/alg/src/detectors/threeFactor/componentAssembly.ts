@@ -135,7 +135,7 @@ export function learnBasketShellFamilyV1(
 		const margins = basketShellMargins(shell, body);
 		const key = margins.join(',');
 		const prior = counts.get(key);
-		conts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
+		counts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
 	}
 	const ranked = [...counts.values()].sort((a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(',')));
 	if (!ranked.length) return null;
