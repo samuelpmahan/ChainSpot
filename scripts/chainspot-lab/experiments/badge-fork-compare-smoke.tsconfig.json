@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "/tmp/badge-fork-compare-smoke-dist",
+    "rootDir": "."
+  },
+  "include": ["badgeForkCompare.ts", "badgeForkCompare.smoke.ts"]
+}
