@@ -87,6 +87,28 @@ export const HELP_CATALOG = Object.freeze([
     outputs: ['A non-executing sequence: set DT, blind scope h1, then optional truth-assisted scope.'],
     caveats: ['The tutorial documents truth assistance; it does not execute it.']
   }),
+  record('experiment', {
+    kind: 'command', group: 'STUDY', title: 'EXPERIMENT — bounded replayable research operations', availability: AVAILABILITY.CLI_ONLY,
+    summary: 'Run a named LAB experiment from explicit cached observations and declared evaluation Frames.',
+    forms: [
+		'lab experiment c1-rectangle-border --control RECEIPT.json --annotation ANNOTATION.json [--out-dir DIR]',
+		'lab experiment basket-composition-pcr --run-dir SWEEP_RUN --through T1|T2|T3|T4|T5 [--out-dir DIR]'
+	],
+    options: [
+      option('--control', 'Read the cached C1 clean-control receipt.', { value: 'FILE', constraints: 'chainspot-c1-clean-control@1 JSON' }),
+      option('--annotation', 'Supply terminal corridor truth for the TrueNorth evaluation Frame.', { value: 'FILE', constraints: 'ChainSpot annotation JSON' }),
+	  option('--run-dir', 'Read cached canonical RGBA and mask evidence from one completed Sweep run.', { value: 'DIR', appliesTo: 'basket-composition-pcr' }),
+	  option('--through', 'Compose the basket PCR cumulatively through one named tick.', { value: 'T1|T2|T3|T4|T5', appliesTo: 'basket-composition-pcr', constraints: 'T1 through T5' }),
+      option('--out-dir', 'Write the VisualRender and receipts under this directory.', { value: 'DIR', defaultValue: 'artifacts/experiments/c1-rectangle-border/DashsTrack' })
+    ],
+    examples: [
+		'lab experiment c1-rectangle-border --control artifacts/.../poc.c1-clean-control.receipt.json --annotation DashsTrack-full.annotation.json',
+		'lab experiment basket-composition-pcr --run-dir artifacts/sweep/.../DashsTrack-full-through-G4 --through T5'
+	],
+    sideEffects: ['Writes one SVG VisualRender, one compact text receipt, and one complete JSON receipt.'],
+    outputs: ['Experiment-specific VisualRender, compact human receipt, complete machine receipt, timings, and render-evidence coverage.'],
+    caveats: ['TrueNorth truth is evaluation-only: it rotates terminal path vectors and never selects baskets, pixels, or factors.', 'UNKNOWN rectangle bins remain missing; factorization consumes additive evidence mass rather than silently converting UNKNOWN to zero.', 'Basket PCR Mask1/Mask2 pixels are mask observations, not established basket ownership.']
+  }),
   record('ui', {
     kind: 'command', group: 'LOOK', title: 'UI — local LAB workbench', availability: AVAILABILITY.CLI_ONLY,
     summary: 'Open the local browser workbench over the same LAB operation modules as the CLI.',

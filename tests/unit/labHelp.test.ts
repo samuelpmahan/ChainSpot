@@ -21,7 +21,7 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 describe('LAB contextual help catalog', () => {
 	test('covers the supported root, shell, option, and documented leaf surface', () => {
 		const coverage = coverageForCatalog();
-		expect(coverage.commandCount).toBe(15);
+		expect(coverage.commandCount).toBe(16);
 		expect(coverage.shellCount).toBe(4);
 		expect(coverage.missingRoots).toEqual([]);
 		expect(coverage.missingShell).toEqual([]);
@@ -33,7 +33,7 @@ describe('LAB contextual help catalog', () => {
 	test('root, exact, nested, local, and exhaustive help are catalog-backed', () => {
 		const root = run(['--help']);
 		expect(root.status).toBe(0);
-		expect((root.stdout.match(/^  (setup|set|tutorial|ui|scope|search|traverse|invariants|detectors|gates|cases|compile|sweep|orient)\b/gm) ?? []).length).toBe(14);
+		expect((root.stdout.match(/^  (setup|set|tutorial|experiment|ui|scope|search|traverse|invariants|detectors|gates|cases|compile|sweep|orient)\b/gm) ?? []).length).toBe(15);
 		expect(root.stdout).toContain('history');
 		expect(root.stdout).toContain('run-script');
 		expect(root.stdout).toContain('exit | quit');

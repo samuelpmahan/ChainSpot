@@ -34,6 +34,9 @@ const COMMANDS = {
   tutorial: {
     run: () => (printTutorial(), 0),
   },
+  experiment: {
+    run: (args) => runTs('experiments/experimentCli.ts', ['experiment', ...args]),
+  },
   ui: {
     run: (args) => runTs('ui/server.ts', args),
   },

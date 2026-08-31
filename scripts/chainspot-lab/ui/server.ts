@@ -164,6 +164,7 @@ function mime(path: string): string {
 		case '.css': return 'text/css; charset=utf-8';
 		case '.json': return 'application/json; charset=utf-8';
 		case '.png': return 'image/png';
+		case '.svg': return 'image/svg+xml; charset=utf-8';
 		case '.jpg': case '.jpeg': return 'image/jpeg';
 		case '.txt': return 'text/plain; charset=utf-8';
 		default: return 'application/octet-stream';
@@ -331,7 +332,7 @@ function listArtifacts(root: string): { path: string; relativePath: string; url?
 				out.push({
 					path,
 					relativePath: relative(root, path),
-					url: ['.png', '.jpg', '.jpeg', '.json', '.txt'].includes(extension) ? artifactUrl(path) : undefined,
+					url: ['.png', '.jpg', '.jpeg', '.svg', '.json', '.txt'].includes(extension) ? artifactUrl(path) : undefined,
 					kind: extension.slice(1) || 'bin'
 				});
 			}

@@ -38,7 +38,7 @@ export function printRootHelp() {
   line('  lab help --all');
   line('  lab help here            read-only local context');
   line('  lab                      interactive shell');
-  for (const group of ['SETUP', 'CONTEXT', 'LEARN', 'LOOK', 'KNOW', 'RUN', 'PROVENANCE']) {
+  for (const group of ['SETUP', 'CONTEXT', 'LEARN', 'STUDY', 'LOOK', 'KNOW', 'RUN', 'PROVENANCE']) {
     const entries = ROOT_COMMANDS.filter((entry) => entry.group === group);
     if (!entries.length) continue;
     line('');
