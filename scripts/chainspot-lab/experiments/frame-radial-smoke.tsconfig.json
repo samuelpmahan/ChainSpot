@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "/tmp/frame-radial-smoke-dist",
+    "rootDir": "."
+  },
+  "include": [
+    "frameStudy.ts",
+    "frameStudy.smoke.ts",
+    "radialRender.ts",
+    "radialRender.smoke.ts"
+  ]
+}
