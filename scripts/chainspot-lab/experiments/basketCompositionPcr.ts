@@ -103,8 +103,12 @@ interface BorderEvidence {
 
 interface SubtractionEvidence {
 	readonly image: Uint8Array;
+	readonly transparentImage: Uint8Array;
 	readonly composedPixels: number;
 	readonly unclaimedPixels: number;
+	readonly innerRingPixels: number;
+	readonly outerRingPixels: number;
+	readonly otherUnclaimedPixels: number;
 }
 
 interface EvidenceCoverage {
@@ -139,7 +143,7 @@ const TICK_EVIDENCE: Readonly<Record<BasketPcrTick, readonly string[]>> = Object
 	T2: ['tick2.mask2Pixels', 'tick2.mask2Counts'],
 	T3: ['tick3.memberIdentities', 'tick3.alignedVotes', 'tick3.familyPixels', 'tick3.familyCounts'],
 	T4: ['tick4.overlapIdentities', 'tick4.fusedComponentPixels', 'tick4.mappingClasses', 'tick4.mappingCounts'],
-	T5: ['tick5.evaluationRegion', 'tick5.composedPixels', 'tick5.unclaimedPixels', 'tick5.subtractionCounts']
+	T5: ['tick5.evaluationRegion', 'tick5.composedPixels', 'tick5.unclaimedPixels', 'tick5.subtractionCounts', 'tick5.transparentRemovedView', 'tick5.innerOuterRings']
 });
 
 export function ticksThrough(through: BasketPcrTick): readonly BasketPcrTick[] {
@@ -353,16 +357,76 @@ function deriveBorder(args: {
 	return { image, width, height, origin: [x0, y0], upperDetectorIndex: withFusedShell.detectorIndex, lowerDetectorIndex: recovered.detectorIndex, fusedComponentLabel: shell.label, bluePixels, redPixels, sharedPixels, residualPixels };
 }
 
+export function classifyUnsubtractedRings(mask: Uint8Array, width: number, height: number): {
+	readonly inner: Uint8Array;
+	readonly outer: Uint8Array;
+} {
+	if (mask.length !== width * height) throw new Error('ring-classification dimensions do not match mask');
+	const exterior = new Uint8Array(mask.length);
+	const queue: number[] = [];
+	const admitExterior = (x: number, y: number): void => {
+		const index = y * width + x;
+		if (mask[index] || exterior[index]) return;
+		exterior[index] = 1;
+		queue.push(index);
+	};
+	for (let x = 0; x < width; x++) { admitExterior(x, 0); admitExterior(x, height - 1); }
+	for (let y = 1; y < height - 1; y++) { admitExterior(0, y); admitExterior(width - 1, y); }
+	for (let cursor = 0; cursor < queue.length; cursor++) {
+		const index = queue[cursor];
+		const x = index % width;
+		const y = Math.floor(index / width);
+		if (x > 0) admitExterior(x - 1, y);
+		if (x + 1 < width) admitExterior(x + 1, y);
+		if (y > 0) admitExterior(x, y - 1);
+		if (y + 1 < height) admitExterior(x, y + 1);
+	}
+	const inner = new Uint8Array(mask.length);
+	const outer = new Uint8Array(mask.length);
+	for (let index = 0; index < mask.length; index++) {
+		if (mask[index]) continue;
+		const x = index % width;
+		const y = Math.floor(index / width);
+		let touchesComposed = false;
+		for (let dy = -1; dy <= 1 && !touchesComposed; dy++) for (let dx = -1; dx <= 1; dx++) {
+			if (dx === 0 && dy === 0) continue;
+			const nx = x + dx;
+			const ny = y + dy;
+			if (nx >= 0 && ny >= 0 && nx < width && ny < height && mask[ny * width + nx]) { touchesComposed = true; break; }
+		}
+		if (!touchesComposed) continue;
+		if (exterior[index]) outer[index] = 1;
+		else inner[index] = 1;
+	}
+	return { inner, outer };
+}
+
 function deriveSubtraction(control: Specimen, family: FamilyEvidence): SubtractionEvidence {
 	const image = control.sourceCrop.slice();
+	const transparentImage = control.sourceCrop.slice();
+	const composed = Uint8Array.from(family.mask, (value) => value ? 1 : 0);
+	const rings = classifyUnsubtractedRings(composed, family.width, family.height);
 	let composedPixels = 0;
 	let unclaimedPixels = 0;
+	let innerRingPixels = 0;
+	let outerRingPixels = 0;
 	for (let index = 0; index < family.mask.length; index++) {
-		if (family.mask[index] === 1) { blendPixel(image, index, RED, 0.82); composedPixels++; }
-		else if (family.mask[index] === 2) { blendPixel(image, index, BLUE, 0.82); composedPixels++; }
-		else { blendPixel(image, index, YELLOW, 0.38); unclaimedPixels++; }
+		if (family.mask[index] === 1) {
+			blendPixel(image, index, RED, 0.82);
+			transparentImage[index * 4 + 3] = 0;
+			composedPixels++;
+		} else if (family.mask[index] === 2) {
+			blendPixel(image, index, BLUE, 0.82);
+			transparentImage[index * 4 + 3] = 0;
+			composedPixels++;
+		} else {
+			blendPixel(image, index, YELLOW, 0.38);
+			unclaimedPixels++;
+			if (rings.inner[index]) { blendPixel(transparentImage, index, [255, 139, 45], 0.94); innerRingPixels++; }
+			else if (rings.outer[index]) { blendPixel(transparentImage, index, [30, 220, 210], 0.94); outerRingPixels++; }
+		}
 	}
-	return { image, composedPixels, unclaimedPixels };
+	return { image, transparentImage, composedPixels, unclaimedPixels, innerRingPixels, outerRingPixels, otherUnclaimedPixels: unclaimedPixels - innerRingPixels - outerRingPixels };
 }
 
 function panel(args: { x: number; y: number; w: number; h: number; title: string; subtitle: string; image: string; imageW?: number; imageH?: number; titleClass?: string }): string {
@@ -383,7 +447,8 @@ function renderProgression(args: RenderInputs): { svg: string; coverage: Evidenc
 	const familyUrl = args.family ? pngDataUrl(familyOverlay(args.family), args.family.width, args.family.height) : undefined;
 	const borderUrl = args.border ? pngDataUrl(args.border.image, args.border.width, args.border.height) : undefined;
 	const subtractionUrl = args.subtraction ? pngDataUrl(args.subtraction.image, args.cropWidth, args.cropHeight) : undefined;
-	const width = 1660;
+	const transparentSubtractionUrl = args.subtraction ? pngDataUrl(args.subtraction.transparentImage, args.cropWidth, args.cropHeight) : undefined;
+	const width = args.subtraction ? 1980 : 1660;
 	const margin = 30;
 	const panelTop = 186;
 	const panelWidth = 300;
@@ -394,14 +459,24 @@ function renderProgression(args: RenderInputs): { svg: string; coverage: Evidenc
 	if (t2Url) panels.push(panel({ x: margin + panelWidth + gap, y: panelTop, w: panelWidth, h: panelHeight, title: 'T2 · MASK2', subtitle: `same control · bright ${args.control.mask2Count ?? 0} px`, image: t2Url, titleClass: 'red' }));
 	if (familyUrl && args.family) panels.push(panel({ x: margin + 2 * (panelWidth + gap), y: panelTop, w: panelWidth, h: panelHeight, title: 'T3 · SUPERPOSITION', subtitle: `${args.family.memberCount} clean → ${args.family.brightPixels}R + ${args.family.darkPixels}B`, image: familyUrl }));
 	if (borderUrl && args.border) panels.push(panel({ x: margin + 3 * (panelWidth + gap), y: panelTop, w: panelWidth, h: panelHeight, title: 'T4 · BORDER MAP', subtitle: `B${args.border.bluePixels} R${args.border.redPixels} P${args.border.sharedPixels} Y${args.border.residualPixels}`, image: borderUrl }));
-	if (subtractionUrl && args.subtraction) panels.push(panel({ x: margin + 4 * (panelWidth + gap), y: panelTop, w: panelWidth, h: panelHeight, title: 'T5 · B+W SUBTRACTION', subtitle: `owned ${args.subtraction.composedPixels} · unknown ${args.subtraction.unclaimedPixels}`, image: subtractionUrl }));
+	if (subtractionUrl && transparentSubtractionUrl && args.subtraction) {
+		const x = margin + 4 * (panelWidth + gap);
+		panels.push(`<g><rect x="${x}" y="${panelTop}" width="618" height="${panelHeight}" rx="10" class="card"/>
+		<text x="${x + 14}" y="${panelTop + 27}" class="head">T5 · B+W SUBTRACTION — TWO VIEWS</text>
+		<text x="${x + 14}" y="${panelTop + 49}" class="small">FULL ACCOUNTING</text>
+		<text x="${x + 322}" y="${panelTop + 49}" class="small">REMOVED → TRANSPARENT · ORANGE INNER · CYAN OUTER</text>
+		<image x="${x + 14}" y="${panelTop + 59}" width="280" height="350" href="${subtractionUrl}" class="pixel"/>
+		<image x="${x + 322}" y="${panelTop + 59}" width="280" height="350" href="${transparentSubtractionUrl}" class="pixel"/>
+		<text x="${x + 14}" y="${panelTop + 434}" class="mono">composed ${args.subtraction.composedPixels} · unknown ${args.subtraction.unclaimedPixels}</text>
+		<text x="${x + 322}" y="${panelTop + 434}" class="mono">inner ${args.subtraction.innerRingPixels} · outer ${args.subtraction.outerRingPixels} · other ${args.subtraction.otherUnclaimedPixels}</text></g>`);
+	}
 	const timingText = Object.entries(args.timings).map(([name, value]) => `${name} ${value.toFixed(1)}ms`).join(' · ');
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="760" viewBox="0 0 ${width} 760">
 	<style>.bg{fill:#0d131d}.card{fill:#141d29;stroke:#314054}.title{font:700 28px sans-serif;fill:#f8fafc}.sub{font:16px sans-serif;fill:#bac6d7}.head{font:700 17px sans-serif;fill:#f3f6fa}.mono{font:12px monospace;fill:#c5d0df}.small{font:12px sans-serif;fill:#91a0b4}.blue{fill:#4b99ff}.red{fill:#ff5368}.pixel{image-rendering:pixelated}</style>
 	<rect width="100%" height="100%" class="bg"/>
 	<text x="${margin}" y="42" class="title">BASKET COMPOSITION PCR — THROUGH ${args.through}</text>
 	<text x="${margin}" y="74" class="sub">One basket until T3. Then family superposition → overlap border mapping → exact B+W subtraction.</text>
-	<text x="${margin}" y="104" class="sub">Blue/red before T3 are mask observations, not ownership. T4 purple = shared; yellow = residue. T5 yellow = UNKNOWN, not “basket.”</text>
+	<text x="${margin}" y="104" class="sub">T5 pairs full accounting with transparent removal. Orange = enclosed inner ring; cyan = exterior-reachable outer ring; all remain unsubtracted.</text>
 	<text x="${margin}" y="134" class="sub">Control ${esc(args.control.id)} · origin ${args.control.origin.join(',')} · crop ${args.cropWidth}×${args.cropHeight} · shell [${args.shellMargins.join(',')}] · truth used NO</text>
 	<text x="${margin}" y="164" class="small">${esc(timingText)}</text>
 	${panels.join('\n')}
@@ -500,14 +575,24 @@ export function runBasketCompositionPcr(input: BasketCompositionPcrInput): Baske
 			...(completedTicks.includes('T2') ? { T2: { input: 'same control with T1 preserved', output: 'cached bright-mask observations in identical coordinates', semantics: 'observation, not ownership', mask2Pixels: control.mask2Count } } : {}),
 			...(family ? { T3: { input: `${family.memberCount} independently enclosed baskets`, output: 'categorical per-pixel family by bright/dark/neither mode; ties UNKNOWN', modalShellMargins: modalKey?.split(',').map(Number), modalSupport, familyCanvas: [family.width, family.height], brightPixels: family.brightPixels, darkPixels: family.darkPixels, unknownPixels: family.unknownPixels, memberDetectorIndices: family.cleanRows.map((row) => row.detectorIndex), overlapDetectorIndices: family.overlapRows.map((row) => row.detectorIndex) } } : {}),
 			...(border ? { T4: { input: 'T3 family aligned over the two overlap baskets', output: 'exact fused-dark-component custody classes', upperDetectorIndex: border.upperDetectorIndex, lowerDetectorIndex: border.lowerDetectorIndex, fusedComponentLabel: border.fusedComponentLabel, mapping: { blueOnly: border.bluePixels, redOnly: border.redPixels, shared: border.sharedPixels, residual: border.residualPixels }, semantics: { blue: 'upper family claim', red: 'lower family claim', purple: 'shared claim / merge', yellow: 'unexplained fused-component residue' } } } : {}),
-			...(subtraction ? { T5: { input: 'control evaluation crop minus exact non-UNKNOWN T3 family support', output: 'composed B+W support plus unclaimed pixels', composedPixels: subtraction.composedPixels, unclaimedPixels: subtraction.unclaimedPixels, semantics: 'unclaimed pixels remain UNKNOWN; this tick makes no basket/fringe/direction claim' } } : {})
+			...(subtraction ? { T5: {
+				input: 'control evaluation crop minus exact non-UNKNOWN T3 family support',
+				output: 'full accounting plus transparent-support fringe view',
+				composedPixels: subtraction.composedPixels,
+				unclaimedPixels: subtraction.unclaimedPixels,
+				innerRingPixels: subtraction.innerRingPixels,
+				outerRingPixels: subtraction.outerRingPixels,
+				otherUnclaimedPixels: subtraction.otherUnclaimedPixels,
+				ringRule: 'one-pixel 8-neighbor ring; inner is enclosed from crop boundary, outer is 4-connected to crop exterior',
+				semantics: 'rings are basket-fringe candidates left unsubtracted; no PCA or directional meaning is assigned'
+			} } : {})
 		},
 		renderEvidenceCoverage: rendered.coverage, timingsMs,
 		outputs: { visualRender: visualRenderPath, machineReceipt: receiptJsonPath, cliReceipt: receiptTextPath }
 	};
 	const familyText = family ? ` · T3 ${family.memberCount}→${family.brightPixels + family.darkPixels} composed/${family.unknownPixels} unknown` : '';
 	const borderText = border ? ` · T4 B${border.bluePixels}/R${border.redPixels}/P${border.sharedPixels}/Y${border.residualPixels}` : '';
-	const subtractionText = subtraction ? ` · T5 ${subtraction.composedPixels} composed/${subtraction.unclaimedPixels} unclaimed` : '';
+	const subtractionText = subtraction ? ` · T5 ${subtraction.composedPixels} composed/${subtraction.unclaimedPixels} unclaimed (${subtraction.innerRingPixels} inner/${subtraction.outerRingPixels} outer)` : '';
 	const text = [
 		`BASKET COMPOSITION PCR — THROUGH ${input.through}`,
 		`source: ${basename(runDir)} · ${width}x${height} · truth used: NO`,

@@ -83,6 +83,13 @@ rejected or unresolved evidence, and unavailable evidence. This exposes input
 for later fringe, PCA, or directional hypotheses without deciding what the
 remaining pixels mean.
 
+Render two synchronized views: a full accounting view, and a cutout where the
+subtracted B+W support is transparent. In the cutout, distinguish the
+unsubtracted one-pixel ring enclosed by the composed silhouette from the ring
+reachable from the evaluation-region exterior. The first is the inner ring and
+the second is the outer ring; neither classification assigns direction or PCA
+meaning.
+
 ## Comparative forks
 
 Any tick may fork into alternative methods. Each branch receives the same input
