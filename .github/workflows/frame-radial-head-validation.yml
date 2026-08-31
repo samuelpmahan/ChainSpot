@@ -1,32 +1,63 @@
-name: frame-radial-head-validation
+name: frame-radial-script-validation
 
 on:
   push:
     branches: [scratch/frame-radial-head-validation]
 
 jobs:
-  validate:
+  replay-script:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Generate SvelteKit config
-        run: npx svelte-kit sync
-      - name: Build algorithm package
-        run: npm run --workspace @chainspot/alg build
-      - name: Ownership smoke
-        run: npx vitest run tests/unit/componentOwnership.test.ts
-      - name: Compile Frame smoke
-        working-directory: scripts/chainspot-lab/experiments
-        run: npx tsc -p frame-study-smoke.tsconfig.json
-      - name: Run Frame smoke
-        run: node /tmp/frame-study-smoke-dist/frameStudy.smoke.js
-      - name: Compile Radial smoke
-        working-directory: scripts/chainspot-lab/experiments
-        run: npx tsc -p frame-radial-smoke.tsconfig.json
-      - name: Run Radial smoke
-        run: node /tmp/frame-radial-smoke-dist/radialRender.smoke.js
+      - name: Install once
+        run: npm ci
+      - name: Replay and validate every handoff state
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMITS=(
+            829f5539f4c08ead6239ef0cff3fbce2b1efcf72
+            26d1a23460ff87d542f3c5abc489b789cb800c18
+            f2eff7fcba4d341ad4a8c603a946328dd895eb86
+            bcc3d77a651a2ff9f65635ac7920e24b665b59cc
+            0785fd08525e1d4ace45cec653eecce1a92ef281
+            11b7bccf43078129d116d9362e7b2584b4791d4d
+            139fcb9d0043dc02b075f4ecca3b397173462696
+          )
+
+          for sha in "${COMMITS[@]}"; do
+            echo "============================================================"
+            echo "REPLAY $sha"
+            git checkout --force "$sha"
+            git show -s --format='commit %H%n%s%n%n%b' HEAD
+
+            npx svelte-kit sync >/dev/null
+            npm run --workspace @chainspot/alg build >/dev/null
+            npx vitest run tests/unit/componentOwnership.test.ts
+
+            if [[ -f scripts/chainspot-lab/experiments/frame-study-smoke.tsconfig.json ]]; then
+              rm -rf /tmp/frame-study-smoke-dist
+              (
+                cd scripts/chainspot-lab/experiments
+                npx tsc -p frame-study-smoke.tsconfig.json
+              )
+              node /tmp/frame-study-smoke-dist/frameStudy.smoke.js
+            fi
+
+            if [[ -f scripts/chainspot-lab/experiments/frame-radial-smoke.tsconfig.json ]]; then
+              rm -rf /tmp/frame-radial-smoke-dist
+              (
+                cd scripts/chainspot-lab/experiments
+                npx tsc -p frame-radial-smoke.tsconfig.json
+              )
+              node /tmp/frame-radial-smoke-dist/radialRender.smoke.js
+            fi
+
+            echo "PASS $sha"
+          done
