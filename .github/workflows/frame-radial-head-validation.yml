@@ -1,0 +1,32 @@
+name: frame-radial-head-validation
+
+on:
+  push:
+    branches: [scratch/frame-radial-head-validation]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate SvelteKit config
+        run: npx svelte-kit sync
+      - name: Build algorithm package
+        run: npm run --workspace @chainspot/alg build
+      - name: Ownership smoke
+        run: npx vitest run tests/unit/componentOwnership.test.ts
+      - name: Compile Frame smoke
+        working-directory: scripts/chainspot-lab/experiments
+        run: npx tsc -p frame-study-smoke.tsconfig.json
+      - name: Run Frame smoke
+        run: node /tmp/frame-study-smoke-dist/frameStudy.smoke.js
+      - name: Compile Radial smoke
+        working-directory: scripts/chainspot-lab/experiments
+        run: npx tsc -p frame-radial-smoke.tsconfig.json
+      - name: Run Radial smoke
+        run: node /tmp/frame-radial-smoke-dist/radialRender.smoke.js
