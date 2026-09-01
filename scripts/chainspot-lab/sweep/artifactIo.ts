@@ -12,7 +12,13 @@ import { join, resolve } from 'node:path';
 import type { ArtifactKind, ArtifactRef } from '@chainspot/alg/exec';
 import { RENDERERS } from './rendererContract';
 
-const JSON_KINDS: readonly ArtifactKind[] = ['componentSet', 'candidateSet', 'polyline', 'measurementTable'];
+const JSON_KINDS: readonly ArtifactKind[] = [
+	'componentSet',
+	'candidateSet',
+	'badgeEvidence',
+	'polyline',
+	'measurementTable'
+];
 
 export interface ArtifactRenderResult {
 	readonly artifactRef: ArtifactRef;
@@ -24,7 +30,12 @@ export interface ArtifactRenderResult {
 /** outDir is the SAME directory createNodeSink(outDir) was given -- the
  * artifact bytes are already sitting under <outDir>/artifacts/<kind>/. This
  * writes any renderer output (or a stub) under <outDir>/renders/<kind>/. */
-export function renderArtifact(outDir: string, opId: string, gate: string, artifactRef: ArtifactRef): ArtifactRenderResult {
+export function renderArtifact(
+	outDir: string,
+	opId: string,
+	gate: string,
+	artifactRef: ArtifactRef
+): ArtifactRenderResult {
 	const bytesPath = resolve(outDir, 'artifacts', artifactRef.kind, `${artifactRef.id}.bin`);
 	const bytes = existsSync(bytesPath) ? new Uint8Array(readFileSync(bytesPath)) : new Uint8Array(0);
 	const parsed = JSON_KINDS.includes(artifactRef.kind) ? safeParseJson(bytes) : undefined;
@@ -56,7 +67,12 @@ export function renderArtifact(outDir: string, opId: string, gate: string, artif
 			opId,
 			gate
 		});
-		return { artifactRef, rendered: true, summary: output.summary, filesWritten: output.filesWritten };
+		return {
+			artifactRef,
+			rendered: true,
+			summary: output.summary,
+			filesWritten: output.filesWritten
+		};
 	}
 
 	const stubPath = join(renderDir, `${artifactRef.id}.stub.txt`);

@@ -129,6 +129,7 @@ export const SEEDED_SLOTS: readonly string[] = [
 	'localImage',
 	'params',
 	'viewport',
+	'paramsHash',
 	'recoveredTees',
 	/** Always present at production front doors. Sweep may replace this
 	 * separate S0-only payload with verified canonical comparison assistance
@@ -370,11 +371,12 @@ export function runEngine(
 	// seedBoard — untouched — still seeds it directly.
 	const board = createExecBoard();
 	seedBoard(board as unknown as EvidenceBoard, image, effectiveParams);
+	board.set('paramsHash', paramsHash ?? plan.planFingerprint);
 	board.set('recoveredTees', recoveredTees);
-	board.set(
-		'straightTestTruthAssistance',
-		{ mode: 'blind', locks: [] } satisfies StraightTestTruthAssistance
-	);
+	board.set('straightTestTruthAssistance', {
+		mode: 'blind',
+		locks: []
+	} satisfies StraightTestTruthAssistance);
 
 	const withTrace = resolved !== undefined;
 	const { ctx, trace } = withTrace

@@ -134,6 +134,7 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
+			'badgeEvidence.materialize',
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
@@ -141,9 +142,16 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 		]
 	},
 	G6: {
-		phase: 'Bent pathfinding + refinement: remaining holes with one or more bends, terminal Z-fit folded in',
+		phase:
+			'Bent pathfinding + refinement: remaining holes with one or more bends, terminal Z-fit folded in',
 		ownGates: ['G6', 'G7'],
-		demonstratedBy: ['assignment.pairs', 'assignment.scoring', 'assignment.ranking', 'assignment.selection', 'zfit']
+		demonstratedBy: [
+			'assignment.pairs',
+			'assignment.scoring',
+			'assignment.ranking',
+			'assignment.selection',
+			'zfit'
+		]
 	},
 	G7: {
 		phase: 'Terminal Z-fit slot (alias of the end of the G6 phase)',

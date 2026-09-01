@@ -114,9 +114,10 @@ describe('LAB sweep receipt seam', () => {
 		);
 		const sliced = await slicePlanThroughGate(plan, 'G4');
 		// zfit left the default schedule on 2026-08-28 (owner directive), so
-		// the endpoints-complete prefix is now the whole 18-operation plan.
-		expect(sliced.ops).toHaveLength(18);
-		expect(sliced.ops[sliced.ops.length - 1].id).toBe('teeRecovery');
+		// the endpoints-complete prefix is now the whole 20-operation plan,
+		// including observational badge evidence materialization.
+		expect(sliced.ops).toHaveLength(20);
+		expect(sliced.ops[sliced.ops.length - 1].id).toBe('teeBadgeLock');
 		expect(sliced.ops.map((operation) => operation.id)).not.toContain('zfit');
 		expect(sliced.slice.notScheduled).toEqual([]);
 		expect(sliced.slice.prerequisites.map((operation) => operation.id)).toEqual([
@@ -124,6 +125,7 @@ describe('LAB sweep receipt seam', () => {
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
+			'badgeEvidence.materialize',
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
@@ -511,8 +513,8 @@ describe('LAB sweep receipt seam', () => {
 			totalTees: 18,
 			assignments: 18
 		});
-		expect(result.runReceipt.slice?.scheduledOperationCount).toBe(18);
-		expect(result.runReceipt.slice?.parentOperationCount).toBe(18);
+		expect(result.runReceipt.slice?.scheduledOperationCount).toBe(20);
+		expect(result.runReceipt.slice?.parentOperationCount).toBe(20);
 		expect(result.runReceipt.slice?.notScheduled).toEqual([]);
 		expect(result.runReceipt.slice?.straightStory?.[0]).toContain(
 			'assignment.selection assigned 15 of 18 badges straight from visible tees'

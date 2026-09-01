@@ -40,12 +40,14 @@ export interface MaterializedBadgeEvidence {
 function cropBbox(
 	bbox: readonly [number, number, number, number],
 	width: number,
-	height: number
+	height: number,
+	minimumY = 0,
+	maximumY = height
 ): readonly [number, number, number, number] {
 	const x0 = Math.max(0, bbox[0] - 1);
-	const y0 = Math.max(0, bbox[1] - 1);
+	const y0 = Math.max(0, minimumY, bbox[1] - 1);
 	const x1 = Math.min(width, bbox[0] + bbox[2] + 1);
-	const y1 = Math.min(height, bbox[1] + bbox[3] + 1);
+	const y1 = Math.min(height, maximumY, bbox[1] + bbox[3] + 1);
 	return [x0, y0, x1 - x0, y1 - y0];
 }
 
@@ -95,14 +97,19 @@ export function materializeBadgeEvidence(
 	fields: BrightDarkComponentFields,
 	badge: BadgeEvidence,
 	assembly: MaterializedComponentAssembly,
-	provenance: BadgeEvidenceProvenance
+	provenance: BadgeEvidenceProvenance,
+	fieldTopPx = 0
 ): MaterializedBadgeEvidence {
 	if (image.data.length !== image.width * image.height * 4)
 		throw new Error('badge evidence source RGBA does not match declared dimensions');
 	for (const field of [fields.bright, fields.dark]) {
-		if (field.mask.width !== image.width || field.mask.height !== image.height)
-			throw new Error('badge evidence component-field mask dimensions do not match source');
-		if (field.labels.length !== image.width * image.height)
+		if (
+			field.mask.width !== image.width ||
+			fieldTopPx < 0 ||
+			fieldTopPx + field.mask.height > image.height
+		)
+			throw new Error('badge evidence component-field frame does not fit the source raster');
+		if (field.labels.length !== field.mask.width * field.mask.height)
 			throw new Error('badge evidence component-field labels do not match source dimensions');
 	}
 	if (assembly.rasterWidth !== image.width)
@@ -119,15 +126,30 @@ export function materializeBadgeEvidence(
 				const xx = x + dx;
 				const yy = y + dy;
 				if (xx < 0 || yy < 0 || xx >= image.width || yy >= image.height) continue;
+				if (yy < fieldTopPx || yy >= fieldTopPx + fields.bright.mask.height) continue;
 				const neighbor = yy * image.width + xx;
+				const localNeighbor = (yy - fieldTopPx) * image.width + xx;
 				if (owned.has(neighbor)) continue;
-				if (fields.bright.mask.data[neighbor] || fields.dark.mask.data[neighbor]) continue;
+				if (fields.bright.mask.data[localNeighbor] || fields.dark.mask.data[localNeighbor])
+					continue;
 				aa.add(neighbor);
 			}
 		}
 	}
 
-	const regionBbox = cropBbox(assembly.bbox, image.width, image.height);
+	const regionBbox = cropBbox(
+		assembly.bbox,
+		image.width,
+		image.height,
+		fieldTopPx,
+		fieldTopPx + fields.bright.mask.height
+	);
+	const localRegionBbox = [
+		regionBbox[0],
+		regionBbox[1] - fieldTopPx,
+		regionBbox[2],
+		regionBbox[3]
+	] as const;
 	const [x0, y0, width, height] = regionBbox;
 	const residueBefore = new Set<number>();
 	const residueAfter = new Set<number>();
@@ -148,10 +170,10 @@ export function materializeBadgeEvidence(
 		region: {
 			bbox: regionBbox,
 			rgba: cropBytes(image.data, image.width, regionBbox, 4),
-			brightMask: cropBytes(fields.bright.mask.data, image.width, regionBbox),
-			darkMask: cropBytes(fields.dark.mask.data, image.width, regionBbox),
-			brightLabels: cropLabels(fields.bright.labels, image.width, regionBbox),
-			darkLabels: cropLabels(fields.dark.labels, image.width, regionBbox)
+			brightMask: cropBytes(fields.bright.mask.data, image.width, localRegionBbox),
+			darkMask: cropBytes(fields.dark.mask.data, image.width, localRegionBbox),
+			brightLabels: cropLabels(fields.bright.labels, image.width, localRegionBbox),
+			darkLabels: cropLabels(fields.dark.labels, image.width, localRegionBbox)
 		},
 		components: assembly.components,
 		ownedBwPixels: sorted(owned),
@@ -164,4 +186,56 @@ export function materializeBadgeEvidence(
 			residueAfter: residueAfter.size
 		}
 	};
+}
+
+/** Stable sink payload; typed arrays stay typed when read back in browser or Node. */
+export function encodeMaterializedBadgeEvidence(specimen: MaterializedBadgeEvidence): Uint8Array {
+	return new TextEncoder().encode(
+		JSON.stringify(specimen, (_key, value: unknown) => {
+			if (typeof value === 'number' && !Number.isFinite(value))
+				return { $chainspotNumber: String(value) };
+			if (value instanceof Uint8Array)
+				return { $chainspotTypedArray: 'u8', data: Array.from(value) };
+			if (value instanceof Uint32Array)
+				return { $chainspotTypedArray: 'u32', data: Array.from(value) };
+			if (value instanceof Int32Array)
+				return { $chainspotTypedArray: 'i32', data: Array.from(value) };
+			return value;
+		})
+	);
+}
+
+export function decodeMaterializedBadgeEvidence(bytes: Uint8Array): MaterializedBadgeEvidence {
+	const value = JSON.parse(new TextDecoder().decode(bytes), (_key, encoded: unknown) => {
+		if (!encoded || typeof encoded !== 'object') return encoded;
+		if ('$chainspotNumber' in encoded) {
+			const tag = (encoded as { $chainspotNumber: unknown }).$chainspotNumber;
+			if (tag === 'Infinity') return Infinity;
+			if (tag === '-Infinity') return -Infinity;
+			if (tag === 'NaN') return NaN;
+			throw new Error(`badge evidence has unknown numeric tag '${String(tag)}'`);
+		}
+		if (!('$chainspotTypedArray' in encoded)) return encoded;
+		const tagged = encoded as { $chainspotTypedArray: unknown; data: unknown };
+		if (!Array.isArray(tagged.data))
+			throw new Error('badge evidence typed array has no data array');
+		if (tagged.$chainspotTypedArray === 'u8') return Uint8Array.from(tagged.data);
+		if (tagged.$chainspotTypedArray === 'u32') return Uint32Array.from(tagged.data);
+		if (tagged.$chainspotTypedArray === 'i32') return Int32Array.from(tagged.data);
+		throw new Error(
+			`badge evidence has unknown typed-array tag '${String(tagged.$chainspotTypedArray)}'`
+		);
+	}) as MaterializedBadgeEvidence;
+	if (value.schema !== BADGE_MATERIALIZED_EVIDENCE_SCHEMA)
+		throw new Error(`unsupported badge evidence schema '${String(value.schema)}'`);
+	const pixels = value.region.bbox[2] * value.region.bbox[3];
+	if (
+		value.region.rgba.length !== pixels * 4 ||
+		value.region.brightMask.length !== pixels ||
+		value.region.darkMask.length !== pixels ||
+		value.region.brightLabels.length !== pixels ||
+		value.region.darkLabels.length !== pixels
+	)
+		throw new Error('badge evidence region payload does not match its declared bbox');
+	return value;
 }

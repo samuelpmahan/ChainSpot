@@ -120,8 +120,10 @@ export const GATE_FEATURE_SETS: Record<GateFeatureSetId, ABFeatureSet> = {
 			'image',
 			'localImage',
 			'params',
+			'paramsHash',
 			'viewport',
 			'stage',
+			'badgeStage.components',
 			'badges',
 			'baskets',
 			'tees',
@@ -182,7 +184,14 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 	'g2-set': ['baskets', 'cleanBasketFamily'],
 	'g3-set': ['tees.ringMeasure', 'tees.exclusion', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
-	'g5-set': ['straightTest', 'supportField', 'badgeOcclusionPatch', 'rawPairs', 'measurement'],
+	'g5-set': [
+		'straightTest',
+		'supportField',
+		'badgeOcclusionPatch',
+		'rawPairs',
+		'measurement',
+		'badgeEvidence.materialize'
+	],
 	'g6-set': [
 		'assignment.pairs',
 		'assignment.scoring',

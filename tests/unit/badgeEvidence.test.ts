@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { materializeBadgeEvidence } from '@chainspot/alg/detectors/threeFactor/badgeEvidence';
+import {
+	decodeMaterializedBadgeEvidence,
+	encodeMaterializedBadgeEvidence,
+	materializeBadgeEvidence
+} from '@chainspot/alg/detectors/threeFactor/badgeEvidence';
 import { groupBrightDarkComponentFields } from '@chainspot/alg/detectors/threeFactor/componentField';
 import {
 	assembleBadgeV1,
@@ -94,5 +98,9 @@ describe('materialized badge evidence', () => {
 		expect([...specimen.ownedBwPixels]).toEqual([...assembly.ownedPixels]);
 		expect(specimen.region.rgba).toHaveLength(49 * 4);
 		expect(specimen.region.brightLabels).toHaveLength(49);
+		const replay = decodeMaterializedBadgeEvidence(encodeMaterializedBadgeEvidence(specimen));
+		expect(replay).toEqual(specimen);
+		expect(replay.ownedBwPixels).toBeInstanceOf(Uint32Array);
+		expect(replay.region.brightLabels).toBeInstanceOf(Int32Array);
 	});
 });

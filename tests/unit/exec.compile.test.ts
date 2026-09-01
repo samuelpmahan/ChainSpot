@@ -64,14 +64,14 @@ const straightTestOnResolved = resolveConfig(
 // produce 45a8167e..., i.e. registering posteriorTeeRecovery does not move it.
 // That equality is the property this test exists to defend.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'45a8167e64474411aba4489d0182a7e58dd26828209827774dbb366a6a243380';
+	'0a70e60a7302fe7c8f1fe0bc3134817e0545846fbe03130c2e11cf08464f0ef8';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
 		expect(UNIT_OPERATIONS.size).toBe(18); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate
 		// 25 prior + posteriorTeeRecovery, which shares the teeBadgeLock unit
 		// rather than owning one -- so UNIT_OPERATIONS.size is unchanged at 18.
-		expect(OPERATION_UNIVERSE.length).toBe(26);
+		expect(OPERATION_UNIVERSE.length).toBe(27);
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
@@ -84,6 +84,10 @@ describe('operation universe (R2 inventory)', () => {
 			'assignment.scoring',
 			'assignment.ranking',
 			'assignment.selection'
+		]);
+		expect(UNIT_OPERATIONS.get('measurement')).toEqual([
+			'measurement',
+			'badgeEvidence.materialize'
 		]);
 		expect(UNIT_OPERATIONS.get('zfit')).toEqual(['zfit']);
 		expect(UNIT_OPERATIONS.get('straightTest')).toEqual(['straightTest']);

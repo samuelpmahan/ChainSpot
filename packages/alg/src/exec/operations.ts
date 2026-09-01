@@ -61,6 +61,13 @@ import {
 	type BrightDarkComponentFields
 } from '../detectors/threeFactor/componentField';
 import {
+	encodeMaterializedBadgeEvidence,
+	materializeBadgeEvidence,
+	type MaterializedBadgeEvidence
+} from '../detectors/threeFactor/badgeEvidence';
+import { acquireObjectGraphV1 } from '../detectors/threeFactor/objects';
+import { sha256HexSync, sha256HexSyncText } from './sha256';
+import {
 	detectBadgeFamily,
 	recoverDarkPlateBadges,
 	type BadgeStageKnobs,
@@ -100,6 +107,7 @@ import type {
 	ThreeFactorAssignment,
 	ThreeFactorMeasurement
 } from '../detectors/threeFactor/types';
+import { THREE_FACTOR_ALGO, THREE_FACTOR_ALGO_VERSION } from '../detectors/threeFactor/types';
 
 /** Cast: ExecBoard (string-keyed) is structurally a superset of the closed-EvidenceSlot EvidenceBoard the legacy unit.run bodies expect. */
 function asLegacyBoard(board: ExecBoard): EvidenceBoard {
@@ -601,6 +609,54 @@ const reusedOps: OperationDef[] = [
 	wrapLegacy('measurement', 'materialize', 'G5'),
 	{
 		spec: {
+			id: 'badgeEvidence.materialize',
+			kind: 'materialize',
+			gate: 'G5',
+			unit: 'measurement',
+			consumes: ['image', 'viewport', 'paramsHash', 'badgeStage.components', 'measurement'],
+			produces: ['badgeEvidence.library'],
+			note: 'materialize exact Badge B+W, naive AA, residue, and source-field evidence'
+		},
+		run(board) {
+			const image = board.get<RgbaImage>('image');
+			const fields = board.get<BadgeStageComponents>('badgeStage.components');
+			const measurement = board.get<ThreeFactorMeasurement>('measurement');
+			const { topPx } = board.get<{ topPx: number }>('viewport');
+			const paramsHash = board.get<string>('paramsHash');
+			const rgba = new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength);
+			const rasterSha = sha256HexSyncText(`${image.width}x${image.height}:${sha256HexSync(rgba)}`);
+			const graph = acquireObjectGraphV1(measurement, {
+				width: image.width,
+				height: fields.bright.mask.height,
+				brightLabels: fields.bright.labels,
+				darkLabels: fields.dark.labels,
+				brightComponents: fields.bright.components,
+				darkComponents: fields.dark.components
+			});
+			const specimens = graph.badges.flatMap((object) => {
+				const assembly = object.raster.componentAssembly;
+				if (!assembly || assembly.status !== 'assembled') return [];
+				return [
+					materializeBadgeEvidence(
+						image,
+						fields,
+						object.evidence,
+						assembly,
+						{
+							imageId: rasterSha,
+							paramsHash,
+							detector: THREE_FACTOR_ALGO,
+							detectorVersion: THREE_FACTOR_ALGO_VERSION
+						},
+						topPx
+					)
+				];
+			});
+			board.set('badgeEvidence.library', specimens);
+		}
+	},
+	{
+		spec: {
 			id: 'phantomTee',
 			kind: 'decide',
 			gate: 'G4',
@@ -723,7 +779,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['baskets', ['baskets']],
 	['tees', teesOps.map((op) => op.spec.id)],
 	['rawPairs', ['rawPairs']],
-	['measurement', ['measurement']],
+	['measurement', ['measurement', 'badgeEvidence.materialize']],
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
@@ -847,6 +903,14 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 				bytes: jsonBytes(fields.dark.components)
 			}
 		];
+	},
+	'badgeEvidence.materialize'(board) {
+		const specimens = board.get<readonly MaterializedBadgeEvidence[]>('badgeEvidence.library');
+		return specimens.map((specimen) => ({
+			kind: 'badgeEvidence',
+			id: `badgeEvidence.${specimen.provenance.imageId.slice(0, 12)}.${specimen.id}`,
+			bytes: encodeMaterializedBadgeEvidence(specimen)
+		}));
 	},
 	'tees.exclusion'(board) {
 		const tees = board.get<readonly TeeEvidence[]>('tees');

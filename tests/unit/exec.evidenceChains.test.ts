@@ -24,10 +24,17 @@ import {
 	type Receipt
 } from '@chainspot/alg/exec';
 import { createNodeSink } from '@chainspot/alg/exec/node-sink';
-import { DEFAULT_EXECUTION, resolveConfig, type ThreeFactorConfig } from '@chainspot/alg/detectors/threeFactor';
+import {
+	DEFAULT_EXECUTION,
+	resolveConfig,
+	type ThreeFactorConfig
+} from '@chainspot/alg/detectors/threeFactor';
 import { CONFIG_SCHEMA } from '@chainspot/alg/detectors/threeFactor/config';
 import { seedBoard } from '@chainspot/alg/detectors/threeFactor/measure';
-import { nullFeatureContext, type EvidenceBoard } from '@chainspot/alg/detectors/threeFactor/features/types';
+import {
+	nullFeatureContext,
+	type EvidenceBoard
+} from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { RgbaImage } from '@chainspot/alg/detectors/threeFactor/types';
 import defaultConfigJson from '@chainspot/alg/detectors/threeFactor/configs/default.json';
 import familyOnConfigJson from '@chainspot/alg/detectors/threeFactor/configs/family-on.json';
@@ -70,6 +77,7 @@ function runChain(configName: string, configJson: unknown, outDir: string) {
 
 	const board = createExecBoard();
 	seedBoard(board as unknown as EvidenceBoard, syntheticImage(), undefined);
+	board.set('paramsHash', plan.paramsHash ?? plan.planFingerprint);
 	board.set('recoveredTees', []);
 
 	const sink = createNodeSink(outDir);
@@ -86,7 +94,11 @@ function runChain(configName: string, configJson: unknown, outDir: string) {
 
 describe('exec evidence chain 1 — default.json', () => {
 	test('compiles, executes via the one gateway, writes receipts + artifacts through the Node sink', () => {
-		const { plan, receipts, outDir } = runChain('default', defaultConfigJson, resolve(OUT_ROOT, 'default'));
+		const { plan, receipts, outDir } = runChain(
+			'default',
+			defaultConfigJson,
+			resolve(OUT_ROOT, 'default')
+		);
 
 		expect(receipts.length).toBe(plan.ops.length);
 		expect(receipts.map((r) => r.opId)).toEqual(plan.ops.map((op) => op.id));
@@ -96,15 +108,27 @@ describe('exec evidence chain 1 — default.json', () => {
 		const firstReceipt = JSON.parse(lines[0]) as Receipt;
 		expect(firstReceipt.opId).toBe('badgeStage.masks');
 
-		const artifactKinds: Set<string> = new Set(receipts.flatMap((r) => r.artifacts.map((a) => a.kind)));
+		const artifactKinds: Set<string> = new Set(
+			receipts.flatMap((r) => r.artifacts.map((a) => a.kind))
+		);
 		// eslint-disable-next-line no-console
-		console.log(`[exec evidence] default: artifact kinds present = ${[...artifactKinds].sort().join(', ')}`);
+		console.log(
+			`[exec evidence] default: artifact kinds present = ${[...artifactKinds].sort().join(', ')}`
+		);
 		// Unconditional kinds: their producing op always runs and always emits,
 		// regardless of scene content (an empty array still JSON-encodes).
 		// 'polyline' (rawPairs's sample leg) is scene-dependent — this
 		// synthetic scene happens to produce zero raw pairs, so it's asserted
 		// separately as "may or may not appear" rather than required.
-		for (const kind of ['rgba', 'mask', 'componentSet', 'candidateSet', 'scalarField', 'orientationField', 'measurementTable']) {
+		for (const kind of [
+			'rgba',
+			'mask',
+			'componentSet',
+			'candidateSet',
+			'scalarField',
+			'orientationField',
+			'measurementTable'
+		]) {
 			expect(artifactKinds.has(kind)).toBe(true);
 		}
 		for (const r of receipts) {
@@ -113,6 +137,11 @@ describe('exec evidence chain 1 — default.json', () => {
 				expect(readdirSync(resolve(outDir, 'artifacts', a.kind))).toContain(`${a.id}.bin`);
 			}
 		}
+		const badgeEvidence = receipts.find((receipt) => receipt.opId === 'badgeEvidence.materialize');
+		expect(badgeEvidence?.actualProduces).toContain('badgeEvidence.library');
+		expect(badgeEvidence?.artifacts.every((artifact) => artifact.kind === 'badgeEvidence')).toBe(
+			true
+		);
 
 		const selection = receipts.find((r) => r.opId === 'assignment.selection');
 		expect(selection?.actualProduces).toContain('assignment');
@@ -121,17 +150,24 @@ describe('exec evidence chain 1 — default.json', () => {
 
 describe('exec evidence chain 2 — family-on.json', () => {
 	test('same gateway, a different (longer) plan, cleanBasketFamily + teeFamily receipts present', () => {
-		const { plan, receipts } = runChain('family-on', familyOnConfigJson, resolve(OUT_ROOT, 'family-on'));
+		const { plan, receipts } = runChain(
+			'family-on',
+			familyOnConfigJson,
+			resolve(OUT_ROOT, 'family-on')
+		);
 		const opIds = receipts.map((r) => r.opId);
 		expect(opIds).toContain('cleanBasketFamily');
 		expect(opIds).toContain('teeFamily');
-		expect(plan.ops.length).toBe(20); // frozen teeFamily + teeRecovery + G7 Z-fit; this plan adds cleanBasketFamily
+		expect(plan.ops.length).toBe(21); // frozen teeFamily + teeRecovery + G7 Z-fit; this plan adds cleanBasketFamily
 	});
 });
 
 describe('exec evidence chain 3 — illegal-order config', () => {
 	test('compile REJECTS before any operation executes, naming the violated dependency', () => {
-		const illegalExecution = ['assignment', ...DEFAULT_EXECUTION.filter((id) => id !== 'assignment')];
+		const illegalExecution = [
+			'assignment',
+			...DEFAULT_EXECUTION.filter((id) => id !== 'assignment')
+		];
 		const illegalConfig: ThreeFactorConfig = {
 			schema: CONFIG_SCHEMA,
 			name: 'illegal-order-demo',

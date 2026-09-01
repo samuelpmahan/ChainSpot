@@ -37,6 +37,7 @@ export const SEEDED_SLOTS: readonly SlotRef[] = [
 	'localImage',
 	'params',
 	'viewport',
+	'paramsHash',
 	'recoveredTees',
 	'straightTestTruthAssistance'
 ];

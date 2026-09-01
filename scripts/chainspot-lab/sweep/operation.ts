@@ -31,10 +31,20 @@ import type {
 	ThreeFactorMeasurement
 } from '@chainspot/alg/detectors/threeFactor/types';
 import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
-import type { BadgeEvidence, BasketEvidence, TeeEvidence } from '@chainspot/alg/detectors/threeFactor/types';
+import type {
+	BadgeEvidence,
+	BasketEvidence,
+	TeeEvidence
+} from '@chainspot/alg/detectors/threeFactor/types';
 import type { LocatedDetection } from './truthScoring';
-import type { StraightTestTruthAssistance, StraightTestTruthLock } from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
-import { makeTraceRunId, sealTrace } from '@chainspot/alg/detectors/threeFactor/features/traceIdentity';
+import type {
+	StraightTestTruthAssistance,
+	StraightTestTruthLock
+} from '@chainspot/alg/detectors/threeFactor/features/st.straightTest.contract';
+import {
+	makeTraceRunId,
+	sealTrace
+} from '@chainspot/alg/detectors/threeFactor/features/traceIdentity';
 import { loadConfig } from './configIo';
 import { canonicalizeInputs } from './inputShim';
 import { associateDetections, compareTruthGrounding, loadTruth, scoreTruth } from './truthScoring';
@@ -147,16 +157,20 @@ export function buildStraightTestTruthAssistance(
 	baskets: readonly BasketEvidence[],
 	provenance = 'verified canonical truth match'
 ): StraightTestTruthAssistance {
-	const teeMatches = associateDetections(
-		truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.tee })),
-		teeDetections(tees)
-	).objectMatches ?? [];
-	const basketMatches = associateDetections(
-		truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.basket })),
-		basketDetections(baskets)
-	).objectMatches ?? [];
+	const teeMatches =
+		associateDetections(
+			truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.tee })),
+			teeDetections(tees)
+		).objectMatches ?? [];
+	const basketMatches =
+		associateDetections(
+			truth.holes.map((hole) => ({ identity: `H${hole.number}`, point: hole.basket })),
+			basketDetections(baskets)
+		).objectMatches ?? [];
 	const teesByHole = new Map(teeMatches.map((match) => [match.truthIdentity, match.detection.id]));
-	const basketsByHole = new Map(basketMatches.map((match) => [match.truthIdentity, match.detection.id]));
+	const basketsByHole = new Map(
+		basketMatches.map((match) => [match.truthIdentity, match.detection.id])
+	);
 	const locks: StraightTestTruthLock[] = [];
 	for (const hole of [...truth.holes].sort((a, b) => a.number - b.number)) {
 		const badge = badges.find((candidate) => candidate.label === String(hole.number));
@@ -342,8 +356,7 @@ export async function runSweepOperation(
 			'lab sweep: truth-assisted Straight Test requires a supplied verified canonical truth file.'
 		);
 	}
-	if (truthAssisted)
-		guardTruthTaint(['lab', 'sweep', configPath, ...inputPaths, truthPath!]);
+	if (truthAssisted) guardTruthTaint(['lab', 'sweep', configPath, ...inputPaths, truthPath!]);
 	// The taint/config firewall is intentionally before this read. A blind or
 	// automated test invocation must refuse before it can inspect annotation
 	// bytes, even when the supplied path is malformed or unreadable.
@@ -385,6 +398,7 @@ export async function runSweepOperation(
 		image,
 		resolveConfiguredParams(undefined, loaded.resolved)
 	);
+	board.set('paramsHash', plan.paramsHash ?? plan.planFingerprint);
 	board.set('recoveredTees', []);
 	// Every production run receives an explicit blind payload. The tainted
 	// comparison payload is installed only after the detector prefix has
@@ -405,7 +419,9 @@ export async function runSweepOperation(
 	let receipts: ReturnType<typeof executeCompiledPlan> = [];
 	const straightIndex = plan.ops.findIndex((operation) => operation.id === 'straightTest');
 	if (truthAssisted && straightIndex < 0) {
-		throw new Error('lab sweep: truth-assisted Straight Test is enabled but no straightTest operation is scheduled.');
+		throw new Error(
+			'lab sweep: truth-assisted Straight Test is enabled but no straightTest operation is scheduled.'
+		);
 	}
 	if (truthAssisted && straightIndex >= 0) {
 		// Run the dependency-complete detector prefix through the same gateway,
@@ -414,7 +430,9 @@ export async function runSweepOperation(
 		const suffix = plan.ops.slice(straightIndex);
 		const prefixReceipts = executeCompiledPlan({ ...plan, ops: prefix }, board, ctx, sink);
 		const teeEvidence = board.has('tees') ? board.get<readonly TeeEvidence[]>('tees') : [];
-		const basketEvidence = board.has('baskets') ? board.get<readonly BasketEvidence[]>('baskets') : [];
+		const basketEvidence = board.has('baskets')
+			? board.get<readonly BasketEvidence[]>('baskets')
+			: [];
 		const badgeEvidence = board.has('badges') ? board.get<readonly BadgeEvidence[]>('badges') : [];
 		const decision = decideTruthScoring(report, canonicalTruth);
 		if (!decision.eligible || !canonicalTruth) {
@@ -430,7 +448,9 @@ export async function runSweepOperation(
 			`verified canonical truth match (${report.truthMatch?.level ?? 'unknown'})`
 		);
 		if (assistance.locks.length === 0)
-			throw new Error('lab sweep: truth-assisted Straight Test refused: no identified badge received a verified endpoint lock.');
+			throw new Error(
+				'lab sweep: truth-assisted Straight Test refused: no identified badge received a verified endpoint lock.'
+			);
 		board.set('straightTestTruthAssistance', assistance);
 		const suffixReceipts = executeCompiledPlan({ ...plan, ops: suffix }, board, ctx, sink);
 		receipts = [...prefixReceipts, ...suffixReceipts];
@@ -470,7 +490,8 @@ export async function runSweepOperation(
 		// cause". Without this, the receipt reads skipped=false + no scoreboard
 		// with no reason, which is exactly the silence the receipt rule forbids.
 		truthScoringSkipped = true;
-		truthScoringReason = 'no truth annotation was supplied to this run; truth evaluation was not attempted';
+		truthScoringReason =
+			'no truth annotation was supplied to this run; truth evaluation was not attempted';
 	}
 	const groundingComparisons = canonicalTruth
 		? compareTruthGrounding(
@@ -513,13 +534,11 @@ export async function runSweepOperation(
 					tees: board
 						.get<ThreeFactorAssignment>('assignment')
 						.tees.map((tee) => ({ id: tee.detId, xPx: tee.xPx, yPx: tee.yPx })),
-					baskets: board
-						.get<ThreeFactorMeasurement>('measurement')
-						.baskets.map((basket) => ({
-							id: basket.detId,
-							xPx: basket.tipXPx,
-							yPx: basket.tipYPx
-						}))
+					baskets: board.get<ThreeFactorMeasurement>('measurement').baskets.map((basket) => ({
+						id: basket.detId,
+						xPx: basket.tipXPx,
+						yPx: basket.tipYPx
+					}))
 				}
 			: undefined;
 	const featureRenderStartedAtMs = performance.now();
@@ -667,22 +686,20 @@ export async function runSweepOperation(
 	const visualRenders: RunReceiptVisualRender[] = [
 		canonicalVisualRender,
 		...artifactVisualRenders,
-		...featureRenders.results.map(
-			(render): RunReceiptVisualRender => ({
-				kind: 'feature',
-				gate: render.gate,
-				// PR #61 adds per-feature sidecar renders beside the endpoint
-				// poster; only the endpoint receipt keeps the run-level id.
-				id:
-					render.featureId === 'endpointReceipt'
-						? 'run.endpoint-summary'
-						: `${render.featureId}.${render.unitId}`,
-				owner: `${render.featureId}@${render.unitId}`,
-				status: 'rendered',
-				summary: render.summary,
-				files: render.filesWritten.map(runRelativePath)
-			})
-		)
+		...featureRenders.results.map((render): RunReceiptVisualRender => ({
+			kind: 'feature',
+			gate: render.gate,
+			// PR #61 adds per-feature sidecar renders beside the endpoint
+			// poster; only the endpoint receipt keeps the run-level id.
+			id:
+				render.featureId === 'endpointReceipt'
+					? 'run.endpoint-summary'
+					: `${render.featureId}.${render.unitId}`,
+			owner: `${render.featureId}@${render.unitId}`,
+			status: 'rendered',
+			summary: render.summary,
+			files: render.filesWritten.map(runRelativePath)
+		}))
 	];
 	const renderWarnings = featureRenders.results.flatMap((render) =>
 		render.warnings.map(
@@ -747,7 +764,10 @@ export async function runSweepOperation(
 	} catch {
 		previousReceiptRaw = undefined;
 	}
-	const previousRun = previousReceiptRaw === undefined ? undefined : compareToPreviousRun(previousReceiptRaw, runReceipt);
+	const previousRun =
+		previousReceiptRaw === undefined
+			? undefined
+			: compareToPreviousRun(previousReceiptRaw, runReceipt);
 	const finalRunReceipt: RunReceipt = { ...runReceipt, ...(previousRun ? { previousRun } : {}) };
 	const runReceiptJsonPath = writeRunReceiptJson(outDir, finalRunReceipt);
 	const runReceiptTextPath = resolve(outDir, 'run.receipt.txt');
@@ -765,7 +785,10 @@ export async function runSweepOperation(
 			sealedTrace
 		);
 		const custodyReceiptPath = resolve(outDir, 'run.custody.receipt.txt');
-		writeFileSync(custodyReceiptPath, formatCustodyReceiptText(custody, canonicalSweepRunName(inputPaths)));
+		writeFileSync(
+			custodyReceiptPath,
+			formatCustodyReceiptText(custody, canonicalSweepRunName(inputPaths))
+		);
 		runReceiptPaths.push(custodyReceiptPath);
 	}
 

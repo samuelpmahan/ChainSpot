@@ -56,6 +56,7 @@ export type ArtifactKind =
 	| 'orientationField'
 	| 'componentSet'
 	| 'candidateSet'
+	| 'badgeEvidence'
 	| 'polyline'
 	| 'measurementTable';
 
