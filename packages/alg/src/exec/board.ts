@@ -35,6 +35,22 @@ export interface DataAccessEvent {
 	readonly value: DataAccessValueSummary;
 }
 
+// Deliberately process-wide for this build-en-place experiment: G0 happens
+// before the detector ExecBoard exists, while G1-G3 happen through that board.
+// One shared journal lets both phases append to the same causal stream without
+// introducing a real E service yet. canonicalizeInputs() resets it at G0 entry.
+const dataAccessJournal: DataAccessEvent[] = [];
+let dataAccessSeq = 0;
+
+export function resetDataAccessLog(): void {
+	dataAccessJournal.length = 0;
+	dataAccessSeq = 0;
+}
+
+export function dataAccessLog(): readonly DataAccessEvent[] {
+	return dataAccessJournal;
+}
+
 function summarizeValue(value: unknown): DataAccessValueSummary {
 	if (value === null) return { type: 'null' };
 	if (value === undefined) return { type: 'undefined' };
@@ -72,7 +88,6 @@ export class LoggedExecBoard implements ExecBoard {
 	private readonly slots = new Map<SlotRef, unknown>();
 	private readonly events: DataAccessEvent[] = [];
 	private scope: string | null = null;
-	private seq = 0;
 
 	get<T>(slot: SlotRef): T {
 		if (!this.slots.has(slot)) throw new Error(`exec board: slot '${slot}' not produced yet.`);
@@ -116,7 +131,9 @@ export class LoggedExecBoard implements ExecBoard {
 
 	private record(kind: DataAccessKind, slot: SlotRef, value: DataAccessValueSummary): void {
 		if (!this.scope || !/^G[0-3]:/.test(this.scope)) return;
-		this.events.push({ seq: this.seq++, scope: this.scope, kind, slot, value });
+		const event = { seq: dataAccessSeq++, scope: this.scope, kind, slot, value } satisfies DataAccessEvent;
+		this.events.push(event);
+		dataAccessJournal.push(event);
 	}
 }
 
