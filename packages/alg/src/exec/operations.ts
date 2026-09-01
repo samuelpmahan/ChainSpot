@@ -55,7 +55,11 @@ import { g5RibbonFeature } from '../detectors/threeFactor/features/g5.ribbon';
 import { g5RoutingFeature } from '../detectors/threeFactor/features/g5.routing';
 import { zfitFeature } from '../detectors/threeFactor/features/g5.zfit';
 import { computeBrightDarkMasks, type HsvKnobs, type Mask } from '../detectors/threeFactor/raster';
-import { extractComponents, type ComponentStats } from '../detectors/threeFactor/components';
+import type { ComponentStats } from '../detectors/threeFactor/components';
+import {
+	groupBrightDarkComponentFields,
+	type BrightDarkComponentFields
+} from '../detectors/threeFactor/componentField';
 import {
 	detectBadgeFamily,
 	recoverDarkPlateBadges,
@@ -145,12 +149,7 @@ interface BadgeStageMasks {
 	readonly bright: Mask;
 	readonly dark: Mask;
 }
-interface BadgeStageComponents {
-	readonly brightLabels: Int32Array;
-	readonly brightComponents: ComponentStats[];
-	readonly darkLabels: Int32Array;
-	readonly darkComponents: ComponentStats[];
-}
+type BadgeStageComponents = BrightDarkComponentFields;
 
 const badgeStageOps: OperationDef[] = [
 	{
@@ -195,14 +194,7 @@ const badgeStageOps: OperationDef[] = [
 		run(board, ctx) {
 			const stop = ctx.span('badgeStage');
 			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { labels: brightLabels, components: brightComponents } = extractComponents(bright);
-			const { labels: darkLabels, components: darkComponents } = extractComponents(dark);
-			board.set('badgeStage.components', {
-				brightLabels,
-				brightComponents,
-				darkLabels,
-				darkComponents
-			} satisfies BadgeStageComponents);
+			board.set('badgeStage.components', groupBrightDarkComponentFields({ bright, dark }));
 			stop();
 		}
 	},
@@ -221,7 +213,8 @@ const badgeStageOps: OperationDef[] = [
 			const stop = ctx.span('badgeStage');
 			const knobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const { dark } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { brightComponents } = board.get<BadgeStageComponents>('badgeStage.components');
+			const { components: brightComponents } =
+				board.get<BadgeStageComponents>('badgeStage.components').bright;
 			const image = board.get<RgbaImage>('localImage');
 			board.set('badgeStage.family', detectBadgeFamily(image.width, dark, brightComponents, knobs));
 			stop();
@@ -243,8 +236,9 @@ const badgeStageOps: OperationDef[] = [
 			const knobs = ctx.resolve(g1BadgesFeature).knobs as unknown as BadgeStageKnobs;
 			const image = board.get<RgbaImage>('localImage');
 			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
-			const { brightLabels, brightComponents, darkLabels, darkComponents } =
-				board.get<BadgeStageComponents>('badgeStage.components');
+			const fields = board.get<BadgeStageComponents>('badgeStage.components');
+			const { labels: brightLabels, components: brightComponents } = fields.bright;
+			const { labels: darkLabels, components: darkComponents } = fields.dark;
 			const family = board.get<ComponentStats[]>('badgeStage.family');
 			const badges = [...family];
 			const badgeSources: ('bright-family' | 'dark-plate-recovery')[] = badges.map(
@@ -269,9 +263,9 @@ const badgeStageOps: OperationDef[] = [
 				brightMask: bright,
 				darkMask: dark,
 				brightLabels,
-				brightComponents,
+				brightComponents: [...brightComponents],
 				darkLabels,
-				darkComponents,
+				darkComponents: [...darkComponents],
 				badges,
 				badgeSources,
 				plateBboxes,
@@ -840,12 +834,17 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 		];
 	},
 	'badgeStage.components'(board) {
-		const { brightComponents } = board.get<BadgeStageComponents>('badgeStage.components');
+		const fields = board.get<BadgeStageComponents>('badgeStage.components');
 		return [
 			{
 				kind: 'componentSet',
 				id: 'badgeStage.components.bright',
-				bytes: jsonBytes(brightComponents)
+				bytes: jsonBytes(fields.bright.components)
+			},
+			{
+				kind: 'componentSet',
+				id: 'badgeStage.components.dark',
+				bytes: jsonBytes(fields.dark.components)
 			}
 		];
 	},
