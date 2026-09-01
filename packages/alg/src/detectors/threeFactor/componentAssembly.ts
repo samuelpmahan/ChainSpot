@@ -10,6 +10,17 @@ export interface RasterComponentRef {
 	readonly area: number;
 }
 
+export interface ComponentAssemblyRelationship {
+	readonly container: RasterComponentRef;
+	readonly member: RasterComponentRef;
+	readonly predicate: 'bbox-contains' | 'modal-shell-encloses';
+	readonly selection:
+		| 'largest-contained-dark-component'
+		| 'contained-bright-component'
+		| 'smallest-enclosing-dark-component-with-modal-margins';
+	readonly margins?: BasketShellMargins;
+}
+
 export interface ComponentAssembly {
 	readonly status: 'assembled';
 	readonly components: readonly RasterComponentRef[];
@@ -17,6 +28,8 @@ export interface ComponentAssembly {
 	readonly outerComponent: RasterComponentRef;
 	/** Union of the owned components; derived once, never detector/fitted geometry. */
 	readonly bbox: RasterBbox;
+	/** Exact predicates the proven V1 assembler used to compose these components. */
+	readonly relationships: readonly ComponentAssemblyRelationship[];
 }
 
 export interface ComponentAssemblyFailure {
@@ -26,7 +39,12 @@ export interface ComponentAssemblyFailure {
 }
 
 export type ComponentAssemblyResult = ComponentAssembly | ComponentAssemblyFailure;
-export type BasketShellMargins = readonly [left: number, top: number, right: number, bottom: number];
+export type BasketShellMargins = readonly [
+	left: number,
+	top: number,
+	right: number,
+	bottom: number
+];
 
 function bboxOf(component: ComponentStats, yOffsetPx = 0): RasterBbox {
 	return [component.bboxX, component.bboxY + yOffsetPx, component.bboxW, component.bboxH];
@@ -37,7 +55,12 @@ export function componentRef(
 	component: ComponentStats,
 	yOffsetPx = 0
 ): RasterComponentRef {
-	return { polarity, label: component.label, bbox: bboxOf(component, yOffsetPx), area: component.area };
+	return {
+		polarity,
+		label: component.label,
+		bbox: bboxOf(component, yOffsetPx),
+		area: component.area
+	};
 }
 
 export function containsBbox(outer: RasterBbox, inner: RasterBbox): boolean {
@@ -58,12 +81,17 @@ export function unionBbox(parts: readonly RasterBbox[]): RasterBbox {
 	return [x0, y0, x1 - x0, y1 - y0];
 }
 
-function merge(parts: readonly RasterComponentRef[], outerComponent: RasterComponentRef): ComponentAssembly {
+function merge(
+	parts: readonly RasterComponentRef[],
+	outerComponent: RasterComponentRef,
+	relationships: readonly ComponentAssemblyRelationship[]
+): ComponentAssembly {
 	return {
 		status: 'assembled',
 		components: parts,
 		outerComponent,
-		bbox: unionBbox(parts.map((part) => part.bbox))
+		bbox: unionBbox(parts.map((part) => part.bbox)),
+		relationships
 	};
 }
 
@@ -83,22 +111,43 @@ export function assembleBadgeV1(
 	const darkChildren = darkComponents
 		.filter((component) => containsBbox(bboxOf(outerBright), bboxOf(component)))
 		.sort((a, b) => b.area - a.area || a.label - b.label);
-	if (!darkChildren.length) return { status: 'failed', reason: 'no contained dark plate component', seedBbox: seed.bbox };
+	if (!darkChildren.length)
+		return { status: 'failed', reason: 'no contained dark plate component', seedBbox: seed.bbox };
 	if (darkChildren.length > 1 && darkChildren[0].area === darkChildren[1].area)
-		return { status: 'failed', reason: 'ambiguous contained dark plate components', seedBbox: seed.bbox };
+		return {
+			status: 'failed',
+			reason: 'ambiguous contained dark plate components',
+			seedBbox: seed.bbox
+		};
 	const plate = darkChildren[0];
 	const plateBbox = bboxOf(plate);
 	const glyphs = brightComponents.filter(
-		(component) => component.label !== outerBright.label && containsBbox(plateBbox, bboxOf(component))
+		(component) =>
+			component.label !== outerBright.label && containsBbox(plateBbox, bboxOf(component))
 	);
 	const outer = seed;
-	return merge(
-		[outer, componentRef('dark', plate, yOffsetPx), ...glyphs.map((component) => componentRef('bright', component, yOffsetPx))],
-		outer
-	);
+	const plateRef = componentRef('dark', plate, yOffsetPx);
+	const glyphRefs = glyphs.map((component) => componentRef('bright', component, yOffsetPx));
+	return merge([outer, plateRef, ...glyphRefs], outer, [
+		{
+			container: outer,
+			member: plateRef,
+			predicate: 'bbox-contains',
+			selection: 'largest-contained-dark-component'
+		},
+		...glyphRefs.map((glyph) => ({
+			container: plateRef,
+			member: glyph,
+			predicate: 'bbox-contains' as const,
+			selection: 'contained-bright-component' as const
+		}))
+	]);
 }
 
-export function basketShellMargins(outerDark: ComponentStats, whiteBody: ComponentStats): BasketShellMargins {
+export function basketShellMargins(
+	outerDark: ComponentStats,
+	whiteBody: ComponentStats
+): BasketShellMargins {
 	return [
 		whiteBody.bboxX - outerDark.bboxX,
 		whiteBody.bboxY - outerDark.bboxY,
@@ -114,12 +163,7 @@ function smallestEnclosingDark(
 	const body = bboxOf(whiteBody);
 	const candidates = darkComponents
 		.filter((component) => containsBbox(bboxOf(component), body))
-		.sort(
-			(a, b) =>
-				a.bboxW * a.bboxH - b.bboxW * b.bboxH ||
-				b.area - a.area ||
-				a.label - b.label
-		);
+		.sort((a, b) => a.bboxW * a.bboxH - b.bboxW * b.bboxH || b.area - a.area || a.label - b.label);
 	return candidates[0] ?? null;
 }
 
@@ -137,7 +181,9 @@ export function learnBasketShellFamilyV1(
 		const prior = counts.get(key);
 		counts.set(key, { margins, count: (prior?.count ?? 0) + 1 });
 	}
-	const ranked = [...counts.values()].sort((a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(',')));
+	const ranked = [...counts.values()].sort(
+		(a, b) => b.count - a.count || a.margins.join(',').localeCompare(b.margins.join(','))
+	);
 	if (!ranked.length) return null;
 	if (ranked.length > 1 && ranked[0].count === ranked[1].count) return null;
 	return ranked[0].margins;
@@ -151,7 +197,8 @@ export function assembleBasketV1(
 ): ComponentAssemblyResult {
 	const body = componentRef('bright', whiteBody, yOffsetPx);
 	const shell = smallestEnclosingDark(whiteBody, darkComponents);
-	if (!shell) return { status: 'failed', reason: 'no enclosing dark shell component', seedBbox: body.bbox };
+	if (!shell)
+		return { status: 'failed', reason: 'no enclosing dark shell component', seedBbox: body.bbox };
 	const margins = basketShellMargins(shell, whiteBody);
 	if (margins.some((value, index) => value !== intactFamily[index])) {
 		return {
@@ -161,13 +208,21 @@ export function assembleBasketV1(
 		};
 	}
 	const outer = componentRef('dark', shell, yOffsetPx);
-	return merge([body, outer], outer);
+	return merge([body, outer], outer, [
+		{
+			container: outer,
+			member: body,
+			predicate: 'modal-shell-encloses',
+			selection: 'smallest-enclosing-dark-component-with-modal-margins',
+			margins
+		}
+	]);
 }
 
 /** V1 intact tee: the enclosing bright component is already the white outside. */
 export function assembleTeeV1(outerBright: ComponentStats, yOffsetPx = 0): ComponentAssembly {
 	const outer = componentRef('bright', outerBright, yOffsetPx);
-	return merge([outer], outer);
+	return merge([outer], outer, []);
 }
 
 export interface ComponentRasterEvidence {
@@ -183,9 +238,31 @@ export interface MaterializedComponentAssembly extends ComponentAssembly {
 	readonly rasterWidth: number;
 	/** Exact union of every owned connected-component pixel, packed as y*width+x. */
 	readonly ownedPixels: Uint32Array;
-	
-/** Boundary pixels of the exact owned union, packed in the same frame. */
+
+	/** Boundary pixels of the exact owned union, packed in the same frame. */
 	readonly perimeterPixels: Uint32Array;
+}
+
+/** Dereference one already-selected component without applying any new geometry. */
+export function materializeRasterComponentPixels(
+	component: RasterComponentRef,
+	raster: ComponentRasterEvidence
+): Uint32Array {
+	const { width, height, topPx, brightLabels, darkLabels } = raster;
+	if (brightLabels.length !== width * height || darkLabels.length !== width * height)
+		throw new Error('component assembly label rasters do not match declared dimensions');
+	const labels = component.polarity === 'bright' ? brightLabels : darkLabels;
+	const [x, originalY, w, h] = component.bbox;
+	const localY = originalY - topPx;
+	const pixels: number[] = [];
+	for (let yy = Math.max(0, localY); yy < Math.min(height, localY + h); yy++) {
+		const row = yy * width;
+		for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) {
+			const index = row + xx;
+			if (labels[index] === component.label) pixels.push((yy + topPx) * width + xx);
+		}
+	}
+	return Uint32Array.from(pixels);
 }
 
 /**
@@ -203,15 +280,10 @@ export function materializeComponentAssembly(
 		throw new Error('component assembly label rasters do not match declared dimensions');
 	const ownedLocal = new Set<number>();
 	for (const part of assembly.components) {
-		const labels = part.polarity === 'bright' ? brightLabels : darkLabels;
-		const [x, originalY, w, h] = part.bbox;
-		const localY = originalY - topPx;
-		for (let yy = Math.max(0, localY); yy < Math.min(height, localY + h); yy++) {
-			const row = yy * width;
-			for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) {
-				const index = row + xx;
-				if (labels[index] === part.label) ownedLocal.add(index);
-			}
+		for (const pixel of materializeRasterComponentPixels(part, raster)) {
+			const x = pixel % width;
+			const y = (pixel - x) / width;
+			ownedLocal.add((y - topPx) * width + x);
 		}
 	}
 	if (!ownedLocal.size) throw new Error('component assembly selected no raster pixels');

@@ -66,6 +66,11 @@ import {
 	type MaterializedBadgeEvidence
 } from '../detectors/threeFactor/badgeEvidence';
 import { acquireObjectGraphV1 } from '../detectors/threeFactor/objects';
+import {
+	encodeMaterializedM1Representation,
+	materializeM1Representation,
+	type MaterializedM1Representation
+} from '../detectors/threeFactor/m1Representation';
 import { sha256HexSync, sha256HexSyncText } from './sha256';
 import {
 	detectBadgeFamily,
@@ -158,6 +163,11 @@ interface BadgeStageMasks {
 	readonly dark: Mask;
 }
 type BadgeStageComponents = BrightDarkComponentFields;
+
+interface MaterializedBadgeEvidenceLibrary {
+	readonly badges: readonly MaterializedBadgeEvidence[];
+	readonly m1: MaterializedM1Representation;
+}
 
 const badgeStageOps: OperationDef[] = [
 	{
@@ -652,7 +662,20 @@ const reusedOps: OperationDef[] = [
 					)
 				];
 			});
-			board.set('badgeEvidence.library', specimens);
+			board.set('badgeEvidence.library', {
+				badges: specimens,
+				m1: materializeM1Representation(
+					graph,
+					fields,
+					{
+						imageId: rasterSha,
+						paramsHash,
+						detector: THREE_FACTOR_ALGO,
+						detectorVersion: THREE_FACTOR_ALGO_VERSION
+					},
+					topPx
+				)
+			} satisfies MaterializedBadgeEvidenceLibrary);
 		}
 	},
 	{
@@ -906,12 +929,21 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 		];
 	},
 	'badgeEvidence.materialize'(board) {
-		const specimens = board.get<readonly MaterializedBadgeEvidence[]>('badgeEvidence.library');
-		return specimens.map((specimen) => ({
-			kind: 'badgeEvidence',
-			id: `badgeEvidence.${specimen.provenance.imageId.slice(0, 12)}.${specimen.id}`,
-			bytes: encodeMaterializedBadgeEvidence(specimen)
-		}));
+		const library = board.get<MaterializedBadgeEvidenceLibrary>('badgeEvidence.library');
+		const specimens = library.badges;
+		const representation = library.m1;
+		return [
+			...specimens.map((specimen) => ({
+				kind: 'badgeEvidence' as const,
+				id: `badgeEvidence.${specimen.provenance.imageId.slice(0, 12)}.${specimen.id}`,
+				bytes: encodeMaterializedBadgeEvidence(specimen)
+			})),
+			{
+				kind: 'm1Representation',
+				id: `m1Representation.${representation.provenance.imageId.slice(0, 12)}`,
+				bytes: encodeMaterializedM1Representation(representation)
+			}
+		];
 	},
 	'tees.exclusion'(board) {
 		const tees = board.get<readonly TeeEvidence[]>('tees');

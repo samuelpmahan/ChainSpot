@@ -57,6 +57,7 @@ export type ArtifactKind =
 	| 'componentSet'
 	| 'candidateSet'
 	| 'badgeEvidence'
+	| 'm1Representation'
 	| 'polyline'
 	| 'measurementTable';
 
