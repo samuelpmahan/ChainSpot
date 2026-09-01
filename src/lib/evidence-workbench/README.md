@@ -1,8 +1,8 @@
 # E badge workbench probe
 
-Storybook owns only selection and projection. The temporary source adapter recomputes live badge
-evidence; `BadgeEvidenceView` and the CI image receipt both consume the same pure
-`projectBadgeImage()` result.
+Storybook owns only selection and projection. Its source adapter executes the opt-in Badge E
+producer and decodes the resulting content-addressed artifacts; `BadgeEvidenceView` and the CI
+image receipt both consume the same pure `projectBadgeImage()` result.
 
 ```sh
 npm run storybook
@@ -13,4 +13,6 @@ npm run storybook:receipt
 
 `CHAINSPOT_BADGE_IMAGE` may point at a DashsTrack source image. Otherwise the adapter looks for the
 sibling `chainspot-corpus` checkout. Without that private corpus, Storybook still compiles and marks
-the evidence library unavailable instead of silently substituting a fixture.
+the evidence library unavailable instead of silently substituting a fixture. With the corpus, the
+image test also proves every E-backed badge-0 projection is byte-identical to the earlier direct
+recomputation backend.

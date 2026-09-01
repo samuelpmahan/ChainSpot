@@ -31,6 +31,16 @@ const specimen: BadgeSpecimen = {
 	provenance: ['fixture']
 };
 
+const PINNED_RECOMPUTATION_BACKEND_HASHES = {
+	raw: '3f31a2de26cd58035763ee5a3c5cf566dbf0d6cd98bd37a1baa7ceae7b96854e',
+	bw: 'ca4ac0ff3221da59e95f6a4a901ecefd4e7b95199b6b4152cf3fba2ac3390ec5',
+	ownership: 'daf6bce07aaa19f84132cd40e187852c5d7985e3b68986a0adbe8a667f405f86',
+	aa: '6212e45560890c58b8eda61b53242ec2822e18f6392694d22fc086e7a3b2d375',
+	'residue-before': '9c90ecc4acca5bc1c162d4a2c20608a057b9dd87b2b303e974c05e445bbef6d1',
+	'residue-after': '470fa5078e27d4582088897d3fdfa454b5a6df91114147d971cf3ba04be909d4',
+	composed: 'c4a2852671d317375d5e93d17c18e297844a7f3733d4f64a0a50e3ebd84373ff'
+};
+
 function encodePng(value: BadgeSpecimen, projection: (typeof BADGE_STORY_PROJECTIONS)[number]) {
 	const image = projectBadgeImage(value, projection);
 	return PNG.sync.write({
@@ -105,6 +115,6 @@ describe('E-backed badge projections', () => {
 			resolve('artifacts/storybook-e/images/badge-0/receipt.json'),
 			`${JSON.stringify({ specimen: pinned.id, metrics: pinned.metrics, hashes }, null, 2)}\n`
 		);
-		expect(Object.keys(hashes)).toEqual(BADGE_STORY_PROJECTIONS);
+		expect(hashes).toEqual(PINNED_RECOMPUTATION_BACKEND_HASHES);
 	}, 30_000);
 });
