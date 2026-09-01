@@ -350,7 +350,8 @@ describe('straightTest production composition and frozen-off parity', () => {
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
-			'measurement'
+			'measurement',
+			'badgeEvidence.materialize'
 		]);
 
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);

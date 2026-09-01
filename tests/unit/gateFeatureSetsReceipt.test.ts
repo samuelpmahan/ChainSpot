@@ -175,7 +175,8 @@ describe('production gate ABFeatureSet receipts', () => {
 			'supportField',
 			'badgeOcclusionPatch',
 			'rawPairs',
-			'measurement'
+			'measurement',
+			'badgeEvidence.materialize'
 		]);
 		const g7 = compileABFeatureSet(GATE_FEATURE_SETS['g7-set'], { zfit: { enabled: true } });
 		expect(g7.plan.ops.map((operation) => operation.id)).toEqual(['zfit']);

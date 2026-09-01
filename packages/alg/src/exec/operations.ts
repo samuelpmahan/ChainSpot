@@ -612,7 +612,7 @@ const reusedOps: OperationDef[] = [
 			id: 'badgeEvidence.materialize',
 			kind: 'materialize',
 			gate: 'G5',
-			unit: 'measurement',
+			unit: 'badgeEvidence',
 			consumes: ['image', 'viewport', 'paramsHash', 'badgeStage.components', 'measurement'],
 			produces: ['badgeEvidence.library'],
 			note: 'materialize exact Badge B+W, naive AA, residue, and source-field evidence'
@@ -779,7 +779,8 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['baskets', ['baskets']],
 	['tees', teesOps.map((op) => op.spec.id)],
 	['rawPairs', ['rawPairs']],
-	['measurement', ['measurement', 'badgeEvidence.materialize']],
+	['measurement', ['measurement']],
+	['badgeEvidence', ['badgeEvidence.materialize']],
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],

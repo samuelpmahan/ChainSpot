@@ -72,6 +72,7 @@ export function executeCompiledPlan(
 	sink: ExecSink = createNullSink(),
 	runtime: OperationRuntime = DEFAULT_OPERATION_RUNTIME
 ): readonly Receipt[] {
+	if (!board.has('paramsHash')) board.set('paramsHash', plan.paramsHash ?? plan.planFingerprint);
 	const receipts: Receipt[] = [];
 	for (const op of plan.ops) {
 		const impl = runtime.implementations.get(op.id);
@@ -119,6 +120,7 @@ export async function executeCompiledPlanAsync(
 	sink: ExecSink = createNullSink(),
 	runtime: OperationRuntime = DEFAULT_OPERATION_RUNTIME
 ): Promise<readonly Receipt[]> {
+	if (!board.has('paramsHash')) board.set('paramsHash', plan.paramsHash ?? plan.planFingerprint);
 	const receipts: Receipt[] = [];
 	for (const op of plan.ops) {
 		const impl = runtime.implementations.get(op.id);

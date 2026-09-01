@@ -36,7 +36,18 @@ const defaultConfig = parseConfig(
 		readFileSync(resolve('packages/alg/src/detectors/threeFactor/configs/default.json'), 'utf8')
 	)
 );
-const resolvedConfig = resolveConfig(defaultConfig, DEFAULT_EXECUTION);
+const baselineConfig = resolveConfig(defaultConfig, DEFAULT_EXECUTION);
+const measurementIndex = baselineConfig.execution.indexOf('measurement');
+if (measurementIndex < 0) throw new Error('default execution has no measurement unit');
+const resolvedConfig = {
+	...baselineConfig,
+	name: 'badge-evidence-proof',
+	execution: [
+		...baselineConfig.execution.slice(0, measurementIndex + 1),
+		'badgeEvidence',
+		...baselineConfig.execution.slice(measurementIndex + 1)
+	]
+};
 const paramsHash = createHash('sha256').update(canonicalJson(resolvedConfig)).digest('hex');
 const plan = compileExecutionPlan(resolvedConfig, paramsHash);
 const board = createExecBoard();

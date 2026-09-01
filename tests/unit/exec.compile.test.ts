@@ -64,11 +64,11 @@ const straightTestOnResolved = resolveConfig(
 // produce 45a8167e..., i.e. registering posteriorTeeRecovery does not move it.
 // That equality is the property this test exists to defend.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'0a70e60a7302fe7c8f1fe0bc3134817e0545846fbe03130c2e11cf08464f0ef8';
+	'd35b0257ef11cdec7de57670ec75cc1a9b68031bd621f0d8e33d802b9843cf7e';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {
-		expect(UNIT_OPERATIONS.size).toBe(18); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate
+		expect(UNIT_OPERATIONS.size).toBe(19); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate + badgeEvidence
 		// 25 prior + posteriorTeeRecovery, which shares the teeBadgeLock unit
 		// rather than owning one -- so UNIT_OPERATIONS.size is unchanged at 18.
 		expect(OPERATION_UNIVERSE.length).toBe(27);
@@ -85,10 +85,8 @@ describe('operation universe (R2 inventory)', () => {
 			'assignment.ranking',
 			'assignment.selection'
 		]);
-		expect(UNIT_OPERATIONS.get('measurement')).toEqual([
-			'measurement',
-			'badgeEvidence.materialize'
-		]);
+		expect(UNIT_OPERATIONS.get('measurement')).toEqual(['measurement']);
+		expect(UNIT_OPERATIONS.get('badgeEvidence')).toEqual(['badgeEvidence.materialize']);
 		expect(UNIT_OPERATIONS.get('zfit')).toEqual(['zfit']);
 		expect(UNIT_OPERATIONS.get('straightTest')).toEqual(['straightTest']);
 	});
@@ -132,6 +130,7 @@ describe('compileExecutionPlan — C1 ordering', () => {
 		expect(a.planFingerprint).toBe(b.planFingerprint);
 		expect(a.planFingerprint).not.toBe(c.planFingerprint);
 		expect(a.planFingerprint).toMatch(/^[0-9a-f]{64}$/);
+		expect(a.ops.map((operation) => operation.id)).not.toContain('badgeEvidence.materialize');
 	});
 
 	test('an unconfigured resolve-only default-OFF feature cannot perturb the frozen default plan fingerprint', () => {
