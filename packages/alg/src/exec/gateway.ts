@@ -13,7 +13,7 @@
 
 import type { CompiledExecutionPlan } from './compile';
 import type { ExecBoard } from './board';
-import { trackAccess } from './board';
+import { trackAccess, withBoardAccessScope } from './board';
 import type { ExecSink } from './sink';
 import { createNullSink } from './sink';
 import { operationImpls, ARTIFACT_EXTRACTORS } from './operations';
@@ -82,7 +82,7 @@ export function executeCompiledPlan(
 
 		const startedAtMs = now();
 		const { tracked, consumed, produced } = trackAccess(board);
-		const result = impl(tracked, ctx);
+		const result = withBoardAccessScope(board, `${op.gate}:${op.id}`, () => impl(tracked, ctx));
 		if (result instanceof Promise) {
 			throw new Error(
 				`executeCompiledPlan: asynchronous operation '${op.id}' requires executeCompiledPlanAsync.`
@@ -130,7 +130,7 @@ export async function executeCompiledPlanAsync(
 
 		const startedAtMs = now();
 		const { tracked, consumed, produced } = trackAccess(board);
-		await impl(tracked, ctx);
+		await withBoardAccessScope(board, `${op.gate}:${op.id}`, () => impl(tracked, ctx));
 		const durationMs = now() - startedAtMs;
 		const artifacts = (runtime.artifactExtractors?.[op.id]?.(board) ?? []).map((artifact) =>
 			sink.putArtifact(artifact.kind, artifact.id, artifact.bytes, artifact.dims)
