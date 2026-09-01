@@ -13,11 +13,12 @@
 		"storybook": "npm run build --workspace @chainspot/alg && storybook dev -p 6006",
 		"build-storybook": "npm run build --workspace @chainspot/alg && storybook build",
 		"storybook:receipt": "node scripts/storybook-e-receipt.mjs",
-		"test-storybook": "npm run build --workspace @chainspot/alg && vitest run tests/unit/badgeProjection.test.ts",
+		"test-storybook": "npm run build --workspace @chainspot/alg && vitest run tests/unit/badgeProjection.test.ts tests/unit/m1StoryProjection.test.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"test:unit": "vitest run",
 		"test:unit:watch": "vitest",
 		"proof:badge-e": "npm --workspace @chainspot/alg run build && node scripts/badge-evidence-smoke.mjs",
+		"proof:m1": "npm --workspace @chainspot/alg run build && node scripts/badge-evidence-smoke.mjs",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write ."
 	},

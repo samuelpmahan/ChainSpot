@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import jpeg from 'jpeg-js';
 import * as threeFactorNamespace from '@chainspot/alg/detectors/threeFactor';
 import * as badgeEvidenceNamespace from '@chainspot/alg/detectors/threeFactor/badgeEvidence';
+import * as m1RepresentationNamespace from '@chainspot/alg/detectors/threeFactor/m1Representation';
 import * as configNamespace from '@chainspot/alg/detectors/threeFactor/config';
 import * as measureNamespace from '@chainspot/alg/detectors/threeFactor/measure';
 import * as featureTypesNamespace from '@chainspot/alg/detectors/threeFactor/features/types';
@@ -19,6 +20,10 @@ const decodeMaterializedBadgeEvidence = exported(
 	badgeEvidenceNamespace,
 	'decodeMaterializedBadgeEvidence'
 );
+const decodeMaterializedM1Representation = exported(
+	m1RepresentationNamespace,
+	'decodeMaterializedM1Representation'
+);
 const parseConfig = exported(configNamespace, 'parseConfig');
 const resolveConfig = exported(configNamespace, 'resolveConfig');
 const seedBoard = exported(measureNamespace, 'seedBoard');
@@ -33,6 +38,7 @@ function unavailableLibrary(imagePath) {
 		status: 'unavailable',
 		note: `Real E materialization unavailable: ${imagePath} does not exist. Set CHAINSPOT_BADGE_IMAGE or place chainspot-corpus beside ChainSpot.`,
 		source: imagePath,
+		m1: null,
 		specimens: [
 			{
 				id: 'unavailable',
@@ -55,6 +61,30 @@ function unavailableLibrary(imagePath) {
 				]
 			}
 		]
+	};
+}
+
+function asStorybookM1(value, artifact) {
+	return {
+		artifact: { id: artifact.id, sha256: artifact.sha256 },
+		raster: value.raster,
+		components: value.components.map((component) => ({
+			...component,
+			pixels: Array.from(component.pixels)
+		})),
+		relationships: value.relationships,
+		objects: value.objects.map((object) => ({
+			...object,
+			accounting:
+				object.accounting.status === 'known'
+					? {
+							...object.accounting,
+							availablePixels: Array.from(object.accounting.availablePixels),
+							explainedPixels: Array.from(object.accounting.explainedPixels),
+							unexplainedPixels: Array.from(object.accounting.unexplainedPixels)
+						}
+					: object.accounting
+		}))
 	};
 }
 
@@ -152,17 +182,22 @@ export async function materializeBadgeSpecimens() {
 	const receipts = executeCompiledPlan(plan, board, nullFeatureContext, sink);
 	const receipt = receipts.find((candidate) => candidate.opId === 'badgeEvidence.materialize');
 	if (!receipt) throw new Error('E emitted no badgeEvidence.materialize receipt');
-	const specimens = receipt.artifacts.map((artifact) => {
-		if (artifact.kind !== 'badgeEvidence')
-			throw new Error(`${artifact.id}: expected badgeEvidence, got ${artifact.kind}`);
-		const bytes = sink.blobs.get(artifact.id);
-		if (!bytes) throw new Error(`${artifact.id}: E sink lost its artifact bytes`);
-		return asStorybookSpecimen(decodeMaterializedBadgeEvidence(bytes), artifact);
-	});
+	const specimens = receipt.artifacts
+		.filter((artifact) => artifact.kind === 'badgeEvidence')
+		.map((artifact) => {
+			const bytes = sink.blobs.get(artifact.id);
+			if (!bytes) throw new Error(`${artifact.id}: E sink lost its artifact bytes`);
+			return asStorybookSpecimen(decodeMaterializedBadgeEvidence(bytes), artifact);
+		});
+	const m1Artifact = receipt.artifacts.find((artifact) => artifact.kind === 'm1Representation');
+	if (!m1Artifact) throw new Error('E emitted no M1 representation artifact');
+	const m1Bytes = sink.blobs.get(m1Artifact.id);
+	if (!m1Bytes) throw new Error(`${m1Artifact.id}: E sink lost its artifact bytes`);
 	return {
 		status: 'materialized',
 		note: `${specimens.length} badges decoded from content-addressed E artifacts`,
 		source: imagePath,
-		specimens
+		specimens,
+		m1: asStorybookM1(decodeMaterializedM1Representation(m1Bytes), m1Artifact)
 	};
 }

@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Args-driven Storybook M1 projections > renders real Badge/Basket accounting and reverse component consumption from E 1`] = `
+{
+  "badge-0:available": "b25e651fdb3cf423b74fdf87fc67af57d27b3da96bdd4a9c81a5fe28120086dd",
+  "badge-0:components": "bb51da38461ad5b45f40f331ad649350738e87bc4d0b4d26726a7865d09fdddc",
+  "badge-0:unexplained": "739d3d9426a1018692e90c780423f3f6a3517790bf3216d06bcf763b37da5766",
+  "basket-0:relationships": "934881c605d77f39afaeacc335b63fb1eddc267a1cda102cc69037c968e6ab4f",
+  "component.bright.12:consumers": "6c3f9d518b8fa0383e6d9df389739c105f7899d36368414d485cbd4a7c65f010",
+}
+`;
