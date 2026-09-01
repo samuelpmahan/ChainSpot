@@ -165,6 +165,26 @@ for (const object of m1.objects) {
 const unconsumed = m1.components.filter((component) => component.consumers.length === 0);
 if (!unconsumed.length)
 	throw new Error('M1 retained no independently addressable unconsumed primitives');
+if (m1.basketShellFamilies.length !== 1)
+	throw new Error(
+		`expected one exact Basket V1 shell family; got ${m1.basketShellFamilies.length}`
+	);
+const basketShellFamily = m1.basketShellFamilies[0];
+const assembledBasketCount = m1.objects.filter(
+	(object) => object.kind === 'basket' && object.accounting.status === 'known'
+).length;
+if (
+	basketShellFamily.id !== 'family.basket-shell.2.3.2.3' ||
+	JSON.stringify(basketShellFamily.margins) !== JSON.stringify([2, 3, 2, 3]) ||
+	basketShellFamily.relationshipIds.length !== assembledBasketCount ||
+	basketShellFamily.componentIds.length !== assembledBasketCount * 2
+)
+	throw new Error('M1 Basket shell family membership drifted from exact assembled relationships');
+for (const relationshipId of basketShellFamily.relationshipIds) {
+	const member = m1.relationships.find((value) => value.id === relationshipId);
+	if (member?.basketShellFamilyId !== basketShellFamily.id)
+		throw new Error(`${relationshipId}: Basket relationship lost its exact shell family`);
+}
 const assembledBadge = m1.objects.find(
 	(object) => object.kind === 'badge' && object.accounting.status === 'known'
 );
@@ -207,6 +227,7 @@ console.log(
 			objects: m1.objects.length,
 			assembled: m1.objects.filter((object) => object.accounting.status === 'known').length,
 			unknown: m1.objects.filter((object) => object.accounting.status === 'unknown').length,
+			basketShellFamily,
 			badge: summarize(assembledBadge),
 			basket: summarize(assembledBasket),
 			unconsumedExample: {

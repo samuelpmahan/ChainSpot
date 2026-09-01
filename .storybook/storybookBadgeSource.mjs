@@ -73,6 +73,7 @@ function asStorybookM1(value, artifact) {
 			pixels: Array.from(component.pixels)
 		})),
 		relationships: value.relationships,
+		basketShellFamilies: value.basketShellFamilies,
 		objects: value.objects.map((object) => ({
 			...object,
 			accounting:

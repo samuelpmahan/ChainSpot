@@ -58,6 +58,16 @@ export interface M1WorkbenchRelationship {
 	readonly predicate: string;
 	readonly selection: string;
 	readonly margins?: readonly [number, number, number, number];
+	readonly basketShellFamilyId?: string;
+}
+
+export interface M1WorkbenchBasketShellFamily {
+	readonly id: string;
+	readonly kind: 'basket-shell-exact-modal-margins-v1';
+	readonly margins: readonly [number, number, number, number];
+	readonly relationshipIds: readonly string[];
+	readonly componentIds: readonly string[];
+	readonly producedBy: string;
 }
 
 export interface M1WorkbenchObject {
@@ -81,5 +91,6 @@ export interface M1WorkbenchLibrary {
 	readonly raster: { readonly width: number; readonly height: number; readonly topPx: number };
 	readonly components: readonly M1WorkbenchComponent[];
 	readonly relationships: readonly M1WorkbenchRelationship[];
+	readonly basketShellFamilies: readonly M1WorkbenchBasketShellFamily[];
 	readonly objects: readonly M1WorkbenchObject[];
 }

@@ -33,6 +33,7 @@ const receipt = {
 		objects: library.m1.objects.length,
 		assembled: library.m1.objects.filter((object) => object.accounting.status === 'known').length,
 		unknown: library.m1.objects.filter((object) => object.accounting.status === 'unknown').length,
+		basketShellFamilies: library.m1.basketShellFamilies,
 		badge0: {
 			available: m1Badge.accounting.availablePixels.length,
 			explained: m1Badge.accounting.explainedPixels.length,
@@ -64,5 +65,8 @@ console.log(
 );
 console.log(
 	`M1 badge-0 ${receipt.m1.badge0.available}/${receipt.m1.badge0.explained}/${receipt.m1.badge0.unexplained}; basket-0 ${receipt.m1.basket0.available}/${receipt.m1.basket0.explained}/${receipt.m1.basket0.unexplained}`
+);
+console.log(
+	`Basket shell family: ${receipt.m1.basketShellFamilies[0]?.id ?? 'UNKNOWN'} · ${receipt.m1.basketShellFamilies[0]?.relationshipIds.length ?? 0} relationships`
 );
 console.log('machine receipt: artifacts/storybook-e/receipt.json');

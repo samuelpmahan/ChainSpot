@@ -28,6 +28,9 @@
 				})
 			: []
 	);
+	function shellFamily(id: string | undefined) {
+		return id ? library.basketShellFamilies.find((family) => family.id === id) : undefined;
+	}
 
 	$effect(() => {
 		if (!canvas) return;
@@ -90,11 +93,18 @@
 		<h3>Preserved relationships</h3>
 		<ul>
 			{#each relationships as relation}
+				{@const family = shellFamily(relation.basketShellFamilyId)}
 				<li>
 					<code>{relation.containerComponentId}</code>
 					{relation.predicate} <code>{relation.memberComponentId}</code> via {relation.selection}{relation.margins
 						? ` [${relation.margins.join(',')}]`
 						: ''}
+					{#if family}
+						<br /><small
+							><code>{family.id}</code> · {family.relationshipIds.length} relationships · {family
+								.componentIds.length} components</small
+						>
+					{/if}
 				</li>
 			{/each}
 		</ul>

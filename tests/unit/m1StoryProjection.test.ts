@@ -23,6 +23,7 @@ const structuralLibrary: M1WorkbenchLibrary = {
 		}
 	],
 	relationships: [],
+	basketShellFamilies: [],
 	objects: [
 		{
 			id: 'badge-0',
@@ -67,6 +68,16 @@ describe('Args-driven Storybook M1 projections', () => {
 		const m1 = materialized.m1;
 		const badge = m1.objects.find((object) => object.id === 'badge-0');
 		const basket = m1.objects.find((object) => object.id === 'basket-0');
+		expect(m1.basketShellFamilies).toMatchObject([
+			{
+				id: 'family.basket-shell.2.3.2.3',
+				margins: [2, 3, 2, 3],
+				relationshipIds: expect.any(Array),
+				componentIds: expect.any(Array)
+			}
+		]);
+		expect(m1.basketShellFamilies[0]?.relationshipIds).toHaveLength(16);
+		expect(m1.basketShellFamilies[0]?.componentIds).toHaveLength(32);
 		expect(badge?.accounting).toMatchObject({ status: 'known' });
 		expect(basket?.accounting).toMatchObject({ status: 'known' });
 		if (

@@ -162,6 +162,19 @@ describe('E representation M1', () => {
 			'bbox-contains',
 			'modal-shell-encloses'
 		]);
+		expect(m1.basketShellFamilies).toEqual([
+			{
+				id: 'family.basket-shell.1.1.1.1',
+				kind: 'basket-shell-exact-modal-margins-v1',
+				margins: [1, 1, 1, 1],
+				relationshipIds: ['relationship.basket-0.0'],
+				componentIds: ['component.bright.2', 'component.dark.2'],
+				producedBy: 'learnBasketShellFamilyV1'
+			}
+		]);
+		expect(m1.relationships[2]).toMatchObject({
+			basketShellFamilyId: 'family.basket-shell.1.1.1.1'
+		});
 		expect(
 			m1.components.find((component) => component.id === 'component.bright.1')?.consumers
 		).toEqual([{ objectId: 'badge-0', objectKind: 'badge', role: 'outer-bright' }]);

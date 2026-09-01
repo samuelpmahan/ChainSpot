@@ -46,7 +46,18 @@ export interface M1ComponentRelationship {
 	readonly predicate: ComponentAssemblyRelationship['predicate'];
 	readonly selection: ComponentAssemblyRelationship['selection'];
 	readonly margins?: readonly [number, number, number, number];
+	readonly basketShellFamilyId?: string;
 	readonly producedBy: 'component-backed-object-assembly-v1';
+}
+
+/** The one family V1 actually learns: exact modal Basket shell margins. */
+export interface M1BasketShellFamily {
+	readonly id: string;
+	readonly kind: 'basket-shell-exact-modal-margins-v1';
+	readonly margins: readonly [number, number, number, number];
+	readonly relationshipIds: readonly string[];
+	readonly componentIds: readonly string[];
+	readonly producedBy: 'learnBasketShellFamilyV1';
 }
 
 export interface M1KnownAccounting {
@@ -86,6 +97,7 @@ export interface MaterializedM1Representation {
 	readonly raster: { readonly width: number; readonly height: number; readonly topPx: number };
 	readonly components: readonly M1PrimitiveComponent[];
 	readonly relationships: readonly M1ComponentRelationship[];
+	readonly basketShellFamilies: readonly M1BasketShellFamily[];
 	readonly objects: readonly M1ObjectComposition[];
 }
 
@@ -107,6 +119,9 @@ function relationship(
 	index: number,
 	value: ComponentAssemblyRelationship
 ): M1ComponentRelationship {
+	const basketShellFamilyId = value.margins
+		? `family.basket-shell.${value.margins.join('.')}`
+		: undefined;
 	return {
 		id: `relationship.${objectId}.${index}`,
 		objectId,
@@ -115,6 +130,7 @@ function relationship(
 		predicate: value.predicate,
 		selection: value.selection,
 		...(value.margins ? { margins: value.margins } : {}),
+		...(basketShellFamilyId ? { basketShellFamilyId } : {}),
 		producedBy: 'component-backed-object-assembly-v1'
 	};
 }
@@ -229,6 +245,29 @@ export function materializeM1Representation(
 		}
 		return assembledObject(object, assembly, raster, consumers, components, relationships);
 	});
+	const basketShellFamilies = [
+		...new Set(
+			relationships.flatMap((value) =>
+				value.basketShellFamilyId ? [value.basketShellFamilyId] : []
+			)
+		)
+	].map((id): M1BasketShellFamily => {
+		const members = relationships.filter((value) => value.basketShellFamilyId === id);
+		const margins = members[0]?.margins;
+		if (!margins) throw new Error(`${id}: Basket shell family has no exact modal margins`);
+		return {
+			id,
+			kind: 'basket-shell-exact-modal-margins-v1',
+			margins,
+			relationshipIds: members.map((value) => value.id),
+			componentIds: [
+				...new Set(
+					members.flatMap((value) => [value.containerComponentId, value.memberComponentId])
+				)
+			].sort(),
+			producedBy: 'learnBasketShellFamilyV1'
+		};
+	});
 
 	return {
 		schema: M1_REPRESENTATION_SCHEMA,
@@ -239,6 +278,7 @@ export function materializeM1Representation(
 			consumers: [...(consumers.get(component.id) ?? [])]
 		})),
 		relationships,
+		basketShellFamilies,
 		objects
 	};
 }
