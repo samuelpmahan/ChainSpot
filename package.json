@@ -2,7 +2,9 @@
 	"name": "chainspot",
 	"private": true,
 	"version": "0.0.1",
-	"workspaces": ["packages/*"],
+	"workspaces": [
+		"packages/*"
+	],
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -11,6 +13,7 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"test:unit": "vitest run",
 		"test:unit:watch": "vitest",
+		"proof:badge-e": "npm --workspace @chainspot/alg run build && node scripts/badge-evidence-smoke.mjs",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write ."
 	},

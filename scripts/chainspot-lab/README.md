@@ -1,5 +1,17 @@
 # ChainSpot LAB
 
+## Badge materialized-evidence proof
+
+`npm run proof:badge-e` runs the real DashsTrack detector/component path and
+materializes every intact badge through one implementation. It pins badge-0 at
+`2096` B+W-owned pixels, `278` naive AA pixels, and `90` residue pixels, while
+checking disjointness and reconstruction for every materialized badge.
+
+The companion corpus must be checked out as `../chainspot-corpus`, or its root
+must be supplied explicitly as `CHAINSPOT_CORPUS_ROOT=/path/to/chainspot-corpus`.
+The proof reads `dev/DashsTrack/DashsTrack-full.jpg`; it writes no fixtures or
+evidence copies into the repository.
+
 LAB is ChainSpot's embodied CV toolkit. It is tooling around the algorithm, not a second algorithm implementation.
 
 The package lives at `scripts/chainspot-lab` as private npm package `@chainspot/lab`. Repository-root `./lab` and `lab.cmd` launch that same npm/Node dispatcher. No Python control layer is involved.
