@@ -5,6 +5,7 @@
 // the boundary into presentation or algorithm code.
 
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
+import { LoggedExecBoard, resetDataAccessLog } from '@chainspot/alg/exec';
 import { toGrayRaster, type InputAsset } from '@chainspot/alg/g0/inputAsset';
 import { stripChromeProposal, type StripChromeResult } from '@chainspot/alg/g0/stripChrome';
 import { cropRaster } from '@chainspot/alg/raster';
@@ -86,64 +87,97 @@ export function normalizeTruthMatchForInputCount(
 }
 
 export async function canonicalizeInputs(filePaths: readonly string[], truth?: CanonicalTruth): Promise<DecodedInput> {
-	if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
-	const assets = await Promise.all(filePaths.map((path) => decodeNodeFile(path)));
-	if (assets.length > 1 && !sameDimensions(assets)) throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
+	// Temporary build-en-place abuse: G0 predates the detector ExecBoard, so
+	// use the same pass-through board locally and share its process-wide journal
+	// with the real G1-G3 board that follows. This is observation only; every
+	// value returned from pass() is the exact object/value that was supplied.
+	resetDataAccessLog();
+	const e = new LoggedExecBoard();
+	return e.withScope('G0:canonicalizeInputs', async () => {
+		const pass = <T>(slot: string, value: T): T => {
+			e.set(slot, value);
+			return e.get<T>(slot);
+		};
 
-	const gray = assets.map(toGrayRaster);
-	const stripChrome = stripChromeProposal(gray);
-	const croppedGray = stripChrome.insets ? gray.map((raster) => cropRaster(raster, stripChrome.insets!)) : gray;
+		if (filePaths.length === 0) throw new Error('LAB intake requires at least one raster input.');
+		const assets = pass('g0.assets', await Promise.all(filePaths.map((path) => decodeNodeFile(path))));
+		if (assets.length > 1 && !sameDimensions(assets)) throw new Error('LAB intake: AutoStitch requires same-size captures from one device/orientation.');
 
-	let placements: readonly Placement[];
-	let hadFallback = false;
-	if (assets.length === 1) placements = [{ x: 0, y: 0 }];
-	else {
-		const stitched = solvePixelStitch(croppedGray);
-		if (!stitched) throw new Error('LAB intake: AutoStitch failed to produce a placement solution.');
-		placements = stitched.placements;
-		hadFallback = stitched.hadFallback;
-	}
+		const gray = pass('g0.gray', assets.map(toGrayRaster));
+		const stripChrome = pass('g0.stripChrome', stripChromeProposal(gray));
+		const croppedGray = pass(
+			'g0.croppedGray',
+			stripChrome.insets ? gray.map((raster) => cropRaster(raster, stripChrome.insets!)) : gray
+		);
 
-	const composite = await materializeComposite(
-		assets.map((asset, index) => ({ rgba: asset.rgba, widthPx: asset.widthPx, heightPx: asset.heightPx, placement: placements[index] })),
-		stripChrome.insets
-	);
+		let placements: readonly Placement[];
+		let hadFallback = false;
+		if (assets.length === 1) placements = [{ x: 0, y: 0 }];
+		else {
+			const stitched = pass('g0.stitchSolve', solvePixelStitch(croppedGray));
+			if (!stitched) throw new Error('LAB intake: AutoStitch failed to produce a placement solution.');
+			placements = stitched.placements;
+			hadFallback = stitched.hadFallback;
+		}
+		placements = pass('g0.placements', placements);
 
-	const entries: LedgerEntry[] = [];
-	if (stripChrome.insets) entries.push({ kind: 'crop', insets: stripChrome.insets });
-	if (assets.length > 1) for (let index = 0; index < placements.length; index++) entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
-	const ledger = appendEntries(createLedger(), entries);
+		const composite = pass(
+			'g0.composite',
+			await materializeComposite(
+				assets.map((asset, index) => ({ rgba: asset.rgba, widthPx: asset.widthPx, heightPx: asset.heightPx, placement: placements[index] })),
+				stripChrome.insets
+			)
+		);
 
-	const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
-	const truthMatch = normalizeTruthMatchForInputCount(
-		assets.length,
-		truth ? matchTruth(rawShaForTruth, { imageId: composite.imageId, widthPx: composite.widthPx, heightPx: composite.heightPx, ledger }, truth) : null
-	);
-	const left = stripChrome.insets?.left ?? 0;
-	const top = stripChrome.insets?.top ?? 0;
-	const canonicalTruth =
-		assets.length === 1 && truthMatch
-			? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
-			: truthMatch?.level === 'byte' && truthMatch.matchedAgainst === 'canonical'
-				? truth
-				: undefined;
+		const entries: LedgerEntry[] = [];
+		if (stripChrome.insets) entries.push({ kind: 'crop', insets: stripChrome.insets });
+		if (assets.length > 1) for (let index = 0; index < placements.length; index++) entries.push({ kind: 'placement', tileIndex: index, placement: placements[index], source: 'pixel' });
+		const ledger = pass('g0.ledger', appendEntries(createLedger(), entries));
 
-	const report: G0Report = {
-		shimmed: false,
-		filePaths: [...filePaths],
-		rawImageIds: assets.map((asset) => asset.imageId),
-		imageId: composite.imageId,
-		widthPx: composite.widthPx,
-		heightPx: composite.heightPx,
-		sourceByteLength: assets.reduce((sum, asset) => sum + asset.sourceByteLength, 0),
-		stripChrome,
-		autoStitch: { sourceCount: assets.length, hadFallback, placements },
-		ledger,
-		singleSourceOffset: assets.length === 1 ? { xPx: -left, yPx: -top } : undefined,
-		truthMatch
-	};
+		const rawShaForTruth = assets.length === 1 ? assets[0].imageId : '';
+		const truthMatch = pass(
+			'g0.truthMatch',
+			normalizeTruthMatchForInputCount(
+				assets.length,
+				truth ? matchTruth(rawShaForTruth, { imageId: composite.imageId, widthPx: composite.widthPx, heightPx: composite.heightPx, ledger }, truth) : null
+			)
+		);
+		const left = stripChrome.insets?.left ?? 0;
+		const top = stripChrome.insets?.top ?? 0;
+		const canonicalTruth = pass(
+			'g0.canonicalTruth',
+			assets.length === 1 && truthMatch
+				? transformedTruthForSingleSource(truth, composite.imageId, composite.widthPx, composite.heightPx, left, top)
+				: truthMatch?.level === 'byte' && truthMatch.matchedAgainst === 'canonical'
+					? truth
+					: undefined
+		);
 
-	return { report, image: { width: composite.widthPx, height: composite.heightPx, data: composite.rgba }, canonicalTruth };
+		const report = pass<G0Report>('g0.report', {
+			shimmed: false,
+			filePaths: [...filePaths],
+			rawImageIds: assets.map((asset) => asset.imageId),
+			imageId: composite.imageId,
+			widthPx: composite.widthPx,
+			heightPx: composite.heightPx,
+			sourceByteLength: assets.reduce((sum, asset) => sum + asset.sourceByteLength, 0),
+			stripChrome,
+			autoStitch: { sourceCount: assets.length, hadFallback, placements },
+			ledger,
+			singleSourceOffset: assets.length === 1 ? { xPx: -left, yPx: -top } : undefined,
+			truthMatch
+		});
+		const image = pass<RgbaImage>('g0.image', {
+			width: composite.widthPx,
+			height: composite.heightPx,
+			data: composite.rgba
+		});
+		return pass<DecodedInput>('g0.output', {
+			report,
+			image,
+			...(canonicalTruth ? { canonicalTruth } : {})
+		});
+	});
 }
 
 export async function decodeInput(filePath: string, truth?: CanonicalTruth): Promise<DecodedInput> {
