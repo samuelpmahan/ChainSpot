@@ -33,7 +33,7 @@ const membership: Record<string, readonly string[]> = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
-	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
+	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing', 'badgeM2Aa'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
 };
@@ -176,7 +176,8 @@ describe('production gate ABFeatureSet receipts', () => {
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
-			'badgeEvidence.materialize'
+			'badgeEvidence.materialize',
+			'badgeEvidence.m2Aa'
 		]);
 		const g7 = compileABFeatureSet(GATE_FEATURE_SETS['g7-set'], { zfit: { enabled: true } });
 		expect(g7.plan.ops.map((operation) => operation.id)).toEqual(['zfit']);

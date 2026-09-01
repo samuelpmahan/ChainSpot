@@ -71,7 +71,7 @@ describe('operation universe (R2 inventory)', () => {
 		expect(UNIT_OPERATIONS.size).toBe(19); // prior inventory + straightTest + teeMinAreaPose + teeBadgeLock + badgeGlyphTemplate + badgeEvidence
 		// 25 prior + posteriorTeeRecovery, which shares the teeBadgeLock unit
 		// rather than owning one -- so UNIT_OPERATIONS.size is unchanged at 18.
-		expect(OPERATION_UNIVERSE.length).toBe(27);
+		expect(OPERATION_UNIVERSE.length).toBe(28);
 		expect(UNIT_OPERATIONS.get('badgeStage')).toEqual([
 			'badgeStage.masks',
 			'badgeStage.components',
@@ -86,7 +86,10 @@ describe('operation universe (R2 inventory)', () => {
 			'assignment.selection'
 		]);
 		expect(UNIT_OPERATIONS.get('measurement')).toEqual(['measurement']);
-		expect(UNIT_OPERATIONS.get('badgeEvidence')).toEqual(['badgeEvidence.materialize']);
+		expect(UNIT_OPERATIONS.get('badgeEvidence')).toEqual([
+			'badgeEvidence.materialize',
+			'badgeEvidence.m2Aa'
+		]);
 		expect(UNIT_OPERATIONS.get('zfit')).toEqual(['zfit']);
 		expect(UNIT_OPERATIONS.get('straightTest')).toEqual(['straightTest']);
 	});

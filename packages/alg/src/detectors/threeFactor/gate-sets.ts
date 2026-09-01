@@ -17,6 +17,7 @@ import { fourLaneSensorFeature } from './features/st.fourLaneSensor';
 import { straightTestFeature } from './features/st.straightTest';
 import { g5RibbonFeature } from './features/g5.ribbon';
 import { g5RoutingFeature } from './features/g5.routing';
+import { badgeM2AaFeature } from './features/g5.badgeM2Aa';
 import { zfitFeature } from './features/g5.zfit';
 import { sharedHsvFeature } from './features/shared.hsv';
 import { ALL_FEATURES } from './features/registry';
@@ -44,7 +45,7 @@ export const GATE_FEATURE_IDS = {
 	'g2-set': ['sprite', 'cleanBasketFamily'],
 	'g3-set': ['endpoints', 'teeFamily', 'teeMinAreaPose'],
 	'g4-set': ['teeRecovery', 'phantomTee', 'teeBadgeLock', 'posteriorTeeRecovery'],
-	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing'],
+	'g5-set': ['fourLaneSensor', 'straightTest', 'ribbon', 'routing', 'badgeM2Aa'],
 	'g6-set': ['scoring', 'search'],
 	'g7-set': ['zfit']
 } as const satisfies Record<GateFeatureSetId, readonly string[]>;
@@ -60,7 +61,13 @@ const FEATURES: Record<GateFeatureSetId, readonly ABFeature[]> = {
 		teeBadgeLockFeature,
 		posteriorTeeRecoveryFeature
 	],
-	'g5-set': [fourLaneSensorFeature, straightTestFeature, g5RibbonFeature, g5RoutingFeature],
+	'g5-set': [
+		fourLaneSensorFeature,
+		straightTestFeature,
+		g5RibbonFeature,
+		g5RoutingFeature,
+		badgeM2AaFeature
+	],
 	'g6-set': [g4ScoringFeature, g4SearchFeature],
 	'g7-set': [zfitFeature]
 };
@@ -190,7 +197,8 @@ const SEMANTIC_OPERATION_ORDER: Record<GateFeatureSetId, readonly string[]> = {
 		'badgeOcclusionPatch',
 		'rawPairs',
 		'measurement',
-		'badgeEvidence.materialize'
+		'badgeEvidence.materialize',
+		'badgeEvidence.m2Aa'
 	],
 	'g6-set': [
 		'assignment.pairs',

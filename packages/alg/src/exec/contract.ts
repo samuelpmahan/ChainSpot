@@ -58,6 +58,7 @@ export type ArtifactKind =
 	| 'candidateSet'
 	| 'badgeEvidence'
 	| 'm1Representation'
+	| 'm2Representation'
 	| 'polyline'
 	| 'measurementTable';
 

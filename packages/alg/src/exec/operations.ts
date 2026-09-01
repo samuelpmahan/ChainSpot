@@ -71,6 +71,7 @@ import {
 	materializeM1Representation,
 	type MaterializedM1Representation
 } from '../detectors/threeFactor/m1Representation';
+import { badgeM2AaOperation } from '../detectors/threeFactor/features/g5.badgeM2Aa';
 import { sha256HexSync, sha256HexSyncText } from './sha256';
 import {
 	detectBadgeFamily,
@@ -679,6 +680,10 @@ const reusedOps: OperationDef[] = [
 		}
 	},
 	{
+		spec: badgeM2AaOperation.spec,
+		run: badgeM2AaOperation.run
+	},
+	{
 		spec: {
 			id: 'phantomTee',
 			kind: 'decide',
@@ -803,7 +808,7 @@ export const UNIT_OPERATIONS: ReadonlyMap<string, readonly string[]> = new Map([
 	['tees', teesOps.map((op) => op.spec.id)],
 	['rawPairs', ['rawPairs']],
 	['measurement', ['measurement']],
-	['badgeEvidence', ['badgeEvidence.materialize']],
+	['badgeEvidence', ['badgeEvidence.materialize', 'badgeEvidence.m2Aa']],
 	['assignment', assignmentOps.map((op) => op.spec.id)],
 	['zfit', zfitOps.map((op) => op.spec.id)],
 	['phantomTee', ['phantomTee']],
@@ -944,6 +949,9 @@ export const ARTIFACT_EXTRACTORS: Readonly<
 				bytes: encodeMaterializedM1Representation(representation)
 			}
 		];
+	},
+	'badgeEvidence.m2Aa'(board) {
+		return [...(badgeM2AaOperation.extractArtifacts?.(board) ?? [])];
 	},
 	'tees.exclusion'(board) {
 		const tees = board.get<readonly TeeEvidence[]>('tees');

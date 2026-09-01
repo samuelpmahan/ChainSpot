@@ -1,0 +1,25 @@
+{
+	"schema": "threeFactor-config@1",
+	"name": "badge-m2-aa-on",
+	"note": "Default-OFF E representation experiment: materialize the frozen Badge M1 B+W control, retain existing radius-one AA candidates, and count their all-badge canonical overlap. This does not change Badge detection, M1 ownership, or promote AA ownership.",
+	"execution": [
+		"badgeStage",
+		"badges",
+		"baskets",
+		"tees",
+		"teeFamily",
+		"supportField",
+		"badgeOcclusionPatch",
+		"rawPairs",
+		"measurement",
+		"badgeEvidence",
+		"assignment",
+		"teeRecovery",
+		"teeBadgeLock"
+	],
+	"gates": {
+		"G5": {
+		"badgeM2Aa": { "enabled": true }
+		}
+	}
+}
