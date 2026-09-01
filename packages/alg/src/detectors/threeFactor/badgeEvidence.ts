@@ -239,3 +239,12 @@ export function decodeMaterializedBadgeEvidence(bytes: Uint8Array): Materialized
 		throw new Error('badge evidence region payload does not match its declared bbox');
 	return value;
 }
+
+/** Consumer projection: OFF is the stored exact baseline; ON is additive. */
+export function badgeOwnedPixels(
+	specimen: MaterializedBadgeEvidence,
+	includeAa: boolean
+): Uint32Array {
+	if (!includeAa) return specimen.ownedBwPixels;
+	return sorted([...specimen.ownedBwPixels, ...specimen.aaPixels]);
+}

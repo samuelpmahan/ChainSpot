@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	badgeOwnedPixels,
 	decodeMaterializedBadgeEvidence,
 	encodeMaterializedBadgeEvidence,
 	materializeBadgeEvidence
@@ -96,6 +97,8 @@ describe('materialized badge evidence', () => {
 		expect(owned.size + specimen.measurements.residueBefore).toBe(49);
 		expect(owned.size + aa.size + residue.size).toBe(49);
 		expect([...specimen.ownedBwPixels]).toEqual([...assembly.ownedPixels]);
+		expect(badgeOwnedPixels(specimen, false)).toBe(specimen.ownedBwPixels);
+		expect(new Set(badgeOwnedPixels(specimen, true))).toEqual(new Set([...owned, ...aa]));
 		expect(specimen.region.rgba).toHaveLength(49 * 4);
 		expect(specimen.region.brightLabels).toHaveLength(49);
 		const replay = decodeMaterializedBadgeEvidence(encodeMaterializedBadgeEvidence(specimen));
