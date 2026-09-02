@@ -135,6 +135,7 @@ export const THROUGH_CUTOFF_CONTRACTS: Record<SweepThroughGate, ThroughCutoffCon
 			'rawPairs',
 			'measurement',
 			'badgeEvidence.materialize',
+			'badgeEvidence.m2Aa',
 			'assignment.pairs',
 			'assignment.scoring',
 			'assignment.ranking',
