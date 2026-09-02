@@ -20,9 +20,12 @@ if (m1Badge?.accounting.status !== 'known' || m1Basket?.accounting.status !== 'k
 const intakePcr = library.pcrs.find((pcr) => pcr.id === 'intake-pcr');
 const badgePcr = library.pcrs.find((pcr) => pcr.id === 'badge-pcr');
 const basketPcr = library.pcrs.find((pcr) => pcr.id === 'basket-pcr');
-if (!intakePcr || !badgePcr || !basketPcr)
-	throw new Error('Intake/Badge/Basket PCR composition missing');
-for (const pcr of [intakePcr, badgePcr, basketPcr]) {
+const visibleTeePcr = library.pcrs.find((pcr) => pcr.id === 'visible-tee-pcr');
+const teeBasketLineworkPcr = library.pcrs.find((pcr) => pcr.id === 'tee-basket-linework-pcr');
+const teeRecoveryPcr = library.pcrs.find((pcr) => pcr.id === 'tee-recovery-pcr');
+const pcrs = [intakePcr, badgePcr, basketPcr, visibleTeePcr, teeBasketLineworkPcr, teeRecoveryPcr];
+if (pcrs.some((pcr) => !pcr)) throw new Error('Expected S0-through-recovery PCR composition missing');
+for (const pcr of pcrs) {
 	if (!/^[0-9a-f]{64}$/.test(pcr.runResultId))
 		throw new Error(`${pcr.id}: invalid frozen runResultId`);
 	for (const tick of pcr.ticks) {
@@ -33,8 +36,25 @@ for (const pcr of [intakePcr, badgePcr, basketPcr]) {
 	}
 }
 const pcrStories = stories.filter((story) => story.title === 'LAB/PCR/Tick Inspection');
-if (pcrStories.length !== 6)
-	throw new Error(`expected 6 indexed PCR specimens; got ${pcrStories.length}`);
+if (pcrStories.length !== 11)
+	throw new Error(`expected 11 indexed PCR specimens; got ${pcrStories.length}`);
+
+function asPcrReceipt(pcr) {
+	return {
+		runResultId: pcr.runResultId,
+		ticks: pcr.ticks.map((tick) => ({
+			id: tick.operation.id,
+			calculations: tick.testimony.frozenCalculations,
+			inputs: tick.testimony.actualConsumes,
+			writes: tick.testimony.writes,
+			materializations: tick.testimony.artifacts.map((artifact) => ({
+				id: artifact.id,
+				kind: artifact.kind,
+				sha256: artifact.sha256
+			}))
+		}))
+	};
+}
 
 const receipt = {
 	source: library.source,
@@ -43,48 +63,12 @@ const receipt = {
 	composedNotebooks: docs.length,
 	pcr: {
 		indexedSpecimens: pcrStories.length,
-		intake: {
-			runResultId: intakePcr.runResultId,
-			ticks: intakePcr.ticks.map((tick) => ({
-				id: tick.operation.id,
-				calculations: tick.testimony.frozenCalculations,
-				inputs: tick.testimony.actualConsumes,
-				writes: tick.testimony.writes,
-				materializations: tick.testimony.artifacts.map((artifact) => ({
-					id: artifact.id,
-					kind: artifact.kind,
-					sha256: artifact.sha256
-				}))
-			}))
-		},
-		badge: {
-			runResultId: badgePcr.runResultId,
-			ticks: badgePcr.ticks.map((tick) => ({
-				id: tick.operation.id,
-				calculations: tick.testimony.frozenCalculations,
-				inputs: tick.testimony.actualConsumes,
-				writes: tick.testimony.writes,
-				materializations: tick.testimony.artifacts.map((artifact) => ({
-					id: artifact.id,
-					kind: artifact.kind,
-					sha256: artifact.sha256
-				}))
-			}))
-		},
-		basket: {
-			runResultId: basketPcr.runResultId,
-			ticks: basketPcr.ticks.map((tick) => ({
-				id: tick.operation.id,
-				calculations: tick.testimony.frozenCalculations,
-				inputs: tick.testimony.actualConsumes,
-				writes: tick.testimony.writes,
-				materializations: tick.testimony.artifacts.map((artifact) => ({
-					id: artifact.id,
-					kind: artifact.kind,
-					sha256: artifact.sha256
-				}))
-			}))
-		}
+		intake: asPcrReceipt(intakePcr),
+		badge: asPcrReceipt(badgePcr),
+		basket: asPcrReceipt(basketPcr),
+		visibleTee: asPcrReceipt(visibleTeePcr),
+		teeBasketLinework: asPcrReceipt(teeBasketLineworkPcr),
+		teeRecovery: asPcrReceipt(teeRecoveryPcr)
 	},
 	pinnedBadge0: pinned.metrics,
 	m1: {
@@ -121,10 +105,10 @@ console.log(`real specimens: ${receipt.specimens} (live DashsTrack materializati
 console.log(`indexed projections: ${receipt.indexedProjections} (storybook-static/index.json)`);
 console.log(`composed notebooks: ${receipt.composedNotebooks} (storybook-static/index.json)`);
 console.log(
-	`PCR: ${receipt.pcr.indexedSpecimens} indexed specimens; Intake ${receipt.pcr.intake.ticks.length} Tick; Badge ${receipt.pcr.badge.ticks.length} Ticks; Basket ${receipt.pcr.basket.ticks.length} Ticks`
+	`PCR: ${receipt.pcr.indexedSpecimens} indexed specimens; Intake ${receipt.pcr.intake.ticks.length}; Badge ${receipt.pcr.badge.ticks.length}; Basket ${receipt.pcr.basket.ticks.length}; Visible Tee ${receipt.pcr.visibleTee.ticks.length}; TeeBasket Linework ${receipt.pcr.teeBasketLinework.ticks.length}; Tee Recovery ${receipt.pcr.teeRecovery.ticks.length} Ticks`
 );
 console.log(
-	`PCR identities: Intake ${receipt.pcr.intake.runResultId}; Badge ${receipt.pcr.badge.runResultId}; Basket ${receipt.pcr.basket.runResultId}`
+	`PCR identities: Intake ${receipt.pcr.intake.runResultId}; Badge ${receipt.pcr.badge.runResultId}; Basket ${receipt.pcr.basket.runResultId}; Visible Tee ${receipt.pcr.visibleTee.runResultId}; TeeBasket Linework ${receipt.pcr.teeBasketLinework.runResultId}; Tee Recovery ${receipt.pcr.teeRecovery.runResultId}`
 );
 console.log(
 	`badge-0: B+W ${pinned.metrics.ownedBw}; AA +${pinned.metrics.aaAdded}; residue ${pinned.metrics.residueBefore} -> ${pinned.metrics.residueAfter}`

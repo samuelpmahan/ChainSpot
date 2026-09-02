@@ -139,6 +139,20 @@ describe('exec evidence chain 1 — default.json', () => {
 		}
 		const selection = receipts.find((r) => r.opId === 'assignment.selection');
 		expect(selection?.actualProduces).toContain('assignment');
+		expect(selection?.frozenCalculations[0]?.address).toBe(
+			'fn.selectOneToOneTeeBasketAssignments'
+		);
+		const visibleTeeSelection = receipts.find((r) => r.opId === 'tees.exclusion');
+		expect(visibleTeeSelection?.frozenCalculations[0]?.address).toBe(
+			'fn.excludeAndAssembleVisibleTees'
+		);
+		const recovery = receipts.find((r) => r.opId === 'teeRecovery');
+		expect(recovery?.writes).toEqual(
+			expect.arrayContaining([
+				{ address: 'assignment.tees', kind: 'replacement' },
+				{ address: 'assignment.rawPairs', kind: 'replacement' }
+			])
+		);
 	});
 });
 

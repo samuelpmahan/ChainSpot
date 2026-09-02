@@ -329,6 +329,7 @@ const teesOps: OperationDef[] = [
 			unit: 'tees',
 			consumes: ['stage'],
 			produces: ['tees.rawRings'],
+			calculations: ['fn.detectTeeRings'],
 			features: [g3EndpointsFeature.id],
 			note: 'enclosed-hole hollow-glyph ring detection over the bright mask, unfiltered'
 		},
@@ -338,7 +339,8 @@ const teesOps: OperationDef[] = [
 			const endpointsKnobs = ctx.resolve(g3EndpointsFeature).knobs as unknown as EndpointsKnobs;
 			board.set('tees.rawRings', detectTeeRings(stage.brightMask, endpointsKnobs));
 			stop();
-		}
+		},
+		calculationBindings: [{ address: 'fn.detectTeeRings', calculate: detectTeeRings }]
 	},
 	{
 		spec: {
@@ -348,6 +350,7 @@ const teesOps: OperationDef[] = [
 			unit: 'tees',
 			consumes: ['tees.rawRings', 'stage', 'sprites', 'viewport'],
 			produces: ['tees'],
+			calculations: ['fn.excludeAndAssembleVisibleTees'],
 			features: [g4ScoringFeature.id, g3EndpointsFeature.id, g1BadgesFeature.id],
 			note: 'visible hollow-ring candidates only: badge-bbox + screen-chrome exclusion, then sort/assign detIds; shard recovery is separate'
 		},
@@ -382,7 +385,10 @@ const teesOps: OperationDef[] = [
 			}
 			board.set('tees', tees);
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.excludeAndAssembleVisibleTees', calculate: excludeAndAssembleTees }
+		]
 	}
 ];
 
@@ -404,6 +410,7 @@ const assignmentOps: OperationDef[] = [
 			unit: 'assignment',
 			consumes: ['measurement', 'recoveredTees'],
 			produces: ['assignment.tees', 'assignment.rawPairs'],
+			calculations: ['fn.mergeRecoveredTeesAndReuseOrReroutePairs'],
 			features: [g4ScoringFeature.id, g4SearchFeature.id, g5RibbonFeature.id, g5RoutingFeature.id],
 			note: 'merge deduped recovered tees, reroute raw pairs when any were accepted'
 		},
@@ -450,6 +457,7 @@ const assignmentOps: OperationDef[] = [
 			unit: 'assignment',
 			consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
 			produces: ['assignment.scoredPairs'],
+			calculations: ['fn.scoreStraightTeeBasketPairs'],
 			features: [g4ScoringFeature.id],
 			note: 'score every pair on the straight-route evidence; bent-path salvage belongs to G7'
 		},
@@ -467,7 +475,10 @@ const assignmentOps: OperationDef[] = [
 				scoreRawPairs(straightMeasurement, tees, rawPairs, undefined, scoringKnobs)
 			);
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.scoreStraightTeeBasketPairs', calculate: scoreRawPairs }
+		]
 	},
 	{
 		spec: {
@@ -477,6 +488,7 @@ const assignmentOps: OperationDef[] = [
 			unit: 'assignment',
 			consumes: ['assignment.scoredPairs'],
 			produces: ['assignment.rankedByBadge'],
+			calculations: ['fn.rankTeeBasketPairsByBadge'],
 			note: 'rank scored pairs within each badge'
 		},
 		run(board, ctx) {
@@ -484,7 +496,10 @@ const assignmentOps: OperationDef[] = [
 			const scored = board.get<ScoredPairEvidence[]>('assignment.scoredPairs');
 			board.set('assignment.rankedByBadge', rankPairsByBadge(scored));
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.rankTeeBasketPairsByBadge', calculate: rankPairsByBadge }
+		]
 	},
 	{
 		spec: {
@@ -494,6 +509,7 @@ const assignmentOps: OperationDef[] = [
 			unit: 'assignment',
 			consumes: ['assignment.rankedByBadge', 'measurement', 'assignment.tees'],
 			produces: ['assignment'],
+			calculations: ['fn.selectOneToOneTeeBasketAssignments'],
 			features: [g4SearchFeature.id],
 			note: 'global one-to-one ownership search, then materialize the ThreeFactorAssignment'
 		},
@@ -529,7 +545,10 @@ const assignmentOps: OperationDef[] = [
 			for (const own of result.assignments) ctx.measure('assignment', 'score', own.score);
 			board.set('assignment', result);
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.selectOneToOneTeeBasketAssignments', calculate: selectAssignments }
+		]
 	}
 ];
 
@@ -737,7 +756,8 @@ const reusedOps: OperationDef[] = [
 	},
 	{
 		spec: teeBadgeLockOperation.spec,
-		run: teeBadgeLockOperation.run
+		run: teeBadgeLockOperation.run,
+		calculationBindings: teeBadgeLockOperation.calculationBindings
 	},
 	{
 		spec: posteriorTeeRecoveryOperation.spec,
@@ -751,10 +771,14 @@ const reusedOps: OperationDef[] = [
 			unit: 'teeFamily',
 			consumes: teeFamilyUnit.consumes,
 			produces: teeFamilyUnit.produces,
+			calculations: ['fn.selectVisibleTeeFamily'],
 			features: [teeFamilyFeature.id],
 			note: teeFamilyUnit.note
 		},
-		run: (board, ctx) => teeFamilyUnit.run(asLegacyBoard(board), ctx)
+		run: (board, ctx) => teeFamilyUnit.run(asLegacyBoard(board), ctx),
+		calculationBindings: [
+			{ address: 'fn.selectVisibleTeeFamily', calculate: teeFamilyUnit.run }
+		]
 	},
 	{
 		spec: {
@@ -777,6 +801,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'teeRecovery',
 			consumes: teeRecoveryUnit.consumes,
 			produces: [...teeRecoveryUnit.produces, 'assignment.tees', 'assignment.rawPairs'],
+			calculations: ['fn.recoverTeeShardsAndRepublishAssignment'],
 			features: [teeRecoveryFeature.id],
 			note: teeRecoveryUnit.note
 		},

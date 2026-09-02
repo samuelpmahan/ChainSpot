@@ -80,7 +80,7 @@
 			{:else if pcr.id === 'intake-pcr'}
 				<p>The canonical RGBA Materialization is frozen in the selected Tick testimony above. This projection performs no decode, normalization, or detector work.</p>
 			{:else}
-				<p>Materialization UNKNOWN: {badgeSpecimenLibrary.note}</p>
+				<p>No molecule-specific pixel projection exists for this checkpoint. Its exact PxC addresses and any content-addressed Materializations remain visible in the Tick testimony above; residue stays UNKNOWN.</p>
 			{/if}
 		</section>
 	</main>

@@ -68,7 +68,7 @@ const straightTestOnResolved = resolveConfig(
 // plan identity must move because its previously-anonymous math is now part
 // of the fingerprint universe.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'009f8e3bb472206cefa42db99b6aeb819d128d2a7093e3abf4424470f49437c7';
+	'bd5d04229fefc6dfecd67142c036f694b0a696729b19afcc54e4f16eecad52a0';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

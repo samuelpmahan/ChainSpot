@@ -217,6 +217,42 @@ export async function materializeBadgeSpecimens() {
 		plan,
 		receipts
 	);
+	const visibleTeePcr = composePcr(
+		{
+			id: 'visible-tee-pcr',
+			title: 'Visible Tee PCR',
+			tickIds: ['tees.ringMeasure', 'tees.exclusion', 'teeFamily']
+		},
+		plan,
+		receipts
+	);
+	const teeBasketLineworkPcr = composePcr(
+		{
+			id: 'tee-basket-linework-pcr',
+			title: 'TeeBasket Linework PCR',
+			tickIds: [
+				'supportField',
+				'badgeOcclusionPatch',
+				'rawPairs',
+				'measurement',
+				'assignment.pairs',
+				'assignment.scoring',
+				'assignment.ranking',
+				'assignment.selection'
+			]
+		},
+		plan,
+		receipts
+	);
+	const teeRecoveryPcr = composePcr(
+		{
+			id: 'tee-recovery-pcr',
+			title: 'Tee Recovery PCR',
+			tickIds: ['teeRecovery', 'teeBadgeLock']
+		},
+		plan,
+		receipts
+	);
 	const receipt = receipts.find((candidate) => candidate.opId === 'badgeEvidence.materialize');
 	if (!receipt) throw new Error('E emitted no badgeEvidence.materialize receipt');
 	const specimens = receipt.artifacts
@@ -234,7 +270,14 @@ export async function materializeBadgeSpecimens() {
 		status: 'materialized',
 		note: `${specimens.length} badges decoded from content-addressed E artifacts`,
 		source: imagePath,
-		pcrs: [intakePcr, badgePcr, basketPcr],
+		pcrs: [
+			intakePcr,
+			badgePcr,
+			basketPcr,
+			visibleTeePcr,
+			teeBasketLineworkPcr,
+			teeRecoveryPcr
+		],
 		specimens,
 		m1: asStorybookM1(decodeMaterializedM1Representation(m1Bytes), m1Artifact)
 	};

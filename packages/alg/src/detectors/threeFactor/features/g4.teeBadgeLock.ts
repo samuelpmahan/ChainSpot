@@ -424,6 +424,7 @@ export const teeBadgeLockOperation: ABFeatureOperation = {
 		unit: 'teeBadgeLock',
 		consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs'],
 		produces: ['teeBadgeLock'],
+		calculations: ['fn.lockTeeBadgePairsFromReversedRoutes'],
 		features: ['teeBadgeLock', 'scoring'],
 		note: 'maximum-weight independent tee↔badge matching over exact reversed routed testimony; no basket evidence is read'
 	},
@@ -435,5 +436,8 @@ export const teeBadgeLockOperation: ABFeatureOperation = {
 		// prove OFF custody rather than hiding a missing dependency.
 		executeTeeBadgeLock(board, ctx, measurement, tees, rawPairs);
 	},
+	calculationBindings: [
+		{ address: 'fn.lockTeeBadgePairsFromReversedRoutes', calculate: executeTeeBadgeLock }
+	],
 	extractArtifacts: measurementTable
 };
