@@ -930,6 +930,22 @@
 								}
 							}
 						},
+						"badgeM2Aa": {
+							"type": "object",
+							"additionalProperties": false,
+							"description": "Default-OFF Badge raw expanded-frame probe: direct source RGBA recurrence beyond the old bbox±1 crop, exact glyph-only masking, deterministic circular-shift control, and post-discovery M1/AA/residue/exterior partitioning. Only adequate, exact 18/18, control-significant pixels may become M2-owned.",
+							"properties": {
+								"enabled": {
+									"type": "boolean",
+									"default": false
+								},
+								"knobs": {
+									"type": "object",
+									"additionalProperties": false,
+									"properties": {}
+								}
+							}
+						},
 						"fourLaneSensor": {
 							"type": "object",
 							"additionalProperties": false,
