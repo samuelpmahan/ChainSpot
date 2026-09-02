@@ -1,10 +1,19 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { PNG } from 'pngjs';
 import { createExecBoard } from '@chainspot/alg/exec';
+import type { ArtifactRef } from '@chainspot/alg/exec';
 import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
 import type {
 	BasketEvidence,
@@ -18,6 +27,7 @@ import {
 	runSweepOperation,
 	slicePlanThroughGate
 } from '../../scripts/chainspot-lab/sweep/operation';
+import { renderArtifact } from '../../scripts/chainspot-lab/sweep/artifactIo';
 import type { G0Report } from '../../scripts/chainspot-lab/sweep/inputShim';
 import {
 	canonicalizeInputs,
@@ -362,6 +372,55 @@ describe('LAB sweep receipt seam', () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	}, 15_000);
+
+	test('a mask artifact with no dims reports a truthful stub status, not "rendered"', () => {
+		// A renderer being REGISTERED for 'mask' is not the same fact as it
+		// having rendered a picture -- mask.ts declines to rasterize and falls
+		// back to a text-only diagnostic receipt when RendererInput.dims is
+		// unavailable (the GAP note in rendererContract.ts). This reproduces
+		// exactly that path directly against renderArtifact(), independent of
+		// whether any real course happens to hit it today (DashsTrack's masks
+		// currently always carry dims -- see the sweep receipt's VISUAL
+		// RENDERS table).
+		const root = mkdtempSync(join(tmpdir(), 'lab-sweep-mask-nodims-'));
+		try {
+			const outDir = join(root, 'out');
+			const bytesDir = join(outDir, 'artifacts', 'mask');
+			mkdirSync(bytesDir, { recursive: true });
+			// mask.data alone, 0/1 per pixel, exactly what maskBytes() writes --
+			// no width/height, same as any real sink output for this kind.
+			const maskBytes = Uint8Array.from([0, 1, 1, 0, 1, 0, 1, 1]);
+			writeFileSync(join(bytesDir, 'synthetic.mask.bin'), maskBytes);
+
+			const artifactRef: ArtifactRef = {
+				id: 'synthetic.mask',
+				kind: 'mask',
+				sha256: 'deadbeef',
+				uri: `file://${join(bytesDir, 'synthetic.mask.bin')}`
+				// dims intentionally omitted: the producing extractor/sink did
+				// not populate ArtifactRef.dims for this artifact.
+			};
+
+			const result = renderArtifact(outDir, 'synthetic.op', 'G1', artifactRef);
+
+			expect(result.rendered).toBe(false);
+			expect(result.summary).toContain('stub only');
+			// mask.ts still writes a diagnostic receipt (dims or not) -- one
+			// real file on disk -- but it is text, not a picture, so `rendered`
+			// must say false regardless of a file existing.
+			expect(result.filesWritten).toHaveLength(1);
+			expect(result.filesWritten[0]).toMatch(/\.receipt\.txt$/);
+			expect(existsSync(result.filesWritten[0])).toBe(true);
+			const receiptText = readFileSync(result.filesWritten[0], 'utf8');
+			expect(receiptText).toContain('Declined to rasterize');
+			// No PNG was ever written -- only the text receipt.
+			expect(readdirSync(join(outDir, 'renders', 'mask'))).toEqual([
+				'mask.synthetic.op.synthetic.mask.receipt.txt'
+			]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 
 	test('smart G2 promotes a course-sized renderer family instead of sliding-window echoes', async () => {
 		const result = await runSweepOperation({

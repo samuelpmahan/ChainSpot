@@ -95,7 +95,10 @@ export const renderMeasurementTable: RendererFn = (input): RendererOutput => {
 			`UNKNOWN: measurementTable payload did not parse as JSON.\n` +
 			`${bytes.byteLength} raw byte(s) written alongside this file.\n`;
 		writeFileSync(path, text);
-		return { filesWritten: [path], summary: 'UNPARSEABLE payload -- text note written' };
+		// The kind's real product is the parsed producer table; this is a
+		// text-only stub note standing in for it, same family as mask's
+		// dims-unavailable fallback -- so this call did not render.
+		return { filesWritten: [path], summary: 'UNPARSEABLE payload -- text note written', rendered: false };
 	}
 
 	const lines = sections(parsed);
@@ -108,6 +111,7 @@ export const renderMeasurementTable: RendererFn = (input): RendererOutput => {
 		filesWritten: [path],
 		summary: isUniformObjectArray(parsed)
 			? `${rowCount} row${rowCount === 1 ? '' : 's'} -> text table`
-			: `${rowCount} table section${rowCount === 1 ? '' : 's'} -> text report`
+			: `${rowCount} table section${rowCount === 1 ? '' : 's'} -> text report`,
+		rendered: true
 	};
 };

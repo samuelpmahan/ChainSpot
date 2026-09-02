@@ -71,7 +71,13 @@ export function renderArtifact(
 		});
 		return {
 			artifactRef,
-			rendered: true,
+			// A registered renderer running is not the same fact as it having
+			// rendered anything -- a renderer can decline (mask with no/mismatched
+			// dims; measurementTable with unparseable JSON) and fall back to a
+			// text-only stub note of its own. Testimony comes from the renderer's
+			// own truthful `rendered` flag (rendererContract.ts), never from
+			// "was RENDERERS[kind] set".
+			rendered: output.rendered,
 			summary: output.summary,
 			filesWritten: output.filesWritten
 		};

@@ -120,8 +120,8 @@ export const renderMask: RendererFn = (input) => {
 	} else {
 		dimsLine =
 			'unavailable (RendererInput.dims was undefined -- see rendererContract.ts GAP note; ' +
-			'artifactIo.ts currently hardcodes `dims: undefined` for every artifact, so this is the ' +
-			'expected path for every mask today, not a per-run failure)';
+			'artifactIo.ts forwards artifactRef.dims verbatim, so this means the producing extractor/sink ' +
+			'did not populate ArtifactRef.dims for this particular artifact, not a blanket artifactIo.ts limitation)';
 		matchLine = `cannot compute width*height -- dims unavailable (byte length alone: ${withCommas(totalBytes)})`;
 		rasterNote = 'Declined to rasterize: no dimensions available, and LAB never guesses shape from byte length alone.';
 	}
@@ -180,7 +180,13 @@ export const renderMask: RendererFn = (input) => {
 			: `dims/byte-length MISMATCH (${dims.width}x${dims.height} vs ${totalBytes} bytes) -- stub only, see receipt`
 		: `dims unavailable -- stub only; ${withCommas(onCount)}/${withCommas(totalBytes)} bytes are value 1 (${onPct ?? 'N/A'}%)`;
 
-	const output: RendererOutput = { filesWritten, summary };
+	// Testimony: this renderer's primary product is the rasterized PNG. A
+	// text receipt always gets written (diagnostics are useful either way),
+	// but `rendered` must say whether the picture actually happened -- true
+	// only when dims were present, matched the byte length, and a PNG was
+	// written; false for the "dims unavailable" and "dims mismatch" stub
+	// paths, which write a receipt but no picture.
+	const output: RendererOutput = { filesWritten, summary, rendered: pngPath !== undefined };
 	return output;
 };
 

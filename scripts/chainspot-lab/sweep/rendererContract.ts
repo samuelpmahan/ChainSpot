@@ -138,6 +138,16 @@ export interface RendererOutput {
 	 * ref, e.g. "512x512 PNG" or "18 components -> SVG + text table" or
 	 * "dims unknown — stub only (see rendererContract.ts GAP note)". */
 	readonly summary: string;
+	/** Testimony, not bookkeeping: true only when this call produced the
+	 * kind's primary product (mask's rasterized PNG; measurementTable's
+	 * actual table from parsed JSON) rather than falling back to a text-only
+	 * stub note (mask with unavailable/mismatched dims; measurementTable
+	 * whose payload didn't parse). artifactIo.ts's renderArtifact() reports
+	 * this verbatim as the artifact's 'rendered'/'stub' receipt status — a
+	 * renderer being REGISTERED for a kind is not the same fact as this call
+	 * having RENDERED anything, and the receipt must say which happened.
+	 * Every renderer added to RENDERERS must set this truthfully. */
+	readonly rendered: boolean;
 }
 
 export type RendererFn = (input: RendererInput) => RendererOutput;
