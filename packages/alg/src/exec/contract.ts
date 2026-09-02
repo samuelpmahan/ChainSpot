@@ -41,11 +41,31 @@ export interface OperationSpec {
 	readonly unit: string;
 	readonly consumes: readonly SlotRef[];
 	readonly produces: readonly SlotRef[];
+	/**
+	 * The real named calculations bound behind this inspection boundary.
+	 * These are descriptive fn.* addresses, not another execution registry:
+	 * OperationRuntime remains the sole authority that binds and runs them.
+	 */
+	readonly calculations?: readonly `fn.${string}`[];
 	/** ABFeature ids this operation reads enabled/knobs from, if any */
 	readonly features?: readonly string[];
 	/** knob names (within `features`) this operation's behavior is sensitive to — receipts/debugging only */
 	readonly knobBindings?: readonly string[];
 	readonly note?: string;
+}
+
+/** One executable calculation frozen at the moment a Tick ran. */
+export interface FrozenCalculation {
+	/** Stable, human-readable address for the real calculation. */
+	readonly address: `fn.${string}`;
+	/** SHA-256 of the bound executable function body in this runtime build. */
+	readonly implementationHash: string;
+}
+
+/** How one PxC address changed while a Tick ran. */
+export interface PxWriteTestimony {
+	readonly address: SlotRef;
+	readonly kind: 'new-address' | 'refinement' | 'replacement';
 }
 
 /** Kinds of artifacts an operation may hand to the sink. */
@@ -101,15 +121,26 @@ export interface Probe {
  */
 export interface Receipt {
 	readonly opId: string;
+	/** The fn.* calculations the production gateway actually bound for this Tick. */
+	readonly frozenCalculations: readonly FrozenCalculation[];
 	readonly startedAtMs: number;
 	readonly durationMs: number;
 	readonly declaredConsumes: readonly SlotRef[];
 	readonly declaredProduces: readonly SlotRef[];
 	readonly actualConsumes: readonly SlotRef[];
 	readonly actualProduces: readonly SlotRef[];
+	/** Collision-visible PxC writes; replacements are never hidden as ordinary output. */
+	readonly writes: readonly PxWriteTestimony[];
 	readonly probes: readonly Probe[];
 	readonly artifacts: readonly ArtifactRef[];
 }
+
+/**
+ * A Tick is the existing gateway Receipt understood as inspection testimony:
+ * exact addresses in, frozen calculations, exact addresses out.  It adds no
+ * execution authority and deliberately has no run() method.
+ */
+export type TickTestimony = Receipt;
 
 /**
  * Placeholder import point for the canonical input type (resolved config +

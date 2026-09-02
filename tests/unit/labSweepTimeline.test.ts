@@ -24,12 +24,14 @@ function plan(...ops: OperationSpec[]): CompiledExecutionPlan {
 function receipt(opId: string, durationMs = 1): Receipt {
 	return {
 		opId,
+		frozenCalculations: [],
 		startedAtMs: 0,
 		durationMs,
 		declaredConsumes: [],
 		declaredProduces: [],
 		actualConsumes: [],
 		actualProduces: [],
+		writes: [],
 		probes: [],
 		artifacts: []
 	};

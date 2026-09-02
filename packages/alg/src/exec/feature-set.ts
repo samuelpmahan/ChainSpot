@@ -10,6 +10,7 @@ import { validateOperationOrder, type CompiledExecutionPlan } from './compile';
 import type { OperationSpec, Receipt, SlotRef } from './contract';
 import {
 	executeCompiledPlanAsync,
+	type CalculationBinding,
 	type OperationArtifact,
 	type OperationImpl,
 	type OperationRuntime
@@ -21,6 +22,8 @@ import { createMemorySink } from './sink';
 export interface ABFeatureOperation {
 	readonly spec: OperationSpec;
 	readonly run: OperationImpl;
+	/** Runtime bodies corresponding exactly to spec.calculations, for frozen fn.* testimony. */
+	readonly calculationBindings?: readonly CalculationBinding[];
 	readonly extractArtifacts?: (board: ExecBoard) => readonly OperationArtifact[];
 }
 
@@ -140,6 +143,7 @@ export function compileABFeatureSet(
 	const operationIds = new Set<string>();
 	const ops: OperationSpec[] = [];
 	const implementations = new Map<string, OperationImpl>();
+	const calculationBindings = new Map<string, readonly CalculationBinding[]>();
 	const artifactExtractors: Record<string, (board: ExecBoard) => readonly OperationArtifact[]> = {};
 	const bindings: Record<string, ResolvedFeature> = {};
 	const enabledFeatureIds: string[] = [];
@@ -239,6 +243,8 @@ export function compileABFeatureSet(
 			operationIds.add(operation.spec.id);
 			ops.push(operation.spec);
 			implementations.set(operation.spec.id, operation.run);
+			if (operation.calculationBindings)
+				calculationBindings.set(operation.spec.id, operation.calculationBindings);
 			if (operation.extractArtifacts)
 				artifactExtractors[operation.spec.id] = operation.extractArtifacts;
 		}
@@ -256,6 +262,8 @@ export function compileABFeatureSet(
 		operationIds.add(operation.spec.id);
 		ops.push(operation.spec);
 		implementations.set(operation.spec.id, operation.run);
+		if (operation.calculationBindings)
+			calculationBindings.set(operation.spec.id, operation.calculationBindings);
 		if (operation.extractArtifacts)
 			artifactExtractors[operation.spec.id] = operation.extractArtifacts;
 	}
@@ -298,7 +306,7 @@ export function compileABFeatureSet(
 	return {
 		definition,
 		plan,
-		runtime: { implementations, artifactExtractors },
+		runtime: { implementations, calculationBindings, artifactExtractors },
 		enabledFeatureIds,
 		ownedServiceIds: [...serviceIds]
 	};

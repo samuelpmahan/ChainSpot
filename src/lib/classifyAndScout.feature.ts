@@ -24,8 +24,12 @@ export const classifyAndScoutFeature = {
 				unit: CLASSIFY_AND_SCOUT_FEATURE_ID,
 				consumes: ['thumbnail', 'classifyAndScout.options'],
 				produces: ['classifyAndScout.trace', 'classifyAndScout.evidence'],
+				calculations: ['fn.produceClassifyAndScouts'],
 				features: [CLASSIFY_AND_SCOUT_FEATURE_ID]
 			},
+			calculationBindings: [
+				{ address: 'fn.produceClassifyAndScouts', calculate: produceClassifyAndScouts }
+			],
 			async run(board) {
 				const traces = board.get<readonly ScoutThumbnailTrace[]>('thumbnail');
 				const options = board.get<ClassifyAndScoutOptions>('classifyAndScout.options');

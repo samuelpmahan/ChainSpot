@@ -63,8 +63,12 @@ const straightTestOnResolved = resolveConfig(
 // by compiling default.json on BOTH baseline/dev6-106 and this branch: both
 // produce 45a8167e..., i.e. registering posteriorTeeRecovery does not move it.
 // That equality is the property this test exists to defend.
+// 2026-09-02: PxC freezes the real fn.* calculation address beside each
+// operation. The schedule and detector configuration are unchanged, but the
+// plan identity must move because its previously-anonymous math is now part
+// of the fingerprint universe.
 const FROZEN_DEFAULT_PLAN_FINGERPRINT =
-	'd35b0257ef11cdec7de57670ec75cc1a9b68031bd621f0d8e33d802b9843cf7e';
+	'009f8e3bb472206cefa42db99b6aeb819d128d2a7093e3abf4424470f49437c7';
 
 describe('operation universe (R2 inventory)', () => {
 	test('every unit decomposes into at least one operation, three units decompose further', () => {

@@ -60,9 +60,13 @@ export function createScoutThumbnailsFeature(
 					unit: 'scout-thumbnails',
 					consumes: ['capturedSources', 'scoutThumbnail.options'],
 					produces: ['thumbnail', 'scoutThumbnail.evidence'],
+					calculations: ['fn.produceScoutThumbnails'],
 					features: ['scout-thumbnails'],
 					note: 'Await the reviewed thumbnail producer, then derive matching CLItext and VisualRender from its traces.'
 				},
+				calculationBindings: [
+					{ address: 'fn.produceScoutThumbnails', calculate: produce }
+				],
 				async run(board) {
 					const sources = board.get<readonly CapturedSource[]>('capturedSources');
 					const options = board.get<ScoutThumbnailOptions>('scoutThumbnail.options');

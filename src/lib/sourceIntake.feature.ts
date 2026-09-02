@@ -58,9 +58,13 @@ export function createCaptureSourceFilesFeature(
 					unit: 'capture-source-files',
 					consumes: ['selectedFiles'],
 					produces: ['capturedSources', 'captureSourceReceipt'],
+					calculations: ['fn.captureSelectedSources'],
 					features: ['capture-source-files'],
 					note: 'Await the existing raw-byte source capture; successful sources and rejected entries share one receipt.'
 				},
+				calculationBindings: [
+					{ address: 'fn.captureSelectedSources', calculate: capture }
+				],
 				async run(board) {
 					const selection = board.get<Iterable<File> | null>('selectedFiles');
 					const receipt = await capture(selection);

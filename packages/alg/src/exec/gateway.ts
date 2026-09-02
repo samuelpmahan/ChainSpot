@@ -16,11 +16,22 @@ import type { ExecBoard } from './board';
 import { trackAccess } from './board';
 import type { ExecSink } from './sink';
 import { createNullSink } from './sink';
-import { operationImpls, ARTIFACT_EXTRACTORS } from './operations';
-import type { Probe, Receipt } from './contract';
+import {
+	operationImpls,
+	operationCalculationBindings,
+	ARTIFACT_EXTRACTORS
+} from './operations';
+import type { FrozenCalculation, OperationSpec, Probe, Receipt } from './contract';
 import type { FeatureContext } from '../detectors/threeFactor/features/types';
+import { sha256HexSyncText } from './sha256';
 
 export type OperationImpl = (board: ExecBoard, ctx: FeatureContext) => void | Promise<void>;
+
+/** Runtime-only binding. Receipts retain its fn.* address and body hash, never the function. */
+export interface CalculationBinding {
+	readonly address: `fn.${string}`;
+	readonly calculate: (...args: never[]) => unknown;
+}
 
 export interface OperationArtifact {
 	readonly kind: Parameters<ExecSink['putArtifact']>[0];
@@ -31,6 +42,7 @@ export interface OperationArtifact {
 
 export interface OperationRuntime {
 	readonly implementations: ReadonlyMap<string, OperationImpl>;
+	readonly calculationBindings?: ReadonlyMap<string, readonly CalculationBinding[]>;
 	readonly artifactExtractors?: Readonly<
 		Record<string, (board: ExecBoard) => readonly OperationArtifact[]>
 	>;
@@ -38,11 +50,36 @@ export interface OperationRuntime {
 
 const DEFAULT_OPERATION_RUNTIME: OperationRuntime = {
 	implementations: operationImpls,
+	calculationBindings: operationCalculationBindings,
 	artifactExtractors: ARTIFACT_EXTRACTORS
 };
 
 function now(): number {
 	return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function freezeCalculations(
+	op: OperationSpec,
+	impl: OperationImpl,
+	runtime: OperationRuntime
+): readonly FrozenCalculation[] {
+	const declared = op.calculations ?? [`fn.${op.id}` as const];
+	const bindings =
+		runtime.calculationBindings?.get(op.id) ??
+		declared.map((address) => ({ address, calculate: impl }));
+	if (
+		bindings.length !== declared.length ||
+		bindings.some((binding, index) => binding.address !== declared[index])
+	) {
+		throw new Error(
+			`executeCompiledPlan: Tick '${op.id}' calculation bindings disagree with its declared fn.* addresses. ` +
+				`declared=[${declared.join(', ')}] bound=[${bindings.map((binding) => binding.address).join(', ')}]`
+		);
+	}
+	return bindings.map((binding) => ({
+		address: binding.address,
+		implementationHash: sha256HexSyncText(Function.prototype.toString.call(binding.calculate))
+	}));
 }
 
 /**
@@ -82,7 +119,8 @@ export function executeCompiledPlan(
 			);
 
 		const startedAtMs = now();
-		const { tracked, consumed, produced } = trackAccess(board);
+		const frozenCalculations = freezeCalculations(op, impl, runtime);
+		const { tracked, consumed, produced, writes } = trackAccess(board, op);
 		const result = impl(tracked, ctx);
 		if (result instanceof Promise) {
 			throw new Error(
@@ -97,12 +135,14 @@ export function executeCompiledPlan(
 
 		const receipt: Receipt = {
 			opId: op.id,
+			frozenCalculations,
 			startedAtMs,
 			durationMs,
 			declaredConsumes: op.consumes,
 			declaredProduces: op.produces,
 			actualConsumes: [...consumed],
 			actualProduces: [...produced],
+			writes,
 			probes: shapeProbes(board, produced),
 			artifacts
 		};
@@ -131,7 +171,8 @@ export async function executeCompiledPlanAsync(
 		}
 
 		const startedAtMs = now();
-		const { tracked, consumed, produced } = trackAccess(board);
+		const frozenCalculations = freezeCalculations(op, impl, runtime);
+		const { tracked, consumed, produced, writes } = trackAccess(board, op);
 		await impl(tracked, ctx);
 		const durationMs = now() - startedAtMs;
 		const artifacts = (runtime.artifactExtractors?.[op.id]?.(board) ?? []).map((artifact) =>
@@ -139,12 +180,14 @@ export async function executeCompiledPlanAsync(
 		);
 		const receipt: Receipt = {
 			opId: op.id,
+			frozenCalculations,
 			startedAtMs,
 			durationMs,
 			declaredConsumes: op.consumes,
 			declaredProduces: op.produces,
 			actualConsumes: [...consumed],
 			actualProduces: [...produced],
+			writes,
 			probes: shapeProbes(board, produced),
 			artifacts
 		};

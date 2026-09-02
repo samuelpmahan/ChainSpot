@@ -17,7 +17,7 @@
 
 import type { OperationKind, OperationSpec, ArtifactKind } from './contract';
 import type { ExecBoard } from './board';
-import type { OperationImpl } from './gateway';
+import type { CalculationBinding, OperationImpl } from './gateway';
 import type {
 	EngineUnit,
 	EvidenceBoard,
@@ -130,6 +130,7 @@ function legacyUnit(id: string): EngineUnit {
 interface OperationDef {
 	readonly spec: OperationSpec;
 	readonly run: OperationImpl;
+	readonly calculationBindings?: readonly CalculationBinding[];
 }
 
 function wrapLegacy(
@@ -137,7 +138,8 @@ function wrapLegacy(
 	kind: OperationKind,
 	gate: string,
 	features?: readonly string[],
-	note?: string
+	note?: string,
+	calculationAddress: `fn.${string}` = `fn.${id}`
 ): OperationDef {
 	const unit = legacyUnit(id);
 	return {
@@ -148,10 +150,12 @@ function wrapLegacy(
 			unit: id,
 			consumes: unit.consumes,
 			produces: unit.produces,
+			calculations: [calculationAddress],
 			...(features ? { features } : {}),
 			...(note ? { note } : {})
 		},
-		run: (board, ctx) => unit.run(asLegacyBoard(board), ctx)
+		run: (board, ctx) => unit.run(asLegacyBoard(board), ctx),
+		calculationBindings: [{ address: calculationAddress, calculate: unit.run }]
 	};
 }
 
@@ -179,6 +183,7 @@ const badgeStageOps: OperationDef[] = [
 			unit: 'badgeStage',
 			consumes: ['localImage'],
 			produces: ['badgeStage.masks'],
+			calculations: ['fn.computeBrightDarkMasks'],
 			features: [sharedHsvFeature.id],
 			note: 'HSV bright/dark thresholding over the viewport-cropped local image'
 		},
@@ -198,7 +203,10 @@ const badgeStageOps: OperationDef[] = [
 				)
 			);
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.computeBrightDarkMasks', calculate: computeBrightDarkMasks }
+		]
 	},
 	{
 		spec: {
@@ -208,6 +216,7 @@ const badgeStageOps: OperationDef[] = [
 			unit: 'badgeStage',
 			consumes: ['badgeStage.masks'],
 			produces: ['badgeStage.components'],
+			calculations: ['fn.groupBrightDarkComponentFields'],
 			note: '8-connected component labeling of the bright mask'
 		},
 		run(board, ctx) {
@@ -215,7 +224,10 @@ const badgeStageOps: OperationDef[] = [
 			const { bright, dark } = board.get<BadgeStageMasks>('badgeStage.masks');
 			board.set('badgeStage.components', groupBrightDarkComponentFields({ bright, dark }));
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.groupBrightDarkComponentFields', calculate: groupBrightDarkComponentFields }
+		]
 	},
 	{
 		spec: {
@@ -225,6 +237,7 @@ const badgeStageOps: OperationDef[] = [
 			unit: 'badgeStage',
 			consumes: ['badgeStage.masks', 'badgeStage.components', 'localImage'],
 			produces: ['badgeStage.family'],
+			calculations: ['fn.detectBadgeFamily'],
 			features: [g1BadgesFeature.id],
 			note: 'anchored bright-family badge candidates (aspect + dark-interior gates)'
 		},
@@ -237,7 +250,8 @@ const badgeStageOps: OperationDef[] = [
 			const image = board.get<RgbaImage>('localImage');
 			board.set('badgeStage.family', detectBadgeFamily(image.width, dark, brightComponents, knobs));
 			stop();
-		}
+		},
+		calculationBindings: [{ address: 'fn.detectBadgeFamily', calculate: detectBadgeFamily }]
 	},
 	{
 		spec: {
@@ -247,6 +261,7 @@ const badgeStageOps: OperationDef[] = [
 			unit: 'badgeStage',
 			consumes: ['badgeStage.masks', 'badgeStage.components', 'badgeStage.family', 'localImage'],
 			produces: ['stage'],
+			calculations: ['fn.recoverDarkPlateBadges'],
 			features: [g1BadgesFeature.id],
 			note: 'dark-plate glyph recovery accept/reject, then materialize the BadgeStageResult'
 		},
@@ -294,7 +309,10 @@ const badgeStageOps: OperationDef[] = [
 			};
 			board.set('stage', stage);
 			stop();
-		}
+		},
+		calculationBindings: [
+			{ address: 'fn.recoverDarkPlateBadges', calculate: recoverDarkPlateBadges }
+		]
 	}
 ];
 
@@ -595,7 +613,14 @@ const reusedOps: OperationDef[] = [
 		},
 		run: (board, ctx) => straightTestUnit.run(asLegacyBoard(board), ctx)
 	},
-	wrapLegacy('badges', 'compute', 'G1', [g1DigitsFeature.id]),
+	wrapLegacy(
+		'badges',
+		'compute',
+		'G1',
+		[g1DigitsFeature.id],
+		undefined,
+		'fn.readAndAssembleCourseBadges'
+	),
 	{
 		spec: {
 			id: 'badgeGlyphTemplate',
@@ -611,7 +636,14 @@ const reusedOps: OperationDef[] = [
 	},
 	wrapLegacy('supportField', 'measure', 'G5', [g5RibbonFeature.id]),
 	wrapLegacy('badgeOcclusionPatch', 'transform', 'G5', [g5RibbonFeature.id]),
-	wrapLegacy('baskets', 'compute', 'G2', [g2SpriteFeature.id]),
+	wrapLegacy(
+		'baskets',
+		'compute',
+		'G2',
+		[g2SpriteFeature.id],
+		undefined,
+		'fn.matchBasketSpritesAndAssembleEvidence'
+	),
 	wrapLegacy('rawPairs', 'compute', 'G5', [
 		g5RibbonFeature.id,
 		g5RoutingFeature.id,
@@ -832,6 +864,26 @@ export const OPERATION_UNIVERSE: readonly OperationSpec[] = OPERATION_DEFS.map((
 
 export const operationImpls: ReadonlyMap<string, OperationImpl> = new Map(
 	OPERATION_DEFS.map((def) => [def.spec.id, def.run])
+);
+
+/**
+ * Runtime function bindings for the fn.* addresses declared by each real
+ * operation.  This map is testimony only; operationImpls remains the sole
+ * execution authority.
+ */
+export const operationCalculationBindings: ReadonlyMap<
+	string,
+	readonly CalculationBinding[]
+> = new Map(
+	OPERATION_DEFS.map((def) => [
+		def.spec.id,
+		def.calculationBindings ?? [
+			{
+				address: def.spec.calculations?.[0] ?? (`fn.${def.spec.id}` as const),
+				calculate: def.run
+			}
+		]
+	])
 );
 
 /** The unit ids compile.ts's inherited validateExecution already understands (unchanged, unit-granularity legality check). */
