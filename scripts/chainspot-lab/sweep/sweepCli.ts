@@ -80,5 +80,8 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
 	console.error(`lab: ${(error as Error).message}`);
+	if (error instanceof Error && error.stack) {
+		console.error(error.stack);
+	}
 	process.exit(1);
 });
