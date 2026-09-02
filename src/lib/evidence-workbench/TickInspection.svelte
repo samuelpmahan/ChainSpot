@@ -47,7 +47,7 @@
 			<section>
 				<h3>Exact PxC inputs</h3>
 				<ul>
-					{#each tick.actualConsumes as address}<li><code>{address}</code></li>{/each}
+					{#each tick.actualConsumes as address (address)}<li><code>{address}</code></li>{/each}
 					{#if tick.actualConsumes.length === 0}<li class="unknown">[] — none read</li>{/if}
 				</ul>
 				{#if missingInputs.length}<p class="warning">Declared but unread: {missingInputs.join(', ')}</p>{/if}
@@ -56,7 +56,7 @@
 			<section class="calculation">
 				<h3>Frozen calculation</h3>
 				<ul>
-					{#each tick.frozenCalculations as calculation}
+					{#each tick.frozenCalculations as calculation (calculation.address)}
 						<li>
 							<strong><code>{calculation.address}</code></strong>
 							<small>SHA-256 {calculation.implementationHash}</small>
@@ -68,7 +68,7 @@
 			<section>
 				<h3>Exact PxC outputs</h3>
 				<ul>
-					{#each tick.writes as write}
+					{#each tick.writes as write (write.address)}
 						<li><code>{write.address}</code> <span class:replacement={write.kind === 'replacement'}>{write.kind}</span></li>
 					{/each}
 					{#if tick.writes.length === 0}<li class="unknown">[] — nothing written</li>{/if}
@@ -81,7 +81,7 @@
 			<h3>Materializations emitted by this Tick</h3>
 			{#if tick.artifacts.length}
 				<ul>
-					{#each tick.artifacts as materialization}
+					{#each tick.artifacts as materialization (materialization.id)}
 						<li>
 							<code>{materialization.kind} · {materialization.id}</code>
 							<small>SHA-256 {materialization.sha256}{materialization.dims ? ` · ${materialization.dims.width}×${materialization.dims.height}` : ''}</small>
@@ -96,7 +96,7 @@
 		<section class="residue">
 			<h3>Residue / UNKNOWN</h3>
 			{#if residue.length}
-				<ul>{#each residue as line}<li><strong>{line.label}: {line.count ?? 'UNKNOWN'}</strong> — {line.note}</li>{/each}</ul>
+				<ul>{#each residue as line (line.label)}<li><strong>{line.label}: {line.count ?? 'UNKNOWN'}</strong> — {line.note}</li>{/each}</ul>
 			{:else}
 				<p class="unknown">UNKNOWN — this Tick establishes no molecule-specific residue account.</p>
 			{/if}

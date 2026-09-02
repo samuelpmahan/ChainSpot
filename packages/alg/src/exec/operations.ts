@@ -20,8 +20,7 @@ import type { ExecBoard } from './board';
 import type { CalculationBinding, OperationImpl } from './gateway';
 import type {
 	EngineUnit,
-	EvidenceBoard,
-	FeatureContext
+	EvidenceBoard
 } from '../detectors/threeFactor/features/types';
 import { measureUnits } from '../detectors/threeFactor/measure';
 import { phantomTeeUnit, phantomTeeFeature } from '../detectors/threeFactor/features/g3.phantomTee';

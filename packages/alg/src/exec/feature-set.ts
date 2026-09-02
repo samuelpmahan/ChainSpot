@@ -342,9 +342,11 @@ export async function executeABFeatureSet(
 		enabledFeatureIds: compiled.enabledFeatureIds,
 		importedFeatureIds: compiled.definition.imports ?? [],
 		locallyOperationlessFeatureIds: compiled.definition.locallyOperationlessFeatureIds ?? [],
-		operations: operations.map(
-			({ startedAtMs: _startedAtMs, durationMs: _durationMs, ...receipt }) => receipt
-		)
+		operations: operations.map(({ startedAtMs, durationMs, ...receipt }) => {
+			void startedAtMs;
+			void durationMs;
+			return receipt;
+		})
 	};
 	return {
 		runId: run.runId,
