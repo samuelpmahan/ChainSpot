@@ -27,7 +27,8 @@
 //   ("likely-thrown"), so decideThrownRound picks it unambiguously.
 import { describe, expect, test } from 'vitest';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
 import { toGrayRaster } from '@chainspot/alg/g0/inputAsset';
 import { measurePurpleMass } from '@chainspot/alg/detectors/purpleMass';
@@ -39,7 +40,8 @@ import { createLedger, appendEntries } from '@chainspot/alg/g0/ledger';
 import { matchTruth } from '@chainspot/alg/g0/truth';
 import type { CanonicalTruth } from '@chainspot/alg/g0/truth';
 
-const CORPUS_DEMO = 'C:\\Users\\tenni\\workspace\\chainspot-corpus\\demo';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CORPUS_DEMO = resolve(HERE, '../../../chainspot-corpus/demo');
 const L_PNG = join(CORPUS_DEMO, 'TheRec-L.PNG');
 const R_PNG = join(CORPUS_DEMO, 'TheRec-R.PNG');
 const THROWN_PNG = join(CORPUS_DEMO, 'TheRec-Thrown-full.PNG');

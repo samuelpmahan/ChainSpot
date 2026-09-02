@@ -43,11 +43,9 @@ const PINNED_RECOMPUTATION_BACKEND_HASHES = {
 
 function encodePng(value: BadgeSpecimen, projection: (typeof BADGE_STORY_PROJECTIONS)[number]) {
 	const image = projectBadgeImage(value, projection);
-	return PNG.sync.write({
-		width: image.width,
-		height: image.height,
-		data: Buffer.from(image.rgba)
-	});
+	const png = new PNG({ width: image.width, height: image.height });
+	png.data = Buffer.from(image.rgba);
+	return PNG.sync.write(png);
 }
 
 function writeStoryImages(value: BadgeSpecimen, output: string) {

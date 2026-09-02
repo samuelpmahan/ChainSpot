@@ -16,11 +16,12 @@
 // matching Heritage's truth-declared canonical dims (1290x2115) exactly.
 //
 // This test depends on chainspot-corpus, a sibling checkout outside this
-// repo (C:\Users\tenni\workspace\chainspot-corpus) — skipped, not failed,
+// repo (checked out as ../chainspot-corpus) — skipped, not failed,
 // when that path isn't present (e.g. CI without the corpus checked out).
 import { describe, expect, test } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { decodeNodeFile } from '@chainspot/alg/adapters/node';
 import { toGrayRaster } from '@chainspot/alg/g0/inputAsset';
 import { applyCrop } from '@chainspot/alg/g0/crop';
@@ -28,7 +29,8 @@ import { createLedger, appendEntry } from '@chainspot/alg/g0/ledger';
 import { matchTruth, type CanonicalTruth } from '@chainspot/alg/g0/truth';
 import type { CanonicalFrame } from '@chainspot/alg/g0/canonicalFrame';
 
-const CORPUS_ROOT = 'C:\\Users\\tenni\\workspace\\chainspot-corpus';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CORPUS_ROOT = resolve(HERE, '../../../chainspot-corpus');
 const HERITAGE_PNG = join(CORPUS_ROOT, 'dev', 'Heritage', 'HeritagePark-full.png');
 const HERITAGE_TRUTH = join(CORPUS_ROOT, 'dev', 'Heritage', 'HeritagePark-full.annotation.json');
 const TOWNELAKE_PNG = join(CORPUS_ROOT, 'dev', 'TowneLake', 'TowneLake-full.png');

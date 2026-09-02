@@ -275,7 +275,7 @@ describe('3factor-dev72 Detector adapter', () => {
 			imageId: 'b'.repeat(64),
 			measurement: measurement(),
 			objects: objectGraph(measurement()),
-		assignment: {
+			assignment: {
 				measurement: measurement(),
 				tees: [tee()],
 				scoredPairs: [],
@@ -290,6 +290,11 @@ describe('3factor-dev72 Detector adapter', () => {
 						alternatives: []
 					}
 				]
+			},
+			custody: {
+				schema: 'chainspot-chain-of-custody@1',
+				traceAvailable: false,
+				tees: []
 			}
 		};
 		const emissions = emissionsFor(run);
@@ -324,11 +329,16 @@ describe('3factor-dev72 Detector adapter', () => {
 			imageId: 'c'.repeat(64),
 			measurement: measurement(),
 			objects: objectGraph(measurement()),
-		assignment: {
+			assignment: {
 				measurement: measurement(),
 				tees: [tee()],
 				scoredPairs: [],
 				assignments: []
+			},
+			custody: {
+				schema: 'chainspot-chain-of-custody@1',
+				traceAvailable: false,
+				tees: []
 			}
 		};
 

@@ -365,7 +365,7 @@ describe('teeBadgeLock all-Hn resolver: every unmatched badge is named, never si
 			tees: [{ detId: 'tee-shared' }]
 		});
 		expect(selected.locks).toMatchObject([{ badgeId: 'badge-1', teeId: 'tee-shared' }]);
-		expect(selected.unmatchedBadgeIds.sort()).toEqual(['badge-2', 'badge-3']);
+		expect([...selected.unmatchedBadgeIds].sort()).toEqual(['badge-2', 'badge-3']);
 
 		const evidence = buildTeeBadgeLockEvidence(selected, { badges });
 		expect(evidence.abstentions).toHaveLength(2);
