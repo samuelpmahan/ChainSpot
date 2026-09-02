@@ -5,7 +5,7 @@
 // turns them into something a human can open: a PNG, an SVG overlay, or a
 // text table. It reads and presents; it never derives.
 //
-// One RendererFn per ArtifactKind (the 8 kinds @chainspot/alg/exec's
+// One RendererFn per ArtifactKind (the 11 kinds @chainspot/alg/exec's
 // contract.ts declares), plus a REGISTRY the sweep CLI dispatches
 // through. Implement a kind by filling in RENDERERS[kind]; an unset kind
 // falls back to the CLI writing the raw artifact bytes + a one-line stub

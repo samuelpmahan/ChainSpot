@@ -85,7 +85,7 @@ Image-coordinate headings are `0 deg` right, `90 deg` down, `180 deg` left, `270
 ```
 
 - `compile` inspects the plan; it does not execute raster work.
-- `--through` currently accepts only `G1`, `G2`, or `G3`. The canonical engine order continues with `G4` Endpoint Recovery, `G5` Straight Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is infrastructure, not a scheduled gate. There is currently no `--stop-after`.
+- `--through` accepts every gate G1-G7; each runs the dependency-complete prefix through that cutoff. The canonical engine order continues with `G4` Endpoint Recovery, `G5` Straight Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is infrastructure, not a scheduled gate. There is currently no `--stop-after`.
 - A positional JSON after inputs is evaluation truth, not detector input.
 - An official scoreboard requires verified truth in the canonical execution frame. Dimensions-only or unmapped truth is skipped with an explicit reason.
 - Repeating the same config/input normally reuses the same artifact directory, so copy evidence you need to preserve before another run.
@@ -100,7 +100,7 @@ For a corpus census, use the batch command. It expands selectors into manifest-b
 LAB_BLIND_TEST=1 ./lab sweep batch --through G3 packages/alg/src/detectors/threeFactor/configs/default.json dev demo
 ```
 
-`--through` is optional for batch and defaults to `G3`; only `G1`, `G2`, and `G3` are valid. `dev`, `demo`, and `all` are selector groups; individual course names and unambiguous aliases are also accepted, and omitting selectors means `dev`. Multiple selectors are combined without duplicate courses. The REC's `TheRec-L.PNG` and `TheRec-R.PNG` captures are one `stitched` multi-input case that runs StripChrome → AutoStitch; `clean-full` and `thrown-full` are separate single-input cases. Batch never loads Annotation truth implicitly, continues after a case failure, exits nonzero if any case fails, and prints deterministic per-case `START` and `DONE`/`FAIL` progress before the final aggregate. A normal single-image `./lab sweep` is unchanged.
+`--through` is optional for batch and defaults to `G3`; every gate G1-G7 is a valid cutoff. `dev`, `demo`, and `all` are selector groups; individual course names and unambiguous aliases are also accepted, and omitting selectors means `dev`. Multiple selectors are combined without duplicate courses. The REC's `TheRec-L.PNG` and `TheRec-R.PNG` captures are one `stitched` multi-input case that runs StripChrome → AutoStitch; `clean-full` and `thrown-full` are separate single-input cases. Batch never loads Annotation truth implicitly, continues after a case failure, exits nonzero if any case fails, and prints deterministic per-case `START` and `DONE`/`FAIL` progress before the final aggregate. A normal single-image `./lab sweep` is unchanged.
 
 Each case writes normal Sweep evidence below `artifacts/sweep/<config>/batches/<course>/<case>/`. The batch root also receives compact `summary.txt` and machine-readable `summary.json` aggregate receipts; these generated artifacts are run evidence and are not source files to commit.
 

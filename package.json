@@ -13,7 +13,7 @@
 		"storybook": "npm run build --workspace @chainspot/alg && storybook dev -p 6006",
 		"build-storybook": "npm run build --workspace @chainspot/alg && storybook build",
 		"storybook:receipt": "node scripts/storybook-e-receipt.mjs",
-		"test-storybook": "npm run build --workspace @chainspot/alg && vitest run tests/unit/badgeProjection.test.ts tests/unit/m1StoryProjection.test.ts",
+		"test-storybook": "npm run build --workspace @chainspot/alg && vitest run tests/unit/badgeProjection.test.ts tests/unit/m1StoryProjection.test.ts tests/unit/m2StoryProjection.test.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"test:unit": "vitest run",
 		"test:unit:watch": "vitest",

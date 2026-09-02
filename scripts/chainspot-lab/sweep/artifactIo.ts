@@ -16,6 +16,8 @@ const JSON_KINDS: readonly ArtifactKind[] = [
 	'componentSet',
 	'candidateSet',
 	'badgeEvidence',
+	'm1Representation',
+	'm2Representation',
 	'polyline',
 	'measurementTable'
 ];
