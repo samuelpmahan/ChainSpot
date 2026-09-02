@@ -14,7 +14,8 @@
 		"rawPairs",
 		"measurement",
 		"assignment",
-		"teeRecovery"
+		"teeRecovery",
+		"teeBadgeLock"
 	],
 	"gates": { "G5": { "straightTest": { "enabled": true } } }
 }

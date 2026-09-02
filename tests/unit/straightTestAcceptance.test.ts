@@ -53,7 +53,10 @@ const DASHS_TRUTH = resolve(CORPUS_ROOT, 'dev/DashsTrack/DashsTrack-full.annotat
 // 2026-08-28: zfit dropped from the default schedule by owner directive; the
 // previous byte hash was
 // 9762044ddfa243010466da423ade733e7902b1877620b40e1581cd904b45ae5b.
-const DEFAULT_SHA256 = '71d88bc2bf44b4a1a10934636acda61aa8fb7563cf6417dc1ae4c7f36a3e1c45';
+// 2026-09-02: re-pinned to the frozen Dev6 106/108 default.json, which schedules
+// and enables teeBadgeLock (a143d09); the previous byte hash was
+// 71d88bc2bf44b4a1a10934636acda61aa8fb7563cf6417dc1ae4c7f36a3e1c45.
+const DEFAULT_SHA256 = '934fb03f1b10ba488f0729e28a3873fd447790b9f0dfdbeb60c00270a84a7080';
 
 function candidate(
 	overrides: Partial<StraightTestCandidateInput> = {}
@@ -341,7 +344,8 @@ describe('straightTest production composition and frozen-off parity', () => {
 			'fourLaneSensor',
 			'straightTest',
 			'ribbon',
-			'routing'
+			'routing',
+			'badgeM2Aa'
 		]);
 		const compiled = compileABFeatureSet(set, { straightTest: { enabled: true } });
 		expect(compiled.enabledFeatureIds).toContain(STRAIGHT_TEST_FEATURE_ID);
@@ -351,7 +355,14 @@ describe('straightTest production composition and frozen-off parity', () => {
 			'badgeOcclusionPatch',
 			'rawPairs',
 			'measurement',
-			'badgeEvidence.materialize'
+			'badgeEvidence.materialize',
+			// d9c7943 added the default-OFF badgeM2Aa feature to g5-set; its
+			// operation compiles into the set's plan like every other member and
+			// is inert at run time unless enabled (g5.badgeM2Aa.ts run(): early
+			// return when !state.enabled; "OFF stays inert" in
+			// badgeM2AaFeatureIntegration.test.ts). Same conscious move as
+			// exec.compile.test.ts's UNIT_OPERATIONS pin in that commit.
+			'badgeEvidence.m2Aa'
 		]);
 
 		const resolved = resolveConfig(defaultConfig as ThreeFactorConfig, DEFAULT_EXECUTION);
