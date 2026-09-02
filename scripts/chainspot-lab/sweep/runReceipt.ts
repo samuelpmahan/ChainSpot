@@ -42,6 +42,10 @@ export interface RunReceiptOperation {
 	readonly unit: string;
 	readonly durationMs: number;
 	readonly percentOfOperationBody: number;
+	readonly frozenCalculations: Receipt['frozenCalculations'];
+	readonly inputs: Receipt['actualConsumes'];
+	readonly outputs: Receipt['actualProduces'];
+	readonly writes: Receipt['writes'];
 	readonly conformance: {
 		readonly ok: boolean;
 		readonly missingConsumes: readonly string[];
@@ -479,6 +483,10 @@ export function buildRunReceipt(input: BuildRunReceiptInput): RunReceipt {
 			unit: op.unit,
 			durationMs: round(receipt.durationMs),
 			percentOfOperationBody: percent(receipt.durationMs, input.timings.operationBodyMs),
+			frozenCalculations: receipt.frozenCalculations,
+			inputs: receipt.actualConsumes,
+			outputs: receipt.actualProduces,
+			writes: receipt.writes,
 			conformance: operationConformance,
 			probes: receipt.probes,
 			artifacts: receipt.artifacts

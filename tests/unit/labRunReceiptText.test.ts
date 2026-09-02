@@ -49,6 +49,10 @@ const receipt: RunReceipt = {
 			unit: 'baskets',
 			durationMs: 7,
 			percentOfOperationBody: 70,
+			frozenCalculations: [{ address: 'fn.second', implementationHash: 'calc-hash-2' }],
+			inputs: [],
+			outputs: ['output'],
+			writes: [{ address: 'output', kind: 'new-address' }],
 			conformance: { ok: false, missingConsumes: ['input'], missingProduces: [] },
 			probes: [{ name: 'count', value: 2 }],
 			artifacts: [{ id: 'a2', kind: 'measurementTable', sha256: 'hash2', uri: 'artifact://second' }]
@@ -62,6 +66,10 @@ const receipt: RunReceipt = {
 			unit: 'badges',
 			durationMs: 3,
 			percentOfOperationBody: 30,
+			frozenCalculations: [{ address: 'fn.first', implementationHash: 'calc-hash-1' }],
+			inputs: ['input'],
+			outputs: ['first'],
+			writes: [{ address: 'first', kind: 'new-address' }],
 			conformance: { ok: true, missingConsumes: [], missingProduces: [] },
 			probes: [],
 			artifacts: [{ id: 'a1', kind: 'measurementTable', sha256: 'hash1', uri: 'artifact://first' }]
@@ -210,7 +218,17 @@ timings.observedTotalMs: 46
 OPERATIONS (CHRONOLOGICAL)
 index | gate | id | durationMs | percentOfOperationBody | conformance | probes
 2 | G2 | second | 7 | 70 | DRIFT missingConsumes=[input] missingProduces=[] | count=2
+  PxC inputs: []
+  Frozen calculations: [fn.second@sha256:calc-hash-2]
+  PxC outputs: [output]
+  PxC writes: [output(new-address)]
+  Materializations: [measurementTable:a2@sha256:hash2]
 1 | G1 | first | 3 | 30 | OK | []
+  PxC inputs: [input]
+  Frozen calculations: [fn.first@sha256:calc-hash-1]
+  PxC outputs: [first]
+  PxC writes: [first(new-address)]
+  Materializations: [measurementTable:a1@sha256:hash1]
 
 CANONICAL GATE ROLLUPS
 gate | title | status | operationIndexes | durationMs | percentOfOperationBody
@@ -308,7 +326,7 @@ artifact[2].uri: artifact://first
 		expect(text).toContain('results.phantomTees: UNKNOWN');
 	});
 
-	test('preserves chronological receipt order and prints warnings and artifact URIs', () => {
+	test('preserves chronology and prints frozen math, PxC traffic, warnings, and artifact URIs', () => {
 		const text = formatRunReceiptText(receipt);
 		expect(text.indexOf('2 | G2 | second')).toBeLessThan(text.indexOf('1 | G1 | first'));
 		expect(text).toContain('WARNINGS\n- first warning\n- second warning');
@@ -316,7 +334,9 @@ artifact[2].uri: artifact://first
 		expect(text).toContain('visualRenderCount: 2');
 		expect(text).toContain('1 | G0 | canonical | StripChrome + AutoStitch');
 		expect(text).toContain('artifact[1].uri: artifact://second');
-		expect(text).not.toContain('sha256');
+		expect(text).toContain('Frozen calculations: [fn.second@sha256:calc-hash-2]');
+		expect(text).toContain('PxC writes: [output(new-address)]');
+		expect(text).toContain('Materializations: [measurementTable:a2@sha256:hash2]');
 	});
 
 	test('serializes each failure row without recomputing it', () => {

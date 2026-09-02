@@ -36,6 +36,26 @@ function probes(receipt: RunReceipt['operations'][number]): string {
 		: receipt.probes.map((probe) => `${probe.name}=${value(probe.value)}`).join(', ');
 }
 
+function frozenCalculations(operation: RunReceipt['operations'][number]): string {
+	return list(
+		operation.frozenCalculations.map(
+			(calculation) => `${calculation.address}@sha256:${calculation.implementationHash}`
+		)
+	);
+}
+
+function writes(operation: RunReceipt['operations'][number]): string {
+	return list(operation.writes.map((write) => `${write.address}(${write.kind})`));
+}
+
+function materializations(operation: RunReceipt['operations'][number]): string {
+	return list(
+		operation.artifacts.map(
+			(artifact) => `${artifact.kind}:${artifact.id}@sha256:${artifact.sha256}`
+		)
+	);
+}
+
 function truthMatchLine(receipt: RunReceipt): string {
 	if (receipt.intake.truthMatch !== undefined && receipt.intake.truthMatch !== null) {
 		return JSON.stringify(receipt.intake.truthMatch);
@@ -108,7 +128,12 @@ export function formatRunReceiptText(receipt: RunReceipt): string {
 	);
 	for (const operation of receipt.operations) {
 		lines.push(
-			`${operation.index} | ${operation.gate} | ${operation.id} | ${operation.durationMs} | ${operation.percentOfOperationBody} | ${conformance(operation)} | ${probes(operation)}`
+			`${operation.index} | ${operation.gate} | ${operation.id} | ${operation.durationMs} | ${operation.percentOfOperationBody} | ${conformance(operation)} | ${probes(operation)}`,
+			`  PxC inputs: ${list(operation.inputs)}`,
+			`  Frozen calculations: ${frozenCalculations(operation)}`,
+			`  PxC outputs: ${list(operation.outputs)}`,
+			`  PxC writes: ${writes(operation)}`,
+			`  Materializations: ${materializations(operation)}`
 		);
 	}
 	if (receipt.operations.length === 0) lines.push('(none)');
