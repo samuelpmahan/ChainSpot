@@ -31,6 +31,7 @@ export interface BadgeSpecimenLibrary {
 	readonly status: 'materialized' | 'unavailable';
 	readonly note: string;
 	readonly source: string;
+	readonly pcrs: readonly Pcr[];
 	readonly specimens: readonly BadgeSpecimen[];
 	readonly m1: M1WorkbenchLibrary | null;
 }
@@ -94,3 +95,4 @@ export interface M1WorkbenchLibrary {
 	readonly basketShellFamilies: readonly M1WorkbenchBasketShellFamily[];
 	readonly objects: readonly M1WorkbenchObject[];
 }
+import type { Pcr } from '@chainspot/alg/exec';

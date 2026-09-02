@@ -17,12 +17,59 @@ const m1Badge = library.m1.objects.find((object) => object.id === 'badge-0');
 const m1Basket = library.m1.objects.find((object) => object.id === 'basket-0');
 if (m1Badge?.accounting.status !== 'known' || m1Basket?.accounting.status !== 'known')
 	throw new Error('representative Badge/Basket M1 accounting is unavailable');
+const badgePcr = library.pcrs.find((pcr) => pcr.id === 'badge-pcr');
+const basketPcr = library.pcrs.find((pcr) => pcr.id === 'basket-pcr');
+if (!badgePcr || !basketPcr) throw new Error('Badge/Basket PCR composition missing');
+for (const pcr of [badgePcr, basketPcr]) {
+	if (!/^[0-9a-f]{64}$/.test(pcr.runResultId))
+		throw new Error(`${pcr.id}: invalid frozen runResultId`);
+	for (const tick of pcr.ticks) {
+		if (tick.testimony.frozenCalculations.length === 0)
+			throw new Error(`${pcr.id}/${tick.operation.id}: no frozen calculation`);
+		if (tick.testimony.actualProduces.length === 0)
+			throw new Error(`${pcr.id}/${tick.operation.id}: no actual PxC output`);
+	}
+}
+const pcrStories = stories.filter((story) => story.title === 'LAB/PCR/Tick Inspection');
+if (pcrStories.length !== 5)
+	throw new Error(`expected 5 indexed PCR specimens; got ${pcrStories.length}`);
 
 const receipt = {
 	source: library.source,
 	specimens: library.specimens.length,
 	indexedProjections: stories.length,
 	composedNotebooks: docs.length,
+	pcr: {
+		indexedSpecimens: pcrStories.length,
+		badge: {
+			runResultId: badgePcr.runResultId,
+			ticks: badgePcr.ticks.map((tick) => ({
+				id: tick.operation.id,
+				calculations: tick.testimony.frozenCalculations,
+				inputs: tick.testimony.actualConsumes,
+				writes: tick.testimony.writes,
+				materializations: tick.testimony.artifacts.map((artifact) => ({
+					id: artifact.id,
+					kind: artifact.kind,
+					sha256: artifact.sha256
+				}))
+			}))
+		},
+		basket: {
+			runResultId: basketPcr.runResultId,
+			ticks: basketPcr.ticks.map((tick) => ({
+				id: tick.operation.id,
+				calculations: tick.testimony.frozenCalculations,
+				inputs: tick.testimony.actualConsumes,
+				writes: tick.testimony.writes,
+				materializations: tick.testimony.artifacts.map((artifact) => ({
+					id: artifact.id,
+					kind: artifact.kind,
+					sha256: artifact.sha256
+				}))
+			}))
+		}
+	},
 	pinnedBadge0: pinned.metrics,
 	m1: {
 		artifact: library.m1.artifact,
@@ -57,6 +104,12 @@ console.log('STORYBOOK E RECEIPT');
 console.log(`real specimens: ${receipt.specimens} (live DashsTrack materialization)`);
 console.log(`indexed projections: ${receipt.indexedProjections} (storybook-static/index.json)`);
 console.log(`composed notebooks: ${receipt.composedNotebooks} (storybook-static/index.json)`);
+console.log(
+	`PCR: ${receipt.pcr.indexedSpecimens} indexed specimens; Badge ${receipt.pcr.badge.ticks.length} Ticks; Basket ${receipt.pcr.basket.ticks.length} Ticks`
+);
+console.log(
+	`PCR identities: Badge ${receipt.pcr.badge.runResultId}; Basket ${receipt.pcr.basket.runResultId}`
+);
 console.log(
 	`badge-0: B+W ${pinned.metrics.ownedBw}; AA +${pinned.metrics.aaAdded}; residue ${pinned.metrics.residueBefore} -> ${pinned.metrics.residueAfter}`
 );

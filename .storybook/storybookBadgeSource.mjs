@@ -32,6 +32,7 @@ const compileExecutionPlan = exported(execNamespace, 'compileExecutionPlan');
 const createExecBoard = exported(execNamespace, 'createExecBoard');
 const createMemorySink = exported(execNamespace, 'createMemorySink');
 const executeCompiledPlan = exported(execNamespace, 'executeCompiledPlan');
+const composePcr = exported(execNamespace, 'composePcr');
 
 function unavailableLibrary(imagePath) {
 	return {
@@ -39,6 +40,7 @@ function unavailableLibrary(imagePath) {
 		note: `Real E materialization unavailable: ${imagePath} does not exist. Set CHAINSPOT_BADGE_IMAGE or place chainspot-corpus beside ChainSpot.`,
 		source: imagePath,
 		m1: null,
+		pcrs: [],
 		specimens: [
 			{
 				id: 'unavailable',
@@ -181,6 +183,31 @@ export async function materializeBadgeSpecimens() {
 	board.set('straightTestTruthAssistance', { mode: 'blind', locks: [] });
 	const sink = createMemorySink();
 	const receipts = executeCompiledPlan(plan, board, nullFeatureContext, sink);
+	const badgePcr = composePcr(
+		{
+			id: 'badge-pcr',
+			title: 'Badge PCR',
+			tickIds: [
+				'badgeStage.masks',
+				'badgeStage.components',
+				'badgeStage.family',
+				'badgeStage.badges',
+				'badges',
+				'badgeEvidence.materialize'
+			]
+		},
+		plan,
+		receipts
+	);
+	const basketPcr = composePcr(
+		{
+			id: 'basket-pcr',
+			title: 'Basket PCR',
+			tickIds: ['baskets', 'badgeEvidence.materialize']
+		},
+		plan,
+		receipts
+	);
 	const receipt = receipts.find((candidate) => candidate.opId === 'badgeEvidence.materialize');
 	if (!receipt) throw new Error('E emitted no badgeEvidence.materialize receipt');
 	const specimens = receipt.artifacts
@@ -198,6 +225,7 @@ export async function materializeBadgeSpecimens() {
 		status: 'materialized',
 		note: `${specimens.length} badges decoded from content-addressed E artifacts`,
 		source: imagePath,
+		pcrs: [badgePcr, basketPcr],
 		specimens,
 		m1: asStorybookM1(decodeMaterializedM1Representation(m1Bytes), m1Artifact)
 	};
