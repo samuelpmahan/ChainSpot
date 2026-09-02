@@ -16,3 +16,15 @@ sibling `chainspot-corpus` checkout. Without that private corpus, Storybook stil
 the evidence library unavailable instead of silently substituting a fixture. With the corpus, the
 image test also proves every E-backed badge-0 projection is byte-identical to the earlier direct
 recomputation backend.
+
+## Staging ProofFloor
+
+`npm run build` compiles only application routes. `npm run build:staging` overlays
+`src/staging-routes` for that build and then shears the generated route tree away. The staging build
+therefore contains `/lab` and `/lab/pcr`; the production build contains neither route nor its LAB
+code.
+
+`/lab/pcr` reuses the Storybook inspection molecules against the same materialized computation. It
+opens with the checked `DEFAULT_PCR_INSPECTION_PLAN` (Badge PCR, `badgeStage.masks`, badge 1,
+composed Materialization). The staging build fails loudly if the corpus is absent or any default
+PCR, Tick, or specimen identity has drifted.

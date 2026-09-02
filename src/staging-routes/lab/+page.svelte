@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	// LAB gate scrubber — dev tooling, not product UI. Load ANY image, run the
 	// local threeFactor pipeline, and step through the sweep gates with the
 	// same vocabulary as the CLI: G1 Badges -> G2 Baskets -> G3 Tees ->
@@ -36,11 +37,41 @@
 	// actually run; `cliName` is shown beside it so the offset is visible
 	// rather than something you rediscover by pasting the wrong number.
 	const GATES = [
-		{ id: 'G1', name: 'Badges', cli: 1, cliName: 'Badges', note: 'bright-family + dark-plate recovery; label + candidates' },
-		{ id: 'G2', name: 'Baskets', cli: 2, cliName: 'Baskets', note: 'sprite matches; tip marks the route endpoint' },
-		{ id: 'G3', name: 'Tees', cli: 3, cliName: 'Tees', note: 'ring/component/recovered tiers; axis where known' },
-		{ id: 'G4', name: 'Tee→Badge', cli: 6, cliName: 'Assignment', note: 'one-to-one tee→badge ownership — no basket knowledge' },
-		{ id: 'G5', name: 'Path', cli: 5, cliName: 'Straight Test', note: 'known tee → known badge → candidate basket, recovered route' }
+		{
+			id: 'G1',
+			name: 'Badges',
+			cli: 1,
+			cliName: 'Badges',
+			note: 'bright-family + dark-plate recovery; label + candidates'
+		},
+		{
+			id: 'G2',
+			name: 'Baskets',
+			cli: 2,
+			cliName: 'Baskets',
+			note: 'sprite matches; tip marks the route endpoint'
+		},
+		{
+			id: 'G3',
+			name: 'Tees',
+			cli: 3,
+			cliName: 'Tees',
+			note: 'ring/component/recovered tiers; axis where known'
+		},
+		{
+			id: 'G4',
+			name: 'Tee→Badge',
+			cli: 6,
+			cliName: 'Assignment',
+			note: 'one-to-one tee→badge ownership — no basket knowledge'
+		},
+		{
+			id: 'G5',
+			name: 'Path',
+			cli: 5,
+			cliName: 'Straight Test',
+			note: 'known tee → known badge → candidate basket, recovered route'
+		}
 	] as const;
 
 	// `lab compile --help` prints this exact path as its example.
@@ -54,7 +85,10 @@
 	// to remove.
 	let history = $state<HistoryEntry[]>([
 		{ cmd: '# LAB session recorded in the browser gate scrubber' },
-		{ cmd: `compile ${DEFAULT_CONFIG_PATH}`, note: 'page load: frozen baseline is the starting config' }
+		{
+			cmd: `compile ${DEFAULT_CONFIG_PATH}`,
+			note: 'page load: frozen baseline is the starting config'
+		}
 	]);
 	// the config token used by every `sweep` line; tracks the loaded config file
 	let configArg = $state(DEFAULT_CONFIG_PATH);
@@ -77,7 +111,9 @@
 	function onViewToggle(event: Event) {
 		const el = event.target as HTMLInputElement | null;
 		if (!el || el.type !== 'checkbox' || !el.dataset.echo) return;
-		echo(`# view-only: ${el.dataset.echo} ${el.checked ? 'on' : 'off'} (overlay state, no LAB command)`);
+		echo(
+			`# view-only: ${el.dataset.echo} ${el.checked ? 'on' : 'off'} (overlay state, no LAB command)`
+		);
 	}
 
 	let imgUrl = $state<string | null>(null);
@@ -96,7 +132,9 @@
 	}
 
 	// engine config: default = frozen baseline; load any config JSON to deviate
-	let labConfig = $state<ResolvedConfig>(resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION));
+	let labConfig = $state<ResolvedConfig>(
+		resolveConfig(parseConfig(defaultConfigJson), DEFAULT_EXECUTION)
+	);
 	let labParamsHash = $state('');
 	let configError = $state<string | null>(null);
 	let traceLayerShow = $state<Record<string, { accepted: boolean; rejected: boolean }>>({});
@@ -255,7 +293,10 @@
 		}
 
 		busy = 'Flattening composite…';
-		let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+		let x0 = Infinity,
+			y0 = Infinity,
+			x1 = -Infinity,
+			y1 = -Infinity;
 		placements.forEach((p, i) => {
 			x0 = Math.min(x0, p.x);
 			y0 = Math.min(y0, p.y);
@@ -294,7 +335,12 @@
 		// chunk's app-rewiring priority was the Import page
 		// (src/routes/+page.svelte), and /lab is a separate, lower-priority
 		// path. Left as a pointer rather than touched, per that chunk's scope.
-		return { imageId: 'composite-' + Date.now().toString(16).padStart(64, '0'), widthPx: w, heightPx: h, rgba: data };
+		return {
+			imageId: 'composite-' + Date.now().toString(16).padStart(64, '0'),
+			widthPx: w,
+			heightPx: h,
+			rgba: data
+		};
 	}
 
 	let heldOut = $state('');
@@ -306,7 +352,8 @@
 	// `lab sweep` is the only LAB command that executes the algorithm plan, so
 	// loading an image here IS a sweep. Echo exactly the inputs that reached it.
 	function echoSweep(names: string[], held: string[]) {
-		for (const name of held) echo(`# held out (thrown round, purple mass): ${name} — not passed to sweep`);
+		for (const name of held)
+			echo(`# held out (thrown round, purple mass): ${name} — not passed to sweep`);
 		echo(
 			`sweep ${configArg} ${names.map(arg).join(' ')}`,
 			names.length > 1 ? 'multi-tile: sweep does StripChrome → AutoStitch → algorithm' : undefined
@@ -361,7 +408,10 @@
 				return;
 			}
 			imgName = tiles.map((t) => t.file.name).join(' + ');
-			echoSweep(tiles.map((t) => t.file.name), held);
+			echoSweep(
+				tiles.map((t) => t.file.name),
+				held
+			);
 			const composite = await buildComposite(
 				tiles.map((t) => t.file),
 				tiles.map((t) => t.rgba)
@@ -426,12 +476,17 @@
 		// Emitting `scope IMAGE -9,150` would hand over a command that cannot
 		// run; say what happened instead of fabricating an in-bounds pixel.
 		if (!m || px < 0 || py < 0 || px >= m.widthPx || py >= m.heightPx) {
-			echo(`# click at ${px},${py} falls outside the ${m ? `${m.widthPx}x${m.heightPx}` : 'canonical'} raster — no scope command`);
+			echo(
+				`# click at ${px},${py} falls outside the ${m ? `${m.widthPx}x${m.heightPx}` : 'canonical'} raster — no scope command`
+			);
 			return;
 		}
 		const at = `${px},${py}`;
 		if (scopeTarget) echo(`scope ${arg(scopeTarget)} ${at}`);
-		else echo(`# scope ${at} — canonical raster is the in-tab composite of ${imgName}; no file to name`);
+		else
+			echo(
+				`# scope ${at} — canonical raster is the in-tab composite of ${imgName}; no file to name`
+			);
 	}
 
 	let counts = $derived(
@@ -462,14 +517,19 @@
 		{labConfig.name}{labParamsHash ? ` · ${labParamsHash.slice(0, 12)}…` : ''}
 	</span>
 	{#if configError}<strong style="color: #a00;">config: {configError}</strong>{/if}
-	<a href="/">← Import Data</a>
+	<a href={`${base}/lab/pcr`}>PCR ProofFloor →</a>
+	<a href={`${base}/`}>← Import Data</a>
 </div>
 
 <CommandHistory entries={history} onclear={clearHistory} />
 
 {#if imgUrl && !run}
 	<!-- the input (or composite) stays visible while the worker crunches -->
-	<img src={imgUrl} alt="processing" style="max-width: 100%; max-height: 78vh; border: 1px solid black; opacity: 0.75;" />
+	<img
+		src={imgUrl}
+		alt="processing"
+		style="max-width: 100%; max-height: 78vh; border: 1px solid black; opacity: 0.75;"
+	/>
 {/if}
 
 {#if run && m}
@@ -480,10 +540,14 @@
 				onclick={() => setGate(i)}
 				style={i === gate ? 'font-weight: bold; outline: 2px solid black;' : ''}
 			>
-				{g.id} {g.name}
+				{g.id}
+				{g.name}
 			</button>
 		{/each}
-		<button onclick={() => setGate(Math.min(GATES.length - 1, gate + 1))} disabled={gate === GATES.length - 1}>▶</button>
+		<button
+			onclick={() => setGate(Math.min(GATES.length - 1, gate + 1))}
+			disabled={gate === GATES.length - 1}>▶</button
+		>
 		<em>{GATES[gate].note}</em>
 	</div>
 	<!-- one delegated change handler; every checkbox names itself via data-echo -->
@@ -494,24 +558,41 @@
 		<label><input type="checkbox" data-echo="badges" bind:checked={show.badges} /> badges</label>
 		<label><input type="checkbox" data-echo="baskets" bind:checked={show.baskets} /> baskets</label>
 		<label><input type="checkbox" data-echo="tees" bind:checked={show.tees} /> tees</label>
-		<label><input type="checkbox" data-echo="tee→badge" bind:checked={show.ownership} /> tee→badge</label>
+		<label
+			><input type="checkbox" data-echo="tee→badge" bind:checked={show.ownership} /> tee→badge</label
+		>
 		<label><input type="checkbox" data-echo="paths" bind:checked={show.path} /> paths</label>
 		{#if run?.trace}
 			<span>| trace:</span>
 			{#if heatmapUrl}
-				<label><input type="checkbox" data-echo="support heatmap" bind:checked={heatmapShow} /> support heatmap</label>
+				<label
+					><input type="checkbox" data-echo="support heatmap" bind:checked={heatmapShow} /> support heatmap</label
+				>
 			{/if}
 			{#each Object.keys(traceLayerShow) as unitId (unitId)}
 				<span>
 					{unitId}
-					<label>✓<input type="checkbox" data-echo={`${unitId} accepted`} bind:checked={traceLayerShow[unitId].accepted} /></label>
-					<label>✗<input type="checkbox" data-echo={`${unitId} rejected`} bind:checked={traceLayerShow[unitId].rejected} /></label>
+					<label
+						>✓<input
+							type="checkbox"
+							data-echo={`${unitId} accepted`}
+							bind:checked={traceLayerShow[unitId].accepted}
+						/></label
+					>
+					<label
+						>✗<input
+							type="checkbox"
+							data-echo={`${unitId} rejected`}
+							bind:checked={traceLayerShow[unitId].rejected}
+						/></label
+					>
 				</span>
 			{/each}
 		{/if}
 	</div>
 	<div style="font-family: monospace; font-size: 13px; margin-bottom: 0.3rem;">
-		badges {counts?.badges} · baskets {counts?.baskets} · tees {counts?.tees} · owned {counts?.owned} · raw pairs {counts?.pairs}
+		badges {counts?.badges} · baskets {counts?.baskets} · tees {counts?.tees} · owned {counts?.owned}
+		· raw pairs {counts?.pairs}
 	</div>
 
 	<!-- the overlay is an image; clicking it is an additive shortcut that only
@@ -551,7 +632,12 @@
 								(d.verdict === 'rejected' && layer.rejected) ||
 								(d.verdict === 'info' && (layer.accepted || layer.rejected)))}
 						{#if visible}
-							{@const color = d.verdict === 'accepted' ? '#7CFC00' : d.verdict === 'rejected' ? '#ff4444' : '#ffffff'}
+							{@const color =
+								d.verdict === 'accepted'
+									? '#7CFC00'
+									: d.verdict === 'rejected'
+										? '#ff4444'
+										: '#ffffff'}
 							{#if d.type === 'box'}
 								<rect
 									x={d.bbox[0]}
@@ -563,7 +649,8 @@
 									stroke-width="2"
 									stroke-dasharray={d.verdict === 'rejected' ? '4 3' : undefined}
 								>
-									<title>{unit.id} {d.verdict}{d.reason ? `: ${d.reason}` : ''} {d.ref ?? ''}</title>
+									<title>{unit.id} {d.verdict}{d.reason ? `: ${d.reason}` : ''} {d.ref ?? ''}</title
+									>
 								</rect>
 							{:else if d.type === 'point'}
 								<circle cx={d.xPx} cy={d.yPx} r="4" fill={color}>
@@ -598,7 +685,9 @@
 				/>
 				{#if show.badges}
 					<text x={b.bbox[0]} y={b.bbox[1] - 6} fill="gold" font-size="20" font-family="monospace">
-						{b.label ?? '?'} ({b.confidence.toFixed(2)}{b.source === 'dark-plate-recovery' ? ' R' : ''})
+						{b.label ?? '?'} ({b.confidence.toFixed(2)}{b.source === 'dark-plate-recovery'
+							? ' R'
+							: ''})
 					</text>
 				{/if}
 			{/each}
@@ -617,7 +706,13 @@
 				/>
 				<circle cx={k.tipXPx} cy={k.tipYPx} r="5" fill="#ff5555" />
 				{#if show.baskets}
-					<text x={k.bbox[0]} y={k.bbox[1] - 6} fill="#ff5555" font-size="18" font-family="monospace">
+					<text
+						x={k.bbox[0]}
+						y={k.bbox[1] - 6}
+						fill="#ff5555"
+						font-size="18"
+						font-family="monospace"
+					>
 						{k.score.toFixed(2)}
 					</text>
 				{/if}
@@ -645,7 +740,9 @@
 					/>
 				{/if}
 				{#if show.tees}
-					<text x={t.xPx + 12} y={t.yPx + 5} fill="#4fd1ff" font-size="16" font-family="monospace">{t.tier}</text>
+					<text x={t.xPx + 12} y={t.yPx + 5} fill="#4fd1ff" font-size="16" font-family="monospace"
+						>{t.tier}</text
+					>
 				{/if}
 			{/each}
 		{/if}

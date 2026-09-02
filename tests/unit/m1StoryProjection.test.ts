@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { describe, expect, test } from 'vitest';
-import { materializeBadgeSpecimens } from '../../.storybook/storybookBadgeSource.mjs';
+import { materializeBadgeSpecimens } from '../../src/lib/server/evidence-workbench/materializeBadgeSpecimens.mjs';
 import { projectM1Image, type M1Projection } from '../../src/lib/evidence-workbench/m1Projection';
 import type { M1WorkbenchLibrary } from '../../src/lib/evidence-workbench/badgeSpecimen';
 

@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/sveltekit';
 import { badgeSpecimenLibrary } from 'virtual:e-badge-specimens';
 import PcrInspectionHost from './PcrInspectionHost.svelte';
+import type { BadgeSpecimenLibrary } from './badgeSpecimen';
+import { DEFAULT_PCR_INSPECTION_PLAN, PCR_MATERIALIZATION_VIEWS } from './pcrInspectionPlan';
 
 type PcrArgs = {
+	library: BadgeSpecimenLibrary;
 	pcrId: string;
 	tickId: string;
 	specimenId: string;
@@ -13,27 +16,25 @@ type PcrArgs = {
 };
 
 const pcrIds = badgeSpecimenLibrary.pcrs.map((pcr) => pcr.id);
-const tickIds = [...new Set(badgeSpecimenLibrary.pcrs.flatMap((pcr) => pcr.ticks.map((tick) => tick.operation.id)))];
+const tickIds = [
+	...new Set(badgeSpecimenLibrary.pcrs.flatMap((pcr) => pcr.ticks.map((tick) => tick.operation.id)))
+];
 
 const meta = {
 	title: 'LAB/PCR/Tick Inspection',
 	component: PcrInspectionHost,
 	args: {
-		pcrId: 'badge-pcr',
-		tickId: 'badgeStage.masks',
-		specimenId: 'badge-0',
-		materializationView: 'composed',
-		zoom: 6,
-		showGrid: false,
-		showReceipt: true
+		library: badgeSpecimenLibrary,
+		...DEFAULT_PCR_INSPECTION_PLAN
 	},
 	argTypes: {
+		library: { table: { disable: true } },
 		pcrId: { control: 'select', options: pcrIds },
 		tickId: { control: 'select', options: tickIds },
 		specimenId: { table: { disable: true } },
 		materializationView: {
 			control: 'select',
-			options: ['raw', 'bw', 'ownership', 'residue-after', 'composed', 'components', 'available', 'explained', 'unexplained', 'relationships']
+			options: PCR_MATERIALIZATION_VIEWS
 		},
 		zoom: { control: { type: 'range', min: 1, max: 16, step: 1 } },
 		showGrid: { control: 'boolean' },
@@ -41,21 +42,58 @@ const meta = {
 	},
 	render: (args, context) => ({
 		Component: PcrInspectionHost,
-		props: { ...args, specimenId: String(context.globals.specimen ?? args.specimenId) }
+		props: {
+			...args,
+			specimenId: String(context.globals.specimen ?? args.specimenId)
+		}
 	})
 } satisfies Meta<PcrArgs>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const CanonicalInput: Story = { args: { pcrId: 'intake-pcr', tickId: 'source.decodeCanonicalInput', materializationView: 'raw' } };
-export const BadgeMasks: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeStage.masks', materializationView: 'bw' } };
-export const BadgeComponents: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeStage.components', materializationView: 'ownership' } };
-export const BadgeMaterialization: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeEvidence.materialize', materializationView: 'residue-after' } };
-export const BasketDetection: Story = { args: { pcrId: 'basket-pcr', tickId: 'baskets', materializationView: 'components' } };
-export const BasketResidue: Story = { args: { pcrId: 'basket-pcr', tickId: 'badgeEvidence.materialize', materializationView: 'unexplained' } };
-export const VisibleTeeRings: Story = { args: { pcrId: 'visible-tee-pcr', tickId: 'tees.ringMeasure', materializationView: 'raw' } };
-export const VisibleTeeSelection: Story = { args: { pcrId: 'visible-tee-pcr', tickId: 'tees.exclusion', materializationView: 'raw' } };
-export const TeeBasketLinework: Story = { args: { pcrId: 'tee-basket-linework-pcr', tickId: 'rawPairs', materializationView: 'raw' } };
-export const TeeBasketAssignment: Story = { args: { pcrId: 'tee-basket-linework-pcr', tickId: 'assignment.selection', materializationView: 'raw' } };
-export const TeeRecovery: Story = { args: { pcrId: 'tee-recovery-pcr', tickId: 'teeRecovery', materializationView: 'raw' } };
+export const CanonicalInput: Story = {
+	args: { pcrId: 'intake-pcr', tickId: 'source.decodeCanonicalInput', materializationView: 'raw' }
+};
+export const BadgeMasks: Story = {
+	args: { pcrId: 'badge-pcr', tickId: 'badgeStage.masks', materializationView: 'bw' }
+};
+export const BadgeComponents: Story = {
+	args: { pcrId: 'badge-pcr', tickId: 'badgeStage.components', materializationView: 'ownership' }
+};
+export const BadgeMaterialization: Story = {
+	args: {
+		pcrId: 'badge-pcr',
+		tickId: 'badgeEvidence.materialize',
+		materializationView: 'residue-after'
+	}
+};
+export const BasketDetection: Story = {
+	args: { pcrId: 'basket-pcr', tickId: 'baskets', materializationView: 'components' }
+};
+export const BasketResidue: Story = {
+	args: {
+		pcrId: 'basket-pcr',
+		tickId: 'badgeEvidence.materialize',
+		materializationView: 'unexplained'
+	}
+};
+export const VisibleTeeRings: Story = {
+	args: { pcrId: 'visible-tee-pcr', tickId: 'tees.ringMeasure', materializationView: 'raw' }
+};
+export const VisibleTeeSelection: Story = {
+	args: { pcrId: 'visible-tee-pcr', tickId: 'tees.exclusion', materializationView: 'raw' }
+};
+export const TeeBasketLinework: Story = {
+	args: { pcrId: 'tee-basket-linework-pcr', tickId: 'rawPairs', materializationView: 'raw' }
+};
+export const TeeBasketAssignment: Story = {
+	args: {
+		pcrId: 'tee-basket-linework-pcr',
+		tickId: 'assignment.selection',
+		materializationView: 'raw'
+	}
+};
+export const TeeRecovery: Story = {
+	args: { pcrId: 'tee-recovery-pcr', tickId: 'teeRecovery', materializationView: 'raw' }
+};

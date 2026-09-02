@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { materializeBadgeSpecimens } from '../.storybook/storybookBadgeSource.mjs';
+import { materializeBadgeSpecimens } from '../src/lib/server/evidence-workbench/materializeBadgeSpecimens.mjs';
 
 const library = await materializeBadgeSpecimens();
 const index = JSON.parse(readFileSync(resolve('storybook-static/index.json'), 'utf8'));

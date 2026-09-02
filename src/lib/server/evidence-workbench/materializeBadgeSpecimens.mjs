@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import * as threeFactorNamespace from '@chainspot/alg/detectors/threeFactor';
 import * as badgeEvidenceNamespace from '@chainspot/alg/detectors/threeFactor/badgeEvidence';
 import * as m1RepresentationNamespace from '@chainspot/alg/detectors/threeFactor/m1Representation';
@@ -37,11 +37,11 @@ const executeNodeCanonicalInputTick = exported(
 	'executeNodeCanonicalInputTick'
 );
 
-function unavailableLibrary(imagePath) {
+function unavailableLibrary(sourceId) {
 	return {
 		status: 'unavailable',
-		note: `Real E materialization unavailable: ${imagePath} does not exist. Set CHAINSPOT_BADGE_IMAGE or place chainspot-corpus beside ChainSpot.`,
-		source: imagePath,
+		note: `Real E materialization unavailable: ${sourceId} does not exist. Set CHAINSPOT_BADGE_IMAGE or place chainspot-corpus beside ChainSpot.`,
+		source: sourceId,
 		m1: null,
 		pcrs: [],
 		specimens: [
@@ -144,10 +144,16 @@ function asStorybookSpecimen(specimen, artifact) {
 
 /** Execute the opt-in E producer, then consume only its content-addressed artifacts. */
 export async function materializeBadgeSpecimens() {
+	const configuredImage = process.env.CHAINSPOT_BADGE_IMAGE;
 	const imagePath = resolve(
-		process.env.CHAINSPOT_BADGE_IMAGE ?? '../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg'
+		configuredImage ?? '../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg'
 	);
-	if (!existsSync(imagePath)) return unavailableLibrary(imagePath);
+	const sourceId =
+		process.env.CHAINSPOT_BADGE_SOURCE_ID ??
+		(configuredImage
+			? `configured/${basename(configuredImage)}`
+			: 'chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg');
+	if (!existsSync(imagePath)) return unavailableLibrary(sourceId);
 
 	const intake = await executeNodeCanonicalInputTick(imagePath);
 	const board = intake.pxc;
@@ -269,15 +275,8 @@ export async function materializeBadgeSpecimens() {
 	return {
 		status: 'materialized',
 		note: `${specimens.length} badges decoded from content-addressed E artifacts`,
-		source: imagePath,
-		pcrs: [
-			intakePcr,
-			badgePcr,
-			basketPcr,
-			visibleTeePcr,
-			teeBasketLineworkPcr,
-			teeRecoveryPcr
-		],
+		source: sourceId,
+		pcrs: [intakePcr, badgePcr, basketPcr, visibleTeePcr, teeBasketLineworkPcr, teeRecoveryPcr],
 		specimens,
 		m1: asStorybookM1(decodeMaterializedM1Representation(m1Bytes), m1Artifact)
 	};

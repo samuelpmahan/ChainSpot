@@ -1,5 +1,5 @@
 import type { StorybookConfig } from '@storybook/sveltekit';
-import { materializeBadgeSpecimens } from './storybookBadgeSource.mjs';
+import { materializeBadgeSpecimens } from '../src/lib/server/evidence-workbench/materializeBadgeSpecimens.mjs';
 
 const virtualId = 'virtual:e-badge-specimens';
 const resolvedVirtualId = `\0${virtualId}`;

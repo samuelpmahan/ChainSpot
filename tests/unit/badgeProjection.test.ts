@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { describe, expect, test } from 'vitest';
-import { materializeBadgeSpecimens } from '../../.storybook/storybookBadgeSource.mjs';
+import { materializeBadgeSpecimens } from '../../src/lib/server/evidence-workbench/materializeBadgeSpecimens.mjs';
 import {
 	BADGE_STORY_PROJECTIONS,
 	assertBadgeConservation,

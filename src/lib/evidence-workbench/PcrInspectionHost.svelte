@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { pcrRenderId } from '@chainspot/alg/exec';
-	import { badgeSpecimenLibrary } from 'virtual:e-badge-specimens';
+	import type { BadgeSpecimenLibrary } from './badgeSpecimen';
 	import BadgeEvidenceView from './BadgeEvidenceView.svelte';
 	import M1EvidenceView from './M1EvidenceView.svelte';
 	import TickInspection from './TickInspection.svelte';
@@ -8,6 +8,7 @@
 	import { M1_PROJECTIONS, type M1Projection } from './m1Projection';
 
 	let {
+		library,
 		pcrId,
 		tickId,
 		specimenId,
@@ -16,6 +17,7 @@
 		showGrid = false,
 		showReceipt = true
 	}: {
+		library: BadgeSpecimenLibrary;
 		pcrId: string;
 		tickId: string;
 		specimenId: string;
@@ -25,15 +27,11 @@
 		showReceipt?: boolean;
 	} = $props();
 
-	let pcr = $derived(
-		badgeSpecimenLibrary.pcrs.find((candidate) => candidate.id === pcrId) ??
-			badgeSpecimenLibrary.pcrs[0]
-	);
+	let pcr = $derived(library.pcrs.find((candidate) => candidate.id === pcrId) ?? library.pcrs[0]);
 	let specimen = $derived(
-		badgeSpecimenLibrary.specimens.find((candidate) => candidate.id === specimenId) ??
-			badgeSpecimenLibrary.specimens[0]
+		library.specimens.find((candidate) => candidate.id === specimenId) ?? library.specimens[0]
 	);
-	let basket = $derived(badgeSpecimenLibrary.m1?.objects.find((object) => object.kind === 'basket'));
+	let basket = $derived(library.m1?.objects.find((object) => object.kind === 'basket'));
 	let badgeProjection = $derived(
 		BADGE_STORY_PROJECTIONS.includes(materializationView as BadgeProjection)
 			? (materializationView as BadgeProjection)
@@ -46,15 +44,33 @@
 	);
 	let residue = $derived.by(() => {
 		if (pcr?.id === 'badge-pcr' && specimen) {
-			return [{ label: 'BadgePixelResidue', count: specimen.metrics.residueAfter, note: 'exact already-computed crop pixels remaining after owned B+W and additive AA' }];
+			return [
+				{
+					label: 'BadgePixelResidue',
+					count: specimen.metrics.residueAfter,
+					note: 'exact already-computed crop pixels remaining after owned B+W and additive AA'
+				}
+			];
 		}
 		if (pcr?.id === 'basket-pcr' && basket) {
 			return basket.accounting.status === 'known'
-				? [{ label: 'BasketPixelResidue', count: basket.accounting.unexplainedPixels.length, note: 'exact M1 pixels not explained by the current Basket assembly' }]
+				? [
+						{
+							label: 'BasketPixelResidue',
+							count: basket.accounting.unexplainedPixels.length,
+							note: 'exact M1 pixels not explained by the current Basket assembly'
+						}
+					]
 				: [{ label: 'BasketPixelResidue', count: null, note: basket.accounting.reason }];
 		}
 		if (pcr?.id === 'intake-pcr') {
-			return [{ label: 'MoleculePixelResidue', count: null, note: 'UNKNOWN — canonical intake establishes pixels, not detector ownership' }];
+			return [
+				{
+					label: 'MoleculePixelResidue',
+					count: null,
+					note: 'UNKNOWN — canonical intake establishes pixels, not detector ownership'
+				}
+			];
 		}
 		return [];
 	});
@@ -70,29 +86,75 @@
 		<TickInspection {pcr} {tickId} {residue} />
 		<section class="projection-only">
 			<header>
-				<div><strong>Projection-only MaterializationView</strong><span>View Args never cross the production gateway</span></div>
+				<div>
+					<strong>Projection-only MaterializationView</strong><span
+						>View Args never cross the production gateway</span
+					>
+				</div>
 				<code>renderId {renderId}</code>
 			</header>
 			{#if pcr.id === 'badge-pcr' && specimen}
-				<BadgeEvidenceView {specimen} projection={badgeProjection} {zoom} {showGrid} {showReceipt} />
-			{:else if pcr.id === 'basket-pcr' && basket && badgeSpecimenLibrary.m1}
-				<M1EvidenceView library={badgeSpecimenLibrary.m1} subjectId={basket.id} projection={m1Projection} {zoom} {showReceipt} />
+				<BadgeEvidenceView
+					{specimen}
+					projection={badgeProjection}
+					{zoom}
+					{showGrid}
+					{showReceipt}
+				/>
+			{:else if pcr.id === 'basket-pcr' && basket && library.m1}
+				<M1EvidenceView
+					library={library.m1}
+					subjectId={basket.id}
+					projection={m1Projection}
+					{zoom}
+					{showReceipt}
+				/>
 			{:else if pcr.id === 'intake-pcr'}
-				<p>The canonical RGBA Materialization is frozen in the selected Tick testimony above. This projection performs no decode, normalization, or detector work.</p>
+				<p>
+					The canonical RGBA Materialization is frozen in the selected Tick testimony above. This
+					projection performs no decode, normalization, or detector work.
+				</p>
 			{:else}
-				<p>No molecule-specific pixel projection exists for this checkpoint. Its exact PxC addresses and any content-addressed Materializations remain visible in the Tick testimony above; residue stays UNKNOWN.</p>
+				<p>
+					No molecule-specific pixel projection exists for this checkpoint. Its exact PxC addresses
+					and any content-addressed Materializations remain visible in the Tick testimony above;
+					residue stays UNKNOWN.
+				</p>
 			{/if}
 		</section>
 	</main>
 {:else}
-	<p>No PCR ran: {badgeSpecimenLibrary.note}</p>
+	<p>No PCR ran: {library.note}</p>
 {/if}
 
 <style>
-	main { display: grid; gap: 1rem; padding: 1rem; background: #fff; }
-	.projection-only { border-top: 4px solid #6d28d9; background: #f5f3ff; padding: .75rem; }
-	header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; }
-	header div { display: grid; }
-	header span { color: #6d28d9; font-size: .75rem; }
-	header code { color: #737373; font-size: .68rem; overflow-wrap: anywhere; }
+	main {
+		display: grid;
+		gap: 1rem;
+		padding: 1rem;
+		background: #fff;
+	}
+	.projection-only {
+		border-top: 4px solid #6d28d9;
+		background: #f5f3ff;
+		padding: 0.75rem;
+	}
+	header {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: end;
+	}
+	header div {
+		display: grid;
+	}
+	header span {
+		color: #6d28d9;
+		font-size: 0.75rem;
+	}
+	header code {
+		color: #737373;
+		font-size: 0.68rem;
+		overflow-wrap: anywhere;
+	}
 </style>
