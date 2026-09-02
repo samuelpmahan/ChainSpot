@@ -27,6 +27,10 @@
 			"types": "./dist/exec/node-sink.d.ts",
 			"default": "./dist/exec/node-sink.js"
 		},
+		"./exec/node-intake": {
+			"types": "./dist/exec/node-intake.d.ts",
+			"default": "./dist/exec/node-intake.js"
+		},
 		"./*.json": "./dist/*.json",
 		"./*": {
 			"types": "./dist/*.d.ts",

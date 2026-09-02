@@ -53,6 +53,9 @@
 				? [{ label: 'BasketPixelResidue', count: basket.accounting.unexplainedPixels.length, note: 'exact M1 pixels not explained by the current Basket assembly' }]
 				: [{ label: 'BasketPixelResidue', count: null, note: basket.accounting.reason }];
 		}
+		if (pcr?.id === 'intake-pcr') {
+			return [{ label: 'MoleculePixelResidue', count: null, note: 'UNKNOWN — canonical intake establishes pixels, not detector ownership' }];
+		}
 		return [];
 	});
 	let renderId = $derived(
@@ -74,6 +77,8 @@
 				<BadgeEvidenceView {specimen} projection={badgeProjection} {zoom} {showGrid} {showReceipt} />
 			{:else if pcr.id === 'basket-pcr' && basket && badgeSpecimenLibrary.m1}
 				<M1EvidenceView library={badgeSpecimenLibrary.m1} subjectId={basket.id} projection={m1Projection} {zoom} {showReceipt} />
+			{:else if pcr.id === 'intake-pcr'}
+				<p>The canonical RGBA Materialization is frozen in the selected Tick testimony above. This projection performs no decode, normalization, or detector work.</p>
 			{:else}
 				<p>Materialization UNKNOWN: {badgeSpecimenLibrary.note}</p>
 			{/if}

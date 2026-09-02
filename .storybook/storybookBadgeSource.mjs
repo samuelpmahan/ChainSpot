@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import jpeg from 'jpeg-js';
 import * as threeFactorNamespace from '@chainspot/alg/detectors/threeFactor';
 import * as badgeEvidenceNamespace from '@chainspot/alg/detectors/threeFactor/badgeEvidence';
 import * as m1RepresentationNamespace from '@chainspot/alg/detectors/threeFactor/m1Representation';
@@ -9,6 +8,7 @@ import * as configNamespace from '@chainspot/alg/detectors/threeFactor/config';
 import * as measureNamespace from '@chainspot/alg/detectors/threeFactor/measure';
 import * as featureTypesNamespace from '@chainspot/alg/detectors/threeFactor/features/types';
 import * as execNamespace from '@chainspot/alg/exec';
+import * as nodeIntakeNamespace from '@chainspot/alg/exec/node-intake';
 
 function exported(namespace, name) {
 	return namespace[name] ?? namespace.default?.[name];
@@ -29,10 +29,13 @@ const resolveConfig = exported(configNamespace, 'resolveConfig');
 const seedBoard = exported(measureNamespace, 'seedBoard');
 const nullFeatureContext = exported(featureTypesNamespace, 'nullFeatureContext');
 const compileExecutionPlan = exported(execNamespace, 'compileExecutionPlan');
-const createExecBoard = exported(execNamespace, 'createExecBoard');
 const createMemorySink = exported(execNamespace, 'createMemorySink');
 const executeCompiledPlan = exported(execNamespace, 'executeCompiledPlan');
 const composePcr = exported(execNamespace, 'composePcr');
+const executeNodeCanonicalInputTick = exported(
+	nodeIntakeNamespace,
+	'executeNodeCanonicalInputTick'
+);
 
 function unavailableLibrary(imagePath) {
 	return {
@@ -146,17 +149,22 @@ export async function materializeBadgeSpecimens() {
 	);
 	if (!existsSync(imagePath)) return unavailableLibrary(imagePath);
 
-	const encoded = readFileSync(imagePath);
-	const decoded = jpeg.decode(encoded, { useTArray: true, maxMemoryUsageInMB: 2048 });
+	const intake = await executeNodeCanonicalInputTick(imagePath);
+	const board = intake.pxc;
 	const image = {
-		width: decoded.width,
-		height: decoded.height,
-		data: new Uint8ClampedArray(
-			decoded.data.buffer,
-			decoded.data.byteOffset,
-			decoded.data.byteLength
-		)
+		width: intake.input.widthPx,
+		height: intake.input.heightPx,
+		data: intake.input.rgba
 	};
+	const intakePcr = composePcr(
+		{
+			id: 'intake-pcr',
+			title: 'Canonical Input PCR',
+			tickIds: [intake.testimony.opId]
+		},
+		intake.plan,
+		[intake.testimony]
+	);
 	const defaultConfig = parseConfig(
 		JSON.parse(
 			readFileSync(resolve('packages/alg/src/detectors/threeFactor/configs/default.json'), 'utf8')
@@ -176,7 +184,8 @@ export async function materializeBadgeSpecimens() {
 	};
 	const paramsHash = createHash('sha256').update(canonicalJson(resolvedConfig)).digest('hex');
 	const plan = compileExecutionPlan(resolvedConfig, paramsHash);
-	const board = createExecBoard();
+	// Seed the engine's established aliases over the exact canonical RGBA bytes
+	// already held by PxC. S1 does not decode or normalize a second copy.
 	seedBoard(board, image, undefined);
 	board.set('paramsHash', paramsHash);
 	board.set('recoveredTees', []);
@@ -225,7 +234,7 @@ export async function materializeBadgeSpecimens() {
 		status: 'materialized',
 		note: `${specimens.length} badges decoded from content-addressed E artifacts`,
 		source: imagePath,
-		pcrs: [badgePcr, basketPcr],
+		pcrs: [intakePcr, badgePcr, basketPcr],
 		specimens,
 		m1: asStorybookM1(decodeMaterializedM1Representation(m1Bytes), m1Artifact)
 	};

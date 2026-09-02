@@ -17,10 +17,12 @@ const m1Badge = library.m1.objects.find((object) => object.id === 'badge-0');
 const m1Basket = library.m1.objects.find((object) => object.id === 'basket-0');
 if (m1Badge?.accounting.status !== 'known' || m1Basket?.accounting.status !== 'known')
 	throw new Error('representative Badge/Basket M1 accounting is unavailable');
+const intakePcr = library.pcrs.find((pcr) => pcr.id === 'intake-pcr');
 const badgePcr = library.pcrs.find((pcr) => pcr.id === 'badge-pcr');
 const basketPcr = library.pcrs.find((pcr) => pcr.id === 'basket-pcr');
-if (!badgePcr || !basketPcr) throw new Error('Badge/Basket PCR composition missing');
-for (const pcr of [badgePcr, basketPcr]) {
+if (!intakePcr || !badgePcr || !basketPcr)
+	throw new Error('Intake/Badge/Basket PCR composition missing');
+for (const pcr of [intakePcr, badgePcr, basketPcr]) {
 	if (!/^[0-9a-f]{64}$/.test(pcr.runResultId))
 		throw new Error(`${pcr.id}: invalid frozen runResultId`);
 	for (const tick of pcr.ticks) {
@@ -31,8 +33,8 @@ for (const pcr of [badgePcr, basketPcr]) {
 	}
 }
 const pcrStories = stories.filter((story) => story.title === 'LAB/PCR/Tick Inspection');
-if (pcrStories.length !== 5)
-	throw new Error(`expected 5 indexed PCR specimens; got ${pcrStories.length}`);
+if (pcrStories.length !== 6)
+	throw new Error(`expected 6 indexed PCR specimens; got ${pcrStories.length}`);
 
 const receipt = {
 	source: library.source,
@@ -41,6 +43,20 @@ const receipt = {
 	composedNotebooks: docs.length,
 	pcr: {
 		indexedSpecimens: pcrStories.length,
+		intake: {
+			runResultId: intakePcr.runResultId,
+			ticks: intakePcr.ticks.map((tick) => ({
+				id: tick.operation.id,
+				calculations: tick.testimony.frozenCalculations,
+				inputs: tick.testimony.actualConsumes,
+				writes: tick.testimony.writes,
+				materializations: tick.testimony.artifacts.map((artifact) => ({
+					id: artifact.id,
+					kind: artifact.kind,
+					sha256: artifact.sha256
+				}))
+			}))
+		},
 		badge: {
 			runResultId: badgePcr.runResultId,
 			ticks: badgePcr.ticks.map((tick) => ({
@@ -105,10 +121,10 @@ console.log(`real specimens: ${receipt.specimens} (live DashsTrack materializati
 console.log(`indexed projections: ${receipt.indexedProjections} (storybook-static/index.json)`);
 console.log(`composed notebooks: ${receipt.composedNotebooks} (storybook-static/index.json)`);
 console.log(
-	`PCR: ${receipt.pcr.indexedSpecimens} indexed specimens; Badge ${receipt.pcr.badge.ticks.length} Ticks; Basket ${receipt.pcr.basket.ticks.length} Ticks`
+	`PCR: ${receipt.pcr.indexedSpecimens} indexed specimens; Intake ${receipt.pcr.intake.ticks.length} Tick; Badge ${receipt.pcr.badge.ticks.length} Ticks; Basket ${receipt.pcr.basket.ticks.length} Ticks`
 );
 console.log(
-	`PCR identities: Badge ${receipt.pcr.badge.runResultId}; Basket ${receipt.pcr.basket.runResultId}`
+	`PCR identities: Intake ${receipt.pcr.intake.runResultId}; Badge ${receipt.pcr.badge.runResultId}; Basket ${receipt.pcr.basket.runResultId}`
 );
 console.log(
 	`badge-0: B+W ${pinned.metrics.ownedBw}; AA +${pinned.metrics.aaAdded}; residue ${pinned.metrics.residueBefore} -> ${pinned.metrics.residueAfter}`

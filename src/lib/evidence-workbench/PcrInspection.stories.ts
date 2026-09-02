@@ -48,6 +48,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+export const CanonicalInput: Story = { args: { pcrId: 'intake-pcr', tickId: 'source.decodeCanonicalInput', materializationView: 'raw' } };
 export const BadgeMasks: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeStage.masks', materializationView: 'bw' } };
 export const BadgeComponents: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeStage.components', materializationView: 'ownership' } };
 export const BadgeMaterialization: Story = { args: { pcrId: 'badge-pcr', tickId: 'badgeEvidence.materialize', materializationView: 'residue-after' } };
