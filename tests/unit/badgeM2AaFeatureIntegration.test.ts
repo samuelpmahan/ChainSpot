@@ -3,7 +3,8 @@ import {
 	BADGE_M2_AA_FEATURE_ID,
 	badgeM2AaFeature,
 	badgeM2AaOperation,
-	decodeMaterializedBadgeM2Library
+	decodeMaterializedBadgeM2Library,
+	encodeMaterializedBadgeM2Library
 } from '@chainspot/alg/detectors/threeFactor/features/g5.badgeM2Aa';
 import {
 	compileABFeatureSet,
@@ -104,5 +105,52 @@ describe('badgeM2Aa production ABFeature gateway', () => {
 		expect(result.state).toBe('insufficient');
 		expect(result.rawProbe?.trace.final).toMatchObject({ status: 'unknown' });
 		expect(result.rawProbe?.trace.final.reason).toMatch(/exactly 18/i);
+	});
+
+	test('a library whose estimated serialized size exceeds V8s max string length gets a loud size-guard artifact instead of a JSON.stringify crash', () => {
+		// A real oversized library would need ~180K real observations to trip
+		// the guard; a `{length}` stand-in exercises the guard's estimate
+		// (which only reads `.observations.length`) without materializing them.
+		const hugeMarginObservationCount = 200_000;
+		const oversized: any = {
+			schema: 'chainspot.badge-m2-raw-frame-library/v2',
+			featureId: BADGE_M2_AA_FEATURE_ID,
+			state: 'materialized',
+			provenance: { imageId: 'huge', paramsHash: 'huge', source: 'full source RGBA expanded-frame recurrence' },
+			rawProbe: {
+				trace: {
+					margins: [{ marginPx: 99, observations: { length: hugeMarginObservationCount } }],
+					final: { finalMarginPx: 99, status: 'insufficient', reason: 'fixture: safety cap reached' }
+				}
+			},
+			representations: []
+		};
+		const bytes = encodeMaterializedBadgeM2Library(oversized);
+		const decoded = JSON.parse(new TextDecoder().decode(bytes));
+		expect(decoded.sizeGuard).toMatchObject({
+			status: 'UNKNOWN',
+			observationCount: hugeMarginObservationCount,
+			bytesPerObservation: 3000,
+			marginCount: 1,
+			finalMarginPx: 99,
+			finalStatus: 'insufficient',
+			finalReason: 'fixture: safety cap reached'
+		});
+		expect(decoded.sizeGuard.estimatedBytes).toBe(hugeMarginObservationCount * decoded.sizeGuard.bytesPerObservation);
+		expect(decoded.sizeGuard.estimatedBytes).toBeGreaterThan(decoded.sizeGuard.limitBytes);
+		expect(decoded.rawProbe).toBeUndefined();
+		expect(decoded.representations).toEqual([]);
+		// A small library never trips the guard and encodes/decodes normally.
+		const tiny: any = {
+			...oversized,
+			rawProbe: {
+				trace: {
+					margins: [{ marginPx: 2, observations: { length: 10 } }],
+					final: { finalMarginPx: 2, status: 'adequate', reason: 'fixture: stabilized' }
+				}
+			}
+		};
+		const tinyDecoded = decodeMaterializedBadgeM2Library(encodeMaterializedBadgeM2Library(tiny));
+		expect((tinyDecoded as any).sizeGuard).toBeUndefined();
 	});
 });

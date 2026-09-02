@@ -366,11 +366,16 @@ describe('M2 expanded-frame raw-source probe', () => {
 	});
 
 	test('glyph mask excludes glyph and halo only; plate and exterior cells remain eligible', () => {
+		// Schema v2: only the final margin retains full per-pixel observations
+		// (superseded margins keep summaries only), so this reads the margin
+		// keyed by trace.final.finalMarginPx rather than an arbitrary index.
+		// Local pixels are owned-bbox-relative and identify the same source
+		// pixel at any margin >= 2, so the expected values are unchanged.
 		const result = materializeExpandedBadgeRawFrameProbe(rawFixture());
-		const margin = result.trace.margins[0]!;
-		expect(margin.observations.find((value) => value.localPixel.join(',') === '1,0')?.exactSupported).toBe(true);
-		expect(margin.observations.find((value) => value.localPixel.join(',') === '2,2')?.eligibleSampleIds).toHaveLength(0);
-		expect(margin.observations.find((value) => value.localPixel.join(',') === '4,0')?.exactSupported).toBe(true);
+		const margin = result.trace.margins.find((value) => value.marginPx === result.trace.final.finalMarginPx)!;
+		expect(margin.observations?.find((value) => value.localPixel.join(',') === '1,0')?.exactSupported).toBe(true);
+		expect(margin.observations?.find((value) => value.localPixel.join(',') === '2,2')?.eligibleSampleIds).toHaveLength(0);
+		expect(margin.observations?.find((value) => value.localPixel.join(',') === '4,0')?.exactSupported).toBe(true);
 	});
 
 	test('frame grows, clears exact boundaries, and quantized diagnostics never control exact support', () => {
@@ -379,7 +384,11 @@ describe('M2 expanded-frame raw-source probe', () => {
 		expect(result.trace.margins[1]?.frameSize).toEqual([10, 10]);
 		expect(result.trace.final.status).toBe('adequate');
 		expect(result.trace.algorithm.quantized.authoritative).toBe(false);
-		const diagnosticOnly = result.trace.margins[0]?.observations.find((value) => value.localPixel.join(',') === '3,0');
+		// Schema v2: superseded margins (all but the final one) no longer carry
+		// `observations`; look the diagnostic coordinate up on the final margin.
+		const finalMargin = result.trace.margins.find((value) => value.marginPx === result.trace.final.finalMarginPx);
+		expect(result.trace.margins.some((value) => value.marginPx !== result.trace.final.finalMarginPx && value.observations !== undefined)).toBe(false);
+		const diagnosticOnly = finalMargin?.observations?.find((value) => value.localPixel.join(',') === '3,0');
 		expect(diagnosticOnly).toMatchObject({ exactSupported: false, quantizedSupported: true });
 		expect(diagnosticOnly?.nullModel).toMatchObject({ p: 0.5, probabilityAllMatch: 3.814697265625e-6, percentAllMatch: 0.0003814697265625 });
 		expect(diagnosticOnly?.sampleSdDenominator).toBe('n-1');

@@ -47,6 +47,32 @@ export interface M2RawFrameStatsControl {
 	readonly replicateCount: number;
 	readonly supportThresholds: readonly number[];
 	readonly assumptions: readonly string[];
+	/**
+	 * At most one entry: the final margin's control (`trace.final.finalMarginPx`).
+	 * Only the final margin's per-pixel observations feed the promotion
+	 * decision, and only the final margin retains them (see the
+	 * EVIDENCE-RETENTION POLICY comment above M2_RAW_SOURCE_PROBE_SCHEMA in
+	 * m2Representation.ts). The PRIMARY statistics every consumer reads --
+	 * `bySupportThreshold`, in particular the `'18'`-threshold
+	 * `globalMaxExactOverlap`/`largestEightConnectedCluster` that gates
+	 * ownership -- are bit-identical to what looping over every swept margin
+	 * and keeping only `marginPx === finalMarginPx` produced, because every
+	 * consumer already selected that way.
+	 *
+	 * CORRECTION: `outermostClearedRing` is not covered by that argument.
+	 * m2Projection.ts's `adaptM2RawFrameStatsControl` and
+	 * tmp-render-m2-frame-receipt.mjs both pick it via
+	 * `control.margins.find(m => m.outermostClearedRing)`, which takes the
+	 * FIRST cleared margin in array order, not the final one. Before this
+	 * change `margins[]` held one entry per swept margin in original order,
+	 * so `.find()` could surface an EARLIER cleared margin than the final
+	 * one (a reviewer fixture demonstrated margin 2 winning over margin 3).
+	 * With at most one entry here, that ring statistic now always comes from
+	 * the final margin -- an intended correction to which margin's
+	 * outermost-cleared-ring reading gets shown, not a preserved behavior.
+	 * `reason` below also now names the final margin explicitly, so its text
+	 * changed too.
+	 */
 	readonly margins: readonly M2RawFrameStatsControlMargin[];
 }
 
@@ -110,8 +136,8 @@ function summary(observed: number, values: readonly number[]): M2RawNullSummary 
 	};
 }
 
-function rowsByKey(margin: M2RawMarginTrace): Map<string, M2RawCoordinateObservation> {
-	return new Map(margin.observations.map((observation) => [key(...observation.localPixel), observation]));
+function rowsByKey(observations: readonly M2RawCoordinateObservation[]): Map<string, M2RawCoordinateObservation> {
+	return new Map(observations.map((observation) => [key(...observation.localPixel), observation]));
 }
 
 function controlledObservation(
@@ -203,16 +229,26 @@ export function materializeM2RawFrameStatsControl(
 	const geometry = trace.registrations[0]?.ownedBbox;
 	if (!geometry || trace.registrations.some((registration) => registration.ownedBbox[2] !== geometry[2] || registration.ownedBbox[3] !== geometry[3]))
 		return { status: 'unknown', reason: 'negative-control requires equal registered crop dimensions', controlSeed, seedAlgorithm: 'fnv1a32(imageId+paramsHash+featureId)', replicateCount: 0, supportThresholds, assumptions: ['sample 0 is fixed', 'all other samples require nonzero x/y circular shifts'], margins: [] };
+	// Only the final margin's per-pixel observations feed the promotion
+	// decision (and only the final margin retains them -- superseded margins
+	// carry summaries only, see m2Representation.ts). The control is computed
+	// for that one margin, never re-swept across every superseded margin.
+	const finalMargin = trace.margins.find((candidate) => candidate.marginPx === trace.final.finalMarginPx);
+	const finalObservations = finalMargin?.observations;
+	if (!finalMargin || !finalObservations)
+		return { status: 'unknown', reason: "negative-control requires the final margin's retained per-pixel observations, which are missing", controlSeed, seedAlgorithm: 'fnv1a32(imageId+paramsHash+featureId)', replicateCount: 0, supportThresholds, assumptions: ['sample 0 is fixed', 'all other samples require nonzero x/y circular shifts'], margins: [] };
 	const margins: M2RawFrameStatsControlMargin[] = [];
-	for (const margin of trace.margins) {
-		const rows = rowsByKey(margin);
+	{
+		const margin = finalMargin;
+		const observations = finalObservations;
+		const rows = rowsByKey(observations);
 		const shiftsAtMargin = shifts(seedNumber ^ margin.marginPx, trace.registrations.length, margin.frameSize[0], margin.frameSize[1]);
 		const observedBySupport: Record<string, { max: number; cluster: number }> = {};
 		const nullBySupport: Record<string, { max: number[]; cluster: number[] }> = {};
 		const nullRing: number[] = [];
 		const allReplicateShifts: (readonly (readonly [number, number])[])[] = [];
 		for (const threshold of supportThresholds) {
-			observedBySupport[String(threshold)] = { max: maxOverlap(margin.observations, threshold), cluster: largestCluster(margin.observations, threshold) };
+			observedBySupport[String(threshold)] = { max: maxOverlap(observations, threshold), cluster: largestCluster(observations, threshold) };
 			nullBySupport[String(threshold)] = { max: [], cluster: [] };
 		}
 		for (let replicate = 0; replicate < replicateCount; replicate++) {
@@ -221,7 +257,7 @@ export function materializeM2RawFrameStatsControl(
 			// One shift belongs to one specimen for the whole crop. Every target
 			// coordinate then reads that specimen's shifted raw row and recomputes
 			// the modal exact tuple; no aggregate observation row is shifted.
-			const controlled = margin.observations.map((target) => controlledObservation(margin, target, rows, replicateShifts, trace.registrations.map((registration) => registration.sampleId)));
+			const controlled = observations.map((target) => controlledObservation(margin, target, rows, replicateShifts, trace.registrations.map((registration) => registration.sampleId)));
 			for (const threshold of supportThresholds) {
 				nullBySupport[String(threshold)]!.max.push(maxOverlap(controlled, threshold));
 				nullBySupport[String(threshold)]!.cluster.push(largestCluster(controlled, threshold));
@@ -239,7 +275,7 @@ export function materializeM2RawFrameStatsControl(
 			largestEightConnectedCluster: summary(observedBySupport[String(threshold)]!.cluster, nullBySupport[String(threshold)]!.cluster)
 		}])) as Record<string, { globalMaxExactOverlap: M2RawNullSummary; largestEightConnectedCluster: M2RawNullSummary }>;
 		const outermostClearedRing = margin.exactBoundary.total === 0
-			? summary(maxOverlap(margin.observations.filter((observation) => {
+			? summary(maxOverlap(observations.filter((observation) => {
 				const [x, y] = observation.localPixel;
 				return x === -margin.marginPx || y === -margin.marginPx || x === margin.frameSize[0] - margin.marginPx - 1 || y === margin.frameSize[1] - margin.marginPx - 1;
 			}), 18), nullRing)
@@ -248,7 +284,7 @@ export function materializeM2RawFrameStatsControl(
 	}
 	return {
 		status: margins.length ? 'measured' : 'unknown',
-		reason: margins.length ? 'deterministic circular-shift null control materialized' : 'raw probe has no margins to control',
+		reason: margins.length ? `deterministic circular-shift null control materialized for the final margin (${finalMargin.marginPx}px) only` : 'raw probe has no margins to control',
 		controlSeed,
 		seedAlgorithm: 'fnv1a32(imageId+paramsHash+featureId)',
 		replicateCount,

@@ -22,7 +22,17 @@ import type { RgbaImage } from '../types';
 import type { ABFeature, FeatureContext, FeatureRender, RunTrace, UnitTrace } from './types';
 
 export const BADGE_M2_AA_FEATURE_ID = 'badgeM2Aa' as const;
-export const BADGE_M2_AA_LIBRARY_SCHEMA = 'chainspot.badge-m2-raw-frame-library/v1' as const;
+/**
+ * Schema v2 (chainspot #m2-rootcause): wraps M2_RAW_SOURCE_PROBE_SCHEMA/v2
+ * and M2_REPRESENTATION_SCHEMA/v2. `rawProbe.trace.margins[].observations`
+ * is now retained ONLY for the final margin (superseded margins carry
+ * summaries); `rawProbe.trace.final.targets[].observations` and
+ * `representations[].rawTrace.observations` no longer exist -- callers join
+ * the final margin's per-pixel data by `finalMarginPx` instead of reading a
+ * re-embedded copy. See the EVIDENCE-RETENTION POLICY comment above
+ * M2_RAW_SOURCE_PROBE_SCHEMA in m2Representation.ts for the full accounting.
+ */
+export const BADGE_M2_AA_LIBRARY_SCHEMA = 'chainspot.badge-m2-raw-frame-library/v2' as const;
 
 export interface MaterializedBadgeM2Library {
 	readonly schema: typeof BADGE_M2_AA_LIBRARY_SCHEMA;
@@ -33,14 +43,45 @@ export interface MaterializedBadgeM2Library {
 		readonly paramsHash: string;
 		readonly source: 'full source RGBA expanded-frame recurrence';
 	};
-	/** Undefined only when explicitly disabled. This is the one raw discovery trace. */
+	/**
+	 * Undefined when explicitly disabled, or when `sizeGuard` fired (the
+	 * estimated serialized size exceeded V8's max string length -- see
+	 * `libraryBytes()`). Otherwise this is the one raw discovery trace.
+	 */
 	readonly rawProbe?: MaterializedExpandedBadgeRawFrameProbe;
 	/**
 	 * Compatibility/control projections. M1 remains exact. A newly discovered
 	 * raw pixel is promoted only when the final adequate frame has exact 18/18
-	 * support and its deterministic circular-shift control passes.
+	 * support and its deterministic circular-shift control passes. Empty when
+	 * `sizeGuard` fired, for the same reason `rawProbe` is undefined.
 	 */
 	readonly representations: readonly MaterializedBadgeM2Representation[];
+	/**
+	 * Present only when the artifact was too large to safely JSON.stringify
+	 * (a loud UNKNOWN instead of the `RangeError: Invalid string length`
+	 * crash this guards against) -- either the pre-flight estimate exceeded
+	 * the limit, or it didn't but the real JSON.stringify threw anyway (see
+	 * `libraryBytes()`'s try/catch). `rawProbe`/`representations` are
+	 * omitted from THIS encoded artifact when this fires; in-memory
+	 * `ctx.measure()` numbers for the run that produced it are unaffected.
+	 * `observationCount`/`bytesPerObservation`/`estimatedBytes` let a reader
+	 * check the estimate's arithmetic; `marginCount`/`finalMarginPx`/
+	 * `finalStatus`/`finalReason` are cheap scalar reads off the same trace
+	 * that say what state the omitted rawProbe was actually in.
+	 */
+	readonly sizeGuard?: {
+		readonly status: 'UNKNOWN';
+		readonly reason: string;
+		readonly estimatedBytes: number;
+		readonly limitBytes: number;
+		readonly observationCount: number;
+		readonly bytesPerObservation: number;
+		readonly marginCount: number;
+		readonly finalMarginPx: number | null;
+		readonly finalStatus: string | null;
+		readonly finalReason: string | null;
+		readonly omitted: string;
+	};
 }
 
 interface BadgeEvidenceLibraryInput {
@@ -91,14 +132,137 @@ function sourceProvenance(library: BadgeEvidenceLibraryInput): MaterializedBadge
 	};
 }
 
+/**
+ * V8's max String length is `String::kMaxLength` = 2**29 - 24 UTF-16 code
+ * units on 64-bit builds (v8/src/objects/string.h; ~536,870,888 units,
+ * ~512 MiB). `JSON.stringify` throws `RangeError: Invalid string length`
+ * once the string it is building would cross that line -- a JS-engine
+ * runtime limit, not a dataset-adequacy threshold or a knob. This payload's
+ * JSON is overwhelmingly ASCII (digits, commas, field names), so 1 UTF-16
+ * code unit approximates 1 byte closely enough for a pre-flight estimate.
+ */
+const V8_MAX_STRING_LENGTH = 2 ** 29 - 24;
+
+/**
+ * CORRECTED against a direct measurement of the real 47,121,103-byte
+ * DashsTrack artifact (schema v2, post-dedup) -- the original comment here
+ * claimed retained per-pixel `observations` were >99% of the artifact; they
+ * are 32,048,356 B = 68.0% of it. The remaining 15,072,747 B split roughly
+ * as `representations` 11,694,001 B (the 18 per-badge frame sweeps over 31
+ * margins), superseded-margin summaries 2,242,402 B, `final.targets`
+ * 858,667 B, and `registrations` 53,061 B -- none of them free, but none
+ * estimated below either. Measured full-artifact rate: 47,121,103 B /
+ * 12,826 observations = ~3,674 B/observation, so the 3000 estimate below
+ * underestimates the real rate by ~18%. That means this pre-flight estimate
+ * ALONE would not fire for observation counts in roughly [146k, 179k),
+ * where the real JSON.stringify would still throw. It stays as a cheap
+ * early exit -- most oversized libraries are caught before any stringify
+ * work happens at all -- but it is no longer load-bearing by itself:
+ * `libraryBytes()` also wraps the real JSON.stringify call in try/catch, so
+ * a RangeError thrown in that gap still degrades to the sizeGuard UNKNOWN
+ * artifact below instead of crashing the sweep.
+ */
+const ESTIMATED_BYTES_PER_RAW_OBSERVATION = 3000;
+
+function totalRawObservationCount(value: MaterializedBadgeM2Library): number {
+	let observationCount = 0;
+	for (const margin of value.rawProbe?.trace.margins ?? []) observationCount += margin.observations?.length ?? 0;
+	return observationCount;
+}
+
+/**
+ * `run()` sets `library.rawProbe.representations` and top-level
+ * `library.representations` to the SAME array by reference (the probe's own
+ * `representations` field is where the value originates; the library just
+ * names it again at the top level for callers that don't want to reach
+ * through `rawProbe`). JSON.stringify does not dedupe references, so without
+ * this the 18 representations would be embedded twice. Strip the nested
+ * duplicate for the wire only -- `decodeMaterializedBadgeM2Library` rehydrates
+ * it, so every in-memory/decoded consumer still sees a complete `rawProbe`.
+ */
+/** Wire-only marker: `rawProbe.representations` was elided because it is an
+ *  exact reference duplicate of the top-level `representations` array;
+ *  decodeMaterializedBadgeM2Library() rehydrates it from there. Exported so
+ *  tests can assert on the raw wire bytes, not just the rehydrated decode. */
+export const RAW_PROBE_REPRESENTATIONS_ELIDED = '$chainspotElidedDuplicateOf:representations' as const;
+
+function libraryForWire(value: MaterializedBadgeM2Library): unknown {
+	if (!value.rawProbe || value.rawProbe.representations !== value.representations) return value;
+	return { ...value, rawProbe: { ...value.rawProbe, representations: RAW_PROBE_REPRESENTATIONS_ELIDED } };
+}
+
+/** Build the small sizeGuard-only library both libraryBytes() branches emit. */
+function sizeGuardLibrary(
+	value: MaterializedBadgeM2Library,
+	estimatedBytes: number,
+	observationCount: number,
+	reason: string
+): MaterializedBadgeM2Library {
+	const trace = value.rawProbe?.trace;
+	return {
+		schema: value.schema,
+		featureId: value.featureId,
+		state: value.state,
+		provenance: value.provenance,
+		representations: [],
+		sizeGuard: {
+			status: 'UNKNOWN',
+			reason,
+			estimatedBytes,
+			limitBytes: V8_MAX_STRING_LENGTH,
+			observationCount,
+			bytesPerObservation: ESTIMATED_BYTES_PER_RAW_OBSERVATION,
+			marginCount: trace?.margins.length ?? 0,
+			finalMarginPx: trace?.final.finalMarginPx ?? null,
+			finalStatus: trace?.final.status ?? null,
+			finalReason: trace?.final.reason ?? null,
+			omitted: 'rawProbe (all margins/targets) and representations (all objects) were omitted from this artifact; per-run ctx.measure() numbers were still recorded on the RunTrace'
+		}
+	};
+}
+
 function libraryBytes(value: MaterializedBadgeM2Library): Uint8Array {
-	return new TextEncoder().encode(
-		JSON.stringify(value, (_key, field: unknown) =>
-			field instanceof Uint32Array
-				? { $chainspotTypedArray: 'u32', data: Array.from(field) }
-				: field
-		)
-	);
+	const observationCount = totalRawObservationCount(value);
+	const estimatedBytes = observationCount * ESTIMATED_BYTES_PER_RAW_OBSERVATION;
+	if (estimatedBytes > V8_MAX_STRING_LENGTH) {
+		return new TextEncoder().encode(
+			JSON.stringify(
+				sizeGuardLibrary(
+					value,
+					estimatedBytes,
+					observationCount,
+					'estimated serialized size exceeds V8 max string length; JSON.stringify was not attempted to avoid crashing the sweep'
+				)
+			)
+		);
+	}
+	try {
+		return new TextEncoder().encode(
+			JSON.stringify(libraryForWire(value), (_key, field: unknown) =>
+				field instanceof Uint32Array
+					? { $chainspotTypedArray: 'u32', data: Array.from(field) }
+					: field
+			)
+		);
+	} catch (error) {
+		// The pre-flight estimate above is a cheap heuristic, not an exact
+		// accounting -- measured ~18% low on the real DashsTrack artifact
+		// (see the comment above ESTIMATED_BYTES_PER_RAW_OBSERVATION) -- so it
+		// can clear the check above while the real JSON.stringify still hits
+		// V8's max string length. Catch that RangeError specifically and
+		// degrade to the same loud sizeGuard artifact instead of crashing.
+		if (!(error instanceof RangeError)) throw error;
+		return new TextEncoder().encode(
+			JSON.stringify(
+				sizeGuardLibrary(
+					value,
+					estimatedBytes,
+					observationCount,
+					`estimated size (${estimatedBytes} B, under the ${V8_MAX_STRING_LENGTH} B limit) cleared the pre-flight check but the real JSON.stringify threw RangeError: ${error.message}`
+				)
+			)
+		);
+	}
 }
 
 export function encodeMaterializedBadgeM2Library(value: MaterializedBadgeM2Library): Uint8Array {
@@ -117,6 +281,11 @@ export function decodeMaterializedBadgeM2Library(bytes: Uint8Array): Materialize
 		throw new Error(`${BADGE_M2_AA_FEATURE_ID}: unsupported library schema '${String(value.schema)}'`);
 	if (value.featureId !== BADGE_M2_AA_FEATURE_ID)
 		throw new Error(`${BADGE_M2_AA_FEATURE_ID}: library has wrong feature id`);
+	// Rehydrate the reference libraryForWire() elided: the wire form marks
+	// rawProbe.representations instead of re-embedding it (it is identical to
+	// the top-level array), so a decoded rawProbe still satisfies its type.
+	if (value.rawProbe && (value.rawProbe.representations as unknown) === RAW_PROBE_REPRESENTATIONS_ELIDED)
+		return { ...value, rawProbe: { ...value.rawProbe, representations: value.representations } };
 	return value;
 }
 
@@ -139,6 +308,19 @@ function measureRawProbe(ctx: FeatureContext, rawProbe: MaterializedExpandedBadg
 	ctx.measure('badgeEvidence', 'm2RawFinalQuantizedDiagnostic', trace.final.quantizedSupportedCoordinates.length);
 	ctx.measure('badgeEvidence', 'm2RawFinalMarginPx', trace.final.finalMarginPx ?? -1);
 	ctx.measure('badgeEvidence', 'm2RawOwnershipPromoted', trace.final.ownership.promoted ? 1 : 0);
+	// Evidence-retention accounting (schema v2): m2RawMarginCount margins were
+	// swept, but only the one whose marginPx equals m2RawFinalMarginPx retains
+	// full per-pixel observations -- every other margin retains a summary
+	// only. m2RawFinalMarginObservationCount is that one margin's per-pixel
+	// count; it is the loud, provenance-backed version of the evidence-
+	// retention statement (see EVIDENCE-RETENTION POLICY in m2Representation.ts).
+	const finalMargin = trace.margins.find((margin) => margin.marginPx === trace.final.finalMarginPx);
+	ctx.measure('badgeEvidence', 'm2RawFinalMarginObservationCount', finalMargin?.observations?.length ?? -1);
+	ctx.measure(
+		'badgeEvidence',
+		'm2RawSupersededMarginsSummaryOnlyCount',
+		Math.max(0, trace.margins.length - (finalMargin?.observations ? 1 : 0))
+	);
 	if (rawProbe.statistics) {
 		ctx.measure('badgeEvidence', 'm2RawControlReplicates', rawProbe.statistics.replicateCount);
 		ctx.measure('badgeEvidence', 'm2RawControlMeasured', rawProbe.statistics.status === 'measured' ? 1 : 0);

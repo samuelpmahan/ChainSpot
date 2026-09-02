@@ -878,6 +878,7 @@ export function formatM2RawFrameCliText(trace: M2RawFrameTrace): string {
 			(outcome) =>
 				`margin ${outcome.marginPx}px: boundary=${outcome.status} sides=${outcome.sides ? `top:${outcome.sides.top},right:${outcome.sides.right},bottom:${outcome.sides.bottom},left:${outcome.sides.left}` : 'UNKNOWN'} supported=${outcome.supportedPixelCount} touching=${outcome.boundarySupportedPixelCount} unknownTruncated=${outcome.unobservedSampleCount}${outcome.reason ? ` reason=${outcome.reason}` : ''}`
 		),
+		`evidence retention: superseded margins retain summaries only (no per-pixel replay); full per-pixel observations retained for the final margin ${visual.marginPx}px only (of ${visual.boundaryByMargin.length} margins swept)`,
 		`final support partition: ${countText(visual.partitionCounts)}`,
 		`ownership display: ${visual.ownershipDisplayAllowed ? 'CONTROL-SIGNIFICANT' : 'UNKNOWN — empirical control significance required; partition is evidence only'}`,
 		`frame boundary: x=${visual.frameBoundary[0]} y=${visual.frameBoundary[1]} width=${visual.frameBoundary[2]} height=${visual.frameBoundary[3]}`,

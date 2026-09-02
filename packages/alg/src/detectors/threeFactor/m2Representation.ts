@@ -3,8 +3,16 @@ import type { MaterializedM1Representation } from './m1Representation';
 import type { RgbaImage } from './types';
 import { materializeM2RawFrameStatsControl, type M2RawFrameStatsControl, type M2RawFrameStatsControlOptions } from './m2RawFrameStatsControl';
 
-/** M2 deliberately keeps the proven M1 B+W worldview intact. */
-export const M2_REPRESENTATION_SCHEMA = 'chainspot.badge-representation-m2/v1' as const;
+/**
+ * M2 deliberately keeps the proven M1 B+W worldview intact.
+ *
+ * Schema v2 (chainspot #m2-rootcause): `rawTrace.observations` was removed
+ * from MaterializedBadgeM2Representation's wire shape (it used to duplicate
+ * the raw-source probe's final-margin per-pixel array by value once per
+ * representation). See the EVIDENCE-RETENTION POLICY comment above
+ * M2_RAW_SOURCE_PROBE_SCHEMA for the full accounting.
+ */
+export const M2_REPRESENTATION_SCHEMA = 'chainspot.badge-representation-m2/v2' as const;
 
 export type M2RegistrationMethod = 'same-raster-m1-geometry' | 'independent-registered-samples';
 export type M2DigitCondition = 'all' | 'digit-adjacent' | 'same-digit';
@@ -818,13 +826,67 @@ export function decodeMaterializedBadgeM2Representation(
 /* ------------------------------------------------------------------------- *
  * M2 expanded-frame raw-source probe
  *
- * The functions above are retained as a wire-compatible adapter for old E
- * artifacts.  New M2 work must use the probe below.  In particular, the
- * probe never uses aaPixels, residuePixels, or region.rgba to discover a
- * repeat.  It reads every requested crop directly from the full RGBA source.
+ * CORRECTED: the functions above are NOT a wire-compatible adapter for old
+ * (v1) E artifacts. `decodeMaterializedBadgeM2Representation()` throws on
+ * any schema mismatch, and M2_REPRESENTATION_SCHEMA was bumped v1 -> v2 in
+ * this same change (below), so it now throws on a v1 artifact too. No v1
+ * artifacts exist on disk to decode (checked: none under artifacts/). New
+ * M2 work must use the probe below. In particular, the probe never uses
+ * aaPixels, residuePixels, or region.rgba to discover a repeat. It reads
+ * every requested crop directly from the full RGBA source.
+ *
+ * EVIDENCE-RETENTION POLICY (schema v2, chainspot #m2-rootcause):
+ * only the FINAL materialized margin (the one that fed the adequacy/
+ * promotion decision) keeps its full per-pixel `observations` array.  Every
+ * superseded margin in `trace.margins[]` retains a SUMMARY only -- marginPx,
+ * frameSize, status, exactSupportedCoordinates/exactBoundary/
+ * quantizedBoundary, clippedSampleIds, and unobservedSampleCount, i.e. every
+ * field of M2RawMarginTrace except `observations` -- so the convergence
+ * trail across margins stays readable without re-embedding per-pixel exact/
+ * quantized replay for margins nothing downstream reads. `observations` is
+ * therefore optional on M2RawMarginTrace and present on at most one entry of
+ * `trace.margins[]`. Per-target and per-representation raw traces (
+ * M2TargetRawTrace) do not duplicate that array either: they carry
+ * `finalMarginPx` and callers join back to `trace.margins.find(m =>
+ * m.marginPx === finalMarginPx).observations` instead of re-embedding it.
+ * Before this schema version, the final margin's observations were embedded
+ * by value 36 times (once per target + once per representation, PLUS a
+ * further whole-array duplicate of `representations` itself under
+ * `rawProbe.representations`, found only by running the real corpus and
+ * inspecting the artifact) and every superseded margin kept full per-pixel
+ * data, producing a ~1.68 GB artifact that crashed `JSON.stringify` past
+ * V8's max string length on an 18-badge corpus run; every one of those is
+ * a zero-evidence-loss dedup/reference fix.
+ *
+ * SUPERSEDED-MARGIN REPLAY (revised -- was overstated as an unqualified
+ * "loss"): `scanRawMargin`'s per-registration eligibility test is `x <
+ * sampleWidth_r + marginPx` (and the y analogue, using that registration's
+ * OWN `ownedBbox` width/height, not the shared canonical `baseWidth`/
+ * `baseHeight`) -- monotonically NON-DECREASING in marginPx per
+ * registration: a registration can only GAIN eligibility for a local
+ * coordinate as marginPx grows, never lose it. So whenever every registered
+ * specimen shares one owned-bbox width/height -- true of every fixture in
+ * this repo's raw-probe unit tests -- eligibility at any coordinate is
+ * IDENTICAL at every margin that scans it, and a superseded margin's true
+ * observation there is exactly, byte-for-byte, the corresponding entry of
+ * the final margin's retained array: recoverable by restriction using the
+ * retained marginPx + frameSize, zero loss, no re-run needed.
+ * That does NOT generalize to non-uniform registrations. The real
+ * DashsTrack corpus measured owned-bbox widths of 54-57px (uniform 42px
+ * height) across its 18 registrations: e.g. a width-54 registration (vs.
+ * baseWidth 57) is eligible for local x=60 at marginPx=32 (60 < 54+32) but
+ * was NOT eligible at marginPx=5 (60 is not < 54+5=59). For a coordinate
+ * adjacent to a narrower/shorter registration's own edge, "restriction"
+ * from the final margin's array would silently over-count that
+ * coordinate's eligible-sample set relative to what an earlier, superseded
+ * margin's scan actually computed there -- that per-pixel replay is a real,
+ * standing loss on non-uniform corpora, it is not retained, and restriction
+ * does not reconstruct it. The interior majority of coordinates -- and
+ * every coordinate on this repo's uniform-dimension test fixtures -- remain
+ * exactly recoverable by restriction.
  * ------------------------------------------------------------------------- */
 
-export const M2_RAW_SOURCE_PROBE_SCHEMA = 'chainspot.badge-m2-raw-source/v1' as const;
+export const M2_RAW_SOURCE_PROBE_SCHEMA = 'chainspot.badge-m2-raw-source/v2' as const;
 
 export type M2RawPartition = 'm1-owned' | 'old-aa' | 'old-residue' | 'exterior';
 
@@ -934,7 +996,15 @@ export interface M2RawBoundarySide {
 export interface M2RawMarginTrace {
 	readonly marginPx: number;
 	readonly frameSize: readonly [number, number];
-	readonly observations: readonly M2RawCoordinateObservation[];
+	/**
+	 * Full per-pixel observations. Retained ONLY on the final materialized
+	 * margin (the one `trace.final.finalMarginPx` names); every superseded
+	 * margin carries every other field on this interface as a summary but
+	 * omits `observations` -- see the EVIDENCE-RETENTION POLICY comment above
+	 * M2_RAW_SOURCE_PROBE_SCHEMA. A caller that needs the final margin's
+	 * per-pixel data joins by `marginPx`; it is never re-embedded elsewhere.
+	 */
+	readonly observations?: readonly M2RawCoordinateObservation[];
 	readonly exactSupportedCoordinates: readonly (readonly [number, number])[];
 	readonly exactModalSupportedCoordinates: readonly (readonly [number, number])[];
 	readonly quantizedSupportedCoordinates: readonly (readonly [number, number])[];
@@ -955,9 +1025,15 @@ export interface M2RawTargetPartition {
 
 export interface M2TargetRawTrace {
 	readonly targetId: string;
+	/**
+	 * Join key, not a duplicate: per-pixel observations for this target's
+	 * frame live at `trace.margins.find(m => m.marginPx ===
+	 * finalMarginPx)?.observations` and are not re-embedded here. Before
+	 * schema v2 this object carried its own copy of that array, which
+	 * JSON.stringify re-serialized once per target (and again once per
+	 * representation via `rawTrace`) instead of dereferencing it.
+	 */
 	readonly finalMarginPx: number | null;
-	/** Final-margin raw observations for this target, before partition tagging. */
-	readonly observations: readonly M2RawCoordinateObservation[];
 	readonly finalExactSupportedCoordinates: readonly (readonly [number, number])[];
 	readonly exactOwnedCoordinates: readonly (readonly [number, number])[];
 	readonly partition: M2RawTargetPartition;
@@ -1423,6 +1499,18 @@ function rawRepresentation(
 }
 
 /**
+ * Drop a superseded margin's full per-pixel `observations` down to the
+ * summary fields already computed for it. Every other field on
+ * M2RawMarginTrace is unchanged; only the heavy per-pixel array is omitted.
+ * See the EVIDENCE-RETENTION POLICY comment above M2_RAW_SOURCE_PROBE_SCHEMA.
+ */
+function summarizeSupersededMargin(margin: M2RawMarginTrace): M2RawMarginTrace {
+	if (!margin.observations) return margin;
+	const { observations: _observations, ...summary } = margin;
+	return summary;
+}
+
+/**
  * Materialize the M2 expanded-frame model from the real source raster.
  * Every sample is translated by its M1-owned bbox top-left. No scaling,
  * fitting, candidate mask, residue mask, or pre-cropped region participates
@@ -1482,6 +1570,13 @@ export function materializeExpandedBadgeRawFrameProbe(
 		const current = scanRawMargin(image, registrations, margin, baseWidth, baseHeight, minimumSupportCount, binWidth);
 		margins.push(current);
 		finalMargin = current;
+		// The margin pushed on the PRIOR iteration is now superseded by `current`
+		// no matter what happens below: strip its full per-pixel observations
+		// down to a summary immediately so at most one entry in `margins[]` ever
+		// holds the heavy array at once. `previous` (below) still references the
+		// pre-strip object for this iteration's stability comparison, since
+		// summarizeSupersededMargin() returns a new object rather than mutating.
+		if (margins.length >= 2) margins[margins.length - 2] = summarizeSupersededMargin(margins[margins.length - 2]!);
 		const stable = !!previous && fingerprint(previous.exactSupportedCoordinates) === fingerprint(current.exactSupportedCoordinates);
 		if (sampleCountValid && !excludedSampleIds.length && stable && current.unobservedSampleCount === 0 && current.exactBoundary.total === 0) {
 			status = 'adequate';
@@ -1500,14 +1595,16 @@ export function materializeExpandedBadgeRawFrameProbe(
 	const representations: MaterializedBadgeM2Representation[] = [];
 	for (const registration of registrations) {
 		const target = registration.specimen;
+		// `finalMargin` is always the last-pushed margins[] entry (see the loop
+		// above): summarizeSupersededMargin() only ever strips the entry BEHIND
+		// it, so its full `observations` array is guaranteed present here.
 		const exactOwnedCoordinates = ownershipEnabled && status === 'adequate' && finalMargin
-			? finalMargin.observations.filter((observation) => observation.modalSupportCount === 18 && observation.eligibleSampleIds.length === 18).map((observation) => observation.localPixel)
+			? (finalMargin.observations ?? []).filter((observation) => observation.modalSupportCount === 18 && observation.eligibleSampleIds.length === 18).map((observation) => observation.localPixel)
 			: [];
 		const partition = targetPartition(target, registration, finalMargin?.exactSupportedCoordinates ?? [], exactOwnedCoordinates);
 		const targetTrace: M2TargetRawTrace = {
 			targetId: target.id,
 			finalMarginPx: finalMargin?.marginPx ?? null,
-			observations: finalMargin?.observations ?? [],
 			finalExactSupportedCoordinates: finalMargin?.exactSupportedCoordinates ?? [],
 			exactOwnedCoordinates,
 			partition

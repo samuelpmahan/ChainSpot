@@ -190,6 +190,7 @@ const cliLines = [
   `glyph exact mask=${glyph.exactPixels.length} pixels · glyph halo/support=${glyph.haloPixels.length} pixels`,
   ...statisticLines,
   ...boundaryByMargin.map((outcome) => `margin ${outcome.marginPx}px: boundary=${outcome.status} sides=${outcome.sides ? `top:${outcome.sides.top},right:${outcome.sides.right},bottom:${outcome.sides.bottom},left:${outcome.sides.left}` : 'UNKNOWN'} supported=${outcome.supportedPixelCount} touching=${outcome.boundarySupportedPixelCount} unknownTruncated=${outcome.unobservedSampleCount}`),
+  `evidence retention: superseded margins retain summaries only (no per-pixel replay); full per-pixel observations retained for the final margin ${behavior.marginPx}px only (of ${boundaryByMargin.length} margins swept)`,
   `final support partition: ${partitionNames.map((name) => `${name}=${partitionCounts[name]}`).join(' ')}`,
   `CAVEAT: ${behavior.jpegCaveat ?? 'JPEG values are decoded samples; exact RGBA means exact decoded bytes.'}`,
   `visual/trace identity: runId=${receiptIdentity.runId} imageId=${receiptIdentity.imageId} traceHash=${receiptIdentity.traceHash}`

@@ -3,7 +3,8 @@ import {
 	BADGE_M2_AA_FEATURE_ID,
 	badgeM2AaFeature,
 	badgeM2AaOperation,
-	decodeMaterializedBadgeM2Library
+	decodeMaterializedBadgeM2Library,
+	RAW_PROBE_REPRESENTATIONS_ELIDED
 } from '@chainspot/alg/detectors/threeFactor/features/g5.badgeM2Aa';
 import {
 	compileABFeatureSet,
@@ -176,7 +177,8 @@ describe('badgeM2Aa raw expanded-frame receipt', () => {
 		expect(receipt?.actualConsumes).toEqual(['image', 'badgeEvidence.library']);
 		const artifact = receipt?.artifacts.find((value: any) => value.kind === 'measurementTable');
 		expect(artifact).toBeDefined();
-		const materialized = decodeMaterializedBadgeM2Library(on.sink.blobs.get(artifact.id)! as Uint8Array) as any;
+		const wireBytes = on.sink.blobs.get(artifact.id)! as Uint8Array;
+		const materialized = decodeMaterializedBadgeM2Library(wireBytes) as any;
 		expect(materialized).toMatchObject({ state: 'materialized', featureId: BADGE_M2_AA_FEATURE_ID });
 		const trace = materialized.rawProbe.trace;
 		expect(trace.registrations).toHaveLength(18);
@@ -201,6 +203,28 @@ describe('badgeM2Aa raw expanded-frame receipt', () => {
 		// a raw-image recurrence. A digit bbox mask would wrongly erase this.
 		expect(final.partition.counts['m1-owned']).toBeGreaterThan(0);
 		expect(trace.registrations[0].glyphExactCount + trace.registrations[0].glyphHaloCount).toBe(9);
+
+		// Schema v2: rawProbe.representations and top-level representations are
+		// the same 18 objects; the wire form elides the nested duplicate and
+		// decodeMaterializedBadgeM2Library() rehydrates it, so a round trip must
+		// come back with both populated and equal (never re-embedded twice).
+		expect(materialized.representations).toHaveLength(18);
+		expect(materialized.rawProbe.representations).toHaveLength(18);
+		expect(materialized.rawProbe.representations).toEqual(materialized.representations);
+		// The decoded-object assertions above pass even if the dedup never
+		// happened on the wire (decode always rehydrates from the top-level
+		// `representations`, so a defeated/no-op libraryForWire() would be
+		// invisible to them). Assert on the raw wire bytes directly: the wire
+		// form must carry the elision marker, not 18 re-embedded objects.
+		const wireParsed = JSON.parse(new TextDecoder().decode(wireBytes)) as any;
+		expect(wireParsed.rawProbe.representations).toBe(RAW_PROBE_REPRESENTATIONS_ELIDED);
+
+		// Schema v2: only the final margin retains full per-pixel observations.
+		const finalMarginPx = trace.final.finalMarginPx;
+		for (const margin of trace.margins) {
+			if (margin.marginPx === finalMarginPx) expect(margin.observations).toBeDefined();
+			else expect(margin.observations).toBeUndefined();
+		}
 	});
 
 	test('uses AA/residue only after discovery as labels, never as the raw support search universe', async () => {
