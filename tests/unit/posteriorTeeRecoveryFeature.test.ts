@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { createExecBoard, executeCompiledPlan } from '@chainspot/alg/exec';
+import { createExecBoard, executeCompiledPlan, type ExecBoard } from '@chainspot/alg/exec';
 import { createNodeSink } from '@chainspot/alg/exec/node-sink';
 import {
 	createTraceContext,
@@ -11,7 +11,7 @@ import {
 import { seedBoard } from '@chainspot/alg/detectors/threeFactor/measure';
 import type { EvidenceBoard } from '@chainspot/alg/detectors/threeFactor/features/types';
 import type { PosteriorTeeRecoveryEvidence } from '@chainspot/alg/detectors/threeFactor/features/g4.posteriorTeeRecovery';
-import type { ThreeFactorAssignment } from '@chainspot/alg/detectors/threeFactor/types';
+import type { BadgeEvidence, ThreeFactorAssignment } from '@chainspot/alg/detectors/threeFactor/types';
 import type { RunTrace } from '@chainspot/alg/detectors/threeFactor/features/types';
 import { buildPosteriorTeeRecoveryPlan } from '@chainspot/alg/detectors/threeFactor/features/g4.posteriorTeeRecoveryReceipt';
 import { loadConfig } from '../../scripts/chainspot-lab/sweep/configIo';
@@ -46,10 +46,23 @@ function courseEntry(id: (typeof COURSE_IDS)[number]): CourseRegistryEntry {
 	) as CourseRegistryEntry;
 }
 
+interface TeeBadgeLockLockLike {
+	readonly badgeId: string;
+	readonly teeId: string;
+	readonly tier: 'visible' | 'recovered';
+	readonly hole?: number;
+	readonly chordPx: number;
+}
+
+interface TeeBadgeLockLike {
+	readonly locks: readonly TeeBadgeLockLockLike[];
+}
+
 interface CourseResult {
 	readonly posterior: PosteriorTeeRecoveryEvidence;
 	readonly assignment: ThreeFactorAssignment;
 	readonly trace: RunTrace;
+	readonly board: ExecBoard;
 }
 
 async function runCourse(id: (typeof COURSE_IDS)[number]): Promise<CourseResult> {
@@ -77,7 +90,8 @@ async function runCourse(id: (typeof COURSE_IDS)[number]): Promise<CourseResult>
 		return {
 			posterior: board.get<PosteriorTeeRecoveryEvidence>('posteriorTeeRecovery'),
 			assignment: board.get<ThreeFactorAssignment>('assignment'),
-			trace
+			trace,
+			board
 		};
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
@@ -96,6 +110,56 @@ describe('posteriorTeeRecovery ABFeature', () => {
 		const posteriorIndex = posterior.plan.ops.findIndex((op) => op.id === 'posteriorTeeRecovery');
 		expect(posteriorIndex).toBe(lockIndex + 1);
 	});
+
+	// Regression test for the c05521a bug (see g4.posteriorTeeRecovery's
+	// commitPosteriorAssignments mechanism note): the posterior's second,
+	// independent assignThreeFactor call mints every `tee-recovered-N` id by
+	// SORTED POSITION over its own recoveredTees array, so reopening even one
+	// badge could silently renumber `tee-recovered-N` ids that frozen
+	// teeBadgeLock testimony already pointed at for OTHER, untouched badges
+	// (AlexClark H8/H10/H11 rotating among nearby tees was exactly this).
+	// This test would have caught it: for every badge OUTSIDE the posterior's
+	// target set, the final assignment must still resolve to the identical
+	// tee id AND the identical physical location teeBadgeLock locked at.
+	//
+	// No separate "before" run is needed to know the original coordinates --
+	// teeBadgeLock's own frozen `chordPx` (the badge<->tee distance at lock
+	// time) is compared against the badge<->tee distance recomputed from the
+	// FINAL assignment.tees; a silent identity swap changes that distance.
+	test('badges outside the posterior target set keep their frozen tee identity', async () => {
+		const { assignment, posterior, board } = await runCourse('AlexClark');
+		const teeBadge = board.get<TeeBadgeLockLike>('teeBadgeLock');
+		const badges = board.get<readonly BadgeEvidence[]>('badges');
+		const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
+		const targetBadgeIds = new Set(posterior.targetBadgeIds);
+
+		const untouched = teeBadge.locks.filter((lock) => !targetBadgeIds.has(lock.badgeId));
+		// Sanity: AlexClark's target set is a small conflict island (see the
+		// H8/H10/H11 bisect), so most of its 18 badges must be untouched --
+		// otherwise this test would vacuously pass by checking nothing.
+		expect(untouched.length).toBeGreaterThan(10);
+
+		for (const lock of untouched) {
+			const row = assignment.assignments.find((entry) => entry.badgeId === lock.badgeId);
+			expect(row, `assignment missing for untouched badge ${lock.badgeId} (H${lock.hole})`).toBeDefined();
+			expect(row?.teeId, `badge ${lock.badgeId} (H${lock.hole}) tee id changed`).toBe(lock.teeId);
+
+			const tee = assignment.tees.find((candidate) => candidate.detId === lock.teeId);
+			expect(
+				tee,
+				`tee ${lock.teeId} missing from assignment.tees for untouched badge ${lock.badgeId} (H${lock.hole})`
+			).toBeDefined();
+			const badge = badgeById.get(lock.badgeId);
+			expect(badge, `badge ${lock.badgeId} missing from badges`).toBeDefined();
+			if (tee && badge) {
+				const chordPx = Math.hypot(tee.xPx - badge.cxPx, tee.yPx - badge.cyPx);
+				expect(
+					chordPx,
+					`badge ${lock.badgeId} (H${lock.hole}) tee ${lock.teeId} moved: frozen chordPx=${lock.chordPx}, recomputed=${chordPx}`
+				).toBeCloseTo(lock.chordPx, 1);
+			}
+		}
+	}, 120_000);
 
 	test('blind posterior commits and renders 107 observable/recovered + 1 NULL->phantom across Dev6', async () => {
 		const results = new Map<(typeof COURSE_IDS)[number], CourseResult>();

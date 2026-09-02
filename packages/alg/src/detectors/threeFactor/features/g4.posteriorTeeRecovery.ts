@@ -577,12 +577,22 @@ function inferPosterior(
  *
  * Geometry is forwarded verbatim from the evidence; nothing is re-derived.
  */
+interface PublishedRecoveredTees {
+	readonly recoveredTees: readonly RecoveredTeeInput[];
+	// Frozen tee ids (teeBadgeLock's own `tee-recovered-N` vocabulary) the
+	// posterior is overruling. commitPosteriorAssignments uses this -- not
+	// x/y coordinates -- to drop exactly these entries from the pre-posterior
+	// `assignment.tees` it otherwise leaves untouched; see C1 in the mechanism
+	// note on commitPosteriorAssignments.
+	readonly supersededTeeIds: ReadonlySet<string>;
+}
+
 function publishRecoveredTees(
 	board: ExecBoard,
 	ctx: FeatureContext,
 	evidence: PosteriorTeeRecoveryEvidence,
 	badges: readonly BadgeEvidence[]
-): readonly RecoveredTeeInput[] {
+): PublishedRecoveredTees {
 	const badgeById = new Map(badges.map((badge) => [badge.detId, badge]));
 	// A reopened badge already owns a frozen RECOVERED tee, and that tee is
 	// exactly what the posterior just overruled. Appending without retiring it
@@ -595,11 +605,13 @@ function publishRecoveredTees(
 	);
 	const targets = new Set(evidence.targetBadgeIds);
 	const superseded: { x: number; y: number }[] = [];
+	const supersededTeeIds = new Set<string>();
 	for (const lock of teeBadge.locks) {
 		if (lock.tier !== 'recovered' || !targets.has(lock.badgeId)) continue;
 		const tee = teeById.get(lock.teeId);
 		if (tee && finite(tee.xPx) && finite(tee.yPx)) {
 			superseded.push({ x: tee.xPx, y: tee.yPx });
+			supersededTeeIds.add(lock.teeId);
 			// The render layer must drop the G3 shard this overrules, or the
 			// badge shows two endpoints. Match by BADGE IDENTITY, not position:
 			// G3 draws its shards as `pixelSet` (no centre point) with a ref of
@@ -719,12 +731,42 @@ function publishRecoveredTees(
 	board.set('recoveredTees', recoveredTees);
 	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesPublished', additions.length);
 	ctx.measure(UNIT_ID, 'posteriorRecoveredTeesRetired', retired);
-	return recoveredTees;
+	return { recoveredTees, supersededTeeIds };
 }
 
+/** Reattach the posterior's decisions to STABLE tee identity.
+ *
+ * `reassigned` is a full, independent rerun of `assignThreeFactor` over the
+ * posterior's merged recoveredTees list. `assignThreeFactor` (and the
+ * identical logic in exec/operations.ts's `assignment.pairs`) mints every
+ * `tee-recovered-N` id by SORTED POSITION (y, x, provenance note) over
+ * whichever recoveredTees array it is handed -- see assignment.ts's
+ * `recoveredTee`. That numbering is only stable *within one call*: adding or
+ * dropping any entry shifts the sorted index, and therefore the minted id,
+ * of every OTHER recovered tee that sorts after it. c05521a's bug was
+ * publishing `reassigned.tees` verbatim as the new `assignment.tees` --
+ * silently renumbering tees for badges the posterior never reopened, so
+ * frozen teeBadgeLock testimony (`tee-recovered-N`) started resolving to a
+ * different physical tee for those badges (AlexClark H8/H10/H11 etc.).
+ *
+ * The fix: `preAssignment` (exactly what teeBadgeLock last saw) is the base
+ * for every badge outside `evidence.targetBadgeIds` (C1) -- both its `tees`
+ * and its `assignments` entries pass through with untouched identity. Only
+ * `targets` (the posterior's actual candidate/phantom picks, C2) are pulled
+ * from `reassigned`, matched back to `preAssignment.tees` by geometry so a
+ * tee that already existed keeps its old id, and a genuinely new tee gets a
+ * fresh id continuing past the highest existing `tee-recovered-N` index (the
+ * scheme the receipt code already parses via `/tee-recovered-(\d+)$/`, so a
+ * distinct namespace would need a second parser -- continuing the same
+ * counter does not). `supersededTeeIds` drops the frozen recovered tees the
+ * posterior is overruling from that base, mirroring what `recoveredTees`
+ * (the RecoveredTeeInput board slot) already does.
+ */
 function commitPosteriorAssignments(
-	assignment: ThreeFactorAssignment,
-	evidence: PosteriorTeeRecoveryEvidence
+	preAssignment: ThreeFactorAssignment,
+	reassigned: ThreeFactorAssignment,
+	evidence: PosteriorTeeRecoveryEvidence,
+	supersededTeeIds: ReadonlySet<string>
 ): ThreeFactorAssignment {
 	const targets = [
 		...(evidence.jointTop[0]?.selections ?? []).flatMap((selection) =>
@@ -738,30 +780,52 @@ function commitPosteriorAssignments(
 			yPx: phantom.yPx
 		}))
 	];
-	if (targets.length === 0) return assignment;
+	if (targets.length === 0) {
+		return supersededTeeIds.size === 0
+			? preAssignment
+			: { ...preAssignment, tees: preAssignment.tees.filter((tee) => !supersededTeeIds.has(tee.detId)) };
+	}
+
+	let nextNewIndex =
+		Math.max(
+			-1,
+			...preAssignment.tees.map((tee) => Number(/^tee-recovered-(\d+)$/.exec(tee.detId)?.[1] ?? -1))
+		) + 1;
+	const stableByGeometry = new Map(preAssignment.tees.map((tee) => [`${tee.xPx}:${tee.yPx}`, tee]));
+	const newTees: TeeEvidence[] = [];
 
 	const committed: AssignmentEvidence[] = [];
 	const targetBadgeIds = new Set(targets.map((target) => target.badgeId));
-	const targetTeeIds = new Set<string>();
+	const committedTeeIds = new Set<string>();
 	for (const target of targets) {
-		const tee = assignment.tees.find(
+		const reassignedTee = reassigned.tees.find(
 			(candidate) =>
 				Math.abs(candidate.xPx - target.xPx) <= 0.5 && Math.abs(candidate.yPx - target.yPx) <= 0.5
 		);
-		if (!tee) throw new Error(`posterior assignment: published tee missing for ${target.badgeId}`);
-		targetTeeIds.add(tee.detId);
-		const ranked = assignment.scoredPairs
-			.filter((pair) => pair.raw.badgeId === target.badgeId && pair.raw.teeId === tee.detId)
+		if (!reassignedTee)
+			throw new Error(`posterior assignment: published tee missing for ${target.badgeId}`);
+		const geometryKey = `${reassignedTee.xPx}:${reassignedTee.yPx}`;
+		let stableTee = stableByGeometry.get(geometryKey);
+		if (!stableTee) {
+			stableTee = { ...reassignedTee, detId: `tee-recovered-${nextNewIndex++}` };
+			stableByGeometry.set(geometryKey, stableTee);
+			newTees.push(stableTee);
+		}
+		committedTeeIds.add(stableTee.detId);
+		const ranked = reassigned.scoredPairs
+			.filter(
+				(pair) => pair.raw.badgeId === target.badgeId && pair.raw.teeId === reassignedTee.detId
+			)
 			.sort((a, b) => b.score - a.score || a.raw.basketId.localeCompare(b.raw.basketId));
 		const selected = ranked[0];
 		if (!selected) {
 			throw new Error(
-				`posterior assignment: no routed pair carries ${target.badgeId} -> ${tee.detId}`
+				`posterior assignment: no routed pair carries ${target.badgeId} -> ${reassignedTee.detId}`
 			);
 		}
 		committed.push({
 			badgeId: target.badgeId,
-			teeId: tee.detId,
+			teeId: stableTee.detId,
 			basketId: selected.raw.basketId,
 			score: selected.score,
 			rank: selected.rank,
@@ -775,10 +839,11 @@ function commitPosteriorAssignments(
 	}
 
 	return {
-		...assignment,
+		...preAssignment,
+		tees: [...preAssignment.tees.filter((tee) => !supersededTeeIds.has(tee.detId)), ...newTees],
 		assignments: [
-			...assignment.assignments.filter(
-				(row) => !targetBadgeIds.has(row.badgeId) && !targetTeeIds.has(row.teeId)
+			...preAssignment.assignments.filter(
+				(row) => !targetBadgeIds.has(row.badgeId) && !committedTeeIds.has(row.teeId)
 			),
 			...committed
 		].sort((a, b) => a.badgeId.localeCompare(b.badgeId))
@@ -792,13 +857,21 @@ function executePosteriorTeeRecovery(board: ExecBoard, ctx: FeatureContext): voi
 		? inferPosterior(board, ctx, state.knobs as unknown as PosteriorKnobs)
 		: disabledEvidence(false);
 	if (state.enabled) {
-		const recoveredTees = publishRecoveredTees(
+		// Snapshot exactly what teeBadgeLock (and every frozen lock) last saw,
+		// before this feature changes anything -- the base every untouched
+		// badge is preserved from (C1; see commitPosteriorAssignments).
+		const preAssignment = board.get<ThreeFactorAssignment>('assignment');
+		const { recoveredTees, supersededTeeIds } = publishRecoveredTees(
 			board,
 			ctx,
 			evidence,
 			board.get<readonly BadgeEvidence[]>('badges')
 		);
 		const measurement = board.get<ThreeFactorMeasurement>('measurement');
+		// Still a full recompute over the merged recoveredTees list -- routing
+		// and scoring for the posterior's own picks need it -- but its ids are
+		// used only to source geometry/scoring for reopened badges, never
+		// published verbatim; see commitPosteriorAssignments for why.
 		const reassigned = assignThreeFactor(
 			measurement,
 			recoveredTees,
@@ -808,7 +881,12 @@ function executePosteriorTeeRecovery(board: ExecBoard, ctx: FeatureContext): voi
 			ctx.resolve(g5RibbonFeature).knobs as unknown as RibbonKnobs,
 			ctx.resolve(g5RoutingFeature).knobs as unknown as RoutingKnobs
 		);
-		const assignment = commitPosteriorAssignments(reassigned, evidence);
+		const assignment = commitPosteriorAssignments(
+			preAssignment,
+			reassigned,
+			evidence,
+			supersededTeeIds
+		);
 		board.set('assignment', assignment);
 		board.set('assignment.tees', assignment.tees);
 		board.set(
