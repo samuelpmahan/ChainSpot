@@ -16,6 +16,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RendererFn, RendererOutput } from '../rendererContract';
+import { isBadgeM2RawFrameLibraryPayload, renderBadgeM2RawFrame } from './badgeM2RawFrame';
 
 /** Column order is first-seen key order across rows — the producer's own
  * ordering, never sorted, so the table reads the way it was written. */
@@ -86,6 +87,17 @@ function sections(parsed: unknown): string[] {
 
 export const renderMeasurementTable: RendererFn = (input): RendererOutput => {
 	const { artifactRef, parsed, bytes, outDir, opId, gate } = input;
+
+	// Delegation, not a new ArtifactKind: the Badge M2 raw-frame library is a
+	// measurementTable payload (op 'badgeEvidence.m2Aa') whose shape is rich
+	// enough (a 31-margin convergence trail, 18 registered badges, per-badge
+	// exact-support partitions) to earn its own contact-sheet-and-receipt
+	// renderer instead of the generic column-table fallback below. Every
+	// other measurementTable payload (assignment.selection.table,
+	// teeBadgeLock.evidence, posteriorTeeRecovery.evidence, ...) is
+	// untouched by this check and falls through to the generic table as before.
+	if (isBadgeM2RawFrameLibraryPayload(parsed, artifactRef.id)) return renderBadgeM2RawFrame(input);
+
 	const path = join(outDir, `${artifactRef.id}.txt`);
 
 	if (parsed === undefined) {

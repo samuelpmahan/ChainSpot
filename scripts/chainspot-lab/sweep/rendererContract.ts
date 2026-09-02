@@ -165,6 +165,15 @@ export type RendererFn = (input: RendererInput) => RendererOutput;
  * this is the one contract every renderer and the CLI both compile
  * against.
  */
+// 2 kinds implemented (mask, measurementTable). measurementTable itself now
+// delegates one sub-shape internally: a payload matching schema
+// 'chainspot.badge-m2-raw-frame-library/v2' (id prefix
+// 'badgeM2RawFrame.library.') is handed to
+// renderers/badgeM2RawFrame.ts's contact-sheet-and-receipt renderer instead
+// of the generic column table -- see the delegation at the top of
+// renderMeasurementTable in renderers/measurementTable.ts. This is NOT a
+// new ArtifactKind/registry key: the kind dispatched on here is still
+// exactly 'measurementTable'.
 export const RENDERERS: Partial<Record<ArtifactKind, RendererFn>> = {
 	// rgba: renderRgba,
 	mask: renderMask,
