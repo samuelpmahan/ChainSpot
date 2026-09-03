@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+#
+# CHAT BOOTSTRAP
+# Repository: samuelpmahan/ChainSpot
+# Branch: task/lab-pxc-storybook-pcr
+# Workflow: Package LAB workspace
+# Artifact prefix: chainspot-lab-workspace-
+#
+# If the artifact ZIP is not already attached, use the GitHub plugin to
+# download the newest artifact from that workflow and branch. Materialize the
+# ZIP beside this script, then run:
+#
+#   bash chainspot-lab-init.sh <artifact.zip>
+#
+# Do not install dependencies. If GitHub, shell, or file access is unavailable,
+# print BOOTSTRAP_BLOCKED with the missing capability and stop immediately.
 
 set -euo pipefail
 
