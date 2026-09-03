@@ -5,6 +5,10 @@
 # Branch: task/lab-pxc-storybook-pcr
 # Workflow: Package LAB workspace
 # Artifact prefix: chainspot-lab-workspace-
+# Proven packet commit: 5826e3f7753150bb8d95d1069d589ba93ec4616f
+# Proven workflow run ID: 33729189138
+# Proven artifact ID: 9883162465
+# Proven artifact file: chainspot-lab-workspace-5826e3f.zip
 #
 # If the artifact ZIP is not already attached, use the GitHub plugin to
 # download the newest artifact from that workflow and branch. Materialize the
