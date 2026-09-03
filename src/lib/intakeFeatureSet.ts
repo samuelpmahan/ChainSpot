@@ -31,8 +31,8 @@ import type { SelectiveFullDecodeTrace } from './selectiveFullDecode.types';
 export const intakeFeatureSet: ABFeatureSet = {
 	id: 'intake-cv',
 	seededSlots: [
-		'selectedFiles',
-		'scoutThumbnail.options',
+		'px.source.selectedFiles',
+		'px.run.scoutThumbnail',
 		'classifyAndScout.options',
 		'selectiveFullDecode.options'
 	],
@@ -52,6 +52,7 @@ export interface IntakeFeatureSetInput {
 	readonly classifyParamsHash: string;
 	readonly scoutEnabled: boolean;
 	readonly selectiveFullDecodeEnabled?: boolean;
+	readonly scoutMaxSidePx?: number;
 }
 
 export interface IntakeFeatureSetResult {
@@ -182,11 +183,11 @@ export async function runIntakeFeatureSet(
 		input.classifyParamsHash
 	);
 	const board = createExecBoard();
-	board.set('selectedFiles', input.selectedFiles);
-	board.set('scoutThumbnail.options', {
+	board.set('px.source.selectedFiles', input.selectedFiles);
+	board.set('px.run.scoutThumbnail', {
 		runId: input.runId,
 		paramsHash: input.scoutParamsHash,
-		maxSidePx: 256
+		maxSidePx: input.scoutMaxSidePx ?? 256
 	});
 	board.set('classifyAndScout.options', {
 		runId: input.runId,
@@ -201,12 +202,12 @@ export async function runIntakeFeatureSet(
 		runId: input.runId,
 		invocation: input.invocation
 	});
-	const captureReceipt = board.get<SourceCaptureReceipt>('captureSourceReceipt');
-	const thumbnailTraces = board.has('thumbnail')
-		? board.get<readonly ScoutThumbnailTrace[]>('thumbnail')
+	const captureReceipt = board.get<SourceCaptureReceipt>('px.source.captureReceipt');
+	const thumbnailTraces = board.has('px.source.thumbnails')
+		? board.get<readonly ScoutThumbnailTrace[]>('px.source.thumbnails')
 		: [];
-	const thumbnailEvidence = board.has('scoutThumbnail.evidence')
-		? board.get<readonly ScoutThumbnailEvidence[]>('scoutThumbnail.evidence')
+	const thumbnailEvidence = board.has('px.source.thumbnailInspections')
+		? board.get<readonly ScoutThumbnailEvidence[]>('px.source.thumbnailInspections')
 		: [];
 	const classificationTraces = board.has('classifyAndScout.trace')
 		? board.get<readonly ClassifyAndScoutTrace[]>('classifyAndScout.trace')

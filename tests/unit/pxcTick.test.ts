@@ -17,7 +17,8 @@ const tickSpec: OperationSpec = {
 	unit: 'test',
 	consumes: ['px.test.input'],
 	produces: ['px.test.output'],
-	calculations: ['fn.doubleNumber']
+	calculations: ['fn.doubleNumber'],
+	accessConformance: 'exact'
 };
 
 describe('ExecBoard is the PxC address space', () => {
@@ -67,10 +68,7 @@ describe('Tick testimony from the production gateway', () => {
 		const runtime: OperationRuntime = {
 			implementations: new Map([['test.double', run]]),
 			calculationBindings: new Map([
-				[
-					'test.double',
-					[{ address: 'fn.doubleNumber', calculate: doubleNumber }]
-				]
+				['test.double', [{ address: 'fn.doubleNumber', calculate: doubleNumber }]]
 			])
 		};
 		const pxc = createExecBoard();
@@ -82,13 +80,13 @@ describe('Tick testimony from the production gateway', () => {
 		expect(tick.actualConsumes).toEqual(['px.test.input']);
 		expect(tick.declaredProduces).toEqual(['px.test.output']);
 		expect(tick.actualProduces).toEqual(['px.test.output']);
-		expect(tick.writes).toEqual([
-			{ address: 'px.test.output', kind: 'new-address' }
-		]);
+		expect(tick.writes).toEqual([{ address: 'px.test.output', kind: 'new-address' }]);
 		expect(tick.frozenCalculations).toEqual([
 			{
 				address: 'fn.doubleNumber',
-				implementationHash: expect.stringMatching(/^[0-9a-f]{64}$/)
+				implementationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+				identityScope: 'runtime-function-body',
+				limitation: 'called helpers, constants, templates, and assets are not covered'
 			}
 		]);
 	});
@@ -111,5 +109,32 @@ describe('Tick testimony from the production gateway', () => {
 				runtime
 			)
 		).toThrow(/calculation bindings disagree/);
+	});
+
+	test('refuses undeclared PxC traffic instead of recording a plausible receipt', () => {
+		const pxc = createExecBoard();
+		pxc.set('px.test.input', 1);
+		const runtime: OperationRuntime = {
+			implementations: new Map([
+				[
+					'test.double',
+					(board) => {
+						board.get('px.test.input');
+						board.get('px.test.hiddenInput');
+						board.set('px.test.output', 2);
+					}
+				]
+			])
+		};
+		pxc.set('px.test.hiddenInput', 99);
+		expect(() =>
+			executeCompiledPlan(
+				{ ops: [tickSpec], planFingerprint: 'test-plan', bindings: {} },
+				pxc,
+				nullFeatureContext,
+				undefined,
+				runtime
+			)
+		).toThrow(/extra reads=\[px\.test\.hiddenInput\]/);
 	});
 });

@@ -26,6 +26,9 @@ export interface Pcr {
 	readonly planFingerprint: string;
 	readonly paramsHash: string | null;
 	readonly runResultId: string;
+	/** Explicitly bounded: opaque PxC values are not silently claimed as content-frozen. */
+	readonly runResultIdentityScope: 'tick-testimony-and-materializations';
+	readonly runResultIdentityLimitation: 'opaque PxC output values require an emitted Materialization';
 	readonly ticks: readonly PcrTickCheckpoint[];
 }
 
@@ -78,6 +81,8 @@ export function composePcr(
 		planFingerprint: plan.planFingerprint,
 		paramsHash,
 		runResultId,
+		runResultIdentityScope: 'tick-testimony-and-materializations',
+		runResultIdentityLimitation: 'opaque PxC output values require an emitted Materialization',
 		ticks
 	};
 }

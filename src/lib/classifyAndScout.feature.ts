@@ -22,7 +22,7 @@ export const classifyAndScoutFeature = {
 				kind: 'compute',
 				gate: 'shared',
 				unit: CLASSIFY_AND_SCOUT_FEATURE_ID,
-				consumes: ['thumbnail', 'classifyAndScout.options'],
+				consumes: ['px.source.thumbnails', 'classifyAndScout.options'],
 				produces: ['classifyAndScout.trace', 'classifyAndScout.evidence'],
 				calculations: ['fn.produceClassifyAndScouts'],
 				features: [CLASSIFY_AND_SCOUT_FEATURE_ID]
@@ -31,7 +31,7 @@ export const classifyAndScoutFeature = {
 				{ address: 'fn.produceClassifyAndScouts', calculate: produceClassifyAndScouts }
 			],
 			async run(board) {
-				const traces = board.get<readonly ScoutThumbnailTrace[]>('thumbnail');
+				const traces = board.get<readonly ScoutThumbnailTrace[]>('px.source.thumbnails');
 				const options = board.get<ClassifyAndScoutOptions>('classifyAndScout.options');
 				const results = await produceClassifyAndScouts(traces, options);
 				board.set('classifyAndScout.trace', results);

@@ -47,6 +47,8 @@ export interface OperationSpec {
 	 * OperationRuntime remains the sole authority that binds and runs them.
 	 */
 	readonly calculations?: readonly `fn.${string}`[];
+	/** Opt-in while legacy declarations are repaired: reject any declared/actual access mismatch. */
+	readonly accessConformance?: 'exact';
 	/** ABFeature ids this operation reads enabled/knobs from, if any */
 	readonly features?: readonly string[];
 	/** knob names (within `features`) this operation's behavior is sensitive to — receipts/debugging only */
@@ -60,6 +62,9 @@ export interface FrozenCalculation {
 	readonly address: `fn.${string}`;
 	/** SHA-256 of the bound executable function body in this runtime build. */
 	readonly implementationHash: string;
+	/** Honest scope of implementationHash. It is not a transitive source or dependency hash. */
+	readonly identityScope: 'runtime-function-body';
+	readonly limitation: 'called helpers, constants, templates, and assets are not covered';
 }
 
 /** How one PxC address changed while a Tick ran. */

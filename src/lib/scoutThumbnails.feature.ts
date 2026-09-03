@@ -33,7 +33,9 @@ function scoutTraceArtifact(traces: readonly ScoutThumbnailTrace[]): OperationAr
 	return {
 		id: 'scout-thumbnails.trace-metadata',
 		kind: 'measurementTable',
-		bytes: new TextEncoder().encode(JSON.stringify({ featureId: 'scout-thumbnails', traces: semanticTraces }))
+		bytes: new TextEncoder().encode(
+			JSON.stringify({ featureId: 'scout-thumbnails', traces: semanticTraces })
+		)
 	};
 }
 
@@ -58,25 +60,26 @@ export function createScoutThumbnailsFeature(
 					kind: 'materialize',
 					gate: 'shared',
 					unit: 'scout-thumbnails',
-					consumes: ['capturedSources', 'scoutThumbnail.options'],
-					produces: ['thumbnail', 'scoutThumbnail.evidence'],
+					consumes: ['px.source.capturedSources', 'px.run.scoutThumbnail'],
+					produces: ['px.source.thumbnails', 'px.source.thumbnailInspections'],
 					calculations: ['fn.produceScoutThumbnails'],
+					accessConformance: 'exact',
 					features: ['scout-thumbnails'],
 					note: 'Await the reviewed thumbnail producer, then derive matching CLItext and VisualRender from its traces.'
 				},
-				calculationBindings: [
-					{ address: 'fn.produceScoutThumbnails', calculate: produce }
-				],
+				calculationBindings: [{ address: 'fn.produceScoutThumbnails', calculate: produce }],
 				async run(board) {
-					const sources = board.get<readonly CapturedSource[]>('capturedSources');
-					const options = board.get<ScoutThumbnailOptions>('scoutThumbnail.options');
+					const sources = board.get<readonly CapturedSource[]>('px.source.capturedSources');
+					const options = board.get<ScoutThumbnailOptions>('px.run.scoutThumbnail');
 					const traces = await produce(sources, options);
 					const evidence: readonly ScoutThumbnailEvidence[] = traces.map(toScoutThumbnailEvidence);
-					board.set('thumbnail', traces);
-					board.set('scoutThumbnail.evidence', evidence);
+					board.set('px.source.thumbnails', traces);
+					board.set('px.source.thumbnailInspections', evidence);
 				},
 				extractArtifacts(board) {
-					return [scoutTraceArtifact(board.get<readonly ScoutThumbnailTrace[]>('thumbnail'))];
+					return [
+						scoutTraceArtifact(board.get<readonly ScoutThumbnailTrace[]>('px.source.thumbnails'))
+					];
 				}
 			}
 		]

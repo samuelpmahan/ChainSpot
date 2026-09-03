@@ -1,0 +1,85 @@
+name: Package LAB workspace
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - task/lab-pxc-storybook-pcr
+    paths:
+      - .github/workflows/lab-workspace-artifact.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-workspace-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/chainspot-lab/package-lock.json
+
+      - name: Install root dependencies without gating the artifact
+        id: root-deps
+        shell: bash
+        run: |
+          set +e
+          npm ci 2>&1 | tee root-npm-ci.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install LAB dependencies without gating the artifact
+        id: lab-deps
+        shell: bash
+        run: |
+          set +e
+          npm ci --prefix scripts/chainspot-lab 2>&1 | tee lab-npm-ci.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record workspace receipt
+        shell: bash
+        env:
+          ROOT_DEPS_STATUS: ${{ steps.root-deps.outputs.status }}
+          LAB_DEPS_STATUS: ${{ steps.lab-deps.outputs.status }}
+        run: |
+          mkdir -p .lab-workspace
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "ref=$GITHUB_REF"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "root_npm_ci_status=$ROOT_DEPS_STATUS"
+            echo "lab_npm_ci_status=$LAB_DEPS_STATUS"
+            echo "tests_run=false"
+          } > .lab-workspace/receipt.txt
+          cp root-npm-ci.log lab-npm-ci.log .lab-workspace/
+
+      - name: Archive source and installed dependencies
+        shell: bash
+        run: |
+          tar \
+            --exclude=.git \
+            --exclude=chainspot-lab-workspace.tar.gz \
+            -czf chainspot-lab-workspace.tar.gz \
+            .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chainspot-lab-workspace-${{ github.sha }}
+          path: chainspot-lab-workspace.tar.gz
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error

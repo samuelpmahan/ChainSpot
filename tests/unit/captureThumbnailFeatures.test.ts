@@ -69,7 +69,7 @@ describe('capture and scout ABFeatures', () => {
 	async function evidenceHashFor(scoutTrace: ScoutThumbnailTrace): Promise<string> {
 		const set: ABFeatureSet = {
 			id: 'capture-and-scout',
-			seededSlots: ['selectedFiles', 'scoutThumbnail.options'],
+			seededSlots: ['px.source.selectedFiles', 'px.run.scoutThumbnail'],
 			features: [
 				createCaptureSourceFilesFeature(async () => captureReceipt),
 				createScoutThumbnailsFeature(async () => [scoutTrace])
@@ -77,8 +77,8 @@ describe('capture and scout ABFeatures', () => {
 		};
 		const compiled = compileABFeatureSet(set, { 'scout-thumbnails': { enabled: true } });
 		const board = createExecBoard();
-		board.set('selectedFiles', [selectedFile, rejectedFile]);
-		board.set('scoutThumbnail.options', { runId: 'run-1', paramsHash: 'params-1' });
+		board.set('px.source.selectedFiles', [selectedFile, rejectedFile]);
+		board.set('px.run.scoutThumbnail', { runId: 'run-1', paramsHash: 'params-1' });
 		return (
 			await executeABFeatureSet(compiled, board, nullFeatureContext, {
 				runId: 'feature-test',
@@ -105,13 +105,13 @@ describe('capture and scout ABFeatures', () => {
 		};
 		const set: ABFeatureSet = {
 			id: 'capture-and-scout',
-			seededSlots: ['selectedFiles', 'scoutThumbnail.options'],
+			seededSlots: ['px.source.selectedFiles', 'px.run.scoutThumbnail'],
 			features: [createCaptureSourceFilesFeature(capture), createScoutThumbnailsFeature(scout)]
 		};
 		const compiled = compileABFeatureSet(set, { 'scout-thumbnails': { enabled: true } });
 		const board = createExecBoard();
-		board.set('selectedFiles', [selectedFile, rejectedFile]);
-		board.set('scoutThumbnail.options', { runId: 'run-1', paramsHash: 'params-1' });
+		board.set('px.source.selectedFiles', [selectedFile, rejectedFile]);
+		board.set('px.run.scoutThumbnail', { runId: 'run-1', paramsHash: 'params-1' });
 
 		const receipt = await executeABFeatureSet(compiled, board, nullFeatureContext, {
 			runId: 'feature-test',
@@ -125,18 +125,19 @@ describe('capture and scout ABFeatures', () => {
 			'scout:end'
 		]);
 		expect(
-			board.get<readonly { imageId: string }[]>('capturedSources').map((source) => source.imageId)
+			board
+				.get<readonly { imageId: string }[]>('px.source.capturedSources')
+				.map((source) => source.imageId)
 		).toEqual(['image-1']);
-		expect(board.get<SourceCaptureReceipt>('captureSourceReceipt')).toBe(captureReceipt);
-		expect(board.get<SourceCaptureReceipt>('captureSourceReceipt').entries[1]).toMatchObject({
+		expect(board.get<SourceCaptureReceipt>('px.source.captureReceipt')).toBe(captureReceipt);
+		expect(board.get<SourceCaptureReceipt>('px.source.captureReceipt').entries[1]).toMatchObject({
 			ok: false,
 			reason: 'source-read-or-hash-failed'
 		});
-		expect(board.get<readonly ScoutThumbnailTrace[]>('thumbnail')).toEqual([trace()]);
-		const evidence =
-			board.get<readonly { cliText: string; visualRender: { traceHash: string } }[]>(
-				'scoutThumbnail.evidence'
-			);
+		expect(board.get<readonly ScoutThumbnailTrace[]>('px.source.thumbnails')).toEqual([trace()]);
+		const evidence = board.get<readonly { cliText: string; visualRender: { traceHash: string } }[]>(
+			'px.source.thumbnailInspections'
+		);
 		expect(evidence).toHaveLength(1);
 		expect(evidence[0].cliText).toContain('traceHash=trace-1');
 		expect(evidence[0].visualRender.traceHash).toBe('trace-1');
@@ -163,7 +164,7 @@ describe('capture and scout ABFeatures', () => {
 	test('keeps the scout deviation out of the default compiled set', () => {
 		const set: ABFeatureSet = {
 			id: 'capture-default-only',
-			seededSlots: ['selectedFiles'],
+			seededSlots: ['px.source.selectedFiles'],
 			features: [createCaptureSourceFilesFeature(), createScoutThumbnailsFeature()]
 		};
 		const compiled = compileABFeatureSet(set);

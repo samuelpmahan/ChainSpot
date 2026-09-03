@@ -59,17 +59,19 @@ export function createSelectiveFullDecodeFeature(
 					kind: 'materialize',
 					gate: 'shared',
 					unit: SELECTIVE_FULL_DECODE_FEATURE_ID,
-					consumes: ['capturedSources', 'classifyAndScout.trace', 'selectiveFullDecode.options'],
+					consumes: [
+						'px.source.capturedSources',
+						'classifyAndScout.trace',
+						'selectiveFullDecode.options'
+					],
 					produces: ['selectiveFullDecode.trace', 'selectiveFullDecode.evidence'],
 					calculations: ['fn.produceSelectiveFullDecode'],
 					features: [SELECTIVE_FULL_DECODE_FEATURE_ID],
 					note: 'Request only source rectangles named by upstream classification traces.'
 				},
-				calculationBindings: [
-					{ address: 'fn.produceSelectiveFullDecode', calculate: produce }
-				],
+				calculationBindings: [{ address: 'fn.produceSelectiveFullDecode', calculate: produce }],
 				async run(board) {
-					const sources = board.get<readonly CapturedSource[]>('capturedSources');
+					const sources = board.get<readonly CapturedSource[]>('px.source.capturedSources');
 					const classifications =
 						board.get<readonly ClassifyAndScoutTrace[]>('classifyAndScout.trace');
 					const options = board.get<Required<SelectiveFullDecodeOptions>>(

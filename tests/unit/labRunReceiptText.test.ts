@@ -49,7 +49,14 @@ const receipt: RunReceipt = {
 			unit: 'baskets',
 			durationMs: 7,
 			percentOfOperationBody: 70,
-			frozenCalculations: [{ address: 'fn.second', implementationHash: 'calc-hash-2' }],
+			frozenCalculations: [
+				{
+					address: 'fn.second',
+					implementationHash: 'calc-hash-2',
+					identityScope: 'runtime-function-body',
+					limitation: 'called helpers, constants, templates, and assets are not covered'
+				}
+			],
 			inputs: [],
 			outputs: ['output'],
 			writes: [{ address: 'output', kind: 'new-address' }],
@@ -66,7 +73,14 @@ const receipt: RunReceipt = {
 			unit: 'badges',
 			durationMs: 3,
 			percentOfOperationBody: 30,
-			frozenCalculations: [{ address: 'fn.first', implementationHash: 'calc-hash-1' }],
+			frozenCalculations: [
+				{
+					address: 'fn.first',
+					implementationHash: 'calc-hash-1',
+					identityScope: 'runtime-function-body',
+					limitation: 'called helpers, constants, templates, and assets are not covered'
+				}
+			],
 			inputs: ['input'],
 			outputs: ['first'],
 			writes: [{ address: 'first', kind: 'new-address' }],

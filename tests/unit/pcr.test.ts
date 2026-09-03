@@ -29,7 +29,12 @@ const plan: CompiledExecutionPlan = {
 const tick: TickTestimony = {
 	opId: operation.id,
 	frozenCalculations: [
-		{ address: 'fn.computeBrightDarkMasks', implementationHash: 'a'.repeat(64) }
+		{
+			address: 'fn.computeBrightDarkMasks',
+			implementationHash: 'a'.repeat(64),
+			identityScope: 'runtime-function-body',
+			limitation: 'called helpers, constants, templates, and assets are not covered'
+		}
 	],
 	startedAtMs: 10,
 	durationMs: 2,
@@ -108,13 +113,7 @@ describe('PCR composes testimony without becoming an engine', () => {
 			const board = createExecBoard();
 			board.set('px.test.value', 15);
 			board.set('px.run.threshold', threshold);
-			const testimony = executeCompiledPlan(
-				runPlan,
-				board,
-				nullFeatureContext,
-				undefined,
-				runtime
-			);
+			const testimony = executeCompiledPlan(runPlan, board, nullFeatureContext, undefined, runtime);
 			return {
 				accepted: board.get<boolean>('px.test.accepted'),
 				pcr: composePcr(
@@ -135,11 +134,7 @@ describe('PCR composes testimony without becoming an engine', () => {
 
 	test('cannot present a planned Tick that never ran', () => {
 		expect(() =>
-			composePcr(
-				{ id: 'badge-pcr', title: 'Badge PCR', tickIds: ['badgeStage.masks'] },
-				plan,
-				[]
-			)
+			composePcr({ id: 'badge-pcr', title: 'Badge PCR', tickIds: ['badgeStage.masks'] }, plan, [])
 		).toThrow("PCR 'badge-pcr' Tick 'badgeStage.masks' never ran.");
 	});
 });

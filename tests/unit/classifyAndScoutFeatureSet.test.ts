@@ -28,14 +28,14 @@ describe('classify-and-scout ABFeatureSet integration', () => {
 	test('executes the real feature operation and reports truthful slot custody', async () => {
 		const definition: ABFeatureSet = {
 			id: 'tick4-integration',
-			seededSlots: ['thumbnail', 'classifyAndScout.options'],
+			seededSlots: ['px.source.thumbnails', 'classifyAndScout.options'],
 			features: [classifyAndScoutFeature]
 		};
 		const compiled = compileABFeatureSet(definition, {
 			'classify-and-scout': { enabled: true }
 		});
 		const board = createExecBoard();
-		board.set('thumbnail', [rejectedThumbnail]);
+		board.set('px.source.thumbnails', [rejectedThumbnail]);
 		board.set('classifyAndScout.options', { runId: 'run-1', paramsHash: 'classify-params' });
 
 		const receipt = await executeABFeatureSet(compiled, board, nullFeatureContext, {
@@ -49,8 +49,8 @@ describe('classify-and-scout ABFeatureSet integration', () => {
 		expect(receipt.operations).toMatchObject([
 			{
 				opId: 'classifyAndScout.dispatch',
-				declaredConsumes: ['thumbnail', 'classifyAndScout.options'],
-				actualConsumes: ['thumbnail', 'classifyAndScout.options'],
+				declaredConsumes: ['px.source.thumbnails', 'classifyAndScout.options'],
+				actualConsumes: ['px.source.thumbnails', 'classifyAndScout.options'],
 				declaredProduces: ['classifyAndScout.trace', 'classifyAndScout.evidence'],
 				actualProduces: ['classifyAndScout.trace', 'classifyAndScout.evidence']
 			}

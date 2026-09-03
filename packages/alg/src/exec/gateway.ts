@@ -16,11 +16,7 @@ import type { ExecBoard } from './board';
 import { trackAccess } from './board';
 import type { ExecSink } from './sink';
 import { createNullSink } from './sink';
-import {
-	operationImpls,
-	operationCalculationBindings,
-	ARTIFACT_EXTRACTORS
-} from './operations';
+import { operationImpls, operationCalculationBindings, ARTIFACT_EXTRACTORS } from './operations';
 import type { FrozenCalculation, OperationSpec, Probe, Receipt } from './contract';
 import type { FeatureContext } from '../detectors/threeFactor/features/types';
 import { sha256HexSyncText } from './sha256';
@@ -78,7 +74,9 @@ function freezeCalculations(
 	}
 	return bindings.map((binding) => ({
 		address: binding.address,
-		implementationHash: sha256HexSyncText(Function.prototype.toString.call(binding.calculate))
+		implementationHash: sha256HexSyncText(Function.prototype.toString.call(binding.calculate)),
+		identityScope: 'runtime-function-body' as const,
+		limitation: 'called helpers, constants, templates, and assets are not covered' as const
 	}));
 }
 
@@ -100,6 +98,27 @@ function shapeProbes(board: ExecBoard, produced: ReadonlySet<string>): Probe[] {
 		}
 	}
 	return probes;
+}
+
+function assertAccessConformance(
+	op: OperationSpec,
+	consumed: ReadonlySet<string>,
+	produced: ReadonlySet<string>
+): void {
+	if (op.accessConformance !== 'exact') return;
+	const declaredConsumes = new Set(op.consumes);
+	const declaredProduces = new Set(op.produces);
+	const missingReads = op.consumes.filter((address) => !consumed.has(address));
+	const extraReads = [...consumed].filter((address) => !declaredConsumes.has(address));
+	const missingWrites = op.produces.filter((address) => !produced.has(address));
+	const extraWrites = [...produced].filter((address) => !declaredProduces.has(address));
+	if (missingReads.length || extraReads.length || missingWrites.length || extraWrites.length) {
+		throw new Error(
+			`PxC: Tick '${op.id}' access contradicts its declaration; ` +
+				`missing reads=[${missingReads.join(', ')}] extra reads=[${extraReads.join(', ')}] ` +
+				`missing writes=[${missingWrites.join(', ')}] extra writes=[${extraWrites.join(', ')}].`
+		);
+	}
 }
 
 export function executeCompiledPlan(
@@ -128,6 +147,7 @@ export function executeCompiledPlan(
 			);
 		}
 		const durationMs = now() - startedAtMs;
+		assertAccessConformance(op, consumed, produced);
 
 		const artifacts = (runtime.artifactExtractors?.[op.id]?.(board) ?? []).map((a) =>
 			sink.putArtifact(a.kind, a.id, a.bytes, a.dims)
@@ -175,6 +195,7 @@ export async function executeCompiledPlanAsync(
 		const { tracked, consumed, produced, writes } = trackAccess(board, op);
 		await impl(tracked, ctx);
 		const durationMs = now() - startedAtMs;
+		assertAccessConformance(op, consumed, produced);
 		const artifacts = (runtime.artifactExtractors?.[op.id]?.(board) ?? []).map((artifact) =>
 			sink.putArtifact(artifact.kind, artifact.id, artifact.bytes, artifact.dims)
 		);

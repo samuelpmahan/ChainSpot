@@ -63,14 +63,18 @@ describe('selective-full-decode ABFeatureSet integration', () => {
 	test('exported feature runs through the set and preserves an unavailable-source rejection', async () => {
 		const definition: ABFeatureSet = {
 			id: 'tick5-integration',
-			seededSlots: ['capturedSources', 'classifyAndScout.trace', 'selectiveFullDecode.options'],
+			seededSlots: [
+				'px.source.capturedSources',
+				'classifyAndScout.trace',
+				'selectiveFullDecode.options'
+			],
 			features: [selectiveFullDecodeFeature]
 		};
 		const compiled = compileABFeatureSet(definition, {
 			'selective-full-decode': { enabled: true }
 		});
 		const board = createExecBoard();
-		board.set('capturedSources', []);
+		board.set('px.source.capturedSources', []);
 		board.set('classifyAndScout.trace', [upstream]);
 		board.set('selectiveFullDecode.options', {
 			runId: 'run-5',
@@ -94,12 +98,12 @@ describe('selective-full-decode ABFeatureSet integration', () => {
 			{
 				opId: 'selective-full-decode.request',
 				declaredConsumes: [
-					'capturedSources',
+					'px.source.capturedSources',
 					'classifyAndScout.trace',
 					'selectiveFullDecode.options'
 				],
 				actualConsumes: [
-					'capturedSources',
+					'px.source.capturedSources',
 					'classifyAndScout.trace',
 					'selectiveFullDecode.options'
 				],
