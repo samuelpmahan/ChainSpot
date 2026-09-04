@@ -215,14 +215,14 @@ export const HELP_CATALOG = Object.freeze([
   record('compile', { kind: 'command', group: 'RUN', title: 'COMPILE — inspect a sweep config', summary: 'Resolve and compile an algorithm config without raster execution.', forms: ['lab compile CONFIG.json'], examples: ['lab compile packages/alg/src/detectors/threeFactor/configs/default.json'], availability: AVAILABILITY.CLI_ONLY, outputs: ['Resolved plan only.'], caveats: ['Compile does not read raster inputs or execute the algorithm plan.'] }),
   record('sweep', {
     kind: 'command', group: 'RUN', title: 'SWEEP — StripChrome/AutoStitch + only algorithm execution path', summary: 'The only LAB command that executes the algorithm plan.',
-    forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through GATE CONFIG.json INPUT... [TRUTH.json]', 'lab sweep batch [--through GATE] CONFIG.json SELECTOR...'],
-    options: [option('--through', 'Execute the dependency-complete chronological prefix through this gate.', { value: 'G1|G2|G3|G4|G5|G6|G7', constraints: 'Every gate G1-G7 is a valid cutoff; a cutoff whose phase owns no scheduled operation is rejected; there is no --stop-after' })],
-    examples: ['lab sweep CONFIG.json course.png', 'lab sweep --through G3 CONFIG.json course.png'],
+    forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through STAGE INPUT', 'lab sweep batch [--through GATE] CONFIG.json SELECTOR...'],
+    options: [option('--through', 'Execute discovered Stage contracts in order through this Stage.', { value: 'S0|S1|...', constraints: 'Contracts are discovered from packages/alg/dist/stages/S*/contract.js; one image input; no config' })],
+    examples: ['lab sweep CONFIG.json course.png', 'lab sweep --through S1 course.png'],
     sideEffects: ['Canonicalizes inputs, executes the plan, and writes algorithm artifacts plus run.receipt.json and run.receipt.txt for every case.'],
     outputs: ['Canonicalization report and chronological operation timeline; run.receipt.json is the canonical machine testimony, while run.receipt.txt is the chronological human report, alongside algorithm artifacts.'],
     caveats: ['INPUT is one or more PNG/JPG/JPEG captures. Optional TRUTH.json is evaluation-only. CLI has no --out-dir even though the operation accepts one.']
   }),
-  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — dependency-complete slice', summary: 'Execute the contiguous chronological prefix of the plan through a gate cutoff.', forms: ['lab sweep --through G1|G2|G3|G4|G5|G6|G7 CONFIG.json INPUT... [TRUTH.json]'], availability: AVAILABILITY.CLI_ONLY, caveats: ['A cutoff is a contiguous chronological prefix of the frozen plan, so later-gate prerequisites inside it still run and are named in the receipt; operations after the prefix are reported as not scheduled. A cutoff whose own phase has no scheduled operation is rejected. There is no --stop-after.'] }),
+  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — Stage prefix', summary: 'Find and execute Stage contracts in numeric order through a requested Stage.', forms: ['lab sweep --through S0|S1|... INPUT'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Each Stage owns packages/alg/src/stages/S*/contract.ts. Adding S2 makes it discoverable after the algorithm build without changing LAB. Stage Sweep currently accepts one image and no config or truth input.'] }),
   record('sweep/batch', {
     parent: 'sweep', aliases: ['sweep/batches'], title: 'SWEEP BATCH — manifest-backed corpus census',
     summary: 'Run the same dependency-valid Sweep slice across named dev/demo course cases.',

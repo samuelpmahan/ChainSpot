@@ -81,11 +81,11 @@ Image-coordinate headings are `0 deg` right, `90 deg` down, `180 deg` left, `270
 
 ```bash
 ./lab compile CONFIG.json
-./lab sweep --through G3 CONFIG.json IMAGE [TRUTH.json]
+./lab sweep --through S1 IMAGE
 ```
 
 - `compile` inspects the plan; it does not execute raster work.
-- `--through` accepts every gate G1-G7; each runs the dependency-complete prefix through that cutoff. The canonical engine order continues with `G4` Endpoint Recovery, `G5` Straight Test, `G6` Assignment, and `G7` Bend Refinement; `shared-set` is infrastructure, not a scheduled gate. There is currently no `--stop-after`.
+- `--through` discovers `packages/alg/dist/stages/S*/contract.js` and executes the numeric Stage prefix. Each Stage owns its contract, so adding S2 requires no LAB change after rebuilding `@chainspot/alg`.
 - A positional JSON after inputs is evaluation truth, not detector input.
 - An official scoreboard requires verified truth in the canonical execution frame. Dimensions-only or unmapped truth is skipped with an explicit reason.
 - Repeating the same config/input normally reuses the same artifact directory, so copy evidence you need to preserve before another run.

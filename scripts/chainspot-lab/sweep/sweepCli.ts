@@ -6,8 +6,8 @@ import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { compileSweepConfig, runSweepOperation } from './operation';
 import { printPlan } from './timeline';
-import { isSweepThroughGate, type SweepThroughGate } from './gateVocabulary';
 import { runSweepBatch } from './batch';
+import { discoverStageContracts, runStageSweep } from './stageOperation';
 
 function usage(): never {
 	console.error(
@@ -15,15 +15,16 @@ function usage(): never {
 			'Usage:',
 			'  lab compile CONFIG.json',
 			'  lab sweep CONFIG.json INPUT... [TRUTH.json]',
-			'  lab sweep --through GATE CONFIG.json INPUT... [TRUTH.json]',
+			'  lab sweep --through STAGE INPUT',
 			'  lab sweep batch [--through GATE] CONFIG.json [dev|demo|all|COURSE]...',
 			'',
 			'INPUT is one or more .png/.jpg/.jpeg captures. Sweep canonicalizes the set:',
 			'  decode -> StripChrome -> AutoStitch (when N>1) -> canonical raster -> algorithm',
 			'',
 			'TRUTH is optional evaluation-only Annotation JSON.',
-			'--through GATE (G1-G7) executes the dependency-complete chronological',
-			'prefix through that gate; the receipt states what was not scheduled and why.',
+			`--through STAGE executes the discovered Stage prefix; available: ${discoverStageContracts()
+				.map((stage) => stage.id)
+				.join(', ')}.`,
 			'',
 			'Clickable workbench:',
 			'  lab ui'
@@ -46,15 +47,17 @@ async function runSweep(args: readonly string[]): Promise<void> {
 		return;
 	}
 	const restArgs = [...args];
-	let throughGate: SweepThroughGate | undefined;
 	const throughIndex = restArgs.indexOf('--through');
 	if (throughIndex >= 0) {
 		const value = restArgs[throughIndex + 1];
-		if (!value || !isSweepThroughGate(value)) {
-			throw new Error(`lab sweep: --through requires a gate cutoff G1 through G7.`);
-		}
-		throughGate = value;
+		if (!value) throw new Error('lab sweep: --through requires a Stage id.');
 		restArgs.splice(throughIndex, 2);
+		if (restArgs.length !== 1) {
+			throw new Error('lab sweep: Stage --through accepts exactly one image input and no config.');
+		}
+		const result = await runStageSweep(value, restArgs[0]);
+		console.log(readFileSync(result.receiptPath, 'utf8').trimEnd());
+		return;
 	}
 	const [configPath, ...rest] = restArgs;
 	if (!configPath || rest.length === 0) usage();
@@ -65,8 +68,7 @@ async function runSweep(args: readonly string[]): Promise<void> {
 	const result = await runSweepOperation({
 		configPath,
 		inputPaths,
-		truthPath: truthPaths[0],
-		...(throughGate ? { throughGate } : {})
+		truthPath: truthPaths[0]
 	});
 	console.log(readFileSync(result.runReceiptPaths[1], 'utf8').trimEnd());
 }

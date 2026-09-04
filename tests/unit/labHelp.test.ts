@@ -66,20 +66,19 @@ describe('LAB contextual help catalog', () => {
 		expect(exhaustive.stdout).toContain('PARKED_UNREGISTERED');
 	});
 
-	test('unknown command/option errors give local suggestions and gate vocabulary', () => {
+	test('unknown command/option errors give local suggestions and Stage vocabulary', () => {
 		const command = run(['scop']);
 		expect(command.status).toBe(2);
 		expect(command.stderr).toContain("Did you mean 'scope'?");
 
-		const option = run(['sweep', '--throug', 'G3', 'config.json', 'input.png']);
+		const option = run(['sweep', '--throug', 'S1', 'input.png']);
 		expect(option.status).toBe(2);
 		expect(option.stderr).toContain("Did you mean '--through'?");
-		expect(option.stderr).toContain('Gate vocabulary');
 
-		const gate = run(['sweep', '--through', 'shared', 'config.json', 'input.png']);
-		expect(gate.status).toBe(2);
-		expect(gate.stderr).toContain('shared');
-		expect(gate.stderr).toContain('not an execution cutoff');
+		const stage = run(['sweep', '--through', 'shared', 'input.png']);
+		expect(stage.status).toBe(1);
+		expect(stage.stderr).toContain("unknown Stage 'shared'");
+		expect(stage.stderr).toContain('available=[S0, S1]');
 
 		const localAction = run(['search', 'strt']);
 		expect(localAction.status).toBe(2);

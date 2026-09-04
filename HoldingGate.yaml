@@ -6,3 +6,8 @@ queue:
       - Must apply across every course, not a NorthPark fixture.
       - Do not assume the removable space is rectangular.
       - Preserve useful map and course pixels.
+  - task: Replace Badge's naive 2px mute producer with learned complete BadgePx.
+    notes:
+      - Current mute fills the observed outer support and expands it by 2px.
+      - Preserve the muddled BadgePx subtraction in the S1 PCR until the missing anti-aliasing pixels are visibly gone.
+      - Overlapped 7 and 9 belong to Badge recovery, not this shortcut.

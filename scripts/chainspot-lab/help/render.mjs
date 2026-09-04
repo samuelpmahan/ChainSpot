@@ -1,7 +1,6 @@
 // @ts-nocheck
 import {
   AVAILABILITY_MEANING,
-  EXECUTABLE_SWEEP_GATES,
   HELP_CATALOG,
   ROOT_COMMANDS,
   SHELL_FORMS,
@@ -207,22 +206,8 @@ export function checkContextualOptions(command, args) {
     const path = helpTopicForInvocation(command, args).join(' ');
     console.error(`lab ${path}: unknown option '${arg}'.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`);
     console.error(`Valid local options: ${known.length ? known.join(', ') : '(none)'}.`);
-    if (command === 'sweep') console.error(`Gate vocabulary: --through accepts ${EXECUTABLE_SWEEP_GATES.join(', ')}; shared is cross-gate infrastructure, not a cutoff.`);
     console.error(`Try: lab help ${path}`);
     return 2;
-  }
-  if (command === 'sweep') {
-    const index = args.indexOf('--through');
-    if (index >= 0) {
-      const gate = args[index + 1];
-      if (!EXECUTABLE_SWEEP_GATES.includes(gate)) {
-        const suggestion = gate ? nearestName(gate, EXECUTABLE_SWEEP_GATES) : undefined;
-        console.error(`lab sweep: --through requires one executable gate: ${EXECUTABLE_SWEEP_GATES.join(', ')}.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`);
-        console.error('`shared` names cross-gate infrastructure and is intentionally not an execution cutoff.');
-        console.error('Try: lab help gate-vocabulary');
-        return 2;
-      }
-    }
   }
   return 0;
 }
