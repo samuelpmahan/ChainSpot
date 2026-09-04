@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
   "types": {
-    "TIDY": "0.0.0"
+    "TIDY": {
+      "version": "0.0.0",
+      "tests": [
+        "node --test .tidy/tidy.test.mjs"
+      ]
+    }
   }
 }
