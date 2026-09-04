@@ -1,4 +1,4 @@
-import { executeS1BadgesCandidate, materializeS1Subtractions } from './candidate';
+import { executeS1BadgesCandidate, materializeS1Subtractions } from './clean';
 import type { StageContract } from '../contract';
 
 export const stageContract: StageContract = {

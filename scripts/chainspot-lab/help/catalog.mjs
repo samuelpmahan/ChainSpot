@@ -213,6 +213,35 @@ export const HELP_CATALOG = Object.freeze([
   record('gates', { kind: 'command', group: 'KNOW', title: 'GATES — pipeline vocabulary', summary: 'List pipeline/gate knowledge or inspect one ID.', forms: ['lab gates [ID]'], examples: ['lab gates', 'lab gates 3'], availability: AVAILABILITY.CLI_ONLY, subtopics: ['gate-vocabulary'] }),
   record('cases', { kind: 'command', group: 'KNOW', title: 'CASES — hard-evidence cases', summary: 'List recorded hard-evidence cases.', forms: ['lab cases'], availability: AVAILABILITY.CLI_ONLY }),
   record('compile', { kind: 'command', group: 'RUN', title: 'COMPILE — inspect a sweep config', summary: 'Resolve and compile an algorithm config without raster execution.', forms: ['lab compile CONFIG.json'], examples: ['lab compile packages/alg/src/detectors/threeFactor/configs/default.json'], availability: AVAILABILITY.CLI_ONLY, outputs: ['Resolved plan only.'], caveats: ['Compile does not read raster inputs or execute the algorithm plan.'] }),
+  record('story', {
+    		kind: 'command',
+    		group: 'LOOK',
+    		title: 'STORY — materialize through Sweep, then render the real Storybook Story',
+    		summary:
+    			'Run one precise Stage Sweep and capture the corresponding native Storybook Story as a human-recognizable percept.',
+    		forms: [
+    			'lab story STAGE IMAGE [--out FILE] [--view showReceipt=true|false]',
+    			'lab story --test STAGE IMAGE [--out FILE] [--view showReceipt=true|false]'
+    		],
+    		options: [
+    			option('--test', 'Exercise the same materialization + Story path as a test.'),
+    			option('--out', 'Write the captured Story percept to FILE.', { value: 'FILE' }),
+    			option('--view', 'Change Story projection only.', { value: 'showReceipt=true|false' })
+    		],
+    		examples: [
+    			'lab story S0 course.png',
+    			'lab story S1 course.png --view showReceipt=false',
+    			'lab story --test S1 course.png'
+    		],
+    		sideEffects: [
+    			'Runs the bound `lab sweep --through STAGE IMAGE`, starts a temporary native Storybook server, and writes one screenshot artifact.'
+    		],
+    		outputs: ['Exact screenshot path for the rendered Storybook Story.'],
+    		caveats: [
+    			'Stages are discovered from the compiled Stage contracts; Storybook remains the native interactive interface.',
+    			'Run binding changes computation through Sweep; --view changes projection only.'
+    		]
+    	}),
   record('sweep', {
     kind: 'command', group: 'RUN', title: 'SWEEP — StripChrome/AutoStitch + only algorithm execution path', summary: 'The only LAB command that executes the algorithm plan.',
     forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through STAGE INPUT', 'lab sweep batch [--through GATE] CONFIG.json SELECTOR...'],

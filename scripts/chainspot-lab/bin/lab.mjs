@@ -40,6 +40,9 @@ const COMMANDS = {
   scope: {
     run: (args) => runTs('scope/scopeCli.ts', args),
   },
+  story: {
+    run: (args) => runTs('story/storyCli.ts', args),
+  },
   digits: {
     run: (args) => runTs('scoreboard/digitsCli.ts', args),
   },

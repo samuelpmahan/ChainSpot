@@ -5,8 +5,9 @@ const virtualId = 'virtual:e-badge-specimens';
 const resolvedVirtualId = `\0${virtualId}`;
 
 const config: StorybookConfig = {
+	staticDirs: ['../artifacts'],
 	stories: ['../src/**/*.mdx', '../src/**/*.stories.@(js|ts|svelte)'],
-	addons: ['@storybook/addon-docs'],
+	addons: ['@storybook/addon-docs', '@storybook/addon-vitest'],
 	framework: {
 		name: '@storybook/sveltekit',
 		options: {}

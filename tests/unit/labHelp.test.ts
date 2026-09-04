@@ -14,14 +14,16 @@ const CLI = resolve('scripts/chainspot-lab/bin/lab.mjs');
 
 function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 	return spawnSync(process.execPath, [CLI, ...args], {
-		cwd: resolve('.'), encoding: 'utf8', env: { ...process.env, ...env }
+		cwd: resolve('.'),
+		encoding: 'utf8',
+		env: { ...process.env, ...env }
 	});
 }
 
 describe('LAB contextual help catalog', () => {
 	test('covers the supported root, shell, option, and documented leaf surface', () => {
 		const coverage = coverageForCatalog();
-		expect(coverage.commandCount).toBe(15);
+		expect(coverage.commandCount).toBe(16);
 		expect(coverage.shellCount).toBe(4);
 		expect(coverage.missingRoots).toEqual([]);
 		expect(coverage.missingShell).toEqual([]);
@@ -33,7 +35,13 @@ describe('LAB contextual help catalog', () => {
 	test('root, exact, nested, local, and exhaustive help are catalog-backed', () => {
 		const root = run(['--help']);
 		expect(root.status).toBe(0);
-		expect((root.stdout.match(/^  (setup|set|tutorial|ui|scope|search|traverse|invariants|detectors|gates|cases|compile|sweep|orient)\b/gm) ?? []).length).toBe(14);
+		expect(
+			(
+				root.stdout.match(
+					/^  (setup|set|tutorial|ui|scope|story|search|traverse|invariants|detectors|gates|cases|compile|sweep|orient)\b/gm
+				) ?? []
+			).length
+		).toBe(15);
 		expect(root.stdout).toContain('history');
 		expect(root.stdout).toContain('run-script');
 		expect(root.stdout).toContain('exit | quit');
@@ -125,9 +133,15 @@ describe('LAB contextual help catalog', () => {
 		writeFileSync(config, JSON.stringify({ version: 1, course: 'DashsTrack', vars: {} }));
 		writeFileSync(state, JSON.stringify({ pages: { p: {} }, trails: { t: {} }, traversals: {} }));
 		const before = [readFileSync(config, 'utf8'), readFileSync(state, 'utf8')];
-		const result = run(['help', 'here'], { LAB_CONFIG: config, LAB_SEARCH_STATE: state, LAB_BLIND_TEST: '1' });
+		const result = run(['help', 'here'], {
+			LAB_CONFIG: config,
+			LAB_SEARCH_STATE: state,
+			LAB_BLIND_TEST: '1'
+		});
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain('zero writes; zero algorithm operations; no Annotation/truth read');
+		expect(result.stdout).toContain(
+			'zero writes; zero algorithm operations; no Annotation/truth read'
+		);
 		expect(result.stdout).toContain('Blind mode: truth-assisted suggestions are suppressed.');
 		expect(result.stdout).not.toContain('scope hN --truth');
 		expect([readFileSync(config, 'utf8'), readFileSync(state, 'utf8')]).toEqual(before);
