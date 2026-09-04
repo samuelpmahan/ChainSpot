@@ -6,17 +6,25 @@
 	}: { stage: string; runName: string; showReceipt?: boolean } = $props();
 
 	let receipt = $state('');
-	let failure = $state<string | null>(null);
+	let receiptFailure = $state<string | null>(null);
+	let imageReady = $state(false);
+	let imageFailure = $state<string | null>(null);
 	let request = 0;
 
 	let artifactUrl = $derived(`/sweep/stages/${runName}-through-${stage}/progression.png`);
 	let receiptUrl = $derived(`/sweep/stages/${runName}-through-${stage}/run.receipt.txt`);
+	let materializationState = $derived(
+		imageFailure || receiptFailure ? 'huh' : imageReady && receipt ? 'ready' : 'loading'
+	);
+	let materializationFailure = $derived(imageFailure ?? receiptFailure);
 
 	$effect(() => {
 		const url = receiptUrl;
 		const id = ++request;
 		receipt = '';
-		failure = null;
+		receiptFailure = null;
+		imageReady = false;
+		imageFailure = null;
 		void fetch(url)
 			.then(async (response) => {
 				if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -27,13 +35,13 @@
 					if (id === request) receipt = text;
 				},
 				(error) => {
-					if (id === request) failure = error instanceof Error ? error.message : String(error);
+					if (id === request) receiptFailure = error instanceof Error ? error.message : String(error);
 				}
 			);
 	});
 </script>
 
-<main>
+<main data-materialization-state={materializationState}>
 	<header>
 		<div>
 			<span>{stage} · materialized Stage percept</span>
@@ -44,15 +52,28 @@
 	</header>
 
 	<section class="percept">
-		<img src={artifactUrl} alt={`${stage} materialized progression for ${runName}`} />
+		<img
+			src={artifactUrl}
+			alt={`${stage} materialized progression for ${runName}`}
+			onload={() => {
+				imageReady = true;
+				imageFailure = null;
+			}}
+			onerror={() => {
+				imageReady = false;
+				imageFailure = `image unavailable: ${artifactUrl}`;
+			}}
+		/>
 	</section>
 
-	{#if showReceipt}
+	{#if materializationFailure}
+		<section class="receipt" data-materialization-huh>
+			<p class="failure">HUH: Story could not GET its Sweep materialization: {materializationFailure}</p>
+		</section>
+	{:else if showReceipt}
 		<section class="receipt">
 			<h2>Receipt</h2>
-			{#if failure}
-				<p class="failure">HUH: Story could not GET the Sweep receipt: {failure}</p>
-			{:else if receipt}
+			{#if receipt}
 				<pre>{receipt}</pre>
 			{:else}
 				<p>GETting materialized receipt…</p>
