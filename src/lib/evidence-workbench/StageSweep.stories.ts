@@ -7,6 +7,26 @@ type StageStoryArgs = {
 	showReceipt: boolean;
 };
 
+async function waitForMaterialization(
+	canvasElement: HTMLElement,
+	expected: 'ready' | 'huh',
+	timeoutMs = 10_000
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	let last = 'missing';
+	while (Date.now() < deadline) {
+		const main = canvasElement.querySelector('main[data-materialization-state]');
+		last = main?.getAttribute('data-materialization-state') ?? 'missing';
+		if (last === expected) return;
+		if (expected === 'ready' && last === 'huh') {
+			const huh = canvasElement.querySelector('[data-materialization-huh]')?.textContent?.trim();
+			throw new Error(huh || 'Story materialization entered HUH state');
+		}
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+	throw new Error(`Story materialization did not reach ${expected}; last state=${last}`);
+}
+
 const meta = {
 	title: 'LAB/Stages',
 	component: StageSweepStory,
@@ -25,4 +45,18 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Stage: Story = {};
+export const Stage: Story = {
+	play: async ({ canvasElement }) => {
+		await waitForMaterialization(canvasElement, 'ready');
+	}
+};
+
+export const MissingMaterializationControl: Story = {
+	args: {
+		runName: '__missing_materialization_control__',
+		showReceipt: true
+	},
+	play: async ({ canvasElement }) => {
+		await waitForMaterialization(canvasElement, 'huh');
+	}
+};
