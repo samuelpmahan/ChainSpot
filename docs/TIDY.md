@@ -87,6 +87,24 @@ A patch bump may explicitly bypass test failure with:
 
 The escape flag itself is refused for minor or major bumps.
 
+## Commit backstop
+
+The repository carries `.githooks/pre-commit` as a deliberately dumb accidental-mistake guard. It runs only:
+
+```sh
+./tidy check
+```
+
+and refuses the commit if Tidy is structurally unhealthy.
+
+Enable the repository-carried hooks for a checkout with:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The hook does not inspect staged files, infer ownership, coordinate agents, or call `tidy up`.
+
 ## Manifest
 
 The manifest may begin with no registered Stage types:
@@ -102,6 +120,4 @@ Types are added deliberately when their Stage lineage exists. Tidy does not inve
 
 ## Non-goals
 
-Tidy does not populate `clean/`, decide when something deserves freezing, promote Scripts or other LAB objects, infer versions from Stage names, silently repair the manifest, or replace Git.
-
-Its job is narrower: make concurrent work in one tree safer by refusing ambiguous Stage succession.
+Tidy does not populate `clean/`, decide when something deserves freezing, promote Scripts or other LAB objects, infer versions from Stage names, silently repair the manifest, coordinate concurrent writers, or replace Git.
