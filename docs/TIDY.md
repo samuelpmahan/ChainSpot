@@ -1,37 +1,107 @@
 # Tidy
 
-Tidy is deliberately small. It is a linter/guard around a version manifest, not a destination for cleaned files and not a promotion system.
+Tidy is deliberately small: a guard around Stage lineage in a shared working tree.
+
+It does not decide what belongs in a Stage, freeze files, promote LAB objects, or own `clean/` contents.
 
 ## Surface
 
 ```sh
 ./tidy check
-./tidy up -v TYPE:CURRENT_VERSION
+./tidy up -v TYPE:TARGET_VERSION [--parent_dir DIR] [--allow-test-failure]
 ```
 
-`check` prints every check it performs and that check's result. A failing check makes the command fail.
+`check` prints every check and its result.
 
-`up` is guarded. `-v` does **not** tell Tidy what version to create. The caller supplies the version they believe is currently recorded for `TYPE`; Tidy independently reads `.tidy/manifest.json` and refuses to act if the supplied version does not exactly match. This is an accidental-invocation check.
+`up` treats `-v` as an accidental-invocation guard over the intended destination. The caller states the exact target version; Tidy independently reads the current version from `.tidy/manifest.json` and accepts only one legal successor:
 
-If the guard matches and the manifest is valid, Tidy increments the patch component itself (`1.2.3 -> 1.2.4`) and writes the manifest atomically.
+```text
+patch  1.3.7 -> 1.3.8
+minor  1.3.7 -> 1.4.0
+major  1.3.7 -> 2.0.0
+```
 
-`S0`, `v1`, integers, and other non-`x.y.z` values are not valid versions.
+These refuse:
 
-## Manifest
+```text
+1.3.7 -> 1.3.9
+1.3.7 -> 1.4.1
+1.3.7 -> 1.5.0
+1.3.7 -> 2.1.0
+```
 
-`.tidy/manifest.json` is intentionally boring:
+Lower-order components must reset to zero for minor and major bumps.
+
+## Stage `clean/` custody
+
+Tidy has a default parent directory for Stages. `--parent_dir DIR` overrides it.
+
+For type `TYPE`, `tidy up` requires this directory to already exist:
+
+```text
+<PARENT_DIR>/<TYPE>/clean
+```
+
+If it does not exist, Tidy refuses the bump.
+
+Tidy does not decide what belongs inside `clean/`; it only requires that the Stage's clean boundary exists before advancing that Stage lineage.
+
+This allows Stage-local custody such as:
+
+```text
+s0/
+  clean/
+s1/
+  clean/
+```
+
+without turning Tidy into a freezer or promotion system.
+
+## Relevant tests
+
+Each registered Stage type owns a list of test commands in `.tidy/manifest.json`:
 
 ```json
 {
   "schemaVersion": 1,
   "types": {
-    "TIDY": "0.0.0"
+    "s0": {
+      "version": "1.3.7",
+      "tests": [
+        "npm run test:s0"
+      ]
+    }
   }
 }
 ```
 
-Types are explicit manifest entries. Tidy does not invent a missing type during `up`; add the type deliberately to the manifest first.
+Before advancing `s0`, Tidy runs the tests registered for `s0`.
+
+Any failing relevant test refuses the bump by default.
+
+A patch bump may explicitly bypass test failure with:
+
+```sh
+./tidy up -v s0:1.3.8 --allow-test-failure
+```
+
+The escape flag itself is refused for minor or major bumps.
+
+## Manifest
+
+The manifest may begin with no registered Stage types:
+
+```json
+{
+  "schemaVersion": 1,
+  "types": {}
+}
+```
+
+Types are added deliberately when their Stage lineage exists. Tidy does not invent missing types.
 
 ## Non-goals
 
-Tidy does not move files into a `clean/` directory, decide what should be frozen, promote Scripts or other LAB objects, infer semantic versions from Stage names, or silently repair the manifest. Those are separate concerns.
+Tidy does not populate `clean/`, decide when something deserves freezing, promote Scripts or other LAB objects, infer versions from Stage names, silently repair the manifest, or replace Git.
+
+Its job is narrower: make concurrent work in one tree safer by refusing ambiguous Stage succession.
