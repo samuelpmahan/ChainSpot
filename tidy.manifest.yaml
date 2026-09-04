@@ -7,3 +7,7 @@ stages:
     version: 0.1.0
     clean: packages/alg/src/stages/S1/clean
     hash: sha256:34ca3b43b9ebabba6ed50a86278ffb57a50a624689af9038816886aa742907e9
+  S2:
+    version: 0.1.0
+    clean: packages/alg/src/stages/S2/clean
+    hash: sha256:9f08575cb8ed45f163174e5aab32cfceab29088359264c1796c6ae80f087d79f

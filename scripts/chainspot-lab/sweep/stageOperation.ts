@@ -156,7 +156,7 @@ export async function runStageSweep(
 	writeFileSync(progressionPath, PNG.sync.write(renderProgression(output.panels)));
 	writeFileSync(
 		receiptPath,
-		`${receipts.join('\n\n')}\nreplicate: ./lab sweep --through ${throughStage} "${absoluteInput}"\nprogressionArtifact: ${progressionPath}\n`
+		`${receipts.join('\n\n')}\nreplicate: ./lab sweep --through ${throughStage} "${absoluteInput}"\n`
 	);
 	return { throughStage, outDir, progressionPath, receiptPath };
 }
