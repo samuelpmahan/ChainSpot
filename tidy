@@ -1,0 +1,219 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const repoDir = path.dirname(fileURLToPath(import.meta.url));
+const manifestPath = path.join(repoDir, '.tidy', 'manifest.json');
+const DEFAULT_PARENT_DIR = repoDir;
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+function out(result, label, detail = '') {
+  console.log(`${result.padEnd(4)} ${label}${detail ? ` — ${detail}` : ''}`);
+}
+
+function readManifest() {
+  if (!fs.existsSync(manifestPath)) return { error: 'manifest is missing' };
+  try {
+    return { manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
+  } catch (error) {
+    return { error: `manifest is not valid JSON: ${error.message}` };
+  }
+}
+
+function checks() {
+  let failed = 0;
+  const exists = fs.existsSync(manifestPath);
+  out(exists ? 'PASS' : 'FAIL', 'manifest exists', path.relative(repoDir, manifestPath));
+  if (!exists) return 1;
+
+  const loaded = readManifest();
+  const parsed = !loaded.error;
+  out(parsed ? 'PASS' : 'FAIL', 'manifest parses', loaded.error ?? 'valid JSON');
+  if (!parsed) return 1;
+
+  const manifest = loaded.manifest;
+  const schemaOk = manifest.schemaVersion === 1;
+  out(schemaOk ? 'PASS' : 'FAIL', 'schemaVersion', `expected 1, found ${JSON.stringify(manifest.schemaVersion)}`);
+  if (!schemaOk) failed++;
+
+  const typesOk = manifest.types && typeof manifest.types === 'object' && !Array.isArray(manifest.types);
+  out(typesOk ? 'PASS' : 'FAIL', 'types map', typesOk ? `${Object.keys(manifest.types).length} type(s)` : 'expected object');
+  if (!typesOk) return failed + 1;
+
+  const entries = Object.entries(manifest.types);
+  out('PASS', 'registered types', entries.length ? entries.map(([type]) => type).join(', ') : 'none');
+
+  for (const [type, spec] of entries) {
+    const typeOk = typeof type === 'string' && type.trim() === type && type.length > 0 && !type.includes(':');
+    out(typeOk ? 'PASS' : 'FAIL', `type ${JSON.stringify(type)}`, typeOk ? 'valid name' : 'must be non-empty, trimmed, and contain no colon');
+    if (!typeOk) failed++;
+
+    const specOk = spec && typeof spec === 'object' && !Array.isArray(spec);
+    out(specOk ? 'PASS' : 'FAIL', `${type} spec`, specOk ? 'object' : 'expected object');
+    if (!specOk) {
+      failed++;
+      continue;
+    }
+
+    const versionOk = typeof spec.version === 'string' && SEMVER.test(spec.version);
+    out(versionOk ? 'PASS' : 'FAIL', `${type} version`, versionOk ? spec.version : `${JSON.stringify(spec.version)} is not x.y.z semver`);
+    if (!versionOk) failed++;
+
+    const testsOk = Array.isArray(spec.tests) && spec.tests.every((test) => typeof test === 'string' && test.trim().length > 0);
+    out(testsOk ? 'PASS' : 'FAIL', `${type} tests`, testsOk ? `${spec.tests.length} command(s)` : 'expected array of non-empty commands');
+    if (!testsOk) failed++;
+  }
+
+  return failed;
+}
+
+function usage(exitCode = 0) {
+  console.log(`tidy — tiny stage-lineage guard\n\nUsage:\n  ./tidy check\n  ./tidy up -v TYPE:TARGET_VERSION [--parent_dir DIR] [--allow-test-failure]\n\nExamples:\n  ./tidy check\n  ./tidy up -v s0:1.3.8\n  ./tidy up -v s0:1.4.0 --parent_dir ./lab/stages\n\n-v names the intended target version. Tidy reads the current version independently\nfrom .tidy/manifest.json and accepts only one legal semver successor:\n  patch: x.y.z -> x.y.(z+1)\n  minor: x.y.z -> x.(y+1).0\n  major: x.y.z -> (x+1).0.0\n\nBefore advancing, Tidy requires <parent_dir>/<TYPE>/clean to exist and runs the\ntests registered for TYPE. Test failure refuses the bump, except an explicit patch\nbump may proceed with --allow-test-failure.`);
+  process.exit(exitCode);
+}
+
+function parseUpArgs(args) {
+  let target = null;
+  let parentDir = DEFAULT_PARENT_DIR;
+  let allowTestFailure = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-v') {
+      if (target !== null || !args[i + 1]) return null;
+      target = args[++i];
+    } else if (arg === '--parent_dir') {
+      if (!args[i + 1]) return null;
+      parentDir = path.resolve(args[++i]);
+    } else if (arg === '--allow-test-failure') {
+      allowTestFailure = true;
+    } else {
+      return null;
+    }
+  }
+
+  if (!target) return null;
+  const split = target.lastIndexOf(':');
+  if (split <= 0 || split === target.length - 1) return null;
+  return {
+    type: target.slice(0, split),
+    target: target.slice(split + 1),
+    parentDir,
+    allowTestFailure,
+  };
+}
+
+function parseVersion(version) {
+  const match = SEMVER.exec(version);
+  if (!match) return null;
+  return match.slice(1).map(Number);
+}
+
+function bumpKind(current, target) {
+  const a = parseVersion(current);
+  const b = parseVersion(target);
+  if (!a || !b) return null;
+  const [major, minor, patch] = a;
+  const [nextMajor, nextMinor, nextPatch] = b;
+  if (nextMajor === major && nextMinor === minor && nextPatch === patch + 1) return 'patch';
+  if (nextMajor === major && nextMinor === minor + 1 && nextPatch === 0) return 'minor';
+  if (nextMajor === major + 1 && nextMinor === 0 && nextPatch === 0) return 'major';
+  return null;
+}
+
+function writeManifest(manifest) {
+  const temp = `${manifestPath}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  fs.renameSync(temp, manifestPath);
+}
+
+function runTests(type, commands) {
+  let failed = 0;
+  for (const command of commands) {
+    try {
+      execSync(command, { cwd: repoDir, stdio: 'inherit', shell: true });
+      out('PASS', `${type} test`, command);
+    } catch {
+      out('FAIL', `${type} test`, command);
+      failed++;
+    }
+  }
+  return failed;
+}
+
+const [command, ...args] = process.argv.slice(2);
+
+if (!command || command === '--help' || command === '-h' || command === 'help') usage(0);
+
+if (command === 'check') {
+  if (args.length) usage(2);
+  const failed = checks();
+  console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} tidy check — ${failed} failed check(s)`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+if (command === 'up') {
+  const request = parseUpArgs(args);
+  if (!request) {
+    console.error('REFUSE tidy up: expected -v TYPE:TARGET_VERSION [--parent_dir DIR] [--allow-test-failure]');
+    process.exit(2);
+  }
+  if (!SEMVER.test(request.target)) {
+    console.error(`REFUSE tidy up: ${JSON.stringify(request.target)} is not x.y.z semver`);
+    process.exit(2);
+  }
+
+  const failedChecks = checks();
+  if (failedChecks) {
+    console.error(`\nREFUSE tidy up: manifest failed ${failedChecks} check(s)`);
+    process.exit(1);
+  }
+
+  const { manifest } = readManifest();
+  const spec = manifest.types[request.type];
+  if (!spec) {
+    console.error(`\nREFUSE tidy up: unknown type ${JSON.stringify(request.type)}`);
+    process.exit(2);
+  }
+
+  const kind = bumpKind(spec.version, request.target);
+  if (!kind) {
+    console.error(`\nREFUSE tidy up: ${spec.version} -> ${request.target} is not one legal patch/minor/major successor`);
+    process.exit(2);
+  }
+
+  if (request.allowTestFailure && kind !== 'patch') {
+    console.error(`\nREFUSE tidy up: --allow-test-failure is permitted only for patch bumps, not ${kind}`);
+    process.exit(2);
+  }
+
+  const cleanDir = path.join(request.parentDir, request.type, 'clean');
+  const cleanExists = fs.existsSync(cleanDir) && fs.statSync(cleanDir).isDirectory();
+  out(cleanExists ? 'PASS' : 'FAIL', `${request.type} clean`, cleanDir);
+  if (!cleanExists) {
+    console.error(`\nREFUSE tidy up: required clean directory is missing for ${request.type}`);
+    process.exit(1);
+  }
+
+  const failedTests = runTests(request.type, spec.tests);
+  if (failedTests && !(kind === 'patch' && request.allowTestFailure)) {
+    console.error(`\nREFUSE tidy up: ${failedTests} relevant test(s) failed`);
+    process.exit(1);
+  }
+  if (failedTests) {
+    console.warn(`\nWARN tidy up: proceeding with patch bump despite ${failedTests} failed test(s) because --allow-test-failure was explicit`);
+  }
+
+  const current = spec.version;
+  spec.version = request.target;
+  writeManifest(manifest);
+  console.log(`\nUP   ${request.type} ${current} -> ${request.target} (${kind})`);
+  console.log(`PASS wrote ${path.relative(repoDir, manifestPath)}`);
+  process.exit(0);
+}
+
+console.error(`Unknown tidy command: ${command}`);
+usage(2);
