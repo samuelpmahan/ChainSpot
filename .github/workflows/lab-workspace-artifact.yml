@@ -34,7 +34,17 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm ci 2>&1 | tee root-npm-ci.log
+          npm install 2>&1 | tee root-npm-ci.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install Playwright Chromium into the workspace
+        id: playwright-browser
+        shell: bash
+        run: |
+          set +e
+          PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers" npx playwright install chromium 2>&1 | tee playwright-install.log
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -54,6 +64,7 @@ jobs:
         env:
           ROOT_DEPS_STATUS: ${{ steps.root-deps.outputs.status }}
           LAB_DEPS_STATUS: ${{ steps.lab-deps.outputs.status }}
+          PLAYWRIGHT_STATUS: ${{ steps.playwright-browser.outputs.status }}
         run: |
           mkdir -p .lab-workspace
           {
@@ -63,9 +74,10 @@ jobs:
             echo "npm=$(npm --version)"
             echo "root_npm_ci_status=$ROOT_DEPS_STATUS"
             echo "lab_npm_ci_status=$LAB_DEPS_STATUS"
+            echo "playwright_chromium_status=$PLAYWRIGHT_STATUS"
             echo "tests_run=false"
           } > .lab-workspace/receipt.txt
-          cp root-npm-ci.log lab-npm-ci.log .lab-workspace/
+          cp root-npm-ci.log lab-npm-ci.log playwright-install.log .lab-workspace/
 
       - name: Archive source and installed dependencies
         shell: bash
