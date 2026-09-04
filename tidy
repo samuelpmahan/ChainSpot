@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoDir = path.dirname(fileURLToPath(import.meta.url));
+const manifestPath = path.join(repoDir, '.tidy', 'manifest.json');
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+function out(result, label, detail = '') {
+  console.log(`${result.padEnd(4)} ${label}${detail ? ` — ${detail}` : ''}`);
+}
+
+function readManifest() {
+  if (!fs.existsSync(manifestPath)) return { error: 'manifest is missing' };
+  try {
+    return { manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
+  } catch (error) {
+    return { error: `manifest is not valid JSON: ${error.message}` };
+  }
+}
+
+function checks() {
+  let failed = 0;
+  const exists = fs.existsSync(manifestPath);
+  out(exists ? 'PASS' : 'FAIL', 'manifest exists', path.relative(repoDir, manifestPath));
+  if (!exists) return 1;
+
+  const loaded = readManifest();
+  const parsed = !loaded.error;
+  out(parsed ? 'PASS' : 'FAIL', 'manifest parses', loaded.error ?? 'valid JSON');
+  if (!parsed) return 1;
+
+  const manifest = loaded.manifest;
+  const schemaOk = manifest.schemaVersion === 1;
+  out(schemaOk ? 'PASS' : 'FAIL', 'schemaVersion', `expected 1, found ${JSON.stringify(manifest.schemaVersion)}`);
+  if (!schemaOk) failed++;
+
+  const typesOk = manifest.types && typeof manifest.types === 'object' && !Array.isArray(manifest.types);
+  out(typesOk ? 'PASS' : 'FAIL', 'types map', typesOk ? `${Object.keys(manifest.types).length} type(s)` : 'expected object');
+  if (!typesOk) return failed + 1;
+
+  const entries = Object.entries(manifest.types);
+  if (entries.length === 0) {
+    out('FAIL', 'registered types', 'at least one type is required');
+    failed++;
+  } else {
+    out('PASS', 'registered types', entries.map(([type]) => type).join(', '));
+  }
+
+  for (const [type, version] of entries) {
+    const typeOk = typeof type === 'string' && type.trim() === type && type.length > 0 && !type.includes(':');
+    out(typeOk ? 'PASS' : 'FAIL', `type ${JSON.stringify(type)}`, typeOk ? 'valid name' : 'must be non-empty, trimmed, and contain no colon');
+    if (!typeOk) failed++;
+
+    const versionOk = typeof version === 'string' && SEMVER.test(version);
+    out(versionOk ? 'PASS' : 'FAIL', `${type || '<empty>'} version`, versionOk ? version : `${JSON.stringify(version)} is not x.y.z semver`);
+    if (!versionOk) failed++;
+  }
+
+  return failed;
+}
+
+function usage(exitCode = 0) {
+  console.log(`tidy — tiny manifest linter and guarded version advance\n\nUsage:\n  ./tidy check\n  ./tidy up -v TYPE:CURRENT_VERSION\n\nExamples:\n  ./tidy check\n  ./tidy up -v TIDY:0.0.0\n\n-v is an accidental-invocation guard, not the version to write.\ntidy reads CURRENT_VERSION from .tidy/manifest.json, requires your guard to match it,\nthen increments the patch version itself.`);
+  process.exit(exitCode);
+}
+
+function parseGuard(args) {
+  const i = args.indexOf('-v');
+  if (i < 0 || !args[i + 1] || i + 2 !== args.length) return null;
+  const raw = args[i + 1];
+  const split = raw.lastIndexOf(':');
+  if (split <= 0 || split === raw.length - 1) return null;
+  return { type: raw.slice(0, split), expected: raw.slice(split + 1) };
+}
+
+function bumpPatch(version) {
+  const match = SEMVER.exec(version);
+  if (!match) throw new Error(`${version} is not x.y.z semver`);
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+}
+
+function writeManifest(manifest) {
+  const temp = `${manifestPath}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  fs.renameSync(temp, manifestPath);
+}
+
+const [command, ...args] = process.argv.slice(2);
+
+if (!command || command === '--help' || command === '-h' || command === 'help') usage(0);
+
+if (command === 'check') {
+  if (args.length) usage(2);
+  const failed = checks();
+  console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} tidy check — ${failed} failed check(s)`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+if (command === 'up') {
+  const guard = parseGuard(args);
+  if (!guard) {
+    console.error('REFUSE tidy up: expected exactly -v TYPE:CURRENT_VERSION');
+    process.exit(2);
+  }
+  if (!SEMVER.test(guard.expected)) {
+    console.error(`REFUSE tidy up: ${JSON.stringify(guard.expected)} is not x.y.z semver`);
+    process.exit(2);
+  }
+
+  const failed = checks();
+  if (failed) {
+    console.error(`\nREFUSE tidy up: manifest failed ${failed} check(s)`);
+    process.exit(1);
+  }
+
+  const { manifest } = readManifest();
+  if (!(guard.type in manifest.types)) {
+    console.error(`\nREFUSE tidy up: unknown type ${JSON.stringify(guard.type)}`);
+    process.exit(2);
+  }
+
+  const actual = manifest.types[guard.type];
+  if (guard.expected !== actual) {
+    console.error(`\nREFUSE tidy up: guard mismatch for ${guard.type}; supplied ${guard.expected}, manifest says ${actual}`);
+    process.exit(2);
+  }
+
+  const next = bumpPatch(actual);
+  manifest.types[guard.type] = next;
+  writeManifest(manifest);
+  console.log(`\nUP   ${guard.type} ${actual} -> ${next}`);
+  console.log(`PASS wrote ${path.relative(repoDir, manifestPath)}`);
+  process.exit(0);
+}
+
+console.error(`Unknown tidy command: ${command}`);
+usage(2);
