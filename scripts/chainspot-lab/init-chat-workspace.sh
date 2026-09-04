@@ -22,7 +22,9 @@
 set -euo pipefail
 
 artifact="${1:-}"
-workspace="${2:-./chainspot-lab-workspace}"
+# Keep the executable world separate from connector/artifact materialization.
+# The transfer path may use ./chainspot-lab-workspace for exposed packet files.
+workspace="${2:-./chainspot-lab-runtime}"
 
 if [[ -z "$artifact" ]]; then
   artifact="$(find . -maxdepth 1 -type f -name 'chainspot-lab-workspace-*.zip' -print | sort | tail -n 1)"
@@ -40,6 +42,16 @@ for command in unzip tar node npm; do
   fi
 done
 
+# Never merge a packet into a pre-existing directory. A LAB runtime is one
+# artifact materialization, not a destination shared with connector files or
+# an older wake.
+if [[ -e "$workspace" ]]; then
+  if [[ ! -d "$workspace" || -n "$(find "$workspace" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "BOOTSTRAP_BLOCKED: workspace destination already exists and is not empty: $workspace" >&2
+    exit 4
+  fi
+fi
+
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
@@ -48,7 +60,7 @@ payload="$scratch/chainspot-lab-workspace.tar.gz"
 
 if [[ ! -f "$payload" ]]; then
   echo "BOOTSTRAP_BLOCKED: artifact does not contain chainspot-lab-workspace.tar.gz" >&2
-  exit 4
+  exit 5
 fi
 
 mkdir -p "$workspace"
@@ -57,17 +69,22 @@ tar --no-same-owner -xzf "$payload" -C "$workspace"
 receipt="$workspace/.lab-workspace/receipt.txt"
 if [[ ! -f "$receipt" ]]; then
   echo "BOOTSTRAP_BLOCKED: workspace receipt is missing" >&2
-  exit 5
+  exit 6
 fi
 
 if [[ ! -d "$workspace/node_modules" ]]; then
   echo "BOOTSTRAP_BLOCKED: root dependencies are missing" >&2
-  exit 6
+  exit 7
 fi
 
 if [[ ! -d "$workspace/scripts/chainspot-lab/node_modules" ]]; then
   echo "BOOTSTRAP_BLOCKED: LAB dependencies are missing" >&2
-  exit 7
+  exit 8
+fi
+
+if [[ ! -x "$workspace/lab" ]]; then
+  echo "BOOTSTRAP_BLOCKED: canonical LAB entrypoint is missing or not executable: $workspace/lab" >&2
+  exit 9
 fi
 
 echo "BOOTSTRAP_OK"
