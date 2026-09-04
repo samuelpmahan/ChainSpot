@@ -20,6 +20,8 @@
 		"test:unit:watch": "vitest",
 		"proof:badge-e": "npm --workspace @chainspot/alg run build && node scripts/badge-evidence-smoke.mjs",
 		"proof:m1": "npm --workspace @chainspot/alg run build && node scripts/badge-evidence-smoke.mjs",
+		"proof:s0": "npm --workspace @chainspot/alg run build && node scripts/s0-full-to-cropped.mjs",
+		"tidy": "./tidy",
 		"proof:m2-overlap": "npm --workspace @chainspot/alg run build && node scripts/tmp-render-m2-frame-receipt.mjs",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write ."

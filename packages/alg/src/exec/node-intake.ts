@@ -1,95 +1,34 @@
-// Node-only S0 adapter. Kept behind @chainspot/alg/exec/node-intake so the
-// browser-safe PxC/gateway barrel never imports node:fs or image decoders.
+// Node-only adapter for the smallest real S0. The frozen browser-safe Stage
+// lives under stages/S0/clean; this file contributes filesystem decode.
 
 import { decodeNodeFile } from '../adapters/node';
-import { canonicalJson } from '../detectors/threeFactor/hash';
-import { nullFeatureContext } from '../detectors/threeFactor/features/types';
-import type { InputAsset } from '../g0/inputAsset';
-import { createExecBoard, type PxC } from './board';
-import type { CompiledExecutionPlan } from './compile';
-import type { OperationSpec, TickTestimony } from './contract';
-import { executeCompiledPlanAsync, type OperationRuntime } from './gateway';
-import { sha256HexSyncText } from './sha256';
-import { createMemorySink } from './sink';
+import type { CompositeResult } from '../g0/composite';
+import type { OperationSpec } from './contract';
+import {
+	createS0Stage,
+	executeS0,
+	S0_CROP_TICK,
+	type S0CropRun,
+	type S0FullImageCache
+} from '../stages/S0/clean';
 
-export const NODE_CANONICAL_INPUT_TICK: OperationSpec = {
-	id: 'source.decodeCanonicalInput',
-	kind: 'materialize',
-	gate: 'shared',
-	unit: 'source-intake',
-	consumes: ['px.source.selectedFiles'],
-	produces: ['px.source.decodedPixels', 'px.course.canonicalPixels'],
-	calculations: ['fn.decodeNodeFile'],
-	note:
-		'Single-source LAB/Storybook intake: real Node decode; decoded pixels are already canonical because no crop/stitch was requested.'
-};
+/** Compatibility export retained for existing Storybook evidence callers. */
+export const NODE_CANONICAL_INPUT_TICK: OperationSpec = S0_CROP_TICK;
 
-const NODE_CANONICAL_INPUT_PLAN: CompiledExecutionPlan = {
-	ops: [NODE_CANONICAL_INPUT_TICK],
-	planFingerprint: sha256HexSyncText(canonicalJson({ operations: [NODE_CANONICAL_INPUT_TICK] })),
-	bindings: {}
-};
-
-export interface NodeCanonicalInputTickResult {
-	readonly pxc: PxC;
-	readonly input: InputAsset;
-	readonly plan: CompiledExecutionPlan;
-	readonly testimony: TickTestimony;
+export interface NodeCanonicalInputTickResult extends S0CropRun {
+	/** The cropped pixels handed to S1. */
+	readonly input: CompositeResult;
 }
 
-/**
- * Execute the real Node decoder through the production gateway. The supplied
- * PxC is returned so S1 can seed legacy aliases over the exact same RGBA bytes.
- */
+/** Decode outside PxC, sanitize, then make the cropped pixels PxC's first image value. */
 export async function executeNodeCanonicalInputTick(
 	filePath: string,
-	pxc: PxC = createExecBoard()
+	fullImageCache?: S0FullImageCache
 ): Promise<NodeCanonicalInputTickResult> {
-	pxc.set('px.source.selectedFiles', [filePath]);
-	const runtime: OperationRuntime = {
-		implementations: new Map([
-			[
-				NODE_CANONICAL_INPUT_TICK.id,
-				async (board) => {
-					const selected = board.get<readonly string[]>('px.source.selectedFiles');
-					if (selected.length !== 1)
-						throw new Error(
-							`source.decodeCanonicalInput requires exactly one selected file; got ${selected.length}.`
-						);
-					const decoded = await decodeNodeFile(selected[0]);
-					board.set('px.source.decodedPixels', decoded);
-					board.set('px.course.canonicalPixels', decoded);
-				}
-			]
-		]),
-		calculationBindings: new Map([
-			[
-				NODE_CANONICAL_INPUT_TICK.id,
-				[{ address: 'fn.decodeNodeFile', calculate: decodeNodeFile }]
-			]
-		]),
-		artifactExtractors: {
-			[NODE_CANONICAL_INPUT_TICK.id](board) {
-				const decoded = board.get<InputAsset>('px.course.canonicalPixels');
-				return [
-					{
-						kind: 'rgba',
-						id: `px.course.canonicalPixels.${decoded.imageId.slice(0, 12)}`,
-						bytes: Uint8Array.from(decoded.rgba),
-						dims: { width: decoded.widthPx, height: decoded.heightPx }
-					}
-				];
-			}
-		}
-	};
-	const sink = createMemorySink();
-	const [testimony] = await executeCompiledPlanAsync(
-		NODE_CANONICAL_INPUT_PLAN,
-		pxc,
-		nullFeatureContext,
-		sink,
-		runtime
-	);
-	const input = pxc.get<InputAsset>('px.course.canonicalPixels');
-	return { pxc, input, plan: NODE_CANONICAL_INPUT_PLAN, testimony };
+	const run = await executeS0({
+		stage: createS0Stage(undefined, fullImageCache),
+		source: filePath,
+		decode: decodeNodeFile
+	});
+	return { ...run, input: run.croppedImage };
 }

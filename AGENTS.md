@@ -63,6 +63,16 @@ accept on sight — a real run, on real course data, printing a receipt. Not
   requires showing the user the verbatim content first and getting explicit
   approval.
 
+## HoldingGate
+
+`HoldingGate.yaml` is the durable place to write down possible work without
+loading it into the active task.
+
+- Adding an entry preserves an idea; it does not schedule or authorize work.
+- Entries carry only enough context to recover why they were left there.
+- File order is not priority, dependency order, or pipeline order.
+- An entry leaves HoldingGate only when Sam explicitly pulls it forward.
+
 ## Long-running tasks
 
 - Long-running tasks must emit progress logs so work can be monitored.

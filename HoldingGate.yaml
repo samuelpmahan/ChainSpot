@@ -1,0 +1,8 @@
+# Writing here preserves a possible task. It does not authorize or schedule it.
+
+queue:
+  - task: Progressively strip embedded map controls and other irregular empty space.
+    notes:
+      - Must apply across every course, not a NorthPark fixture.
+      - Do not assume the removable space is rectangular.
+      - Preserve useful map and course pixels.

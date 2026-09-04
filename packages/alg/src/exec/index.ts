@@ -13,3 +13,4 @@ export * from './gateway';
 export * from './operations';
 export * from './feature-set';
 export * from './pcr';
+export * from '../stages/S0/clean';

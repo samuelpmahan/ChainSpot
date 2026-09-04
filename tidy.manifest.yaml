@@ -1,0 +1,5 @@
+stages:
+  S0:
+    version: 0.1.0
+    clean: packages/alg/src/stages/S0/clean
+    hash: sha256:be3fcbbac90961afe1d87e8aad96452c3824dd4d90d42cc737699c760f9d93a0
