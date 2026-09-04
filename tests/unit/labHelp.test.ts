@@ -78,7 +78,7 @@ describe('LAB contextual help catalog', () => {
 		const stage = run(['sweep', '--through', 'shared', 'input.png']);
 		expect(stage.status).toBe(1);
 		expect(stage.stderr).toContain("unknown Stage 'shared'");
-		expect(stage.stderr).toContain('available=[S0, S1]');
+		expect(stage.stderr).toContain('available=[S0, S1, S2]');
 
 		const localAction = run(['search', 'strt']);
 		expect(localAction.status).toBe(2);

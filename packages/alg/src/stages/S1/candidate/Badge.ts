@@ -1,4 +1,3 @@
-import type { CompositeResult } from '../../../g0/composite';
 import {
 	assembleBadgeV1,
 	componentRef,
@@ -19,16 +18,14 @@ import {
 import type { Mask } from '../../../detectors/threeFactor/raster';
 import type { BadgeEvidence as LegacyBadgeRead } from '../../../detectors/threeFactor/types';
 import { pxFn, pxKey, type PxC } from '../../../exec/board';
+import { ComponentPxC, type BrightDarkMasks } from '../../componentPxC';
 
-export interface BadgeMasks {
-	readonly bright: Mask;
-	readonly dark: Mask;
-}
+export type BadgeMasks = BrightDarkMasks;
 
 export const BadgePxC = {
-	image: pxKey<CompositeResult>('px.image.cropped'),
-	masks: pxKey<BadgeMasks>('px.components.masks'),
-	components: pxKey<BrightDarkComponentFields>('px.components'),
+	image: ComponentPxC.image,
+	masks: ComponentPxC.masks,
+	components: ComponentPxC.fields,
 	family: pxKey<readonly ComponentStats[]>('px.badges.family'),
 	stage: pxKey<BadgeStageResult>('px.badges.stage'),
 	reads: pxKey<readonly LegacyBadgeRead[]>('badges'),
