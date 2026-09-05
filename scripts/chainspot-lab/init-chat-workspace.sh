@@ -2,19 +2,15 @@
 #
 # CHAT BOOTSTRAP
 # Repository: samuelpmahan/ChainSpot
-# Branch: task/lab-pxc-storybook-pcr
+# Branch: lab/worldboot-opus
 # Workflow: Package LAB workspace
 # Artifact prefix: chainspot-lab-workspace-
-# Proven packet commit: 5826e3f7753150bb8d95d1069d589ba93ec4616f
-# Proven workflow run ID: 33729189138
-# Proven artifact ID: 9883162465
-# Proven artifact file: chainspot-lab-workspace-5826e3f.zip
 #
 # If the artifact ZIP is not already attached, use the GitHub plugin to
 # download the newest artifact from that workflow and branch. Materialize the
 # ZIP beside this script, then run:
 #
-#   bash chainspot-lab-init.sh <artifact.zip>
+#   bash init-chat-workspace.sh <artifact.zip>
 #
 # Do not install dependencies. If GitHub, shell, or file access is unavailable,
 # print BOOTSTRAP_BLOCKED with the missing capability and stop immediately.
