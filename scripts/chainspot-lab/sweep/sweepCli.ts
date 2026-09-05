@@ -9,6 +9,7 @@ import { printPlan } from './timeline';
 import { runSweepBatch } from './batch';
 import { discoverStageContracts, runStageSweep } from './stageOperation';
 import { runStageExperimentCli } from './stageExperiment';
+import { runStageAuditCli } from './stageAudit';
 
 function usage(): never {
 	console.error(
@@ -43,6 +44,7 @@ async function runCompile(args: readonly string[]): Promise<void> {
 }
 
 async function runSweep(args: readonly string[]): Promise<void> {
+	if (args[0] === 'audit') { runStageAuditCli(args.slice(1)); return; }
 	if (args.includes('--warm') || args.includes('--exp')) {
 		await runStageExperimentCli(args);
 		return;
