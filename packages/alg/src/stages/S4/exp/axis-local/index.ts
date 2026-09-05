@@ -14,7 +14,7 @@ export interface PairMeasure {
 }
 export interface Resolution extends PairMeasure {
   readonly center: readonly [number, number];
-  readonly visibility: 'VISIBLE';
+  readonly visibility: 'VISIBLE' | 'PARTIALLY_OBSERVED_RECOVERED';
   readonly ownedPx: Uint32Array;
   readonly state: 'RESOLVED_BY_NAIVE_GATE';
 }
@@ -23,7 +23,7 @@ export interface ResolutionState {
   readonly unresolvedHoles: readonly number[];
   readonly unresolvedTees: readonly number[];
   readonly assumption: string;
-  readonly recovery: 'NOT_RUN';
+  readonly recovery: 'NOT_RUN' | 'OPEN_FRAME_ONLY';
 }
 export const S4PxC = {
   pairs: pxKey<readonly PairMeasure[]>('px.s4.teeBadge.pairs'),
@@ -32,7 +32,7 @@ export const S4PxC = {
 };
 
 /** Bidirectional major axis: the eigenvector's sign is not semantic direction. */
-export function measurePairs(tees: readonly Tee[], badges: readonly Badge[]): PairMeasure[] {
+export function measurePairs(tees: readonly Pick<Tee,'center'|'angleRad'>[], badges: readonly Badge[]): PairMeasure[] {
   return tees.flatMap((tee, index) => badges.flatMap(badge => {
     const hole = Number(badge.label);
     if (!Number.isInteger(hole) || hole <= 0) return [];
@@ -50,7 +50,7 @@ export function measurePairs(tees: readonly Tee[], badges: readonly Badge[]): Pa
  * Reciprocal nearest within the axis window is deliberately falsifiable.
  * Do not free conflicting candidates and rerun until the cardinality is 18.
  */
-export function judgePairs(pairs: readonly PairMeasure[], tees: readonly Tee[]): ResolutionState {
+export function judgePairs(pairs: readonly PairMeasure[], tees: readonly Pick<Tee,'center'|'px'>[]): ResolutionState {
   const eligible = pairs.filter(pair => pair.angleDeg <= AXIS_WINDOW_DEG && pair.distancePx > 0);
   const nearest = (items: readonly PairMeasure[]) => [...items].sort((a,b) =>
     a.distancePx-b.distancePx || a.angleDeg-b.angleDeg || a.hole-b.hole || a.tee-b.tee)[0];
