@@ -46,8 +46,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Stage: Story = {
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, args }) => {
 		await waitForMaterialization(canvasElement, 'ready');
+		if (args.stage === 'S3') {
+			const receipt = canvasElement.querySelector('pre')?.textContent ?? '';
+			if (!receipt.includes('Tee family: 16')) {
+				throw new Error('S3 Story reached READY without the recognized clean baseline: Tee family: 16');
+			}
+		}
 	}
 };
 
