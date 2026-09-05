@@ -1,0 +1,2 @@
+# Recovered existing production path; separate from the new S0–S3 Stage contracts.
+sweep packages/alg/src/detectors/threeFactor/configs/default.json "../chainspot-corpus/dev/NorthPark/NorthPark-full.png"

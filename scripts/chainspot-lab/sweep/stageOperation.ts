@@ -77,7 +77,7 @@ function blitScaled(
 	}
 }
 
-function stroke(
+export function stroke(
 	png: PNG,
 	x0: number,
 	y0: number,
@@ -101,7 +101,7 @@ function stroke(
 	}
 }
 
-function renderProgression(panels: readonly StagePanel[]): PNG {
+export function renderProgression(panels: readonly StagePanel[]): PNG {
 	const panelWidth = Math.min(420, ...panels.map((panel) => panel.widthPx));
 	const panelHeights = panels.map((panel) =>
 		Math.round((panel.heightPx / panel.widthPx) * panelWidth)

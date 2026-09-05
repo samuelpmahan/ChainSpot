@@ -1,0 +1,131 @@
+{
+  "dataset": "Dev6 full-course captures; not every zoom capture",
+  "rows": [
+    {
+      "course": "AlexClark-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 15,
+        "tees": 14
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": false,
+      "experimentWarmHit": true,
+      "baselineMs": 5122.143183,
+      "experimentMs": 2172.132747,
+      "inputSha256": "e1b257382f0d459fd6b57366529c6fbb8bfeca9ca3ec580b48cc9959bbdfe976",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/AlexClark-full/clean/1788599542715-64130d17/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/AlexClark-full/fill-consistent/1788599546939-dc5cc91e/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    },
+    {
+      "course": "DashsTrack-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 17,
+        "tees": 18
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": false,
+      "experimentWarmHit": true,
+      "baselineMs": 5069.579584,
+      "experimentMs": 2145.7147720000003,
+      "inputSha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/DashsTrack-full/clean/1788599550730-4471f0cf/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/DashsTrack-full/fill-consistent/1788599554989-1bf3027b/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    },
+    {
+      "course": "HeritagePark-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 15,
+        "tees": 14
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": false,
+      "experimentWarmHit": true,
+      "baselineMs": 5529.269414,
+      "experimentMs": 2235.143901,
+      "inputSha256": "fb77ea132dd29136905088344ed35d170057dea2135e86b06f91e672bc4b2f7f",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/HeritagePark-full/clean/1788599558943-9fd54440/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/HeritagePark-full/fill-consistent/1788599563418-81ac8428/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    },
+    {
+      "course": "Lenard-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 16,
+        "tees": 17
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": false,
+      "experimentWarmHit": true,
+      "baselineMs": 4820.484639,
+      "experimentMs": 2103.22332,
+      "inputSha256": "27ad16bcf2c075316048ec39bc5035e0ebbe260bde32140466a3010f15d75834",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/Lenard-full/clean/1788599566873-449bc116/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/Lenard-full/fill-consistent/1788599571009-af43d21f/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    },
+    {
+      "course": "NorthPark-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 17,
+        "tees": 16
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": true,
+      "experimentWarmHit": true,
+      "baselineMs": 3684.7917949999996,
+      "experimentMs": 2083.448628,
+      "inputSha256": "7da949829ce487eba4cb0060f80589c652716239973b395c8f7fc3ceb56617f6",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/NorthPark-full/clean/1788599614425-6bd22d4b/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/NorthPark-full/fill-consistent/1788599618401-1e16cd14/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    },
+    {
+      "course": "TowneLake-full",
+      "counts": {
+        "badges": 18,
+        "baskets": 18,
+        "tees": 17
+      },
+      "selectedFrameAdded": [],
+      "selectedFrameRemoved": [],
+      "teeGeometryAndOwnershipCountsEqual": true,
+      "coldOrWarmBaseline": false,
+      "experimentWarmHit": true,
+      "baselineMs": 4939.541078,
+      "experimentMs": 2001.5571409999998,
+      "inputSha256": "da2a0ccca4e017cfa9a31d59882903c51905e57b7b21d55b513d788dcf7c18ed",
+      "baselineReceipt": "artifacts/sweep/stage-experiments/TowneLake-full/clean/1788599622000-4f2d1ced/run.receipt.json",
+      "experimentReceipt": "artifacts/sweep/stage-experiments/TowneLake-full/fill-consistent/1788599626094-9071e166/run.receipt.json",
+      "experimentPcrId": "S3.exp.fill-consistent",
+      "semanticCorrectness": "UNKNOWN",
+      "promotion": "NONE"
+    }
+  ]
+}

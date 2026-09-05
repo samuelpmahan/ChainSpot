@@ -8,6 +8,7 @@ import { compileSweepConfig, runSweepOperation } from './operation';
 import { printPlan } from './timeline';
 import { runSweepBatch } from './batch';
 import { discoverStageContracts, runStageSweep } from './stageOperation';
+import { runStageExperimentCli } from './stageExperiment';
 
 function usage(): never {
 	console.error(
@@ -42,6 +43,10 @@ async function runCompile(args: readonly string[]): Promise<void> {
 }
 
 async function runSweep(args: readonly string[]): Promise<void> {
+	if (args.includes('--warm') || args.includes('--exp')) {
+		await runStageExperimentCli(args);
+		return;
+	}
 	if (args[0] === 'batch') {
 		process.exitCode = await runSweepBatch(args);
 		return;

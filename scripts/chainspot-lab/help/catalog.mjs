@@ -245,13 +245,13 @@ export const HELP_CATALOG = Object.freeze([
   record('sweep', {
     kind: 'command', group: 'RUN', title: 'SWEEP — StripChrome/AutoStitch + only algorithm execution path', summary: 'The only LAB command that executes the algorithm plan.',
     forms: ['lab sweep CONFIG.json INPUT... [TRUTH.json]', 'lab sweep --through STAGE INPUT', 'lab sweep batch [--through GATE] CONFIG.json SELECTOR...'],
-    options: [option('--through', 'Execute discovered Stage contracts in order through this Stage.', { value: 'S0|S1|...', constraints: 'Contracts are discovered from packages/alg/dist/stages/S*/contract.js; one image input; no config' })],
+    options: [option('--through', 'Execute discovered Stage contracts in order through this Stage.', { value: 'S0|S1|...', constraints: 'Contracts are discovered from packages/alg/dist/stages/S*/contract.js; one image input; no config' }), option('--warm', 'Opt-in S3 lane: persist declared S0–S2 PxC values and restore isolated candidate state; validate input/build identity.', { constraints: 'Only --through S3; snapshots/artifacts written locally; default path unchanged' }), option('--exp', 'Select stages/S3/exp/NAME/contract.js; never changes clean/.', { value: 'NAME', constraints: 'Only --through S3; currently fill-consistent; add --warm for prefix reuse' })],
     examples: ['lab sweep CONFIG.json course.png', 'lab sweep --through S1 course.png'],
     sideEffects: ['Canonicalizes inputs, executes the plan, and writes algorithm artifacts plus run.receipt.json and run.receipt.txt for every case.'],
     outputs: ['Canonicalization report and chronological operation timeline; run.receipt.json is the canonical machine testimony, while run.receipt.txt is the chronological human report, alongside algorithm artifacts.'],
     caveats: ['INPUT is one or more PNG/JPG/JPEG captures. Optional TRUTH.json is evaluation-only. CLI has no --out-dir even though the operation accepts one.']
   }),
-  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — Stage prefix', summary: 'Find and execute Stage contracts in numeric order through a requested Stage.', forms: ['lab sweep --through S0|S1|... INPUT'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Each Stage owns packages/alg/src/stages/S*/contract.ts. Adding a Stage makes it discoverable after the algorithm build without changing LAB. Stage Sweep currently accepts one image and no config or truth input.'] }),
+  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — Stage prefix', summary: 'Find and execute Stage contracts in numeric order through a requested Stage.', forms: ['lab sweep --through S0|S1|... INPUT', 'lab sweep --through S3 --warm [--exp fill-consistent] INPUT'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Each Stage owns packages/alg/src/stages/S*/contract.ts. Adding a Stage makes it discoverable after the algorithm build without changing LAB. Stage Sweep currently accepts one image and no config or truth input.'] }),
   record('sweep/batch', {
     parent: 'sweep', aliases: ['sweep/batches'], title: 'SWEEP BATCH — manifest-backed corpus census',
     summary: 'Run the same dependency-valid Sweep slice across named dev/demo course cases.',
@@ -329,7 +329,7 @@ export const RECOGNIZED_EXECUTION_SURFACE = Object.freeze({
     digits: ['--crops', '--floor', '--out'],
     search: ['--page', '--color', '--ttl', '--style', ...searchViewOptions.map((entry) => entry.name)],
     traverse: ['--radius', '--page', '--annotation', '--start', '--xy', '--polar', '--tile-out', '--no-grid'],
-    sweep: ['--through'],
+    sweep: ['--through', '--warm', '--exp'],
     orient: ['--verbose']
   }),
   leaves: Object.freeze({

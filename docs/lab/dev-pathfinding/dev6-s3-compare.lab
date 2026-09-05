@@ -1,0 +1,14 @@
+# Dev6 whole-course S3 census. Default clean/ is not modified.
+# Fresh process per command; --warm retains S0–S2 via checked PxC snapshots.
+sweep --through S3 --warm "../chainspot-corpus/dev/AlexClark/AlexClark-full.jpg"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/AlexClark/AlexClark-full.jpg"
+sweep --through S3 --warm "../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg"
+sweep --through S3 --warm "../chainspot-corpus/dev/Heritage/HeritagePark-full.png"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/Heritage/HeritagePark-full.png"
+sweep --through S3 --warm "../chainspot-corpus/dev/Lenard/Lenard-full.PNG"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/Lenard/Lenard-full.PNG"
+sweep --through S3 --warm "../chainspot-corpus/dev/NorthPark/NorthPark-full.png"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/NorthPark/NorthPark-full.png"
+sweep --through S3 --warm "../chainspot-corpus/dev/TowneLake/TowneLake-full.png"
+sweep --through S3 --warm --exp fill-consistent "../chainspot-corpus/dev/TowneLake/TowneLake-full.png"
