@@ -2,19 +2,15 @@
 #
 # CHAT BOOTSTRAP
 # Repository: samuelpmahan/ChainSpot
-# Branch: task/lab-pxc-storybook-pcr
+# Branch: lab/world
 # Workflow: Package LAB workspace
 # Artifact prefix: chainspot-lab-workspace-
-# Proven packet commit: 5826e3f7753150bb8d95d1069d589ba93ec4616f
-# Proven workflow run ID: 33729189138
-# Proven artifact ID: 9883162465
-# Proven artifact file: chainspot-lab-workspace-5826e3f.zip
 #
 # If the artifact ZIP is not already attached, use the GitHub plugin to
 # download the newest artifact from that workflow and branch. Materialize the
 # ZIP beside this script, then run:
 #
-#   bash chainspot-lab-init.sh <artifact.zip>
+#   CHAINSPOT_EXPECTED_COMMIT=<lab/world HEAD sha> bash init-chat-workspace.sh <artifact.zip>
 #
 # Do not install dependencies. If GitHub, shell, or file access is unavailable,
 # print BOOTSTRAP_BLOCKED with the missing capability and stop immediately.
@@ -23,6 +19,8 @@ set -euo pipefail
 
 artifact="${1:-}"
 workspace="${2:-./chainspot-lab-workspace}"
+expected_ref="refs/heads/lab/world"
+expected_commit="${CHAINSPOT_EXPECTED_COMMIT:-}"
 
 if [[ -z "$artifact" ]]; then
   artifact="$(find . -maxdepth 1 -type f -name 'chainspot-lab-workspace-*.zip' -print | sort | tail -n 1)"
@@ -58,6 +56,19 @@ receipt="$workspace/.lab-workspace/receipt.txt"
 if [[ ! -f "$receipt" ]]; then
   echo "BOOTSTRAP_BLOCKED: workspace receipt is missing" >&2
   exit 5
+fi
+
+actual_ref="$(sed -n 's/^ref=//p' "$receipt" | head -n 1)"
+actual_commit="$(sed -n 's/^commit=//p' "$receipt" | head -n 1)"
+
+if [[ "$actual_ref" != "$expected_ref" ]]; then
+  echo "BOOTSTRAP_BLOCKED: artifact ref '$actual_ref' does not match '$expected_ref'" >&2
+  exit 8
+fi
+
+if [[ -n "$expected_commit" && "$actual_commit" != "$expected_commit" ]]; then
+  echo "BOOTSTRAP_BLOCKED: artifact commit '$actual_commit' does not match expected '$expected_commit'" >&2
+  exit 9
 fi
 
 if [[ ! -d "$workspace/node_modules" ]]; then
