@@ -6,6 +6,7 @@ on:
     branches:
       - lab/stages
       - lab/world
+      - lab/dev-pathfinding
 
 permissions:
   contents: read
