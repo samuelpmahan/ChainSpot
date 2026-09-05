@@ -9,7 +9,7 @@ import { decodeNodeFile } from '@chainspot/alg/adapters/node';
 import { ComponentPxC } from '@chainspot/alg/stages/componentPxC';
 import { BadgePxC } from '@chainspot/alg/stages/S1/clean/Badge';
 import { BasketPxC } from '@chainspot/alg/stages/S2/clean/Basket';
-import { TeePxC } from '@chainspot/alg/stages/S3/clean/Tee';
+import { TeePxC, type Tee } from '@chainspot/alg/stages/S3/clean/Tee';
 import type { StageContract, StageOutput, StagePanel } from '@chainspot/alg/stages/contract';
 import { discoverStageContracts, renderProgression, stroke } from './stageOperation';
 import { capturePxC, digest, restorePxC, snapshotIdentity } from './pxcSnapshot';
@@ -133,7 +133,8 @@ export async function runStageExperimentCli(args: readonly string[]): Promise<vo
   if (digest(output.pxc.get(ComponentPxC.image).rgba) !== beforePixels) throw new Error('Stage mutated canonical pixels.');
   const badges = output.pxc.get(BadgePxC.objects);
   const baskets = output.pxc.get(BasketPxC.objects);
-  const tees = output.pxc.get(TeePxC.objects);
+  const selectionAddress = output.pxc.has('px.tees.exp.objects') ? 'px.tees.exp.objects' : TeePxC.objects.address;
+  const tees = output.pxc.get<readonly (Pick<Tee, 'center' | 'bbox' | 'angleRad' | 'px'> & { readonly has: unknown })[]>(selectionAddress);
   const family = output.pxc.get(TeePxC.family);
   const members = new Set(family.members.map(member => member.frame.label));
   const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -145,11 +146,11 @@ export async function runStageExperimentCli(args: readonly string[]): Promise<vo
     return { label: panel.label, path: file };
   });
   writeFileSync(join(outDir, 'progression.png'), PNG.sync.write(renderProgression(output.panels)));
-  const extra = ['px.tees.exp.pcr', 'px.tees.exp.selectionFn'].filter(address => output.pxc.has(address));
+  const extra = ['px.tees.exp.pcr', 'px.tees.exp.selectionFn', 'px.tees.exp.interior', 'px.tees.exp.audit', 'px.tees.exp.objects'].filter(address => output.pxc.has(address));
   const retained = capturePxC(output.pxc, [...PREFIX_ADDRESSES, ...TEE_ADDRESSES, ...extra]);
   writeFileSync(join(outDir, 'pxc.bin'), retained);
   const receipt = {
-    schemaVersion: 1, runId, source, variant, throughStage: 'S3', identity,
+    schemaVersion: 1, runId, source, variant, selectionAddress, throughStage: 'S3', identity,
     cache: { key, hit: cacheHit, upstreamExecuted: !cacheHit, addresses: PREFIX_ADDRESSES },
     timing: { upstreamMs, computeMs, totalMs: performance.now() - started },
     canonicalPixelsUnchanged: true,
@@ -158,6 +159,7 @@ export async function runStageExperimentCli(args: readonly string[]): Promise<vo
     family: family.measured.map(m => ({ selected: members.has(m.frame.label), ring: m.ring, frame: m.frame })),
     tees: tees.map(tee => ({ center: tee.center, bbox: tee.bbox, angleRad: tee.angleRad, ownedPx: tee.px.length, has: tee.has })),
     pcr: output.pxc.has('px.tees.exp.pcr') ? output.pxc.get('px.tees.exp.pcr') : null,
+    experimentAudit: output.pxc.has('px.tees.exp.audit') ? output.pxc.get('px.tees.exp.audit') : null,
     pcrStatus: variant === 'clean' ? 'not exposed by clean Stage adapter' : 'retained',
     semanticCorrectness: 'UNKNOWN', recovery: 'NOT RUN', pathfinding: 'NOT RUN', promotion: 'NONE',
     artifacts: { panels, progression: 'progression.png', pxc: { path: 'pxc.bin', sha256: digest(retained) } },
