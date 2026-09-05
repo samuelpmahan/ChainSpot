@@ -61,25 +61,50 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Prime generated SvelteKit state
+        id: svelte-sync
+        shell: bash
+        run: |
+          set +e
+          npx svelte-kit sync 2>&1 | tee svelte-sync.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build ALG into the packaged workspace
+        id: alg-build
+        shell: bash
+        run: |
+          set +e
+          npm run build --workspace @chainspot/alg 2>&1 | tee alg-build.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
       - name: Record workspace receipt
         shell: bash
         env:
           ROOT_DEPS_STATUS: ${{ steps.root-deps.outputs.status }}
           LAB_DEPS_STATUS: ${{ steps.lab-deps.outputs.status }}
           PLAYWRIGHT_STATUS: ${{ steps.playwright-browser.outputs.status }}
+          SVELTE_SYNC_STATUS: ${{ steps.svelte-sync.outputs.status }}
+          ALG_BUILD_STATUS: ${{ steps.alg-build.outputs.status }}
         run: |
           mkdir -p .lab-workspace
           {
             echo "commit=$GITHUB_SHA"
             echo "ref=$GITHUB_REF"
+            echo "checkout_fetch_depth=1"
             echo "node=$(node --version)"
             echo "npm=$(npm --version)"
             echo "root_npm_ci_status=$ROOT_DEPS_STATUS"
             echo "lab_npm_ci_status=$LAB_DEPS_STATUS"
             echo "playwright_chromium_status=$PLAYWRIGHT_STATUS"
+            echo "svelte_sync_status=$SVELTE_SYNC_STATUS"
+            echo "alg_build_status=$ALG_BUILD_STATUS"
             echo "tests_run=false"
           } > .lab-workspace/receipt.txt
-          cp root-npm-ci.log lab-npm-ci.log playwright-install.log .lab-workspace/
+          cp root-npm-ci.log lab-npm-ci.log playwright-install.log svelte-sync.log alg-build.log .lab-workspace/
 
       - name: Archive source and installed dependencies
         shell: bash
