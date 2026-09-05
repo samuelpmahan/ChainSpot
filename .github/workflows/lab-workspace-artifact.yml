@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - lab/stages
+      - lab/worldboot-opus
 
 permissions:
   contents: read
