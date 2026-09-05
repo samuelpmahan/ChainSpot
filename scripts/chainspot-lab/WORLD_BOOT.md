@@ -17,7 +17,7 @@ Enter
 Use GitHub to fetch:
 
 * Repository: samuelpmahan/ChainSpot
-* Branch: task/lab-pxc-storybook-pcr
+* Branch: lab/worldboot-opus
 * File: scripts/chainspot-lab/init-chat-workspace.sh
 
 Follow that script exactly.
