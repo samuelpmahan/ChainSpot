@@ -251,7 +251,7 @@ export const HELP_CATALOG = Object.freeze([
     outputs: ['Canonicalization report and chronological operation timeline; run.receipt.json is the canonical machine testimony, while run.receipt.txt is the chronological human report, alongside algorithm artifacts.'],
     caveats: ['INPUT is one or more PNG/JPG/JPEG captures. Optional TRUTH.json is evaluation-only. CLI has no --out-dir even though the operation accepts one.']
   }),
-  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — Stage prefix', summary: 'Find and execute Stage contracts in numeric order through a requested Stage.', forms: ['lab sweep --through S0|S1|... INPUT'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Each Stage owns packages/alg/src/stages/S*/contract.ts. Adding S2 makes it discoverable after the algorithm build without changing LAB. Stage Sweep currently accepts one image and no config or truth input.'] }),
+  record('sweep/through', { parent: 'sweep', title: 'SWEEP THROUGH — Stage prefix', summary: 'Find and execute Stage contracts in numeric order through a requested Stage.', forms: ['lab sweep --through S0|S1|... INPUT'], availability: AVAILABILITY.CLI_ONLY, caveats: ['Each Stage owns packages/alg/src/stages/S*/contract.ts. Adding a Stage makes it discoverable after the algorithm build without changing LAB. Stage Sweep currently accepts one image and no config or truth input.'] }),
   record('sweep/batch', {
     parent: 'sweep', aliases: ['sweep/batches'], title: 'SWEEP BATCH — manifest-backed corpus census',
     summary: 'Run the same dependency-valid Sweep slice across named dev/demo course cases.',
