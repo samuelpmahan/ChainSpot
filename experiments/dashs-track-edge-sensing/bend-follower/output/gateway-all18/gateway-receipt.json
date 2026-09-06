@@ -1,0 +1,85 @@
+{
+  "runId": "paired-boundary-follower-source-v1",
+  "featureId": "pairedBoundaryPathFollower",
+  "traceHash": "99b389c8283b494617d8c55d468e9fa8ff0fdc3c9a0b80080e3434a41d33b078",
+  "off": {
+    "runId": "paired-boundary-follower-gateway-v1",
+    "invocation": "OFF",
+    "setId": "paired-boundary-follower.experimental",
+    "planFingerprint": "887035083fcad88474921cddc505a8d9e1b7cf5c8053517f7e69fd2224766e1e",
+    "ownedFeatureIds": [
+      "pairedBoundaryPathFollower"
+    ],
+    "enabledFeatureIds": [],
+    "importedFeatureIds": [],
+    "locallyOperationlessFeatureIds": [],
+    "operations": [],
+    "ownedServiceIds": [],
+    "startedAtMs": 131.778293,
+    "durationMs": 0.09158800000000156,
+    "manifestHash": "19979b941a9c9fdfcf73c31e33b473636cc03f01d53e5c0151893c2e54509cb7"
+  },
+  "on": {
+    "runId": "paired-boundary-follower-gateway-v1",
+    "invocation": "ON",
+    "setId": "paired-boundary-follower.experimental",
+    "planFingerprint": "5afebcaeda8f77f6278ba6eb0561406f0b4c0f469b21713f4e1da125bb281176",
+    "ownedFeatureIds": [
+      "pairedBoundaryPathFollower"
+    ],
+    "enabledFeatureIds": [
+      "pairedBoundaryPathFollower"
+    ],
+    "importedFeatureIds": [],
+    "locallyOperationlessFeatureIds": [],
+    "operations": [
+      {
+        "opId": "paired-boundary-follower.track",
+        "frozenCalculations": [
+          {
+            "address": "fn.paired-boundary-follower.track",
+            "implementationHash": "43b011072a618616901caa6972bea0d7e5593d61bc0a93df274c804f0796291d",
+            "identityScope": "runtime-function-body",
+            "limitation": "called helpers, constants, templates, and assets are not covered"
+          }
+        ],
+        "startedAtMs": 133.025367,
+        "durationMs": 64681.532108,
+        "declaredConsumes": [
+          "bendFollower.sourceSpec"
+        ],
+        "declaredProduces": [
+          "bendFollower.trace"
+        ],
+        "actualConsumes": [
+          "bendFollower.sourceSpec"
+        ],
+        "actualProduces": [
+          "bendFollower.trace"
+        ],
+        "writes": [
+          {
+            "address": "bendFollower.trace",
+            "kind": "new-address"
+          }
+        ],
+        "probes": [],
+        "artifacts": []
+      }
+    ],
+    "ownedServiceIds": [],
+    "startedAtMs": 133.00068,
+    "durationMs": 64681.856087,
+    "manifestHash": "2f541cb7e15283db61282883a7d7e0142b9461479692db0dfb54334cae8a95d0"
+  },
+  "check": {
+    "offOperations": 0,
+    "onOperations": 1,
+    "offEnabled": [],
+    "onEnabled": [
+      "pairedBoundaryPathFollower"
+    ],
+    "accessExact": true,
+    "actualTraceHash": "99b389c8283b494617d8c55d468e9fa8ff0fdc3c9a0b80080e3434a41d33b078"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "7a8cf02f664bfd78fe1e23664e1e37d78539712d41a5b28408fd075251c309f1"
+    },
+    {
+      "path": "__init__.py",
+      "sha256": "45c327ad856dfbe8e9f48c5db937cca7b19355554c380715bb462a36b7a90fa1"
+    },
+    {
+      "path": "check.sh",
+      "sha256": "f4b854814805ce1814c0974831e1212a5e29211166fbf238bd81a0c73b4bc903"
+    },
+    {
+      "path": "exp/paired-boundary-follower/run.sh",
+      "sha256": "d09bacafa064c266b1d4b20611dd28513670e63568d8c93f5a7c244116e571f5"
+    },
+    {
+      "path": "exp/paired-boundary-follower/st.pairedBoundaryPathFollower.mts",
+      "sha256": "b4950e46b314488496cec4e51fc0dc6f851e0dd5213e67b9030bf9275d8092e7"
+    },
+    {
+      "path": "lib/__init__.py",
+      "sha256": "45c327ad856dfbe8e9f48c5db937cca7b19355554c380715bb462a36b7a90fa1"
+    },
+    {
+      "path": "lib/render_trace.py",
+      "sha256": "546065516cb71c2bcddc477362470066a8a2303bb0a4754daa16fa90505e5386"
+    },
+    {
+      "path": "lib/tracker.py",
+      "sha256": "098d538f34d1f5f24e2aa99ad34645df47346a3e51cac9f66748cde1fa990353"
+    },
+    {
+      "path": "render.py",
+      "sha256": "0daddd87230bc502fd967a70daf0d4efcd4ad9e1247727109a8e550f221a5c4b"
+    },
+    {
+      "path": "run.py",
+      "sha256": "4c51ddf04d0c506f71a947798d5136fd2d9dfb008923b776f0849a10ea20024b"
+    },
+    {
+      "path": "run.sh",
+      "sha256": "17849673f705d51f799cb9cd359e82eacbc6336301ad1ead0d33ef275cf77406"
+    },
+    {
+      "path": "run_gateway.cjs",
+      "sha256": "d988de0d024ece2411fddd828878f040c9c153a976ae6eb06fd9ab081399cdb0"
+    },
+    {
+      "path": "test_render.py",
+      "sha256": "eda723bf65102973d3603721d26f9250807c740c7234090c0c1d04ae482847f6"
+    },
+    {
+      "path": "test_tracker.py",
+      "sha256": "125cd2a7f9015c1fcc9322917e01d1bafb2d232d88cfda19baf405f97c3ed392"
+    },
+    {
+      "path": "tests_run.py",
+      "sha256": "512a3c49640bdbc4e88054ed860f5d1c75cc1bf06f69cc624805cd18975b0d5e"
+    }
+  ],
+  "sha256": "83024da1ee065de5f778ac2a922350f218bc3799c080a177870a5e0ad6bfc2c3"
+}

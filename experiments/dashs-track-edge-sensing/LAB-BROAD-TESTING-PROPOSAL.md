@@ -96,3 +96,23 @@ may be evaluated downstream, never used as attraction targets.
 
 Begin with the matrix receipts and grouped gallery (usable); add adaptive job
 selection and richer PxCQL planning after measured reuse and parity (useful).
+
+## Correction: compute slices must not limit hole length
+
+The first follower checkpoint used 90 poses (~356 nominal forward pixels). That
+is an arbitrary distance cap and does not accommodate a course's long outlier
+hole. A matrix must not mistake this censored prefix for a completed path or a
+geometric failure.
+
+The proposed follower contract separates three events: observed terminal
+evidence, unresolved continuation, and scheduler pause. Steady paired support
+advances without a fixed hole-length allowance. Support changes trigger finer
+steps, local walkback and competing continuations. A scheduler slice yields a
+serializable frontier plus accumulated trace, material revisions, unresolved
+branches and scoring state; resuming must match uninterrupted execution. Do not
+restart each chunk from its winning point and discard other live hypotheses.
+
+Test this specifically with a supported corridor longer than the old cap, the
+same corridor split across different compute slices, a closed loop, and a
+branching distractor. Loop/revisit detection is a separate explicit condition.
+The present prototype is capped and does not yet implement this resumption.

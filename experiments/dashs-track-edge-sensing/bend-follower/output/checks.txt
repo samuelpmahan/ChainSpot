@@ -1,0 +1,190 @@
+unit-like checks: PASS
+{
+  "straight": {
+    "name": "straight_corridor",
+    "status": "OK",
+    "stop": "budget",
+    "points": 20,
+    "end": [
+      65.0,
+      40.0
+    ],
+    "bends": [
+      {
+        "status": "UNKNOWN",
+        "index": 4,
+        "point": [
+          20.0,
+          40.0
+        ],
+        "angle_change": 0.0,
+        "confidence": 0.0,
+        "reason": "no_piecewise_improvement_over_straight",
+        "diagnostics": {
+          "straightSsePx2": 0.0,
+          "splitSsePx2": 0.0,
+          "complexityPenaltyPx2": 4.0,
+          "piecewiseRmsPx": 0.0,
+          "left_angle": 0.0,
+          "right_angle": 0.0,
+          "sequentialWindowPx": 18,
+          "candidateBudget": 3,
+          "candidateBudgetClipped": false
+        }
+      }
+    ],
+    "rejections": {
+      "width": 0,
+      "curvature": 0,
+      "pair_support": 4266,
+      "nonfinite": 294
+    }
+  },
+  "crossing": {
+    "beam": {
+      "name": "crossing_distractor_beam",
+      "status": "OK",
+      "stop": "budget",
+      "points": 20,
+      "end": [
+        64.93527772268479,
+        39.35913662186676
+      ],
+      "bends": [
+        {
+          "status": "UNKNOWN",
+          "index": 4,
+          "point": [
+            19.935277722684795,
+            39.35913662186676
+          ],
+          "angle_change": 0.10020484201322288,
+          "confidence": 0.0,
+          "reason": "no_piecewise_improvement_over_straight",
+          "diagnostics": {
+            "straightSsePx2": 0.5603367688890294,
+            "splitSsePx2": 0.06957447236416371,
+            "complexityPenaltyPx2": 4.0,
+            "piecewiseRmsPx": 0.0589807054739784,
+            "left_angle": -0.10020484201322304,
+            "right_angle": 0.0,
+            "sequentialWindowPx": 18,
+            "candidateBudget": 3,
+            "candidateBudgetClipped": false
+          }
+        }
+      ],
+      "rejections": {
+        "width": 0,
+        "curvature": 0,
+        "pair_support": 3241,
+        "nonfinite": 860
+      }
+    },
+    "greedy": {
+      "name": "crossing_distractor_greedy",
+      "status": "OK",
+      "stop": "lack_support",
+      "points": 3,
+      "end": [
+        14.0,
+        40.0
+      ],
+      "bends": [
+        {
+          "status": "UNKNOWN",
+          "index": null,
+          "point": null,
+          "angle_change": 0.0,
+          "confidence": 0.0,
+          "reason": "insufficient_points",
+          "diagnostics": {
+            "sequentialWindowPx": 18,
+            "candidateBudget": 3,
+            "candidateBudgetClipped": false
+          }
+        }
+      ],
+      "rejections": {
+        "width": 0,
+        "curvature": 0,
+        "pair_support": 27,
+        "nonfinite": 35
+      }
+    }
+  },
+  "noSignal": {
+    "name": "no_signal",
+    "status": "PARTIAL",
+    "stop": "lack_support",
+    "points": 1,
+    "end": [
+      8,
+      40
+    ],
+    "bends": [
+      {
+        "status": "UNKNOWN",
+        "index": null,
+        "point": null,
+        "angle_change": 0.0,
+        "confidence": 0.0,
+        "reason": "insufficient_points",
+        "diagnostics": {
+          "sequentialWindowPx": 18,
+          "candidateBudget": 3,
+          "candidateBudgetClipped": false
+        }
+      }
+    ],
+    "rejections": {
+      "width": 0,
+      "curvature": 0,
+      "pair_support": 27,
+      "nonfinite": 0
+    }
+  },
+  "claims": "Synthetic turning geometry is not asserted here; crossing is a paired-support-vs-greedy ablation and no-signal must stop."
+}
+{
+  "turningCorridor": {
+    "name": "turning_corridor",
+    "status": "OK",
+    "stop": "lack_support",
+    "points": 14,
+    "end": [
+      46.633269162543634,
+      38.445639003556586
+    ],
+    "bends": [
+      {
+        "status": "UNKNOWN",
+        "index": 9,
+        "point": [
+          35.0,
+          40.0
+        ],
+        "angle_change": 0.091645592460051,
+        "confidence": 0.0,
+        "reason": "no_piecewise_improvement_over_straight",
+        "diagnostics": {
+          "straightSsePx2": 1.7465519289591531,
+          "splitSsePx2": 1.113434742957849,
+          "complexityPenaltyPx2": 4.0,
+          "piecewiseRmsPx": 0.28201250516318915,
+          "left_angle": 0.0,
+          "right_angle": -0.09164559246005084,
+          "sequentialWindowPx": 18,
+          "candidateBudget": 3,
+          "candidateBudgetClipped": false
+        }
+      }
+    ],
+    "rejections": {
+      "width": 0,
+      "curvature": 0,
+      "pair_support": 9025,
+      "nonfinite": 1345
+    }
+  }
+}

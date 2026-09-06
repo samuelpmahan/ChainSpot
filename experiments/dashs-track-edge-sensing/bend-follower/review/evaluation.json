@@ -1,0 +1,649 @@
+{
+  "traceHash": "99b389c8283b494617d8c55d468e9fa8ff0fdc3c9a0b80080e3434a41d33b078",
+  "traceFileSha256": "2647fe5f089bd8a0e33f0fa4daac29ae57a022c3f48e9d98f7def9193005c929",
+  "annotationSha256": "8b861acd38ca07ddfdf123daf5e3ee5445b84dc137f043897e87b96a34721c85",
+  "evaluationOnly": true,
+  "matching": "minimum total distance, one-to-one, no acceptance threshold; unmatched retained",
+  "rows": [
+    {
+      "hole": 1,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 83,
+      "annotationBends": 1,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.579606464211525,
+        "widthPx": 40,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          848.8252248338623,
+          434.10613599917076
+        ],
+        "distanceFromBadgePx": -95,
+        "edgeSupport": [
+          4.579606464211525,
+          5.71811414491513
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [
+        {
+          "proposalIndex": 2,
+          "annotationIndex": 0,
+          "distancePx": 109.63655313464977
+        }
+      ],
+      "unmatchedProposals": [
+        0,
+        1
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 2,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 6.3290437210346395,
+        "widthPx": 68,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          478.14293096313327,
+          576.6553051194267
+        ],
+        "distanceFromBadgePx": -100,
+        "edgeSupport": [
+          6.3290437210346395,
+          6.958068670957023
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 3,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 46,
+      "annotationBends": 0,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": 3,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.565702363781233,
+        "widthPx": 40,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          701.2615106830174,
+          703.3881356735503
+        ],
+        "distanceFromBadgePx": -100,
+        "edgeSupport": [
+          5.398851872964649,
+          4.565702363781233
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 4,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 5.503991777878686,
+        "widthPx": 20,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          430.8363606441439,
+          660.0254883973181
+        ],
+        "distanceFromBadgePx": -85,
+        "edgeSupport": [
+          8.623256133488143,
+          5.503991777878686
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 18,
+      "executionStatus": "OK",
+      "stop": "budget",
+      "tracePoints": 90,
+      "annotationBends": 2,
+      "proposedBends": 2,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 5.164343386299767,
+        "widthPx": 40,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          796.1600169740346,
+          838.8194594855514
+        ],
+        "distanceFromBadgePx": -90,
+        "edgeSupport": [
+          5.451709779260309,
+          5.164343386299767
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [
+        {
+          "proposalIndex": 0,
+          "annotationIndex": 0,
+          "distancePx": 18.898326876634133
+        },
+        {
+          "proposalIndex": 1,
+          "annotationIndex": 1,
+          "distancePx": 17.636004944073203
+        }
+      ],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 5,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 6.271838995194838,
+        "widthPx": 20,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          473.56565013927775,
+          858.8685236480014
+        ],
+        "distanceFromBadgePx": -90,
+        "edgeSupport": [
+          6.271838995194838,
+          10.643893998194779
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 6,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 52,
+      "annotationBends": 0,
+      "proposedBends": 2,
+      "falseBendsOnAnnotatedStraight": 2,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.907279438895023,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          579.7726832070214,
+          876.5069027399664
+        ],
+        "distanceFromBadgePx": -30,
+        "edgeSupport": [
+          4.907279438895023,
+          4.970732524606223
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 17,
+      "executionStatus": "OK",
+      "stop": "budget",
+      "tracePoints": 90,
+      "annotationBends": 0,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": 3,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.99712903717541,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          1030.9347392870388,
+          876.6942591369459
+        ],
+        "distanceFromBadgePx": -80,
+        "edgeSupport": [
+          5.248612462915645,
+          4.99712903717541
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 16,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 0,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": 0,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 5.302335905336316,
+        "widthPx": 100,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": true,
+        "centerAtPx": [
+          1144.5750928900968,
+          1025.8614535234242
+        ],
+        "distanceFromBadgePx": -60,
+        "edgeSupport": [
+          6.848940140303934,
+          5.302335905336316
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 7,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 11.51642206870625,
+        "widthPx": 20,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          354.0073955380379,
+          981.8462486607441
+        ],
+        "distanceFromBadgePx": -90,
+        "edgeSupport": [
+          11.51642206870625,
+          11.540553248696428
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 8,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 6,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 8.317385470811116,
+        "widthPx": 20,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          529.305997114591,
+          1001.9750747203643
+        ],
+        "distanceFromBadgePx": -95,
+        "edgeSupport": [
+          14.327061869388396,
+          8.317385470811116
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 15,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 1,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 7.104977651706669,
+        "widthPx": 20,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          875.937116484142,
+          1351.1365162029615
+        ],
+        "distanceFromBadgePx": -80,
+        "edgeSupport": [
+          8.066056080532332,
+          7.104977651706669
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": [
+        0
+      ]
+    },
+    {
+      "hole": 9,
+      "executionStatus": "OK",
+      "stop": "budget",
+      "tracePoints": 90,
+      "annotationBends": 0,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": 3,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 5.645768213062634,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          360.6438139315398,
+          1222.0716307337086
+        ],
+        "distanceFromBadgePx": -85,
+        "edgeSupport": [
+          5.645768213062634,
+          10.283252722628044
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 14,
+      "executionStatus": "OK",
+      "stop": "budget",
+      "tracePoints": 90,
+      "annotationBends": 1,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": null,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 5.656494648294668,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          673.0830680565524,
+          1510.5230342522334
+        ],
+        "distanceFromBadgePx": -90,
+        "edgeSupport": [
+          5.656494648294668,
+          8.935151853335684
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [
+        {
+          "proposalIndex": 0,
+          "annotationIndex": 0,
+          "distancePx": 6.74919311182931
+        }
+      ],
+      "unmatchedProposals": [
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 13,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 65,
+      "annotationBends": 0,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": 3,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 3.336080095454696,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          482.54451431305995,
+          1490.304182740287
+        ],
+        "distanceFromBadgePx": -100,
+        "edgeSupport": [
+          4.214447435225242,
+          3.336080095454696
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 10,
+      "executionStatus": "PARTIAL",
+      "stop": "lack_support",
+      "tracePoints": 1,
+      "annotationBends": 0,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": 0,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.020802845950115,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          216.53671156508307,
+          1521.2928782753197
+        ],
+        "distanceFromBadgePx": -40,
+        "edgeSupport": [
+          4.020802845950115,
+          4.160291553129223
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 12,
+      "executionStatus": "OK",
+      "stop": "budget",
+      "tracePoints": 90,
+      "annotationBends": 0,
+      "proposedBends": 3,
+      "falseBendsOnAnnotatedStraight": 3,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 3.653965819275952,
+        "widthPx": 40,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          399.58752222680414,
+          1709.5397112500993
+        ],
+        "distanceFromBadgePx": -70,
+        "edgeSupport": [
+          3.7937975766186205,
+          3.653965819275952
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [
+        0,
+        1,
+        2
+      ],
+      "unmatchedAnnotationBends": []
+    },
+    {
+      "hole": 11,
+      "executionStatus": "OK",
+      "stop": "lack_support",
+      "tracePoints": 4,
+      "annotationBends": 0,
+      "proposedBends": 0,
+      "falseBendsOnAnnotatedStraight": 0,
+      "initialWidth": {
+        "state": "MEASURED",
+        "score": 4.814043752008239,
+        "widthPx": 44,
+        "searchPx": [
+          12,
+          100
+        ],
+        "clipped": false,
+        "centerAtPx": [
+          146.15965566062297,
+          1823.5053687967654
+        ],
+        "distanceFromBadgePx": -95,
+        "edgeSupport": [
+          4.814043752008239,
+          5.752613063865567
+        ],
+        "leg": "exposed Tee\u2192Badge (backward from Badge center)"
+      },
+      "oneToOneMatches": [],
+      "unmatchedProposals": [],
+      "unmatchedAnnotationBends": []
+    }
+  ]
+}
