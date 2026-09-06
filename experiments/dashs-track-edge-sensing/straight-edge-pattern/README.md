@@ -1,10 +1,13 @@
-# Straight-hole edge-pattern search — checkpoint
+# Straight-hole edge-pattern search
 
-Current state: the original sampler has run on nine annotation-selected straight
-DashsTrack holes plus H18 as the reference. Pattern matching and source review
-are in progress; no detection improvement is claimed by this checkpoint.
+The original sampler ran on nine annotation-selected straight DashsTrack holes
+plus H18 as the reference. Source review found opposing waves on straight H16
+at 57–107 px beyond Badge and H11 at 40–90 px. Those windows retain positive
+edge support: this recurring pattern does not require the ray to leave a ribbon.
+The cause is unresolved; no pathfinding improvement is claimed.
 
-Run `node exp/straight-edge-pattern/sample.mjs` from this directory.
+Run `bash exp/straight-edge-pattern/run.sh` from this directory after the
+checkpoint's `prepare.py`. This saves all readings, searches, parity, and figures.
 Node 24 strips the sampler's TypeScript types. Source bands are saved in
 `output/bands.json`; negative distances are before the Badge.
 
@@ -18,3 +21,30 @@ remain in the observations and must be inspected when interpreting patterns.
 Annotations select straight examples and supply inspection landmarks. They do
 not steer the sampling ray, which follows the saved Tee-to-Badge heading.
 H3 and H12 use annotation-assisted Tee seeds, retained in inputs.json.
+
+## What was searched
+
+Two questions are recorded separately in `search.py`:
+
+1. Shape similarity to H18 d105–155: no side swap, time reversal, stretching,
+   or smoothing. Search both original +/-20 readers and movable offsets.
+   Correlations rank candidates for inspection; they are not probabilities.
+2. Opposite movement between the original two readers: every available 50 px
+   window within the annotated Tee/Basket extent, inset 15 px. This found H16
+   and H11 without moving the readers. Windows can include range-circle pixels.
+
+Every straight hole's best result is retained, including poor matches. The best
+individual-curve match (H11 after lateral search) is NOT the strongest opposite
+pair. These questions must not be collapsed into a success count.
+
+`verify.py` compares 5,719 overlapping original-reader values with the original
+script's outputs: exact equality, maximum difference zero. This verifies the
+sampler reconstruction, not the interpretation of curve recurrence.
+
+![Source-backed recurrence](output/straight-edge-recurrence.png)
+
+![Two-dimensional H16 readings](output/H16-two-dimensional-readings.png)
+
+The H16 field keeps the straight boundaries visible while their sampled
+strengths vary. Small boundary displacement, background variation and raster
+sampling remain competing explanations; this run does not identify their cause.

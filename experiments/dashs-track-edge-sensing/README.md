@@ -41,10 +41,17 @@ Seven sensing unit tests and three renderer checks passed before checkpoint.
 The production ABFeature gateway executed the producer with exact slot custody;
 its 0-operation OFF and 1-operation ON receipts are preserved. The archived gateway runtime is vendored as `runtime.tar.gz` for reproducibility.
 
-The straight-hole scan is currently **sampled, not interpreted**. Its saved
-script observes two dimensions (distance and sideways offset) through the exact
-original band sampler. Nine straight examples are annotation-selected, with
-H18 retained as a reference. No pattern recurrence is claimed yet.
+The straight-hole scan now has source-reviewed recurrences: H16 at 57–107 px
+and H11 at 40–90 px beyond Badge. Opposing waves occur while both original edge
+readers retain positive support. Cause remains unresolved. Run
+`bash straight-edge-pattern/exp/straight-edge-pattern/run.sh` after `prepare.py`.
+The two-dimensional H16 field keeps source pixels, sideways position and distance
+aligned. All nine straight-hole curves, ranking outputs and 5,719 exact original
+sampler comparisons are saved with the script.
+
+![Straight-hole recurrence](straight-edge-pattern/output/straight-edge-recurrence.png)
+
+![Two-dimensional edge field](straight-edge-pattern/output/H16-two-dimensional-readings.png)
 
 See `ternary-review/RESULTS.md` for detailed provenance and limitations.
 

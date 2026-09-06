@@ -4,6 +4,6 @@ restored/edge-diagnostic/edge-readings-work/DashsTrack-source.png
 restored/edge-diagnostic/edge-readings-work/readings.json
 restored/edge-diagnostic/edge-readings-work/readings.csv
 straight-edge-pattern/data/source.jpg
-straight-edge-pattern/output/
+straight-edge-pattern/output/bands.json
 ternary-edge/output/*/trace.json
 ternary-edge/runtime/

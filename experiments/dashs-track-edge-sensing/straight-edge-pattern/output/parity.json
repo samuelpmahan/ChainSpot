@@ -1,0 +1,10 @@
+{
+  "originalSamplerParity": {
+    "comparisons": 5719,
+    "maxAbsoluteDifference": 0.0
+  },
+  "sourceSha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+  "holesSampled": 10,
+  "distanceSamples": 521,
+  "sidewaysSamples": 241
+}

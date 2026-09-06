@@ -3,6 +3,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {sampleFourLaneBand, DEFAULT_FOUR_LANE_SENSOR_KNOBS as knobs} from './st.fourLaneSensor.mts';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+fs.mkdirSync(root+'/output',{recursive:true});
 const input=JSON.parse(fs.readFileSync(root+'/data/inputs.json'));
 const ann=JSON.parse(fs.readFileSync(root+'/data/annotation.json'));
 const straight=ann.holes.filter(h=>!h.corridorBends.length).map(h=>h.number);
