@@ -16,9 +16,9 @@ function overlayRoutes(from, to) {
 // Keep the generated tree below the repository so Node/Vite resolve workspace
 // packages exactly as they do for src/routes. The finally block always shears
 // it away after the staging-only compilation.
-const routeRoot = mkdtempSync(resolve('.chainspot-staging-routes-'));
 const viewerAssets = resolve('static/labui-s0');
 if (existsSync(viewerAssets)) throw new Error('static/labui-s0 is reserved for generated S0 outputs');
+const routeRoot = mkdtempSync(resolve('.chainspot-staging-routes-'));
 
 try {
 	cpSync(resolve('src/routes'), routeRoot, { recursive: true });
