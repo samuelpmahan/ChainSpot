@@ -1,0 +1,84 @@
+{
+  "featureId": "ternaryEdgeSensing",
+  "traceHash": "3c106de79547b69699c4213d0bfdf0848f4e7e34a1dfa964d654b1cf6608d68c",
+  "off": {
+    "runId": "ternary-edge-gateway-v1",
+    "invocation": "OFF",
+    "setId": "ternary-edge.experimental",
+    "planFingerprint": "e3bcc23d7e2e09d932a4a8c7c74eba9c75ca5c3ad6a0db423d417028cedbd51f",
+    "ownedFeatureIds": [
+      "ternaryEdgeSensing"
+    ],
+    "enabledFeatureIds": [],
+    "importedFeatureIds": [],
+    "locallyOperationlessFeatureIds": [],
+    "operations": [],
+    "ownedServiceIds": [],
+    "startedAtMs": 135.755398,
+    "durationMs": 0.09164899999998966,
+    "manifestHash": "1cceaaf4ae1aaa80ec6c57a282aeb05f69500e84fc664a95dcc6a1ca082487eb"
+  },
+  "on": {
+    "runId": "ternary-edge-gateway-v1",
+    "invocation": "ON",
+    "setId": "ternary-edge.experimental",
+    "planFingerprint": "8ba1d9bd9d4512409ec59dc4014c859f1ecc16e58ed6077d5d8f24297300ae3b",
+    "ownedFeatureIds": [
+      "ternaryEdgeSensing"
+    ],
+    "enabledFeatureIds": [
+      "ternaryEdgeSensing"
+    ],
+    "importedFeatureIds": [],
+    "locallyOperationlessFeatureIds": [],
+    "operations": [
+      {
+        "opId": "ternary-edge.sample-and-classify",
+        "frozenCalculations": [
+          {
+            "address": "fn.ternary-edge.sample-and-classify",
+            "implementationHash": "f7ce0104be2a53bf4b3c93a4157fe7bf0deb810b720261964640a0af2aa7d17b",
+            "identityScope": "runtime-function-body",
+            "limitation": "called helpers, constants, templates, and assets are not covered"
+          }
+        ],
+        "startedAtMs": 136.65022,
+        "durationMs": 39052.156653,
+        "declaredConsumes": [
+          "ternary.sourceSpec"
+        ],
+        "declaredProduces": [
+          "ternary.materialTrace"
+        ],
+        "actualConsumes": [
+          "ternary.sourceSpec"
+        ],
+        "actualProduces": [
+          "ternary.materialTrace"
+        ],
+        "writes": [
+          {
+            "address": "ternary.materialTrace",
+            "kind": "new-address"
+          }
+        ],
+        "probes": [],
+        "artifacts": []
+      }
+    ],
+    "ownedServiceIds": [],
+    "startedAtMs": 136.628017,
+    "durationMs": 39052.362033,
+    "manifestHash": "445dc6bddba8850387ca93b3cb599a41fd83dd896683ee6c1443eca0462450fb"
+  },
+  "check": {
+    "offOperations": 0,
+    "onOperations": 1,
+    "offEnabled": [],
+    "onEnabled": [
+      "ternaryEdgeSensing"
+    ],
+    "accessExact": true,
+    "actualTraceHash": "3c106de79547b69699c4213d0bfdf0848f4e7e34a1dfa964d654b1cf6608d68c"
+  }
+}

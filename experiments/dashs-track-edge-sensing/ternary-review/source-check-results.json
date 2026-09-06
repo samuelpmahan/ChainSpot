@@ -1,0 +1,153 @@
+{
+  "runId": "ternary-edge-initial-v1",
+  "traceHash": "3c106de79547b69699c4213d0bfdf0848f4e7e34a1dfa964d654b1cf6608d68c",
+  "scope": "14 hand-inspected reader positions; illustrative check, not corpus accuracy",
+  "summary": {
+    "methodA_live": {
+      "matches": 11,
+      "unknown": 0,
+      "mismatches": 3,
+      "total": 14
+    },
+    "methodA_predrop": {
+      "matches": 12,
+      "unknown": 0,
+      "mismatches": 2,
+      "total": 14
+    },
+    "methodB": {
+      "matches": 12,
+      "unknown": 2,
+      "mismatches": 0,
+      "total": 14
+    }
+  },
+  "checks": [
+    {
+      "hole": 18,
+      "distancePx": 70,
+      "side": "left",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 18,
+      "distancePx": 70,
+      "side": "right",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 11,
+      "distancePx": 30,
+      "side": "left",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 11,
+      "distancePx": 30,
+      "side": "right",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 16,
+      "distancePx": 30,
+      "side": "left",
+      "visualState": "edge",
+      "methodA_live": "TERRAIN",
+      "methodA_predrop": "TERRAIN",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 16,
+      "distancePx": 30,
+      "side": "right",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "EDGE"
+    },
+    {
+      "hole": 16,
+      "distancePx": 60,
+      "side": "left",
+      "visualState": "edge",
+      "methodA_live": "TERRAIN",
+      "methodA_predrop": "TERRAIN",
+      "methodB": "UNKNOWN"
+    },
+    {
+      "hole": 16,
+      "distancePx": 60,
+      "side": "right",
+      "visualState": "edge",
+      "methodA_live": "EDGE",
+      "methodA_predrop": "EDGE",
+      "methodB": "UNKNOWN"
+    },
+    {
+      "hole": 18,
+      "distancePx": 130,
+      "side": "left",
+      "visualState": "ribbon",
+      "methodA_live": "RIBBON",
+      "methodA_predrop": "RIBBON",
+      "methodB": "RIBBON"
+    },
+    {
+      "hole": 18,
+      "distancePx": 130,
+      "side": "right",
+      "visualState": "terrain",
+      "methodA_live": "TERRAIN",
+      "methodA_predrop": "TERRAIN",
+      "methodB": "TERRAIN"
+    },
+    {
+      "hole": 18,
+      "distancePx": 150,
+      "side": "left",
+      "visualState": "ribbon",
+      "methodA_live": "RIBBON",
+      "methodA_predrop": "RIBBON",
+      "methodB": "RIBBON"
+    },
+    {
+      "hole": 18,
+      "distancePx": 150,
+      "side": "right",
+      "visualState": "terrain",
+      "methodA_live": "TERRAIN",
+      "methodA_predrop": "TERRAIN",
+      "methodB": "TERRAIN"
+    },
+    {
+      "hole": 18,
+      "distancePx": 180,
+      "side": "left",
+      "visualState": "ribbon",
+      "methodA_live": "RIBBON",
+      "methodA_predrop": "RIBBON",
+      "methodB": "RIBBON"
+    },
+    {
+      "hole": 18,
+      "distancePx": 180,
+      "side": "right",
+      "visualState": "terrain",
+      "methodA_live": "RIBBON",
+      "methodA_predrop": "TERRAIN",
+      "methodB": "TERRAIN"
+    }
+  ]
+}

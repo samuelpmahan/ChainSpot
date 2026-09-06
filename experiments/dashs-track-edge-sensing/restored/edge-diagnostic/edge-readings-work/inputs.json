@@ -1,0 +1,321 @@
+{
+  "width": 1290,
+  "height": 2091,
+  "sourceSha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+  "seeds": [
+    {
+      "hole": 1,
+      "badge": {
+        "xPx": 755.0,
+        "yPx": 449.0,
+        "bboxX": 731,
+        "bboxY": 431,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1559
+      },
+      "tee": {
+        "xPx": 879.8197674418604,
+        "yPx": 429.1860465116279
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 2,
+      "badge": {
+        "xPx": 578.0,
+        "yPx": 582.0,
+        "bboxX": 554,
+        "bboxY": 564,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1491
+      },
+      "tee": {
+        "xPx": 452.4674556213018,
+        "yPx": 575.2810650887574
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 3,
+      "badge": {
+        "xPx": 607.0,
+        "yPx": 670.0,
+        "bboxX": 583,
+        "bboxY": 652,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1488
+      },
+      "tee": {
+        "xPx": 734.7499923706055,
+        "yPx": 715.2500076293945
+      },
+      "teeSource": "annotation diagnostic seed; detection absent"
+    },
+    {
+      "hole": 4,
+      "badge": {
+        "xPx": 444.0,
+        "yPx": 744.0,
+        "bboxX": 420,
+        "bboxY": 726,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1476
+      },
+      "tee": {
+        "xPx": 428.5801749271137,
+        "yPx": 645.6326530612245
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 18,
+      "badge": {
+        "xPx": 862.5,
+        "yPx": 778.0,
+        "bboxX": 838,
+        "bboxY": 760,
+        "bboxW": 49,
+        "bboxH": 36,
+        "area": 1319
+      },
+      "tee": {
+        "xPx": 787.9736842105264,
+        "yPx": 846.3245614035088
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 5,
+      "badge": {
+        "xPx": 551.0,
+        "yPx": 813.0,
+        "bboxX": 527,
+        "bboxY": 795,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1467
+      },
+      "tee": {
+        "xPx": 483.59288537549406,
+        "yPx": 852.9288537549407
+      },
+      "teeSource": "annotation diagnostic seed; detection absent"
+    },
+    {
+      "hole": 6,
+      "badge": {
+        "xPx": 551.0,
+        "yPx": 885.0,
+        "bboxX": 527,
+        "bboxY": 867,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1418
+      },
+      "tee": {
+        "xPx": 676.4854651162791,
+        "yPx": 847.9593023255813
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 17,
+      "badge": {
+        "xPx": 965.0,
+        "yPx": 922.0,
+        "bboxX": 941,
+        "bboxY": 904,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1422
+      },
+      "tee": {
+        "xPx": 1068.1337209302326,
+        "yPx": 851.1337209302326
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 16,
+      "badge": {
+        "xPx": 1140.5,
+        "yPx": 966.0,
+        "bboxX": 1116,
+        "bboxY": 948,
+        "bboxW": 49,
+        "bboxH": 36,
+        "area": 1343
+      },
+      "tee": {
+        "xPx": 1154.9970674486804,
+        "yPx": 1178.9560117302053
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 7,
+      "badge": {
+        "xPx": 444.0,
+        "yPx": 983.0,
+        "bboxX": 420,
+        "bboxY": 965,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1536
+      },
+      "tee": {
+        "xPx": 366,
+        "yPx": 982
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 8,
+      "badge": {
+        "xPx": 461.0,
+        "yPx": 1068.0,
+        "bboxX": 437,
+        "bboxY": 1050,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1402
+      },
+      "tee": {
+        "xPx": 519.405247813411,
+        "yPx": 1011.5451895043732
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 15,
+      "badge": {
+        "xPx": 906.0,
+        "yPx": 1277.0,
+        "bboxX": 882,
+        "bboxY": 1259,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1357
+      },
+      "tee": {
+        "xPx": 871.4373177842566,
+        "yPx": 1362.2332361516035
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 9,
+      "badge": {
+        "xPx": 338.0,
+        "yPx": 1304.0,
+        "bboxX": 314,
+        "bboxY": 1286,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1422
+      },
+      "tee": {
+        "xPx": 372.05882352941177,
+        "yPx": 1180.770588235294
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 14,
+      "badge": {
+        "xPx": 704.0,
+        "yPx": 1426.0,
+        "bboxX": 679,
+        "bboxY": 1408,
+        "bboxW": 50,
+        "bboxH": 36,
+        "area": 1433
+      },
+      "tee": {
+        "xPx": 676.4622093023256,
+        "yPx": 1501.2848837209303
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 13,
+      "badge": {
+        "xPx": 572.0,
+        "yPx": 1535.0,
+        "bboxX": 548,
+        "bboxY": 1517,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1377
+      },
+      "tee": {
+        "xPx": 446.11304347826086,
+        "yPx": 1472.1014492753623
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 10,
+      "badge": {
+        "xPx": 195.0,
+        "yPx": 1555.0,
+        "bboxX": 170,
+        "bboxY": 1537,
+        "bboxW": 50,
+        "bboxH": 36,
+        "area": 1340
+      },
+      "tee": {
+        "xPx": 258.17251461988303,
+        "yPx": 1456.1286549707602
+      },
+      "teeSource": "saved detection"
+    },
+    {
+      "hole": 12,
+      "badge": {
+        "xPx": 375.0,
+        "yPx": 1644.0,
+        "bboxX": 351,
+        "bboxY": 1626,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1379
+      },
+      "tee": {
+        "xPx": 421.4,
+        "yPx": 1767.6823529411765
+      },
+      "teeSource": "annotation diagnostic seed; detection absent"
+    },
+    {
+      "hole": 11,
+      "badge": {
+        "xPx": 241.0,
+        "yPx": 1818.0,
+        "bboxX": 217,
+        "bboxY": 1800,
+        "bboxW": 48,
+        "bboxH": 36,
+        "area": 1442
+      },
+      "tee": {
+        "xPx": 76.96793002915452,
+        "yPx": 1827.521865889213
+      },
+      "teeSource": "saved detection"
+    }
+  ],
+  "provenance": {
+    "tee": "Saved detected S3 Tee, canonical y+4; annotation tee used only to identify hole number",
+    "badge": "Dark connected plate pixels, fixed bbox shape filter; saved receipt labels in y order",
+    "width": "Diagnostic annotation width40, NOT learned; H18 sweep32,36,44,48",
+    "occlusion": "All detected Badge bboxes masked. Basket/range-circle ownership unavailable and explicitly unmodeled",
+    "sampler": "Actual sampleFourLaneBand from recovered source, no reimplementation",
+    "trajectory": "Frozen Tee to Badge initial heading extended 500px, no bends or Basket endpoints read by sampler"
+  }
+}

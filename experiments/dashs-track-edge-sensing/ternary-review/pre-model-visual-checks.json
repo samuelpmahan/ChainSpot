@@ -1,0 +1,89 @@
+{
+  "basis": "Root visual inspection of raw pixel crops before candidate outputs; small diagnostic set, not annotation truth or corpus accuracy. Near ambiguous transitions omitted. Labels fixed before outputs and not used for parameter fitting.",
+  "rows": [
+    {
+      "hole": 18,
+      "distancePx": 70,
+      "side": "left",
+      "visualState": "edge"
+    },
+    {
+      "hole": 18,
+      "distancePx": 70,
+      "side": "right",
+      "visualState": "edge"
+    },
+    {
+      "hole": 11,
+      "distancePx": 30,
+      "side": "left",
+      "visualState": "edge"
+    },
+    {
+      "hole": 11,
+      "distancePx": 30,
+      "side": "right",
+      "visualState": "edge"
+    },
+    {
+      "hole": 16,
+      "distancePx": 30,
+      "side": "left",
+      "visualState": "edge"
+    },
+    {
+      "hole": 16,
+      "distancePx": 30,
+      "side": "right",
+      "visualState": "edge"
+    },
+    {
+      "hole": 16,
+      "distancePx": 60,
+      "side": "left",
+      "visualState": "edge"
+    },
+    {
+      "hole": 16,
+      "distancePx": 60,
+      "side": "right",
+      "visualState": "edge"
+    },
+    {
+      "hole": 18,
+      "distancePx": 130,
+      "side": "left",
+      "visualState": "ribbon"
+    },
+    {
+      "hole": 18,
+      "distancePx": 130,
+      "side": "right",
+      "visualState": "terrain"
+    },
+    {
+      "hole": 18,
+      "distancePx": 150,
+      "side": "left",
+      "visualState": "ribbon"
+    },
+    {
+      "hole": 18,
+      "distancePx": 150,
+      "side": "right",
+      "visualState": "terrain"
+    },
+    {
+      "hole": 18,
+      "distancePx": 180,
+      "side": "left",
+      "visualState": "ribbon"
+    },
+    {
+      "hole": 18,
+      "distancePx": 180,
+      "side": "right",
+      "visualState": "terrain"
+    }
+  ]
+}
