@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checks": [
+    "one cell per case/variant despite partial failure",
+    "actual CLI resume increases observations",
+    "old slice immutable",
+    "course and hole selectors"
+  ],
+  "initialEvents": 1,
+  "resumedEvents": 2,
+  "sourceHash": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+  "implementation": {
+    "revision": "f5d538dd79f94619134a6c97e93b4948d975b5d9cb95014804590446c3225566",
+    "kind": "ABFeatureSet production gateway",
+    "planFingerprint": "b6b11ccfed7303398677b7571f00dec07ce2468488a160c675981818b0b26139",
+    "manifestHash": "7fd1c2dee10b7ad84c7c24bef7a091f1b15942dacea1ad9fb91f5896aacf1ead"
+  }
+}

@@ -1,0 +1,280 @@
+{
+  "version": 1,
+  "id": "source-edge-branching-matrix-v1",
+  "calculationRevision": "content-hydrated-by-LAB",
+  "cases": [
+    {
+      "id": "DashsTrack-H01",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 1
+      }
+    },
+    {
+      "id": "DashsTrack-H02",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 2
+      }
+    },
+    {
+      "id": "DashsTrack-H03",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 3
+      }
+    },
+    {
+      "id": "DashsTrack-H04",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 4
+      }
+    },
+    {
+      "id": "DashsTrack-H05",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 5
+      }
+    },
+    {
+      "id": "DashsTrack-H06",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 6
+      }
+    },
+    {
+      "id": "DashsTrack-H07",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 7
+      }
+    },
+    {
+      "id": "DashsTrack-H08",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 8
+      }
+    },
+    {
+      "id": "DashsTrack-H09",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 9
+      }
+    },
+    {
+      "id": "DashsTrack-H10",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 10
+      }
+    },
+    {
+      "id": "DashsTrack-H11",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 11
+      }
+    },
+    {
+      "id": "DashsTrack-H12",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 12
+      }
+    },
+    {
+      "id": "DashsTrack-H13",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 13
+      }
+    },
+    {
+      "id": "DashsTrack-H14",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 14
+      }
+    },
+    {
+      "id": "DashsTrack-H15",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 15
+      }
+    },
+    {
+      "id": "DashsTrack-H16",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 16
+      }
+    },
+    {
+      "id": "DashsTrack-H17",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 17
+      }
+    },
+    {
+      "id": "DashsTrack-H18",
+      "course": "DashsTrack",
+      "source": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+      "metadata": {
+        "seedInputs": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-readings-work/inputs.json",
+        "hole": 18
+      }
+    },
+    {
+      "id": "AlexClark-source-seeds-missing",
+      "course": "AlexClark",
+      "source": "../chainspot-corpus/dev/AlexClark/AlexClark-full.jpg",
+      "prerequisites": [
+        "AlexClark.source-tee-badge-seeds"
+      ],
+      "metadata": {
+        "note": "Source raster available; source-derived Tee/Badge seed adapter not yet materialized. Do not read annotation endpoints to fill it."
+      }
+    },
+    {
+      "id": "Heritage-source-seeds-missing",
+      "course": "Heritage",
+      "source": "../chainspot-corpus/dev/Heritage/HeritagePark-full.png",
+      "prerequisites": [
+        "Heritage.source-tee-badge-seeds"
+      ],
+      "metadata": {
+        "note": "Source raster available; source-derived Tee/Badge seed adapter not yet materialized. Do not read annotation endpoints to fill it."
+      }
+    },
+    {
+      "id": "Lenard-source-seeds-missing",
+      "course": "Lenard",
+      "source": "../chainspot-corpus/dev/Lenard/Lenard-full.PNG",
+      "prerequisites": [
+        "Lenard.source-tee-badge-seeds"
+      ],
+      "metadata": {
+        "note": "Source raster available; source-derived Tee/Badge seed adapter not yet materialized. Do not read annotation endpoints to fill it."
+      }
+    },
+    {
+      "id": "NorthPark-source-seeds-missing",
+      "course": "NorthPark",
+      "source": "../chainspot-corpus/dev/NorthPark/NorthPark-full.png",
+      "prerequisites": [
+        "NorthPark.source-tee-badge-seeds"
+      ],
+      "metadata": {
+        "note": "Source raster available; source-derived Tee/Badge seed adapter not yet materialized. Do not read annotation endpoints to fill it."
+      }
+    },
+    {
+      "id": "TowneLake-source-seeds-missing",
+      "course": "TowneLake",
+      "source": "../chainspot-corpus/dev/TowneLake/TowneLake-full.png",
+      "prerequisites": [
+        "TowneLake.source-tee-badge-seeds"
+      ],
+      "metadata": {
+        "note": "Source raster available; source-derived Tee/Badge seed adapter not yet materialized. Do not read annotation endpoints to fill it."
+      }
+    }
+  ],
+  "variants": [
+    {
+      "id": "fixed-broad",
+      "implementation": "branching",
+      "params": {
+        "mode": "fixed",
+        "sliceSteps": 120,
+        "sensing": "broad",
+        "supportFactor": 0.5,
+        "centerFactor": 1
+      }
+    },
+    {
+      "id": "poisson-broad-strict",
+      "implementation": "branching",
+      "params": {
+        "mode": "poisson",
+        "sliceSteps": 120,
+        "sensing": "broad",
+        "supportFactor": 1,
+        "centerFactor": 1
+      }
+    },
+    {
+      "id": "poisson-broad-permissive",
+      "implementation": "branching",
+      "params": {
+        "mode": "poisson",
+        "sliceSteps": 120,
+        "sensing": "broad",
+        "supportFactor": 0.5,
+        "centerFactor": 1
+      }
+    },
+    {
+      "id": "reflection-contact",
+      "implementation": "branching",
+      "params": {
+        "mode": "reflection",
+        "sliceSteps": 120,
+        "sensing": "broad",
+        "supportFactor": 0.5,
+        "centerFactor": 1
+      }
+    }
+  ],
+  "galleryGroups": [
+    "edge_loss",
+    "width_boundary",
+    "branch_reacquired",
+    "paused",
+    "unresolved"
+  ],
+  "metadata": {
+    "note": "18 measured Dash cases plus explicit missing seed cases for remaining Dev courses. Original source frame. No Basket/bend endpoints enter tracking. Compute slices are resumable, not hole length limits."
+  }
+}

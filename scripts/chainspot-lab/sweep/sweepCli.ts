@@ -7,6 +7,7 @@ import { extname } from 'node:path';
 import { compileSweepConfig, runSweepOperation } from './operation';
 import { printPlan } from './timeline';
 import { runSweepBatch } from './batch';
+import { runSweepMatrix } from './matrix';
 import { discoverStageContracts, runStageSweep } from './stageOperation';
 
 function usage(): never {
@@ -17,6 +18,7 @@ function usage(): never {
 			'  lab sweep CONFIG.json INPUT... [TRUTH.json]',
 			'  lab sweep --through STAGE INPUT',
 			'  lab sweep batch [--through GATE] CONFIG.json [dev|demo|all|COURSE]...',
+			'  lab sweep matrix MATRIX.json [dev|demo|all|COURSE]',
 			'',
 			'INPUT is one or more .png/.jpg/.jpeg captures. Sweep canonicalizes the set:',
 			'  decode -> StripChrome -> AutoStitch (when N>1) -> canonical raster -> algorithm',
@@ -44,6 +46,10 @@ async function runCompile(args: readonly string[]): Promise<void> {
 async function runSweep(args: readonly string[]): Promise<void> {
 	if (args[0] === 'batch') {
 		process.exitCode = await runSweepBatch(args);
+		return;
+	}
+	if (args[0] === 'matrix') {
+		process.exitCode = await runSweepMatrix(args);
 		return;
 	}
 	const restArgs = [...args];

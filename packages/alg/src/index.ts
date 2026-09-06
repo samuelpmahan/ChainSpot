@@ -16,3 +16,5 @@ export * from './detect';
 export * from './raster';
 export * from './autoCrop';
 export * from './stitch';
+export * from './experiments/labBranching';
+export * from './experimental/reflectionContact';

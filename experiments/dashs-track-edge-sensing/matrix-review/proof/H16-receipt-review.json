@@ -1,0 +1,54 @@
+[
+  {
+    "case": {
+      "course": "DashsTrack",
+      "hole": 16,
+      "seedProvenance": "saved detection"
+    },
+    "variant": "fixed-broad",
+    "status": "COMPLETE",
+    "readings": 27,
+    "longestRecordedBranchPx": 88.00000000000043,
+    "largestParentSegmentPx": 4.000000000000033,
+    "jobKey": "3b483709d93ac3e7b734b387e5bbd64dbef0db6300f5ce9100a368f7628a2cf6"
+  },
+  {
+    "case": {
+      "course": "DashsTrack",
+      "hole": 16,
+      "seedProvenance": "saved detection"
+    },
+    "variant": "poisson-broad-strict",
+    "status": "PAUSED",
+    "readings": 120,
+    "longestRecordedBranchPx": 64.00000000000024,
+    "largestParentSegmentPx": 4.000000000000078,
+    "jobKey": "f340cba9d5a5e2c37831873f7bb0e32f4f8a0fccc08317a8be94c6b60886afd2"
+  },
+  {
+    "case": {
+      "course": "DashsTrack",
+      "hole": 16,
+      "seedProvenance": "saved detection"
+    },
+    "variant": "poisson-broad-permissive",
+    "status": "PAUSED",
+    "readings": 120,
+    "longestRecordedBranchPx": 100.00000000000037,
+    "largestParentSegmentPx": 4.0000000000001,
+    "jobKey": "1382f5b0c04ac23fc7b0b8231c8fe4a686b5bafcb4e315855f05e2d3cad041ba"
+  },
+  {
+    "case": {
+      "course": "DashsTrack",
+      "hole": 16,
+      "seedProvenance": "saved detection"
+    },
+    "variant": "reflection-contact",
+    "status": "COMPLETE",
+    "readings": 27,
+    "longestRecordedBranchPx": 88.00000000000043,
+    "largestParentSegmentPx": 4.000000000000033,
+    "jobKey": "ddd4cb53f8d8d55b51d17ab59f26c769a6b822886b80b5dc76aa93af470be2a0"
+  }
+]

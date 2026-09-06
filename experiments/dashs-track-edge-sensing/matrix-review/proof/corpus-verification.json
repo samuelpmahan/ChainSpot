@@ -1,0 +1,35 @@
+{
+  "jobs": 72,
+  "rows": 92,
+  "statusCounts": {
+    "COMPLETE": 51,
+    "PAUSED": 21,
+    "missing-prerequisite": 20
+  },
+  "sourceHashes": [
+    "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a"
+  ],
+  "implementationRevisions": [
+    "f5d538dd79f94619134a6c97e93b4948d975b5d9cb95014804590446c3225566"
+  ],
+  "parentLinksChecked": 2884,
+  "maxParentSegmentPx": 4.0000000000001075,
+  "branchTargetsChecked": 1777,
+  "violations": [],
+  "cache": {
+    "requests": 72,
+    "hits": 54,
+    "misses": 18,
+    "writes": 18,
+    "profileHits": 5985,
+    "profileMisses": 2094,
+    "profileWrites": 2094
+  },
+  "groups": {
+    "unresolved": 18,
+    "edge_loss": 14,
+    "paused": 14,
+    "branch_reacquired": 14
+  },
+  "summarySha256": "b60cc0ff5f561b45dca16a0311438fb3f471290ea82d526781549a59ba37cca5"
+}

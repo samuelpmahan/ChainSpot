@@ -1,0 +1,17 @@
+{
+  "scripts/chainspot-lab/sweep/sweepCli.ts": "66d84c555cad75e0908161447a0dba85f99f725c8e77128fa03ba82bad8bcbf6",
+  "scripts/chainspot-lab/sweep/matrix.ts": "57e0277a9d2197d1be96679ee8a33b19181e643eff3a3b44bd868e185cf375c1",
+  "packages/alg/src/experimental/branching.ts": "a4bc7d247882dd325546097f23f18b37d6e28a712c0a103512128b4cd6a3866b",
+  "packages/alg/src/experimental/reflectionContact.ts": "2a175b0389657c162e4f8487bc5728b417ba496436d7ae29f798121cb050e00c",
+  "packages/alg/src/experiments/labBranching.ts": "80080d40284739f2a1aa5b877bd2f7167120b8742ac5961d1675d4417a495426",
+  "packages/alg/src/index.ts": "f752478e8899ca79f96bcdbd9d94a92c33aa9968462372ab66f0ee9c698f7072",
+  "scripts/chainspot-lab/sweep/matrix/types.ts": "1efb94e1d24cfc9235154b7d5a9bcc202c2e7101ea82d6a81f79de7a5171f80b",
+  "scripts/chainspot-lab/sweep/matrix/manifest.ts": "8782a54ec6456535b23c7eae69df02b779a812aefed462cc90384feae11147b5",
+  "scripts/chainspot-lab/sweep/matrix/evidence.ts": "7ea18f4f7aef3c00aea13b0c9efc28060b124300e7e26b5fa5bb6dd0367f0a51",
+  "scripts/chainspot-lab/sweep/matrix/index.ts": "ff7ab929e1d05877301ce133414c98a9ca401eabe723f644476ef35fe4c06c54",
+  "scripts/chainspot-lab/sweep/matrix/materials.ts": "17ae4a52dec21cf1510dce59402f6e7eaa14d89f5b149e0c3f32369d47b1237b",
+  "tests/unit/labBranching.test.ts": "f88a25690b4d79af74448afee9abb84199f418708bde4fe7f9ae4eb37c6339ee",
+  "tests/unit/reflectionContact.test.ts": "c12052bccd70f5e59a2b0a06794f5df79c1858982f4897222d96185d86401fb7",
+  "tests/unit/matrixEvidence.test.ts": "9ba96f47e680dd23f35d8ccfac451c507115aa437c9e0033c7f73bd8942bebf1",
+  "tests/unit/matrixMaterials.test.ts": "ae36392a633e979957d7ff076824444e4d54dd5442f9753b77761b38892dd219"
+}
