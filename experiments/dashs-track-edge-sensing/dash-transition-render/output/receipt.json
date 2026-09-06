@@ -1,0 +1,75 @@
+{
+  "source": "/workspace/scratch/7843e3219195/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+  "sha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+  "source_size": [
+    1290,
+    2091
+  ],
+  "grid_stride_px": 2,
+  "grid_samples": 674670,
+  "normal_sigma_px": 2,
+  "gradient_sigmas_px": [
+    1,
+    2,
+    4
+  ],
+  "profile_offsets_px": [
+    -12,
+    -11,
+    -10,
+    -9,
+    -8,
+    -7,
+    -6,
+    -5,
+    -4,
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "brightness": "arithmetic RGB mean",
+  "profile_smoothing_sigma_px": 1,
+  "span": "10\u201390% positive derivative mass, conditional monotonicity>=0.8, mass>=5, no active boundary or out of bounds",
+  "unresolved_spans": 649296,
+  "cropping_view_only": {
+    "H18-bends": [
+      760,
+      340,
+      1085,
+      880
+    ],
+    "H16-straight": [
+      1060,
+      660,
+      1245,
+      1210
+    ],
+    "H11-straight": [
+      50,
+      1650,
+      450,
+      1890
+    ]
+  },
+  "detected_geometry": false,
+  "ownership": false,
+  "boundary_active_rule": "mean positive derivative in first/last two intervals > 0.25 * profile peak",
+  "span_display_resampling": "nearest neighbor for both values and validity",
+  "comparison_display_range": [
+    0,
+    60
+  ]
+}

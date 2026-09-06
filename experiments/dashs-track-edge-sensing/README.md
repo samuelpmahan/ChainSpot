@@ -60,3 +60,9 @@ See `ternary-review/RESULTS.md` for detailed provenance and limitations.
 Preserve scripts and recognizable results in Git at each useful checkpoint.
 Keep experiments enabled when selected. Do not overwrite clean implementations.
 Do not turn same-pixel model agreement into independent confidence.
+
+## Whole-course transition field
+
+The [whole-raster renderer](dash-transition-render/README.md) now compares fine gradients, wider normal-profile change, and conditional transition spans across all DashsTrack. Run `bash dash-transition-render/exp/transition-field/run.sh`. No hole seeds or endpoint assignments enter its measurements. Four numerical checks pass; H18 bends are visible, while terrain and circle responses remain.
+
+![Whole-course comparison](dash-transition-render/output/DashsTrack-transition-comparison.jpg)

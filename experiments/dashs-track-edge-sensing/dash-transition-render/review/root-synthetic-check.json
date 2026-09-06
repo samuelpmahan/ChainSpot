@@ -1,0 +1,24 @@
+{
+  "checks": [
+    {
+      "sourceBlurSigma": 0,
+      "massSpan": 2.0,
+      "netChange": 80.0,
+      "resolved": true
+    },
+    {
+      "sourceBlurSigma": 2,
+      "massSpan": 6.0,
+      "netChange": 80.0,
+      "resolved": true
+    },
+    {
+      "sourceBlurSigma": 5,
+      "massSpan": 12.0,
+      "netChange": 78.48478698730469,
+      "resolved": true
+    }
+  ],
+  "flatResolved": 0,
+  "interpretation": "Increasing imposed blur widens conditional gradient-mass span; it is not corridor width or calibrated renderer alpha."
+}
