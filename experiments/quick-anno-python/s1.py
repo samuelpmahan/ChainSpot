@@ -14,6 +14,7 @@ from chainspot_quick_anno import Calculation, Part, PCR, PQL, PxC
 DEFAULT_IMAGE = ROOT.parent / "chainspot-corpus" / "dev" / "DashsTrack" / "DashsTrack-full.jpg"
 OUT = Path(__file__).with_name("generated") / "DashsTrack-S1"
 SNAPSHOT = OUT / "snapshot.json"
+NEON_MATERIALIZER = Path(__file__).with_name("materialize_s1_neon.py")
 
 
 def export_real_s1(image: Path) -> dict:
@@ -71,10 +72,13 @@ def main() -> None:
     (OUT / "python-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (OUT / "python-S1.mmd").write_text(pcr.mermaid())
 
+    subprocess.run([sys.executable, str(NEON_MATERIALIZER), str(SNAPSHOT)], check=True, cwd=ROOT)
+
     print(json.dumps(summary, indent=2))
     print("\nCorrectness renders:")
     for key, file in snapshot["panels"].items():
         print(f"  {key}: {OUT / file}")
+    print(f"  neon: {OUT / 's1-neon-correctness-sheet.png'}")
     print(f"\nPython PCR view: {OUT / 'python-S1.mmd'}")
     print(f"Snapshot: {SNAPSHOT}")
 
