@@ -14,7 +14,7 @@ async function walk(dir) {
 		const full = join(dir, entry.name);
 		if (entry.isDirectory()) {
 			await walk(full);
-		} else if (entry.name.endsWith('.json')) {
+		} else if (entry.name.endsWith('.json') || entry.name.endsWith('.yaml')) {
 			const rel = full.slice(srcDir.length + 1);
 			const dest = join(distDir, rel);
 			await mkdir(dirname(dest), { recursive: true });

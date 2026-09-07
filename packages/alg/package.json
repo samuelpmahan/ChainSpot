@@ -40,5 +40,8 @@
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs"
+	},
+	"dependencies": {
+		"yaml": "2.9.0"
 	}
 }

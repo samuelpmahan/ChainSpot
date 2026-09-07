@@ -56,7 +56,7 @@ export interface ABFeatureSetServiceDescriptor {
 /** Short name for callers that do not need to spell out "descriptor". */
 export type ABFeatureSetService = ABFeatureSetServiceDescriptor;
 
-/** An ordered, executable composition. List order is execution intent. */
+/** @deprecated New Stage compositions live in PrincipleComponentRender.yaml. Retained for existing pipelines. */
 export interface ABFeatureSet {
 	readonly id: string;
 	readonly features: readonly ABFeature[];

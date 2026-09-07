@@ -40,6 +40,8 @@ function addressOf(slot: SlotRef | PxKey<unknown>): SlotRef {
  * a second synchronized store.
  */
 export interface PxC {
+	/** Snapshot addresses and registered functions; immutable Part values remain shared. */
+	fork(): PxC;
 	get<T>(slot: SlotRef | PxKey<T>): T;
 	has(slot: SlotRef | PxKey<unknown>): boolean;
 	set<T>(slot: SlotRef | PxKey<T>, value: T): void;
@@ -49,10 +51,10 @@ export interface PxC {
 
 export type ExecBoard = PxC;
 
-export function createExecBoard(): PxC {
-	const slots = new Map<SlotRef, unknown>();
-	const calculations = new Map<string, PxCalculation<unknown, unknown>>();
+export function createExecBoard(): PxC { return boardFrom(new Map(), new Map()); }
+function boardFrom(slots: Map<SlotRef, unknown>, calculations: Map<string, PxCalculation<unknown, unknown>>): PxC {
 	return {
+		fork: () => boardFrom(new Map(slots), new Map(calculations)),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
 			if (!slots.has(address)) throw new Error(`exec board: slot '${address}' not produced yet.`);
@@ -98,6 +100,7 @@ export function trackAccess(
 	const writes: PxWriteTestimony[] = [];
 	const declaredConsumes = new Set(tick.consumes);
 	const tracked: PxC = {
+		fork: () => board.fork(),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
 			consumed.add(address);
