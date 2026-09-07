@@ -55,20 +55,22 @@ def build_investigation(snapshot: dict) -> tuple[PxC, PCR]:
 
 
 def main() -> None:
-    snapshot = INV.export(INV.image_from_argv(sys.argv))
+    image = INV.image_from_argv(sys.argv)
+    inv = INV.for_image(image)
+    snapshot = inv.export(image)
     pxc, pcr = build_investigation(snapshot)
 
     summary = PQL.part('scratch.s1.ownershipSummary').one(pxc)
-    INV.emit(summary, pcr)
-    INV.materialize()
+    inv.emit(summary)
+    # inv.write_mermaid(pcr) renders the composition when a graph needs a picture.
+    inv.materialize()
 
     print(json.dumps(summary, indent=2))
     print('\nCorrectness renders:')
     for key, file in snapshot['panels'].items():
-        print(f'  {key}: {INV.out_dir / file}')
-    print(f"  neon: {INV.out_dir / 's1-neon-correctness-sheet.png'}")
-    print(f"\nPython PCR view: {INV.out_dir / 'python-S1.mmd'}")
-    print(f'Snapshot: {INV.snapshot_path}')
+        print(f'  {key}: {inv.out_dir / file}')
+    print(f"  neon: {inv.out_dir / 's1-neon-correctness-sheet.png'}")
+    print(f'Snapshot: {inv.snapshot_path}')
 
 
 if __name__ == '__main__':

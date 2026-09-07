@@ -94,18 +94,20 @@ def build_investigation(snapshot: dict) -> tuple[PxC, PCR]:
 
 
 def main() -> None:
-    snapshot = INV.export(INV.image_from_argv(sys.argv))
+    image = INV.image_from_argv(sys.argv)
+    inv = INV.for_image(image)
+    snapshot = inv.export(image)
     pxc, pcr = build_investigation(snapshot)
 
     summary = PQL.part('scratch.s3.teeSummary').one(pxc)
-    INV.emit(summary, pcr)
-    INV.materialize()
+    inv.emit(summary)
+    # inv.write_mermaid(pcr) renders the composition when a graph needs a picture.
+    inv.materialize()
 
     print(json.dumps(summary, indent=2))
     print(f"\nexperimental fill-consistent variant: {snapshot['experimental']['fillConsistent']}")
-    print(f"\nNeon correctness: {INV.out_dir / 's3-neon-correctness-sheet.png'}")
-    print(f"Python PCR view: {INV.out_dir / 'python-S3.mmd'}")
-    print(f'Snapshot: {INV.snapshot_path}')
+    print(f"\nNeon correctness: {inv.out_dir / 's3-neon-correctness-sheet.png'}")
+    print(f'Snapshot: {inv.snapshot_path}')
 
 
 if __name__ == '__main__':
