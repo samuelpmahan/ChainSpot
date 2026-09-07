@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
       - run: npm run build --workspace @chainspot/alg
       - name: Test root mounts
-        run: npx vitest run packages/alg/src/exec/mounts.test.ts
+        run: npx vitest run tests/unit/pxcRootMounts.test.ts
       - name: Warm all dev PxC roots
         run: timeout --signal=TERM 55s node scripts/warm-dev-pxc-roots.mjs chainspot-corpus/dev /tmp/warm-dev-pxc-roots.json
       - name: Upload warm report
