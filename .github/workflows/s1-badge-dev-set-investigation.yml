@@ -1,0 +1,39 @@
+name: S1 badge dev-set investigation
+
+on:
+  push:
+    branches:
+      - investigate/s1-badge-pixels-5607611
+    paths:
+      - 'investigations/s1-badge-pixels/dev-set-probe.mjs'
+      - '.github/workflows/s1-badge-dev-set-investigation.yml'
+      - 'packages/alg/**'
+      - 'package*.json'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: investigate/s1-badge-pixels-5607611
+      - name: Checkout dev corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @chainspot/alg
+      - name: Probe all dev courses
+        run: node investigations/s1-badge-pixels/dev-set-probe.mjs chainspot-corpus/dev /tmp/s1-badge-dev-set
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s1-badge-dev-set-investigation
+          path: /tmp/s1-badge-dev-set
+          if-no-files-found: error
