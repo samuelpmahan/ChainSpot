@@ -11,53 +11,69 @@ Prove one complete slice before delegating S2+:
 - Python can consume a real S1 snapshot from the production ChainSpot runtime;
 - a Python PCR can derive and publish a scratch Part;
 - PQL can query that result;
-- S1 emits deterministic correctness renders from the same production run;
+- S1 emits deterministic neon-first correctness renders from the same production run;
 - the Python PCR can emit Mermaid as a view of composition.
 
 This is an experimental investigation surface, not a production Stage rewrite.
 
-## Run
+## Reproduce
 
-From repository root in the sweep-ready environment:
+From repository root:
 
 ```sh
+python -m pip install -e packages/quick_anno_py
 python experiments/quick-anno-python/s1.py \
   ../chainspot-corpus/dev/DashsTrack/DashsTrack-full.jpg
 ```
 
-The script invokes `export_s1_snapshot.cjs`, which executes real S0 then real S1 using the built `@chainspot/alg` runtime and writes the Stage panels plus `snapshot.json`.
+Focused Python-core validation:
 
-Outputs are under:
+```sh
+PYTHONPATH=packages/quick_anno_py python -m pytest -q \
+  packages/quick_anno_py/tests/test_first_class.py
+```
+
+The S1 script invokes `export_s1_snapshot.cjs`, which executes real S0 then real S1 using the built `@chainspot/alg` runtime, loads the exported material into first-class Python PxC, runs the Python PCR/PQL investigation, then generates the neon correctness materialization.
+
+Outputs land under:
 
 ```text
 experiments/quick-anno-python/generated/DashsTrack-S1/
 ```
 
-Expected correctness renders include:
+Primary correctness artifact:
 
 ```text
-s0-fullimage.png
-s0-croppedimage.png
-s1-croppedimage.png
-s1-masks.png
-s1-badgepx-subtraction.png
-s1-badge-mute-subtraction.png
-s1-badge-objects.png
+s1-neon-correctness-sheet.png
 ```
 
-Python also writes:
+Its panels are intentionally loud before subtle:
+
+1. Badge objects — thick neon green boxes and labels.
+2. Production bright/dark masks.
+3. Owned pixels — neon cyan.
+4. Added mute only (`muted - owned`) — neon yellow.
+5. Total muted — cyan owned + yellow added mute.
+6. Everything removed from remaining — neon magenta.
+7. Actual remaining raster — removals transparent over checkerboard.
+
+Other useful artifacts:
 
 ```text
+snapshot.json
 python-summary.json
 python-S1.mmd
-snapshot.json
+s1-owned-neon.png
+s1-added-mute-neon.png
+s1-muted-neon.png
+s1-removed-neon.png
+s1-remaining-checkerboard.png
+s1-badge-objects-neon.png
 s0.receipt.txt
 s1.receipt.txt
 ```
 
 ## Observed Dash's Track result
-
-Observed in the bounded materialization run used to establish this checkpoint:
 
 ```text
 canonical: 1290x2083
@@ -82,9 +98,9 @@ The Python-owned derived Part `scratch.s1.ownershipSummary` produced:
 }
 ```
 
-## Correctness meaning
+Visual inspection confirmed the neon owned/mute material is localized to the badge regions, added mute extends beyond owned BadgePx, and the remaining raster removes those regions. A subtle render is not accepted as the first correctness proof; **neon first** is the investigation convention.
 
-The materialized images are the correctness check. The Python surface is acceptable only if its source snapshot corresponds to the same real S1 run represented by those panels and receipts.
+## Correctness boundary
 
 Do not claim the Python-authored semantic S1 graph itself executes the full badge detector yet. Today the production runtime executes S1; Python consumes its resulting testimony/materials and performs experimental calculations over them.
 
@@ -100,8 +116,9 @@ A Luna extending this pattern should:
 4. express new experimental work as named Calculations in a PCR;
 5. publish useful scratch Parts into Python PxC;
 6. query with PQL rather than parallel ad-hoc state;
-7. materialize a visual correctness check;
-8. emit Mermaid/PCR testimony from the same composition;
-9. add a convenience only after real repeated friction demonstrates it.
+7. materialize a **neon-first** visual correctness check;
+8. visually inspect the materialization before claiming success;
+9. emit Mermaid/PCR testimony from the same composition;
+10. add a convenience only after real repeated friction demonstrates it.
 
-S2 is the next useful transfer test.
+S2 is the next transfer test.
