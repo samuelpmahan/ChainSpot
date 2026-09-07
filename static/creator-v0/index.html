@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="theme-color" content="#111518"/>
+  <meta name="description" content="Your actual discs. Ready for their close-up. A local-first DiscCard and DiscBattle workbench."/>
+  <title>ChainSpot · Creator workbench</title>
+  <link rel="stylesheet" href="./styles.css"/>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23c9ef82'/%3E%3Cellipse cx='32' cy='32' rx='21' ry='10' transform='rotate(-30 32 32)' fill='none' stroke='%23111518' stroke-width='5'/%3E%3C/svg%3E"/>
+</head>
+<body>
+  <a href="#workspace" class="skip-link">Skip to workbench</a>
+  <header class="app-header">
+    <a class="brand" href="#workspace" aria-label="ChainSpot creator home"><span class="brand-mark" aria-hidden="true">◒</span> ChainSpot <span class="version">CREATOR / 0.0</span></a>
+    <nav class="mode-switch" aria-label="Graphic format">
+      <button data-mode="card" aria-pressed="false">DiscCard</button>
+      <button data-mode="battle" class="chosen" aria-pressed="true">DiscBattle</button>
+    </nav>
+    <div class="header-end"><span id="save-status" role="status">Opening local collection…</span><button class="quiet" data-action="backup" title="Save discs, photos and composition together">Save backup ↓</button></div>
+  </header>
+  <div id="storage-warning" class="warning" role="alert" hidden></div>
+  <div class="app-grid">
+    <aside class="collection-panel" aria-labelledby="collection-heading">
+      <div class="section-top"><h2 id="collection-heading">My discs <span id="disc-count" class="count"></span></h2><span class="eyebrow">YOUR SHELF</span></div>
+      <p class="subtle">The exact disc. Not just the mold.</p>
+      <button class="primary add-disc" data-action="new-disc">＋ Add a disc</button>
+      <label class="search-wrap"><span class="sr-only">Find a disc</span><span aria-hidden="true">⌕</span><input id="disc-search" type="search" placeholder="Find a disc…" autocomplete="off"/></label>
+      <div id="collection-list" class="collection-list"></div>
+      <div class="collection-foot"><p>Local-first. Backups travel with you.<br>No account. No server uploads.</p><button class="text-button" data-action="restore">Restore a backup ↗</button><button class="text-button" data-action="reset-demo">Reset to sample discs</button></div>
+    </aside>
+    <main id="workspace" class="workspace" tabindex="-1">
+      <div class="workspace-heading"><div><div class="eyebrow">A LITTLE GRAPHIC. A BETTER VIDEO.</div><h1 id="mode-title">Let your discs compete.</h1><p id="mode-description">Your lineup, your scores. Nothing happens until you choose it.</p></div><span class="prototype-tag">WORKBENCH</span></div>
+      <section class="preview-panel" aria-label="Live graphics preview">
+        <div class="preview-toolbar"><span><span class="live-dot"></span> LIVE PREVIEW <span class="canvas-size">1920 × 1080</span></span><div><button class="quiet" data-action="context">＋ Your footage</button><button class="quiet" data-action="clean">Clean view ↗</button></div></div>
+        <div id="preview-stage" class="preview-stage">
+          <div id="preview-placeholder" class="preview-placeholder"><span class="preview-glyph" aria-hidden="true">◌</span><strong>The flight gets the screen.</strong><span>Your discs get the credit.</span><button class="text-button" data-action="context">Try a photo or video behind your graphic ↗</button></div>
+          <img id="context-image" alt="Your preview background" hidden/>
+          <video id="context-video" muted loop playsinline controls hidden></video>
+          <div class="safe-frame" aria-hidden="true"></div>
+          <div id="overlay" class="overlay"></div>
+          <span id="empty-overlay" class="empty-overlay" hidden>Choose a disc from your shelf to start.</span>
+        </div>
+        <div class="preview-footer"><span id="preview-measure">Transparent overlay · footage is preview-only</span><button class="text-button" data-action="clear-context" id="clear-context" hidden>Remove footage ×</button><button class="text-button" data-action="canvas">Canvas: <span id="canvas-label">checker</span></button></div>
+      </section>
+      <section class="lineup-panel" id="lineup-panel" aria-labelledby="lineup-heading">
+        <div class="section-top"><div><h2 id="lineup-heading">On screen <span id="entry-count" class="count"></span></h2><p class="subtle">Edit any score. Highlight any disc. In any order.</p></div><button class="quiet" data-action="clear-highlight">Clear highlight</button></div>
+        <div id="lineup" class="lineup"></div>
+      </section>
+      <div id="single-note" class="single-note" hidden>Pick a disc from your shelf. Its card updates here instantly.</div>
+      <div class="workspace-foot"><span>✦ Made for the discs you actually throw.</span><details id="state-details"><summary>Inspect object model</summary><pre id="state-inspector"></pre></details></div>
+    </main>
+    <aside class="inspector-panel" aria-label="Appearance and selected disc">
+      <div class="section-top"><h2>Make it yours</h2><span class="eyebrow">APPEARANCE</span></div>
+      <div class="setting"><span class="setting-label">Graphic style</span><div class="segmented" id="theme-controls"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div></div>
+      <label class="setting"><span>Layout</span><select id="layout-control"></select></label>
+      <div class="setting"><span class="setting-label">Place on screen</span><div class="anchor-grid" aria-label="Overlay position"><button data-anchor="top-left" aria-label="Top left">↖</button><button data-anchor="top-right" aria-label="Top right">↗</button><button data-anchor="center" aria-label="Center">◎</button><button data-anchor="bottom-left" aria-label="Bottom left">↙</button><button data-anchor="bottom-right" aria-label="Bottom right">↘</button></div></div>
+      <label class="setting"><span class="setting-label">Overlay size <output id="scale-value">100%</output></span><input id="scale-control" type="range" min="50" max="150" step="5" value="100"/></label>
+      <label class="toggle-label"><input type="checkbox" id="show-flight" checked/><span>Flight numbers</span></label>
+      <label class="toggle-label"><input type="checkbox" id="show-label" checked/><span>My disc's nickname</span></label>
+      <hr/>
+      <div id="selected-disc" class="selected-disc"></div>
+      <hr/>
+      <button class="primary export-button" data-action="export">Save overlay PNG ↓</button>
+      <p class="export-hint">A transparent still of this exact state.<br>Not a video export or timeline.</p>
+      <p class="local-note">Photos stay on your device. Keep a backup before clearing browser data.</p>
+    </aside>
+  </div>
+  <button class="back-to-editor" data-action="clean">← Back to editor</button>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="disc-dialog" aria-labelledby="disc-dialog-title">
+    <form id="disc-form">
+      <div class="dialog-heading"><div><span class="eyebrow">YOUR COLLECTION</span><h2 id="disc-dialog-title">Add your disc</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close disc editor">×</button></div>
+      <div class="disc-form-grid"><div>
+        <div id="photo-drop" class="photo-drop"><div id="photo-preview"></div><label class="photo-upload">Choose your exact disc's photo<input id="photo-file" type="file" accept="image/jpeg,image/png,image/webp"/></label><small>Or drop it here · JPG, PNG, WebP · up to 12 MB</small></div>
+        <p class="subtle">Full photo, no automatic crop. Transparent PNGs work too.</p><button type="button" class="text-button" data-action="remove-photo">Remove photo</button>
+      </div><div class="disc-fields">
+        <label>Manufacturer<input name="manufacturer" required maxlength="80" placeholder="Discraft" autocomplete="off"/></label>
+        <label>Disc / mold name<input name="mold" required maxlength="80" placeholder="Buzzz" autocomplete="off"/></label>
+        <label>Nickname <span class="optional">optional</span><input name="label" maxlength="80" placeholder="My pink swirly one" autocomplete="off"/></label>
+        <div class="two-fields"><label>Plastic <span class="optional">optional</span><input name="plastic" maxlength="60" placeholder="ESP"/></label><label>Weight <span class="optional">optional</span><input name="weight" maxlength="30" placeholder="177 g"/></label></div>
+        <fieldset><legend>Flight numbers</legend><div class="flight-fields"><label>Speed<input name="speed" type="number" step="any" required/></label><label>Glide<input name="glide" type="number" step="any" required/></label><label>Turn<input name="turn" type="number" step="any" required/></label><label>Fade<input name="fade" type="number" step="any" required/></label></div></fieldset>
+      </div></div>
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="quiet" data-action="close-dialog">Cancel</button><button type="submit" class="primary" id="save-disc">Save disc</button></div>
+    </form>
+  </dialog>
+  <input id="context-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" hidden/>
+  <input id="restore-file" type="file" accept="application/json,.json" hidden/>
+  <noscript><p class="warning">This local graphics workbench needs JavaScript. No server or account is required.</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
