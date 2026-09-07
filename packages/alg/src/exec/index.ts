@@ -7,6 +7,7 @@
 
 export * from './contract';
 export * from './board';
+export * from './mounts';
 export * from './sink';
 export * from './compile';
 export * from './gateway';
