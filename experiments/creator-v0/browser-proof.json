@@ -1,0 +1,52 @@
+{
+  "passed": 30,
+  "checks": [
+    "seeded shelf has five discs",
+    "initial battle has three blank scores, no highlight or winner",
+    "opaque-origin storage failure is explicitly shown, not falsely Saved",
+    "manual decimal and negative scores retained",
+    "scores do not infer winner or highlight",
+    "editing focus, highlight, and winner remain independent",
+    "four-card composition prevents accidental fifth add",
+    "reorder keeps entry score and emphasis identity",
+    "PNG exported at 1920 x 1080 with transparent canvas",
+    "clear highlight leaves winner unchanged",
+    "DiscCard uses current selection without inheriting score",
+    "manual collection add retains exact uploaded photo identity",
+    "photo resize preserves full aspect ratio",
+    "preview preserves entire uploaded frame without clipping",
+    "downloaded backup contains actual embedded image bytes",
+    "all four source-image corners survive local photo processing",
+    "another of this mold reuses facts but clears photo",
+    "same mold with different photo remains a separate physical disc",
+    "two same-mold photo bytes do not alias",
+    "local preview image loads behind graphic",
+    "preview background is absent from exported card PNG",
+    "clean view hides authoring controls",
+    "delete removes only selected physical instance",
+    "invalid backup does not replace collection",
+    "actual backup restore returns discs and composition",
+    "shelf search distinguishes physical instances",
+    "Escape closes edit dialog",
+    "mobile viewport has no horizontal document overflow",
+    "empty collection is usable, with export disabled",
+    "no uncaught browser exceptions"
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "mode": "in-memory HTML; opaque origin",
+  "nativeIndexedDBVerified": false,
+  "browser": "144.0.7559.96",
+  "viewportChecks": [
+    [
+      1536,
+      1000
+    ],
+    [
+      390,
+      844
+    ]
+  ],
+  "photoEvidence": "Synthetic raster fixtures, not real owner-disc photos. Full-frame image fidelity tested.",
+  "exportEvidence": "Actual UI downloads; 1920x1080 PNG transparency and JSON contents checked."
+}
