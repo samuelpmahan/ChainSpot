@@ -79,7 +79,7 @@ for(const name of readdirSync(corpusRoot).sort()){
   const input=files.find(f=>basename(f).toLowerCase().includes('-full.')) ?? files[0];
   const warm=await executeNodeCanonicalInputTick(resolve(input));
   const stage=createStage(yaml); const results=stage.run({pxc:warm.pxc});
-  const ok=results.find(r=>r.status==='succeeded'&&r.run);
+  const ok=results.find(r=>r.status==='completed'&&r.run);
   if(!ok) throw new Error(`${name}: stage failed: ${JSON.stringify(results.map(r=>({variant:r.variant,status:r.status,error:r.error})))}`);
   let candidates;
   for(const tick of ok.run.ticks??[]) for(const calc of tick.calculations??[]) if(calc.output?.candidates) candidates=calc.output.candidates;
