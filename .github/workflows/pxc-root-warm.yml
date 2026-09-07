@@ -22,6 +22,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace @chainspot/alg
+      - name: Prepare unit-test config
+        run: npx svelte-kit sync
       - name: Test root mounts
         run: npx vitest run tests/unit/pxcRootMounts.test.ts
       - name: Warm all dev PxC roots
