@@ -106,6 +106,8 @@ function assemble({plates,plateBorders,plateDigits,digitLoops,acceptance}: Assem
  return {candidates,incomplete};
 }
 
+export type BadgeAssemblyResult = ReturnType<typeof assemble>;
+
 export const BadgeAssemblyFn = {
  selectComponents: pxFn<SelectArgs,PlateSelection>('fn.s1.exp.badgeAssembly.selectComponents'),
  findRelated: pxFn<RelatedArgs,Relations>('fn.s1.exp.badgeAssembly.findRelated'),

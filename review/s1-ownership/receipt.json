@@ -1,0 +1,248 @@
+{
+  "rule": "outer-border-bbox",
+  "reviewMarginPx": 8,
+  "marginPurpose": "view-only exterior context; not an ownership allowance",
+  "partition": "every raster pixel exactly once",
+  "source": "../s1-assembly-run/source.png",
+  "executionMs": 912.8246479999998,
+  "owned": 37295,
+  "muted": 3949,
+  "remaining": 2645826,
+  "total": 2687070,
+  "perBadge": [
+    {
+      "id": "badge-candidate:black-component-115:white-component-12",
+      "number": "1",
+      "bbox": [
+        728,
+        424,
+        54,
+        42
+      ],
+      "components": 2096,
+      "unaccountedButOwned": 172,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-146:white-component-17",
+      "number": "2",
+      "bbox": [
+        551,
+        557,
+        54,
+        42
+      ],
+      "components": 2087,
+      "unaccountedButOwned": 181,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-167:white-component-21",
+      "number": "3",
+      "bbox": [
+        580,
+        645,
+        54,
+        42
+      ],
+      "components": 2073,
+      "unaccountedButOwned": 195,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-181:white-component-26",
+      "number": "4",
+      "bbox": [
+        417,
+        719,
+        54,
+        42
+      ],
+      "components": 2103,
+      "unaccountedButOwned": 165,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-187:white-component-30",
+      "number": "18",
+      "bbox": [
+        835,
+        753,
+        55,
+        42
+      ],
+      "components": 2062,
+      "unaccountedButOwned": 248,
+      "excluded": 2310
+    },
+    {
+      "id": "badge-candidate:black-component-194:white-component-36",
+      "number": "5",
+      "bbox": [
+        524,
+        788,
+        54,
+        42
+      ],
+      "components": 2068,
+      "unaccountedButOwned": 200,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-200:white-component-44",
+      "number": "6",
+      "bbox": [
+        524,
+        860,
+        54,
+        42
+      ],
+      "components": 2066,
+      "unaccountedButOwned": 202,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-209:white-component-49",
+      "number": "17",
+      "bbox": [
+        938,
+        897,
+        54,
+        42
+      ],
+      "components": 2042,
+      "unaccountedButOwned": 226,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-212:white-component-54",
+      "number": "16",
+      "bbox": [
+        1113,
+        941,
+        55,
+        42
+      ],
+      "components": 2052,
+      "unaccountedButOwned": 258,
+      "excluded": 2310
+    },
+    {
+      "id": "badge-candidate:black-component-213:white-component-57",
+      "number": "7",
+      "bbox": [
+        417,
+        958,
+        54,
+        42
+      ],
+      "components": 2106,
+      "unaccountedButOwned": 162,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-224:white-component-62",
+      "number": "8",
+      "bbox": [
+        434,
+        1043,
+        54,
+        42
+      ],
+      "components": 2065,
+      "unaccountedButOwned": 203,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-305:white-component-69",
+      "number": "15",
+      "bbox": [
+        879,
+        1252,
+        55,
+        42
+      ],
+      "components": 2036,
+      "unaccountedButOwned": 274,
+      "excluded": 2310
+    },
+    {
+      "id": "badge-candidate:black-component-324:white-component-72",
+      "number": "9",
+      "bbox": [
+        311,
+        1279,
+        54,
+        42
+      ],
+      "components": 2063,
+      "unaccountedButOwned": 205,
+      "excluded": 2268
+    },
+    {
+      "id": "badge-candidate:black-component-370:white-component-77",
+      "number": "14",
+      "bbox": [
+        676,
+        1401,
+        56,
+        42
+      ],
+      "components": 2129,
+      "unaccountedButOwned": 223,
+      "excluded": 2352
+    },
+    {
+      "id": "badge-candidate:black-component-458:white-component-91",
+      "number": "13",
+      "bbox": [
+        545,
+        1510,
+        55,
+        42
+      ],
+      "components": 2032,
+      "unaccountedButOwned": 278,
+      "excluded": 2310
+    },
+    {
+      "id": "badge-candidate:black-component-471:white-component-95",
+      "number": "10",
+      "bbox": [
+        167,
+        1530,
+        57,
+        42
+      ],
+      "components": 2108,
+      "unaccountedButOwned": 286,
+      "excluded": 2394
+    },
+    {
+      "id": "badge-candidate:black-component-503:white-component-104",
+      "number": "12",
+      "bbox": [
+        348,
+        1619,
+        55,
+        42
+      ],
+      "components": 2040,
+      "unaccountedButOwned": 270,
+      "excluded": 2310
+    },
+    {
+      "id": "badge-candidate:black-component-677:white-component-131",
+      "number": "11",
+      "bbox": [
+        214,
+        1793,
+        54,
+        42
+      ],
+      "components": 2067,
+      "unaccountedButOwned": 201,
+      "excluded": 2268
+    }
+  ]
+}

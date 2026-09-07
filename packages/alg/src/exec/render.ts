@@ -54,6 +54,9 @@ function inspector(data: any, render: typeof renderPartsSvg, collect: typeof pix
   const value=data.outputs[operation.selectedIndex].output;
   const collection=Array.isArray(value)?value:value.candidates??value.components;
   const chosen=collection?collection[item.selectedIndex]:value;
+  const selected=data.outputs[operation.selectedIndex];
+  document.getElementById('details')!.textContent=JSON.stringify({tick:selected.tick,call:selected.call,args:selected.args,into:selected.into,
+   reading:chosen?.reading},null,2);
   layers=collect(chosen);visible=layers.map(()=>true);layersBox.replaceChildren();
   layers.forEach((layer,i)=>{const label=document.createElement('label'),box=document.createElement('input');box.type='checkbox';box.checked=true;box.onchange=()=>{visible[i]=box.checked;paint();};label.append(box,document.createTextNode(layer.name));label.style.color=layer.color;layersBox.append(label);});
   paint();
@@ -78,7 +81,7 @@ export function pixelLayers(value: unknown): PixelLayer[] {
   function visit(node:any,path:string) {
    if(!node || typeof node!=='object')return;
    if(node.kind==='cropped-raster')return;
-   if(node.kind==='component'||node.kind==='mask') {
+   if(node.kind==='component'||node.kind==='mask'||node.kind==='pixel-set') {
     const identity=node.address??path;if(seen.has(identity))return;seen.add(identity);
     const pixels=node.kind==='mask'?Array.from(node.pixels as ArrayLike<number>).flatMap((v:number,i:number)=>v?[i]:[]):node.pixels;
     layers.push({name:`${path} / ${node.id}`,pixels,color:palette[layers.length%palette.length]});return;

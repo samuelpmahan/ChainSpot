@@ -84,4 +84,54 @@ Ticks:
         args:
           acceptance: border-and-digit-material
         into: px.s1.exp.badgeAssembly.badgeCandidates
-# Partial S1: digit recognition and final Badge/muted/remaining outputs follow.
+  - name: WhiteDigitRecognition
+    Calculations:
+      - call: fn.s1.whiteDigits.prepare
+        with:
+          badges: px.s1.exp.badgeAssembly.badgeCandidates
+        args:
+          # Existing DEFAULT_DIGITS_KNOBS; explicit here for inspection.
+          knobs:
+            minComponentArea: 6
+            heightRatioMin: 0.5
+            wideRatio: 0.95
+            valleySearchLo: 0.3
+            valleySearchHi: 0.7
+            digitW: 24
+            digitH: 32
+            confidenceFloorDivisor: 8
+            labelAmbiguityMargin: 0.045
+        into: px.s1.whiteDigits.prepared
+      - call: fn.s1.whiteDigits.match
+        with:
+          prepared: px.s1.whiteDigits.prepared
+          model: px.s1.whiteDigits.model
+        args: {}
+        into: px.s1.whiteDigits.recognizedBadges
+  - name: BadgeOutputs
+    Calculations:
+      - call: fn.s1.badges.declareOwnership
+        with:
+          recognized: px.s1.whiteDigits.recognizedBadges
+        args: {}
+        into: px.badges.objects
+      - call: fn.s1.badges.ownedPixels
+        with:
+          badges: px.badges.objects
+          raster: px.course.canonicalPixels
+        args: {}
+        into: px.badges.px
+      - call: fn.s1.badges.mutedPixels
+        with:
+          badges: px.badges.objects
+          owned: px.badges.px
+          raster: px.course.canonicalPixels
+        args: {}
+        into: px.badges.muted
+      - call: fn.s1.badges.remainingPixels
+        with:
+          owned: px.badges.px
+          muted: px.badges.muted
+          raster: px.course.canonicalPixels
+        args: {}
+        into: px.remaining.afterBadges

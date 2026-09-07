@@ -1,0 +1,23 @@
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),sharp=require('sharp');
+const {PNG}=require('pngjs');
+const {createExecBoard}=require('../packages/alg/dist/exec/board');
+const {createStage}=require('../packages/alg/dist/stages/S1/exp/badge-assembly/stage');
+const {renderPqlHtml,renderPartsSvg,pixelLayers}=require('../packages/alg/dist/exec/render');
+const [input,out,reference]=process.argv.slice(2);fs.mkdirSync(out,{recursive:true});
+const bytes=fs.readFileSync(input),image=PNG.sync.read(bytes),pxc=createExecBoard();
+pxc.set('px.course.canonicalPixels',{imageId:crypto.createHash('sha256').update(bytes).digest('hex'),widthPx:image.width,heightPx:image.height,rgba:new Uint8ClampedArray(image.data)});
+const yaml=fs.readFileSync(path.join(__dirname,'../packages/alg/src/stages/S1/exp/badge-assembly/PrincipleComponentRender.yaml'),'utf8');
+const result=createStage(yaml).run({pxc})[0];if(result.status!=='completed')throw Error(result.error);
+const output=result.pxc.get('px.s1.whiteDigits.recognizedBadges');
+const badges=output.candidates;
+const old=reference?JSON.parse(fs.readFileSync(reference)).assembledWhiteAdapter.badges:null;
+const readings=badges.map(b=>({id:b.id,value:b.reading.value,status:b.reading.status,blackLoopComponents:b.digitLoops.reduce((n,r)=>n+r.matches.length,0),normalizedHashes:b.reading.digits.map(d=>crypto.createHash('sha256').update(d.normalized).digest('hex'))}));
+const parity=old?readings.map(b=>{const prev=old.find(p=>p.id===b.id);return {id:b.id,valueEqual:b.value===prev?.value,masksEqual:JSON.stringify(b.normalizedHashes)===JSON.stringify(prev?.readings.map(d=>d.normalizedSha256))};}):null;
+const receipt={source:input,sourceSha256:crypto.createHash('sha256').update(bytes).digest('hex'),executionMs:result.executionMs,ticks:result.run.Ticks.map(t=>({name:t.name,calculations:t.Calculations.map(c=>({call:c.actualCall,args:c.args,with:c.with,into:c.into}))})),readings,parity,incomplete:output.incomplete.length};
+fs.writeFileSync(path.join(out,'receipt.json'),JSON.stringify(receipt,null,2));
+// Inspector includes every PCR calculation; it reads recorded values only.
+fs.writeFileSync(path.join(out,'inspector.html'),renderPqlHtml(result.run,image.width,image.height));
+let svg='<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="960"><rect width="100%" height="100%" fill="#17140d"/><text x="20" y="32" fill="#ead9b6" font-family="monospace" font-size="22">S1 PCR · white digit recognition · actual assembled Parts</text>';
+for(let i=0;i<badges.length;i++){const b=badges[i],x=10+(i%6)*200,y=55+Math.floor(i/6)*300;svg+=`<g transform="translate(${x} ${y})"><rect width="190" height="288" fill="#211c13" stroke="#74603a"/><text x="10" y="25" font-family="monospace" font-size="20" fill="#ead9b6">Read: ${b.reading.value??'UNREAD'}</text><svg x="10" y="42" width="170" height="205">${renderPartsSvg(pixelLayers(b),image.width,image.height)}</svg><text x="10" y="272" font-family="monospace" font-size="13" fill="#ead9b6">Black loops: ${readings[i].blackLoopComponents}</text></g>`;}svg+='</svg>';
+fs.writeFileSync(path.join(out,'badges.svg'),svg);
+sharp(Buffer.from(svg)).png().toFile(path.join(out,'badges.png')).then(()=>console.log(JSON.stringify({badges:badges.length,readings:readings.map(b=>b.value),ticks:receipt.ticks.map(t=>t.name),parity:parity?.every(p=>p.valueEqual&&p.masksEqual),executionMs:receipt.executionMs})));
