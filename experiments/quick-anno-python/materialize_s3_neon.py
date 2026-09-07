@@ -74,10 +74,25 @@ def main() -> None:
     tees_strip = crops(canonical, ordered(snapshot['tees']), GREEN)
     # Rejections get more surrounding context than acceptances: the question a
     # rejection panel has to answer is "what IS this thing", not "where was it".
+    # Every bucket gets one, so no drop is judged by its bounding box alone.
     voted_strip = crops(
         canonical,
         [(item['frame']['bbox'], str(item['order'])) for item in voted_out],
         MAGENTA,
+        pad=52,
+        cell=192,
+    )
+    muted_strip = crops(
+        canonical,
+        [(ring['bbox'], str(order)) for order, ring in enumerate(rings['excludedByBadge'], 1)],
+        RED,
+        pad=52,
+        cell=192,
+    )
+    unframed_strip = crops(
+        canonical,
+        [(ring['bbox'], str(order)) for order, ring in enumerate(family['unframed'], 1)],
+        ORANGE,
         pad=52,
         cell=192,
     )
@@ -105,6 +120,11 @@ def main() -> None:
         panel('7  ACTUAL REMAINING — transparent TeePx over checkerboard', remaining_view),
         panel(f"8  WHAT EACH ACCEPTED TEE IS — crop per object ({counts['tees']})", tees_strip),
         panel(f'9  WHAT WAS VOTED OUT — crop per rejected frame ({len(voted_out)})', voted_strip),
+        panel(
+            f"10  WHAT THE BADGE MUTE EXCLUDED — crop per ring ({counts['excludedByBadge']})",
+            muted_strip,
+        ),
+        panel(f"11  WHAT HAD NO ENCLOSING FRAME — crop per ring ({counts['unframed']})", unframed_strip),
     ]
 
     out = out_dir / 's3-neon-correctness-sheet.png'
@@ -118,6 +138,8 @@ def main() -> None:
     remaining_view.save(out_dir / 's3-remaining-checkerboard.png')
     tees_strip.save(out_dir / 's3-tee-crops.png')
     voted_strip.save(out_dir / 's3-voted-out-crops.png')
+    muted_strip.save(out_dir / 's3-badge-muted-crops.png')
+    unframed_strip.save(out_dir / 's3-unframed-crops.png')
     print(out)
 
 

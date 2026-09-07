@@ -125,10 +125,23 @@ def crops(
         )
         tile = image.crop(box).convert('RGBA')
         side = max(tile.width, tile.height, 1)
+        offset_x = (side - tile.width) // 2
+        offset_y = (side - tile.height) // 2
         square = Image.new('RGBA', (side, side), (0, 0, 0, 255))
-        square.alpha_composite(tile, ((side - tile.width) // 2, (side - tile.height) // 2))
+        square.alpha_composite(tile, (offset_x, offset_y))
         tile = square.resize((cell, cell), Image.Resampling.NEAREST)
         draw = ImageDraw.Draw(tile)
+        # Mark the subject inside the tile. Without this a crop says "something
+        # near here", and a neighbouring object is easily mistaken for the one
+        # being judged.
+        scale = cell / side
+        mark_x = (x - box[0] + offset_x) * scale
+        mark_y = (y - box[1] + offset_y) * scale
+        draw.rectangle(
+            [mark_x - 1, mark_y - 1, mark_x + width * scale + 1, mark_y + height * scale + 1],
+            outline=color,
+            width=2,
+        )
         draw.rectangle([0, 0, cell - 1, cell - 1], outline=color, width=2)
         if text:
             draw.rectangle([2, 2, 26, 15], fill=(0, 0, 0, 230))

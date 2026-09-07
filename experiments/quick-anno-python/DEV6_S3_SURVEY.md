@@ -93,6 +93,68 @@ screenshot was captured and cropped, and this survey did not establish the
 mechanism. AlexClark is already on record as the course `screenChrome.ts` was
 tuned against.
 
+## The constant `excludedByBadge: 3` — solved, and it is correct behaviour
+
+Three rings excluded by Badge mute on six different courses, at six different
+zoom levels, looked like six coincidences. It is not a coincidence: the crops
+show the same three badges every time — **4, 14 and 10** — and the rings are
+the *enclosed counters of the digits*.
+
+On a course numbered 1-18 the counters that survive the `tee-rect` elongation
+filter are the `4` in hole 4, the `4` in hole 14 and the `0` in hole 10.
+Round counters (`6`, `8`, `9`, `16`, `18`, and the second `8` in 8) classify
+as `diamond` and die one filter earlier, in `diamondDropped`. Three is
+therefore *structural* for any 1-18 course, not an artifact.
+
+This is the Badge mute doing exactly its job, on exactly the failure mode the
+CV engrams say has cost this project repeatedly: digit glyphs masquerading as
+tee evidence. Receipts: `s3-badge-muted-crops.png` on every course
+(DashsTrack reads 4/14/10, HeritagePark reads 10/4/14).
+
+## The unframed bucket, and the one ring in it that matters
+
+Screening every unframed ring against its own course's accepted tee-ring
+profile (inner-hole width, height and area — and for DashsTrack and AlexClark
+recomputed from real pads only, since their accepted sets contain chrome and
+would otherwise widen their own reference):
+
+```text
+DashsTrack     0 of  4 unframed rings match the tee profile
+Lenard         0 of  6
+TowneLake      0 of  4
+NorthPark      0 of  3
+HeritagePark   1 of 11   <- [1219,1511,9,9] holeArea 46, ringFrac 0.75
+AlexClark      0 of  3
+```
+
+Everything else in the bucket is correctly dropped: parking lots, rooftops and
+driveways with dark cars as enclosed holes, and the counters of the letters in
+`Maps` along the bottom edge.
+
+The single exception is on HeritagePark, the course that finds 14 Tee objects
+for 18 holes. Ring `[1219,1511,9,9]`, holeArea 46, sits inside Heritage's
+accepted profile on all three measures (w 6-10, h 5-10, area 45-80), 591px
+above the bottom edge — nowhere near the chrome strip — and its `ringFrac` of
+0.75 says a quarter of its enclosing band is not bright, which is why no
+enclosing component was found. The crop marks it on a small pad-shaped bright
+object adjacent to badge 15.
+
+**What is claimed:** a tee-profile ring, in tee territory, dies in the
+unframed bucket on HeritagePark, and the completeness invariant says every
+such drop must be classified.
+
+**What is not claimed:** that this object is hole 15's tee. Identity precedes
+geometry, and badge-ray adjudication is not run in this lane. Badge chrome
+stays the competing hypothesis until something better than a crop rules on it.
+
+## A tool fix this survey forced
+
+`neon.crops` originally outlined the tile, not the subject. On Heritage's
+unframed ring 5 that was the difference between "a badge" and "a pad beside a
+badge" — two different findings. Crops now draw the bbox at its scaled
+position inside the tile, so every rejection crop says which object it is
+about rather than "something near here".
+
 ## What this does not say
 
 - It does not say how many holes each course *should* find at S3. Recovery is
@@ -102,9 +164,8 @@ tuned against.
 - It does not propose a fix. No threshold was moved, no selector edited,
   nothing registered into `S3_PLAN`. This lane proves the investigation
   pattern; the algorithm is the owner's call.
-- The constant `excludedByBadge: 3` across six different courses is a
-  regularity with no offered explanation. Six coincidences would be
-  surprising; it is recorded as an open question, not smoothed over.
+- It does not establish the identity of HeritagePark's unframed tee-profile
+  ring beyond "pad-shaped bright object adjacent to badge 15".
 
 ## Why the crops were necessary
 
