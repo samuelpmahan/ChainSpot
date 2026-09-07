@@ -1,0 +1,19 @@
+PrincipleComponentRender: NumberTemplateSensitivity
+Ticks:
+  - name: TightNumberTemplates
+    Calculations:
+      - call: fn.s1.templates.normalize
+        with: {samples: px.s1.discovery.material, labels: px.s1.discovery.labels}
+        args: {width: 32, height: 24}
+        into: px.s1.templates.reference
+  - name: PerturbedQueries
+    Calculations:
+      - call: fn.s1.templates.queries
+        with: {templates: px.s1.templates.reference}
+        into: px.s1.templates.queries
+  - name: NumberMatching
+    Calculations:
+      - call: fn.s1.templates.match
+        with: {templates: px.s1.templates.reference, queries: px.s1.templates.queries}
+        args: {metric: dice}
+        into: px.s1.templates.readings

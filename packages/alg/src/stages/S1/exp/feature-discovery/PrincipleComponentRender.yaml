@@ -1,0 +1,39 @@
+PrincipleComponentRender: S1FeatureDiscovery
+Ticks:
+  - name: UnaccountedDigitMaterial
+    Calculations:
+      - call: fn.s1.discovery.material
+        with: {badges: px.s1.exp.badgeAssembly.badgeCandidates}
+        args:
+          # Review guesses, not calibrated bounds.
+          insetPx: 2
+          cornerFraction: 0.15
+          canvasWidth: 32
+          canvasHeight: 24
+        into: px.s1.discovery.material
+  - name: FeatureMeasurements
+    Calculations:
+      - call: fn.s1.discovery.features
+        with:
+          samples: px.s1.discovery.material
+          labels: px.s1.discovery.labels
+        args: {columns: 4, rows: 3, canvasWidth: 32, canvasHeight: 24}
+        into: px.s1.discovery.features
+  - name: FeatureCombinations
+    Calculations:
+      - call: fn.s1.discovery.mine
+        with: {table: px.s1.discovery.features}
+        args: {minSupport: 2, buckets: 4096, maxTriples: 20000}
+        into: px.s1.discovery.combinations
+  - name: DiscoveryModel
+    Calculations:
+      - call: fn.s1.discovery.model
+        with: {table: px.s1.discovery.features}
+        args: {method: tree, maxDepth: 6, rounds: 12}
+        into: px.s1.discovery.model
+  - name: FeatureSensitivity
+    Calculations:
+      - call: fn.s1.discovery.sensitivity
+        with: {samples: px.s1.discovery.material, table: px.s1.discovery.features}
+        args: {columns: 4, rows: 3, canvasWidth: 32, canvasHeight: 24}
+        into: px.s1.discovery.sensitivity

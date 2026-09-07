@@ -1,0 +1,157 @@
+{
+  "sourceCommit": "56076112878edf4ac167d97c66f9f83082abe2b1",
+  "sourceImage": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+  "raster": {
+    "width": 1290,
+    "height": 2083
+  },
+  "ticks": 3,
+  "calculations": [
+    {
+      "tick": "BlackMask",
+      "call": "fn.s1.exp.maskComponents.selectHsvMask",
+      "args": {
+        "polarity": "black",
+        "valueMax": 45,
+        "alpha": "ignored"
+      },
+      "into": "px.s1.exp.maskComponents.part.blackMask",
+      "collections": {}
+    },
+    {
+      "tick": "BlackMask",
+      "call": "fn.s1.exp.maskComponents.group8Connected",
+      "args": {
+        "connectivity": 8,
+        "retainSingletons": true
+      },
+      "into": "px.s1.exp.maskComponents.part.blackComponents",
+      "collections": {
+        "components": 952
+      }
+    },
+    {
+      "tick": "WhiteMask",
+      "call": "fn.s1.exp.maskComponents.selectHsvMask",
+      "args": {
+        "polarity": "white",
+        "valueMin": 210,
+        "saturationMax": 45,
+        "alpha": "ignored"
+      },
+      "into": "px.s1.exp.maskComponents.part.whiteMask",
+      "collections": {}
+    },
+    {
+      "tick": "WhiteMask",
+      "call": "fn.s1.exp.maskComponents.group8Connected",
+      "args": {
+        "connectivity": 8,
+        "retainSingletons": true
+      },
+      "into": "px.s1.exp.maskComponents.part.whiteComponents",
+      "collections": {
+        "components": 176
+      }
+    },
+    {
+      "tick": "BadgeAssembly",
+      "call": "fn.s1.exp.badgeAssembly.selectComponents",
+      "args": {
+        "predicate": "plate-bbox-and-fill",
+        "minWidth": 34,
+        "maxWidth": 78,
+        "minHeight": 24,
+        "maxHeight": 54,
+        "minAspect": 1,
+        "maxAspect": 2.4,
+        "minFill": 0.55
+      },
+      "into": "px.s1.exp.badgeAssembly.plates",
+      "collections": {
+        "selected": 18,
+        "rejected": 934
+      }
+    },
+    {
+      "tick": "BadgeAssembly",
+      "call": "fn.s1.exp.badgeAssembly.findRelated",
+      "args": {
+        "anchorRole": "plate",
+        "predicate": "candidate-bbox-contains-anchor"
+      },
+      "into": "px.s1.exp.badgeAssembly.plateBorders",
+      "collections": {
+        "rows": 18
+      }
+    },
+    {
+      "tick": "BadgeAssembly",
+      "call": "fn.s1.exp.badgeAssembly.findRelated",
+      "args": {
+        "anchorRole": "plate",
+        "predicate": "anchor-bbox-contains-candidate"
+      },
+      "into": "px.s1.exp.badgeAssembly.plateDigits",
+      "collections": {
+        "rows": 18
+      }
+    },
+    {
+      "tick": "BadgeAssembly",
+      "call": "fn.s1.exp.badgeAssembly.findRelated",
+      "args": {
+        "anchorRole": "related-component",
+        "predicate": "anchor-bbox-contains-candidate"
+      },
+      "into": "px.s1.exp.badgeAssembly.digitLoops",
+      "collections": {
+        "rows": 27
+      }
+    },
+    {
+      "tick": "BadgeAssembly",
+      "call": "fn.s1.exp.badgeAssembly.assemble",
+      "args": {
+        "acceptance": "border-and-digit-material"
+      },
+      "into": "px.s1.exp.badgeAssembly.badgeCandidates",
+      "collections": {
+        "candidates": 18,
+        "incomplete": 0
+      }
+    }
+  ],
+  "candidates": 18,
+  "incomplete": 0,
+  "selectedCandidate": "badge-candidate:black-component-181:white-component-26",
+  "parts": [
+    {
+      "role": "Part.plate.part / black-component-181",
+      "pixelCount": 1468,
+      "color": "#ffbf50"
+    },
+    {
+      "role": "Part.border.part / white-component-26",
+      "pixelCount": 459,
+      "color": "#50d6ff"
+    },
+    {
+      "role": "Part.digits.0.part / white-component-28",
+      "pixelCount": 157,
+      "color": "#ffffff"
+    },
+    {
+      "role": "Part.digitLoops.0.matches.0.part / black-component-185",
+      "pixelCount": 19,
+      "color": "#ff7b98"
+    }
+  ],
+  "frame": [
+    413,
+    715,
+    62,
+    50
+  ],
+  "browserInteractionVerified": false
+}

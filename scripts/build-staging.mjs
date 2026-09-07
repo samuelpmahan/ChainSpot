@@ -32,7 +32,7 @@ try {
 	if (result.error) throw result.error;
 	if (result.status !== 0)
 		throw new Error(`staging build exited ${result.status ?? 'without status'}`);
-	for (const page of ['build/index.html', 'build/labui-s0/snapshot.json', 'build/lab.html', 'build/lab/pcr.html']) {
+	for (const page of ['build/index.html', 'build/labui-s0/snapshot.json', 'build/labui-s0/CroppedImage.rgba', 'build/parts.html', 'build/lab.html', 'build/lab/pcr.html']) {
 		if (!existsSync(resolve(page))) throw new Error(`staging build omitted ${page}`);
 	}
 	console.log('STAGING_LAB_PRESENT build/lab.html build/lab/pcr.html');
