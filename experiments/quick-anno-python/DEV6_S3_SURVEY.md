@@ -36,8 +36,8 @@ AlexClark         29     6    23     3    20    17     3     3    14   3111
 ```
 
 `balanced: true` on all six — every enclosed ring leaves through exactly one
-named door. Note `bMute` is **3 on all six courses**; that regularity is
-unexplained and is flagged below rather than explained away.
+named door. `bMute` is **3 on all six courses**, which looked like six
+coincidences and is not one; see "The constant `excludedByBadge: 3`" below.
 
 ## What the identity crops show
 
