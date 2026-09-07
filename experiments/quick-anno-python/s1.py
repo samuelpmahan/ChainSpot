@@ -1,59 +1,50 @@
+"""S1 investigation: Badge ownership and mute, as first-class Python PxC / PCR / PQL.
+
+Production executes S1. Python consumes the resulting material and performs a
+bounded experimental Calculation over it. See S1_CHECKPOINT.md.
+"""
+
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-PKG = ROOT / "packages" / "quick_anno_py"
-sys.path.insert(0, str(PKG))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages' / 'quick_anno_py'))
 
 from chainspot_quick_anno import Calculation, Part, PCR, PQL, PxC
+from chainspot_quick_anno.investigation import StageInvestigation
 
-DEFAULT_IMAGE = ROOT.parent / "chainspot-corpus" / "dev" / "DashsTrack" / "DashsTrack-full.jpg"
-OUT = Path(__file__).with_name("generated") / "DashsTrack-S1"
-SNAPSHOT = OUT / "snapshot.json"
-NEON_MATERIALIZER = Path(__file__).with_name("materialize_s1_neon.py")
-
-
-def export_real_s1(image: Path) -> dict:
-    OUT.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["node", str(Path(__file__).with_name("export_s1_snapshot.cjs")), str(image), str(OUT)],
-        cwd=ROOT,
-        check=True,
-    )
-    return json.loads(SNAPSHOT.read_text())
+INV = StageInvestigation('S1', Path(__file__).parent)
 
 
 def build_investigation(snapshot: dict) -> tuple[PxC, PCR]:
     pxc = PxC()
 
-    badges = Part("px.badges.objects")
-    owned = Part("px.badges.px")
-    muted = Part("px.badges.muted")
-    summary = Part("scratch.s1.ownershipSummary")
+    badges = Part('px.badges.objects')
+    owned = Part('px.badges.px')
+    muted = Part('px.badges.muted')
+    summary = Part('scratch.s1.ownershipSummary')
 
-    pxc.set(badges, snapshot["badges"])
-    pxc.set(owned, snapshot["ownedPixels"])
-    pxc.set(muted, snapshot["mutedPixels"])
+    pxc.set(badges, snapshot['badges'])
+    pxc.set(owned, snapshot['ownedPixels'])
+    pxc.set(muted, snapshot['mutedPixels'])
 
     summarize = Calculation(
-        "fn.quickAnno.s1.summarizeOwnership",
+        'fn.quickAnno.s1.summarizeOwnership',
         lambda args: {
-            "badges": len(args["badges"]),
-            "ownedPx": len(args["owned"]),
-            "mutedPx": len(args["muted"]),
-            "addedMutePx": len(set(args["muted"]) - set(args["owned"])),
+            'badges': len(args['badges']),
+            'ownedPx': len(args['owned']),
+            'mutedPx': len(args['muted']),
+            'addedMutePx': len(set(args['muted']) - set(args['owned'])),
         },
     )
 
-    pcr = PCR("S1.quick-anno")
+    pcr = PCR('S1.quick-anno')
     pcr.calc(
-        "InspectOwnership",
+        'InspectOwnership',
         summarize,
-        id="summarizeOwnership",
+        id='summarizeOwnership',
         badges=badges,
         owned=owned,
         muted=muted,
@@ -64,24 +55,21 @@ def build_investigation(snapshot: dict) -> tuple[PxC, PCR]:
 
 
 def main() -> None:
-    image = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else DEFAULT_IMAGE.resolve()
-    snapshot = export_real_s1(image)
+    snapshot = INV.export(INV.image_from_argv(sys.argv))
     pxc, pcr = build_investigation(snapshot)
 
-    summary = PQL.part("scratch.s1.ownershipSummary").one(pxc)
-    (OUT / "python-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    (OUT / "python-S1.mmd").write_text(pcr.mermaid())
-
-    subprocess.run([sys.executable, str(NEON_MATERIALIZER), str(SNAPSHOT)], check=True, cwd=ROOT)
+    summary = PQL.part('scratch.s1.ownershipSummary').one(pxc)
+    INV.emit(summary, pcr)
+    INV.materialize()
 
     print(json.dumps(summary, indent=2))
-    print("\nCorrectness renders:")
-    for key, file in snapshot["panels"].items():
-        print(f"  {key}: {OUT / file}")
-    print(f"  neon: {OUT / 's1-neon-correctness-sheet.png'}")
-    print(f"\nPython PCR view: {OUT / 'python-S1.mmd'}")
-    print(f"Snapshot: {SNAPSHOT}")
+    print('\nCorrectness renders:')
+    for key, file in snapshot['panels'].items():
+        print(f'  {key}: {INV.out_dir / file}')
+    print(f"  neon: {INV.out_dir / 's1-neon-correctness-sheet.png'}")
+    print(f"\nPython PCR view: {INV.out_dir / 'python-S1.mmd'}")
+    print(f'Snapshot: {INV.snapshot_path}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
