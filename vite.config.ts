@@ -2,6 +2,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	server: { host: '0.0.0.0', allowedHosts: ['terminal.local'] },
 	plugins: [sveltekit()],
 	// @chainspot/alg is an npm-workspace-linked CJS package (dist/ built by
 	// tsc, no bundler — see packages/alg's own tsconfig for why). By default

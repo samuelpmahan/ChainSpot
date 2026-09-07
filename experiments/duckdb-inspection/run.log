@@ -1,0 +1,72 @@
+{
+  "sourceCommit": "1231cdc69420c69c47b4708e877a631155bab162",
+  "sourceImage": "experiments/dashs-track-edge-sensing/restored/edge-diagnostic/edge-reading-inspection/DashsTrack-full.jpg",
+  "sourceRgbaSha256": "cadc67b69fa6430ade488d16415f36068cead4262572b04c63c25ceafa254455",
+  "compositionSha256": "7870bd5c61ba1ee79ce60386f3619f3ce2c7b15e0e73453a898fa02d21c1fe56",
+  "engine": "v1.4.3",
+  "engineRuntime": "DuckDB-Wasm / Node blocking (feature-selected bundle)",
+  "executionMs": 613.154858,
+  "projectionMs": 45.51708500000018,
+  "databaseMs": 3802.124526,
+  "ticks": 3,
+  "calculations": 9,
+  "tables": {
+    "results": 2163,
+    "parts": 1130,
+    "result_parts": 2390
+  },
+  "candidates": 18,
+  "incomplete": 0,
+  "selectedPlates": 18,
+  "rejectedPlates": 934,
+  "queries": [
+    {
+      "id": "candidates",
+      "rows": 18,
+      "elapsedMs": 145.67245399999956
+    },
+    {
+      "id": "rejected-plates",
+      "rows": 934,
+      "elapsedMs": 68.61170200000015
+    },
+    {
+      "id": "shared-candidate-parts",
+      "rows": 0,
+      "elapsedMs": 69.74086699999953
+    }
+  ],
+  "selectedCandidate": "badge-candidate:black-component-181:white-component-26",
+  "selectedTarget": {
+    "calculation": 8,
+    "item": "candidates:3",
+    "part": "px.s1.exp.maskComponents.part.blackComponent-181"
+  },
+  "selectedParts": [
+    {
+      "role": "Part.plate.part / black-component-181",
+      "pixelCount": 1468
+    },
+    {
+      "role": "Part.border.part / white-component-26",
+      "pixelCount": 459
+    },
+    {
+      "role": "Part.digits.0.part / white-component-28",
+      "pixelCount": 157
+    },
+    {
+      "role": "Part.digitLoops.0.matches.0.part / black-component-185",
+      "pixelCount": 19
+    }
+  ],
+  "checks": [
+    "SQL candidate count equals assembly output",
+    "SQL rejected count equals selection output",
+    "All rejected reasons and dimensions match recorded Calculation output",
+    "Each candidate Part count matches the existing renderer traversal",
+    "Every SQL result resolves to an inspector target",
+    "Dense mask counts equal nonzero pixels"
+  ],
+  "browserVerified": false
+}

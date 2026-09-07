@@ -20,6 +20,8 @@ export async function prepareS0Viewer(routeRoot, assetRoot) {
 			address: index === 0 ? 'px.source.fullImage' : 'px.course.canonicalPixels' };
 	});
 	const receipt = formatS0ReceiptText(run, { inputLabel: 'DashsTrack-full.jpg' });
+	// Seed the browser's warm PxC with the exact S0 bytes, without image-decoder changes.
+	writeFileSync(join(assetRoot, 'CroppedImage.rgba'), run.croppedImage.rgba);
 	const snapshot = { sourceSha, sourcePath, panels, crop: run.cropReceipt, receipt,
 		contract: readFileSync('packages/alg/src/stages/S0/contract.ts', 'utf8') };
 	writeFileSync(join(assetRoot, 'snapshot.json'), `${JSON.stringify(snapshot, null, 2)}\n`);

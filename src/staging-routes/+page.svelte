@@ -22,7 +22,7 @@
 
 <main class="labui">
 	<header><span class="brand">LABUI_</span><a class="revision" href={`https://github.com/samuelpmahan/ChainSpot/commit/${data.sourceSha}`} title={data.sourceSha}>source {data.sourceSha.slice(0, 8)} ↗</a></header>
-	<div class="context"><span>Dash’s Track <span class="muted">/ DashsTrack-full.jpg</span></span><span class="muted">S0 · build snapshot</span></div>
+	<div class="context"><span>Dash’s Track <span class="muted">/ DashsTrack-full.jpg</span></span><a href={`${base}/parts`}>S1 · inspect Parts →</a><span class="muted">S0 · build snapshot</span></div>
 	<div class="layout">
 		<nav class="pane" aria-label="S0 image views">
 			<div class="heading">01 / STAGE</div><div class="stage">S0 <span class="muted">/ clean</span></div>
@@ -43,7 +43,7 @@
 			<div class="block"><div class="label">S0 CONTRACT</div><div>Ingest the image.<br />StripChrome.<br />Store the result in PxC.</div></div>
 			<div class="block"><div class="label">SELECTED</div><div class="value">{panel.label}</div><div class="address">{panel.address}</div></div>
 			<div class="block"><div class="label">RUN</div><dl><dt>Crop method</dt><dd>{data.crop.cropMethod}</dd><dt>Rows removed</dt><dd>{data.crop.upperRowsRemoved} top · {data.crop.lowerRowsRemoved} bottom</dd><dt>Pixels removed</dt><dd>{data.crop.totalPxRemoved.toLocaleString('en-US')} · {data.crop.pctPxRemoved.toFixed(2)}%</dd></dl></div>
-			<details><summary>Declared panels</summary><pre>{data.panels.map(p => `${p.label}\n  widthPx · heightPx · rgba`).join('\n\n')}</pre></details>
+			<details><summary>Declared panels</summary><pre>{data.panels.map((p: { label: string }) => `${p.label}\n  widthPx · heightPx · rgba`).join('\n\n')}</pre></details>
 			<details><summary>Receipt</summary><pre>{data.receipt}</pre></details>
 			<details><summary>Contract source</summary><pre>{data.contract}</pre></details>
 			<a class="download" href={`${base}/labui-s0/snapshot.json`} download>Snapshot JSON ↓</a>

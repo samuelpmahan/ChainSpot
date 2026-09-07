@@ -1,5 +1,7 @@
 node_modules/
 .svelte-kit/
+.svelte-kit-lab/
+.chainspot-lab-dev-*/
 build/
 storybook-static/
 packages/*/dist/

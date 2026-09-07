@@ -1,8 +1,20 @@
 /// <reference lib="dom" />
 import type { PqlRun } from './pql';
 export interface PixelLayer { name: string; pixels: readonly number[]; color: string }
+export type PixelViewBox = readonly [number, number, number, number];
+/** Fit the complete selection once; visibility changes can reuse this frame. */
+export function partsViewBox(layers: readonly PixelLayer[], width: number, height: number): PixelViewBox {
+ let x0=width,y0=height,x1=0,y1=0;
+ for (const layer of layers) for (const pixel of layer.pixels) {
+  const x=pixel%width,y=Math.floor(pixel/width);
+  x0=Math.min(x0,x); y0=Math.min(y0,y); x1=Math.max(x1,x+1); y1=Math.max(y1,y+1);
+ }
+ if (x1<=x0 || y1<=y0) return [0,0,width,height];
+ x0=Math.max(0,x0-4); y0=Math.max(0,y0-4); x1=Math.min(width,x1+4); y1=Math.min(height,y1+4);
+ return [x0,y0,x1-x0,y1-y0];
+}
 /** Same SVG projection is used by browser inspection and SVG export. */
-export function renderPartsSvg(layers: readonly PixelLayer[], width: number, height: number, source = ''): string {
+export function renderPartsSvg(layers: readonly PixelLayer[], width: number, height: number, source = '', viewBox?: PixelViewBox): string {
  let x0=width,y0=height,x1=0,y1=0;
  const paths=layers.map(layer=>{
   const sorted=[...new Set(layer.pixels)].sort((a,b)=>a-b);
@@ -19,7 +31,8 @@ export function renderPartsSvg(layers: readonly PixelLayer[], width: number, hei
  if(!layers.some(l=>l.pixels.length)){x0=0;y0=0;x1=width;y1=height;}
  x0=Math.max(0,x0-4); y0=Math.max(0,y0-4); x1=Math.min(width,x1+4); y1=Math.min(height,y1+4);
  const safeSource=source.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
- return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0} ${y0} ${x1-x0} ${y1-y0}" style="width:100%;height:100%;image-rendering:pixelated" shape-rendering="crispEdges"><rect x="${x0}" y="${y0}" width="${x1-x0}" height="${y1-y0}" fill="#444"/>${source?`<image href="${safeSource}" width="${width}" height="${height}"/>`:''}${paths.join('')}</svg>`;
+ const frame=viewBox??[x0,y0,x1-x0,y1-y0];
+ return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${frame.join(' ')}" style="width:100%;height:100%;image-rendering:pixelated" shape-rendering="crispEdges"><rect x="${frame[0]}" y="${frame[1]}" width="${frame[2]}" height="${frame[3]}" fill="#444"/>${source?`<image href="${safeSource}" width="${width}" height="${height}"/>`:''}${paths.join('')}</svg>`;
 }
 
 /** A portable inspector over actual Calculation outputs, with no detector calls. */

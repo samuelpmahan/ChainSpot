@@ -1,0 +1,36 @@
+{
+  "implementationCommit": "1231cdc69420c69c47b4708e877a631155bab162",
+  "surface": "LAB /parts development preview",
+  "engine": "v1.4.3",
+  "startupSeconds": 5.79,
+  "queries": [
+    {
+      "id": "candidates",
+      "rows": 18,
+      "elapsedMs": 150.7
+    },
+    {
+      "id": "rejected-plates",
+      "rows": 934,
+      "elapsedMs": 227.6
+    },
+    {
+      "id": "shared-candidate-parts",
+      "rows": 0,
+      "elapsedMs": 182.8
+    }
+  ],
+  "selectedCandidate": "badge-candidate:black-component-181:white-component-26",
+  "visiblePartsBefore": 4,
+  "visiblePartsAfterHidingPlate": 3,
+  "restoredAllParts": true,
+  "rejectedSelection": {
+    "id": "black-component-1",
+    "visibleParts": 1,
+    "reason": "width outside range; height outside range; aspect outside range"
+  },
+  "screenshot": "browser.jpg",
+  "productionBuildPassed": true,
+  "productionBrowserTested": false,
+  "pagesDeployed": false
+}
