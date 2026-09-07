@@ -1,0 +1,35 @@
+name: Warm mounted PxC roots
+
+on:
+  push:
+    branches:
+      - lab/pxc-root-mounts
+
+jobs:
+  warm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout dev corpus with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: samuelpmahan/chainspot-corpus
+          path: chainspot-corpus
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @chainspot/alg
+      - name: Test root mounts
+        run: npx vitest run packages/alg/src/exec/mounts.test.ts
+      - name: Warm all dev PxC roots
+        run: timeout --signal=TERM 55s node scripts/warm-dev-pxc-roots.mjs chainspot-corpus/dev /tmp/warm-dev-pxc-roots.json
+      - name: Upload warm report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warm-dev-pxc-roots
+          path: /tmp/warm-dev-pxc-roots.json
+          if-no-files-found: warn
