@@ -36,3 +36,25 @@ test('cycles fail loudly', () => {
     /Tick dependency cycle: a, b/
   );
 });
+
+
+test('real S0-shaped graph keeps cache reusable when Crop changes', () => {
+  const ticks = [
+    { id: 'source.decodeFullImage', consumes: ['px.source.selectedInput'], produces: ['px.source.fullImage'] },
+    { id: 'source.cropUDiscChrome', consumes: ['px.source.fullImage'], produces: ['px.course.canonicalPixels'] },
+    { id: 'source.cacheFullImage', consumes: ['px.source.fullImage'], produces: [] },
+    { id: 'badges.acceptCroppedImage', consumes: ['px.course.canonicalPixels'], produces: ['px.badges.image'] }
+  ];
+  const graph = topologicalTicks(ticks);
+  assert.deepEqual(graph.order, [
+    'source.decodeFullImage',
+    'source.cropUDiscChrome',
+    'source.cacheFullImage',
+    'badges.acceptCroppedImage'
+  ]);
+  assert.deepEqual(
+    invalidationClosure(ticks, ['source.cropUDiscChrome']),
+    ['source.cropUDiscChrome', 'badges.acceptCroppedImage']
+  );
+  assert.ok(!invalidationClosure(ticks, ['source.cropUDiscChrome']).includes('source.cacheFullImage'));
+});
