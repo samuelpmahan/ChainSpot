@@ -36,8 +36,13 @@ export interface OperationArtifact {
 	readonly dims?: Parameters<ExecSink['putArtifact']>[3];
 }
 
+export type OperationResolution = { readonly resolution: 'EXECUTE' | 'REUSE'; readonly reason?: string };
+export type OperationResolver = (op: OperationSpec) => OperationResolution;
+
 export interface OperationRuntime {
 	readonly implementations: ReadonlyMap<string, OperationImpl>;
+	/** Omitted preserves legacy behavior: every Tick executes. */
+	readonly resolver?: OperationResolver;
 	readonly calculationBindings?: ReadonlyMap<string, readonly CalculationBinding[]>;
 	readonly artifactExtractors?: Readonly<
 		Record<string, (board: ExecBoard) => readonly OperationArtifact[]>
@@ -139,6 +144,15 @@ export function executeCompiledPlan(
 
 		const startedAtMs = now();
 		const frozenCalculations = freezeCalculations(op, impl, runtime);
+		const decision = runtime.resolver?.(op) ?? { resolution: 'EXECUTE' as const, reason: 'default-execute' };
+		if (decision.resolution === 'REUSE') {
+			const receipt: Receipt = {
+				opId: op.id, frozenCalculations, startedAtMs, durationMs: now() - startedAtMs,
+				declaredConsumes: op.consumes, declaredProduces: op.produces,
+				actualConsumes: [], actualProduces: [], writes: [], probes: [], artifacts: []
+			};
+			sink.putReceipt(receipt); receipts.push(receipt); continue;
+		}
 		const { tracked, consumed, produced, writes } = trackAccess(board, op);
 		const result = impl(tracked, ctx);
 		if (result instanceof Promise) {
