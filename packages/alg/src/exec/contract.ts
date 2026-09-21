@@ -54,6 +54,23 @@ export interface OperationSpec {
 	/** knob names (within `features`) this operation's behavior is sensitive to — receipts/debugging only */
 	readonly knobBindings?: readonly string[];
 	readonly note?: string;
+	/**
+	 * Optional observational execution lineages. Empty/omitted is the ordinary Tick.
+	 * Forks never gain authority by executing; Stage composition decides whether a
+	 * lineage may pass its boundary.
+	 */
+	readonly forks?: readonly OperationForkSpec[];
+}
+
+/** A bounded Calculation override evaluated beside the authoritative Tick. */
+export interface OperationForkSpec {
+	readonly id: `exp/${string}`;
+	/** Calculation addresses from the owning Tick that this lineage replaces. */
+	readonly overrides: readonly `fn.${string}`[];
+	/** Optional named semantic comparator; default testimony still records runtime/writes/hashes. */
+	readonly comparator?: `fn.${string}`;
+	/** Experimental lineages stop at their Stage unless explicitly passed through. */
+	readonly stageBoundary?: 'stop' | 'pass';
 }
 
 /** One executable calculation frozen at the moment a Tick ran. */
