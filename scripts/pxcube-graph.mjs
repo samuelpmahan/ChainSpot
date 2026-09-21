@@ -85,3 +85,31 @@ export function comparisonObligations(ticks, seedTickIds) {
   }
   return obligations;
 }
+
+
+/**
+ * Execute a fork-capable Tick without allowing observational lineages to mutate
+ * the authoritative state. The base case (forks omitted/empty) is ordinary Tick execution.
+ */
+export async function executeForkCapableTick({ tick, state, execute, forks = [], compare }) {
+  const authoritative = await execute({ tick, state, lineage: 'clean' });
+  const observations = [];
+  for (const fork of forks) {
+    const isolatedState = structuredClone(state);
+    const started = performance.now();
+    const result = await execute({
+      tick,
+      state: isolatedState,
+      lineage: fork.id,
+      override: fork.override
+    });
+    const elapsedMs = performance.now() - started;
+    observations.push({
+      lineage: fork.id,
+      elapsedMs,
+      result,
+      comparison: compare ? await compare(authoritative, result, fork) : undefined
+    });
+  }
+  return { authoritative, observations };
+}
