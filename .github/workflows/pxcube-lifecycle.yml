@@ -23,4 +23,7 @@ jobs:
         with:
           node-version: 22
       - name: Prove Part-derived toposort and invalidation closure
-        run: node --test tests/node/pxcube-graph.test.mjs
+        run: |
+          npm install --ignore-scripts
+          npm run build --workspace @chainspot/alg
+          node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs
