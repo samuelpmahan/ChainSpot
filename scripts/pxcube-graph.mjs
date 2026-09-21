@@ -92,10 +92,14 @@ export function comparisonObligations(ticks, seedTickIds) {
  * the authoritative state. The base case (forks omitted/empty) is ordinary Tick execution.
  */
 export async function executeForkCapableTick({ tick, state, execute, forks = [], compare }) {
-  const authoritative = await execute({ tick, state, lineage: 'clean' });
+  // Every lineage starts from the same pre-Tick snapshot. Clean execution may mutate
+  // its lane, but must not mutate the caller's input or seed experimental forks.
+  const preTickState = structuredClone(state);
+  const authoritativeState = structuredClone(preTickState);
+  const authoritative = await execute({ tick, state: authoritativeState, lineage: 'clean' });
   const observations = [];
   for (const fork of forks) {
-    const isolatedState = structuredClone(state);
+    const isolatedState = structuredClone(preTickState);
     const started = performance.now();
     const result = await execute({
       tick,
