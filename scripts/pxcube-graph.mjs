@@ -113,3 +113,18 @@ export async function executeForkCapableTick({ tick, state, execute, forks = [],
   }
   return { authoritative, observations };
 }
+
+
+/** Stage boundaries stop experimental lineages unless passthrough is explicit. */
+export function stageLineageOutputs({ stageId, clean, observations = [], passthrough = [] }) {
+  const allowed = new Set(passthrough);
+  return {
+    clean,
+    experimental: observations.map((observation) => ({
+      ...observation,
+      boundary: allowed.has(observation.lineage) ? 'PASS' : 'STOP',
+      nextLineage: allowed.has(observation.lineage) ? observation.lineage : undefined,
+      stageId
+    }))
+  };
+}
