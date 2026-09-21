@@ -1,0 +1,26 @@
+name: PxCube lifecycle
+
+on:
+  push:
+    branches:
+      - 'pxcube/**'
+  pull_request:
+    paths:
+      - 'scripts/pxcube-graph.mjs'
+      - 'tests/node/pxcube-graph.test.mjs'
+      - '.github/workflows/pxcube-lifecycle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  graph-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prove Part-derived toposort and invalidation closure
+        run: node --test tests/node/pxcube-graph.test.mjs
