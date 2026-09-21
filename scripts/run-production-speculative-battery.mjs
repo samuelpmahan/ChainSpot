@@ -26,4 +26,4 @@ const result=await runFlexibleBattery(check,[
   }
 ]);
 console.log(JSON.stringify(result,null,2));
-process.exitCode=result.status===PASS ? 0 : 1;
+process.exitCode=result.result.status===PASS ? 0 : 1;
