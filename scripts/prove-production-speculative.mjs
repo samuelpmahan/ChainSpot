@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { convergeOnEquivalence, propagateWhileParity, semanticDelta, surgicalExecutionCone } from '../packages/alg/dist/exec/speculative.js';
+import { conservativeSemanticPlan, convergeOnEquivalence, propagateWhileParity, semanticDelta, surgicalExecutionCone } from '../packages/alg/dist/exec/speculative.js';
 
 const deltas=semanticDelta({membership:{bottom:4},meta:{filename:'a'}},{membership:{bottom:20},meta:{filename:'a'}});
 assert.deepEqual(surgicalExecutionCone(deltas,[
@@ -21,3 +21,21 @@ const result=propagateWhileParity([
 assert.equal(result.status,'REBUKED');
 assert.equal(after,false);
 console.log('production speculative kernel PASS');
+
+
+const conservative=conservativeSemanticPlan(
+  [{path:'localImage.pixels',before:'clean',after:'candidate'}],
+  [
+    {id:'masks',semanticConsumes:['localImage.pixels'],produces:['masks']},
+    {id:'components',semanticConsumes:['masks.bright'],consumes:['masks'],produces:['components']},
+    {id:'unknownLegacy',consumes:['masks'],produces:['legacy']},
+    {id:'metadata',semanticConsumes:['localImage.filename'],produces:['meta']}
+  ]
+);
+assert.deepEqual(conservative,[
+  {id:'masks',resolution:'EXECUTE',reason:'semantic-delta'},
+  {id:'components',resolution:'EXECUTE',reason:'semantic-delta'},
+  {id:'unknownLegacy',resolution:'EXECUTE',reason:'semantic-dependency-unknown'},
+  {id:'metadata',resolution:'REUSE',reason:'declared-unaffected'}
+]);
+console.log('conservative semantic resolver PASS');
