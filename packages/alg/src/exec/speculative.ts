@@ -57,3 +57,25 @@ export function propagateWhileParity<T extends { readonly id: string; readonly c
 	}
 	return { status: 'SUPPORTED' as const, continuation: 'PASS_WHILE' as const, visited };
 }
+
+
+/**
+ * Production conservative resolver: missing semantic declarations are UNKNOWN,
+ * therefore EXECUTE. Reuse is earned only by an explicit unaffected declaration.
+ */
+export function conservativeSemanticPlan(
+	deltas: readonly SemanticDelta[],
+	calculations: readonly SemanticCalculation[]
+) {
+	const known = calculations.filter((calc) => calc.semanticConsumes !== undefined);
+	const knownPlan = new Map(surgicalExecutionCone(deltas, known).map((item) => [item.id, item.resolution]));
+	return calculations.map((calc) => {
+		if (calc.semanticConsumes === undefined) {
+			return { id: calc.id, resolution: 'EXECUTE' as const, reason: 'semantic-dependency-unknown' as const };
+		}
+		const resolution = knownPlan.get(calc.id) ?? 'REUSE';
+		return resolution === 'EXECUTE'
+			? { id: calc.id, resolution, reason: 'semantic-delta' as const }
+			: { id: calc.id, resolution, reason: 'declared-unaffected' as const };
+	});
+}
