@@ -22,11 +22,16 @@ export async function runFlexibleBattery(check, adapters) {
         environmentTestimony:result.environmentTestimony ?? {},
         durationMs:performance.now()-started
       };
-      attempts.push(normalized);
-      if (normalized.status !== BLOCKED) return {...normalized,attempts};
+      attempts.push({
+        adapter: adapter.id,
+        status: normalized.status,
+        reason: normalized.status === BLOCKED ? normalized.environmentTestimony?.reason : undefined,
+        durationMs: normalized.durationMs
+      });
+      if (normalized.status !== BLOCKED) return {attempts,result:normalized};
     } catch (error) {
       attempts.push({adapter:adapter.id,status:BLOCKED,reason:error instanceof Error ? error.message : String(error)});
     }
   }
-  return {check:check.id,status:BLOCKED,fulfillment:null,semanticTestimony:{},environmentTestimony:{},durationMs:0,attempts};
+  return {attempts,result:{check:check.id,status:BLOCKED,fulfillment:null,semanticTestimony:{},environmentTestimony:{},durationMs:0}};
 }
