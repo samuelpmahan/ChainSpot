@@ -26,7 +26,7 @@ jobs:
         run: |
           npm install --ignore-scripts
           npm run build --workspace @chainspot/alg
-          node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs
+          node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs tests/node/pxcube-visual-comparison.test.mjs
       - name: Materialize readiness receipt
         run: |
           mkdir -p artifacts/pxcube-readiness
