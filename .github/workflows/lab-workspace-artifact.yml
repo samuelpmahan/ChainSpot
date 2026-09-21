@@ -80,10 +80,20 @@ jobs:
           } > .lab-workspace/receipt.txt
           cp root-npm-ci.log lab-npm-ci.log playwright-install.log .lab-workspace/
 
-      - name: Archive source and installed dependencies
+      - name: Remove disposable runtime weight
+        shell: bash
+        run: |
+          rm -rf node_modules scripts/chainspot-lab/node_modules .playwright-browsers
+          rm -f root-npm-ci.log lab-npm-ci.log playwright-install.log
+
+      - name: Archive lean source workspace
         shell: bash
         run: |
           tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude='*/node_modules' \
+            --exclude=.playwright-browsers \
             -czf "$RUNNER_TEMP/chainspot-lab-workspace.tar.gz" \
             .
 
