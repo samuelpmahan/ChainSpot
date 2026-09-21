@@ -58,3 +58,30 @@ export function invalidationClosure(ticks, seedTickIds) {
   }
   return order.filter((id) => reached.has(id));
 }
+
+
+/** Comparison obligations arise at invalidated produced Parts that have downstream consumers. */
+export function comparisonObligations(ticks, seedTickIds) {
+  const invalidated = new Set(invalidationClosure(ticks, seedTickIds));
+  const consumersByPart = new Map();
+  for (const tick of ticks) for (const part of tick.consumes ?? []) {
+    const consumers = consumersByPart.get(part) ?? [];
+    consumers.push(tick.id);
+    consumersByPart.set(part, consumers);
+  }
+  const obligations = [];
+  for (const tick of ticks) {
+    if (!invalidated.has(tick.id)) continue;
+    for (const part of tick.produces ?? []) {
+      const consumers = consumersByPart.get(part) ?? [];
+      if (consumers.length === 0) continue;
+      obligations.push({
+        producer: tick.id,
+        part,
+        consumers,
+        reason: `${tick.id} may change ${part}; compare baseline vs candidate before trusting downstream consumers`
+      });
+    }
+  }
+  return obligations;
+}
