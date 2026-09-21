@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { invalidationClosure, topologicalTicks } from '../../scripts/pxcube-graph.mjs';
+import { comparisonObligations, invalidationClosure, topologicalTicks } from '../../scripts/pxcube-graph.mjs';
 
 test('toposort follows Part producer -> consumer edges, not declaration order', () => {
   const ticks = [
@@ -57,4 +57,21 @@ test('real S0-shaped graph keeps cache reusable when Crop changes', () => {
     ['source.cropUDiscChrome', 'badges.acceptCroppedImage']
   );
   assert.ok(!invalidationClosure(ticks, ['source.cropUDiscChrome']).includes('source.cacheFullImage'));
+});
+
+
+test('invalidated Parts create direct comparison obligations', () => {
+  const ticks = [
+    { id: 'decode', consumes: ['source'], produces: ['full'] },
+    { id: 'crop', consumes: ['full'], produces: ['canonical'] },
+    { id: 'cache', consumes: ['full'], produces: [] },
+    { id: 'badge', consumes: ['canonical'], produces: ['badges'] }
+  ];
+  assert.deepEqual(comparisonObligations(ticks, ['crop']), [{
+    producer: 'crop',
+    part: 'canonical',
+    consumers: ['badge'],
+    reason: 'crop may change canonical; compare baseline vs candidate before trusting downstream consumers'
+  }]);
+  assert.deepEqual(comparisonObligations(ticks, ['cache']), []);
 });
