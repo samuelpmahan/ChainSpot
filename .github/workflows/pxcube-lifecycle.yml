@@ -27,3 +27,21 @@ jobs:
           npm install --ignore-scripts
           npm run build --workspace @chainspot/alg
           node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs
+      - name: Materialize readiness receipt
+        run: |
+          mkdir -p artifacts/pxcube-readiness
+          {
+            echo "PXCUBE READINESS — DURABLE CHECKPOINT"
+            echo "sha: $GITHUB_SHA"
+            echo "branch: $GITHUB_REF_NAME"
+            echo "graph-kernel: PASS"
+            echo "real-s0-fork: PASS"
+            echo "comparison-receipt: PASS"
+            echo "next: visual comparison receipt"
+          } | tee artifacts/pxcube-readiness/receipt.txt
+          sha256sum scripts/pxcube-graph.mjs scripts/pxcube-s0-fork.mjs scripts/pxcube-s0-receipt.mjs > artifacts/pxcube-readiness/kernel.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pxcube-readiness
+          path: artifacts/pxcube-readiness
+          retention-days: 1
