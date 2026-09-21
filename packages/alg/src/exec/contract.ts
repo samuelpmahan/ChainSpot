@@ -170,6 +170,11 @@ export interface Probe {
  */
 export interface Receipt {
 	readonly opId: string;
+	/** Resolution context is explicit testimony; consumers never infer reuse from empty writes. */
+	readonly lineage?: 'clean' | `exp/${string}`;
+	readonly resolution?: 'EXECUTE' | 'REUSE';
+	readonly resolutionReason?: string;
+	readonly resolutionCause?: readonly string[];
 	/** The fn.* calculations the production gateway actually bound for this Tick. */
 	readonly frozenCalculations: readonly FrozenCalculation[];
 	readonly startedAtMs: number;
