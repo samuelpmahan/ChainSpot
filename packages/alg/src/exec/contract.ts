@@ -65,13 +65,34 @@ export interface OperationSpec {
 /** A bounded Calculation override evaluated beside the authoritative Tick. */
 export interface OperationForkSpec {
 	readonly id: `exp/${string}`;
-	/** Calculation addresses from the owning Tick that this lineage replaces. */
+	/**
+	 * Calculation addresses from the owning Tick that this lineage replaces.
+	 * The override boundary is declarative; execution may reuse any valid
+	 * precalculated/cached prefix and downstream results proven equivalent.
+	 */
 	readonly overrides: readonly `fn.${string}`[];
-	/** Optional named semantic comparator; default testimony still records runtime/writes/hashes. */
+	/** Optional named semantic comparator defining where/why the lineage differs. */
 	readonly comparator?: `fn.${string}`;
 	/** Experimental lineages stop at their Stage unless explicitly passed through. */
 	readonly stageBoundary?: 'stop' | 'pass';
 }
+
+/**
+ * Lineage is a resolution context over one PxC computation graph, not a copied
+ * execution transcript. Authority selects the default lineage; it does not
+ * merge sibling state.
+ */
+export interface ExecutionLineage {
+	readonly id: 'clean' | `exp/${string}`;
+	readonly authority: 'authoritative' | 'observational';
+	readonly parent?: ExecutionLineage['id'];
+	readonly stageBoundary: 'pass' | 'stop';
+}
+
+/** Why a Calculation resolved without recomputation in one lineage. */
+export type CalculationResolution =
+	| { readonly kind: 'execute' }
+	| { readonly kind: 'reuse'; readonly reason: 'precalculated' | 'cache-hit' | 'equivalent-result' };
 
 /** One executable calculation frozen at the moment a Tick ran. */
 export interface FrozenCalculation {
