@@ -36,7 +36,12 @@ export interface OperationArtifact {
 	readonly dims?: Parameters<ExecSink['putArtifact']>[3];
 }
 
-export type OperationResolution = { readonly resolution: 'EXECUTE' | 'REUSE'; readonly reason?: string };
+export type OperationResolution = {
+	readonly resolution: 'EXECUTE' | 'REUSE';
+	readonly reason?: string;
+	readonly cause?: readonly string[];
+	readonly lineage?: 'clean' | `exp/${string}`;
+};
 export type OperationResolver = (op: OperationSpec) => OperationResolution;
 
 export interface OperationRuntime {
@@ -148,6 +153,7 @@ export function executeCompiledPlan(
 		if (decision.resolution === 'REUSE') {
 			const receipt: Receipt = {
 				opId: op.id, frozenCalculations, startedAtMs, durationMs: now() - startedAtMs,
+				lineage: decision.lineage ?? 'clean', resolution: 'REUSE', resolutionReason: decision.reason, resolutionCause: decision.cause,
 				declaredConsumes: op.consumes, declaredProduces: op.produces,
 				actualConsumes: [], actualProduces: [], writes: [], probes: [], artifacts: []
 			};
@@ -169,6 +175,10 @@ export function executeCompiledPlan(
 
 		const receipt: Receipt = {
 			opId: op.id,
+			lineage: decision.lineage ?? 'clean',
+			resolution: 'EXECUTE',
+			resolutionReason: decision.reason,
+			resolutionCause: decision.cause,
 			frozenCalculations,
 			startedAtMs,
 			durationMs,
