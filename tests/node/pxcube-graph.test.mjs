@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comparisonObligations, executeForkCapableTick, invalidationClosure, topologicalTicks } from '../../scripts/pxcube-graph.mjs';
+import { comparisonObligations, executeForkCapableTick, invalidationClosure, stageLineageOutputs, topologicalTicks } from '../../scripts/pxcube-graph.mjs';
 
 test('toposort follows Part producer -> consumer edges, not declaration order', () => {
   const ticks = [
@@ -110,4 +110,22 @@ test('observational fork cannot mutate clean state and may compare semantically'
   assert.deepEqual(run.observations[0].result, { value: 6 });
   assert.deepEqual(run.observations[0].comparison, { delta: 2, why: 'override changed multiplier' });
   assert.deepEqual(state, { value: 2 });
+});
+
+
+test('Stage stops experimental lineage unless passthrough is explicit', () => {
+  const observation = { lineage: 'exp/A', result: { canonical: 'candidate' } };
+  const stopped = stageLineageOutputs({ stageId: 'S0', clean: { canonical: 'clean' }, observations: [observation] });
+  assert.equal(stopped.experimental[0].boundary, 'STOP');
+  assert.equal(stopped.experimental[0].nextLineage, undefined);
+
+  const passed = stageLineageOutputs({
+    stageId: 'S0',
+    clean: { canonical: 'clean' },
+    observations: [observation],
+    passthrough: ['exp/A']
+  });
+  assert.equal(passed.experimental[0].boundary, 'PASS');
+  assert.equal(passed.experimental[0].nextLineage, 'exp/A');
+  assert.deepEqual(passed.clean, { canonical: 'clean' });
 });
