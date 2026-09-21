@@ -47,6 +47,12 @@ export interface OperationSpec {
 	 * OperationRuntime remains the sole authority that binds and runs them.
 	 */
 	readonly calculations?: readonly `fn.${string}`[];
+	/**
+	 * Semantic paths this Tick's Calculations actually inspect. More precise than
+	 * Part addresses: used by SpeculativeExecution to seed surgical invalidation.
+	 * Omitted means semantic dependency is not yet declared, never "depends on nothing".
+	 */
+	readonly semanticConsumes?: readonly string[];
 	/** Opt-in while legacy declarations are repaired: reject any declared/actual access mismatch. */
 	readonly accessConformance?: 'exact';
 	/** ABFeature ids this operation reads enabled/knobs from, if any */
