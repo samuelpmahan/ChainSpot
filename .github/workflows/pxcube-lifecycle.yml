@@ -27,7 +27,7 @@ jobs:
           npm install --ignore-scripts
           npm run build --workspace @chainspot/alg
           npx vitest run packages/alg/tests/unit/speculative.test.ts
-          node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs tests/node/pxcube-visual-comparison.test.mjs tests/node/pxcube-speculative-execution.test.mjs tests/node/pxcube-cache-key.test.mjs tests/node/pxcube-parity-propagation.test.mjs tests/node/pxcube-semantic-delta.test.mjs tests/node/pxcube-surgical-cone.test.mjs
+          node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs tests/node/pxcube-visual-comparison.test.mjs tests/node/pxcube-speculative-execution.test.mjs tests/node/pxcube-cache-key.test.mjs tests/node/pxcube-parity-propagation.test.mjs tests/node/pxcube-semantic-delta.test.mjs tests/node/pxcube-surgical-cone.test.mjs tests/node/pxcube-flexible-battery.test.mjs
       - name: Materialize readiness receipt
         run: |
           mkdir -p artifacts/pxcube-readiness
