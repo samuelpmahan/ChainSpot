@@ -41,6 +41,7 @@ function addressOf(slot: SlotRef | PxKey<unknown>): SlotRef {
  */
 export interface PxC {
 	readonly lineage: PartEdition['lineage'];
+	readonly catalog: PartCatalog;
 	/** Fork shares the append-only catalog but changes resolution context. */
 	fork(lineage?: PartEdition['lineage']): PxC;
 	get<T>(slot: SlotRef | PxKey<T>): T;
@@ -63,6 +64,7 @@ function boardFrom(
 ): PxC {
 	return {
 		lineage,
+		catalog,
 		fork: (nextLineage = lineage) => boardFrom(new Map(slots), new Map(calculations), catalog, nextLineage),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
@@ -118,6 +120,7 @@ export function trackAccess(
 	const declaredConsumes = new Set(tick.consumes);
 	const tracked: PxC = {
 		lineage: board.lineage,
+		catalog: board.catalog,
 		fork: (lineage) => board.fork(lineage),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
