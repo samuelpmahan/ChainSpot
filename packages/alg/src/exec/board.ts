@@ -135,3 +135,44 @@ export function trackAccess(
 	};
 	return { tracked, consumed, produced, writes };
 }
+
+export interface PartEdition<T = unknown> {
+	readonly address: SlotRef;
+	readonly lineage: 'clean' | `exp/${string}`;
+	readonly edition: string;
+	readonly producer?: `fn.${string}`;
+	readonly value: T;
+}
+
+export interface PartCatalog {
+	publish<T>(part: PartEdition<T>): void;
+	resolve<T>(address: SlotRef, lineage?: PartEdition['lineage']): PartEdition<T>;
+	editions<T>(address: SlotRef): readonly PartEdition<T>[];
+}
+
+/**
+ * Append-only Part editions. Same address may have arbitrarily many lineage
+ * editions; only duplicate address+lineage+edition publication is a collision.
+ */
+export function createPartCatalog(): PartCatalog {
+	const byAddress = new Map<SlotRef, PartEdition[]>();
+	return {
+		publish(part) {
+			const editions = byAddress.get(part.address) ?? [];
+			if (editions.some((x) => x.lineage === part.lineage && x.edition === part.edition)) {
+				throw new Error(`PxC: duplicate Part edition '${part.address}' '${part.lineage}' '${part.edition}'.`);
+			}
+			editions.push(Object.freeze({ ...part }));
+			byAddress.set(part.address, editions);
+		},
+		resolve<T>(address: SlotRef, lineage: PartEdition['lineage'] = 'clean'): PartEdition<T> {
+			const editions = byAddress.get(address) ?? [];
+			const matches = editions.filter((x) => x.lineage === lineage);
+			if (!matches.length) throw new Error(`PxC: no Part edition for '${address}' in lineage '${lineage}'.`);
+			return matches[matches.length - 1] as PartEdition<T>;
+		},
+		editions<T>(address: SlotRef): readonly PartEdition<T>[] {
+			return [...(byAddress.get(address) ?? [])] as readonly PartEdition<T>[];
+		}
+	};
+}
