@@ -232,6 +232,30 @@ export async function executeCompiledPlanAsync(
 
 		const startedAtMs = now();
 		const frozenCalculations = freezeCalculations(op, impl, runtime);
+		const decision = runtime.resolver?.(op) ?? { resolution: 'EXECUTE' as const, reason: 'default-execute' };
+		if (decision.resolution === 'REUSE') {
+			const reused = decision.reusedParts ?? {};
+			const missing = op.produces.filter((address) => !(address in reused));
+			if (missing.length) throw new Error(
+				`executeCompiledPlanAsync: REUSE for Tick '${op.id}' did not resolve produced Parts [${missing.join(', ')}].`
+			);
+			const reusedProduced = new Set<string>();
+			const reusedWrites = [];
+			for (const address of op.produces) {
+				const existed = board.has(address);
+				board.set(address, reused[address]);
+				reusedProduced.add(address);
+				reusedWrites.push({ address, kind: existed ? 'replacement' as const : 'new-address' as const });
+			}
+			const receipt: Receipt = {
+				opId: op.id, frozenCalculations, startedAtMs, durationMs: now() - startedAtMs,
+				lineage: decision.lineage ?? 'clean', resolution: 'REUSE', resolutionReason: decision.reason, resolutionCause: decision.cause,
+				declaredConsumes: op.consumes, declaredProduces: op.produces,
+				actualConsumes: [], actualProduces: [...reusedProduced], writes: reusedWrites,
+				probes: shapeProbes(board, reusedProduced), artifacts: []
+			};
+			sink.putReceipt(receipt); receipts.push(receipt); continue;
+		}
 		const { tracked, consumed, produced, writes } = trackAccess(board, op);
 		await impl(tracked, ctx);
 		const durationMs = now() - startedAtMs;
@@ -241,6 +265,10 @@ export async function executeCompiledPlanAsync(
 		);
 		const receipt: Receipt = {
 			opId: op.id,
+			lineage: decision.lineage ?? 'clean',
+			resolution: 'EXECUTE',
+			resolutionReason: decision.reason,
+			resolutionCause: decision.cause,
 			frozenCalculations,
 			startedAtMs,
 			durationMs,
