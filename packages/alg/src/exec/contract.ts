@@ -23,6 +23,31 @@ export type OperationKind = 'measure' | 'transform' | 'compute' | 'decide' | 'ma
  * by the type system.
  */
 export type SlotRef = string;
+export type PartAddress = SlotRef;
+export type CalculationAddress = `fn.${string}`;
+export type LineageAddress = 'clean' | `exp/${string}`;
+
+/** A semantic field inside an already-addressed Part; never a second Part namespace. */
+export interface SemanticPartRef {
+	readonly part: PartAddress;
+	readonly path?: string;
+}
+
+/** Exact produced edition of one semantic Part address. */
+export interface PartEditionRef {
+	readonly part: PartAddress;
+	readonly lineage: LineageAddress;
+	readonly edition: string;
+	readonly producedBy?: {
+		readonly tick: string;
+		readonly calculation?: CalculationAddress;
+	};
+}
+
+/** Human-readable rendering only; structured refs remain authoritative. */
+export function formatPartEditionRef(ref: PartEditionRef): string {
+	return `${ref.part}@${ref.lineage}/${ref.edition}`;
+}
 
 /**
  * One node in the operation DAG. A single engine unit (e.g. badgeStage,
