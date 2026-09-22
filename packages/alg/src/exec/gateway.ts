@@ -41,8 +41,6 @@ export type OperationResolution = {
 	readonly reason?: string;
 	readonly cause?: readonly string[];
 	readonly lineage?: 'clean' | `exp/${string}`;
-	/** Trusted produced Parts supplied when resolution is REUSE. */
-	readonly reusedParts?: Readonly<Record<string, unknown>>;
 };
 export type OperationResolver = (op: OperationSpec) => OperationResolution;
 
@@ -153,16 +151,16 @@ export function executeCompiledPlan(
 		const frozenCalculations = freezeCalculations(op, impl, runtime);
 		const decision = runtime.resolver?.(op) ?? { resolution: 'EXECUTE' as const, reason: 'default-execute' };
 		if (decision.resolution === 'REUSE') {
-			const reused = decision.reusedParts ?? {};
-			const missing = op.produces.filter((address) => !(address in reused));
-			if (missing.length) throw new Error(
-				`executeCompiledPlan: REUSE for Tick '${op.id}' did not resolve produced Parts [${missing.join(', ')}].`
-			);
+			const sourceLineage = decision.lineage ?? board.lineage;
 			const reusedProduced = new Set<string>();
 			const reusedWrites = [];
 			for (const address of op.produces) {
+				let edition;
+				try { edition = board.catalog.resolve(address, sourceLineage); }
+				catch { try { edition = board.catalog.resolve(address, 'clean'); }
+				catch { throw new Error(`executeCompiledPlan: REUSE for Tick '${op.id}' could not resolve Part '${address}'.`); } }
 				const existed = board.has(address);
-				board.set(address, reused[address]);
+				board.set(address, edition.value);
 				reusedProduced.add(address);
 				reusedWrites.push({ address, kind: existed ? 'replacement' as const : 'new-address' as const });
 			}
@@ -234,16 +232,16 @@ export async function executeCompiledPlanAsync(
 		const frozenCalculations = freezeCalculations(op, impl, runtime);
 		const decision = runtime.resolver?.(op) ?? { resolution: 'EXECUTE' as const, reason: 'default-execute' };
 		if (decision.resolution === 'REUSE') {
-			const reused = decision.reusedParts ?? {};
-			const missing = op.produces.filter((address) => !(address in reused));
-			if (missing.length) throw new Error(
-				`executeCompiledPlanAsync: REUSE for Tick '${op.id}' did not resolve produced Parts [${missing.join(', ')}].`
-			);
+			const sourceLineage = decision.lineage ?? board.lineage;
 			const reusedProduced = new Set<string>();
 			const reusedWrites = [];
 			for (const address of op.produces) {
+				let edition;
+				try { edition = board.catalog.resolve(address, sourceLineage); }
+				catch { try { edition = board.catalog.resolve(address, 'clean'); }
+				catch { throw new Error(`executeCompiledPlanAsync: REUSE for Tick '${op.id}' could not resolve Part '${address}'.`); } }
 				const existed = board.has(address);
-				board.set(address, reused[address]);
+				board.set(address, edition.value);
 				reusedProduced.add(address);
 				reusedWrites.push({ address, kind: existed ? 'replacement' as const : 'new-address' as const });
 			}
