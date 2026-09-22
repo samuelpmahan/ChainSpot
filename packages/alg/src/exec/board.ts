@@ -7,7 +7,7 @@
 // masks', 'assignment.scoredPairs', ...) in one store. Browser-safe: no
 // I/O, no node built-ins.
 
-import type { OperationSpec, PxWriteTestimony, SlotRef } from './contract';
+import type { CalculationAddress, LineageAddress, OperationSpec, PartAddress, PartEditionRef, PxWriteTestimony, SlotRef } from './contract';
 
 export interface PxKey<T> {
 	readonly address: SlotRef;
@@ -79,7 +79,7 @@ function boardFrom(
 		set: (slot, value) => {
 			const address = addressOf(slot);
 			slots.set(address, value);
-			catalog.publish({ address, lineage, edition: `write/${catalog.editions(address).filter((x) => x.lineage === lineage).length + 1}`, value });
+			catalog.publish({ part: address, lineage, edition: `write/${catalog.editions(address).filter((x) => x.lineage === lineage).length + 1}`, value });
 		},
 		register(fn, calculate) {
 			const current = calculations.get(fn.address);
@@ -154,11 +154,7 @@ export function trackAccess(
 	return { tracked, consumed, produced, writes };
 }
 
-export interface PartEdition<T = unknown> {
-	readonly address: SlotRef;
-	readonly lineage: 'clean' | `exp/${string}`;
-	readonly edition: string;
-	readonly producer?: `fn.${string}`;
+export interface PartEdition<T = unknown> extends PartEditionRef {
 	readonly value: T;
 }
 
@@ -176,12 +172,12 @@ export function createPartCatalog(): PartCatalog {
 	const byAddress = new Map<SlotRef, PartEdition[]>();
 	return {
 		publish(part) {
-			const editions = byAddress.get(part.address) ?? [];
+			const editions = byAddress.get(part.part) ?? [];
 			if (editions.some((x) => x.lineage === part.lineage && x.edition === part.edition)) {
-				throw new Error(`PxC: duplicate Part edition '${part.address}' '${part.lineage}' '${part.edition}'.`);
+				throw new Error(`PxC: duplicate Part edition '${part.part}' '${part.lineage}' '${part.edition}'.`);
 			}
 			editions.push(Object.freeze({ ...part }));
-			byAddress.set(part.address, editions);
+			byAddress.set(part.part, editions);
 		},
 		resolve<T>(address: SlotRef, lineage: PartEdition['lineage'] = 'clean'): PartEdition<T> {
 			const editions = byAddress.get(address) ?? [];
