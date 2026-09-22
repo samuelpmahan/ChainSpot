@@ -20,12 +20,13 @@ executeCompiledPlan(plan,board,ctx,undefined,runtime);
 assert.deepEqual(order,['left','right','join']); assert.equal(board.get('total'),13);
 
 // Async resolver parity: reused left Part satisfies downstream join; right executes.
-const asyncBoard=createExecBoard(); asyncBoard.set('x',4); let leftCalls=0,rightCalls=0,joinCalls=0;
+const asyncRoot=createExecBoard(); asyncRoot.set('x',4); asyncRoot.set('left',5);
+const asyncBoard=asyncRoot.fork('exp/dag'); let leftCalls=0,rightCalls=0,joinCalls=0;
 const asyncRuntime={implementations:new Map([
  ['left',async(b)=>{leftCalls++;b.set('left',b.get('x')+1)}],
  ['right',async(b)=>{rightCalls++;b.set('right',b.get('x')*2)}],
  ['join',async(b)=>{joinCalls++;b.set('total',b.get('left')+b.get('right'))}]
-]),resolver:(op)=>op.id==='left'?{resolution:'REUSE',reason:'cache-hit',reusedParts:{left:5},lineage:'exp/dag'}:{resolution:'EXECUTE',reason:'required',lineage:'exp/dag'}};
+]),resolver:(op)=>op.id==='left'?{resolution:'REUSE',reason:'cache-hit',lineage:'exp/dag'}:{resolution:'EXECUTE',reason:'required',lineage:'exp/dag'}};
 const receipts=await executeCompiledPlanAsync(plan,asyncBoard,ctx,undefined,asyncRuntime);
 assert.equal(leftCalls,0); assert.equal(rightCalls,1); assert.equal(joinCalls,1); assert.equal(asyncBoard.get('total'),13);
 assert.deepEqual(receipts.map(r=>[r.opId,r.resolution]),[['left','REUSE'],['right','EXECUTE'],['join','EXECUTE']]);
