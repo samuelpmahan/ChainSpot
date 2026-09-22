@@ -37,9 +37,27 @@ jobs:
           test -f artifacts/chainspot-workspace/WORKSPACE.json
           test -f artifacts/chainspot-workspace/package.json
           test -d artifacts/chainspot-workspace/packages/alg/src
-          test ! -e artifacts/chainspot-workspace/.git
-          test ! -e artifacts/chainspot-workspace/node_modules
-          (cd artifacts/chainspot-workspace && npm install --ignore-scripts && npm run build --workspace @chainspot/alg)
+          rm -rf artifacts/chainspot-workspace-smoke
+          cp -a artifacts/chainspot-workspace artifacts/chainspot-workspace-smoke
+          (cd artifacts/chainspot-workspace-smoke && npm install --ignore-scripts && npm run build --workspace @chainspot/alg)
+      - name: Prove staged Gitless artifact is clean
+        run: |
+          staged=artifacts/chainspot-workspace
+          forbidden='node_modules|\.git|dist|\.svelte-kit|coverage'
+          if find "$staged" -type d \
+            \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
+            -print -quit | grep -q .; then
+            echo "staged Gitless artifact leaked an excluded directory" >&2
+            find "$staged" -type d \
+              \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
+              -print >&2
+            exit 1
+          fi
+          tar -C artifacts -cf artifacts/chainspot-workspace-staged.tar chainspot-workspace
+          if tar -tf artifacts/chainspot-workspace-staged.tar | grep -E "(^|/)($forbidden)(/|$)"; then
+            echo "staged Gitless artifact archive contains an excluded directory" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: chainspot-workspace
