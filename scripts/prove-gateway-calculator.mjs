@@ -17,8 +17,14 @@ const normal=run(undefined);
 assert.equal(normal.calls,1); assert.equal(normal.board.get('sum'),12);
 assert.equal(normal.receipt.resolution,'EXECUTE'); assert.equal(normal.receipt.lineage,'clean');
 
-const reused=run(()=>({resolution:'REUSE',reason:'declared-unaffected',cause:['inputs unchanged'],lineage:'exp/reuse'}));
-assert.equal(reused.calls,0); assert.equal(reused.board.has('sum'),false);
-assert.equal(reused.receipt.resolution,'REUSE'); assert.equal(reused.receipt.resolutionReason,'declared-unaffected');
-assert.deepEqual(reused.receipt.resolutionCause,['inputs unchanged']); assert.equal(reused.receipt.lineage,'exp/reuse');
+const reused=run(()=>({resolution:'REUSE',reason:'cache-hit',cause:['semantic identity matched trusted clean Part'],lineage:'exp/reuse',reusedParts:{sum:12}}));
+assert.equal(reused.calls,0); assert.equal(reused.board.get('sum'),12);
+assert.equal(reused.receipt.resolution,'REUSE'); assert.equal(reused.receipt.resolutionReason,'cache-hit');
+assert.deepEqual(reused.receipt.resolutionCause,['semantic identity matched trusted clean Part']); assert.equal(reused.receipt.lineage,'exp/reuse');
 console.log(JSON.stringify({execute:{calls:normal.calls,resolution:normal.receipt.resolution,durationMs:normal.receipt.durationMs},reuse:{calls:reused.calls,resolution:reused.receipt.resolution,durationMs:reused.receipt.durationMs}},null,2));
+
+let refused=false;
+try { run(()=>({resolution:'REUSE',reason:'cache-hit',lineage:'exp/bad-cache'})); } catch(e) {
+  refused=/did not resolve produced Parts/.test(String(e));
+}
+assert.equal(refused,true,'REUSE without produced Parts must fail loud');
