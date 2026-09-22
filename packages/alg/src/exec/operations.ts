@@ -183,7 +183,7 @@ const badgeStageOps: OperationDef[] = [
 			consumes: ['localImage'],
 			produces: ['badgeStage.masks'],
 			calculations: ['fn.computeBrightDarkMasks'],
-			semanticConsumes: ['localImage.pixels', 'feature.sharedHsv.knobs'],
+			semanticConsumes: ['px.course.canonicalPixels.pixels', 'feature.sharedHsv.knobs'],
 			features: [sharedHsvFeature.id],
 			note: 'HSV bright/dark thresholding over the viewport-cropped local image'
 		},
@@ -239,7 +239,7 @@ const badgeStageOps: OperationDef[] = [
 			consumes: ['badgeStage.masks', 'badgeStage.components', 'localImage'],
 			produces: ['badgeStage.family'],
 			calculations: ['fn.detectBadgeFamily'],
-			semanticConsumes: ['localImage.width', 'badgeStage.masks.dark', 'badgeStage.components.bright', 'feature.g1Badges.knobs'],
+			semanticConsumes: ['px.course.canonicalPixels.width', 'badgeStage.masks.dark', 'badgeStage.components.bright', 'feature.g1Badges.knobs'],
 			features: [g1BadgesFeature.id],
 			note: 'anchored bright-family badge candidates (aspect + dark-interior gates)'
 		},
@@ -264,7 +264,7 @@ const badgeStageOps: OperationDef[] = [
 			consumes: ['badgeStage.masks', 'badgeStage.components', 'badgeStage.family', 'localImage'],
 			produces: ['stage'],
 			calculations: ['fn.recoverDarkPlateBadges'],
-			semanticConsumes: ['localImage.width', 'badgeStage.masks', 'badgeStage.components', 'badgeStage.family', 'feature.g1Badges.knobs'],
+			semanticConsumes: ['px.course.canonicalPixels.width', 'badgeStage.masks', 'badgeStage.components', 'badgeStage.family', 'feature.g1Badges.knobs'],
 			features: [g1BadgesFeature.id],
 			note: 'dark-plate glyph recovery accept/reject, then materialize the BadgeStageResult'
 		},
