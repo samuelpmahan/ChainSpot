@@ -280,6 +280,11 @@ export interface S1BadgesCandidateRun {
 	readonly pcr: Pcr;
 }
 
+
+export function executeS1BadgesCandidateInLineage(pxc: PxC, lineage: `exp/${string}`): S1BadgesCandidateRun {
+	return executeS1BadgesCandidate(pxc.lineage === lineage ? pxc : pxc.fork(lineage));
+}
+
 export function executeS1BadgesCandidate(pxc: PxC): S1BadgesCandidateRun {
 	if (!pxc.has(S0_CROPPED_IMAGE_ADDRESS))
 		throw new Error(`S1 requires PxC address '${S0_CROPPED_IMAGE_ADDRESS}'.`);
