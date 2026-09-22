@@ -40,8 +40,9 @@ function addressOf(slot: SlotRef | PxKey<unknown>): SlotRef {
  * a second synchronized store.
  */
 export interface PxC {
-	/** Snapshot addresses and registered functions; immutable Part values remain shared. */
-	fork(): PxC;
+	readonly lineage: PartEdition['lineage'];
+	/** Fork shares the append-only catalog but changes resolution context. */
+	fork(lineage?: PartEdition['lineage']): PxC;
 	get<T>(slot: SlotRef | PxKey<T>): T;
 	has(slot: SlotRef | PxKey<unknown>): boolean;
 	set<T>(slot: SlotRef | PxKey<T>, value: T): void;
@@ -51,18 +52,34 @@ export interface PxC {
 
 export type ExecBoard = PxC;
 
-export function createExecBoard(): PxC { return boardFrom(new Map(), new Map()); }
-function boardFrom(slots: Map<SlotRef, unknown>, calculations: Map<string, PxCalculation<unknown, unknown>>): PxC {
+export function createExecBoard(): PxC {
+	return boardFrom(new Map(), new Map(), createPartCatalog(), 'clean');
+}
+function boardFrom(
+	slots: Map<SlotRef, unknown>,
+	calculations: Map<string, PxCalculation<unknown, unknown>>,
+	catalog: PartCatalog,
+	lineage: PartEdition['lineage']
+): PxC {
 	return {
-		fork: () => boardFrom(new Map(slots), new Map(calculations)),
+		lineage,
+		fork: (nextLineage = lineage) => boardFrom(new Map(slots), new Map(calculations), catalog, nextLineage),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
-			if (!slots.has(address)) throw new Error(`exec board: slot '${address}' not produced yet.`);
-			return slots.get(address) as T;
+			try { return catalog.resolve<T>(address, lineage).value; }
+			catch {
+				if (!slots.has(address)) throw new Error(`exec board: slot '${address}' not produced yet.`);
+				return slots.get(address) as T;
+			}
 		},
-		has: (slot) => slots.has(addressOf(slot)),
+		has: (slot) => {
+			const address = addressOf(slot);
+			try { catalog.resolve(address, lineage); return true; } catch { return slots.has(address); }
+		},
 		set: (slot, value) => {
-			slots.set(addressOf(slot), value);
+			const address = addressOf(slot);
+			slots.set(address, value);
+			catalog.publish({ address, lineage, edition: `write/${catalog.editions(address).filter((x) => x.lineage === lineage).length + 1}`, value });
 		},
 		register(fn, calculate) {
 			const current = calculations.get(fn.address);
@@ -100,7 +117,8 @@ export function trackAccess(
 	const writes: PxWriteTestimony[] = [];
 	const declaredConsumes = new Set(tick.consumes);
 	const tracked: PxC = {
-		fork: () => board.fork(),
+		lineage: board.lineage,
+		fork: (lineage) => board.fork(lineage),
 		get<T>(slot: SlotRef | PxKey<T>): T {
 			const address = addressOf(slot);
 			consumed.add(address);
