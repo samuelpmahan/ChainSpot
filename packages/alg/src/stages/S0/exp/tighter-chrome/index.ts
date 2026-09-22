@@ -1,6 +1,6 @@
-import { materializeComposite } from '../../../g0/composite';
-import type { CompositeResult } from '../../../g0/composite';
-import type { InputAsset } from '../../../g0/inputAsset';
+import { materializeComposite } from '../../../../g0/composite';
+import type { CompositeResult } from '../../../../g0/composite';
+import type { InputAsset } from '../../../../g0/inputAsset';
 
 /**
  * Deliberately boring S0 experiment: take one extra row from each vertical
