@@ -41,6 +41,8 @@ export type OperationResolution = {
 	readonly reason?: string;
 	readonly cause?: readonly string[];
 	readonly lineage?: 'clean' | `exp/${string}`;
+	/** Trusted produced Parts supplied when resolution is REUSE. */
+	readonly reusedParts?: Readonly<Record<string, unknown>>;
 };
 export type OperationResolver = (op: OperationSpec) => OperationResolution;
 
@@ -151,11 +153,25 @@ export function executeCompiledPlan(
 		const frozenCalculations = freezeCalculations(op, impl, runtime);
 		const decision = runtime.resolver?.(op) ?? { resolution: 'EXECUTE' as const, reason: 'default-execute' };
 		if (decision.resolution === 'REUSE') {
+			const reused = decision.reusedParts ?? {};
+			const missing = op.produces.filter((address) => !(address in reused));
+			if (missing.length) throw new Error(
+				`executeCompiledPlan: REUSE for Tick '${op.id}' did not resolve produced Parts [${missing.join(', ')}].`
+			);
+			const reusedProduced = new Set<string>();
+			const reusedWrites = [];
+			for (const address of op.produces) {
+				const existed = board.has(address);
+				board.set(address, reused[address]);
+				reusedProduced.add(address);
+				reusedWrites.push({ address, kind: existed ? 'replacement' as const : 'new-address' as const });
+			}
 			const receipt: Receipt = {
 				opId: op.id, frozenCalculations, startedAtMs, durationMs: now() - startedAtMs,
 				lineage: decision.lineage ?? 'clean', resolution: 'REUSE', resolutionReason: decision.reason, resolutionCause: decision.cause,
 				declaredConsumes: op.consumes, declaredProduces: op.produces,
-				actualConsumes: [], actualProduces: [], writes: [], probes: [], artifacts: []
+				actualConsumes: [], actualProduces: [...reusedProduced], writes: reusedWrites,
+				probes: shapeProbes(board, reusedProduced), artifacts: []
 			};
 			sink.putReceipt(receipt); receipts.push(receipt); continue;
 		}
