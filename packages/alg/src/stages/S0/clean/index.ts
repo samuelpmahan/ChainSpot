@@ -134,6 +134,30 @@ export interface ExecuteS0Args<Source> {
 	readonly decode: (source: Source) => Promise<InputAsset>;
 }
 
+/** Run only the crop Tick in an isolated lineage over S0's existing FullImage. */
+export async function forkS0Crop(
+	stage: S0Stage,
+	lineage: `exp/${string}`,
+	cropper: (fullImage: InputAsset) => Promise<CompositeResult>
+): Promise<{ readonly pxc: PxC; readonly croppedImage: CompositeResult; readonly testimony: TickTestimony }> {
+	const fork = stage.pxc.fork(lineage);
+	const runtime: OperationRuntime = {
+		implementations: new Map([
+			[S0_CROP_TICK.id, async (board) => {
+				const fullImage = board.get<InputAsset>(S0_FULL_IMAGE_ADDRESS);
+				board.set(S0_CROPPED_IMAGE_ADDRESS, await cropper(fullImage));
+			}]
+		]),
+		calculationBindings: new Map([
+			[S0_CROP_TICK.id, [{ address: 'fn.materializeComposite', calculate: cropper }]]
+		]),
+		resolver: () => ({ resolution: 'EXECUTE', reason: 'speculative-crop', lineage })
+	};
+	const plan: CompiledExecutionPlan = { ops: [{ ...S0_CROP_TICK, calculations: ['fn.materializeComposite'] }], planFingerprint: S0_PLAN.planFingerprint, bindings: {} };
+	const [testimony] = await executeCompiledPlanAsync(plan, fork, nullFeatureContext, createMemorySink(), runtime);
+	return { pxc: fork, croppedImage: fork.get<CompositeResult>(S0_CROPPED_IMAGE_ADDRESS), testimony };
+}
+
 /** Human replay of S0 in execution order. */
 export function formatS0ReceiptText(run: S0CropRun, context: S0ReceiptTextContext): string {
 	const cropWrites = run.testimony.writes
