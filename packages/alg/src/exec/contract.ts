@@ -71,7 +71,7 @@ export interface OperationSpec {
 	 * These are descriptive fn.* addresses, not another execution registry:
 	 * OperationRuntime remains the sole authority that binds and runs them.
 	 */
-	readonly calculations?: readonly `fn.${string}`[];
+	readonly calculations: readonly `fn.${string}`[];
 	/**
 	 * Semantic paths this Tick's Calculations actually inspect. More precise than
 	 * Part addresses: used by SpeculativeExecution to seed surgical invalidation.
