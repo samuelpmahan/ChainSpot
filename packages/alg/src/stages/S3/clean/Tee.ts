@@ -56,7 +56,7 @@ interface FoundTeePx {
 export const TeePxC = {
 	rings: pxKey<TeeRingSearch>('px.tees.rings'),
 	family: pxKey<TeeFamily>('px.tees.family'),
-	objects: pxKey<readonly Tee[]>('px.tees')
+	objects: pxKey<readonly Tee[]>('px.tees.initial')
 } as const;
 
 export const TeeFn = {
