@@ -11,7 +11,7 @@ import { ComponentPxC } from '../../componentPxC';
 import { BadgePxC, type Badge } from '../../S1/clean/Badge';
 import { BasketPxC, type Basket } from '../../S2/clean/Basket';
 import { TeePxC, type Tee } from '../../S3/clean/Tee';
-import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';
+import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';\nimport { recoverOccludedBaskets } from './BasketRecovery';
 
 export const S4_RECOVER_TICK: OperationSpec = {
 	id: 'OccludedObject.recover',
@@ -49,7 +49,7 @@ function recover(pxc: PxC): void {
 	const image=pxc.get<any>(ComponentPxC.image);
 	const run=runThreeFactor(image);
 	const badges: RecoveredBadge[]=[];
-	const baskets: RecoveredBasket[]=[];
+	const baskets: RecoveredBasket[]=[...recoverOccludedBaskets(image,pxc.get<readonly Badge[]>(BadgePxC.objects),pxc.get<readonly Basket[]>(BasketPxC.objects))];
 	const tees: RecoveredTee[]=[];
 	const badgesById=new Map(run.measurement.badges.map((x)=>[x.detId,x] as const));
 	const teesById=new Map(run.assignment.tees.map((x)=>[x.detId,x] as const));
