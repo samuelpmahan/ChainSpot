@@ -37,19 +37,19 @@ jobs:
           test -f artifacts/chainspot-workspace/WORKSPACE.json
           test -f artifacts/chainspot-workspace/package.json
           test -d artifacts/chainspot-workspace/packages/alg/src
-          rm -rf artifacts/chainspot-workspace-smoke
-          cp -a artifacts/chainspot-workspace artifacts/chainspot-workspace-smoke
-          (cd artifacts/chainspot-workspace-smoke && npm install --ignore-scripts && npm run build --workspace @chainspot/alg)
+          test -d artifacts/chainspot-workspace/node_modules
+          # Prove the uploaded workspace is immediately runnable: no dependency install.
+          (cd artifacts/chainspot-workspace && npm run build --workspace @chainspot/alg)
       - name: Prove staged Gitless artifact is clean
         run: |
           staged=artifacts/chainspot-workspace
-          forbidden='node_modules|\.git|dist|\.svelte-kit|coverage'
+          forbidden='\.git|dist|\.svelte-kit|coverage'
           if find "$staged" -type d \
-            \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
+            \( -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
             -print -quit | grep -q .; then
             echo "staged Gitless artifact leaked an excluded directory" >&2
             find "$staged" -type d \
-              \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
+              \( -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) \
               -print >&2
             exit 1
           fi
