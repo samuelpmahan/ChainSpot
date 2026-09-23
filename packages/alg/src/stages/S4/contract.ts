@@ -6,7 +6,7 @@ export interface RecoveredObject {
 }
 
 export type RecoveredBadge = RecoveredObject;
-export type RecoveredBasket = RecoveredObject;
+export interface RecoveredBasket {\n\treadonly bbox: readonly [number, number, number, number];\n\treadonly score: number;\n\treadonly trustedFraction: number;\n\treadonly source: 'masked-course-template';\n}
 export type RecoveredTee = RecoveredObject;
 
 export const S4PxC = {
