@@ -9,8 +9,6 @@ mkdir -p "$OUT"
 # exclude nested workspace node_modules from the artifact.
 tar \
   --exclude-vcs \
-  --exclude='node_modules' \
-  --exclude='*/node_modules' \
   --exclude='artifacts' \
   --exclude='*/artifacts' \
   --exclude='dist' \
@@ -23,11 +21,13 @@ tar \
   -cf - . | tar -xf - -C "$OUT"
 
 # Packaging contract: fail before upload if disposable dependency/build state leaked.
-if find "$OUT" -type d \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) -print -quit | grep -q .; then
+if find "$OUT" -type d \( -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) -print -quit | grep -q .; then
   echo "gitless workspace packaging leaked an excluded directory" >&2
-  find "$OUT" -type d \( -name node_modules -o -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) -print >&2
+  find "$OUT" -type d \( -name .git -o -name dist -o -name .svelte-kit -o -name coverage \) -print >&2
   exit 1
 fi
+
+test -d "$OUT/node_modules" || { echo "gitless workspace requires preinstalled node_modules" >&2; exit 1; }
 
 cat > "$OUT/WORKSPACE.json" <<EOF
 {
@@ -35,6 +35,6 @@ cat > "$OUT/WORKSPACE.json" <<EOF
   "repository": "samuelpmahan/ChainSpot",
   "branch": "${GITHUB_REF_NAME:-unknown}",
   "baseCommit": "${GITHUB_SHA:-unknown}",
-  "contract": "gitless-development-checkout"
+  "contract": "gitless-development-checkout-ready"
 }
 EOF
