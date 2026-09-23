@@ -1,18 +1,28 @@
-export interface RecoveredTee {
+export interface RecoveredObject {
 	readonly hole: number;
 	readonly xPx: number;
 	readonly yPx: number;
 	readonly source: string;
 }
 
+export type RecoveredBadge = RecoveredObject;
+export type RecoveredBasket = RecoveredObject;
+export type RecoveredTee = RecoveredObject;
+
 export const S4PxC = {
-	/** Recovery-only testimony: objects S4 added to the visible inventory. */
+	recoveredBadges: { address: 'px.badges.recovered' },
+	recoveredBaskets: { address: 'px.baskets.recovered' },
 	recoveredTees: { address: 'px.tees.recovered' },
-	/** Canonical post-recovery tee inventory consumed by later stages. */
+	badges: { address: 'px.badges.complete' },
+	baskets: { address: 'px.baskets.complete' },
 	tees: { address: 'px.tees.complete' }
 } as const;
 
 export const S4Fn = {
+	recoverBadges: { address: 'fn.Badge.recoverOccluded' },
+	recoverBaskets: { address: 'fn.Basket.recoverOccluded' },
 	recoverTees: { address: 'fn.Tee.recoverOccluded' },
+	completeBadges: { address: 'fn.Badge.complete' },
+	completeBaskets: { address: 'fn.Basket.complete' },
 	completeTees: { address: 'fn.Tee.complete' }
 } as const;
