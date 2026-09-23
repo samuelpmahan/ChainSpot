@@ -1,12 +1,11 @@
 import { runThreeFactor } from '../../../detectors/threeFactor';
 import type { PxC } from '../../../exec/board';
-import type { OperationSpec, TickTestimony } from '../../../exec/contract';
-import type { CompiledExecutionPlan } from '../../../exec/compile';
-import { executeCompiledPlan, type OperationRuntime } from '../../../exec/gateway';
+import type { TickTestimony } from '../../../exec/contract';
+import { executeCompiledPlan } from '../../../exec/gateway';
+import { NeatCatalog } from '../../../exec/neat';
+import { compileStage, type CrispTickDeclaration } from '../../../exec/crisp';
 import { createMemorySink } from '../../../exec/sink';
 import { nullFeatureContext } from '../../../detectors/threeFactor/features/types';
-import { canonicalJson } from '../../../detectors/threeFactor/hash';
-import { sha256HexSyncText } from '../../../exec/sha256';
 import { ComponentPxC } from '../../componentPxC';
 import { BadgePxC, type Badge } from '../../S1/clean/Badge';
 import { BasketPxC, type Basket } from '../../S2/clean/Basket';
@@ -15,7 +14,7 @@ import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredT
 import { recoverOccludedBaskets } from './BasketRecovery';
 import { completeTees } from './TeeCompletion';
 
-export const S4_RECOVER_TICK: OperationSpec = {
+export const S4_RECOVER_TICK = {
 	id: 'OccludedObject.recover',
 	kind: 'compute',
 	gate: 'S4',
@@ -25,9 +24,11 @@ export const S4_RECOVER_TICK: OperationSpec = {
 	calculations: [S4Fn.recoverBadges.address,S4Fn.recoverBaskets.address,S4Fn.recoverTees.address],
 	accessConformance: 'exact',
 	note: 'All long-tail occlusion recovery lives in S4.'
-};
+,
+	run: recover
+} satisfies CrispTickDeclaration;
 
-export const S4_COMPLETE_TICK: OperationSpec = {
+export const S4_COMPLETE_TICK = {
 	id: 'OccludedObject.complete',
 	kind: 'compute',
 	gate: 'S4',
@@ -38,9 +39,6 @@ export const S4_COMPLETE_TICK: OperationSpec = {
 	accessConformance: 'exact',
 	note: 'Initial + recovered produces the authoritative post-S4 inventories.'
 };
-
-const OPS=[S4_RECOVER_TICK,S4_COMPLETE_TICK] as const;
-const PLAN: CompiledExecutionPlan={ops:OPS,bindings:{},planFingerprint:sha256HexSyncText(canonicalJson({clean:'S4-occluded-object-recovery',ops:OPS}))};
 
 function recover(pxc: PxC): void {
 	// S4 recovery consumes the established initial inventories even while the legacy
@@ -109,7 +107,7 @@ export interface S4Run {
 export function executeS4OccludedObjectRecovery(pxc: PxC): S4Run {
 	for(const address of [ComponentPxC.image.address,BadgePxC.objects.address,BasketPxC.objects.address,TeePxC.objects.address])
 		if(!pxc.has(address)) throw new Error(`S4 requires PxC address '${address}'.`);
-	const testimonies=executeCompiledPlan(PLAN,pxc,nullFeatureContext,createMemorySink(),RUNTIME);
+	const testimonies=executeCompiledPlan(COMPILED.plan,pxc,nullFeatureContext,createMemorySink(),COMPILED.runtime);
 	return {
 		pxc,
 		recoveredBadges:pxc.get(S4PxC.recoveredBadges.address),
