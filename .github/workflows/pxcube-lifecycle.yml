@@ -31,6 +31,36 @@ jobs:
           node scripts/prove-calculator-dag.mjs
           node scripts/prove-calculator-catalog.mjs
           node --test tests/node/pxcube-graph.test.mjs tests/node/pxcube-s0-fork.test.mjs tests/node/pxcube-s0-receipt.test.mjs tests/node/pxcube-visual-comparison.test.mjs tests/node/pxcube-speculative-execution.test.mjs tests/node/pxcube-cache-key.test.mjs tests/node/pxcube-parity-propagation.test.mjs tests/node/pxcube-semantic-delta.test.mjs tests/node/pxcube-surgical-cone.test.mjs tests/node/pxcube-flexible-battery.test.mjs tests/node/pxcube-readiness-battery.test.mjs tests/node/pxcube-s1-real-cone.test.mjs tests/node/pxcube-resolution-testimony.test.mjs tests/node/pxcube-simple-calculator.test.mjs tests/node/pxcube-simple-calculator-pxc.test.mjs tests/node/pxcube-timing-comparison.test.mjs tests/node/pxcube-wave-scheduler.test.mjs tests/node/pxcube-part-editions.test.mjs tests/node/pxcube-lineage-board.test.mjs tests/node/pxcube-s0-catalog-fork.test.mjs tests/node/pxcube-s0-s1-semantic-bridge.test.mjs tests/node/pxcube-badge-parity.test.mjs tests/node/pxcube-cross-stage-receipt.test.mjs
+      - name: Materialize full receipt suite
+        run: |
+          mkdir -p artifacts/receipts
+          # Every receipt/proof runner is part of the lifecycle artifact. A missing
+          # or failing runner fails the workflow instead of silently shrinking evidence.
+          runners=(
+            scripts/pxcube-s0-receipt.mjs
+            scripts/prove-gateway-calculator.mjs
+            scripts/prove-calculator-dag.mjs
+            scripts/prove-calculator-catalog.mjs
+            scripts/run-production-speculative-battery.mjs
+          )
+          for runner in "${runners[@]}"; do
+            test -f "$runner"
+            name="$(basename "$runner" .mjs)"
+            echo "=== $runner ===" | tee "artifacts/receipts/$name.txt"
+            node "$runner" 2>&1 | tee -a "artifacts/receipts/$name.txt"
+          done
+          node --test tests/node/pxcube-*.test.mjs 2>&1 | tee artifacts/receipts/pxcube-node-suite.txt
+          {
+            echo "PXCUBE RECEIPT SUITE"
+            echo "sha: $GITHUB_SHA"
+            echo "runner-count: ${#runners[@]}"
+            echo "node-suite: PASS"
+          } | tee artifacts/receipts/SUITE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pxcube-receipts
+          path: artifacts/receipts
+          retention-days: 7
       - name: Build fixed Gitless development workspace
         run: |
           bash scripts/package-gitless-workspace.sh artifacts/chainspot-workspace
