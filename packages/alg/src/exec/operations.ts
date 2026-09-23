@@ -564,6 +564,7 @@ const zfitOps: OperationDef[] = [
 			unit: 'zfit',
 			consumes: ['measurement', 'assignment.tees', 'assignment.rawPairs', 'assignment'],
 			produces: ['assignment'],
+			calculations: ['fn.refineBentPathAssignment'],
 			features: [zfitFeature.id, g4ScoringFeature.id, g4SearchFeature.id],
 			note: 'when enabled, rescore the top-K weak straight routes with bent-path Z-fit and reselect ownership'
 		},
@@ -630,6 +631,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'straightTest',
 			consumes: straightTestUnit.consumes,
 			produces: straightTestUnit.produces,
+			calculations: ['fn.straightTest'],
 			features: [straightTestFeature.id],
 			note: straightTestUnit.note
 		},
@@ -651,6 +653,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'badgeGlyphTemplate',
 			consumes: badgeGlyphTemplateUnit.consumes,
 			produces: badgeGlyphTemplateUnit.produces,
+			calculations: ['fn.badgeGlyphTemplate'],
 			features: [badgeGlyphTemplateFeature.id],
 			note: badgeGlyphTemplateUnit.note
 		},
@@ -680,6 +683,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'badgeEvidence',
 			consumes: ['image', 'viewport', 'paramsHash', 'badgeStage.components', 'measurement'],
 			produces: ['badgeEvidence.library'],
+			calculations: ['fn.materializeBadgeEvidence'],
 			note: 'materialize exact Badge B+W, naive AA, residue, and source-field evidence'
 		},
 		run(board) {
@@ -745,6 +749,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'phantomTee',
 			consumes: phantomTeeUnit.consumes,
 			produces: phantomTeeUnit.produces,
+			calculations: ['fn.phantomTee'],
 			features: [
 				phantomTeeFeature.id,
 				zfitFeature.id,
@@ -791,6 +796,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'teeMinAreaPose',
 			consumes: teeMinAreaPoseUnit.consumes,
 			produces: teeMinAreaPoseUnit.produces,
+			calculations: ['fn.teeMinAreaPose'],
 			features: [teeMinAreaPoseFeature.id],
 			note: teeMinAreaPoseUnit.note
 		},
@@ -830,6 +836,7 @@ const reusedOps: OperationDef[] = [
 			unit: 'cleanBasketFamily',
 			consumes: cleanBasketFamilyUnit.consumes,
 			produces: cleanBasketFamilyUnit.produces,
+			calculations: ['fn.cleanBasketFamily'],
 			features: [cleanBasketFamilyFeature.id],
 			note: cleanBasketFamilyUnit.note
 		},
