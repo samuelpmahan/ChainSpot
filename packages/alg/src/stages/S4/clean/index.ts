@@ -11,7 +11,7 @@ import { ComponentPxC } from '../../componentPxC';
 import { BadgePxC } from '../../S1/clean/Badge';
 import { BasketPxC } from '../../S2/clean/Basket';
 import { TeePxC } from '../../S3/clean/Tee';
-import { S4Fn, S4PxC, type RecoveredOccludedObject } from '../contract';
+import { S4Fn, S4PxC, type RecoveredTee } from '../contract';
 
 export const S4_RECOVER_TEES_TICK: OperationSpec = {
 	id: 'OccludedObject.recoverTees',
@@ -19,8 +19,8 @@ export const S4_RECOVER_TEES_TICK: OperationSpec = {
 	gate: 'S4',
 	unit: 'OccludedObject',
 	consumes: [ComponentPxC.image.address, BadgePxC.objects.address, BasketPxC.objects.address, TeePxC.objects.address],
-	produces: [S4PxC.objects.address],
-	calculations: [S4Fn.recoverTees.address],
+	produces: [S4PxC.recoveredTees.address, S4PxC.tees.address],
+	calculations: [S4Fn.recoverTees.address, S4Fn.completeTees.address],
 	accessConformance: 'exact',
 	note: 'Port the existing production teeRecovery capability into the explicit S4 occluded-object boundary.'
 };
@@ -31,7 +31,7 @@ const PLAN: CompiledExecutionPlan={ops:OPS,bindings:{},planFingerprint:sha256Hex
 function recoverTees(pxc: PxC): void {
 	const image=pxc.get<any>(ComponentPxC.image);
 	const run=runThreeFactor(image);
-	const recovered: RecoveredOccludedObject[]=[];
+	const recovered: RecoveredTee[]=[];
 	const badgesById=new Map(run.measurement.badges.map((badge)=>[badge.detId,badge] as const));
 	const teesById=new Map(run.assignment.tees.map((tee)=>[tee.detId,tee] as const));
 	for(const ownership of run.assignment.assignments){
@@ -39,21 +39,22 @@ function recoverTees(pxc: PxC): void {
 		const tee=teesById.get(ownership.teeId);
 		const n=Number(badge?.label ?? NaN);
 		if(!Number.isInteger(n)||!tee||tee.tier!=='recovered') continue;
-		recovered.push({kind:'tee',hole:n,xPx:tee.xPx,yPx:tee.yPx,source:tee.recovery?.source ?? 'teeRecovery'});
+		recovered.push({hole:n,xPx:tee.xPx,yPx:tee.yPx,source:tee.recovery?.source ?? 'teeRecovery'});
 	}
-	pxc.set(S4PxC.objects.address,recovered);
+	pxc.set(S4PxC.recoveredTees.address,recovered);
+	pxc.set(S4PxC.tees.address,[...pxc.get<readonly Tee[]>(TeePxC.objects),...recovered]);
 }
 
 const RUNTIME: OperationRuntime={
 	implementations:new Map([[S4_RECOVER_TEES_TICK.id,recoverTees]]),
-	calculationBindings:new Map([[S4_RECOVER_TEES_TICK.id,[{address:S4Fn.recoverTees.address,calculate:recoverTees}]]])
+	calculationBindings:new Map([[S4_RECOVER_TEES_TICK.id,[{address:S4Fn.recoverTees.address,calculate:recoverTees},{address:S4Fn.completeTees.address,calculate:recoverTees}]]])
 };
 
-export interface S4Run { readonly pxc:PxC; readonly recovered:readonly RecoveredOccludedObject[]; readonly testimonies:readonly TickTestimony[]; }
+export interface S4Run { readonly pxc:PxC; readonly recovered:readonly RecoveredTee[]; readonly testimonies:readonly TickTestimony[]; }
 
 export function executeS4OccludedObjectRecovery(pxc: PxC): S4Run {
 	for(const address of [ComponentPxC.image.address,BadgePxC.objects.address,BasketPxC.objects.address,TeePxC.objects.address])
 		if(!pxc.has(address)) throw new Error(`S4 requires PxC address '${address}'.`);
 	const testimonies=executeCompiledPlan(PLAN,pxc,nullFeatureContext,createMemorySink(),RUNTIME);
-	return {pxc,recovered:pxc.get(S4PxC.objects.address),testimonies};
+	return {pxc,recovered:pxc.get(S4PxC.recoveredTees.address),testimonies};
 }
