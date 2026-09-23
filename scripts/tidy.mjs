@@ -10,6 +10,7 @@ import { relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const MANIFEST_NAME = 'tidy.manifest.yaml';
+const CONTRACT_SCHEMA = 'pxc.stage/v1';
 const repo = process.cwd();
 const manifestPath = resolve(repo, MANIFEST_NAME);
 
@@ -38,14 +39,14 @@ function parseManifestText(text) {
 			stages[stage.id] = stage.value;
 			continue;
 		}
-		const fieldMatch = /^    (version|clean|hash): (\S.*)$/.exec(line);
+		const fieldMatch = /^    (version|clean|hash|contract): (\\S.*)$/.exec(line);
 		if (!fieldMatch || !stage) throw new Error(`unexpected manifest syntax at line ${number}`);
 		const [, field, value] = fieldMatch;
 		if (field in stage.value) throw new Error(`duplicate '${field}' for Stage '${stage.id}'`);
 		stage.value[field] = value;
 	}
 	for (const [id, value] of Object.entries(stages)) {
-		for (const field of ['version', 'clean', 'hash']) {
+		for (const field of ['version', 'clean', 'hash', 'contract']) {
 			if (typeof value[field] !== 'string') throw new Error(`Stage '${id}' is missing '${field}'`);
 		}
 		if (Object.keys(value).length !== 3) throw new Error(`Stage '${id}' has unsupported fields`);
@@ -62,7 +63,7 @@ function manifestText(manifest) {
 		lines.push(`  ${id}:`);
 		lines.push(`    version: ${stage.version}`);
 		lines.push(`    clean: ${stage.clean}`);
-		lines.push(`    hash: ${stage.hash}`);
+		lines.push(`    hash: ${stage.hash}`);\n\t\tlines.push(`    contract: ${stage.contract}`);
 	}
 	return `${lines.join('\n')}\n`;
 }
@@ -336,7 +337,7 @@ function addStage(args) {
 		if (original.manifest.stages[id]) return refuse(`Stage '${id}' is already in Tidy.`);
 		const hash = hashCleanDirectory(clean);
 		const next = structuredClone(original.manifest);
-		next.stages[id] = { version: '0.1.0', clean, hash };
+		next.stages[id] = { version: '0.1.0', clean, hash, contract: `artifacts/crisp/${id}.stage.json` };
 		writeManifest(next);
 		if (!checkTidy()) {
 			writeFileSync(manifestPath, original.text);
