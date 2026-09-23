@@ -933,6 +933,7 @@ export const posteriorTeeRecoveryOperation: ABFeatureOperation = {
 			'recoveredTees'
 		],
 		produces: [FEATURE_ID, 'recoveredTees', 'assignment', 'assignment.tees', 'assignment.rawPairs'],
+		calculations: ['fn.posteriorTeeRecovery'],
 		features: [FEATURE_ID],
 		note: 'posterior reconciliation over the evidence-derived tee-recovery conflict island; commits each selected tee to its chosen badge'
 	},
