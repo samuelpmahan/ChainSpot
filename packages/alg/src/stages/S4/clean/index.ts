@@ -11,7 +11,7 @@ import { ComponentPxC } from '../../componentPxC';
 import { BadgePxC, type Badge } from '../../S1/clean/Badge';
 import { BasketPxC, type Basket } from '../../S2/clean/Basket';
 import { TeePxC, type Tee } from '../../S3/clean/Tee';
-import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';\nimport { recoverOccludedBaskets } from './BasketRecovery';
+import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';\nimport { recoverOccludedBaskets } from './BasketRecovery';\nimport { completeTees } from './TeeCompletion';
 
 export const S4_RECOVER_TICK: OperationSpec = {
 	id: 'OccludedObject.recover',
@@ -70,7 +70,7 @@ function recover(pxc: PxC): void {
 function complete(pxc: PxC): void {
 	const badges=[...pxc.get<readonly Badge[]>(BadgePxC.objects),...pxc.get<readonly RecoveredBadge[]>(S4PxC.recoveredBadges.address)];
 	const baskets=[...pxc.get<readonly Basket[]>(BasketPxC.objects),...pxc.get<readonly RecoveredBasket[]>(S4PxC.recoveredBaskets.address)];
-	const tees=[...pxc.get<readonly Tee[]>(TeePxC.objects),...pxc.get<readonly RecoveredTee[]>(S4PxC.recoveredTees.address)];
+	const tees=completeTees(pxc.get<readonly Tee[]>(TeePxC.objects),pxc.get<readonly RecoveredTee[]>(S4PxC.recoveredTees.address),badges.length);
 	pxc.set(S4PxC.badges.address,badges);
 	pxc.set(S4PxC.baskets.address,baskets);
 	pxc.set(S4PxC.tees.address,tees);
