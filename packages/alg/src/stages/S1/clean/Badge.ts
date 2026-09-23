@@ -32,7 +32,7 @@ export const BadgePxC = {
 	family: pxKey<readonly ComponentStats[]>('px.badges.family'),
 	stage: pxKey<BadgeStageResult>('px.badges.stage'),
 	reads: pxKey<readonly LegacyBadgeRead[]>('badges'),
-	objects: pxKey<readonly Badge[]>('px.badges')
+	objects: pxKey<readonly Badge[]>('px.badges.initial')
 } as const;
 
 interface DetectFamilyArgs {
