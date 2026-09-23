@@ -14,32 +14,6 @@ import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredT
 import { recoverOccludedBaskets } from './BasketRecovery';
 import { completeTees } from './TeeCompletion';
 
-export const S4_RECOVER_TICK = {
-	id: 'OccludedObject.recover',
-	kind: 'compute',
-	gate: 'S4',
-	unit: 'OccludedObject',
-	consumes: [ComponentPxC.image.address, BadgePxC.objects.address, BasketPxC.objects.address, TeePxC.objects.address],
-	produces: [S4PxC.recoveredBadges.address,S4PxC.recoveredBaskets.address,S4PxC.recoveredTees.address],
-	calculations: [S4Fn.recoverBadges.address,S4Fn.recoverBaskets.address,S4Fn.recoverTees.address],
-	accessConformance: 'exact',
-	note: 'All long-tail occlusion recovery lives in S4.'
-,
-	run: recover
-} satisfies CrispTickDeclaration;
-
-export const S4_COMPLETE_TICK = {
-	id: 'OccludedObject.complete',
-	kind: 'compute',
-	gate: 'S4',
-	unit: 'OccludedObject',
-	consumes: [BadgePxC.objects.address,BasketPxC.objects.address,TeePxC.objects.address,S4PxC.recoveredBadges.address,S4PxC.recoveredBaskets.address,S4PxC.recoveredTees.address],
-	produces: [S4PxC.badges.address,S4PxC.baskets.address,S4PxC.tees.address],
-	calculations: [S4Fn.completeBadges.address,S4Fn.completeBaskets.address,S4Fn.completeTees.address],
-	accessConformance: 'exact',
-	note: 'Initial + recovered produces the authoritative post-S4 inventories.'
-};
-
 function recover(pxc: PxC): void {
 	// S4 recovery consumes the established initial inventories even while the legacy
 	// recovery adapter still recomputes some detector evidence internally.
@@ -80,21 +54,29 @@ function complete(pxc: PxC): void {
 	);
 }
 
-const RUNTIME: OperationRuntime={
-	implementations:new Map([[S4_RECOVER_TICK.id,recover],[S4_COMPLETE_TICK.id,complete]]),
-	calculationBindings:new Map([
-		[S4_RECOVER_TICK.id,[
-			{address:S4Fn.recoverBadges.address,calculate:recover},
-			{address:S4Fn.recoverBaskets.address,calculate:recover},
-			{address:S4Fn.recoverTees.address,calculate:recover}
-		]],
-		[S4_COMPLETE_TICK.id,[
-			{address:S4Fn.completeBadges.address,calculate:complete},
-			{address:S4Fn.completeBaskets.address,calculate:complete},
-			{address:S4Fn.completeTees.address,calculate:complete}
-		]]
-	])
-};
+
+export const S4_RECOVER_TICK = {
+	id:'OccludedObject.recover', kind:'compute', gate:'S4', unit:'OccludedObject',
+	consumes:[ComponentPxC.image.address,BadgePxC.objects.address,BasketPxC.objects.address,TeePxC.objects.address],
+	produces:[S4PxC.recoveredBadges.address,S4PxC.recoveredBaskets.address,S4PxC.recoveredTees.address],
+	calculations:[S4Fn.recoverBadges.address,S4Fn.recoverBaskets.address,S4Fn.recoverTees.address],
+	accessConformance:'exact', note:'All long-tail occlusion recovery lives in S4.', run:recover
+} satisfies CrispTickDeclaration;
+
+export const S4_COMPLETE_TICK = {
+	id:'OccludedObject.complete', kind:'compute', gate:'S4', unit:'OccludedObject',
+	consumes:[BadgePxC.objects.address,BasketPxC.objects.address,TeePxC.objects.address,S4PxC.recoveredBadges.address,S4PxC.recoveredBaskets.address,S4PxC.recoveredTees.address],
+	produces:[S4PxC.badges.address,S4PxC.baskets.address,S4PxC.tees.address],
+	calculations:[S4Fn.completeBadges.address,S4Fn.completeBaskets.address,S4Fn.completeTees.address],
+	accessConformance:'exact', note:'Initial + recovered produces the authoritative post-S4 inventories.', run:complete
+} satisfies CrispTickDeclaration;
+
+const neat=new NeatCatalog();
+for(const address of S4_RECOVER_TICK.calculations) neat.register({address,lineage:'clean',calculate:recover});
+for(const address of S4_COMPLETE_TICK.calculations) neat.register({address,lineage:'clean',calculate:complete});
+const COMPILED=compileStage('S4',[S4_RECOVER_TICK,S4_COMPLETE_TICK],neat,[{
+	id:'ObjectFamilyCardinality',description:'badges.complete == baskets.complete == tees.complete'
+}]);
 
 export interface S4Run {
 	readonly pxc:PxC;
