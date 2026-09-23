@@ -46,13 +46,13 @@ export function materializeTickReceipt(op: OperationSpec, pxc: PxC, testimony: T
 		`Receipt incomplete for ${op.id}: declared output(s) missing: ${missingProduced.map((x) => x.address).join(', ')}`
 	);
 	if (!testimony) throw new Error(`Receipt incomplete for ${op.id}: execution testimony missing`);
-	if ((op.calculations ?? []).length === 0) throw new Error(`Receipt incomplete for ${op.id}: no declared calculations`);
+	if (op.calculations.length === 0) throw new Error(`Receipt incomplete for ${op.id}: no declared calculations`);
 	return {
 		tick: op.id,
 		attempts: (testimony as any).attempts ?? [],
 		result: (testimony as any).result ?? testimony,
 		consumed,
-		calculations: (op.calculations ?? []).map((address) => ({ address })),
+		calculations: op.calculations.map((address) => ({ address })),
 		produced
 	};
 }
