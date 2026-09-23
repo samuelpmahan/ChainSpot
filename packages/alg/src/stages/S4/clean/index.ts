@@ -68,9 +68,16 @@ function recover(pxc: PxC): void {
 }
 
 function complete(pxc: PxC): void {
-	pxc.set(S4PxC.badges.address,[...pxc.get<readonly Badge[]>(BadgePxC.objects),...pxc.get<readonly RecoveredBadge[]>(S4PxC.recoveredBadges.address)]);
-	pxc.set(S4PxC.baskets.address,[...pxc.get<readonly Basket[]>(BasketPxC.objects),...pxc.get<readonly RecoveredBasket[]>(S4PxC.recoveredBaskets.address)]);
-	pxc.set(S4PxC.tees.address,[...pxc.get<readonly Tee[]>(TeePxC.objects),...pxc.get<readonly RecoveredTee[]>(S4PxC.recoveredTees.address)]);
+	const badges=[...pxc.get<readonly Badge[]>(BadgePxC.objects),...pxc.get<readonly RecoveredBadge[]>(S4PxC.recoveredBadges.address)];
+	const baskets=[...pxc.get<readonly Basket[]>(BasketPxC.objects),...pxc.get<readonly RecoveredBasket[]>(S4PxC.recoveredBaskets.address)];
+	const tees=[...pxc.get<readonly Tee[]>(TeePxC.objects),...pxc.get<readonly RecoveredTee[]>(S4PxC.recoveredTees.address)];
+	pxc.set(S4PxC.badges.address,badges);
+	pxc.set(S4PxC.baskets.address,baskets);
+	pxc.set(S4PxC.tees.address,tees);
+	const expected=badges.length;
+	if(baskets.length!==expected||tees.length!==expected) throw new Error(
+		`S4 incomplete object inventory: badges.complete=${expected}, baskets.complete=${baskets.length}, tees.complete=${tees.length}; each semantic hole requires exactly one Basket and one Tee`
+	);
 }
 
 const RUNTIME: OperationRuntime={
