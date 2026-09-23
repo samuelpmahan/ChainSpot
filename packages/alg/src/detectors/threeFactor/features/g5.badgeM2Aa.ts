@@ -391,6 +391,7 @@ export const badgeM2AaOperation: ABFeatureOperation = {
 		unit: 'badgeEvidence',
 		consumes: ['image', 'badgeEvidence.library'],
 		produces: ['badgeEvidence.m2Library'],
+		calculations: ['fn.materializeBadgeM2Aa'],
 		features: [BADGE_M2_AA_FEATURE_ID],
 		note: 'materialize default-OFF raw RGBA expanded-frame badge recurrence and post-discovery partition trace'
 	},
