@@ -11,7 +11,9 @@ import { ComponentPxC } from '../../componentPxC';
 import { BadgePxC, type Badge } from '../../S1/clean/Badge';
 import { BasketPxC, type Basket } from '../../S2/clean/Basket';
 import { TeePxC, type Tee } from '../../S3/clean/Tee';
-import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';\nimport { recoverOccludedBaskets } from './BasketRecovery';\nimport { completeTees } from './TeeCompletion';
+import { S4Fn, S4PxC, type RecoveredBadge, type RecoveredBasket, type RecoveredTee } from '../contract';
+import { recoverOccludedBaskets } from './BasketRecovery';
+import { completeTees } from './TeeCompletion';
 
 export const S4_RECOVER_TICK: OperationSpec = {
 	id: 'OccludedObject.recover',
