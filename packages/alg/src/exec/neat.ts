@@ -1,6 +1,6 @@
 import type { CalculationAddress } from './contract';
 
-export type NeatLineage='clean'|`exp/${string}`;
+export type NeatLineage='clean'|'work'|`exp/${string}`;
 
 export interface NeatCalculation<T=unknown> {
 	readonly address:CalculationAddress;
