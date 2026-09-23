@@ -6,7 +6,7 @@ import {
 	readFileSync,
 	writeFileSync
 } from 'node:fs';
-import { relative, resolve, sep } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const MANIFEST_NAME = 'tidy.manifest.yaml';
@@ -300,6 +300,26 @@ export function checkTidy() {
 	return tidy;
 }
 
+function registerContract(args) {
+	const id=valueAfter(args,['-id','--id']);
+	const contract=valueAfter(args,['-contract','--contract']);
+	if(!id||!contract)return refuse('usage: tidy register-contract -id <Stage> -contract <repo-relative-json>');
+	try{
+		const original=readCurrentManifest();
+		const stage=original.manifest.stages[id];
+		if(!stage)return refuse(`Stage '${id}' is not enrolled in tidy.`);
+		const absolute=cleanAbsolute(contract);
+		if(!existsSync(absolute)||!lstatSync(absolute).isFile())return refuse(`crisp contract does not exist: ${contract}`);
+		const parsed=JSON.parse(readFileSync(absolute,'utf8'));
+		if(parsed.schema!==CONTRACT_SCHEMA)return refuse(`unsupported crisp contract schema '${parsed.schema}'`);
+		if(parsed.stage!==id)return refuse(`crisp contract Stage '${parsed.stage}' does not match tidy Stage '${id}'`);
+		const next=structuredClone(original.manifest);
+		next.stages[id]={...stage,contract};
+		writeManifest(next);
+		console.log(`REGISTERED ${id} contract ${contract}`);
+	}catch(error){return refuse(error instanceof Error?error.message:String(error));}
+}
+
 function writeManifest(manifest) {
 	writeFileSync(manifestPath, manifestText(manifest));
 }
@@ -423,7 +443,8 @@ const [command, ...args] = process.argv.slice(2);
 if (command === 'check') process.exitCode = checkTidy() ? 0 : 1;
 else if (command === 'add') addStage(args);
 else if (command === 'up') promote(args);
+else if (command === 'register-contract') registerContract(args);
 else {
-	console.log('usage: tidy <check|add|up>');
+	console.log('usage: tidy <check|add|up|register-contract>');
 	process.exitCode = 2;
 }
