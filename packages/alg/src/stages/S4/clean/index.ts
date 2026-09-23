@@ -41,6 +41,11 @@ const OPS=[S4_RECOVER_TICK,S4_COMPLETE_TICK] as const;
 const PLAN: CompiledExecutionPlan={ops:OPS,bindings:{},planFingerprint:sha256HexSyncText(canonicalJson({clean:'S4-occluded-object-recovery',ops:OPS}))};
 
 function recover(pxc: PxC): void {
+	// S4 recovery consumes the established initial inventories even while the legacy
+	// recovery adapter still recomputes some detector evidence internally.
+	pxc.get(BadgePxC.objects);
+	pxc.get(BasketPxC.objects);
+	pxc.get(TeePxC.objects);
 	const image=pxc.get<any>(ComponentPxC.image);
 	const run=runThreeFactor(image);
 	const badges: RecoveredBadge[]=[];
