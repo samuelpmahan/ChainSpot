@@ -246,12 +246,13 @@ export function checkTidy() {
 
 		const hashMatches = actualHash !== undefined && stage.hash === actualHash;
 		report(
-			`${id}.checkpoint`,
-			true,
+			`${id}.clean.checkpoint`,
+			hashMatches,
 			hashMatches
 				? `PROMOTED ${actualHash.slice(7,19)}`
-				: `DEVELOPING checkpoint=${stage.hash.slice(7,19)} current=${actualHash?.slice(7,19) ?? 'unavailable'}`
+				: `clean changed: checkpoint=${stage.hash.slice(7,19)} current=${actualHash?.slice(7,19) ?? 'unavailable'}; develop in work/ or exp/`
 		);
+		tidy &&= hashMatches;
 
 		if (head.kind !== 'present') {
 			report(`${id}.head.manifest`, true, 'new Stage');
@@ -271,17 +272,15 @@ export function checkTidy() {
 		const versionsComparable = validVersion && parseSemver(previous.version) !== undefined;
 		const regressed = !versionsComparable || compareSemver(stage.version, previous.version) < 0;
 		const surfaceChanged = actualHash !== previous.hash || stage.clean !== previous.clean;
-		const historyPass = !regressed;
+		const historyPass = !regressed && (!surfaceChanged || compareSemver(stage.version, previous.version) > 0);
 		report(
 			`${id}.version.history`,
 			historyPass,
 			regressed
 				? `regressed from ${previous.version}`
-				: surfaceChanged && compareSemver(stage.version, previous.version) === 0
-					? `DEVELOPING from ${previous.version}`
-					: surfaceChanged
-						? `promoted from ${previous.version}`
-						: 'unchanged surface'
+				: surfaceChanged
+					? historyPass ? `promoted from ${previous.version}` : `clean changed without promotion; use work/ or exp/`
+					: 'unchanged surface'
 		);
 		tidy &&= historyPass;
 	}
