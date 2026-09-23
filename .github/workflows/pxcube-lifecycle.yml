@@ -39,7 +39,9 @@ jobs:
           test -d artifacts/chainspot-workspace/packages/alg/src
           test -d artifacts/chainspot-workspace/node_modules
           # Prove the uploaded workspace is immediately runnable: no dependency install.
+          # Build output is reproducible and must not leak into the uploaded workspace.
           (cd artifacts/chainspot-workspace && npm run build --workspace @chainspot/alg)
+          rm -rf artifacts/chainspot-workspace/packages/alg/dist
       - name: Prove staged Gitless artifact is clean
         run: |
           staged=artifacts/chainspot-workspace
