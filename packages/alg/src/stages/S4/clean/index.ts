@@ -21,7 +21,7 @@ export const S4_RECOVER_TEES_TICK: OperationSpec = {
 	consumes: [ComponentPxC.image.address, BadgePxC.objects.address, BasketPxC.objects.address, TeePxC.objects.address],
 	produces: [S4PxC.objects.address],
 	calculations: [S4Fn.recoverTees.address],
-	accessConformance: 'declared-subset',
+	accessConformance: 'exact',
 	note: 'Port the existing production teeRecovery capability into the explicit S4 occluded-object boundary.'
 };
 
@@ -32,11 +32,14 @@ function recoverTees(pxc: PxC): void {
 	const image=pxc.get<any>(ComponentPxC.image);
 	const run=runThreeFactor(image);
 	const recovered: RecoveredOccludedObject[]=[];
-	for(const row of run.assignment.assignments){
-		const n=Number(row.badge?.label ?? row.badgeLabel ?? NaN);
-		const tee:any=row.tee;
+	const badgesById=new Map(run.measurement.badges.map((badge)=>[badge.detId,badge] as const));
+	const teesById=new Map(run.assignment.tees.map((tee)=>[tee.detId,tee] as const));
+	for(const ownership of run.assignment.assignments){
+		const badge=badgesById.get(ownership.badgeId);
+		const tee=teesById.get(ownership.teeId);
+		const n=Number(badge?.label ?? NaN);
 		if(!Number.isInteger(n)||!tee||tee.tier!=='recovered') continue;
-		recovered.push({kind:'tee',hole:n,xPx:tee.xPx,yPx:tee.yPx,source:'teeRecovery'});
+		recovered.push({kind:'tee',hole:n,xPx:tee.xPx,yPx:tee.yPx,source:tee.recovery?.source ?? 'teeRecovery'});
 	}
 	pxc.set(S4PxC.objects.address,recovered);
 }
