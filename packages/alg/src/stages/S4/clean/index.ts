@@ -43,7 +43,7 @@ function recoverTees(pxc: PxC): void {
 
 const RUNTIME: OperationRuntime={
 	implementations:new Map([[S4_RECOVER_TEES_TICK.id,recoverTees]]),
-	calculationBindings:new Map([[S4_RECOVER_TEES_TICK.id,[{address:S4Fn.recoverTees.address,calculate:recoverTees}]])
+	calculationBindings:new Map([[S4_RECOVER_TEES_TICK.id,[{address:S4Fn.recoverTees.address,calculate:recoverTees}]]])
 };
 
 export interface S4Run { readonly pxc:PxC; readonly recovered:readonly RecoveredOccludedObject[]; readonly testimonies:readonly TickTestimony[]; }
