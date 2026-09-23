@@ -19,6 +19,16 @@ export interface StageContext {
 	readonly pxc?: PxC;
 }
 
+export interface StageAssertion {
+	readonly id: string;
+	readonly description: string;
+	readonly evaluate: (pxc: PxC) => {
+		readonly pass: boolean;
+		readonly observed: string;
+		readonly expected: string;
+	};
+}
+
 export interface StageOutput {
 	readonly pxc: PxC;
 	readonly receiptText: string;
@@ -28,5 +38,9 @@ export interface StageOutput {
 /** The executable contract LAB discovers at stages/S<number>/contract.js. */
 export interface StageContract {
 	readonly id: `S${number}`;
+	/** Semantic Parts this Stage promises to leave materialized. */
+	readonly produces?: readonly string[];
+	/** Named postconditions evaluated by the generic receipt runner. */
+	readonly assertions?: readonly StageAssertion[];
 	readonly execute: (context: StageContext) => Promise<StageOutput>;
 }
