@@ -37,10 +37,16 @@ export function materializeTickReceipt(op: OperationSpec, pxc: PxC, testimony: T
 	});
 	const consumed = op.consumes.map(part);
 	const produced = op.produces.map(part);
-	const missing = produced.filter((entry) => entry.summary === 'MISSING');
-	if (missing.length) throw new Error(
-		`Receipt incomplete for ${op.id}: declared output(s) missing: ${missing.map((x) => x.address).join(', ')}`
+	const missingConsumed = consumed.filter((entry) => entry.summary === 'MISSING');
+	if (missingConsumed.length) throw new Error(
+		`Receipt incomplete for ${op.id}: declared input(s) missing: ${missingConsumed.map((x) => x.address).join(', ')}`
 	);
+	const missingProduced = produced.filter((entry) => entry.summary === 'MISSING');
+	if (missingProduced.length) throw new Error(
+		`Receipt incomplete for ${op.id}: declared output(s) missing: ${missingProduced.map((x) => x.address).join(', ')}`
+	);
+	if (!testimony) throw new Error(`Receipt incomplete for ${op.id}: execution testimony missing`);
+	if (op.calculations.length === 0) throw new Error(`Receipt incomplete for ${op.id}: no declared calculations`);
 	return {
 		tick: op.id,
 		attempts: (testimony as any).attempts ?? [],
@@ -53,5 +59,12 @@ export function materializeTickReceipt(op: OperationSpec, pxc: PxC, testimony: T
 
 export function materializeStageReceipt(ops: readonly OperationSpec[], pxc: PxC, testimonies: readonly TickTestimony[]): readonly TickReceipt[] {
 	const byTick = new Map(testimonies.map((t: any) => [t.tick ?? t.operationId ?? t.id, t] as const));
-	return ops.map((op, index) => materializeTickReceipt(op, pxc, (byTick.get(op.id) ?? testimonies[index]) as TickTestimony));
+	if (testimonies.length !== ops.length) throw new Error(
+		`Stage receipt incomplete: declared ${ops.length} Tick(s), received ${testimonies.length} testimony record(s)`
+	);
+	return ops.map((op, index) => {
+		const testimony = byTick.get(op.id) ?? testimonies[index];
+		if (!testimony) throw new Error(`Stage receipt incomplete: no testimony for Tick ${op.id}`);
+		return materializeTickReceipt(op, pxc, testimony as TickTestimony);
+	});
 }
