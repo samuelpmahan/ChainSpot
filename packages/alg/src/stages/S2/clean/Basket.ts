@@ -72,7 +72,7 @@ interface FoundBasketPx {
 export const BasketPxC = {
 	family: pxKey<BasketFamily>('px.baskets.family'),
 	shellFamily: pxKey<BasketShellFamily>('px.baskets.shellFamily'),
-	objects: pxKey<readonly Basket[]>('px.baskets')
+	objects: pxKey<readonly Basket[]>('px.baskets.initial')
 } as const;
 
 export const BasketFn = {
