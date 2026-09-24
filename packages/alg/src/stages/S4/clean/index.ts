@@ -72,8 +72,8 @@ export const S4_COMPLETE_TICK = {
 } satisfies CrispTickDeclaration;
 
 const neat=new NeatCatalog();
-for(const address of S4_RECOVER_TICK.calculations) neat.register({address,lineage:'clean',calculate:recover});
-for(const address of S4_COMPLETE_TICK.calculations) neat.register({address,lineage:'clean',calculate:complete});
+for(const address of S4_RECOVER_TICK.calculations) neat.register({address,lineage:'clean',calculate:recover,source:'packages/alg/src/stages/S4/clean/index.ts'});
+for(const address of S4_COMPLETE_TICK.calculations) neat.register({address,lineage:'clean',calculate:complete,source:'packages/alg/src/stages/S4/clean/index.ts'});
 const COMPILED=compileStage('S4',[S4_RECOVER_TICK,S4_COMPLETE_TICK],neat,[{
 	id:'ObjectFamilyCardinality',description:'badges.complete == baskets.complete == tees.complete'
 }]);
