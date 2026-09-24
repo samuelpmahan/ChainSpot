@@ -23,6 +23,7 @@ export interface CrispStageContract {
 	readonly stage:`S${number}`;
 	readonly ticks:readonly CrispTickContract[];
 	readonly assertions:readonly CrispAssertionContract[];
+	readonly registrations:readonly {readonly address:CalculationAddress;readonly lineage:NeatLineage;readonly source:string}[];
 }
 
 /**
@@ -41,7 +42,7 @@ export function generateStageContract(
 		ids.add(tick.id);
 		if(tick.calculations.length===0)throw new Error(`crisp: Tick '${tick.id}' has no neat Calculation registration`);
 	}
-	return {schema:'pxc.stage/v1',stage,ticks,assertions};
+	return {schema:'pxc.stage/v1',stage,ticks,assertions,registrations:[]};
 }
 
 
@@ -71,7 +72,8 @@ export function compileStage(
 	assertions:readonly CrispAssertionContract[]=[],
 	lineage:NeatLineage='clean'
 ):CompiledCrispStage {
-	const contract=generateStageContract(stage,ticks,assertions);
+	const generated=generateStageContract(stage,ticks,assertions);
+	const contract:CrispStageContract={...generated,registrations:ticks.flatMap(t=>t.calculations.map(address=>{const w=neat.require(address,lineage);return {address,lineage,source:w.source};}))};
 	const ops:OperationSpec[]=ticks.map(({run:_,...tick})=>({
 		id:tick.id,kind:tick.kind,gate:tick.gate,unit:tick.unit,
 		consumes:tick.consumes,produces:tick.produces,calculations:tick.calculations,
