@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { invalidationClosure, comparisonObligations } from './pxcube-graph.mjs';
 
 const [command,stage,lineage='work']=process.argv.slice(2);
 if(command!=='delta'||!stage){console.error('usage: crisp delta <Stage> [work|exp/name]');process.exit(2);}
@@ -13,5 +14,34 @@ const a=new Map(files(clean).map(p=>[relative(clean,p),digest(p)]));
 const b=new Map(files(target).map(p=>[relative(target,p),digest(p)]));
 const paths=[...new Set([...a.keys(),...b.keys()])].sort();
 const changed=paths.filter(p=>a.get(p)!==b.get(p)).map(p=>({path:p,kind:!a.has(p)?'added':!b.has(p)?'removed':'changed'}));
-const receipt={stage,baseline:'clean',lineage,changed,delta:changed.length};
-console.log(JSON.stringify(receipt,null,2));
+
+const contractPath=resolve('artifacts/crisp',`${stage}.stage.json`);
+let semantic;
+if(existsSync(contractPath)){
+	const contract=JSON.parse(readFileSync(contractPath,'utf8'));
+	const ticks=contract.ticks??[];
+	// crisp contracts are authoritative for fn.* membership. Changed source is
+	// conservatively mapped to any Calculation whose semantic tail appears in
+	// the changed path; if mapping is ambiguous, fail loudly rather than claim a
+	// surgical DeltaBuild.
+	const seeds=[];
+	for(const tick of ticks) for(const fn of tick.calculations??[]){
+		const tail=fn.slice(3).split('.').at(-1).toLowerCase();
+		if(changed.some(x=>x.path.toLowerCase().includes(tail))) seeds.push(tick.id);
+	}
+	const unique=[...new Set(seeds)];
+	if(changed.length&&unique.length===0){
+		semantic={status:'UNMAPPED',reason:'changed source has no registered fn.* identity; DeltaBuild refused'};
+	}else{
+		const affectedTicks=invalidationClosure(ticks,unique);
+		semantic={
+			status:'MAPPED',
+			seedTicks:unique,
+			affectedTicks,
+			affectedParts:[...new Set(ticks.filter(t=>affectedTicks.includes(t.id)).flatMap(t=>t.produces??[]))],
+			comparisonObligations:comparisonObligations(ticks,unique)
+		};
+	}
+}else semantic={status:'NO_CONTRACT',reason:`missing crisp contract ${relative(process.cwd(),contractPath)}`};
+
+console.log(JSON.stringify({stage,baseline:'clean',lineage,changed,delta:changed.length,semantic},null,2));
