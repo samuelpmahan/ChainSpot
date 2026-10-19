@@ -221,7 +221,7 @@ export type ProjectParseResult =
 	| { ok: true; state: ProjectState }
 	| { ok: false; error: ProjectSchemaError };
 
-class SchemaFailure extends Error {
+export class SchemaFailure extends Error {
 	constructor(readonly error: ProjectSchemaError) {
 		super(error.message);
 		this.name = 'SchemaFailure';
@@ -1001,7 +1001,7 @@ function readPar(input: unknown, path: string): number | undefined {
  * Reads the `holes` array. Absent/null is an empty list, which is exactly how a migrated
  * v1 document (written before hole annotation existed) arrives here.
  */
-function readHoles(input: unknown, images: ImageAsset[]): AnnotatedHole[] {
+export function readHoles(input: unknown, images: ImageAsset[]): AnnotatedHole[] {
 	if (input === undefined || input === null) return [];
 	if (!Array.isArray(input)) {
 		throw failure('required-type', 'required.missing', 'holes', 'holes must be an array');
@@ -1097,7 +1097,7 @@ function readConfidence01(input: unknown, path: string): number {
  * rule covering v1, v2, and v3 documents (none of which had this field) uniformly, the
  * same trick `readHoles` already uses for its own v1 migration.
  */
-function readNumberBadges(input: unknown, images: ImageAsset[]): HoleNumberBadgeAnchor[] {
+export function readNumberBadges(input: unknown, images: ImageAsset[]): HoleNumberBadgeAnchor[] {
 	if (input === undefined || input === null) return [];
 	if (!Array.isArray(input)) {
 		throw failure('required-type', 'required.missing', 'numberBadges', 'numberBadges must be an array');
