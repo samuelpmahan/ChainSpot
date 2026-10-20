@@ -601,11 +601,13 @@ export async function readProjectBundle(
 			};
 		}
 	}
-	if (pathOwners.size !== 2) {
+	// One distinct path per image; the schema fixes how many images (two, or since v8 a course-only
+	// project's single source-overview image).
+	if (pathOwners.size === 0 || pathOwners.size !== state.images.length) {
 		return {
 			ok: false,
 			kind: 'failure',
-			error: error('path', 'The project must reference exactly two image bundle paths.')
+			error: error('path', 'The project must reference one bundle path per image.')
 		};
 	}
 

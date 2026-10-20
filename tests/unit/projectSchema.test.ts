@@ -171,7 +171,7 @@ describe('schema round trip', () => {
 	it('serializes and parses a representative project byte-for-byte without coordinate drift', () => {
 		const state = buildState();
 		const doc = docFromState(state);
-		expect(doc.schemaVersion).toBe(7);
+		expect(doc.schemaVersion).toBe(8);
 
 		const result = parseProjectDocument(JSON.parse(JSON.stringify(doc)));
 		expect(result.ok).toBe(true);
@@ -388,7 +388,7 @@ describe('schema version validation', () => {
 	});
 
 	it('exposes the single supported current version constant', () => {
-		expect(CURRENT_SCHEMA_VERSION).toBe(7);
+		expect(CURRENT_SCHEMA_VERSION).toBe(8);
 		expect(typeof CURRENT_SCHEMA_VERSION).toBe('number');
 	});
 });
@@ -489,14 +489,18 @@ describe('required primitive types and no coercion', () => {
 });
 
 describe('image manifest cardinality, roles, and dimensions', () => {
-	it('requires exactly one source-overview and one target-basemap image', () => {
+	it('requires exactly one source-overview and at most one target-basemap image (v8)', () => {
 		const none = plainDoc(buildState());
 		none.images = [];
 		expectError(none, 'image-manifest', 'images.cardinality', 'images');
 
-		const onlySource = plainDoc(buildState());
-		onlySource.images = [sourceAsset()];
-		expectError(onlySource, 'image-manifest', 'images.cardinality', 'images');
+		// v8: a course-only project (no target) reads, as long as it has no control-point pairs.
+		const courseOnly = plainDoc(buildState({ images: [sourceAsset()], controlPointPairs: [] }));
+		expect(expectDocumentOk(courseOnly).images.map((image) => image.role)).toEqual(['source-overview']);
+
+		const pairsWithoutTarget = plainDoc(buildState());
+		pairsWithoutTarget.images = [sourceAsset()];
+		expectError(pairsWithoutTarget, 'reference', 'pair.target-missing', 'controlPointPairs');
 
 		const three = plainDoc(buildState());
 		three.images = [sourceAsset(), targetAsset(), targetAsset({ id: 'image-target-2' })];
@@ -505,6 +509,31 @@ describe('image manifest cardinality, roles, and dimensions', () => {
 		const twoSources = plainDoc(buildState());
 		twoSources.images = [sourceAsset(), sourceAsset({ id: 'image-source-2' })];
 		expectError(twoSources, 'image-manifest', 'images.cardinality', 'images');
+	});
+
+	it('v7 and older still require exactly one target-basemap image', () => {
+		const onlySource = plainDoc(buildState({ images: [sourceAsset()], controlPointPairs: [] }));
+		onlySource.schemaVersion = 7;
+		expectError(onlySource, 'image-manifest', 'images.cardinality', 'images');
+	});
+
+	it('a v7 document with a target reads unchanged and re-serializes as v8 with the same content', () => {
+		const state = buildState();
+		const v7 = plainDoc(state);
+		v7.schemaVersion = 7;
+		const read = expectDocumentOk(v7);
+		expect(JSON.stringify(read)).toBe(JSON.stringify(state));
+		const rewritten = serializeProjectState(read) as unknown as Record<string, unknown>;
+		expect(rewritten.schemaVersion).toBe(8);
+		expect({ ...rewritten, schemaVersion: 7 }).toEqual(v7);
+	});
+
+	it('serializes a course-only project (source image and holes, no target) and reads it back', () => {
+		const hole = { id: 'hole-1', number: 1, tee: { xPx: 10, yPx: 10 }, basket: { xPx: 100, yPx: 100 }, shots: [], corridorBends: [{ xPx: 50, yPx: 20 }], corridorWidthPx: 41.62 };
+		const state = buildState({ images: [sourceAsset()], controlPointPairs: [], holes: [hole], viewState: null });
+		const doc = serializeProjectState(state);
+		expect(doc.images).toHaveLength(1);
+		expect(expectDocumentOk(JSON.parse(JSON.stringify(doc)))).toEqual(state);
 	});
 
 	it('rejects an unknown image role', () => {
@@ -1134,8 +1163,13 @@ describe('serializer validation of domain state', () => {
 
 	it('throws structured errors for incomplete images, duplicate ids, and invalid dimensions', () => {
 		const oneImage = buildState();
-		oneImage.images = [sourceAsset()];
+		oneImage.images = [targetAsset()];
 		expectSerializeError(oneImage, 'image-manifest', 'images.cardinality');
+
+		// v8: no target is allowed, but pairs still need one.
+		const pairsWithoutTarget = buildState();
+		pairsWithoutTarget.images = [sourceAsset()];
+		expectSerializeError(pairsWithoutTarget, 'reference', 'pair.target-missing');
 
 		const duplicateIds = buildState();
 		(duplicateIds.images[1] as { id: string }).id = 'image-source';

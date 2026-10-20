@@ -78,6 +78,15 @@
  * `source-overview` manifest with a present `rotationDeg` is a structured `rotation`
  * category failure, the same role-guard `provenance` uses in the other direction.
  *
+ * v7 -> v8: a project may hold NO `target-basemap` image: exactly one `source-overview` and
+ * zero or one `target-basemap`. A course-only project (a screenshot with its holes, as
+ * Correct Course saves after loading a `chainspot.course-geometry` file) has no clean
+ * target yet. Control-point pairs still need a target: a document with pairs and no target
+ * is a structured `reference` failure (`pair.target-missing`). v1-v7 documents keep their
+ * own rule (exactly one target) and read unchanged. The version is bumped so a v7-only build
+ * meets a course-only document as `schema.version.unsupported` instead of a confusing
+ * cardinality failure.
+ *
  * Coordinate rule (detailed plan section 9.2): pixel coordinates remain authoritative.
  * Normalized values are derived on serialization from pixels and intrinsic dimensions and
  * are only checked (never trusted) on load. A present finite normalized value that does
@@ -149,10 +158,10 @@ import type {
 import type { Affine6Coefficients } from './geometry/affine6';
 
 /** The schema version written by this build. */
-export const CURRENT_SCHEMA_VERSION = 7 as const;
+export const CURRENT_SCHEMA_VERSION = 8 as const;
 
 /** Every version this build can read; older ones are migrated forward on parse. */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 export interface ImagePointV1 {
 	imageId: string;
@@ -181,7 +190,7 @@ export interface NumberBadgeAnchorDoc {
 }
 
 export interface ProjectDocumentV4 {
-	schemaVersion: 7;
+	schemaVersion: 8;
 	project: ProjectMetadata;
 	images: ImageAsset[];
 	controlPointPairs: ControlPointPairV1[];
@@ -746,7 +755,10 @@ function readImageRotation(input: unknown, path: string, role: ImageRole): numbe
 	return degrees;
 }
 
-function readImages(input: unknown): ImageAsset[] {
+/** First schema version whose projects may hold no `target-basemap` image (see the v7 -> v8 note). */
+const TARGET_OPTIONAL_FROM_VERSION = 8;
+
+function readImages(input: unknown, schemaVersion: number = CURRENT_SCHEMA_VERSION): ImageAsset[] {
 	if (!Array.isArray(input)) {
 		throw failure('required-type', 'required.missing', 'images', 'images must be an array');
 	}
@@ -775,12 +787,15 @@ function readImages(input: unknown): ImageAsset[] {
 		else targetCount++;
 		images.push(image);
 	}
-	if (sourceCount !== 1 || targetCount !== 1) {
+	const targetOptional = schemaVersion >= TARGET_OPTIONAL_FROM_VERSION;
+	if (sourceCount !== 1 || targetCount > 1 || (!targetOptional && targetCount !== 1)) {
 		throw failure(
 			'image-manifest',
 			'images.cardinality',
 			'images',
-			`project must contain exactly one 'source-overview' image and exactly one 'target-basemap' image, found ${sourceCount} source and ${targetCount} target`
+			targetOptional
+				? `project must contain exactly one 'source-overview' image and at most one 'target-basemap' image, found ${sourceCount} source and ${targetCount} target`
+				: `project must contain exactly one 'source-overview' image and exactly one 'target-basemap' image, found ${sourceCount} source and ${targetCount} target`
 		);
 	}
 	return images;
@@ -881,7 +896,18 @@ function readPairs(input: unknown, images: ImageAsset[]): ControlPointPair[] {
 		);
 	}
 	const sourceImage = images.find((image) => image.role === 'source-overview') as ImageAsset;
-	const targetImage = images.find((image) => image.role === 'target-basemap') as ImageAsset;
+	const targetImage = images.find((image) => image.role === 'target-basemap');
+	if (!targetImage) {
+		if (input.length > 0) {
+			throw failure(
+				'reference',
+				'pair.target-missing',
+				'controlPointPairs',
+				`a project with control-point pairs needs a 'target-basemap' image; this one has ${input.length} pair(s) and no target`
+			);
+		}
+		return [];
+	}
 	const pairs: ControlPointPair[] = [];
 	const ordinals = new Map<number, string>();
 	for (let index = 0; index < input.length; index++) {
@@ -1245,7 +1271,7 @@ function readDocument(value: unknown): ProjectState {
 	}
 
 	const project = readProject(root.project);
-	const images = readImages(root.images);
+	const images = readImages(root.images, schemaVersion);
 	const pairs = readPairs(root.controlPointPairs, images);
 	assertUniqueIds(project, images, pairs);
 	// Migration from pre-hole documents: v1 simply has no `holes`, which
@@ -1313,12 +1339,12 @@ export function parseProjectJson(text: string): ProjectParseResult {
 function buildPoint(
 	point: ImagePoint,
 	sourceImage: ImageAsset,
-	targetImage: ImageAsset
+	targetImage: ImageAsset | undefined
 ): ImagePointV1 {
 	const image =
 		point.imageId === sourceImage.id
 			? sourceImage
-			: point.imageId === targetImage.id
+			: point.imageId === targetImage?.id
 				? targetImage
 				: undefined;
 	const normalized = image
@@ -1420,7 +1446,7 @@ export function serializeProjectState(state: ProjectState): ProjectDocumentV4 {
 		throw error;
 	}
 	const sourceImage = state.images.find((image) => image.role === 'source-overview') as ImageAsset;
-	const targetImage = state.images.find((image) => image.role === 'target-basemap') as ImageAsset;
+	const targetImage = state.images.find((image) => image.role === 'target-basemap');
 	const viewState = state.viewState
 		? {
 				source: {

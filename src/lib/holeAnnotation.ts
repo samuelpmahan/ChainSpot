@@ -265,6 +265,43 @@ export function moveCorridorBend(
 	});
 }
 
+/**
+ * Inserts a bend at a given position in the ordered list, without re-sorting. For a
+ * gesture that names its place in the route: a click on corridor leg `index` (the
+ * segment from centerline point `index` to `index + 1`, centerline = [tee, ...bends,
+ * basket]) inserts the bend between those two points. The leg the user pointed at is the
+ * order; projecting onto tee->basket (`addCorridorBend`) can scramble a hooked hole.
+ */
+export function insertCorridorBend(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	index: number,
+	point: SourcePoint
+): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		if (!Number.isInteger(index) || index < 0 || index > hole.corridorBends.length) return hole;
+		const bends = [...hole.corridorBends];
+		bends.splice(index, 0, point);
+		return { ...hole, corridorBends: bends };
+	});
+}
+
+/**
+ * Moves one bend in place, keeping the order. A drag keeps hold of the bend it grabbed:
+ * re-sorting mid-drag (`moveCorridorBend`) would change which index the next move hits.
+ */
+export function setCorridorBend(
+	holes: readonly AnnotatedHole[],
+	holeId: string,
+	index: number,
+	point: SourcePoint
+): AnnotatedHole[] {
+	return updateHole(holes, holeId, (hole) => {
+		if (index < 0 || index >= hole.corridorBends.length) return hole;
+		return { ...hole, corridorBends: hole.corridorBends.map((bend, bendIndex) => (bendIndex === index ? point : bend)) };
+	});
+}
+
 /** Pops the last bend; an empty bend list is a valid straight hole. */
 export function removeLastBend(holes: readonly AnnotatedHole[], holeId: string): AnnotatedHole[] {
 	return updateHole(holes, holeId, (hole) => ({ ...hole, corridorBends: hole.corridorBends.slice(0, -1) }));
