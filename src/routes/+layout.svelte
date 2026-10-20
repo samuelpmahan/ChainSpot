@@ -55,6 +55,14 @@
 			Annotate Course
 		</a>
 		<a
+			href="{base}/correct-course"
+			class="nav-link"
+			class:active={page.url.pathname === `${base}/correct-course`}
+			aria-current={page.url.pathname === `${base}/correct-course` ? 'page' : undefined}
+		>
+			Correct Course
+		</a>
+		<a
 			href="{base}/map-round"
 			class="nav-link"
 			class:active={page.url.pathname === `${base}/map-round`}

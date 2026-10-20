@@ -100,6 +100,13 @@
 		 * edge or corner of the visible pane.
 		 */
 		popover?: Snippet<[PopoverContext]>;
+		/**
+		 * False hides Choose / Replace image: for a page whose image comes with its data (a course-geometry file and
+		 * its screenshot), where replacing the raster alone would orphan the geometry.
+		 */
+		imageActions?: boolean;
+		/** Empty-state text when no image is loaded. */
+		emptyMessage?: string;
 	}
 
 	let {
@@ -121,7 +128,9 @@
 		focusRequest,
 		diagnostics,
 		overlay,
-		popover
+		popover,
+		imageActions = true,
+		emptyMessage = 'Choose a course map to begin'
 	}: Props = $props();
 
 	let vp = new ViewportController();
@@ -421,14 +430,16 @@
 				{@render headerActions()}
 			{/if}
 			<button type="button" data-testid={`pane-fit-${role}`} disabled={!currentImage()} onclick={() => vp.fit()}>Fit image</button>
-			<button
-				type="button"
-				data-testid={`pane-choose-${role}`}
-				aria-label={currentImage() ? `Replace the ${title} image` : `Choose a ${title} image`}
-				onclick={() => fileInput?.click()}
-			>
-				{currentImage() ? 'Replace image' : 'Choose image'}
-			</button>
+			{#if imageActions}
+				<button
+					type="button"
+					data-testid={`pane-choose-${role}`}
+					aria-label={currentImage() ? `Replace the ${title} image` : `Choose a ${title} image`}
+					onclick={() => fileInput?.click()}
+				>
+					{currentImage() ? 'Replace image' : 'Choose image'}
+				</button>
+			{/if}
 		</div>
 	</header>
 
@@ -496,8 +507,8 @@
 						</div>
 					{:else}
 						<div class="empty-state">
-							<strong>{loading ? 'Loading image…' : 'Choose a course map to begin'}</strong>
-							{#if !loading}
+							<strong>{loading ? 'Loading image…' : emptyMessage}</strong>
+							{#if !loading && imageActions}
 								<button
 									type="button"
 									data-testid={`pane-choose-inline-${role}`}
