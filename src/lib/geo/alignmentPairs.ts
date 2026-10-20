@@ -241,8 +241,17 @@ function summarize(values: readonly { id: string; value: number }[]): ResidualSu
 	};
 }
 
-export function fitAlignmentPairs(file: AlignmentPairsFile): AlignmentFitReport {
-	const groundScale = basemapGroundScale(file.basemap);
+export interface FitOptions {
+	/**
+	 * Ground scale of the SOURCE screenshot, e.g. from the course-geometry file's C1 circle (10 m = rC1 px). Used only
+	 * when the basemap has none: carried through the fit as source m/px divided by the fit's linear scale
+	 * (sqrt |det|, exact for a similarity).
+	 */
+	readonly sourceGroundScale?: GroundScale;
+}
+
+export function fitAlignmentPairs(file: AlignmentPairsFile, options: FitOptions = {}): AlignmentFitReport {
+	let groundScale = basemapGroundScale(file.basemap);
 	const inputs: AlignmentPairInput[] = file.pairs.map((pair) => ({
 		id: pair.id,
 		enabled: pair.enabled,
@@ -258,6 +267,13 @@ export function fitAlignmentPairs(file: AlignmentPairsFile): AlignmentFitReport 
 			...(estimate.requiredPairs !== undefined ? { requiredPairs: estimate.requiredPairs } : {}),
 			...(estimate.availablePairs !== undefined ? { availablePairs: estimate.availablePairs } : {}),
 			groundScale
+		};
+	}
+	if (!groundScale && options.sourceGroundScale) {
+		const linear = Math.sqrt(Math.abs(estimate.transform.determinant));
+		groundScale = {
+			metersPerPixel: options.sourceGroundScale.metersPerPixel / linear,
+			referent: `${options.sourceGroundScale.referent}, carried through the ${estimate.model} fit (x${linear.toFixed(4)})`
 		};
 	}
 	const labels = new Map(file.pairs.map((pair) => [pair.id, pair.label]));

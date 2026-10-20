@@ -2,11 +2,15 @@
  * Headless fit-and-project: point pairs + a basemap + a course-geometry file -> every hole on the basemap.
  *
  *   npx tsx scripts/geo/fit-and-project.ts --geometry <course-geometry.json> --basemap <image> --out <dir>
- *       [--pairs <alignment-pairs.json>] [--frame <hole number>|all] [--course <name>]
+ *       [--pairs <alignment-pairs.json>] [--frame <hole number>|all] [--course <name>] [--rc1-px <px> --rc1-note <text>]
  *
  * With --pairs (format `chainspot.alignment-pairs`, see src/lib/geo/alignmentPairs.ts) the screenshot-to-basemap
  * transform is fitted by the app's own estimators and every pair's residual is reported in px of the basemap and,
  * when the pairs file gives the basemap a ground scale (a radius-based NAIP export), in metres.
+ * Ground scale, first that exists: the basemap's own (a radius-based NAIP export in the pairs file); else the
+ * course-geometry file's `scale` (the C1 putting circle is 10 m in radius: 10 m = rC1 px of the screenshot), carried
+ * through the fit; else --rc1-px for a file that predates `scale` (its note says where the radius was measured). With
+ * none, lengths stay in px, labelled as px of the basemap.
  * Without --pairs the basemap must BE the screenshot the geometry was read from (its sha256 is checked against
  * `source.sha256`), and the transform is the identity: the "until NAIP" mode.
  *
@@ -27,7 +31,8 @@ import { computeCenterlineLengthPx } from '../../src/lib/graphics/distances';
 import { composeBroadcastFrame } from '../../src/lib/graphics/frame';
 import { planHoleGraphic } from '../../src/lib/holeGraphics';
 import type { HoleGraphicPlan } from '../../src/lib/holeGraphics';
-import { needsReview, parseCourseGeometry } from '../../src/lib/import/courseGeometry';
+import { needsReview, parseCourseGeometry, scaleFromC1Radius } from '../../src/lib/import/courseGeometry';
+import type { GroundScale } from '../../src/lib/geo/alignmentPairs';
 
 const FEET_PER_METER = 3.280839895;
 
@@ -90,10 +95,29 @@ const basemapSha = createHash('sha256').update(basemapBytes).digest('hex');
 const basemap = imageSize(basemapBytes);
 const basemapName = basename(basemapPath);
 
+// The screenshot's own ground scale: the file's C1 scale, else a C1 radius given on the command line.
+const rc1Arg = arg('--rc1-px');
+let sourceGroundScale: GroundScale | null = null;
+if (geometry.scale) {
+	sourceGroundScale = {
+		metersPerPixel: geometry.scale.metresPerPx,
+		referent: `C1 radius 10 m = ${geometry.scale.rC1Px} px on ${geometry.source.fileName}`
+	};
+	if (rc1Arg) console.error(`--rc1-px ignored: the course-geometry file carries its own scale (rC1 ${geometry.scale.rC1Px} px)`);
+} else if (rc1Arg) {
+	const rC1Px = Number(rc1Arg);
+	if (!(rC1Px > 0)) die('--rc1-px must be a positive number');
+	sourceGroundScale = {
+		metersPerPixel: scaleFromC1Radius(rC1Px).metresPerPx,
+		referent: `C1 radius 10 m = ${rC1Px} px on ${geometry.source.fileName}`
+	};
+	if (arg('--rc1-note')) console.error(`rC1 ${rC1Px} px: ${arg('--rc1-note')}`);
+}
+
 let transform: SerializableTransform;
 let fit: AlignmentFitReport | { ok: true; model: 'identity'; reason: string };
 let courseName = arg('--course') ?? geometry.source.fileName;
-let groundScale: { metersPerPixel: number; referent: string } | null = null;
+let groundScale: GroundScale | null = null;
 
 if (pairsPath) {
 	const pairs = parseAlignmentPairs(readFileSync(pairsPath, 'utf8'));
@@ -109,7 +133,7 @@ if (pairsPath) {
 		die(`integrity: the pairs were picked on ${file.source.sha256}, the geometry was read from ${geometry.source.sha256}`);
 	}
 	courseName = arg('--course') ?? file.course;
-	fit = fitAlignmentPairs(file);
+	fit = fitAlignmentPairs(file, sourceGroundScale ? { sourceGroundScale } : {});
 	groundScale = fit.groundScale;
 	transform = fit.ok ? fit.transform : IDENTITY;
 } else {
@@ -118,6 +142,7 @@ if (pairsPath) {
 	}
 	transform = IDENTITY;
 	fit = { ok: true, model: 'identity', reason: 'no pairs: the basemap is the screenshot the geometry was read from' };
+	groundScale = sourceGroundScale;
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -140,7 +165,8 @@ const holes = plans.map((plan) => {
 		needsReview: evidence ? needsReview(evidence) : null,
 		teeAndBasketOnBasemap: inside,
 		centerlineLengthPx: lengthPx === null ? null : Math.round(lengthPx * 10) / 10,
-		centerlineLengthFt: lengthPx === null || feetPerPixel === undefined ? null : Math.round(lengthPx * feetPerPixel)
+		centerlineLengthFt: lengthPx === null || feetPerPixel === undefined ? null : Math.round(lengthPx * feetPerPixel),
+		toolkitLengthFt: evidence?.trace?.lengthFt ?? null
 	};
 });
 
@@ -159,7 +185,7 @@ if (fit.ok && fit.model !== 'identity' && 'residualsPx' in fit) {
 	summary.push(`no fit: ${fit.reason} (${'availablePairs' in fit ? fit.availablePairs : '?'} complete pairs, ${'requiredPairs' in fit ? fit.requiredPairs : '?'} needed)`);
 } else {
 	summary.push('identity: the basemap is the screenshot itself (no NAIP yet)');
-	summary.push(`lengths in px of ${basemapName}; feet need a ground scale`);
+	summary.push(groundScale ? `ground scale: ${groundScale.referent}` : `lengths in px of ${basemapName}; feet need a ground scale`);
 }
 
 writeFileSync(
@@ -170,10 +196,14 @@ writeFileSync(
 			geometry: { file: basename(geometryPath), source: geometry.source.fileName, sha256: geometry.source.sha256, producer: geometry.producer },
 			basemap: { file: basemapName, sha256: basemapSha, widthPx: basemap.widthPx, heightPx: basemap.heightPx },
 			groundScale,
+			sourceGroundScale: sourceGroundScale
+				? { ...sourceGroundScale, from: geometry.scale ? 'course-geometry scale' : `--rc1-px${arg('--rc1-note') ? `: ${arg('--rc1-note')}` : ''}` }
+				: null,
 			units: {
 				residual: 'px of the basemap; m on the ground only when groundScale is known',
 				centerlineLengthPx: 'px of the basemap along tee, bends, basket',
-				centerlineLengthFt: 'feet on the ground, only when groundScale is known'
+				centerlineLengthFt: 'feet on the ground, only when groundScale is known',
+				toolkitLengthFt: "the toolkit's own route length (evidence trace.lengthFt), when the file carries it"
 			},
 			fit,
 			holes

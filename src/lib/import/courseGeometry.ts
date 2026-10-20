@@ -46,7 +46,13 @@ export interface HoleEvidence {
 	};
 	readonly tee?: { readonly state: string; readonly source?: string | null };
 	readonly basket?: { readonly state: string };
-	readonly trace?: { readonly outcome: string; readonly lengthPx?: number | null; readonly bendCount?: number | null };
+	readonly trace?: {
+		readonly outcome: string;
+		readonly lengthPx?: number | null;
+		/** ft along the route, from the file's C1 ground scale (`scale`); absent in files that predate it. */
+		readonly lengthFt?: number | null;
+		readonly bendCount?: number | null;
+	};
 	readonly reasons: readonly string[];
 }
 
@@ -59,6 +65,27 @@ export interface CourseGeometrySource {
 	readonly s0Crop: { readonly rowsRemovedTop: number; readonly rowsRemovedBottom: number };
 }
 
+/**
+ * The ground scale, read off the screenshot itself: the C1 putting circle drawn around every basket is 10 m in radius,
+ * so 10 m = `rC1Px` px of `source.frame` (LOCAL, measured on this image). Absent in files that predate it.
+ */
+export interface CourseGeometryScale {
+	readonly rC1Px: number;
+	readonly metresPerPx: number;
+	readonly feetPerPx: number;
+	readonly rule?: string;
+}
+
+/** The radius of the C1 putting circle, the scale's referent. */
+export const C1_RADIUS_METRES = 10;
+export const METRES_PER_FOOT = 0.3048;
+
+/** The scale implied by a C1 radius measured in px of the screenshot. */
+export function scaleFromC1Radius(rC1Px: number): CourseGeometryScale {
+	const metresPerPx = C1_RADIUS_METRES / rC1Px;
+	return { rC1Px, metresPerPx, feetPerPx: metresPerPx / METRES_PER_FOOT };
+}
+
 export interface CourseGeometry {
 	readonly format: typeof COURSE_GEOMETRY_FORMAT;
 	readonly version: typeof COURSE_GEOMETRY_VERSION;
@@ -69,6 +96,8 @@ export interface CourseGeometry {
 	readonly candidates: readonly CourseGeometryCandidate[];
 	readonly evidence: readonly HoleEvidence[];
 	readonly units: Readonly<Record<string, string>>;
+	/** Absent when the file carries no ground scale (lengths then stay in px). */
+	readonly scale?: CourseGeometryScale;
 }
 
 export type CourseGeometryErrorCode =
@@ -153,6 +182,22 @@ function readSource(value: unknown): CourseGeometrySource | string {
 		frame: 'original-upload',
 		s0Crop: { rowsRemovedTop: crop.rowsRemovedTop as number, rowsRemovedBottom: crop.rowsRemovedBottom as number }
 	};
+}
+
+/** Reads `scale`; its three numbers must agree (10 m = rC1Px px; 1 ft = 0.3048 m) to 0.1%. */
+function readScale(value: unknown): CourseGeometryScale | undefined | string {
+	if (value === undefined) return undefined;
+	if (!isRecord(value)) return 'scale must be an object';
+	const { rC1Px, metresPerPx, feetPerPx, rule } = value;
+	if (!isFiniteNumber(rC1Px) || rC1Px <= 0 || !isFiniteNumber(metresPerPx) || metresPerPx <= 0 || !isFiniteNumber(feetPerPx) || feetPerPx <= 0) {
+		return 'scale needs positive rC1Px, metresPerPx and feetPerPx';
+	}
+	const implied = scaleFromC1Radius(rC1Px);
+	const agrees = (a: number, b: number) => Math.abs(a - b) <= 1e-3 * b;
+	if (!agrees(metresPerPx, implied.metresPerPx) || !agrees(feetPerPx, implied.feetPerPx)) {
+		return `scale is inconsistent: rC1Px ${rC1Px} implies ${implied.metresPerPx} m/px and ${implied.feetPerPx} ft/px`;
+	}
+	return { rC1Px, metresPerPx, feetPerPx, ...(typeof rule === 'string' ? { rule } : {}) };
 }
 
 function readCandidates(value: unknown): CourseGeometryCandidate[] | string {
@@ -258,6 +303,8 @@ export function parseCourseGeometry(text: string, options: ParseCourseGeometryOp
 		if (error instanceof SchemaFailure) return fail('geometry.invalid', error.error.path, error.error.message, error.error);
 		throw error;
 	}
+	const scale = readScale(root.scale);
+	if (typeof scale === 'string') return fail('structure.invalid', 'scale', scale);
 	const candidates = readCandidates(root.candidates);
 	if (typeof candidates === 'string') return fail('structure.invalid', 'candidates', candidates);
 	const evidence = readEvidence(root.evidence, new Set(holes.map((hole) => hole.id)));
@@ -274,7 +321,8 @@ export function parseCourseGeometry(text: string, options: ParseCourseGeometryOp
 		numberBadges,
 		candidates,
 		evidence,
-		units
+		units,
+		...(scale ? { scale } : {})
 	};
 
 	const base = options.project ?? { ...createProjectState({ name: source.fileName }), images: [sourceImage] };

@@ -6,7 +6,8 @@ import {
 	COURSE_GEOMETRY_FORMAT,
 	COURSE_GEOMETRY_VERSION,
 	needsReview,
-	parseCourseGeometry
+	parseCourseGeometry,
+	scaleFromC1Radius
 } from '../../src/lib/import/courseGeometry';
 import { parseProjectDocument, serializeProjectState } from '../../src/lib/projectSchema';
 import { planHoleGraphic } from '../../src/lib/holeGraphics';
@@ -170,5 +171,26 @@ describe('needsReview', () => {
 		expect(needsReview({ ...base, status: 'partial', confidence: { level: 'unconfirmed' } })).toBe(true);
 		expect(needsReview({ ...base, status: 'unresolved', confidence: { level: 'noReading' } })).toBe(true);
 		expect(needsReview({ ...base, status: 'resolved', confidence: { level: 'unconfirmed' } })).toBe(true);
+	});
+});
+
+describe('parseCourseGeometry: the C1 ground scale (10 m = rC1 px)', () => {
+	const withScale = (scale: unknown) => JSON.stringify({ ...JSON.parse(text), scale });
+
+	it('is absent from the golden fixture, which predates it', () => {
+		expect(loaded().geometry.scale).toBeUndefined();
+	});
+
+	it('reads a consistent scale: golden rC1 44.5 px is 10 / 44.5 m/px', () => {
+		const result = parseCourseGeometry(withScale({ rC1Px: 44.5, metresPerPx: 0.224719, feetPerPx: 0.737267, rule: 'C1 = 10 m' }));
+		if (!result.ok) throw new Error(result.error.message);
+		expect(result.geometry.scale).toEqual({ rC1Px: 44.5, metresPerPx: 0.224719, feetPerPx: 0.737267, rule: 'C1 = 10 m' });
+		expect(scaleFromC1Radius(44.5).feetPerPx).toBeCloseTo(10 / 44.5 / 0.3048, 12);
+	});
+
+	it('rejects a scale whose numbers disagree, as a result', () => {
+		const result = parseCourseGeometry(withScale({ rC1Px: 44.5, metresPerPx: 0.5, feetPerPx: 0.737267 }));
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.error).toMatchObject({ code: 'structure.invalid', path: 'scale' });
 	});
 });

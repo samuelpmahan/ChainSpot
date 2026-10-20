@@ -129,3 +129,18 @@ describe('The Rec fixture: stitched composite to its left tile (not NAIP)', () =
 		expect(report.residualsM).toBeNull();
 	});
 });
+
+describe('fitAlignmentPairs: a source ground scale (C1) carried through the fit', () => {
+	test('used only when the basemap has none: source m/px divided by the fit scale', () => {
+		const base = file();
+		const noScale = { ...base, basemap: { fileName: 'tile.png', widthPx: 1290, heightPx: 2796 } };
+		const sourceGroundScale = { metersPerPixel: 10 / 44.5, referent: 'C1 circle, 10 m = 44.5 px (rC1)' };
+		const report = fitAlignmentPairs(noScale, { sourceGroundScale });
+		if (!report.ok) throw new Error('fit failed');
+		expect(report.groundScale!.metersPerPixel).toBeCloseTo(10 / 44.5 / 0.5, 9);
+		expect(report.groundScale!.referent).toContain('carried through the similarity fit');
+		const withNaip = fitAlignmentPairs(base, { sourceGroundScale });
+		if (!withNaip.ok) throw new Error('fit failed');
+		expect(withNaip.groundScale!.referent).toContain('USGS NAIP');
+	});
+});
