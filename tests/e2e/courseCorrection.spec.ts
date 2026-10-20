@@ -234,17 +234,40 @@ test('a background drag still pans the one surface (not an edit)', async ({ page
 	await expect(page.getByTestId('cc-undo')).toBeDisabled();
 });
 
+test('adopt an alternative route: 1 click on its ghost, undoable', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	await page.getByTestId('cc-hole-row-7').click(); // navigation, not counted: the walk reaches it with N
+	await settle(page);
+	await expect(page.getByTestId('cc-ghost-0')).toBeVisible();
+	await shot(page, '15-hole7-ghost-alternative');
+	const before = await bends(page, 7);
+	const target = goldenHole(7).corridorBends[0];
+	const budget = new Budget(page);
+	const at = await toPage(page, target);
+	await budget.click(at.x, at.y);
+	expect(budget.count).toBe(1);
+	const adopted = await bends(page, 7);
+	expect(adopted).toHaveLength(1);
+	expect(dist(adopted[0], target)).toBeLessThan(0.01);
+	expect(dist(await handle(page, 'cc-tee-7'), goldenHole(7).tee)).toBeLessThan(0.01);
+	await expect(page.getByTestId('cc-message')).toContainText('adopted alternative 1');
+	await shot(page, '16-hole7-alternative-adopted');
+	await page.keyboard.press('Control+z');
+	expect(await bends(page, 7)).toEqual(before);
+});
+
 // ---------------------------------------------------------------------------
 // Steps 3 and 4: walk only the uncertain holes with N, fix each, save, reopen
 // ---------------------------------------------------------------------------
 
-test('review walk: N visits only the four flagged holes; the whole course is fixed in 8 actions, saved and reopened', async ({ page }) => {
+test('review walk: N visits only the five flagged holes; the whole course is fixed in 9 actions, saved and reopened', async ({ page }) => {
 	test.setTimeout(120_000);
 	await open(page, [REVIEW, SCREENSHOT]);
-	await expect(page.getByTestId('cc-queue-count')).toContainText('4 of 18 need review');
-	// The list puts the flagged holes first.
+	await expect(page.getByTestId('cc-queue-count')).toContainText('5 of 18 need review');
+	// The list puts the flagged holes first: hole 3 is confirmed but its alternative disagrees.
 	const rows = page.locator('[data-testid^="cc-hole-row-"]');
-	expect(await rows.evaluateAll((els) => els.slice(0, 4).map((el) => el.getAttribute('data-testid')))).toEqual([
+	expect(await rows.evaluateAll((els) => els.slice(0, 5).map((el) => el.getAttribute('data-testid')))).toEqual([
+		'cc-hole-row-3',
 		'cc-hole-row-7',
 		'cc-hole-row-10',
 		'cc-hole-row-12',
@@ -254,11 +277,18 @@ test('review walk: N visits only the four flagged holes; the whole course is fix
 	const zoomOf = async () => Number(await page.locator(VIEWPORT).getAttribute('data-view-zoom'));
 	const fitZoom = await zoomOf();
 
+	// Hole 3: the primary is right, its off-route alternative is not; look and move on (no edit).
+	await budget.press('n');
+	await settle(page);
+	await expect(page.getByTestId('cc-hole-row-3')).toHaveAttribute('aria-current', 'true');
+	expect(await zoomOf()).toBeGreaterThan(fitZoom);
+	await expect(page.getByTestId('cc-ghost-0')).toBeVisible();
+	await shot(page, '07a-walk-hole3-alternative-disagrees');
+
 	// Hole 7: wrong bend.
 	await budget.press('n');
 	await settle(page);
 	await expect(page.getByTestId('cc-hole-row-7')).toHaveAttribute('aria-current', 'true');
-	expect(await zoomOf()).toBeGreaterThan(fitZoom);
 	await shot(page, '07-walk-hole7');
 	await budget.drag(await toPage(page, await handle(page, 'cc-bend-7-0')), await toPage(page, goldenHole(7).corridorBends[0]));
 
@@ -291,11 +321,11 @@ test('review walk: N visits only the four flagged holes; the whole course is fix
 
 	// N wraps back to the first flagged hole: the walk never visits a confirmed hole.
 	await page.keyboard.press('n');
-	await expect(page.getByTestId('cc-hole-row-7')).toHaveAttribute('aria-current', 'true');
+	await expect(page.getByTestId('cc-hole-row-3')).toHaveAttribute('aria-current', 'true');
 	await page.keyboard.press('p');
 	await expect(page.getByTestId('cc-hole-row-14')).toHaveAttribute('aria-current', 'true');
 
-	expect(budget.count).toBe(8);
+	expect(budget.count).toBe(9);
 
 	// Every hole now agrees with golden (bends within half the corridor, tees within 8 px).
 	const checkAgainstGolden = async () => {

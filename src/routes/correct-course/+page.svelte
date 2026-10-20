@@ -18,9 +18,9 @@
 	import { ProjectEditor } from '$lib/domain/editor';
 	import { findImageByRole } from '$lib/domain/project';
 	import type { AnnotatedHole } from '$lib/domain/project';
-	import { parseCourseGeometry, needsReview } from '$lib/import/courseGeometry';
-	import type { CourseGeometry, HoleEvidence } from '$lib/import/courseGeometry';
-	import { clampPointToImageBounds, screenToImage } from '$lib/coords';
+	import { parseCourseGeometry } from '$lib/import/courseGeometry';
+	import type { CourseGeometry, HoleEvidence, RouteAlternative } from '$lib/import/courseGeometry';
+	import { clampPointToImageBounds, imageToScreen, screenToImage } from '$lib/coords';
 	import type { ScreenSpacePoint, ViewTransformState } from '$lib/coords';
 	import { clickSlopPx } from '$lib/viewport.svelte';
 	import type { ViewportController } from '$lib/viewport.svelte';
@@ -35,6 +35,10 @@
 		STATUS_COLOURS,
 		STATUS_LABELS,
 		addBendOnLeg,
+		adoptAlternative,
+		alternativeCenterline,
+		deriveSeparation,
+		hitTestAlternative,
 		hitTestCourse,
 		holeBounds,
 		holeEdited,
@@ -42,6 +46,7 @@
 		removeBend,
 		reviewOrder,
 		reviewQueue,
+		reviewReason,
 		reviewStatus,
 		roundPoint,
 		stepReviewQueue
@@ -71,9 +76,10 @@
 	});
 	let evidenceByHole = $derived(new Map<string, HoleEvidence>((geometry?.evidence ?? []).map((e) => [e.holeId, e])));
 	let originalById = $derived(new Map<string, AnnotatedHole>((geometry?.holes ?? []).map((h) => [h.id, h])));
-	let ordered = $derived(reviewOrder(holes, evidenceByHole));
-	let queue = $derived(reviewQueue(holes, evidenceByHole));
+	let ordered = $derived(reviewOrder(holes, evidenceByHole, originalById));
+	let queue = $derived(reviewQueue(holes, evidenceByHole, originalById));
 	let selectedHole = $derived(selection ? (shown.find((hole) => hole.id === selection!.holeId) ?? null) : null);
+	let selectedAlternatives = $derived<readonly RouteAlternative[]>(selectedHole ? (evidenceByHole.get(selectedHole.id)?.alternatives ?? []) : []);
 	const LEGEND: ReviewStatus[] = ['resolved', 'straight', 'partial', 'unresolved', 'none'];
 
 	function refresh(): void {
@@ -180,10 +186,30 @@
 		draft = null;
 	}
 
-	/** A background click: places a missing tee or basket on the selected hole, otherwise clears the selection. */
+	function adopt(index: number): void {
+		const hole = selectedHole;
+		const alternative = selectedAlternatives[index];
+		if (!hole || !alternative) return;
+		commit(adoptAlternative(holes, hole.id, alternative));
+		selection = { holeId: hole.id };
+		message = `Hole ${hole.number}: adopted alternative ${index + 1} (${alternative.ruleSets.join(', ') || 'no rule set named'}).`;
+	}
+
+	/**
+	 * A background click (unclaimed, so a drag here still pans): adopts the selected hole's alternative under the
+	 * pointer; else places a missing tee or basket on the selected hole; else clears the selection.
+	 */
 	function onPlacement(point: { xPx: number; yPx: number }): void {
 		lastBendClick = null;
 		const hole = selectedHole;
+		const vp = pane?.getViewportController();
+		if (hole && vp && selectedAlternatives.length > 0) {
+			const index = hitTestAlternative(hole, selectedAlternatives, imageToScreen(point, vp.view), vp.view);
+			if (index !== null) {
+				adopt(index);
+				return;
+			}
+		}
 		if (hole && !hole.tee) {
 			commit(setTee(holes, hole.id, roundPoint(point)));
 			return;
@@ -308,7 +334,11 @@
 			images: parsed.state.images.map((img) => (img.id === asset.id && isSupportedMimeType(image.type) ? { ...img, mimeType: image.type } : img))
 		};
 		const next = new ProjectEditor({ state, assets: new Map([[asset.id, { bytes, decoded: decoded.image }]]) });
-		const flagged = parsed.needsReview.length;
+		const flagged = reviewQueue(
+			parsed.state.holes,
+			new Map(parsed.geometry.evidence.map((e) => [e.holeId, e])),
+			new Map(parsed.geometry.holes.map((h) => [h.id, h]))
+		).length;
 		replaceEditor(next, parsed.geometry, `Loaded ${parsed.state.holes.length} holes from ${json.name}; ${flagged} need review.`);
 	}
 
@@ -424,7 +454,8 @@
 				{#each ordered as hole (hole.id)}
 					{@const evidence = evidenceByHole.get(hole.id)}
 					{@const status = reviewStatus(evidence)}
-					{@const flagged = evidence ? needsReview(evidence) : false}
+					{@const reason = reviewReason(hole, evidence, originalById.get(hole.id))}
+					{@const flagged = reason !== null}
 					<li>
 						<button
 							type="button"
@@ -437,7 +468,7 @@
 						>
 							<span class="swatch" style={`background:${STATUS_COLOURS[status]}`}></span>
 							<span class="num">Hole {hole.number}</span>
-							<span class="status">{STATUS_LABELS[status]}{evidence && evidence.confidence.level !== 'confirmed' ? ` · ${evidence.confidence.level}` : ''}</span>
+							<span class="status">{STATUS_LABELS[status]}{evidence && evidence.confidence.level !== 'confirmed' ? ` · ${evidence.confidence.level}` : ''}{reason === 'alternatives' ? ' · alternatives disagree' : ''}</span>
 							<span class="bends">{bendSummary(hole)}</span>
 							{#if geometry && holeEdited(hole, originalById.get(hole.id))}
 								<span class="edited" data-testid={`cc-edited-${hole.number}`}>edited</span>
@@ -471,19 +502,42 @@
 							<dd>{evidence.reasons.join('; ')}</dd>
 						{/if}
 					</dl>
+					{#if selectedAlternatives.length > 0}
+						<h3>Alternative routes</h3>
+						<p class="hint">Faint dashed corridors on the map. Click one (or Adopt) to make it this hole's route.</p>
+						<ol class="alternatives" data-testid="cc-alternatives">
+							{#each selectedAlternatives as alternative, index (index)}
+								<li>
+									<span>
+										<strong>Alt {index + 1}</strong>
+										{alternative.ruleSets.join(', ') || 'no rule set named'}
+										<br />
+										<small>
+											{alternative.verts.length - 2} bend{alternative.verts.length === 3 ? '' : 's'};
+											{deriveSeparation(selectedHole, alternativeCenterline(alternative)).toFixed(1)} px from the current route (source px);
+											sensor {alternative.sensor?.passFrac ?? 'n/a'} of {alternative.sensor?.stations ?? 'n/a'} stations;
+											contrast {alternative.contrastLum ?? 'n/a'} lum
+										</small>
+									</span>
+									<button type="button" data-testid={`cc-adopt-${index}`} onclick={() => adopt(index)}>Adopt</button>
+								</li>
+							{/each}
+						</ol>
+					{/if}
 				{/if}
 				<h3>Gestures</h3>
 				<ul class="help">
 					<li><strong>Drag</strong> a bend, tee or basket to move it.</li>
 					<li><strong>Drag from a corridor</strong> to add a bend and place it; <strong>click</strong> one to add a bend at the click.</li>
 					<li><strong>Double-click</strong> a bend, or click it and press <kbd>Delete</kbd>, to remove it.</li>
+					<li><strong>Click a ghost</strong> (a selected hole's alternative route) to adopt it.</li>
 					<li><kbd>N</kbd> / <kbd>P</kbd>: next / previous hole to review. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo.</li>
 				</ul>
 			</div>
 		{/snippet}
 
 		{#snippet overlay({ image, zoom })}
-			<CourseCorrectionLayer holes={shown} {evidenceByHole} {selection} {zoom} widthPx={image.widthPx} heightPx={image.heightPx} />
+			<CourseCorrectionLayer holes={shown} {evidenceByHole} {selection} alternatives={selectedAlternatives} {zoom} widthPx={image.widthPx} heightPx={image.heightPx} />
 		{/snippet}
 	</ImageEditorPane>
 </main>
@@ -639,6 +693,33 @@
 		display: grid;
 		gap: 0.3rem;
 		color: #d4d4d8;
+	}
+
+	.hint {
+		margin: 0 0 0.3rem;
+		color: #a1a1aa;
+	}
+
+	.alternatives {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: grid;
+		gap: 0.4rem;
+	}
+
+	.alternatives li {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.35rem 0.45rem;
+		border: 1px dashed #c4b5fd;
+		border-radius: 4px;
+	}
+
+	.alternatives small {
+		color: #a1a1aa;
 	}
 
 	.message {

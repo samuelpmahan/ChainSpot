@@ -15,7 +15,7 @@ import { deriveCorridorCenterline } from './corridor';
 import type { AnnotatedHole, SourcePoint } from './domain/project';
 import { insertCorridorBend, moveBasket, moveTee, removeCorridorBend, setCorridorBend } from './holeAnnotation';
 import { needsReview } from './import/courseGeometry';
-import type { HoleEvidence, HoleStatus } from './import/courseGeometry';
+import type { HoleEvidence, HoleStatus, RouteAlternative } from './import/courseGeometry';
 
 /** Grab radius of a tee, basket or bend handle, in screen px (an ergonomic constant, not a map quantity). */
 export const HANDLE_HIT_PX = 12;
@@ -116,6 +116,89 @@ export function removeBend(holes: readonly AnnotatedHole[], holeId: string, inde
 }
 
 // ---------------------------------------------------------------------------
+// Alternative routes (other rule sets' answers, kept beside the primary)
+// ---------------------------------------------------------------------------
+
+/** An alternative's route as source points, tee first. */
+export function alternativeCenterline(alternative: RouteAlternative): SourcePoint[] {
+	return alternative.verts.map(([xPx, yPx]) => ({ xPx, yPx }));
+}
+
+function distanceToPolyline(point: SourcePoint, line: readonly SourcePoint[]): number {
+	if (line.length === 1) return Math.hypot(point.xPx - line[0].xPx, point.yPx - line[0].yPx);
+	let best = Infinity;
+	for (let i = 0; i < line.length - 1; i++) {
+		const { distance } = distanceToSegment(
+			{ x: point.xPx, y: point.yPx },
+			{ x: line[i].xPx, y: line[i].yPx },
+			{ x: line[i + 1].xPx, y: line[i + 1].yPx }
+		);
+		best = Math.min(best, distance);
+	}
+	return best;
+}
+
+/**
+ * How far apart two routes are, in source px: the largest distance from a vertex of either route to the other route
+ * (symmetric, vertex-to-polyline). Two routes through the same hallway with the same corners score under half the
+ * corridor width; a different corner, a missing one or a different endpoint scores more.
+ */
+export function routeSeparationPx(a: readonly SourcePoint[], b: readonly SourcePoint[]): number {
+	if (a.length === 0 || b.length === 0) return Infinity;
+	let worst = 0;
+	for (const point of a) worst = Math.max(worst, distanceToPolyline(point, b));
+	for (const point of b) worst = Math.max(worst, distanceToPolyline(point, a));
+	return worst;
+}
+
+/** Separation between a hole's current route and another route, in source px (`routeSeparationPx`). */
+export function deriveSeparation(hole: AnnotatedHole, line: readonly SourcePoint[]): number {
+	return routeSeparationPx(deriveCorridorCenterline(hole), line);
+}
+
+/**
+ * Whether any alternative disagrees with the hole's route: separated by more than half the corridor width (the
+ * plan's bend match rule; LOCAL, it scales with this screenshot's corridor).
+ */
+export function alternativesDisagree(hole: AnnotatedHole, evidence: HoleEvidence | undefined): boolean {
+	const alternatives = evidence?.alternatives ?? [];
+	if (alternatives.length === 0) return false;
+	const primary = deriveCorridorCenterline(hole);
+	return alternatives.some((alternative) => routeSeparationPx(primary, alternativeCenterline(alternative)) > hole.corridorWidthPx / 2);
+}
+
+/**
+ * The alternative of `hole` under `pointer` (screen px), or null. Same reach as a corridor leg. Only consulted for
+ * the selected hole, after handles and legs: a press where the ghost overlaps a real corridor edits the corridor.
+ */
+export function hitTestAlternative(
+	hole: AnnotatedHole,
+	alternatives: readonly RouteAlternative[],
+	pointer: ScreenSpacePoint,
+	view: ViewTransformState
+): number | null {
+	const reach = Math.max((hole.corridorWidthPx / 2) * view.zoom, LEG_MIN_HIT_PX);
+	let best: { index: number; distance: number } | null = null;
+	alternatives.forEach((alternative, index) => {
+		const line = alternativeCenterline(alternative).map((p) => imageToScreen(p, view));
+		for (let i = 0; i < line.length - 1; i++) {
+			const { distance } = distanceToSegment(pointer, line[i], line[i + 1]);
+			if (distance <= reach && (!best || distance < best.distance)) best = { index, distance };
+		}
+	});
+	return best ? (best as { index: number }).index : null;
+}
+
+/** Adopts an alternative as the hole's route: its first vertex is the tee, its last the basket, the rest are bends. */
+export function adoptAlternative(holes: readonly AnnotatedHole[], holeId: string, alternative: RouteAlternative): AnnotatedHole[] {
+	const line = alternativeCenterline(alternative).map(roundPoint);
+	if (line.length < 2) return [...holes];
+	return holes.map((hole) =>
+		hole.id === holeId ? { ...hole, tee: line[0], basket: line[line.length - 1], corridorBends: line.slice(1, -1) } : hole
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Review order
 // ---------------------------------------------------------------------------
 
@@ -144,25 +227,41 @@ export const STATUS_LABELS: Readonly<Record<ReviewStatus, string>> = {
 };
 
 /**
- * Holes in review order: the ones whose evidence asks for a look (`needsReview`: status not resolved/straight, or a
- * route the sensor did not confirm) first, then the rest; each group by hole number.
+ * Why a hole is in the review walk, or null: its evidence asks for a look (`needsReview`: status not
+ * resolved/straight, or a route the sensor left unconfirmed / unread), or its alternatives disagree with the primary
+ * route. Disagreement is judged against the primary as LOADED (`loadedById`), so the walk does not reshuffle while
+ * the reviewer edits.
  */
-export function reviewOrder(holes: readonly AnnotatedHole[], evidenceByHole: ReadonlyMap<string, HoleEvidence>): AnnotatedHole[] {
-	const flagged = (hole: AnnotatedHole): boolean => {
-		const evidence = evidenceByHole.get(hole.id);
-		return evidence ? needsReview(evidence) : false;
-	};
+export function reviewReason(
+	hole: AnnotatedHole,
+	evidence: HoleEvidence | undefined,
+	loaded: AnnotatedHole | undefined = undefined
+): 'evidence' | 'alternatives' | null {
+	if (!evidence) return null;
+	if (needsReview(evidence)) return 'evidence';
+	if (alternativesDisagree(loaded ?? hole, evidence)) return 'alternatives';
+	return null;
+}
+
+/** Holes in review order: the flagged ones (`reviewReason`) first, then the rest; each group by hole number. */
+export function reviewOrder(
+	holes: readonly AnnotatedHole[],
+	evidenceByHole: ReadonlyMap<string, HoleEvidence>,
+	loadedById: ReadonlyMap<string, AnnotatedHole> = new Map()
+): AnnotatedHole[] {
+	const flagged = (hole: AnnotatedHole): boolean => reviewReason(hole, evidenceByHole.get(hole.id), loadedById.get(hole.id)) !== null;
 	const byNumber = (a: AnnotatedHole, b: AnnotatedHole) => a.number - b.number;
 	return [...holes.filter(flagged).sort(byNumber), ...holes.filter((hole) => !flagged(hole)).sort(byNumber)];
 }
 
 /** The ids of the holes that need review, in review order. */
-export function reviewQueue(holes: readonly AnnotatedHole[], evidenceByHole: ReadonlyMap<string, HoleEvidence>): string[] {
-	return reviewOrder(holes, evidenceByHole)
-		.filter((hole) => {
-			const evidence = evidenceByHole.get(hole.id);
-			return evidence ? needsReview(evidence) : false;
-		})
+export function reviewQueue(
+	holes: readonly AnnotatedHole[],
+	evidenceByHole: ReadonlyMap<string, HoleEvidence>,
+	loadedById: ReadonlyMap<string, AnnotatedHole> = new Map()
+): string[] {
+	return reviewOrder(holes, evidenceByHole, loadedById)
+		.filter((hole) => reviewReason(hole, evidenceByHole.get(hole.id), loadedById.get(hole.id)) !== null)
 		.map((hole) => hole.id);
 }
 

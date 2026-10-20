@@ -7,20 +7,37 @@
 <script lang="ts">
 	import { deriveCorridorBand, deriveCorridorCenterline } from '$lib/corridor';
 	import type { AnnotatedHole, SourcePoint } from '$lib/domain/project';
-	import type { HoleEvidence } from '$lib/import/courseGeometry';
-	import { STATUS_COLOURS, reviewStatus } from '$lib/courseCorrection';
+	import type { HoleEvidence, RouteAlternative } from '$lib/import/courseGeometry';
+	import { STATUS_COLOURS, alternativeCenterline, reviewStatus } from '$lib/courseCorrection';
 	import type { CorrectionSelection } from '$lib/courseCorrection';
 
 	interface Props {
 		holes: readonly AnnotatedHole[];
 		evidenceByHole: ReadonlyMap<string, HoleEvidence>;
 		selection: CorrectionSelection | null;
+		/** The selected hole's alternative routes, drawn as ghost corridors under it. */
+		alternatives?: readonly RouteAlternative[];
 		zoom: number;
 		widthPx: number;
 		heightPx: number;
 	}
 
-	let { holes, evidenceByHole, selection, zoom, widthPx, heightPx }: Props = $props();
+	let { holes, evidenceByHole, selection, alternatives = [], zoom, widthPx, heightPx }: Props = $props();
+	let selectedHole = $derived(selection ? holes.find((hole) => hole.id === selection!.holeId) : undefined);
+	let ghosts = $derived(
+		selectedHole
+			? alternatives.map((alternative) => {
+					const line = alternativeCenterline(alternative);
+					const band = deriveCorridorBand({
+						tee: line[0],
+						basket: line[line.length - 1],
+						corridorBends: line.slice(1, -1),
+						corridorWidthPx: selectedHole!.corridorWidthPx
+					});
+					return { line, band };
+				})
+			: []
+	);
 
 	const points = (list: readonly SourcePoint[]): string => list.map((p) => `${p.xPx},${p.yPx}`).join(' ');
 	let px = $derived(1 / zoom);
@@ -40,6 +57,20 @@
 	height={heightPx}
 	aria-hidden="true"
 >
+	<!-- The selected hole's alternative routes: faint ghosts under every real corridor. -->
+	{#each ghosts as ghost, index (index)}
+		<g class="ghost" data-testid={`cc-ghost-${index}`} data-verts={JSON.stringify(ghost.line.map((p) => [p.xPx, p.yPx]))}>
+			{#if ghost.band}
+				<polygon class="ghost-band" points={points(ghost.band)} stroke-width={1.5 * px} stroke-dasharray={`${5 * px} ${4 * px}`} />
+			{/if}
+			<polyline class="ghost-line" points={points(ghost.line)} stroke-width={1.5 * px} stroke-dasharray={`${5 * px} ${4 * px}`} />
+			{#each ghost.line.slice(1, -1) as vert, vertIndex (vertIndex)}
+				<circle class="ghost-vert" cx={vert.xPx} cy={vert.yPx} r={4 * px} />
+			{/each}
+			<text class="ghost-label" x={ghost.line[Math.floor(ghost.line.length / 2)].xPx + 8 * px} y={ghost.line[Math.floor(ghost.line.length / 2)].yPx + 4 * px} font-size={12 * px} stroke-width={3 * px}>alt {index + 1}</text>
+		</g>
+	{/each}
+
 	<!-- Corridors under handles, the selected hole last so it draws on top. -->
 	{#each [...holes].sort((a, b) => Number(a.id === selection?.holeId) - Number(b.id === selection?.holeId)) as hole (hole.id)}
 		{@const evidence = evidenceByHole.get(hole.id)}
@@ -168,6 +199,33 @@
 
 	.handle.active {
 		stroke: #facc15;
+	}
+
+	.ghost-band {
+		fill: #c4b5fd;
+		fill-opacity: 0.2;
+		stroke: #ddd6fe;
+		stroke-opacity: 0.95;
+		pointer-events: visiblePainted;
+		cursor: pointer;
+	}
+
+	.ghost-line {
+		fill: none;
+		stroke: #c4b5fd;
+		opacity: 0.8;
+	}
+
+	.ghost-vert {
+		fill: #c4b5fd;
+		opacity: 0.8;
+	}
+
+	.ghost-label {
+		fill: #ede9fe;
+		stroke: #18181b;
+		paint-order: stroke;
+		font-family: system-ui, sans-serif;
 	}
 
 	.label {

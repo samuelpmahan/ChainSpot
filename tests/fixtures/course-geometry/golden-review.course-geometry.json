@@ -3,6 +3,32 @@
  "conditions": [],
  "evidence": [
   {
+   "alternatives": [
+    {
+     "contrastLum": 12.0,
+     "ruleSets": [
+      "synthetic: agrees within 6 px"
+     ],
+     "sensor": {
+      "passFrac": 1,
+      "stations": 180
+     },
+     "verts": [
+      [
+       879.83,
+       429.18
+      ],
+      [
+       648.9,
+       464.34
+      ],
+      [
+       516.84,
+       427.73
+      ]
+     ]
+    }
+   ],
    "basket": {
     "candidate": "Basket ca",
     "state": "matched"
@@ -51,6 +77,32 @@
    }
   },
   {
+   "alternatives": [
+    {
+     "contrastLum": 3.2,
+     "ruleSets": [
+      "synthetic: off-route bend"
+     ],
+     "sensor": {
+      "passFrac": 0.41,
+      "stations": 30
+     },
+     "verts": [
+      [
+       734.94,
+       714.29
+      ],
+      [
+       633.9,
+       614.9
+      ],
+      [
+       492.84,
+       628.73
+      ]
+     ]
+    }
+   ],
    "basket": {
     "candidate": "Basket cd",
     "state": "matched"
@@ -147,6 +199,32 @@
    }
   },
   {
+   "alternatives": [
+    {
+     "contrastLum": 10.194,
+     "ruleSets": [
+      "synthetic: golden route"
+     ],
+     "sensor": {
+      "passFrac": 0.855,
+      "stations": 55
+     },
+     "verts": [
+      [
+       366.25,
+       981.9
+      ],
+      [
+       508.28,
+       983.67
+      ],
+      [
+       617.84,
+       950.73
+      ]
+     ]
+    }
+   ],
    "basket": {
     "candidate": "Basket ci",
     "state": "matched"
@@ -874,7 +952,7 @@
  "producer": {
   "attemptId": "attempt-1792431456091-b0db33a09c92",
   "name": "chainspot test fixture (golden with four holes broken on purpose)",
-  "note": "Synthetic. Derived from golden.course-geometry.json for the Correct Course UI tests: hole 7 bend displaced, hole 14 bend removed, hole 10 spurious bend added, hole 12 tee displaced. Not a toolkit output.",
+  "note": "Synthetic. Derived from golden.course-geometry.json for the Correct Course UI tests: hole 7 bend displaced, hole 14 bend removed, hole 10 spurious bend added, hole 12 tee displaced. evidence[].alternatives (hand-made, not rule-set output): hole 7 carries the golden route as an alternative; hole 3 an off-route alternative that disagrees with its (correct) primary; hole 1 an alternative that agrees with its primary. Not a toolkit output.",
   "recipe": "chainspot-s0-s7",
   "stagesRun": [
    0,

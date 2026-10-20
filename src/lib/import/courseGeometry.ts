@@ -35,6 +35,19 @@ export interface CourseGeometryCandidate {
 	readonly kind: 'basket' | 'tee' | 'badge';
 }
 
+/**
+ * One distinct route another rule set produced for a hole (the primary stays in `holes`). `verts` is the route
+ * polyline tee -> bends -> basket in source px. Absent from older exports: read as no alternatives.
+ */
+export interface RouteAlternative {
+	readonly verts: readonly (readonly [number, number])[];
+	readonly ruleSets: readonly string[];
+	/** Hallway sensor on this route: fraction of stations reading as hallway (0..1), and the station count. */
+	readonly sensor?: { readonly passFrac?: number | null; readonly stations?: number | null } | null;
+	/** Hallway-vs-surround luminance contrast along the route, in 8-bit luminance levels. */
+	readonly contrastLum?: number | null;
+}
+
 export interface HoleEvidence {
 	readonly holeId: string;
 	readonly status: HoleStatus;
@@ -48,6 +61,8 @@ export interface HoleEvidence {
 	readonly basket?: { readonly state: string };
 	readonly trace?: { readonly outcome: string; readonly lengthPx?: number | null; readonly bendCount?: number | null };
 	readonly reasons: readonly string[];
+	/** Distinct routes from other rule sets; `[]` when the export carries none. */
+	readonly alternatives?: readonly RouteAlternative[];
 }
 
 export interface CourseGeometrySource {
@@ -168,7 +183,33 @@ function readCandidates(value: unknown): CourseGeometryCandidate[] | string {
 	return out;
 }
 
-function readEvidence(value: unknown, holeIds: ReadonlySet<string>): HoleEvidence[] | string {
+function readAlternatives(value: unknown, path: string, source: CourseGeometrySource): RouteAlternative[] | string {
+	if (value === undefined || value === null) return [];
+	if (!Array.isArray(value)) return `${path} must be an array`;
+	const out: RouteAlternative[] = [];
+	for (const [index, item] of value.entries()) {
+		const at = `${path}[${index}]`;
+		if (!isRecord(item) || !Array.isArray(item.verts) || item.verts.length < 2) return `${at}.verts must be an array of at least two [x, y] points`;
+		const verts: [number, number][] = [];
+		for (const vert of item.verts) {
+			if (!Array.isArray(vert) || vert.length !== 2 || !isFiniteNumber(vert[0]) || !isFiniteNumber(vert[1])) return `${at}.verts must hold finite [x, y] pairs`;
+			if (vert[0] < 0 || vert[0] >= source.widthPx || vert[1] < 0 || vert[1] >= source.heightPx) return `${at}.verts has a point outside the ${source.widthPx} x ${source.heightPx} px source frame`;
+			verts.push([vert[0], vert[1]]);
+		}
+		const ruleSets = item.ruleSets ?? [];
+		if (!Array.isArray(ruleSets) || !ruleSets.every((name) => typeof name === 'string')) return `${at}.ruleSets must be an array of strings`;
+		const sensor = isRecord(item.sensor)
+			? {
+					passFrac: isFiniteNumber(item.sensor.passFrac) ? item.sensor.passFrac : null,
+					stations: isFiniteNumber(item.sensor.stations) ? item.sensor.stations : null
+				}
+			: null;
+		out.push({ verts, ruleSets: ruleSets as string[], sensor, contrastLum: isFiniteNumber(item.contrastLum) ? item.contrastLum : null });
+	}
+	return out;
+}
+
+function readEvidence(value: unknown, holeIds: ReadonlySet<string>, source: CourseGeometrySource): HoleEvidence[] | string {
 	if (value === undefined) return [];
 	if (!Array.isArray(value)) return 'evidence must be an array';
 	const out: HoleEvidence[] = [];
@@ -181,7 +222,9 @@ function readEvidence(value: unknown, holeIds: ReadonlySet<string>): HoleEvidenc
 		if (!isRecord(confidence) || !LEVELS.includes(confidence.level as string)) return `${path}.confidence.level must be one of ${LEVELS.join(', ')}`;
 		const reasons = item.reasons ?? [];
 		if (!Array.isArray(reasons) || !reasons.every((reason) => typeof reason === 'string')) return `${path}.reasons must be an array of strings`;
-		out.push(item as unknown as HoleEvidence);
+		const alternatives = readAlternatives(item.alternatives, `${path}.alternatives`, source);
+		if (typeof alternatives === 'string') return alternatives;
+		out.push({ ...(item as unknown as HoleEvidence), alternatives });
 	}
 	return out;
 }
@@ -260,7 +303,7 @@ export function parseCourseGeometry(text: string, options: ParseCourseGeometryOp
 	}
 	const candidates = readCandidates(root.candidates);
 	if (typeof candidates === 'string') return fail('structure.invalid', 'candidates', candidates);
-	const evidence = readEvidence(root.evidence, new Set(holes.map((hole) => hole.id)));
+	const evidence = readEvidence(root.evidence, new Set(holes.map((hole) => hole.id)), source);
 	if (typeof evidence === 'string') return fail('structure.invalid', 'evidence', evidence);
 
 	const producer = isRecord(root.producer) && typeof root.producer.name === 'string' ? (root.producer as CourseGeometry['producer']) : { name: 'unknown' };

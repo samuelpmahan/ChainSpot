@@ -5,7 +5,12 @@ import {
 	HANDLE_HIT_PX,
 	LEG_MIN_HIT_PX,
 	addBendOnLeg,
+	adoptAlternative,
+	alternativesDisagree,
+	hitTestAlternative,
 	hitTestCourse,
+	reviewReason,
+	routeSeparationPx,
 	holeBounds,
 	holeEdited,
 	moveHandle,
@@ -125,13 +130,80 @@ describe('review order', () => {
 		expect(stepReviewQueue([], 'h1', 1)).toBeNull();
 	});
 
-	it('golden: every route is confirmed, so the queue is empty; the review fixture queues its four broken holes', () => {
+	it('golden: every route is confirmed, so the queue is empty; the review fixture queues its four broken holes and the one whose alternative disagrees', () => {
 		const load = (name: string) => {
 			const result = parseCourseGeometry(readFileSync(new URL(`../fixtures/course-geometry/${name}`, import.meta.url), 'utf8'));
 			if (!result.ok) throw new Error(result.error.message);
 			return reviewQueue(result.state.holes, new Map(result.geometry.evidence.map((e) => [e.holeId, e])));
 		};
 		expect(load('golden.course-geometry.json')).toEqual([]);
-		expect(load('golden-review.course-geometry.json')).toEqual(['hole-7', 'hole-10', 'hole-12', 'hole-14']);
+		expect(load('golden-review.course-geometry.json')).toEqual(['hole-3', 'hole-7', 'hole-10', 'hole-12', 'hole-14']);
+	});
+});
+
+describe('alternative routes', () => {
+	const primary = hole('a', 1); // tee (0,0) -> bend (100,50) -> basket (200,0), corridor 20 px
+	const alt = (verts: [number, number][], ruleSets = ['r']) => ({ verts, ruleSets });
+	const ev = (alternatives: ReturnType<typeof alt>[]): HoleEvidence => ({ holeId: 'a', status: 'resolved', confidence: { level: 'confirmed' }, reasons: [], alternatives });
+
+	it('measures route separation in source px, symmetric and vertex-to-polyline', () => {
+		const line = [{ xPx: 0, yPx: 0 }, { xPx: 100, yPx: 50 }, { xPx: 200, yPx: 0 }];
+		expect(routeSeparationPx(line, line)).toBe(0);
+		expect(routeSeparationPx(line, [{ xPx: 0, yPx: 0 }, { xPx: 200, yPx: 0 }])).toBeCloseTo(Math.hypot(100, 50) * Math.sin(Math.atan2(50, 100)), 6);
+	});
+
+	it('an alternative disagrees when it is more than half the corridor width from the primary', () => {
+		expect(alternativesDisagree(primary, ev([alt([[0, 0], [104, 46], [200, 0]])]))).toBe(false);
+		expect(alternativesDisagree(primary, ev([alt([[0, 0], [100, 80], [200, 0]])]))).toBe(true);
+		expect(alternativesDisagree(primary, ev([]))).toBe(false);
+		expect(alternativesDisagree(primary, undefined)).toBe(false);
+	});
+
+	it('a disagreeing alternative puts a confirmed hole in the walk; judged against the loaded primary', () => {
+		const disagreeing = ev([alt([[0, 0], [100, 80], [200, 0]])]);
+		expect(reviewReason(primary, disagreeing)).toBe('alternatives');
+		const adopted = adoptAlternative([primary], 'a', disagreeing.alternatives![0])[0];
+		expect(reviewReason(adopted, disagreeing, primary)).toBe('alternatives');
+		expect(reviewQueue([adopted], new Map([['a', disagreeing]]), new Map([['a', primary]]))).toEqual(['a']);
+	});
+
+	it('adopting takes tee, bends and basket from the alternative', () => {
+		const next = adoptAlternative([primary], 'a', alt([[1, 2], [50, 60], [120, 70], [199, 3]]));
+		expect(next[0]).toMatchObject({ tee: { xPx: 1, yPx: 2 }, basket: { xPx: 199, yPx: 3 }, corridorBends: [{ xPx: 50, yPx: 60 }, { xPx: 120, yPx: 70 }] });
+		expect(next[0].corridorWidthPx).toBe(primary.corridorWidthPx);
+	});
+
+	it('hits the nearest ghost within the corridor reach (screen px)', () => {
+		const alternatives = [alt([[0, 0], [100, 150], [200, 0]]), alt([[0, 0], [100, -150], [200, 0]])];
+		expect(hitTestAlternative(primary, alternatives, screenOf({ xPx: 100, yPx: 148 }), view)).toBe(0);
+		expect(hitTestAlternative(primary, alternatives, screenOf({ xPx: 100, yPx: -146 }), view)).toBe(1);
+		expect(hitTestAlternative(primary, alternatives, screenOf({ xPx: 100, yPx: 400 }), view)).toBeNull();
+	});
+});
+
+describe('parseCourseGeometry: evidence alternatives', () => {
+	const text = readFileSync(new URL('../fixtures/course-geometry/golden.course-geometry.json', import.meta.url), 'utf8');
+	const edit = (change: (doc: Record<string, any>) => void) => {
+		const doc = JSON.parse(text);
+		change(doc);
+		return parseCourseGeometry(JSON.stringify(doc));
+	};
+
+	it('absent alternatives read as none (exports that predate the field)', () => {
+		const result = parseCourseGeometry(text);
+		expect(result.ok && result.geometry.evidence.every((e) => e.alternatives?.length === 0)).toBe(true);
+	});
+
+	it('reads verts, rule sets, sensor and contrast', () => {
+		const result = edit((doc) => (doc.evidence[0].alternatives = [{ verts: [[1, 2], [3, 4]], ruleSets: ['s7-a', 's7-b'], sensor: { passFrac: 0.9, stations: 40 }, contrastLum: 11.5 }]));
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.geometry.evidence[0].alternatives).toEqual([{ verts: [[1, 2], [3, 4]], ruleSets: ['s7-a', 's7-b'], sensor: { passFrac: 0.9, stations: 40 }, contrastLum: 11.5 }]);
+	});
+
+	it('a malformed or out-of-frame alternative is a structure error, not a throw', () => {
+		const code = (r: ReturnType<typeof parseCourseGeometry>) => (r.ok ? 'ok' : r.error.code);
+		expect(code(edit((doc) => (doc.evidence[0].alternatives = [{ verts: [[1, 2]], ruleSets: [] }])))).toBe('structure.invalid');
+		expect(code(edit((doc) => (doc.evidence[0].alternatives = [{ verts: [[1, 2], [5000, 4]], ruleSets: [] }])))).toBe('structure.invalid');
+		expect(code(edit((doc) => (doc.evidence[0].alternatives = 'x')))).toBe('structure.invalid');
 	});
 });
