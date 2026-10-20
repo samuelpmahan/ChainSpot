@@ -127,6 +127,7 @@ export function fitAndProject(options: FitProjectOptions): FitProjectResult {
 	let fit: FitProjectResult['fit'];
 	let courseName = options.courseName ?? geometry.source.fileName;
 	let groundScale: GroundScale | null = null;
+	let basemapProvider: string | undefined;
 
 	if (pairsPath) {
 		const pairs = parseAlignmentPairs(readFileSync(pairsPath, 'utf8'));
@@ -144,6 +145,7 @@ export function fitAndProject(options: FitProjectOptions): FitProjectResult {
 			throw new IntegrityError(`integrity: the pairs were picked on ${file.source.sha256}, the geometry was read from ${geometry.source.sha256}`);
 		}
 		courseName = options.courseName ?? file.course;
+		basemapProvider = file.basemap.provider ? `${file.basemap.provider.replace(/-/g, ' ').toUpperCase()}` : undefined;
 		fit = fitAlignmentPairs(file, sourceGroundScale ? { sourceGroundScale } : {});
 		groundScale = fit.groundScale;
 		transform = fit.ok ? fit.transform : IDENTITY;
@@ -241,7 +243,13 @@ export function fitAndProject(options: FitProjectOptions): FitProjectResult {
 	if (options.frames) {
 		const wanted = options.frames === 'all' ? plans : plans.filter((plan) => (options.frames as readonly number[]).includes(plan.number));
 		for (const plan of wanted) {
-			const frame = composeBroadcastFrame(plan, href, { targetName: basemapName, feetPerPixel, groundScaleReferent: groundScale?.referent, courseName });
+			// the frame's note is short: the scale and where it came from; fit.json keeps the full referent
+			const shortReferent = !groundScale
+				? undefined
+				: !pairsPath && sourceGroundScale
+					? `C1 circle, 10 m = ${sourceGroundScale.rC1Px} px of ${basemapName}`
+					: `${groundScale.metersPerPixel.toFixed(3)} m/px, ${basemapProvider ?? basemapName}`;
+			const frame = composeBroadcastFrame(plan, href, { targetName: basemapName, feetPerPixel, groundScaleReferent: shortReferent, courseName });
 			const file = join(outDir, `frame-hole-${String(plan.number).padStart(2, '0')}.svg`);
 			writeFileSync(file, frame.svg);
 			frameFiles.push(file);

@@ -128,3 +128,16 @@ describe('buildCourseOverviewMarkup', () => {
 		expect(markup).not.toContain('>Hole 7<');
 	});
 });
+
+describe('composeBroadcastFrame title card placement', () => {
+	test('moves off the bottom-left corner when the tee sits there', () => {
+		// A hole whose tee lands bottom-left of its (16:9-filled) crop.
+		const plan = planHoleGraphic({ ...hole, tee: { xPx: 100, yPx: 600 }, basket: { xPx: 700, yPx: 300 }, corridorBends: [] }, transform(1), 1000, 1000)!;
+		const frame = composeBroadcastFrame(plan, 'blob:t', { targetName: 'a.png' });
+		const card = /<g data-role="title-card"><rect x="([0-9.]+)" y="([0-9.]+)"/.exec(frame.svg)!;
+		const [cx, cy] = [Number(card[1]), Number(card[2])];
+		const s = frame.effectiveScale;
+		const tee = { x: frame.bounds.x + (plan.tee!.xPx - frame.plan.crop.xPx) * s, y: frame.bounds.y + (plan.tee!.yPx - frame.plan.crop.yPx) * s };
+		expect(cx > tee.x || cy > tee.y + 20 || cy + 200 < tee.y).toBe(true);
+	});
+});

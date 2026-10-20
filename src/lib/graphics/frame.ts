@@ -132,6 +132,20 @@ export function placeInFrame(
 	return { x, y, scale };
 }
 
+/** Splits text at spaces into lines of at most `max` characters (a longer word stays whole). */
+export function wrapWords(text: string, max: number): string[] {
+	const lines: string[] = [];
+	let line = '';
+	for (const word of text.split(/\s+/).filter(Boolean)) {
+		if (line && line.length + 1 + word.length > max) {
+			lines.push(line);
+			line = word;
+		} else line = line ? `${line} ${word}` : word;
+	}
+	if (line) lines.push(line);
+	return lines;
+}
+
 function titleCard(
 	plan: HoleGraphicPlan,
 	length: HoleLengthLabel | null,
@@ -153,13 +167,31 @@ function titleCard(
 		.filter((fact): fact is string => fact !== null)
 		.join('  ·  ');
 	if (facts) lines.push({ text: facts, size: lineSize, color: style.cardText, weight: '700' });
-	if (length) lines.push({ text: length.referent, size: noteSize, color: style.cardText, weight: '400' });
+	if (length) for (const text of wrapWords(length.referent, 44)) lines.push({ text, size: noteSize, color: style.cardText, weight: '400' });
 
 	// Text width estimate (about 0.6 em per character for a bold sans); the card grows with its longest line.
 	const width = Math.max(...lines.map((line) => line.text.length * line.size * 0.6)) + 2 * pad;
 	const height = lines.reduce((sum, line) => sum + line.size * 1.25, 0) + 2 * pad;
-	const x = Math.max(bounds.x, BROADCAST_FRAME.marginPx) + 2 * u;
-	const y = Math.min(bounds.y + bounds.height, BROADCAST_FRAME.heightPx - BROADCAST_FRAME.marginPx) - height - 2 * u;
+	// The card takes the corner of the map that covers the fewest of the hole's own marks (tee, bends, basket).
+	const left = Math.max(bounds.x, BROADCAST_FRAME.marginPx) + 2 * u;
+	const right = Math.min(bounds.x + bounds.width, BROADCAST_FRAME.widthPx - BROADCAST_FRAME.marginPx) - width - 2 * u;
+	const top = Math.max(bounds.y, BROADCAST_FRAME.marginPx) + 2 * u;
+	const bottom = Math.min(bounds.y + bounds.height, BROADCAST_FRAME.heightPx - BROADCAST_FRAME.marginPx) - height - 2 * u;
+	const scale = bounds.width / plan.crop.widthPx;
+	const marks = [...(plan.tee ? [plan.tee] : []), ...plan.bends, ...(plan.basket ? [plan.basket] : [])].map((p) => ({
+		x: bounds.x + (p.xPx - plan.crop.xPx) * scale,
+		y: bounds.y + (p.yPx - plan.crop.yPx) * scale
+	}));
+	const clearance = 3 * u;
+	const covered = (cx: number, cy: number) =>
+		marks.filter((m) => m.x >= cx - clearance && m.x <= cx + width + clearance && m.y >= cy - clearance && m.y <= cy + height + clearance).length;
+	const corners = [
+		{ x: left, y: bottom },
+		{ x: right, y: bottom },
+		{ x: left, y: top },
+		{ x: right, y: top }
+	];
+	const { x, y } = corners.reduce((best, c) => (covered(c.x, c.y) < covered(best.x, best.y) ? c : best), corners[0]);
 
 	const parts = [
 		`<rect x="${round3(x)}" y="${round3(y)}" width="${round3(width)}" height="${round3(height)}" rx="${round3(u)}" fill="${escapeText(style.cardBackground)}" />`,
