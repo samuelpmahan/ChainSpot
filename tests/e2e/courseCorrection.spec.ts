@@ -141,3 +141,213 @@ test('a wrong screenshot is a visible message, not a load', async ({ page }) => 
 	await page.getByTestId('cc-open-input').setInputFiles([GOLDEN, fixture('acceptance-source-overview.png')]);
 	await expect(page.getByTestId('cc-error')).toContainText('was read from IMG_5641.jpg');
 });
+
+// ---------------------------------------------------------------------------
+// Step 2: bend editing within the click budget (each fix from the fitted view, no navigation)
+// ---------------------------------------------------------------------------
+
+test('fix a wrong bend: 1 drag', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	const budget = new Budget(page);
+	const wrong = await handle(page, 'cc-bend-7-0');
+	const target = goldenHole(7).corridorBends[0];
+	expect(dist(wrong, target)).toBeGreaterThan(HALF_CORRIDOR);
+	await shot(page, '02-wrong-bend-before');
+	await budget.drag(await toPage(page, wrong), await toPage(page, target));
+	const fixed = await handle(page, 'cc-bend-7-0');
+	expect(dist(fixed, target)).toBeLessThan(HALF_CORRIDOR);
+	expect(Number(await page.getByTestId('cc-hole-7').getAttribute('data-bends'))).toBe(1);
+	expect(budget.count).toBe(1);
+	await expect(page.getByTestId('cc-edited-7')).toBeVisible();
+	await shot(page, '03-wrong-bend-fixed');
+
+	// One drag is one ProjectEditor history step.
+	await page.keyboard.press('Control+z');
+	expect(await handle(page, 'cc-bend-7-0')).toEqual(wrong);
+	await page.keyboard.press('Control+Shift+z');
+	expect(await handle(page, 'cc-bend-7-0')).toEqual(fixed);
+});
+
+test('add a missing bend: 1 drag from the corridor leg (or 1 click to drop it on the leg)', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	const h = goldenHole(14);
+	const target = h.corridorBends[0];
+	expect(Number(await page.getByTestId('cc-hole-14').getAttribute('data-bends'))).toBe(0);
+	const legMid = { xPx: (h.tee.xPx + h.basket.xPx) / 2, yPx: (h.tee.yPx + h.basket.yPx) / 2 };
+
+	const budget = new Budget(page);
+	await shot(page, '04-missing-bend-before');
+	await budget.drag(await toPage(page, legMid), await toPage(page, target));
+	expect(Number(await page.getByTestId('cc-hole-14').getAttribute('data-bends'))).toBe(1);
+	expect(dist(await handle(page, 'cc-bend-14-0'), target)).toBeLessThan(HALF_CORRIDOR);
+	expect(budget.count).toBe(1);
+	await shot(page, '05-missing-bend-added');
+
+	// The click variant: one click on the leg adds a bend exactly there.
+	await page.keyboard.press('Control+z');
+	expect(Number(await page.getByTestId('cc-hole-14').getAttribute('data-bends'))).toBe(0);
+	const clicks = new Budget(page);
+	await clicks.click(...Object.values(await toPage(page, legMid)) as [number, number]);
+	expect(Number(await page.getByTestId('cc-hole-14').getAttribute('data-bends'))).toBe(1);
+	expect(dist(await handle(page, 'cc-bend-14-0'), legMid)).toBeLessThan(3);
+	expect(clicks.count).toBe(1);
+});
+
+test('remove a spurious bend: 1 double-click, or click + Delete', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	const spurious = await handle(page, 'cc-bend-10-0');
+	const at = await toPage(page, spurious);
+	const budget = new Budget(page);
+	await budget.dblclick(at.x, at.y);
+	expect(Number(await page.getByTestId('cc-hole-10').getAttribute('data-bends'))).toBe(0);
+	expect(budget.count).toBe(1);
+	await shot(page, '06-spurious-bend-removed');
+
+	await page.keyboard.press('Control+z');
+	expect(Number(await page.getByTestId('cc-hole-10').getAttribute('data-bends'))).toBe(1);
+	const twoStep = new Budget(page);
+	await twoStep.click(at.x, at.y);
+	await twoStep.press('Delete');
+	expect(Number(await page.getByTestId('cc-hole-10').getAttribute('data-bends'))).toBe(0);
+	expect(twoStep.count).toBe(2);
+});
+
+test('drag a tee endpoint: 1 drag', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	const target = goldenHole(12).tee;
+	const budget = new Budget(page);
+	await budget.drag(await toPage(page, await handle(page, 'cc-tee-12')), await toPage(page, target));
+	expect(dist(await handle(page, 'cc-tee-12'), target)).toBeLessThan(TEE_MATCH_PX);
+	expect(budget.count).toBe(1);
+});
+
+test('a background drag still pans the one surface (not an edit)', async ({ page }) => {
+	await open(page, [REVIEW, SCREENSHOT]);
+	const vp = page.locator(VIEWPORT);
+	const before = Number(await vp.getAttribute('data-view-pan-x'));
+	const box = (await vp.boundingBox())!;
+	await page.mouse.move(box.x + 40, box.y + 40);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 140, box.y + 60, { steps: 5 });
+	await page.mouse.up();
+	expect(Number(await vp.getAttribute('data-view-pan-x'))).toBeCloseTo(before + 100, 0);
+	await expect(page.getByTestId('cc-undo')).toBeDisabled();
+});
+
+// ---------------------------------------------------------------------------
+// Steps 3 and 4: walk only the uncertain holes with N, fix each, save, reopen
+// ---------------------------------------------------------------------------
+
+test('review walk: N visits only the four flagged holes; the whole course is fixed in 8 actions, saved and reopened', async ({ page }) => {
+	test.setTimeout(120_000);
+	await open(page, [REVIEW, SCREENSHOT]);
+	await expect(page.getByTestId('cc-queue-count')).toContainText('4 of 18 need review');
+	// The list puts the flagged holes first.
+	const rows = page.locator('[data-testid^="cc-hole-row-"]');
+	expect(await rows.evaluateAll((els) => els.slice(0, 4).map((el) => el.getAttribute('data-testid')))).toEqual([
+		'cc-hole-row-7',
+		'cc-hole-row-10',
+		'cc-hole-row-12',
+		'cc-hole-row-14'
+	]);
+	const budget = new Budget(page);
+	const zoomOf = async () => Number(await page.locator(VIEWPORT).getAttribute('data-view-zoom'));
+	const fitZoom = await zoomOf();
+
+	// Hole 7: wrong bend.
+	await budget.press('n');
+	await settle(page);
+	await expect(page.getByTestId('cc-hole-row-7')).toHaveAttribute('aria-current', 'true');
+	expect(await zoomOf()).toBeGreaterThan(fitZoom);
+	await shot(page, '07-walk-hole7');
+	await budget.drag(await toPage(page, await handle(page, 'cc-bend-7-0')), await toPage(page, goldenHole(7).corridorBends[0]));
+
+	// Hole 10: spurious bend.
+	await budget.press('n');
+	await settle(page);
+	await expect(page.getByTestId('cc-hole-row-10')).toHaveAttribute('aria-current', 'true');
+	await shot(page, '08-walk-hole10');
+	const spurious = await toPage(page, await handle(page, 'cc-bend-10-0'));
+	await budget.dblclick(spurious.x, spurious.y);
+
+	// Hole 12: displaced tee.
+	await budget.press('n');
+	await settle(page);
+	await expect(page.getByTestId('cc-hole-row-12')).toHaveAttribute('aria-current', 'true');
+	await shot(page, '09-walk-hole12');
+	await budget.drag(await toPage(page, await handle(page, 'cc-tee-12')), await toPage(page, goldenHole(12).tee));
+
+	// Hole 14: missing bend.
+	await budget.press('n');
+	await settle(page);
+	await expect(page.getByTestId('cc-hole-row-14')).toHaveAttribute('aria-current', 'true');
+	await shot(page, '10-walk-hole14');
+	const h14 = goldenHole(14);
+	await budget.drag(
+		await toPage(page, { xPx: (h14.tee.xPx + h14.basket.xPx) / 2, yPx: (h14.tee.yPx + h14.basket.yPx) / 2 }),
+		await toPage(page, h14.corridorBends[0])
+	);
+	await shot(page, '11-walk-hole14-fixed');
+
+	// N wraps back to the first flagged hole: the walk never visits a confirmed hole.
+	await page.keyboard.press('n');
+	await expect(page.getByTestId('cc-hole-row-7')).toHaveAttribute('aria-current', 'true');
+	await page.keyboard.press('p');
+	await expect(page.getByTestId('cc-hole-row-14')).toHaveAttribute('aria-current', 'true');
+
+	expect(budget.count).toBe(8);
+
+	// Every hole now agrees with golden (bends within half the corridor, tees within 8 px).
+	const checkAgainstGolden = async () => {
+		for (const g of golden.holes) {
+			expect(await bends(page, g.number), `hole ${g.number} bends`).toHaveLength(g.corridorBends.length);
+			const got = await bends(page, g.number);
+			g.corridorBends.forEach((b: { xPx: number; yPx: number }, i: number) => expect(dist(got[i], b), `hole ${g.number} bend ${i}`).toBeLessThan(HALF_CORRIDOR));
+			expect(dist(await handle(page, `cc-tee-${g.number}`), g.tee), `hole ${g.number} tee`).toBeLessThan(TEE_MATCH_PX);
+		}
+	};
+	await checkAgainstGolden();
+	await page.locator(VIEWPORT).focus();
+	await page.keyboard.press('0');
+	await settle(page);
+	await shot(page, '12-walk-all-fixed');
+
+	// Step 4: save through the existing persistence, then reopen.
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByTestId('cc-save').click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toMatch(/\.chainspot\.zip$/);
+	const zipPath = test.info().outputPath(download.suggestedFilename());
+	await download.saveAs(zipPath);
+	const zip = unzipSync(new Uint8Array(readFileSync(zipPath)));
+	const project = JSON.parse(strFromU8(zip['project.json']));
+	expect(project.schemaVersion).toBe(8);
+	expect(project.images.map((i: { role: string }) => i.role)).toEqual(['source-overview']);
+	expect(project.holes).toHaveLength(18);
+	const saved7 = project.holes.find((h: { number: number }) => h.number === 7);
+	expect(dist(saved7.corridorBends[0], goldenHole(7).corridorBends[0])).toBeLessThan(HALF_CORRIDOR);
+	expect(project.holes.find((h: { number: number }) => h.number === 10).corridorBends).toEqual([]);
+	expect(project.holes.find((h: { number: number }) => h.number === 14).corridorBends).toHaveLength(1);
+	// No evidence or review state inside the project: ProjectState stays clean.
+	expect(Object.keys(saved7).sort()).toEqual(['basket', 'corridorBends', 'corridorWidthPx', 'id', 'number', 'shots', 'tee']);
+
+	// Reopen in a fresh page: the bundle alone restores every edit.
+	const fresh = await page.context().newPage();
+	await open(fresh, [zipPath]);
+	await expect(fresh.getByTestId('cc-message')).toContainText('18 holes');
+	for (const saved of project.holes) {
+		const got = await bends(fresh, saved.number);
+		expect(got).toEqual(saved.corridorBends);
+		expect(await handle(fresh, `cc-tee-${saved.number}`)).toEqual(saved.tee);
+	}
+	await expect(fresh.locator('g[data-testid^="cc-hole-"][data-status="none"]')).toHaveCount(18);
+	await shot(fresh, '13-reopened-bundle');
+
+	// With the geometry file alongside, the evidence comes back and the edits are marked.
+	await fresh.getByTestId('cc-open-input').setInputFiles([zipPath, REVIEW]);
+	await expect(fresh.locator('g[data-testid="cc-hole-7"]')).toHaveAttribute('data-status', 'partial');
+	for (const n of [7, 10, 12, 14]) await expect(fresh.getByTestId(`cc-edited-${n}`)).toBeVisible();
+	await expect(fresh.locator('[data-testid^="cc-edited-"]')).toHaveCount(4);
+	expect(await bends(fresh, 14)).toEqual(project.holes.find((h: { number: number }) => h.number === 14).corridorBends);
+	await shot(fresh, '14-reopened-with-evidence');
+});

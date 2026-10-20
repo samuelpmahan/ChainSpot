@@ -202,7 +202,8 @@ describe('Save project (F)', () => {
 		host.remove();
 	});
 
-	it('a project without both images fails save specifically without downloading', async () => {
+	// Schema v8: a source-only (course-only) project saves; a project with no source image still cannot.
+	it('a project without a source image fails save specifically without downloading', async () => {
 		const editor = new ProjectEditor({
 			state: createProjectState({ createId: () => 'project-1', now: NOW }),
 			createId: nextId,
@@ -210,7 +211,7 @@ describe('Save project (F)', () => {
 		});
 		await intakeImageFile({
 			editor,
-			role: 'source-overview',
+			role: 'target-basemap',
 			file: fileOf('a.png', 'image/png', SRC),
 			decode,
 			createAssetId: nextId,
