@@ -21,6 +21,7 @@ import type { AlignmentModel, AlignmentPairInput, SerializableTransform, Validat
 import { validateTransform } from '../alignment/validation';
 import { naipMetersPerPixel } from '../naip';
 import type { GeoPoint } from '../naip';
+import type { GeoRaster } from './webMercator';
 
 export const ALIGNMENT_PAIRS_FORMAT = 'chainspot.alignment-pairs';
 export const ALIGNMENT_PAIRS_VERSION = 1;
@@ -47,7 +48,12 @@ export interface ImageRef {
 
 export interface BasemapRef extends ImageRef {
 	readonly naip?: { readonly center: GeoPoint; readonly radiusMeters: number; readonly sizePx: number };
+	/** Ground m/px; when the basemap came from scripts/geo/fetch-naip.ts, measured from the extent the service rendered. */
 	readonly metersPerPixel?: number;
+	/** The basemap's georeference (EPSG:3857 extent and size), from the fetch sidecar. */
+	readonly raster?: GeoRaster;
+	/** Which provider served it (fetch sidecar `source`). */
+	readonly provider?: string;
 }
 
 export interface AlignmentPairsFile {
@@ -180,6 +186,18 @@ export function parseAlignmentPairs(text: string): AlignmentPairsParseResult {
 			naip: { center: { lat: naip.center.lat, lon: naip.center.lon }, radiusMeters: naip.radiusMeters, sizePx: naip.sizePx }
 		};
 	}
+	if (basemapRaw.raster !== undefined) {
+		const r = basemapRaw.raster as Record<string, unknown> | null;
+		const e = r && typeof r === 'object' ? (r.extent as Record<string, unknown> | undefined) : undefined;
+		if (!r || !e || ![e.xmin, e.ymin, e.xmax, e.ymax].every(isFiniteNumber) || r.widthPx !== basemapImage.widthPx || r.heightPx !== basemapImage.heightPx) {
+			return fail('basemap.raster', 'needs extent { xmin, ymin, xmax, ymax } and the basemap widthPx / heightPx');
+		}
+		basemap = {
+			...basemap,
+			raster: { extent: { xmin: e.xmin as number, ymin: e.ymin as number, xmax: e.xmax as number, ymax: e.ymax as number }, widthPx: basemapImage.widthPx, heightPx: basemapImage.heightPx }
+		};
+	}
+	if (typeof basemapRaw.provider === 'string') basemap = { ...basemap, provider: basemapRaw.provider };
 	if (basemapRaw.metersPerPixel !== undefined) {
 		if (!isFiniteNumber(basemapRaw.metersPerPixel) || basemapRaw.metersPerPixel <= 0) {
 			return fail('basemap.metersPerPixel', 'must be a positive number');
@@ -214,6 +232,12 @@ export function parseAlignmentPairs(text: string): AlignmentPairsParseResult {
 
 /** The basemap's ground scale, when it has one: a radius-based NAIP export, or one stated outright. */
 export function basemapGroundScale(basemap: BasemapRef): GroundScale | null {
+	if (basemap.metersPerPixel !== undefined && basemap.raster) {
+		return {
+			metersPerPixel: basemap.metersPerPixel,
+			referent: `${basemap.provider ?? 'aerial'} export ${basemap.fileName}, ${basemap.metersPerPixel.toFixed(4)} m/px from its rendered extent`
+		};
+	}
 	if (basemap.naip) {
 		return {
 			metersPerPixel: naipMetersPerPixel(basemap.naip.radiusMeters, basemap.naip.sizePx),

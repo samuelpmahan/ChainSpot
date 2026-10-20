@@ -5,16 +5,14 @@
  *   NODE_USE_ENV_PROXY=1 npx tsx scripts/geo/fetch-naip.ts --lat <deg> --lon <deg> --radius <m> --out <dir> [--size 2048]
  *
  * Writes <out>/naip.png and <out>/naip.geo.json: the provider that served, every attempt (and why each failed), centre,
- * radius, size, the exact ground scale (`naipMetersPerPixel`: the request is 2r metres square at size px), the URL and
- * the fetch time. The `basemap.naip` block of a `chainspot.alignment-pairs` file is the sidecar's `naip` object.
+ * radius, size, the EPSG:3857 extent the service rendered (the raster's georeference, `webMercator.ts`), the ground
+ * scale measured from that extent per axis (and `naipMetersPerPixel`'s nominal 2r / size beside it), the URLs and the
+ * fetch time. scripts/geo/tile.ts `basemapBlock` turns the sidecar into a pairs file's `basemap`.
  * When every provider fails, the attempts are printed and the script exits 1; no image is written.
  * Node's fetch ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY=1 (Node >= 22.21).
  */
-import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fetchAerialWithFallback } from '../../src/lib/geo/aerialProviders';
-import { NAIP_EXPORT_SIZE_PX, bboxFromCenter, naipMetersPerPixel } from '../../src/lib/naip';
+import { NAIP_EXPORT_SIZE_PX } from '../../src/lib/naip';
+import { fetchTile } from './tile';
 
 function arg(name: string): string | null {
 	const index = process.argv.indexOf(name);
@@ -31,28 +29,11 @@ if (!outDir || !Number.isFinite(lat) || !Number.isFinite(lon) || !(radiusMeters 
 	process.exit(2);
 }
 
-const center = { lat, lon };
-const bbox = bboxFromCenter(center, radiusMeters);
-const result = await fetchAerialWithFallback(bbox, { widthPx: sizePx, heightPx: sizePx });
-if (!result.ok) {
-	console.error(result.message);
-	for (const attempt of result.attempts) console.error(`  ${attempt.providerId}: ${attempt.kind}: ${attempt.message}`);
+try {
+	const tile = await fetchTile({ lat, lon }, radiusMeters, sizePx, outDir);
+	const s = tile.sidecar;
+	console.log(JSON.stringify({ file: tile.imagePath, provider: s.source, sha256: s.sha256, metersPerPixel: s.metersPerPixel, attempts: s.attempts.map((a) => `${a.providerId}:${a.ok ? 'ok' : a.kind}`) }));
+} catch (error) {
+	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
 }
-const bytes = Buffer.from(result.bytes);
-mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, 'naip.png'), bytes);
-const sidecar = {
-	source: result.provider.id,
-	provider: { id: result.provider.id, label: result.provider.label, dynamic: result.provider.dynamic },
-	attempts: result.attempts,
-	naip: { center, radiusMeters, sizePx },
-	bbox,
-	metersPerPixel: naipMetersPerPixel(radiusMeters, sizePx),
-	contentType: result.contentType,
-	sha256: createHash('sha256').update(bytes).digest('hex'),
-	url: result.url,
-	fetchedAt: new Date().toISOString()
-};
-writeFileSync(join(outDir, 'naip.geo.json'), JSON.stringify(sidecar, null, 1) + '\n');
-console.log(JSON.stringify({ file: join(outDir, 'naip.png'), provider: result.provider.id, bytes: bytes.length, metersPerPixel: sidecar.metersPerPixel }));

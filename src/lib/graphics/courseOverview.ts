@@ -119,8 +119,22 @@ export function buildCourseOverviewMarkup(
 	const lineHeight = fontSize * 1.3;
 	const boxWidth = Math.max(...[...lines, ...legend.map((l) => '    ' + l.text)].map((t) => t.length * fontSize * 0.56), 10 * u) + 4 * u;
 	const boxHeight = (lines.length + legend.length) * lineHeight + 3 * u;
-	const boxX = 2 * u;
-	const boxY = targetHeightPx - boxHeight - 2 * u;
+	// The legend takes the corner that covers the fewest projected points (holes and pairs), so it hides no hole.
+	const marks = [
+		...plans.flatMap((plan) => [...(plan.tee ? [plan.tee] : []), ...(plan.basket ? [plan.basket] : []), ...plan.bends, ...(plan.corridorBand ?? [])]),
+		...(options.pairs ?? []).map((pair) => pair.target)
+	];
+	const corners = [
+		{ x: 2 * u, y: targetHeightPx - boxHeight - 2 * u },
+		{ x: 2 * u, y: 2 * u },
+		{ x: targetWidthPx - boxWidth - 2 * u, y: 2 * u },
+		{ x: targetWidthPx - boxWidth - 2 * u, y: targetHeightPx - boxHeight - 2 * u }
+	];
+	const covered = (c: { x: number; y: number }) =>
+		marks.filter((m) => m.xPx >= c.x - 6 * u && m.xPx <= c.x + boxWidth + 6 * u && m.yPx >= c.y - 6 * u && m.yPx <= c.y + boxHeight + 6 * u).length;
+	const corner = corners.reduce((best, c) => (covered(c) < covered(best) ? c : best), corners[0]);
+	const boxX = corner.x;
+	const boxY = corner.y;
 	parts.push(`<rect x="${r3(boxX)}" y="${r3(boxY)}" width="${r3(boxWidth)}" height="${r3(boxHeight)}" rx="${r3(u)}" fill="rgba(11, 18, 32, 0.85)" />`);
 	let y = boxY + 1.5 * u;
 	lines.forEach((line, index) => {

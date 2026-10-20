@@ -1,0 +1,113 @@
+{
+	"format": "chainspot.alignment-pairs",
+	"version": 1,
+	"course": "Dash's Track",
+	"notes": "Picked by eye between IMG_5641.jpg (UDisc screenshot) and the WIDE NAIP tile around the searched centre (USDA NAIP, 400 m radius, 2048 px, EPSG:3857). Each pair was chosen by eye on side-by-side crops; its NAIP point was then refined by a local gradient correlation and checked in a 50/50 blend crop. Tee pads were tried and rejected: they are not visible in NAIP at 0.39 m/px.",
+	"model": "similarity",
+	"source": {
+		"fileName": "IMG_5641.jpg",
+		"sha256": "e6616738640eee1d05d8cc2b59dd657f24b4a5a01dc2f68571b7e44c6f372b8a",
+		"widthPx": 1290,
+		"heightPx": 2091
+	},
+	"basemap": {
+		"fileName": "naip.png",
+		"sha256": "33aafdcdb721062bb7c210b2f62f7054b14fe88271889ac4df87ef39d3d051b5",
+		"widthPx": 2048,
+		"heightPx": 2048,
+		"naip": {
+			"center": {
+				"lat": 33.12551979622626,
+				"lon": -96.86103869229555
+			},
+			"radiusMeters": 400,
+			"sizePx": 2048
+		},
+		"metersPerPixel": 0.39062321332632,
+		"raster": {
+			"widthPx": 2048,
+			"heightPx": 2048,
+			"extent": {
+				"xmin": -10782999.128720926,
+				"ymin": 3911498.878944569,
+				"xmax": -10782043.881146895,
+				"ymax": 3912454.1265186006
+			}
+		},
+		"provider": "usda-naip"
+	},
+	"pairs": [
+		{
+			"id": "fence",
+			"label": "Ballfield fences: junction between the two south diamonds",
+			"source": {
+				"xPx": 415,
+				"yPx": 105
+			},
+			"target": {
+				"xPx": 685.0,
+				"yPx": 994.0
+			}
+		},
+		{
+			"id": "lot-west",
+			"label": "Parking lot east of the ballfields: rounded west end and its curb",
+			"source": {
+				"xPx": 600,
+				"yPx": 250
+			},
+			"target": {
+				"xPx": 792.0,
+				"yPx": 1080.0
+			}
+		},
+		{
+			"id": "trail-west",
+			"label": "Dirt trail west of holes 9-10, its bend and light patch",
+			"source": {
+				"xPx": 110,
+				"yPx": 1285
+			},
+			"target": {
+				"xPx": 510.0,
+				"yPx": 1677.0
+			}
+		},
+		{
+			"id": "pavilion",
+			"label": "Pavilion roof north of the south parking lot",
+			"source": {
+				"xPx": 1045,
+				"yPx": 1438
+			},
+			"target": {
+				"xPx": 1052.5,
+				"yPx": 1764.5
+			}
+		},
+		{
+			"id": "entrance",
+			"label": "T junction: south lot entrance road meets the main road",
+			"source": {
+				"xPx": 1189,
+				"yPx": 1568
+			},
+			"target": {
+				"xPx": 1133.5,
+				"yPx": 1840.5
+			}
+		},
+		{
+			"id": "shelter",
+			"label": "Square picnic shelter on the west side of the south lot",
+			"source": {
+				"xPx": 1002,
+				"yPx": 1814
+			},
+			"target": {
+				"xPx": 1026.5,
+				"yPx": 1983.5
+			}
+		}
+	]
+}

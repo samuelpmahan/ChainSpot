@@ -7,12 +7,16 @@
  *   3. USGS NAIP                 imagery.nationalmap.gov  ImageServer (dynamic; the one `naip.ts` uses)
  *   4. USGS ImageryOnly          basemap.nationalmap.gov  MapServer (compressed cached basemap: fallback only)
  *
- * Every request is the same WGS84 bbox (`naip.ts`'s `bboxFromCenter`) in and out (`bboxSR=imageSR=4326`), so a square
- * request of `2r` metres at `size` px has the same exact ground scale from every provider (`naipMetersPerPixel`).
+ * Every request is the same WGS84 bbox (`naip.ts`'s `bboxFromCenter`, `bboxSR=4326`) rendered in Web Mercator
+ * (`imageSR=3857`), asked for as JSON (`f=json`) so the service reports the extent it actually rendered; the image is
+ * then read from the returned `href`. That extent is the raster's georeference (`webMercator.ts`). The old module asked
+ * for `imageSR=4326`, which the service answers with pixels square in degrees: on the ground the image comes back
+ * squeezed vertically by cos(latitude) (measured at Dash's Track: 0.3906 m/px across, 0.4665 m/px down).
  * Every attempt is recorded (provider, URL, outcome, network cause), and the result names the provider that served.
  * Failure is a returned result, never a throw.
  */
 import type { GeoBoundingBox } from '../naip';
+import type { GeoRaster } from './webMercator';
 
 export type AerialProviderId = 'usda-naip' | 'usgs-naip-plus' | 'usgs-naip' | 'usgs-imagery-only';
 
@@ -71,7 +75,7 @@ export interface AerialRasterSize {
 	readonly heightPx: number;
 }
 
-export type AerialAttemptKind = 'size-cap' | 'network' | 'http-error' | 'bad-content-type';
+export type AerialAttemptKind = 'size-cap' | 'network' | 'http-error' | 'bad-content-type' | 'bad-json';
 
 export interface AerialFetchAttempt {
 	readonly providerId: AerialProviderId;
@@ -83,7 +87,18 @@ export interface AerialFetchAttempt {
 }
 
 export type AerialFetchResult =
-	| { readonly ok: true; readonly bytes: Uint8Array; readonly contentType: string; readonly provider: AerialProvider; readonly url: string; readonly attempts: readonly AerialFetchAttempt[] }
+	| {
+			readonly ok: true;
+			readonly bytes: Uint8Array;
+			readonly contentType: string;
+			readonly provider: AerialProvider;
+			/** The export request (JSON); `imageUrl` is the rendered image it pointed to. */
+			readonly url: string;
+			readonly imageUrl: string;
+			/** The extent the service actually rendered, and the raster size. */
+			readonly raster: GeoRaster;
+			readonly attempts: readonly AerialFetchAttempt[];
+	  }
 	| { readonly ok: false; readonly attempts: readonly AerialFetchAttempt[]; readonly message: string };
 
 /** One export URL, WGS84 in and out. Throws only for a size over the provider's cap (a caller error, recorded as an attempt). */
@@ -97,12 +112,43 @@ export function buildAerialExportUrl(provider: AerialProvider, bbox: GeoBounding
 	const params = new URLSearchParams({
 		bbox: `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`,
 		bboxSR: '4326',
-		imageSR: '4326',
+		imageSR: '3857',
 		size: `${size.widthPx},${size.heightPx}`,
 		format: provider.kind === 'map-server' ? 'png32' : 'png',
-		f: 'image'
+		f: 'json'
 	});
 	return `${provider.baseUrl}?${params.toString()}`;
+}
+
+/** The export's JSON answer: the image href, its size, and the EPSG:3857 extent actually rendered. */
+async function readExportJson(response: Response, size: AerialRasterSize): Promise<(GeoRaster & { href: string }) | string> {
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		return `expected the export's JSON, got ${response.headers.get('content-type') || 'no content type'}`;
+	}
+	const b = body as { href?: unknown; width?: unknown; height?: unknown; extent?: Record<string, unknown>; error?: { message?: string } };
+	if (b.error) return `service error: ${b.error.message ?? JSON.stringify(b.error)}`;
+	const e = b.extent;
+	const wkid = (e?.spatialReference as { latestWkid?: number; wkid?: number } | undefined) ?? {};
+	if (
+		typeof b.href !== 'string' ||
+		typeof b.width !== 'number' ||
+		typeof b.height !== 'number' ||
+		!e ||
+		![e.xmin, e.ymin, e.xmax, e.ymax].every((v) => typeof v === 'number' && Number.isFinite(v))
+	) {
+		return 'export JSON lacks href, width, height or extent';
+	}
+	if ((wkid.latestWkid ?? wkid.wkid) !== 3857 && wkid.wkid !== 102100) return `extent is not in EPSG:3857 (${JSON.stringify(wkid)})`;
+	if (b.width !== size.widthPx || b.height !== size.heightPx) return `asked for ${size.widthPx} x ${size.heightPx} px, got ${b.width} x ${b.height}`;
+	return {
+		href: b.href,
+		widthPx: b.width,
+		heightPx: b.height,
+		extent: { xmin: e.xmin as number, ymin: e.ymin as number, xmax: e.xmax as number, ymax: e.ymax as number }
+	};
 }
 
 function causeOf(error: unknown): string {
@@ -137,14 +183,41 @@ export async function fetchAerialWithFallback(
 			attempts.push({ ...base, url, ok: false, kind: 'http-error', message: `HTTP ${response.status}` });
 			continue;
 		}
-		const contentType = response.headers.get('content-type') ?? '';
-		if (!contentType.toLowerCase().startsWith('image/')) {
-			attempts.push({ ...base, url, ok: false, kind: 'bad-content-type', message: `expected image bytes, got ${contentType || 'no content type'}` });
+		const raster = await readExportJson(response, size);
+		if (typeof raster === 'string') {
+			attempts.push({ ...base, url, ok: false, kind: 'bad-json', message: raster });
 			continue;
 		}
-		const bytes = new Uint8Array(await response.arrayBuffer());
+		// The image: the returned href first; some services (USDA's) answer that href with HTTP 400 from a node that does
+		// not hold the file, so the same export is then asked for as `f=image` (same request, same extent).
+		const imageUrls = [raster.href, url.replace('f=json', 'f=image')];
+		let served: { bytes: Uint8Array; contentType: string; imageUrl: string } | null = null;
+		for (const imageUrl of imageUrls) {
+			let image: Response;
+			try {
+				image = await fetchImpl(imageUrl);
+			} catch (error) {
+				attempts.push({ ...base, url: imageUrl, ok: false, kind: 'network', message: causeOf(error) });
+				continue;
+			}
+			const contentType = image.headers.get('content-type') ?? '';
+			if (!image.ok || !contentType.toLowerCase().startsWith('image/')) {
+				attempts.push({
+					...base,
+					url: imageUrl,
+					ok: false,
+					kind: image.ok ? 'bad-content-type' : 'http-error',
+					message: image.ok ? `expected image bytes, got ${contentType || 'no content type'}` : `HTTP ${image.status}`
+				});
+				continue;
+			}
+			served = { bytes: new Uint8Array(await image.arrayBuffer()), contentType, imageUrl };
+			break;
+		}
+		if (!served) continue;
 		attempts.push({ ...base, url, ok: true });
-		return { ok: true, bytes, contentType, provider, url, attempts };
+		const { href: _href, ...georeference } = raster;
+		return { ok: true, bytes: served.bytes, contentType: served.contentType, provider, url, imageUrl: served.imageUrl, raster: georeference, attempts };
 	}
 	return { ok: false, attempts, message: 'No federal aerial provider returned image bytes.' };
 }
