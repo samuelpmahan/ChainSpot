@@ -83,8 +83,12 @@ export interface HoleGraphicPlan {
 
 /** Padding around a hole's transformed points, as a fraction of its own bounding box. */
 const CROP_PADDING_FRACTION = 0.2;
-/** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
-const MIN_CROP_PADDING_PX = 40;
+/**
+ * Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame, as a fraction of the
+ * target image's shorter side (a map-scaled quantity, so never an absolute px bound). Referent: about 40 px on the
+ * app's default target, a 2048 px NAIP export (the absolute floor this replaces).
+ */
+const MIN_CROP_PADDING_FRACTION = 0.02;
 
 /**
  * Framing/crop parameters for `planHoleGraphic`, factored out as an explicit
@@ -95,14 +99,58 @@ const MIN_CROP_PADDING_PX = 40;
 export interface HoleFramingOptions {
 	/** Padding around a hole's transformed points, as a fraction of its own bounding box. */
 	readonly paddingFraction: number;
-	/** Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame. */
-	readonly minPaddingPx: number;
+	/**
+	 * Floor so a hole with only a single point (e.g. tee alone) still gets a sensible frame, as a fraction of the
+	 * target image's shorter side (LOCAL: measured per target image).
+	 */
+	readonly minPaddingFraction: number;
 }
 
 export const DEFAULT_HOLE_FRAMING: HoleFramingOptions = {
 	paddingFraction: CROP_PADDING_FRACTION,
-	minPaddingPx: MIN_CROP_PADDING_PX
+	minPaddingFraction: MIN_CROP_PADDING_FRACTION
 };
+
+/**
+ * Every size `buildHoleGraphicMarkup` draws (marker radii, strokes, dashes, the info card's font and spacing) is a
+ * multiple of ONE unit, measured per output frame (LOCAL): 1/`GRAPHIC_UNITS_PER_FRAME` of the geometric mean of the
+ * crop's two sides. The output PNG is the crop, so the layout reads the same at every target scale (a 300 m NAIP
+ * radius or a 150 m one, a screenshot or a mosaic). Referent: on a 400 x 400 px crop one unit is 4 px, and each size
+ * below equals the absolute px constant it replaces (marker radius 8 px, bend radius 6 px, font 20 px, ...).
+ */
+export const GRAPHIC_UNITS_PER_FRAME = 100;
+
+/** Sizes in graphic units (see `GRAPHIC_UNITS_PER_FRAME`). */
+export const GRAPHIC_SIZES_IN_UNITS = {
+	markerRadius: 2,
+	bendRadius: 1.5,
+	markerStroke: 0.375,
+	corridorStroke: 0.5,
+	walkingPathStroke: 0.75,
+	centerlineStroke: 0.375,
+	guideStroke: 0.5,
+	dashOn: 1.5,
+	dashOff: 1,
+	fontSize: 5,
+	lineGap: 1.5,
+	cardPaddingX: 2.5,
+	cardPaddingY: 1.5,
+	cardInset: 1.5,
+	cardBorder: 0.5,
+	/** Estimated advance per character, about 0.55 em for the bold system sans. */
+	charAdvance: 2.75,
+	cardTextSlack: 3
+} as const;
+
+/** One graphic unit in output px for this crop (LOCAL: measured on this crop). */
+export function graphicUnitPx(crop: Pick<CropRect, 'widthPx' | 'heightPx'>): number {
+	return Math.sqrt(crop.widthPx * crop.heightPx) / GRAPHIC_UNITS_PER_FRAME;
+}
+
+/** Rounds a derived size for markup (1/1000 px is below any raster's resolution). */
+function px(value: number): number {
+	return Math.round(value * 1000) / 1000;
+}
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), Math.max(min, max));
@@ -174,8 +222,9 @@ export function planHoleGraphic(
 	const maxX = Math.max(...framedPoints.map((point) => point.xPx));
 	const minY = Math.min(...framedPoints.map((point) => point.yPx));
 	const maxY = Math.max(...framedPoints.map((point) => point.yPx));
-	const paddingX = Math.max(framing.minPaddingPx, (maxX - minX) * framing.paddingFraction);
-	const paddingY = Math.max(framing.minPaddingPx, (maxY - minY) * framing.paddingFraction);
+	const minPaddingPx = framing.minPaddingFraction * Math.min(targetWidthPx, targetHeightPx);
+	const paddingX = Math.max(minPaddingPx, (maxX - minX) * framing.paddingFraction);
+	const paddingY = Math.max(minPaddingPx, (maxY - minY) * framing.paddingFraction);
 
 	const rawX = minX - paddingX;
 	const rawY = minY - paddingY;
@@ -245,7 +294,7 @@ function escapeAttr(value: string): string {
  * "PAR p" and, when a real-world ground scale (`feetPerPixel`) is supplied,
  * the hole's straight-line length and remaining distance to the pin.
  */
-function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel: number | undefined): string {
+function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel: number | undefined, unit: number): string {
 	const lines = [`Hole ${plan.number}`];
 	if (plan.par !== undefined) lines.push(`Par ${plan.par}`);
 	if (feetPerPixel !== undefined) {
@@ -255,22 +304,24 @@ function buildInfoCard(plan: HoleGraphicPlan, style: GraphicStyle, feetPerPixel:
 	}
 
 	const { crop } = plan;
-	const fontSize = 20;
-	const lineHeight = fontSize + 6;
-	const paddingX = 10;
-	const paddingY = 6;
-	const cardWidth = Math.max(...lines.map((line) => 12 + line.length * 11)) + paddingX;
+	const size = GRAPHIC_SIZES_IN_UNITS;
+	const fontSize = size.fontSize * unit;
+	const lineHeight = (size.fontSize + size.lineGap) * unit;
+	const paddingX = size.cardPaddingX * unit;
+	const paddingY = size.cardPaddingY * unit;
+	const cardWidth =
+		Math.max(...lines.map((line) => (size.cardTextSlack + line.length * size.charAdvance) * unit)) + paddingX;
 	const cardHeight = lines.length * lineHeight + paddingY;
-	const cardX = crop.xPx + 6;
-	const cardY = crop.yPx + 6;
+	const cardX = crop.xPx + size.cardInset * unit;
+	const cardY = crop.yPx + size.cardInset * unit;
 
 	const parts = [
-		`<rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${escapeAttr(style.cardBackground)}" stroke="${escapeAttr(style.cardBorder)}" stroke-width="2" />`
+		`<rect x="${px(cardX)}" y="${px(cardY)}" width="${px(cardWidth)}" height="${px(cardHeight)}" fill="${escapeAttr(style.cardBackground)}" stroke="${escapeAttr(style.cardBorder)}" stroke-width="${px(size.cardBorder * unit)}" />`
 	];
 	lines.forEach((line, index) => {
 		const textY = cardY + paddingY + index * lineHeight + fontSize;
 		parts.push(
-			`<text x="${cardX + paddingX / 2}" y="${textY}" font-family="system-ui, sans-serif" font-weight="bold" font-size="${fontSize}" fill="${escapeAttr(style.cardText)}">${escapeAttr(line)}</text>`
+			`<text x="${px(cardX + paddingX / 2)}" y="${px(textY)}" font-family="system-ui, sans-serif" font-weight="bold" font-size="${px(fontSize)}" fill="${escapeAttr(style.cardText)}">${escapeAttr(line)}</text>`
 		);
 	});
 	return parts.join('');
@@ -306,10 +357,16 @@ export function buildHoleGraphicMarkup(
 	plan: HoleGraphicPlan,
 	targetImageHref: string,
 	style: GraphicStyle = DEFAULT_GRAPHIC_STYLE,
-	feetPerPixel?: number
+	feetPerPixel?: number,
+	options: HoleGraphicMarkupOptions = {}
 ): string {
 	const { crop } = plan;
 	const rotated = plan.targetRotationDeg !== 0;
+	const unit = options.unitPx ?? graphicUnitPx(crop);
+	const size = GRAPHIC_SIZES_IN_UNITS;
+	const dash = `${px(size.dashOn * unit)} ${px(size.dashOff * unit)}`;
+	const markerStroke = px(size.markerStroke * unit);
+	const markerRadius = px(size.markerRadius * unit);
 	const parts: string[] = [];
 	parts.push(
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${crop.xPx} ${crop.yPx} ${crop.widthPx} ${crop.heightPx}" width="${crop.widthPx}" height="${crop.heightPx}">`
@@ -319,13 +376,15 @@ export function buildHoleGraphicMarkup(
 		const cy = plan.targetHeightPx / 2;
 		parts.push(`<g transform="rotate(${plan.targetRotationDeg} ${cx} ${cy})">`);
 	}
-	parts.push(
-		`<image href="${escapeAttr(targetImageHref)}" x="0" y="0" width="${plan.targetWidthPx}" height="${plan.targetHeightPx}" preserveAspectRatio="xMidYMid meet" />`
-	);
+	if (options.raster !== false) {
+		parts.push(
+			`<image href="${escapeAttr(targetImageHref)}" x="0" y="0" width="${plan.targetWidthPx}" height="${plan.targetHeightPx}" preserveAspectRatio="xMidYMid meet" />`
+		);
+	}
 
 	if (plan.corridorBand && plan.corridorBand.length >= 3) {
 		parts.push(
-			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="${escapeAttr(style.pathColor)}" fill-opacity="0.25" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" />`
+			`<polygon points="${pointsAttr(plan.corridorBand)}" fill="${escapeAttr(style.pathColor)}" fill-opacity="0.25" stroke="${escapeAttr(style.pathColor)}" stroke-width="${px(size.corridorStroke * unit)}" />`
 		);
 	}
 
@@ -334,52 +393,68 @@ export function buildHoleGraphicMarkup(
 	// not a derived reference line.
 	if (plan.walkingPath.length >= 2) {
 		parts.push(
-			`<polyline points="${pointsAttr(plan.walkingPath)}" fill="none" stroke="${escapeAttr(style.walkingPathColor)}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />`
+			`<polyline points="${pointsAttr(plan.walkingPath)}" fill="none" stroke="${escapeAttr(style.walkingPathColor)}" stroke-width="${px(size.walkingPathStroke * unit)}" stroke-linejoin="round" stroke-linecap="round" />`
 		);
 	}
 
 	if (plan.centerline.length >= 2) {
 		parts.push(
-			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="${escapeAttr(style.pathHaloColor)}" stroke-width="1.5" stroke-dasharray="6 4" />`
+			`<polyline points="${pointsAttr(plan.centerline)}" fill="none" stroke="${escapeAttr(style.pathHaloColor)}" stroke-width="${px(size.centerlineStroke * unit)}" stroke-dasharray="${dash}" />`
 		);
 	}
 
 	for (const bend of plan.bends) {
 		parts.push(
-			`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="6" fill="${escapeAttr(style.pathColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+			`<circle cx="${bend.xPx}" cy="${bend.yPx}" r="${px(size.bendRadius * unit)}" fill="${escapeAttr(style.pathColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="${markerStroke}" />`
 		);
 	}
 
 	const guidePoints = [...(plan.tee ? [plan.tee] : []), ...plan.shots];
 	if (guidePoints.length >= 2) {
 		parts.push(
-			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="${escapeAttr(style.pathColor)}" stroke-width="2" stroke-dasharray="6 4" />`
+			`<polyline points="${pointsAttr(guidePoints)}" fill="none" stroke="${escapeAttr(style.pathColor)}" stroke-width="${px(size.guideStroke * unit)}" stroke-dasharray="${dash}" />`
 		);
 	}
 
 	for (const shot of plan.shots) {
 		parts.push(
-			`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="8" fill="${escapeAttr(style.shotColor)}" stroke="${escapeAttr(style.shotStrokeColor)}" stroke-width="1.5" />`
+			`<circle cx="${shot.xPx}" cy="${shot.yPx}" r="${markerRadius}" fill="${escapeAttr(style.shotColor)}" stroke="${escapeAttr(style.shotStrokeColor)}" stroke-width="${markerStroke}" />`
 		);
 	}
 	if (plan.tee) {
 		parts.push(
-			`<circle cx="${plan.tee.xPx}" cy="${plan.tee.yPx}" r="8" fill="${escapeAttr(style.teeColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+			`<circle cx="${plan.tee.xPx}" cy="${plan.tee.yPx}" r="${markerRadius}" fill="${escapeAttr(style.teeColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="${markerStroke}" />`
 		);
 	}
 	if (plan.basket) {
 		parts.push(
-			`<circle cx="${plan.basket.xPx}" cy="${plan.basket.yPx}" r="8" fill="${escapeAttr(style.basketColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="1.5" />`
+			`<circle cx="${plan.basket.xPx}" cy="${plan.basket.yPx}" r="${markerRadius}" fill="${escapeAttr(style.basketColor)}" stroke="${escapeAttr(style.markerHaloColor)}" stroke-width="${markerStroke}" />`
 		);
 	}
 
 	if (rotated) parts.push('</g>');
 
 	// Outside the rotated group so the card always reads upright, pinned to the crop's corner.
-	parts.push(buildInfoCard(plan, style, feetPerPixel));
+	if (options.infoCard !== false) parts.push(buildInfoCard(plan, style, feetPerPixel, unit));
 
 	parts.push('</svg>');
 	return parts.join('');
+}
+
+/** Optional presentation inputs for `buildHoleGraphicMarkup`; omitting them keeps the per-crop defaults. */
+export interface HoleGraphicMarkupOptions {
+	/**
+	 * Output px per graphic unit. Defaults to `graphicUnitPx(plan.crop)`; a compositor that places several crops in
+	 * one frame passes one shared unit so markers match across them.
+	 */
+	readonly unitPx?: number;
+	/** false leaves the info card off, for a compositor that draws its own title card (default true). */
+	readonly infoCard?: boolean;
+	/**
+	 * false leaves the target raster out, for a compositor that draws the raster once and layers several holes'
+	 * overlays on it (default true).
+	 */
+	readonly raster?: boolean;
 }
 
 export interface LoadedImageSize {

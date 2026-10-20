@@ -17,8 +17,27 @@
  */
 import type { SourcePoint } from './domain/project';
 
-/** Initial corridor width (source-image pixels) assigned when a hole is created. */
+/**
+ * Fallback corridor width (source-image pixels) for a hole created on a course that has no width yet, and for
+ * legacy project files that carry none. It is an absolute px bound on a map-scaled quantity, so it is the LAST
+ * resort: `defaultCorridorWidthPx` prefers the course's own width (LOCAL, measured on this screenshot, e.g. the
+ * toolkit's hallway width W). Referent: about one corridor on a 1290 px wide iPhone UDisc screenshot.
+ */
 export const DEFAULT_CORRIDOR_WIDTH_PX = 60;
+
+/**
+ * The width a new hole on this course should start with: the median width of the course's existing holes (LOCAL,
+ * px of the same screenshot), else `DEFAULT_CORRIDOR_WIDTH_PX`. Non-finite or non-positive widths are ignored.
+ */
+export function defaultCorridorWidthPx(holes: readonly { readonly corridorWidthPx: number }[]): number {
+	const widths = holes
+		.map((hole) => hole.corridorWidthPx)
+		.filter((width) => Number.isFinite(width) && width > 0)
+		.sort((a, b) => a - b);
+	if (widths.length === 0) return DEFAULT_CORRIDOR_WIDTH_PX;
+	const middle = Math.floor(widths.length / 2);
+	return widths.length % 2 === 1 ? widths[middle] : (widths[middle - 1] + widths[middle]) / 2;
+}
 
 /** Miter ratio beyond which a join falls back to a bevel (standard 2–4 range). */
 const MITER_LIMIT = 4;

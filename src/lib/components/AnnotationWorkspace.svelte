@@ -80,7 +80,7 @@
 	import {
 		deriveCorridorBand,
 		deriveCorridorCenterline,
-		DEFAULT_CORRIDOR_WIDTH_PX
+		defaultCorridorWidthPx
 	} from '$lib/corridor';
 	import {
 		detectCourseCandidates,
@@ -1415,12 +1415,13 @@
 	/**
 	 * The width a newly created hole should inherit — the active hole's width,
 	 * so the new hole matches its siblings instead of always starting at the
-	 * bare default. Falls back to the default when there's no active hole yet
-	 * (the very first hole on a fresh round).
+	 * bare default. With no active hole it takes the course's own width (the
+	 * median of its holes, LOCAL to this screenshot), and only a course with no
+	 * hole at all falls back to the absolute default.
 	 */
 	function currentCorridorWidthPx(): number {
 		const active = holes.find((hole) => hole.id === activeHoleId);
-		return active?.corridorWidthPx ?? DEFAULT_CORRIDOR_WIDTH_PX;
+		return active?.corridorWidthPx ?? defaultCorridorWidthPx(holes);
 	}
 
 	function handleAddHole(): void {

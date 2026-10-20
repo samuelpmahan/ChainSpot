@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
 	buildHoleGraphicMarkup,
+	graphicUnitPx,
 	planHoleGraphic,
 	renderHoleGraphicPng,
 	zipHoleGraphics
@@ -80,10 +81,18 @@ describe('planHoleGraphic', () => {
 		expect(plan!.crop.yPx + plan!.crop.heightPx).toBeGreaterThanOrEqual(Math.max(...bandY));
 	});
 
-	test('a single-point hole gets the minimum padding floor, not a zero-size crop', () => {
+	test('a single-point hole gets the minimum padding floor (2% of the target short side), not a zero-size crop', () => {
 		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
 		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
-		expect(plan!.crop).toEqual({ xPx: 460, yPx: 460, widthPx: 80, heightPx: 80 });
+		expect(plan!.crop).toEqual({ xPx: 480, yPx: 480, widthPx: 40, heightPx: 40 });
+	});
+
+	test('the padding floor scales with the target image, never an absolute px bound', () => {
+		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 250, yPx: 250 }, corridorBends: [], corridorWidthPx: 60 };
+		const small = planHoleGraphic(hole, IDENTITY, 500, 500)!;
+		const large = planHoleGraphic({ ...hole, tee: { xPx: 1024, yPx: 1024 } }, IDENTITY, 2048, 2048)!;
+		expect(large.crop.widthPx / 2048).toBeCloseTo(small.crop.widthPx / 500, 9);
+		expect(large.crop.widthPx).toBeCloseTo(2 * 0.02 * 2048, 9);
 	});
 
 	test('clamps the crop to the target image bounds near an edge', () => {
@@ -97,12 +106,12 @@ describe('planHoleGraphic', () => {
 
 	test('a non-default framing option changes the plan crop', () => {
 		const hole: AnnotatedHole = { id: 'h1', number: 1, shots: [], tee: { xPx: 500, yPx: 500 }, corridorBends: [], corridorWidthPx: 60 };
-		const tightFraming: HoleFramingOptions = { paddingFraction: 0.2, minPaddingPx: 5 };
+		const tightFraming: HoleFramingOptions = { paddingFraction: 0.2, minPaddingFraction: 0.005 };
 
 		const defaultPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000);
 		const tightPlan = planHoleGraphic(hole, IDENTITY, 1000, 1000, tightFraming);
 
-		expect(defaultPlan!.crop).toEqual({ xPx: 460, yPx: 460, widthPx: 80, heightPx: 80 });
+		expect(defaultPlan!.crop).toEqual({ xPx: 480, yPx: 480, widthPx: 40, heightPx: 40 });
 		expect(tightPlan!.crop).toEqual({ xPx: 495, yPx: 495, widthPx: 10, heightPx: 10 });
 		expect(tightPlan!.crop).not.toEqual(defaultPlan!.crop);
 	});
@@ -205,12 +214,12 @@ describe('planHoleGraphic target rotation (CHSPT-44)', () => {
 		};
 		const unrotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 0)!;
 		const rotated = planHoleGraphic(hole, IDENTITY, 1000, 1000, undefined, [], 180)!;
-		// 180 degrees about (500, 500) maps (50, 50) to (950, 950); the 40px minimum
-		// padding is unaffected by rotation, and a rectangle centered on its own
+		// 180 degrees about (500, 500) maps (50, 50) to (950, 950); the minimum
+		// padding (2% of the 1000 px short side = 20 px) is unaffected by rotation, and a rectangle centered on its own
 		// centroid maps back onto itself under a 180-degree turn, so the clamp bounds
 		// stay the plain [0, 1000] x [0, 1000] box either way.
-		expect(unrotated.crop).toEqual({ xPx: 10, yPx: 10, widthPx: 80, heightPx: 80 });
-		expect(rotated.crop).toEqual({ xPx: 910, yPx: 910, widthPx: 80, heightPx: 80 });
+		expect(unrotated.crop).toEqual({ xPx: 30, yPx: 30, widthPx: 40, heightPx: 40 });
+		expect(rotated.crop).toEqual({ xPx: 930, yPx: 930, widthPx: 40, heightPx: 40 });
 	});
 
 	test('clamps the rotated crop to the rotated image footprint, never outside where the raster actually paints', () => {
@@ -224,7 +233,8 @@ describe('planHoleGraphic target rotation (CHSPT-44)', () => {
 			corridorBends: [],
 			corridorWidthPx: 60
 		};
-		const rotated = planHoleGraphic(hole, IDENTITY, 200, 100, undefined, [], 45)!;
+		// A 40 px floor on this 100 px short side (the default 2% would be 2 px, too small to reach the edge).
+		const rotated = planHoleGraphic(hole, IDENTITY, 200, 100, { paddingFraction: 0.2, minPaddingFraction: 0.4 }, [], 45)!;
 		const center = { xPx: 100, yPx: 50 };
 		const corners = [
 			{ xPx: 0, yPx: 0 },
@@ -424,5 +434,65 @@ describe('zipHoleGraphics', () => {
 		const bytes = new Uint8Array(await zip.arrayBuffer());
 		const files = unzipSync(bytes);
 		expect(Object.keys(files).sort()).toEqual(['hole-01.png', 'hole-12.png']);
+	});
+});
+
+describe('frame-relative sizes (no absolute px in the markup)', () => {
+	const hole: AnnotatedHole = {
+		id: 'h1',
+		number: 7,
+		tee: { xPx: 100, yPx: 100 },
+		basket: { xPx: 300, yPx: 220 },
+		shots: [{ id: 's1', landing: { xPx: 200, yPx: 150 } }],
+		corridorBends: [{ xPx: 220, yPx: 130 }],
+		corridorWidthPx: 30
+	};
+	const scaled = (k: number): SerializableTransform => ({ ...IDENTITY, coefficients: [k, 0, 0, k, 0, 0] });
+
+	/** Every size attribute in the markup, in document order. */
+	function sizes(markup: string): number[] {
+		return [...markup.matchAll(/ (?:r|stroke-width|font-size|width|height)="([0-9.]+)"/g)].map((m) => Number(m[1]));
+	}
+	function dashes(markup: string): number[] {
+		return [...markup.matchAll(/stroke-dasharray="([0-9.]+) ([0-9.]+)"/g)].flatMap((m) => [Number(m[1]), Number(m[2])]);
+	}
+
+	test('the same hole at two target scales has the same layout in graphic units', () => {
+		const small = planHoleGraphic(hole, scaled(1), 1000, 1000)!;
+		const large = planHoleGraphic(hole, scaled(3), 3000, 3000)!;
+		expect(large.crop.widthPx / small.crop.widthPx).toBeCloseTo(3, 9);
+		const smallMarkup = buildHoleGraphicMarkup(small, 'blob:t', DEFAULT_GRAPHIC_STYLE, 0.9);
+		const largeMarkup = buildHoleGraphicMarkup(large, 'blob:t', DEFAULT_GRAPHIC_STYLE, 0.3);
+		const ratio = graphicUnitPx(large.crop) / graphicUnitPx(small.crop);
+		expect(ratio).toBeCloseTo(3, 9);
+		const smallSizes = sizes(smallMarkup);
+		const largeSizes = sizes(largeMarkup);
+		expect(largeSizes.length).toBe(smallSizes.length);
+		largeSizes.forEach((value, index) => expect(value / ratio).toBeCloseTo(smallSizes[index], 2));
+		dashes(largeMarkup).forEach((value, index) => expect(value / ratio).toBeCloseTo(dashes(smallMarkup)[index], 2));
+		// Same real length on both (feet per px chosen so the ground scale matches), same card text.
+		expect(largeMarkup.match(/<text[^>]*>[^<]*<\/text>/g)!.map((t) => t.replace(/<[^>]+>/g, ''))).toEqual(
+			smallMarkup.match(/<text[^>]*>[^<]*<\/text>/g)!.map((t) => t.replace(/<[^>]+>/g, ''))
+		);
+	});
+
+	test('on a 400 x 400 px crop every size equals the absolute constant it replaced (referent)', () => {
+		const plan = { ...planHoleGraphic(hole, IDENTITY, 1000, 1000)!, crop: { xPx: 0, yPx: 0, widthPx: 400, heightPx: 400 } };
+		expect(graphicUnitPx(plan.crop)).toBe(4);
+		const markup = buildHoleGraphicMarkup(plan, 'blob:t');
+		expect(markup).toContain('r="8"');
+		expect(markup).toContain('r="6"');
+		expect(markup).toContain('font-size="20"');
+		expect(markup).toContain('stroke-dasharray="6 4"');
+		expect(markup).toContain('stroke-width="1.5"');
+		expect(markup).toContain('stroke-width="2"');
+	});
+
+	test('a compositor can pass one shared unit and drop the info card', () => {
+		const plan = planHoleGraphic(hole, IDENTITY, 1000, 1000)!;
+		const markup = buildHoleGraphicMarkup(plan, 'blob:t', DEFAULT_GRAPHIC_STYLE, undefined, { unitPx: 10, infoCard: false });
+		expect(markup).toContain('r="20"');
+		expect(markup).not.toContain('Hole 7');
+		expect(markup).not.toContain('<text');
 	});
 });

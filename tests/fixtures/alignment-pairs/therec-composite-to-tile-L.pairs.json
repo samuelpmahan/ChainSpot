@@ -1,0 +1,93 @@
+{
+	"format": "chainspot.alignment-pairs",
+	"version": 1,
+	"course": "The REC (McKinney, TX)",
+	"model": "similarity",
+	"notes": "Not NAIP. A real two-frame check of the fit-and-project path: source = the toolkit's stitched composite (export numberBadges, CV badge centres); target = the left UDisc tile TheRec-L.PNG with the repo's hand-read badge centres (TheRec-L-number-golden.json). The stitch put tile L at composite = tile + (0, -330), so the fit should be that translation inverted, scale 1. The basemap has no ground scale, so residuals are px only.",
+	"source": {
+		"fileName": "course.png",
+		"sha256": "5c85e2539b8f6ddf737fb89b986282f387add7ce6e4e615dbbc3c0481705f2bd",
+		"widthPx": 2244,
+		"heightPx": 2212
+	},
+	"basemap": {
+		"fileName": "TheRec-L.PNG",
+		"sha256": "f96268139c00764fdc60b93d6cc4969dfce5a49752b6fa4db45998d516ed0ba3",
+		"widthPx": 1290,
+		"heightPx": 2796
+	},
+	"pairs": [
+		{
+			"id": "badge-1",
+			"label": "Badge 1",
+			"source": {
+				"xPx": 914.5,
+				"yPx": 548.5
+			},
+			"target": {
+				"xPx": 914.5,
+				"yPx": 878.5
+			}
+		},
+		{
+			"id": "badge-5",
+			"label": "Badge 5",
+			"source": {
+				"xPx": 1262.5,
+				"yPx": 1753.5
+			},
+			"target": {
+				"xPx": 1262.5,
+				"yPx": 2083.5
+			}
+		},
+		{
+			"id": "badge-6",
+			"label": "Badge 6",
+			"source": {
+				"xPx": 531.5,
+				"yPx": 1802.5
+			},
+			"target": {
+				"xPx": 531.5,
+				"yPx": 2132.5
+			}
+		},
+		{
+			"id": "badge-7",
+			"label": "Badge 7",
+			"source": {
+				"xPx": 713.5,
+				"yPx": 1393.5
+			},
+			"target": {
+				"xPx": 713.5,
+				"yPx": 1723.5
+			}
+		},
+		{
+			"id": "badge-8",
+			"label": "Badge 8",
+			"source": {
+				"xPx": 981.5,
+				"yPx": 959.5
+			},
+			"target": {
+				"xPx": 981.5,
+				"yPx": 1289.5
+			}
+		},
+		{
+			"id": "badge-9",
+			"label": "Badge 9",
+			"source": {
+				"xPx": 372.5,
+				"yPx": 859.5
+			},
+			"target": {
+				"xPx": 372.5,
+				"yPx": 1189.5
+			}
+		}
+	]
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	DEFAULT_CORRIDOR_WIDTH_PX,
+	defaultCorridorWidthPx,
 	deriveCorridorBand,
 	deriveCorridorCenterline
 } from '../../src/lib/corridor';
@@ -199,5 +200,16 @@ describe('deriveCorridorBand', () => {
 		const narrowSpread = Math.max(...narrow.map((point) => point.yPx)) - Math.min(...narrow.map((point) => point.yPx));
 		const wideSpread = Math.max(...wide.map((point) => point.yPx)) - Math.min(...wide.map((point) => point.yPx));
 		expect(wideSpread).toBeCloseTo(narrowSpread * 2);
+	});
+});
+
+describe('defaultCorridorWidthPx (LOCAL to the course, absolute default last)', () => {
+	it('takes the median width of the course holes', () => {
+		expect(defaultCorridorWidthPx([{ corridorWidthPx: 41.62 }, { corridorWidthPx: 41.62 }, { corridorWidthPx: 90 }])).toBe(41.62);
+		expect(defaultCorridorWidthPx([{ corridorWidthPx: 40 }, { corridorWidthPx: 70 }])).toBe(55);
+	});
+	it('falls back to the absolute default only for a course with no usable width', () => {
+		expect(defaultCorridorWidthPx([])).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
+		expect(defaultCorridorWidthPx([{ corridorWidthPx: Number.NaN }, { corridorWidthPx: 0 }])).toBe(DEFAULT_CORRIDOR_WIDTH_PX);
 	});
 });

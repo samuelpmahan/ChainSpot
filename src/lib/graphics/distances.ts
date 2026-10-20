@@ -27,3 +27,17 @@ export function computeHoleDistances(plan: HoleGraphicPlan, feetPerPixel: number
 
 	return { lengthFt, distanceToPinFt };
 }
+
+/**
+ * Length of the hole along its centerline (tee, bends, basket), in px of the plan's target image; null when tee or
+ * basket is missing. A px length means nothing without its referent (which image's px); a caller with a known ground
+ * scale multiplies by it (`naipMetersPerPixel`), and a caller without one labels the number as px of that image.
+ */
+export function computeCenterlineLengthPx(plan: HoleGraphicPlan): number | null {
+	if (!plan.tee || !plan.basket) return null;
+	let length = 0;
+	for (let index = 1; index < plan.centerline.length; index += 1) {
+		length += distancePx(plan.centerline[index - 1], plan.centerline[index]);
+	}
+	return length;
+}
