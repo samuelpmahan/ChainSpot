@@ -1,0 +1,89 @@
+{
+	"format": "chainspot.alignment-pairs",
+	"version": 1,
+	"course": "The REC (McKinney, TX)",
+	"notes": "Picked by eye between the stitched UDisc composite course.png (TheRec-L + TheRec-R, toolkit attempt-1792503698488-8057729e71a7) and a NAIP tile on the course found from the searched point (33.1745, -96.6395; USDA NAIP, 200 m radius, 2048 px, EPSG:3857). The screenshot is leaf-off and NAIP leaf-on: only the footpath network is visible in both, so all pairs are on it, and none are in the wooded east half. The two bottom pairs were refined by local gradient correlation; the two top ones were read off a 50/50 blend crop, because correlation there locked onto tree shadows. Rejected candidates: tree crowns, a light slab at the top left (bare ground in NAIP), and the frontage road edge (it fixes x only).",
+	"model": "similarity",
+	"source": {
+		"fileName": "course.png",
+		"sha256": "5c85e2539b8f6ddf737fb89b986282f387add7ce6e4e615dbbc3c0481705f2bd",
+		"widthPx": 2244,
+		"heightPx": 2212
+	},
+	"basemap": {
+		"fileName": "naip.png",
+		"sha256": "a27ed84573a06ca19cd8bf7b95803beefae0b403ff225938098c317eae48e64f",
+		"widthPx": 2048,
+		"heightPx": 2048,
+		"naip": {
+			"center": {
+				"lat": 33.18062194856273,
+				"lon": -96.63826744984578
+			},
+			"radiusMeters": 200,
+			"sizePx": 2048
+		},
+		"metersPerPixel": 0.19531160660837232,
+		"raster": {
+			"widthPx": 2048,
+			"heightPx": 2048,
+			"extent": {
+				"xmin": -10757961.685623944,
+				"ymin": 3919064.1605577865,
+				"xmax": -10757483.761698091,
+				"ymax": 3919542.0844836393
+			}
+		},
+		"provider": "usda-naip"
+	},
+	"pairs": [
+		{
+			"id": "path-junction-top",
+			"label": "Footpath T junction at the top of the course (branch east)",
+			"source": {
+				"xPx": 1078,
+				"yPx": 90.5
+			},
+			"target": {
+				"xPx": 1017.3,
+				"yPx": 479.0
+			}
+		},
+		{
+			"id": "path-elbow-top",
+			"label": "Footpath elbow where it turns south-east toward basket 1",
+			"source": {
+				"xPx": 1087.4,
+				"yPx": 269.5
+			},
+			"target": {
+				"xPx": 1014.8,
+				"yPx": 576.5
+			}
+		},
+		{
+			"id": "path-lower-mid",
+			"label": "Footpath lower curve, segment south-west of basket 4",
+			"source": {
+				"xPx": 1000,
+				"yPx": 1600
+			},
+			"target": {
+				"xPx": 969.5,
+				"yPx": 1304.5
+			}
+		},
+		{
+			"id": "path-lower-west",
+			"label": "Footpath lower curve, its westmost bend at basket 5",
+			"source": {
+				"xPx": 766,
+				"yPx": 1836
+			},
+			"target": {
+				"xPx": 843.5,
+				"yPx": 1436.5
+			}
+		}
+	]
+}

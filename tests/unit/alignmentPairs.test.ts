@@ -129,3 +129,47 @@ describe('The Rec fixture: stitched composite to its left tile (not NAIP)', () =
 		expect(report.residualsM).toBeNull();
 	});
 });
+
+describe('fitAlignmentPairs: a source ground scale (C1) carried through the fit', () => {
+	test('used only when the basemap has none: source m/px divided by the fit scale', () => {
+		const base = file();
+		const noScale = { ...base, basemap: { fileName: 'tile.png', widthPx: 1290, heightPx: 2796 } };
+		const sourceGroundScale = { metersPerPixel: 10 / 44.5, referent: 'C1 circle, 10 m = 44.5 px (rC1)' };
+		const report = fitAlignmentPairs(noScale, { sourceGroundScale });
+		if (!report.ok) throw new Error('fit failed');
+		expect(report.groundScale!.metersPerPixel).toBeCloseTo(10 / 44.5 / 0.5, 9);
+		expect(report.groundScale!.referent).toContain('carried through the similarity fit');
+		const withNaip = fitAlignmentPairs(base, { sourceGroundScale });
+		if (!withNaip.ok) throw new Error('fit failed');
+		expect(withNaip.groundScale!.referent).toContain('USGS NAIP');
+	});
+});
+
+describe('the slice fixtures: pairs picked by eye on NAIP', () => {
+	const load = (name: string) => {
+		const parsed = parseAlignmentPairs(readFileSync(`tests/fixtures/alignment-pairs/${name}`, 'utf8'));
+		if (!parsed.ok) throw new Error(parsed.error.message);
+		return parsed.file;
+	};
+
+	test("Dash's Track: 6 pairs on the wide tile fit a similarity to under 1 m RMS, scale in m from the rendered extent", () => {
+		const file = load('dashs-track.naip-wide.pairs.json');
+		expect(file.basemap.raster?.widthPx).toBe(2048);
+		const report = fitAlignmentPairs(file);
+		if (!report.ok) throw new Error(report.reason);
+		expect(report.groundScale!.referent).toContain('from its rendered extent');
+		expect(report.residualsM!.rms).toBeLessThan(1);
+		// the C1 cross-check: NAIP m per screenshot px vs 10 m / 44.5 px (golden rC1), within 2%
+		const naipShot = Math.sqrt(report.transform.determinant) * report.groundScale!.metersPerPixel;
+		expect(Math.abs(naipShot / (10 / 44.5) - 1)).toBeLessThan(0.02);
+	});
+
+	test('The Rec: 4 path pairs on the pick tile fit to under 1 m RMS and agree with rC1 94 px within 2%', () => {
+		const file = load('therec.naip-pick.pairs.json');
+		const report = fitAlignmentPairs(file);
+		if (!report.ok) throw new Error(report.reason);
+		expect(report.residualsM!.rms).toBeLessThan(1);
+		const naipShot = Math.sqrt(report.transform.determinant) * report.groundScale!.metersPerPixel;
+		expect(Math.abs(naipShot / (10 / 94) - 1)).toBeLessThan(0.02);
+	});
+});

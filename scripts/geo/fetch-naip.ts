@@ -1,17 +1,18 @@
 /**
- * Headless NAIP fetch through the app's own src/lib/naip.ts (no key; USGS National Map exportImage).
+ * Headless aerial fetch for one course: keyless federal providers tried in the old front end's order
+ * (src/lib/geo/aerialProviders.ts: USDA NAIP, USGS NAIP Plus, USGS NAIP, USGS ImageryOnly), on `naip.ts`'s bbox math.
  *
  *   NODE_USE_ENV_PROXY=1 npx tsx scripts/geo/fetch-naip.ts --lat <deg> --lon <deg> --radius <m> --out <dir> [--size 2048]
  *
- * Writes <out>/naip.png and <out>/naip.geo.json: centre, radius, size, the exact ground scale (`naipMetersPerPixel`),
- * the request URL and the fetch time. The `basemap` block of a `chainspot.alignment-pairs` file is that sidecar's
- * `naip` object. A failed fetch prints naip.ts's typed error (and the network cause) and exits 1; nothing is written.
+ * Writes <out>/naip.png and <out>/naip.geo.json: the provider that served, every attempt (and why each failed), centre,
+ * radius, size, the EPSG:3857 extent the service rendered (the raster's georeference, `webMercator.ts`), the ground
+ * scale measured from that extent per axis (and `naipMetersPerPixel`'s nominal 2r / size beside it), the URLs and the
+ * fetch time. scripts/geo/tile.ts `basemapBlock` turns the sidecar into a pairs file's `basemap`.
+ * When every provider fails, the attempts are printed and the script exits 1; no image is written.
  * Node's fetch ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY=1 (Node >= 22.21).
  */
-import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { NAIP_EXPORT_SIZE_PX, bboxFromCenter, fetchNaipImage, naipMetersPerPixel } from '../../src/lib/naip';
+import { NAIP_EXPORT_SIZE_PX } from '../../src/lib/naip';
+import { fetchTile } from './tile';
 
 function arg(name: string): string | null {
 	const index = process.argv.indexOf(name);
@@ -28,34 +29,11 @@ if (!outDir || !Number.isFinite(lat) || !Number.isFinite(lon) || !(radiusMeters 
 	process.exit(2);
 }
 
-const center = { lat, lon };
-let cause = '';
-const tracingFetch: typeof fetch = async (input, init) => {
-	try {
-		return await fetch(input, init);
-	} catch (caught) {
-		const error = caught as { message?: string; cause?: { code?: string; message?: string } };
-		cause = [error.message, error.cause?.code, error.cause?.message].filter(Boolean).join(' | ');
-		throw caught;
-	}
-};
-
-const result = await fetchNaipImage(center, radiusMeters, { sizePx, fetch: tracingFetch });
-if (!result.ok) {
-	console.error(`NAIP fetch failed: ${result.error.kind}: ${result.error.message}${cause ? ` (cause: ${cause})` : ''}`);
+try {
+	const tile = await fetchTile({ lat, lon }, radiusMeters, sizePx, outDir);
+	const s = tile.sidecar;
+	console.log(JSON.stringify({ file: tile.imagePath, provider: s.source, sha256: s.sha256, metersPerPixel: s.metersPerPixel, attempts: s.attempts.map((a) => `${a.providerId}:${a.ok ? 'ok' : a.kind}`) }));
+} catch (error) {
+	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
 }
-const bytes = Buffer.from(await result.blob.arrayBuffer());
-mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, 'naip.png'), bytes);
-const sidecar = {
-	source: 'usgs-naip',
-	naip: { center, radiusMeters, sizePx },
-	bbox: bboxFromCenter(center, radiusMeters),
-	metersPerPixel: naipMetersPerPixel(radiusMeters, sizePx),
-	sha256: createHash('sha256').update(bytes).digest('hex'),
-	url: result.url,
-	fetchedAt: new Date().toISOString()
-};
-writeFileSync(join(outDir, 'naip.geo.json'), JSON.stringify(sidecar, null, 1) + '\n');
-console.log(JSON.stringify({ file: join(outDir, 'naip.png'), bytes: bytes.length, metersPerPixel: sidecar.metersPerPixel, sha256: sidecar.sha256 }));
